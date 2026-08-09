@@ -296,6 +296,19 @@ class GroupChatRouter:
             event_type="group_typing",
         )
 
+    def _graph_member_labels(self, group_avatar_ids: Sequence[str]) -> Dict[str, str]:
+        """avatar_id → display name for Run Graph node labels (not hex ids)."""
+        labels: Dict[str, str] = {META_LEADER_AGENT_ID: self._meta_leader_label}
+        for aid in group_avatar_ids:
+            sid = str(aid or "").strip()
+            if not sid:
+                continue
+            avatar = self.avatar_registry.get_avatar(sid)
+            name = str(getattr(avatar, "name", "") or "").strip() if avatar else ""
+            if name:
+                labels[sid] = name
+        return labels
+
     def _group_user_addressing_rules(self, user_display_name: str) -> str:
         u = str(user_display_name or "").strip() or "用户"
         ml = self._meta_leader_label
@@ -437,7 +450,9 @@ class GroupChatRouter:
         """Map runtime event to user-visible progress text."""
         et = str(event_type or "")
         if et == EventType.ROUND_START.value:
-            return "开始处理任务..."
+            # No chat-line for round start — frontend shows the expert label +
+            # stream placeholder instead of a noisy "开始处理任务..." row.
+            return ""
         if et == EventType.TOOL_CALL.value:
             tool_name = str(data.get("name", "") or data.get("tool_name", "") or "tool")
             raw_args = data.get("arguments", data.get("args", {}))
@@ -494,6 +509,146 @@ class GroupChatRouter:
             return "group_clarification"
         return "group_progress"
 
+    def _graph_sse_reply(self, etype: str, data: Dict[str, Any]) -> GroupReply:
+        """Wrap a graph.* payload as a skipped GroupReply for chat SSE passthrough."""
+        return GroupReply(
+            agent_id=META_LEADER_AGENT_ID,
+            avatar_name="Graph",
+            avatar_url="",
+            content=json.dumps(data, ensure_ascii=False),
+            skipped=True,
+            event_type=str(etype),
+        )
+
+    def _project_a2a_message_edge(
+        self,
+        *,
+        base_session: StudioSession,
+        group_id: str,
+        group_avatar_ids: Sequence[str],
+        source_agent_id: str,
+        target_agent_id: str,
+        summary: str = "",
+    ) -> List[GroupReply]:
+        """Persist MESSAGE edge on presence/workforce run and return SSE replies."""
+        try:
+            from agenticx.runtime.graph.social import (
+                ensure_presence_run,
+                message_edge_events,
+                note_debate_edge,
+                upsert_message_edge,
+            )
+            from agenticx.runtime.graph.store import get_default_store
+
+            pad = getattr(base_session, "scratchpad", None)
+            if not isinstance(pad, dict):
+                pad = {}
+                try:
+                    setattr(base_session, "scratchpad", pad)
+                except Exception:
+                    return []
+            existing = str(pad.get("graph_run_id") or "").strip() or None
+            member_labels = self._graph_member_labels(group_avatar_ids)
+            run = ensure_presence_run(
+                session_id=str(getattr(base_session, "session_id", "") or ""),
+                group_id=group_id,
+                member_ids=list(group_avatar_ids) + [META_LEADER_AGENT_ID],
+                store=get_default_store(),
+                existing_run_id=existing,
+                member_labels=member_labels,
+            )
+            pad["graph_run_id"] = run.run_id
+            src = (
+                f"agent:{source_agent_id}"
+                if not str(source_agent_id).startswith("agent:")
+                else str(source_agent_id)
+            )
+            tgt = (
+                f"agent:{target_agent_id}"
+                if not str(target_agent_id).startswith("agent:")
+                else str(target_agent_id)
+            )
+            edge = upsert_message_edge(run, source=src, target=tgt, label="mention")
+            get_default_store().save(run, bump_version=True)
+            note_debate_edge(pad, source=src, target=tgt)
+            out: List[GroupReply] = []
+            for ev in message_edge_events(run, edge, summary=summary):
+                et = str(ev.get("type") or "graph.edge_flow")
+                out.append(self._graph_sse_reply(et, ev))
+            return out
+        except Exception:
+            return []
+
+    def _project_h2a_fanout(
+        self,
+        *,
+        base_session: StudioSession,
+        group_id: str,
+        group_avatar_ids: Sequence[str],
+        target_agent_ids: Sequence[str],
+    ) -> List[GroupReply]:
+        try:
+            from agenticx.runtime.graph.social import (
+                ensure_presence_run,
+                note_debate_edge,
+                project_h2a_fanout,
+            )
+            from agenticx.runtime.graph.store import get_default_store
+
+            pad = getattr(base_session, "scratchpad", None)
+            if not isinstance(pad, dict):
+                pad = {}
+                try:
+                    setattr(base_session, "scratchpad", pad)
+                except Exception:
+                    return []
+            existing = str(pad.get("graph_run_id") or "").strip() or None
+            member_labels = self._graph_member_labels(group_avatar_ids)
+            run = ensure_presence_run(
+                session_id=str(getattr(base_session, "session_id", "") or ""),
+                group_id=group_id,
+                member_ids=list(group_avatar_ids) + [META_LEADER_AGENT_ID],
+                store=get_default_store(),
+                existing_run_id=existing,
+                member_labels=member_labels,
+            )
+            pad["graph_run_id"] = run.run_id
+            edges, events = project_h2a_fanout(
+                run, target_agent_ids, member_labels=member_labels
+            )
+            for edge in edges:
+                note_debate_edge(pad, source=edge.source, target=edge.target)
+            get_default_store().save(run, bump_version=True)
+            return [
+                self._graph_sse_reply(str(ev.get("type") or "graph.edge_updated"), ev)
+                for ev in events
+            ]
+        except Exception:
+            return []
+
+    def _maybe_yield_debate_nudge(self, base_session: StudioSession) -> List[GroupReply]:
+        try:
+            from agenticx.runtime.graph.social import maybe_debate_nudge
+
+            pad = getattr(base_session, "scratchpad", None)
+            if not isinstance(pad, dict):
+                return []
+            text = maybe_debate_nudge(pad)
+            if not text:
+                return []
+            return [
+                GroupReply(
+                    agent_id=META_LEADER_AGENT_ID,
+                    avatar_name=self._meta_leader_label,
+                    avatar_url="",
+                    content=text,
+                    skipped=True,
+                    event_type="graph.debate_nudge",
+                )
+            ]
+        except Exception:
+            return []
+
     async def _emit_mention_follow_ups(
         self,
         *,
@@ -508,6 +663,15 @@ class GroupChatRouter:
         hops: int,
         responded_this_turn: set[str],
     ) -> AsyncGenerator[GroupReply, None]:
+        # Selection-rule converge policy can suppress A2A mention hops.
+        try:
+            from agenticx.runtime.graph.intervene import effective_mention_hops
+
+            pad = getattr(base_session, "scratchpad", None)
+            if isinstance(pad, dict):
+                hops = effective_mention_hops(pad, hops)
+        except Exception:
+            pass
         if hops <= 0:
             return
         if reply.skipped or not str(reply.content or "").strip():
@@ -521,6 +685,17 @@ class GroupChatRouter:
                 continue
             if await self._should_stop(should_stop):
                 return
+            for ge in self._project_a2a_message_edge(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                source_agent_id=str(reply.agent_id),
+                target_agent_id=str(tid),
+                summary=(reply.content or "")[:80],
+            ):
+                yield ge
+            for nudge in self._maybe_yield_debate_nudge(base_session):
+                yield nudge
             if tid == META_LEADER_AGENT_ID:
                 ty_name = self._meta_leader_label
             else:
@@ -903,6 +1078,22 @@ class GroupChatRouter:
             f"## 你的长期指令\n{avatar_prompt or '(无)'}\n\n"
             f"## 最近群聊上下文\n{dialogue_context}\n"
         )
+        # Graph Runtime interventions queued on the owner session scratchpad.
+        try:
+            from agenticx.runtime.graph.intervene import consume_graph_directives
+
+            owner_pad = getattr(base_session, "scratchpad", None)
+            if isinstance(owner_pad, dict):
+                gdirs = consume_graph_directives(owner_pad, str(avatar_id))
+                if gdirs:
+                    joined = "\n".join(f"- {d}" for d in gdirs)
+                    system_prompt = (
+                        f"{system_prompt}\n"
+                        "## Graph intervention (authoritative)\n"
+                        f"{joined}\n"
+                    )
+        except Exception:
+            pass
         if quoted_content.strip():
             local_user_input = f"{user_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
         else:
@@ -1232,6 +1423,15 @@ class GroupChatRouter:
             primary_targets = [x for x in primary_targets if x in explicit]
         else:
             primary_targets = primary_targets[:2]
+        # H2A fan-out: project human→agent MESSAGE edges for God-View.
+        if primary_targets:
+            for ge in self._project_h2a_fanout(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                target_agent_ids=primary_targets,
+            ):
+                yield ge
         any_success = False
         for target in primary_targets:
             if await self._should_stop(should_stop):
@@ -1669,30 +1869,69 @@ class GroupChatRouter:
         async for r in _drain_relay():
             yield r
 
-        # ── 8. Execution: per-subtask via AgentRuntime (_run_one_target) ───
+        # ── 8. Execution: Graph DAG scheduler + AgentRuntime per node ───────
+        # Hybrid stack preserved (ADR 0002): Workforce plans; AgentRuntime executes.
+        from agenticx.runtime.graph.compiler import compile_workforce_run
+        from agenticx.runtime.graph.models import GraphNode
+        from agenticx.runtime.graph.scheduler import execute_group_run
+        from agenticx.runtime.graph.store import get_default_store
+
         responded_this_turn: set[str] = set()
+        subtask_by_id = {str(st.id): st for st in subtasks}
+        session_id = str(getattr(base_session, "session_id", "") or group_id)
+        graph_run = compile_workforce_run(
+            session_id=session_id,
+            group_id=group_id,
+            subtasks=subtasks,
+            assignment_map={str(k): str(v) for k, v in assignment_map.items()},
+        )
+        try:
+            scratch = getattr(base_session, "scratchpad", None)
+            if isinstance(scratch, dict):
+                scratch["graph_run_id"] = graph_run.run_id
+        except Exception:
+            pass
 
-        for subtask in subtasks:
-            if await self._should_stop(should_stop):
-                break
+        graph_event_queue: asyncio.Queue[GroupReply] = asyncio.Queue()
 
-            worker_id = assignment_map.get(subtask.id, "")
-            avatar_id = worker_id_to_avatar_id.get(worker_id, worker_id)
+        def _on_graph_event(etype: str, data: dict) -> None:
+            import json as _json
+            node = data.get("node") if isinstance(data, dict) else None
+            agent_id = META_LEADER_AGENT_ID
+            if isinstance(node, dict) and node.get("agent_id"):
+                agent_id = str(node.get("agent_id"))
+            graph_event_queue.put_nowait(
+                GroupReply(
+                    agent_id=agent_id,
+                    avatar_name="Graph",
+                    avatar_url="",
+                    content=_json.dumps(data, ensure_ascii=False),
+                    skipped=True,
+                    event_type=str(etype),
+                )
+            )
 
-            # Emit TASK_STARTED
+        async def _drain_graph_events() -> None:
+            while not graph_event_queue.empty():
+                yield graph_event_queue.get_nowait()
+
+        async def _node_runner(node: GraphNode):
+            st = subtask_by_id.get(node.id)
+            desc = (st.description if st is not None else node.task_text) or node.task_text
+            worker_id = str(node.agent_id or assignment_map.get(node.id, "") or "")
+            avatar_id = worker_id_to_avatar_id.get(worker_id, worker_id) or META_LEADER_AGENT_ID
+
             event_bus.publish(WorkforceEvent(
                 action=WorkforceAction.TASK_STARTED,
-                task_id=subtask.id,
-                agent_id=avatar_id or META_LEADER_AGENT_ID,
-                data={"task_description": subtask.description},
+                task_id=node.id,
+                agent_id=avatar_id,
+                data={"task_description": desc},
             ))
             async for r in _drain_relay():
                 yield r
+            async for r in _drain_graph_events():
+                yield r
 
-            if not avatar_id:
-                avatar_id = META_LEADER_AGENT_ID
-
-            # Show typing indicator.
             if avatar_id == META_LEADER_AGENT_ID:
                 ty_name = self._meta_leader_label
             else:
@@ -1700,10 +1939,14 @@ class GroupChatRouter:
                 ty_name = str(getattr(av, "name", "") or avatar_id) if av else avatar_id
             yield self._typing_event(avatar_id, ty_name)
 
-            # Execute via AgentRuntime (full Studio capabilities).
-            subtask_input = subtask.description
+            subtask_input = desc
             if quoted_content.strip():
                 subtask_input = f"{subtask_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
+            if node.directives:
+                joined = "\n".join(f"- {d}" for d in node.directives)
+                subtask_input = (
+                    f"{subtask_input}\n\n## Graph intervention (authoritative)\n{joined}"
+                )
 
             reply: GroupReply | None = None
             async for target_evt in self._run_one_target_stream(
@@ -1725,7 +1968,7 @@ class GroupChatRouter:
             if reply is None or reply.skipped:
                 event_bus.publish(WorkforceEvent(
                     action=WorkforceAction.TASK_FAILED,
-                    task_id=subtask.id,
+                    task_id=node.id,
                     agent_id=avatar_id,
                     data={"error": reply.error if reply else "no response"},
                 ))
@@ -1734,13 +1977,28 @@ class GroupChatRouter:
                 task_lock.add_conversation("assistant", reply.content or "")
                 event_bus.publish(WorkforceEvent(
                     action=WorkforceAction.TASK_COMPLETED,
-                    task_id=subtask.id,
+                    task_id=node.id,
                     agent_id=avatar_id,
                     data={"result": (reply.content or "")[:500]},
                 ))
-
             async for r in _drain_relay():
                 yield r
+
+        max_parallel = min(4, max(1, len(worker_instances)))
+        async for item in execute_group_run(
+            graph_run,
+            runner=_node_runner,
+            on_event=_on_graph_event,
+            store=get_default_store(),
+            max_parallel=max_parallel,
+            should_stop=should_stop,
+        ):
+            yield item
+            async for r in _drain_graph_events():
+                yield r
+
+        async for r in _drain_graph_events():
+            yield r
 
         # ── 9. Leader summary ───────────────────────────────────────────────
         if not await self._should_stop(should_stop):

@@ -81,6 +81,20 @@ body {
   height: 0;
 }
 
+/*
+ * Group expert replies: label → body gap should match plain-text experts (~p 0.5em).
+ * Meta/PM reports often start with `---` + ## heading; default h2 mt-4 left a huge hole.
+ * Depth-agnostic (CitationMarkdownBody nests wrappers under .msg-content).
+ */
+.agx-expert-body .msg-content hr:first-child {
+  display: none !important;
+  margin: 0 !important;
+}
+.agx-expert-body .msg-content :is(h1, h2, h3):first-of-type {
+  /* Match .msg-content p { margin: 0.5em 0 } so ## titles sit like “收到。” openers. */
+  margin-top: 0.5em !important;
+}
+
 /* GFM tables (react-markdown + remark-gfm) — default UA styles are invisible on dark bubbles */
 .msg-content table {
   border-collapse: collapse;
