@@ -1,47 +1,61 @@
 # AgenticX Enterprise
 
-> 企业级大模型应用一体化平台 —— 前台 · 后台 · AI 网关三端联动
+**Language / 语言**: [English](README.md) | [中文](README_ZN.md)
 
-## 架构
+> Integrated enterprise LLM application platform — Web Portal · Admin Console · AI Gateway
+
+## Architecture
+
+<div align="center">
+<img src="assets/AgenticX Enterprise Architecture Infographic.png" alt="AgenticX Enterprise Architecture — enterprise access, control plane, Portal BFF, Go AI Gateway, data infrastructure, and Agent Runtime evolution area" width="900" />
+</div>
+
+The current production path consists of the enterprise access layer, Portal BFF, control plane, Go AI Gateway, data infrastructure, and upstream compatible models. The Go Gateway provides compliance and model relay; it is **not a full Agent Runtime**. Edge Agent has reached MVP but is not on the default path; Cluster Runtime remains a future direction.
+
+> Architecture drawing prompts: [Enterprise (English)](../assets/prompt-for-pics/enterprise_en.md)
+
+### Repository layout
 
 ```
 enterprise/
-├── apps/                      🎯 可部署整机
-│   ├── web-portal/            #  员工前台（Next.js）
-│   ├── admin-console/         #  管理后台（Next.js）
-│   └── gateway/               #  AI 网关（Go，基于 APIPark）
+├── apps/                      Deployable apps
+│   ├── web-portal/            #  Employee portal (Next.js)
+│   ├── admin-console/         #  Admin console (Next.js)
+│   └── gateway/               #  AI Gateway (Go)
 │
-├── features/                  🧩 业务功能域（客户挪用主单元）
-│   ├── iam/                   身份 · 租户 · 部门 · 角色
-│   ├── chat/                  对话工作区
-│   ├── model-service/         模型服务管理
-│   ├── knowledge-base/        知识库
-│   ├── tools-mcp/             工具 · MCP
-│   ├── agents/                智能体 · 分身
-│   ├── metering/              计量 · 四维查询
-│   ├── audit/                 审计日志
-│   ├── policy/                敏感规则配置
-│   └── settings/              设置面板
+├── features/                  Business domains (primary reuse units for customer projects)
+│   ├── iam/                   Identity · tenant · dept · roles
+│   ├── chat/                  Chat workspace
+│   ├── model-service/         Model service management
+│   ├── knowledge-base/        Knowledge base
+│   ├── tools-mcp/             Tools · MCP
+│   ├── agents/                Agents · avatars
+│   ├── metering/              Metering · multi-dimension query
+│   ├── audit/                 Audit logs
+│   ├── policy/                Policy / sensitive-rule config
+│   └── settings/              Settings panels
 │
-├── packages/                  📦 技术零件
-│   ├── ui/                    shadcn 组件 + 主题
-│   ├── branding/              白标组件
-│   ├── auth/                  认证抽象（Supabase/LDAP/SSO/账密）
-│   ├── db-schema/             Drizzle schema（多租户）
-│   ├── core-api/              类型契约
-│   ├── policy-engine/         JS 端规则引擎
-│   ├── sdk-ts/                TS 客户端 SDK
+├── packages/                  Shared packages
+│   ├── ui/                    shadcn components + theme
+│   ├── branding/              White-label components
+│   ├── auth/                  Auth abstractions (Supabase / LDAP / SSO / password)
+│   ├── db-schema/             Drizzle schema (multi-tenant)
+│   ├── core-api/              Type contracts
+│   ├── policy-engine/         JS-side policy engine
+│   ├── sdk-ts/                TypeScript client SDK
 │   ├── sdk-py/                Python SDK
-│   ├── config/                配置加载器
-│   └── telemetry/             埋点 · 审计上报
+│   ├── config/                Config loader
+│   └── telemetry/             Telemetry · audit reporting
 │
-├── plugins/                   🔌 运行时插件
+├── plugins/                   Runtime plugins
 │   ├── moderation-pii-baseline/
 │   ├── moderation-finance/
 │   ├── moderation-medical/
 │   ├── tool-watermark/
 │   ├── tool-doc-review/
 │   └── theme-default/
+│
+├── assets/                    Architecture diagrams and shared media
 │
 ├── deploy/
 │   ├── docker-compose/
@@ -50,96 +64,96 @@ enterprise/
 └── docs/
 ```
 
-## 国际化（i18n）
+## Internationalization (i18n)
 
-admin-console 与 web-portal 支持 **中文 / English** 切换（cookie `NEXT_LOCALE`，默认 `zh`）。文案集中在各 app 的 `messages/{zh,en}.json`，详见 [docs/architecture/i18n.md](./docs/architecture/i18n.md)。
+admin-console and web-portal support **Chinese / English** switching (`NEXT_LOCALE` cookie, default `zh`). Copy lives in each app’s `messages/{zh,en}.json`. See [docs/architecture/i18n.md](./docs/architecture/i18n.md).
 
 ```bash
-# 双语言 × 双主题视觉截图（需先 start-dev.sh）
-pnpm -C enterprise visual-tour:i18n
+# Dual-locale × dual-theme visual captures (start-dev.sh first)
+pnpm -C enterprise visual-capture:i18n
 ```
 
-## 快速开始
+## Quick start
 
-### 日常启动（最常用，3 条命令就够）
+### Daily workflow (three commands)
 
 ```bash
 cd enterprise
-bash scripts/bootstrap.sh     # 只需首次 / 环境/密钥变更时跑（默认 PostgreSQL）
-bash scripts/start-dev.sh     # 每天开工跑这一条
+bash scripts/bootstrap.sh     # First time / when env or secrets change (PostgreSQL by default)
+bash scripts/start-dev.sh     # Daily start
 ```
 
-MySQL 8.0 开发栈：
+MySQL 8.0 stack:
 
 ```bash
 bash scripts/bootstrap.sh --db=mysql
-# 或
+# or
 bash scripts/start-dev-with-infra.sh --db=mysql
 bash scripts/start-dev.sh
 ```
 
-双方言说明与割接：[docs/runbooks/mysql-deployment.md](./docs/runbooks/mysql-deployment.md)、[docs/database/cutover-runbook.md](./docs/database/cutover-runbook.md)。
+Dialect notes and cutover: [docs/runbooks/mysql-deployment.md](./docs/runbooks/mysql-deployment.md), [docs/database/cutover-runbook.md](./docs/database/cutover-runbook.md).
 
-起来后：
+Once up:
 
-- 前台：<http://localhost:3000>
-- 后台：<http://localhost:3001>
-- 网关健康检查：<http://localhost:8088/healthz>
+- Portal: <http://localhost:3000>
+- Admin: <http://localhost:3001>
+- Gateway health: <http://localhost:8088/healthz>
 
-登录账号（`bootstrap.sh` 交互设置的密码，落在 `.env.local`）：
+Login accounts (passwords set interactively by `bootstrap.sh`, stored in `.env.local`):
 
-- 后台：`owner@agenticx.local` + `ADMIN_CONSOLE_LOGIN_PASSWORD`
-- 前台：`owner@agenticx.local` + `AUTH_DEV_OWNER_PASSWORD`
-  - 如果输入 `staff@agenticx.local` 会报 `Invalid credentials` —— 默认种子里没有这个人，需要先在后台或注册页创建
+- Admin: `owner@agenticx.local` + `ADMIN_CONSOLE_LOGIN_PASSWORD`
+- Portal: `owner@agenticx.local` + `AUTH_DEV_OWNER_PASSWORD`
+  - `staff@agenticx.local` returns `Invalid credentials` by default — that user is not in the seed; create it in admin or via signup first
 
-> 默认 `owner` 已自带 `workspace:chat` 权限；旧种子环境若 HMR 命中也会被自动补齐，无需手动改库。
+> Default `owner` already has `workspace:chat`. Older seed environments may auto-heal this on HMR; no manual DB edit is usually required.
 
-### 启用 OIDC SSO（统一认证）
+### Enable OIDC SSO
 
-已支持 OIDC SSO 登录（portal + admin）。配置参考：
+OIDC SSO is supported for portal + admin. See:
 
 - `docs/runbooks/sso-oidc-setup.md`
 - `docs/runbooks/sso-acceptance-checklist.md`
 
-### 让聊天回真实模型（推荐 ① · admin GUI 控制）
+### Real model chat (recommended · admin GUI)
 
-后台 → 平台配置 → **模型服务**：
+Admin → Platform config → **Model services**:
 
-1. 「+ 添加厂商」从模板选 OpenAI / DeepSeek / Moonshot / 阿里云百炼 / 智谱 / MiniMax / 月之暗面 / 千帆 / 火山引擎 / Ollama，或手动添加任意 OpenAI 兼容上游
-2. 填入 API Key，点击「检测」做一次连通性探活；通过后保存
-3. 在「模型列表」内勾选要启用的 model
-4. 后台 → 身份与权限 → **用户**：点开任一用户，在「可见模型分配」勾选要授予该用户的模型，自动保存
-5. 用该用户的账号登录前台 portal：模型下拉只会出现刚才分配的模型，发送消息走真调
-6. 顶部 token chip 实时显示「↑输入 ↓输出 Σ合计」累计
+1. “+ Add provider” — pick a template (OpenAI / DeepSeek / Moonshot / Bailian / Zhipu / MiniMax / Qianfan / Volcengine / Ollama, etc.) or add any OpenAI-compatible upstream
+2. Enter the API key, click **Test**, then save
+3. Enable models in the model list
+4. Admin → IAM → **Users**: open a user, assign visible models (auto-save)
+5. Sign in to the portal as that user — the model picker shows only assigned models; sends hit the real upstream
+6. The top token chip shows cumulative ↑input ↓output Σtotal
 
-> **运行时配置（模型服务 / 用户可见模型 / Token 配额）以业务库为单一数据源**（表 `enterprise_runtime_*`，PostgreSQL 或 MySQL 由 `DATABASE_DIALECT` 决定）。
-> 本地开发若仍保留 `enterprise/.runtime/admin/{providers,user-models,quotas}.json`，会在 `bootstrap.sh` / `start-dev.sh` 与 `pnpm migrate:legacy-runtime` 时**幂等导入**；导入后 admin / portal 均只读业务库。
-> Gateway 后台每 5 秒重读一次 provider 配置，admin 改完几秒内生效，无需重启。
+> **Runtime config** (model services / visible models / token quotas) uses the business DB as the single source of truth (`enterprise_runtime_*`; PostgreSQL or MySQL via `DATABASE_DIALECT`).
+> If local `enterprise/.runtime/admin/{providers,user-models,quotas}.json` still exists, `bootstrap.sh` / `start-dev.sh` and `pnpm migrate:legacy-runtime` import them **idempotently**; afterward admin / portal read only the DB.
+> The Gateway rereads provider config every 5 seconds — admin changes take effect within seconds without restart.
 
-### 让聊天回真实模型（备选 ② · 环境变量）
+### Real model chat (fallback · environment variables)
 
-未通过 admin 配置 Key 的厂商，gateway 会回退到环境变量解析（变量名规则：`<PROVIDER>_API_KEY`）：
+Providers without an admin-configured key fall back to env vars (`<PROVIDER>_API_KEY`):
 
 ```bash
-# enterprise/.env.local 末尾追加（admin GUI 已配置时不需要）
+# Append to enterprise/.env.local (not needed if admin GUI already has keys)
 DEEPSEEK_API_KEY=sk-...
-LLM_API_KEY=sk-...   # 通用兜底
+LLM_API_KEY=sk-...   # generic fallback
 ```
 
-详细 Key 解析规则与生产部署建议见 `apps/gateway/README.md`。
+Key resolution and production notes: `apps/gateway/README.md`.
 
-### `start-dev.sh` 的 3 个参数（只要记这些）
+### `start-dev.sh` flags
 
-| 命令 | 行为 |
+| Command | Behavior |
 |---|---|
-| `bash scripts/start-dev.sh` | 默认，仅拉起 enterprise 的 web-portal + admin-console |
-| `bash scripts/start-dev.sh --all` | 同时拉起 `customers/*`（如 hechuang 的 `:3100/:3101`） |
-| `bash scripts/start-dev.sh --ui=stream` | 关闭 Turbo TUI，输出纯日志（Ctrl+C 一次就退） |
-| `bash scripts/start-dev.sh --help` | 随时查 |
+| `bash scripts/start-dev.sh` | Default: web-portal + admin-console only |
+| `bash scripts/start-dev.sh --all` | Also start `customers/*` (e.g. `:3100/:3101`) |
+| `bash scripts/start-dev.sh --ui=stream` | Disable Turbo TUI; plain logs (single Ctrl+C exits) |
+| `bash scripts/start-dev.sh --help` | Help |
 
-> Turbo TUI 的小提示：默认 `tui` 模式下，用 `↑/↓` 切任务、`/` 搜索、`q` 退出。如果感觉"卡住/Ctrl+C 没反应"，先按 `Esc` 再按 `q`，或直接改用 `--ui=stream`。
+> Turbo TUI tip: in default `tui` mode use `↑/↓` to switch tasks, `/` to search, `q` to quit. If Ctrl+C feels stuck, press `Esc` then `q`, or use `--ui=stream`.
 
-### 企业服务器部署（不交互）
+### Non-interactive server bootstrap
 
 ```bash
 export DATABASE_URL='postgresql://...'
@@ -150,29 +164,29 @@ export ADMIN_CONSOLE_SESSION_SECRET='...'
 bash scripts/bootstrap.sh --mode=server
 ```
 
-`bootstrap.sh` 要点：
+What `bootstrap.sh` does:
 
-1. 预检 node/pnpm/go/docker/openssl
-2. 写入 `enterprise/.env.local`（chmod 600，已 `.gitignore`）
-3. 若缺少密码 → 交互提示（强度校验）；`--mode=server` 下直接失败
+1. Preflight: node / pnpm / go / docker / openssl
+2. Write `enterprise/.env.local` (chmod 600, gitignored)
+3. Prompt for missing passwords (strength-checked); `--mode=server` fails instead of prompting
 4. `pnpm install`
-5. 启动 postgres + redis（local）；server 模式跳过
-6. 跑 `db:migrate` + `db:seed`
-7. 跑 `migrate:legacy-runtime`（将 `.runtime/admin/*.json` 幂等导入 PG）
-8. 生成 RSA-2048 JWT 密钥对至 `enterprise/.local-secrets/`（local）
+5. Start postgres + redis (local); skip in server mode
+6. `db:migrate` + `db:seed`
+7. `migrate:legacy-runtime` (idempotent import of `.runtime/admin/*.json`)
+8. Generate RSA-2048 JWT keypair under `enterprise/.local-secrets/` (local)
 
-常用选项：
+Common options:
 
-- `--reset-db`：`docker compose down -v` 后重建（仅开发）
-- `--skip-docker`：本机已有独立 postgres，不经 compose
-- `--mode=server`：非交互，全部密钥/密码必须来自外部环境变量
+- `--reset-db`: `docker compose down -v` then recreate (dev only)
+- `--skip-docker`: use an existing local Postgres, skip compose
+- `--mode=server`: non-interactive; all secrets must come from the environment
 
-### 不用脚本，直接 pnpm（知道自己在做什么时）
+### Direct pnpm (when you know what you are doing)
 
 ```bash
-# 在 enterprise/ 根目录，环境变量需自行注入
+# From enterprise/, inject env yourself
 set -a; source .env.local; set +a
-# .env.local 里存的是 *_FILE，需要手动展开 PEM 内容
+# .env.local stores *_FILE paths — expand PEM contents manually
 export AUTH_JWT_PRIVATE_KEY="$(cat "$AUTH_JWT_PRIVATE_KEY_FILE")"
 export AUTH_JWT_PUBLIC_KEY="$(cat "$AUTH_JWT_PUBLIC_KEY_FILE")"
 pnpm install
@@ -181,36 +195,36 @@ pnpm exec turbo run dev \
   --filter=@agenticx/app-admin-console
 ```
 
-## 产品定位
+## Product positioning
 
-- **护城河**：桌面端（Machi）+ 后台管理 + AI 网关三端联动
-- **差异化**：支持"云端统一管控 + 端侧安全闭环"混合模式
-- **商业模式**：开源主干 + 客户专属定制（定制代码在独立私有仓 `customers/*`）
+- **Moat**: Desktop (Near) + admin console + AI Gateway working together
+- **Differentiation**: Hybrid “centralized cloud control + on-device security loop”
+- **Business model**: Open-source trunk + customer-specific customization in private `customers/*` repos
 
-## 给客户项目挪用 enterprise 模块
+## Reusing enterprise modules in customer projects
 
-见 `docs/guides/2026-04-21-enterprise-customers-collaboration.md`
+See `docs/guides/2026-04-21-enterprise-customers-collaboration.md`
 
-## 相关文档
+## Related docs
 
-完整文档索引：**[docs/README.md](./docs/README.md)**
+Full index: **[docs/README.md](./docs/README.md)**
 
-| 主题 | 路径 |
+| Topic | Path |
 |---|---|
-| 架构总览 | [docs/architecture/overview.md](./docs/architecture/overview.md) |
-| 数据流 | [docs/architecture/data-flow.md](./docs/architecture/data-flow.md) |
-| API 契约 | [docs/api/README.md](./docs/api/README.md) |
-| 数据库 Schema | [docs/database/schema.md](./docs/database/schema.md) |
-| RBAC Scopes | [docs/rbac/scopes.md](./docs/rbac/scopes.md) |
+| Architecture overview | [docs/architecture/overview.md](./docs/architecture/overview.md) |
+| Data flow | [docs/architecture/data-flow.md](./docs/architecture/data-flow.md) |
+| API contracts | [docs/api/README.md](./docs/api/README.md) |
+| Database schema | [docs/database/schema.md](./docs/database/schema.md) |
+| RBAC scopes | [docs/rbac/scopes.md](./docs/rbac/scopes.md) |
 | Gateway | [docs/gateway/overview.md](./docs/gateway/overview.md) |
-| 插件协议 | [docs/plugin-protocol/README.md](./docs/plugin-protocol/README.md) |
+| Plugin protocol | [docs/plugin-protocol/README.md](./docs/plugin-protocol/README.md) |
 | Features / Packages / Apps | [docs/features/](./docs/features/) · [docs/packages/](./docs/packages/) · [docs/apps/](./docs/apps/) |
-| 本地开发 / 排障 | [docs/development/local-dev.md](./docs/development/local-dev.md) · [docs/development/troubleshooting.md](./docs/development/troubleshooting.md) |
-| 测试 | [docs/testing/README.md](./docs/testing/README.md) |
-| 部署 | [docs/deployment/README.md](./docs/deployment/README.md) |
-| 客户定制协作 | [docs/guides/enterprise-customers-collaboration.md](./docs/guides/enterprise-customers-collaboration.md) |
-| 产品架构（主仓） | [../docs/plans/2026-04-21-agenticx-enterprise-architecture.md](../docs/plans/2026-04-21-agenticx-enterprise-architecture.md) |
+| Local dev / troubleshooting | [docs/development/local-dev.md](./docs/development/local-dev.md) · [docs/development/troubleshooting.md](./docs/development/troubleshooting.md) |
+| Testing | [docs/testing/README.md](./docs/testing/README.md) |
+| Deployment | [docs/deployment/README.md](./docs/deployment/README.md) |
+| Customer collaboration | [docs/guides/enterprise-customers-collaboration.md](./docs/guides/enterprise-customers-collaboration.md) |
+| Product architecture (main repo) | [../docs/plans/2026-04-21-agenticx-enterprise-architecture.md](../docs/plans/2026-04-21-agenticx-enterprise-architecture.md) |
 
 ## License
 
-Apache 2.0（与 AgenticX 主仓一致）
+Apache 2.0 (same as the AgenticX main repository)

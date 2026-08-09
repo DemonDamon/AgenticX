@@ -35,7 +35,7 @@ AgenticX 旨在提供一套统一、可扩展、生产就绪的智能体技术�
 ## 系统架构
 
 <div align="center">
-<img src="assets/AgenticX 系统架构总览图.png" alt="AgenticX 系统架构总览图 — 涵盖 UI 层、Studio 运行时、核心框架、平台服务、领域扩展五大层级" width="900" />
+<img src="assets/AgenticX 产品与技术架构信息图.png" alt="AgenticX 产品与技术架构 — 产品入口、Studio / Agent / Core SDK Runtime、协议生态与平台支撑层" width="900" />
 </div>
 
 整体架构由一个共享能力内核和两种产品形态构成：
@@ -46,7 +46,7 @@ AgenticX 旨在提供一套统一、可扩展、生产就绪的智能体技术�
 
 Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路相互独立：Near 默认使用本机 Python Runtime；Enterprise 当前在线主链路使用 Go Gateway。Enterprise Edge Agent 已达 MVP 但未进入默认链路，Cluster Agent Runtime 仍是规划方向。
 
-> 架构图重绘提示词：[总架构（中文）](docs/prompt-for-pics/overall_cn.md) · [Near Desktop（中文）](docs/prompt-for-pics/desktop_cn.md) · [Enterprise（中文）](docs/prompt-for-pics/enterprise_cn.md)
+> 架构图重绘提示词：[总架构（中文）](assets/prompt-for-pics/overall_cn.md) · [Near Desktop（中文）](assets/prompt-for-pics/desktop_cn.md) · [Enterprise（中文）](assets/prompt-for-pics/enterprise_cn.md)
 
 ## 核心功能
 
