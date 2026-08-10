@@ -1084,8 +1084,11 @@ export function MachiChatView({
         {/* 主对话区 */}
         <div className="relative min-h-0 flex-1 overflow-hidden">
           {isEmpty ? (
-            /* 空态：NEAR 字标靠上 + 收窄加高输入区（深度研究入口暂走侧栏） */
-            <div className="relative flex h-full flex-col items-center justify-start gap-10 overflow-y-auto px-4 pt-14 pb-10 md:gap-12 md:pt-16 md:pb-16">
+            /* 空态：线稿发顶与侧栏「深度研究」按钮上沿对齐
+             * 侧栏：h-14 品牌行 + p-3 + h-9 新对话 + gap-1.5 → ≈110px
+             * 主区顶栏：py-4 + h-8 操作行 → ≈64px
+             * 故空态 pt ≈ 110-64 = 46px（pt-11） */
+            <div className="relative flex h-full flex-col items-center justify-start gap-8 overflow-y-auto px-4 pt-11 pb-10 md:gap-10 md:pb-16">
               <NearEmptyWordmark
                 caption={deepResearchMode ? tw("deepResearchEmptySubtitle") : undefined}
               />
