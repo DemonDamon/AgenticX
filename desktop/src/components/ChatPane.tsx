@@ -39,6 +39,7 @@ import {
   type SidePanelTab,
 } from "../store";
 import { useGraphRunStore } from "./graph/useGraphRun";
+import { graphHasTaskNodes } from "./graph/graph-types";
 import {
   appendDictationText,
   cancelDictation,
@@ -2678,6 +2679,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const retryInFlightRef = useRef<Record<string, boolean>>({});
   /** Live-reattach (FR-4): per-session abort controllers for read-only reattach streams. */
   const reattachControllersRef = useRef<Record<string, AbortController>>({});
+  /** Debounce timers for mid-reattach group disk merges (keyed by session id). */
+  const reattachGroupMergeTimersRef = useRef<Record<string, number>>({});
   const liveReattachEnabledRef = useRef(false);
   /** RAF mirror for the currently displayed session's stream overlay only. */
   const streamTextRef = useRef("");
@@ -3743,7 +3746,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const searchAtCandidates = async (queryText: string) => {
     const lowered = queryText.trim().toLowerCase();
-    const avatarCandidates: AtCandidate[] = isGroupPane
+    const metaLabel = metaLeaderDisplayName.trim() || META_AGENT_DISPLAY_NAME;
+    const metaAtAliases = [metaLabel, META_AGENT_DISPLAY_NAME, "组长", "Machi", "machi", "meta", "meta-agent"];
+    const metaMatchesQuery =
+      !lowered ||
+      metaAtAliases.some((alias) => alias.toLowerCase().includes(lowered)) ||
+      "群聊协调者".includes(lowered) ||
+      "项目经理".includes(lowered);
+    const metaCandidate: AtCandidate | null =
+      isGroupPane && metaMatchesQuery
+        ? {
+            kind: "avatar",
+            avatarId: "__meta__",
+            label: metaLabel,
+            role: "群聊协调者",
+            avatarUrl: metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL,
+          }
+        : null;
+    const memberCandidates: AtCandidate[] = isGroupPane
       ? groupMembers
           .filter((a) => !lowered || a.name.toLowerCase().includes(lowered) || a.role.toLowerCase().includes(lowered))
           .map((a) => ({
@@ -3754,6 +3774,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             avatarUrl: a.avatarUrl || undefined,
           }))
       : [];
+    // Near (meta leader) first — always @-able in group chat, matching members panel.
+    const avatarCandidates: AtCandidate[] = metaCandidate
+      ? [metaCandidate, ...memberCandidates]
+      : memberCandidates;
 
     const apiSessionId = resolveTaskspaceApiSessionId();
     if (!apiSessionId) {
@@ -6096,12 +6120,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   /** Returns true only when disk merge actually added/changed rows (used to gate progress timer). */
   const mergeTailFromDisk = useCallback(
-    async (sid: string): Promise<boolean> => {
+    async (sid: string, opts?: { allowDuringStream?: boolean }): Promise<boolean> => {
       // A foreground SSE stream is the single source of truth while it runs;
       // disk lags and uses a positional id scheme incompatible with the live
       // `uid()` rows, so merging mid-stream re-introduces the just-truncated
       // old reply (the retry "拼接"). Let the stream own the in-memory state.
-      if (sessionStreamStateRef.current[sid]?.active) return false;
+      // Reattach may opt in via allowDuringStream for mid-turn group replies.
+      if (!opts?.allowDuringStream && sessionStreamStateRef.current[sid]?.active) return false;
       try {
         const msgs = await window.agenticxDesktop.loadSessionMessages(sid);
         if (!msgs.ok || !Array.isArray(msgs.messages)) return false;
@@ -6191,12 +6216,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               if (st) st.text = liveText;
               if (isCurrent()) setStreamedAssistantText(liveText);
             }
-            // done/final/replay_gap: reconciled from disk in finally.
+            if (p.type === "group_reply" || p.type === "group_skipped") {
+              // Group replies are persisted mid-turn; merge via disk so ids stay
+              // aligned instead of minting live rows. Debounce to avoid thrash.
+              const prevTimer = reattachGroupMergeTimersRef.current[sid];
+              if (prevTimer != null) window.clearTimeout(prevTimer);
+              reattachGroupMergeTimersRef.current[sid] = window.setTimeout(() => {
+                delete reattachGroupMergeTimersRef.current[sid];
+                void mergeTailFromDisk(sid, { allowDuringStream: true });
+              }, 300);
+              continue;
+            }
+            // done/final/replay_gap/graph.*/group_typing: disk merge in finally.
           }
         }
       } catch {
         /* aborted or network error — disk merge below reconciles state */
       } finally {
+        const mergeTimer = reattachGroupMergeTimersRef.current[sid];
+        if (mergeTimer != null) {
+          window.clearTimeout(mergeTimer);
+          delete reattachGroupMergeTimersRef.current[sid];
+        }
         delete reattachControllersRef.current[sid];
         const st = sessionStreamStateRef.current[sid];
         if (st) st.active = false;
@@ -8367,6 +8408,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const mentionMap = new Map(
       groupMembers.map((a) => [a.name.trim().toLowerCase(), a.id])
     );
+    if (isGroupPane) {
+      const metaLabel = metaLeaderDisplayName.trim() || META_AGENT_DISPLAY_NAME;
+      for (const alias of [metaLabel, META_AGENT_DISPLAY_NAME, "组长", "Machi", "machi", "meta", "meta-agent"]) {
+        const key = alias.trim().toLowerCase();
+        if (key) mentionMap.set(key, "__meta__");
+      }
+    }
     const mentionRegex = /@([^\s@]+)/g;
     const mentionedAvatarIds: string[] = [];
     if (isGroupPane) {
@@ -9179,6 +9227,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     row.id === pane.id ? { ...row, activeGraphRunId: rid } : row,
                   ),
                 }));
+              }
+              // Autopen only when a real task DAG exists — presence-only graphs
+              // (human + agent nodes) must not steal focus in ordinary group chat.
+              if (
+                (payload.type === "graph.node_updated" || payload.type === "graph.run_created") &&
+                graphHasTaskNodes(useGraphRunStore.getState().byPane[pane.id]?.nodes)
+              ) {
                 try {
                   if (localStorage.getItem("agx-graph-panel-autopen-v1") !== "done") {
                     openWorkspaceSidebarForPane(

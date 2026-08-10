@@ -1441,7 +1441,7 @@ export function WorkPanel({
       key: "graph",
       icon: <Share2 className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
       title: "运行图",
-      subtitle: "观察协作节点、专家状态，并做注入 / 改派干预",
+      subtitle: "任务拆解时观察分工与依赖，并做注入 / 改派干预",
       onClick: openGraphTab,
     },
     {

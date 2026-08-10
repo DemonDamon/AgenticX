@@ -132,7 +132,7 @@ export function RunGraphPanel({ pane, onClose, tintColor, embedded = false }: Pr
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-2.5 py-2">
         {!embedded ? (
           <>
-            <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.8} />
+            <Share2 className="h-4 w-4 shrink-0 text-text-subtle" strokeWidth={1.8} />
             <span className="text-[14px] font-medium text-text-strong">运行图</span>
           </>
         ) : null}
@@ -197,6 +197,12 @@ export function RunGraphPanel({ pane, onClose, tintColor, embedded = false }: Pr
       {banner ? (
         <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-200">
           {banner}
+        </div>
+      ) : null}
+
+      {hasRun && !hasTaskNodes ? (
+        <div className="shrink-0 border-b border-border px-2.5 py-1 text-[10px] leading-snug text-text-faint">
+          本轮只有「谁在答」的协作关系；出现可拆解的任务时，这里会显示任务分工与依赖，并支持注入 / 改派。
         </div>
       ) : null}
 
