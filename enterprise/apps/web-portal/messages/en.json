@@ -159,6 +159,7 @@
     "shareImageReady": "Image generated and downloaded",
     "shareImageShared": "Image generated and downloaded",
     "shareImageDownloaded": "Image downloaded",
+    "shareSyncError": "Conversation history could not be synchronized. Refresh the page and try again.",
     "shareSources": "Search sources",
     "shareSearchResults": "Search web · {count} results",
     "sharePageBrand": "{product} · Shared conversation",

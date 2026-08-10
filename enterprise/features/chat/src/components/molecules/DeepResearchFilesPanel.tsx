@@ -528,6 +528,7 @@ export function DeepResearchFilesPanel({
   const [zipping, setZipping] = React.useState(false);
   const [panelWidthPx, setPanelWidthPx] = React.useState(480);
   const panelRef = React.useRef<HTMLElement | null>(null);
+  const htmlPreviewFrameRef = React.useRef<HTMLIFrameElement | null>(null);
   const userResizedRef = React.useRef(false);
 
   const tree = React.useMemo(() => buildArtifactTree(artifacts), [artifacts]);
@@ -710,6 +711,18 @@ export function DeepResearchFilesPanel({
     () => (selectedIsHtml ? prepareHtmlPreviewSrcDoc(previewRaw, portalDark) : ""),
     [selectedIsHtml, previewRaw, portalDark],
   );
+
+  React.useEffect(() => {
+    if (!open || !selectedIsHtml || !onOpenExternalUrl) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== htmlPreviewFrameRef.current?.contentWindow) return;
+      const data = event.data as { type?: unknown; url?: unknown; title?: unknown };
+      if (data?.type !== "agx:external-link" || typeof data.url !== "string") return;
+      onOpenExternalUrl(data.url, typeof data.title === "string" ? data.title : undefined);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [open, selectedIsHtml, onOpenExternalUrl]);
 
   // Prefer a wider docked width for HTML so the report TOC can sit beside content
   // when the viewport allows — never force fullscreen; user may drag or toggle.
@@ -1121,6 +1134,7 @@ export function DeepResearchFilesPanel({
           {!previewLoading && !previewError && selectedIsHtml && htmlSrcDoc.trim() ? (
             <iframe
               key={selectedId ?? title}
+              ref={htmlPreviewFrameRef}
               title={title}
               srcDoc={htmlSrcDoc}
               // Scripts needed for Mermaid CDN; content is tenant-owned report HTML.

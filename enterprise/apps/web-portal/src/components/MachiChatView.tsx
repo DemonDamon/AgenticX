@@ -562,7 +562,11 @@ export function MachiChatView({
         error?: { message?: string };
       };
       if (!response.ok || !payload.data?.path) {
-        throw new Error(payload.error?.message ?? t("shareFailed"));
+        const message = payload.error?.message;
+        if (message === "select at least one message to share") {
+          throw new Error(t("shareSyncError"));
+        }
+        throw new Error(message ?? t("shareFailed"));
       }
       return payload.data.share_url ?? new URL(payload.data.path, window.location.origin).toString();
     },

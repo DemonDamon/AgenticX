@@ -159,6 +159,7 @@
     "shareImageReady": "图片已生成并下载",
     "shareImageShared": "图片已生成并下载",
     "shareImageDownloaded": "图片已下载",
+    "shareSyncError": "历史消息同步异常，请刷新页面后重试",
     "shareSources": "搜索来源",
     "shareSearchResults": "搜索网页 · {count} 个结果",
     "sharePageBrand": "{product} · 对话分享",

@@ -83,6 +83,8 @@ describe("prepareHtmlPreviewSrcDoc", () => {
     expect(out).toContain('id="agx-portal-toc-narrow-js"');
     expect(out).toContain(".theme-toggle { display: none !important; }");
     expect(out).toContain("__agxPortalHashNav");
+    expect(out).toContain('type: "agx:external-link"');
+    expect(out).toContain("window.parent.postMessage");
     expect(out).toContain("scrollToHash");
     const clickHandler = out.slice(
       out.indexOf("__agxPortalHashNav"),

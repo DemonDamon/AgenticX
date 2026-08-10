@@ -117,6 +117,16 @@ const PORTAL_TOC_NARROW_PATCH = `
       }
       if (!a) return;
       var href = a.getAttribute("href") || "";
+      if (/^https?:\/\//i.test(href)) {
+        event.preventDefault();
+        if (event.stopPropagation) event.stopPropagation();
+        window.parent.postMessage({
+          type: "agx:external-link",
+          url: href,
+          title: (a.textContent || href).trim()
+        }, "*");
+        return;
+      }
       if (href.charAt(0) !== "#") return;
       // Always stop hash navigation escaping the sandbox (bare hash or missing targets).
       event.preventDefault();
