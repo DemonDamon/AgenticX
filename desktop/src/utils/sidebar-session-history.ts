@@ -171,6 +171,10 @@ export function resolveSidebarAvatarChipName(
   const aid = String(row.avatar_id ?? "").trim();
   if (!aid) return META_AGENT_DISPLAY_NAME;
   if (aid.startsWith("group:")) {
+    // Prefer live group registry name so every session of the same group
+    // shares one chip (new sessions often omit avatar_name → used to show「群聊」).
+    const fromMap = String(avatarNameById.get(aid) ?? "").trim();
+    if (fromMap) return fromMap;
     const fromRow = String(row.avatar_name ?? "").trim();
     if (fromRow) return fromRow;
     return "群聊";
