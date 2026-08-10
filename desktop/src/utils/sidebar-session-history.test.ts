@@ -87,12 +87,21 @@ describe("sidebar-session-history utils", () => {
   });
 
   it("resolves chip names", () => {
-    const map = new Map([["av1", "飞廉"]]);
+    const map = new Map([
+      ["av1", "飞廉"],
+      ["group:g1", "Graph难用例突击队"],
+    ]);
     expect(resolveSidebarAvatarChipName({ avatar_id: null }, map)).toBe("Near");
     expect(resolveSidebarAvatarChipName({ avatar_id: "av1" }, map)).toBe("飞廉");
     expect(
       resolveSidebarAvatarChipName({ avatar_id: "group:g1", avatar_name: "项目组" }, map)
-    ).toBe("项目组");
+    ).toBe("Graph难用例突击队");
+    expect(
+      resolveSidebarAvatarChipName({ avatar_id: "group:g1", avatar_name: null }, map)
+    ).toBe("Graph难用例突击队");
+    expect(
+      resolveSidebarAvatarChipName({ avatar_id: "group:unknown", avatar_name: null }, map)
+    ).toBe("群聊");
   });
 
   it("formats relative activity time", () => {
