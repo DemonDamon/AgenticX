@@ -43,6 +43,7 @@ function rowToAuditEvent(row: typeof gatewayAuditEvents.$inferSelect): AuditEven
     user_email: row.userEmail ?? undefined,
     department_id: row.departmentId ?? undefined,
     session_id: row.sessionId ?? undefined,
+    trace_id: row.traceId ?? undefined,
     client_type: row.clientType as AuditEvent["client_type"],
     client_ip: row.clientIp ?? undefined,
     provider: row.provider ?? undefined,
@@ -124,6 +125,12 @@ export class MysqlAuditStore implements AuditStore {
 
     if (input.user_id) {
       conditions.push(eq(gatewayAuditEvents.userId, input.user_id));
+    }
+    if (input.trace_id) {
+      conditions.push(eq(gatewayAuditEvents.traceId, input.trace_id));
+    }
+    if (input.session_id) {
+      conditions.push(eq(gatewayAuditEvents.sessionId, input.session_id));
     }
     if (input.department_id) {
       conditions.push(eq(gatewayAuditEvents.departmentId, input.department_id));
@@ -208,6 +215,8 @@ export class MysqlAuditStore implements AuditStore {
     await applyRetentionWindow(input.tenant_id, conditions);
 
     if (input.user_id) conditions.push(eq(gatewayAuditEvents.userId, input.user_id));
+    if (input.trace_id) conditions.push(eq(gatewayAuditEvents.traceId, input.trace_id));
+    if (input.session_id) conditions.push(eq(gatewayAuditEvents.sessionId, input.session_id));
     if (input.department_id) conditions.push(eq(gatewayAuditEvents.departmentId, input.department_id));
     if (input.provider) conditions.push(eq(gatewayAuditEvents.provider, input.provider));
     if (input.model) conditions.push(eq(gatewayAuditEvents.model, input.model));
@@ -251,6 +260,7 @@ export class MysqlAuditStore implements AuditStore {
       "event_time",
       "event_type",
       "user_id",
+      "trace_id",
       "department_id",
       "provider",
       "model",
@@ -283,6 +293,7 @@ export class MysqlAuditStore implements AuditStore {
           ev.event_time,
           ev.event_type,
           ev.user_id ?? "",
+          ev.trace_id ?? "",
           ev.department_id ?? "",
           ev.provider ?? "",
           ev.model ?? "",
