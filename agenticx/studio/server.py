@@ -2925,6 +2925,7 @@ def create_studio_app() -> FastAPI:
                 )
             manager.clear_interrupt(payload.session_id)
             manager.set_execution_state(payload.session_id, "running")
+            setattr(session, "_session_id", payload.session_id)
             setattr(session, "_usage_owner_session_id", payload.session_id)
 
             # Local import: later in this handler there is another `import asyncio`
@@ -6083,7 +6084,21 @@ def create_studio_app() -> FastAPI:
         sid = str(session_id or "").strip()
         if not sid:
             raise HTTPException(status_code=400, detail="session_id required")
-        runs = get_default_store().list_by_session(sid)
+        store = get_default_store()
+        runs = store.list_by_session(sid)
+        if not runs:
+            # Legacy: workforce/presence runs were bound to group_id (or empty
+            # session_id) because StudioSession had no session_id field.
+            managed = manager.get(sid, touch=False)
+            avatar_id = str(getattr(managed, "avatar_id", "") or "").strip() if managed else ""
+            if avatar_id.startswith("group:"):
+                gid = avatar_id[len("group:") :].strip()
+                if gid:
+                    seen = {r.run_id for r in runs}
+                    for r in store.list_by_group_id(gid):
+                        if r.run_id not in seen:
+                            runs.append(r)
+                            seen.add(r.run_id)
         return {
             "ok": True,
             "session_id": sid,
