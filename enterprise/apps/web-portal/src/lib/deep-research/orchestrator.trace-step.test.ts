@@ -61,9 +61,9 @@ describe("runDeepResearchTurn trace step increment", () => {
         },
         proposeClarify: async () => ({ needed: false, questions: [] }),
         runReconFn: async () => ({ brief: "", hits: [] }),
-        fetchPagesFn: async () => [],
+        fetchPagesFn: (async () => ({ pages: [], stats: {} })) as never,
         expandQueriesFn: async () => [],
-        reflectFn: async () => ({ gaps: [], enough: true }),
+        reflectFn: (async () => []) as never,
         now: () => Date.now(),
       },
     );
