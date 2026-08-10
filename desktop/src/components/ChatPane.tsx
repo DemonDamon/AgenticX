@@ -246,6 +246,7 @@ import { avatarTintBg } from "../utils/avatar-color";
 import { formatModelOptionLabel } from "../utils/model-display";
 import { collectSelectableModelOptions, coerceSelectableModel, isModelSelectable } from "../utils/model-options";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
+import { sessionCreateAvatarId } from "../utils/session-create-avatar";
 import {
   ccBridgeSendToolProgressLabel,
   parseCcBridgeModeFromPayload,
@@ -7943,8 +7944,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (existing) return existing;
 
     try {
-      const avatarId =
-        pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+      const avatarId = sessionCreateAvatarId(pane.avatarId);
       const inheritFrom = peekPaneLazyInheritParent(pane.id);
       const pendingMode = peekPanePendingSessionMode(pane.id) ?? pane.sessionMode ?? "daily_office";
       const created = await window.agenticxDesktop.createSession({
@@ -8170,7 +8170,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
     }
 
-    const useLazySession = !isGroupPane && !isAutomationTaskPane;
     let requestSessionId = resolveSendSessionId(options?.lockedSessionId, pane.sessionId);
     // Dev-only invariant: every async/system send (continuation / retry / queued /
     // forward) MUST lock the session id captured at dispatch time. Reading the live
@@ -8195,10 +8194,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     };
 
     if (!requestSessionId) {
-      if (!useLazySession) {
-        releaseSendLock();
-        return;
-      }
+      // Meta lazy-creates on first send; group/automation must also materialize
+      // here (createNewTopic clears sessionId — previously bailed and looked stuck).
       const materializedSessionId = await materializeLazySession();
       if (!materializedSessionId) {
         addPaneMessage(
@@ -8305,8 +8302,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         otherPanesWithSameSession.length,
       );
       try {
-        const avatarId =
-          pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+        const avatarId = sessionCreateAvatarId(pane.avatarId);
         const created = await window.agenticxDesktop.createSession({ avatar_id: avatarId });
         if (created.ok && created.session_id) {
           requestSessionId = created.session_id;
@@ -8903,7 +8899,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (resp.status === 404) {
         // Recover from stale bound session IDs (e.g. old WeChat binding points to removed session).
         const created = await window.agenticxDesktop.createSession({
-          avatar_id: pane.avatarId && !pane.avatarId.startsWith("group:") ? pane.avatarId : undefined,
+          avatar_id: sessionCreateAvatarId(pane.avatarId),
         });
         if (created.ok && created.session_id) {
           const oldSessionId = requestSessionId;
@@ -10526,8 +10522,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [forwardAutoReply, paneId, pane.sessionId]);
 
   const initSession = async (inherit = false, prevSessionId?: string) => {
-    const avatarId =
-      pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+    const avatarId = sessionCreateAvatarId(pane.avatarId);
     const pendingMode = peekPanePendingSessionMode(pane.id) ?? pane.sessionMode ?? "daily_office";
     try {
       const result = await window.agenticxDesktop.createSession({
@@ -10579,8 +10574,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     markPaneAwaitingFreshSession(pane.id);
     setPaneSessionId(pane.id, "");
     setPaneLazyInheritParent(pane.id, inherit && prevSessionId ? prevSessionId : undefined);
-    // Defer server createSession until the user sends the first message so an
-    // empty session never appears in the history sidebar with an id-only title.
+    if (isGroupPane || isAutomationTaskPane) {
+      // Group/automation UI requires a bound session_id (no lazy empty composer).
+      // Eager create with the pane's group:/automation: avatar_id.
+      void initSession(inherit, prevSessionId || undefined);
+      return;
+    }
+    // Meta/avatar: defer createSession until the first send so an empty session
+    // never appears in the history sidebar with an id-only title.
   };
 
   resumeInNewSessionRef.current = () => {
