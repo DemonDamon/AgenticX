@@ -44,6 +44,16 @@ type QueryResult = {
 
 type LevelFilter = "all" | "warn+" | "error";
 
+const ROUTE_FILTER_OPTIONS = [
+  "",
+  "chat.completions",
+  "deep_research.runs",
+  "deep_research.stream",
+  "deep_research.resume",
+] as const;
+
+type RouteFilter = (typeof ROUTE_FILTER_OPTIONS)[number];
+
 function levelBadgeVariant(level: string): "destructive" | "warning" | "secondary" {
   if (level === "error") return "destructive";
   if (level === "warn") return "warning";
@@ -60,7 +70,9 @@ function PortalLogsPageContent() {
   const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<PortalLogItem | null>(null);
   const [traceId, setTraceId] = useState(initialTrace);
+  const [sessionId, setSessionId] = useState(searchParams.get("session_id")?.trim() ?? "");
   const [level, setLevel] = useState<LevelFilter>("all");
+  const [route, setRoute] = useState<RouteFilter>("");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [loading, setLoading] = useState(false);
@@ -69,6 +81,8 @@ function PortalLogsPageContent() {
   useEffect(() => {
     const fromQuery = searchParams.get("trace_id")?.trim() ?? "";
     if (fromQuery) setTraceId(fromQuery);
+    const sessionFromQuery = searchParams.get("session_id")?.trim() ?? "";
+    if (sessionFromQuery) setSessionId(sessionFromQuery);
   }, [searchParams]);
 
   const load = useCallback(async () => {
@@ -80,7 +94,9 @@ function PortalLogsPageContent() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           trace_id: traceId || undefined,
+          session_id: sessionId || undefined,
           level: level === "all" ? undefined : level,
+          route: route || undefined,
           start: start ? new Date(start).toISOString() : undefined,
           end: end ? new Date(end).toISOString() : undefined,
           limit: 100,
@@ -107,7 +123,7 @@ function PortalLogsPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [traceId, level, start, end, t]);
+  }, [traceId, sessionId, level, route, start, end, t]);
 
   useEffect(() => {
     void load();
@@ -207,6 +223,16 @@ function PortalLogsPageContent() {
               className="font-mono"
             />
           </div>
+          <div className="min-w-[280px] flex-1 space-y-1.5">
+            <Label htmlFor="portal-log-session">{t("filterSessionId")}</Label>
+            <Input
+              id="portal-log-session"
+              value={sessionId}
+              onChange={(e) => setSessionId(e.target.value)}
+              placeholder={t("filterSessionIdPlaceholder")}
+              className="font-mono"
+            />
+          </div>
           <div className="w-[160px] space-y-1.5">
             <Label>{t("filterLevel")}</Label>
             <Select value={level} onValueChange={(v) => setLevel(v as LevelFilter)}>
@@ -217,6 +243,24 @@ function PortalLogsPageContent() {
                 <SelectItem value="all">{t("levelAll")}</SelectItem>
                 <SelectItem value="warn+">{t("levelWarnPlus")}</SelectItem>
                 <SelectItem value="error">{t("levelError")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-[220px] space-y-1.5">
+            <Label>{t("filterRoute")}</Label>
+            <Select
+              value={route === "" ? "__all__" : route}
+              onValueChange={(v) => setRoute(v === "__all__" ? "" : (v as RouteFilter))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{t("routeAll")}</SelectItem>
+                <SelectItem value="chat.completions">chat.completions</SelectItem>
+                <SelectItem value="deep_research.runs">deep_research.runs</SelectItem>
+                <SelectItem value="deep_research.stream">deep_research.stream</SelectItem>
+                <SelectItem value="deep_research.resume">deep_research.resume</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -302,6 +346,11 @@ function PortalLogsPageContent() {
                       <Button type="button" variant="outline" size="sm" className="h-7" asChild>
                         <Link href={`/audit?trace_id=${encodeURIComponent(selected.trace_id)}`}>
                           {t("detail.viewAudit")}
+                        </Link>
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" className="h-7" asChild>
+                        <Link href={`/traces/${encodeURIComponent(selected.trace_id)}`}>
+                          {t("detail.viewRuntime")}
                         </Link>
                       </Button>
                     </>

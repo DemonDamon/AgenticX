@@ -41,6 +41,7 @@ export type RunRecord = {
   tenantId: string;
   userId: string;
   sessionId: string;
+  traceId?: string;
   status: DeepResearchRunStatus;
   phase: string;
   topic: string;
@@ -60,6 +61,7 @@ export type RunStore = {
     userId: string;
     sessionId: string;
     topic: string;
+    traceId?: string;
   }): Promise<RunRecord>;
   /** 追加事件并可选更新 status/phase；超过 MAX_EVENTS_PER_RUN 时丢弃最旧的 lane_progress。 */
   appendEvents(
@@ -133,6 +135,7 @@ function mapRow(row: {
   tenantId: string;
   userId: string;
   sessionId: string;
+  traceId?: string | null;
   status: string;
   phase: string;
   topic: string;
@@ -149,6 +152,7 @@ function mapRow(row: {
     tenantId: row.tenantId,
     userId: row.userId,
     sessionId: row.sessionId,
+    traceId: row.traceId ?? undefined,
     status: isRunStatus(row.status) ? row.status : "running",
     phase: row.phase,
     topic: row.topic,
@@ -225,6 +229,7 @@ function createMemoryStore(): RunStore {
         tenantId: input.tenantId,
         userId: input.userId,
         sessionId: input.sessionId,
+        traceId: input.traceId,
         status: "running",
         phase: "recon",
         topic: input.topic,
@@ -362,6 +367,7 @@ function createSqlStore(): RunStore {
         tenantId: input.tenantId,
         userId: input.userId,
         sessionId: input.sessionId,
+        traceId: input.traceId ?? null,
         status: "running" as const,
         phase: "recon",
         topic: input.topic,
@@ -387,6 +393,7 @@ function createSqlStore(): RunStore {
         tenantId: input.tenantId,
         userId: input.userId,
         sessionId: input.sessionId,
+        traceId: input.traceId,
         status: "running",
         phase: "recon",
         topic: input.topic,

@@ -104,6 +104,16 @@ describe("portal log db sink", () => {
     expect(insertBatch).not.toHaveBeenCalled();
   });
 
+  it("does not enqueue debug deep_research.runs.finish when min level is info", async () => {
+    const insertBatch = vi.fn(async () => undefined);
+    __resetDbSinkForTests({ insertBatch });
+
+    enqueueLog(row({ level: "debug", event: "deep_research.runs.finish", route: "deep_research.runs" }));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(insertBatch).not.toHaveBeenCalled();
+    expect(__getDbSinkQueueForTests()).toHaveLength(0);
+  });
+
   it("disables after 3 consecutive insert failures", async () => {
     const insertBatch = vi.fn(async () => {
       throw new Error("db down");
