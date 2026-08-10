@@ -999,7 +999,7 @@
         "emptyDescription": "No records match filters",
         "exportSuccess": "Exported {count} records",
         "columns": {
-          "time": "Time",
+          "time": "Time (China Standard Time)",
           "event": "Event",
           "user": "User",
           "model": "Model",
@@ -1013,7 +1013,7 @@
           "tabSummary": "Summary",
           "tabPolicies": "Policies",
           "tabRaw": "Raw JSON",
-          "time": "Time",
+          "time": "Time (China Standard Time)",
           "user": "User",
           "model": "Model",
           "provider": "Provider",

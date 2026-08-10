@@ -47,6 +47,36 @@ type QueryResult = {
   chain_error_reason?: string;
 };
 
+type AuditUser = {
+  id: string;
+  email: string;
+  displayName: string;
+};
+
+type AuditUserListResult = {
+  data?: { items: AuditUser[]; total: number };
+};
+
+const AUDIT_DISPLAY_TIME_ZONE = "Asia/Shanghai";
+
+function formatAuditTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: AUDIT_DISPLAY_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .format(date)
+    .replace(/\//g, "-");
+}
+
 export default function AuditPage() {
   const t = useTranslations("pages.ops.audit");
   const ts = useTranslations("shell");
@@ -62,6 +92,8 @@ export default function AuditPage() {
   const [policyHit, setPolicyHit] = useState("");
   const [crossBorderOnly, setCrossBorderOnly] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [userNamesById, setUserNamesById] = useState<Map<string, string>>(new Map());
+  const [userNamesByEmail, setUserNamesByEmail] = useState<Map<string, string>>(new Map());
 
   const [chainFull, setChainFull] = useState<{
     valid: boolean;
@@ -145,9 +177,44 @@ export default function AuditPage() {
     }
   }, [userId, model, policyHit, crossBorderOnly, loadChainVerify, t]);
 
+  const loadUserDirectory = useCallback(async () => {
+    try {
+      const pageSize = 200;
+      const firstResponse = await adminFetch(`/api/admin/users?limit=${pageSize}&offset=0`);
+      if (!firstResponse.ok) return;
+      const firstPayload = (await firstResponse.json()) as AuditUserListResult;
+      const firstPage = firstPayload.data;
+      if (!firstPage) return;
+
+      const users = [...firstPage.items];
+      for (let offset = pageSize; offset < firstPage.total; offset += pageSize) {
+        const response = await adminFetch(`/api/admin/users?limit=${pageSize}&offset=${offset}`);
+        if (!response.ok) break;
+        const payload = (await response.json()) as AuditUserListResult;
+        if (!payload.data?.items.length) break;
+        users.push(...payload.data.items);
+      }
+
+      const byId = new Map<string, string>();
+      const byEmail = new Map<string, string>();
+      for (const user of users) {
+        if (user.displayName) byId.set(user.id, user.displayName);
+        if (user.email && user.displayName) byEmail.set(user.email.toLowerCase(), user.displayName);
+      }
+      setUserNamesById(byId);
+      setUserNamesByEmail(byEmail);
+    } catch {
+      // Audit rows remain usable with email/ID when the directory is unavailable.
+    }
+  }, []);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void loadUserDirectory();
+  }, [loadUserDirectory]);
 
   const handleExport = async () => {
     const response = await adminFetch("/api/audit/export", {
@@ -177,7 +244,7 @@ export default function AuditPage() {
         accessorKey: "event_time",
         header: t("columns.time"),
         cell: ({ row }) => (
-          <span className="font-mono text-xs text-muted-foreground">{row.original.event_time}</span>
+          <span className="font-mono text-xs text-muted-foreground">{formatAuditTime(row.original.event_time)}</span>
         ),
       },
       {
@@ -188,14 +255,27 @@ export default function AuditPage() {
       {
         accessorKey: "user_id",
         header: t("columns.user"),
-        cell: ({ row }) => (
-          <div className="flex items-center gap-2">
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[10px] font-semibold text-primary">
-              {row.original.user_id?.slice(0, 1)?.toUpperCase() ?? "?"}
-            </span>
-            <span className="truncate text-sm">{row.original.user_id ?? "—"}</span>
-          </div>
-        ),
+        cell: ({ row }) => {
+          const userName =
+            (row.original.user_id ? userNamesById.get(row.original.user_id) : undefined) ??
+            (row.original.user_email ? userNamesByEmail.get(row.original.user_email.toLowerCase()) : undefined);
+          const userLabel = userName ?? row.original.user_email ?? row.original.user_id ?? "—";
+          const userInitial = userLabel.slice(0, 1).toUpperCase();
+
+          return (
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[10px] font-semibold text-primary">
+                {userInitial}
+              </span>
+              <div className="min-w-0">
+                <span className="block truncate text-sm">{userLabel}</span>
+                {row.original.user_email ? (
+                  <span className="block truncate text-[11px] text-muted-foreground">{row.original.user_email}</span>
+                ) : null}
+              </div>
+            </div>
+          );
+        },
       },
       {
         accessorKey: "model",
@@ -243,7 +323,7 @@ export default function AuditPage() {
         },
       },
     ],
-    [t]
+    [t, userNamesByEmail, userNamesById]
   );
 
   const activeFilters = useMemo(() => {
@@ -464,8 +544,22 @@ export default function AuditPage() {
 
                 <TabsContent value="summary" className="flex-1 overflow-y-auto pr-1">
                   <dl className="divide-y divide-border text-sm">
-                    <DetailField label={t("detail.time")} value={<span className="font-mono text-xs">{selected.event_time}</span>} />
-                    <DetailField label={t("detail.user")} value={selected.user_id ?? "—"} />
+                    <DetailField label={t("detail.time")} value={<span className="font-mono text-xs">{formatAuditTime(selected.event_time)}</span>} />
+                    <DetailField
+                      label={t("detail.user")}
+                      value={
+                        <div>
+                          <div>
+                            {(selected.user_id ? userNamesById.get(selected.user_id) : undefined) ??
+                              (selected.user_email ? userNamesByEmail.get(selected.user_email.toLowerCase()) : undefined) ??
+                              selected.user_email ??
+                              "—"}
+                          </div>
+                          {selected.user_email ? <div className="text-xs text-muted-foreground">{selected.user_email}</div> : null}
+                          {selected.user_id ? <div className="font-mono text-xs text-muted-foreground">{selected.user_id}</div> : null}
+                        </div>
+                      }
+                    />
                     <DetailField label={t("detail.model")} value={selected.model ?? "—"} />
                     <DetailField label={t("detail.provider")} value={selected.provider ?? "—"} />
                     <DetailField label={t("detail.tenant")} value={<span className="font-mono text-xs">{selected.tenant_id}</span>} />

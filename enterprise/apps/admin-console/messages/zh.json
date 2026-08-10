@@ -999,7 +999,7 @@
         "emptyDescription": "无符合条件的记录",
         "exportSuccess": "已导出 {count} 条记录",
         "columns": {
-          "time": "时间",
+          "time": "时间（北京时间）",
           "event": "事件",
           "user": "用户",
           "model": "模型",
@@ -1013,7 +1013,7 @@
           "tabSummary": "概览",
           "tabPolicies": "策略",
           "tabRaw": "原始 JSON",
-          "time": "时间",
+          "time": "时间（北京时间）",
           "user": "用户",
           "model": "模型",
           "provider": "Provider",

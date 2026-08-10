@@ -344,6 +344,9 @@ importers:
       '@tanstack/react-virtual':
         specifier: ^3.13.24
         version: 3.14.7(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      lucide-react:
+        specifier: ^0.542.0
+        version: 0.542.0(react@19.2.8)
       pdfjs-dist:
         specifier: 4.10.38
         version: 4.10.38
