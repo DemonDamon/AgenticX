@@ -43,6 +43,7 @@
   "workspace": {
     "brandSubtitle": "Workspace",
     "newChat": "New chat",
+    "emptyHeadline": "和 Near 一起工作",
     "deepResearch": "深度研究",
     "deepResearchEmptySubtitle": "拆解问题、联网检索并生成带引用的研究报告",
     "deepResearchPlaceholder": "描述你的问题，生成深度研究报告",

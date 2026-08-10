@@ -43,6 +43,7 @@
   "workspace": {
     "brandSubtitle": "Workspace",
     "newChat": "New chat",
+    "emptyHeadline": "Work with Near",
     "deepResearch": "Deep research",
     "deepResearchEmptySubtitle": "Break down the question, search the web, and generate a cited research report",
     "deepResearchPlaceholder": "Describe your question to generate a deep research report",
