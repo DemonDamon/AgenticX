@@ -16,10 +16,8 @@ type NearEmptyWordmarkProps = {
 };
 
 /**
- * Empty-state brand lockup: Machi line-art portrait as the hero mark,
- * plus a single headline sentence. Portrait stays large enough for the
- * wireframe hatching to remain legible (≈160–176px); dark theme inverts
- * the black strokes to white.
+ * Empty-state brand lockup: Machi line-art portrait + product wordmark
+ * + brand tagline. No hover chrome — the mark is static identity, not a control.
  */
 export function NearEmptyWordmark({ className, caption }: NearEmptyWordmarkProps) {
   const tw = useTranslations("workspace");
@@ -32,34 +30,22 @@ export function NearEmptyWordmark({ className, caption }: NearEmptyWordmarkProps
         width={176}
         height={184}
         draggable={false}
-        className={[
-          "h-40 w-40 select-none object-contain opacity-[0.92] md:h-44 md:w-44",
-          "transition-opacity duration-300 ease-out",
-          "dark:invert",
-        ].join(" ")}
+        className="h-40 w-40 select-none object-contain opacity-[0.92] dark:invert md:h-44 md:w-44"
       />
-      <div
-        className={[
-          nearDisplay.className,
-          "group/near relative inline-block select-none",
-          "text-[clamp(1.55rem,3.4vw,2.15rem)] font-semibold leading-none tracking-[-0.02em]",
-          "text-foreground/80",
-          "transition-[color,letter-spacing] duration-300 ease-out",
-          "hover:tracking-[-0.035em] hover:text-foreground",
-          "motion-reduce:transition-none motion-reduce:hover:tracking-[-0.02em]",
-        ].join(" ")}
-        aria-label={tw("emptyHeadline")}
-      >
-        {tw("emptyHeadline")}
-        <span
-          aria-hidden
+      <div className="flex flex-col items-center gap-2 select-none">
+        <div
           className={[
-            "pointer-events-none absolute left-1/2 -bottom-[0.24em] h-px w-0 -translate-x-1/2",
-            "bg-foreground/40 transition-[width,background-color] duration-300 ease-out",
-            "group-hover/near:w-full group-hover/near:bg-foreground/60",
-            "motion-reduce:hidden",
+            nearDisplay.className,
+            "text-[clamp(1.75rem,3.8vw,2.35rem)] font-semibold leading-none tracking-[0.18em]",
+            "text-foreground/85",
           ].join(" ")}
-        />
+          aria-label={tw("emptyWordmark")}
+        >
+          {tw("emptyWordmark")}
+        </div>
+        <p className="text-[12px] uppercase tracking-[0.22em] text-muted-foreground/80">
+          {tw("emptyTagline")}
+        </p>
       </div>
       {caption ? (
         <p className="max-w-md text-sm text-muted-foreground/80">{caption}</p>
