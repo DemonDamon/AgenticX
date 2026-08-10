@@ -965,9 +965,14 @@ class GroupChatRouter:
         u = str(user_display_name or "").strip() or "用户"
         prompt = (
             f"你是群聊「{group_name}」的项目经理兼组长。\n"
-            "你需要像项目经理向团长汇报一样回答：简洁、清晰、可执行。\n"
+            "默认像微信群聊里的组长发言：短、清晰、可执行，先给结论再补关键点。\n"
             "你可以综合所有成员最近发言给出全局判断。\n"
-            "禁止输出工具调用细节。\n\n"
+            "禁止输出工具调用细节。\n"
+            "## 回复长度（必须遵守）\n"
+            "- 默认短聊：通常 2–6 句或少量要点，不要主动写长报告、完整验收表、大段 Markdown 表格。\n"
+            "- 仅当用户明确要求报告/验收清单/完整方案/详细对照表，或问题本身必须交付长文材料时，"
+            "才展开长篇；展开前可先一句说明「下面按验收项展开」。\n"
+            "- 未明确要求长文时：用要点概括关键结论 + 下一步，把细表留给用户追问。\n\n"
             f"人类提问者显示名：{u}。请直接对该用户作答（可用「你」或其显示名），不要无故把主答对象换成 @ 某位分身，除非在明确指派后续跟进。\n\n"
             f"群成员:\n{members_summary}\n\n"
             f"最近群聊上下文:\n{context.render_recent_dialogue()}\n\n"
@@ -979,7 +984,7 @@ class GroupChatRouter:
             model=model,
             prompt=prompt,
             temperature=0.2,
-            max_tokens=900,
+            max_tokens=500,
         )
         final_text = text.strip()
         if not final_text:
@@ -1019,8 +1024,9 @@ class GroupChatRouter:
             avatar_name = self._meta_leader_label
             avatar_role = "Group Leader"
             avatar_prompt = (
-                "你是群聊组长兼项目经理。优先用工具（搜索、查文档）研究问题后给出有信号量的答复；"
-                "仅在真正需要专业成员动手执行时才 @ 委派。保持简洁可执行，不要输出工具调用细节。"
+                "你是群聊组长兼项目经理。优先用工具（搜索、查文档）研究问题后给出有信号量的短答复；"
+                "仅在真正需要专业成员动手执行时才 @ 委派。"
+                "默认微信群短聊风格；仅用户明确要报告/清单/长文时才展开。不要输出工具调用细节。"
             )
             avatar_url = ""
             provider = getattr(base_session, "provider_name", None)
@@ -1070,7 +1076,11 @@ class GroupChatRouter:
             "- 你是微信群聊中的一个成员，遵循自然对话风格。\n"
             f"{force_rule}"
             "- 若需要回答，请直接给完整答案，不要流式、不分段。\n"
-            "- 回答简洁、有执行性，贴合你的角色职责。\n"
+            "- 默认短聊：像真人在微信群里说话——先结论，再补 2–5 个关键点；"
+            "不要主动输出长报告、完整验收清单、大段对照表或说明书式长文。\n"
+            "- 仅当用户明确要「报告 / 验收清单 / 完整方案 / 详细表格 / 长文」，"
+            "或当前问题显然是在交付文档材料时，才仔细展开长篇；否则保持短回复，细项留给追问。\n"
+            "- 回答有执行性，贴合你的角色职责；能一句话说清就不要写成章节。\n"
             "- 你能看到其他成员最近发言，可基于上下文补充或纠正。\n"
             "- 查看「最近群聊上下文」，若已有成员提出了相同的澄清问题，不要重复；"
             "给出你独特的专业判断、不同视角，或主动用工具查找答案。\n"
@@ -2027,7 +2037,7 @@ class GroupChatRouter:
             summary_prompt = (
                 f"{user_input}\n\n"
                 "[系统] 所有子任务已执行完毕，请以项目经理身份综合以上成员的工作成果，"
-                "给出简洁的最终答复和下一步建议。"
+                "用微信群短聊风格给出最终答复和下一步建议（默认短，勿主动写长报告）。"
             )
             pm = await self._run_meta_project_manager_reply(
                 base_session=base_session,
@@ -2035,7 +2045,10 @@ class GroupChatRouter:
                 group_name=group_name,
                 user_input=summary_prompt,
                 quoted_content="",
-                extra_instruction="请综合所有成员成果，给出最终答复。",
+                extra_instruction=(
+                    "请综合所有成员成果，给出最终答复。"
+                    "默认短聊：结论 + 关键点 + 下一步；仅用户本轮明确要求报告/清单时才展开长文。"
+                ),
                 user_display_name=user_display_name,
             )
             yield pm
