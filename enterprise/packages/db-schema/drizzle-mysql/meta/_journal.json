@@ -120,6 +120,13 @@
       "when": 1786100000001,
       "tag": "0016_portal_request_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1786200000001,
+      "tag": "0017_deep_research_runs_trace_id",
+      "breakpoints": true
     }
   ]
 }

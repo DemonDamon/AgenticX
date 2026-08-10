@@ -68,4 +68,49 @@ describe("withRequestLog", () => {
     });
     expect(isTraceId(response.headers.get("x-agenticx-trace-id"))).toBe(true);
   });
+
+  it("logs deep_research.runs finish at debug and chat.completions at info", async () => {
+    vi.stubEnv("PORTAL_LOG_LEVEL", "debug");
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      lines.push(String(line));
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await withRequestLog("deep_research.runs", async () => new Response("ok", { status: 200 }));
+    await withRequestLog("chat.completions", async () => new Response("ok", { status: 200 }));
+
+    const parsed = lines
+      .map((line) => {
+        try {
+          return JSON.parse(line) as { event?: string; level?: string };
+        } catch {
+          return null;
+        }
+      })
+      .filter((row): row is { event?: string; level?: string } => Boolean(row));
+
+    const runsFinish = parsed.find((row) => row.event === "deep_research.runs.finish");
+    const chatFinish = parsed.find((row) => row.event === "chat.completions.finish");
+    expect(runsFinish?.level).toBe("debug");
+    expect(chatFinish?.level).toBe("info");
+  });
+
+  it("still logs error level on polling route failure", async () => {
+    const errors: string[] = [];
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation((line: unknown) => {
+      errors.push(String(line));
+    });
+
+    await expect(
+      withRequestLog("deep_research.runs", async () => {
+        throw new Error("poll boom");
+      }),
+    ).rejects.toThrow("poll boom");
+
+    const parsed = errors.map((line) => JSON.parse(line) as { event: string; level: string });
+    const errRow = parsed.find((row) => row.event === "deep_research.runs.error");
+    expect(errRow?.level).toBe("error");
+  });
 });
