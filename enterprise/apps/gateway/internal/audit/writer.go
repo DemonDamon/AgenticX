@@ -29,6 +29,7 @@ type Event struct {
 	UserEmail          string          `json:"user_email,omitempty"`
 	DepartmentID       string          `json:"department_id,omitempty"`
 	SessionID          string          `json:"session_id,omitempty"`
+	TraceID            string          `json:"trace_id,omitempty"`
 	ClientType         string          `json:"client_type"`
 	ClientIP           string          `json:"client_ip,omitempty"`
 	Provider           string          `json:"provider,omitempty"`

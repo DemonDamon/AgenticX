@@ -37,7 +37,7 @@ function session(id: string, title: string): ChatSession {
 
 class UpdateDepthClient implements ChatClient {
   async sendMessage(_req: ChatRequest): Promise<SendMessageResult> {
-    return { requestId: "req-1" };
+    return { requestId: "req-1", traceId: "01TESTTRACEID000000000001" };
   }
 
   async *stream(_requestId: string): AsyncIterable<ChatChunk> {

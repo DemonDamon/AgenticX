@@ -357,12 +357,16 @@ function extractUpstreamErrorMessage(errText: string, status: number): string {
 async function callGatewayStream(
   deps: GatewayFetchDeps,
   body: Record<string, unknown>,
+  nextTraceStep?: () => string,
 ): Promise<Response> {
   const fetchImpl = deps.fetchImpl ?? fetch;
+  const headers = nextTraceStep
+    ? { ...deps.headers, "x-agenticx-trace-step": nextTraceStep() }
+    : deps.headers;
   try {
     return await fetchImpl(deps.url, {
       method: "POST",
-      headers: deps.headers,
+      headers,
       body: JSON.stringify(body),
       signal: deps.signal,
     });
@@ -554,6 +558,9 @@ export async function runWebSearchTurn(
   parsedBody: Record<string, unknown>,
   deps: GatewayFetchDeps,
 ): Promise<Response> {
+  let traceStep = 0;
+  const nextTraceStep = () => String(++traceStep);
+
   const baseBody = stripWebSearchFlag(parsedBody);
   // Sanitize assistant history before search/skip paths so prior <think> chains and
   // stale [N] citation indices never reach the upstream model.
@@ -570,12 +577,16 @@ export async function runWebSearchTurn(
   const respondWithoutSearch = async (reason: string): Promise<Response> => {
     console.info(`[web-search] skipped search-first (reason=${reason})`);
     try {
-      const upstream = await callGatewayStream(deps, {
-        ...rest,
-        stream: true,
-        // Hint first so thinking models do not narrate "无需功能调用".
-        messages: withTrivialTurnContext(withCurrentTimeContext(originalMessages)),
-      });
+      const upstream = await callGatewayStream(
+        deps,
+        {
+          ...rest,
+          stream: true,
+          // Hint first so thinking models do not narrate "无需功能调用".
+          messages: withTrivialTurnContext(withCurrentTimeContext(originalMessages)),
+        },
+        nextTraceStep,
+      );
       return pipeUpstreamSse(upstream, {});
     } catch (error) {
       return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
@@ -584,11 +595,15 @@ export async function runWebSearchTurn(
 
   if (!cfg.enabled) {
     try {
-      const upstream = await callGatewayStream(deps, {
-        ...rest,
-        stream: true,
-        messages: withCurrentTimeContext(originalMessages),
-      });
+      const upstream = await callGatewayStream(
+        deps,
+        {
+          ...rest,
+          stream: true,
+          messages: withCurrentTimeContext(originalMessages),
+        },
+        nextTraceStep,
+      );
       return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT);
     } catch (error) {
       return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
@@ -663,11 +678,15 @@ export async function runWebSearchTurn(
 
   let upstream: Response;
   try {
-    upstream = await callGatewayStream(deps, {
-      ...rest,
-      stream: true,
-      messages,
-    });
+    upstream = await callGatewayStream(
+      deps,
+      {
+        ...rest,
+        stream: true,
+        messages,
+      },
+      nextTraceStep,
+    );
   } catch (error) {
     return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
   }
