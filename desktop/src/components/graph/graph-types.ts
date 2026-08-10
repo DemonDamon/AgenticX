@@ -187,6 +187,23 @@ export function applyGraphEvent(state: PaneGraphState, payload: GraphSsePayload)
     return { ...next, edges };
   }
 
+  if (type === "graph.edge_removed") {
+    const eid = String(
+      payload.edge_id || (payload.edge as GraphEdgeSnapshot | undefined)?.id || "",
+    ).trim();
+    if (!eid) return next;
+    return {
+      ...next,
+      edges: next.edges.filter((e) => e.id !== eid),
+      projection: next.projection
+        ? {
+            ...next.projection,
+            agent_edges: (next.projection.agent_edges || []).filter((e) => e.id !== eid),
+          }
+        : next.projection,
+    };
+  }
+
   if (type === "graph.edge_flow") {
     const eid = String(payload.edge_id || (payload.edge as GraphEdgeSnapshot | undefined)?.id || "");
     if (!eid) return next;

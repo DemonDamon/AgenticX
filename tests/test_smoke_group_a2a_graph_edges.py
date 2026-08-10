@@ -97,3 +97,20 @@ def test_h2a_fanout_multi_targets(tmp_path: Path) -> None:
     assert all(e.source == HUMAN_NODE_ID for e in edges)
     assert all(e.kind.value == "message" for e in edges)
     assert len(events) >= 4  # updated+flow per edge
+
+
+def test_h2a_fanout_replaces_stale_human_edges(tmp_path: Path) -> None:
+    store = GraphRunStore(root=tmp_path)
+    run = ensure_presence_run(
+        session_id="s1",
+        group_id="g1",
+        member_ids=["a1", "a2", "__meta__"],
+        store=store,
+    )
+    project_h2a_fanout(run, ["a1"])
+    assert any(e.target == "agent:a1" for e in run.edges if e.source == HUMAN_NODE_ID)
+    edges, events = project_h2a_fanout(run, ["__meta__"])
+    human_targets = [e.target for e in run.edges if e.source == HUMAN_NODE_ID and e.kind.value == "message"]
+    assert human_targets == ["agent:__meta__"]
+    assert all(e.target == "agent:__meta__" for e in edges)
+    assert any(ev.get("type") == "graph.edge_removed" for ev in events)
