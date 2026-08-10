@@ -5,6 +5,8 @@ import {
   newEventsSince,
   type DeepResearchRunStatus,
 } from "../../../../../../../lib/deep-research/run-store";
+import { log } from "../../../../../../../lib/observability/logger";
+import { withRequestLog } from "../../../../../../../lib/observability/with-request-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 1500;
@@ -31,6 +33,7 @@ function sseDelta(content: string): string {
 }
 
 export async function GET(request: Request, segmentData: { params: Params }) {
+  return withRequestLog("deep_research.stream", async (logCtx) => {
   const session = await getSessionFromCookies();
   if (!session) {
     return new Response(JSON.stringify({ error: { code: "40101", message: "unauthorized" } }), {
@@ -47,6 +50,11 @@ export async function GET(request: Request, segmentData: { params: Params }) {
     });
   }
 
+  logCtx.setUser({
+    userId: session.userId,
+    tenantId: session.tenantId,
+  });
+
   const store = defaultRunStore;
   const initial = await store.get(session.tenantId, session.userId, runId);
   if (!initial) {
@@ -59,6 +67,7 @@ export async function GET(request: Request, segmentData: { params: Params }) {
 
   const encoder = new TextEncoder();
   const abortSignal = request.signal;
+  const traceId = logCtx.traceId;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -72,6 +81,7 @@ export async function GET(request: Request, segmentData: { params: Params }) {
         }
       };
 
+      try {
       // Full replay once
       for (const event of initial.events) {
         safeEnqueue(formatDeepResearchEventSse(event));
@@ -131,6 +141,23 @@ export async function GET(request: Request, segmentData: { params: Params }) {
       } catch {
         // ignore
       }
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        log("error", {
+          event: "deep_research.stream.error",
+          route: "deep_research.stream",
+          trace_id: traceId,
+          run_id: runId,
+          error_name: err.name,
+          error_message: err.message,
+          error_stack: err.stack,
+        });
+        try {
+          controller.error(error);
+        } catch {
+          // ignore
+        }
+      }
     },
   });
 
@@ -139,6 +166,8 @@ export async function GET(request: Request, segmentData: { params: Params }) {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
+      "x-agenticx-trace-id": traceId,
     },
   });
+  }, request);
 }

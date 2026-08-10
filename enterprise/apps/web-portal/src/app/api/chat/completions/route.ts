@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { isTraceId, newTraceId } from "@agenticx/sdk-ts";
 import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
@@ -17,6 +16,8 @@ import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
+import { log } from "../../../../lib/observability/logger";
+import { withRequestLog } from "../../../../lib/observability/with-request-log";
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.messages)) return body;
@@ -42,6 +43,7 @@ export const maxDuration = 1500;
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  return withRequestLog("chat.completions", async (logCtx) => {
   const auth = await getSessionAuthFromCookies();
   if (!auth) {
     return NextResponse.json(
@@ -70,8 +72,12 @@ export async function POST(request: Request) {
     );
   }
 
-  const incomingTraceId = request.headers.get("x-agenticx-trace-id")?.trim() ?? "";
-  const traceId = isTraceId(incomingTraceId) ? incomingTraceId : newTraceId();
+  const traceId = logCtx.traceId;
+  logCtx.setUser({
+    userId: session.userId,
+    tenantId: session.tenantId,
+    sessionId: chatSessionId,
+  });
 
   const ctx = toChatHistoryContext(session);
   const owned = await isChatSessionOwned(ctx, chatSessionId);
@@ -236,6 +242,11 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "gateway unreachable";
+    log("error", {
+      event: "chat.completions.gateway_unreachable",
+      trace_id: traceId,
+      error_message: detail,
+    });
     return NextResponse.json(
       {
         error: {
@@ -252,6 +263,11 @@ export async function POST(request: Request) {
   }
 
   if (!upstream.ok) {
+    log("warn", {
+      event: "chat.completions.gateway_status",
+      trace_id: traceId,
+      status: upstream.status,
+    });
     const errorBody = await upstream.text();
     return new NextResponse(errorBody, {
       status: upstream.status,
@@ -271,4 +287,5 @@ export async function POST(request: Request) {
       "x-agenticx-trace-id": traceId,
     },
   });
+  }, request);
 }

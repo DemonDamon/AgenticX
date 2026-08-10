@@ -37,6 +37,7 @@ import {
   PLAN_GATE_PATCH_KEY,
   resolveClarifyResume,
 } from "../../../../../lib/deep-research/run-wait";
+import { withRequestLog } from "../../../../../lib/observability/with-request-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 1500;
@@ -79,6 +80,7 @@ function alreadyContinued(runId: string) {
 }
 
 export async function POST(request: Request) {
+  return withRequestLog("deep_research.resume", async (logCtx) => {
   const auth = await getSessionAuthFromCookies();
   if (!auth) {
     return NextResponse.json(
@@ -88,6 +90,10 @@ export async function POST(request: Request) {
   }
   const { session, accessToken } = auth;
   let refreshToken = auth.refreshToken;
+  logCtx.setUser({
+    userId: session.userId,
+    tenantId: session.tenantId,
+  });
 
   let body: {
     runId?: unknown;
@@ -757,4 +763,5 @@ export async function POST(request: Request) {
     message: "ok",
     data: { runId, resumed: true, orphanContinued: true },
   });
+  }, request);
 }
