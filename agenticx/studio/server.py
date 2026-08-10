@@ -2926,14 +2926,38 @@ def create_studio_app() -> FastAPI:
             manager.clear_interrupt(payload.session_id)
             manager.set_execution_state(payload.session_id, "running")
             setattr(session, "_usage_owner_session_id", payload.session_id)
-            async def _group_chat_stream() -> AsyncGenerator[str, None]:
+
+            # Local import: later in this handler there is another `import asyncio`
+            # which makes the name function-local for the whole body.
+            import asyncio as _asyncio_group
+
+            group_use_event_hub = live_reattach_enabled()
+            group_event_hub = (
+                manager.ensure_event_hub(payload.session_id) if group_use_event_hub else None
+            )
+            group_fallback_queue: "_asyncio_group.Queue[SseEvent | None]" = _asyncio_group.Queue()
+
+            async def _emit_group_event(evt: SseEvent) -> None:
+                """Publish to hub when enabled, else queue for the local generator."""
+                if group_event_hub is not None:
+                    await group_event_hub.publish(
+                        RuntimeEvent(
+                            type=evt.type,
+                            data=dict(evt.data or {}),
+                            agent_id=str((evt.data or {}).get("agent_id") or "meta"),
+                        )
+                    )
+                else:
+                    await group_fallback_queue.put(evt)
+
+            async def _produce_group_events() -> None:
                 try:
                     if turn_context_files:
                         progress_evt = SseEvent(
                             type=EventType.TOOL_PROGRESS.value,
                             data={"name": "document_parse", "elapsed_seconds": 0},
                         )
-                        yield f"data: {json.dumps(progress_evt.model_dump(), ensure_ascii=False)}\n\n"
+                        await _emit_group_event(progress_evt)
                         try:
                             await hydrate_turn_context_files(turn_context_files, session.context_files)
                         except Exception:
@@ -2990,7 +3014,7 @@ def create_studio_app() -> FastAPI:
                                 "avatar_name": meta_leader_label,
                             },
                         )
-                        yield f"data: {json.dumps(typing_evt.model_dump(), ensure_ascii=False)}\n\n"
+                        await _emit_group_event(typing_evt)
                     for aid in mentioned_set:
                         avatar_cfg = avatar_registry.get_avatar(aid)
                         typing_evt = SseEvent(
@@ -3000,7 +3024,7 @@ def create_studio_app() -> FastAPI:
                                 "avatar_name": (avatar_cfg.name if avatar_cfg else aid),
                             },
                         )
-                        yield f"data: {json.dumps(typing_evt.model_dump(), ensure_ascii=False)}\n\n"
+                        await _emit_group_event(typing_evt)
 
                     u_display = str(getattr(payload, "user_display_name", None) or "").strip() or None
                     async for reply in router.run_group_turn(
@@ -3013,11 +3037,9 @@ def create_studio_app() -> FastAPI:
                         user_input=payload.user_input,
                         quoted_content=quoted_content,
                         quoted_message_id=quoted_message_id,
-                        should_stop=request.is_disconnected,
+                        should_stop=lambda: manager.should_interrupt(payload.session_id),
                         user_display_name=u_display,
                     ):
-                        if await request.is_disconnected():
-                            break
                         evt_type = str(getattr(reply, "event_type", "") or "")
                         if not evt_type:
                             evt_type = "group_skipped" if reply.skipped else "group_reply"
@@ -3033,17 +3055,97 @@ def create_studio_app() -> FastAPI:
                                 "confirm_request_id": str(getattr(reply, "confirm_request_id", "") or ""),
                             },
                         )
-                        yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                        await _emit_group_event(evt)
+                        if evt_type in {"group_reply", "group_skipped"}:
+                            try:
+                                manager.incremental_persist(payload.session_id)
+                            except Exception:
+                                pass
                 except Exception as exc:
                     err = SseEvent(type="error", data={"text": f"Group runtime error: {exc}"})
-                    yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                    with contextlib.suppress(Exception):
+                        await _emit_group_event(err)
                 finally:
+                    # publish_done must precede set_execution_state("idle"):
+                    # idle clears/closes the hub (see SessionManager.set_execution_state).
                     manager.clear_interrupt(payload.session_id)
-                    manager.set_execution_state(payload.session_id, "idle")
                     await manager.persist_async(payload.session_id)
-                yield 'data: {"type":"done","data":{}}\n\n'
+                    if group_event_hub is not None:
+                        await group_event_hub.publish_done()
+                    else:
+                        await group_fallback_queue.put(None)
+                    manager.set_execution_state(payload.session_id, "idle")
 
-            return StreamingResponse(_group_chat_stream(), media_type="text/event-stream")
+            async def _group_chat_stream() -> AsyncGenerator[str, None]:
+                group_runtime_task: _asyncio_group.Task[None] | None = None
+                client_disconnected = False
+                hub_sub_id: int | None = None
+                try:
+                    group_runtime_task = _asyncio_group.create_task(_produce_group_events())
+                    if group_event_hub is not None:
+                        hub_sub_id, hub_sub_q, _ = group_event_hub.subscribe()
+                        while True:
+                            if await request.is_disconnected():
+                                client_disconnected = True
+                                break
+                            try:
+                                buffered = await _asyncio_group.wait_for(
+                                    hub_sub_q.get(), timeout=0.1
+                                )
+                            except _asyncio_group.TimeoutError:
+                                if group_event_hub.is_runtime_done and hub_sub_q.empty():
+                                    yield 'data: {"type":"done","data":{}}\n\n'
+                                    break
+                                continue
+                            if buffered.event is None:
+                                yield 'data: {"type":"done","data":{}}\n\n'
+                                break
+                            for line in _buffered_event_to_sse_lines(buffered):
+                                yield line
+                    else:
+                        while True:
+                            if await request.is_disconnected():
+                                client_disconnected = True
+                                break
+                            try:
+                                evt = await _asyncio_group.wait_for(
+                                    group_fallback_queue.get(), timeout=0.1
+                                )
+                            except _asyncio_group.TimeoutError:
+                                if (
+                                    group_runtime_task is not None
+                                    and group_runtime_task.done()
+                                    and group_fallback_queue.empty()
+                                ):
+                                    yield 'data: {"type":"done","data":{}}\n\n'
+                                    break
+                                continue
+                            if evt is None:
+                                yield 'data: {"type":"done","data":{}}\n\n'
+                                break
+                            yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                finally:
+                    if hub_sub_id is not None and group_event_hub is not None:
+                        group_event_hub.unsubscribe(hub_sub_id)
+                    if group_runtime_task is not None and not group_runtime_task.done():
+                        if group_event_hub is not None and client_disconnected:
+                            logger.info(
+                                "[group] client disconnected, runtime continues (hub) session=%s",
+                                payload.session_id,
+                            )
+                        else:
+                            group_runtime_task.cancel()
+                            with contextlib.suppress(Exception):
+                                await group_runtime_task
+                    elif group_runtime_task is not None:
+                        with contextlib.suppress(Exception):
+                            await group_runtime_task
+
+            return StreamingResponse(
+                _group_chat_stream(),
+                media_type="text/event-stream",
+                headers=_STREAMING_SSE_HEADERS,
+            )
 
         try:
             llm = _resolve_llm()

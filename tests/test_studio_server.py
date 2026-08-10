@@ -523,7 +523,25 @@ def test_group_chat_branch_sets_execution_state_running_then_idle(monkeypatch) -
         def pick_targets(self, **_kwargs):
             return []
 
-        async def run_group_turn(self, **_kwargs):
+        def _plain_targets_in_text(self, *_args, **_kwargs):
+            return []
+
+        async def run_group_turn(self, **kwargs):
+            base_session = kwargs.get("base_session")
+            hist = getattr(base_session, "chat_history", None) if base_session is not None else None
+            if not isinstance(hist, list):
+                hist = []
+                if base_session is not None:
+                    setattr(base_session, "chat_history", hist)
+            hist.append({"role": "user", "content": str(kwargs.get("user_input") or "")})
+            hist.append(
+                {
+                    "role": "assistant",
+                    "content": "group done",
+                    "agent_id": "meta",
+                    "avatar_name": "Machi",
+                }
+            )
             yield GroupReply(
                 agent_id="meta",
                 avatar_name="Machi",
