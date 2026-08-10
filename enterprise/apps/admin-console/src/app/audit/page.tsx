@@ -36,8 +36,9 @@ import {
   toast,
 } from "@agenticx/ui";
 import type { ColumnDef } from "@tanstack/react-table";
-import { FileWarning, Filter, Inbox, RefreshCcw, Search, ShieldAlert, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Copy, FileWarning, Filter, Inbox, RefreshCcw, Search, ShieldAlert, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useTranslations } from "next-intl";
+import type { ReactNode } from "react";
 
 type QueryResult = {
   total: number;
@@ -47,6 +48,24 @@ type QueryResult = {
   chain_error_reason?: string;
 };
 
+type TraceSpanRow = {
+  step_no: number;
+  step_kind: string;
+  status: string;
+  model: string | null;
+  total_tokens: number;
+  duration_ms: number;
+  error_message: string | null;
+};
+
+type TracePanelState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "forbidden" }
+  | { status: "not_found" }
+  | { status: "error"; message: string }
+  | { status: "ok"; spans: TraceSpanRow[] };
+
 export default function AuditPage() {
   const t = useTranslations("pages.ops.audit");
   const ts = useTranslations("shell");
@@ -55,11 +74,14 @@ export default function AuditPage() {
   const [selected, setSelected] = useState<AuditEvent | null>(null);
   const [chainValid, setChainValid] = useState(true);
   const [chainError, setChainError] = useState<{ at?: string; reason?: string } | null>(null);
+  const [traceId, setTraceId] = useState("");
+  const [sessionId, setSessionId] = useState("");
   const [userId, setUserId] = useState("");
   const [model, setModel] = useState("");
   const [policyHit, setPolicyHit] = useState("");
   const [crossBorderOnly, setCrossBorderOnly] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [tracePanel, setTracePanel] = useState<TracePanelState>({ status: "idle" });
 
   const [chainFull, setChainFull] = useState<{
     valid: boolean;
@@ -98,6 +120,8 @@ export default function AuditPage() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          trace_id: traceId || undefined,
+          session_id: sessionId || undefined,
           user_id: userId || undefined,
           model: model || undefined,
           policy_hit: policyHit || undefined,
@@ -122,17 +146,59 @@ export default function AuditPage() {
     } finally {
       setLoading(false);
     }
-  }, [userId, model, policyHit, crossBorderOnly, loadChainVerify, t]);
+  }, [traceId, sessionId, userId, model, policyHit, crossBorderOnly, loadChainVerify, t]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setTracePanel({ status: "idle" });
+  }, [selected?.id]);
+
+  const loadTraceDetail = useCallback(
+    async (id: string) => {
+      setTracePanel({ status: "loading" });
+      try {
+        const response = await adminFetch(`/api/agent-traces?trace_id=${encodeURIComponent(id)}`);
+        if (response.status === 401 || response.status === 403) {
+          setTracePanel({ status: "forbidden" });
+          return;
+        }
+        if (response.status === 404) {
+          setTracePanel({ status: "not_found" });
+          return;
+        }
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as { message?: string };
+          setTracePanel({
+            status: "error",
+            message: payload.message ?? t("detail.traceLoadFailed"),
+          });
+          return;
+        }
+        const payload = (await response.json()) as {
+          data?: { spans?: TraceSpanRow[] };
+        };
+        const spans = Array.isArray(payload.data?.spans) ? payload.data.spans : [];
+        setTracePanel({ status: "ok", spans });
+      } catch (error) {
+        setTracePanel({
+          status: "error",
+          message: error instanceof Error ? error.message : t("detail.traceLoadFailed"),
+        });
+      }
+    },
+    [t],
+  );
 
   const handleExport = async () => {
     const response = await adminFetch("/api/audit/export", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        trace_id: traceId || undefined,
+        session_id: sessionId || undefined,
         user_id: userId || undefined,
         model: model || undefined,
         policy_hit: policyHit || undefined,
@@ -227,12 +293,14 @@ export default function AuditPage() {
 
   const activeFilters = useMemo(() => {
     const list = [];
+    if (traceId) list.push({ id: "trace", label: `${t("filterLabels.trace")}${traceId}`, onRemove: () => setTraceId("") });
+    if (sessionId) list.push({ id: "session", label: `${t("filterLabels.session")}${sessionId}`, onRemove: () => setSessionId("") });
     if (userId) list.push({ id: "user", label: `${t("filterLabels.user")}${userId}`, onRemove: () => setUserId("") });
     if (model) list.push({ id: "model", label: `${t("filterLabels.model")}${model}`, onRemove: () => setModel("") });
     if (policyHit) list.push({ id: "policy", label: `${t("filterLabels.policy")}${policyHit}`, onRemove: () => setPolicyHit("") });
     if (crossBorderOnly) list.push({ id: "cross", label: "仅跨境", onRemove: () => setCrossBorderOnly(false) });
     return list;
-  }, [userId, model, policyHit, crossBorderOnly, t]);
+  }, [traceId, sessionId, userId, model, policyHit, crossBorderOnly, t]);
 
   const headerChainOk = chainFull != null ? chainFull.valid : chainValid;
   const headerChainPartial = chainFull?.valid === true && chainFull.verification === "partial";
@@ -302,6 +370,8 @@ export default function AuditPage() {
             searchPlaceholder={t("searchPlaceholder")}
             activeFilters={activeFilters}
             onClearFilters={() => {
+              setTraceId("");
+              setSessionId("");
               setUserId("");
               setModel("");
               setPolicyHit("");
@@ -338,6 +408,24 @@ export default function AuditPage() {
                       {t("advancedFilter")}
                     </div>
                     <Separator />
+                    <div className="space-y-1.5">
+                      <Label htmlFor="flt-trace">{t("filterTraceId")}</Label>
+                      <Input
+                        id="flt-trace"
+                        value={traceId}
+                        onChange={(event) => setTraceId(event.target.value)}
+                        placeholder="01JABCDEFGHJKMNPQRSTVWXYZ"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="flt-session">{t("filterSessionId")}</Label>
+                      <Input
+                        id="flt-session"
+                        value={sessionId}
+                        onChange={(event) => setSessionId(event.target.value)}
+                        placeholder="sess_..."
+                      />
+                    </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="flt-user">{t("filterUserId")}</Label>
                       <Input
@@ -378,6 +466,8 @@ export default function AuditPage() {
                         variant="ghost"
                         size="sm"
                         onClick={() => {
+                          setTraceId("");
+                          setSessionId("");
                           setUserId("");
                           setModel("");
                           setPolicyHit("");
@@ -443,6 +533,91 @@ export default function AuditPage() {
                     <DetailField label={t("detail.provider")} value={selected.provider ?? "—"} />
                     <DetailField label={t("detail.tenant")} value={<span className="font-mono text-xs">{selected.tenant_id}</span>} />
                     <DetailField label={t("detail.session")} value={<span className="font-mono text-xs">{selected.session_id ?? "—"}</span>} />
+                    {selected.trace_id ? (
+                      <DetailField
+                        label={t("detail.requestId")}
+                        value={
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-xs">{selected.trace_id}</span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2"
+                                onClick={() => {
+                                  void navigator.clipboard.writeText(selected.trace_id ?? "").then(() => {
+                                    toast.success(t("toast.copied"));
+                                  });
+                                }}
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                                {t("detail.copyRequestId")}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7"
+                                disabled={tracePanel.status === "loading"}
+                                onClick={() => void loadTraceDetail(selected.trace_id!)}
+                              >
+                                {t("detail.viewTrace")}
+                              </Button>
+                            </div>
+                            {tracePanel.status === "loading" ? (
+                              <p className="text-xs text-muted-foreground">{t("detail.traceLoading")}</p>
+                            ) : null}
+                            {tracePanel.status === "forbidden" ? (
+                              <p className="text-xs text-muted-foreground">{t("detail.traceNoPermission")}</p>
+                            ) : null}
+                            {tracePanel.status === "not_found" ? (
+                              <p className="text-xs text-muted-foreground">{t("detail.traceNotFound")}</p>
+                            ) : null}
+                            {tracePanel.status === "error" ? (
+                              <p className="text-xs text-danger">{tracePanel.message}</p>
+                            ) : null}
+                            {tracePanel.status === "ok" && tracePanel.spans.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">{t("detail.traceEmpty")}</p>
+                            ) : null}
+                            {tracePanel.status === "ok" && tracePanel.spans.length > 0 ? (
+                              <div className="overflow-x-auto rounded-md border border-border">
+                                <table className="w-full min-w-[520px] text-left text-xs">
+                                  <thead className="bg-muted/50 text-muted-foreground">
+                                    <tr>
+                                      <th className="px-2 py-1.5 font-medium">{t("detail.traceColumns.stepNo")}</th>
+                                      <th className="px-2 py-1.5 font-medium">{t("detail.traceColumns.stepKind")}</th>
+                                      <th className="px-2 py-1.5 font-medium">{t("detail.traceColumns.status")}</th>
+                                      <th className="px-2 py-1.5 font-medium">{t("detail.traceColumns.model")}</th>
+                                      <th className="px-2 py-1.5 font-medium">{t("detail.traceColumns.totalTokens")}</th>
+                                      <th className="px-2 py-1.5 font-medium">{t("detail.traceColumns.durationMs")}</th>
+                                      <th className="px-2 py-1.5 font-medium">{t("detail.traceColumns.error")}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {[...tracePanel.spans]
+                                      .sort((a, b) => a.step_no - b.step_no)
+                                      .map((span) => (
+                                        <tr key={`${span.step_no}-${span.step_kind}`} className="border-t border-border">
+                                          <td className="px-2 py-1.5 font-mono">{span.step_no}</td>
+                                          <td className="px-2 py-1.5">{span.step_kind}</td>
+                                          <td className="px-2 py-1.5">{span.status}</td>
+                                          <td className="px-2 py-1.5 font-mono">{span.model ?? "—"}</td>
+                                          <td className="px-2 py-1.5 font-mono">{span.total_tokens}</td>
+                                          <td className="px-2 py-1.5 font-mono">{span.duration_ms}</td>
+                                          <td className="max-w-[180px] truncate px-2 py-1.5 text-muted-foreground">
+                                            {span.error_message ?? "—"}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : null}
+                          </div>
+                        }
+                      />
+                    ) : null}
                     <DetailField label={t("detail.inputTokens")} value={<span className="font-mono">{selected.input_tokens ?? "—"}</span>} />
                     <DetailField label={t("detail.outputTokens")} value={<span className="font-mono">{selected.output_tokens ?? "—"}</span>} />
                     <DetailField label={t("detail.totalTokens")} value={<span className="font-mono">{selected.total_tokens ?? "—"}</span>} />
@@ -523,7 +698,7 @@ export default function AuditPage() {
   );
 }
 
-function DetailField({ label, value }: { label: string; value: React.ReactNode }) {
+function DetailField({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="grid grid-cols-[120px_1fr] gap-3 py-2.5">
       <dt className="text-muted-foreground">{label}</dt>
