@@ -164,4 +164,37 @@ describe("assembleTraceTimeline", () => {
     expect(timeline.nodes[0]?.children[0]?.kind).toBe("model_step");
     expect(timeline.totals.tokens).toBe(11);
   });
+
+  it("labels model steps with stage and surfaces duration/error status", () => {
+    const timeline = assembleTraceTimeline({
+      traceId: "01JZTRACEID000000000000003",
+      portalLogs: [
+        portalLog({
+          id: "log-y",
+          event: "chat.completions.finish",
+          duration_ms: 900,
+        }),
+      ],
+      modelSpans: [
+        span({
+          id: "s-err",
+          step_no: 2,
+          duration_ms: 1234,
+          status: "error",
+          error_message: "upstream 500",
+          metadata: { stage: "dr.lane.expand" },
+        }),
+      ],
+      deepResearchRun: null,
+    });
+
+    const node = timeline.nodes[0]?.children[0];
+    expect(node?.kind).toBe("model_step");
+    expect(node?.label).toContain("dr.lane.expand");
+    expect(node?.label).toContain("step 2");
+    expect(node?.durationMs).toBe(1234);
+    expect(node?.status).toBe("error");
+    expect(node?.attrs?.stage).toBe("dr.lane.expand");
+    expect(node?.attrs?.error_message).toBe("upstream 500");
+  });
 });

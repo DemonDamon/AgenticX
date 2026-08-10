@@ -199,6 +199,12 @@ func (s *Server) protocolComplete(
 	if err != nil {
 		s.billingService.RollbackContext(qctx, reservedTokens)
 		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
+		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
+			DurationMS:   durationMSSince(startedAt),
+			Status:       "error",
+			ErrorMessage: sanitizeTraceError(err.Error()),
+			PromptText:   joinMessages(req.Messages),
+		})
 		if up, ok := err.(*adaptor.UpstreamError); ok {
 			writeAPIError(w, adaptor.MapUpstreamError(up.StatusCode, up.Body, session.inbound))
 			return
@@ -228,7 +234,11 @@ func (s *Server) protocolComplete(
 	}
 	actualTotal := int64(providerInputTokens + providerOutputTokens)
 	settle := s.billingService.SettleContext(qctx, reservedTokens, actualTotal)
-	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck)
+	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
+		DurationMS:     durationMSSince(startedAt),
+		PromptText:     joinMessages(req.Messages),
+		CompletionText: responseContent,
+	})
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
 		Stream: false, Response: resp, Usage: resp.Usage,
 	})
@@ -395,7 +405,11 @@ func (s *Server) protocolStream(
 	)
 	s.reportUsageDetailed(identity, decision, openai.Usage{
 		PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens,
-	}, &budgetCheck)
+	}, &budgetCheck, spanMeta{
+		DurationMS:     durationMSSince(startedAt),
+		PromptText:     joinMessages(req.Messages),
+		CompletionText: responseText,
+	})
 
 	usage := openai.Usage{PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens}
 	switch session.outbound {

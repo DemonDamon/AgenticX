@@ -32,6 +32,12 @@ func (s *Server) handleChatCompleteRelay(
 	if err != nil {
 		s.billingService.RollbackContext(qctx, reservedTokens)
 		s.recordUpstreamError(identity.TenantID, makeID("req"), result.Channel.ID, 500, []byte(err.Error()))
+		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
+			DurationMS:   durationMSSince(startedAt),
+			Status:       "error",
+			ErrorMessage: sanitizeTraceError(err.Error()),
+			PromptText:   joinMessages(req.Messages),
+		})
 		writeAPIError(w, openai.Internal(err.Error()))
 		return
 	}
@@ -53,7 +59,11 @@ func (s *Server) handleChatCompleteRelay(
 	}
 	actualTotal := int64(providerInputTokens + providerOutputTokens)
 	settle := s.billingService.SettleContext(qctx, reservedTokens, actualTotal)
-	s.reportUsageDetailed(identity, decision, resp.Usage, nil)
+	s.reportUsageDetailed(identity, decision, resp.Usage, nil, spanMeta{
+		DurationMS:     durationMSSince(startedAt),
+		PromptText:     joinMessages(req.Messages),
+		CompletionText: responseContent,
+	})
 
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
 		Stream:   false,
