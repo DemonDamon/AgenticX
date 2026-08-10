@@ -14,6 +14,7 @@ GRAPH_EVENT_TYPES = frozenset(
         "graph.run_created",
         "graph.node_updated",
         "graph.edge_updated",
+        "graph.edge_removed",
         "graph.edge_flow",
         "graph.intervention_applied",
         "graph.run_status",

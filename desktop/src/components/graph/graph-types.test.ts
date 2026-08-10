@@ -56,6 +56,30 @@ describe("graph-types", () => {
     expect(s.pulseEdges.e1).toBeGreaterThan(0);
   });
 
+  it("applyGraphEvent removes edges on edge_removed", () => {
+    let s = emptyPaneGraphState();
+    s = {
+      ...s,
+      edges: [
+        { id: "msg_human_agent:a1", kind: "message", source: "human", target: "agent:a1" },
+        { id: "msg_human_agent:__meta__", kind: "message", source: "human", target: "agent:__meta__" },
+      ],
+      projection: {
+        agent_nodes: [],
+        agent_edges: [
+          { id: "msg_human_agent:a1", kind: "message", source: "human", target: "agent:a1" },
+        ],
+      },
+    };
+    s = applyGraphEvent(s, {
+      type: "graph.edge_removed",
+      run_id: "gr_1",
+      edge_id: "msg_human_agent:a1",
+    });
+    expect(s.edges.map((e) => e.id)).toEqual(["msg_human_agent:__meta__"]);
+    expect(s.projection?.agent_edges).toEqual([]);
+  });
+
   it("applyGraphSnapshot replaces nodes/edges", () => {
     const s = applyGraphSnapshot(emptyPaneGraphState(), {
       run_id: "gr_2",

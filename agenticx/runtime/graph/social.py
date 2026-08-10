@@ -228,14 +228,21 @@ def project_h2a_fanout(
     target_agent_ids: Sequence[str],
     member_labels: Optional[Mapping[str, str]] = None,
 ) -> Tuple[List[GraphEdge], List[Dict[str, Any]]]:
-    """Create human→agent MESSAGE edges for each target; return edges + SSE events."""
+    """Create human→agent MESSAGE edges for each target; return edges + SSE events.
+
+    Previous human→agent MESSAGE edges that are not in this turn's targets are
+    removed so the God-View dashed line matches the current @ / route target.
+    Agent↔agent MESSAGE edges are left untouched.
+    """
     events: List[Dict[str, Any]] = []
     edges: List[GraphEdge] = []
+    keep_targets: set[str] = set()
     for aid in target_agent_ids:
         tid = str(aid or "").strip()
         if not tid:
             continue
         node_id = tid if tid.startswith("agent:") else f"agent:{tid}"
+        keep_targets.add(node_id)
         agent_id = tid.removeprefix("agent:")
         label = _member_display_label(agent_id, member_labels)
         if node_id not in run.nodes:
@@ -252,4 +259,25 @@ def project_h2a_fanout(
         edge = upsert_message_edge(run, source=HUMAN_NODE_ID, target=node_id, label="user")
         edges.append(edge)
         events.extend(message_edge_events(run, edge, summary="user→agent"))
+
+    stale = [
+        e
+        for e in list(run.edges)
+        if e.kind == EdgeKind.MESSAGE
+        and e.source == HUMAN_NODE_ID
+        and e.target not in keep_targets
+    ]
+    if stale:
+        stale_ids = {e.id for e in stale}
+        run.edges = [e for e in run.edges if e.id not in stale_ids]
+        for old in stale:
+            events.append(
+                graph_event(
+                    "graph.edge_removed",
+                    run_id=run.run_id,
+                    version=run.version,
+                    edge_id=old.id,
+                    edge=old.to_dict(),
+                )
+            )
     return edges, events

@@ -1295,6 +1295,13 @@ class GroupChatRouter:
             and _is_open_call_question(user_input)
         ):
             context.clear_active_thread()
+            for ge in self._project_h2a_fanout(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                target_agent_ids=[META_LEADER_AGENT_ID],
+            ):
+                yield ge
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
             if await self._should_stop(should_stop):
                 return
@@ -1329,6 +1336,13 @@ class GroupChatRouter:
             return
         if META_LEADER_AGENT_ID in mention_set:
             context.clear_active_thread()
+            for ge in self._project_h2a_fanout(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                target_agent_ids=[META_LEADER_AGENT_ID],
+            ):
+                yield ge
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
             if await self._should_stop(should_stop):
                 return
@@ -1385,6 +1399,13 @@ class GroupChatRouter:
             )
         if decision.action == "meta_direct":
             context.clear_active_thread()
+            for ge in self._project_h2a_fanout(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                target_agent_ids=[META_LEADER_AGENT_ID],
+            ):
+                yield ge
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
             if await self._should_stop(should_stop):
                 return
