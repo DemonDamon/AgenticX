@@ -56,7 +56,7 @@ class HangingStreamClient implements ChatClient {
       resolveWait = resolve;
     });
     this.pending.set(requestId, { resolveWait, waitPromise, cancelled: false });
-    return { requestId };
+    return { requestId, traceId: `01TESTTRACEID0000000000${String(this.seq).padStart(2, "0")}` };
   }
 
   async *stream(requestId: string): AsyncIterable<ChatChunk> {

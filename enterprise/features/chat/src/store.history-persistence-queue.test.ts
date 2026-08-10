@@ -41,7 +41,7 @@ function session(id: string): ChatSession {
 
 class ImmediateStreamClient implements ChatClient {
   async sendMessage(_request: ChatRequest): Promise<SendMessageResult> {
-    return { requestId: crypto.randomUUID() };
+    return { requestId: crypto.randomUUID(), traceId: "01TESTTRACEID000000000002" };
   }
 
   async *stream(requestId: string): AsyncIterable<ChatChunk> {

@@ -251,6 +251,10 @@ export type DeepResearchDeps = {
   userId?: string;
   sessionId?: string;
   runId?: string;
+  /** Correlates portal → gateway audit / token traces for this research turn. */
+  traceId?: string;
+  /** Internal: assigned by runDeepResearchTurn to increment X-AgenticX-Trace-Step. */
+  nextTraceStep?: () => string;
   clarifyTimeoutMs?: number;
   /** Skip clarify wait (tests). When false and clarifier needed, still emits clarify then continues with skip. */
   awaitClarify?: boolean;
@@ -283,7 +287,7 @@ function sseDelta(content: string): string {
   return sseDataFrame({ choices: [{ delta: { content } }] });
 }
 
-function eventStreamResponse(stream: ReadableStream<Uint8Array>): Response {
+function eventStreamResponse(stream: ReadableStream<Uint8Array>, traceId?: string): Response {
   return new Response(stream, {
     status: 200,
     headers: {
@@ -291,8 +295,18 @@ function eventStreamResponse(stream: ReadableStream<Uint8Array>): Response {
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
       "x-accel-buffering": "no",
+      ...(traceId ? { "x-agenticx-trace-id": traceId } : {}),
     },
   });
+}
+
+function gatewayCallHeaders(deps: DeepResearchDeps): Record<string, string> {
+  const step = deps.nextTraceStep?.() ?? "1";
+  return {
+    ...deps.headers,
+    ...(deps.traceId ? { "x-agenticx-trace-id": deps.traceId } : {}),
+    "x-agenticx-trace-step": step,
+  };
 }
 
 function extractLastUserQuery(messages: ChatMessage[]): string {
@@ -463,7 +477,7 @@ async function callGatewayStream(
   const fetchImpl = deps.fetchImpl ?? fetch;
   return fetchImpl(deps.url, {
     method: "POST",
-    headers: deps.headers,
+    headers: gatewayCallHeaders(deps),
     body: JSON.stringify(body),
     signal: deps.signal,
   });
@@ -476,7 +490,7 @@ async function callGatewayJson(
   const fetchImpl = deps.fetchImpl ?? fetch;
   const response = await fetchImpl(deps.url, {
     method: "POST",
-    headers: deps.headers,
+    headers: gatewayCallHeaders(deps),
     body: JSON.stringify({ ...body, stream: false }),
     signal: deps.signal,
   });
@@ -493,12 +507,19 @@ async function callGatewayJson(
   return typeof content === "string" ? content : "";
 }
 
-async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<Response> {
+async function pipeWithPrefix(
+  upstream: Response,
+  prefixText: string,
+  traceId?: string,
+): Promise<Response> {
   if (!upstream.ok || !upstream.body) {
     const errText = await upstream.text().catch(() => "gateway error");
     return new Response(errText, {
       status: upstream.status || 502,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(traceId ? { "x-agenticx-trace-id": traceId } : {}),
+      },
     });
   }
   const stream = new ReadableStream<Uint8Array>({
@@ -518,10 +539,10 @@ async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<R
       }
     },
   });
-  return eventStreamResponse(stream);
+  return eventStreamResponse(stream, traceId);
 }
 
-function textOnlyDoneStream(content: string): Response {
+function textOnlyDoneStream(content: string, traceId?: string): Response {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const encoder = new TextEncoder();
@@ -534,7 +555,7 @@ function textOnlyDoneStream(content: string): Response {
       }
     },
   });
-  return eventStreamResponse(stream);
+  return eventStreamResponse(stream, traceId);
 }
 
 function citationsToHits(citations: Citation[]): WebSearchHit[] {
@@ -626,6 +647,18 @@ export async function runDeepResearchTurn(
   parsedBody: Record<string, unknown>,
   deps: DeepResearchDeps,
 ): Promise<Response> {
+  let traceStep = 0;
+  const nextTraceStep = () => String(++traceStep);
+  const traceId = deps.traceId;
+  deps = {
+    ...deps,
+    nextTraceStep,
+    headers: {
+      ...deps.headers,
+      ...(traceId ? { "x-agenticx-trace-id": traceId } : {}),
+    },
+  };
+
   const baseBody = stripFlags(parsedBody);
   const originalMessages = Array.isArray(baseBody.messages)
     ? (baseBody.messages as ChatMessage[])
@@ -665,7 +698,7 @@ export async function runDeepResearchTurn(
       stream: true,
       messages: originalMessages,
     });
-    return pipeWithPrefix(upstream, DEEP_RESEARCH_DISABLED_HINT);
+    return pipeWithPrefix(upstream, DEEP_RESEARCH_DISABLED_HINT, traceId);
   }
 
   if (!searchCfg.enabled) {
@@ -674,7 +707,7 @@ export async function runDeepResearchTurn(
       stream: true,
       messages: originalMessages,
     });
-    return pipeWithPrefix(upstream, DEEP_RESEARCH_SEARCH_DISABLED_HINT);
+    return pipeWithPrefix(upstream, DEEP_RESEARCH_SEARCH_DISABLED_HINT, traceId);
   }
 
   const encoder = new TextEncoder();
@@ -927,7 +960,7 @@ export async function runDeepResearchTurn(
             enqueueFlush();
             const next = await planFn({
               url: deps.url,
-              headers: deps.headers,
+              headers: gatewayCallHeaders(deps),
               body: baseBody,
               userQuery: buildPlanRevisionUserQuery({
                 originalQuery: originalUserQuery,
@@ -1180,7 +1213,7 @@ export async function runDeepResearchTurn(
           try {
             clarifyResult = await clarifyFn({
               url: deps.url,
-              headers: deps.headers,
+              headers: gatewayCallHeaders(deps),
               body: baseBody,
               userQuery,
               todayLine,
@@ -1299,7 +1332,7 @@ export async function runDeepResearchTurn(
         } else {
           plan = await planFn({
             url: deps.url,
-            headers: deps.headers,
+            headers: gatewayCallHeaders(deps),
             body: baseBody,
             userQuery: planningContext,
             todayLine,
@@ -2416,7 +2449,7 @@ export async function runDeepResearchTurn(
     },
   });
 
-  return eventStreamResponse(stream);
+  return eventStreamResponse(stream, traceId);
 }
 
 /** Test helper: plain failure stream when all searches fail (exported for AC). */

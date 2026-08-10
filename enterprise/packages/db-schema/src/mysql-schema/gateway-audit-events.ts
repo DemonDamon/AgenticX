@@ -16,6 +16,7 @@ export const gatewayAuditEvents = mysqlTable(
     userEmail: varchar("user_email", { length: 320 }),
     departmentId: varchar("department_id", { length: 128 }),
     sessionId: varchar("session_id", { length: 128 }),
+    traceId: varchar("trace_id", { length: 128 }),
     clientType: varchar("client_type", { length: 32 }).notNull().default("web-portal"),
     clientIp: varchar("client_ip", { length: 128 }),
     provider: varchar("provider", { length: 128 }),
@@ -50,6 +51,7 @@ export const gatewayAuditEvents = mysqlTable(
   (table) => ({
     tenantIdIdUq: uniqueIndex("gateway_audit_events_tenant_id_id_uq").on(table.tenantId, table.id),
     tenantTimeIdx: index("gateway_audit_events_tenant_event_time_idx").on(table.tenantId, table.eventTime),
+    tenantTraceIdx: index("gateway_audit_events_tenant_trace_idx").on(table.tenantId, table.traceId),
     tenantUserTimeIdx: index("gateway_audit_events_tenant_user_event_time_idx").on(
       table.tenantId,
       table.userId,

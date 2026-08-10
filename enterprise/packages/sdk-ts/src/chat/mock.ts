@@ -1,4 +1,5 @@
 import type { ChatClient } from "./client";
+import { newTraceId } from "../trace/trace-id";
 import type { ChatChunk, ChatRequest, SendMessageResult } from "../types";
 
 type PendingRequest = {
@@ -32,13 +33,14 @@ export class MockChatClient implements ChatClient {
 
   public async sendMessage(req: ChatRequest): Promise<SendMessageResult> {
     const requestId = makeRequestId();
+    const traceId = newTraceId();
     this.pending.set(requestId, {
       requestId,
       text: buildMockReply(req),
       cursor: 0,
       cancelled: false,
     });
-    return { requestId };
+    return { requestId, traceId };
   }
 
   public async *stream(requestId: string): AsyncIterable<ChatChunk> {
