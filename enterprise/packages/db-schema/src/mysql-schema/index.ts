@@ -7,6 +7,7 @@ export * from "./user-roles";
 export * from "./usage-records";
 export * from "./audit-events";
 export * from "./gateway-audit-events";
+export * from "./portal-request-logs";
 export * from "./policy";
 export * from "./sso-providers";
 export * from "./chat-sessions";

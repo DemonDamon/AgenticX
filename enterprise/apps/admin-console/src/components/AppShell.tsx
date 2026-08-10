@@ -40,6 +40,7 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
+  FileText,
   FileWarning,
   Gauge,
   History,
@@ -100,6 +101,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "ops",
     items: [
       { href: "/audit", labelKey: "audit", icon: FileWarning },
+      { href: "/portal-logs", labelKey: "portalLogs", icon: FileText },
       { href: "/admin/compliance", labelKey: "compliance", icon: Shield },
       { href: "/metering", labelKey: "metering", icon: BarChart3 },
       { href: "/metering/quota", labelKey: "quota", icon: Sliders },
