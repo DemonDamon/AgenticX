@@ -9,9 +9,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Callable, Dict, List, Sequence
+
+_log = logging.getLogger(__name__)
 
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.agent_tools import STUDIO_TOOLS
@@ -50,6 +53,20 @@ def _get_mention_hops() -> int:
 
 # Keep the module-level name for backward-compat callers that import it directly.
 GROUP_MENTION_FOLLOWUP_HOPS = _DEFAULT_MENTION_HOPS
+
+
+def resolve_studio_session_id(base_session: Any) -> str:
+    """Resolve the studio chat UUID from a StudioSession-like object.
+
+    ``StudioSession`` has no ``session_id`` field; the chat handler attaches
+    ``_session_id`` / ``_usage_owner_session_id``. Prefer those over a bare
+    ``session_id`` attribute (tests / mocks may set the latter).
+    """
+    for key in ("_session_id", "_usage_owner_session_id", "session_id"):
+        val = str(getattr(base_session, key, "") or "").strip()
+        if val:
+            return val
+    return ""
 
 
 # Heuristic markers that hint a complex multi-step task suitable for Workforce
@@ -550,7 +567,7 @@ class GroupChatRouter:
             existing = str(pad.get("graph_run_id") or "").strip() or None
             member_labels = self._graph_member_labels(group_avatar_ids)
             run = ensure_presence_run(
-                session_id=str(getattr(base_session, "session_id", "") or ""),
+                session_id=resolve_studio_session_id(base_session),
                 group_id=group_id,
                 member_ids=list(group_avatar_ids) + [META_LEADER_AGENT_ID],
                 store=get_default_store(),
@@ -605,7 +622,7 @@ class GroupChatRouter:
             existing = str(pad.get("graph_run_id") or "").strip() or None
             member_labels = self._graph_member_labels(group_avatar_ids)
             run = ensure_presence_run(
-                session_id=str(getattr(base_session, "session_id", "") or ""),
+                session_id=resolve_studio_session_id(base_session),
                 group_id=group_id,
                 member_ids=list(group_avatar_ids) + [META_LEADER_AGENT_ID],
                 store=get_default_store(),
@@ -1723,8 +1740,9 @@ class GroupChatRouter:
         llm = self.llm_factory(provider or None, model or None)
 
         # ── 1. TaskLock (session-scoped project state) ─────────────────────
+        _sid_for_lock = resolve_studio_session_id(base_session) or str(group_id or "")
         task_lock = get_or_create_task_lock(
-            project_id=f"group::{group_id}::{getattr(base_session, 'session_id', group_id)}"
+            project_id=f"group::{group_id}::{_sid_for_lock}"
         )
         task_lock.add_conversation("user", user_input)
 
@@ -1909,7 +1927,13 @@ class GroupChatRouter:
 
         responded_this_turn: set[str] = set()
         subtask_by_id = {str(st.id): st for st in subtasks}
-        session_id = str(getattr(base_session, "session_id", "") or group_id)
+        session_id = resolve_studio_session_id(base_session)
+        if not session_id:
+            _log.warning(
+                "workforce graph compile missing studio session_id group_id=%s; "
+                "refusing to bind GraphRun.session_id to group_id",
+                group_id,
+            )
         graph_run = compile_workforce_run(
             session_id=session_id,
             group_id=group_id,

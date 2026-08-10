@@ -94,6 +94,26 @@ class GraphRunStore:
         found.sort(key=lambda r: r.version, reverse=True)
         return found
 
+    def list_by_group_id(self, group_id: str) -> List[GraphRun]:
+        """List runs for a group, including legacy mis-bound session_id==group_id."""
+        gid = str(group_id or "").strip()
+        if not gid or not self.root.is_dir():
+            return []
+        found: List[GraphRun] = []
+        for child in sorted(self.root.iterdir()):
+            if not child.is_dir():
+                continue
+            path = child / "run.json"
+            if not path.is_file():
+                continue
+            run = self.load(child.name)
+            if run is None:
+                continue
+            if str(run.group_id or "").strip() == gid or str(run.session_id or "").strip() == gid:
+                found.append(run)
+        found.sort(key=lambda r: r.version, reverse=True)
+        return found
+
 
 _default_store: Optional[GraphRunStore] = None
 

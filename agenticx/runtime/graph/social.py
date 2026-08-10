@@ -81,6 +81,10 @@ def ensure_presence_run(
             version=0,
             meta={"source": "presence", "ephemeral": True},
         )
+    elif sid and not str(run.session_id or "").strip():
+        # Legacy presence runs were saved with empty session_id when
+        # StudioSession had no bound UUID; backfill on reuse.
+        run.session_id = sid
 
     if HUMAN_NODE_ID not in run.nodes:
         run.nodes[HUMAN_NODE_ID] = GraphNode(
