@@ -173,6 +173,7 @@ export async function POST(request: Request) {
     "x-dept-id": session.deptId ?? "",
     "x-user-email": session.email,
     "x-session-id": session.sessionId,
+    "x-agenticx-trace-id": logCtx.traceId,
     ...(providerHintEarly ? { "x-agenticx-provider": providerHintEarly } : {}),
   };
 
@@ -549,6 +550,7 @@ export async function POST(request: Request) {
     "x-dept-id": session.deptId ?? "",
     "x-user-email": session.email,
     "x-session-id": session.sessionId,
+    "x-agenticx-trace-id": logCtx.traceId,
     ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
   };
 
@@ -590,6 +592,7 @@ export async function POST(request: Request) {
         userId: session.userId,
         sessionId,
         runId,
+        traceId: logCtx.traceId,
         awaitClarify: true,
         continueFromPlanGate: {
           plan,
@@ -709,6 +712,7 @@ export async function POST(request: Request) {
       userId: session.userId,
       sessionId,
       runId,
+      traceId: logCtx.traceId,
       awaitClarify: false,
       continueFromPlanGate: {
         plan,

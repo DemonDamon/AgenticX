@@ -6,13 +6,16 @@ describe("runDeepResearchTurn trace step increment", () => {
     const tid = "01JTRACESTEPTEST00000000001";
     const steps: string[] = [];
     const traceIds: string[] = [];
+    const stages: string[] = [];
 
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       const step = headers.get("x-agenticx-trace-step") ?? "";
       const traceId = headers.get("x-agenticx-trace-id") ?? "";
+      const stage = headers.get("x-agenticx-trace-stage") ?? "";
       steps.push(step);
       traceIds.push(traceId);
+      stages.push(stage);
       return new Response(
         JSON.stringify({
           choices: [{ message: { content: '{"topic":"t","complexity":"simple","subQuestions":["q1"],"sourceStrategy":[],"deliverables":[],"assumptions":[]}' } }],
@@ -79,5 +82,6 @@ describe("runDeepResearchTurn trace step increment", () => {
     for (let i = 1; i < numeric.length; i++) {
       expect(numeric[i]).toBeGreaterThan(numeric[i - 1]!);
     }
+    expect(stages.some((s) => s === "dr.plan")).toBe(true);
   });
 });

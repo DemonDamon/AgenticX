@@ -837,6 +837,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.provider.Complete(r.Context(), req, decision)
 	if err != nil {
 		s.rollbackChatQuotaAndBudget(identity, req.Model, estimatedInputTokens, budgetCheck)
+		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
+			DurationMS:   durationMSSince(startedAt),
+			Status:       "error",
+			ErrorMessage: sanitizeTraceError(err.Error()),
+			PromptText:   joinMessages(req.Messages),
+		})
 		writeAPIError(w, openai.Internal(err.Error()))
 		return
 	}
@@ -855,7 +861,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
-	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck)
+	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
+		DurationMS:     durationMSSince(startedAt),
+		PromptText:     joinMessages(req.Messages),
+		CompletionText: responseContent,
+	})
 	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
 
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
@@ -1207,14 +1217,32 @@ func (s *Server) handleStream(
 			_ = s.writeAuditEvent(ev)
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
-			s.reportUsage(identity, decision, estimatedInputTokens, partialOutputTokens)
+			s.reportUsageDetailed(identity, decision, openai.Usage{
+				PromptTokens: estimatedInputTokens, CompletionTokens: partialOutputTokens,
+				TotalTokens: estimatedInputTokens + partialOutputTokens,
+			}, nil, spanMeta{
+				DurationMS:     durationMSSince(startedAt),
+				Status:         "error",
+				ErrorMessage:   "policy blocked stream chunk",
+				PromptText:     inputText,
+				CompletionText: responseBuilder.String(),
+			})
 			if !s.useChannelRelay() {
 				s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, estimatedInputTokens+partialOutputTokens)
 			}
 			return
 		}
 		partialOutputTokens := estimateTextTokens(responseBuilder.String())
-		s.reportUsage(identity, decision, estimatedInputTokens, partialOutputTokens)
+		s.reportUsageDetailed(identity, decision, openai.Usage{
+			PromptTokens: estimatedInputTokens, CompletionTokens: partialOutputTokens,
+			TotalTokens: estimatedInputTokens + partialOutputTokens,
+		}, nil, spanMeta{
+			DurationMS:     durationMSSince(startedAt),
+			Status:         "error",
+			ErrorMessage:   sanitizeTraceError(formatStreamError(streamErr)),
+			PromptText:     inputText,
+			CompletionText: responseBuilder.String(),
+		})
 		if s.useChannelRelay() {
 			actualTotal := int64(estimatedInputTokens + partialOutputTokens)
 			s.billingService.SettleContext(
@@ -1251,7 +1279,11 @@ func (s *Server) handleStream(
 		CompletionTokens: outputTokens,
 		TotalTokens:      inputTokens + outputTokens,
 	}
-	s.reportUsageDetailed(identity, decision, streamUsage, &budgetCheck)
+	s.reportUsageDetailed(identity, decision, streamUsage, &budgetCheck, spanMeta{
+		DurationMS:     durationMSSince(startedAt),
+		PromptText:     inputText,
+		CompletionText: responseText,
+	})
 	if s.metrics != nil && !firstTokenAt.IsZero() {
 		s.metrics.ObserveTPS(req.Model, decision.ChannelID, outputTokens, time.Since(firstTokenAt))
 	}
@@ -1434,6 +1466,7 @@ type requestIdentity struct {
 	AuthViaPAT    bool
 	TraceID       string
 	TraceStep     int
+	TraceStage    string
 }
 
 func (s *Server) quotaContext(identity requestIdentity, model string) quota.RequestContext {
@@ -1630,7 +1663,7 @@ func (s *Server) reportUsage(identity requestIdentity, decision routing.Decision
 		PromptTokens:     inputTokens,
 		CompletionTokens: outputTokens,
 		TotalTokens:      inputTokens + outputTokens,
-	}, nil)
+	}, nil, spanMeta{})
 }
 
 func (s *Server) reconcileQuotaUsage(

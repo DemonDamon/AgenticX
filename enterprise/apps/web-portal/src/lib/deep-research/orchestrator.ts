@@ -300,12 +300,13 @@ function eventStreamResponse(stream: ReadableStream<Uint8Array>, traceId?: strin
   });
 }
 
-function gatewayCallHeaders(deps: DeepResearchDeps): Record<string, string> {
+function gatewayCallHeaders(deps: DeepResearchDeps, stage?: string): Record<string, string> {
   const step = deps.nextTraceStep?.() ?? "1";
   return {
     ...deps.headers,
     ...(deps.traceId ? { "x-agenticx-trace-id": deps.traceId } : {}),
     "x-agenticx-trace-step": step,
+    ...(stage ? { "x-agenticx-trace-stage": stage } : {}),
   };
 }
 
@@ -473,11 +474,12 @@ export async function mapPool<T, R>(
 async function callGatewayStream(
   deps: DeepResearchDeps,
   body: Record<string, unknown>,
+  stage?: string,
 ): Promise<Response> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   return fetchImpl(deps.url, {
     method: "POST",
-    headers: gatewayCallHeaders(deps),
+    headers: gatewayCallHeaders(deps, stage),
     body: JSON.stringify(body),
     signal: deps.signal,
   });
@@ -486,11 +488,12 @@ async function callGatewayStream(
 async function callGatewayJson(
   deps: DeepResearchDeps,
   body: Record<string, unknown>,
+  stage?: string,
 ): Promise<string> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const response = await fetchImpl(deps.url, {
     method: "POST",
-    headers: gatewayCallHeaders(deps),
+    headers: gatewayCallHeaders(deps, stage),
     body: JSON.stringify({ ...body, stream: false }),
     signal: deps.signal,
   });
@@ -693,20 +696,28 @@ export async function runDeepResearchTurn(
   const pageFetchCfg = resolvePageFetchConfig(tenant);
 
   if (!deepResearchEnabled) {
-    const upstream = await callGatewayStream(deps, {
-      ...baseBody,
-      stream: true,
-      messages: originalMessages,
-    });
+    const upstream = await callGatewayStream(
+      deps,
+      {
+        ...baseBody,
+        stream: true,
+        messages: originalMessages,
+      },
+      "chat.answer",
+    );
     return pipeWithPrefix(upstream, DEEP_RESEARCH_DISABLED_HINT, traceId);
   }
 
   if (!searchCfg.enabled) {
-    const upstream = await callGatewayStream(deps, {
-      ...baseBody,
-      stream: true,
-      messages: originalMessages,
-    });
+    const upstream = await callGatewayStream(
+      deps,
+      {
+        ...baseBody,
+        stream: true,
+        messages: originalMessages,
+      },
+      "chat.answer",
+    );
     return pipeWithPrefix(upstream, DEEP_RESEARCH_SEARCH_DISABLED_HINT, traceId);
   }
 
@@ -961,7 +972,7 @@ export async function runDeepResearchTurn(
             enqueueFlush();
             const next = await planFn({
               url: deps.url,
-              headers: gatewayCallHeaders(deps),
+              headers: gatewayCallHeaders(deps, "dr.plan"),
               body: baseBody,
               userQuery: buildPlanRevisionUserQuery({
                 originalQuery: originalUserQuery,
@@ -1214,7 +1225,7 @@ export async function runDeepResearchTurn(
           try {
             clarifyResult = await clarifyFn({
               url: deps.url,
-              headers: gatewayCallHeaders(deps),
+              headers: gatewayCallHeaders(deps, "dr.clarify"),
               body: baseBody,
               userQuery,
               todayLine,
@@ -1333,7 +1344,7 @@ export async function runDeepResearchTurn(
         } else {
           plan = await planFn({
             url: deps.url,
-            headers: gatewayCallHeaders(deps),
+            headers: gatewayCallHeaders(deps, "dr.plan"),
             body: baseBody,
             userQuery: planningContext,
             todayLine,
@@ -1474,7 +1485,11 @@ export async function runDeepResearchTurn(
                     todayLine,
                     callJson: async (messages) => {
                       try {
-                        return await callGatewayJson(toolDeps, { ...baseBody, messages });
+                        return await callGatewayJson(
+                          toolDeps,
+                          { ...baseBody, messages },
+                          "dr.lane.expand",
+                        );
                       } catch (error) {
                         if (error instanceof DeepResearchPolicyError) {
                           expandPolicyError = error;
@@ -1672,16 +1687,20 @@ export async function runDeepResearchTurn(
                   return `[${c.index}] ${c.title}\n${body}`;
                 })
                 .join("\n\n");
-              memo = await callGatewayJson(toolDeps, {
-                ...baseBody,
-                messages: [
-                  { role: "system", content: LANE_SUMMARY_SYSTEM },
-                  {
-                    role: "user",
-                    content: `子问题：${question}\n\n摘录：\n${evidenceBits}`,
-                  },
-                ],
-              });
+              memo = await callGatewayJson(
+                toolDeps,
+                {
+                  ...baseBody,
+                  messages: [
+                    { role: "system", content: LANE_SUMMARY_SYSTEM },
+                    {
+                      role: "user",
+                      content: `子问题：${question}\n\n摘录：\n${evidenceBits}`,
+                    },
+                  ],
+                },
+                "dr.memo",
+              );
               if (!memo.trim()) {
                 memo = questionCitations
                   .map((c) => `- [${c.index}] ${c.title}: ${c.snippet}`)
@@ -1921,7 +1940,7 @@ export async function runDeepResearchTurn(
               })),
               callJson: async (messages) => {
                 try {
-                  return await callGatewayJson(toolDeps, { ...baseBody, messages });
+                  return await callGatewayJson(toolDeps, { ...baseBody, messages }, "dr.reflect");
                 } catch (error) {
                   if (error instanceof DeepResearchPolicyError) {
                     reflectPolicyError = error;
@@ -2053,10 +2072,14 @@ export async function runDeepResearchTurn(
           evidence,
           callJson: async (messages) => {
             try {
-              return await callGatewayJson(toolDeps, {
-                ...baseBody,
-                messages,
-              });
+              return await callGatewayJson(
+                toolDeps,
+                {
+                  ...baseBody,
+                  messages,
+                },
+                "dr.outline",
+              );
             } catch (error) {
               if (error instanceof DeepResearchPolicyError) {
                 outlinePolicyError = error;
@@ -2072,11 +2095,15 @@ export async function runDeepResearchTurn(
         const streamSectionInto = async (
           messages: Array<{ role: string; content: string }>,
         ): Promise<string> => {
-          const upstream = await callGatewayStream(toolDeps, {
-            ...baseBody,
-            stream: true,
-            messages,
-          });
+          const upstream = await callGatewayStream(
+            toolDeps,
+            {
+              ...baseBody,
+              stream: true,
+              messages,
+            },
+            "dr.section",
+          );
           if (!upstream.ok || !upstream.body) {
             const failure = await readGatewayFailure(upstream);
             const policyError = policyErrorFromFailure(failure);
@@ -2343,7 +2370,7 @@ export async function runDeepResearchTurn(
           const summary = await buildCompletionSummary(summaryInput, {
             callJson: async (messages) => {
               try {
-                return await callGatewayJson(toolDeps, { ...baseBody, messages });
+                return await callGatewayJson(toolDeps, { ...baseBody, messages }, "dr.section");
               } catch (error) {
                 if (error instanceof DeepResearchPolicyError) {
                   summaryPolicyError = error;
