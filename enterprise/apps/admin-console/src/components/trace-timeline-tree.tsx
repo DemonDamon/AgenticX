@@ -392,6 +392,8 @@ export function TraceExplorer({
                   attachments: labels.conversation.attachments,
                   chars: labels.conversation.chars,
                   loadEarlier: labels.conversation.loadEarlier ?? "Load earlier",
+                  reasoningExpand: labels.conversation.reasoningExpand,
+                  reasoningCollapse: labels.conversation.reasoningCollapse,
                 }}
               />
             ) : null}
