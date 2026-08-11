@@ -6927,7 +6927,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       type="button"
                       className={`mt-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition ${
                         blockAnySelected
-                          ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-white"
+                          ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-[var(--theme-color-text)]"
                           : "border-text-faint bg-transparent text-transparent"
                       }`}
                       onClick={() => toggleSelectBlock(workMessages)}
@@ -7018,7 +7018,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                             <button
                               type="button"
                               className={`rounded p-1 hover:bg-surface-hover ${
-                                blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"
+                                blockAnySelected
+                                  ? "text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-90"
+                                  : "hover:text-text-strong"
                               }`}
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={() => toggleSelectBlock(workMessages)}
