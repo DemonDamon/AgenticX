@@ -226,6 +226,102 @@ describe("assembleTraceTimeline", () => {
     expect(early!.widthPct).toBeGreaterThanOrEqual(1);
   });
 
+  it("fills dr_lane duration from lane_started/lane_done ts", () => {
+    const timeline = assembleTraceTimeline({
+      traceId: "01JZTRACEID000000000000005",
+      portalLogs: [
+        portalLog({
+          id: "log-dr",
+          event: "chat.completions.finish",
+          log_time: "2026-08-10T08:00:00.000Z",
+          duration_ms: 10000,
+        }),
+      ],
+      modelSpans: [],
+      deepResearchRun: {
+        runId: "run-ts",
+        sessionId: "session-1",
+        status: "completed",
+        phase: "done",
+        topic: "topic",
+        createdAt: "2026-08-10T08:00:00.000Z",
+        updatedAt: "2026-08-10T08:00:20.000Z",
+        events: [
+          {
+            type: "phase",
+            phase: "lanes",
+            message: "lanes",
+            ts: "2026-08-10T08:00:01.000Z",
+          },
+          {
+            type: "lane_started",
+            laneId: "lane-a",
+            title: "Lane A",
+            index: 0,
+            total: 1,
+            ts: "2026-08-10T08:00:02.000Z",
+          },
+          {
+            type: "lane_done",
+            laneId: "lane-a",
+            status: "ok",
+            ts: "2026-08-10T08:00:07.000Z",
+          },
+          {
+            type: "phase",
+            phase: "done",
+            message: "done",
+            ts: "2026-08-10T08:00:08.000Z",
+          },
+        ],
+      },
+    });
+
+    const primary = timeline.nodes[0];
+    const lanesPhase = primary?.children.find((c) => c.label === "phase: lanes");
+    expect(lanesPhase?.startedAt).toBe("2026-08-10T08:00:01.000Z");
+    expect(lanesPhase?.durationMs).toBe(7000);
+
+    const lane = lanesPhase?.children.find((c) => c.kind === "dr_lane");
+    expect(lane?.startedAt).toBe("2026-08-10T08:00:02.000Z");
+    expect(lane?.durationMs).toBe(5000);
+    expect(lane?.status).toBe("ok");
+  });
+
+  it("leaves dr_lane duration empty when events lack ts", () => {
+    const timeline = assembleTraceTimeline({
+      traceId: "01JZTRACEID000000000000006",
+      portalLogs: [
+        portalLog({
+          id: "log-old",
+          event: "chat.completions.finish",
+          duration_ms: 1000,
+        }),
+      ],
+      modelSpans: [],
+      deepResearchRun: {
+        runId: "run-old",
+        sessionId: "session-1",
+        status: "completed",
+        phase: "done",
+        topic: "topic",
+        createdAt: "2026-08-10T08:00:00.000Z",
+        updatedAt: "2026-08-10T08:00:10.000Z",
+        events: [
+          { type: "phase", phase: "lanes", message: "lanes" },
+          { type: "lane_started", laneId: "lane-a", title: "Lane A", index: 0, total: 1 },
+          { type: "lane_done", laneId: "lane-a", status: "ok" },
+        ],
+      },
+    });
+
+    const lane = timeline.nodes[0]?.children
+      .find((c) => c.kind === "dr_phase")
+      ?.children.find((c) => c.kind === "dr_lane");
+    expect(lane?.durationMs).toBeUndefined();
+    expect(lane?.startedAt).toBeUndefined();
+  });
+
   it("labels model steps with stage and surfaces duration/error status", () => {
     const timeline = assembleTraceTimeline({
       traceId: "01JZTRACEID000000000000003",

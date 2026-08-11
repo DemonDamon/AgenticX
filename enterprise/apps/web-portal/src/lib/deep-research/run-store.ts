@@ -795,7 +795,11 @@ export function createRunWriter(store: RunStore, runId: string): RunWriter {
 
   return {
     push(event, patch) {
-      pendingEvents.push(event);
+      const stamped: DeepResearchEvent = {
+        ...event,
+        ts: event.ts ?? new Date().toISOString(),
+      };
+      pendingEvents.push(stamped);
       const nextPatch = { ...pendingPatch };
       if (patch?.status) nextPatch.status = patch.status;
       if (patch?.phase) nextPatch.phase = patch.phase;
