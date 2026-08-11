@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFollowUpRewriteMessages,
   extractEntityFromHistory,
+  hasPriorFollowUpQueryLeakage,
   isReferentialFollowUp,
+  parseFollowUpQueryRewrite,
   resolveFollowUpQuery,
 } from "../follow-up";
 
@@ -64,5 +67,43 @@ describe("follow-up entity resolution", () => {
       query: "蔡徐坤 他为什么被封为宗主呢",
       entity: "蔡徐坤",
     });
+  });
+
+  it("builds a bounded rewrite prompt that keeps the current query separate", () => {
+    const messages = buildFollowUpRewriteMessages([
+      { role: "user", content: "王虹是谁" },
+      { role: "assistant", content: "王虹是一位研究员。" },
+      { role: "user", content: "她最近怎么样" },
+    ]);
+
+    expect(messages?.[0]?.content).toContain("只改写当前追问");
+    expect(messages?.[0]?.content).toContain("不能返回");
+    expect(messages?.[1]?.content).toContain('"current_query":"她最近怎么样"');
+    expect(messages?.[1]?.content).toContain("王虹是谁");
+  });
+
+  it("accepts a confident JSON rewrite and rejects unresolved pronouns", () => {
+    expect(
+      parseFollowUpQueryRewrite('{"resolved_query":"王虹 最近怎么样","confidence":0.96}'),
+    ).toEqual({ query: "王虹 最近怎么样", confidence: 0.96 });
+    expect(
+      parseFollowUpQueryRewrite('{"resolved_query":"王虹是谁 她最近怎么样","confidence":0.96}'),
+    ).toBeNull();
+    expect(
+      parseFollowUpQueryRewrite('```json\n{"resolved_query":"王虹 最近怎么样","confidence":0.96}\n```'),
+    ).toEqual({ query: "王虹 最近怎么样", confidence: 0.96 });
+    expect(
+      parseFollowUpQueryRewrite('{"resolved_query":"王虹 最近怎么样","confidence":0.5}'),
+    ).toBeNull();
+  });
+
+  it("rejects a rewrite that copies the complete prior question", () => {
+    const messages = [
+      { role: "user", content: "王虹是谁" },
+      { role: "assistant", content: "王虹是一位研究员。" },
+      { role: "user", content: "她最近怎么样" },
+    ];
+    expect(hasPriorFollowUpQueryLeakage("王虹是谁 最近怎么样", messages)).toBe(true);
+    expect(hasPriorFollowUpQueryLeakage("王虹 最近怎么样", messages)).toBe(false);
   });
 });
