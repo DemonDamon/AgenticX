@@ -2768,6 +2768,16 @@ def create_studio_app() -> FastAPI:
             session.provider_name = payload.provider
         if payload.model:
             session.model_name = payload.model
+        # Kimi K3 reasoning_effort (low/high/max); cleared when absent so stale values
+        # from a previous K3 turn do not leak onto other models.
+        _effort = str(getattr(payload, "reasoning_effort", None) or "").strip().lower()
+        if _effort in {"low", "high", "max"}:
+            setattr(session, "_reasoning_effort", _effort)
+        elif hasattr(session, "_reasoning_effort"):
+            try:
+                delattr(session, "_reasoning_effort")
+            except Exception:
+                setattr(session, "_reasoning_effort", None)
 
         from agenticx.llms.vision import is_vision_capable
 

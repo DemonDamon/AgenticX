@@ -801,6 +801,15 @@ input[type="radio"] {
   box-shadow: 0 0 0 1px rgba(var(--theme-color-rgb, 59, 130, 246), 0.5) !important;
 }
 
+/* Model picker menu: scales from the trigger edge, never from nothing */
+@keyframes agx-menu-pop {
+  0% { opacity: 0; transform: translateY(4px) scale(0.985); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.agx-menu-pop {
+  animation: agx-menu-pop 0.14s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 /* Codex-style file preview popover animation */
 @keyframes agx-preview-pop {
   0% { opacity: 0; transform: scale(0.98) translateX(8px); }

@@ -145,6 +145,11 @@ export type ChatPane = {
   sessionId: string;
   modelProvider: string;
   modelName: string;
+  /**
+   * Kimi K3 `reasoning_effort` for this pane (`low` | `high` | `max`).
+   * Only sent when the active model is Kimi K3; ignored otherwise.
+   */
+  reasoningEffort?: "low" | "high" | "max";
   messages: Message[];
   historyOpen: boolean;
   memoryGraphOpen: boolean;
@@ -570,6 +575,8 @@ type AppState = {
   setStatus: (status: UiStatus) => void;
   setActiveModel: (provider: string, model: string) => void;
   setPaneModel: (paneId: string, provider: string, model: string) => void;
+  /** Persist Kimi K3 reasoning_effort for a pane (low/high/max). */
+  setPaneReasoningEffort: (paneId: string, effort: "low" | "high" | "max") => void;
   /** Migrate pane/global picks that are no longer in the visible model catalog. */
   reconcilePaneModels: () => { changedPaneIds: string[]; activeChanged: boolean };
   setUserMode: (mode: "pro" | "lite") => void;
@@ -1144,6 +1151,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         panes: nextPanes,
         activeProvider: nextProvider,
         activeModel: nextModel,
+      };
+    }),
+  setPaneReasoningEffort: (paneId, effort) =>
+    set((state) => {
+      const next =
+        effort === "low" || effort === "high" || effort === "max" ? effort : "max";
+      return {
+        panes: state.panes.map((pane) =>
+          pane.id === paneId ? { ...pane, reasoningEffort: next } : pane,
+        ),
       };
     }),
   reconcilePaneModels: () => {
