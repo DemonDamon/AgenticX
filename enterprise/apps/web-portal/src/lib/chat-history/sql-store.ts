@@ -68,6 +68,7 @@ type MessageMetadata = {
   attachments?: ChatMessage["attachments"];
   web_search_sources?: ChatMessage["web_search_sources"];
   deep_research?: ChatMessage["deep_research"];
+  trace_id?: string;
 };
 
 function parseMetadata(value: unknown): MessageMetadata | null {
@@ -97,13 +98,17 @@ export function serializeMessageMetadata(message: ChatMessage): string | null {
       : [];
     metadata.deep_research = { ...message.deep_research, events };
   }
+  if (message.trace_id) {
+    metadata.trace_id = message.trace_id;
+  }
   // IMPORTANT: mysql2 + MySQL JSON columns reject JS objects here with
   // ER_INVALID_JSON_TEXT ("Invalid value." at position 1). Always pass a
   // JSON string (or null). PostgreSQL jsonb accepts the string equally well.
   return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
 }
 
-function mapMessage(row: Record<string, unknown>): ChatMessage {
+/** Exported for unit tests — keep metadata.trace_id round-trip stable. */
+export function mapMessage(row: Record<string, unknown>): ChatMessage {
   const metadata = parseMetadata(row.metadata);
   return {
     id: String(row.id),
@@ -116,6 +121,7 @@ function mapMessage(row: Record<string, unknown>): ChatMessage {
     web_search_sources: metadata?.web_search_sources,
     deep_research: metadata?.deep_research,
     model: row.model == null ? undefined : String(row.model),
+    trace_id: metadata?.trace_id,
     created_at: toDate(row.created_at).toISOString(),
   };
 }

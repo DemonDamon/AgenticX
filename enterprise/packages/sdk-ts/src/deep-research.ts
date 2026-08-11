@@ -24,7 +24,7 @@ export type ResearchInteractionProfile = {
   assumptions: string[];
 };
 
-export type DeepResearchEvent =
+export type DeepResearchEventPayload =
   | { type: "run_started"; runId: string }
   | {
       type: "phase";
@@ -112,6 +112,9 @@ export type DeepResearchEvent =
       pagesFetched: number;
     }
   | { type: "narrative"; text: string };
+
+/** Optional wall-clock ISO timestamp stamped at emit time for trace duration. */
+export type DeepResearchEvent = DeepResearchEventPayload & { ts?: string };
 
 export type DeepResearchStatus =
   | "running"
