@@ -87,6 +87,8 @@ import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
+import { StallWaitChip } from "./messages/StallWaitChip";
+import { parseStallWaitPayload, type StallWaitInfo } from "../utils/stall-wait-chip";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
@@ -2260,6 +2262,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const userStoppedSessionRef = useRef<Record<string, boolean>>({});
   const stopInFlightRef = useRef<Record<string, boolean>>({});
   const [lastToolProgress, setLastToolProgress] = useState<{ name: string; sec: number } | null>(null);
+  const [stallWait, setStallWait] = useState<StallWaitInfo | null>(null);
   const [contextLoopStats, setContextLoopStats] = useState<{
     round: number;
     tool_result_tokens_session: number;
@@ -5814,6 +5817,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       setStallTick((t) => t + 1);
       setSessionExecutionState("idle");
       setLastToolProgress(null);
+      setStallWait(null);
       setContextLoopStats(null);
 
       if (sid) {
@@ -8903,6 +8907,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "tool_progress") {
               recordProgressActivity(requestSessionId);
+              const progressPhase = String(payload.data?.phase ?? "");
+              if (progressPhase === "stall_patient_wait") {
+                if (sessionStillActive) {
+                  const info = parseStallWaitPayload(payload.data, Date.now());
+                  if (info) setStallWait(info);
+                }
+                continue;
+              }
+              if (progressPhase === "stall_patient_recovered") {
+                if (sessionStillActive) setStallWait(null);
+                continue;
+              }
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
               if (eventAgentId === "meta" && sessionStillActive) {
@@ -8950,6 +8966,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }
                 full += tokenText;
                 cumulativeFull += tokenText;
+                setStallWait(null);
                 if (/<think>/i.test(full) && streamReasoningStartedAt === null) {
                   streamReasoningStartedAt = Date.now();
                 }
@@ -8966,6 +8983,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
             }
             if (payload.type === "tool_call") {
+              setStallWait(null);
               const toolNameStr = String(payload.data?.name ?? "tool");
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
@@ -9738,6 +9756,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "final") {
               receivedFinalEvent = true;
+              setStallWait(null);
               if (eventAgentId === "meta") {
                 useAppStore.getState().clearSessionHistoryHint(requestSessionId);
                 const normalizedFinal = normalizeFinalAssistantPayload(
@@ -9821,6 +9840,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               setContextLoopStats({ round, tool_result_tokens_session: toolSession, archived_tool_calls: archived });
             }
             if (payload.type === "error") {
+              setStallWait(null);
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
@@ -11350,6 +11370,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   .filter(Boolean)
                   .join(" · ")}
               </span>
+              {stallWait ? <StallWaitChip info={stallWait} /> : null}
               {sessionHealth !== "normal" ? (
                 <span
                   className={`rounded-full px-2 py-0.5 ${
