@@ -15,9 +15,10 @@ export type TraceConversationPanelLabels = ConversationMessageListLabels & {
   loading: string;
   empty: string;
   loadFailed: string;
-  expand: string;
-  collapse: string;
   truncatedHint: string;
+  /** Short labels for reasoning toggle; falls back to expand/collapse. */
+  reasoningExpand?: string;
+  reasoningCollapse?: string;
   scopeTurn?: string;
   scopeSession?: string;
   loadEarlier?: string;
@@ -117,7 +118,14 @@ export function TraceConversationPanel({
       {anyTruncated && !expanded ? (
         <p className="text-[11px] text-muted-foreground">{labels.truncatedHint}</p>
       ) : null}
-      <ConversationMessageList messages={data.messages} labels={labels} />
+      <ConversationMessageList
+        messages={data.messages}
+        labels={{
+          ...labels,
+          expand: labels.reasoningExpand ?? labels.expand,
+          collapse: labels.reasoningCollapse ?? labels.collapse,
+        }}
+      />
     </div>
   );
 }
