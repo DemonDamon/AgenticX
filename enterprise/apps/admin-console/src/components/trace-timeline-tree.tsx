@@ -5,6 +5,7 @@ import type { TraceNode, TraceNodeKind, TraceTimeline } from "@agenticx/core-api
 import { Badge } from "@agenticx/ui";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { adminFetch } from "../lib/admin-client-auth";
+import { computeGanttPlacement, computeTraceTimeWindow } from "../lib/trace-timeline";
 import { SessionConversationPanel } from "./session-conversation-panel";
 import {
   TraceConversationPanel,
@@ -48,14 +49,22 @@ function kindBadgeVariant(
   return "secondary";
 }
 
-function collectDurations(nodes: TraceNode[], out: number[] = []): number[] {
-  for (const node of nodes) {
-    if (typeof node.durationMs === "number" && node.durationMs > 0) {
-      out.push(node.durationMs);
+function ganttBarClass(kind: TraceNodeKind, status?: string): string {
+  if (isFailed(status)) return "bg-destructive/80";
+  switch (kind) {
+    case "model_step":
+      return "bg-primary/70";
+    case "request":
+      return "bg-muted-foreground/50";
+    case "dr_phase":
+    case "dr_lane":
+    case "dr_event":
+      return "bg-violet-500/70";
+    default: {
+      const _exhaustive: never = kind;
+      return _exhaustive;
     }
-    if (node.children.length > 0) collectDurations(node.children, out);
   }
-  return out;
 }
 
 function findNodeById(nodes: TraceNode[], id: string): TraceNode | null {
@@ -90,7 +99,8 @@ function TraceTreeRow({
   node,
   depth,
   selectedId,
-  maxDurationMs,
+  tMinMs,
+  tMaxMs,
   tKind,
   tExpand,
   tCollapse,
@@ -99,7 +109,8 @@ function TraceTreeRow({
   node: TraceNode;
   depth: number;
   selectedId: string | null;
-  maxDurationMs: number;
+  tMinMs: number | null;
+  tMaxMs: number | null;
   tKind: (key: TraceNodeKind) => string;
   tExpand: string;
   tCollapse: string;
@@ -109,10 +120,8 @@ function TraceTreeRow({
   const hasChildren = node.children.length > 0;
   const selected = selectedId === node.id;
   const failed = isFailed(node.status);
-  const barPct =
-    maxDurationMs > 0 && typeof node.durationMs === "number"
-      ? Math.max(4, Math.min(100, (node.durationMs / maxDurationMs) * 100))
-      : 0;
+  const place =
+    tMinMs != null && tMaxMs != null ? computeGanttPlacement(node, tMinMs, tMaxMs) : null;
 
   return (
     <div>
@@ -167,11 +176,11 @@ function TraceTreeRow({
               {node.label}
             </span>
           </div>
-          {barPct > 0 ? (
-            <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+          {place ? (
+            <div className="relative mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
               <div
-                className={`h-full rounded-full ${failed ? "bg-destructive/80" : "bg-primary/70"}`}
-                style={{ width: `${barPct}%` }}
+                className={`absolute top-0 h-full rounded-full ${ganttBarClass(node.kind, node.status)}`}
+                style={{ left: `${place.offsetPct}%`, width: `${place.widthPct}%` }}
               />
             </div>
           ) : null}
@@ -187,7 +196,8 @@ function TraceTreeRow({
               node={child}
               depth={depth + 1}
               selectedId={selectedId}
-              maxDurationMs={maxDurationMs}
+              tMinMs={tMinMs}
+              tMaxMs={tMaxMs}
               tKind={tKind}
               tExpand={tExpand}
               tCollapse={tCollapse}
@@ -218,7 +228,8 @@ export function TraceNodeRow({
       node={node}
       depth={depth}
       selectedId={null}
-      maxDurationMs={0}
+      tMinMs={null}
+      tMaxMs={null}
       tKind={tKind}
       tExpand={tExpand}
       tCollapse={tCollapse}
@@ -232,6 +243,10 @@ export type TraceExplorerLabels = {
   collapse: string;
   kind: (key: TraceNodeKind) => string;
   detailTitle: string;
+  /** Optional mid-pane eyebrow; falls back to conversation.title */
+  contentTitle?: string;
+  /** Optional right-pane title; falls back to detailTitle */
+  metadataTitle?: string;
   selectHint: string;
   close: string;
   status: string;
@@ -268,10 +283,7 @@ export function TraceExplorer({
   labels: TraceExplorerLabels;
   className?: string;
 }) {
-  const maxDurationMs = useMemo(() => {
-    const ds = collectDurations(data.nodes);
-    return ds.length > 0 ? Math.max(...ds) : 0;
-  }, [data.nodes]);
+  const timeWindow = useMemo(() => computeTraceTimeWindow(data.nodes), [data.nodes]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [conversationScope, setConversationScope] = useState<"turn" | "session">("turn");
@@ -305,10 +317,15 @@ export function TraceExplorer({
         }).io ?? null)
       : null;
 
+  const metadataTitle = labels.metadataTitle ?? labels.detailTitle;
+  const contentTitle = labels.contentTitle ?? labels.conversation.title;
+
   return (
     <div
       className={`grid min-h-[320px] overflow-hidden rounded-md border border-border ${
-        selected ? "md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]" : "grid-cols-1"
+        selected
+          ? "md:grid-cols-[minmax(280px,1.2fr)_minmax(0,1.4fr)_minmax(220px,0.9fr)]"
+          : "grid-cols-1"
       } ${className ?? ""}`}
     >
       <div
@@ -322,7 +339,8 @@ export function TraceExplorer({
             node={node}
             depth={0}
             selectedId={selectedId}
-            maxDurationMs={maxDurationMs}
+            tMinMs={timeWindow.tMinMs}
+            tMaxMs={timeWindow.tMaxMs}
             tKind={labels.kind}
             tExpand={labels.expand}
             tCollapse={labels.collapse}
@@ -334,8 +352,9 @@ export function TraceExplorer({
         ) : null}
       </div>
       {selected ? (
-        <div className="max-h-[520px] space-y-4 overflow-auto p-3">
-          <div className="space-y-2">
+        <>
+          <div className="max-h-[520px] space-y-3 overflow-auto border-b border-border p-3 md:border-b-0 md:border-r">
+            <div className="text-xs font-medium text-muted-foreground">{contentTitle}</div>
             {labels.conversation.scopeTurn && labels.conversation.scopeSession ? (
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
@@ -397,10 +416,25 @@ export function TraceExplorer({
                 }}
               />
             ) : null}
+            {io ? (
+              <div className="space-y-1.5 border-t border-border pt-3">
+                <div className="text-xs font-medium text-muted-foreground">{labels.ioTitle}</div>
+                <div className="rounded-md border border-border bg-muted/30 p-2">
+                  <div className="mb-1 text-[10px] text-muted-foreground">{labels.ioPrompt}</div>
+                  <pre className="mb-2 max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">
+                    {io.prompt_preview || "—"}
+                  </pre>
+                  <div className="mb-1 text-[10px] text-muted-foreground">{labels.ioCompletion}</div>
+                  <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">
+                    {io.completion_preview || "—"}
+                  </pre>
+                </div>
+              </div>
+            ) : null}
           </div>
-          <div className="border-t border-border pt-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="text-xs font-medium text-muted-foreground">{labels.detailTitle}</div>
+          <div className="max-h-[520px] space-y-3 overflow-auto p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-medium text-muted-foreground">{metadataTitle}</div>
               <button
                 type="button"
                 className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -411,80 +445,61 @@ export function TraceExplorer({
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
-            <div className="space-y-3">
-              <div>
-                <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                  <span
-                    className={`h-2 w-2 rounded-full ${kindDotClass(selected.kind, selected.status)}`}
-                  />
-                  <Badge variant={kindBadgeVariant(selected.kind, selected.status)}>
-                    {labels.kind(selected.kind)}
-                  </Badge>
-                </div>
-                <div
-                  className={`text-sm font-medium ${isFailed(selected.status) ? "text-destructive" : ""}`}
-                >
-                  {selected.label}
-                </div>
+            <div>
+              <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                <span
+                  className={`h-2 w-2 rounded-full ${kindDotClass(selected.kind, selected.status)}`}
+                />
+                <Badge variant={kindBadgeVariant(selected.kind, selected.status)}>
+                  {labels.kind(selected.kind)}
+                </Badge>
               </div>
-              <dl>
-                <DetailField label={labels.status} value={selected.status ?? "—"} />
-                <DetailField label={labels.stage} value={stage || "—"} />
-                <DetailField
-                  label={labels.duration}
-                  value={selected.durationMs != null ? `${selected.durationMs}ms` : "—"}
-                />
-                <DetailField
-                  label={labels.tokens}
-                  value={
-                    selected.tokens
-                      ? `in ${selected.tokens.input} / out ${selected.tokens.output} / total ${selected.tokens.total}`
-                      : "—"
-                  }
-                />
-                <DetailField
-                  label={labels.cost}
-                  value={
-                    typeof selected.costUsd === "number" ? selected.costUsd.toFixed(6) : "—"
-                  }
-                />
-                <DetailField label={labels.startedAt} value={selected.startedAt ?? "—"} />
-                <DetailField label={labels.errorMessage} value={errorMessage || "—"} />
-              </dl>
-              {io ? (
-                <div className="space-y-1.5">
-                  <div className="text-xs font-medium text-muted-foreground">{labels.ioTitle}</div>
-                  <div className="rounded-md border border-border bg-muted/30 p-2">
-                    <div className="mb-1 text-[10px] text-muted-foreground">{labels.ioPrompt}</div>
-                    <pre className="mb-2 max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">
-                      {io.prompt_preview || "—"}
-                    </pre>
-                    <div className="mb-1 text-[10px] text-muted-foreground">{labels.ioCompletion}</div>
-                    <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">
-                      {io.completion_preview || "—"}
-                    </pre>
-                  </div>
-                </div>
-              ) : null}
-              {sources.length > 0 ? (
-                <div className="space-y-1">
-                  <div className="text-xs font-medium text-muted-foreground">{labels.sources}</div>
-                  <SourceList sources={sources} />
-                </div>
-              ) : null}
-              <div className="space-y-1">
-                <div className="text-xs font-medium text-muted-foreground">{labels.attributes}</div>
-                {selected.attrs && Object.keys(selected.attrs).length > 0 ? (
-                  <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px]">
-                    {JSON.stringify(selected.attrs, null, 2)}
-                  </pre>
-                ) : (
-                  <p className="text-xs text-muted-foreground">{labels.emptyAttrs}</p>
-                )}
+              <div
+                className={`text-sm font-medium ${isFailed(selected.status) ? "text-destructive" : ""}`}
+              >
+                {selected.label}
               </div>
             </div>
+            <dl>
+              <DetailField label={labels.status} value={selected.status ?? "—"} />
+              <DetailField label={labels.stage} value={stage || "—"} />
+              <DetailField
+                label={labels.duration}
+                value={selected.durationMs != null ? `${selected.durationMs}ms` : "—"}
+              />
+              <DetailField
+                label={labels.tokens}
+                value={
+                  selected.tokens
+                    ? `in ${selected.tokens.input} / out ${selected.tokens.output} / total ${selected.tokens.total}`
+                    : "—"
+                }
+              />
+              <DetailField
+                label={labels.cost}
+                value={typeof selected.costUsd === "number" ? selected.costUsd.toFixed(6) : "—"}
+              />
+              <DetailField label={labels.startedAt} value={selected.startedAt ?? "—"} />
+              <DetailField label={labels.errorMessage} value={errorMessage || "—"} />
+            </dl>
+            {sources.length > 0 ? (
+              <div className="space-y-1">
+                <div className="text-xs font-medium text-muted-foreground">{labels.sources}</div>
+                <SourceList sources={sources} />
+              </div>
+            ) : null}
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-muted-foreground">{labels.attributes}</div>
+              {selected.attrs && Object.keys(selected.attrs).length > 0 ? (
+                <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px]">
+                  {JSON.stringify(selected.attrs, null, 2)}
+                </pre>
+              ) : (
+                <p className="text-xs text-muted-foreground">{labels.emptyAttrs}</p>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       ) : null}
     </div>
   );
@@ -501,6 +516,8 @@ export type TraceTimelineTreeLabels = {
   totalsTokens: string;
   totalsDuration: string;
   detailTitle: string;
+  contentTitle?: string;
+  metadataTitle?: string;
   selectHint: string;
   close: string;
   status: string;
@@ -613,6 +630,8 @@ export function TraceTimelineInline({
           collapse: labels.collapse,
           kind: labels.kind,
           detailTitle: labels.detailTitle,
+          contentTitle: labels.contentTitle,
+          metadataTitle: labels.metadataTitle,
           selectHint: labels.selectHint,
           close: labels.close,
           status: labels.status,
