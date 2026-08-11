@@ -7,6 +7,10 @@ export type StallNudgeConfig = {
   stall_auto_nudge_enabled: boolean;
   stall_auto_nudge_after_seconds: number;
   stall_auto_nudge_max_per_session: number;
+  /** LLM round-timeout patience mode: wait + auto retry instead of dying. */
+  llm_stall_patience_enabled: boolean;
+  llm_stall_patience_max_attempts: number;
+  llm_stall_patience_budget_seconds: number;
 };
 
 type Props = {
@@ -130,6 +134,81 @@ export function StallNudgeConfigSection({ value, onChange, disabled }: Props) {
                   });
                 }}
                 className="w-16 rounded-md border border-border bg-surface-card px-2 py-1 text-center text-xs text-text-primary disabled:opacity-50"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-border bg-surface-panel p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-text-primary">模型超时自动等待恢复</span>
+                <span
+                  className={`shrink-0 rounded-full border px-1.5 text-[10px] ${
+                    value.llm_stall_patience_enabled
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                      : "border-border bg-surface-card text-text-faint"
+                  }`}
+                >
+                  {value.llm_stall_patience_enabled ? "已启用" : "未启用"}
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-text-muted">
+                模型响应超时后不立即判定失败：界面显示「网络较慢，可能要等待更长时间」的缓冲提示，
+                后台按指数退避自动重试，网络恢复后本轮自动续跑，无需手动点「恢复执行」。预算耗尽后才落失败卡。默认开启。
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 text-xs text-text-muted">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-border"
+                checked={value.llm_stall_patience_enabled}
+                disabled={disabled}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  set({ llm_stall_patience_enabled: e.target.checked })
+                }
+              />
+              启用
+            </label>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center gap-3">
+              <span className="w-28 shrink-0 text-xs text-text-muted">自动重试次数</span>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={value.llm_stall_patience_max_attempts}
+                disabled={disabled || !value.llm_stall_patience_enabled}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n)) return;
+                  set({
+                    llm_stall_patience_max_attempts: Math.max(1, Math.min(10, Math.round(n))),
+                  });
+                }}
+                className="w-16 rounded-md border border-border bg-surface-card px-2 py-1 text-center text-xs text-text-primary disabled:opacity-50"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="w-28 shrink-0 text-xs text-text-muted">总等待预算（秒）</span>
+              <input
+                type="number"
+                min={60}
+                max={3600}
+                step={60}
+                value={value.llm_stall_patience_budget_seconds}
+                disabled={disabled || !value.llm_stall_patience_enabled}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n)) return;
+                  set({
+                    llm_stall_patience_budget_seconds: Math.max(60, Math.min(3600, Math.round(n))),
+                  });
+                }}
+                className="w-20 rounded-md border border-border bg-surface-card px-2 py-1 text-center text-xs text-text-primary disabled:opacity-50"
               />
             </div>
           </div>
