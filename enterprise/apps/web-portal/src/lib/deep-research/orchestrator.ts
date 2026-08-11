@@ -793,8 +793,12 @@ export async function runDeepResearchTurn(
         event: DeepResearchEvent,
         patch?: { status?: DeepResearchRunStatus; phase?: string },
       ) => {
-        writer?.push(event, patch);
-        safeControllerEnqueue(encoder.encode(formatDeepResearchEventSse(event)));
+        const stamped: DeepResearchEvent = {
+          ...event,
+          ts: event.ts ?? new Date().toISOString(),
+        };
+        writer?.push(stamped, patch);
+        safeControllerEnqueue(encoder.encode(formatDeepResearchEventSse(stamped)));
       };
 
       const persistFinish = async (
