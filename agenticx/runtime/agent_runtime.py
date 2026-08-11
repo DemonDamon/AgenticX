@@ -426,6 +426,9 @@ DEFAULT_LLM_HEARTBEAT_TIMEOUT_SECONDS = 60.0
 DEFAULT_LLM_HARD_TIMEOUT_SECONDS = 300.0
 DEFAULT_LLM_ROUND_TIMEOUT_SECONDS = 180.0
 LLM_ROUND_TIMEOUT_RETRY_LIMIT = 1
+DEFAULT_LLM_STALL_PATIENCE_MAX_ATTEMPTS = 3
+DEFAULT_LLM_STALL_PATIENCE_BUDGET_SECONDS = 900.0
+DEFAULT_LLM_STALL_PATIENCE_BASE_SECONDS = 15.0
 logger = logging.getLogger(__name__)
 
 
@@ -734,6 +737,101 @@ def _reset_llm_timeout_retry_count(session: StudioSession) -> None:
         sp.pop("_llm_round_timeout_count", None)
 
 
+def _resolve_stall_patience_config(session: StudioSession) -> Dict[str, Any]:
+    """Resolve patience-mode config: env first, then config.yaml runtime.*, then defaults.
+
+    Patience mode keeps retrying a timed-out LLM round with exponential backoff
+    (and SSE progress events) instead of killing the turn after the single
+    immediate retry, so a transient network stall auto-recovers without the
+    user clicking resume.
+    """
+
+    def _cfg(key: str) -> Any:
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            return ConfigManager.get_value(f"runtime.llm_stall_patience_{key}")
+        except Exception:
+            return None
+
+    def _bool(env_key: str, cfg_key: str, default: bool) -> bool:
+        raw = os.getenv(env_key, "").strip().lower()
+        if raw in {"0", "false", "no", "off"}:
+            return False
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+        cfg_value = _cfg(cfg_key)
+        if cfg_value is not None:
+            return bool(cfg_value)
+        return default
+
+    def _int(env_key: str, cfg_key: str, default: int) -> int:
+        raw = os.getenv(env_key, "").strip()
+        if raw:
+            try:
+                value = int(raw)
+                if value > 0:
+                    return value
+            except ValueError:
+                pass
+        cfg_value = _cfg(cfg_key)
+        if cfg_value is not None:
+            try:
+                value = int(cfg_value)
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        return default
+
+    def _float(env_key: str, cfg_key: str, default: float) -> float:
+        raw = os.getenv(env_key, "").strip()
+        if raw:
+            try:
+                value = float(raw)
+                if value > 0:
+                    return value
+            except ValueError:
+                pass
+        cfg_value = _cfg(cfg_key)
+        if cfg_value is not None:
+            try:
+                value = float(cfg_value)
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        return default
+
+    return {
+        "enabled": _bool("AGX_LLM_STALL_PATIENCE_ENABLED", "enabled", True),
+        "max_attempts": _int(
+            "AGX_LLM_STALL_PATIENCE_MAX_ATTEMPTS", "max_attempts", DEFAULT_LLM_STALL_PATIENCE_MAX_ATTEMPTS
+        ),
+        "budget_seconds": _float(
+            "AGX_LLM_STALL_PATIENCE_BUDGET_SECONDS", "budget_seconds", DEFAULT_LLM_STALL_PATIENCE_BUDGET_SECONDS
+        ),
+        "base_seconds": _float(
+            "AGX_LLM_STALL_PATIENCE_BASE_SECONDS", "base_seconds", DEFAULT_LLM_STALL_PATIENCE_BASE_SECONDS
+        ),
+    }
+
+
+def _stall_patience_state(session: StudioSession) -> Dict[str, Any]:
+    """Per-session patience-mode state: {"attempts": int, "started_at": float}."""
+    state = getattr(session, "_stall_patience", None)
+    if not isinstance(state, dict):
+        state = {"attempts": 0, "started_at": 0.0}
+        setattr(session, "_stall_patience", state)
+    state.setdefault("attempts", 0)
+    state.setdefault("started_at", 0.0)
+    return state
+
+
+def _reset_stall_patience(session: StudioSession) -> None:
+    setattr(session, "_stall_patience", {"attempts": 0, "started_at": 0.0})
+
+
 def _should_emit_show_widget_delta(
     emit_state: Dict[int, Dict[str, float]],
     idx: int,
@@ -886,6 +984,40 @@ def _serialize_context_files(session: StudioSession) -> str:
     if not session.context_files:
         return "(empty)"
     return serialize_context_files(session.context_files)
+
+
+def _build_attached_files_hint(session: StudioSession) -> str:
+    """Build a user-message hint listing this turn's attached text/document files.
+
+    Files live in system prompt context_files; this hint makes their presence
+    explicit at the user-turn level so tool-using models actually read them.
+    """
+    cf = getattr(session, "context_files", None)
+    if not isinstance(cf, dict) or not cf:
+        return ""
+    lines: list[str] = []
+    for key, value in cf.items():
+        k = str(key or "").strip()
+        v = str(value or "").strip()
+        if not k or k.startswith("skill:") or k.startswith("@dir:"):
+            continue
+        if (
+            v.startswith("[图片")
+            or v.startswith("[视频]")
+            or v.startswith("[附件解析失败]")
+            or v.startswith("[附件] ")
+            or v.startswith("[文件引用] ")
+        ):
+            continue
+        name = os.path.basename(k.replace("\\", "/")) or k
+        lines.append(f"- {name}（{k}）")
+    if not lines:
+        return ""
+    return (
+        "\n\n[已附文件]\n"
+        + "\n".join(lines)
+        + "\n上述文件内容已在 system prompt 的 context_files 节中给出，请直接阅读并基于其回答。"
+    )
 
 
 def _serialize_skill_summaries(session: StudioSession) -> str:
@@ -2986,6 +3118,12 @@ class AgentRuntime:
             if not _is_system_trigger:
                 pending_compaction_notice_count = int(compacted_count)
         user_content: Any = user_message_content if user_message_content is not None else user_input
+        attached_hint = _build_attached_files_hint(session)
+        if attached_hint:
+            if isinstance(user_content, str):
+                user_content = f"{user_content}{attached_hint}"
+            elif isinstance(user_content, list):
+                user_content = list(user_content) + [{"type": "text", "text": attached_hint}]
         messages.append({"role": "user", "content": user_content})
         if persist_user_message:
             # Store rich content (list with image_url blocks for vision uploads) + attachments
@@ -4096,6 +4234,48 @@ class AgentRuntime:
                     )
                     messages.append({"role": "user", "content": f"[系统通知] {notice}"})
                     continue
+                _patience = _resolve_stall_patience_config(session)
+                if _patience["enabled"]:
+                    _pstate = _stall_patience_state(session)
+                    _now_mono = asyncio.get_running_loop().time()
+                    if not _pstate.get("started_at"):
+                        _pstate["started_at"] = _now_mono
+                    _waited_seconds = _now_mono - float(_pstate["started_at"])
+                    if (
+                        _pstate["attempts"] < _patience["max_attempts"]
+                        and _waited_seconds < _patience["budget_seconds"]
+                    ):
+                        _pstate["attempts"] += 1
+                        _wait_seconds = min(
+                            _patience["base_seconds"] * (2 ** (_pstate["attempts"] - 1)),
+                            60.0,
+                            max(1.0, _patience["budget_seconds"] - _waited_seconds),
+                        )
+                        yield RuntimeEvent(
+                            type=EventType.TOOL_PROGRESS.value,
+                            data={
+                                "name": "模型响应",
+                                "phase": "stall_patient_wait",
+                                "tool_call_id": "",
+                                "attempt": _pstate["attempts"],
+                                "max_attempts": _patience["max_attempts"],
+                                "waited_seconds": int(_waited_seconds),
+                                "next_retry_in_seconds": int(_wait_seconds),
+                                "provider": provider_hint,
+                                "model": model_hint,
+                            },
+                            agent_id=agent_id,
+                        )
+                        if _pstate["attempts"] == 1:
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "[系统通知] 模型响应持续超时，系统正在自动等待并重试；"
+                                    "恢复后将继续本轮，无需用户操作。"
+                                ),
+                            })
+                        await asyncio.sleep(_wait_seconds)
+                        continue
                 yield RuntimeEvent(
                     type=EventType.STALL.value,
                     data={
@@ -4258,6 +4438,17 @@ class AgentRuntime:
                     agent_id=agent_id,
                 )
                 return
+            if _stall_patience_state(session)["attempts"] > 0:
+                yield RuntimeEvent(
+                    type=EventType.TOOL_PROGRESS.value,
+                    data={
+                        "name": "模型响应",
+                        "phase": "stall_patient_recovered",
+                        "tool_call_id": "",
+                    },
+                    agent_id=agent_id,
+                )
+            _reset_stall_patience(session)
             _reset_llm_timeout_retry_count(session)
             reset_provider_timeout_streak(session)
             # Preserve streamed raw before response.content overwrites the
