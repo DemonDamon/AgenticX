@@ -2074,6 +2074,57 @@ def _build_progress_signature(session: StudioSession) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _tool_result_ok_flag(result: Any) -> Optional[bool]:
+    """Return the boolean ``ok`` flag from a JSON tool result, if present.
+
+    Meta tools (create_avatar / delegate_to_avatar / config writers, etc.)
+    return ``{"ok": true|false, ...}``; use it as an authoritative progress
+    signal. Returns None when the result is not a JSON object with a boolean
+    ``ok`` field, so callers fall back to existing heuristics.
+    """
+    if not isinstance(result, str):
+        return None
+    head = result.lstrip()[:4000]
+    if not head.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(head)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    flag = parsed.get("ok")
+    return flag if isinstance(flag, bool) else None
+
+
+def _build_loop_halt_success_digest(session: StudioSession, *, max_items: int = 20) -> str:
+    """Summarize confirmed successful tool outcomes from this session for the
+    loop-halt prompt, so the final user-facing summary cannot claim "no
+    progress" when concrete results were already produced."""
+    lines: List[str] = []
+    seen: set[str] = set()
+    for msg in getattr(session, "agent_messages", []) or []:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if _tool_result_ok_flag(content) is not True:
+            continue
+        try:
+            payload = json.loads(str(content).lstrip()[:4000])
+        except Exception:
+            continue
+        tool_name = str(msg.get("name") or "tool")
+        label = payload.get("name") or payload.get("message") or ""
+        line = f"{tool_name} 成功：{label}" if label else f"{tool_name} 成功"
+        if line in seen:
+            continue
+        seen.add(line)
+        lines.append(f"- {line}")
+    if len(lines) > max_items:
+        lines = lines[-max_items:]
+    return "\n".join(lines)
+
+
 _CONFIRMATION_SPAM_KEYWORDS = frozenset(
     {"TODO", "FINAL", "COMPLETED", "ULTIMATE", "ABSOLUTE", "REPORT", "SUMMARY"}
 )
@@ -5367,6 +5418,11 @@ class AgentRuntime:
                     and not is_error_result
                     and len(result.strip()) > 10
                 )
+                ok_flag = _tool_result_ok_flag(result)
+                if ok_flag is True:
+                    # Meta tools (create_avatar, delegate_to_avatar, ...) return
+                    # {"ok": true}; a confirmed success must count as progress.
+                    logical_progress = True
                 if tool_name in EXPLORATORY_TOOLS and isinstance(result, str) and result.strip():
                     if not is_error_result:
                         # Successful exploratory call resets the discovery budget
@@ -5502,14 +5558,17 @@ class AgentRuntime:
                     synced_session_message_count = len(session.agent_messages)
 
                     _original_task_snippet = (user_input or "").strip().replace("\n", " ")[:500]
+                    _success_digest = _build_loop_halt_success_digest(session)
                     halt_prompt = (
                         "[system-halt] 运行时检测到连续工具调用无进展，已自动停止重试。\n"
                         f"触发原因：{loop_issue.message}\n"
                         f"【用户原始请求】{_original_task_snippet}\n"
+                        "【本轮已确认完成的事实】（以下工具调用已成功返回，属于已完成事项，不得描述为失败或无进展）：\n"
+                        f"{_success_digest or '（无）'}\n"
                         "⚠️ 严格要求：回答必须紧扣上面的【用户原始请求】，不得切换、发明或扩展到任何其它话题（例如不要自行转为配置教程、产品对比等与原始请求无关的主题）。\n"
-                        "请用中文 3-5 句直接对用户说明：\n"
-                        "1) 围绕【用户原始请求】你尝试过哪些工具/参数；\n"
-                        "2) 失败或无进展的主要原因（参数不对 / 站点不可达 / 工具能力不足 / 需鉴权 等）；\n"
+                        "请用中文 3-6 句直接对用户说明：\n"
+                        "1) 若【本轮已确认完成的事实】非空，必须先明确告知这些事项已经成功完成；\n"
+                        "2) 再说明本轮为何被自动停止（如后续重复调用已存在的对象等）以及尚未完成的部分；\n"
                         "3) 围绕同一个原始请求的下一步建议（换工具、补充信息、手动执行等）。\n"
                         "请直接给出正文，不要再调用任何工具，也不要讨论与原始请求无关的内容。"
                     )
