@@ -100,9 +100,44 @@ function labelForDrEvent(event: Record<string, unknown>): string {
   return type;
 }
 
+function eventTs(raw: Record<string, unknown>): string | undefined {
+  if (typeof raw.ts !== "string") return undefined;
+  const ms = Date.parse(raw.ts);
+  return Number.isFinite(ms) ? raw.ts : undefined;
+}
+
+function applyDurationFromTs(node: TraceNode, endTs: string | undefined): void {
+  if (!node.startedAt || !endTs) return;
+  const start = Date.parse(node.startedAt);
+  const end = Date.parse(endTs);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return;
+  node.durationMs = end - start;
+}
+
+function maxEndTsInSubtree(node: TraceNode): string | undefined {
+  let bestMs: number | null = null;
+  let bestIso: string | undefined;
+  const visit = (n: TraceNode) => {
+    if (n.startedAt) {
+      const start = Date.parse(n.startedAt);
+      if (Number.isFinite(start)) {
+        const end = start + (typeof n.durationMs === "number" ? Math.max(0, n.durationMs) : 0);
+        if (bestMs == null || end > bestMs) {
+          bestMs = end;
+          bestIso = new Date(end).toISOString();
+        }
+      }
+    }
+    for (const child of n.children) visit(child);
+  };
+  visit(node);
+  return bestIso;
+}
+
 function buildDeepResearchChildren(events: unknown[]): TraceNode[] {
   const roots: TraceNode[] = [];
   let currentPhase: TraceNode | null = null;
+  let previousPhase: TraceNode | null = null;
   const laneNodes = new Map<string, TraceNode>();
 
   const attach = (node: TraceNode) => {
@@ -117,17 +152,23 @@ function buildDeepResearchChildren(events: unknown[]): TraceNode[] {
     const raw = events[i];
     if (!isRecord(raw)) continue;
     const type = eventType(raw);
+    const ts = eventTs(raw);
 
     if (type === "phase") {
       const phase = typeof raw.phase === "string" ? raw.phase : "unknown";
+      if (previousPhase?.startedAt && ts) {
+        applyDurationFromTs(previousPhase, ts);
+      }
       currentPhase = {
         id: `dr-phase-${i}-${phase}`,
         kind: "dr_phase",
         label: `phase: ${phase}`,
         status: phase,
+        startedAt: ts,
         attrs: sanitizeDrEventAttrs(raw),
         children: [],
       };
+      previousPhase = currentPhase;
       laneNodes.clear();
       roots.push(currentPhase);
       continue;
@@ -139,6 +180,7 @@ function buildDeepResearchChildren(events: unknown[]): TraceNode[] {
         id: `dr-lane-${laneId}-${i}`,
         kind: "dr_lane",
         label: labelForDrEvent(raw),
+        startedAt: ts,
         attrs: sanitizeDrEventAttrs(raw),
         children: [],
       };
@@ -150,11 +192,16 @@ function buildDeepResearchChildren(events: unknown[]): TraceNode[] {
     if (type === "lane_progress" || type === "lane_sources" || type === "lane_done") {
       const laneId = typeof raw.laneId === "string" ? raw.laneId : "";
       const parent = laneId ? laneNodes.get(laneId) : undefined;
+      if (type === "lane_done" && parent) {
+        applyDurationFromTs(parent, ts);
+        if (typeof raw.status === "string") parent.status = raw.status;
+      }
       const child: TraceNode = {
         id: `dr-event-${type}-${i}`,
         kind: "dr_event",
         label: labelForDrEvent(raw),
         status: type === "lane_done" && typeof raw.status === "string" ? raw.status : undefined,
+        startedAt: ts,
         attrs: sanitizeDrEventAttrs(raw),
         children: [],
       };
@@ -170,9 +217,14 @@ function buildDeepResearchChildren(events: unknown[]): TraceNode[] {
       id: `dr-event-${type}-${i}`,
       kind: "dr_event",
       label: labelForDrEvent(raw),
+      startedAt: ts,
       attrs: sanitizeDrEventAttrs(raw),
       children: [],
     });
+  }
+
+  if (previousPhase && previousPhase.durationMs == null) {
+    applyDurationFromTs(previousPhase, maxEndTsInSubtree(previousPhase));
   }
 
   return roots;

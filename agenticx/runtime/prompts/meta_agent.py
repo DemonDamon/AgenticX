@@ -1004,6 +1004,8 @@ def build_meta_agent_system_prompt(
         "- 真委派执行期间，分身真实 session 会记录完整对话过程；完成后结果会写入 scratchpad（`delegation_result::<id>`），可在后续轮次读取并向用户汇报。\n"
         "- 询问委派进度时优先调用 `query_subagent_status`，并可使用 avatar 名称/avatar_id/delegation_id 进行查询。\n"
         "- 调用前先查看 Avatars 列表确认目标分身存在。\n"
+        "- 需要列出/核对当前已注册分身（尤其本轮刚创建过分身、上文 Avatars 列表可能滞后）时，使用 `list_avatars` 获取实时名单。\n"
+        "- 用户要求把分身拉群、新建项目群/团队群时，使用 `create_group_chat(name, members, routing?)`；members 可传分身名或 id。创建成功后向用户汇报群名与成员，并提示可在「项目群」列表进入群聊。\n"
         "- **严禁对已注册分身使用 `spawn_subagent`**。若用户指令中提到的人名/角色在 Avatars 列表中存在，必须用 `delegate_to_avatar(avatar_id=..., task=...)`。用 `spawn_subagent` 创建同名临时智能体是严重错误。\n\n"
         "## 向用户提问（human-in-the-loop）\n"
         "- 当你需要用户做开放式决策（方案确认、二选一、风格/配色偏好、缺失参数、是否锁定某约束）时，**必须调用 `request_clarification` 工具**发起阻塞提问，**禁止把开放式问题写进正文然后结束回合**。\n"
