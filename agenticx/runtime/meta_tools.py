@@ -649,6 +649,60 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_avatars",
+            "description": (
+                "List all registered digital avatars (数字分身) with fresh data "
+                "from the registry. Use this to resolve avatar names/ids before "
+                "delegation or group creation, especially after creating avatars "
+                "earlier in the same turn (the prompt's Avatars list is built at "
+                "turn start and may be stale)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_group_chat",
+            "description": (
+                "Create a persistent project group chat (项目群) from registered "
+                "avatars. Members may be avatar ids or display names "
+                "(case-insensitive). The group appears in the desktop project "
+                "group list immediately. Duplicate group names are allowed; if a "
+                "same-name group with identical members already exists, return it "
+                "instead of creating a duplicate. Meta-Agent is always implicitly "
+                "present in group chats and must NOT be listed as a member."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Group display name, e.g. 游戏开发工作室.",
+                    },
+                    "members": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Avatar ids or display names to include.",
+                    },
+                    "routing": {
+                        "type": "string",
+                        "enum": ["intelligent", "user-directed", "meta-routed", "round-robin"],
+                        "description": "Optional routing strategy; default intelligent.",
+                    },
+                },
+                "required": ["name", "members"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 _studio_tool_names = {
@@ -3037,6 +3091,108 @@ async def dispatch_meta_tool_async(
                 "description": cfg.description,
                 "tags": list(cfg.tags or []),
                 "message": f"数字分身「{cfg.name}」已创建并加入分身列表（id={cfg.id}）。",
+            },
+            ensure_ascii=False,
+        )
+
+    if name == "list_avatars":
+        from agenticx.avatar.registry import AvatarRegistry
+
+        registry = AvatarRegistry()
+        avatars = [
+            {
+                "avatar_id": av.id,
+                "name": av.name,
+                "role": av.role,
+                "description": av.description,
+                "tags": list(av.tags or []),
+            }
+            for av in registry.list_avatars()
+        ]
+        return json.dumps(
+            {"ok": True, "count": len(avatars), "avatars": avatars},
+            ensure_ascii=False,
+        )
+
+    if name == "create_group_chat":
+        from agenticx.avatar.group_chat import GroupChatRegistry
+        from agenticx.avatar.registry import AvatarRegistry
+
+        group_name = str(arguments.get("name", "")).strip()
+        raw_members = arguments.get("members")
+        routing = str(arguments.get("routing", "intelligent")).strip() or "intelligent"
+        if routing not in {"intelligent", "user-directed", "meta-routed", "round-robin"}:
+            return json.dumps(
+                {"ok": False, "error": "invalid_routing", "message": f"非法 routing: {routing}"},
+                ensure_ascii=False,
+            )
+        if not group_name:
+            return json.dumps(
+                {"ok": False, "error": "missing_name", "message": "name is required to create a group chat."},
+                ensure_ascii=False,
+            )
+        if not isinstance(raw_members, list) or not raw_members:
+            return json.dumps(
+                {"ok": False, "error": "missing_members", "message": "members must be a non-empty list of avatar names or ids."},
+                ensure_ascii=False,
+            )
+        avatar_registry = AvatarRegistry()
+        all_avatars = avatar_registry.list_avatars()
+        resolved_ids: list[str] = []
+        resolved_names: list[str] = []
+        unresolved: list[str] = []
+        for item in raw_members:
+            query = str(item).strip()
+            if not query:
+                continue
+            match = None
+            for av in all_avatars:
+                if query.lower() in ((av.id or "").lower(), (av.name or "").lower()):
+                    match = av
+                    break
+            if match is None:
+                unresolved.append(query)
+                continue
+            if match.id not in resolved_ids:
+                resolved_ids.append(match.id)
+                resolved_names.append(match.name)
+        if not resolved_ids:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "members_unresolved",
+                    "unresolved": unresolved,
+                    "message": "未能解析任何成员，请用 list_avatars 获取有效分身名称/id 后重试。",
+                    "available_avatars": [
+                        {"avatar_id": av.id, "name": av.name} for av in all_avatars
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        group_registry = GroupChatRegistry()
+        wanted = set(resolved_ids)
+        for existing in group_registry.list_groups():
+            if existing.name == group_name and set(existing.avatar_ids or []) == wanted:
+                return json.dumps(
+                    {
+                        "ok": True,
+                        "existing": True,
+                        "group": existing.to_dict(),
+                        "message": f"同名同成员群聊「{group_name}」已存在（id={existing.id}），直接复用。",
+                    },
+                    ensure_ascii=False,
+                )
+        config = group_registry.create_group(name=group_name, avatar_ids=resolved_ids, routing=routing)
+        return json.dumps(
+            {
+                "ok": True,
+                "group": config.to_dict(),
+                "resolved_members": resolved_names,
+                "unresolved": unresolved,
+                "message": (
+                    f"项目群「{config.name}」已创建（id={config.id}，成员 {len(resolved_ids)} 人："
+                    f"{'、'.join(resolved_names)}），已出现在项目群列表，点击即可开始群聊。"
+                ),
             },
             ensure_ascii=False,
         )
