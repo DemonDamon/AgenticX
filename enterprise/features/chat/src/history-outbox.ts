@@ -43,6 +43,8 @@ export type HistoryAppendPayload = {
   role: ChatMessageRole;
   content: string;
   model?: string;
+  /** 本轮 x-agenticx-trace-id，供事后排障关联 Portal 日志。 */
+  trace_id?: string;
   created_at: string;
   web_search_sources?: WebSearchSource[];
   attachments?: HistoryAppendAttachmentMeta[];
@@ -202,6 +204,7 @@ export function stripToAppendPayload(message: ChatMessage): HistoryAppendPayload
     created_at: message.created_at,
   };
   if (message.model) payload.model = message.model;
+  if (message.trace_id) payload.trace_id = message.trace_id;
   if (message.web_search_sources?.length) {
     payload.web_search_sources = message.web_search_sources.map((source) => ({
       title: source.title,

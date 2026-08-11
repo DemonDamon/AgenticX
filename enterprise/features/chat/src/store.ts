@@ -1852,8 +1852,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         deepResearchEnabled,
         getDeepResearchInteractionPref(),
       );
-      const { requestId } = await client.sendMessage(request);
+      const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
+      // trace_id 是跨服务关联键（requestId 只是前端内存句柄，不出浏览器）。
+      // 挂到助手消息上，供气泡「复制请求 ID」与落库后的排障检索。
+      if (traceId) {
+        set((prev) => ({
+          messages: prev.messages.map((message) =>
+            message.id === assistantMessage.id ? { ...message, trace_id: traceId } : message,
+          ),
+        }));
+      }
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
@@ -2107,8 +2116,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         Boolean(state.lastDeepResearchBySessionId[sessionId]),
         getDeepResearchInteractionPref(),
       );
-      const { requestId } = await client.sendMessage(request);
+      const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
+      // trace_id 是跨服务关联键（requestId 只是前端内存句柄，不出浏览器）。
+      // 挂到助手消息上，供气泡「复制请求 ID」与落库后的排障检索。
+      if (traceId) {
+        set((prev) => ({
+          messages: prev.messages.map((message) =>
+            message.id === replacementAssistant.id ? { ...message, trace_id: traceId } : message,
+          ),
+        }));
+      }
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
@@ -2328,8 +2346,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         Boolean(state.lastDeepResearchBySessionId[sessionId]),
         getDeepResearchInteractionPref(),
       );
-      const { requestId } = await client.sendMessage(request);
+      const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
+      // trace_id 是跨服务关联键（requestId 只是前端内存句柄，不出浏览器）。
+      // 挂到助手消息上，供气泡「复制请求 ID」与落库后的排障检索。
+      if (traceId) {
+        set((prev) => ({
+          messages: prev.messages.map((message) =>
+            message.id === replacementAssistant.id ? { ...message, trace_id: traceId } : message,
+          ),
+        }));
+      }
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
