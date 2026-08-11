@@ -6,6 +6,12 @@ import {
   resolveAdminUserLabel,
   type AdminUserDirectory,
 } from "../../lib/admin-user-directory";
+import {
+  emptyAdminDepartmentDirectory,
+  loadAdminDepartmentDirectory,
+  resolveAdminDepartmentLabel,
+  type AdminDepartmentDirectory,
+} from "../../lib/admin-department-directory";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -87,6 +93,7 @@ export default function DashboardPage() {
   const [meteringRows, setMeteringRows] = useState<MeteringRow[]>([]);
   const [auditItems, setAuditItems] = useState<AuditEvent[]>([]);
   const [userDirectory, setUserDirectory] = useState<AdminUserDirectory>(() => emptyAdminUserDirectory());
+  const [departmentDirectory, setDepartmentDirectory] = useState<AdminDepartmentDirectory>(() => emptyAdminDepartmentDirectory());
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -159,10 +166,21 @@ export default function DashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void loadAdminDepartmentDirectory().then((directory) => {
+      if (active) setDepartmentDirectory(directory);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   /* ---------- 派生图表数据 ---------- */
 
   const callsSeriesKey = t("charts.callsSeries");
   const costSeriesKey = t("charts.costSeries");
+  const unassignedDepartmentLabel = tc("users.detail.unassigned");
 
   const trendData = useMemo(() => {
     return meteringRows.slice(-12).map((row, index) => ({
@@ -189,16 +207,17 @@ export default function DashboardPage() {
   const deptModelData = useMemo(() => {
     const map = new Map<string, { dept: string; deepseek: number; moonshot: number; others: number }>();
     for (const row of meteringRows) {
-      const dept = row.dims.dept ?? "unknown";
+      const deptId = row.dims.dept ?? "__unassigned__";
+      const dept = resolveAdminDepartmentLabel(departmentDirectory, row.dims.dept, unassignedDepartmentLabel);
       const model = row.dims.model ?? "others";
-      const item = map.get(dept) ?? { dept, deepseek: 0, moonshot: 0, others: 0 };
+      const item = map.get(deptId) ?? { dept, deepseek: 0, moonshot: 0, others: 0 };
       if (model.includes("deepseek")) item.deepseek += row.total_tokens;
       else if (model.includes("moonshot")) item.moonshot += row.total_tokens;
       else item.others += row.total_tokens;
-      map.set(dept, item);
+      map.set(deptId, item);
     }
     return Array.from(map.values());
-  }, [meteringRows]);
+  }, [departmentDirectory, meteringRows, unassignedDepartmentLabel]);
 
   const topUsers = useMemo(() => {
     const stats = new Map<string, { count: number; email?: string }>();
