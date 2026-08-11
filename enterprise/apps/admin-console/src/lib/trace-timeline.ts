@@ -178,6 +178,60 @@ function buildDeepResearchChildren(events: unknown[]): TraceNode[] {
   return roots;
 }
 
+function parseStartedAtMs(startedAt: string | undefined): number | null {
+  if (!startedAt) return null;
+  const ms = Date.parse(startedAt);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** Trace time window from startedAt + durationMs across the tree. */
+export function computeTraceTimeWindow(nodes: TraceNode[]): {
+  tMinMs: number | null;
+  tMaxMs: number | null;
+} {
+  let tMinMs: number | null = null;
+  let tMaxMs: number | null = null;
+
+  const visit = (list: TraceNode[]) => {
+    for (const node of list) {
+      const start = parseStartedAtMs(node.startedAt);
+      if (start != null) {
+        const end = start + (typeof node.durationMs === "number" ? Math.max(0, node.durationMs) : 0);
+        tMinMs = tMinMs == null ? start : Math.min(tMinMs, start);
+        tMaxMs = tMaxMs == null ? Math.max(end, start) : Math.max(tMaxMs, end, start);
+      }
+      if (node.children.length > 0) visit(node.children);
+    }
+  };
+
+  visit(nodes);
+  return { tMinMs, tMaxMs };
+}
+
+export function computeGanttPlacement(
+  node: Pick<TraceNode, "startedAt" | "durationMs">,
+  tMinMs: number,
+  tMaxMs: number,
+): { offsetPct: number; widthPct: number } | null {
+  const start = parseStartedAtMs(node.startedAt);
+  if (start == null || !Number.isFinite(tMinMs) || !Number.isFinite(tMaxMs) || tMaxMs <= tMinMs) {
+    return null;
+  }
+  const span = tMaxMs - tMinMs;
+  const duration = typeof node.durationMs === "number" ? Math.max(0, node.durationMs) : 0;
+  const rawOffset = ((start - tMinMs) / span) * 100;
+  const rawWidth = Math.max(1, (duration / span) * 100);
+  const offsetPct = Math.max(0, Math.min(100, rawOffset));
+  const widthPct = Math.max(1, Math.min(100 - offsetPct, rawWidth));
+  return { offsetPct, widthPct };
+}
+
+function spanStartedAtIso(createdAt: AgentTraceSpanRow["created_at"]): string | undefined {
+  if (createdAt instanceof Date) return createdAt.toISOString();
+  if (typeof createdAt === "string") return createdAt;
+  return undefined;
+}
+
 /**
  * Pure assembler: stitches portal logs + model spans + deep-research events into a tree.
  * Deterministic rules — see plan FR-6.
@@ -223,6 +277,7 @@ export function assembleTraceTimeline(input: TraceTimelineInput): TraceTimeline 
       kind: "model_step" as const,
       label,
       status: span.status,
+      startedAt: spanStartedAtIso(span.created_at),
       durationMs: span.duration_ms,
       tokens: {
         input: span.input_tokens,
