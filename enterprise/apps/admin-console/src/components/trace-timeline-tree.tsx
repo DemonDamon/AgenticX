@@ -259,6 +259,8 @@ export type TraceExplorerLabels = {
   ioTitle: string;
   ioPrompt: string;
   ioCompletion: string;
+  /** Empty state when a selected step has no captured I/O */
+  noStepIo?: string;
   attributes: string;
   sources: string;
   emptyAttrs: string;
@@ -319,6 +321,8 @@ export function TraceExplorer({
 
   const metadataTitle = labels.metadataTitle ?? labels.detailTitle;
   const contentTitle = labels.contentTitle ?? labels.conversation.title;
+  const noStepIo = labels.noStepIo ?? "No input/output captured for this step.";
+  const isRequestRoot = selected?.kind === "request";
 
   return (
     <div
@@ -355,66 +359,70 @@ export function TraceExplorer({
         <>
           <div className="max-h-[520px] space-y-3 overflow-auto border-b border-border p-3 md:border-b-0 md:border-r">
             <div className="text-xs font-medium text-muted-foreground">{contentTitle}</div>
-            {labels.conversation.scopeTurn && labels.conversation.scopeSession ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  className={`rounded-md px-2 py-1 text-xs ${
-                    conversationScope === "turn"
-                      ? "bg-muted font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-muted/50"
-                  }`}
-                  onClick={() => setConversationScope("turn")}
-                >
-                  {labels.conversation.scopeTurn}
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-md px-2 py-1 text-xs ${
-                    conversationScope === "session"
-                      ? "bg-muted font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-muted/50"
-                  } ${!sessionId ? "cursor-not-allowed opacity-50" : ""}`}
-                  disabled={!sessionId}
-                  title={!sessionId ? labels.conversation.noSession : undefined}
-                  onClick={() => {
-                    if (sessionId) setConversationScope("session");
-                  }}
-                >
-                  {labels.conversation.scopeSession}
-                </button>
-              </div>
-            ) : null}
-            <div className={conversationScope === "turn" ? "block" : "hidden"}>
-              <TraceConversationPanel
-                traceId={data.trace_id}
-                labels={labels.conversation}
-                onSessionId={setSessionId}
-              />
-            </div>
-            {conversationScope === "session" && sessionId ? (
-              <SessionConversationPanel
-                sessionId={sessionId}
-                labels={{
-                  title: labels.conversation.titleSession ?? labels.conversation.title,
-                  loading: labels.conversation.loading,
-                  empty: labels.conversation.empty,
-                  loadFailed: labels.conversation.loadFailed,
-                  expand: labels.conversation.expand,
-                  collapse: labels.conversation.collapse,
-                  truncatedHint: labels.conversation.truncatedHint,
-                  roleUser: labels.conversation.roleUser,
-                  roleAssistant: labels.conversation.roleAssistant,
-                  roleTool: labels.conversation.roleTool,
-                  roleSystem: labels.conversation.roleSystem,
-                  reasoning: labels.conversation.reasoning,
-                  attachments: labels.conversation.attachments,
-                  chars: labels.conversation.chars,
-                  loadEarlier: labels.conversation.loadEarlier ?? "Load earlier",
-                  reasoningExpand: labels.conversation.reasoningExpand,
-                  reasoningCollapse: labels.conversation.reasoningCollapse,
-                }}
-              />
+            {isRequestRoot ? (
+              <>
+                {labels.conversation.scopeTurn && labels.conversation.scopeSession ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      className={`rounded-md px-2 py-1 text-xs ${
+                        conversationScope === "turn"
+                          ? "bg-muted font-medium text-foreground"
+                          : "text-muted-foreground hover:bg-muted/50"
+                      }`}
+                      onClick={() => setConversationScope("turn")}
+                    >
+                      {labels.conversation.scopeTurn}
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-md px-2 py-1 text-xs ${
+                        conversationScope === "session"
+                          ? "bg-muted font-medium text-foreground"
+                          : "text-muted-foreground hover:bg-muted/50"
+                      } ${!sessionId ? "cursor-not-allowed opacity-50" : ""}`}
+                      disabled={!sessionId}
+                      title={!sessionId ? labels.conversation.noSession : undefined}
+                      onClick={() => {
+                        if (sessionId) setConversationScope("session");
+                      }}
+                    >
+                      {labels.conversation.scopeSession}
+                    </button>
+                  </div>
+                ) : null}
+                <div className={conversationScope === "turn" ? "block" : "hidden"}>
+                  <TraceConversationPanel
+                    traceId={data.trace_id}
+                    labels={labels.conversation}
+                    onSessionId={setSessionId}
+                  />
+                </div>
+                {conversationScope === "session" && sessionId ? (
+                  <SessionConversationPanel
+                    sessionId={sessionId}
+                    labels={{
+                      title: labels.conversation.titleSession ?? labels.conversation.title,
+                      loading: labels.conversation.loading,
+                      empty: labels.conversation.empty,
+                      loadFailed: labels.conversation.loadFailed,
+                      expand: labels.conversation.expand,
+                      collapse: labels.conversation.collapse,
+                      truncatedHint: labels.conversation.truncatedHint,
+                      roleUser: labels.conversation.roleUser,
+                      roleAssistant: labels.conversation.roleAssistant,
+                      roleTool: labels.conversation.roleTool,
+                      roleSystem: labels.conversation.roleSystem,
+                      reasoning: labels.conversation.reasoning,
+                      attachments: labels.conversation.attachments,
+                      chars: labels.conversation.chars,
+                      loadEarlier: labels.conversation.loadEarlier ?? "Load earlier",
+                      reasoningExpand: labels.conversation.reasoningExpand,
+                      reasoningCollapse: labels.conversation.reasoningCollapse,
+                    }}
+                  />
+                ) : null}
+              </>
             ) : null}
             {io ? (
               <div className="space-y-1.5 border-t border-border pt-3">
@@ -430,6 +438,8 @@ export function TraceExplorer({
                   </pre>
                 </div>
               </div>
+            ) : !isRequestRoot ? (
+              <p className="text-xs text-muted-foreground">{noStepIo}</p>
             ) : null}
           </div>
           <div className="max-h-[520px] space-y-3 overflow-auto p-3">
@@ -530,6 +540,7 @@ export type TraceTimelineTreeLabels = {
   ioTitle: string;
   ioPrompt: string;
   ioCompletion: string;
+  noStepIo?: string;
   attributes: string;
   sources: string;
   emptyAttrs: string;
@@ -644,6 +655,7 @@ export function TraceTimelineInline({
           ioTitle: labels.ioTitle,
           ioPrompt: labels.ioPrompt,
           ioCompletion: labels.ioCompletion,
+          noStepIo: labels.noStepIo,
           attributes: labels.attributes,
           sources: labels.sources,
           emptyAttrs: labels.emptyAttrs,
