@@ -1,7 +1,7 @@
 # AI-assisted follow-up query resolution
 
-Planned-with: GPT-5
-Suggested-Impl-Model: GPT-5
+Planned-with: gpt5.6-luna-max
+Suggested-Impl-Model: gpt5.6-luna-max
 
 ## 背景与根因证据
 
@@ -23,7 +23,8 @@ Suggested-Impl-Model: GPT-5
 
 `历史对话 + 当前追问 → 结构化 resolved_query → executeWebSearch(resolved_query) → 最终回答`
 
-只对 `isReferentialFollowUp()` 判定为指代追问的轮次启用；普通自包含查询保持原有单次搜索路径。
+只对 `isReferentialFollowUp()` 判定为指代追问的轮次启用 AI 改写；普通查询不增加改写请求，自动搜索判定
+沿用 `main` 的 allowlist 语义：仅明确的本地轮次跳过，其余未识别问题默认进入搜索路径。
 历史对话只用于解析当前追问的指代，不用于拼接上一轮搜索意图。例如 `王虹是谁` →
 `她最近怎么样` 必须改写成 `王虹 最近怎么样`，不能把 `王虹是谁` 继续带入本轮查询。
 AI 改写失败、超时、输出不符合约束或返回空查询时，必须回退到现有规则解析，不能阻塞本轮回答。
@@ -114,9 +115,35 @@ const query = resolved
   - 断言改写请求失败后仍会执行一次规则搜索或按现有无实体策略降级，最终回答请求仍发出。
   - 断言普通查询不新增改写请求，避免所有联网搜索都增加延迟和模型成本。
 
+## FR-4：对齐 main 的自动搜索判定
+
+### 精确落点
+
+- `enterprise/apps/web-portal/src/lib/web-search/search-necessity.ts`：`classifyWebSearchNeed`
+  使用 `main` 当前的 allowlist 判定。保留的跳过原因只有 `datetime`、`greeting`、
+  `assistant_meta`、`attachment_only`、`arithmetic` 和指代无法消解时由 `tool-loop` 构造的
+  `referential_no_entity`；删除“自包含写作/解释/翻译”的默认跳过分支。
+- 判定顺序固定为：信息标记直接搜索；纯日期/时刻跳过；仅处理附件正文的短指令跳过；空查询、
+  长查询和无法识别的短查询均搜索；最后才对寒暄、助手元问题和纯算式执行跳过。
+- `enterprise/apps/web-portal/src/lib/web-search/tool-loop.ts`：`runWebSearchTurn` 的
+  `classifyWebSearchNeed` 调用保持现有指代特殊处理，但注释与行为必须明确表达“未识别问题默认搜索”。
+
+### 根因与边界
+
+旧分支把“没有显式搜索词”的普通问题都判为 `self_contained`，导致“王虹最近怎么样”这类隐含事实
+问题直接走无检索回答，表现为联网搜索结果变差或召回过少。`main` 采用反向 allowlist，只跳过明确不需要
+外部事实的轮次，避免自动搜索逻辑过度保守。本 FR 不改变搜索 provider、排序、预算和回答生成逻辑。
+
+### 测试与验收
+
+- `enterprise/apps/web-portal/src/lib/web-search/__tests__/search-necessity.test.ts`：断言普通隐含
+  事实问题、空查询和长查询返回 `{ need: "search" }`；断言问候、助手元问题、日期、纯算式和附件-only
+  仍按对应原因跳过。
+- `enterprise/apps/web-portal/src/lib/web-search/__tests__/tool-loop.test.ts`：断言普通写作请求和未被
+  allowlist 识别的能力类问题也会发起一次搜索；搜索无结果时仍以不可用提示降级到模型直答。
+
 ## 非目标 / 边界
 
-- 不改变 `search-necessity.ts` 的自动搜索判定；本计划不处理“是否触发搜索”。
 - 不改变 provider、页面抓取、rerank、context budget 或来源选择逻辑。
 - 不把 AI 改写结果写入聊天历史，不改变用户可见回答内容，不新增前端交互。
 - 不把深度调研的规划、澄清或报告写作链路纳入本次改动。
@@ -129,3 +156,5 @@ const query = resolved
 2. AI 改写上游不可用时，普通搜索仍可完成；客户端不会因为改写失败显示额外错误。
 3. 普通自包含联网问题仍只有一次上游回答请求和一次搜索请求，不增加改写调用。
 4. 所有新增单元测试通过，并通过 web-portal 现有 typecheck/test 命令。
+5. 自动搜索的跳过范围与 `origin/main` 的 `search-necessity.ts` 一致，普通未识别问题不会因缺少
+   显式“搜索/最新”等词而被静默跳过。

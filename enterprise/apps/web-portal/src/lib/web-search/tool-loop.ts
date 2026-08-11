@@ -758,8 +758,9 @@ export async function runWebSearchTurn(
     ? resolved?.query || queryForSkip
     : buildWebSearchQuery(originalMessages);
 
-  // Auto mode skips high-confidence self-contained turns and searches only when
-  // the query has explicit lookup or current/public-web fact signals.
+  // Auto mode follows the allowlist gate: only clearly local turns skip search;
+  // unrecognized questions continue through search so implicit factual queries
+  // do not silently degrade to an ungrounded direct answer.
   const skip = webSearchAlwaysOn()
     ? null
     : isReferential
