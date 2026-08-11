@@ -1,5 +1,11 @@
 "use client";
 import { adminFetch } from "../../lib/admin-client-auth";
+import {
+  emptyAdminUserDirectory,
+  loadAdminUserDirectory,
+  resolveAdminUserLabel,
+  type AdminUserDirectory,
+} from "../../lib/admin-user-directory";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -80,6 +86,7 @@ export default function DashboardPage() {
   });
   const [meteringRows, setMeteringRows] = useState<MeteringRow[]>([]);
   const [auditItems, setAuditItems] = useState<AuditEvent[]>([]);
+  const [userDirectory, setUserDirectory] = useState<AdminUserDirectory>(() => emptyAdminUserDirectory());
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -142,6 +149,16 @@ export default function DashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void loadAdminUserDirectory().then((directory) => {
+      if (active) setUserDirectory(directory);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   /* ---------- 派生图表数据 ---------- */
 
   const callsSeriesKey = t("charts.callsSeries");
@@ -184,15 +201,25 @@ export default function DashboardPage() {
   }, [meteringRows]);
 
   const topUsers = useMemo(() => {
-    const stats = new Map<string, number>();
+    const stats = new Map<string, { count: number; email?: string }>();
     for (const item of auditItems) {
       if (!item.user_id) continue;
-      stats.set(item.user_id, (stats.get(item.user_id) ?? 0) + 1);
+      const current = stats.get(item.user_id) ?? { count: 0 };
+      stats.set(item.user_id, {
+        count: current.count + 1,
+        email: current.email ?? item.user_email ?? undefined,
+      });
     }
     return Array.from(stats.entries())
-      .sort((a, b) => b[1] - a[1])
+      .map(([userId, value]) => ({
+        userId,
+        email: value.email,
+        displayName: resolveAdminUserLabel(userDirectory, userId, value.email),
+        count: value.count,
+      }))
+      .sort((a, b) => b.count - a.count || a.displayName.localeCompare(b.displayName))
       .slice(0, 5);
-  }, [auditItems]);
+  }, [auditItems, userDirectory]);
 
   /* ---------- 渲染 ---------- */
 
@@ -374,13 +401,14 @@ export default function DashboardPage() {
                 className="border-0"
               />
             ) : (
-              topUsers.map(([userId, count], index) => (
+              topUsers.map(({ userId, displayName, email, count }, index) => (
                 <div key={userId} className="flex items-center gap-3 rounded-md border border-border bg-surface-subtle px-3 py-2">
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
                     #{index + 1}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{userId}</div>
+                    <div className="truncate text-sm font-medium">{displayName}</div>
+                    {email && displayName !== email ? <div className="truncate text-[11px] text-muted-foreground">{email}</div> : null}
                     <div className="text-xs text-muted-foreground">
                       {count} {t("topUsers.eventCount")}
                     </div>
@@ -419,6 +447,7 @@ export default function DashboardPage() {
           ) : (
             auditItems.slice(0, 10).map((event) => {
               const hitCount = event.policies_hit?.length ?? 0;
+              const userLabel = resolveAdminUserLabel(userDirectory, event.user_id, event.user_email);
               return (
                 <Link
                   key={event.id}
@@ -435,7 +464,7 @@ export default function DashboardPage() {
                   <div className="flex min-w-0 flex-1 items-center gap-3 text-sm">
                     <span className="font-mono text-xs text-muted-foreground">{event.event_time}</span>
                     <span className="truncate font-medium">{event.event_type}</span>
-                    <span className="truncate text-muted-foreground">{event.user_id}</span>
+                    <span className="truncate text-muted-foreground">{userLabel}</span>
                   </div>
                   <Badge variant={hitCount > 0 ? "destructive" : "soft"} className="shrink-0">
                     {hitCount > 0 ? `${t("recentAudit.hit")} ${hitCount}` : t("recentAudit.compliant")}

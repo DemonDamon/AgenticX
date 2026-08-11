@@ -38,6 +38,12 @@ import {
 import type { ColumnDef } from "@tanstack/react-table";
 import { FileWarning, Filter, Inbox, RefreshCcw, Search, ShieldAlert, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useTranslations } from "next-intl";
+import {
+  emptyAdminUserDirectory,
+  loadAdminUserDirectory,
+  resolveAdminUserLabel,
+  type AdminUserDirectory,
+} from "../../lib/admin-user-directory";
 
 type QueryResult = {
   total: number;
@@ -45,16 +51,6 @@ type QueryResult = {
   chain_valid: boolean;
   chain_error_at?: string;
   chain_error_reason?: string;
-};
-
-type AuditUser = {
-  id: string;
-  email: string;
-  displayName: string;
-};
-
-type AuditUserListResult = {
-  data?: { items: AuditUser[]; total: number };
 };
 
 const AUDIT_DISPLAY_TIME_ZONE = "Asia/Shanghai";
@@ -92,8 +88,7 @@ export default function AuditPage() {
   const [policyHit, setPolicyHit] = useState("");
   const [crossBorderOnly, setCrossBorderOnly] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [userNamesById, setUserNamesById] = useState<Map<string, string>>(new Map());
-  const [userNamesByEmail, setUserNamesByEmail] = useState<Map<string, string>>(new Map());
+  const [userDirectory, setUserDirectory] = useState<AdminUserDirectory>(() => emptyAdminUserDirectory());
 
   const [chainFull, setChainFull] = useState<{
     valid: boolean;
@@ -178,34 +173,7 @@ export default function AuditPage() {
   }, [userId, model, policyHit, crossBorderOnly, loadChainVerify, t]);
 
   const loadUserDirectory = useCallback(async () => {
-    try {
-      const pageSize = 200;
-      const firstResponse = await adminFetch(`/api/admin/users?limit=${pageSize}&offset=0`);
-      if (!firstResponse.ok) return;
-      const firstPayload = (await firstResponse.json()) as AuditUserListResult;
-      const firstPage = firstPayload.data;
-      if (!firstPage) return;
-
-      const users = [...firstPage.items];
-      for (let offset = pageSize; offset < firstPage.total; offset += pageSize) {
-        const response = await adminFetch(`/api/admin/users?limit=${pageSize}&offset=${offset}`);
-        if (!response.ok) break;
-        const payload = (await response.json()) as AuditUserListResult;
-        if (!payload.data?.items.length) break;
-        users.push(...payload.data.items);
-      }
-
-      const byId = new Map<string, string>();
-      const byEmail = new Map<string, string>();
-      for (const user of users) {
-        if (user.displayName) byId.set(user.id, user.displayName);
-        if (user.email && user.displayName) byEmail.set(user.email.toLowerCase(), user.displayName);
-      }
-      setUserNamesById(byId);
-      setUserNamesByEmail(byEmail);
-    } catch {
-      // Audit rows remain usable with email/ID when the directory is unavailable.
-    }
+    setUserDirectory(await loadAdminUserDirectory());
   }, []);
 
   useEffect(() => {
@@ -256,10 +224,7 @@ export default function AuditPage() {
         accessorKey: "user_id",
         header: t("columns.user"),
         cell: ({ row }) => {
-          const userName =
-            (row.original.user_id ? userNamesById.get(row.original.user_id) : undefined) ??
-            (row.original.user_email ? userNamesByEmail.get(row.original.user_email.toLowerCase()) : undefined);
-          const userLabel = userName ?? row.original.user_email ?? row.original.user_id ?? "—";
+          const userLabel = resolveAdminUserLabel(userDirectory, row.original.user_id, row.original.user_email);
           const userInitial = userLabel.slice(0, 1).toUpperCase();
 
           return (
@@ -323,7 +288,7 @@ export default function AuditPage() {
         },
       },
     ],
-    [t, userNamesByEmail, userNamesById]
+    [t, userDirectory]
   );
 
   const activeFilters = useMemo(() => {
@@ -550,10 +515,7 @@ export default function AuditPage() {
                       value={
                         <div>
                           <div>
-                            {(selected.user_id ? userNamesById.get(selected.user_id) : undefined) ??
-                              (selected.user_email ? userNamesByEmail.get(selected.user_email.toLowerCase()) : undefined) ??
-                              selected.user_email ??
-                              "—"}
+                            {resolveAdminUserLabel(userDirectory, selected.user_id, selected.user_email)}
                           </div>
                           {selected.user_email ? <div className="text-xs text-muted-foreground">{selected.user_email}</div> : null}
                           {selected.user_id ? <div className="font-mono text-xs text-muted-foreground">{selected.user_id}</div> : null}
