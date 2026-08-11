@@ -1152,6 +1152,8 @@
         "collapse": "Collapse",
         "detail": {
           "title": "Node detail",
+          "contentTitle": "Content",
+          "metadataTitle": "Metadata",
           "selectHint": "Select a node above to inspect",
           "close": "Close detail",
           "status": "Status",
