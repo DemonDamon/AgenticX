@@ -19,6 +19,8 @@ import type { SearchReference } from "../../types/search-references";
 export { normalizeChatMarkdownContent, normalizeLenientEmphasisInText } from "./markdown-normalize";
 import { openExternalUrl } from "../../utils/open-external";
 import { isAbsoluteFilePath, resolveRelativeAssetPath } from "../../utils/workspace-file-path";
+import { parseLocalArtifactPath } from "../../utils/sandbox-artifact-link";
+import { ArtifactFileLink } from "./ArtifactFileLink";
 import { buildSvgCharsetDataUrl } from "../../utils/svg-markup";
 
 export const MarkdownContext = createContext<{
@@ -558,6 +560,10 @@ export const chatMarkdownComponents: Partial<Components> = {
   a({ href, children, ...rest }) {
     const url = String(href ?? "").trim();
     const external = /^https?:\/\//i.test(url);
+    const localArtifactPath = external ? null : parseLocalArtifactPath(url);
+    if (localArtifactPath) {
+      return <ArtifactFileLink path={localArtifactPath}>{children}</ArtifactFileLink>;
+    }
     return (
       <a
         {...rest}
