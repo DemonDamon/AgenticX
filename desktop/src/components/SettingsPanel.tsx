@@ -2267,6 +2267,9 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
     stall_auto_nudge_enabled: false,
     stall_auto_nudge_after_seconds: 120,
     stall_auto_nudge_max_per_session: 2,
+    llm_stall_patience_enabled: true,
+    llm_stall_patience_max_attempts: 3,
+    llm_stall_patience_budget_seconds: 900,
   });
   const [unattended, setUnattended] = useState<UnattendedConfig>({
     unattended_enabled: false,
@@ -2445,6 +2448,15 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
             1,
             Math.min(5, Number(runtimeResult.stall_auto_nudge_max_per_session ?? 2) || 2),
           ),
+          llm_stall_patience_enabled: Boolean(runtimeResult.llm_stall_patience_enabled ?? true),
+          llm_stall_patience_max_attempts: Math.max(
+            1,
+            Math.min(10, Number(runtimeResult.llm_stall_patience_max_attempts ?? 3) || 3),
+          ),
+          llm_stall_patience_budget_seconds: Math.max(
+            60,
+            Math.min(3600, Number(runtimeResult.llm_stall_patience_budget_seconds ?? 900) || 900),
+          ),
         });
         setUnattended({
           unattended_enabled: Boolean(runtimeResult.unattended_enabled),
@@ -2569,6 +2581,9 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           stall_auto_nudge_enabled: stallNudge.stall_auto_nudge_enabled,
           stall_auto_nudge_after_seconds: afterSec,
           stall_auto_nudge_max_per_session: stallNudge.stall_auto_nudge_max_per_session,
+          llm_stall_patience_enabled: stallNudge.llm_stall_patience_enabled,
+          llm_stall_patience_max_attempts: stallNudge.llm_stall_patience_max_attempts,
+          llm_stall_patience_budget_seconds: stallNudge.llm_stall_patience_budget_seconds,
           unattended_enabled: unattended.unattended_enabled,
           unattended_max_continuations_per_session: unattended.unattended_max_continuations_per_session,
           unattended_max_wall_clock_hours: unattended.unattended_max_wall_clock_hours,

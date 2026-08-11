@@ -54,6 +54,8 @@ import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
+import { StallWaitChip } from "./messages/StallWaitChip";
+import { parseStallWaitPayload, type StallWaitInfo } from "../utils/stall-wait-chip";
 import {
   isDoubleEnterWithinWindow,
   shouldEnqueueOnResend,
@@ -478,6 +480,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     stall_auto_nudge_after_seconds: 120,
     stall_auto_nudge_max_per_session: 2,
   });
+  const [stallWait, setStallWait] = useState<StallWaitInfo | null>(null);
   const [autoNudgeCount, setAutoNudgeCount] = useState(0);
   const autoNudgeTriggeredRef = useRef<Record<string, number>>({});
   const autoNudgeBucketRef = useRef<Record<string, number>>({});
@@ -1425,6 +1428,16 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             if (payload.type === "tool_progress") {
               if (!isCurrentRequest()) continue;
               recordProgressActivity();
+              const progressPhase = String(payload.data?.phase ?? "");
+              if (progressPhase === "stall_patient_wait") {
+                const info = parseStallWaitPayload(payload.data, Date.now());
+                if (info) setStallWait(info);
+                continue;
+              }
+              if (progressPhase === "stall_patient_recovered") {
+                setStallWait(null);
+                continue;
+              }
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
               const outputLine = payload.data?.line as string | undefined;
@@ -1464,9 +1477,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               if (!tokenText) continue;
               full += tokenText;
               cumulativeFull += tokenText;
+              setStallWait(null);
               scheduleStreamTextUpdate(full);
             }
             if (payload.type === "tool_call") {
+              setStallWait(null);
               const toolNameStr = String(payload.data?.name ?? "tool");
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
@@ -1822,6 +1837,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               }
             }
             if (payload.type === "final") {
+              setStallWait(null);
               if (eventAgentId !== "meta") {
                 flushSubAgentLiveOutput(eventAgentId);
                 updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" });
@@ -1960,6 +1976,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               }
             }
             if (payload.type === "error") {
+              setStallWait(null);
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
@@ -2723,6 +2740,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 noBubbleBorder
                 streamStalled={stallState === "stall"}
               />
+            </div>
+          ) : null}
+          {stallWait ? (
+            <div className="mb-2 flex justify-start">
+              <StallWaitChip info={stallWait} />
             </div>
           ) : null}
           {stallState === "stall" ? (
