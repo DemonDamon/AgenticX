@@ -30,6 +30,7 @@ export type ChatRequest = {
   webSearch?: boolean;
   /** User toggled deep research in the composer; BFF runs the multi-stage research pipeline. */
   deepResearch?: boolean;
+  deepResearchAuto?: boolean;
 };
 
 export type ChatUsage = {

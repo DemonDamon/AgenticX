@@ -8,14 +8,12 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
   cn,
 } from "@agenticx/ui";
-import { Check, ChevronRight, Globe, Paperclip, Plus, X } from "lucide-react";
+import { Check, ChevronRight, Globe, Microscope, Paperclip, Plus, X } from "lucide-react";
 
 export type WebSearchMode = "auto" | "off";
+export type DeepResearchMode = "off" | "manual" | "auto";
 
 /** 菜单行悬停：实底灰底，避免 muted/70 在 popover 上几乎看不见 */
 const menuItemClass =
@@ -120,6 +118,8 @@ export function hintLines(raw: string): string[] {
 type ComposerPlusMenuProps = {
   webSearchMode: WebSearchMode;
   onWebSearchModeChange: (mode: WebSearchMode) => void;
+  deepResearchMode: DeepResearchMode;
+  onDeepResearchModeChange: (mode: DeepResearchMode) => void;
   onPickFiles: () => void;
   showFileEntry?: boolean;
   /** 新建对话空态向下展开，避免挡住输入框；有消息时向上展开 */
@@ -130,6 +130,8 @@ type ComposerPlusMenuProps = {
 export function ComposerPlusMenu({
   webSearchMode,
   onWebSearchModeChange,
+  deepResearchMode,
+  onDeepResearchModeChange,
   onPickFiles,
   showFileEntry = true,
   menuSide = "top",
@@ -140,7 +142,6 @@ export function ComposerPlusMenu({
   const [webSearchOpen, setWebSearchOpen] = React.useState(false);
 
   const filesHint = hintLines(t("filesAndImagesHint"));
-  const webSearchHint = hintLines(t("webSearchMenuHint"));
 
   React.useEffect(() => {
     if (!open) setWebSearchOpen(false);
@@ -148,26 +149,21 @@ export function ComposerPlusMenu({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={t("plusMenuTooltip")}
-              className={cn(
-                "h-8 w-8 rounded-full text-muted-foreground hover:text-foreground",
-                open ? "bg-muted text-foreground" : "",
-                className,
-              )}
-            >
-              {open ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        {!open ? <TooltipContent>{t("plusMenuTooltip")}</TooltipContent> : null}
-      </Tooltip>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={t("plusMenuTooltip")}
+          className={cn(
+            "h-8 w-8 rounded-full text-muted-foreground hover:text-foreground",
+            open ? "bg-muted text-foreground" : "",
+            className,
+          )}
+        >
+          {open ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+        </Button>
+      </PopoverTrigger>
 
       <PopoverContent
         side={menuSide}
@@ -197,17 +193,15 @@ export function ComposerPlusMenu({
           onMouseEnter={() => setWebSearchOpen(true)}
           onMouseLeave={() => setWebSearchOpen(false)}
         >
-          <CapabilityHoverTip label={t("webSearchMenu")} lines={webSearchHint}>
-            <button
-              type="button"
-              className={cn(menuItemClass, webSearchOpen && "bg-black/[0.06] dark:bg-white/10")}
-              onClick={() => setWebSearchOpen((v) => !v)}
-            >
-              <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 font-medium">{t("webSearchMenu")}</span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-            </button>
-          </CapabilityHoverTip>
+          <button
+            type="button"
+            className={cn(menuItemClass, webSearchOpen && "bg-black/[0.06] dark:bg-white/10")}
+            onClick={() => setWebSearchOpen((v) => !v)}
+          >
+            <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 font-medium">{t("webSearchMenu")}</span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </button>
 
           {webSearchOpen ? (
             <div
@@ -264,6 +258,18 @@ export function ComposerPlusMenu({
             </div>
           ) : null}
         </div>
+        <button
+          type="button"
+          className={cn(menuItemClass, deepResearchMode !== "off" && "bg-black/[0.06] dark:bg-white/10")}
+          onClick={() => {
+            onDeepResearchModeChange(deepResearchMode === "off" ? "manual" : "off");
+            setOpen(false);
+          }}
+        >
+          <Microscope className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="shrink-0 whitespace-nowrap font-medium">{t("deepResearch")}</span>
+          {deepResearchMode !== "off" ? <Check className="h-4 w-4 shrink-0 text-primary" /> : null}
+        </button>
       </PopoverContent>
     </Popover>
   );

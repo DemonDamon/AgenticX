@@ -60,6 +60,7 @@ type SendMessageInput = {
   userId?: string;
   webSearch?: boolean;
   deepResearch?: boolean;
+  deepResearchAuto?: boolean;
 };
 
 type SendMessageOptions = {
@@ -275,6 +276,7 @@ function toSdkRequest(
   messages: ChatMessage[],
   webSearch?: boolean,
   deepResearch?: boolean,
+  deepResearchAuto?: boolean,
 ): SdkChatRequest {
   return {
     sessionId,
@@ -305,6 +307,7 @@ function toSdkRequest(
     }),
     ...(webSearch ? { webSearch: true } : {}),
     ...(deepResearch ? { deepResearch: true } : {}),
+    ...(deepResearchAuto ? { deepResearchAuto: true } : {}),
   };
 }
 
@@ -1237,6 +1240,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     };
     const webSearchEnabled = Boolean(input.webSearch);
     const deepResearchEnabled = Boolean(input.deepResearch);
+    const deepResearchAuto = Boolean(input.deepResearchAuto);
     const assistantMessage: ChatMessage = {
       id: makeId(),
       session_id: sessionId,
@@ -1305,6 +1309,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         nextSessionMessages,
         webSearchEnabled,
         deepResearchEnabled,
+        deepResearchAuto,
       );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
@@ -2125,4 +2130,3 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     });
   },
 }));
-

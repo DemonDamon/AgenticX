@@ -53,6 +53,7 @@ import {
   type HistoryAppendPayload,
 } from "@agenticx/feature-chat";
 import { MachiChatView } from "./MachiChatView";
+import type { DeepResearchMode } from "./ComposerPlusMenu";
 import {
   ENTERPRISE_ORG_NAME,
   EnterpriseBrandMark,
@@ -115,7 +116,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const [historyPanelOpen, setHistoryPanelOpen] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [panelMode, setPanelMode] = React.useState<PanelMode>("chat");
-  const [deepResearchMode, setDeepResearchMode] = React.useState(false);
+  const [deepResearchMode, setDeepResearchMode] = React.useState<DeepResearchMode>("off");
   /** Tenant gate: sidebar entry hidden when admin disables deep research. Default ON. */
   const [deepResearchAvailable, setDeepResearchAvailable] = React.useState(true);
 
@@ -126,7 +127,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
 
   const applyDeepResearchAvailable = React.useCallback((enabled: boolean) => {
     setDeepResearchAvailable(enabled);
-    if (!enabled) setDeepResearchMode(false);
+    if (!enabled) setDeepResearchMode("off");
   }, []);
 
   React.useEffect(() => {
@@ -191,21 +192,21 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
 
   const onNewChat = React.useCallback(() => {
     void createSession({ defaultModel: activeModel || "deepseek-chat", title: t("newChat") });
-    setDeepResearchMode(false);
+    setDeepResearchMode("off");
     setPanelMode("chat");
     setMobileOpen(false);
   }, [createSession, activeModel, t]);
 
   const onDeepResearchNav = React.useCallback(() => {
     void createSession({ defaultModel: activeModel || "deepseek-chat", title: t("newChat") });
-    setDeepResearchMode(true);
+    setDeepResearchMode("manual");
     setPanelMode("chat");
     setMobileOpen(false);
   }, [createSession, activeModel, t]);
 
   const onSelectSession = React.useCallback((id: string) => {
     void switchSession(id);
-    setDeepResearchMode(false);
+    setDeepResearchMode("off");
     setPanelMode("chat");
     setMobileOpen(false);
   }, [switchSession]);
@@ -376,7 +377,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
             </Button>
             {deepResearchAvailable ? (
               <Button
-                variant={deepResearchMode && activeSessionEmpty ? "default" : "outline"}
+                variant={deepResearchMode !== "off" && activeSessionEmpty ? "default" : "outline"}
                 onClick={onDeepResearchNav}
                 className={collapsed ? "" : "w-full justify-start"}
                 size={collapsed ? "icon" : "default"}

@@ -17,6 +17,7 @@ import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
+import { shouldAutoRunDeepResearch } from "../../../../lib/deep-research/auto-need";
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.messages)) return body;
@@ -92,6 +93,7 @@ export async function POST(request: Request) {
   let forwardBody = rawBody;
   let enableWebSearch = false;
   let enableDeepResearch = false;
+  let enableDeepResearchAuto = false;
   let parsedBody: Record<string, unknown> | null = null;
   // portal 把模型 id 编码为 "<provider>/<model>"；admin 配置好的 provider 与上游 endpoint 一一对应。
   // gateway 用 model 字段查表，所以这里把 provider 拆出来放请求头，body.model 仅保留模型名。
@@ -100,12 +102,15 @@ export async function POST(request: Request) {
       model?: string;
       agenticx_web_search?: unknown;
       agenticx_deep_research?: unknown;
+      agenticx_deep_research_auto?: unknown;
     };
     enableWebSearch = parsed.agenticx_web_search === true;
     enableDeepResearch = parsed.agenticx_deep_research === true;
+    enableDeepResearchAuto = parsed.agenticx_deep_research_auto === true;
     const {
       agenticx_web_search: _stripWs,
       agenticx_deep_research: _stripDr,
+      agenticx_deep_research_auto: _stripDrAuto,
       ...withoutFlag
     } = parsed;
     parsedBody = withoutFlag;
@@ -140,6 +145,12 @@ export async function POST(request: Request) {
     }
   } catch {
     // body 不是 JSON 时维持原样转发
+  }
+
+  if (enableDeepResearchAuto && parsedBody) {
+    enableDeepResearch = shouldAutoRunDeepResearch(
+      Array.isArray(parsedBody.messages) ? (parsedBody.messages as Array<{ role?: unknown; content?: unknown }>) : [],
+    );
   }
 
   const gatewayHeaders: Record<string, string> = {

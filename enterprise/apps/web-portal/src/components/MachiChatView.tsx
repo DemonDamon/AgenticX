@@ -59,6 +59,7 @@ import {
   CapabilityHoverTip,
   ComposerPlusMenu,
   hintLines,
+  type DeepResearchMode,
   type WebSearchMode,
 } from "./ComposerPlusMenu";
 import { ENTERPRISE_PRODUCT_NAME } from "./EnterpriseBrandMark";
@@ -94,8 +95,8 @@ function formatActiveModelFallback(modelId: string): string {
 
 type MachiChatViewProps = {
   client: ChatClient;
-  deepResearchMode?: boolean;
-  onDeepResearchModeChange?: (next: boolean) => void;
+  deepResearchMode?: DeepResearchMode;
+  onDeepResearchModeChange?: (next: DeepResearchMode) => void;
 };
 
 function isComplianceError(message: string): boolean {
@@ -109,7 +110,7 @@ function isQuotaExhaustedError(message: string | null): boolean {
 
 export function MachiChatView({
   client,
-  deepResearchMode = false,
+  deepResearchMode = "off",
   onDeepResearchModeChange,
 }: MachiChatViewProps) {
   const t = useTranslations("chat");
@@ -301,7 +302,7 @@ export function MachiChatView({
   }, [messages, filesPanelSessionId]);
 
   const setDeepResearchMode = React.useCallback(
-    (next: boolean) => {
+    (next: DeepResearchMode) => {
       onDeepResearchModeChange?.(next);
     },
     [onDeepResearchModeChange],
@@ -655,12 +656,14 @@ export function MachiChatView({
           content: trimmed,
           attachments: messageAttachments,
           webSearch: webSearchMode === "auto",
-          deepResearch: deepResearchMode,
+          deepResearch: deepResearchMode === "manual",
+          deepResearchAuto: deepResearchMode === "auto",
         },
         opts?.forceSend ? { forceSend: true } : undefined,
       );
       setDraft("");
       clearAttachments();
+      if (deepResearchMode === "manual") onDeepResearchModeChange?.("auto");
     },
     [
       clearAttachments,
@@ -670,6 +673,7 @@ export function MachiChatView({
       sendMessage,
       toMessageAttachments,
       webSearchMode,
+      onDeepResearchModeChange,
     ],
   );
 
@@ -793,7 +797,7 @@ export function MachiChatView({
             : undefined
         }
         placeholder={
-          deepResearchMode ? tw("deepResearchPlaceholder") : `发送消息给${ENTERPRISE_PRODUCT_NAME}...`
+          deepResearchMode !== "off" ? tw("deepResearchPlaceholder") : `发送消息给${ENTERPRISE_PRODUCT_NAME}...`
         }
         attachments={Object.values(attachments)}
         onAddFiles={handleAddFiles}
@@ -805,6 +809,8 @@ export function MachiChatView({
               key="composer-plus"
               webSearchMode={webSearchMode}
               onWebSearchModeChange={setWebSearchMode}
+              deepResearchMode={deepResearchMode}
+              onDeepResearchModeChange={onDeepResearchModeChange ?? (() => undefined)}
               onPickFiles={() => fileInputRef.current?.click()}
               showFileEntry={false}
               menuSide={isEmpty ? "bottom" : "top"}
@@ -825,24 +831,29 @@ export function MachiChatView({
                 <Paperclip className="h-4 w-4" />
               </Button>
             </CapabilityHoverTip>
-            {deepResearchMode ? (
-              <span
-                key="deep-research-chip"
-                className="group/dr-chip inline-flex h-8 items-center gap-1.5 rounded-full bg-primary-soft/70 px-2.5 text-xs font-medium text-primary"
-                aria-label={tw("deepResearchChip")}
-              >
-                <button
-                  type="button"
-                  onClick={() => setDeepResearchMode(false)}
-                  className="relative flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-                  aria-label={tw("exitDeepResearch")}
-                  title={tw("exitDeepResearch")}
+            {deepResearchMode !== "off" ? (
+              <>
+                <span
+                  key="deep-research-chip"
+                  className="group/dr-chip inline-flex h-8 items-center gap-1.5 rounded-full bg-primary-soft/70 px-2.5 text-xs font-medium text-primary"
+                  aria-label={tw("deepResearchChip")}
                 >
-                  <Microscope className="h-3.5 w-3.5 group-hover/dr-chip:hidden" />
-                  <X className="hidden h-3.5 w-3.5 group-hover/dr-chip:block" strokeWidth={2.5} />
-                </button>
-                <span>{tw("deepResearchChip")}</span>
-              </span>
+                  <button
+                    type="button"
+                    onClick={() => setDeepResearchMode("off")}
+                    className="relative flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+                    aria-label={tw("exitDeepResearch")}
+                    title={tw("exitDeepResearch")}
+                  >
+                    <Microscope className="h-3.5 w-3.5 group-hover/dr-chip:hidden" />
+                    <X className="hidden h-3.5 w-3.5 group-hover/dr-chip:block" strokeWidth={2.5} />
+                  </button>
+                  <span className="whitespace-nowrap">{tw("deepResearchChip")}</span>
+                </span>
+                <span className="max-w-[12rem] text-[10px] leading-tight text-amber-700/90 dark:text-amber-300/90">
+                  {tw("deepResearchTokenHint")}
+                </span>
+              </>
             ) : null}
           </>
         }
@@ -998,7 +1009,7 @@ export function MachiChatView({
             /* 空态：品牌字标靠上 + 收窄加高输入区（深度研究入口暂走侧栏） */
             <div className="relative flex h-full flex-col items-center justify-start gap-10 overflow-y-auto px-4 pt-14 pb-10 md:gap-12 md:pt-16 md:pb-16">
               <NearEmptyWordmark
-                caption={deepResearchMode ? tw("deepResearchEmptySubtitle") : undefined}
+                caption={deepResearchMode !== "off" ? tw("deepResearchEmptySubtitle") : undefined}
                 badgeLabel={t("beta")}
               />
 
