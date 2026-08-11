@@ -27,7 +27,6 @@ import {
   RefreshCw,
   Share2,
   Terminal as TerminalIcon,
-  Users,
   BarChart3,
   X,
 } from "lucide-react";
@@ -35,7 +34,7 @@ import { useAppStore, type Avatar, type ChatPane, type Message, type PaneTermina
 import { WorkspacePanel } from "../WorkspacePanel";
 import { RunGraphPanel } from "../graph/RunGraphPanel";
 import { ExecutionTimeline } from "../graph/ExecutionTimeline";
-import { MembersTabPanel } from "./MembersTabPanel";
+import { GroupMembersSummaryList } from "./GroupMembersSummaryList";
 import {
   loadAbsoluteFilePreview,
   type WorkspacePreview,
@@ -387,10 +386,9 @@ export type WorkPanelTabKind =
   | "browser"
   | "preview"
   | "graph"
-  | "members"
   | "timeline";
 
-export type SummarySectionId = "todo" | "artifacts" | "spawns" | "refs";
+export type SummarySectionId = "todo" | "artifacts" | "spawns" | "refs" | "members";
 
 export type WorkPanelFocus =
   | { kind: "summary"; section?: SummarySectionId; highlightPath?: string }
@@ -414,7 +412,6 @@ export type WorkPanelFocus =
     }
   /** Run Graph God-View tab (same shell as browser / summary). */
   | { kind: "graph" }
-  | { kind: "members" }
   | { kind: "timeline" }
   | null;
 
@@ -711,7 +708,6 @@ export function WorkPanel({
   const [previewTabs, setPreviewTabs] = useState<PreviewTab[]>([]);
   const [workspaceTabOpen, setWorkspaceTabOpen] = useState(false);
   const [graphTabOpen, setGraphTabOpen] = useState(false);
-  const [membersTabOpen, setMembersTabOpen] = useState(false);
   const [timelineTabOpen, setTimelineTabOpen] = useState(false);
   const paneForGraph = useAppStore(
     (s) => s.panes.find((p) => p.id === paneId) ?? null,
@@ -745,6 +741,7 @@ export function WorkPanel({
     artifacts: false,
     spawns: false,
     refs: false,
+    members: false,
   });
   const [extraArtifactPaths, setExtraArtifactPaths] = useState<string[]>([]);
   /** Paths only present in agent_messages.json (ahead of chat messages.json). */
@@ -903,7 +900,6 @@ export function WorkPanel({
     summaryTabOpen ||
     workspaceTabOpen ||
     graphTabOpen ||
-    membersTabOpen ||
     timelineTabOpen ||
     terminalTabs.length > 0 ||
     browserTabs.length > 0 ||
@@ -913,7 +909,6 @@ export function WorkPanel({
     excludeSummary?: boolean;
     excludeWorkspace?: boolean;
     excludeGraph?: boolean;
-    excludeMembers?: boolean;
     excludeTimeline?: boolean;
     excludeTerminalId?: string;
     excludeBrowserId?: string;
@@ -921,7 +916,6 @@ export function WorkPanel({
   }): WorkPanelTabKind | null => {
     if (!opts?.excludeSummary && summaryTabOpen) return "summary";
     if (!opts?.excludeGraph && graphTabOpen) return "graph";
-    if (!opts?.excludeMembers && membersTabOpen) return "members";
     if (!opts?.excludeTimeline && timelineTabOpen) return "timeline";
     const nextPreview = previewTabs.find((t) => t.id !== opts?.excludePreviewId);
     if (nextPreview) {
@@ -1127,17 +1121,12 @@ export function WorkPanel({
     } else if (focusRequest.kind === "graph") {
       setGraphTabOpen(true);
       setActiveKind("graph");
-    } else if (focusRequest.kind === "members") {
-      if (isGroupPane) {
-        setMembersTabOpen(true);
-        setActiveKind("members");
-      }
     } else if (focusRequest.kind === "timeline") {
       setTimelineTabOpen(true);
       setActiveKind("timeline");
     }
     onFocusRequestHandled?.();
-  }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab, isGroupPane]);
+  }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab]);
 
   useEffect(() => {
     if (subAgents.length > 0) {
@@ -1146,6 +1135,15 @@ export function WorkPanel({
       setOpenSections((prev) => (!prev.spawns ? prev : { ...prev, spawns: false }));
     }
   }, [subAgents.length]);
+
+  // Group panes always have Meta + members; keep the summary section expanded by default.
+  useEffect(() => {
+    if (!isGroupPane) {
+      setOpenSections((prev) => (!prev.members ? prev : { ...prev, members: false }));
+      return;
+    }
+    setOpenSections((prev) => (prev.members ? prev : { ...prev, members: true }));
+  }, [isGroupPane]);
 
   useEffect(() => {
     if (presentArtifactPaths.length > 0) {
@@ -1218,20 +1216,6 @@ export function WorkPanel({
     setGraphTabOpen(false);
     if (activeKind === "graph") {
       setActiveKind(resolveFallbackKind({ excludeGraph: true }));
-    }
-  };
-
-  const openMembersTab = () => {
-    if (!isGroupPane) return;
-    setMembersTabOpen(true);
-    setActiveKind("members");
-    closePlus();
-  };
-
-  const closeMembersTab = () => {
-    setMembersTabOpen(false);
-    if (activeKind === "members") {
-      setActiveKind(resolveFallbackKind({ excludeMembers: true }));
     }
   };
 
@@ -1474,16 +1458,6 @@ export function WorkPanel({
               <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
               运行图
             </button>
-            {isGroupPane ? (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-                onClick={openMembersTab}
-              >
-                <Users className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-                成员
-              </button>
-            ) : null}
             <button
               type="button"
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
@@ -1535,17 +1509,6 @@ export function WorkPanel({
       subtitle: "任务拆解时观察分工与依赖，并做注入 / 改派干预",
       onClick: openGraphTab,
     },
-    ...(isGroupPane
-      ? [
-          {
-            key: "members" as const,
-            icon: <Users className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
-            title: "成员",
-            subtitle: "查看与增删群成员",
-            onClick: openMembersTab,
-          },
-        ]
-      : []),
     {
       key: "timeline",
       icon: <BarChart3 className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
@@ -1668,40 +1631,6 @@ export function WorkPanel({
                 }
               }}
               aria-label="关闭运行图标签"
-            >
-              <X className="h-3 w-3" strokeWidth={2} />
-            </span>
-          </button>
-        ) : null}
-
-        {membersTabOpen ? (
-          <button
-            type="button"
-            className={`flex h-7 max-w-[110px] items-center gap-1.5 rounded-full px-2 text-[12px] ${
-              activeKind === "members"
-                ? "bg-surface-card-strong text-text-strong"
-                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
-            }`}
-            onClick={() => setActiveKind("members")}
-          >
-            <Users className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-            <span className="truncate">成员</span>
-            <span
-              role="button"
-              tabIndex={0}
-              className="rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeMembersTab();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  closeMembersTab();
-                }
-              }}
-              aria-label="关闭成员标签"
             >
               <X className="h-3 w-3" strokeWidth={2} />
             </span>
@@ -1864,11 +1793,7 @@ export function WorkPanel({
           ref={plusBtnRef}
           type="button"
           className="agx-topbar-btn !px-[5px]"
-          title={
-            isGroupPane
-              ? "打开任务摘要 / 浏览器 / 运行图 / 成员 / 执行时间线 / 终端 / 工作区"
-              : "打开任务摘要 / 浏览器 / 运行图 / 执行时间线 / 终端 / 工作区"
-          }
+          title="打开任务摘要 / 浏览器 / 运行图 / 执行时间线 / 终端 / 工作区"
           aria-label="新建工作台标签"
           onClick={openPlusMenu}
         >
@@ -2019,6 +1944,22 @@ export function WorkPanel({
               )}
             </Section>
 
+            {isGroupPane && groupId ? (
+              <Section
+                id="members"
+                title="成员"
+                count={1 + groupAvatarIds.length}
+                open={openSections.members}
+                onToggle={toggleSection}
+              >
+                <GroupMembersSummaryList
+                  groupId={groupId}
+                  avatarList={avatarList}
+                  metaLeaderLabel={metaLeaderLabel}
+                />
+              </Section>
+            ) : null}
+
             <Section
               id="spawns"
               title="子智能体"
@@ -2142,14 +2083,6 @@ export function WorkPanel({
             onClose={closeGraphTab}
             tintColor={tintColor}
             embedded
-          />
-        ) : null}
-
-        {hasAnyTab && activeKind === "members" && membersTabOpen && groupId ? (
-          <MembersTabPanel
-            groupId={groupId}
-            avatarList={avatarList}
-            metaLeaderLabel={metaLeaderLabel}
           />
         ) : null}
 
