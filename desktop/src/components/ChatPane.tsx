@@ -8427,6 +8427,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           if (fromFile) {
             contextFilePayload[key] = fromFile;
           } else {
+            // materializeSessionAttachments rewrote sourcePath after parse;
+            // resolveReadyAttachment then misses readyEntries and the body is
+            // lost. Warn so this silent degradation is observable in devtools.
+            console.warn(
+              "[ChatPane] attachment body lost after materialize, key=",
+              key,
+              "sourcePath=",
+              file.sourcePath,
+            );
             contextFilePayload[key] = `[附件] ${file.name}`;
           }
         }
