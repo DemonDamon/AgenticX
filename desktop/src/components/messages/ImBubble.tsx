@@ -496,7 +496,11 @@ export function ImBubble({
         <HoverTip label="多选">
           <button
             type="button"
-            className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+            className={`rounded p-1 hover:bg-surface-hover ${
+              selected
+                ? "text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-90"
+                : "hover:text-text-strong"
+            }`}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onToggleSelectMessage?.(message)}
           >
@@ -550,7 +554,7 @@ export function ImBubble({
           type="button"
           className={`mt-8 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition ${
             selected
-              ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-white"
+              ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-[var(--theme-color-text)]"
               : "border-text-faint bg-transparent text-transparent"
           }`}
           onClick={() => onToggleSelectMessage?.(message)}
@@ -781,6 +785,11 @@ export function ImBubble({
                   <HoverTip label="多选" tooltipAlign="end">
                     <button
                       type="button"
+                      className={
+                        selected
+                          ? "text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-90"
+                          : undefined
+                      }
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => onToggleSelectMessage?.(message)}
                     >
