@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { ulid } from "ulid";
 import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
@@ -148,6 +149,10 @@ export async function POST(request: Request) {
     // body 不是 JSON 时维持原样转发
   }
 
+  logCtx.setMode(
+    enableDeepResearch ? "deep_research" : enableWebSearch ? "web_search" : "chat",
+  );
+
   const gatewayHeaders: Record<string, string> = {
     "content-type": "application/json",
     authorization: `Bearer ${accessToken}`,
@@ -163,6 +168,8 @@ export async function POST(request: Request) {
   };
 
   if (enableDeepResearch && parsedBody) {
+    const deepResearchRunId = ulid().toLowerCase();
+    logCtx.setRun(deepResearchRunId);
     return runDeepResearchTurn(withSanitizedMessages(parsedBody), {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
@@ -172,6 +179,7 @@ export async function POST(request: Request) {
       tenantId: session.tenantId,
       userId: session.userId,
       sessionId: chatSessionId,
+      runId: deepResearchRunId,
       traceId,
       refreshAccessToken: async () => {
         if (!refreshToken) return null;

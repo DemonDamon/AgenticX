@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { TraceNode, TraceNodeKind, TraceTimeline } from "@agenticx/core-api";
 import { Badge } from "@agenticx/ui";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { adminFetch } from "../lib/admin-client-auth";
+import { SessionConversationPanel } from "./session-conversation-panel";
 import {
   TraceConversationPanel,
   type TraceConversationPanelLabels,
@@ -64,17 +65,6 @@ function findNodeById(nodes: TraceNode[], id: string): TraceNode | null {
     if (child) return child;
   }
   return null;
-}
-
-function findDefaultSelectedId(nodes: TraceNode[]): string | null {
-  const stack = [...nodes];
-  while (stack.length > 0) {
-    const node = stack.shift();
-    if (!node) break;
-    if (node.kind === "model_step") return node.id;
-    stack.push(...node.children);
-  }
-  return nodes[0]?.id ?? null;
 }
 
 function SourceList({ sources }: { sources: Array<{ title?: string; url?: string }> }) {
@@ -243,6 +233,7 @@ export type TraceExplorerLabels = {
   kind: (key: TraceNodeKind) => string;
   detailTitle: string;
   selectHint: string;
+  close: string;
   status: string;
   duration: string;
   tokens: string;
@@ -282,12 +273,14 @@ export function TraceExplorer({
     return ds.length > 0 ? Math.max(...ds) : 0;
   }, [data.nodes]);
 
-  const [selectedId, setSelectedId] = useState<string | null>(() =>
-    findDefaultSelectedId(data.nodes),
-  );
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [conversationScope, setConversationScope] = useState<"turn" | "session">("turn");
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   useEffect(() => {
-    setSelectedId(findDefaultSelectedId(data.nodes));
+    setSelectedId(null);
+    setConversationScope("turn");
+    setSessionId(null);
   }, [data.trace_id, data.nodes]);
 
   const selected = selectedId ? findNodeById(data.nodes, selectedId) : null;
@@ -314,9 +307,15 @@ export function TraceExplorer({
 
   return (
     <div
-      className={`grid min-h-[320px] overflow-hidden rounded-md border border-border md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] ${className ?? ""}`}
+      className={`grid min-h-[320px] overflow-hidden rounded-md border border-border ${
+        selected ? "md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]" : "grid-cols-1"
+      } ${className ?? ""}`}
     >
-      <div className="max-h-[520px] overflow-auto border-b border-border md:border-b-0 md:border-r">
+      <div
+        className={`max-h-[520px] overflow-auto ${
+          selected ? "border-b border-border md:border-b-0 md:border-r" : ""
+        }`}
+      >
         {data.nodes.map((node) => (
           <TraceTreeRow
             key={node.id}
@@ -327,17 +326,89 @@ export function TraceExplorer({
             tKind={labels.kind}
             tExpand={labels.expand}
             tCollapse={labels.collapse}
-            onSelect={setSelectedId}
+            onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
           />
         ))}
+        {!selected ? (
+          <p className="px-3 py-2 text-xs text-muted-foreground">{labels.selectHint}</p>
+        ) : null}
       </div>
-      <div className="max-h-[520px] space-y-4 overflow-auto p-3">
-        <TraceConversationPanel traceId={data.trace_id} labels={labels.conversation} />
-        <div className="border-t border-border pt-3">
-          <div className="mb-2 text-xs font-medium text-muted-foreground">{labels.detailTitle}</div>
-          {!selected ? (
-            <p className="text-xs text-muted-foreground">{labels.selectHint}</p>
-          ) : (
+      {selected ? (
+        <div className="max-h-[520px] space-y-4 overflow-auto p-3">
+          <div className="space-y-2">
+            {labels.conversation.scopeTurn && labels.conversation.scopeSession ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  className={`rounded-md px-2 py-1 text-xs ${
+                    conversationScope === "turn"
+                      ? "bg-muted font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-muted/50"
+                  }`}
+                  onClick={() => setConversationScope("turn")}
+                >
+                  {labels.conversation.scopeTurn}
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-md px-2 py-1 text-xs ${
+                    conversationScope === "session"
+                      ? "bg-muted font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-muted/50"
+                  } ${!sessionId ? "cursor-not-allowed opacity-50" : ""}`}
+                  disabled={!sessionId}
+                  title={!sessionId ? labels.conversation.noSession : undefined}
+                  onClick={() => {
+                    if (sessionId) setConversationScope("session");
+                  }}
+                >
+                  {labels.conversation.scopeSession}
+                </button>
+              </div>
+            ) : null}
+            <div className={conversationScope === "turn" ? "block" : "hidden"}>
+              <TraceConversationPanel
+                traceId={data.trace_id}
+                labels={labels.conversation}
+                onSessionId={setSessionId}
+              />
+            </div>
+            {conversationScope === "session" && sessionId ? (
+              <SessionConversationPanel
+                sessionId={sessionId}
+                labels={{
+                  title: labels.conversation.titleSession ?? labels.conversation.title,
+                  loading: labels.conversation.loading,
+                  empty: labels.conversation.empty,
+                  loadFailed: labels.conversation.loadFailed,
+                  expand: labels.conversation.expand,
+                  collapse: labels.conversation.collapse,
+                  truncatedHint: labels.conversation.truncatedHint,
+                  roleUser: labels.conversation.roleUser,
+                  roleAssistant: labels.conversation.roleAssistant,
+                  roleTool: labels.conversation.roleTool,
+                  roleSystem: labels.conversation.roleSystem,
+                  reasoning: labels.conversation.reasoning,
+                  attachments: labels.conversation.attachments,
+                  chars: labels.conversation.chars,
+                  loadEarlier: labels.conversation.loadEarlier ?? "Load earlier",
+                }}
+              />
+            ) : null}
+          </div>
+          <div className="border-t border-border pt-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-xs font-medium text-muted-foreground">{labels.detailTitle}</div>
+              <button
+                type="button"
+                className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label={labels.close}
+                title={labels.close}
+                onClick={() => setSelectedId(null)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
             <div className="space-y-3">
               <div>
                 <div className="mb-1 flex flex-wrap items-center gap-1.5">
@@ -410,9 +481,9 @@ export function TraceExplorer({
                 )}
               </div>
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -429,6 +500,7 @@ export type TraceTimelineTreeLabels = {
   totalsDuration: string;
   detailTitle: string;
   selectHint: string;
+  close: string;
   status: string;
   duration: string;
   tokens: string;
@@ -540,6 +612,7 @@ export function TraceTimelineInline({
           kind: labels.kind,
           detailTitle: labels.detailTitle,
           selectHint: labels.selectHint,
+          close: labels.close,
           status: labels.status,
           duration: labels.duration,
           tokens: labels.tokens,

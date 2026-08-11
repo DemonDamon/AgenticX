@@ -54,6 +54,8 @@ export async function GET(request: Request, segmentData: { params: Params }) {
     userId: session.userId,
     tenantId: session.tenantId,
   });
+  logCtx.setMode("deep_research");
+  logCtx.setRun(runId.trim());
 
   const store = defaultRunStore;
   const initial = await store.get(session.tenantId, session.userId, runId);

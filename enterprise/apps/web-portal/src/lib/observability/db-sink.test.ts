@@ -114,6 +114,27 @@ describe("portal log db sink", () => {
     expect(__getDbSinkQueueForTests()).toHaveLength(0);
   });
 
+  it("passes mode and run_id through to insertBatch", async () => {
+    const insertBatch = vi.fn(async (_rows: PortalLogRow[]) => undefined);
+    __resetDbSinkForTests({ insertBatch });
+
+    enqueueLog(
+      row({
+        level: "info",
+        event: "chat.completions.finish",
+        route: "chat.completions",
+        mode: "deep_research",
+        run_id: "01JTESTMODE000000000000002",
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(insertBatch).toHaveBeenCalledTimes(1);
+    const batch = insertBatch.mock.calls[0]?.[0];
+    expect(batch?.[0]?.mode).toBe("deep_research");
+    expect(batch?.[0]?.run_id).toBe("01JTESTMODE000000000000002");
+  });
+
+
   it("disables after 3 consecutive insert failures", async () => {
     const insertBatch = vi.fn(async () => {
       throw new Error("db down");
