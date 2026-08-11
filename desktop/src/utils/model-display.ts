@@ -8,6 +8,25 @@ export function normalizeBareModelId(model: string): string {
   return trimmed;
 }
 
+export type ModelDisplayParts = {
+  /** Bare model id, e.g. `kimi-k2.6`. */
+  modelName: string;
+  /** Configured vendor label, e.g. `月之暗面`. */
+  providerLabel: string;
+};
+
+/** Split the flat `vendor/model` label so UI can rank model name over routing vendor. */
+export function formatModelDisplayParts(
+  providerId: string,
+  model: string,
+  entry?: ProviderDisplayEntry | null,
+): ModelDisplayParts {
+  return {
+    modelName: normalizeBareModelId(model),
+    providerLabel: getProviderDisplayName(providerId, entry),
+  };
+}
+
 /** User-facing label: always reflect configured provider, never infer an unconfigured vendor from model id. */
 export function formatModelOptionLabel(
   providerId: string,

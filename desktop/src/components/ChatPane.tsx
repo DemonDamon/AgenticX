@@ -5,6 +5,7 @@ import {
   Bookmark,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Copy,
   Database,
@@ -17,6 +18,7 @@ import {
   Sparkles,
   Radar,
   SquarePen,
+  Plus,
   Wrench,
   PhoneCall,
   History,
@@ -243,7 +245,17 @@ import { StreamCommitRegistry } from "../utils/stream-commit-registry";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
-import { formatModelOptionLabel } from "../utils/model-display";
+import { formatModelDisplayParts, formatModelOptionLabel } from "../utils/model-display";
+import {
+  DEFAULT_KIMI_REASONING_EFFORT,
+  describeModelForPicker,
+  KIMI_REASONING_EFFORT_OPTIONS,
+  labelForKimiReasoningEffort,
+  normalizeKimiReasoningEffort,
+  supportsKimiK3ReasoningEffort,
+  type KimiReasoningEffort,
+} from "../utils/model-hover-blurb";
+import { getProviderBrandColor, getProviderDisplayName } from "../utils/provider-display";
 import { collectSelectableModelOptions, coerceSelectableModel, isModelSelectable } from "../utils/model-options";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { sessionCreateAvatarId } from "../utils/session-create-avatar";
@@ -533,8 +545,11 @@ const FALLBACK_PANE: ChatPaneState = {
 /** Compose-style primary action (豆包式「撰写」语义) + 下拉切换「全新对话」/「继承上下文」，默认前者。 */
 function NewTopicSplitControl({
   onNewTopic,
+  /** True while the parent「更多操作」popup is open — render only the trigger, suppress the chevron+panel. */
+  embedded = false,
 }: {
   onNewTopic: (inherit: boolean, sessionMode?: PaneSessionMode) => void;
+  embedded?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [inheritMode, setInheritMode] = useState(false);
@@ -647,6 +662,23 @@ function NewTopicSplitControl({
 
   const baseTip = inheritMode ? "新对话 · 继承上下文（当前选项）" : "全新对话 · 不继承上下文（当前选项）";
 
+  if (embedded) {
+    return (
+      <button
+        type="button"
+        className="flex h-full w-7 shrink-0 items-center justify-center text-text-muted transition-colors hover:text-text-strong"
+        aria-label={inheritMode ? "新建对话：继承上下文" : "新建对话：全新对话"}
+        onClick={() => onNewTopic(inheritMode, inheritMode ? "daily_office" : "daily_office")}
+      >
+        {inheritMode ? (
+          <GitBranch className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
+        ) : (
+          <SquarePen className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
+        )}
+      </button>
+    );
+  }
+
   return (
     <>
       <div ref={rootRef} className="flex h-[26px] shrink-0 items-stretch overflow-hidden rounded-md bg-transparent transition-colors hover:bg-surface-hover">
@@ -683,6 +715,130 @@ function NewTopicSplitControl({
   );
 }
 
+/** 「更多操作」+ 按钮：向上弹出图标菜单，内含附件/新话题/技能/知识库检索/连接器。 */
+function ComposerMoreActionsButton({
+  onPickFile,
+  onNewTopic,
+  renderSkillPicker,
+  renderKbRetrieval,
+  renderConnectors,
+}: {
+  onPickFile: () => void;
+  onNewTopic: (inherit: boolean, sessionMode?: PaneSessionMode) => void;
+  renderSkillPicker: () => ReactNode;
+  renderKbRetrieval: () => ReactNode;
+  renderConnectors: () => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [panelPos, setPanelPos] = useState<{ bottom: number; left: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const toggleOpen = useCallback(() => {
+    setOpen((prev) => {
+      const next = !prev;
+      if (next && rootRef.current) {
+        const rect = rootRef.current.getBoundingClientRect();
+        setPanelPos({ bottom: window.innerHeight - rect.top + 6, left: rect.left });
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t)) return;
+      if (panelRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onResize = () => {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPanelPos({ bottom: window.innerHeight - rect.top + 6, left: rect.left });
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onResize, true);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onResize, true);
+    };
+  }, [open]);
+
+  const panel =
+    open && panelPos
+      ? createPortal(
+          <div
+            ref={panelRef}
+            style={{ bottom: panelPos.bottom, left: panelPos.left, transformOrigin: "bottom left" }}
+            className="agx-menu-pop fixed z-[9999] flex items-center gap-0.5 rounded-xl border border-border bg-surface-panel p-1 shadow-xl backdrop-blur-xl"
+            role="menu"
+            aria-label="更多操作"
+          >
+            <HoverTip label="上传附件" tooltipAlign="center">
+              <button
+                type="button"
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+                onClick={() => {
+                  onPickFile();
+                  setOpen(false);
+                }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                </svg>
+              </button>
+            </HoverTip>
+            <HoverTip label="新对话" tooltipAlign="center">
+              <div className="flex items-center">
+                <NewTopicSplitControl onNewTopic={onNewTopic} embedded />
+              </div>
+            </HoverTip>
+            <HoverTip label="引用技能" tooltipAlign="center">
+              <div className="flex items-center">{renderSkillPicker()}</div>
+            </HoverTip>
+            <HoverTip label="知识库检索" tooltipAlign="center">
+              <div className="flex items-center">{renderKbRetrieval()}</div>
+            </HoverTip>
+            <HoverTip label="连接器" tooltipAlign="center">
+              <div className="flex items-center">{renderConnectors()}</div>
+            </HoverTip>
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <>
+      <div ref={rootRef} className="flex shrink-0 items-center">
+        <HoverTip label={open ? "收起更多操作" : "更多操作：附件 / 新话题 / 技能 / 知识库 / 连接器"}>
+          <button
+            type="button"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+            aria-label="更多操作"
+            aria-expanded={open}
+            onClick={toggleOpen}
+          >
+            <Plus
+              className={`h-[15px] w-[15px] transition-transform ${open ? "rotate-45" : ""}`}
+              strokeWidth={2}
+              aria-hidden
+            />
+          </button>
+        </HoverTip>
+      </div>
+      {panel}
+    </>
+  );
+}
+
 interface SkillItem {
   name: string;
   description: string;
@@ -695,11 +851,13 @@ interface SkillPickerButtonProps {
   apiBase: string;
   apiToken: string;
   onSelect: (skill: SkillItem) => void;
+  /** True while the parent「更多操作」popup is open — render only the trigger, suppress the dropdown. */
+  embedded?: boolean;
 }
 
 const SKILL_DROPDOWN_WIDTH = 288; // w-72
 
-function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonProps) {
+function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: SkillPickerButtonProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [skills, setSkills] = useState<SkillItem[]>([]);
@@ -834,6 +992,22 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
         )
       : null;
 
+  if (embedded) {
+    return (
+      <button
+        ref={btnRef}
+        type="button"
+        className={iconBtn}
+        aria-label="引用技能"
+        onClick={() => {
+          onSelect({ name: "", description: "" });
+        }}
+      >
+        <SkillPuzzleIcon className="h-[15px] w-[15px]" />
+      </button>
+    );
+  }
+
   return (
     <>
       <HoverTip label="引用技能 · 注入 Skill 上下文">
@@ -898,7 +1072,7 @@ class HistoryPanelBoundary extends Component<
 const PANE_MODEL_PICKER_MARGIN = 8;
 const PANE_MODEL_PICKER_GAP = 4;
 const PANE_MODEL_PICKER_MIN_MAX_HEIGHT = 64;
-const PANE_MODEL_PICKER_PANEL_WIDTH = 280;
+const PANE_MODEL_PICKER_PANEL_WIDTH = 236;
 
 function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
   const vw = window.innerWidth;
@@ -916,9 +1090,14 @@ function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
   const spaceAbove = anchor.top - PANE_MODEL_PICKER_MARGIN - PANE_MODEL_PICKER_GAP;
   const spaceBelow = vh - anchor.bottom - PANE_MODEL_PICKER_MARGIN - PANE_MODEL_PICKER_GAP;
   const preferAbove = spaceAbove >= 120 || spaceAbove >= spaceBelow;
+  // Cap the menu's natural height so it reads as a compact list, not a page overlay.
+  const naturalHeightCap = Math.floor(vh * 0.5);
 
   if (preferAbove) {
-    const maxHeight = Math.max(PANE_MODEL_PICKER_MIN_MAX_HEIGHT, Math.floor(spaceAbove));
+    const maxHeight = Math.min(
+      naturalHeightCap,
+      Math.max(PANE_MODEL_PICKER_MIN_MAX_HEIGHT, Math.floor(spaceAbove)),
+    );
     return {
       left,
       width: panelWidth,
@@ -926,10 +1105,15 @@ function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
       bottom: vh - anchor.top + PANE_MODEL_PICKER_GAP,
       top: "auto",
       right: "auto",
+      // Menus should grow out of their trigger, not from the panel's own centre.
+      transformOrigin: "bottom left",
     };
   }
 
-  const maxHeight = Math.max(PANE_MODEL_PICKER_MIN_MAX_HEIGHT, Math.floor(spaceBelow));
+  const maxHeight = Math.min(
+    naturalHeightCap,
+    Math.max(PANE_MODEL_PICKER_MIN_MAX_HEIGHT, Math.floor(spaceBelow)),
+  );
   return {
     left,
     width: panelWidth,
@@ -937,6 +1121,7 @@ function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
     top: anchor.bottom + PANE_MODEL_PICKER_GAP,
     bottom: "auto",
     right: "auto",
+    transformOrigin: "top left",
   };
 }
 
@@ -1004,13 +1189,63 @@ function historyPanelPopoverStyle(anchor: DOMRect): CSSProperties {
   };
 }
 
+/** Monochrome brand mark (WorkBuddy-style): shape carries identity, ink stays high-contrast. */
+function ProviderGlyph({
+  provider,
+  model,
+}: {
+  provider: string;
+  model?: string;
+}) {
+  return (
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center text-text-strong" aria-hidden>
+      <ProviderIcon provider={provider} model={model} className="h-[15px] w-[15px]" />
+    </span>
+  );
+}
+
+const MODEL_HOVER_TIP_WIDTH = 220;
+const MODEL_HOVER_TIP_GAP = 8;
+
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const settings = useAppStore((s) => s.settings);
   const setPaneModel = useAppStore((s) => s.setPaneModel);
+  const setPaneReasoningEffort = useAppStore((s) => s.setPaneReasoningEffort);
   const paneModel = useAppStore((s) => s.panes.find((pane) => pane.id === paneId));
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const hoverClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const [hoverRowTop, setHoverRowTop] = useState(0);
+  const [effortMenuOpen, setEffortMenuOpen] = useState(false);
+
+  /** Keep tip visible while moving between list row and tip card. */
+  const cancelClearHover = useCallback(() => {
+    if (hoverClearTimerRef.current != null) {
+      clearTimeout(hoverClearTimerRef.current);
+      hoverClearTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleClearHover = useCallback(() => {
+    cancelClearHover();
+    hoverClearTimerRef.current = setTimeout(() => {
+      setHoverKey(null);
+      setEffortMenuOpen(false);
+      hoverClearTimerRef.current = null;
+    }, 120);
+  }, [cancelClearHover]);
+
+  useEffect(() => {
+    return () => {
+      if (hoverClearTimerRef.current != null) {
+        clearTimeout(hoverClearTimerRef.current);
+        hoverClearTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleSelect = (provider: string, model: string) => {
     setPaneModel(paneId, provider, model);
@@ -1030,17 +1265,50 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     [settings.providers],
   );
 
+  /** Group by vendor so the list reads as sections instead of one wall of `vendor/model`. */
+  const groups = useMemo(() => {
+    const byProvider = new Map<string, typeof options>();
+    for (const opt of options) {
+      const bucket = byProvider.get(opt.provider);
+      if (bucket) bucket.push(opt);
+      else byProvider.set(opt.provider, [opt]);
+    }
+    return [...byProvider.entries()].map(([provider, items]) => ({
+      provider,
+      providerLabel: getProviderDisplayName(provider, settings.providers[provider]),
+      items,
+    }));
+  }, [options, settings.providers]);
+
+  /** Same model id served by several vendors — only then does the row need its vendor spelled out. */
+  const ambiguousModelNames = useMemo(() => {
+    const seen = new Map<string, Set<string>>();
+    for (const opt of options) {
+      const { modelName } = formatModelDisplayParts(opt.provider, opt.model, settings.providers[opt.provider]);
+      const providers = seen.get(modelName) ?? new Set<string>();
+      providers.add(opt.provider);
+      seen.set(modelName, providers);
+    }
+    return new Set([...seen.entries()].filter(([, p]) => p.size > 1).map(([name]) => name));
+  }, [options, settings.providers]);
+
   const currentProvider = (paneModel?.modelProvider || "").trim();
   const currentModel = (paneModel?.modelName || "").trim();
+  const currentSelectable =
+    Boolean(currentModel)
+    && Boolean(currentProvider)
+    && isModelSelectable(currentProvider, currentModel, settings.providers);
+  const currentParts = useMemo(() => {
+    if (!currentSelectable) return null;
+    return formatModelDisplayParts(currentProvider, currentModel, settings.providers[currentProvider]);
+  }, [currentSelectable, currentModel, currentProvider, settings.providers]);
   const currentLabel = useMemo(() => {
     if (!currentModel) return "未选模型";
     if (!currentProvider) return currentModel;
-    if (!isModelSelectable(currentProvider, currentModel, settings.providers)) {
-      return "未选模型";
-    }
+    if (!currentSelectable) return "未选模型";
     const entry = settings.providers[currentProvider];
     return formatModelOptionLabel(currentProvider, currentModel, entry);
-  }, [currentModel, currentProvider, settings.providers]);
+  }, [currentModel, currentProvider, currentSelectable, settings.providers]);
 
   const syncPanelPosition = useCallback(() => {
     const el = anchorRef.current;
@@ -1060,55 +1328,246 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     };
   }, [open, syncPanelPosition, options.length]);
 
+  useEffect(() => {
+    if (!open) {
+      setHoverKey(null);
+      setEffortMenuOpen(false);
+      cancelClearHover();
+    }
+  }, [open, cancelClearHover]);
+
+  const hoverOpt = useMemo(() => {
+    if (!hoverKey) return null;
+    return options.find((o) => `${o.provider}:${o.model}` === hoverKey) ?? null;
+  }, [hoverKey, options]);
+
+  const hoverBlurb = useMemo(() => {
+    if (!hoverOpt) return null;
+    const providerLabel = getProviderDisplayName(hoverOpt.provider, settings.providers[hoverOpt.provider]);
+    return describeModelForPicker(hoverOpt.provider, hoverOpt.model, providerLabel);
+  }, [hoverOpt, settings.providers]);
+
+  const paneReasoningEffort = normalizeKimiReasoningEffort(paneModel?.reasoningEffort);
+  const showEffortControls = Boolean(hoverBlurb?.supportsReasoningEffort);
+
+  const hoverTipStyle = useMemo((): CSSProperties | null => {
+    if (!hoverBlurb || !panelRef.current) return null;
+    const panel = panelRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const tipW = MODEL_HOVER_TIP_WIDTH;
+    const spaceRight = vw - panel.right - PANE_MODEL_PICKER_MARGIN;
+    const placeRight = spaceRight >= tipW + MODEL_HOVER_TIP_GAP;
+    const left = placeRight
+      ? panel.right + MODEL_HOVER_TIP_GAP
+      : Math.max(PANE_MODEL_PICKER_MARGIN, panel.left - MODEL_HOVER_TIP_GAP - tipW);
+    const tipH = showEffortControls ? (effortMenuOpen ? 196 : 148) : 108;
+    let top = hoverRowTop;
+    if (top + tipH > vh - PANE_MODEL_PICKER_MARGIN) {
+      top = Math.max(PANE_MODEL_PICKER_MARGIN, vh - PANE_MODEL_PICKER_MARGIN - tipH);
+    }
+    if (top < PANE_MODEL_PICKER_MARGIN) top = PANE_MODEL_PICKER_MARGIN;
+    return {
+      left,
+      top,
+      width: tipW,
+    };
+  }, [hoverBlurb, hoverRowTop, showEffortControls, effortMenuOpen]);
+
   return (
     <div className="relative min-w-0 max-w-full" ref={anchorRef}>
       <button
         type="button"
-        className="flex h-8 min-h-8 max-w-full min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)] transition hover:bg-surface-hover"
+        className={`group flex h-8 min-h-8 max-w-full min-w-0 items-center gap-2 rounded-lg px-1.5 text-[13px] font-medium leading-none transition-colors focus:outline-none focus-visible:bg-surface-hover ${
+          open ? "bg-surface-hover" : "hover:bg-surface-hover"
+        }`}
         onClick={() => setOpen((v) => !v)}
         title={currentLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >
-        <ProviderIcon provider={currentProvider} className="h-[13px] w-[13px] shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-left">{currentLabel}</span>
-        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2} aria-hidden />
+        <ProviderGlyph provider={currentProvider} model={currentModel} />
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5 text-left">
+          <span className="min-w-0 truncate text-text-strong">
+            {currentParts?.modelName ?? currentLabel}
+          </span>
+          {currentParts && ambiguousModelNames.has(currentParts.modelName) ? (
+            <span className="shrink-0 truncate text-[11px] font-normal text-text-muted">{currentParts.providerLabel}</span>
+          ) : null}
+        </span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 shrink-0 text-text-muted transition-transform duration-fast ease-out ${open ? "rotate-180" : ""}`}
+          strokeWidth={2}
+          aria-hidden
+        />
       </button>
       {open &&
         createPortal(
           <>
             <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
             <div
-              className="fixed z-40 overflow-y-auto rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
-              style={panelStyle}
+              ref={panelRef}
+              className="agx-menu-pop fixed z-40 flex flex-col overflow-hidden rounded-2xl border border-border bg-surface-panel shadow-2xl backdrop-blur-xl"
+              style={{
+                ...panelStyle,
+                display: "flex",
+                flexDirection: "column",
+              }}
+              role="listbox"
+              onMouseEnter={cancelClearHover}
+              onMouseLeave={scheduleClearHover}
             >
-              {options.length === 0 ? (
-                <div className="px-3 py-3 text-center text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)]">
-                  请先在设置中配置模型
+              <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+                {options.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-[12px] leading-relaxed text-text-muted">
+                    还没有可用模型
+                    <span className="mt-1 block text-[11px] text-text-subtle">请先在设置中配置服务商</span>
+                  </div>
+                ) : (
+                  groups.map((group, groupIndex) => (
+                    <div key={group.provider} className={groupIndex > 0 ? "mt-1" : undefined}>
+                      <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-1.5">
+                        <span
+                          className="h-[5px] w-[5px] shrink-0 rounded-full"
+                          style={{ backgroundColor: getProviderBrandColor(group.provider) }}
+                          aria-hidden
+                        />
+                        <span className="min-w-0 truncate text-[11px] font-medium text-text-muted">
+                          {group.providerLabel}
+                        </span>
+                      </div>
+                      {group.items.map((opt) => {
+                        const rowKey = `${opt.provider}:${opt.model}`;
+                        const isActive = opt.provider === currentProvider && opt.model === currentModel;
+                        const isHover = hoverKey === rowKey;
+                        const { modelName } = formatModelDisplayParts(
+                          opt.provider,
+                          opt.model,
+                          settings.providers[opt.provider],
+                        );
+                        return (
+                          <button
+                            key={rowKey}
+                            type="button"
+                            role="option"
+                            aria-selected={isActive}
+                            className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-none transition-colors ${
+                              isActive || isHover ? "bg-surface-cardStrong" : "hover:bg-surface-hover"
+                            }`}
+                            onMouseEnter={(e) => {
+                              cancelClearHover();
+                              setHoverKey(rowKey);
+                              setEffortMenuOpen(false);
+                              setHoverRowTop(e.currentTarget.getBoundingClientRect().top);
+                            }}
+                            onClick={() => handleSelect(opt.provider, opt.model)}
+                          >
+                            <ProviderGlyph provider={opt.provider} model={opt.model} />
+                            <span className="min-w-0 flex-1 truncate font-semibold text-text-strong">
+                              {modelName}
+                            </span>
+                            <span className="flex w-3.5 shrink-0 justify-end">
+                              {isActive ? (
+                                <Check className="h-3.5 w-3.5 text-status-success" strokeWidth={2.5} />
+                              ) : null}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="shrink-0 border-t border-border p-1.5">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-surface-cardStrong px-2.5 py-2 text-[12.5px] font-medium text-text-strong transition-colors hover:bg-surface-hover"
+                  onMouseEnter={() => setHoverKey(null)}
+                  onClick={() => {
+                    setOpen(false);
+                    useAppStore.getState().openSettings("provider");
+                  }}
+                >
+                  <SquarePen className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+                  配置模型
+                </button>
+              </div>
+            </div>
+            {hoverBlurb && hoverTipStyle ? (
+              <div
+                className={`agx-menu-pop fixed z-50 rounded-xl border border-border bg-surface-panel px-3.5 py-3 shadow-2xl backdrop-blur-xl ${
+                  showEffortControls ? "pointer-events-auto" : "pointer-events-none"
+                }`}
+                style={hoverTipStyle}
+                role="tooltip"
+                onMouseEnter={cancelClearHover}
+                onMouseLeave={scheduleClearHover}
+              >
+                <div className="truncate text-[13px] font-semibold leading-snug text-text-strong">
+                  {hoverBlurb.title}
                 </div>
-              ) : (
-                options.map((opt) => {
-                  const isActive = opt.provider === currentProvider && opt.model === currentModel;
-                  return (
+                <div className="mt-1 text-[12px] leading-relaxed text-text-muted">
+                  {hoverBlurb.description}
+                </div>
+                <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-border pt-2.5 text-[11px]">
+                  <span className="text-text-muted">{hoverBlurb.metaLabel}</span>
+                  <span className="truncate font-medium text-text-strong">{hoverBlurb.metaValue}</span>
+                </div>
+                {showEffortControls ? (
+                  <div className="relative mt-2 border-t border-border pt-2">
                     <button
-                      key={`${opt.provider}:${opt.model}`}
                       type="button"
-                      className={`group flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-2 pr-3 text-left text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)] transition-colors ${
-                        isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
-                      }`}
-                      title={opt.label}
-                      onClick={() => handleSelect(opt.provider, opt.model)}
+                      className="flex w-full items-center justify-between gap-3 text-[11px] transition-colors hover:text-text-strong"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEffortMenuOpen((v) => !v);
+                      }}
                     >
-                      <span className="flex flex-1 items-center gap-2">
-                        <ProviderIcon provider={opt.provider} className="h-[13px] w-[13px] shrink-0" />
-                        <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-                      </span>
-                      <span className="flex w-4 shrink-0 justify-end">
-                        {isActive && <Check className="h-[13px] w-[13px] text-[color:var(--chat-im-assistant-text)]" strokeWidth={2} />}
+                      <span className="text-text-muted">思考强度</span>
+                      <span className="inline-flex items-center gap-0.5 font-medium text-text-strong">
+                        {labelForKimiReasoningEffort(paneReasoningEffort)}
+                        <ChevronRight
+                          className={`h-3 w-3 text-text-muted transition-transform ${
+                            effortMenuOpen ? "rotate-90" : ""
+                          }`}
+                          strokeWidth={2}
+                          aria-hidden
+                        />
                       </span>
                     </button>
-                  );
-                })
-              )}
-            </div>
+                    {effortMenuOpen ? (
+                      <div className="mt-1.5 overflow-hidden rounded-lg border border-border bg-surface-cardStrong p-0.5">
+                        {KIMI_REASONING_EFFORT_OPTIONS.map((opt) => {
+                          const active = paneReasoningEffort === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                                active
+                                  ? "bg-surface-hover font-medium text-text-strong"
+                                  : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                              }`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const next = opt.value as KimiReasoningEffort;
+                                setPaneReasoningEffort(paneId, next);
+                                setEffortMenuOpen(false);
+                              }}
+                            >
+                              <span>{opt.label}</span>
+                              {active ? (
+                                <Check className="h-3 w-3 text-status-success" strokeWidth={2.5} />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </>,
           document.body,
         )}
@@ -1123,6 +1582,8 @@ function PaneKnowledgeRetrievalModeSwitch({
   paneId,
   globalDefaultMode,
   onNewSessionDefaultChange,
+  /** True while the parent「更多操作」popup is open — render only the trigger, suppress the panel. */
+  embedded = false,
 }: {
   apiToken: string;
   apiBase: string;
@@ -1130,6 +1591,7 @@ function PaneKnowledgeRetrievalModeSwitch({
   paneId: string;
   globalDefaultMode: KbRetrievalMode;
   onNewSessionDefaultChange?: (mode: KbRetrievalMode) => void;
+  embedded?: boolean;
 }) {
   const resolveApiBase = useCallback(async () => {
     const base = String(apiBase ?? "").trim();
@@ -1283,6 +1745,27 @@ function PaneKnowledgeRetrievalModeSwitch({
           document.body,
         )
       : null;
+
+  if (embedded) {
+    return (
+      <button
+        type="button"
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition hover:bg-surface-hover hover:text-text-strong ${
+          open ? "bg-surface-hover text-text-strong" : "text-text-muted"
+        }`}
+        disabled={saving}
+        aria-label="知识库检索模式"
+        aria-expanded={open}
+        onClick={() => (open ? setOpen(false) : openMenu())}
+      >
+        {mode === "auto" ? (
+          <Sparkles className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
+        ) : (
+          <Radar className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
+        )}
+      </button>
+    );
+  }
 
   return (
     <>
@@ -3634,6 +4117,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     selection.addRange(range);
     composerSavedRangeRef.current = range.cloneRange();
   }, []);
+
+  /** Skill 插入：当前实现是直接把 skill token 追加到输入框末尾；caret-aware 版本后续再补。 */
+  const handleSkillSelect = useCallback(
+    (skill: SkillItem) => {
+      const el = composerRef.current;
+      if (!el) return;
+      const skillToken = createSkillRefToken(skill.name);
+      const space = document.createTextNode(" ");
+      el.appendChild(skillToken);
+      el.appendChild(space);
+      focusComposerEnd();
+      setInput(extractComposerSendText());
+    },
+    [focusComposerEnd, setInput]
+  );
 
   const saveComposerCaret = useCallback(() => {
     const el = composerRef.current;
@@ -8363,6 +8861,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
       if (chatProvider) body.provider = chatProvider;
       if (chatModel) body.model = chatModel;
+      if (chatModel && supportsKimiK3ReasoningEffort(chatModel)) {
+        body.reasoning_effort = normalizeKimiReasoningEffort(
+          pane.reasoningEffort ?? DEFAULT_KIMI_REASONING_EFFORT,
+        );
+      }
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
       // Per-session KB retrieval mode: carry the session's explicit choice so the
       // backend prompt honors it instead of the single global config value.
@@ -11751,63 +12254,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     e.target.value = "";
                   }}
                 />
-                <button
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-                  title="上传附件"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-                  </svg>
-                </button>
-                <NewTopicSplitControl onNewTopic={createNewTopic} />
-                <SkillPickerButton
-                  apiBase={apiBase}
-                  apiToken={apiToken}
-                  onSelect={(skill) => {
-                    const el = composerRef.current;
-                    if (!el) return;
-                    const skillToken = createSkillRefToken(skill.name);
-                    const space = document.createTextNode(" ");
-                    // Insert at current caret or append to end
-                    const sel = window.getSelection();
-                    if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
-                      const range = sel.getRangeAt(0);
-                      range.deleteContents();
-                      range.insertNode(space);
-                      range.insertNode(skillToken);
-                      range.setStartAfter(space);
-                      range.setEndAfter(space);
-                      sel.removeAllRanges();
-                      sel.addRange(range);
-                    } else {
-                      el.appendChild(skillToken);
-                      el.appendChild(space);
-                      focusComposerEnd();
-                    }
-                    // Sync input state
-                    setInput(extractComposerSendText());
-                  }}
+                <ComposerMoreActionsButton
+                  onPickFile={() => fileInputRef.current?.click()}
+                  onNewTopic={createNewTopic}
+                  renderSkillPicker={() => (
+                    <SkillPickerButton apiBase={apiBase} apiToken={apiToken} onSelect={handleSkillSelect} embedded />
+                  )}
+                  renderKbRetrieval={() => (
+                    <PaneKnowledgeRetrievalModeSwitch
+                      apiToken={apiToken}
+                      apiBase={apiBase}
+                      sessionId={pane.sessionId}
+                      paneId={paneId}
+                      globalDefaultMode={kbGlobalDefaultMode}
+                      onNewSessionDefaultChange={onKbNewSessionDefaultChange}
+                      embedded
+                    />
+                  )}
+                  renderConnectors={() => (
+                    <ConnectorsMenuButton sessionId={pane.sessionId} embedded />
+                  )}
                 />
-                <div className="flex items-center">
-                  <PaneKnowledgeRetrievalModeSwitch
-                    apiToken={apiToken}
-                    apiBase={apiBase}
-                    sessionId={pane.sessionId}
-                    paneId={paneId}
-                    globalDefaultMode={kbGlobalDefaultMode}
-                    onNewSessionDefaultChange={onKbNewSessionDefaultChange}
-                  />
-                </div>
-                <div className="flex items-center">
-                  <ContextUsageButton
-                    paneId={pane.id}
-                    sessionId={pane.sessionId ?? ""}
-                    apiBase={apiBase}
-                    apiToken={apiToken}
-                  />
-                </div>
-                <ConnectorsMenuButton sessionId={pane.sessionId} />
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
               <div className="flex min-w-0 shrink-0 items-center gap-1.5">
@@ -11843,6 +12310,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     ) : null}
                   </div>
                 )}
+                <ContextUsageButton
+                  paneId={pane.id}
+                  sessionId={pane.sessionId ?? ""}
+                  apiBase={apiBase}
+                  apiToken={apiToken}
+                />
                 <PaneModelPicker paneId={pane.id} />
                 <ActionCircleButton
                   hasInput={

@@ -15,6 +15,8 @@ const DROPDOWN_WIDTH = 260;
 type Props = {
   /** Falls back to the global session id when the pane has not bound one yet. */
   sessionId?: string;
+  /** True while the parent「更多操作」popup is open — render only the trigger, suppress the dropdown. */
+  embedded?: boolean;
 };
 
 type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu" | "wecom" | "qqmail";
@@ -25,7 +27,7 @@ type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu" | "wecom" | "qq
  * - Popup list only shows truly connected connectors (with disconnect toggle).
  * - 「选择更多连接器」jumps to Settings → 连接器 marketplace (same as「管理」).
  */
-export function ConnectorsMenuButton({ sessionId }: Props) {
+export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
   const mcpServers = useAppStore((state) => state.mcpServers);
   const setMcpServers = useAppStore((state) => state.setMcpServers);
   const globalSessionId = useAppStore((state) => state.sessionId);
@@ -531,7 +533,7 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       title={connectedIds.length > 0 ? `已连接：${connectedLabel}` : "连接器"}
       aria-label={connectedIds.length > 0 ? `已连接的连接器：${connectedLabel}` : "连接器"}
       aria-expanded={open}
-      onClick={handleOpen}
+      onClick={embedded ? undefined : handleOpen}
     >
       {connectedIds.length > 0 ? (
         <span className="flex items-center">
@@ -563,7 +565,7 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       ) : (
         toolbarButton
       )}
-      {dropdown}
+      {embedded ? null : dropdown}
 
       <Modal
         open={tapdModalOpen}

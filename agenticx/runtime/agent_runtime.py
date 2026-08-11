@@ -914,6 +914,20 @@ def _resolve_round_max_tokens(
     return int(resolved)
 
 
+def _kimi_k3_reasoning_effort_kwargs(session: Any, model_name: str) -> Dict[str, Any]:
+    """Pass Moonshot Kimi K3 top-level ``reasoning_effort`` when set on the session.
+
+    Values: ``low`` / ``high`` / ``max``. Other models ignore this attribute.
+    """
+    bare = str(model_name or "").strip().lower().split("/")[-1]
+    if not (bare == "kimi-k3" or bare.startswith("kimi-k3-") or bare.startswith("kimi-k3.")):
+        return {}
+    raw = str(getattr(session, "_reasoning_effort", "") or "").strip().lower()
+    if raw not in {"low", "high", "max"}:
+        return {}
+    return {"reasoning_effort": raw}
+
+
 def _build_streamed_tool_truncation_hint(names: Sequence[str]) -> str:
     """FR-C: human-readable retry hint appended to assistant text when streamed
     tool calls were dropped due to truncation.
@@ -3486,6 +3500,12 @@ class AgentRuntime:
                     }
                 except Exception:
                     llm_call_kwargs = {}
+                try:
+                    llm_call_kwargs.update(
+                        _kimi_k3_reasoning_effort_kwargs(session, model_name)
+                    )
+                except Exception:
+                    pass
                 try:
                     from agenticx.runtime.tool_search import (
                         estimate_schema_tokens,
