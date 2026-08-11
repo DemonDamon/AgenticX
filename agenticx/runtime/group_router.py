@@ -272,6 +272,12 @@ class GroupReply:
     error: str = ""
     event_type: str = "group_reply"
     confirm_request_id: str = ""
+    # Structured fields for graph projection / member activity side panel.
+    graph_run_id: str = ""
+    graph_node_id: str = ""
+    tool_name: str = ""
+    tool_phase: str = ""  # "calling" | "done" | ""
+    tool_call_id: str = ""
 
 
 @dataclass
@@ -451,6 +457,8 @@ class GroupChatRouter:
         avatar_name: str,
         avatar_url: str,
         text: str,
+        graph_run_id: str = "",
+        graph_node_id: str = "",
     ) -> GroupReply:
         """Build one progress event row for group chat streaming."""
         return GroupReply(
@@ -460,6 +468,8 @@ class GroupChatRouter:
             content=str(text or "").strip(),
             skipped=True,
             event_type="group_progress",
+            graph_run_id=str(graph_run_id or "").strip(),
+            graph_node_id=str(graph_node_id or "").strip(),
         )
 
     @staticmethod
@@ -472,33 +482,12 @@ class GroupChatRouter:
             return ""
         if et == EventType.TOOL_CALL.value:
             tool_name = str(data.get("name", "") or data.get("tool_name", "") or "tool")
-            raw_args = data.get("arguments", data.get("args", {}))
-            if isinstance(raw_args, str):
-                args_preview = raw_args.strip()
-            else:
-                try:
-                    args_preview = json.dumps(raw_args, ensure_ascii=False)
-                except Exception:
-                    args_preview = str(raw_args)
-            if len(args_preview) > 180:
-                args_preview = args_preview[:177] + "..."
-            if args_preview and args_preview not in {"{}", "null", "None"}:
-                return f"正在调用工具：{tool_name} {args_preview}"
+            # Keep status scannable; args belong in side-panel detail, not the line.
             return f"正在调用工具：{tool_name}"
         if et == EventType.TOOL_RESULT.value:
             tool_name = str(data.get("name", "") or data.get("tool_name", "") or "tool")
-            raw_result = data.get("result", "")
-            if isinstance(raw_result, str):
-                result_preview = raw_result.strip()
-            else:
-                try:
-                    result_preview = json.dumps(raw_result, ensure_ascii=False)
-                except Exception:
-                    result_preview = str(raw_result)
-            if len(result_preview) > 220:
-                result_preview = result_preview[:217] + "..."
-            if result_preview and result_preview not in {"{}", "null", "None"}:
-                return f"工具已完成：{tool_name} · {result_preview}"
+            # Result body belongs to the assistant reply / side panel detail, not the
+            # one-line status. Keep the status row scannable.
             return f"工具已完成：{tool_name}"
         if et == EventType.CONFIRM_REQUIRED.value:
             question = str(data.get("question", "") or "").strip()
@@ -515,6 +504,36 @@ class GroupChatRouter:
         if et == EventType.SUBAGENT_ERROR.value:
             return str(data.get("text", "") or "子任务执行失败，正在处理")
         return ""
+
+    @staticmethod
+    def _runtime_event_to_tool_step(event_type: str, data: Dict[str, Any]) -> Dict[str, str]:
+        """Structured tool step for graph projection (no long previews)."""
+        et = str(event_type or "")
+        if et == EventType.TOOL_CALL.value:
+            phase = "calling"
+        elif et == EventType.TOOL_RESULT.value:
+            phase = "done"
+        else:
+            return {}
+        tool_name = str(data.get("name", "") or data.get("tool_name", "") or "tool")
+        call_id = str(data.get("id", "") or data.get("tool_call_id", "") or "")
+        return {"tool_name": tool_name, "tool_phase": phase, "tool_call_id": call_id}
+
+    @staticmethod
+    def _graph_run_id_of(base_session: StudioSession) -> str:
+        pad = getattr(base_session, "scratchpad", None)
+        if not isinstance(pad, dict):
+            return ""
+        return str(pad.get("graph_run_id") or "").strip()
+
+    @staticmethod
+    def _graph_node_id_for_agent(agent_id: str) -> str:
+        aid = str(agent_id or "").strip()
+        if not aid:
+            return ""
+        if aid.startswith("agent:"):
+            return aid
+        return f"agent:{aid}"
 
     @staticmethod
     def _runtime_event_to_group_event_type(event_type: str) -> str:
@@ -1142,6 +1161,8 @@ class GroupChatRouter:
             max_tool_rounds=self.max_tool_rounds,
             clarify_gate=clarify_gate,
         )
+        graph_run_id = self._graph_run_id_of(base_session)
+        graph_node_id = self._graph_node_id_for_agent(avatar_id)
         if progress_queue is not None:
             progress_queue.put_nowait(
                 self._progress_reply(
@@ -1149,6 +1170,8 @@ class GroupChatRouter:
                     avatar_name=avatar_name,
                     avatar_url=avatar_url,
                     text="已接收任务，正在分析...",
+                    graph_run_id=graph_run_id,
+                    graph_node_id=graph_node_id,
                 )
             )
         final_text = ""
@@ -1172,6 +1195,7 @@ class GroupChatRouter:
                         if group_evt_type in ("group_blocked", "group_clarification")
                         else ""
                     )
+                    tool_step = self._runtime_event_to_tool_step(event.type, event.data)
                     progress_queue.put_nowait(
                         GroupReply(
                             agent_id=avatar_id,
@@ -1181,6 +1205,11 @@ class GroupChatRouter:
                             skipped=True,
                             event_type=group_evt_type,
                             confirm_request_id=confirm_request_id,
+                            graph_run_id=graph_run_id,
+                            graph_node_id=graph_node_id,
+                            tool_name=tool_step.get("tool_name", ""),
+                            tool_phase=tool_step.get("tool_phase", ""),
+                            tool_call_id=tool_step.get("tool_call_id", ""),
                         )
                     )
             if event.type == EventType.FINAL.value:

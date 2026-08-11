@@ -862,7 +862,14 @@ export function ImBubble({
                     <StreamingDots compact />
                   )
                 ) : isGroupTyping ? (
-                  <StreamingDots compact />
+                  bodyText?.trim() ? (
+                    <div className="flex min-w-0 items-center gap-2 text-[13px] text-text-muted">
+                      <span className="min-w-0 break-words leading-[1.65]">{bodyText.trim()}</span>
+                      <StreamingDots compact />
+                    </div>
+                  ) : (
+                    <StreamingDots compact />
+                  )
                 ) : (
                   <>
                     {(citationReferences?.length ?? 0) > 0 ? (
