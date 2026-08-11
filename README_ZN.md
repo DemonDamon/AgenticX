@@ -717,6 +717,7 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust 高性能安全智能体 Shell |
 | **OpenSkills** | [numman-ali/openskills](https://github.com/numman-ali/openskills) | Skill 注册中心与发现机制 |
 | **OWL** | [camel-ai/owl](https://github.com/camel-ai/owl) | 具身多智能体协作 |
+| **PenguinHarness** | [Prism-Shadow/penguin-harness](https://github.com/Prism-Shadow/penguin-harness) | 执行时间线（Trajectory）UX 与工具调用 span 可观测性 |
 | **Pydantic AI** | [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai) | 类型安全智能体与评测框架 |
 | **Refly** | [refly-ai/refly](https://github.com/refly-ai/refly) | AI 原生知识画布 UX |
 | **Serverless Devs** | [Serverless-Devs/Serverless-Devs](https://github.com/Serverless-Devs/Serverless-Devs) | Serverless 智能体部署工具链 |

@@ -721,6 +721,7 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust-based secure agent shell |
 | **OpenSkills** | [numman-ali/openskills](https://github.com/numman-ali/openskills) | Skill registry & discovery |
 | **OWL** | [camel-ai/owl](https://github.com/camel-ai/owl) | Embodied multi-agent collaboration |
+| **PenguinHarness** | [Prism-Shadow/penguin-harness](https://github.com/Prism-Shadow/penguin-harness) | Execution timeline (Trajectory) UX & tool-span observability |
 | **Pydantic AI** | [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai) | Type-safe agent & eval framework |
 | **Refly** | [refly-ai/refly](https://github.com/refly-ai/refly) | AI-native knowledge canvas UX |
 | **Serverless Devs** | [Serverless-Devs/Serverless-Devs](https://github.com/Serverless-Devs/Serverless-Devs) | Serverless agent deployment toolchain |
