@@ -9147,6 +9147,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   // Ignore parse errors; tool card still renders via formatter.
                 }
               }
+              if (toolName === "create_group_chat") {
+                try {
+                  const rawResult = payload.data?.result;
+                  const parsed =
+                    typeof rawResult === "string"
+                      ? (JSON.parse(rawResult) as Record<string, unknown>)
+                      : (rawResult as Record<string, unknown> | null | undefined);
+                  if (parsed && parsed.ok) {
+                    const group = parsed.group as Record<string, unknown> | undefined;
+                    window.dispatchEvent(
+                      new CustomEvent("agenticx:groups:changed", {
+                        detail: { groupId: String(group?.id ?? "").trim() },
+                      })
+                    );
+                  }
+                } catch {
+                  // Ignore parse errors; tool card still renders via formatter.
+                }
+              }
               const formatted = formatToolResultMessage(toolName, payload.data?.result, settings.providers);
               if (formatted.silent) continue;
               const resultCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
