@@ -3054,6 +3054,11 @@ def create_studio_app() -> FastAPI:
                                 "skipped": reply.skipped,
                                 "error": reply.error,
                                 "confirm_request_id": str(getattr(reply, "confirm_request_id", "") or ""),
+                                "graph_run_id": str(getattr(reply, "graph_run_id", "") or ""),
+                                "graph_node_id": str(getattr(reply, "graph_node_id", "") or ""),
+                                "tool_name": str(getattr(reply, "tool_name", "") or ""),
+                                "tool_phase": str(getattr(reply, "tool_phase", "") or ""),
+                                "tool_call_id": str(getattr(reply, "tool_call_id", "") or ""),
                             },
                         )
                         await _emit_group_event(evt)

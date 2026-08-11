@@ -40,6 +40,15 @@ export type GraphProjection = {
   agent_edges: GraphEdgeSnapshot[];
 };
 
+export type ToolStep = {
+  callId: string;
+  toolName: string;
+  phase: "calling" | "done";
+  /** epoch ms of first observation */
+  startedAt: number;
+  updatedAt: number;
+};
+
 export type GraphRunSnapshot = {
   run_id: string;
   session_id: string;
@@ -93,6 +102,8 @@ export type PaneGraphState = {
   pulseEdges: Record<string, number>;
   selectedNodeIds: string[];
   lastError: string | null;
+  /** Live tool steps keyed by graph node id (e.g. agent:<avatar_id>). */
+  toolStepsByNode: Record<string, ToolStep[]>;
 };
 
 export function emptyPaneGraphState(): PaneGraphState {
@@ -106,7 +117,33 @@ export function emptyPaneGraphState(): PaneGraphState {
     pulseEdges: {},
     selectedNodeIds: [],
     lastError: null,
+    toolStepsByNode: {},
   };
+}
+
+export function applyToolStepToState(
+  state: PaneGraphState,
+  nodeId: string,
+  step: ToolStep,
+): PaneGraphState {
+  if (!nodeId || !step.callId) return state;
+  const byNode = state.toolStepsByNode ?? {};
+  const prev = byNode[nodeId] ?? [];
+  const idx = prev.findIndex((s) => s.callId === step.callId);
+  const next =
+    idx >= 0
+      ? prev.map((s, i) =>
+          i === idx
+            ? {
+                ...s,
+                phase: step.phase,
+                toolName: step.toolName || s.toolName,
+                updatedAt: step.updatedAt,
+              }
+            : s,
+        )
+      : [...prev, step];
+  return { ...state, toolStepsByNode: { ...byNode, [nodeId]: next } };
 }
 
 /**

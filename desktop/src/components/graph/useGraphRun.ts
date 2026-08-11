@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   applyGraphEvent,
   applyGraphSnapshot,
+  applyToolStepToState,
   EMPTY_PANE_GRAPH_STATE,
   emptyPaneGraphState,
   type GraphProjection,
@@ -9,6 +10,7 @@ import {
   type GraphSsePayload,
   type InterveneRequest,
   type PaneGraphState,
+  type ToolStep,
 } from "./graph-types";
 
 type GraphRunStore = {
@@ -19,6 +21,7 @@ type GraphRunStore = {
     run: GraphRunSnapshot,
     projection?: GraphProjection | null,
   ) => void;
+  applyToolStep: (paneId: string, nodeId: string, step: ToolStep) => void;
   setSelected: (paneId: string, nodeIds: string[]) => void;
   resetPane: (paneId: string) => void;
   getPane: (paneId: string) => PaneGraphState;
@@ -43,6 +46,13 @@ export const useGraphRunStore = create<GraphRunStore>((set, get) => ({
       byPane: {
         ...s.byPane,
         [paneId]: applyGraphSnapshot(ensureMutable(s.byPane, paneId), run, projection),
+      },
+    })),
+  applyToolStep: (paneId, nodeId, step) =>
+    set((s) => ({
+      byPane: {
+        ...s.byPane,
+        [paneId]: applyToolStepToState(ensureMutable(s.byPane, paneId), nodeId, step),
       },
     })),
   setSelected: (paneId, nodeIds) =>
