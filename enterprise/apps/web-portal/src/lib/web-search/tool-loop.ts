@@ -20,7 +20,14 @@ import {
   selectHitsWithinBudget,
   WEB_SEARCH_SNIPPET_CHARS,
 } from "./context-budget";
-import { resolveFollowUpQuery } from "./follow-up";
+import {
+  buildFollowUpRewriteMessages,
+  hasPriorFollowUpQueryLeakage,
+  isReferentialFollowUp,
+  parseFollowUpQueryRewrite,
+  resolveFollowUpQuery,
+  type FollowUpQueryRewrite,
+} from "./follow-up";
 import { sanitizeHistoryForUpstream } from "./history-sanitize";
 import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeConfig } from "./providers";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
@@ -397,6 +404,100 @@ async function callGatewayStream(
   }
 }
 
+function extractCompletionContent(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const choices = (payload as { choices?: unknown }).choices;
+  if (!Array.isArray(choices)) return "";
+  const message = choices[0] as { message?: { content?: unknown } } | undefined;
+  const content = message?.message?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part): part is { type?: unknown; text?: unknown } => Boolean(part && typeof part === "object"))
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text as string)
+    .join("");
+}
+
+async function callGatewayJson(
+  deps: GatewayFetchDeps,
+  body: Record<string, unknown>,
+  timeoutMs = 2500,
+): Promise<unknown> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  if (deps.signal) {
+    if (deps.signal.aborted) controller.abort();
+    else deps.signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  try {
+    const response = await fetchImpl(deps.url, {
+      method: "POST",
+      headers: {
+        ...deps.headers,
+        "x-agenticx-trace-stage": "chat.search-query-rewrite",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`query rewrite upstream HTTP ${response.status}`);
+    }
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      throw new Error("query rewrite upstream returned non-JSON");
+    }
+  } finally {
+    clearTimeout(timeout);
+    deps.signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+type FollowUpResolution = FollowUpQueryRewrite & {
+  source: "ai" | "heuristic";
+};
+
+async function resolveFollowUpQueryWithAi(
+  messages: ChatMessage[],
+  model: string | undefined,
+  deps: GatewayFetchDeps,
+): Promise<FollowUpResolution | null> {
+  const rewriteMessages = buildFollowUpRewriteMessages(messages);
+  if (!rewriteMessages) return null;
+
+  try {
+    const payload = await callGatewayJson(deps, {
+      ...(model ? { model } : {}),
+      messages: rewriteMessages,
+      stream: false,
+      temperature: 0,
+      max_tokens: 96,
+    });
+    const rewrite = parseFollowUpQueryRewrite(extractCompletionContent(payload));
+    if (rewrite && hasPriorFollowUpQueryLeakage(rewrite.query, messages)) {
+      throw new Error("query rewrite copied the prior question");
+    }
+    if (rewrite) {
+      console.info(
+        `[web-search] follow-up query rewrite source=ai confidence=${rewrite.confidence.toFixed(2)} chars=${rewrite.query.length}`,
+      );
+      return { ...rewrite, source: "ai" };
+    }
+    throw new Error("query rewrite output failed validation");
+  } catch (error) {
+    console.warn(
+      "[web-search] follow-up query rewrite unavailable, falling back:",
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
+
 type PipeOptions = {
   sourcesFrame?: string;
   prefixText?: string;
@@ -620,28 +721,48 @@ export async function runWebSearchTurn(
     }
   }
 
-  // Referential follow-ups resolve entity from prior assistant reply; else slot-fill / raw last.
-  const resolved = resolveFollowUpQuery(originalMessages);
+  // Skip classification uses the bare last-user turn (greetings must not inherit prior intent).
+  const queryForSkip = extractLastUserQuery(originalMessages);
+  const isReferential = isReferentialFollowUp(queryForSkip);
+  const modelName = typeof rest.model === "string" ? rest.model : undefined;
+  const heuristicResolved = isReferential ? resolveFollowUpQuery(originalMessages) : null;
+  let resolved: FollowUpResolution | null = null;
 
-  // 指代追问但历史里消解不出实体 → 本轮不搜（搜代词只会得到跑题 SERP），
+  if (isReferential) {
+    const aiResolved = await resolveFollowUpQueryWithAi(originalMessages, modelName, deps);
+    if (aiResolved) {
+      resolved = aiResolved;
+    } else if (heuristicResolved?.query) {
+      resolved = {
+        query: heuristicResolved.query,
+        confidence: 0,
+        source: "heuristic",
+      };
+      console.info("[web-search] follow-up query rewrite source=heuristic");
+    }
+  }
+
+  // 指代追问但 AI 与规则都消解不出实体 → 本轮不搜（搜代词只会得到跑题 SERP），
   // 直接基于对话上下文作答。
-  if (!webSearchAlwaysOn() && resolved && !resolved.entity) {
+  if (!webSearchAlwaysOn() && isReferential && !resolved?.query) {
     return respondWithoutSearch("referential_no_entity");
   }
-  if (resolved?.entity) {
-    console.info(`[web-search] follow-up resolved entity=${resolved.entity}`);
+  if (resolved) {
+    console.info(
+      `[web-search] follow-up resolved source=${resolved.source} confidence=${resolved.confidence.toFixed(2)} chars=${resolved.query.length}`,
+    );
   }
   // When ALWAYS=1 and entity resolution failed, fall back to the raw last-user text
   // so the escape hatch still performs a search instead of a missing-query degrade.
-  const query = resolved
-    ? resolved.query || extractLastUserQuery(originalMessages)
+  const query = isReferential
+    ? resolved?.query || queryForSkip
     : buildWebSearchQuery(originalMessages);
 
   // Auto mode skips high-confidence self-contained turns and searches only when
   // the query has explicit lookup or current/public-web fact signals.
   const skip = webSearchAlwaysOn()
     ? null
-    : resolved?.entity
+    : isReferential
       ? null
       : classifyWebSearchNeed({
           query,
@@ -668,7 +789,6 @@ export async function runWebSearchTurn(
     console.warn("[web-search] search failed, degrading:", error instanceof Error ? error.message : error);
   }
 
-  const modelName = typeof rest.model === "string" ? rest.model : undefined;
   const ranked = searchFailed ? [] : rerankHits(query, hits);
   const { selected, remainder } = searchFailed
     ? { selected: [] as WebSearchHit[], remainder: [] as WebSearchHit[] }

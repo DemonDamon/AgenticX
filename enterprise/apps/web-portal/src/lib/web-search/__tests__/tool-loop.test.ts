@@ -20,6 +20,13 @@ function sseResponse(text: string): Response {
   });
 }
 
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 async function readText(res: Response): Promise<string> {
   return res.text();
 }
@@ -693,9 +700,21 @@ describe("web search tool loop", () => {
     const executeSearch = vi.fn(async (q: string) => [
       { title: "宗主梗", url: "https://ex.com/zongzhu", snippet: "蔡徐坤 宗主" },
     ]);
-    const fetchImpl = vi.fn(async () =>
-      sseResponse('data: {"choices":[{"delta":{"content":"答"}}]}\n\ndata: [DONE]\n\n'),
-    );
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: '{"resolved_query":"蔡徐坤 为什么被封为宗主呢","confidence":0.98}',
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"答"}}]}\n\ndata: [DONE]\n\n');
+    });
 
     await runWebSearchTurn(
       {
@@ -727,14 +746,78 @@ describe("web search tool loop", () => {
     );
 
     expect(executeSearch).toHaveBeenCalledTimes(1);
-    expect(String(executeSearch.mock.calls[0]?.[0])).toContain("蔡徐坤");
+    expect(executeSearch.mock.calls[0]?.[0]).toBe("蔡徐坤 为什么被封为宗主呢");
+  });
+
+  it("rewrites only the current referential query, not the prior question", async () => {
+    const executeSearch = vi.fn(async (q: string) => [
+      { title: "王虹", url: "https://ex.com/wang-hong", snippet: q },
+    ]);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: '{"resolved_query":"王虹 最近怎么样","confidence":0.99}',
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"答"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "王虹是谁" },
+          { role: "assistant", content: "王虹是一位研究员。" },
+          { role: "user", content: "她最近怎么样" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).toHaveBeenCalledWith("王虹 最近怎么样", undefined, expect.anything());
+    expect(executeSearch.mock.calls[0]?.[0]).not.toContain("王虹是谁");
+    const rewriteBody = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body ?? "{}")) as {
+      stream?: boolean;
+      agenticx_web_search?: unknown;
+    };
+    expect(rewriteBody.stream).toBe(false);
+    expect(rewriteBody.agenticx_web_search).toBeUndefined();
   });
 
   it("skips search when referential follow-up has no resolvable entity", async () => {
     const bodies: unknown[] = [];
     const executeSearch = vi.fn(async () => []);
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      bodies.push(body);
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [
+            {
+              message: { content: '{"resolved_query":"","confidence":0}' },
+            },
+          ],
+        });
+      }
       return sseResponse('data: {"choices":[{"delta":{"content":"基于上下文"}}]}\n\ndata: [DONE]\n\n');
     });
 
@@ -763,7 +846,7 @@ describe("web search tool loop", () => {
     );
 
     expect(executeSearch).not.toHaveBeenCalled();
-    const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
+    const body = bodies[1] as { messages?: Array<{ role?: string; content?: string }> };
     const system = String(body.messages?.[0]?.content ?? "");
     expect(system).not.toContain("联网搜索结果");
   });
@@ -775,9 +858,19 @@ describe("web search tool loop", () => {
       const executeSearch = vi.fn(async (q: string) => [
         { title: "T", url: "https://ex.com/t", snippet: String(q) },
       ]);
-      const fetchImpl = vi.fn(async () =>
-        sseResponse('data: {"choices":[{"delta":{"content":"forced"}}]}\n\ndata: [DONE]\n\n'),
-      );
+      const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+        if (body.stream === false) {
+          return jsonResponse({
+            choices: [
+              {
+                message: { content: '{"resolved_query":"","confidence":0}' },
+              },
+            ],
+          });
+        }
+        return sseResponse('data: {"choices":[{"delta":{"content":"forced"}}]}\n\ndata: [DONE]\n\n');
+      });
 
       await runWebSearchTurn(
         {
@@ -815,7 +908,22 @@ describe("web search tool loop", () => {
     const THINK_CLOSE = "<" + "/" + "think" + ">";
     const bodies: Array<{ messages?: Array<{ role?: string; content?: string }> }> = [];
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: '{"resolved_query":"蔡徐坤 为什么被封为宗主呢","confidence":0.98}',
+              },
+            },
+          ],
+        });
+      }
+      bodies.push(body);
       return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
     });
 
