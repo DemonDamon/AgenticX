@@ -6,18 +6,15 @@ services:
     depends_on:
       gateway-a:
         condition: service_started
-      gateway-b:
-        condition: service_started
       web-portal:
         condition: service_started
       admin-console:
         condition: service_started
     ports:
+      # 外层反向代理负责 HTTPS 终止；Compose 内部入口只提供 HTTP upstream。
       - "80:80"
-      - "443:443"
     volumes:
       - ../nginx/gateway.conf:/etc/nginx/nginx.conf:ro
-      - ../nginx/certs:/etc/nginx/certs:ro
     networks:
       - agenticx-backbone
 
@@ -77,8 +74,8 @@ services:
       DATABASE_DIALECT: ${DATABASE_DIALECT:-postgresql}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
-      GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://192.168.16.66:8088}
-      GATEWAY_INTERNAL_BASE_URL: ${GATEWAY_INTERNAL_BASE_URL:-http://192.168.16.66:8088}
+      GATEWAY_BASE_URL: ${GATEWAY_BASE_URL:-http://192.168.16.66}
+      GATEWAY_INTERNAL_BASE_URL: ${GATEWAY_INTERNAL_BASE_URL:-http://192.168.16.66}
       GATEWAY_INTERNAL_TOKEN: ${GATEWAY_INTERNAL_TOKEN:?GATEWAY_INTERNAL_TOKEN is required}
       AUTH_JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
       AUTH_JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
