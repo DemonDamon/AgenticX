@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent, CSSProperties } from "react";
+import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent, CSSProperties, RefObject } from "react";
 import {
   Bookmark,
   Check,
@@ -542,10 +542,14 @@ const FALLBACK_PANE: ChatPaneState = {
   runDrawerRunId: null,
 };
 
+/** 「更多操作」竖排菜单里各行子菜单的浮层宽度（子菜单从行右侧弹出，需按自身宽度做边界收敛）。 */
+const NEW_TOPIC_SUBMENU_WIDTH = 160; // w-[160px]
+const KB_MODE_SUBMENU_WIDTH = 200; // w-[200px]
+
 /** Compose-style primary action (豆包式「撰写」语义) + 下拉切换「全新对话」/「继承上下文」，默认前者。 */
 function NewTopicSplitControl({
   onNewTopic,
-  /** True while the parent「更多操作」popup is open — render only the trigger, suppress the chevron+panel. */
+  /** True when rendered as a row inside「更多操作」vertical menu (full-width row + right flyout). */
   embedded = false,
 }: {
   onNewTopic: (inherit: boolean, sessionMode?: PaneSessionMode) => void;
@@ -554,16 +558,19 @@ function NewTopicSplitControl({
   const [menuOpen, setMenuOpen] = useState(false);
   const [inheritMode, setInheritMode] = useState(false);
   const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const chevronRef = useRef<HTMLButtonElement>(null);
 
-  const openMenu = () => {
+  const openMenu = (flyoutRight = false) => {
     if (rootRef.current) {
       const rect = rootRef.current.getBoundingClientRect();
+      const left = flyoutRight
+        ? Math.max(8, Math.min(rect.right + 8, window.innerWidth - NEW_TOPIC_SUBMENU_WIDTH - 8))
+        : rect.left;
       setMenuPos({
         bottom: window.innerHeight - rect.top + 4,
-        left: rect.left,
+        left,
       });
     }
     setMenuOpen(true);
@@ -585,6 +592,7 @@ function NewTopicSplitControl({
     menuOpen && menuPos
       ? createPortal(
           <div
+            id="agx-more-actions-new-topic-menu"
             ref={menuRef}
             style={{ bottom: menuPos.bottom, left: menuPos.left }}
             className="fixed z-[9999] w-[160px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
@@ -664,24 +672,44 @@ function NewTopicSplitControl({
 
   if (embedded) {
     return (
-      <button
-        type="button"
-        className="flex h-full w-7 shrink-0 items-center justify-center text-text-muted transition-colors hover:text-text-strong"
-        aria-label={inheritMode ? "新建对话：继承上下文" : "新建对话：全新对话"}
-        onClick={() => onNewTopic(inheritMode, inheritMode ? "daily_office" : "daily_office")}
-      >
-        {inheritMode ? (
-          <GitBranch className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
-        ) : (
-          <SquarePen className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
-        )}
-      </button>
+      <>
+        <div
+          ref={rootRef as unknown as RefObject<HTMLDivElement>}
+          className="flex w-full items-center rounded-lg text-text-standard transition-colors hover:bg-surface-hover"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="flex flex-1 items-center gap-2.5 px-2.5 py-2 text-left text-[13px]"
+            aria-label={inheritMode ? "新建对话：继承上下文" : "新建对话：全新对话"}
+            onClick={() => onNewTopic(inheritMode, inheritMode ? "daily_office" : "daily_office")}
+          >
+            {inheritMode ? (
+              <GitBranch className="h-[15px] w-[15px] shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+            ) : (
+              <SquarePen className="h-[15px] w-[15px] shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+            )}
+            <span className="flex-1">新对话</span>
+            <span className="text-[11px] text-text-faint">{inheritMode ? "继承上下文" : "全新对话"}</span>
+          </button>
+          <button
+            type="button"
+            className="flex h-full shrink-0 items-center px-2 py-2 text-text-faint transition-colors hover:text-text-strong"
+            aria-label="切换新建方式"
+            aria-expanded={menuOpen}
+            onClick={() => (menuOpen ? setMenuOpen(false) : openMenu(true))}
+          >
+            <ChevronRight className={`h-3.5 w-3.5 transition-transform ${menuOpen ? "rotate-90" : ""}`} aria-hidden />
+          </button>
+        </div>
+        {panel}
+      </>
     );
   }
 
   return (
     <>
-      <div ref={rootRef} className="flex h-[26px] shrink-0 items-stretch overflow-hidden rounded-md bg-transparent transition-colors hover:bg-surface-hover">
+      <div ref={rootRef as unknown as RefObject<HTMLDivElement>} className="flex h-[26px] shrink-0 items-stretch overflow-hidden rounded-md bg-transparent transition-colors hover:bg-surface-hover">
         <HoverTip label={baseTip}>
           <button
             type="button"
@@ -715,7 +743,7 @@ function NewTopicSplitControl({
   );
 }
 
-/** 「更多操作」+ 按钮：向上弹出图标菜单，内含附件/新话题/技能/知识库检索/连接器。 */
+/** 「更多操作」+ 按钮：向上弹出竖排文字菜单，内含附件/新话题/技能/知识库检索/连接器。 */
 function ComposerMoreActionsButton({
   onPickFile,
   onNewTopic,
@@ -751,6 +779,17 @@ function ComposerMoreActionsButton({
       const t = e.target as Node;
       if (rootRef.current?.contains(t)) return;
       if (panelRef.current?.contains(t)) return;
+      // 子项浮层 portal 到 body，不在 panelRef 内；点二级菜单时勿关掉一级菜单。
+      const flyoutIds = [
+        "agx-more-actions-new-topic-menu",
+        "agx-skill-picker-dropdown",
+        "agx-kb-retrieval-mode-menu",
+        "agx-connectors-menu-dropdown",
+      ];
+      for (const id of flyoutIds) {
+        const el = document.getElementById(id);
+        if (el?.contains(t)) return;
+      }
       setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
@@ -778,38 +817,34 @@ function ComposerMoreActionsButton({
           <div
             ref={panelRef}
             style={{ bottom: panelPos.bottom, left: panelPos.left, transformOrigin: "bottom left" }}
-            className="agx-menu-pop fixed z-[9999] flex items-center gap-0.5 rounded-xl border border-border bg-surface-panel p-1 shadow-xl backdrop-blur-xl"
+            className="agx-menu-pop fixed z-[9999] flex w-56 flex-col gap-0.5 rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
             role="menu"
             aria-label="更多操作"
           >
-            <HoverTip label="上传附件" tooltipAlign="center">
-              <button
-                type="button"
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-                onClick={() => {
-                  onPickFile();
-                  setOpen(false);
-                }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
-                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-                </svg>
-              </button>
-            </HoverTip>
-            <HoverTip label="新对话" tooltipAlign="center">
-              <div className="flex items-center">
-                <NewTopicSplitControl onNewTopic={onNewTopic} embedded />
-              </div>
-            </HoverTip>
-            <HoverTip label="引用技能" tooltipAlign="center">
-              <div className="flex items-center">{renderSkillPicker()}</div>
-            </HoverTip>
-            <HoverTip label="知识库检索" tooltipAlign="center">
-              <div className="flex items-center">{renderKbRetrieval()}</div>
-            </HoverTip>
-            <HoverTip label="连接器" tooltipAlign="center">
-              <div className="flex items-center">{renderConnectors()}</div>
-            </HoverTip>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+              onClick={() => {
+                onPickFile();
+                setOpen(false);
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px] shrink-0 text-text-muted">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+              </svg>
+              <span className="flex-1">添加文件</span>
+            </button>
+            <NewTopicSplitControl
+              onNewTopic={(inherit, sessionMode) => {
+                onNewTopic(inherit, sessionMode);
+                setOpen(false);
+              }}
+              embedded
+            />
+            {renderSkillPicker()}
+            {renderKbRetrieval()}
+            {renderConnectors()}
           </div>,
           document.body
         )
@@ -851,7 +886,7 @@ interface SkillPickerButtonProps {
   apiBase: string;
   apiToken: string;
   onSelect: (skill: SkillItem) => void;
-  /** True while the parent「更多操作」popup is open — render only the trigger, suppress the dropdown. */
+  /** True when rendered as a row inside「更多操作」vertical menu (full-width row + right flyout). */
   embedded?: boolean;
 }
 
@@ -890,9 +925,8 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
   const handleOpen = async () => {
     if (btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
-      // Left-align the dropdown to the button so it opens rightward, staying within the chat pane.
-      // Clamp: don't let right edge go off screen (8px margin).
-      const left = Math.min(rect.left, window.innerWidth - SKILL_DROPDOWN_WIDTH - 8);
+      // 「更多操作」竖排菜单里，技能行的子菜单从该行右侧弹出；并钳制右边缘不出屏。
+      const left = Math.min(rect.right + 8, window.innerWidth - SKILL_DROPDOWN_WIDTH - 8);
       setDropdownPos({
         bottom: window.innerHeight - rect.top + 6,
         left: Math.max(8, left),
@@ -994,17 +1028,22 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
 
   if (embedded) {
     return (
-      <button
-        ref={btnRef}
-        type="button"
-        className={iconBtn}
-        aria-label="引用技能"
-        onClick={() => {
-          onSelect({ name: "", description: "" });
-        }}
-      >
-        <SkillPuzzleIcon className="h-[15px] w-[15px]" />
-      </button>
+      <>
+        <button
+          ref={btnRef}
+          type="button"
+          role="menuitem"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+          aria-label="技能"
+          aria-expanded={open}
+          onClick={open ? handleClose : handleOpen}
+        >
+          <SkillPuzzleIcon className="h-[15px] w-[15px] shrink-0 text-text-muted" />
+          <span className="flex-1">技能</span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
+        </button>
+        {dropdown}
+      </>
     );
   }
 
@@ -1582,7 +1621,7 @@ function PaneKnowledgeRetrievalModeSwitch({
   paneId,
   globalDefaultMode,
   onNewSessionDefaultChange,
-  /** True while the parent「更多操作」popup is open — render only the trigger, suppress the panel. */
+  /** True when rendered as a row inside「更多操作」vertical menu (full-width row + right flyout). */
   embedded = false,
 }: {
   apiToken: string;
@@ -1606,7 +1645,7 @@ function PaneKnowledgeRetrievalModeSwitch({
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const refreshGenRef = useRef(0);
 
@@ -1637,12 +1676,15 @@ function PaneKnowledgeRetrievalModeSwitch({
     void refresh();
   }, [refresh]);
 
-  const openMenu = useCallback(() => {
+  const openMenu = useCallback((flyoutRight = false) => {
     if (rootRef.current) {
       const rect = rootRef.current.getBoundingClientRect();
+      const left = flyoutRight
+        ? Math.max(8, Math.min(rect.right + 8, window.innerWidth - KB_MODE_SUBMENU_WIDTH - 8))
+        : rect.left;
       setMenuPos({
         bottom: window.innerHeight - rect.top + 4,
-        left: rect.left,
+        left,
       });
     }
     setOpen(true);
@@ -1693,6 +1735,7 @@ function PaneKnowledgeRetrievalModeSwitch({
     open && menuPos
       ? createPortal(
           <div
+            id="agx-kb-retrieval-mode-menu"
             ref={menuRef}
             style={{ bottom: menuPos.bottom, left: menuPos.left }}
             className="fixed z-[9999] w-[200px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
@@ -1748,28 +1791,34 @@ function PaneKnowledgeRetrievalModeSwitch({
 
   if (embedded) {
     return (
-      <button
-        type="button"
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition hover:bg-surface-hover hover:text-text-strong ${
-          open ? "bg-surface-hover text-text-strong" : "text-text-muted"
-        }`}
-        disabled={saving}
-        aria-label="知识库检索模式"
-        aria-expanded={open}
-        onClick={() => (open ? setOpen(false) : openMenu())}
-      >
-        {mode === "auto" ? (
-          <Sparkles className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
-        ) : (
-          <Radar className="h-[15px] w-[15px]" strokeWidth={2} aria-hidden />
-        )}
-      </button>
+      <>
+        <button
+          ref={rootRef as unknown as RefObject<HTMLButtonElement>}
+          type="button"
+          role="menuitem"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+          disabled={saving}
+          aria-label="知识库检索"
+          aria-expanded={open}
+          onClick={() => (open ? setOpen(false) : openMenu(true))}
+        >
+          {mode === "auto" ? (
+            <Sparkles className="h-[15px] w-[15px] shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+          ) : (
+            <Radar className="h-[15px] w-[15px] shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+          )}
+          <span className="flex-1">知识库检索</span>
+          <span className="text-[11px] text-text-faint">{activeLabel}</span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
+        </button>
+        {panel}
+      </>
     );
   }
 
   return (
     <>
-      <div ref={rootRef} className="relative">
+      <div ref={rootRef as unknown as RefObject<HTMLDivElement>} className="relative">
         <HoverTip label={`知识库检索模式：${activeLabel}`}>
           <button
             type="button"

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ExternalLink, Link2, Loader2, SquareArrowOutUpRight } from "lucide-react";
+import { ChevronRight, ExternalLink, Link2, Loader2, SquareArrowOutUpRight } from "lucide-react";
 
 import { nativeConnectorAvailability, resolveConnectedConnectorIds } from "../../../electron/native-connectors-core";
 import { CONNECTORS, type ConnectorId } from "../settings/connectors/connector-catalog";
@@ -15,7 +15,7 @@ const DROPDOWN_WIDTH = 260;
 type Props = {
   /** Falls back to the global session id when the pane has not bound one yet. */
   sessionId?: string;
-  /** True while the parent「更多操作」popup is open — render only the trigger, suppress the dropdown. */
+  /** True when rendered as a row inside「更多操作」vertical menu (full-width row + right flyout). */
   embedded?: boolean;
 };
 
@@ -243,7 +243,10 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
   const handleOpen = () => {
     if (btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
-      const left = Math.min(rect.left, window.innerWidth - DROPDOWN_WIDTH - 8);
+      // embedded 场景下按钮即「更多操作」竖排菜单里的整行，子菜单需在该行右侧弹出。
+      const left = embedded
+        ? Math.min(rect.right + 8, window.innerWidth - DROPDOWN_WIDTH - 8)
+        : Math.min(rect.left, window.innerWidth - DROPDOWN_WIDTH - 8);
       setDropdownPos({ bottom: window.innerHeight - rect.top + 6, left: Math.max(8, left) });
     }
     setOpen((prev) => !prev);
@@ -523,6 +526,25 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
         )
       : null;
 
+  const embeddedRow = (
+    <button
+      ref={btnRef}
+      type="button"
+      role="menuitem"
+      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+      aria-label="连接器"
+      aria-expanded={open}
+      onClick={handleOpen}
+    >
+      <Link2 className="h-[15px] w-[15px] shrink-0 text-text-muted" aria-hidden />
+      <span className="flex-1">连接器</span>
+      {connectedIds.length > 0 ? (
+        <span className="text-[11px] text-text-faint">已连接 {connectedIds.length}</span>
+      ) : null}
+      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
+    </button>
+  );
+
   const toolbarButton = (
     <button
       ref={btnRef}
@@ -533,7 +555,7 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
       title={connectedIds.length > 0 ? `已连接：${connectedLabel}` : "连接器"}
       aria-label={connectedIds.length > 0 ? `已连接的连接器：${connectedLabel}` : "连接器"}
       aria-expanded={open}
-      onClick={embedded ? undefined : handleOpen}
+      onClick={handleOpen}
     >
       {connectedIds.length > 0 ? (
         <span className="flex items-center">
@@ -560,12 +582,14 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
 
   return (
     <>
-      {connectedIds.length > 0 ? (
+      {embedded ? (
+        embeddedRow
+      ) : connectedIds.length > 0 ? (
         <HoverTip label={`已连接：${connectedLabel}`}>{toolbarButton}</HoverTip>
       ) : (
         toolbarButton
       )}
-      {embedded ? null : dropdown}
+      {dropdown}
 
       <Modal
         open={tapdModalOpen}
