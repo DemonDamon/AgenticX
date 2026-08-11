@@ -18,7 +18,6 @@ import {
   Radar,
   SquarePen,
   Wrench,
-  Users,
   PhoneCall,
   History,
   Settings,
@@ -10855,16 +10854,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return () => window.removeEventListener("resize", onResize);
   }, [pane.historyOpen]);
 
-  const openMembersWorkbenchTab = () => {
-    closeHistoryPanelOnly();
-    openWorkspaceSidebarForPane(
-      pane.id,
-      paneRef.current?.clientWidth ?? paneWidth,
-      openSidePanel,
-    );
-    setWorkPanelFocus({ kind: "members" });
-  };
-
   return (
     <div
       ref={paneRef}
@@ -11022,15 +11011,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 aria-label="会话内搜索"
               >
                 <Search className="h-[18px] w-[18px]" strokeWidth={1.8} />
-              </button>
-            )}
-            {isGroupPane && (
-              <button
-                className={`agx-topbar-btn !px-[5px] ${pane.taskspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
-                onClick={openMembersWorkbenchTab}
-                title="群成员"
-              >
-                <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             )}
             {paneSettingsAvatar ? (
