@@ -146,6 +146,7 @@ export async function GET(request: Request) {
     tenantId: session.tenantId,
     sessionId,
   });
+  logCtx.setMode("deep_research");
   const store = defaultRunStore;
   await reapStaleRunsThrottled();
   const activeRaw = await store.listActive(session.tenantId, session.userId, sessionId);

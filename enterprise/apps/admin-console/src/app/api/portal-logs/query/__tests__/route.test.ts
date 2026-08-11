@@ -131,4 +131,30 @@ describe("POST /api/portal-logs/query", () => {
 
     expect(queryPortalLogsMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 500 }));
   });
+
+  it("accepts mode=deep_research and forwards it to queryPortalLogs", async () => {
+    requireAdminSomeScopeMock.mockResolvedValue({
+      ok: true,
+      session: { tenantId: "t1", userId: "u1", email: "a@example.com" },
+      scopes: ["audit:read:all"],
+    });
+    queryPortalLogsMock.mockResolvedValue({ total: 0, items: [] });
+
+    const { POST } = await import("../route");
+    const response = await POST(
+      new Request("http://localhost/api/portal-logs/query", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "deep_research", run_id: "01JRUNAAAAAAAAAAAAAAAAAAA" }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(queryPortalLogsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "deep_research",
+        run_id: "01JRUNAAAAAAAAAAAAAAAAAAA",
+      }),
+    );
+  });
 });

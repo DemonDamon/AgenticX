@@ -12,6 +12,8 @@ function portalLog(partial: Partial<PortalLogItem> & Pick<PortalLogItem, "id" | 
     user_id: "user-1",
     session_id: "session-1",
     route: "chat.completions",
+    mode: "chat",
+    run_id: null,
     status: 200,
     duration_ms: 1200,
     error_name: null,

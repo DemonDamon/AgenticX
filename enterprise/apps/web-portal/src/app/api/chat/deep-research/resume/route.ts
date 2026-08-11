@@ -94,6 +94,7 @@ export async function POST(request: Request) {
     userId: session.userId,
     tenantId: session.tenantId,
   });
+  logCtx.setMode("deep_research");
 
   let body: {
     runId?: unknown;
@@ -110,6 +111,7 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as typeof body;
   } catch {
+    logCtx.markNoop();
     return NextResponse.json(
       { error: { code: "40001", message: "invalid json body" } },
       { status: 400 },
@@ -118,11 +120,13 @@ export async function POST(request: Request) {
 
   const runId = typeof body.runId === "string" ? body.runId.trim() : "";
   if (!runId) {
+    logCtx.markNoop();
     return NextResponse.json(
       { error: { code: "40001", message: "runId required" } },
       { status: 400 },
     );
   }
+  logCtx.setRun(runId);
 
   const answers: Record<string, string> = {};
   const chatReply = typeof body.chatReply === "string" ? body.chatReply.trim() : "";
@@ -249,11 +253,11 @@ export async function POST(request: Request) {
     const clientTopic =
       typeof body.topic === "string" ? body.topic.trim().slice(0, 500) : "";
     if (run?.status === "completed") {
-      return alreadyContinued(runId);
+      logCtx.markNoop(); return alreadyContinued(runId);
     }
     // 已开车道 / 已批准 → 不能再改计划
     if (run && orphanGateKind(run.events) !== "plan") {
-      return alreadyContinued(runId);
+      logCtx.markNoop(); return alreadyContinued(runId);
     }
 
     let proposedSnapshot = clientPlanEarly;
@@ -268,7 +272,11 @@ export async function POST(request: Request) {
 
     const sessionId = (run?.sessionId || clientSessionId).trim();
     const topic = (run?.topic || clientTopic || proposedSnapshot.objective).trim();
+    if (sessionId) {
+      logCtx.setUser({ sessionId });
+    }
     if (!sessionId) {
+      logCtx.markNoop();
       return NextResponse.json(
         { error: { code: "40001", message: "sessionId required to continue plan gate" } },
         { status: 400 },
@@ -311,11 +319,17 @@ export async function POST(request: Request) {
         status: "awaiting_clarify",
         phase: "plan",
       });
-      if (!reopened) return alreadyContinued(runId);
+      if (!reopened) {
+        logCtx.markNoop();
+        return alreadyContinued(runId);
+      }
       run = await defaultRunStore.get(session.tenantId, session.userId, runId);
     }
 
-    if (!run) return alreadyContinued(runId);
+    if (!run) {
+      logCtx.markNoop();
+      return alreadyContinued(runId);
+    }
 
     try {
       const revised = await syncRevisePlanChat({
@@ -382,7 +396,7 @@ export async function POST(request: Request) {
 
   if (!isPlanResume) {
     // 非计划 gate：磁盘握手失败则保持旧语义（已继续 / 无等待方）。
-    return alreadyContinued(runId);
+    logCtx.markNoop(); return alreadyContinued(runId);
   }
 
   // --- Orphan / client-attested plan gate continue ---
@@ -395,19 +409,19 @@ export async function POST(request: Request) {
 
   // Successfully finished runs must not be restarted from a stale plan card.
   if (run?.status === "completed") {
-    return alreadyContinued(runId);
+    logCtx.markNoop(); return alreadyContinued(runId);
   }
   // Server already past plan gate → do not re-run even if UI still shows a draft.
   if (run && orphanGateKind(run.events) !== "plan") {
-    return alreadyContinued(runId);
+    logCtx.markNoop(); return alreadyContinued(runId);
   }
   // Store wiped on restart: require client snapshot to rebuild.
   if (!run && !clientPlan) {
-    return alreadyContinued(runId);
+    logCtx.markNoop(); return alreadyContinued(runId);
   }
   // Run exists but not orphan-eligible and no client snapshot (should be rare).
   if (run && !isOrphanedPlanGate(run) && !clientPlan) {
-    return alreadyContinued(runId);
+    logCtx.markNoop(); return alreadyContinued(runId);
   }
 
   let proposedSnapshot: ResearchPlanSnapshot | null = null;
@@ -430,12 +444,16 @@ export async function POST(request: Request) {
   }
 
   if (!proposedSnapshot) {
-    return alreadyContinued(runId);
+    logCtx.markNoop(); return alreadyContinued(runId);
   }
 
   const sessionId = (run?.sessionId || clientSessionId).trim();
   const topic = (run?.topic || clientTopic || proposedSnapshot.objective).trim();
+  if (sessionId) {
+    logCtx.setUser({ sessionId });
+  }
   if (!sessionId) {
+    logCtx.markNoop();
     return NextResponse.json(
       { error: { code: "40001", message: "sessionId required to continue plan gate" } },
       { status: 400 },
@@ -480,12 +498,12 @@ export async function POST(request: Request) {
       phase: "plan",
     });
     if (!reopened) {
-      return alreadyContinued(runId);
+      logCtx.markNoop(); return alreadyContinued(runId);
     }
   }
 
   if (!run) {
-    return alreadyContinued(runId);
+    logCtx.markNoop(); return alreadyContinued(runId);
   }
 
   const locks = orphanContinues();

@@ -191,6 +191,7 @@ export default function TraceRuntimePage() {
             kind: (kind) => t(`kind.${kind}`),
             detailTitle: t("detail.title"),
             selectHint: t("detail.selectHint"),
+            close: t("detail.close"),
             status: t("detail.status"),
             duration: t("detail.duration"),
             tokens: t("detail.tokens"),
@@ -206,6 +207,7 @@ export default function TraceRuntimePage() {
             emptyAttrs: t("detail.emptyAttrs"),
             conversation: {
               title: t("conversation.title"),
+              titleSession: t("conversation.titleSession"),
               loading: t("conversation.loading"),
               empty: t("conversation.empty"),
               loadFailed: t("conversation.loadFailed"),
@@ -219,6 +221,10 @@ export default function TraceRuntimePage() {
               reasoning: t("conversation.reasoning"),
               attachments: t("conversation.attachments"),
               chars: t("conversation.chars"),
+              scopeTurn: t("conversation.scopeTurn"),
+              scopeSession: t("conversation.scopeSession"),
+              loadEarlier: t("conversation.loadEarlier"),
+              noSession: t("conversation.noSession"),
             },
           }}
           className="min-h-[480px] bg-card"
