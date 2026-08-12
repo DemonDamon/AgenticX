@@ -2,7 +2,7 @@ type Props = {
   text?: string;
   className?: string;
   /**
-   * `status` = stronger light/dark sweep for faint meta rows
+   * `status` = slow spotlight sweep on faint meta rows
    * (e.g. tool "运行中 · 1s" / reasoning "思考中 · 1s").
    */
   variant?: "default" | "status";
