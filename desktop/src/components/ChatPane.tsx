@@ -255,8 +255,13 @@ import {
   supportsKimiK3ReasoningEffort,
   type KimiReasoningEffort,
 } from "../utils/model-hover-blurb";
-import { getProviderBrandColor, getProviderDisplayName } from "../utils/provider-display";
-import { collectSelectableModelOptions, coerceSelectableModel, isModelSelectable } from "../utils/model-options";
+import { getProviderDisplayName } from "../utils/provider-display";
+import {
+  collectSelectableModelOptions,
+  coerceSelectableModel,
+  isModelSelectable,
+  isProviderCredentialed,
+} from "../utils/model-options";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { sessionCreateAvatarId } from "../utils/session-create-avatar";
 import {
@@ -1252,11 +1257,13 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const activeModelRowRef = useRef<HTMLButtonElement | null>(null);
   const hoverClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [hoverRowTop, setHoverRowTop] = useState(0);
   const [effortMenuOpen, setEffortMenuOpen] = useState(false);
+  const [collapsedProviders, setCollapsedProviders] = useState<Set<string>>(() => new Set());
 
   /** Keep tip visible while moving between list row and tip card. */
   const cancelClearHover = useCallback(() => {
@@ -1302,9 +1309,17 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     [settings.providers],
   );
 
-  /** Group by vendor so the list reads as sections instead of one wall of `vendor/model`. */
+  /**
+   * Group by vendor. Seed every enabled+credentialed provider first so「已启动」渠道
+   * (e.g. MOMA with only legacy `model` / empty visible `models`) still gets a section.
+   */
   const groups = useMemo(() => {
     const byProvider = new Map<string, typeof options>();
+    for (const [provider, entry] of Object.entries(settings.providers)) {
+      if (entry.enabled === false) continue;
+      if (!isProviderCredentialed(entry)) continue;
+      byProvider.set(provider, []);
+    }
     for (const opt of options) {
       const bucket = byProvider.get(opt.provider);
       if (bucket) bucket.push(opt);
@@ -1372,6 +1387,48 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
       cancelClearHover();
     }
   }, [open, cancelClearHover]);
+
+  // 打开时：折叠其它渠道，展开当前选中渠道，便于立刻看到正在用的模型。
+  useEffect(() => {
+    if (!open) return;
+    const next = new Set(groups.map((g) => g.provider));
+    let expandProvider = "";
+    if (currentProvider && next.has(currentProvider)) {
+      expandProvider = currentProvider;
+    } else {
+      for (const group of groups) {
+        if (
+          group.items.some(
+            (item) => item.provider === currentProvider && item.model === currentModel,
+          )
+        ) {
+          expandProvider = group.provider;
+          break;
+        }
+      }
+    }
+    if (expandProvider) next.delete(expandProvider);
+    setCollapsedProviders(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per open
+  }, [open]);
+
+  // 当前渠道展开后，把当前模型滚进列表可视区。
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (currentProvider && collapsedProviders.has(currentProvider)) return;
+    const row = activeModelRowRef.current;
+    if (!row) return;
+    row.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [open, collapsedProviders, currentProvider, currentModel]);
+
+  const toggleProviderCollapsed = useCallback((provider: string) => {
+    setCollapsedProviders((prev) => {
+      const next = new Set(prev);
+      if (next.has(provider)) next.delete(provider);
+      else next.add(provider);
+      return next;
+    });
+  }, []);
 
   const hoverOpt = useMemo(() => {
     if (!hoverKey) return null;
@@ -1461,58 +1518,92 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                     <span className="mt-1 block text-[11px] text-text-subtle">请先在设置中配置服务商</span>
                   </div>
                 ) : (
-                  groups.map((group, groupIndex) => (
-                    <div key={group.provider} className={groupIndex > 0 ? "mt-1" : undefined}>
-                      <div className="flex items-center gap-1.5 px-2.5 pb-1 pt-1.5">
-                        <span
-                          className="h-[5px] w-[5px] shrink-0 rounded-full"
-                          style={{ backgroundColor: getProviderBrandColor(group.provider) }}
-                          aria-hidden
-                        />
-                        <span className="min-w-0 truncate text-[11px] font-medium text-text-muted">
-                          {group.providerLabel}
-                        </span>
-                      </div>
-                      {group.items.map((opt) => {
-                        const rowKey = `${opt.provider}:${opt.model}`;
-                        const isActive = opt.provider === currentProvider && opt.model === currentModel;
-                        const isHover = hoverKey === rowKey;
-                        const { modelName } = formatModelDisplayParts(
-                          opt.provider,
-                          opt.model,
-                          settings.providers[opt.provider],
-                        );
-                        return (
-                          <button
-                            key={rowKey}
-                            type="button"
-                            role="option"
-                            aria-selected={isActive}
-                            className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-none transition-colors ${
-                              isActive || isHover ? "bg-surface-cardStrong" : "hover:bg-surface-hover"
+                  groups.map((group, groupIndex) => {
+                    const isCollapsed = collapsedProviders.has(group.provider);
+                    return (
+                      <div
+                        key={group.provider}
+                        className={groupIndex > 0 ? "mt-1 border-t border-border pt-1" : undefined}
+                      >
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-surface-hover"
+                          aria-expanded={!isCollapsed}
+                          onClick={() => {
+                            toggleProviderCollapsed(group.provider);
+                            setHoverKey(null);
+                          }}
+                        >
+                          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-text-strong">
+                            {group.providerLabel}
+                          </span>
+                          <span className="shrink-0 text-[11px] tabular-nums text-text-faint">
+                            {group.items.length}
+                          </span>
+                          <ChevronDown
+                            className={`h-3.5 w-3.5 shrink-0 text-text-muted transition-transform ${
+                              isCollapsed ? "-rotate-90" : ""
                             }`}
-                            onMouseEnter={(e) => {
-                              cancelClearHover();
-                              setHoverKey(rowKey);
-                              setEffortMenuOpen(false);
-                              setHoverRowTop(e.currentTarget.getBoundingClientRect().top);
-                            }}
-                            onClick={() => handleSelect(opt.provider, opt.model)}
-                          >
-                            <ProviderGlyph provider={opt.provider} model={opt.model} />
-                            <span className="min-w-0 flex-1 truncate font-semibold text-text-strong">
-                              {modelName}
-                            </span>
-                            <span className="flex w-3.5 shrink-0 justify-end">
-                              {isActive ? (
-                                <Check className="h-3.5 w-3.5 text-status-success" strokeWidth={2.5} />
-                              ) : null}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ))
+                            strokeWidth={2}
+                            aria-hidden
+                          />
+                        </button>
+                        {!isCollapsed ? (
+                          group.items.length === 0 ? (
+                            <div className="px-2.5 py-2 text-[12px] text-text-faint">
+                              暂无可见模型，请在设置中添加
+                            </div>
+                          ) : (
+                            group.items.map((opt) => {
+                              const rowKey = `${opt.provider}:${opt.model}`;
+                              const isActive =
+                                opt.provider === currentProvider && opt.model === currentModel;
+                              const isHover = hoverKey === rowKey;
+                              const { modelName } = formatModelDisplayParts(
+                                opt.provider,
+                                opt.model,
+                                settings.providers[opt.provider],
+                              );
+                              return (
+                                <button
+                                  key={rowKey}
+                                  ref={isActive ? activeModelRowRef : undefined}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={isActive}
+                                  className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-none transition-colors ${
+                                    isActive || isHover
+                                      ? "bg-surface-cardStrong"
+                                      : "hover:bg-surface-hover"
+                                  }`}
+                                  onMouseEnter={(e) => {
+                                    cancelClearHover();
+                                    setHoverKey(rowKey);
+                                    setEffortMenuOpen(false);
+                                    setHoverRowTop(e.currentTarget.getBoundingClientRect().top);
+                                  }}
+                                  onClick={() => handleSelect(opt.provider, opt.model)}
+                                >
+                                  <ProviderGlyph provider={opt.provider} model={opt.model} />
+                                  <span className="min-w-0 flex-1 truncate font-semibold text-text-strong">
+                                    {modelName}
+                                  </span>
+                                  <span className="flex w-3.5 shrink-0 justify-end">
+                                    {isActive ? (
+                                      <Check
+                                        className="h-3.5 w-3.5 text-status-success"
+                                        strokeWidth={2.5}
+                                      />
+                                    ) : null}
+                                  </span>
+                                </button>
+                              );
+                            })
+                          )
+                        ) : null}
+                      </div>
+                    );
+                  })
                 )}
               </div>
               <div className="shrink-0 border-t border-border p-1.5">
