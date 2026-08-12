@@ -66,6 +66,14 @@ body {
   @apply font-semibold;
   color: var(--text-strong);
 }
+.msg-content a {
+  color: rgb(var(--theme-color-rgb, 59, 130, 246));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.msg-content a:hover {
+  opacity: 0.9;
+}
 .msg-content h1, .msg-content h2, .msg-content h3 {
   @apply font-semibold mt-4 mb-2;
   color: var(--text-strong);

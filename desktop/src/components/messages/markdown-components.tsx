@@ -570,6 +570,9 @@ export const chatMarkdownComponents: Partial<Components> = {
         href={url || undefined}
         target={external ? "_blank" : rest.target}
         rel={external ? "noopener noreferrer" : rest.rel}
+        className={`text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90 ${
+          typeof rest.className === "string" ? rest.className : ""
+        }`.trim()}
         onClick={
           external
             ? (event) => {
