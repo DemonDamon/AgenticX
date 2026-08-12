@@ -37,7 +37,7 @@ import { adminFetch } from "../../../lib/admin-client-auth";
 import { CreateUserDialog } from "../../../components/CreateUserDialog";
 import { QuotaRing, formatTokenCount } from "../../../components/QuotaRing";
 import {
-  UserFormDialog,
+  UserFormFields,
   type UserFormDeptOption,
   type UserFormRoleOption,
   type UserFormValues,
@@ -136,12 +136,10 @@ export default function RolesPage() {
   const [resetPasswordPending, setResetPasswordPending] = useState(false);
   const [newPassword, setNewPassword] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(createRequested);
-  const [userFormOpen, setUserFormOpen] = useState(false);
   const [userFormLoading, setUserFormLoading] = useState(false);
   const [userFormInitial, setUserFormInitial] = useState<UserFormValues | null>(null);
   const [userFormDeptOptions, setUserFormDeptOptions] = useState<UserFormDeptOption[]>([]);
   const [userFormRoleOptions, setUserFormRoleOptions] = useState<UserFormRoleOption[]>([]);
-  const [userFormUser, setUserFormUser] = useState<UserQuotaOverview | null>(null);
   const [viewMode, setViewMode] = useState<"cards" | "list">("cards");
   const [viewModeHydrated, setViewModeHydrated] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -216,45 +214,24 @@ export default function RolesPage() {
     setInitialExcludedGroupModelIds([]);
     setResetPasswordPending(false);
     setNewPassword(null);
+    setUserFormInitial(null);
+    setUserFormDeptOptions([]);
+    setUserFormRoleOptions([]);
     setLoadingModels(true);
-    try {
-      const response = await adminFetch(`/api/admin/users/${user.id}/models`, { cache: "no-store" });
-      const json = (await response.json()) as ApiEnvelope<ModelAccess>;
-      if (!response.ok || json.code !== "00000" || !json.data) throw new Error(json.message || "加载可用模型失败");
-      const groupModelIds = new Set(json.data.groupModelIds ?? []);
-      const individualModelIds = (json.data.individualModelIds ?? []).filter((modelId) => !groupModelIds.has(modelId));
-      setModelAccess(json.data);
-      setManualModelIds(individualModelIds);
-      setInitialManualModelIds(individualModelIds);
-      const excludedIds = json.data.excludedGroupModelIds ?? [];
-      setExcludedGroupModelIds(excludedIds);
-      setInitialExcludedGroupModelIds(excludedIds);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载可用模型失败");
-    } finally {
-      setLoadingModels(false);
-    }
-  }, []);
-
-  const openUserManagement = useCallback(async (user?: UserQuotaOverview) => {
-    const target = user ?? selected;
-    if (!target || userFormLoading) return;
-    setUserFormUser(target);
-    if (user) setSelected(null);
     setUserFormLoading(true);
     try {
-      const [userResponse, departmentResponse, roleResponse] = await Promise.all([
-        adminFetch(`/api/admin/users/${encodeURIComponent(target.id)}`, { cache: "no-store" }),
+      const [modelResponse, userResponse, departmentResponse, roleResponse] = await Promise.all([
+        adminFetch(`/api/admin/users/${encodeURIComponent(user.id)}/models`, { cache: "no-store" }),
+        adminFetch(`/api/admin/users/${encodeURIComponent(user.id)}`, { cache: "no-store" }),
         adminFetch("/api/admin/departments?shape=flat", { cache: "no-store" }),
         adminFetch("/api/admin/roles", { cache: "no-store" }),
       ]);
-      const userJson = (await userResponse.json()) as ApiEnvelope<{ user: EditableUser }>;
-      const departmentJson = (await departmentResponse.json()) as ApiEnvelope<{
-        items: Array<{ id: string; name: string; path: string }>;
-      }>;
-      const roleJson = (await roleResponse.json()) as ApiEnvelope<{
-        items: UserFormRoleOption[];
-      }>;
+      const [modelJson, userJson, departmentJson, roleJson] = await Promise.all([
+        modelResponse.json() as Promise<ApiEnvelope<ModelAccess>>,
+        userResponse.json() as Promise<ApiEnvelope<{ user: EditableUser }>>,
+        departmentResponse.json() as Promise<ApiEnvelope<{ items: Array<{ id: string; name: string; path: string }> }>>,
+        roleResponse.json() as Promise<ApiEnvelope<{ items: UserFormRoleOption[] }>>,
+      ]);
       if (!userResponse.ok || userJson.code !== "00000" || !userJson.data?.user) {
         throw new Error(userJson.message || "加载用户信息失败");
       }
@@ -264,16 +241,17 @@ export default function RolesPage() {
       if (!roleResponse.ok || roleJson.code !== "00000") {
         throw new Error(roleJson.message || "加载角色失败");
       }
-      const user = userJson.data.user;
+
+      const editableUser = userJson.data.user;
       setUserFormInitial({
-        email: user.email,
-        displayName: user.displayName,
-        status: user.status,
-        deptId: user.deptId ?? "",
-        phone: user.phone ?? "",
-        employeeNo: user.employeeNo ?? "",
-        jobTitle: user.jobTitle ?? "",
-        roleCodes: user.roleCodes.length ? user.roleCodes : ["member"],
+        email: editableUser.email,
+        displayName: editableUser.displayName,
+        status: editableUser.status,
+        deptId: editableUser.deptId ?? "",
+        phone: editableUser.phone ?? "",
+        employeeNo: editableUser.employeeNo ?? "",
+        jobTitle: editableUser.jobTitle ?? "",
+        roleCodes: editableUser.roleCodes.length ? editableUser.roleCodes : ["member"],
         initialPassword: "",
       });
       setUserFormDeptOptions(
@@ -283,73 +261,27 @@ export default function RolesPage() {
         })),
       );
       setUserFormRoleOptions(roleJson.data?.items ?? []);
-      setUserFormOpen(true);
+
+      if (!modelResponse.ok || modelJson.code !== "00000" || !modelJson.data) {
+        toast.error(modelJson.message || "加载可用模型失败");
+        return;
+      }
+
+      const groupModelIds = new Set(modelJson.data.groupModelIds ?? []);
+      const individualModelIds = (modelJson.data.individualModelIds ?? []).filter((modelId) => !groupModelIds.has(modelId));
+      setModelAccess(modelJson.data);
+      setManualModelIds(individualModelIds);
+      setInitialManualModelIds(individualModelIds);
+      const excludedIds = modelJson.data.excludedGroupModelIds ?? [];
+      setExcludedGroupModelIds(excludedIds);
+      setInitialExcludedGroupModelIds(excludedIds);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载用户信息失败");
+      toast.error(error instanceof Error ? error.message : "加载用户详细信息失败");
     } finally {
+      setLoadingModels(false);
       setUserFormLoading(false);
     }
-  }, [selected, userFormLoading]);
-
-  const saveUserDetails = async (values: UserFormValues) => {
-    const target = userFormUser ?? selected;
-    if (!target) return;
-    const response = await adminFetch(`/api/admin/users/${encodeURIComponent(target.id)}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        email: values.email.trim(),
-        displayName: values.displayName.trim(),
-        status: values.status,
-        deptId: values.deptId || null,
-        phone: values.phone.trim() || null,
-        employeeNo: values.employeeNo.trim() || null,
-        jobTitle: values.jobTitle.trim() || null,
-        roleCodes: values.roleCodes,
-      }),
-    });
-    const json = (await response.json()) as ApiEnvelope<{ user: EditableUser }>;
-    if (!response.ok || json.code !== "00000" || !json.data?.user) {
-      toast.error(json.message || "保存用户信息失败");
-      return;
-    }
-    const updated = json.data.user;
-    setSelected((current) =>
-      current && current.id === updated.id
-        ? {
-            ...current,
-            email: updated.email,
-            displayName: updated.displayName,
-            deptId: updated.deptId,
-            status: updated.status,
-            phone: updated.phone,
-            employeeNo: updated.employeeNo,
-            jobTitle: updated.jobTitle,
-          }
-        : current,
-    );
-    setItems((current) =>
-      current.map((item) =>
-        item.id === updated.id
-          ? {
-              ...item,
-              email: updated.email,
-              displayName: updated.displayName,
-              deptId: updated.deptId,
-              status: updated.status,
-              phone: updated.phone,
-              employeeNo: updated.employeeNo,
-              jobTitle: updated.jobTitle,
-            }
-          : item,
-      ),
-    );
-    toast.success("用户信息已保存");
-    setUserFormOpen(false);
-    setUserFormInitial(null);
-    setUserFormUser(null);
-    await load();
-  };
+  }, []);
 
   useEffect(() => {
     void load();
@@ -378,8 +310,8 @@ export default function RolesPage() {
     const user = items.find((item) => item.id === userId);
     if (!user) return;
     openedFromQueryRef.current = userId;
-    void openUserManagement(user);
-  }, [items, loading, openUserManagement, searchParams]);
+    void openEditor(user);
+  }, [items, loading, openEditor, searchParams]);
 
   useEffect(() => {
     if (createRequested) setCreateOpen(true);
@@ -431,7 +363,11 @@ export default function RolesPage() {
   };
 
   const save = async () => {
-    if (!selected || saving) return;
+    if (!selected || !userFormInitial || saving || userFormLoading) return;
+    if (!userFormInitial.email.trim() || !userFormInitial.displayName.trim()) {
+      toast.error("请填写邮箱和姓名");
+      return;
+    }
     const nextQuota = unlimitedTokens ? 0 : Number(monthlyTokens);
     if (!unlimitedTokens && (!Number.isInteger(nextQuota) || nextQuota <= 0)) {
       toast.error("请关闭不限额后输入正整数 Token 额度");
@@ -441,13 +377,24 @@ export default function RolesPage() {
     const modelsChanged =
       !sameIds(manualModelIds, initialManualModelIds) ||
       !sameIds(excludedGroupModelIds, initialExcludedGroupModelIds);
-    if (!quotaChanged && !modelsChanged) {
-      setSelected(null);
-      return;
-    }
     setSaving(true);
     try {
-      const requests: Promise<Response>[] = [];
+      const requests: Promise<Response>[] = [
+        adminFetch(`/api/admin/users/${encodeURIComponent(selected.id)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            email: userFormInitial.email.trim(),
+            displayName: userFormInitial.displayName.trim(),
+            status: userFormInitial.status,
+            deptId: userFormInitial.deptId || null,
+            phone: userFormInitial.phone.trim() || null,
+            employeeNo: userFormInitial.employeeNo.trim() || null,
+            jobTitle: userFormInitial.jobTitle.trim() || null,
+            roleCodes: userFormInitial.roleCodes.length ? userFormInitial.roleCodes : ["member"],
+          }),
+        }),
+      ];
       if (quotaChanged) {
         requests.push(
           adminFetch(`/api/admin/users/${selected.id}/quota`, {
@@ -471,8 +418,9 @@ export default function RolesPage() {
         const json = (await response.json()) as ApiEnvelope<unknown>;
         if (!response.ok || json.code !== "00000") throw new Error(json.message || "保存失败");
       }
-      toast.success("用户设置已保存");
+      toast.success("用户详细信息已保存");
       setSelected(null);
+      setUserFormInitial(null);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "保存失败");
@@ -693,7 +641,7 @@ export default function RolesPage() {
               <Card
                 key={user.id}
                 className="group cursor-pointer transition-colors hover:border-primary/50 hover:bg-muted/20"
-                onClick={() => void openUserManagement(user)}
+                onClick={() => void openEditor(user)}
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-3">
@@ -727,7 +675,7 @@ export default function RolesPage() {
                           void openEditor(user);
                         }}
                       >
-                        <Pencil className="h-3 w-3" />调整额度和模型
+                        <Pencil className="h-3 w-3" />详细编辑
                       </button>
                     </div>
                   </div>
@@ -797,11 +745,11 @@ export default function RolesPage() {
                         role="button"
                         tabIndex={0}
                         className={`${userListGridClass} cursor-pointer px-4 py-3 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset`}
-                        onClick={() => void openUserManagement(user)}
+                        onClick={() => void openEditor(user)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            void openUserManagement(user);
+                            void openEditor(user);
                           }
                         }}
                       >
@@ -842,7 +790,7 @@ export default function RolesPage() {
                               void openEditor(user);
                             }}
                           >
-                            <Pencil />额度与模型
+                            <Pencil />详细编辑
                           </Button>
                         </div>
                       </div>
@@ -855,27 +803,21 @@ export default function RolesPage() {
         </div>
       )}
 
-      <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-2xl">
+      <Sheet
+        open={Boolean(selected)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelected(null);
+            setUserFormInitial(null);
+          }
+        }}
+      >
+        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-3xl">
           {selected ? (
             <>
-              <SheetHeader className="border-b border-border pb-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <SheetTitle>编辑用户</SheetTitle>
-                    <SheetDescription>额度始终由该用户独立计量；个人可以增加模型，也可以关闭来自用户组的模型。</SheetDescription>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={() => void openUserManagement()}
-                    disabled={userFormLoading}
-                    title="打开用户资料编辑，不离开当前页面"
-                  >
-                    <Pencil />{userFormLoading ? "加载中…" : "用户管理"}
-                  </Button>
-                </div>
+              <SheetHeader className="border-b border-border pb-5 pr-8">
+                <SheetTitle>详细编辑</SheetTitle>
+                <SheetDescription>统一维护用户资料、角色、个人额度、可用模型、登录密码和账号状态。</SheetDescription>
               </SheetHeader>
               <div className="space-y-6 py-6">
                 <div className="rounded-xl border border-border bg-muted/20 p-4">
@@ -888,6 +830,29 @@ export default function RolesPage() {
                     <p><span className="text-muted-foreground">状态：</span>{selected.status === "active" ? "正常" : selected.status === "locked" ? "已锁定" : "已停用"}</p>
                   </div>
                 </div>
+                <section className="space-y-3">
+                  <div>
+                    <h2 className="text-sm font-medium">基本资料与角色</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">维护姓名、邮箱、组织、职位、账号状态和角色。</p>
+                  </div>
+                  {userFormLoading ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {[1, 2, 3, 4, 5, 6].map((key) => <Skeleton key={key} className="h-10" />)}
+                    </div>
+                  ) : userFormInitial ? (
+                    <UserFormFields
+                      values={userFormInitial}
+                      onChange={setUserFormInitial}
+                      deptOptions={userFormDeptOptions}
+                      roleOptions={userFormRoleOptions}
+                      idPrefix="user-detail"
+                    />
+                  ) : (
+                    <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                      用户资料加载失败，请关闭后重试。
+                    </p>
+                  )}
+                </section>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-3">
                     <Label htmlFor="user-monthly-tokens">每月 Token 额度</Label>
@@ -1013,32 +978,24 @@ export default function RolesPage() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => setSelected(null)}>取消</Button>
-                  <Button onClick={() => void save()} disabled={saving || loadingModels}>{saving ? "保存中…" : "保存设置"}</Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSelected(null);
+                      setUserFormInitial(null);
+                    }}
+                  >
+                    取消
+                  </Button>
+                  <Button onClick={() => void save()} disabled={saving || loadingModels || userFormLoading || !userFormInitial}>
+                    {saving ? "保存中…" : "保存详细信息"}
+                  </Button>
                 </div>
               </div>
             </>
           ) : null}
         </SheetContent>
       </Sheet>
-
-      <UserFormDialog
-        open={userFormOpen}
-        onOpenChange={(open) => {
-          setUserFormOpen(open);
-          if (!open) {
-            setUserFormInitial(null);
-            setUserFormUser(null);
-          }
-        }}
-        title="编辑用户"
-        description={userFormInitial?.email}
-        submitLabel="保存"
-        initial={userFormInitial ?? undefined}
-        deptOptions={userFormDeptOptions}
-        roleOptions={userFormRoleOptions}
-        onSubmit={saveUserDetails}
-      />
 
       <CreateUserDialog
         open={createOpen}

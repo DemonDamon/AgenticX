@@ -46,7 +46,7 @@
         "audit": "审计日志",
         "compliance": "合规留存",
         "metering": "用量与额度",
-        "quota": "额度控制",
+        "quota": "公司额度",
         "quotaPlans": "Token 套餐",
         "billingSplit": "分账结算",
         "autoRouting": "自动路由",

@@ -555,19 +555,14 @@ export default function GroupsPage() {
       </div>
 
       <Sheet open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
-        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-2xl">
+        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden sm:max-w-2xl">
           {editing ? (
             <>
-              <SheetHeader className="border-b border-border pb-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <SheetTitle>{editing === "new" ? "新建用户组" : `编辑 ${editing.name}`}</SheetTitle>
-                    <SheetDescription className="mt-1">保存后会为成员应用每人月额度；基础模型在运行时自动继承，成员可以在用户页面额外开通或关闭模型。</SheetDescription>
-                  </div>
-                  <Button size="sm" onClick={() => void save()} disabled={saving}>{saving ? "保存中…" : "保存并应用"}</Button>
-                </div>
+              <SheetHeader className="shrink-0 border-b border-border pb-5 pr-8">
+                <SheetTitle>{editing === "new" ? "新建用户组" : `编辑 ${editing.name}`}</SheetTitle>
+                <SheetDescription className="mt-1">保存后会为成员应用每人月额度；基础模型在运行时自动继承，成员可以在用户页面额外开通或关闭模型。</SheetDescription>
               </SheetHeader>
-              <div className="space-y-6 py-6">
+              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto py-6 pr-1">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="group-name">用户组名称</Label>
@@ -655,8 +650,9 @@ export default function GroupsPage() {
                   </section>
                 ) : null}
               </div>
-              <div className="mt-auto flex justify-end gap-2 border-t border-border pt-4">
+              <div className="flex shrink-0 justify-end gap-2 border-t border-border pt-4">
                 <Button variant="outline" onClick={() => setEditing(null)}>关闭</Button>
+                <Button onClick={() => void save()} disabled={saving}>{saving ? "保存中…" : "保存并应用"}</Button>
               </div>
             </>
           ) : null}

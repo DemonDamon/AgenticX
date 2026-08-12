@@ -501,6 +501,28 @@ export default function MeteringQuotaPage() {
     });
   };
 
+  const companyMonthlyTokenLimit =
+    budget.defaults?.unit === "tokens" &&
+    budget.defaults.period === "month" &&
+    budget.defaults.action === "block"
+      ? budget.defaults.limit
+      : 0;
+
+  const setCompanyMonthlyTokenLimit = (limit: number) => {
+    setBudget((prev) => ({
+      ...prev,
+      defaults: {
+        ...(prev.defaults ?? EMPTY_BUDGET_RULE),
+        unit: "tokens",
+        period: "month",
+        limit: Math.max(0, Math.floor(Number.isFinite(limit) ? limit : 0)),
+        warnThresholdPct: prev.defaults?.warnThresholdPct ?? 80,
+        action: "block",
+        fallbackModel: undefined,
+      },
+    }));
+  };
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -534,6 +556,40 @@ export default function MeteringQuotaPage() {
           </Button>
         }
       />
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>全公司月度 Token 上限</CardTitle>
+          <CardDescription>
+            统计公司内所有成员的月度 Token 消耗；达到上限后停止新的模型请求。设置为 0 表示不限制。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex max-w-xl flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="min-w-0 flex-1 space-y-2">
+              <Label htmlFor="company-monthly-token-limit">每月 Token 预算上限</Label>
+              <Input
+                id="company-monthly-token-limit"
+                inputMode="numeric"
+                value={companyMonthlyTokenLimit || ""}
+                placeholder="0（不限额）"
+                onChange={(event) => {
+                  const value = event.target.value.replace(/[^0-9]/g, "");
+                  setCompanyMonthlyTokenLimit(value ? Number(value) : 0);
+                }}
+              />
+            </div>
+            <Button
+              type="button"
+              variant={companyMonthlyTokenLimit <= 0 ? "secondary" : "outline"}
+              onClick={() => setCompanyMonthlyTokenLimit(0)}
+            >
+              {companyMonthlyTokenLimit <= 0 ? "不限额（当前）" : "设为不限额"}
+            </Button>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">修改后请点击页面右上角“保存”应用。</p>
+        </CardContent>
+      </Card>
 
       <Tabs defaultValue="roles">
         <TabsList>
