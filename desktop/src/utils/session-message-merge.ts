@@ -36,6 +36,28 @@ const clientTurnId = (message: Message) =>
 const assistantBodyKey = (content: unknown) =>
   assistantVisibleBodyForUi(String(content ?? "")).trim();
 
+const toolCallIdOf = (message: Message) => String(message.toolCallId ?? "").trim();
+
+const TERMINAL_TOOL_STATUSES = new Set<NonNullable<Message["toolStatus"]>>([
+  "done",
+  "error",
+  "cancelled",
+]);
+
+/**
+ * Disk terminal status wins over a stale live `running`/`pending` card.
+ * Live streams often keep args-only rows as running after the server already
+ * persisted the result; preferring memory here left orphan "正在调用" rows.
+ */
+function resolveMergedToolStatus(
+  diskStatus: Message["toolStatus"],
+  memoryStatus: Message["toolStatus"],
+): Message["toolStatus"] {
+  if (diskStatus && TERMINAL_TOOL_STATUSES.has(diskStatus)) return diskStatus;
+  if (memoryStatus && TERMINAL_TOOL_STATUSES.has(memoryStatus)) return memoryStatus;
+  return memoryStatus ?? diskStatus;
+}
+
 function overlayMemoryEnrichment(diskRow: Message, memory: Message): Message {
   return {
     ...diskRow,
@@ -51,7 +73,7 @@ function overlayMemoryEnrichment(diskRow: Message, memory: Message): Message {
     searchedQueries: memory.searchedQueries ?? diskRow.searchedQueries,
     reasoning: memory.reasoning ?? diskRow.reasoning,
     reasoningSeconds: memory.reasoningSeconds ?? diskRow.reasoningSeconds,
-    toolStatus: memory.toolStatus ?? diskRow.toolStatus,
+    toolStatus: resolveMergedToolStatus(diskRow.toolStatus, memory.toolStatus),
     toolElapsedSec: memory.toolElapsedSec ?? diskRow.toolElapsedSec,
     metadata: memory.metadata ?? diskRow.metadata,
   };
@@ -86,6 +108,21 @@ export function mergeSessionMessagesTail(
       if (byClientTurn) {
         consumedMemory.add(byClientTurn);
         return byClientTurn;
+      }
+    }
+    // Live tool cards keep JSON args as content while disk stores the result
+    // body — content equality never hits. Align on toolCallId first.
+    const diskToolCallId = diskRow.role === "tool" ? toolCallIdOf(diskRow) : "";
+    if (diskToolCallId) {
+      const byToolCallId = existing.find(
+        (memory) =>
+          !consumedMemory.has(memory) &&
+          memory.role === "tool" &&
+          toolCallIdOf(memory) === diskToolCallId,
+      );
+      if (byToolCallId) {
+        consumedMemory.add(byToolCallId);
+        return byToolCallId;
       }
     }
     if (!diskClientTurnId) {
@@ -127,6 +164,7 @@ export function mergeSessionMessagesTail(
 
   const out: Message[] = [];
   const placedAssistantBodies = new Set<string>();
+  const placedToolCallIds = new Set<string>();
   for (const diskRow of mapped) {
     const memory = findMemoryMatch(diskRow);
     const row = memory ? overlayMemoryEnrichment(diskRow, memory) : diskRow;
@@ -135,11 +173,17 @@ export function mergeSessionMessagesTail(
       const body = assistantBodyKey(row.content);
       if (body) placedAssistantBodies.add(body);
     }
+    if (row.role === "tool") {
+      const callId = toolCallIdOf(row);
+      if (callId) placedToolCallIds.add(callId);
+    }
   }
 
   // Append in-memory rows that disk hasn't persisted yet (缺失自愈), but never
   // re-append an assistant row whose body already appears above — those are the
   // accumulated duplicate "思考了 N 秒" copies left by earlier failed merges.
+  // Also never re-append a live tool card whose toolCallId already landed from
+  // disk (stale running args-only rows used to appear after the final answer).
   for (const memory of existing) {
     if (consumedMemory.has(memory)) continue;
     if (isOrphanFormattedToolResultMessage(memory)) continue;
@@ -147,6 +191,10 @@ export function mergeSessionMessagesTail(
       const body = assistantBodyKey(memory.content);
       if (body && placedAssistantBodies.has(body)) continue;
       if (body) placedAssistantBodies.add(body);
+    }
+    if (memory.role === "tool") {
+      const callId = toolCallIdOf(memory);
+      if (callId && placedToolCallIds.has(callId)) continue;
     }
     out.push(memory);
   }
