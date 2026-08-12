@@ -69,6 +69,19 @@ Suggested-Impl-Model: Composer 2.5 档即可（单文件、两处 effect 的精�
 
 - `desktop/src/components/ChatPane.tsx`：`poll()` 写入分支（FR-1）、首次加载 effect 的骨架屏开关（FR-2）、轮询 effect 依赖数组。
 
+## Follow-up（2026-08-12）：空群重启骨架屏偏慢
+
+用户反馈：重启后打开尚未对话的群聊，仍长时间停在「正在加载会话…」。
+
+根因补充：
+- bootstrap 把「tail 成功且 messages=[]」与「tail 失败」混为一谈，空会话也会再打一轮 `loadSessionMessages` 全量 fallback。
+- 全量/tail 都确认空时未写 `sessionBootstrapRef`，finally 仍按 `!hydrated` 调度最多 4 次重试。
+
+修复（同文件 bootstrap effect）：
+- `entry && messages.length===0 && !hasOlder` → 标记 bootstrapped，直接出空态，跳过全量二次加载。
+- `full.ok`（含空数组）→ 标记 bootstrapped。
+- finally 仅在 `sessionBootstrapRef !== sid`（真正加载失败）时重试。
+
 ## Out of scope（no-scope-creep 边界）
 
 - 不改 `mergeSessionMessagesTail` / `session-tail-cache.ts` / `usePaneNavigation.ts` 任何逻辑。

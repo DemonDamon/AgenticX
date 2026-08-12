@@ -5780,20 +5780,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           sessionBootstrapRef.current = sid;
           return;
         }
-        // Tail page empty/unavailable — fall back to a full load so a transient
-        // pagination miss never leaves the pane blank (mirrors history panel).
-        const full = await window.agenticxDesktop.loadSessionMessages(sid);
-        if (cancelled || !paneStillOnSid()) return;
-        if (full.ok && Array.isArray(full.messages) && full.messages.length > 0) {
-          const mapped = full.messages.map((item, index) =>
-            mapLoadedSessionMessage(item as LoadedSessionMessage, sid, index, sid)
-          );
-          setPaneMessages(pane.id, mapped);
+        // Tail succeeded with an empty window and no older pages → session is
+        // authoritatively empty (brand-new group / never chatted). Skip the
+        // full-load fallback and do not schedule empty-session retries — both
+        // previously kept the skeleton up for an extra IPC round-trip (and up
+        // to ~8s of silent refetch) even though there was nothing to load.
+        if (entry && !entry.hasOlder) {
           setPaneMessagePaging(pane.id, {
             oldestLoadedIndex: 0,
             hasOlderMessages: false,
             loadingOlderMessages: false,
           });
+          sessionBootstrapRef.current = sid;
+          return;
+        }
+        // Tail unavailable (null) or suspicious empty-with-older — full load so
+        // a transient pagination miss never leaves the pane blank.
+        const full = await window.agenticxDesktop.loadSessionMessages(sid);
+        if (cancelled || !paneStillOnSid()) return;
+        if (full.ok && Array.isArray(full.messages)) {
+          if (full.messages.length > 0) {
+            const mapped = full.messages.map((item, index) =>
+              mapLoadedSessionMessage(item as LoadedSessionMessage, sid, index, sid)
+            );
+            setPaneMessages(pane.id, mapped);
+          }
+          setPaneMessagePaging(pane.id, {
+            oldestLoadedIndex: 0,
+            hasOlderMessages: false,
+            loadingOlderMessages: false,
+          });
+          // Mark bootstrapped on authoritative empty too — otherwise the
+          // finally-block retry loop keeps re-fetching an empty session.
           sessionBootstrapRef.current = sid;
         }
       } catch {
@@ -5803,12 +5821,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           sessionBootstrapInflightRef.current = "";
         }
         if (!cancelled && paneStillOnSid()) {
-          const hydrated =
-            visibleMessagesForSession(
-              useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [],
-              sid
-            ).length > 0;
-          if (!hydrated && sessionBootstrapAttemptRef.current < 4) {
+          // Only retry when the load itself failed — not when the session is
+          // confirmed empty (sessionBootstrapRef already set above).
+          const bootstrapped = sessionBootstrapRef.current === sid;
+          if (!bootstrapped && sessionBootstrapAttemptRef.current < 4) {
             sessionBootstrapAttemptRef.current += 1;
             window.setTimeout(() => {
               const stillSid =
