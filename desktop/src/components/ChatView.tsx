@@ -2888,6 +2888,13 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => void send()}>发送</button>
           )}
           </div>
+          {messages.some((m) => m.role === "user" || m.role === "assistant") ? (
+            <div className="mt-1.5 flex justify-center px-0.5">
+              <p className="select-none text-[11px] leading-none text-text-faint">
+                内容由 AI 生成，请核实重要信息
+              </p>
+            </div>
+          ) : null}
         </div>
         {!isLite && <ShortcutHints />}
       </div>

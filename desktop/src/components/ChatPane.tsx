@@ -12472,6 +12472,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
             </div>
           </div>
+          {/* AI 免责声明：仅非空会话显示（对齐 Work Buddy，空新建会话不打扰） */}
+          {(pane.messages ?? []).some(
+            (m) => m.role === "user" || m.role === "assistant"
+          ) ? (
+            <div className="mt-1.5 flex justify-center px-0.5">
+              <p className="select-none text-[11px] leading-none text-text-faint">
+                内容由 AI 生成，请核实重要信息
+              </p>
+            </div>
+          ) : null}
           {composerRefTip
             ? createPortal(
                 <div
