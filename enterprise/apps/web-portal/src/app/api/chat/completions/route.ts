@@ -14,14 +14,19 @@ import { listAvailableModelsForUser } from "../../../../lib/admin-providers-read
 import { stripEmptyAssistantMessages } from "../../../../lib/chat-completion-sanitize";
 import { withCurrentTimeContext } from "../../../../lib/current-time";
 import {
-  resolveStandaloneSearchQuery,
   runWebSearchTurn,
   type WebSearchChatMessage,
 } from "../../../../lib/web-search/tool-loop";
-import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
+import {
+  loadTenantWebSearchConfig,
+  loadTenantWebSearchConfigStrict,
+} from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
-import { decideAutoRunDeepResearch } from "../../../../lib/deep-research/auto-need";
+import {
+  decideAutoRunDeepResearch,
+  resolveManualDeepResearchQuery,
+} from "../../../../lib/deep-research/auto-need";
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.messages)) return body;
@@ -102,13 +107,25 @@ export async function POST(request: Request) {
   let parsedBody: Record<string, unknown> | null = null;
   // portal 把模型 id 编码为 "<provider>/<model>"；admin 配置好的 provider 与上游 endpoint 一一对应。
   // gateway 用 model 字段查表，所以这里把 provider 拆出来放请求头，body.model 仅保留模型名。
+  let parsedRequest: (Record<string, unknown> & {
+    model?: string;
+    agenticx_web_search?: unknown;
+    agenticx_deep_research?: unknown;
+    agenticx_deep_research_auto?: unknown;
+  }) | null = null;
   try {
-    const parsed = JSON.parse(rawBody) as Record<string, unknown> & {
+    parsedRequest = JSON.parse(rawBody) as Record<string, unknown> & {
       model?: string;
       agenticx_web_search?: unknown;
       agenticx_deep_research?: unknown;
       agenticx_deep_research_auto?: unknown;
     };
+  } catch {
+    // Non-JSON bodies are forwarded unchanged.
+  }
+
+  if (parsedRequest) {
+    const parsed = parsedRequest;
     enableWebSearch = parsed.agenticx_web_search === true;
     enableDeepResearch = parsed.agenticx_deep_research === true;
     enableDeepResearchAuto = parsed.agenticx_deep_research_auto === true;
@@ -120,11 +137,42 @@ export async function POST(request: Request) {
     } = parsed;
     parsedBody = withoutFlag;
 
-    if (typeof parsed.model === "string" && parsed.model.includes("/")) {
-      // 服务端实时校验：用户/部门可见模型收窄后，禁止转发到已失效的模型（客户端未刷新前也不得放行）。
-      const effectiveModels = await listAvailableModelsForUser(session.userId, session.email, session.deptId ?? undefined);
-      const isVisible = effectiveModels.some((m) => m.id === parsed.model);
-      if (!isVisible) {
+    if (typeof parsed.model === "string" && process.env.NEXT_PUBLIC_CHAT_CLIENT_MODE !== "mock") {
+      // Resolve every portal model through the user's effective list. This
+      // prevents a bare model name from bypassing provider visibility before
+      // the same model is used for automatic routing or the final answer.
+      let effectiveModels: Awaited<ReturnType<typeof listAvailableModelsForUser>>;
+      try {
+        effectiveModels = await listAvailableModelsForUser(
+          session.userId,
+          session.email,
+          session.deptId ?? undefined,
+        );
+      } catch (error) {
+        console.error(
+          "[chat] effective model policy unavailable:",
+          error instanceof Error ? error.message : error,
+        );
+        return NextResponse.json(
+          {
+            error: {
+              code: "50302",
+              message: "模型权限暂时无法校验，请稍后重试",
+            },
+          },
+          { status: 503 },
+        );
+      }
+      const requestedModel = parsed.model.trim();
+      const resolvedModelId = requestedModel.includes("/")
+        ? effectiveModels.find((model) => model.id === requestedModel)?.id
+        : (() => {
+            const matches = effectiveModels.filter(
+              (model) => model.id.split("/").slice(1).join("/") === requestedModel,
+            );
+            return matches.length === 1 ? matches[0]?.id : undefined;
+          })();
+      if (!resolvedModelId) {
         return NextResponse.json(
           {
             error: {
@@ -136,7 +184,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const [providerId, ...rest] = parsed.model.split("/");
+      const [providerId, ...rest] = resolvedModelId.split("/");
       const modelName = rest.join("/");
       if (providerId && modelName) {
         providerHint = providerId;
@@ -148,8 +196,6 @@ export async function POST(request: Request) {
     } else {
       forwardBody = JSON.stringify(withoutFlag);
     }
-  } catch {
-    // body 不是 JSON 时维持原样转发
   }
 
   const gatewayHeaders: Record<string, string> = {
@@ -163,10 +209,60 @@ export async function POST(request: Request) {
     ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
   };
 
-  if (enableDeepResearchAuto && !enableDeepResearch && parsedBody) {
+  let tenantSearchConfigSnapshot: Awaited<ReturnType<typeof loadTenantWebSearchConfig>> = null;
+  let tenantSearchConfigLoaded = false;
+  let ordinaryTenantConfigPromise: ReturnType<typeof loadTenantWebSearchConfig> | null = null;
+  const loadTenantSearchConfigForWeb = () => {
+    if (tenantSearchConfigLoaded) return Promise.resolve(tenantSearchConfigSnapshot);
+    ordinaryTenantConfigPromise ??= loadTenantWebSearchConfig(session.tenantId);
+    return ordinaryTenantConfigPromise;
+  };
+  let deepResearchAvailable = true;
+  if ((enableDeepResearch || enableDeepResearchAuto) && parsedBody) {
+    try {
+      tenantSearchConfigSnapshot = await loadTenantWebSearchConfigStrict(session.tenantId);
+      tenantSearchConfigLoaded = true;
+      deepResearchAvailable = tenantSearchConfigSnapshot?.deepResearchEnabled ?? true;
+    } catch (error) {
+      console.error(
+        "[deep-research] tenant policy unavailable:",
+        error instanceof Error ? error.message : error,
+      );
+      if (enableDeepResearch) {
+        return NextResponse.json(
+          {
+            error: {
+              code: "50303",
+              message: "深度研究策略暂时无法校验，请稍后重试",
+            },
+          },
+          { status: 503 },
+        );
+      }
+      // Automatic mode is fail-closed for the expensive path. Ordinary web
+      // search may still use its established best-effort configuration path.
+      deepResearchAvailable = false;
+      enableDeepResearchAuto = false;
+      console.info("[deep-research] automatic route skipped (policy_unavailable)");
+    }
+    if (!deepResearchAvailable && enableDeepResearchAuto && !enableDeepResearch) {
+      // Automatic mode silently falls back to the ordinary web-search policy.
+      // A manual request stays enabled so the orchestrator can return its
+      // existing administrator-disabled explanation without a router call.
+      enableDeepResearchAuto = false;
+      console.info("[deep-research] automatic route skipped (tenant_disabled)");
+    }
+  }
+
+  if (
+    deepResearchAvailable &&
+    enableDeepResearchAuto &&
+    !enableDeepResearch &&
+    parsedBody
+  ) {
     const decision = await decideAutoRunDeepResearch(
       Array.isArray(parsedBody.messages)
-        ? (parsedBody.messages as Array<{ role?: unknown; content?: unknown }>)
+        ? (parsedBody.messages as WebSearchChatMessage[])
         : [],
       {
         url: GATEWAY_COMPLETIONS_URL,
@@ -176,32 +272,47 @@ export async function POST(request: Request) {
       },
     );
     enableDeepResearch = decision.runDeepResearch;
+    if (decision.runDeepResearch) {
+      resolvedDeepResearchQuery = decision.resolvedQuery;
+    }
     console.info(
-      `[deep-research] automatic route run=${decision.runDeepResearch} confidence=${decision.confidence.toFixed(2)} reason=${decision.reason || "unspecified"}`,
+      `[deep-research] automatic route run=${decision.runDeepResearch} route_confidence=${decision.routeConfidence.toFixed(2)} query_confidence=${decision.queryConfidence.toFixed(2)} query_chars=${decision.resolvedQuery.length} reason=${decision.reason || "unspecified"}`,
     );
   }
 
-  if (enableDeepResearch && parsedBody) {
-    const queryResolution = await resolveStandaloneSearchQuery(
+  // Automatic routing already resolved the contextual query in its one model
+  // call. Manual activation intentionally skips the decision gate, but still
+  // uses the shared resolver when history is needed to fill missing context.
+  if (
+    deepResearchAvailable &&
+    enableDeepResearch &&
+    parsedBody &&
+    !resolvedDeepResearchQuery
+  ) {
+    const queryResolution = await resolveManualDeepResearchQuery(
       Array.isArray(parsedBody.messages)
         ? (parsedBody.messages as WebSearchChatMessage[])
         : [],
-      typeof parsedBody.model === "string" ? parsedBody.model : undefined,
       {
         url: GATEWAY_COMPLETIONS_URL,
         headers: gatewayHeaders,
         signal: request.signal,
+        model: typeof parsedBody.model === "string" ? parsedBody.model : undefined,
       },
     );
     if (queryResolution.kind === "unresolved") {
       console.warn(
-        `[deep-research] standalone query unresolved (${queryResolution.reason}); using contextual normal chat`,
+        `[deep-research] manual query unresolved (${queryResolution.reason}); rejecting instead of silently downgrading`,
       );
-      enableDeepResearch = false;
-      // Normal web search uses the same resolver and would only repeat the
-      // failed rewrite. Keep the conversation intact and answer without a raw
-      // pronoun/ellipsis search instead.
-      enableWebSearch = false;
+      return NextResponse.json(
+        {
+          error: {
+            code: "40001",
+            message: "无法从本轮消息确定深度研究主题，请补充文字说明后重试",
+          },
+        },
+        { status: 400 },
+      );
     } else {
       resolvedDeepResearchQuery = queryResolution.value.query;
       console.info(
@@ -215,7 +326,7 @@ export async function POST(request: Request) {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
       signal: request.signal,
-      loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
+      tenantConfig: tenantSearchConfigSnapshot,
       artifactStore: defaultArtifactStore,
       tenantId: session.tenantId,
       userId: session.userId,
@@ -261,7 +372,7 @@ export async function POST(request: Request) {
         url: GATEWAY_COMPLETIONS_URL,
         headers: gatewayHeaders,
         signal: request.signal,
-        loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
+        loadTenantConfig: loadTenantSearchConfigForWeb,
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "web search turn failed";

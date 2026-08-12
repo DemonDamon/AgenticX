@@ -50,6 +50,53 @@ describe("contextual search-query rewrite", () => {
     ).toBeNull();
   });
 
+  it("extracts text from multimodal turns without leaking image payloads", () => {
+    const messages = buildSearchQueryRewriteMessages([
+      { role: "user", content: "比较王虹和邓煜的经历" },
+      { role: "assistant", content: "上一轮回答" },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "他们最近的风评有什么变化" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+        ],
+      },
+    ]);
+
+    expect(messages?.[1]?.content).toContain(
+      '"current_query":"他们最近的风评有什么变化"',
+    );
+    expect(messages?.[1]?.content).not.toContain("base64");
+  });
+
+  it("does not reuse an older query for an image-only latest turn", () => {
+    expect(
+      buildSearchQueryRewriteMessages([
+        { role: "user", content: "不要再次搜索这个旧问题" },
+        { role: "assistant", content: "上一轮回答" },
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+          ],
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  it("does not reinterpret an attachment-only filename as a follow-up query", () => {
+    expect(
+      buildSearchQueryRewriteMessages([
+        { role: "user", content: "搜索这个旧问题" },
+        { role: "assistant", content: "上一轮回答" },
+        {
+          role: "user",
+          content: "--- 附件: 行业报告.pdf ---\n文件正文",
+        },
+      ]),
+    ).toBeNull();
+  });
+
   it("accepts valid agent output without applying pronoun word-list semantics", () => {
     expect(
       parseSearchQueryRewrite(

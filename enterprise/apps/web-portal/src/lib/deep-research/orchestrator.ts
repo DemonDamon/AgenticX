@@ -207,6 +207,8 @@ export type DeepResearchDeps = {
   headers: Record<string, string>;
   fetchImpl?: typeof fetch;
   loadTenantConfig?: () => Promise<TenantWebSearchRow>;
+  /** Optional request-scoped snapshot avoids reading tenant policy twice. */
+  tenantConfig?: TenantWebSearchRow;
   executeSearch?: typeof executeWebSearch;
   buildPlan?: typeof buildResearchPlan;
   proposeClarify?: typeof proposeClarification;
@@ -223,7 +225,7 @@ export type DeepResearchDeps = {
   userId?: string;
   sessionId?: string;
   runId?: string;
-  /** Standalone AI-resolved retrieval query shared with normal web search. */
+  /** Standalone research request resolved from the current conversation. */
   resolvedUserQuery?: string;
   clarifyTimeoutMs?: number;
   /** Skip clarify wait (tests). When false and clarifier needed, still emits clarify then continues with skip. */
@@ -585,7 +587,7 @@ export async function runDeepResearchTurn(
   const awaitClarify = deps.awaitClarify !== false;
   const clarifyTimeoutMs = deps.clarifyTimeoutMs ?? CLARIFY_TIMEOUT_MS;
 
-  const tenant = deps.loadTenantConfig ? await deps.loadTenantConfig() : null;
+  const tenant = deps.tenantConfig ?? (deps.loadTenantConfig ? await deps.loadTenantConfig() : null);
   const deepResearchEnabled = tenant?.deepResearchEnabled ?? true;
   const searchCfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);
   const pageFetchCfg = resolvePageFetchConfig(tenant);

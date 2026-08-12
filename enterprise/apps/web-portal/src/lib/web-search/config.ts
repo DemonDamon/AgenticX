@@ -21,7 +21,7 @@ export type TenantWebSearchRow = {
   /** Ordered, decrypted provider instances; absent rows retain legacy single-provider behavior. */
   providers?: WebSearchProviderConfig[];
   primaryProviderId?: string;
-  /** Opt-in deep research (default false). */
+  /** Tenant deep-research switch; missing legacy config currently defaults to enabled. */
   deepResearchEnabled?: boolean;
   /** 逗号分隔的后端链，如 "native,jina"。 */
   pageFetchBackends?: string;

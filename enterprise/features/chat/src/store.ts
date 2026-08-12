@@ -66,6 +66,10 @@ type SendMessageInput = {
 type SendMessageOptions = {
   /** Interrupt current stream and send immediately (queue send-now / double Enter). */
   forceSend?: boolean;
+  /** Dispatch to this session even when another conversation is currently active. */
+  targetSessionId?: string;
+  /** Fires once accepted, carrying the actual session id after draft promotion. */
+  onAccepted?: (sessionId: string) => void;
 };
 
 type EditUserMessageInput = {
@@ -863,11 +867,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       {
         content: item.content,
         attachments: item.attachments,
-        webSearch: get().lastWebSearchBySessionId[item.sessionId],
-        deepResearch: get().lastDeepResearchBySessionId[item.sessionId],
-        deepResearchAuto: get().lastDeepResearchAutoBySessionId[item.sessionId],
+        webSearch: item.webSearch,
+        deepResearch: item.deepResearch,
+        deepResearchAuto: item.deepResearchAuto,
       },
-      { forceSend: true }
+      { forceSend: true, targetSessionId: item.sessionId }
     );
   },
 
@@ -1192,8 +1196,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   async sendMessage(client, input, options) {
     const state = get();
-    let sessionId = state.activeSessionId;
+    let sessionId = options?.targetSessionId?.trim() || state.activeSessionId;
     if (!sessionId) return;
+    if (
+      options?.targetSessionId &&
+      !isDraftSessionId(state, sessionId) &&
+      !state.sessions.some((session) => session.id === sessionId)
+    ) {
+      return;
+    }
+    let requestModel =
+      state.sessions.find((session) => session.id === sessionId)?.active_model ??
+      state.activeModel;
 
     const content = input.content.trim();
     const attachments =
@@ -1215,15 +1229,20 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             sessionId: enqueueSessionId,
             content: content || "（附件）",
             attachments: attachments.length > 0 ? attachments : undefined,
+            webSearch: Boolean(input.webSearch),
+            deepResearch: Boolean(input.deepResearch),
+            deepResearchAuto: Boolean(input.deepResearchAuto),
             timestamp: Date.now(),
           },
         ],
       }));
+      options?.onAccepted?.(enqueueSessionId);
       return;
     }
 
     if (options?.forceSend && isSessionStreaming(get(), sessionId)) {
-      await get().cancel(client);
+      const requestId = getSessionRequestId(get(), sessionId);
+      if (requestId) await client.cancel(requestId);
     }
 
     let queueSessionId = sessionId;
@@ -1232,9 +1251,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           try {
             const created = await portalHistory.createSession({
               title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
-              activeModel: state.activeModel,
+              activeModel: requestModel,
             });
             sessionId = created.id;
+            requestModel = created.active_model ?? requestModel;
             set((prev) => {
               const draftId = prev.draftSessionId;
               const draftTokens = draftId ? (prev.sessionTokensBySessionId[draftId] ?? { ...EMPTY_USAGE }) : { ...EMPTY_USAGE };
@@ -1243,7 +1263,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               nextTokensMap[created.id] = draftTokens;
               return {
                 draftSessionId: null,
-                activeSessionId: created.id,
+                activeSessionId:
+                  prev.activeSessionId === draftId ? created.id : prev.activeSessionId,
                 sessions: [...prev.sessions, created],
                 sessionTokensBySessionId: nextTokensMap,
               };
@@ -1262,7 +1283,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             tenant_id: input.tenantId ?? DEFAULT_TENANT,
             user_id: input.userId ?? DEFAULT_USER,
             title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
-            active_model: state.activeModel,
+            active_model: requestModel,
             message_count: 0,
             created_at: now(),
             updated_at: now(),
@@ -1300,7 +1321,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       user_id: userId,
       role: "assistant",
       content: "",
-      model: latest.activeModel,
+      model: requestModel,
       created_at: createdAtPair.assistant,
       ...(deepResearchEnabled
         ? {
@@ -1356,6 +1377,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         };
       }),
     }));
+    options?.onAccepted?.(sessionId);
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
@@ -1363,7 +1385,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       let streamedWebSearchTrace: ChatMessage["web_search_trace"];
       const request = toSdkRequest(
         sessionId,
-        get().activeModel,
+        requestModel,
         nextSessionMessages,
         webSearchEnabled,
         deepResearchEnabled,
@@ -1520,13 +1542,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         pendingMessages: prev.pendingMessages.filter((_, index) => index !== idx),
       }));
       queueMicrotask(() => {
-        void get().sendMessage(client, {
-          content: next.content,
-          attachments: next.attachments,
-          webSearch: get().lastWebSearchBySessionId[next.sessionId],
-          deepResearch: get().lastDeepResearchBySessionId[next.sessionId],
-          deepResearchAuto: get().lastDeepResearchAutoBySessionId[next.sessionId],
-        });
+        void get().sendMessage(
+          client,
+          {
+            content: next.content,
+            attachments: next.attachments,
+            webSearch: next.webSearch,
+            deepResearch: next.deepResearch,
+            deepResearchAuto: next.deepResearchAuto,
+          },
+          { targetSessionId: next.sessionId },
+        );
       });
     }
   },

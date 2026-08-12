@@ -129,7 +129,8 @@ export const WEB_SEARCH_CONTEXT_SNIPPET_CHARS = WEB_SEARCH_SNIPPET_CHARS;
 
 export type WebSearchChatMessage = {
   role: string;
-  content?: string | null;
+  /** Gateway requests may carry OpenAI-style multimodal content parts. */
+  content?: unknown;
   tool_calls?: unknown;
   tool_call_id?: string;
   name?: string;
@@ -180,8 +181,16 @@ export function synthesizeTextSse(
 
 /** Keep search keywords short — full document dumps make DDG challenge / return empty. */
 export const MAX_WEB_SEARCH_QUERY_CHARS = 240;
+const PORTAL_ATTACHMENT_AFTER_TEXT = /\n---\s*(?:附件|attachment)\s*[:：]/i;
+const PORTAL_ATTACHMENT_AT_START = /^---\s*(?:附件|attachment)\s*[:：]/i;
+const PORTAL_ATTACHMENT_NAME =
+  /^---\s*(?:附件|attachment)\s*[:：]\s*(.+?)\s*---/i;
 
-function textFromMessageContent(content: unknown): string {
+export function isPortalAttachmentOnlyTurn(raw: string): boolean {
+  return PORTAL_ATTACHMENT_AT_START.test(raw.replace(/\r\n/g, "\n").trim());
+}
+
+export function messageContentToText(content: unknown): string {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
   const parts: string[] = [];
@@ -202,12 +211,12 @@ function textFromMessageContent(content: unknown): string {
 export function sanitizeWebSearchQuery(raw: string, maxChars = MAX_WEB_SEARCH_QUERY_CHARS): string {
   let text = raw.replace(/\r\n/g, "\n").trim();
   if (!text) return "";
-  const attachIdx = text.search(/\n---\s*附件\s*[:：]/);
+  const attachIdx = text.search(PORTAL_ATTACHMENT_AFTER_TEXT);
   if (attachIdx >= 0) {
     text = text.slice(0, attachIdx).trim();
-  } else if (/^---\s*附件\s*[:：]/.test(text)) {
+  } else if (PORTAL_ATTACHMENT_AT_START.test(text)) {
     // User sent attachment-only turn — fall back to filename line if present.
-    const nameMatch = text.match(/^---\s*附件\s*[:：]\s*(.+?)\s*---/);
+    const nameMatch = text.match(PORTAL_ATTACHMENT_NAME);
     text = nameMatch?.[1]?.trim() || "";
   }
   text = text.replace(/\s+/g, " ").trim();
@@ -215,12 +224,28 @@ export function sanitizeWebSearchQuery(raw: string, maxChars = MAX_WEB_SEARCH_QU
   return text.slice(0, Math.max(1, maxChars - 1)).trimEnd();
 }
 
+/**
+ * Research prompts may put output constraints at the end. Keep both boundaries
+ * when bounding them; ordinary provider queries continue using prefix truncation.
+ */
+export function sanitizeResearchRequest(raw: string, maxChars: number): string {
+  const text = sanitizeWebSearchQuery(raw, Number.MAX_SAFE_INTEGER);
+  if (text.length <= maxChars) return text;
+  const separator = " … ";
+  const usable = Math.max(2, maxChars - separator.length);
+  const head = Math.ceil(usable / 2);
+  const tail = Math.floor(usable / 2);
+  return `${text.slice(0, head).trimEnd()}${separator}${text.slice(-tail).trimStart()}`;
+}
+
 export function extractLastUserQuery(messages: ChatMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg?.role !== "user") continue;
-    const text = textFromMessageContent(msg.content);
-    if (text) return sanitizeWebSearchQuery(text);
+    // Only the actual current user turn may define the current query. Falling
+    // through to an older user row would silently search the previous topic on
+    // an image-only or otherwise textless turn.
+    return sanitizeWebSearchQuery(messageContentToText(msg.content));
   }
   return "";
 }
@@ -239,8 +264,7 @@ export function extractLastUserRawText(messages: ChatMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg?.role !== "user") continue;
-    const text = textFromMessageContent(msg.content);
-    if (text) return text;
+    return messageContentToText(msg.content);
   }
   return "";
 }

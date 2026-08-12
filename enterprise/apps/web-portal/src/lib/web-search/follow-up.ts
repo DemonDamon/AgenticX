@@ -1,11 +1,39 @@
 /** AI-assisted standalone search-query completion from recent conversation context. */
 
 import { getCurrentTimeFacts } from "../current-time";
-import { extractLastUserQuery, sanitizeWebSearchQuery } from "./tool-loop";
+import {
+  isPortalAttachmentOnlyTurn,
+  messageContentToText,
+  sanitizeResearchRequest,
+  sanitizeWebSearchQuery,
+} from "./tool-loop";
 
 type ChatMessage = {
   role: string;
-  content?: string | null;
+  content?: unknown;
+};
+
+export type ContextualQueryPayload = {
+  temporal_context: {
+    current_date: string;
+    timezone: string;
+    utc_offset: string;
+  };
+  conversation: Array<{ role: string; content: string }>;
+  current_query: string;
+};
+
+export type ContextualQueryBudget = {
+  maxMessages: number;
+  maxCharsPerMessage: number;
+  maxCurrentQueryChars: number;
+  preserveTail?: boolean;
+};
+
+const DEFAULT_CONTEXTUAL_QUERY_BUDGET: ContextualQueryBudget = {
+  maxMessages: 7,
+  maxCharsPerMessage: 2_400,
+  maxCurrentQueryChars: 240,
 };
 
 export type SearchQueryRewriteMessage = {
@@ -81,8 +109,69 @@ function stripThinkBlocks(text: string): string {
 }
 
 function textForRewrite(content: unknown): string {
-  if (typeof content !== "string") return "";
-  return stripThinkBlocks(content).replace(/\[\d+\]/g, "").replace(/\s+/g, " ").trim();
+  return stripThinkBlocks(messageContentToText(content))
+    .replace(/\[\d+\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * One bounded, clock-anchored context payload shared by ordinary search and
+ * automatic deep-research routing. Callers own the task-specific decision prompt.
+ */
+export function buildContextualQueryPayload(
+  messages: ChatMessage[],
+  now: Date = new Date(),
+  budget: ContextualQueryBudget = DEFAULT_CONTEXTUAL_QUERY_BUDGET,
+): ContextualQueryPayload | null {
+  let currentIndex = -1;
+  let currentQuery = "";
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role !== "user") continue;
+    currentIndex = i;
+    const rawCurrentQuery = messageContentToText(messages[i]?.content);
+    // A portal attachment payload is transport context, not a fresh search or
+    // research intent. Never reinterpret its filename as the current request.
+    if (isPortalAttachmentOnlyTurn(rawCurrentQuery)) break;
+    currentQuery = budget.preserveTail
+      ? sanitizeResearchRequest(rawCurrentQuery, budget.maxCurrentQueryChars)
+      : sanitizeWebSearchQuery(rawCurrentQuery, budget.maxCurrentQueryChars);
+    break;
+  }
+  if (currentIndex < 0 || !currentQuery) return null;
+
+  const conversation = messages
+    .slice(0, currentIndex + 1)
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .slice(-budget.maxMessages)
+    .map((message) => ({
+      role: message.role,
+      // Attachment markers depend on line boundaries, so strip the appended
+      // body before text normalization collapses whitespace.
+      content: message.role === "user"
+        ? budget.preserveTail
+          ? sanitizeResearchRequest(
+              messageContentToText(message.content),
+              budget.maxCharsPerMessage,
+            )
+          : sanitizeWebSearchQuery(
+              messageContentToText(message.content),
+              budget.maxCharsPerMessage,
+            )
+        : textForRewrite(message.content).slice(0, budget.maxCharsPerMessage),
+    }))
+    .filter((message) => message.content);
+
+  const currentTime = getCurrentTimeFacts(now);
+  return {
+    temporal_context: {
+      current_date: currentTime.date,
+      timezone: currentTime.tzName,
+      utc_offset: currentTime.utcOffset,
+    },
+    conversation,
+    current_query: currentQuery,
+  };
 }
 
 /**
@@ -93,50 +182,18 @@ export function buildSearchQueryRewriteMessages(
   messages: ChatMessage[],
   now: Date = new Date(),
 ): SearchQueryRewriteMessage[] | null {
-  let currentIndex = -1;
-  let currentQuery = "";
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.role !== "user") continue;
-    const query = extractLastUserQuery(messages.slice(0, i + 1));
-    if (!query) continue;
-    currentIndex = i;
-    currentQuery = query;
-    break;
-  }
-  if (currentIndex < 0 || !currentQuery) return null;
-
-  const context = messages
-    .slice(Math.max(0, currentIndex - 6), currentIndex + 1)
-    .filter((message) => message.role === "user" || message.role === "assistant")
-    .map((message) => ({
-      role: message.role,
-      content: textForRewrite(message.content).slice(0, 2400),
-    }))
-    .filter((message) => message.content);
+  const payload = buildContextualQueryPayload(messages, now);
+  if (!payload) return null;
 
   // A first-turn query is already the only available intent. Avoid an extra model
   // round trip unless there is actual history that can fill omitted information.
-  if (context.length < 2) return null;
-
-  const currentTime = getCurrentTimeFacts(now);
+  if (payload.conversation.length < 2) return null;
 
   return [
     { role: "system", content: QUERY_REWRITE_SYSTEM_PROMPT },
     {
       role: "user",
-      content: JSON.stringify(
-        {
-          temporal_context: {
-            current_date: currentTime.date,
-            timezone: currentTime.tzName,
-            utc_offset: currentTime.utcOffset,
-          },
-          conversation: context,
-          current_query: currentQuery,
-        },
-        null,
-        0,
-      ),
+      content: JSON.stringify(payload, null, 0),
     },
   ];
 }
@@ -261,7 +318,14 @@ export function hasPriorSearchQueryLeakage(
   }
   if (currentIndex <= 0) return false;
 
-  const previousQuery = extractLastUserQuery(messages.slice(0, currentIndex));
+  let previousQuery = "";
+  for (let i = currentIndex - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role !== "user") continue;
+    previousQuery = sanitizeWebSearchQuery(
+      messageContentToText(messages[i]?.content),
+    );
+    if (previousQuery) break;
+  }
   if (previousQuery.length < 4) return false;
   const compact = (value: string) => value.replace(/\s+/g, "");
   return compact(query).includes(compact(previousQuery));

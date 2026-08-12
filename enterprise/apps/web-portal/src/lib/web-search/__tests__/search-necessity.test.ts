@@ -60,6 +60,13 @@ describe("classifyWebSearchNeed", () => {
         rawQuery: "总结一下\n--- 附件: a.pdf ---\nlong body",
       }),
     ).toEqual({ need: "skip", reason: "attachment_only" });
+
+    expect(
+      classifyWebSearchNeed({
+        query: "Summarize",
+        rawQuery: "Summarize\n--- Attachment: a.pdf ---\nlong body",
+      }),
+    ).toEqual({ need: "skip", reason: "attachment_only" });
   });
 
   it("does not skip informational queries (AC-3)", () => {

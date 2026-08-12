@@ -36,7 +36,7 @@ const ASSISTANT_META =
 const ARITHMETIC = /^[\d\s+\-*/×÷().=%]+$/;
 const ARITHMETIC_OP = /[+\-*/×÷=%]/;
 
-const ATTACHMENT_MARKER = /(^|\n)---\s*附件\s*[:：]/;
+const ATTACHMENT_MARKER = /(^|\n)---\s*(?:附件|attachment)\s*[:：]/i;
 const SHORT_QUERY_MAX = 24;
 const ATTACHMENT_USER_TEXT_MAX = 40;
 
@@ -52,9 +52,9 @@ function normalize(query: string): string {
 /** User prose before / without the portal-injected attachment body block. */
 function userTextWithoutAttachment(rawQuery: string): string {
   const text = rawQuery.replace(/\r\n/g, "\n");
-  const idx = text.search(/\n---\s*附件\s*[:：]/);
+  const idx = text.search(/\n---\s*(?:附件|attachment)\s*[:：]/i);
   if (idx >= 0) return text.slice(0, idx).trim();
-  if (/^---\s*附件\s*[:：]/.test(text.trimStart())) return "";
+  if (/^---\s*(?:附件|attachment)\s*[:：]/i.test(text.trimStart())) return "";
   return text.trim();
 }
 

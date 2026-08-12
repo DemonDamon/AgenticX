@@ -10,7 +10,7 @@
 
 type ChatMessage = {
   role: string;
-  content?: string | null;
+  content?: unknown;
   tool_calls?: unknown;
   tool_call_id?: string;
   name?: string;

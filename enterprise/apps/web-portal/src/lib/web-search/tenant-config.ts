@@ -166,29 +166,20 @@ function normalizeProviderUpdates(
   return providers.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
 }
 
-export async function loadTenantWebSearchConfig(tenantId: string): Promise<TenantWebSearchRow> {
+/**
+ * Strict runtime read: an absent row is `null`, while database/configuration
+ * failures reject. High-cost feature gates must not confuse those two states.
+ */
+export async function loadTenantWebSearchConfigStrict(
+  tenantId: string,
+): Promise<TenantWebSearchRow> {
   const tid = tenantId.trim();
   if (!tid || !process.env.DATABASE_URL?.trim()) return null;
 
-  try {
-    const config = resolveDatabaseConfig();
-    if (config.dialect === "mysql") {
-      const { raw: db } = await createMysqlDb(config);
-      const rows = await db.select().from(mysqlTable).where(eq(mysqlTable.tenantId, tid)).limit(1);
-      const row = rows[0];
-      if (!row) return null;
-      return {
-        enabled: Boolean(row.enabled),
-        provider: row.provider,
-        apiKey: decryptProviderApiKey(row.apiKeyCipher ?? ""),
-        providers: parseStoredProviders(row.providers),
-        maxResults: Number(row.maxResults) || DEFAULT_MAX_RESULTS,
-        deepResearchEnabled: Boolean(row.deepResearchEnabled),
-      };
-    }
-
-    const db = getIamDb();
-    const rows = await db.select().from(pgTable).where(eq(pgTable.tenantId, tid)).limit(1);
+  const config = resolveDatabaseConfig();
+  if (config.dialect === "mysql") {
+    const { raw: db } = await createMysqlDb(config);
+    const rows = await db.select().from(mysqlTable).where(eq(mysqlTable.tenantId, tid)).limit(1);
     const row = rows[0];
     if (!row) return null;
     return {
@@ -199,6 +190,26 @@ export async function loadTenantWebSearchConfig(tenantId: string): Promise<Tenan
       maxResults: Number(row.maxResults) || DEFAULT_MAX_RESULTS,
       deepResearchEnabled: Boolean(row.deepResearchEnabled),
     };
+  }
+
+  const db = getIamDb();
+  const rows = await db.select().from(pgTable).where(eq(pgTable.tenantId, tid)).limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    enabled: Boolean(row.enabled),
+    provider: row.provider,
+    apiKey: decryptProviderApiKey(row.apiKeyCipher ?? ""),
+    providers: parseStoredProviders(row.providers),
+    maxResults: Number(row.maxResults) || DEFAULT_MAX_RESULTS,
+    deepResearchEnabled: Boolean(row.deepResearchEnabled),
+  };
+}
+
+/** Best-effort settings read retained for non-gating UI and update flows. */
+export async function loadTenantWebSearchConfig(tenantId: string): Promise<TenantWebSearchRow> {
+  try {
+    return await loadTenantWebSearchConfigStrict(tenantId);
   } catch {
     return null;
   }

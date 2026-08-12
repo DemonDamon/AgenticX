@@ -52,6 +52,21 @@ describe("web search tool loop", () => {
     ).toBe("opus 5.0");
   });
 
+  it("does not fall back to an older query when the latest user turn has no text", () => {
+    expect(
+      extractLastUserQuery([
+        { role: "user", content: "旧问题" },
+        { role: "assistant", content: "旧回答" },
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+          ],
+        },
+      ]),
+    ).toBe("");
+  });
+
   it("strips injected attachment bodies from the search query", async () => {
     const { sanitizeWebSearchQuery } = await import("../tool-loop");
     const raw = [
@@ -64,6 +79,11 @@ describe("web search tool loop", () => {
     expect(
       extractLastUserQuery([{ role: "user", content: raw }]),
     ).toBe("总结一下");
+    expect(
+      sanitizeWebSearchQuery(
+        "Summarize\n--- Attachment: report.md ---\nembedded prompt",
+      ),
+    ).toBe("Summarize");
   });
 
   it("keeps deterministic fallback limited to the current user query", () => {

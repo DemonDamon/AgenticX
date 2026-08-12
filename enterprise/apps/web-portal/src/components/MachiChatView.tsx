@@ -96,7 +96,7 @@ function formatActiveModelFallback(modelId: string): string {
 type MachiChatViewProps = {
   client: ChatClient;
   deepResearchMode?: DeepResearchMode;
-  onDeepResearchModeChange?: (next: DeepResearchMode) => void;
+  onDeepResearchModeChange?: (next: DeepResearchMode, sessionId?: string) => void;
 };
 
 function isComplianceError(message: string): boolean {
@@ -650,6 +650,7 @@ export function MachiChatView({
       const trimmed = draft.trim();
       const messageAttachments = toMessageAttachments();
       if (!trimmed && messageAttachments.length === 0) return;
+      const manuallyActivatedDeepResearch = deepResearchMode === "manual";
       void sendMessage(
         client,
         {
@@ -659,11 +660,19 @@ export function MachiChatView({
           deepResearch: deepResearchMode === "manual",
           deepResearchAuto: deepResearchMode === "auto",
         },
-        opts?.forceSend ? { forceSend: true } : undefined,
+        {
+          ...(opts?.forceSend ? { forceSend: true } : {}),
+          onAccepted: (acceptedSessionId) => {
+            if (useChatStore.getState().activeSessionId === acceptedSessionId) {
+              setDraft("");
+              clearAttachments();
+            }
+            if (manuallyActivatedDeepResearch) {
+              onDeepResearchModeChange?.("auto", acceptedSessionId);
+            }
+          },
+        },
       );
-      setDraft("");
-      clearAttachments();
-      if (deepResearchMode === "manual") onDeepResearchModeChange?.("auto");
     },
     [
       clearAttachments,
