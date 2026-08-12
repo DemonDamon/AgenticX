@@ -9,7 +9,6 @@ import {
   ChevronUp,
   Copy,
   Database,
-  GitBranch,
   GripVertical,
   LayoutList,
   Quote,
@@ -263,6 +262,7 @@ import {
 } from "../utils/model-options";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { sessionCreateAvatarId } from "../utils/session-create-avatar";
+import { NEW_TOPIC_INHERITS_CONTEXT, newTopicTriggerLabel } from "../utils/new-topic-label";
 import {
   ccBridgeSendToolProgressLabel,
   parseCcBridgeModeFromPayload,
@@ -546,217 +546,39 @@ const FALLBACK_PANE: ChatPaneState = {
   runDrawerRunId: null,
 };
 
-/** 「更多操作」竖排菜单里各行子菜单的浮层宽度（子菜单从行右侧弹出，需按自身宽度做边界收敛）。 */
-const NEW_TOPIC_SUBMENU_WIDTH = 160; // w-[160px]
+/** 输入区能力菜单的浮层宽度。 */
 const KB_MODE_SUBMENU_WIDTH = 200; // w-[200px]
 
-/** Compose-style primary action (豆包式「撰写」语义) + 下拉切换「全新对话」/「继承上下文」，默认前者。 */
-function NewTopicSplitControl({
+/** 顶栏单一主操作：始终在当前 Near、数字专家或群聊下开启全新上下文。 */
+function NewTopicButton({
   onNewTopic,
-  /** True when rendered as a row inside「更多操作」vertical menu (full-width row + right flyout). */
-  embedded = false,
+  triggerLabel,
 }: {
   onNewTopic: (inherit: boolean, sessionMode?: PaneSessionMode) => void;
-  embedded?: boolean;
+  triggerLabel: string;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [inheritMode, setInheritMode] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
-  const rootRef = useRef<HTMLElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const chevronRef = useRef<HTMLButtonElement>(null);
-
-  const openMenu = (flyoutRight = false) => {
-    if (rootRef.current) {
-      const rect = rootRef.current.getBoundingClientRect();
-      const left = flyoutRight
-        ? Math.max(8, Math.min(rect.right + 8, window.innerWidth - NEW_TOPIC_SUBMENU_WIDTH - 8))
-        : rect.left;
-      setMenuPos({
-        bottom: window.innerHeight - rect.top + 4,
-        left,
-      });
-    }
-    setMenuOpen(true);
-  };
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (rootRef.current?.contains(t)) return;
-      if (menuRef.current?.contains(t)) return;
-      setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
-
-  const panel =
-    menuOpen && menuPos
-      ? createPortal(
-          <div
-            id="agx-more-actions-new-topic-menu"
-            ref={menuRef}
-            style={{ bottom: menuPos.bottom, left: menuPos.left }}
-            className="fixed z-[9999] w-[160px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
-            role="listbox"
-            aria-label="新建对话方式"
-          >
-            <button
-              type="button"
-              role="option"
-              aria-selected={!inheritMode}
-              className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                !inheritMode ? "bg-surface-hover" : "hover:bg-surface-hover"
-              }`}
-              onClick={() => {
-                setInheritMode(false);
-                setMenuOpen(false);
-              }}
-            >
-              <SquarePen
-                className={`h-[15px] w-[15px] shrink-0 ${
-                  !inheritMode ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
-                }`}
-                strokeWidth={2}
-              />
-              <span className="flex flex-1 flex-col gap-0.5">
-                <span
-                  className={`text-[13px] font-medium leading-none ${
-                    !inheritMode ? "text-text-strong" : "text-text-standard"
-                  }`}
-                >
-                  全新对话
-                </span>
-                <span className="text-[11px] leading-none text-text-faint">不继承上下文</span>
-              </span>
-              <span className="flex w-4 shrink-0 justify-end">
-                {!inheritMode && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
-              </span>
-            </button>
-            <button
-              type="button"
-              role="option"
-              aria-selected={inheritMode}
-              className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                inheritMode ? "bg-surface-hover" : "hover:bg-surface-hover"
-              }`}
-              onClick={() => {
-                setInheritMode(true);
-                setMenuOpen(false);
-              }}
-            >
-              <GitBranch
-                className={`h-[15px] w-[15px] shrink-0 ${
-                  inheritMode ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
-                }`}
-                strokeWidth={2}
-              />
-              <span className="flex flex-1 flex-col gap-0.5">
-                <span
-                  className={`text-[13px] font-medium leading-none ${
-                    inheritMode ? "text-text-strong" : "text-text-standard"
-                  }`}
-                >
-                  继承上下文
-                </span>
-                <span className="text-[11px] leading-none text-text-faint">携带摘要接续</span>
-              </span>
-              <span className="flex w-4 shrink-0 justify-end">
-                {inheritMode && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
-              </span>
-            </button>
-          </div>,
-          document.body
-        )
-      : null;
-
-  const baseTip = inheritMode ? "新对话 · 继承上下文（当前选项）" : "全新对话 · 不继承上下文（当前选项）";
-
-  if (embedded) {
-    return (
-      <>
-        <div
-          ref={rootRef as unknown as RefObject<HTMLDivElement>}
-          className="flex w-full items-center rounded-lg text-text-standard transition-colors hover:bg-surface-hover"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            className="flex flex-1 items-center gap-2.5 px-2.5 py-2 text-left text-[13px]"
-            aria-label={inheritMode ? "新建对话：继承上下文" : "新建对话：全新对话"}
-            onClick={() => onNewTopic(inheritMode, inheritMode ? "daily_office" : "daily_office")}
-          >
-            {inheritMode ? (
-              <GitBranch className="h-[15px] w-[15px] shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
-            ) : (
-              <SquarePen className="h-[15px] w-[15px] shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
-            )}
-            <span className="flex-1">新对话</span>
-            <span className="text-[11px] text-text-faint">{inheritMode ? "继承上下文" : "全新对话"}</span>
-          </button>
-          <button
-            type="button"
-            className="flex h-full shrink-0 items-center px-2 py-2 text-text-faint transition-colors hover:text-text-strong"
-            aria-label="切换新建方式"
-            aria-expanded={menuOpen}
-            onClick={() => (menuOpen ? setMenuOpen(false) : openMenu(true))}
-          >
-            <ChevronRight className={`h-3.5 w-3.5 transition-transform ${menuOpen ? "rotate-90" : ""}`} aria-hidden />
-          </button>
-        </div>
-        {panel}
-      </>
-    );
-  }
-
   return (
-    <>
-      <div ref={rootRef as unknown as RefObject<HTMLDivElement>} className="flex h-[26px] shrink-0 items-stretch overflow-hidden rounded-md bg-transparent transition-colors hover:bg-surface-hover">
-        <HoverTip label={baseTip}>
-          <button
-            type="button"
-            className="flex h-full w-7 shrink-0 items-center justify-center text-text-muted transition-colors hover:text-text-strong"
-            aria-label={inheritMode ? "新建对话：继承上下文" : "新建对话：全新对话"}
-            onClick={() => onNewTopic(inheritMode, inheritMode ? "daily_office" : "daily_office")}
-          >
-            {inheritMode ? (
-              <GitBranch className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
-            ) : (
-              <SquarePen className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
-            )}
-          </button>
-        </HoverTip>
-        <div className="my-1.5 w-[1px] shrink-0 self-stretch bg-border" aria-hidden />
-        <HoverTip label="切换新建方式">
-          <button
-            ref={chevronRef}
-            type="button"
-            className="flex h-full w-[18px] shrink-0 items-center justify-center text-text-muted transition-colors hover:text-text-strong"
-            aria-label="展开新建对话选项"
-            aria-expanded={menuOpen}
-            onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
-          >
-            <ChevronDown className={`h-3 w-3 transition-transform ${menuOpen ? "rotate-180" : ""}`} strokeWidth={2.5} aria-hidden />
-          </button>
-        </HoverTip>
-      </div>
-      {panel}
-    </>
+    <HoverTip label={triggerLabel}>
+      <button
+        type="button"
+        className="agx-topbar-btn !px-[5px]"
+        aria-label={triggerLabel}
+        onClick={() => onNewTopic(NEW_TOPIC_INHERITS_CONTEXT, "daily_office")}
+      >
+        <SquarePen className="h-[18px] w-[18px]" strokeWidth={1.8} aria-hidden />
+      </button>
+    </HoverTip>
   );
 }
 
-/** 「更多操作」+ 按钮：向上弹出竖排文字菜单，内含附件/新话题/技能/知识库检索/连接器。 */
+/** 「更多操作」+ 按钮：仅承载当前消息的附件与能力，不混入会话级操作。 */
 function ComposerMoreActionsButton({
   onPickFile,
-  onNewTopic,
   renderSkillPicker,
   renderKbRetrieval,
   renderConnectors,
 }: {
   onPickFile: () => void;
-  onNewTopic: (inherit: boolean, sessionMode?: PaneSessionMode) => void;
   renderSkillPicker: () => ReactNode;
   renderKbRetrieval: () => ReactNode;
   renderConnectors: () => ReactNode;
@@ -785,7 +607,6 @@ function ComposerMoreActionsButton({
       if (panelRef.current?.contains(t)) return;
       // 子项浮层 portal 到 body，不在 panelRef 内；点二级菜单时勿关掉一级菜单。
       const flyoutIds = [
-        "agx-more-actions-new-topic-menu",
         "agx-skill-picker-dropdown",
         "agx-kb-retrieval-mode-menu",
         "agx-connectors-menu-dropdown",
@@ -839,13 +660,6 @@ function ComposerMoreActionsButton({
               </svg>
               <span className="flex-1">添加文件</span>
             </button>
-            <NewTopicSplitControl
-              onNewTopic={(inherit, sessionMode) => {
-                onNewTopic(inherit, sessionMode);
-                setOpen(false);
-              }}
-              embedded
-            />
             {renderSkillPicker()}
             {renderKbRetrieval()}
             {renderConnectors()}
@@ -1818,7 +1632,7 @@ function PaneKnowledgeRetrievalModeSwitch({
     KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索";
 
   // Portal to document.body — composer toolbar has overflow-hidden and would clip
-  // an absolute dropdown (same pattern as NewTopicSplitControl).
+  // an absolute dropdown.
   const panel =
     open && menuPos
       ? createPortal(
@@ -2828,6 +2642,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       url: found?.avatarUrl || undefined,
     };
   }, [pane?.avatarId, pane?.avatarName, avatars, metaAvatarUrl]);
+  const newTopicLabel = useMemo(
+    () => newTopicTriggerLabel({ displayName: paneAvatarMeta.name, isGroup: isGroupPane }),
+    [isGroupPane, paneAvatarMeta.name],
+  );
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -11642,6 +11460,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </div>
           </div>
           <div className="no-drag flex shrink-0 items-center gap-1">
+            <NewTopicButton onNewTopic={createNewTopic} triggerLabel={newTopicLabel} />
             {sessionFindOpen ? (
               <div
                 className="flex h-8 items-center gap-1 rounded-lg border border-border bg-surface-card px-1.5 shadow-sm"
@@ -12413,7 +12232,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 />
                 <ComposerMoreActionsButton
                   onPickFile={() => fileInputRef.current?.click()}
-                  onNewTopic={createNewTopic}
                   renderSkillPicker={() => (
                     <SkillPickerButton apiBase={apiBase} apiToken={apiToken} onSelect={handleSkillSelect} embedded />
                   )}
