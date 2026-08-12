@@ -1,11 +1,14 @@
 services:
   nginx-edge:
+    # 仅在该容器直接作为 HTTPS 边缘入口时使用；已有外层反代终止 TLS 时不要叠加本文件。
     image: nginx:1.27-alpine
     container_name: agenticx-nginx-edge
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
+      - "3000:3000"
+      - "3001:3001"
     volumes:
       - ../nginx/edge-split-https.conf:/etc/nginx/nginx.conf:ro
       - ../nginx/certs:/etc/nginx/certs:ro
