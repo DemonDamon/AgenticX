@@ -65,6 +65,7 @@ from agenticx.cli.studio_mcp import (
     set_mcp_skip_default_names_config,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
+from agenticx.llms.sampling_params import provider_raw_enabled_for_fallback
 from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AutoSuspendClarifyGate
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
@@ -2823,6 +2824,12 @@ def create_studio_app() -> FastAPI:
                     if not key or key in seen:
                         continue
                     seen.add(key)
+                    # Do not silently pick catalog entries the user disabled in Settings.
+                    raw_provider = cfg.providers.get(key) if isinstance(cfg.providers, dict) else None
+                    if not provider_raw_enabled_for_fallback(
+                        raw_provider if isinstance(raw_provider, dict) else None
+                    ):
+                        continue
                     provider_cfg = cfg.get_provider(key)
                     fallback_model = str(provider_cfg.model or "").strip()
                     if not fallback_model:
