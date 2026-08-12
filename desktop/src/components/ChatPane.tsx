@@ -853,21 +853,19 @@ function ComposerMoreActionsButton({
   return (
     <>
       <div ref={rootRef} className="flex shrink-0 items-center">
-        <HoverTip label={open ? "收起更多操作" : "更多操作：附件 / 新话题 / 技能 / 知识库 / 连接器"}>
-          <button
-            type="button"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-            aria-label="更多操作"
-            aria-expanded={open}
-            onClick={toggleOpen}
-          >
-            <Plus
-              className={`h-[15px] w-[15px] transition-transform ${open ? "rotate-45" : ""}`}
-              strokeWidth={2}
-              aria-hidden
-            />
-          </button>
-        </HoverTip>
+        <button
+          type="button"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+          aria-label="更多操作"
+          aria-expanded={open}
+          onClick={toggleOpen}
+        >
+          <Plus
+            className={`h-[15px] w-[15px] transition-transform ${open ? "rotate-45" : ""}`}
+            strokeWidth={2}
+            aria-hidden
+          />
+        </button>
       </div>
       {panel}
     </>
