@@ -235,10 +235,10 @@ body {
   color: rgb(37, 99, 235);
 }
 
-/* 助手推荐问 chip：浅色消息区白底时需独立底色，避免与页面融为一体 */
+/* 助手推荐问：柔和填充胶囊、无描边，宽度贴合文字 */
 .agx-followup-chip {
-  background-color: var(--chat-followup-chip-bg, var(--surface-popover));
-  border-color: var(--chat-followup-chip-border, var(--border-subtle));
+  background-color: var(--chat-followup-chip-bg, var(--surface-card));
+  border: none;
 }
 .agx-followup-chip:hover {
   background-color: var(--chat-followup-chip-bg-hover, var(--surface-hover));
