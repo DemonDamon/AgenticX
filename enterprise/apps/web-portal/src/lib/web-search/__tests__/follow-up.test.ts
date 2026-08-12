@@ -10,17 +10,27 @@ const THINK_CLOSE = "<" + "/" + "think" + ">";
 
 describe("contextual search-query rewrite", () => {
   it("sends bounded recent context and the current query to the rewrite agent", () => {
-    const messages = buildSearchQueryRewriteMessages([
-      { role: "user", content: "王虹到底解决了什么数学难题" },
-      {
-        role: "assistant",
-        content: `${THINK_OPEN}内部推理${THINK_CLOSE}数学家王虹研究三维挂谷猜想。[8]`,
-      },
-      { role: "user", content: "搜一下这几天关于她的新闻" },
-    ]);
+    const messages = buildSearchQueryRewriteMessages(
+      [
+        { role: "user", content: "王虹到底解决了什么数学难题" },
+        {
+          role: "assistant",
+          content: `${THINK_OPEN}内部推理${THINK_CLOSE}数学家王虹研究三维挂谷猜想。[8]`,
+        },
+        { role: "user", content: "搜一下这几天关于她的新闻" },
+      ],
+      new Date(2026, 7, 12, 9, 30, 0),
+    );
 
     expect(messages?.[0]?.content).toContain("最近几条对话");
-    expect(messages?.[0]?.content).toContain("数学家 王虹 最近几天 新闻");
+    expect(messages?.[0]?.content).toContain(
+      "数学家 王虹 截至 2026-08-12 最近几天 新闻",
+    );
+    expect(messages?.[0]?.content).toContain("不得擅自假定具体天数");
+    expect(messages?.[0]?.content).toContain("不要携带请求搜索或查找的操作指令");
+    expect(messages?.[1]?.content).toContain(
+      '"temporal_context":{"current_date":"2026-08-12"',
+    );
     expect(messages?.[1]?.content).toContain(
       '"current_query":"搜一下这几天关于她的新闻"',
     );

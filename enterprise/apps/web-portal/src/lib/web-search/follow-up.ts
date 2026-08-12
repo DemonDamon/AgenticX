@@ -1,5 +1,6 @@
 /** AI-assisted standalone search-query completion from recent conversation context. */
 
+import { getCurrentTimeFacts } from "../current-time";
 import { extractLastUserQuery, sanitizeWebSearchQuery } from "./tool-loop";
 
 type ChatMessage = {
@@ -23,9 +24,14 @@ const QUERY_REWRITE_SYSTEM_PROMPT =
   "阅读最近几条对话，只把当前用户问题改写成一条脱离上下文也能准确检索的查询。" +
   "当前问题已经完整时，保持其原意并返回精简的等价查询；存在省略主语、代词、地点、对象或限定条件时，" +
   "从历史中补齐缺失部分，必要时加入身份或领域锚点来消除重名。" +
+  "输入中的 temporal_context 是服务器系统时钟提供的权威日期事实。" +
+  "当前问题包含相对时间时，使用该日期消除时间歧义：昨天、上个月、今年等边界明确的表达应改写为对应的绝对日期、月份或年份；" +
+  "最近、近期、这几天等边界模糊的表达不得擅自假定具体天数，应保留原时间语义并补充‘截至当前日期’的锚点。" +
+  "当前问题没有时间限定时，不要凭空添加日期。resolved_query 只包含可直接检索的查询，不要携带请求搜索或查找的操作指令。" +
   "历史只用于补全当前问题，不得把上一轮问题的问法、旧搜索意图或答案结论拼接进新查询。" +
   "例如‘王虹到底解决了什么数学难题’之后问‘搜一下这几天关于她的新闻’，" +
-  "应返回‘数学家 王虹 最近几天 新闻’，不能原样保留‘她’，也不能带入‘解决了什么数学难题’。" +
+  "若 temporal_context.current_date 为 2026-08-12，应返回‘数学家 王虹 截至 2026-08-12 最近几天 新闻’，" +
+  "不能原样保留‘她’，也不能带入‘解决了什么数学难题’。" +
   "例如询问天气后补充‘广州南沙’，应返回包含地点和天气意图的独立查询。" +
   "只返回 JSON：{\"resolved_query\":\"...\",\"confidence\":0到1之间的数字}。" +
   "只有在近期历史也不足以恢复当前问题的必要信息时，才返回 {\"resolved_query\":\"\",\"confidence\":0}。" +
@@ -72,6 +78,7 @@ function textForRewrite(content: unknown): string {
  */
 export function buildSearchQueryRewriteMessages(
   messages: ChatMessage[],
+  now: Date = new Date(),
 ): SearchQueryRewriteMessage[] | null {
   let currentIndex = -1;
   let currentQuery = "";
@@ -98,12 +105,19 @@ export function buildSearchQueryRewriteMessages(
   // round trip unless there is actual history that can fill omitted information.
   if (context.length < 2) return null;
 
+  const currentTime = getCurrentTimeFacts(now);
+
   return [
     { role: "system", content: QUERY_REWRITE_SYSTEM_PROMPT },
     {
       role: "user",
       content: JSON.stringify(
         {
+          temporal_context: {
+            current_date: currentTime.date,
+            timezone: currentTime.tzName,
+            utc_offset: currentTime.utcOffset,
+          },
           conversation: context,
           current_query: currentQuery,
         },
