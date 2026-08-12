@@ -7,7 +7,14 @@ const config: Config = {
       colors: {
         base: "var(--surface-base)",
         panel: "var(--surface-panel)",
-        border: "var(--border-subtle)",
+        // Named tokens (no /opacity). CSS vars already carry alpha; Tailwind
+        // `/70` on `var(--…)` emits invalid `rgb(var(--…) / 0.7)` and falls
+        // back to preflight gray-200 — bright white lines on dark themes.
+        border: {
+          DEFAULT: "var(--border-subtle)",
+          muted: "var(--border-muted)",
+          strong: "var(--border-strong)",
+        },
         text: {
           primary: "var(--text-primary)",
           strong: "var(--text-strong)",
@@ -39,6 +46,11 @@ const config: Config = {
           hover: "var(--ui-btn-primary-bg-hover)",
           text: "var(--ui-btn-primary-text)",
         },
+      },
+      // Preflight `*, ::before, ::after { border-color }` must use theme token,
+      // not gray-200, or any failed border-* /opacity utility looks neon-white.
+      borderColor: {
+        DEFAULT: "var(--border-subtle)",
       },
       transitionDuration: {
         fast: "var(--ds-dur-fast)",

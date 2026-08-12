@@ -1871,7 +1871,7 @@ const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandle>(func
                 onChange={(e) => setToolInsertFilter(e.target.value)}
                 aria-label="筛选工具列表"
               />
-              <div className="max-h-40 overflow-y-auto rounded border border-border/60 bg-surface-card p-1.5">
+              <div className="max-h-40 overflow-y-auto rounded border border-[var(--border-muted)] bg-surface-card p-1.5">
                 <div className="flex flex-wrap gap-1">
                   {filteredRegistryTools.map((t) => (
                     <button
@@ -6137,7 +6137,7 @@ function MetaMarkdownField({
           {externalHintText}
         </div>
       ) : null}
-      <div className="overflow-hidden rounded-lg border border-border/80 bg-surface-panel">
+      <div className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-surface-panel">
         <div className="flex h-9 items-center justify-between bg-surface-hover/35 pl-3 pr-2">
           <span className="text-[10px] font-medium tracking-wide text-text-faint">Markdown</span>
           <div className="flex items-center gap-0.5">
@@ -8453,7 +8453,7 @@ export function SettingsPanel({
             {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
             <div className={tab === "general" ? "space-y-4" : "hidden"}>
                 <Panel title="显示">
-                  <div className="divide-y divide-border/70">
+                  <div className="flex flex-col">
                     <div className="flex min-h-14 items-center justify-between gap-6 py-1">
                       <div>
                         <div className="text-sm font-medium text-text-primary">外观</div>
@@ -8479,6 +8479,8 @@ export function SettingsPanel({
                       })()}
                     </div>
 
+                    <div className="h-px bg-[var(--border-muted)]" aria-hidden="true" />
+
                     <div className="flex min-h-14 items-center justify-between gap-6 py-1">
                       <div>
                         <div className="text-sm font-medium text-text-primary">消息布局</div>
@@ -8503,6 +8505,8 @@ export function SettingsPanel({
                         );
                       })()}
                     </div>
+
+                    <div className="h-px bg-[var(--border-muted)]" aria-hidden="true" />
 
                     <div className="flex min-h-14 items-center justify-between gap-6 py-1">
                       <div>
@@ -8579,7 +8583,7 @@ export function SettingsPanel({
                   </div>
 
                   {userProfileEditing ? (
-                    <div className="mt-4 border-t border-border/70 pt-4">
+                    <div className="mt-4 border-t border-[var(--border-muted)] pt-4">
                       <div className="mb-4 flex items-center gap-3">
                         <label className="inline-flex h-8 cursor-pointer items-center rounded-md border border-border bg-surface-panel px-3 text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary">
                           更换头像
@@ -8687,7 +8691,7 @@ export function SettingsPanel({
                     管理元智能体的身份与行为原则
                   </p>
 
-                  <div className="mt-4 overflow-hidden rounded-lg border border-border/80">
+                  <div className="mt-4 overflow-hidden rounded-lg border border-[var(--border-subtle)]">
                     {[
                       {
                         kind: "identity" as const,
@@ -8711,7 +8715,7 @@ export function SettingsPanel({
                       return (
                         <div
                           key={item.kind}
-                          className={index > 0 ? "border-t border-border/80" : ""}
+                          className={index > 0 ? "border-t border-[var(--border-muted)]" : ""}
                         >
                           <button
                             type="button"
@@ -8745,7 +8749,7 @@ export function SettingsPanel({
                           </button>
 
                           {open ? (
-                            <div className="border-t border-border/60 bg-surface-hover/30 px-3 pb-3 pt-2.5">
+                            <div className="border-t border-[var(--border-muted)] bg-surface-hover/30 px-3 pb-3 pt-2.5">
                               {item.kind === "identity" ? (
                                 <MetaMarkdownField
                                   label="身份定义"
@@ -8819,8 +8823,8 @@ export function SettingsPanel({
                   ) : null}
 
                   {metaHistoryOpen ? (
-                    <div className="mt-3 border-t border-border/60 pt-3">
-                      <div className="space-y-3 rounded-md border border-border/60 bg-surface-panel/50 p-2">
+                    <div className="mt-3 border-t border-[var(--border-muted)] pt-3">
+                      <div className="space-y-3 rounded-md border border-[var(--border-muted)] bg-surface-panel/50 p-2">
                         {metaHistoryLoading ? (
                           <div className="text-[11px] text-text-faint">加载中…</div>
                         ) : null}
@@ -8897,12 +8901,12 @@ export function SettingsPanel({
                     />
                   </div>
                   {confirmStrategy === "auto" ? (
-                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-status-warning/25 bg-status-warning/8 px-3 py-2 text-xs leading-5 text-text-subtle">
+                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-text-subtle">
                       <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" />
                       <span>所有工具将直接执行。建议仅在你信任的工作区中使用。</span>
                     </div>
                   ) : null}
-                  <div className="mt-4 border-t border-border/70 pt-3">
+                  <div className="mt-4 border-t border-[var(--border-muted)] pt-3">
                     <div className="flex items-start gap-2">
                       <div className="min-w-0">
                         <div className="text-xs font-medium text-text-muted">凭据安全</div>
