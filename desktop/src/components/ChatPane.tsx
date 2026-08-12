@@ -855,14 +855,14 @@ function ComposerMoreActionsButton({
       <div ref={rootRef} className="flex shrink-0 items-center">
         <button
           type="button"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-strong transition hover:bg-surface-hover"
           aria-label="更多操作"
           aria-expanded={open}
           onClick={toggleOpen}
         >
           <Plus
-            className={`h-[15px] w-[15px] transition-transform ${open ? "rotate-45" : ""}`}
-            strokeWidth={2}
+            className={`h-[17px] w-[17px] transition-transform ${open ? "rotate-45" : ""}`}
+            strokeWidth={1.85}
             aria-hidden
           />
         </button>
@@ -12357,13 +12357,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     ) : null}
                   </div>
                 )}
-                <ContextUsageButton
-                  paneId={pane.id}
-                  sessionId={pane.sessionId ?? ""}
-                  apiBase={apiBase}
-                  apiToken={apiToken}
-                />
-                <PaneModelPicker paneId={pane.id} />
+                {/* 用量与模型选择贴紧：共享同一悬停高度（h-8），间距收窄 */}
+                <div className="flex min-w-0 items-center gap-0.5">
+                  <ContextUsageButton
+                    paneId={pane.id}
+                    sessionId={pane.sessionId ?? ""}
+                    apiBase={apiBase}
+                    apiToken={apiToken}
+                  />
+                  <PaneModelPicker paneId={pane.id} />
+                </div>
                 <ActionCircleButton
                   hasInput={
                     (!!input.trim() || readyAttachments.length > 0 || quoteTargets.length > 0)
