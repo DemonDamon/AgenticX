@@ -10,7 +10,9 @@ import {
   WEB_SEARCH_SYSTEM_HINT,
   withSearchContext,
 } from "../tool-loop";
-import type { WebSearchHit } from "../providers";
+import { executeWebSearch, type WebSearchHit } from "../providers";
+
+type ExecuteSearchConfig = Parameters<typeof executeWebSearch>[2];
 
 function sseResponse(text: string): Response {
   return new Response(text, {
@@ -192,6 +194,186 @@ describe("web search tool loop", () => {
     expect(text).toContain("https://news.example/opus");
     expect(text.includes("**来源**")).toBe(false);
     expect(text.includes("minimax:tool_call")).toBe(false);
+  });
+
+  it("complements extremely sparse evidence with a different configured provider", async () => {
+    const searched: Array<{ query: string; providerId?: string }> = [];
+    const executeSearch = vi.fn(async (
+      query: string,
+      _max: number | undefined,
+      cfg: ExecuteSearchConfig,
+    ) => {
+      searched.push({ query, providerId: cfg.primaryProviderId });
+      if (cfg.primaryProviderId === "tenant-primary") {
+        return [{ title: "Primary", url: "https://one.example/a", snippet: "one" }];
+      }
+      return [
+        { title: "Second A", url: "https://two.example/a", snippet: "two" },
+        { title: "Second B", url: "https://three.example/b", snippet: "three" },
+      ];
+    });
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "查询今天最新行业动态" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "primary-key",
+          maxResults: 50,
+          providers: [
+            {
+              id: "tenant-primary",
+              adapter: "bocha",
+              displayName: "Primary",
+              apiKey: "primary-key",
+              enabled: true,
+              priority: 0,
+            },
+            {
+              id: "tenant-secondary",
+              adapter: "tavily",
+              displayName: "Secondary",
+              apiKey: "secondary-key",
+              enabled: true,
+              priority: 1,
+            },
+          ],
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(searched).toEqual([
+      { query: "查询今天最新行业动态", providerId: "tenant-primary" },
+      { query: "查询今天最新行业动态", providerId: "tenant-secondary" },
+    ]);
+    const text = await response.text();
+    expect(text).toContain("https://one.example/a");
+    expect(text).toContain("https://two.example/a");
+  });
+
+  it("does not complement evidence that already has source diversity", async () => {
+    const executeSearch = vi.fn(async () => [
+      { title: "A", url: "https://one.example/a", snippet: "one" },
+      { title: "B", url: "https://two.example/b", snippet: "two" },
+    ]);
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "查询最新消息" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "primary-key",
+          maxResults: 50,
+          providers: [
+            {
+              id: "tenant-primary",
+              adapter: "bocha",
+              displayName: "Primary",
+              apiKey: "primary-key",
+              enabled: true,
+              priority: 0,
+            },
+            {
+              id: "tenant-secondary",
+              adapter: "tavily",
+              displayName: "Secondary",
+              apiKey: "secondary-key",
+              enabled: true,
+              priority: 1,
+            },
+          ],
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it("tries at most one different configured provider after primary failure", async () => {
+    const attempted: string[] = [];
+    const executeSearch = vi.fn(async (
+      _query: string,
+      _max: number | undefined,
+      cfg: ExecuteSearchConfig,
+    ) => {
+      attempted.push(String(cfg.primaryProviderId));
+      throw new Error("provider unavailable");
+    });
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"degraded"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "查询最新消息" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "primary-key",
+          maxResults: 50,
+          providers: [
+            {
+              id: "provider-a",
+              adapter: "bocha",
+              displayName: "A",
+              apiKey: "a",
+              enabled: true,
+              priority: 0,
+            },
+            {
+              id: "provider-b",
+              adapter: "tavily",
+              displayName: "B",
+              apiKey: "b",
+              enabled: true,
+              priority: 1,
+            },
+            {
+              id: "provider-c",
+              adapter: "duckduckgo",
+              displayName: "C",
+              apiKey: "",
+              enabled: true,
+              priority: 2,
+            },
+          ],
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(attempted).toEqual(["provider-a", "provider-b"]);
   });
 
   it("skips web search for pure current-date questions and grounds on local clock", async () => {

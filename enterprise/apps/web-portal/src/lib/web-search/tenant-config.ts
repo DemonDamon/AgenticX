@@ -9,7 +9,17 @@ import { decryptProviderApiKey, encryptProviderApiKey } from "@agenticx/iam-core
 import { eq } from "drizzle-orm";
 
 import type { TenantWebSearchRow } from "./config";
-import { DEFAULT_MAX_RESULTS, type WebSearchProviderName } from "./providers";
+import {
+  DEFAULT_MAX_RESULTS,
+  listWebSearchAdapters,
+  type WebSearchAdapterPublicDefinition,
+  type WebSearchProviderConfig,
+  type WebSearchProviderName,
+} from "./providers";
+
+export type PublicWebSearchProvider = Omit<WebSearchProviderConfig, "apiKey" | "options"> & {
+  hasApiKey: boolean;
+};
 
 export type WebSearchPublicConfig = {
   enabled: boolean;
@@ -17,6 +27,19 @@ export type WebSearchPublicConfig = {
   maxResults: number;
   hasApiKey: boolean;
   deepResearchEnabled: boolean;
+  providers: PublicWebSearchProvider[];
+  availableAdapters: WebSearchAdapterPublicDefinition[];
+};
+
+export type WebSearchProviderUpdate = {
+  id: string;
+  adapter: string;
+  displayName?: string;
+  /** Empty string clears; undefined preserves the secret for the same provider id. */
+  apiKey?: string;
+  enabled?: boolean;
+  priority?: number;
+  options?: Record<string, unknown>;
 };
 
 export type WebSearchUpdateInput = {
@@ -26,12 +49,121 @@ export type WebSearchUpdateInput = {
   /** Empty string clears key; undefined leaves unchanged. */
   apiKey?: string;
   deepResearchEnabled?: boolean;
+  providers?: WebSearchProviderUpdate[];
 };
 
 function normalizeProvider(raw: string | undefined): WebSearchProviderName {
   const value = (raw ?? "duckduckgo").trim().toLowerCase();
-  if (value === "bocha" || value === "tavily" || value === "duckduckgo") return value;
-  return "duckduckgo";
+  return value || "duckduckgo";
+}
+
+type StoredProvider = {
+  id: string;
+  adapter: string;
+  displayName: string;
+  apiKeyCipher: string;
+  enabled: boolean;
+  priority: number;
+  options?: Record<string, unknown>;
+};
+
+function asOptions(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function parseStoredProviders(raw: unknown): WebSearchProviderConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const providers: WebSearchProviderConfig[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Partial<StoredProvider>;
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const adapter = typeof row.adapter === "string" ? normalizeProvider(row.adapter) : "";
+    if (!id || !adapter || seen.has(id)) continue;
+    seen.add(id);
+    providers.push({
+      id,
+      adapter,
+      displayName:
+        typeof row.displayName === "string" && row.displayName.trim()
+          ? row.displayName.trim()
+          : id,
+      apiKey: decryptProviderApiKey(
+        typeof row.apiKeyCipher === "string" ? row.apiKeyCipher : "",
+      ),
+      enabled: row.enabled !== false,
+      priority:
+        typeof row.priority === "number" && Number.isFinite(row.priority)
+          ? row.priority
+          : providers.length,
+      options: asOptions(row.options),
+    });
+  }
+  return providers.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+}
+
+function storedProviders(providers: WebSearchProviderConfig[]): StoredProvider[] {
+  return providers.map((provider, index) => ({
+    id: provider.id,
+    adapter: provider.adapter,
+    displayName: provider.displayName,
+    apiKeyCipher: encryptProviderApiKey(provider.apiKey),
+    enabled: provider.enabled,
+    priority: index,
+    options: provider.options,
+  }));
+}
+
+function legacyProvider(provider: string, apiKey: string): WebSearchProviderConfig {
+  const adapter = normalizeProvider(provider);
+  return {
+    id: adapter,
+    adapter,
+    displayName: listWebSearchAdapters().find((item) => item.id === adapter)?.displayName ?? adapter,
+    apiKey,
+    enabled: true,
+    priority: 0,
+  };
+}
+
+function publicProviders(providers: WebSearchProviderConfig[]): PublicWebSearchProvider[] {
+  return providers.map(({ apiKey, options: _options, ...provider }) => ({
+    ...provider,
+    hasApiKey: Boolean(apiKey.trim()),
+  }));
+}
+
+function normalizeProviderUpdates(
+  updates: WebSearchProviderUpdate[],
+  existing: WebSearchProviderConfig[],
+): WebSearchProviderConfig[] {
+  const existingById = new Map(existing.map((provider) => [provider.id, provider]));
+  const seen = new Set<string>();
+  const providers: WebSearchProviderConfig[] = [];
+  for (const update of updates) {
+    const id = typeof update?.id === "string" ? update.id.trim() : "";
+    const adapter =
+      typeof update?.adapter === "string" ? normalizeProvider(update.adapter) : "";
+    if (!id || !adapter || seen.has(id)) continue;
+    seen.add(id);
+    const previous = existingById.get(id);
+    providers.push({
+      id,
+      adapter,
+      displayName: update.displayName?.trim() || previous?.displayName || id,
+      apiKey: update.apiKey === undefined ? previous?.apiKey ?? "" : update.apiKey,
+      enabled: update.enabled ?? previous?.enabled ?? true,
+      priority:
+        typeof update.priority === "number" && Number.isFinite(update.priority)
+          ? update.priority
+          : providers.length,
+      options: asOptions(update.options) ?? previous?.options,
+    });
+  }
+  return providers.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
 }
 
 export async function loadTenantWebSearchConfig(tenantId: string): Promise<TenantWebSearchRow> {
@@ -49,6 +181,7 @@ export async function loadTenantWebSearchConfig(tenantId: string): Promise<Tenan
         enabled: Boolean(row.enabled),
         provider: row.provider,
         apiKey: decryptProviderApiKey(row.apiKeyCipher ?? ""),
+        providers: parseStoredProviders(row.providers),
         maxResults: Number(row.maxResults) || DEFAULT_MAX_RESULTS,
         deepResearchEnabled: Boolean(row.deepResearchEnabled),
       };
@@ -62,6 +195,7 @@ export async function loadTenantWebSearchConfig(tenantId: string): Promise<Tenan
       enabled: Boolean(row.enabled),
       provider: row.provider,
       apiKey: decryptProviderApiKey(row.apiKeyCipher ?? ""),
+      providers: parseStoredProviders(row.providers),
       maxResults: Number(row.maxResults) || DEFAULT_MAX_RESULTS,
       deepResearchEnabled: Boolean(row.deepResearchEnabled),
     };
@@ -79,6 +213,8 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
       maxResults: DEFAULT_MAX_RESULTS,
       hasApiKey: false,
       deepResearchEnabled: true,
+      providers: [],
+      availableAdapters: listWebSearchAdapters(),
     };
   }
   return {
@@ -87,6 +223,10 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
     maxResults: row.maxResults,
     hasApiKey: Boolean(row.apiKey.trim()),
     deepResearchEnabled: Boolean(row.deepResearchEnabled),
+    providers: publicProviders(
+      row.providers?.length ? row.providers : [legacyProvider(row.provider, row.apiKey)],
+    ),
+    availableAdapters: listWebSearchAdapters(),
   };
 }
 
@@ -102,15 +242,45 @@ export async function upsertTenantWebSearchConfig(
 
   const existing = await loadTenantWebSearchConfig(tid);
   const nextEnabled = input.enabled ?? existing?.enabled ?? true;
-  const nextProvider = normalizeProvider(input.provider ?? existing?.provider ?? "duckduckgo");
+  const existingProviders = existing?.providers?.length
+    ? existing.providers
+    : existing
+      ? [legacyProvider(existing.provider, existing.apiKey)]
+      : [];
+  let nextProviders =
+    input.providers !== undefined
+      ? normalizeProviderUpdates(input.providers, existingProviders)
+      : existingProviders.slice();
+
+  if (input.provider !== undefined && input.providers === undefined) {
+    const selectedAdapter = normalizeProvider(input.provider);
+    const index = nextProviders.findIndex(
+      (provider) => provider.id === input.provider?.trim() || provider.adapter === selectedAdapter,
+    );
+    const selected =
+      index >= 0
+        ? nextProviders.splice(index, 1)[0]!
+        : legacyProvider(selectedAdapter, "");
+    nextProviders.unshift(selected);
+  }
+
+  if (nextProviders.length === 0) {
+    nextProviders = [legacyProvider(input.provider ?? existing?.provider ?? "duckduckgo", "")];
+  }
+
+  if (input.apiKey !== undefined) {
+    nextProviders[0] = { ...nextProviders[0]!, apiKey: input.apiKey };
+  }
+  nextProviders = nextProviders.map((provider, priority) => ({ ...provider, priority }));
+
+  const primary = nextProviders[0]!;
+  const nextProvider = primary.adapter;
   const nextMax = input.maxResults ?? existing?.maxResults ?? DEFAULT_MAX_RESULTS;
   const nextDeepResearch =
     input.deepResearchEnabled ?? existing?.deepResearchEnabled ?? true;
-  let nextKey = existing?.apiKey ?? "";
-  if (input.apiKey !== undefined) {
-    nextKey = input.apiKey;
-  }
+  const nextKey = primary.apiKey;
   const cipher = encryptProviderApiKey(nextKey);
+  const providerRows = storedProviders(nextProviders);
   const updatedAt = new Date();
 
   const config = resolveDatabaseConfig();
@@ -123,6 +293,7 @@ export async function upsertTenantWebSearchConfig(
         enabled: nextEnabled,
         provider: nextProvider,
         apiKeyCipher: cipher,
+        providers: providerRows,
         maxResults: nextMax,
         deepResearchEnabled: nextDeepResearch,
         updatedAt,
@@ -132,6 +303,7 @@ export async function upsertTenantWebSearchConfig(
           enabled: nextEnabled,
           provider: nextProvider,
           apiKeyCipher: cipher,
+          providers: providerRows,
           maxResults: nextMax,
           deepResearchEnabled: nextDeepResearch,
           updatedAt,
@@ -146,6 +318,7 @@ export async function upsertTenantWebSearchConfig(
         enabled: nextEnabled,
         provider: nextProvider,
         apiKeyCipher: cipher,
+        providers: providerRows,
         maxResults: nextMax,
         deepResearchEnabled: nextDeepResearch,
         updatedAt,
@@ -156,6 +329,7 @@ export async function upsertTenantWebSearchConfig(
           enabled: nextEnabled,
           provider: nextProvider,
           apiKeyCipher: cipher,
+          providers: providerRows,
           maxResults: nextMax,
           deepResearchEnabled: nextDeepResearch,
           updatedAt,
@@ -169,5 +343,7 @@ export async function upsertTenantWebSearchConfig(
     maxResults: nextMax,
     hasApiKey: Boolean(nextKey.trim()),
     deepResearchEnabled: nextDeepResearch,
+    providers: publicProviders(nextProviders),
+    availableAdapters: listWebSearchAdapters(),
   };
 }

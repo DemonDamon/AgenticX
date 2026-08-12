@@ -3,7 +3,31 @@ import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../
 import {
   getPublicWebSearchConfig,
   upsertTenantWebSearchConfig,
+  type WebSearchProviderUpdate,
 } from "../../../../lib/web-search/tenant-config";
+
+function providerUpdates(raw: unknown): WebSearchProviderUpdate[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    if (typeof row.id !== "string" || typeof row.adapter !== "string") return [];
+    return [
+      {
+        id: row.id,
+        adapter: row.adapter,
+        displayName: typeof row.displayName === "string" ? row.displayName : undefined,
+        apiKey: typeof row.apiKey === "string" ? row.apiKey : undefined,
+        enabled: typeof row.enabled === "boolean" ? row.enabled : undefined,
+        priority: typeof row.priority === "number" ? row.priority : undefined,
+        options:
+          row.options && typeof row.options === "object" && !Array.isArray(row.options)
+            ? (row.options as Record<string, unknown>)
+            : undefined,
+      },
+    ];
+  });
+}
 
 export async function GET() {
   const session = await getSessionFromCookies();
@@ -58,6 +82,7 @@ export async function PUT(request: Request) {
     maxResults?: unknown;
     apiKey?: unknown;
     deepResearchEnabled?: unknown;
+    providers?: unknown;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -81,6 +106,7 @@ export async function PUT(request: Request) {
       apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
       deepResearchEnabled:
         typeof body.deepResearchEnabled === "boolean" ? body.deepResearchEnabled : undefined,
+      providers: providerUpdates(body.providers),
     });
     return NextResponse.json({ data });
   } catch (error) {

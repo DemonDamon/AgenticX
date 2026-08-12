@@ -113,6 +113,13 @@
       "when": 1786000000001,
       "tag": "0015_chat_messages_content_mediumtext",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1786522380151,
+      "tag": "0016_web_search_provider_pool",
+      "breakpoints": true
     }
   ]
 }

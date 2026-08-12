@@ -27,9 +27,23 @@ import {
   type SearchQueryRewrite,
 } from "./follow-up";
 import { sanitizeHistoryForUpstream } from "./history-sanitize";
-import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeConfig } from "./providers";
+import {
+  configForWebSearchProvider,
+  configuredWebSearchProviders,
+  executeWebSearch,
+  formatHits,
+  primaryWebSearchProvider,
+  WEB_SEARCH_MAX_RESULTS_CAP,
+  type WebSearchHit,
+  type WebSearchRuntimeConfig,
+} from "./providers";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
 import { rerankHits } from "./rerank";
+import {
+  assessSearchEvidence,
+  mergeSearchHits,
+  selectAlternativeProvider,
+} from "./search-retry";
 import { classifyWebSearchNeed } from "./search-necessity";
 
 export const WEB_SEARCH_TOOL = {
@@ -782,17 +796,61 @@ export async function runWebSearchTurn(
   let hits: WebSearchHit[] = [];
   let searchFailed = false;
 
-  try {
-    if (!query) {
-      throw new Error("missing user query for web search");
-    }
-    hits = await searchFn(query, undefined, cfg);
-    if (hits.length === 0) {
-      throw new Error("search returned no hits");
-    }
-  } catch (error) {
+  if (!query) {
     searchFailed = true;
-    console.warn("[web-search] search failed, degrading:", error instanceof Error ? error.message : error);
+    console.warn("[web-search] search failed, degrading: missing user query for web search");
+  } else {
+    const providers = configuredWebSearchProviders(cfg);
+    const primary = primaryWebSearchProvider(cfg);
+    if (!primary) {
+      searchFailed = true;
+      console.warn("[web-search] search failed, degrading: no configured provider");
+    } else {
+      const alternative = selectAlternativeProvider(providers, primary.id);
+      let primaryFailed = false;
+      try {
+        hits = await searchFn(
+          query,
+          undefined,
+          configForWebSearchProvider(cfg, primary),
+        );
+        primaryFailed = hits.length === 0;
+      } catch (error) {
+        primaryFailed = true;
+        console.warn(
+          `[web-search] provider=${primary.id} failed:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+
+      const quality = assessSearchEvidence(hits);
+      const retryReason = primaryFailed ? "primary_failed" : quality.retry ? "sparse_evidence" : null;
+      if (retryReason && alternative) {
+        console.info(
+          `[web-search] retry reason=${retryReason} from=${primary.id} to=${alternative.id} uniqueUrls=${quality.uniqueUrls} uniqueHosts=${quality.uniqueHosts}`,
+        );
+        try {
+          const complement = await searchFn(
+            query,
+            undefined,
+            configForWebSearchProvider(cfg, alternative),
+          );
+          hits = primaryFailed
+            ? complement
+            : mergeSearchHits(hits, complement).slice(0, WEB_SEARCH_MAX_RESULTS_CAP);
+        } catch (error) {
+          console.warn(
+            `[web-search] retry provider=${alternative.id} failed:`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }
+
+      searchFailed = hits.length === 0;
+      if (searchFailed) {
+        console.warn("[web-search] search failed, degrading: no usable hits");
+      }
+    }
   }
 
   const ranked = searchFailed ? [] : rerankHits(query, hits);

@@ -17,16 +17,124 @@ export type WebSearchHit = {
   publishedAt?: string;
 };
 
-export type WebSearchProviderName = "duckduckgo" | "bocha" | "tavily";
+/**
+ * A configured provider instance. `id` is tenant-defined identity; `adapter`
+ * names the request/response protocol implementation registered in this BFF.
+ * Retry routing compares only `id`, so it never needs a vendor allowlist.
+ */
+export type WebSearchProviderConfig = {
+  id: string;
+  adapter: string;
+  displayName: string;
+  apiKey: string;
+  enabled: boolean;
+  priority: number;
+  options?: Record<string, unknown>;
+};
+
+/** @deprecated Provider identity is now a configured string, not a closed union. */
+export type WebSearchProviderName = string;
 
 export type WebSearchRuntimeConfig = {
   enabled: boolean;
+  /** Legacy mirror of the primary provider adapter. */
   provider: WebSearchProviderName;
+  /** Legacy mirror of the primary provider secret. */
   apiKey: string;
   maxResults: number;
+  primaryProviderId?: string;
+  providers?: WebSearchProviderConfig[];
 };
 
 type FetchLike = typeof fetch;
+
+type WebSearchAdapterContext = {
+  query: string;
+  maxResults: number;
+  apiKey: string;
+  options: Record<string, unknown>;
+  fetchImpl: FetchLike;
+};
+
+export type WebSearchAdapterDefinition = {
+  id: string;
+  displayName: string;
+  requiresApiKey: boolean;
+  search: (context: WebSearchAdapterContext) => Promise<WebSearchHit[]>;
+};
+
+export type WebSearchAdapterPublicDefinition = Omit<WebSearchAdapterDefinition, "search">;
+
+const ADAPTERS = new Map<string, WebSearchAdapterDefinition>();
+
+/** Adapter registration is the only protocol-specific extension point. */
+export function registerWebSearchAdapter(definition: WebSearchAdapterDefinition): void {
+  const id = definition.id.trim().toLowerCase();
+  if (!id) throw new Error("web search adapter id is required");
+  ADAPTERS.set(id, { ...definition, id });
+}
+
+export function listWebSearchAdapters(): WebSearchAdapterPublicDefinition[] {
+  return [...ADAPTERS.values()].map(({ search: _search, ...definition }) => definition);
+}
+
+export function isConfiguredWebSearchProvider(provider: WebSearchProviderConfig): boolean {
+  if (!provider.enabled || !provider.id.trim()) return false;
+  const adapter = ADAPTERS.get(provider.adapter.trim().toLowerCase());
+  if (!adapter) return false;
+  return !adapter.requiresApiKey || Boolean(provider.apiKey.trim());
+}
+
+export function configuredWebSearchProviders(
+  config: Pick<
+    WebSearchRuntimeConfig,
+    "provider" | "apiKey" | "maxResults" | "primaryProviderId" | "providers"
+  >,
+): WebSearchProviderConfig[] {
+  const configured = (config.providers ?? [])
+    .filter(isConfiguredWebSearchProvider)
+    .slice()
+    .sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+  // An explicit pool is authoritative, including the case where every entry is
+  // disabled or missing credentials. Never resurrect a disabled legacy mirror.
+  if ((config.providers?.length ?? 0) > 0) return configured;
+
+  const adapter = config.provider.trim().toLowerCase();
+  const legacy: WebSearchProviderConfig = {
+    id: config.primaryProviderId?.trim() || adapter,
+    adapter,
+    displayName: ADAPTERS.get(adapter)?.displayName ?? adapter,
+    apiKey: config.apiKey,
+    enabled: true,
+    priority: 0,
+  };
+  return isConfiguredWebSearchProvider(legacy) ? [legacy] : [];
+}
+
+export function primaryWebSearchProvider(
+  config: Pick<
+    WebSearchRuntimeConfig,
+    "provider" | "apiKey" | "maxResults" | "primaryProviderId" | "providers"
+  >,
+): WebSearchProviderConfig | null {
+  const providers = configuredWebSearchProviders(config);
+  const primaryId = config.primaryProviderId?.trim();
+  return providers.find((provider) => provider.id === primaryId) ?? providers[0] ?? null;
+}
+
+/** Narrow a runtime pool to one exact provider so adapters cannot hide fallback calls. */
+export function configForWebSearchProvider(
+  config: WebSearchRuntimeConfig,
+  provider: WebSearchProviderConfig,
+): WebSearchRuntimeConfig {
+  return {
+    ...config,
+    provider: provider.adapter,
+    apiKey: provider.apiKey,
+    primaryProviderId: provider.id,
+    providers: [provider],
+  };
+}
 
 function clampMaxResults(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_MAX_RESULTS;
@@ -282,34 +390,67 @@ export function formatHits(hits: WebSearchHit[]): string {
 export async function executeWebSearch(
   query: string,
   maxResults: number | undefined,
-  cfg: Pick<WebSearchRuntimeConfig, "provider" | "apiKey" | "maxResults">,
+  cfg: Pick<
+    WebSearchRuntimeConfig,
+    "provider" | "apiKey" | "maxResults" | "primaryProviderId" | "providers"
+  >,
   fetchImpl: FetchLike = directFetch as FetchLike,
 ): Promise<WebSearchHit[]> {
   const q = query.trim();
   if (!q) return [];
   const n = clampMaxResults(maxResults ?? cfg.maxResults ?? DEFAULT_MAX_RESULTS);
-  const provider = cfg.provider || "duckduckgo";
-  const freshness = resolveFreshness(q);
+  const providers = configuredWebSearchProviders(cfg).slice(0, 2);
+  if (providers.length === 0) throw new Error("no configured web search provider");
 
-  try {
-    if (provider === "bocha") {
-      if (!cfg.apiKey.trim()) throw new Error("bocha api key missing");
-      const hits = await searchBocha(q, n, cfg.apiKey, fetchImpl, freshness);
-      if (hits.length > 0) return hits;
-    } else if (provider === "tavily") {
-      if (!cfg.apiKey.trim()) throw new Error("tavily api key missing");
-      const hits = await searchTavily(q, n, cfg.apiKey, fetchImpl);
-      if (hits.length > 0) return hits;
-    } else {
-      return await searchDuckDuckGo(q, n, fetchImpl);
+  let lastError: unknown = new Error("search returned no hits");
+  for (const provider of providers) {
+    const adapterId = provider.adapter.trim().toLowerCase();
+    const adapter = ADAPTERS.get(adapterId);
+    if (!adapter) {
+      lastError = new Error(`web search adapter is not registered: ${adapterId}`);
+      continue;
     }
-  } catch (error) {
-    if (provider === "duckduckgo") throw error;
-    console.warn(
-      `[web-search] provider=${provider} failed, falling back to duckduckgo:`,
-      error instanceof Error ? error.message : String(error),
-    );
+    if (adapter.requiresApiKey && !provider.apiKey.trim()) {
+      lastError = new Error(`web search provider is missing credentials: ${provider.id}`);
+      continue;
+    }
+    try {
+      const hits = await adapter.search({
+        query: q,
+        maxResults: n,
+        apiKey: provider.apiKey,
+        options: provider.options ?? {},
+        fetchImpl,
+      });
+      if (hits.length > 0) return hits;
+      lastError = new Error(`web search provider returned no hits: ${provider.id}`);
+    } catch (error) {
+      lastError = error;
+    }
   }
-
-  return searchDuckDuckGo(q, n, fetchImpl);
+  throw lastError;
 }
+
+registerWebSearchAdapter({
+  id: "duckduckgo",
+  displayName: "DuckDuckGo",
+  requiresApiKey: false,
+  search: ({ query, maxResults, fetchImpl }) =>
+    searchDuckDuckGo(query, maxResults, fetchImpl),
+});
+
+registerWebSearchAdapter({
+  id: "bocha",
+  displayName: "Bocha",
+  requiresApiKey: true,
+  search: ({ query, maxResults, apiKey, fetchImpl }) =>
+    searchBocha(query, maxResults, apiKey, fetchImpl, resolveFreshness(query)),
+});
+
+registerWebSearchAdapter({
+  id: "tavily",
+  displayName: "Tavily",
+  requiresApiKey: true,
+  search: ({ query, maxResults, apiKey, fetchImpl }) =>
+    searchTavily(query, maxResults, apiKey, fetchImpl),
+});

@@ -159,6 +159,11 @@ export const enterpriseRuntimeWebSearch = pgTable("enterprise_runtime_web_search
   enabled: boolean("enabled").default(true).notNull(),
   provider: varchar("provider", { length: 32 }).default("duckduckgo").notNull(),
   apiKeyCipher: text("api_key_cipher").default("").notNull(),
+  /** Ordered provider instances; secrets remain encrypted inside each item. */
+  providers: jsonb("providers")
+    .default([])
+    .notNull()
+    .$type<Array<Record<string, unknown>>>(),
   maxResults: integer("max_results").default(50).notNull(),
   deepResearchEnabled: boolean("deep_research_enabled").default(true).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

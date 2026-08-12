@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  configuredWebSearchProviders,
   executeWebSearch,
   formatHits,
   looksLikeDdgChallenge,
   parseDuckDuckGoHtml,
   parseDuckDuckGoLite,
+  registerWebSearchAdapter,
   unwrapDuckDuckGoRedirect,
   WEB_SEARCH_MAX_RESULTS_CAP,
 } from "../providers";
@@ -159,6 +161,59 @@ describe("web search providers", () => {
     expect(tavilyHits[0]?.title).toBe("Tavily Hit");
   });
 
+  it("routes tenant-defined provider ids through a registered adapter", async () => {
+    const search = vi.fn(async ({ query }: { query: string }) => [
+      { title: "Custom", url: "https://custom.example/result", snippet: query },
+    ]);
+    registerWebSearchAdapter({
+      id: "test-custom-protocol",
+      displayName: "Test custom protocol",
+      requiresApiKey: true,
+      search,
+    });
+
+    const hits = await executeWebSearch("custom query", 5, {
+      provider: "test-custom-protocol",
+      apiKey: "legacy-key",
+      maxResults: 5,
+      providers: [
+        {
+          id: "tenant-chosen-name",
+          adapter: "test-custom-protocol",
+          displayName: "Tenant Search",
+          apiKey: "tenant-key",
+          enabled: true,
+          priority: 0,
+        },
+      ],
+    });
+
+    expect(hits[0]?.snippet).toBe("custom query");
+    expect(search).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: "tenant-key", query: "custom query" }),
+    );
+  });
+
+  it("does not revive a disabled explicit provider through legacy mirrors", () => {
+    expect(
+      configuredWebSearchProviders({
+        provider: "bocha",
+        apiKey: "legacy-key",
+        maxResults: 5,
+        providers: [
+          {
+            id: "disabled-provider",
+            adapter: "bocha",
+            displayName: "Disabled",
+            apiKey: "configured-key",
+            enabled: false,
+            priority: 0,
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
   it("sends bocha summary+freshness for weather queries and omits freshness for stable facts", async () => {
     const bodies: unknown[] = [];
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -240,22 +295,58 @@ describe("web search providers", () => {
     expect(withoutDate).not.toContain("发布时间");
   });
 
-  it("falls back to duckduckgo when bocha throws", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("falls back only to another configured provider instance", async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (String(url).includes("bochaai.com")) {
         throw new Error("bocha down");
       }
       return new Response(DDG_HTML, { status: 200 });
     });
-    const hits = await executeWebSearch("q", 5, { provider: "bocha", apiKey: "k", maxResults: 5 }, fetchImpl as unknown as typeof fetch);
+    const hits = await executeWebSearch(
+      "q",
+      5,
+      {
+        provider: "bocha",
+        apiKey: "k",
+        maxResults: 5,
+        providers: [
+          {
+            id: "customer-primary",
+            adapter: "bocha",
+            displayName: "Primary",
+            apiKey: "k",
+            enabled: true,
+            priority: 0,
+          },
+          {
+            id: "customer-secondary",
+            adapter: "duckduckgo",
+            displayName: "Secondary",
+            apiKey: "",
+            enabled: true,
+            priority: 1,
+          },
+        ],
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
     expect(hits.length).toBeGreaterThanOrEqual(2);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("[web-search] provider=bocha failed"),
-      "bocha down",
-    );
-    warn.mockRestore();
+  });
+
+  it("does not invent an unconfigured fallback provider", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("primary down");
+    });
+    await expect(
+      executeWebSearch(
+        "q",
+        5,
+        { provider: "bocha", apiKey: "k", maxResults: 5 },
+        fetchImpl as unknown as typeof fetch,
+      ),
+    ).rejects.toThrow("primary down");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("clamps max_results above cap to 50", async () => {

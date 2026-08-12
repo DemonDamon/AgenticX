@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveWebSearchConfig } from "../web-search/config";
 
-const ENV_KEYS = ["WEB_SEARCH_PROVIDER", "WEB_SEARCH_API_KEY", "WEB_SEARCH_MAX_RESULTS"] as const;
+const ENV_KEYS = [
+  "WEB_SEARCH_PROVIDER",
+  "WEB_SEARCH_API_KEY",
+  "WEB_SEARCH_MAX_RESULTS",
+  "WEB_SEARCH_PROVIDERS_JSON",
+  "WEB_SEARCH_PRIMARY_PROVIDER_ID",
+] as const;
 
 describe("resolveWebSearchConfig", () => {
   afterEach(() => {
@@ -48,5 +54,33 @@ describe("resolveWebSearchConfig", () => {
       maxResults: 5,
     });
     expect(cfg.enabled).toBe(false);
+  });
+
+  it("loads an ordered provider pool without a provider-name allowlist", () => {
+    process.env.WEB_SEARCH_PROVIDERS_JSON = JSON.stringify([
+      {
+        id: "customer-search-primary",
+        adapter: "future-adapter",
+        displayName: "Customer primary",
+        apiKey: "key-a",
+        enabled: true,
+        priority: 0,
+      },
+      {
+        id: "customer-search-secondary",
+        adapter: "another-adapter",
+        displayName: "Customer secondary",
+        apiKey: "key-b",
+        enabled: true,
+        priority: 1,
+      },
+    ]);
+
+    const cfg = resolveWebSearchConfig(null);
+    expect(cfg.providers?.map((provider) => provider.id)).toEqual([
+      "customer-search-primary",
+      "customer-search-secondary",
+    ]);
+    expect(cfg.provider).toBe("future-adapter");
   });
 });
