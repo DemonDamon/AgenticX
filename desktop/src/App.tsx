@@ -20,6 +20,7 @@ import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/sess
 import type { Message, ProviderEntry } from "./store";
 import { useAppStore } from "./store";
 import { stopSpeak } from "./voice/tts";
+import { VOICE_FOCUS_ENTRY_ENABLED } from "./voice/focus-mode-ui";
 import { matchKeybinding } from "./core/keybinding-manager";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 import { resolveMetaDisplayName } from "./utils/display-name";
@@ -1794,8 +1795,10 @@ export function App() {
       } else if (action === "toggle-plan-mode") {
         setPlanMode(!planMode);
       } else if (action === "toggle-focus-mode") {
+        // 灵巧模式入口未成熟时 keybinding 已不注册；保留分支便于恢复后生效。
         // 快捷键场景：把当前 activePaneId 作为目标 pane 传给灵巧模式，
         // 让历史继承 / 写回都对齐用户正在聊的那个会话（非硬编码 pane-meta）。
+        if (!VOICE_FOCUS_ENTRY_ENABLED) return;
         toggleFocusMode(useAppStore.getState().activePaneId);
       } else if (action === "open-keybindings") {
         setKeybindingsPanelOpen(true);

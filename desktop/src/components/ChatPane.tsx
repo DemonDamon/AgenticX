@@ -46,6 +46,7 @@ import {
   type SttPhase,
 } from "../voice/stt";
 import { useVoicePushToTalk } from "../hooks/useVoicePushToTalk";
+import { VOICE_FOCUS_ENTRY_ENABLED } from "../voice/focus-mode-ui";
 import { VoicePttOverlay } from "./VoicePttOverlay";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
@@ -11553,7 +11554,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             ) : null}
-            {!isGroupPane && (
+            {VOICE_FOCUS_ENTRY_ENABLED && !isGroupPane && (
               <button
                 type="button"
                 className="agx-topbar-btn !px-[5px]"

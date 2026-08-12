@@ -1,3 +1,5 @@
+import { VOICE_FOCUS_ENTRY_ENABLED } from "../voice/focus-mode-ui";
+
 export type KeybindingAction =
   | "open-global-search"
   | "open-settings"
@@ -22,7 +24,10 @@ const RULES: MatchRule[] = [
   { action: "clear-messages", key: "l", ctrlOrMeta: true, mode: "pro" },
   { action: "toggle-mode", key: "m", ctrlOrMeta: true, shift: true, mode: "both" },
   { action: "toggle-plan-mode", key: "p", ctrlOrMeta: true, shift: true, mode: "pro" },
-  { action: "toggle-focus-mode", key: "f", ctrlOrMeta: true, shift: true, mode: "pro" },
+  // 灵巧模式入口未成熟时不注册 ⇧⌘F；见 VOICE_FOCUS_ENTRY_ENABLED
+  ...(VOICE_FOCUS_ENTRY_ENABLED
+    ? [{ action: "toggle-focus-mode" as const, key: "f", ctrlOrMeta: true, shift: true, mode: "pro" as const }]
+    : []),
   { action: "open-keybindings", key: "/", ctrlOrMeta: true, mode: "pro" },
 ];
 
