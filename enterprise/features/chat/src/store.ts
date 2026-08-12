@@ -460,6 +460,15 @@ function applyWebSearchSourcesToAssistant(
   });
 }
 
+function preserveStreamedWebSearchSources(
+  message: ChatMessage,
+  assistantId: string,
+  sources: ChatMessage["web_search_sources"],
+): ChatMessage {
+  if (message.id !== assistantId || !sources?.length) return message;
+  return { ...message, web_search_sources: sources };
+}
+
 function findVersionIndexByAssistantId(versions: AssistantResponseVersion[], assistantId: string): number {
   return versions.findIndex((version) => version.id === assistantId);
 }
@@ -1303,6 +1312,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
+      let streamedWebSearchSources: ChatMessage["web_search_sources"];
       const request = toSdkRequest(
         sessionId,
         get().activeModel,
@@ -1376,6 +1386,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.webSearchSources?.length) {
+          streamedWebSearchSources = chunk.webSearchSources;
           applyWebSearchSourcesToAssistant(set, assistantMessage.id, userMessage.id, chunk.webSearchSources);
         }
 
@@ -1393,14 +1404,27 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       }
 
+      if (streamedWebSearchSources?.length) {
+        applyWebSearchSourcesToAssistant(
+          set,
+          assistantMessage.id,
+          userMessage.id,
+          streamedWebSearchSources,
+        );
+      }
       const after = get();
       if (after.status !== "error" && after.hydrated) {
         const u = after.messages.find((m) => m.id === userMessage.id);
         const a = after.messages.find((m) => m.id === assistantMessage.id);
         if (u && a && u.role === "user" && a.role === "assistant") {
+          const assistantToPersist = preserveStreamedWebSearchSources(
+            a,
+            assistantMessage.id,
+            streamedWebSearchSources,
+          );
           // Yield one tick after SSE teardown so the portal can accept the follow-up POST.
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          await persistAppendMessages(set, sessionId, [u, a]);
+          await persistAppendMessages(set, sessionId, [u, assistantToPersist]);
         }
       }
     } catch (error) {
@@ -1539,6 +1563,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
+      let streamedWebSearchSources: ChatMessage["web_search_sources"];
       const request = toSdkRequest(
         sessionId,
         state.activeModel,
@@ -1615,6 +1640,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.webSearchSources?.length) {
+          streamedWebSearchSources = chunk.webSearchSources;
           applyWebSearchSourcesToAssistant(
             set,
             replacementAssistant.id,
@@ -1637,9 +1663,23 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       }
 
+      if (streamedWebSearchSources?.length) {
+        applyWebSearchSourcesToAssistant(
+          set,
+          replacementAssistant.id,
+          input.messageId,
+          streamedWebSearchSources,
+        );
+      }
       const afterEdit = get();
       if (afterEdit.status !== "error" && afterEdit.hydrated) {
-        const snapshot = getSessionMessages(afterEdit.messages, sessionId);
+        const snapshot = getSessionMessages(afterEdit.messages, sessionId).map((message) =>
+          preserveStreamedWebSearchSources(
+            message,
+            replacementAssistant.id,
+            streamedWebSearchSources,
+          ),
+        );
         try {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
           await portalHistory.replaceMessages(sessionId, snapshot);
@@ -1755,6 +1795,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
     try {
+      let streamedWebSearchSources: ChatMessage["web_search_sources"];
       const request = toSdkRequest(
         sessionId,
         state.activeModel,
@@ -1831,6 +1872,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.webSearchSources?.length) {
+          streamedWebSearchSources = chunk.webSearchSources;
           applyWebSearchSourcesToAssistant(
             set,
             replacementAssistant.id,
@@ -1853,9 +1895,23 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
       }
 
+      if (streamedWebSearchSources?.length) {
+        applyWebSearchSourcesToAssistant(
+          set,
+          replacementAssistant.id,
+          targetUserMessageId,
+          streamedWebSearchSources,
+        );
+      }
       const afterRegen = get();
       if (afterRegen.status !== "error" && afterRegen.hydrated) {
-        const snapshot = getSessionMessages(afterRegen.messages, sessionId);
+        const snapshot = getSessionMessages(afterRegen.messages, sessionId).map((message) =>
+          preserveStreamedWebSearchSources(
+            message,
+            replacementAssistant.id,
+            streamedWebSearchSources,
+          ),
+        );
         try {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
           await portalHistory.replaceMessages(sessionId, snapshot);

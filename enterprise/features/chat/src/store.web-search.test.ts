@@ -2,13 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatChunk, ChatClient, ChatRequest, SendMessageResult } from "@agenticx/sdk-ts";
 import type { ChatSession } from "@agenticx/core-api";
 
+const historyClientMocks = vi.hoisted(() => ({
+  appendMessages: vi.fn(),
+  replaceMessages: vi.fn(),
+}));
+
 vi.mock("./history-client", () => ({
   createPortalChatHistoryClient: () => ({
     listSessions: vi.fn().mockResolvedValue([]),
     createSession: vi.fn(),
     getMessages: vi.fn().mockResolvedValue([]),
-    appendMessages: vi.fn().mockResolvedValue(undefined),
-    replaceMessages: vi.fn().mockResolvedValue(undefined),
+    appendMessages: historyClientMocks.appendMessages,
+    replaceMessages: historyClientMocks.replaceMessages,
     renameSession: vi.fn(),
     patchSession: vi.fn(),
     deleteSession: vi.fn(),
@@ -39,6 +44,7 @@ class CapturingClient implements ChatClient {
   public readonly requests: ChatRequest[] = [];
   private seq = 0;
   public streamSources = false;
+  public afterSources: (() => void) | undefined;
 
   async sendMessage(req: ChatRequest): Promise<SendMessageResult> {
     this.requests.push(req);
@@ -47,7 +53,6 @@ class CapturingClient implements ChatClient {
   }
 
   async *stream(requestId: string): AsyncIterable<ChatChunk> {
-    yield { requestId, done: false, delta: "ok" };
     if (this.streamSources) {
       yield {
         requestId,
@@ -56,7 +61,9 @@ class CapturingClient implements ChatClient {
           { title: "Example", url: "https://example.com/a", snippet: "snip" },
         ],
       };
+      this.afterSources?.();
     }
+    yield { requestId, done: false, delta: "ok" };
     yield { requestId, done: true };
   }
 
@@ -67,6 +74,8 @@ class CapturingClient implements ChatClient {
 
 describe("chat store webSearch request wiring", () => {
   beforeEach(() => {
+    historyClientMocks.appendMessages.mockReset().mockResolvedValue(undefined);
+    historyClientMocks.replaceMessages.mockReset().mockResolvedValue(undefined);
     useChatStore.setState({
       sessions: [session("A", "web search")],
       activeSessionId: "A",
@@ -133,5 +142,32 @@ describe("chat store webSearch request wiring", () => {
       { title: "Example", url: "https://example.com/a", snippet: "snip" },
     ]);
     expect(assistant?.content).toBe("ok");
+  });
+
+  it("preserves source-first citations in memory and the history append payload", async () => {
+    const client = new CapturingClient();
+    client.streamSources = true;
+    client.afterSources = () => {
+      useChatStore.setState((state) => ({
+        messages: state.messages.map((message) =>
+          message.role === "assistant" ? { ...message, web_search_sources: undefined } : message,
+        ),
+      }));
+    };
+
+    await useChatStore.getState().sendMessage(client, { content: "persist sources", webSearch: true });
+
+    const expectedSources = [
+      { title: "Example", url: "https://example.com/a", snippet: "snip" },
+    ];
+    const assistant = useChatStore.getState().messages.find((message) => message.role === "assistant");
+    expect(assistant?.web_search_sources).toEqual(expectedSources);
+
+    const appendPayload = historyClientMocks.appendMessages.mock.calls.at(-1)?.[1] as
+      | Array<{ role: string; web_search_sources?: unknown[] }>
+      | undefined;
+    expect(appendPayload?.find((message) => message.role === "assistant")?.web_search_sources).toEqual(
+      expectedSources,
+    );
   });
 });
