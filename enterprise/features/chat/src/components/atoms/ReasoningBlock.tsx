@@ -6,11 +6,18 @@ import {
   ASSISTANT_MD_COMPONENTS,
   assistantUrlTransform,
 } from "../../markdown/assistant-markdown-components";
+import {
+  formatReasoningTitle,
+  getCachedReasoningDuration,
+  measureReasoningSeconds,
+  setCachedReasoningDuration,
+} from "./reasoning-duration";
 
 type ReasoningBlockProps = {
   reasoning: string;
   thinkingStarted: boolean;
   thinkingInProgress: boolean;
+  durationKey?: string;
 };
 
 function Chevron({ open }: { open: boolean }) {
@@ -53,12 +60,22 @@ function ThinkingGlyph() {
   );
 }
 
-export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress }: ReasoningBlockProps) {
+export function ReasoningBlock({
+  reasoning,
+  thinkingStarted,
+  thinkingInProgress,
+  durationKey = "",
+}: ReasoningBlockProps) {
   const content = reasoning.trim();
   // 流式思考中默认展开；完成后默认折叠（历史消息同理），避免长思考链刷屏
   const [open, setOpen] = React.useState(thinkingInProgress);
   const [tick, setTick] = React.useState(0);
-  const startedAtRef = React.useRef<number | null>(null);
+  const cachedAtMount = getCachedReasoningDuration(durationKey);
+  const startedAtRef = React.useRef<number | null>(
+    thinkingInProgress && cachedAtMount && !cachedAtMount.completed
+      ? Date.now() - cachedAtMount.seconds * 1000
+      : null,
+  );
   const finishedAtRef = React.useRef<number | null>(null);
   const autoPhaseRef = React.useRef<"idle" | "thinking" | "done">(
     thinkingStarted ? (thinkingInProgress ? "thinking" : "done") : "idle",
@@ -72,10 +89,10 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
       return;
     }
     probeNote("ReasoningBlock.effect", { thinkingInProgress });
-    if (startedAtRef.current === null) {
-      startedAtRef.current = Date.now();
-    }
     if (thinkingInProgress) {
+      if (startedAtRef.current === null) {
+        startedAtRef.current = Date.now();
+      }
       finishedAtRef.current = null;
       if (autoPhaseRef.current !== "thinking") {
         autoPhaseRef.current = "thinking";
@@ -83,12 +100,19 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
       }
       return;
     }
-    if (autoPhaseRef.current !== "done") {
+    if (autoPhaseRef.current === "thinking") {
       autoPhaseRef.current = "done";
       finishedAtRef.current = Date.now();
+      if (startedAtRef.current !== null) {
+        setCachedReasoningDuration(
+          durationKey,
+          measureReasoningSeconds(startedAtRef.current, finishedAtRef.current),
+          true,
+        );
+      }
       setOpen((prev) => (!prev ? prev : false));
     }
-  }, [thinkingStarted, thinkingInProgress]);
+  }, [durationKey, thinkingStarted, thinkingInProgress]);
 
   React.useEffect(() => {
     if (!thinkingStarted || !thinkingInProgress) return;
@@ -96,13 +120,40 @@ export function ReasoningBlock({ reasoning, thinkingStarted, thinkingInProgress 
     return () => window.clearInterval(timer);
   }, [thinkingStarted, thinkingInProgress]);
 
+  React.useEffect(() => {
+    return () => {
+      if (autoPhaseRef.current !== "thinking" || startedAtRef.current === null) return;
+      setCachedReasoningDuration(
+        durationKey,
+        measureReasoningSeconds(startedAtRef.current, Date.now()),
+        false,
+      );
+    };
+  }, [durationKey]);
+
   if (!thinkingStarted) return null;
 
-  const startedAt = startedAtRef.current ?? Date.now();
+  void tick;
+
+  const startedAt = startedAtRef.current;
   const finishedAt = finishedAtRef.current;
-  const elapsedMs = (finishedAt ?? Date.now()) - startedAt;
-  const elapsedSeconds = Math.max(1, Math.round(elapsedMs / 1000));
-  const title = thinkingInProgress ? "Thinking" : `Thought for ${elapsedSeconds} seconds`;
+  const cachedDuration = getCachedReasoningDuration(durationKey);
+  let elapsedSeconds = 0;
+  let hasReliableDuration = false;
+
+  if (startedAt !== null) {
+    elapsedSeconds = measureReasoningSeconds(startedAt, finishedAt ?? Date.now());
+    hasReliableDuration = true;
+  } else if (cachedDuration?.completed) {
+    elapsedSeconds = cachedDuration.seconds;
+    hasReliableDuration = true;
+  }
+
+  const title = formatReasoningTitle({
+    thinkingInProgress,
+    elapsedSeconds,
+    hasReliableDuration,
+  });
   const showContent = open && (content.length > 0 || thinkingInProgress);
 
   return (

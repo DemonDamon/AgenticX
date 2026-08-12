@@ -859,6 +859,7 @@ export function MessageList({
                               reasoning={parsedAssistant.reasoningContent}
                               thinkingStarted={parsedAssistant.thinkingStarted}
                               thinkingInProgress={parsedAssistant.thinkingInProgress}
+                              durationKey={message.id}
                             />
                           </div>
                         ) : null}
@@ -889,6 +890,7 @@ export function MessageList({
                               reasoning={parsedAssistant.reasoningContent}
                               thinkingStarted={parsedAssistant.thinkingStarted}
                               thinkingInProgress={parsedAssistant.thinkingInProgress}
+                              durationKey={message.id}
                             />
                           </div>
                         ) : null}
