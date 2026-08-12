@@ -24,6 +24,7 @@ import {
 } from "@agenticx/ui";
 import { ArrowUpRight, ChevronDown, ChevronRight, CirclePlus, Pencil, RefreshCw, Trash2, UsersRound } from "lucide-react";
 import { adminFetch } from "../../../lib/admin-client-auth";
+import { UserDetailEditor, type UserDetailTarget } from "../../../components/UserDetailEditor";
 
 type OverviewMember = { id: string; displayName: string; email: string; deptId: string | null; usedTokens: number };
 type GroupMemberOverview = OverviewMember & {
@@ -291,6 +292,7 @@ export default function GroupsPage() {
   const [finiteMonthlyTokens, setFiniteMonthlyTokens] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editingMember, setEditingMember] = useState<UserDetailTarget | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -523,17 +525,20 @@ export default function GroupsPage() {
                 </div>
                 <div className="grid max-h-72 gap-2 overflow-y-auto rounded-xl border border-border p-2 sm:grid-cols-2">
                   {group.members.length ? group.members.map((member) => (
-                    <Link
+                    <button
+                      type="button"
                       key={member.id}
-                      href={`/iam/roles?user=${encodeURIComponent(member.id)}&edit=1`}
-                      onClick={(event) => event.stopPropagation()}
-                      className="flex min-w-0 items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-sm transition-colors hover:border-primary/50 hover:bg-muted"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setEditingMember(member);
+                      }}
+                      className="flex min-w-0 items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-left text-sm transition-colors hover:border-primary/50 hover:bg-muted"
                     >
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{member.displayName.slice(0, 1)}</span>
                       <span className="min-w-0 flex-1"><span className="block truncate font-medium">{member.displayName}</span><span className="block truncate text-xs text-muted-foreground">{member.email}</span></span>
                       {member.hasIndividualOverride ? <Badge variant="outline" className="shrink-0 border-amber-500/50 px-1 py-0 text-[10px] text-amber-700 dark:text-amber-300">个人特例</Badge> : null}
                       <MemberQuotaRing used={member.usedTokens} limit={member.monthlyTokens} unlimited={member.unlimited} />
-                    </Link>
+                    </button>
                   )) : <span className="p-2 text-sm text-muted-foreground">尚未选择成员</span>}
                 </div>
               </section>
@@ -658,6 +663,14 @@ export default function GroupsPage() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <UserDetailEditor
+        target={editingMember}
+        onOpenChange={(open) => {
+          if (!open) setEditingMember(null);
+        }}
+        onChanged={load}
+      />
     </div>
   );
 }

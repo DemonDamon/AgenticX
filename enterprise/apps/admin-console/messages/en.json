@@ -46,7 +46,7 @@
         "audit": "Audit Logs",
         "compliance": "Compliance",
         "metering": "Usage & Quotas",
-        "quota": "Company Quotas",
+        "quota": "Quota Control",
         "quotaPlans": "Token Plans",
         "billingSplit": "Billing Split",
         "autoRouting": "Auto Routing",
