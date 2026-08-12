@@ -1625,7 +1625,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               const resultCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
               const rawContent = serializeToolResultRaw(resultRaw);
               const preview = formatted.content.replace(/\s+/g, " ").trim().slice(0, 160);
-              const mergedStatus = deriveToolStatusFromResult(resultRaw);
+              const mergedStatus = payload.data?.is_error === true
+                ? "error"
+                : deriveToolStatusFromResult(resultRaw);
               if (eventAgentId === "meta") {
                 const resultPatch = {
                   content: rawContent,
@@ -2007,9 +2009,10 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                     noticeKind,
                   });
                 } else if (!isEphemeralStopErrorText(errText)) {
-                  // Hook-blocked: merge into existing ToolCallCard to avoid duplicate bubble.
+                  // Merge tool-scoped errors into the existing ToolCallCard when possible
+                  // (hook-block / not-loaded / permission deny all share tool_call_id).
                   const errToolCallId = String(payload.data?.tool_call_id ?? "").trim();
-                  if (HOOK_BLOCK_RE.test(errText) && errToolCallId) {
+                  if (errToolCallId) {
                     const merged = updateMessageByToolCallId(errToolCallId, {
                       content: errText,
                       toolStatus: "error",
@@ -2017,7 +2020,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                       toolStreamLines: [],
                     });
                     if (!merged) {
-                      addMessage("tool", errText, "meta");
+                      addMessage("tool", `❌ ${errText}`, "meta");
                     }
                   } else {
                     addMessage("tool", `❌ ${errText}`, "meta");

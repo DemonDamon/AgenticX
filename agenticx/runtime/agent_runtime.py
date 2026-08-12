@@ -2949,7 +2949,7 @@ class AgentRuntime:
         )
         from agenticx.runtime.context_budget import maybe_compact_meta_turn_context
         from agenticx.runtime.tool_search import (
-            TOOL_NOT_YET_LOADED_TEMPLATE,
+            auto_load_deferred_tool,
             is_tool_pending_next_round,
             project_tools_for_round,
         )
@@ -5045,6 +5045,13 @@ class AgentRuntime:
                 if not tool_name:
                     invalid_message = "模型返回了无效工具调用（缺少 tool name），已忽略本次调用。"
                     tool_name = "unknown_tool"
+                    # Emit TOOL_CALL first so the desktop client has a pending card to merge
+                    # the denied result into, rather than falling back to a bare bubble.
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
                     messages.append(
                         {
                             "role": "tool",
@@ -5075,12 +5082,21 @@ class AgentRuntime:
                         )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
-                        data={"text": invalid_message, "tool_call_id": tool_call_id},
+                        data={
+                            "text": invalid_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     yield RuntimeEvent(
                         type=EventType.TOOL_RESULT.value,
-                        data={"name": tool_name, "result": invalid_message, "tool_call_id": tool_call_id},
+                        data={
+                            "name": tool_name,
+                            "result": invalid_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     _record_tool_turn_outcome("failed")
@@ -5089,6 +5105,13 @@ class AgentRuntime:
                 perm_deny = tool_denied_by_session_permissions(tool_name)
                 if perm_deny:
                     denied_message = perm_deny
+                    # Emit TOOL_CALL first so the desktop client has a pending card to merge
+                    # the denied result into, rather than falling back to a bare bubble.
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
                     messages.append(
                         {
                             "role": "tool",
@@ -5119,12 +5142,21 @@ class AgentRuntime:
                         )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
-                        data={"text": denied_message, "tool_call_id": tool_call_id},
+                        data={
+                            "text": denied_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     yield RuntimeEvent(
                         type=EventType.TOOL_RESULT.value,
-                        data={"name": tool_name, "result": denied_message, "tool_call_id": tool_call_id},
+                        data={
+                            "name": tool_name,
+                            "result": denied_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     _record_tool_turn_outcome("failed")
@@ -5136,9 +5168,16 @@ class AgentRuntime:
                         allowed_tool_names=allowed_tool_names,
                         full_openai_tools=full_tool_pool,
                     ):
-                        denied_message = TOOL_NOT_YET_LOADED_TEMPLATE.format(name=tool_name)
+                        denied_message = auto_load_deferred_tool(session, ts_ctx, tool_name)
                     else:
                         denied_message = f"工具 '{tool_name}' 不在当前允许列表中，已拒绝执行。"
+                    # Emit TOOL_CALL first so the desktop client has a pending card to merge
+                    # the denied/auto-loaded result into, rather than falling back to a bare bubble.
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
                     messages.append(
                         {
                             "role": "tool",
@@ -5169,12 +5208,21 @@ class AgentRuntime:
                         )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
-                        data={"text": denied_message, "tool_call_id": tool_call_id},
+                        data={
+                            "text": denied_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     yield RuntimeEvent(
                         type=EventType.TOOL_RESULT.value,
-                        data={"name": tool_name, "result": denied_message, "tool_call_id": tool_call_id},
+                        data={
+                            "name": tool_name,
+                            "result": denied_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     _record_tool_turn_outcome("failed")
