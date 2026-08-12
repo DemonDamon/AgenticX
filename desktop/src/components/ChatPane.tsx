@@ -9839,7 +9839,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const resultCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
               const rawContent = serializeToolResultRaw(payload.data?.result);
               const preview = formatted.content.replace(/\s+/g, " ").trim().slice(0, 160);
-              const mergedStatus = deriveToolStatusFromResult(payload.data?.result);
+              const mergedStatus = payload.data?.is_error === true
+                ? "error"
+                : deriveToolStatusFromResult(payload.data?.result);
               if (eventAgentId === "meta") {
                 const resultPatch = {
                   content: rawContent,
@@ -10550,9 +10552,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 setStallState("exhausted");
                 addPaneMessageIfSessionActive(pane.id, "tool", errText, "meta");
               } else if (!isEphemeralStopErrorText(errText)) {
-                // Hook-blocked: merge into existing ToolCallCard to avoid duplicate bubble.
+                // Merge tool-scoped errors into the existing ToolCallCard when possible
+                // (hook-block / not-loaded / permission deny all share tool_call_id).
                 const errToolCallId = String(payload.data?.tool_call_id ?? "").trim();
-                if (HOOK_BLOCK_RE.test(errText) && errToolCallId) {
+                if (errToolCallId) {
                   const merged = updatePaneToolMessageForSession(errToolCallId, {
                     content: errText,
                     toolStatus: "error",
@@ -10560,7 +10563,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     toolStreamLines: [],
                   });
                   if (!merged) {
-                    addPaneMessageIfSessionActive(pane.id, "tool", errText, "meta");
+                    addPaneMessageIfSessionActive(pane.id, "tool", `❌ ${errText}`, "meta");
                   }
                 } else {
                   addPaneMessageIfSessionActive(pane.id, "tool", `❌ ${errText}`, "meta");
