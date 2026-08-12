@@ -8805,15 +8805,46 @@ export function SettingsPanel({
                 </Panel>
                 <Panel title="权限">
                   <div className="mb-2 text-sm font-medium text-text-primary">工具执行权限模式</div>
-                  <select
-                    className="w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
-                    value={confirmStrategy}
-                    onChange={(e) => void onConfirmStrategyChange(e.target.value as ConfirmMode)}
+                  {/* Inline radios (document flow) — native <select> popup overlays help text below. */}
+                  <div
+                    className="space-y-0.5 rounded-md border border-border bg-surface-panel p-1"
+                    role="radiogroup"
+                    aria-label="工具执行权限模式"
                   >
-                    <option value="manual">每次询问</option>
-                    <option value="semi-auto">白名单放行</option>
-                    <option value="auto">全部自动执行</option>
-                  </select>
+                    {(
+                      [
+                        { value: "manual" as const, label: "每次询问" },
+                        { value: "semi-auto" as const, label: "白名单放行" },
+                        { value: "auto" as const, label: "全部自动执行" },
+                      ] as const
+                    ).map((opt) => {
+                      const selected = confirmStrategy === opt.value;
+                      return (
+                        <label
+                          key={opt.value}
+                          className={`flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm transition ${
+                            selected
+                              ? "bg-surface-hover text-text-strong"
+                              : "text-text-subtle hover:bg-surface-hover/70"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="confirm-strategy"
+                            className="accent-[var(--ui-btn-primary-bg)]"
+                            checked={selected}
+                            onChange={() => void onConfirmStrategyChange(opt.value)}
+                          />
+                          <span>{opt.label}</span>
+                          {selected ? (
+                            <span className="ml-auto text-text-faint" aria-hidden>
+                              ✓
+                            </span>
+                          ) : null}
+                        </label>
+                      );
+                    })}
+                  </div>
                   <div className="mt-2 text-xs text-text-subtle">
                     {confirmStrategy === "manual"
                       ? "每次工具执行都询问确认（最安全）。"
