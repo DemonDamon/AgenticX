@@ -155,7 +155,7 @@ export function TurnToolGroupCard({
         <span className="flex min-w-0 items-center gap-1.5">
           {inProgress ? (
             <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>
-              正在调用 {activeToolTitle}
+              调用 {activeToolTitle}
               {activeTools.length > 1 ? ` 等 ${activeTools.length} 个工具` : ""}
             </span>
           ) : (
