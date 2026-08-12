@@ -80,6 +80,7 @@ from agenticx.llms.provider_fault import (
     human_hint_for_fault,
     record_session_provider_hard_failure,
 )
+from agenticx.llms.sampling_params import resolve_chat_temperature
 from agenticx.runtime.provider_fallback import (
     maybe_apply_provider_fallback,
     record_provider_timeout,
@@ -887,6 +888,14 @@ def _streamed_tool_call_truncated(name: str, args_obj: Dict[str, Any]) -> bool:
     if isinstance(args_obj, dict) and len(args_obj) == 0:
         return True
     return False
+
+
+def _chat_temperature_kwargs(model_name: str, provider_name: str) -> Dict[str, float]:
+    """Build optional temperature kwarg for invoke/stream (omit when None)."""
+    value = resolve_chat_temperature(model_name, provider=provider_name)
+    if value is None:
+        return {}
+    return {"temperature": float(value)}
 
 
 def _resolve_round_max_tokens(
@@ -3624,9 +3633,9 @@ class AgentRuntime:
                                 stream_kwargs: Dict[str, Any] = {
                                     "tools": list(active_tools),
                                     "tool_choice": _round_tool_choice,
-                                    "temperature": 0.2,
                                     "max_tokens": int(_max_tokens),
                                     "timeout": request_timeout_seconds,
+                                    **_chat_temperature_kwargs(model_name, provider_name),
                                 }
                                 if _zhipu_tool_stream_supported(provider_name, model_name):
                                     # BigModel exposes incremental tool-call deltas as
@@ -3635,7 +3644,6 @@ class AgentRuntime:
                                     stream_kwargs["tool_stream"] = True
                                 if provider_name.strip().lower() == "minimax":
                                     stream_kwargs.pop("tool_choice", None)
-                                    stream_kwargs.pop("temperature", None)
                                     # _resolve_round_max_tokens already clamps MiniMax.
                                     stream_kwargs["max_tokens"] = int(_max_tokens)
                                 stream_kwargs.update(llm_call_kwargs)
@@ -3923,7 +3931,6 @@ class AgentRuntime:
                                 messages_for_llm,
                                 tools=active_tools,
                                 tool_choice=_fallback_tool_choice,
-                                temperature=0.2,
                                 max_tokens=_resolve_round_max_tokens(
                                     int(
                                         getattr(session, "_max_tokens_override", None)
@@ -3933,6 +3940,7 @@ class AgentRuntime:
                                     provider=provider_name,
                                 ),
                                 timeout=request_timeout_seconds,
+                                **_chat_temperature_kwargs(model_name, provider_name),
                                 **llm_call_kwargs,
                             )
                         except Exception as invoke_exc:
@@ -4421,11 +4429,12 @@ class AgentRuntime:
                         )
                         continue
 
-                err_text = (
-                    human_hint_for_fault(fault)
-                    if fault in {"billing", "auth", "rate_limit", "context_window", "transient"}
-                    else f"模型调用失败: {exc}"
-                )
+                if fault in {"billing", "auth", "rate_limit", "context_window", "transient"}:
+                    err_text = human_hint_for_fault(fault)
+                else:
+                    _prov = str(provider_name or "").strip() or "?"
+                    _model = str(model_name or "").strip() or "?"
+                    err_text = f"模型调用失败 ({_prov}/{_model}): {exc}"
                 # Recover once from broken tool-call pairing after compaction/split.
                 if (
                     fault in {"context_window", "transient"}
@@ -4750,7 +4759,6 @@ class AgentRuntime:
                             try:
                                 for chunk in self.llm.stream(
                                     messages,
-                                    temperature=0.2,
                                     max_tokens=_resolve_round_max_tokens(
                                         int(
                                             getattr(session, "_max_tokens_override", None)
@@ -4760,6 +4768,7 @@ class AgentRuntime:
                                         provider=provider_name,
                                     ),
                                     timeout=request_timeout_seconds,
+                                    **_chat_temperature_kwargs(model_name, provider_name),
                                     **llm_call_kwargs,
                                 ):
                                     if stop_event.is_set():
@@ -5844,9 +5853,9 @@ class AgentRuntime:
                             try:
                                 for chunk in self.llm.stream(
                                     messages,
-                                    temperature=0.2,
                                     max_tokens=800,
                                     timeout=request_timeout_seconds,
+                                    **_chat_temperature_kwargs(model_name, provider_name),
                                 ):
                                     if stop_event.is_set():
                                         break
