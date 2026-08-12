@@ -68,6 +68,45 @@ describe("parseAssistantContent", () => {
     expect(parsed.displayContent).toBe("摘要\n附件说明");
     expect(parsed.displayContent).not.toContain("<citations>");
   });
+
+  it("keeps repeated provider close tags and their fragments inside reasoning", () => {
+    const parsed = parseAssistantContent({
+      id: "m3",
+      session_id: "s1",
+      tenant_id: "t1",
+      user_id: "u1",
+      role: "assistant",
+      content:
+        "<think>判断检索意图</think>" +
+        "准备搜索近期新闻。</think>" +
+        "等待搜索结果。</think>" +
+        "这是最终回答。",
+      created_at: "2026-08-12T00:00:00.000Z",
+    });
+
+    expect(parsed.displayContent).toBe("这是最终回答。");
+    expect(parsed.displayContent).not.toContain("</think>");
+    expect(parsed.reasoningContent).toContain("判断检索意图");
+    expect(parsed.reasoningContent).toContain("准备搜索近期新闻");
+    expect(parsed.reasoningContent).toContain("等待搜索结果");
+    expect(parsed.thinkingInProgress).toBe(false);
+  });
+
+  it("collects multiple balanced reasoning blocks without hiding visible text", () => {
+    const parsed = parseAssistantContent({
+      id: "m4",
+      session_id: "s1",
+      tenant_id: "t1",
+      user_id: "u1",
+      role: "assistant",
+      content: "<think>第一步</think>正文一。<think>第二步</think>正文二。",
+      created_at: "2026-08-12T00:00:00.000Z",
+    });
+
+    expect(parsed.displayContent).toBe("正文一。正文二。");
+    expect(parsed.reasoningContent).toContain("第一步");
+    expect(parsed.reasoningContent).toContain("第二步");
+  });
 });
 
 describe("copyable assistant content", () => {

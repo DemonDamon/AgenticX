@@ -106,6 +106,84 @@ function finalizeAssistantDisplayContent(raw: string): string {
   return stripPlaceholderCitationMarkers(stripModelCitationTags(raw));
 }
 
+type ThinkSplit = {
+  display: string;
+  reasoning: string;
+  started: boolean;
+  inProgress: boolean;
+};
+
+function joinReasoningParts(parts: string[]): string {
+  let output = "";
+  for (const part of parts) {
+    if (!part) continue;
+    if (
+      output &&
+      !/\s$/.test(output) &&
+      !/^\s/.test(part)
+    ) {
+      output += "\n";
+    }
+    output += part;
+  }
+  return output;
+}
+
+/**
+ * Split every reasoning block, including malformed provider streams that repeat
+ * closing tags without repeating an opening tag. Text immediately before an
+ * orphan close belongs to reasoning; only text after the final close is visible.
+ */
+function splitThinkContent(raw: string): ThinkSplit {
+  const lower = raw.toLowerCase();
+  const displayParts: string[] = [];
+  const reasoningParts: string[] = [];
+  let cursor = 0;
+  let started = false;
+  let inProgress = false;
+
+  while (cursor < raw.length) {
+    const openIdx = lower.indexOf(REDACTED_OPEN, cursor);
+    const closeIdx = lower.indexOf(REDACTED_CLOSE, cursor);
+
+    if (openIdx >= 0 && (closeIdx < 0 || openIdx < closeIdx)) {
+      displayParts.push(raw.slice(cursor, openIdx));
+      started = true;
+      const reasoningStart = openIdx + REDACTED_OPEN.length;
+      const matchingClose = lower.indexOf(REDACTED_CLOSE, reasoningStart);
+      if (matchingClose < 0) {
+        reasoningParts.push(raw.slice(reasoningStart));
+        inProgress = true;
+        cursor = raw.length;
+        break;
+      }
+      reasoningParts.push(raw.slice(reasoningStart, matchingClose));
+      cursor = matchingClose + REDACTED_CLOSE.length;
+      continue;
+    }
+
+    if (closeIdx >= 0) {
+      // A close tag without a matching open is still an explicit reasoning
+      // boundary. Treat the preceding fragment as reasoning instead of leaking
+      // both the fragment and raw XML marker into the answer body.
+      reasoningParts.push(raw.slice(cursor, closeIdx));
+      started = true;
+      cursor = closeIdx + REDACTED_CLOSE.length;
+      continue;
+    }
+
+    displayParts.push(raw.slice(cursor));
+    break;
+  }
+
+  return {
+    display: displayParts.join(""),
+    reasoning: joinReasoningParts(reasoningParts),
+    started,
+    inProgress,
+  };
+}
+
 /** MiniMax 等模型常在推理段写好代码，可见正文却在 ``` 处提前 stop；从推理段补全未闭合代码块。 */
 export function recoverIncompleteCodeFences(displayContent: string, reasoningContent: string): string {
   const trimmed = displayContent.replace(/\s+$/, "");
@@ -141,8 +219,9 @@ export function parseAssistantContent(message: ChatMessage): ParsedAssistantCont
   const raw = normalizeThinkTags(message.content ?? "");
   const lower = raw.toLowerCase();
   const openIdx = lower.indexOf(REDACTED_OPEN);
+  const closeIdx = lower.indexOf(REDACTED_CLOSE);
 
-  if (openIdx < 0) {
+  if (openIdx < 0 && closeIdx < 0) {
     const displayContent = finalizeAssistantDisplayContent(recoverIncompleteCodeFences(raw, fallbackReasoning));
     return {
       displayContent,
@@ -152,32 +231,16 @@ export function parseAssistantContent(message: ChatMessage): ParsedAssistantCont
     };
   }
 
-  const before = raw.slice(0, openIdx);
-  const reasoningStart = openIdx + REDACTED_OPEN.length;
-  const closeIdx = lower.indexOf(REDACTED_CLOSE, reasoningStart);
-
-  if (closeIdx < 0) {
-    const reasoningContent = raw.slice(reasoningStart);
-    return {
-      displayContent: finalizeAssistantDisplayContent(recoverIncompleteCodeFences(before, reasoningContent)),
-      reasoningContent,
-      thinkingStarted: true,
-      thinkingInProgress: true,
-    };
-  }
-
-  const reasoningContent = raw.slice(reasoningStart, closeIdx);
+  const split = splitThinkContent(raw);
+  const reasoningContent = split.reasoning || fallbackReasoning;
   const displayContent = finalizeAssistantDisplayContent(
-    recoverIncompleteCodeFences(
-      `${before}${raw.slice(closeIdx + REDACTED_CLOSE.length)}`,
-      reasoningContent,
-    ),
+    recoverIncompleteCodeFences(split.display, reasoningContent),
   );
 
   return {
     displayContent,
     reasoningContent,
-    thinkingStarted: true,
-    thinkingInProgress: false,
+    thinkingStarted: split.started || fallbackReasoning.length > 0,
+    thinkingInProgress: split.inProgress,
   };
 }

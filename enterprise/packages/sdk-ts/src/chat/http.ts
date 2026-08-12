@@ -79,16 +79,49 @@ function isAbortError(error: unknown): boolean {
   return name === "AbortError";
 }
 
-function pickStreamDelta(deltaObj: { content?: string; reasoning_content?: string } | undefined): string | undefined {
-  if (!deltaObj) return undefined;
-  const parts: string[] = [];
-  if (typeof deltaObj.content === "string" && deltaObj.content.length > 0) {
-    parts.push(deltaObj.content);
+const THINK_OPEN = "<" + "think" + ">";
+const THINK_CLOSE = "<" + "/" + "think" + ">";
+
+function cleanReasoningDelta(raw: string): string {
+  return raw.replaceAll(THINK_OPEN, "").replaceAll(THINK_CLOSE, "");
+}
+
+/** Preserve reasoning before visible content when a gateway uses split fields. */
+class StreamDeltaComposer {
+  private reasoningOpen = false;
+
+  merge(deltaObj: { content?: string; reasoning_content?: string } | undefined): string | undefined {
+    if (!deltaObj) return undefined;
+    let output = "";
+    const reasoning =
+      typeof deltaObj.reasoning_content === "string"
+        ? cleanReasoningDelta(deltaObj.reasoning_content)
+        : "";
+    let content = typeof deltaObj.content === "string" ? deltaObj.content : "";
+
+    if (reasoning) {
+      if (!this.reasoningOpen) {
+        output += THINK_OPEN;
+        this.reasoningOpen = true;
+      }
+      output += reasoning;
+    }
+    if (content) {
+      if (this.reasoningOpen) {
+        content = content.replaceAll(THINK_OPEN, "").replaceAll(THINK_CLOSE, "");
+        output += `${THINK_CLOSE}\n`;
+        this.reasoningOpen = false;
+      }
+      output += content;
+    }
+    return output || undefined;
   }
-  if (typeof deltaObj.reasoning_content === "string" && deltaObj.reasoning_content.length > 0) {
-    parts.push(deltaObj.reasoning_content);
+
+  close(): string | undefined {
+    if (!this.reasoningOpen) return undefined;
+    this.reasoningOpen = false;
+    return THINK_CLOSE;
   }
-  return parts.length > 0 ? parts.join("") : undefined;
 }
 
 export class HttpChatClient implements ChatClient {
@@ -170,6 +203,7 @@ export class HttpChatClient implements ChatClient {
       }
 
       const decoder = new TextDecoder();
+      const deltaComposer = new StreamDeltaComposer();
       let buffer = "";
       // Every exit from this block (natural EOF, [DONE] sentinel, chunk.error, or a thrown
       // read error) MUST release the reader immediately. Otherwise the browser keeps the
@@ -196,13 +230,20 @@ export class HttpChatClient implements ChatClient {
           if (dataLines.length === 0) continue;
           const data = dataLines.join("\n");
           if (data === "[DONE]") {
+            const reasoningTail = deltaComposer.close();
+            if (reasoningTail) {
+              yield { requestId, done: false, delta: reasoningTail };
+            }
             notifyQuotaUsageChanged();
             yield { requestId, done: true };
             this.pending.delete(requestId);
             return;
           }
           let chunk: {
-            choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
+            choices?: Array<{
+              delta?: { content?: string; reasoning_content?: string };
+              finish_reason?: string | null;
+            }>;
             agenticx_usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
             agenticx_web_search_sources?: Array<{
               title?: string;
@@ -302,7 +343,7 @@ export class HttpChatClient implements ChatClient {
           const deltaObj = chunk.choices?.[0]?.delta as
             | { content?: string; reasoning_content?: string }
             | undefined;
-          const delta = pickStreamDelta(deltaObj);
+          const delta = deltaComposer.merge(deltaObj);
           if (delta) {
             yield {
               requestId,
@@ -314,6 +355,10 @@ export class HttpChatClient implements ChatClient {
           // Portal BFF appends trailer frames (agenticx_web_search_sources / agenticx_usage)
           // after the last content chunk and before data: [DONE]. Returning here drops them.
         }
+      }
+      const reasoningTail = deltaComposer.close();
+      if (reasoningTail) {
+        yield { requestId, done: false, delta: reasoningTail };
       }
       notifyQuotaUsageChanged();
       yield { requestId, done: true };

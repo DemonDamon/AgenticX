@@ -83,6 +83,63 @@ describe("HttpChatClient stream cancel", () => {
     expect(sourcesChunk?.delta).toBeUndefined();
   });
 
+  it("keeps split reasoning inside one balanced think block before visible content", async () => {
+    const payload =
+      'data: {"choices":[{"delta":{"reasoning_content":"先判断意图。</think>"}}]}\n\n' +
+      'data: {"choices":[{"delta":{"reasoning_content":"再规划检索。</think>"}}]}\n\n' +
+      'data: {"choices":[{"delta":{"content":"</think>最终回答"}}]}\n\n' +
+      "data: [DONE]\n\n";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(payload, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+        ),
+      ),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+    const combined = chunks.map((chunk) => chunk.delta ?? "").join("");
+
+    expect(combined).toBe("<think>先判断意图。再规划检索。</think>\n最终回答");
+    expect(combined.match(/<think>/g)).toHaveLength(1);
+    expect(combined.match(/<\/think>/g)).toHaveLength(1);
+  });
+
+  it("orders split reasoning before content from the same SSE delta", async () => {
+    const payload =
+      'data: {"choices":[{"delta":{"content":"最终回答","reasoning_content":"内部判断"}}]}\n\n' +
+      "data: [DONE]\n\n";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(payload, { status: 200 }))),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+    expect(chunks.map((chunk) => chunk.delta ?? "").join("")).toBe(
+      "<think>内部判断</think>\n最终回答",
+    );
+  });
+
   it("notifies the portal quota card after a completed stream", async () => {
     const payload = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n' + "data: [DONE]\n\n";
     vi.stubGlobal(

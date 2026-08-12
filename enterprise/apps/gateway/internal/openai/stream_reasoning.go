@@ -26,22 +26,34 @@ type StreamReasoningState struct {
 	separateReasoningOpen bool
 }
 
+// cleanSeparateReasoningDelta removes inline markers from a field that is already
+// semantically identified as reasoning_content. Some OpenAI-compatible providers
+// include a closing marker in every reasoning delta; forwarding those markers
+// creates dozens of orphan </think> tags in the visible answer.
+func cleanSeparateReasoningDelta(reasoning string) string {
+	reasoning = strings.ReplaceAll(reasoning, redactedOpen, "")
+	reasoning = strings.ReplaceAll(reasoning, redactedThinkingCloseTag, "")
+	return reasoning
+}
+
 // MergeDelta folds upstream reasoning/content fields into one client-visible content delta.
-func (s *StreamReasoningState) MergeDelta(accumulated, reasoning, content string) string {
+func (s *StreamReasoningState) MergeDelta(_ string, reasoning, content string) string {
 	var merged strings.Builder
+	reasoning = cleanSeparateReasoningDelta(reasoning)
 	if reasoning != "" {
-		if strings.Contains(accumulated, redactedThinkingCloseTag) {
-			merged.WriteString(reasoning)
-		} else {
-			if !s.separateReasoningOpen {
-				merged.WriteString("<think>")
-				s.separateReasoningOpen = true
-			}
-			merged.WriteString(reasoning)
+		if !s.separateReasoningOpen {
+			merged.WriteString("<think>")
+			s.separateReasoningOpen = true
 		}
+		merged.WriteString(reasoning)
 	}
 	if content != "" {
-		if s.separateReasoningOpen && !strings.Contains(content, redactedThinkingCloseTag) {
+		if s.separateReasoningOpen {
+			// When a provider emits both reasoning_content and an inline closing
+			// marker, our canonical close below owns the boundary. Removing only
+			// markers here preserves the provider's visible answer text.
+			content = strings.ReplaceAll(content, redactedOpen, "")
+			content = strings.ReplaceAll(content, redactedThinkingCloseTag, "")
 			merged.WriteString("</think>\n")
 			s.separateReasoningOpen = false
 		}
