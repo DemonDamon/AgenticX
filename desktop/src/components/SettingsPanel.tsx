@@ -36,8 +36,10 @@ import {
   SquarePen,
   CircleMinus,
   CheckCircle2,
+  Compass,
   Eye,
   EyeOff,
+  History,
   ExternalLink,
   FolderOpen,
   Library,
@@ -6096,6 +6098,7 @@ function formatSkillScanSummary(scan: {
 
 function MetaMarkdownField({
   label,
+  showLabel = true,
   value,
   rows,
   externalHint,
@@ -6107,6 +6110,7 @@ function MetaMarkdownField({
   onOpenInEditor,
 }: {
   label: string;
+  showLabel?: boolean;
   value: string;
   rows: number;
   externalHint?: boolean;
@@ -6119,25 +6123,70 @@ function MetaMarkdownField({
 }) {
   const [preview, setPreview] = useState(false);
   const toolbarBtnClass = (active?: boolean) =>
-    `flex items-center justify-center rounded p-1 transition-colors disabled:opacity-40 ${
+    `flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors disabled:opacity-40 ${
       active
-        ? "bg-surface-card text-text-primary"
-        : "text-text-faint hover:bg-surface-hover hover:text-text-subtle"
+        ? "bg-surface-hover"
+        : "hover:bg-surface-hover hover:text-text-primary"
     }`;
   const iconClass = "h-3.5 w-3.5 shrink-0";
   return (
     <div>
-      <div className="mb-1.5 text-sm font-medium text-text-muted">{label}</div>
+      {showLabel ? <div className="mb-1.5 text-sm font-medium text-text-muted">{label}</div> : null}
       {externalHint ? (
         <div className="mb-1 text-[10px] text-amber-600/90 dark:text-amber-400/90">
           {externalHintText}
         </div>
       ) : null}
-      {/* textarea + 右上角悬浮操作组 */}
-      <div className="relative">
+      <div className="overflow-hidden rounded-lg border border-border/80 bg-surface-panel">
+        <div className="flex h-9 items-center justify-between bg-surface-hover/35 pl-3 pr-2">
+          <span className="text-[10px] font-medium tracking-wide text-text-faint">Markdown</span>
+          <div className="flex items-center gap-0.5">
+            {onAiAssist ? (
+              <HoverTip label={value.trim() ? "AI 润色" : "AI 生成"}>
+                <button
+                  type="button"
+                  disabled={aiAssistLoading}
+                  className={toolbarBtnClass()}
+                  onClick={onAiAssist}
+                >
+                  {aiAssistLoading ? (
+                    <Loader2 className={`${iconClass} animate-spin`} aria-hidden />
+                  ) : (
+                    <Sparkles className={iconClass} aria-hidden />
+                  )}
+                </button>
+              </HoverTip>
+            ) : null}
+            <HoverTip label="编辑">
+              <button
+                type="button"
+                className={toolbarBtnClass(!preview)}
+                onClick={() => setPreview(false)}
+              >
+                <SquarePen className={iconClass} aria-hidden />
+              </button>
+            </HoverTip>
+            <HoverTip label="预览">
+              <button
+                type="button"
+                className={toolbarBtnClass(preview)}
+                onClick={() => setPreview(true)}
+              >
+                <Eye className={iconClass} aria-hidden />
+              </button>
+            </HoverTip>
+            {onOpenInEditor ? (
+              <HoverTip label="在编辑器中打开">
+                <button type="button" className={toolbarBtnClass()} onClick={onOpenInEditor}>
+                  <ExternalLink className={iconClass} aria-hidden />
+                </button>
+              </HoverTip>
+            ) : null}
+          </div>
+        </div>
         {preview ? (
           <div
-            className="agx-settings-md w-full min-h-[4rem] rounded-md border border-border bg-surface-panel px-3 py-2 pr-[7.5rem] text-sm text-text-primary overflow-auto"
+            className="agx-settings-md min-h-[4rem] w-full overflow-auto px-3 py-2 text-[13px] leading-5 text-text-primary [scrollbar-gutter:stable]"
             style={{ minHeight: `${rows * 1.625}rem` }}
           >
             {value.trim() ? (
@@ -6154,56 +6203,13 @@ function MetaMarkdownField({
           </div>
         ) : (
           <textarea
-            className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 pr-[7.5rem] text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
+            className="block w-full resize-none border-0 bg-transparent px-3 py-2 text-[13px] leading-5 text-text-primary placeholder:text-text-faint outline-none [scrollbar-gutter:stable] focus:ring-0"
             rows={rows}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
           />
         )}
-        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md bg-surface-panel/90 backdrop-blur-sm px-1 py-0.5">
-          {onAiAssist ? (
-            <HoverTip label={value.trim() ? "AI 润色" : "AI 生成"}>
-              <button
-                type="button"
-                disabled={aiAssistLoading}
-                className={toolbarBtnClass()}
-                onClick={onAiAssist}
-              >
-                {aiAssistLoading ? (
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                ) : (
-                  <Sparkles className="h-4 w-4 shrink-0" aria-hidden />
-                )}
-              </button>
-            </HoverTip>
-          ) : null}
-          <HoverTip label="编辑">
-            <button
-              type="button"
-              className={toolbarBtnClass(!preview)}
-              onClick={() => setPreview(false)}
-            >
-              <SquarePen className={iconClass} aria-hidden />
-            </button>
-          </HoverTip>
-          <HoverTip label="预览">
-            <button
-              type="button"
-              className={toolbarBtnClass(preview)}
-              onClick={() => setPreview(true)}
-            >
-              <Eye className={iconClass} aria-hidden />
-            </button>
-          </HoverTip>
-          {onOpenInEditor ? (
-            <HoverTip label="在编辑器中打开">
-              <button type="button" className={toolbarBtnClass()} onClick={onOpenInEditor}>
-                <ExternalLink className={iconClass} aria-hidden />
-              </button>
-            </HoverTip>
-          ) : null}
-        </div>
       </div>
     </div>
   );
@@ -6272,7 +6278,6 @@ export function SettingsPanel({
   const setThemeColor = useAppStore((s) => s.setThemeColor);
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
-  const setMetaAvatarUrl = useAppStore((s) => s.setMetaAvatarUrl);
   const settingsOpenToTab = useAppStore((s) => s.settings.openToTab);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const memoryContextPane = panes.find((p) => p.id === activePaneId) ?? panes[0];
@@ -6289,6 +6294,8 @@ export function SettingsPanel({
   const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
   const permissionsPanelRef = useRef<PermissionsAdvancedPanelHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
+  const [userProfileEditing, setUserProfileEditing] = useState(false);
+  const [metaEditorKind, setMetaEditorKind] = useState<"identity" | "soul" | null>(null);
   const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
   const [navWidth, setNavWidth] = useState(() =>
     loadSettingsNavWidth(loadSettingsPanelSize().width),
@@ -6496,7 +6503,6 @@ export function SettingsPanel({
   const [userPreferenceDraft, setUserPreferenceDraft] = useState("");
   const [userProfileMessage, setUserProfileMessage] = useState("");
   const [userAvatarMessage, setUserAvatarMessage] = useState("");
-  const [metaAvatarMessage, setMetaAvatarMessage] = useState("");
   const [workspaceDirDraft, setWorkspaceDirDraft] = useState("~/.agenticx/workspace");
   const [workspaceDirSaved, setWorkspaceDirSaved] = useState("~/.agenticx/workspace");
   const [workspaceDirResolved, setWorkspaceDirResolved] = useState("");
@@ -7064,41 +7070,32 @@ export function SettingsPanel({
   );
 
   const handleProfileAvatarUpload = useCallback(
-    (file: File, target: "user" | "meta") => {
+    (file: File) => {
       const maxBytes = 1.8 * 1024 * 1024;
       if (!file.type.startsWith("image/")) {
-        (target === "user" ? setUserAvatarMessage : setMetaAvatarMessage)(
-          "请选择图片文件（PNG/JPG/WebP/GIF）。"
-        );
+        setUserAvatarMessage("请选择图片文件（PNG/JPG/WebP/GIF）。");
         return;
       }
       if (file.size > maxBytes) {
-        (target === "user" ? setUserAvatarMessage : setMetaAvatarMessage)(
-          "图片过大，请选择小于 1.8MB 的文件。"
-        );
+        setUserAvatarMessage("图片过大，请选择小于 1.8MB 的文件。");
         return;
       }
       const reader = new FileReader();
       reader.onload = () => {
         const result = typeof reader.result === "string" ? reader.result : "";
         if (!result) {
-          (target === "user" ? setUserAvatarMessage : setMetaAvatarMessage)("读取图片失败，请重试。");
+          setUserAvatarMessage("读取图片失败，请重试。");
           return;
         }
-        if (target === "user") {
-          setUserAvatarUrl(result);
-          setUserAvatarMessage("已更新我的头像。");
-        } else {
-          setMetaAvatarUrl(result);
-          setMetaAvatarMessage("已更新 Near 头像。");
-        }
+        setUserAvatarUrl(result);
+        setUserAvatarMessage("已更新我的头像。");
       };
       reader.onerror = () => {
-        (target === "user" ? setUserAvatarMessage : setMetaAvatarMessage)("读取图片失败，请重试。");
+        setUserAvatarMessage("读取图片失败，请重试。");
       };
       reader.readAsDataURL(file);
     },
-    [setMetaAvatarUrl, setUserAvatarUrl]
+    [setUserAvatarUrl]
   );
 
   useEffect(() => {
@@ -8456,129 +8453,167 @@ export function SettingsPanel({
             {/* === GENERAL TAB ===（保持挂载以便底部「保存」能刷入权限 API，避免仅失焦写入） */}
             <div className={tab === "general" ? "space-y-4" : "hidden"}>
                 <Panel title="显示">
-                  <div className="flex gap-4">
-                    {/* 主题 自定义下拉 */}
-                    {(() => {
-                      const themeOptions = [
-                        { value: "dark", label: "深色" },
-                        { value: "light", label: "浅色" },
-                      ] as const;
-                      const currentLabel = themeOptions.find((o) => o.value === theme)?.label ?? theme;
-                      return (
-                        <SettingsDropdown
-                          label="主题"
-                          value={theme}
-                          displayLabel={currentLabel}
-                          options={themeOptions}
-                          onChange={(v) => onThemeChange(v as "dark" | "light" | "dim")}
-                          className="flex-1"
-                        />
-                      );
-                    })()}
-                    {/* 聊天风格 自定义下拉 */}
-                    {(() => {
-                      const styleOptions = [
-                        { value: "im", label: "IM 风格（头像 + 气泡）" },
-                        { value: "terminal", label: "Terminal 风格（等宽前缀）" },
-                        { value: "clean", label: "Clean 风格（极简分隔块）" },
-                      ] as const;
-                      const currentLabel = styleOptions.find((o) => o.value === chatStyle)?.label?.split("（")[0] ?? chatStyle;
-                      return (
-                        <SettingsDropdown
-                          label="聊天风格"
-                          value={chatStyle}
-                          displayLabel={currentLabel}
-                          options={styleOptions}
-                          onChange={(v) => onChatStyleChange(v as ChatStyle)}
-                          className="flex-[2]"
-                        />
-                      );
-                    })()}
-                  </div>
-                  <div className="mt-3 block text-sm text-text-muted">
-                    主题色系
-                    <div className="mt-2 flex items-center gap-3">
-                      {[
-                        { id: "blue", color: "bg-blue-500", label: "蓝色" },
-                        { id: "green", color: "bg-emerald-500", label: "绿色" },
-                        { id: "pink", color: "bg-pink-500", label: "粉红色" },
-                        { id: "yellow", color: "bg-amber-500", label: "黄色" },
-                        {
-                          id: "white",
-                          color: theme === "light" ? "bg-slate-900" : "bg-white",
-                          label: "白色/单色",
-                        },
-                      ].map((tc) => (
-                        <button
-                          key={tc.id}
-                          type="button"
-                          className={`group relative flex h-6 w-6 items-center justify-center rounded-full transition-all hover:scale-110 ${themeColor === tc.id ? "ring-2 ring-text-primary ring-offset-2 ring-offset-surface-base" : ""}`}
-                          onClick={() => setThemeColor(tc.id as any)}
-                          title={tc.label}
-                        >
-                          <span className={`h-full w-full rounded-full ${tc.color}`} />
-                        </button>
-                      ))}
+                  <div className="divide-y divide-border/70">
+                    <div className="flex min-h-14 items-center justify-between gap-6 py-1">
+                      <div>
+                        <div className="text-sm font-medium text-text-primary">外观</div>
+                        <div className="mt-0.5 text-[11px] text-text-faint">选择界面的明暗层级</div>
+                      </div>
+                      {(() => {
+                        const options = [
+                          { value: "light", label: "浅色" },
+                          { value: "dim", label: "暗灰" },
+                          { value: "dark", label: "深色" },
+                        ] as const;
+                        return (
+                          <SettingsDropdown
+                            value={theme}
+                            displayLabel={options.find((option) => option.value === theme)?.label ?? theme}
+                            options={options}
+                            onChange={(next) => onThemeChange(next as "dark" | "light" | "dim")}
+                            className="w-40 shrink-0"
+                            size="compact"
+                            menuPortal
+                          />
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex min-h-14 items-center justify-between gap-6 py-1">
+                      <div>
+                        <div className="text-sm font-medium text-text-primary">消息布局</div>
+                        <div className="mt-0.5 text-[11px] text-text-faint">决定聊天内容的呈现方式</div>
+                      </div>
+                      {(() => {
+                        const options = [
+                          { value: "im", label: "IM 风格" },
+                          { value: "terminal", label: "终端风格" },
+                          { value: "clean", label: "简洁风格" },
+                        ] as const;
+                        return (
+                          <SettingsDropdown
+                            value={chatStyle}
+                            displayLabel={options.find((option) => option.value === chatStyle)?.label ?? chatStyle}
+                            options={options}
+                            onChange={(next) => onChatStyleChange(next as ChatStyle)}
+                            className="w-40 shrink-0"
+                            size="compact"
+                            menuPortal
+                          />
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex min-h-14 items-center justify-between gap-6 py-1">
+                      <div>
+                        <div className="text-sm font-medium text-text-primary">强调色</div>
+                        <div className="mt-0.5 text-[11px] text-text-faint">用于按钮、选中状态与焦点提示</div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {[
+                          { id: "blue", color: "bg-blue-500", label: "蓝色" },
+                          { id: "green", color: "bg-emerald-500", label: "绿色" },
+                          { id: "pink", color: "bg-pink-500", label: "粉红色" },
+                          { id: "yellow", color: "bg-amber-500", label: "黄色" },
+                          {
+                            id: "white",
+                            color: theme === "light" ? "bg-slate-900" : "bg-white",
+                            label: "单色",
+                          },
+                        ].map((color) => {
+                          const selected = themeColor === color.id;
+                          return (
+                            <button
+                              key={color.id}
+                              type="button"
+                              className={`flex h-7 w-7 items-center justify-center rounded-full border transition-transform active:scale-95 ${
+                                selected
+                                  ? "border-text-primary bg-surface-panel shadow-sm"
+                                  : "border-transparent hover:bg-surface-hover"
+                              }`}
+                              onClick={() =>
+                                setThemeColor(color.id as "blue" | "green" | "pink" | "yellow" | "white")
+                              }
+                              aria-label={color.label}
+                              aria-pressed={selected}
+                            >
+                              <span className={`h-4 w-4 rounded-full ${color.color}`} />
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 </Panel>
                 <Panel title="用户档案">
-                  <p className="mb-3 text-[11px] leading-relaxed text-text-subtle">
-                    「你」的身份与展示，以及<strong className="font-medium text-text-muted">对所有元智能体 / 分身 / 群聊生效的全局用户偏好基线</strong>（称呼、头像、偏好与风格）。各主体还会在各自的 MEMORY.md 中单独记录对本主体的理解；全局人格（SOUL）仍在下方 Near 区块。
-                  </p>
-                  <div className="flex items-start gap-6">
-                    {/* 左侧：头像区 */}
-                    <div className="flex shrink-0 flex-col items-center gap-3 pt-1">
+                  <div className="flex items-center gap-3">
+                    <div className="relative shrink-0">
                       {userAvatarUrl ? (
                         <img
                           src={userAvatarUrl}
                           alt="我的头像"
-                          className="h-16 w-16 rounded-full border border-border object-cover shadow-sm"
+                          className="h-12 w-12 rounded-full border border-border object-cover"
                         />
                       ) : (
-                        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-lg font-semibold text-[var(--theme-color-text)] shadow-sm">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-base font-semibold text-[var(--theme-color-text)]">
                           {(userNicknameDraft.trim().slice(0, 1) || "我").toUpperCase()}
                         </div>
                       )}
-                      <div className="flex items-center gap-2">
-                        <label className="cursor-pointer text-xs font-medium text-[rgba(var(--theme-color-rgb),0.9)] transition-opacity hover:opacity-80">
-                          更换
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-text-primary">
+                        {userNicknameDraft.trim() || "我"}
+                      </div>
+                      <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-text-faint">
+                        {userPreferenceDraft.trim() || "尚未设置回答偏好与沟通风格"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface-panel px-3 text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary active:scale-[0.98]"
+                      onClick={() => setUserProfileEditing((editing) => !editing)}
+                    >
+                      <SquarePen className="h-3.5 w-3.5" />
+                      {userProfileEditing ? "收起" : "编辑"}
+                    </button>
+                  </div>
+
+                  {userProfileEditing ? (
+                    <div className="mt-4 border-t border-border/70 pt-4">
+                      <div className="mb-4 flex items-center gap-3">
+                        <label className="inline-flex h-8 cursor-pointer items-center rounded-md border border-border bg-surface-panel px-3 text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary">
+                          更换头像
                           <input
                             type="file"
                             accept="image/*"
                             className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) handleProfileAvatarUpload(file, "user");
-                              e.currentTarget.value = "";
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              if (file) handleProfileAvatarUpload(file);
+                              event.currentTarget.value = "";
                             }}
                           />
                         </label>
-                        {userAvatarUrl && (
-                          <>
-                            <span className="text-border">|</span>
-                            <button
-                              type="button"
-                              className="text-xs text-text-subtle transition-colors hover:text-text-muted"
-                              onClick={() => {
-                                setUserAvatarUrl("");
-                                setUserAvatarMessage("已恢复默认。");
-                              }}
-                            >
-                              清除
-                            </button>
-                          </>
-                        )}
+                        {userAvatarUrl ? (
+                          <button
+                            type="button"
+                            className="text-xs text-text-faint transition-colors hover:text-text-muted"
+                            onClick={() => {
+                              setUserAvatarUrl("");
+                              setUserAvatarMessage("已恢复默认。");
+                            }}
+                          >
+                            恢复默认
+                          </button>
+                        ) : null}
+                        {userAvatarMessage ? (
+                          <span className="text-[11px] text-text-faint">{userAvatarMessage}</span>
+                        ) : null}
                       </div>
-                      {userAvatarMessage ? (
-                        <div className="text-[10px] text-text-subtle">{userAvatarMessage}</div>
-                      ) : null}
-                    </div>
 
-                    {/* 右侧：表单区 */}
-                    <div className="flex-1 min-w-0 space-y-4">
+                      <div className="space-y-4">
                       <div>
-                        <div className="mb-1.5 text-sm font-medium text-text-muted">我的称呼（用于所有对话）</div>
+                        <div className="mb-1.5 text-xs font-medium text-text-muted">我的称呼</div>
                         <input
                           type="text"
                           className="w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
@@ -8590,13 +8625,10 @@ export function SettingsPanel({
                           placeholder="留空则显示「我」"
                           maxLength={48}
                         />
-                        <p className="mt-1.5 text-[11px] text-text-subtle">
-                          在单聊与群聊中均以此称呼标注你的身份，分身会称呼你此名。
-                        </p>
                       </div>
 
                       <div>
-                        <div className="mb-1.5 text-sm font-medium text-text-muted">用户偏好与风格（注入系统提示）</div>
+                        <div className="mb-1.5 text-xs font-medium text-text-muted">回答偏好与沟通风格</div>
                         <textarea
                           className="w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb),0.5)] focus:outline-none focus:ring-1 focus:ring-[rgba(var(--theme-color-rgb),0.5)] transition-shadow"
                           rows={3}
@@ -8609,9 +8641,7 @@ export function SettingsPanel({
                           maxLength={500}
                         />
                         <div className="mt-1.5 flex items-start justify-between gap-3">
-                          <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-text-subtle">
-                            {`${userPreferenceDraft.length}/500 字。作为 user 级只读基线注入每次对话的系统提示，对所有元智能体、分身与群聊生效。`}
-                          </p>
+                          <span className="text-[11px] text-text-faint">{userPreferenceDraft.length}/500</span>
                           <div className="flex shrink-0 items-center gap-2">
                             {userProfileMessage ? (
                               <span
@@ -8649,190 +8679,209 @@ export function SettingsPanel({
                         </div>
                       </div>
                     </div>
-                  </div>
+                    </div>
+                  ) : null}
                 </Panel>
-                <Panel title="元智能体（Near）">
-                  <div className="flex items-start gap-6">
-                    {/* 左侧：头像区 */}
-                    <div className="flex shrink-0 flex-col items-center gap-3 pt-1">
-                      <img
-                        src={effectiveMetaAvatarUrl}
-                        alt="Near 头像"
-                        className="h-16 w-16 rounded-full border border-border object-cover shadow-sm"
-                      />
-                      <div className="flex items-center gap-2">
-                        <label className="cursor-pointer text-xs font-medium text-[rgba(var(--theme-color-rgb),0.9)] transition-opacity hover:opacity-80">
-                          更换
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) handleProfileAvatarUpload(file, "meta");
-                              e.currentTarget.value = "";
-                            }}
-                          />
-                        </label>
-                        {metaAvatarUrl && (
-                          <>
-                            <span className="text-border">|</span>
-                            <button
-                              type="button"
-                              className="text-xs text-text-subtle transition-colors hover:text-text-muted"
-                              onClick={() => {
-                                setMetaAvatarUrl("");
-                                setMetaAvatarMessage("已恢复默认。");
-                              }}
-                            >
-                              清除
-                            </button>
-                          </>
-                        )}
-                      </div>
-                      {metaAvatarMessage ? (
-                        <div className="text-[10px] text-text-subtle">{metaAvatarMessage}</div>
-                      ) : null}
-                    </div>
+                <Panel title="元智能体">
+                  <p className="text-[11px] leading-4 text-text-faint">
+                    管理元智能体的身份与行为原则
+                  </p>
 
-                    {/* 右侧：表单区 */}
-                    <div className="flex-1 min-w-0 space-y-2">
-                      <MetaMarkdownField
-                        label="身份定义"
-                        value={metaIdentity}
-                        rows={3}
-                        externalHint={metaExternalHintIdentity}
-                        externalHintText="磁盘上的身份定义可能已在外部修改。"
-                        placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
-                        onAiAssist={() => void callAiAssist("identity")}
-                        aiAssistLoading={aiAssistLoading === "identity"}
-                        onOpenInEditor={() => void openMetaWorkspaceInEditor("identity")}
-                        onChange={(v) => {
-                          setMetaIdentity(v);
-                          setMetaWorkspaceMessage("");
-                          setMetaExternalHintIdentity(false);
-                        }}
-                      />
-
-                      <MetaMarkdownField
-                        label="全局人格"
-                        value={metaSoul}
-                        rows={5}
-                        externalHint={metaExternalHintSoul}
-                        externalHintText="磁盘上的全局人格可能已在外部修改。"
-                        placeholder={"例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
-                        onAiAssist={() => void callAiAssist("soul")}
-                        aiAssistLoading={aiAssistLoading === "soul"}
-                        onOpenInEditor={() => void openMetaWorkspaceInEditor("soul")}
-                        onChange={(v) => {
-                          setMetaSoul(v);
-                          setMetaWorkspaceMessage("");
-                          setMetaExternalHintSoul(false);
-                        }}
-                      />
-
-                      <div className="border-t border-border/60 pt-2">
-                        <button
-                          type="button"
-                          className="flex items-center gap-1 text-xs text-text-subtle transition-colors hover:text-text-muted"
-                          onClick={() => setMetaHistoryOpen((v) => !v)}
+                  <div className="mt-4 overflow-hidden rounded-lg border border-border/80">
+                    {[
+                      {
+                        kind: "identity" as const,
+                        title: "身份定义",
+                        description: "Near 是谁，以及它在对话中的角色",
+                        preview: metaIdentity,
+                      },
+                      {
+                        kind: "soul" as const,
+                        title: "人格与原则",
+                        description: "Near 如何思考、表达和执行任务",
+                        preview: metaSoul,
+                      },
+                    ].map((item, index) => {
+                      const open = metaEditorKind === item.kind;
+                      const preview =
+                        item.preview
+                          .split("\n")
+                          .map((line) => line.replace(/^#+\s*/, "").trim())
+                          .find(Boolean) || "尚未设置";
+                      return (
+                        <div
+                          key={item.kind}
+                          className={index > 0 ? "border-t border-border/80" : ""}
                         >
-                          <ChevronRight
-                            className={`h-3.5 w-3.5 transition-transform ${metaHistoryOpen ? "rotate-90" : ""}`}
-                            aria-hidden
-                          />
-                          历史记录
-                        </button>
-                        {metaHistoryOpen ? (
-                          <div className="mt-2 space-y-3 rounded-md border border-border/60 bg-surface-panel/50 p-2">
-                            {metaHistoryLoading ? (
-                              <div className="text-[11px] text-text-faint">加载中…</div>
-                            ) : null}
-                            {metaHistoryMessage ? (
-                              <div className="text-[11px] text-red-400">{metaHistoryMessage}</div>
-                            ) : null}
-                            <div>
-                              <div className="mb-1 text-[11px] font-medium text-text-muted">身份定义</div>
-                              {metaHistoryIdentityItems.length === 0 ? (
-                                <div className="text-[10px] text-text-faint">
-                                  暂无历史版本（保存后会自动记录变更前内容）
-                                </div>
+                          <button
+                            type="button"
+                            className={`flex w-full items-center gap-3 px-3 py-3 text-left transition-colors ${
+                              open ? "bg-surface-hover/80" : "bg-surface-panel/45 hover:bg-surface-hover"
+                            }`}
+                            onClick={() => setMetaEditorKind(open ? null : item.kind)}
+                            aria-expanded={open}
+                          >
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-hover text-text-muted">
+                              {item.kind === "identity" ? (
+                                <User className="h-4 w-4" />
                               ) : (
-                                <ul className="space-y-1">
-                                  {metaHistoryIdentityItems.map((item) => (
-                                    <li key={item.id} className="flex items-start gap-2 text-[11px]">
-                                      <span className="shrink-0 text-text-faint">
-                                        {formatMetaWorkspaceHistoryTime(item.id, item.savedAt)}
-                                      </span>
-                                      <span className="min-w-0 flex-1 truncate text-text-subtle">
-                                        {item.preview || "（空）"}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        className="shrink-0 text-theme hover:underline"
-                                        onClick={() =>
-                                          void restoreMetaWorkspaceHistoryItem("identity", item.id)
-                                        }
-                                      >
-                                        恢复
-                                      </button>
-                                    </li>
-                                  ))}
-                                </ul>
+                                <Compass className="h-4 w-4" />
                               )}
                             </div>
-                            <div>
-                              <div className="mb-1 text-[11px] font-medium text-text-muted">全局人格</div>
-                              {metaHistorySoulItems.length === 0 ? (
-                                <div className="text-[10px] text-text-faint">
-                                  暂无历史版本（保存后会自动记录变更前内容）
-                                </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-medium text-text-primary">{item.title}</div>
+                              <div className="mt-0.5 truncate text-[11px] text-text-faint" title={preview}>
+                                {item.description}
+                              </div>
+                            </div>
+                            <span className="hidden max-w-[32%] truncate text-[11px] text-text-faint md:block">
+                              {preview}
+                            </span>
+                            <ChevronRight
+                              className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${
+                                open ? "rotate-90" : ""
+                              }`}
+                            />
+                          </button>
+
+                          {open ? (
+                            <div className="border-t border-border/60 bg-surface-hover/30 px-3 pb-3 pt-2.5">
+                              {item.kind === "identity" ? (
+                                <MetaMarkdownField
+                                  label="身份定义"
+                                  showLabel={false}
+                                  value={metaIdentity}
+                                  rows={5}
+                                  externalHint={metaExternalHintIdentity}
+                                  externalHintText="磁盘上的身份定义可能已在外部修改。"
+                                  placeholder={"例如：\n- Name: Near\n- Role: 你的个人 AI 助理\n- Vibe: 务实、简洁、执行优先"}
+                                  onAiAssist={() => void callAiAssist("identity")}
+                                  aiAssistLoading={aiAssistLoading === "identity"}
+                                  onOpenInEditor={() => void openMetaWorkspaceInEditor("identity")}
+                                  onChange={(value) => {
+                                    setMetaIdentity(value);
+                                    setMetaWorkspaceMessage("");
+                                    setMetaExternalHintIdentity(false);
+                                  }}
+                                />
                               ) : (
-                                <ul className="space-y-1">
-                                  {metaHistorySoulItems.map((item) => (
-                                    <li key={item.id} className="flex items-start gap-2 text-[11px]">
-                                      <span className="shrink-0 text-text-faint">
-                                        {formatMetaWorkspaceHistoryTime(item.id, item.savedAt)}
-                                      </span>
-                                      <span className="min-w-0 flex-1 truncate text-text-subtle">
-                                        {item.preview || "（空）"}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        className="shrink-0 text-theme hover:underline"
-                                        onClick={() =>
-                                          void restoreMetaWorkspaceHistoryItem("soul", item.id)
-                                        }
-                                      >
-                                        恢复
-                                      </button>
-                                    </li>
-                                  ))}
-                                </ul>
+                                <MetaMarkdownField
+                                  label="人格与原则"
+                                  showLabel={false}
+                                  value={metaSoul}
+                                  rows={7}
+                                  externalHint={metaExternalHintSoul}
+                                  externalHintText="磁盘上的全局人格可能已在外部修改。"
+                                  placeholder={"例如：\n- 回答先给结论\n- 不做过度客套\n- 任务进度要可见"}
+                                  onAiAssist={() => void callAiAssist("soul")}
+                                  aiAssistLoading={aiAssistLoading === "soul"}
+                                  onOpenInEditor={() => void openMetaWorkspaceInEditor("soul")}
+                                  onChange={(value) => {
+                                    setMetaSoul(value);
+                                    setMetaWorkspaceMessage("");
+                                    setMetaExternalHintSoul(false);
+                                  }}
+                                />
                               )}
                             </div>
-                          </div>
-                        ) : null}
-                      </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
 
-                      <div className="flex items-center justify-end gap-3">
-                        {metaWorkspaceMessage ? (
-                          <span className="mr-auto text-[11px] text-text-subtle">{metaWorkspaceMessage}</span>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="rounded-md bg-btnPrimary px-4 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
-                          disabled={
-                            (metaSoulSaving || metaIdentitySaving) ||
-                            (!metaSoulDirty && !metaIdentityDirty)
-                          }
-                          onClick={() => void saveMetaWorkspace()}
-                        >
-                          {(metaSoulSaving || metaIdentitySaving) ? "保存中…" : "保存"}
-                        </button>
-                      </div>
+                  <div className="mt-3 flex items-center justify-end gap-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 rounded-md px-2 py-1.5 text-xs text-text-subtle transition-colors hover:bg-surface-hover hover:text-text-muted"
+                        onClick={() => setMetaHistoryOpen((open) => !open)}
+                      >
+                        <History className="h-3.5 w-3.5" />
+                        历史记录
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md bg-btnPrimary px-4 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
+                        disabled={
+                          (metaSoulSaving || metaIdentitySaving) ||
+                          (!metaSoulDirty && !metaIdentityDirty)
+                        }
+                        onClick={() => void saveMetaWorkspace()}
+                      >
+                        {(metaSoulSaving || metaIdentitySaving) ? "保存中…" : "保存"}
+                      </button>
                     </div>
                   </div>
+
+                  {metaWorkspaceMessage ? (
+                    <div className="mt-2 text-right text-[11px] text-text-subtle">{metaWorkspaceMessage}</div>
+                  ) : null}
+
+                  {metaHistoryOpen ? (
+                    <div className="mt-3 border-t border-border/60 pt-3">
+                      <div className="space-y-3 rounded-md border border-border/60 bg-surface-panel/50 p-2">
+                        {metaHistoryLoading ? (
+                          <div className="text-[11px] text-text-faint">加载中…</div>
+                        ) : null}
+                        {metaHistoryMessage ? (
+                          <div className="text-[11px] text-red-400">{metaHistoryMessage}</div>
+                        ) : null}
+                        <div>
+                          <div className="mb-1 text-[11px] font-medium text-text-muted">身份定义</div>
+                          {metaHistoryIdentityItems.length === 0 ? (
+                            <div className="text-[10px] text-text-faint">暂无历史版本</div>
+                          ) : (
+                            <ul className="space-y-1">
+                              {metaHistoryIdentityItems.map((item) => (
+                                <li key={item.id} className="flex items-start gap-2 text-[11px]">
+                                  <span className="shrink-0 text-text-faint">
+                                    {formatMetaWorkspaceHistoryTime(item.id, item.savedAt)}
+                                  </span>
+                                  <span className="min-w-0 flex-1 truncate text-text-subtle">
+                                    {item.preview || "（空）"}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="shrink-0 text-theme hover:underline"
+                                    onClick={() => void restoreMetaWorkspaceHistoryItem("identity", item.id)}
+                                  >
+                                    恢复
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                        <div>
+                          <div className="mb-1 text-[11px] font-medium text-text-muted">人格与原则</div>
+                          {metaHistorySoulItems.length === 0 ? (
+                            <div className="text-[10px] text-text-faint">暂无历史版本</div>
+                          ) : (
+                            <ul className="space-y-1">
+                              {metaHistorySoulItems.map((item) => (
+                                <li key={item.id} className="flex items-start gap-2 text-[11px]">
+                                  <span className="shrink-0 text-text-faint">
+                                    {formatMetaWorkspaceHistoryTime(item.id, item.savedAt)}
+                                  </span>
+                                  <span className="min-w-0 flex-1 truncate text-text-subtle">
+                                    {item.preview || "（空）"}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="shrink-0 text-theme hover:underline"
+                                    onClick={() => void restoreMetaWorkspaceHistoryItem("soul", item.id)}
+                                  >
+                                    恢复
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </Panel>
                 <Panel title="权限">
                   <div className="flex items-center justify-between gap-6">
