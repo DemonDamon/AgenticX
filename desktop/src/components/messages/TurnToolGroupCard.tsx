@@ -12,6 +12,7 @@ import {
   useLiveToolElapsedSeconds,
 } from "./tool-elapsed-timer";
 import { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
+import { Shimmer } from "../ds/Shimmer";
 
 type Props = {
   messages: Message[];
@@ -161,9 +162,11 @@ export function TurnToolGroupCard({
             <CompletedToolSummary messages={visibleMessages} />
           )}
           {activeTool ? (
-            <span className="shrink-0 text-[12px] text-text-faint tabular-nums">
-              运行中 · {formatToolElapsedSeconds(liveElapsedSec)}
-            </span>
+            <Shimmer
+              variant="status"
+              text={`运行中 · ${formatToolElapsedSeconds(liveElapsedSec)}`}
+              className="shrink-0 whitespace-nowrap text-[12px] font-normal tabular-nums"
+            />
           ) : null}
         </span>
         {expanded ? (
