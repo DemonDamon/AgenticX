@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+
+import { HoverTip } from "./ds/HoverTip";
 
 interface ContextUsage {
   used_tokens: number;
@@ -35,6 +37,41 @@ const CATEGORY_COLORS: Record<string, string> = {
 function formatK(n: number): string {
   if (!Number.isFinite(n)) return "0";
   return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
+}
+
+/** Pie wedge from 12 o'clock clockwise; scales with context usage percent. */
+function pieWedgePath(cx: number, cy: number, r: number, percent: number): string | null {
+  const p = Math.min(100, Math.max(0, Number.isFinite(percent) ? percent : 0));
+  if (p <= 0.05) return null;
+  if (p >= 99.5) {
+    // Full disk (two semicircle arcs)
+    return `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx} ${cy + r} A ${r} ${r} 0 1 1 ${cx} ${cy - r} Z`;
+  }
+  const angle = (p / 100) * 2 * Math.PI;
+  const startX = cx;
+  const startY = cy - r;
+  const endX = cx + r * Math.sin(angle);
+  const endY = cy - r * Math.cos(angle);
+  const largeArc = p > 50 ? 1 : 0;
+  return `M ${cx} ${cy} L ${startX} ${startY} A ${r} ${r} 0 ${largeArc} 1 ${endX} ${endY} Z`;
+}
+
+function UsagePieIcon({ percent }: { percent: number }) {
+  const wedge = pieWedgePath(12, 12, 8.0, percent);
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-[17px] w-[17px] shrink-0" aria-hidden>
+      <circle
+        cx="12"
+        cy="12"
+        r="8.0"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      {wedge ? (
+        <path d={wedge} fill="currentColor" opacity={0.82} />
+      ) : null}
+    </svg>
+  );
 }
 
 export function ContextUsageButton({
@@ -121,38 +158,58 @@ export function ContextUsageButton({
     };
   }, [open, refreshPanelPosition]);
 
+  // Warm pie fill when the bound session changes.
   useEffect(() => {
-    setUsage(null);
     setLoadFailed(false);
     requestSeqRef.current += 1;
+    if (!sessionId) {
+      setUsage(null);
+      return;
+    }
+    void fetchUsage();
+  }, [fetchUsage, sessionId]);
+
+  useEffect(() => {
     if (open && sessionId) {
       refreshPanelPosition();
       void fetchUsage();
     }
   }, [fetchUsage, open, refreshPanelPosition, sessionId]);
 
-  const usedTokens = usage?.used_tokens ?? 0;
+  const percent = usage?.percent ?? 0;
+  const hoverLabel = useMemo(() => {
+    if (open) return "";
+    if (!sessionId) return "上下文用量（会话未就绪）";
+    if (!usage) return "上下文用量";
+    return `${usage.percent}% · ${formatK(usage.used_tokens)} / ${formatK(usage.max_tokens)} 上下文已使用`;
+  }, [open, sessionId, usage]);
+
+  const ariaLabel = useMemo(() => {
+    if (!sessionId) return "上下文用量（会话未就绪）";
+    if (!usage) return "上下文用量";
+    return `上下文用量 ${usage.percent}% · ${formatK(usage.used_tokens)} / ${formatK(usage.max_tokens)}`;
+  }, [sessionId, usage]);
+
+  const trigger = (
+    <button
+      ref={buttonRef}
+      type="button"
+      data-pane-id={paneId}
+      disabled={!sessionId}
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-strong transition hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40 ${
+        open ? "bg-surface-hover" : ""
+      }`}
+      aria-label={ariaLabel}
+      aria-expanded={open}
+      onClick={toggleOpen}
+    >
+      <UsagePieIcon percent={percent} />
+    </button>
+  );
 
   return (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        data-pane-id={paneId}
-        disabled={!sessionId}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong disabled:cursor-not-allowed disabled:opacity-40"
-        title="上下文用量"
-        onClick={toggleOpen}
-      >
-        <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 shrink-0" aria-hidden>
-          <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.8" />
-          <path
-            d="M12 12 L12 3.5 A8.5 8.5 0 0 1 19.8 16.5 Z"
-            fill="currentColor"
-            opacity="0.55"
-          />
-        </svg>
-      </button>
+      <HoverTip label={hoverLabel}>{trigger}</HoverTip>
       {open && panelPos
         ? createPortal(
             <div
