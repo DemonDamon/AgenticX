@@ -121,10 +121,10 @@ type geminiContentWire struct {
 }
 
 type geminiGenerationConfigWire struct {
-	Temperature     float64  `json:"temperature,omitempty"`
-	TopP            float64  `json:"topP,omitempty"`
-	MaxOutputTokens int      `json:"maxOutputTokens,omitempty"`
-	StopSequences   []string `json:"stopSequences,omitempty"`
+	Temperature     *float64       `json:"temperature,omitempty"`
+	TopP            float64        `json:"topP,omitempty"`
+	MaxOutputTokens int            `json:"maxOutputTokens,omitempty"`
+	StopSequences   []string       `json:"stopSequences,omitempty"`
 	ThinkingConfig  map[string]any `json:"thinkingConfig,omitempty"`
 }
 
@@ -158,7 +158,7 @@ func pivotToGeminiRequest(req openai.ChatCompletionRequest) geminiGenerateReques
 	if maxTok <= 0 {
 		maxTok = req.MaxCompletionTokens
 	}
-	if req.Temperature > 0 || req.TopP > 0 || maxTok > 0 || len(req.Stop) > 0 || req.ThinkingBudget > 0 {
+	if req.Temperature != nil || req.TopP > 0 || maxTok > 0 || len(req.Stop) > 0 || req.ThinkingBudget > 0 {
 		cfg := &geminiGenerationConfigWire{
 			Temperature:     req.Temperature,
 			TopP:            req.TopP,

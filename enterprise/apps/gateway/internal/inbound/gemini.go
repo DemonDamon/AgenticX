@@ -33,17 +33,17 @@ type geminiTool struct {
 }
 
 type GeminiGenerateRequest struct {
-	Contents          []geminiContent        `json:"contents"`
-	SystemInstruction *geminiContent         `json:"systemInstruction,omitempty"`
+	Contents          []geminiContent         `json:"contents"`
+	SystemInstruction *geminiContent          `json:"systemInstruction,omitempty"`
 	GenerationConfig  *geminiGenerationConfig `json:"generationConfig,omitempty"`
-	Tools             []geminiTool           `json:"tools,omitempty"`
-	SafetySettings    json.RawMessage        `json:"safetySettings,omitempty"`
+	Tools             []geminiTool            `json:"tools,omitempty"`
+	SafetySettings    json.RawMessage         `json:"safetySettings,omitempty"`
 }
 
 type geminiInboundPayload struct {
 	GeminiGenerateRequest
-	Model string `json:"-"`
-	Stream bool  `json:"-"`
+	Model  string `json:"-"`
+	Stream bool   `json:"-"`
 }
 
 // ParseGeminiGenerate parses Gemini generateContent body; model comes from URL path.
@@ -62,7 +62,7 @@ func ParseGeminiGenerate(body io.Reader, model string, stream bool) (openai.Chat
 	}
 	if raw.GenerationConfig != nil {
 		if raw.GenerationConfig.Temperature != nil {
-			req.Temperature = *raw.GenerationConfig.Temperature
+			req.Temperature = raw.GenerationConfig.Temperature
 		}
 		if raw.GenerationConfig.TopP != nil {
 			req.TopP = *raw.GenerationConfig.TopP

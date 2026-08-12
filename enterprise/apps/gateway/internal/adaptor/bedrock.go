@@ -181,9 +181,9 @@ type bedrockConverseRequest struct {
 }
 
 type bedrockInference struct {
-	MaxTokens   int     `json:"maxTokens,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
-	TopP        float64 `json:"topP,omitempty"`
+	MaxTokens   int      `json:"maxTokens,omitempty"`
+	Temperature *float64 `json:"temperature,omitempty"`
+	TopP        float64  `json:"topP,omitempty"`
 }
 
 type bedrockConverseResponse struct {
@@ -232,7 +232,7 @@ func openAIToBedrockConverse(req openai.ChatCompletionRequest) bedrockConverseRe
 		inf.MaxTokens = req.MaxTokens
 		hasInf = true
 	}
-	if req.Temperature > 0 {
+	if req.Temperature != nil {
 		inf.Temperature = req.Temperature
 		hasInf = true
 	}

@@ -13,9 +13,9 @@ import (
 const ProtocolClaude = "claude-messages"
 
 type claudeContentBlock struct {
-	Type          string          `json:"type"`
-	Text          string          `json:"text,omitempty"`
-	CacheControl  json.RawMessage `json:"cache_control,omitempty"`
+	Type         string          `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 }
 
 type claudeMessage struct {
@@ -24,17 +24,17 @@ type claudeMessage struct {
 }
 
 type ClaudeMessagesRequest struct {
-	Model         string          `json:"model"`
-	Messages      []claudeMessage `json:"messages"`
-	System        json.RawMessage `json:"system,omitempty"`
-	MaxTokens     int             `json:"max_tokens"`
-	Temperature   *float64        `json:"temperature,omitempty"`
-	TopP          *float64        `json:"top_p,omitempty"`
-	TopK          *int            `json:"top_k,omitempty"`
-	StopSequences []string        `json:"stop_sequences,omitempty"`
-	Stream        bool            `json:"stream,omitempty"`
+	Model         string                 `json:"model"`
+	Messages      []claudeMessage        `json:"messages"`
+	System        json.RawMessage        `json:"system,omitempty"`
+	MaxTokens     int                    `json:"max_tokens"`
+	Temperature   *float64               `json:"temperature,omitempty"`
+	TopP          *float64               `json:"top_p,omitempty"`
+	TopK          *int                   `json:"top_k,omitempty"`
+	StopSequences []string               `json:"stop_sequences,omitempty"`
+	Stream        bool                   `json:"stream,omitempty"`
 	Tools         []transform.ClaudeTool `json:"tools,omitempty"`
-	ToolChoice    json.RawMessage `json:"tool_choice,omitempty"`
+	ToolChoice    json.RawMessage        `json:"tool_choice,omitempty"`
 }
 
 func ParseClaudeMessages(body io.Reader) (openai.ChatCompletionRequest, error) {
@@ -50,14 +50,14 @@ func ParseClaudeMessages(body io.Reader) (openai.ChatCompletionRequest, error) {
 	}
 
 	req := openai.ChatCompletionRequest{
-		Model:       raw.Model,
-		Stream:      raw.Stream,
-		MaxTokens:   raw.MaxTokens,
-		Stop:        raw.StopSequences,
-		Tools:       transform.ClaudeToolsToOpenAI(raw.Tools),
+		Model:     raw.Model,
+		Stream:    raw.Stream,
+		MaxTokens: raw.MaxTokens,
+		Stop:      raw.StopSequences,
+		Tools:     transform.ClaudeToolsToOpenAI(raw.Tools),
 	}
 	if raw.Temperature != nil {
-		req.Temperature = *raw.Temperature
+		req.Temperature = raw.Temperature
 	}
 	if raw.TopP != nil {
 		req.TopP = *raw.TopP

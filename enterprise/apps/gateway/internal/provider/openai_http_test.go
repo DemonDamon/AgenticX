@@ -42,6 +42,7 @@ func TestDefaultKeyFromEnv_HyphenProviderName(t *testing.T) {
 func TestOpenAIHTTP_Complete_SendsBearerAndDecodesResponse(t *testing.T) {
 	var receivedAuth string
 	var receivedBody openai.ChatCompletionRequest
+	temperature := 0.0
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
@@ -70,8 +71,9 @@ func TestOpenAIHTTP_Complete_SendsBearerAndDecodesResponse(t *testing.T) {
 
 	resp, err := provider.Complete(context.Background(),
 		openai.ChatCompletionRequest{
-			Model:    "deepseek-chat",
-			Messages: []openai.ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+			Model:       "deepseek-chat",
+			Messages:    []openai.ChatMessage{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+			Temperature: &temperature,
 		},
 		routing.Decision{Provider: "deepseek", Endpoint: server.URL + "/v1", Model: "deepseek-chat"},
 	)
@@ -83,6 +85,9 @@ func TestOpenAIHTTP_Complete_SendsBearerAndDecodesResponse(t *testing.T) {
 	}
 	if receivedBody.Stream {
 		t.Errorf("Complete should send stream=false to upstream")
+	}
+	if receivedBody.Temperature == nil || *receivedBody.Temperature != 0 {
+		t.Errorf("explicit temperature=0 was not forwarded: %#v", receivedBody.Temperature)
 	}
 	if len(resp.Choices) != 1 || string(resp.Choices[0].Message.Content) != `"你好，世界"` {
 		t.Errorf("unexpected upstream response: %+v", resp)

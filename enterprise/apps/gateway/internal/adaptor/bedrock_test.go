@@ -12,11 +12,11 @@ import (
 
 func TestOpenAIToBedrockConverse(t *testing.T) {
 	req := openai.ChatCompletionRequest{
-		Model:    "anthropic.claude-3-haiku-20240307-v1:0",
-		System:   "be helpful",
-		Messages: []openai.ChatMessage{{Role: "user", Content: "hello"}},
-		MaxTokens: 128,
-		Temperature: 0.2,
+		Model:       "anthropic.claude-3-haiku-20240307-v1:0",
+		System:      "be helpful",
+		Messages:    []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("hello")}},
+		MaxTokens:   128,
+		Temperature: temperaturePtr(0.2),
 	}
 	wire := openAIToBedrockConverse(req)
 	if len(wire.System) == 0 || wire.System[0].Text != "be helpful" {
@@ -41,7 +41,7 @@ func TestBedrockConverseToOpenAI(t *testing.T) {
 	wire.Usage.TotalTokens = 15
 	wire.StopReason = "end_turn"
 	out := bedrockConverseToOpenAI(wire, "claude-haiku")
-	if out.Choices[0].Message.Content != "hi there" {
+	if openai.ContentText(out.Choices[0].Message.Content) != "hi there" {
 		t.Fatalf("unexpected content: %q", out.Choices[0].Message.Content)
 	}
 	if out.Usage.TotalTokens != 15 {
