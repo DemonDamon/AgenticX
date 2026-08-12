@@ -18,6 +18,8 @@ const ZOOM_FACTOR = 1.2;
 const VIEWPORT_MIN_H = 280;
 const VIEWPORT_MAX_H = 560;
 const FIT_PAD = 20;
+/** Top inset so the floating centered toolbar never covers fitted diagram content. */
+const TOOLBAR_RESERVE = 44;
 
 /** Prefer width-fit height so tall flowcharts are not crushed into a short strip. */
 function computeAdaptiveViewportH(
@@ -26,8 +28,10 @@ function computeAdaptiveViewportH(
 ): number {
   if (viewportWidth <= 0 || natural.w <= 0 || natural.h <= 0) return VIEWPORT_MIN_H;
   const widthFitScale = Math.min((viewportWidth - FIT_PAD) / natural.w, MAX_SCALE);
-  const neededH = Math.ceil(natural.h * Math.max(widthFitScale, 0.05) + FIT_PAD);
-  return Math.min(VIEWPORT_MAX_H, Math.max(VIEWPORT_MIN_H, neededH));
+  const neededH = Math.ceil(
+    natural.h * Math.max(widthFitScale, 0.05) + FIT_PAD + TOOLBAR_RESERVE,
+  );
+  return Math.min(VIEWPORT_MAX_H, Math.max(VIEWPORT_MIN_H + TOOLBAR_RESERVE, neededH));
 }
 
 function useDocumentDataTheme(): string {
@@ -195,8 +199,8 @@ function ToolbarButton({ title, active, onClick, children }: ToolbarBtnProps) {
       onPointerDown={(e) => e.stopPropagation()}
       className={`no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
         active
-          ? "bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/35"
-          : "text-[var(--text-primary)] hover:bg-white/10"
+          ? "bg-[rgba(var(--theme-color-rgb),0.16)] text-[rgb(var(--theme-color-rgb))] ring-1 ring-[rgba(var(--theme-color-rgb),0.4)]"
+          : "text-text-primary hover:bg-surface-hover"
       }`}
     >
       {children}
@@ -269,11 +273,12 @@ export function MermaidBlock({ code }: Props) {
     const pw = vp.clientWidth;
     const ph = overrideH ?? vp.clientHeight;
     if (pw <= 0 || ph <= 0) return;
-    const s = Math.min((pw - FIT_PAD) / dims.w, (ph - FIT_PAD) / dims.h, MAX_SCALE);
+    const usableH = Math.max(ph - TOOLBAR_RESERVE, 1);
+    const s = Math.min((pw - FIT_PAD) / dims.w, (usableH - FIT_PAD) / dims.h, MAX_SCALE);
     const scaleFit = Math.max(s, 0.05);
     setScale(scaleFit);
     setTx((pw - dims.w * scaleFit) / 2);
-    setTy((ph - dims.h * scaleFit) / 2);
+    setTy(TOOLBAR_RESERVE + (usableH - dims.h * scaleFit) / 2);
   }, []);
 
   useLayoutEffect(() => {
@@ -313,7 +318,8 @@ export function MermaidBlock({ code }: Props) {
     const pw = vp.clientWidth;
     const ph = vp.clientHeight;
     const cx = pw / 2;
-    const cy = ph / 2;
+    // Zoom around the visual center of the area below the floating toolbar.
+    const cy = TOOLBAR_RESERVE + (ph - TOOLBAR_RESERVE) / 2;
     setScale((prev) => {
       const safePrev = Math.max(prev, 1e-6);
       const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev * factor));
@@ -438,7 +444,7 @@ export function MermaidBlock({ code }: Props) {
     <>
       <div className="group/mmd relative my-2 overflow-hidden rounded-md border border-border bg-surface-panel/50">
         <div
-          className="no-drag pointer-events-auto absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-lg border px-1 py-0.5 opacity-60 shadow-md transition-opacity duration-150 group-hover/mmd:opacity-100"
+          className="no-drag pointer-events-auto absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border px-1 py-0.5 opacity-70 shadow-md transition-opacity duration-150 group-hover/mmd:opacity-100"
           style={{
             background: "color-mix(in srgb, var(--surface-card) 92%, transparent)",
             borderColor: "var(--border-subtle)",
@@ -481,14 +487,14 @@ export function MermaidBlock({ code }: Props) {
         </div>
 
         {copied ? (
-          <div className="pointer-events-none absolute left-2 top-2 z-10 rounded border border-border bg-surface-panel/95 px-2 py-0.5 text-[11px] text-text-faint">
+          <div className="pointer-events-none absolute right-2 top-2 z-10 rounded border border-border bg-surface-panel/95 px-2 py-0.5 text-[11px] text-text-faint">
             已复制源码
           </div>
         ) : null}
 
         <div
           ref={viewportRef}
-          title="悬停右侧工具栏高亮；Ctrl/⌘ + 滚轮缩放；可点放大查看"
+          title="Ctrl/⌘ + 滚轮缩放；可点放大查看"
           className={`relative w-full touch-none overflow-hidden ${panMode ? (draggingUi ? "cursor-grabbing" : "cursor-grab") : "cursor-default"}`}
           style={{
             minHeight: VIEWPORT_MIN_H,
