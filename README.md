@@ -633,11 +633,11 @@ graph TD
 
 ## Contributing
 
-We welcome community contributions! Please refer to:
+We welcome community contributions! Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** (中文：[CONTRIBUTING_ZN.md](CONTRIBUTING_ZN.md)) before opening a PR. In short:
 
 1. Submit Issues to report bugs or request features
-2. Fork the project and create feature branches
-3. Submit Pull Requests, ensuring all tests pass
+2. Fork the project and create a scoped feature branch (`feat/` / `fix/` / …)
+3. Submit Pull Requests with Conventional Commits; run the relevant tests (and Desktop `npm run build` when UI changes)
 4. Participate in code reviews and discussions
 
 ## Acknowledgements / Upstream Credits

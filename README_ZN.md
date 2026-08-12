@@ -629,11 +629,11 @@ graph TD
 
 ## 贡献指南
 
-我们欢迎社区贡献！请参考：
+我们欢迎社区贡献！提交 PR 前请阅读 **[CONTRIBUTING_ZN.md](CONTRIBUTING_ZN.md)**（English：[CONTRIBUTING.md](CONTRIBUTING.md)）。简要流程：
 
 1. 提交 Issue 报告 bug 或提出功能请求
-2. Fork 项目并创建功能分支
-3. 提交 Pull Request，确保通过所有测试
+2. Fork 项目并创建范围明确的功能分支（`feat/` / `fix/` / …）
+3. 提交 Pull Request（Conventional Commits）；跑通相关测试（改 Desktop 时另需 `npm run build`）
 4. 参与代码审查和讨论
 
 ## 致谢与来源说明
