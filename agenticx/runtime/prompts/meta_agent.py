@@ -408,6 +408,21 @@ def _build_memory_recall_context(session: StudioSession) -> str:
         return ""
 
 
+def _session_has_explicit_context_inheritance(session: StudioSession) -> bool:
+    """True when create_session wrote an explicit [context_inherited] marker.
+
+    Fresh "new chat" sessions must stay clean; only user-opted inherit-from
+    prior topic may receive automatic cross-session summary injection.
+    """
+    for msg in getattr(session, "agent_messages", None) or []:
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and "[context_inherited]" in content:
+            return True
+    return False
+
+
 def _build_session_summary_context(session: StudioSession, max_age_days: int = 7) -> str:
     from agenticx.runtime.session_summary_store import (
         chat_history_ends_with_pending_user,
@@ -417,6 +432,11 @@ def _build_session_summary_context(session: StudioSession, max_age_days: int = 7
     )
 
     if not is_session_summary_enabled():
+        return ""
+    # Brand-new chats must not silently continue the previous topic via
+    # workspace session summaries. Carry-over only happens when the user
+    # explicitly inherited context (see POST /api/sessions inherit path).
+    if not _session_has_explicit_context_inheritance(session):
         return ""
     if chat_history_ends_with_pending_user(session):
         return ""

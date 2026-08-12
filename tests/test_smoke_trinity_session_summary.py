@@ -58,6 +58,14 @@ def test_meta_prompt_includes_cross_session_summary(tmp_path: Path, monkeypatch:
     (root / "other-session.md").write_text("# Session Summary\n- stable", encoding="utf-8")
     session = StudioSession()
     setattr(session, "_session_id", "current-session")
+    # Only sessions that explicitly inherited a prior topic may receive
+    # automatic cross-session summary injection.
+    session.agent_messages = [
+        {
+            "role": "system",
+            "content": "[context_inherited] 以下是前一话题的上下文摘要，用于保持连续性：\nparent summary",
+        }
+    ]
     session.chat_history = [
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "hi"},
@@ -65,6 +73,27 @@ def test_meta_prompt_includes_cross_session_summary(tmp_path: Path, monkeypatch:
     prompt = build_meta_agent_system_prompt(session)
     assert "其他会话摘要" in prompt
     assert "stable" in prompt
+
+
+def test_meta_prompt_skips_cross_session_summary_for_fresh_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Brand-new chats must stay clean: no automatic previous-session summary."""
+    monkeypatch.setenv("AGX_SESSION_SUMMARY", "true")
+    root = _patch_summary_home(monkeypatch, tmp_path)
+    (root / "other-session.md").write_text(
+        "# Session Summary\n下一步是委派游承峰启动 F1，要现在开工吗？",
+        encoding="utf-8",
+    )
+    session = StudioSession()
+    setattr(session, "_session_id", "fresh-session")
+    # First-turn prompt build happens before the user message is appended.
+    session.chat_history = []
+    session.agent_messages = []
+    prompt = build_meta_agent_system_prompt(session)
+    assert "其他会话摘要" not in prompt
+    assert "游承峰" not in prompt
+    assert "F1" not in prompt
 
 
 def test_meta_prompt_excludes_current_session_summary(
@@ -78,6 +107,12 @@ def test_meta_prompt_excludes_current_session_summary(
 
     session = StudioSession()
     setattr(session, "_session_id", current)
+    session.agent_messages = [
+        {
+            "role": "system",
+            "content": "[context_inherited] 以下是前一话题的上下文摘要，用于保持连续性：\nparent",
+        }
+    ]
     session.chat_history = [
         {"role": "user", "content": "q"},
         {"role": "assistant", "content": "a"},
