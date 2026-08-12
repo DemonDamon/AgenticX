@@ -12,7 +12,11 @@ import {
 test("formatReasoningTitle uses Chinese labels", () => {
   assert.equal(
     formatReasoningTitle({ streaming: true, elapsedSeconds: 3, hasReliableDuration: true }),
-    "思考中（3 秒）",
+    "思考中 · 3s",
+  );
+  assert.equal(
+    formatReasoningTitle({ streaming: true, elapsedSeconds: 0, hasReliableDuration: false }),
+    "思考中 · …",
   );
   assert.equal(
     formatReasoningTitle({ streaming: false, elapsedSeconds: 5, hasReliableDuration: true }),
