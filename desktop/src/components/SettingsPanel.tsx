@@ -345,6 +345,37 @@ function resolveMcpRowPresentation(server: McpServer): {
 }
 
 type ConfirmMode = "manual" | "semi-auto" | "auto";
+
+const CONFIRM_MODE_OPTIONS = [
+  { value: "manual" as const, label: "每次询问" },
+  { value: "semi-auto" as const, label: "白名单放行" },
+  { value: "auto" as const, label: "全部自动执行" },
+] as const;
+
+/** Compact settings dropdown using the shared popover behavior. */
+function ConfirmStrategyDropdown({
+  value,
+  onChange,
+}: {
+  value: ConfirmMode;
+  onChange: (strategy: ConfirmMode) => void;
+}) {
+  const displayLabel =
+    CONFIRM_MODE_OPTIONS.find((option) => option.value === value)?.label ?? value;
+
+  return (
+    <SettingsDropdown
+      value={value}
+      displayLabel={displayLabel}
+      options={CONFIRM_MODE_OPTIONS}
+      onChange={(next) => onChange(next as ConfirmMode)}
+      className="w-44 shrink-0"
+      size="compact"
+      menuPortal
+    />
+  );
+}
+
 type EmailPresetId = "qq" | "163" | "gmail" | "outlook" | "custom";
 
 type EmailSettingsForm = {
@@ -8804,64 +8835,33 @@ export function SettingsPanel({
                   </div>
                 </Panel>
                 <Panel title="权限">
-                  <div className="mb-2 text-sm font-medium text-text-primary">工具执行权限模式</div>
-                  {/* Inline radios (document flow) — native <select> popup overlays help text below. */}
-                  <div
-                    className="space-y-0.5 rounded-md border border-border bg-surface-panel p-1"
-                    role="radiogroup"
-                    aria-label="工具执行权限模式"
-                  >
-                    {(
-                      [
-                        { value: "manual" as const, label: "每次询问" },
-                        { value: "semi-auto" as const, label: "白名单放行" },
-                        { value: "auto" as const, label: "全部自动执行" },
-                      ] as const
-                    ).map((opt) => {
-                      const selected = confirmStrategy === opt.value;
-                      return (
-                        <label
-                          key={opt.value}
-                          className={`flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm transition ${
-                            selected
-                              ? "bg-surface-hover text-text-strong"
-                              : "text-text-subtle hover:bg-surface-hover/70"
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="confirm-strategy"
-                            className="accent-[var(--ui-btn-primary-bg)]"
-                            checked={selected}
-                            onChange={() => void onConfirmStrategyChange(opt.value)}
-                          />
-                          <span>{opt.label}</span>
-                          {selected ? (
-                            <span className="ml-auto text-text-faint" aria-hidden>
-                              ✓
-                            </span>
-                          ) : null}
-                        </label>
-                      );
-                    })}
+                  <div className="flex items-center justify-between gap-6">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-text-primary">执行确认</div>
+                      <p className="mt-0.5 text-xs leading-5 text-text-faint">
+                        控制运行命令和工具前何时需要你的确认
+                      </p>
+                    </div>
+                    <ConfirmStrategyDropdown
+                      value={confirmStrategy}
+                      onChange={(next) => void onConfirmStrategyChange(next)}
+                    />
                   </div>
-                  <div className="mt-2 text-xs text-text-subtle">
-                    {confirmStrategy === "manual"
-                      ? "每次工具执行都询问确认（最安全）。"
-                      : confirmStrategy === "semi-auto"
-                        ? "命中同类操作白名单自动放行，未命中时询问（推荐）。"
-                        : "默认全部自动执行，不再询问（高风险）。"}
-                  </div>
-                  <p className="mt-2 text-[11px] text-text-faint">
-                    下方「路径 / 命令 / 工具拒绝」修改后，请点击窗口底部「退出」写入 Studio（与失焦保存等效）。未配置远程 URL 时使用本机内置 API；若仍出现 HTTP 404，请升级远端 agenticx 版本或核对服务器地址是否指向当前 Near 使用的同一 Studio。
-                  </p>
-                  <div className="mt-3 rounded-md border border-border bg-status-warning/10 px-3 py-2.5 text-xs text-text-subtle">
-                    <div className="font-medium text-status-warning">凭据安全</div>
-                    <p className="mt-1 leading-relaxed">
-                      API Key、Token、密码<strong className="font-medium text-text-primary">请勿在对话中发送</strong>
-                      ——聊天记录会保存在本机。模型密钥请在侧栏「模型服务」配置；MCP 密钥请在「MCP 服务」安装或编辑时的环境变量中填写（写入{" "}
-                      <code className="text-[10px]">~/.agenticx/mcp.json</code>）。Near 不会要求你在聊天里粘贴密钥来代为配置。
-                    </p>
+                  {confirmStrategy === "auto" ? (
+                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-status-warning/25 bg-status-warning/8 px-3 py-2 text-xs leading-5 text-text-subtle">
+                      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" />
+                      <span>所有工具将直接执行。建议仅在你信任的工作区中使用。</span>
+                    </div>
+                  ) : null}
+                  <div className="mt-4 border-t border-border/70 pt-3">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-text-muted">凭据安全</div>
+                        <p className="mt-1 text-[11px] leading-5 text-text-faint">
+                          请勿在对话中发送 API Key、Token 或密码；请前往对应服务设置中配置。
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </Panel>
                 <PermissionsAdvancedPanel ref={permissionsPanelRef} />
