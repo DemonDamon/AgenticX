@@ -28,6 +28,8 @@ describe("contextual search-query rewrite", () => {
     );
     expect(messages?.[0]?.content).toContain("不得擅自假定具体天数");
     expect(messages?.[0]?.content).toContain("不要携带请求搜索或查找的操作指令");
+    expect(messages?.[0]?.content).toContain("search_queries");
+    expect(messages?.[0]?.content).toContain("默认只给 1 条");
     expect(messages?.[1]?.content).toContain(
       '"temporal_context":{"current_date":"2026-08-12"',
     );
@@ -53,17 +55,73 @@ describe("contextual search-query rewrite", () => {
       parseSearchQueryRewrite(
         '{"resolved_query":"数学家 王虹 最近几天 新闻","confidence":0.96}',
       ),
-    ).toEqual({ query: "数学家 王虹 最近几天 新闻", confidence: 0.96 });
+    ).toEqual({
+      query: "数学家 王虹 最近几天 新闻",
+      needSearch: true,
+      searchQueries: ["数学家 王虹 最近几天 新闻"],
+      confidence: 0.96,
+    });
     expect(
       parseSearchQueryRewrite(
         '```json\n{"resolved_query":"广州南沙 天气","confidence":0.91}\n```',
       ),
-    ).toEqual({ query: "广州南沙 天气", confidence: 0.91 });
+    ).toEqual({
+      query: "广州南沙 天气",
+      needSearch: true,
+      searchQueries: ["广州南沙 天气"],
+      confidence: 0.91,
+    });
     expect(
       parseSearchQueryRewrite(
         '{"resolved_query":"她最近怎么样","confidence":0.96}',
       ),
-    ).toEqual({ query: "她最近怎么样", confidence: 0.96 });
+    ).toEqual({
+      query: "她最近怎么样",
+      needSearch: true,
+      searchQueries: ["她最近怎么样"],
+      confidence: 0.96,
+    });
+  });
+
+  it("accepts a bounded multi-entity retrieval plan", () => {
+    expect(
+      parseSearchQueryRewrite(
+        JSON.stringify({
+          need_search: true,
+          resolved_query: "王虹和邓煜为什么分别离开北京大学",
+          search_queries: [
+            "王虹 离开北京大学 原因",
+            "邓煜 离开北京大学 原因",
+            "邓煜 离开北京大学 原因",
+            "第三个独立检索面",
+            "超出上限不应保留",
+          ],
+          confidence: 0.98,
+        }),
+      ),
+    ).toEqual({
+      query: "王虹和邓煜为什么分别离开北京大学",
+      needSearch: true,
+      searchQueries: [
+        "王虹 离开北京大学 原因",
+        "邓煜 离开北京大学 原因",
+        "第三个独立检索面",
+      ],
+      confidence: 0.98,
+    });
+  });
+
+  it("accepts a semantic no-search decision without adding regex rules", () => {
+    expect(
+      parseSearchQueryRewrite(
+        '{"need_search":false,"resolved_query":"1+1 等于几","search_queries":[],"confidence":0.99}',
+      ),
+    ).toEqual({
+      query: "1+1 等于几",
+      needSearch: false,
+      searchQueries: [],
+      confidence: 0.99,
+    });
   });
 
   it("extracts the JSON contract from reasoning wrappers and surrounding prose", () => {
@@ -71,18 +129,18 @@ describe("contextual search-query rewrite", () => {
       parseSearchQueryRewrite(
         '<think>先消解主语</think>\n```json\n{"resolved_query":"数学家 王虹 最近几天 新闻","confidence":0.97}\n```',
       ),
-    ).toEqual({ query: "数学家 王虹 最近几天 新闻", confidence: 0.97 });
+    ).toMatchObject({ query: "数学家 王虹 最近几天 新闻", confidence: 0.97 });
     expect(
       parseSearchQueryRewrite(
         '结果如下：{"resolved_query":"王虹 近期新闻","confidence":0.9}。',
       ),
-    ).toEqual({ query: "王虹 近期新闻", confidence: 0.9 });
+    ).toMatchObject({ query: "王虹 近期新闻", confidence: 0.9 });
   });
 
   it("accepts an explicit unresolved decision and rejects malformed confidence", () => {
     expect(
       parseSearchQueryRewrite('{"resolved_query":"","confidence":0}'),
-    ).toEqual({ query: "", confidence: 0 });
+    ).toEqual({ query: "", needSearch: false, searchQueries: [], confidence: 0 });
     expect(
       parseSearchQueryRewrite('{"resolved_query":"","confidence":0.9}'),
     ).toBeNull();

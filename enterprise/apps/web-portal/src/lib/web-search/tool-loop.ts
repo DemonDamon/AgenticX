@@ -41,6 +41,7 @@ import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
 import { rerankHits } from "./rerank";
 import {
   assessSearchEvidence,
+  interleaveSearchHitGroups,
   mergeSearchHits,
   selectAlternativeProvider,
 } from "./search-retry";
@@ -487,7 +488,12 @@ async function rewriteSearchQueryWithAi(
         QUERY_REWRITE_TIMEOUT_MS,
       );
       const rewrite = parseSearchQueryRewrite(extractCompletionContent(payload));
-      if (rewrite?.query && hasPriorSearchQueryLeakage(rewrite.query, messages)) {
+      if (
+        rewrite &&
+        [rewrite.query, ...rewrite.searchQueries].some(
+          (query) => query && hasPriorSearchQueryLeakage(query, messages),
+        )
+      ) {
         throw new Error("query rewrite copied the prior question");
       }
       if (!rewrite) throw new Error("query rewrite output failed validation");
@@ -536,7 +542,13 @@ export async function resolveStandaloneSearchQuery(
   if (!query) return { kind: "unresolved", reason: "agent_unresolved" };
   return {
     kind: "resolved",
-    value: { query, confidence: 1, source: "current" },
+    value: {
+      query,
+      needSearch: true,
+      searchQueries: [query],
+      confidence: 1,
+      source: "current",
+    },
   };
 }
 
@@ -715,6 +727,85 @@ async function pipeWithSourcesAppendix(
   return pipeUpstreamSse(upstream, { sourcesFrame });
 }
 
+export const MAX_ORDINARY_SEARCH_PROVIDER_CALLS = 3;
+
+function perQueryMaxResults(cfg: WebSearchRuntimeConfig, queryCount: number): number | undefined {
+  if (queryCount <= 1) return undefined;
+  const total = Math.max(1, Math.min(WEB_SEARCH_MAX_RESULTS_CAP, cfg.maxResults));
+  return Math.max(1, Math.floor(total / queryCount));
+}
+
+async function executeOrdinarySearchPlan(
+  queries: string[],
+  cfg: WebSearchRuntimeConfig,
+  searchFn: typeof executeWebSearch,
+): Promise<WebSearchHit[][]> {
+  const providers = configuredWebSearchProviders(cfg);
+  const primary = primaryWebSearchProvider(cfg);
+  if (!primary) throw new Error("no configured web search provider");
+
+  const alternative = selectAlternativeProvider(providers, primary.id);
+  const maxResults = perQueryMaxResults(cfg, queries.length);
+  let callsUsed = 0;
+
+  const groups = await Promise.all(
+    queries.map(async (query) => {
+      callsUsed += 1;
+      try {
+        return await searchFn(
+          query,
+          maxResults,
+          configForWebSearchProvider(cfg, primary),
+        );
+      } catch (error) {
+        console.warn(
+          `[web-search] provider=${primary.id} query_chars=${query.length} failed:`,
+          error instanceof Error ? error.message : error,
+        );
+        return [];
+      }
+    }),
+  );
+
+  // All facets share one retry budget. Two facets may consume 2+1 calls; three
+  // facets already consume the complete budget and never expand to six calls.
+  if (alternative && callsUsed < MAX_ORDINARY_SEARCH_PROVIDER_CALLS) {
+    let retryIndex = groups.findIndex((hits) => hits.length === 0);
+    if (retryIndex < 0) {
+      retryIndex = groups.findIndex((hits) => assessSearchEvidence(hits).retry);
+    }
+    if (retryIndex >= 0) {
+      const current = groups[retryIndex] ?? [];
+      const quality = assessSearchEvidence(current);
+      const retryReason = current.length === 0 ? "primary_failed" : "sparse_evidence";
+      console.info(
+        `[web-search] retry reason=${retryReason} from=${primary.id} to=${alternative.id} query_index=${retryIndex} uniqueUrls=${quality.uniqueUrls} uniqueHosts=${quality.uniqueHosts}`,
+      );
+      callsUsed += 1;
+      try {
+        const complement = await searchFn(
+          queries[retryIndex]!,
+          maxResults,
+          configForWebSearchProvider(cfg, alternative),
+        );
+        groups[retryIndex] = current.length === 0
+          ? complement
+          : mergeSearchHits(current, complement);
+      } catch (error) {
+        console.warn(
+          `[web-search] retry provider=${alternative.id} failed:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+  }
+
+  console.info(
+    `[web-search] retrieval queries=${queries.length} provider_calls=${callsUsed}/${MAX_ORDINARY_SEARCH_PROVIDER_CALLS}`,
+  );
+  return groups;
+}
+
 export async function runWebSearchTurn(
   parsedBody: Record<string, unknown>,
   deps: GatewayFetchDeps,
@@ -788,7 +879,15 @@ export async function runWebSearchTurn(
   if (queryResolution.kind === "unresolved") {
     return respondWithoutSearch(`context_query_${queryResolution.reason}`);
   }
+  if (!queryResolution.value.needSearch) {
+    return respondWithoutSearch("semantic_no_search");
+  }
   const query = queryResolution.value.query;
+  const searchQueries = (
+    queryResolution.value.searchQueries.length > 0
+      ? queryResolution.value.searchQueries
+      : [query]
+  ).slice(0, MAX_ORDINARY_SEARCH_PROVIDER_CALLS);
   // Only the first user turn may search the current text verbatim. Once recent
   // context exists, provider retrieval is gated on a standalone agent rewrite.
 
@@ -800,63 +899,32 @@ export async function runWebSearchTurn(
     searchFailed = true;
     console.warn("[web-search] search failed, degrading: missing user query for web search");
   } else {
-    const providers = configuredWebSearchProviders(cfg);
-    const primary = primaryWebSearchProvider(cfg);
-    if (!primary) {
-      searchFailed = true;
-      console.warn("[web-search] search failed, degrading: no configured provider");
-    } else {
-      const alternative = selectAlternativeProvider(providers, primary.id);
-      let primaryFailed = false;
-      try {
-        hits = await searchFn(
-          query,
-          undefined,
-          configForWebSearchProvider(cfg, primary),
-        );
-        primaryFailed = hits.length === 0;
-      } catch (error) {
-        primaryFailed = true;
-        console.warn(
-          `[web-search] provider=${primary.id} failed:`,
-          error instanceof Error ? error.message : error,
-        );
-      }
-
-      const quality = assessSearchEvidence(hits);
-      const retryReason = primaryFailed ? "primary_failed" : quality.retry ? "sparse_evidence" : null;
-      if (retryReason && alternative) {
-        console.info(
-          `[web-search] retry reason=${retryReason} from=${primary.id} to=${alternative.id} uniqueUrls=${quality.uniqueUrls} uniqueHosts=${quality.uniqueHosts}`,
-        );
-        try {
-          const complement = await searchFn(
-            query,
-            undefined,
-            configForWebSearchProvider(cfg, alternative),
-          );
-          hits = primaryFailed
-            ? complement
-            : mergeSearchHits(hits, complement).slice(0, WEB_SEARCH_MAX_RESULTS_CAP);
-        } catch (error) {
-          console.warn(
-            `[web-search] retry provider=${alternative.id} failed:`,
-            error instanceof Error ? error.message : error,
-          );
-        }
-      }
-
+    try {
+      const groups = await executeOrdinarySearchPlan(searchQueries, cfg, searchFn);
+      const rankedGroups = groups.map((group, index) =>
+        rerankHits(searchQueries[index]!, group).map((hit) =>
+          searchQueries.length > 1
+            ? { ...hit, searchQuery: searchQueries[index]! }
+            : hit,
+        ),
+      );
+      hits = interleaveSearchHitGroups(rankedGroups).slice(0, WEB_SEARCH_MAX_RESULTS_CAP);
       searchFailed = hits.length === 0;
       if (searchFailed) {
         console.warn("[web-search] search failed, degrading: no usable hits");
       }
+    } catch (error) {
+      searchFailed = true;
+      console.warn(
+        "[web-search] search failed, degrading:",
+        error instanceof Error ? error.message : error,
+      );
     }
   }
 
-  const ranked = searchFailed ? [] : rerankHits(query, hits);
   const { selected, remainder } = searchFailed
     ? { selected: [] as WebSearchHit[], remainder: [] as WebSearchHit[] }
-    : selectHitsWithinBudget(ranked, modelName);
+    : selectHitsWithinBudget(hits, modelName);
   if (!searchFailed) {
     const budget = resolveInjectionBudgetChars(modelName);
     console.info(

@@ -78,3 +78,24 @@ export function mergeSearchHits(
   }
   return merged;
 }
+
+/**
+ * Interleave independently ranked query facets so one entity cannot consume the
+ * entire answer-context budget. Duplicate URLs are kept only in the first facet.
+ */
+export function interleaveSearchHitGroups<T extends WebSearchHit>(groups: T[][]): T[] {
+  const merged: T[] = [];
+  const seen = new Set<string>();
+  const maxLength = groups.reduce((max, group) => Math.max(max, group.length), 0);
+  for (let rank = 0; rank < maxLength; rank += 1) {
+    for (const group of groups) {
+      const hit = group[rank];
+      if (!hit) continue;
+      const key = canonicalUrl(hit.url);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(hit);
+    }
+  }
+  return merged;
+}

@@ -15,6 +15,8 @@ export type WebSearchHit = {
   snippet: string;
   /** ISO8601，provider 提供时才有（当前仅 Bocha）。 */
   publishedAt?: string;
+  /** Internal retrieval facet label; provider adapters never need to populate it. */
+  searchQuery?: string;
 };
 
 /**
@@ -382,7 +384,8 @@ export function formatHits(hits: WebSearchHit[]): string {
   return hits
     .map((hit, index) => {
       const date = hit.publishedAt ? `\n发布时间: ${hit.publishedAt}` : "";
-      return `[${index + 1}] ${hit.title}\nURL: ${hit.url}${date}\n${hit.snippet}`;
+      const facet = hit.searchQuery ? `\n检索子问题: ${hit.searchQuery}` : "";
+      return `[${index + 1}] ${hit.title}${facet}\nURL: ${hit.url}${date}\n${hit.snippet}`;
     })
     .join("\n\n");
 }

@@ -943,6 +943,226 @@ describe("web search tool loop", () => {
     expect(executeSearch.mock.calls[0]?.[0]).toBe("蔡徐坤 为什么被封为宗主呢");
   });
 
+  it("uses a semantic no-search decision for natural-language arithmetic", async () => {
+    const bodies: Array<{ stream?: boolean; messages?: Array<{ content?: string }> }> = [];
+    const executeSearch = vi.fn(async () => [
+      { title: "不应搜索", url: "https://example.com/no", snippet: "no" },
+    ]);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        messages?: Array<{ content?: string }>;
+      };
+      bodies.push(body);
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content:
+                  '{"need_search":false,"resolved_query":"1+1 等于几","search_queries":[],"confidence":0.99}',
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse(
+        'data: {"choices":[{"delta":{"content":"1+1=2"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "我们刚才在聊数学家" },
+          { role: "assistant", content: "是的。" },
+          { role: "user", content: "但是我想知道 1+1 的等于几" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    expect(bodies.map((body) => body.stream)).toEqual([false, true]);
+    expect(String(bodies[1]?.messages?.[0]?.content)).toContain("本轮说明");
+    const text = await response.text();
+    expect(text).toContain("1+1=2");
+    expect(text).not.toContain("agenticx_web_search_sources");
+  });
+
+  it("searches independent entity facets and preserves both in answer context", async () => {
+    const searched: Array<{ query: string; max?: number }> = [];
+    const bodies: Array<{
+      stream?: boolean;
+      messages?: Array<{ role?: string; content?: string }>;
+    }> = [];
+    const executeSearch = vi.fn(async (query: string, max?: number) => {
+      searched.push({ query, max });
+      if (query.startsWith("王虹")) {
+        return [{ title: "王虹经历", url: "https://wang.example/leave", snippet: "王虹 北大" }];
+      }
+      return [{ title: "邓煜经历", url: "https://deng.example/leave", snippet: "邓煜 北大" }];
+    });
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      bodies.push(body);
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  need_search: true,
+                  resolved_query: "王虹和邓煜为什么分别离开北京大学",
+                  search_queries: [
+                    "王虹 离开北京大学 原因",
+                    "邓煜 离开北京大学 原因",
+                  ],
+                  confidence: 0.99,
+                }),
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"分别说明"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "王虹和邓煜都获得了数学奖项" },
+          { role: "assistant", content: "两人都有北京大学求学经历。" },
+          { role: "user", content: "他们两个人为什么都从北大离开了？" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(searched).toEqual([
+      { query: "王虹 离开北京大学 原因", max: 25 },
+      { query: "邓煜 离开北京大学 原因", max: 25 },
+    ]);
+    const system = String(bodies.find((body) => body.stream === true)?.messages?.[0]?.content);
+    expect(system).toContain("检索子问题: 王虹 离开北京大学 原因");
+    expect(system).toContain("检索子问题: 邓煜 离开北京大学 原因");
+    const text = await response.text();
+    expect(text).toContain("https://wang.example/leave");
+    expect(text).toContain("https://deng.example/leave");
+  });
+
+  it("shares one retry across two facets and caps provider calls at three", async () => {
+    const attempted: Array<{ query: string; providerId?: string }> = [];
+    const executeSearch = vi.fn(async (
+      query: string,
+      _max: number | undefined,
+      cfg: ExecuteSearchConfig,
+    ) => {
+      attempted.push({ query, providerId: cfg.primaryProviderId });
+      if (cfg.primaryProviderId === "secondary") {
+        return [{ title: "补充证据", url: "https://fallback.example/a", snippet: query }];
+      }
+      return [];
+    });
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  need_search: true,
+                  resolved_query: "甲和乙的离职原因",
+                  search_queries: ["甲 离职 原因", "乙 离职 原因"],
+                  confidence: 0.99,
+                }),
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "甲和乙曾经在同一家公司" },
+          { role: "assistant", content: "是的。" },
+          { role: "user", content: "他们为什么离职？" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "primary-key",
+          maxResults: 50,
+          providers: [
+            {
+              id: "primary",
+              adapter: "bocha",
+              displayName: "Primary",
+              apiKey: "primary-key",
+              enabled: true,
+              priority: 0,
+            },
+            {
+              id: "secondary",
+              adapter: "tavily",
+              displayName: "Secondary",
+              apiKey: "secondary-key",
+              enabled: true,
+              priority: 1,
+            },
+          ],
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(attempted).toEqual([
+      { query: "甲 离职 原因", providerId: "primary" },
+      { query: "乙 离职 原因", providerId: "primary" },
+      { query: "甲 离职 原因", providerId: "secondary" },
+    ]);
+  });
+
   it("rewrites only the current query, not the prior question", async () => {
     const executeSearch = vi.fn(async (q: string) => [
       { title: "王虹", url: "https://ex.com/wang-hong", snippet: q },

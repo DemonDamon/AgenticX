@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WebSearchHit, WebSearchProviderConfig } from "../providers";
 import {
   assessSearchEvidence,
+  interleaveSearchHitGroups,
   mergeSearchHits,
   selectAlternativeProvider,
 } from "../search-retry";
@@ -84,6 +85,18 @@ describe("cost-bounded ordinary-search retry policy", () => {
     expect(merged.map((item) => item.url)).toEqual([
       "https://example.com/a#primary",
       "https://other.example/b",
+    ]);
+  });
+
+  it("interleaves independently ranked facets and removes cross-facet duplicates", () => {
+    const merged = interleaveSearchHitGroups([
+      [hit("https://wang.example/1"), hit("https://shared.example/item")],
+      [hit("https://deng.example/1"), hit("https://shared.example/item")],
+    ]);
+    expect(merged.map((item) => item.url)).toEqual([
+      "https://wang.example/1",
+      "https://deng.example/1",
+      "https://shared.example/item",
     ]);
   });
 });
