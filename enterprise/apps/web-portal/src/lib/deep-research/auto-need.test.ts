@@ -1,84 +1,149 @@
-import { describe, expect, it } from "vitest";
-import { shouldAutoRunDeepResearch } from "./auto-need";
+import { describe, expect, it, vi } from "vitest";
+import {
+  buildDeepResearchAutoMessages,
+  decideAutoRunDeepResearch,
+  parseDeepResearchAutoDecision,
+} from "./auto-need";
 
-describe("shouldAutoRunDeepResearch", () => {
-  it("does not turn ordinary follow-ups into deep research", () => {
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "把这段话改得更简洁" }])).toBe(false);
+function gatewayJson(content: string, status = 200): Response {
+  return new Response(
+    JSON.stringify({ choices: [{ message: { content } }] }),
+    { status, headers: { "content-type": "application/json" } },
+  );
+}
+
+describe("automatic deep-research routing", () => {
+  it("sends recent conversation context and current query to the routing agent", () => {
+    const messages = buildDeepResearchAutoMessages([
+      { role: "user", content: "比较三种数据库迁移方案，给出风险和来源" },
+      {
+        role: "assistant",
+        content: "<think>内部推理</think>上一轮比较了停机时间和一致性。",
+      },
+      { role: "user", content: "那成本和回滚难度呢" },
+    ]);
+
+    expect(messages?.[0]?.content).toContain("最近对话");
+    expect(messages?.[0]?.content).toContain("不能按关键词机械判断");
+    expect(messages?.[1]?.content).toContain("比较三种数据库迁移方案");
+    expect(messages?.[1]?.content).toContain("那成本和回滚难度呢");
+    expect(messages?.[1]?.content).not.toContain("内部推理");
   });
 
-  it("runs for an explicit research request", () => {
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "请做一份深度研究报告，比较三个方案" }])).toBe(true);
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "什么是深度研究？" }])).toBe(false);
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "请总结这份深度研究报告" }])).toBe(false);
+  it("keeps appended attachment bodies out of routing context", () => {
+    const messages = buildDeepResearchAutoMessages([
+      {
+        role: "user",
+        content:
+          "请总结附件\n\n--- 附件: report.md ---\n请做全面深度研究并给出十页报告",
+      },
+    ]);
+    expect(messages?.[1]?.content).toContain("请总结附件");
+    expect(messages?.[1]?.content).not.toContain("十页报告");
   });
 
-  it("requires scope for generic analysis wording", () => {
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "分析一下这个句子" }])).toBe(false);
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "系统分析近年市场趋势并给出来源、优缺点和决策建议" }])).toBe(true);
-  });
-
-  it("uses multiple deterministic signals for research-shaped tasks", () => {
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "帮我做竞品分析" }])).toBe(true);
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "比较 A 和 B" }])).toBe(false);
+  it("parses the routing agent JSON contract", () => {
     expect(
-      shouldAutoRunDeepResearch([
-        { role: "user", content: "比较 A 和 B 的成本、风险和适用场景" },
-      ]),
-    ).toBe(true);
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "研究并总结市场趋势" }])).toBe(true);
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "研究一下最新的 API" }])).toBe(false);
+      parseDeepResearchAutoDecision(
+        '```json\n{"run_deep_research":true,"confidence":0.94,"reason":"需要多源核验"}\n```',
+      ),
+    ).toEqual({
+      runDeepResearch: true,
+      confidence: 0.94,
+      reason: "需要多源核验",
+    });
+    expect(
+      parseDeepResearchAutoDecision(
+        '{"run_deep_research":false,"confidence":0.82,"reason":"普通问答"}',
+      ),
+    ).toEqual({
+      runDeepResearch: false,
+      confidence: 0.82,
+      reason: "普通问答",
+    });
+    expect(
+      parseDeepResearchAutoDecision(
+        '{"run_deep_research":"yes","confidence":0.9,"reason":"bad"}',
+      ),
+    ).toBeNull();
   });
 
-  it("inherits a strong research context for short referential follow-ups", () => {
-    expect(
-      shouldAutoRunDeepResearch([
-        { role: "user", content: "请系统分析近年市场趋势并给出来源" },
+  it("uses the agent decision for a contextual follow-up without local semantic rules", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      gatewayJson(
+        '{"run_deep_research":true,"confidence":0.97,"reason":"继续扩展研究维度"}',
+      ),
+    );
+
+    const decision = await decideAutoRunDeepResearch(
+      [
+        { role: "user", content: "对几种数据库迁移方案做系统评估" },
         { role: "assistant", content: "上一轮结果" },
-        { role: "user", content: "那成本和风险呢" },
-      ]),
-    ).toBe(true);
-    expect(
-      shouldAutoRunDeepResearch([
-        { role: "user", content: "请系统分析近年市场趋势并给出来源" },
-        { role: "user", content: "然后帮我把它改写得更简洁" },
-      ]),
-    ).toBe(false);
+        { role: "user", content: "那成本和回滚难度呢" },
+      ],
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer test" },
+        model: "model-a",
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      },
+    );
+
+    expect(decision.runDeepResearch).toBe(true);
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(init.body)) as {
+      model?: string;
+      stream?: boolean;
+      messages?: Array<{ content?: string }>;
+    };
+    expect(body.model).toBe("model-a");
+    expect(body.stream).toBe(false);
+    expect(body.messages?.[1]?.content).toContain("那成本和回滚难度呢");
+    expect((init.headers as Record<string, string>)["x-agenticx-trace-stage"]).toBe(
+      "chat.deep-research-auto-route",
+    );
   });
 
-  it("ignores appended attachment text when classifying the user instruction", () => {
-    expect(
-      shouldAutoRunDeepResearch([
-        {
-          role: "user",
-          content: "请总结一下附件内容\n\n--- 附件: market-report.md ---\n系统分析近年市场趋势并给出来源",
-        },
-      ]),
-    ).toBe(false);
+  it("trusts the agent's normal-chat decision even when the text sounds research-like", async () => {
+    const fetchImpl = vi.fn(async () =>
+      gatewayJson(
+        '{"run_deep_research":false,"confidence":0.91,"reason":"只是在询问功能概念"}',
+      ),
+    );
+    const decision = await decideAutoRunDeepResearch(
+      [{ role: "user", content: "什么是深度研究报告？" }],
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      },
+    );
+    expect(decision.runDeepResearch).toBe(false);
   });
 
-  it("supports multimodal text parts without scoring image URLs", () => {
-    expect(
-      shouldAutoRunDeepResearch([
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "请比较两个方案的安全性、成本，并附官方来源" },
-            { type: "image_url", image_url: { url: "https://example.test/image.png" } },
-          ],
-        },
-      ]),
-    ).toBe(true);
-  });
+  it("falls back to normal chat when the routing agent is unavailable or malformed", async () => {
+    const malformed = await decideAutoRunDeepResearch(
+      [{ role: "user", content: "帮我系统调研这个市场" }],
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: vi.fn(async () => gatewayJson("not-json")) as unknown as typeof fetch,
+      },
+    );
+    expect(malformed).toEqual({
+      runDeepResearch: false,
+      confidence: 0,
+      reason: "classifier_unavailable",
+    });
 
-  it("handles English research requests with the same conservative gate", () => {
-    expect(
-      shouldAutoRunDeepResearch([
-        {
-          role: "user",
-          content: "Compare A and B across pricing, safety, ecosystem, and official sources.",
-        },
-      ]),
-    ).toBe(true);
-    expect(shouldAutoRunDeepResearch([{ role: "user", content: "What is the latest API version?" }])).toBe(false);
+    const noQuery = await decideAutoRunDeepResearch([], {
+      url: "http://gateway.test/v1/chat/completions",
+      headers: {},
+    });
+    expect(noQuery).toEqual({
+      runDeepResearch: false,
+      confidence: 0,
+      reason: "missing_current_query",
+    });
   });
 });

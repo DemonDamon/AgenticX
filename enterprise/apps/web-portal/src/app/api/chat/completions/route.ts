@@ -17,7 +17,7 @@ import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
-import { shouldAutoRunDeepResearch } from "../../../../lib/deep-research/auto-need";
+import { decideAutoRunDeepResearch } from "../../../../lib/deep-research/auto-need";
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.messages)) return body;
@@ -147,12 +147,6 @@ export async function POST(request: Request) {
     // body 不是 JSON 时维持原样转发
   }
 
-  if (enableDeepResearchAuto && parsedBody) {
-    enableDeepResearch = shouldAutoRunDeepResearch(
-      Array.isArray(parsedBody.messages) ? (parsedBody.messages as Array<{ role?: unknown; content?: unknown }>) : [],
-    );
-  }
-
   const gatewayHeaders: Record<string, string> = {
     "content-type": "application/json",
     authorization: `Bearer ${accessToken}`,
@@ -163,6 +157,24 @@ export async function POST(request: Request) {
     "x-session-id": session.sessionId,
     ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
   };
+
+  if (enableDeepResearchAuto && !enableDeepResearch && parsedBody) {
+    const decision = await decideAutoRunDeepResearch(
+      Array.isArray(parsedBody.messages)
+        ? (parsedBody.messages as Array<{ role?: unknown; content?: unknown }>)
+        : [],
+      {
+        url: GATEWAY_COMPLETIONS_URL,
+        headers: gatewayHeaders,
+        signal: request.signal,
+        model: typeof parsedBody.model === "string" ? parsedBody.model : undefined,
+      },
+    );
+    enableDeepResearch = decision.runDeepResearch;
+    console.info(
+      `[deep-research] automatic route run=${decision.runDeepResearch} confidence=${decision.confidence.toFixed(2)} reason=${decision.reason || "unspecified"}`,
+    );
+  }
 
   if (enableDeepResearch && parsedBody) {
     return runDeepResearchTurn(withSanitizedMessages(parsedBody), {
