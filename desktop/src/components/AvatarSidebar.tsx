@@ -3,7 +3,6 @@ import type { LucideIcon } from "lucide-react";
 import { AlarmClock, MessageSquarePlus, UserRound, Waypoints } from "lucide-react";
 import { useAppStore, type MainView } from "../store";
 import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
-import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { isNewTaskNavActive } from "../utils/workspace-session-visibility";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
@@ -42,7 +41,6 @@ const NAV_ENTRIES: NavEntry[] = [
 export function AvatarSidebar({ onToggleSidebar }: Props) {
   const setAvatars = useAppStore((s) => s.setAvatars);
   const setGroups = useAppStore((s) => s.setGroups);
-  const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const mainView = useAppStore((s) => s.mainView);
   const setMainView = useAppStore((s) => s.setMainView);
   const activePaneId = useAppStore((s) => s.activePaneId);
@@ -218,28 +216,24 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
           />
         </div>
 
-        {/* Meta-Agent brand row */}
+        {/* Meta-Agent brand row — text-only product name + version (no character logo) */}
         <button
-          className={`group flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors ${
+          className={`group flex w-full items-center px-4 py-2.5 text-left transition-colors ${
             metaPaneActive ? "" : "hover:bg-surface-hover"
           }`}
           aria-current={metaPaneActive ? "page" : undefined}
+          aria-label={`${APP_DISPLAY_NAME} ${APP_VERSION}`}
           onClick={() => openMetaOrAvatarPane(null, META_AGENT_DISPLAY_NAME)}
           onContextMenu={(e) => {
             e.preventDefault();
             setMachiContextMenu({ x: e.clientX, y: e.clientY });
           }}
         >
-          <img
-            src={metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL}
-            alt={APP_DISPLAY_NAME}
-            className="h-8 w-8 shrink-0 rounded-[7px] object-cover"
-          />
           <div className="flex min-w-0 items-baseline gap-1.5">
-            <span className="truncate text-[20px] font-bold leading-none text-text-strong">
+            <span className="truncate text-[16px] font-semibold leading-none tracking-[-0.015em] text-text-strong">
               {APP_DISPLAY_NAME}
             </span>
-            <span className="shrink-0 text-[11px] font-medium leading-none text-text-faint">
+            <span className="shrink-0 text-[11px] font-normal leading-none tabular-nums text-text-faint">
               {APP_VERSION}
             </span>
           </div>
