@@ -8,6 +8,7 @@ import {
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../lib/admin-auth";
 import { getDefaultOrgId } from "../../../../../lib/admin-pg-auth";
+import { removeUserFromAllGroups } from "../../../../../lib/user-groups-store";
 
 function isStatus(value: unknown): value is AdminUserStatus {
   return value === "active" || value === "disabled" || value === "locked";
@@ -69,7 +70,24 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   const { id } = await context.params;
   try {
     await softDeleteUser(auth.session.tenantId, id, auth.session.userId);
-    return NextResponse.json({ code: "00000", message: "ok" });
+    let removedFromGroups = 0;
+    let groupCleanupPending = false;
+    try {
+      removedFromGroups = await removeUserFromAllGroups(id);
+    } catch (cleanupError) {
+      // The IAM deletion has already succeeded. Do not report the whole delete
+      // as failed; group edit/load paths also prune legacy missing members.
+      groupCleanupPending = true;
+      console.error(
+        "[admin/users] deleted user group cleanup failed:",
+        cleanupError instanceof Error ? cleanupError.stack ?? cleanupError.message : cleanupError,
+      );
+    }
+    return NextResponse.json({
+      code: "00000",
+      message: "ok",
+      data: { removedFromGroups, groupCleanupPending },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid request";
     return NextResponse.json({ code: "40000", message }, { status: 400 });

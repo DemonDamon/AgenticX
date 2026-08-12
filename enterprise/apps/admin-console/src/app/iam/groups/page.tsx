@@ -420,9 +420,16 @@ export default function GroupsPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...form, monthlyTokens: Math.floor(monthlyTokens) }),
       });
-      const json = (await response.json()) as ApiEnvelope<unknown>;
+      const json = (await response.json()) as ApiEnvelope<{ removedMissingMembers?: number }>;
       if (!response.ok || json.code !== "00000") throw new Error(json.message || "保存失败");
-      toast.success(isNew ? "用户组已创建并应用到成员" : "用户组设置已应用到成员");
+      const removedMissingMembers = json.data?.removedMissingMembers ?? 0;
+      toast.success(
+        removedMissingMembers > 0
+          ? `已自动移除 ${removedMissingMembers} 位已删除成员，用户组设置已保存`
+          : isNew
+            ? "用户组已创建并应用到成员"
+            : "用户组设置已应用到成员",
+      );
       setEditing(null);
       await load();
     } catch (error) {

@@ -174,6 +174,37 @@ export async function applyUserGroupPolicy(
   await setQuotaConfig({ ...config, users });
 }
 
+/**
+ * Remove a deleted user from every group stored in the quota configuration.
+ *
+ * Group membership is embedded in the quota payload rather than protected by
+ * an IAM foreign key, so deleting the IAM row cannot cascade this reference.
+ */
+export async function removeUserFromAllGroups(userId: string): Promise<number> {
+  const normalizedUserId = String(userId ?? "").trim();
+  if (!normalizedUserId) return 0;
+
+  const config = await getQuotaConfig();
+  const groups = groupsOf(config);
+  const updatedAt = new Date().toISOString();
+  let changedGroups = 0;
+
+  for (const [id, group] of Object.entries(groups)) {
+    if (!group.memberIds.includes(normalizedUserId)) continue;
+    groups[id] = {
+      ...group,
+      memberIds: group.memberIds.filter((memberId) => memberId !== normalizedUserId),
+      updatedAt,
+    };
+    changedGroups += 1;
+  }
+
+  if (changedGroups > 0) {
+    await setQuotaConfig({ ...config, groups });
+  }
+  return changedGroups;
+}
+
 export async function deleteUserGroup(id: string): Promise<boolean> {
   const config = await getQuotaConfig();
   const groups = groupsOf(config);
