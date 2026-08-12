@@ -21,12 +21,10 @@ import {
   WEB_SEARCH_SNIPPET_CHARS,
 } from "./context-budget";
 import {
-  buildFollowUpRewriteMessages,
-  hasPriorFollowUpQueryLeakage,
-  isReferentialFollowUp,
-  parseFollowUpQueryRewrite,
-  resolveFollowUpQuery,
-  type FollowUpQueryRewrite,
+  buildSearchQueryRewriteMessages,
+  hasPriorSearchQueryLeakage,
+  parseSearchQueryRewrite,
+  type SearchQueryRewrite,
 } from "./follow-up";
 import { sanitizeHistoryForUpstream } from "./history-sanitize";
 import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeConfig } from "./providers";
@@ -198,41 +196,13 @@ export function extractLastUserQuery(messages: ChatMessage[]): string {
   return "";
 }
 
-/** Intent-bearing words: short turns containing these are full questions, not slot-fills. */
-const FOLLOW_UP_INTENT =
-  /天气|气温|温度|湿度|预报|新闻|头条|价格|股价|汇率|怎么样|如何|多少|最新|查询|搜索|财报|官网|是谁|哪里|哪个/;
-
 /**
- * True when last user turn looks like a slot-fill (e.g. city name), not a full question.
- * Used so multi-turn search can keep prior intent: 「今天天气怎么样」→「广州南沙」.
- */
-export function isShortFollowUpQuery(query: string): boolean {
-  const q = query.trim();
-  if (!q || q.length > 24) return false;
-  if (FOLLOW_UP_INTENT.test(q)) return false;
-  return true;
-}
-
-/**
- * Keywords for executeWebSearch on the current turn.
- * Default = last user text. When last is a short follow-up and a previous user
- * turn exists, prepend the slot-fill: 「广州南沙 今天天气怎么样」.
+ * Deterministic fallback used only when no contextual rewrite is available.
+ * Semantic completion belongs to the query-rewrite agent; this function never
+ * guesses intent from word lists or concatenates previous turns.
  */
 export function buildWebSearchQuery(messages: ChatMessage[]): string {
-  const users: string[] = [];
-  for (let i = messages.length - 1; i >= 0 && users.length < 2; i -= 1) {
-    const msg = messages[i];
-    if (msg?.role !== "user") continue;
-    const text = textFromMessageContent(msg.content);
-    if (!text) continue;
-    users.push(sanitizeWebSearchQuery(text));
-  }
-  const last = users[0] ?? "";
-  if (!last) return "";
-  const prev = users[1] ?? "";
-  // Only splice when prior turn carried searchable intent (天气/新闻/…), not 「你好」.
-  if (!prev || !isShortFollowUpQuery(last) || !FOLLOW_UP_INTENT.test(prev)) return last;
-  return sanitizeWebSearchQuery(`${last} ${prev}`);
+  return extractLastUserQuery(messages);
 }
 
 /** Raw last-user text (attachment bodies NOT stripped) — for skip classification. */
@@ -422,7 +392,7 @@ function extractCompletionContent(payload: unknown): string {
 async function callGatewayJson(
   deps: GatewayFetchDeps,
   body: Record<string, unknown>,
-  timeoutMs = 2500,
+  timeoutMs = 8000,
 ): Promise<unknown> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const controller = new AbortController();
@@ -458,16 +428,16 @@ async function callGatewayJson(
   }
 }
 
-type FollowUpResolution = FollowUpQueryRewrite & {
-  source: "ai" | "heuristic";
+type SearchQueryResolution = SearchQueryRewrite & {
+  source: "ai";
 };
 
-async function resolveFollowUpQueryWithAi(
+async function rewriteSearchQueryWithAi(
   messages: ChatMessage[],
   model: string | undefined,
   deps: GatewayFetchDeps,
-): Promise<FollowUpResolution | null> {
-  const rewriteMessages = buildFollowUpRewriteMessages(messages);
+): Promise<SearchQueryResolution | null> {
+  const rewriteMessages = buildSearchQueryRewriteMessages(messages);
   if (!rewriteMessages) return null;
 
   try {
@@ -478,20 +448,20 @@ async function resolveFollowUpQueryWithAi(
       temperature: 0,
       max_tokens: 96,
     });
-    const rewrite = parseFollowUpQueryRewrite(extractCompletionContent(payload));
-    if (rewrite && hasPriorFollowUpQueryLeakage(rewrite.query, messages)) {
+    const rewrite = parseSearchQueryRewrite(extractCompletionContent(payload));
+    if (rewrite?.query && hasPriorSearchQueryLeakage(rewrite.query, messages)) {
       throw new Error("query rewrite copied the prior question");
     }
     if (rewrite) {
       console.info(
-        `[web-search] follow-up query rewrite source=ai confidence=${rewrite.confidence.toFixed(2)} chars=${rewrite.query.length}`,
+        `[web-search] contextual query rewrite confidence=${rewrite.confidence.toFixed(2)} chars=${rewrite.query.length}`,
       );
       return { ...rewrite, source: "ai" };
     }
     throw new Error("query rewrite output failed validation");
   } catch (error) {
     console.warn(
-      "[web-search] follow-up query rewrite unavailable, falling back:",
+      "[web-search] contextual query rewrite unavailable, using current query:",
       error instanceof Error ? error.message : error,
     );
     return null;
@@ -721,57 +691,28 @@ export async function runWebSearchTurn(
     }
   }
 
-  // Skip classification uses the bare last-user turn (greetings must not inherit prior intent).
+  // Decide whether this turn needs search from the current user text only. If it
+  // does, contextual completion below is always delegated to the rewrite agent.
   const queryForSkip = extractLastUserQuery(originalMessages);
-  const isReferential = isReferentialFollowUp(queryForSkip);
-  const modelName = typeof rest.model === "string" ? rest.model : undefined;
-  const heuristicResolved = isReferential ? resolveFollowUpQuery(originalMessages) : null;
-  let resolved: FollowUpResolution | null = null;
-
-  if (isReferential) {
-    const aiResolved = await resolveFollowUpQueryWithAi(originalMessages, modelName, deps);
-    if (aiResolved) {
-      resolved = aiResolved;
-    } else if (heuristicResolved?.query) {
-      resolved = {
-        query: heuristicResolved.query,
-        confidence: 0,
-        source: "heuristic",
-      };
-      console.info("[web-search] follow-up query rewrite source=heuristic");
-    }
-  }
-
-  // 指代追问但 AI 与规则都消解不出实体 → 本轮不搜（搜代词只会得到跑题 SERP），
-  // 直接基于对话上下文作答。
-  if (!webSearchAlwaysOn() && isReferential && !resolved?.query) {
-    return respondWithoutSearch("referential_no_entity");
-  }
-  if (resolved) {
-    console.info(
-      `[web-search] follow-up resolved source=${resolved.source} confidence=${resolved.confidence.toFixed(2)} chars=${resolved.query.length}`,
-    );
-  }
-  // When ALWAYS=1 and entity resolution failed, fall back to the raw last-user text
-  // so the escape hatch still performs a search instead of a missing-query degrade.
-  const query = isReferential
-    ? resolved?.query || queryForSkip
-    : buildWebSearchQuery(originalMessages);
-
-  // Auto mode follows the allowlist gate: only clearly local turns skip search;
-  // unrecognized questions continue through search so implicit factual queries
-  // do not silently degrade to an ungrounded direct answer.
-  const skip = webSearchAlwaysOn()
+  const alwaysSearch = webSearchAlwaysOn();
+  const skip = alwaysSearch
     ? null
-    : isReferential
-      ? null
-      : classifyWebSearchNeed({
-          query,
-          rawQuery: extractLastUserRawText(originalMessages),
-        });
-  if (skip && skip.need === "skip") {
+    : classifyWebSearchNeed({
+        query: queryForSkip,
+        rawQuery: extractLastUserRawText(originalMessages),
+      });
+  if (skip?.need === "skip") {
     return respondWithoutSearch(skip.reason);
   }
+
+  const modelName = typeof rest.model === "string" ? rest.model : undefined;
+  const resolved = await rewriteSearchQueryWithAi(originalMessages, modelName, deps);
+  if (resolved && !resolved.query && !alwaysSearch) {
+    return respondWithoutSearch("context_query_unresolved");
+  }
+  // First turns have no rewrite call. A failed/malformed rewrite also falls back
+  // to the current turn verbatim — never to regex-based intent reconstruction.
+  const query = resolved?.query || buildWebSearchQuery(originalMessages);
 
   const searchFn = deps.executeSearch ?? executeWebSearch;
   let hits: WebSearchHit[] = [];

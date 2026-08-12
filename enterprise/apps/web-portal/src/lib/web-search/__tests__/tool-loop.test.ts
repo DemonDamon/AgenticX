@@ -3,7 +3,6 @@ import {
   buildWebSearchQuery,
   compactHitsForModel,
   extractLastUserQuery,
-  isShortFollowUpQuery,
   pipeUpstreamSse,
   runWebSearchTurn,
   synthesizeTextSse,
@@ -64,25 +63,19 @@ describe("web search tool loop", () => {
     ).toBe("总结一下");
   });
 
-  it("detects short follow-up slot fills vs full questions", () => {
-    expect(isShortFollowUpQuery("广州南沙")).toBe(true);
-    expect(isShortFollowUpQuery("广州南沙天气如何")).toBe(false);
-  });
-
-  it("builds contextual search query for multi-turn slot fill", () => {
+  it("keeps deterministic fallback limited to the current user query", () => {
     expect(
       buildWebSearchQuery([
         { role: "user", content: "今天天气怎么样" },
         { role: "assistant", content: "请问哪个城市？" },
         { role: "user", content: "广州南沙" },
       ]),
-    ).toBe("广州南沙 今天天气怎么样");
+    ).toBe("广州南沙");
 
     expect(
       buildWebSearchQuery([{ role: "user", content: "广州南沙天气如何" }]),
     ).toBe("广州南沙天气如何");
 
-    // Prior turn was greeting — do not splice into search keywords.
     expect(
       buildWebSearchQuery([
         { role: "user", content: "你好" },
@@ -379,9 +372,23 @@ describe("web search tool loop", () => {
     const executeSearch = vi.fn(async (q: string) => [
       { title: "南沙天气", url: "https://weather.example/nansha", snippet: "气温 24~30℃" },
     ]);
-    const fetchImpl = vi.fn(async () =>
-      sseResponse('data: {"choices":[{"delta":{"content":"南沙今天大雨"}}]}\n\ndata: [DONE]\n\n'),
-    );
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: '{"resolved_query":"广州南沙 今天天气","confidence":0.98}',
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse(
+        'data: {"choices":[{"delta":{"content":"南沙今天大雨"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
 
     await runWebSearchTurn(
       {
@@ -408,7 +415,8 @@ describe("web search tool loop", () => {
     );
 
     expect(executeSearch).toHaveBeenCalledTimes(1);
-    expect(executeSearch.mock.calls[0]?.[0]).toBe("广州南沙 今天天气怎么样");
+    expect(executeSearch.mock.calls[0]?.[0]).toBe("广州南沙 今天天气");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("skips web search for greetings", async () => {
@@ -700,7 +708,7 @@ describe("web search tool loop", () => {
     expect(sources.length).toBe(hits.length);
   });
 
-  it("resolves referential follow-up entity into the search query", async () => {
+  it("lets the rewrite agent complete a contextual search query", async () => {
     const executeSearch = vi.fn(async (q: string) => [
       { title: "宗主梗", url: "https://ex.com/zongzhu", snippet: "蔡徐坤 宗主" },
     ]);
@@ -753,7 +761,7 @@ describe("web search tool loop", () => {
     expect(executeSearch.mock.calls[0]?.[0]).toBe("蔡徐坤 为什么被封为宗主呢");
   });
 
-  it("rewrites only the current referential query, not the prior question", async () => {
+  it("rewrites only the current query, not the prior question", async () => {
     const executeSearch = vi.fn(async (q: string) => [
       { title: "王虹", url: "https://ex.com/wang-hong", snippet: q },
     ]);
@@ -807,7 +815,64 @@ describe("web search tool loop", () => {
     expect(rewriteBody.agenticx_web_search).toBeUndefined();
   });
 
-  it("skips search when referential follow-up has no resolvable entity", async () => {
+  it("adds the identity anchor needed for an ambiguous Chinese name", async () => {
+    const executeSearch = vi.fn(async (q: string) => [
+      { title: "王虹近期新闻", url: "https://ex.com/wang-hong-news", snippet: q },
+    ]);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content:
+                  '{"resolved_query":"数学家 王虹 最近几天 新闻","confidence":0.99}',
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"答"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "王虹到底解决了什么数学难题" },
+          {
+            role: "assistant",
+            content: "数学家王虹与合作者证明了三维挂谷猜想。",
+          },
+          { role: "user", content: "搜一下这几天关于她的新闻" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "k",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    expect(executeSearch).toHaveBeenCalledWith(
+      "数学家 王虹 最近几天 新闻",
+      undefined,
+      expect.anything(),
+    );
+  });
+
+  it("skips search when the rewrite agent cannot form a standalone query", async () => {
     const bodies: unknown[] = [];
     const executeSearch = vi.fn(async () => []);
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -855,7 +920,7 @@ describe("web search tool loop", () => {
     expect(system).not.toContain("联网搜索结果");
   });
 
-  it("AGENTICX_WEB_SEARCH_ALWAYS still searches referential follow-ups without entity", async () => {
+  it("AGENTICX_WEB_SEARCH_ALWAYS still searches when contextual completion is unresolved", async () => {
     const prev = process.env.AGENTICX_WEB_SEARCH_ALWAYS;
     process.env.AGENTICX_WEB_SEARCH_ALWAYS = "1";
     try {
