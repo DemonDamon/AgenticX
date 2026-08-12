@@ -212,7 +212,6 @@ import {
 import { resolveReferencesForAssistant } from "../utils/turn-reference-context";
 import { reattachSessionStreamUrl, parseSseFrame } from "../utils/session-reattach";
 import {
-  attachmentsFromSessionRow,
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
@@ -231,7 +230,7 @@ import {
 } from "../utils/reference-attachment";
 import { NEAR_ARTIFACT_TASKSPACES_SYNCED } from "../utils/workspace-sidebar-events";
 import { isLikelyTextFile } from "../utils/text-attachment";
-import { isViewImageInjectMessage, viewImageInjectRowFromSession } from "../utils/view-image-inject";
+import { isViewImageInjectMessage } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
 import { maxContinuationRound } from "../utils/continuation-notice";
@@ -3391,26 +3390,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (result.ok && Array.isArray(result.messages) && result.messages.length > 0) {
           if (result.messages.length <= lastPollCountRef.current) return;
           lastPollCountRef.current = result.messages.length;
-          const seen = new Set<string>();
-          const deduped: Message[] = [];
-          for (let idx = 0; idx < result.messages.length; idx++) {
-            const item = result.messages[idx];
-            const role = String(item.role ?? "");
-            const content = String(item.content ?? "").trim();
-            const rowAtts = attachmentsFromSessionRow(
-              (item as { attachments?: unknown }).attachments
-            );
-            if (!content && !rowAtts?.length && !viewImageInjectRowFromSession(item)) continue;
-            const attSig =
-              rowAtts?.length && rowAtts[0]?.dataUrl
-                ? rowAtts[0].dataUrl.slice(0, 72)
-                : "";
-            const key = `${role}::${content.slice(0, 300)}::${attSig}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            deduped.push(mapLoadedSessionMessage(item as LoadedSessionMessage, `dlgpoll-${currentSid}`, idx, currentSid));
+          // 增量合并而非整表替换：mergeSessionMessagesTail 以 sid 为 id 前缀并
+          // 复用内存行 id，已有气泡的 React key 稳定，不会整列表重挂载闪烁。
+          const livePane = useAppStore.getState().panes.find((p) => p.id === pane.id);
+          const current = livePane?.messages ?? [];
+          const merged = mergeSessionMessagesTail(
+            current,
+            result.messages as LoadedSessionMessage[],
+            currentSid
+          );
+          const changed =
+            merged.length !== current.length ||
+            String(merged[merged.length - 1]?.content ?? "") !==
+              String(current[current.length - 1]?.content ?? "");
+          if (!changed) return;
+          setPaneMessages(pane.id, merged);
+          // 全量合并后内存已覆盖完整磁盘历史，复位分页游标，避免顶部
+          // 「加载更早消息」按旧 oldestLoadedIndex 拉取与内存同 id 的行。
+          if (livePane?.hasOlderMessages || (livePane?.oldestLoadedIndex ?? 0) > 0) {
+            setPaneMessagePaging(pane.id, {
+              oldestLoadedIndex: 0,
+              hasOlderMessages: false,
+              loadingOlderMessages: false,
+            });
           }
-          setPaneMessages(pane.id, deduped);
         }
       } catch {
         // ignore polling failures
@@ -3451,6 +3454,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     pane?.messages?.length,
     panes,
     setPaneMessages,
+    setPaneMessagePaging,
   ]);
 
   useEffect(() => {
@@ -5758,8 +5762,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       String(
         useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
       ).trim() === sid;
+    // 骨架屏只在首次尝试点亮；失败/空会话的退避重试在后台静默进行，
+    // 避免「正在加载会话…」与空态来回切换造成频闪。
+    const showSkeleton = sessionBootstrapAttemptRef.current === 0;
     void (async () => {
-      setPaneLoadingMessages(pane.id, true);
+      if (showSkeleton) setPaneLoadingMessages(pane.id, true);
       try {
         const entry = await resolveSessionTailForSwitch(sid);
         if (cancelled || !paneStillOnSid()) return;
@@ -5813,14 +5820,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }, 800 * sessionBootstrapAttemptRef.current);
           }
         }
-        if (!cancelled) setPaneLoadingMessages(pane.id, false);
+        if (!cancelled && showSkeleton) setPaneLoadingMessages(pane.id, false);
       }
     })();
     return () => {
       cancelled = true;
       if (sessionBootstrapInflightRef.current === sid) {
         sessionBootstrapInflightRef.current = "";
-        setPaneLoadingMessages(pane.id, false);
+        if (showSkeleton) setPaneLoadingMessages(pane.id, false);
       }
     };
   }, [
