@@ -83,7 +83,13 @@ import {
 } from "../utils/noisy-chat-messages";
 import { isStreamToolLabelOnlyText, shouldSkipFormattedToolResultFallback } from "../utils/orphan-formatted-tool";
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
-import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
+import {
+  collectTurnLinkedIds,
+  collectTurnLinkedIdsForBlock,
+  countSelectedConversationTurns,
+  expandMessagesToTopLevelRows,
+  expandSelectionToCompleteTurns,
+} from "./messages/react-blocks";
 import { isSubAgentLiveStatus, shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
@@ -5179,22 +5185,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const toggleSelectMessage = useCallback((message: Message) => {
     setSelectedMessageIds((prev) => {
       const next = new Set(prev);
-      const linkedIds = new Set<string>([message.id]);
-      // In IM ReAct layout, selecting a user message should also toggle its following assistant/tool block.
-      if (useReActImLayout && topLevelRowsIm && message.role === "user") {
-        for (let i = 0; i < topLevelRowsIm.length; i++) {
-          const row = topLevelRowsIm[i];
-          if (row.kind === "user" && row.message.id === message.id) {
-            const nextRow = topLevelRowsIm[i + 1];
-            if (nextRow && nextRow.kind === "react") {
-              for (const m of nextRow.block.workMessages) linkedIds.add(m.id);
-              if (nextRow.block.finalAssistant) linkedIds.add(nextRow.block.finalAssistant.id);
-            }
-            break;
-          }
-        }
-      }
+      // Pair user question + following ReAct/assistant block as one turn (and vice versa).
+      const linkedIds = collectTurnLinkedIds(
+        message,
+        useReActImLayout ? topLevelRowsIm : null,
+        visibleMessages,
+      );
       const allSelected = Array.from(linkedIds).every((id) => next.has(id));
+      if (allSelected) {
+        for (const id of linkedIds) next.delete(id);
+      } else {
+        for (const id of linkedIds) next.add(id);
+      }
+      return next;
+    });
+  }, [topLevelRowsIm, useReActImLayout, visibleMessages]);
+
+  /** Toggle a full conversation turn: ReAct block + preceding user question. */
+  const toggleSelectBlock = useCallback((messages: Message[]) => {
+    setSelectedMessageIds((prev) => {
+      const linkedIds = collectTurnLinkedIdsForBlock(
+        messages,
+        useReActImLayout ? topLevelRowsIm : null,
+      );
+      const allSelected = Array.from(linkedIds).every((id) => prev.has(id));
+      const next = new Set(prev);
       if (allSelected) {
         for (const id of linkedIds) next.delete(id);
       } else {
@@ -5204,41 +5219,53 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     });
   }, [topLevelRowsIm, useReActImLayout]);
 
-  /** Toggle the entire ReAct block: if any message in the block is selected, deselect all; otherwise select all. */
-  const toggleSelectBlock = useCallback((messages: Message[]) => {
-    setSelectedMessageIds((prev) => {
-      const anySelected = messages.some((m) => prev.has(m.id));
-      const next = new Set(prev);
-      if (anySelected) {
-        for (const m of messages) next.delete(m.id);
-      } else {
-        for (const m of messages) next.add(m.id);
-      }
-      return next;
-    });
-  }, []);
-
   const selectUpTo = useCallback((targetMessage: Message) => {
     setSelectedMessageIds((prev) => {
-      if (prev.size === 0) return new Set([targetMessage.id]);
+      if (prev.size === 0) {
+        return collectTurnLinkedIds(
+          targetMessage,
+          useReActImLayout ? topLevelRowsIm : null,
+          visibleMessages,
+        );
+      }
       let lastSelectedIdx = -1;
       for (let i = visibleMessages.length - 1; i >= 0; i--) {
         if (prev.has(visibleMessages[i].id)) { lastSelectedIdx = i; break; }
       }
       const targetIdx = visibleMessages.findIndex((m) => m.id === targetMessage.id);
       if (targetIdx < 0) return prev;
-      if (lastSelectedIdx < 0) return new Set([targetMessage.id]);
+      if (lastSelectedIdx < 0) {
+        return collectTurnLinkedIds(
+          targetMessage,
+          useReActImLayout ? topLevelRowsIm : null,
+          visibleMessages,
+        );
+      }
       const lo = Math.min(lastSelectedIdx, targetIdx);
       const hi = Math.max(lastSelectedIdx, targetIdx);
       const next = new Set(prev);
       for (let i = lo; i <= hi; i++) next.add(visibleMessages[i].id);
-      return next;
+      return expandSelectionToCompleteTurns(
+        next,
+        useReActImLayout ? topLevelRowsIm : null,
+        visibleMessages,
+      );
     });
-  }, [visibleMessages]);
+  }, [topLevelRowsIm, useReActImLayout, visibleMessages]);
 
   const selectedMessages = useMemo(
     () => visibleMessages.filter((m) => selectedMessageIds.has(m.id)),
     [visibleMessages, selectedMessageIds]
+  );
+
+  const selectedTurnCount = useMemo(
+    () =>
+      countSelectedConversationTurns(
+        useReActImLayout ? topLevelRowsIm : null,
+        selectedMessageIds,
+        visibleMessages,
+      ),
+    [selectedMessageIds, topLevelRowsIm, useReActImLayout, visibleMessages],
   );
 
   const resolveForwardTarget = useCallback(
@@ -5383,11 +5410,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const deleteSelectedMessages = useCallback(async () => {
     if (selectedMessages.length === 0 || !apiBase || !pane.sessionId) return;
     const desktop = window.agenticxDesktop;
+    const deleteLabel =
+      selectedTurnCount > 0
+        ? `确认删除已选中的 ${selectedTurnCount} 轮对话？`
+        : `确认删除已选中的 ${selectedMessages.length} 条消息？`;
     const confirmResult =
       typeof desktop.confirmDialog === "function"
         ? await desktop.confirmDialog({
             title: "确认删除消息",
-            message: `确认删除已选中的 ${selectedMessages.length} 条消息？`,
+            message: deleteLabel,
             detail: "删除后不可恢复。",
             confirmText: "删除",
             cancelText: "取消",
@@ -5395,7 +5426,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           })
         : {
             ok: true,
-            confirmed: window.confirm(`确认删除已选中的 ${selectedMessages.length} 条消息？删除后不可恢复。`),
+            confirmed: window.confirm(`${deleteLabel}删除后不可恢复。`),
           };
     if (!confirmResult.confirmed) return;
     try {
@@ -5438,7 +5469,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     } catch (err) {
       console.error("[ChatPane] delete selected messages failed:", err);
     }
-  }, [apiBase, apiToken, pane.id, pane.messages, pane.sessionId, selectedMessages, setPaneMessages]);
+  }, [
+    apiBase,
+    apiToken,
+    pane.id,
+    pane.messages,
+    pane.sessionId,
+    selectedMessages,
+    selectedTurnCount,
+    setPaneMessages,
+  ]);
 
   const reloadSessionFromDisk = useCallback(
     async (sid: string) => {
@@ -11843,7 +11883,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           {selectedMessageIds.size > 0 ? (
             <div className="mb-1.5 flex items-center gap-1 rounded-2xl border border-transparent bg-surface-card px-3 py-2 text-xs text-text-muted">
-              <span className="mr-1 shrink-0">已多选 {selectedMessageIds.size} 条</span>
+              <span className="mr-1 shrink-0">已多选 {selectedTurnCount} 轮</span>
               <button
                 type="button"
                 className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
