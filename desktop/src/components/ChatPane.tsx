@@ -11842,11 +11842,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </div>
           ) : null}
           {selectedMessageIds.size > 0 ? (
-            <div className="mb-1 flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-muted">
-              <span>已多选 {selectedMessageIds.size} 条</span>
-              <button className="rounded px-1 hover:bg-surface-hover" onClick={forwardSelectedMessages}>转发</button>
+            <div className="mb-1.5 flex items-center gap-1 rounded-2xl border border-transparent bg-surface-card px-3 py-2 text-xs text-text-muted">
+              <span className="mr-1 shrink-0">已多选 {selectedMessageIds.size} 条</span>
               <button
-                className="rounded px-1 hover:bg-surface-hover"
+                type="button"
+                className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
+                onClick={forwardSelectedMessages}
+              >
+                转发
+              </button>
+              <button
+                type="button"
+                className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
                 onClick={async () => {
                   const merged = selectedMessages
                     .map((message) => {
@@ -11869,13 +11876,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               >
                 复制
               </button>
-              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => void exportSelectedMessagesToPdf()}>
+              <button
+                type="button"
+                className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
+                onClick={() => void exportSelectedMessagesToPdf()}
+              >
                 保存为 PDF
               </button>
-              <button className="rounded px-1 hover:bg-surface-hover text-rose-300" onClick={() => void deleteSelectedMessages()}>
+              <button
+                type="button"
+                className="rounded-xl px-2 py-1 text-rose-300 transition-colors hover:bg-surface-hover"
+                onClick={() => void deleteSelectedMessages()}
+              >
                 删除
               </button>
-              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setSelectedMessageIds(new Set())}>取消</button>
+              <button
+                type="button"
+                className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
+                onClick={() => setSelectedMessageIds(new Set())}
+              >
+                取消
+              </button>
             </div>
           ) : null}
           <MessageQueuePanel
