@@ -763,8 +763,9 @@ body.agx-settings-nav-resizing {
   background: var(--surface-hover);
 }
 
+/* 用户气泡：纯填充、无描边（描边会在浅色主题下叠出双层边缘） */
 .agx-im-user-bubble {
-  border-color: var(--chat-im-user-border);
+  border: none;
   box-shadow: none;
 }
 
