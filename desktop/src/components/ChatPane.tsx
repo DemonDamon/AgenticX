@@ -550,6 +550,29 @@ const FALLBACK_PANE: ChatPaneState = {
 /** 输入区能力菜单的浮层宽度。 */
 const KB_MODE_SUBMENU_WIDTH = 200; // w-[200px]
 
+/**
+ * 「更多操作」内二级菜单：与主菜单同顶同高并排，绝不向下越过主菜单底边
+ * （避免挡住「滚到底」FAB / 输入区）。右侧空间不够则翻到左侧。
+ */
+function positionEmbeddedComposerFlyout(
+  triggerEl: HTMLElement,
+  flyoutWidth: number,
+): { top: number; left: number; maxHeight: number } {
+  const parent = triggerEl.closest(".agx-menu-pop");
+  const band = (parent ?? triggerEl).getBoundingClientRect();
+  const gap = 8;
+  let left = band.right + gap;
+  if (left + flyoutWidth > window.innerWidth - gap) {
+    left = band.left - flyoutWidth - gap;
+  }
+  left = Math.max(gap, Math.min(left, window.innerWidth - flyoutWidth - gap));
+  return {
+    top: band.top,
+    left,
+    maxHeight: Math.max(120, band.height),
+  };
+}
+
 /** 顶栏单一主操作：始终在当前 Near、数字专家或群聊下开启全新上下文。 */
 function NewTopicButton({
   onNewTopic,
@@ -714,7 +737,9 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
   const [query, setQuery] = useState("");
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [dropdownPos, setDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<
+    { left: number; top?: number; bottom?: number; maxHeight?: number } | null
+  >(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const iconBtn =
@@ -741,13 +766,19 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
 
   const handleOpen = async () => {
     if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      // 「更多操作」竖排菜单里，技能行的子菜单从该行右侧弹出；并钳制右边缘不出屏。
-      const left = Math.min(rect.right + 8, window.innerWidth - SKILL_DROPDOWN_WIDTH - 8);
-      setDropdownPos({
-        bottom: window.innerHeight - rect.top + 6,
-        left: Math.max(8, left),
-      });
+      if (embedded) {
+        setDropdownPos(positionEmbeddedComposerFlyout(btnRef.current, SKILL_DROPDOWN_WIDTH));
+      } else {
+        const rect = btnRef.current.getBoundingClientRect();
+        const left = Math.max(
+          8,
+          Math.min(rect.right + 8, window.innerWidth - SKILL_DROPDOWN_WIDTH - 8),
+        );
+        setDropdownPos({
+          bottom: window.innerHeight - rect.top + 6,
+          left,
+        });
+      }
     }
     setOpen(true);
     setQuery("");
@@ -787,10 +818,16 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
       ? createPortal(
           <div
             id="agx-skill-picker-dropdown"
-            style={{ bottom: dropdownPos.bottom, left: dropdownPos.left }}
-            className="fixed z-[9999] w-72 rounded-xl border border-border bg-surface-panel shadow-xl backdrop-blur-md"
+            style={{
+              left: dropdownPos.left,
+              width: SKILL_DROPDOWN_WIDTH,
+              ...(dropdownPos.top != null
+                ? { top: dropdownPos.top, maxHeight: dropdownPos.maxHeight }
+                : { bottom: dropdownPos.bottom }),
+            }}
+            className="fixed z-[9999] flex w-72 flex-col overflow-hidden rounded-xl border border-border bg-surface-panel shadow-xl backdrop-blur-md"
           >
-            <div className="border-b border-border p-2">
+            <div className="shrink-0 border-b border-border p-2">
               <input
                 ref={searchRef}
                 type="text"
@@ -803,7 +840,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
                 }}
               />
             </div>
-            <div className="max-h-60 overflow-y-auto p-1">
+            <div className="min-h-0 flex-1 overflow-y-auto p-1">
               {loading ? (
                 <div className="px-3 py-4 text-center text-[11px] text-text-faint">加载中…</div>
               ) : filtered.length === 0 ? (
@@ -1547,7 +1584,9 @@ function PaneKnowledgeRetrievalModeSwitch({
   );
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<
+    { left: number; top?: number; bottom?: number; maxHeight?: number } | null
+  >(null);
   const rootRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const refreshGenRef = useRef(0);
@@ -1581,14 +1620,15 @@ function PaneKnowledgeRetrievalModeSwitch({
 
   const openMenu = useCallback((flyoutRight = false) => {
     if (rootRef.current) {
-      const rect = rootRef.current.getBoundingClientRect();
-      const left = flyoutRight
-        ? Math.max(8, Math.min(rect.right + 8, window.innerWidth - KB_MODE_SUBMENU_WIDTH - 8))
-        : rect.left;
-      setMenuPos({
-        bottom: window.innerHeight - rect.top + 4,
-        left,
-      });
+      if (flyoutRight) {
+        setMenuPos(positionEmbeddedComposerFlyout(rootRef.current, KB_MODE_SUBMENU_WIDTH));
+      } else {
+        const rect = rootRef.current.getBoundingClientRect();
+        setMenuPos({
+          bottom: window.innerHeight - rect.top + 4,
+          left: rect.left,
+        });
+      }
     }
     setOpen(true);
   }, []);
@@ -1640,8 +1680,13 @@ function PaneKnowledgeRetrievalModeSwitch({
           <div
             id="agx-kb-retrieval-mode-menu"
             ref={menuRef}
-            style={{ bottom: menuPos.bottom, left: menuPos.left }}
-            className="fixed z-[9999] w-[200px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
+            style={{
+              left: menuPos.left,
+              ...(menuPos.top != null
+                ? { top: menuPos.top, maxHeight: menuPos.maxHeight }
+                : { bottom: menuPos.bottom }),
+            }}
+            className="fixed z-[9999] w-[200px] overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
             role="listbox"
             aria-label="知识库检索模式"
           >
