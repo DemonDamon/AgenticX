@@ -61,6 +61,25 @@
   animation: agx-working-shimmer 2.2s ease-in-out infinite;
 }
 
+/* Faint status meta (运行中 / 思考中): narrower bright band, higher contrast, faster sweep.
+   Use background-image (not the `background` shorthand) so background-clip: text survives. */
+.agx-working-shimmer.agx-status-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--text-faint) 0%,
+    var(--text-faint) 38%,
+    var(--text-subtle) 46%,
+    var(--text-strong) 50%,
+    var(--text-subtle) 54%,
+    var(--text-faint) 62%,
+    var(--text-faint) 100%
+  );
+  background-size: 280% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: agx-working-shimmer 2.8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -82,5 +101,9 @@
     -webkit-background-clip: unset;
     background-clip: unset;
     animation: none;
+  }
+
+  .agx-working-shimmer.agx-status-shimmer {
+    color: var(--text-faint);
   }
 }

@@ -409,9 +409,11 @@ export function ToolCallCard({
   );
 
   const metaRight = toolIsActive ? (
-    <span className="shrink-0 text-[12px] text-text-faint tabular-nums">
-      运行中 · {formatToolElapsedSeconds(liveElapsedSec)}
-    </span>
+    <Shimmer
+      variant="status"
+      text={`运行中 · ${formatToolElapsedSeconds(liveElapsedSec)}`}
+      className="shrink-0 whitespace-nowrap text-[12px] font-normal tabular-nums"
+    />
   ) : null;
 
   const expandedDetailClass =
@@ -581,10 +583,8 @@ export function ToolCallCard({
           <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
             <Icon className={`h-3.5 w-3.5 ${iconColorClass}`} aria-hidden />
           </span>
-          <span className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className="min-w-0 flex-1 truncate text-left">{titleEl}</span>
-            {metaRight}
-          </span>
+          <span className="min-w-0 truncate text-left">{titleEl}</span>
+          {metaRight}
           {hasDetail ? (
             expanded ? (
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
@@ -618,7 +618,7 @@ export function ToolCallCard({
                 <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
               ))}
             <Icon className={`h-3.5 w-3.5 shrink-0 ${iconColorClass}`} />
-            <span className="min-w-0 flex-1 truncate">{titleEl}</span>
+            <span className="min-w-0 truncate">{titleEl}</span>
             {metaRight}
           </button>
         </div>

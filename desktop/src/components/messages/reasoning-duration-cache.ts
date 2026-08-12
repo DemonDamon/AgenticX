@@ -30,11 +30,13 @@ export function formatReasoningTitle(options: {
   elapsedSeconds: number;
   hasReliableDuration: boolean;
 }): string {
+  // Streaming mirrors tool-group meta "运行中 · 1s" (same · + elapsed shape).
+  // Completed keeps the sentence form shown after the turn settles.
   if (options.streaming) {
     if (options.hasReliableDuration && options.elapsedSeconds >= 1) {
-      return `思考中（${options.elapsedSeconds} 秒）`;
+      return `思考中 · ${options.elapsedSeconds}s`;
     }
-    return "思考中…";
+    return "思考中 · …";
   }
   if (options.hasReliableDuration) {
     return `思考了 ${options.elapsedSeconds} 秒`;
