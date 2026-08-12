@@ -2549,6 +2549,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     () => (pane.messages ?? []).filter((m) => m.role === "tool" && (m.toolName ?? "").trim()).length,
     [pane.messages]
   );
+  /** Hide context-usage until the user has actually started chatting. */
+  const hasStartedChat = useMemo(
+    () =>
+      (pane.messages ?? []).some(
+        (m) => m.role === "user" && String(m.content ?? "").trim().length > 0,
+      ),
+    [pane.messages],
+  );
   const toolRoundBudget = 60;
   const queuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
   const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
@@ -12331,14 +12339,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     ) : null}
                   </div>
                 )}
-                {/* 用量与模型选择贴紧：共享同一悬停高度（h-8），间距收窄 */}
+                {/* 用量与模型选择贴紧：共享同一悬停高度（h-8），间距收窄。
+                    空会话不展示用量（用户心智：还没开聊就不该有「已用」）。 */}
                 <div className="flex min-w-0 items-center gap-0.5">
-                  <ContextUsageButton
-                    paneId={pane.id}
-                    sessionId={pane.sessionId ?? ""}
-                    apiBase={apiBase}
-                    apiToken={apiToken}
-                  />
+                  {hasStartedChat ? (
+                    <ContextUsageButton
+                      paneId={pane.id}
+                      sessionId={pane.sessionId ?? ""}
+                      apiBase={apiBase}
+                      apiToken={apiToken}
+                    />
+                  ) : null}
                   <PaneModelPicker paneId={pane.id} />
                 </div>
                 <ActionCircleButton
