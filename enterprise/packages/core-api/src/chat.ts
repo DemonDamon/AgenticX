@@ -38,6 +38,157 @@ export type WebSearchSource = {
   usedByModel?: boolean;
 };
 
+/**
+ * Lightweight, provider-agnostic diagnostics for one automatic web-search turn.
+ * Persisted as optional chat message metadata; never required to render history.
+ */
+export type WebSearchTrace = {
+  version: 1;
+  decision: "search" | "skip";
+  reason: string;
+  resolvedQuery?: string;
+  facets?: Array<{
+    query: string;
+    /** Configured provider instance ids attempted for this facet, in order. */
+    providerIds?: string[];
+    hitCount: number;
+    uniqueHosts: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }>;
+  providerCalls: number;
+  retry?: {
+    used: true;
+    queryIndex: number;
+    reason: string;
+    fromProviderId: string;
+    toProviderId: string;
+  };
+  timings?: {
+    queryResolutionMs: number;
+    retrievalMs: number;
+  };
+};
+
+const MAX_WEB_SEARCH_TRACE_REASON_CHARS = 500;
+const MAX_WEB_SEARCH_TRACE_QUERY_CHARS = 2_000;
+const MAX_WEB_SEARCH_TRACE_PROVIDER_ID_CHARS = 200;
+const MAX_WEB_SEARCH_TRACE_FACETS = 3;
+const MAX_WEB_SEARCH_TRACE_COUNT = 10_000;
+const MAX_WEB_SEARCH_TRACE_DURATION_MS = 10 * 60 * 1_000;
+
+function boundedTraceInteger(raw: unknown, max: number): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return undefined;
+  return Math.min(Math.trunc(raw), max);
+}
+
+function boundedTraceString(raw: unknown, max: number): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim();
+  return value ? value.slice(0, max) : undefined;
+}
+
+/**
+ * Best-effort boundary sanitizer for optional retrieval diagnostics.
+ * Unknown versions or malformed required fields are dropped instead of failing chat history.
+ */
+export function sanitizeWebSearchTrace(raw: unknown): WebSearchTrace | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const row = raw as Record<string, unknown>;
+  if (row.version !== 1 || (row.decision !== "search" && row.decision !== "skip")) {
+    return undefined;
+  }
+  const reason = boundedTraceString(row.reason, MAX_WEB_SEARCH_TRACE_REASON_CHARS);
+  const providerCalls = boundedTraceInteger(row.providerCalls, MAX_WEB_SEARCH_TRACE_COUNT);
+  if (!reason || providerCalls === undefined) return undefined;
+
+  const resolvedQuery = boundedTraceString(row.resolvedQuery, MAX_WEB_SEARCH_TRACE_QUERY_CHARS);
+  let facets: WebSearchTrace["facets"];
+  if (Array.isArray(row.facets)) {
+    const sanitized = row.facets
+      .slice(0, MAX_WEB_SEARCH_TRACE_FACETS)
+      .flatMap((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+        const facet = item as Record<string, unknown>;
+        const query = boundedTraceString(facet.query, MAX_WEB_SEARCH_TRACE_QUERY_CHARS);
+        const hitCount = boundedTraceInteger(facet.hitCount, MAX_WEB_SEARCH_TRACE_COUNT);
+        const uniqueHosts = boundedTraceInteger(facet.uniqueHosts, MAX_WEB_SEARCH_TRACE_COUNT);
+        if (!query || hitCount === undefined || uniqueHosts === undefined) return [];
+        const providerIds = Array.isArray(facet.providerIds)
+          ? facet.providerIds
+              .slice(0, 2)
+              .flatMap((providerId) => {
+                const value = boundedTraceString(
+                  providerId,
+                  MAX_WEB_SEARCH_TRACE_PROVIDER_ID_CHARS,
+                );
+                return value ? [value] : [];
+              })
+          : [];
+        const dateFrom = boundedTraceString(facet.dateFrom, 32);
+        const dateTo = boundedTraceString(facet.dateTo, 32);
+        return [{
+          query,
+          ...(providerIds.length > 0 ? { providerIds } : {}),
+          hitCount,
+          uniqueHosts,
+          ...(dateFrom ? { dateFrom } : {}),
+          ...(dateTo ? { dateTo } : {}),
+        }];
+      });
+    if (sanitized.length > 0) facets = sanitized;
+  }
+
+  let retry: WebSearchTrace["retry"];
+  if (row.retry && typeof row.retry === "object" && !Array.isArray(row.retry)) {
+    const value = row.retry as Record<string, unknown>;
+    const queryIndex = boundedTraceInteger(value.queryIndex, MAX_WEB_SEARCH_TRACE_COUNT);
+    const retryReason = boundedTraceString(value.reason, MAX_WEB_SEARCH_TRACE_REASON_CHARS);
+    const fromProviderId = boundedTraceString(value.fromProviderId, MAX_WEB_SEARCH_TRACE_PROVIDER_ID_CHARS);
+    const toProviderId = boundedTraceString(value.toProviderId, MAX_WEB_SEARCH_TRACE_PROVIDER_ID_CHARS);
+    if (
+      value.used === true &&
+      queryIndex !== undefined &&
+      queryIndex < MAX_WEB_SEARCH_TRACE_FACETS &&
+      retryReason &&
+      fromProviderId &&
+      toProviderId
+    ) {
+      retry = {
+        used: true,
+        queryIndex,
+        reason: retryReason,
+        fromProviderId,
+        toProviderId,
+      };
+    }
+  }
+
+  let timings: WebSearchTrace["timings"];
+  if (row.timings && typeof row.timings === "object" && !Array.isArray(row.timings)) {
+    const value = row.timings as Record<string, unknown>;
+    const queryResolutionMs = boundedTraceInteger(
+      value.queryResolutionMs,
+      MAX_WEB_SEARCH_TRACE_DURATION_MS,
+    );
+    const retrievalMs = boundedTraceInteger(value.retrievalMs, MAX_WEB_SEARCH_TRACE_DURATION_MS);
+    if (queryResolutionMs !== undefined && retrievalMs !== undefined) {
+      timings = { queryResolutionMs, retrievalMs };
+    }
+  }
+
+  return {
+    version: 1,
+    decision: row.decision,
+    reason,
+    ...(resolvedQuery ? { resolvedQuery } : {}),
+    ...(facets ? { facets } : {}),
+    providerCalls,
+    ...(retry ? { retry } : {}),
+    ...(timings ? { timings } : {}),
+  };
+}
+
 /** Deep-research workbench state attached to an assistant message. */
 export type DeepResearchEvent =
   | { type: "run_started"; runId: string }
@@ -75,6 +226,26 @@ export type DeepResearchEvent =
         /** Whether the full text was fetched successfully. */
         fetched?: boolean;
       }>;
+      /** Optional cost/coverage diagnostics, captured from calls already made. */
+      trace?: {
+        queries: Array<{
+          query: string;
+          kind: "primary" | "term" | "english" | "authority" | "recency" | "contrarian";
+          status: "ok" | "empty" | "failed" | "skipped";
+          hitCount: number;
+          /** Actual configured provider instances attempted by the default search executor. */
+          providerIds?: string[];
+        }>;
+        /** Top-level search queries run; provider adapters may internally fail over. */
+        topLevelQueriesRun: number;
+        /** Actual provider attempts observed; may be 0 for a custom injected search function. */
+        providerCalls: number;
+        candidateCount: number;
+        selectedCount: number;
+        uniqueHosts: number;
+        dateFrom?: string;
+        dateTo?: string;
+      };
     }
   | {
       type: "artifact";
@@ -114,6 +285,7 @@ export type ChatMessage = {
   content: string;
   attachments?: ChatMessageAttachment[];
   web_search_sources?: WebSearchSource[];
+  web_search_trace?: WebSearchTrace;
   deep_research?: ChatMessageDeepResearch;
   model?: string;
   provider?: string;
@@ -191,4 +363,3 @@ export type ApiEnvelope<T> = {
   message: string;
   data?: T;
 };
-

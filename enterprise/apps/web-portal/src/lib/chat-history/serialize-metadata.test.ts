@@ -32,4 +32,39 @@ describe("serializeMessageMetadata", () => {
       web_search_sources: [{ title: "T", url: "https://example.com", snippet: "s" }],
     });
   });
+
+  it("serializes a bounded web_search_trace as JSON for both SQL dialects", () => {
+    const raw = serializeMessageMetadata(
+      baseMessage({
+        web_search_trace: {
+          version: 1,
+          decision: "skip",
+          reason: "stable fact",
+          providerCalls: 0,
+        },
+      }),
+    );
+    expect(JSON.parse(raw!)).toEqual({
+      web_search_trace: {
+        version: 1,
+        decision: "skip",
+        reason: "stable fact",
+        providerCalls: 0,
+      },
+    });
+  });
+
+  it("drops an unknown web_search_trace without failing metadata serialization", () => {
+    const raw = serializeMessageMetadata(
+      baseMessage({
+        web_search_trace: {
+          version: 2,
+          decision: "search",
+          reason: "future schema",
+          providerCalls: 1,
+        } as unknown as NonNullable<ChatMessage["web_search_trace"]>,
+      }),
+    );
+    expect(raw).toBeNull();
+  });
 });

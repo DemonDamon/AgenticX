@@ -3,6 +3,8 @@
  */
 
 import { ulid } from "ulid";
+import { EVIDENCE_DISCIPLINE_HINT } from "../retrieval/evidence-discipline";
+import { summarizeEvidenceFacet } from "../retrieval/evidence-profile";
 import {
   executeWebSearch,
   type WebSearchHit,
@@ -91,6 +93,8 @@ export const MAX_SOURCES = 40;
 export const MAX_LANES = 5;
 export const MIN_RESULTS_PER_LANE = 4;
 export const MAX_RESULTS_PER_LANE = 10;
+/** Diagnostics stay compact even if a query-expander returns unexpected prose. */
+export const MAX_TRACE_QUERY_CHARS = 500;
 /**
  * 单车道采用上限，与「每条检索式请求多少条」解耦。
  *
@@ -106,6 +110,10 @@ export const LANE_ADOPT_CAP = 12;
  */
 export const EARLY_STOP_PROBE_VARIANTS = 2;
 export const RECON_TIMEOUT_MS = 15_000;
+
+type LaneSourcesTrace = NonNullable<
+  Extract<DeepResearchEvent, { type: "lane_sources" }>["trace"]
+>;
 
 function envMs(key: string, fallback: number): number {
   const raw = Number(process.env[key]);
@@ -182,7 +190,9 @@ function policyErrorFromFailure(failure: GatewayFailure): DeepResearchPolicyErro
 }
 
 const LANE_SUMMARY_SYSTEM =
-  "你是调研备忘助手。根据检索摘录写一段简洁 Markdown 备忘（≤400 字），保留关键事实与 [N] 引用。只输出正文。";
+  "你是调研备忘助手。根据检索摘录写一段简洁 Markdown 备忘（≤400 字），保留关键事实与 [N] 引用。" +
+  EVIDENCE_DISCIPLINE_HINT +
+  "只输出正文。";
 
 type ChatMessage = {
   role: string;
@@ -331,6 +341,13 @@ export function formatEvidencePack(
   }
   citationsByQuestion.forEach((item, idx) => {
     parts.push(`## 子问题 ${idx + 1}：${item.question}`);
+    const evidence = summarizeEvidenceFacet(item.question, item.citations);
+    if (evidence.selectedHits > 0 && evidence.uniqueHosts < 2) {
+      parts.push(
+        `证据覆盖提醒：当前仅 ${evidence.uniqueHosts} 个来源域名；` +
+          "域名不等于独立信源，证据不足时须降级措辞。",
+      );
+    }
     if (item.memo?.trim()) {
       parts.push("### 车道备忘");
       parts.push(item.memo.trim());
@@ -344,6 +361,7 @@ export function formatEvidencePack(
     for (const c of item.citations) {
       parts.push(`[${c.index}] ${c.title}`);
       parts.push(`URL: ${c.url}`);
+      if (c.publishedAt) parts.push(`发布时间: ${c.publishedAt}`);
       const body = c.fullText ? `正文节选：${c.fullText}` : `摘要：${c.snippet}`;
       parts.push(body);
       parts.push("");
@@ -470,7 +488,12 @@ function textOnlyDoneStream(content: string): Response {
 }
 
 function citationsToHits(citations: Citation[]): WebSearchHit[] {
-  return citations.map((c) => ({ title: c.title, url: c.url, snippet: c.snippet }));
+  return citations.map((c) => ({
+    title: c.title,
+    url: c.url,
+    snippet: c.snippet,
+    ...(c.publishedAt ? { publishedAt: c.publishedAt } : {}),
+  }));
 }
 
 function applyClarifyAnswers(
@@ -1015,12 +1038,27 @@ export async function runDeepResearchTurn(
             const pool = new SourcePool();
             let variantFailures = 0;
             let variantsRun = 0;
-            const runSearchWave = async (wave: QueryVariant[]): Promise<void> => {
+            const queryTrace: LaneSourcesTrace["queries"] = variants.map((variant) => ({
+              query: variant.query.slice(0, MAX_TRACE_QUERY_CHARS),
+              kind: variant.kind,
+              status: "skipped" as "ok" | "empty" | "failed" | "skipped",
+              hitCount: 0,
+            }));
+            const observedProviderCalls = () =>
+              queryTrace.reduce((sum, item) => sum + (item.providerIds?.length ?? 0), 0);
+            const indexedVariants = variants.map((variant, variantIndex) => ({
+              variant,
+              variantIndex,
+            }));
+            const runSearchWave = async (
+              wave: Array<{ variant: QueryVariant; variantIndex: number }>,
+            ): Promise<void> => {
               if (wave.length === 0) return;
               await mapPool(
                 wave,
                 SEARCH_CONCURRENCY,
-                async (variant) => {
+                async ({ variant, variantIndex }) => {
+                  const providerIds: string[] = [];
                   try {
                     if (searchBudgetLeft() <= 0) return;
                     variantsRun += 1;
@@ -1029,10 +1067,31 @@ export async function runDeepResearchTurn(
                       resultsPerLane,
                       searchCfg,
                       deps.fetchImpl,
+                      {
+                        onProviderAttempt: ({ providerId }) => {
+                          if (providerIds.length < 2 && !providerIds.includes(providerId)) {
+                            providerIds.push(providerId);
+                          }
+                        },
+                      },
                     );
+                    queryTrace[variantIndex] = {
+                      query: variant.query.slice(0, MAX_TRACE_QUERY_CHARS),
+                      kind: variant.kind,
+                      status: hits.length > 0 ? "ok" : "empty",
+                      hitCount: hits.length,
+                      ...(providerIds.length > 0 ? { providerIds } : {}),
+                    };
                     for (const hit of hits) pool.add(hit, variant.query);
                   } catch (error) {
                     variantFailures += 1;
+                    queryTrace[variantIndex] = {
+                      query: variant.query.slice(0, MAX_TRACE_QUERY_CHARS),
+                      kind: variant.kind,
+                      status: "failed",
+                      hitCount: 0,
+                      ...(providerIds.length > 0 ? { providerIds } : {}),
+                    };
                     console.warn(
                       "[deep-research] variant search failed:",
                       error instanceof Error ? error.message : error,
@@ -1046,9 +1105,9 @@ export async function runDeepResearchTurn(
             // Probe with the first couple of queries, then stop if the pool
             // already exceeds what this lane is allowed to adopt — extra queries
             // cost money per request and would only shuffle the shortlist.
-            await runSearchWave(variants.slice(0, EARLY_STOP_PROBE_VARIANTS));
+            await runSearchWave(indexedVariants.slice(0, EARLY_STOP_PROBE_VARIANTS));
             const laneAdoptCap = resolveLaneAdoptCap(registry.size);
-            const deferredVariants = variants.slice(EARLY_STOP_PROBE_VARIANTS);
+            const deferredVariants = indexedVariants.slice(EARLY_STOP_PROBE_VARIANTS);
             if (deferredVariants.length > 0) {
               if (pool.size >= laneAdoptCap) {
                 enqueueEvent({
@@ -1069,11 +1128,24 @@ export async function runDeepResearchTurn(
 
             if (pool.size === 0 && variantsRun > 0 && variantFailures >= variantsRun) {
               searchFailures += 1;
+              enqueueEvent({
+                type: "lane_sources",
+                laneId,
+                sources: [],
+                trace: {
+                  queries: queryTrace,
+                  topLevelQueriesRun: variantsRun,
+                  providerCalls: observedProviderCalls(),
+                  candidateCount: 0,
+                  selectedCount: 0,
+                  uniqueHosts: 0,
+                },
+              });
               enqueueEvent({ type: "lane_done", laneId, status: "failed" });
               return { ...empty, queriesPlanned: variantsRun };
             }
 
-            const scored = scorePool(plan.topic || userQuery, pool.list());
+            const scored = scorePool(question, pool.list());
             const selected = selectTopSources(
               scored,
               resolveLaneAdoptCap(registry.size),
@@ -1160,24 +1232,33 @@ export async function runDeepResearchTurn(
               }
             }
 
-            if (questionCitations.length > 0) {
-              enqueueEvent({
-                type: "lane_sources",
-                laneId,
-                sources: questionCitations.map((c) => {
-                  const snippet = c.snippet?.trim() ?? "";
-                  return {
-                    title: c.title,
-                    url: c.url,
-                    ...(snippet ? { snippet: snippet.slice(0, 200) } : {}),
-                    ...(archivedUrls.has(c.url)
-                      ? { archivedPath: pageArchivePath(runId, c.url, c.title) }
-                      : {}),
-                    fetched: fetchedUrls.has(c.url),
-                  };
-                }),
-              });
-            }
+            const laneEvidence = summarizeEvidenceFacet(question, questionCitations);
+            enqueueEvent({
+              type: "lane_sources",
+              laneId,
+              sources: questionCitations.map((c) => {
+                const snippet = c.snippet?.trim() ?? "";
+                return {
+                  title: c.title,
+                  url: c.url,
+                  ...(snippet ? { snippet: snippet.slice(0, 200) } : {}),
+                  ...(archivedUrls.has(c.url)
+                    ? { archivedPath: pageArchivePath(runId, c.url, c.title) }
+                    : {}),
+                  fetched: fetchedUrls.has(c.url),
+                };
+              }),
+              trace: {
+                queries: queryTrace,
+                topLevelQueriesRun: variantsRun,
+                providerCalls: observedProviderCalls(),
+                candidateCount: pool.size,
+                selectedCount: questionCitations.length,
+                uniqueHosts: laneEvidence.uniqueHosts,
+                ...(laneEvidence.dateFrom ? { dateFrom: laneEvidence.dateFrom } : {}),
+                ...(laneEvidence.dateTo ? { dateTo: laneEvidence.dateTo } : {}),
+              },
+            });
 
             let memo = "";
             if (questionCitations.length > 0 && searchBudgetLeft() > 0) {

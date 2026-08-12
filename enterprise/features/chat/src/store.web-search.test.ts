@@ -44,6 +44,7 @@ class CapturingClient implements ChatClient {
   public readonly requests: ChatRequest[] = [];
   private seq = 0;
   public streamSources = false;
+  public streamTrace = false;
   public afterSources: (() => void) | undefined;
 
   async sendMessage(req: ChatRequest): Promise<SendMessageResult> {
@@ -62,6 +63,20 @@ class CapturingClient implements ChatClient {
         ],
       };
       this.afterSources?.();
+    }
+    if (this.streamTrace) {
+      yield {
+        requestId,
+        done: false,
+        webSearchTrace: {
+          version: 1,
+          decision: "search",
+          reason: "current information requested",
+          resolvedQuery: "latest policy 2026-08-12",
+          facets: [{ query: "latest policy 2026-08-12", hitCount: 7, uniqueHosts: 5 }],
+          providerCalls: 1,
+        },
+      };
     }
     yield { requestId, done: false, delta: "ok" };
     yield { requestId, done: true };
@@ -169,6 +184,26 @@ describe("chat store webSearch request wiring", () => {
       | undefined;
     expect(appendPayload?.find((message) => message.role === "assistant")?.web_search_sources).toEqual(
       expectedSources,
+    );
+  });
+
+  it("attaches and persists webSearchTrace from stream chunks", async () => {
+    const client = new CapturingClient();
+    client.streamTrace = true;
+    await useChatStore.getState().sendMessage(client, { content: "trace this", webSearch: true });
+
+    const assistant = useChatStore.getState().messages.find((message) => message.role === "assistant");
+    expect(assistant?.web_search_trace).toMatchObject({
+      version: 1,
+      decision: "search",
+      providerCalls: 1,
+      resolvedQuery: "latest policy 2026-08-12",
+    });
+    const appendPayload = historyClientMocks.appendMessages.mock.calls.at(-1)?.[1] as
+      | Array<{ role: string; web_search_trace?: unknown }>
+      | undefined;
+    expect(appendPayload?.find((message) => message.role === "assistant")?.web_search_trace).toEqual(
+      assistant?.web_search_trace,
     );
   });
 });

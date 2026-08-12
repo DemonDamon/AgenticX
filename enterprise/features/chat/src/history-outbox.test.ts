@@ -154,6 +154,47 @@ describe("history-outbox", () => {
     });
   });
 
+  it("stripToAppendPayload and pending overlay preserve web_search_trace", async () => {
+    const append = vi.fn(async () => {
+      throw new ChatHistoryHttpError("unavailable", 503);
+    });
+    startHistoryOutboxCoordinator(
+      { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" },
+      { appendMessages: append },
+    );
+    const sessionId = "01SESSIONAAAAAAAAAAAAAAAAA";
+    const assistant = {
+      ...msg(),
+      role: "assistant" as const,
+      web_search_sources: [
+        { title: "used", url: "https://used.example", snippet: "s", usedByModel: true },
+        { title: "extra", url: "https://extra.example", snippet: "s", usedByModel: false },
+      ],
+      web_search_trace: {
+        version: 1 as const,
+        decision: "search" as const,
+        reason: "current information requested",
+        resolvedQuery: "current topic as of 2026-08-12",
+        facets: [{
+          query: "topic 2026-08-12",
+          providerIds: ["customer-primary"],
+          hitCount: 8,
+          uniqueHosts: 5,
+        }],
+        providerCalls: 1,
+      },
+    };
+    expect(stripToAppendPayload(assistant).web_search_sources?.map((source) => source.usedByModel))
+      .toEqual([true, false]);
+    expect(stripToAppendPayload(assistant).web_search_trace).toEqual(assistant.web_search_trace);
+
+    await enqueueAppend(sessionId, [assistant]);
+    await flushHistoryOutbox();
+    const overlay = (await listPendingOverlayMessages(sessionId))[0];
+    expect(overlay?.web_search_trace).toEqual(assistant.web_search_trace);
+    expect(overlay?.web_search_sources?.map((source) => source.usedByModel)).toEqual([true, false]);
+  });
+
   it("stripToAppendPayload keeps truncated parsed_text and drops image data_url", () => {
     const longText = "文档正文".repeat(40_000); // > 120k chars
     const payload = stripToAppendPayload({

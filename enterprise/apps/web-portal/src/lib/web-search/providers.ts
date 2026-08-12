@@ -67,6 +67,18 @@ export type WebSearchAdapterDefinition = {
 
 export type WebSearchAdapterPublicDefinition = Omit<WebSearchAdapterDefinition, "search">;
 
+export type WebSearchProviderAttempt = {
+  providerId: string;
+  outcome: "ok" | "empty" | "failed";
+  hitCount: number;
+  durationMs: number;
+};
+
+export type WebSearchExecutionDiagnostics = {
+  /** Best-effort observability only; observer failures never affect retrieval. */
+  onProviderAttempt?: (attempt: WebSearchProviderAttempt) => void;
+};
+
 const ADAPTERS = new Map<string, WebSearchAdapterDefinition>();
 
 /** Adapter registration is the only protocol-specific extension point. */
@@ -398,6 +410,7 @@ export async function executeWebSearch(
     "provider" | "apiKey" | "maxResults" | "primaryProviderId" | "providers"
   >,
   fetchImpl: FetchLike = directFetch as FetchLike,
+  diagnostics?: WebSearchExecutionDiagnostics,
 ): Promise<WebSearchHit[]> {
   const q = query.trim();
   if (!q) return [];
@@ -407,14 +420,29 @@ export async function executeWebSearch(
 
   let lastError: unknown = new Error("search returned no hits");
   for (const provider of providers) {
+    const attemptStartedAt = Date.now();
+    const observe = (outcome: WebSearchProviderAttempt["outcome"], hitCount: number) => {
+      try {
+        diagnostics?.onProviderAttempt?.({
+          providerId: provider.id,
+          outcome,
+          hitCount,
+          durationMs: Math.max(0, Date.now() - attemptStartedAt),
+        });
+      } catch {
+        // Diagnostics must never alter provider failover or the user response.
+      }
+    };
     const adapterId = provider.adapter.trim().toLowerCase();
     const adapter = ADAPTERS.get(adapterId);
     if (!adapter) {
       lastError = new Error(`web search adapter is not registered: ${adapterId}`);
+      observe("failed", 0);
       continue;
     }
     if (adapter.requiresApiKey && !provider.apiKey.trim()) {
       lastError = new Error(`web search provider is missing credentials: ${provider.id}`);
+      observe("failed", 0);
       continue;
     }
     try {
@@ -425,9 +453,11 @@ export async function executeWebSearch(
         options: provider.options ?? {},
         fetchImpl,
       });
+      observe(hits.length > 0 ? "ok" : "empty", hits.length);
       if (hits.length > 0) return hits;
       lastError = new Error(`web search provider returned no hits: ${provider.id}`);
     } catch (error) {
+      observe("failed", 0);
       lastError = error;
     }
   }

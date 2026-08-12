@@ -5,6 +5,7 @@ import type {
   DeepResearchEvent,
   WebSearchSource,
 } from "@agenticx/core-api";
+import { sanitizeWebSearchTrace } from "@agenticx/core-api";
 
 const ALLOWED_ROLES = new Set(["system", "user", "assistant", "tool"]);
 const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
@@ -175,6 +176,9 @@ export function sanitizeInboundMessages(
     if (!ALLOWED_ROLES.has(role)) throw new Error(`invalid role: ${role}`);
     const attachments = sanitizeAttachments(row.attachments);
     const webSearchSources = sanitizeWebSearchSources(row.web_search_sources);
+    // Retrieval diagnostics are optional observability metadata. Malformed or
+    // unknown versions are ignored so they can never reject an otherwise valid turn.
+    const webSearchTrace = sanitizeWebSearchTrace(row.web_search_trace);
     const deepResearch = sanitizeDeepResearch(row.deep_research);
     if (role === "user" && !content.trim() && !attachments?.length) {
       throw new Error("message content required");
@@ -192,6 +196,7 @@ export function sanitizeInboundMessages(
       content,
       attachments,
       web_search_sources: webSearchSources,
+      web_search_trace: webSearchTrace,
       deep_research: deepResearch,
       model,
       created_at: createdAt,

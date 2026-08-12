@@ -296,6 +296,7 @@ describe("web search providers", () => {
   });
 
   it("falls back only to another configured provider instance", async () => {
+    const attempts: Array<{ providerId: string; outcome: string; hitCount: number }> = [];
     const fetchImpl = vi.fn(async (url: string) => {
       if (String(url).includes("bochaai.com")) {
         throw new Error("bocha down");
@@ -329,9 +330,18 @@ describe("web search providers", () => {
         ],
       },
       fetchImpl as unknown as typeof fetch,
+      {
+        onProviderAttempt: ({ providerId, outcome, hitCount }) => {
+          attempts.push({ providerId, outcome, hitCount });
+        },
+      },
     );
     expect(hits.length).toBeGreaterThanOrEqual(2);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(attempts).toEqual([
+      { providerId: "customer-primary", outcome: "failed", hitCount: 0 },
+      { providerId: "customer-secondary", outcome: "ok", hitCount: hits.length },
+    ]);
   });
 
   it("does not invent an unconfigured fallback provider", async () => {

@@ -15,6 +15,14 @@
 
 import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
 import { withCurrentTimeContext } from "../current-time";
+import type { WebSearchTrace } from "@agenticx/core-api";
+import { EVIDENCE_DISCIPLINE_HINT } from "../retrieval/evidence-discipline";
+import {
+  formatEvidenceCoverage,
+  summarizeEvidenceFacet,
+  type EvidenceFacetSummary,
+} from "../retrieval/evidence-profile";
+import { diversifyBySourceHost } from "../retrieval/source-diversity";
 import {
   resolveInjectionBudgetChars,
   selectHitsWithinBudget,
@@ -85,7 +93,8 @@ export const WEB_SEARCH_SYSTEM_HINT =
   "禁止拿历史编号与本轮结果互相比对，也不要因编号对不上而推翻自己此前的结论。" +
   "若本轮结果整体与用户问题无关（例如检索词被泛化、命中的都是同名的其他事物），" +
   "须直接说明「本次检索结果与问题无关」，随后基于对话上下文已确认的事实作答，" +
-  "禁止用无关结果拼凑答案或改写此前结论。";
+  "禁止用无关结果拼凑答案或改写此前结论。" +
+  EVIDENCE_DISCIPLINE_HINT;
 
 /**
  * Injected on search-skip turns so thinking models (Kimi-like) do not narrate
@@ -269,6 +278,17 @@ export function formatWebSearchSourcesSse(
   return sseDataFrame({ agenticx_web_search_sources: payload });
 }
 
+export type WebSearchTracePayload = WebSearchTrace;
+
+/** Trace is diagnostics-only: serialization failure must never break a reply. */
+export function formatWebSearchTraceSse(trace: WebSearchTracePayload): string {
+  try {
+    return sseDataFrame({ agenticx_web_search_trace: trace });
+  } catch {
+    return "";
+  }
+}
+
 /**
  * @deprecated Prefer selectHitsWithinBudget + rerankHits. Thin wrapper for older tests.
  */
@@ -276,9 +296,14 @@ export function compactHitsForModel(hits: WebSearchHit[]): WebSearchHit[] {
   return selectHitsWithinBudget(hits, undefined).selected;
 }
 
-export function withSearchContext(messages: ChatMessage[], hits: WebSearchHit[]): ChatMessage[] {
+export function withSearchContext(
+  messages: ChatMessage[],
+  hits: WebSearchHit[],
+  evidence: EvidenceFacetSummary[] = [],
+): ChatMessage[] {
+  const coverage = formatEvidenceCoverage(evidence);
   const resultsBlock =
-    `${WEB_SEARCH_SYSTEM_HINT}\n\n--- 联网搜索结果 ---\n${formatHits(hits)}\n--- 搜索结果结束 ---`;
+    `${WEB_SEARCH_SYSTEM_HINT}${coverage ? `\n\n${coverage}` : ""}\n\n--- 联网搜索结果 ---\n${formatHits(hits)}\n--- 搜索结果结束 ---`;
   const next = messages.map((m) => ({ ...m }));
   if (next[0]?.role === "system") {
     const existing = typeof next[0].content === "string" ? next[0].content : "";
@@ -289,6 +314,19 @@ export function withSearchContext(messages: ChatMessage[], hits: WebSearchHit[])
     return next;
   }
   return [{ role: "system", content: resultsBlock }, ...next];
+}
+
+/** Attribute selected evidence to the facet that survived global URL dedupe. */
+export function summarizeSelectedEvidence(
+  searchQueries: string[],
+  selected: WebSearchHit[],
+): EvidenceFacetSummary[] {
+  return searchQueries.map((facet) =>
+    summarizeEvidenceFacet(
+      facet,
+      selected.filter((hit) => searchQueries.length === 1 || hit.searchQuery === facet),
+    ),
+  );
 }
 
 /** Prepend the trivial-turn hint so skip-path reasoning stays Kimi-clean. */
@@ -554,6 +592,7 @@ export async function resolveStandaloneSearchQuery(
 
 type PipeOptions = {
   sourcesFrame?: string;
+  traceFrame?: string;
   prefixText?: string;
 };
 
@@ -591,16 +630,20 @@ function frameHasContentDelta(data: string): boolean {
  */
 export async function pipeUpstreamSse(upstream: Response, options: PipeOptions = {}): Promise<Response> {
   const sourcesFrame = options.sourcesFrame ?? "";
+  const traceFrame = options.traceFrame ?? "";
   const prefixText = options.prefixText ?? "";
 
   if (!upstream.ok || !upstream.body) {
     const errText = await upstream.text().catch(() => "gateway error");
     const message = extractUpstreamErrorMessage(errText, upstream.status);
+    // A diagnostic-only trace must never change HTTP error semantics. Preserve
+    // the legacy SSE recovery only when search sources were already produced.
     if (sourcesFrame) {
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
           const encoder = new TextEncoder();
           controller.enqueue(encoder.encode(sourcesFrame));
+          if (traceFrame) controller.enqueue(encoder.encode(traceFrame));
           controller.enqueue(
             encoder.encode(
               formatSseErrorFrame(`模型回答失败：${message}`, String(upstream.status || 502)),
@@ -632,6 +675,9 @@ export async function pipeUpstreamSse(upstream: Response, options: PipeOptions =
         }
         if (sourcesFrame) {
           controller.enqueue(encoder.encode(sourcesFrame));
+        }
+        if (traceFrame) {
+          controller.enqueue(encoder.encode(traceFrame));
         }
 
         const reader = upstream.body!.getReader();
@@ -713,18 +759,29 @@ export async function pipeUpstreamSse(upstream: Response, options: PipeOptions =
   return eventStreamResponse(stream);
 }
 
-async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<Response> {
-  return pipeUpstreamSse(upstream, { prefixText });
+async function pipeWithPrefix(
+  upstream: Response,
+  prefixText: string,
+  trace?: WebSearchTracePayload,
+): Promise<Response> {
+  return pipeUpstreamSse(upstream, {
+    prefixText,
+    ...(trace ? { traceFrame: formatWebSearchTraceSse(trace) } : {}),
+  });
 }
 
 async function pipeWithSourcesAppendix(
   upstream: Response,
   selected: WebSearchHit[],
   remainder: WebSearchHit[] = [],
+  trace?: WebSearchTracePayload,
 ): Promise<Response> {
   const sourcesFrame =
     selected.length + remainder.length > 0 ? formatWebSearchSourcesSse(selected, remainder) : "";
-  return pipeUpstreamSse(upstream, { sourcesFrame });
+  return pipeUpstreamSse(upstream, {
+    sourcesFrame,
+    ...(trace ? { traceFrame: formatWebSearchTraceSse(trace) } : {}),
+  });
 }
 
 export const MAX_ORDINARY_SEARCH_PROVIDER_CALLS = 3;
@@ -739,7 +796,12 @@ async function executeOrdinarySearchPlan(
   queries: string[],
   cfg: WebSearchRuntimeConfig,
   searchFn: typeof executeWebSearch,
-): Promise<WebSearchHit[][]> {
+): Promise<{
+  groups: WebSearchHit[][];
+  providerCalls: number;
+  providerIdsByQuery: string[][];
+  retry?: NonNullable<WebSearchTracePayload["retry"]>;
+}> {
   const providers = configuredWebSearchProviders(cfg);
   const primary = primaryWebSearchProvider(cfg);
   if (!primary) throw new Error("no configured web search provider");
@@ -747,6 +809,8 @@ async function executeOrdinarySearchPlan(
   const alternative = selectAlternativeProvider(providers, primary.id);
   const maxResults = perQueryMaxResults(cfg, queries.length);
   let callsUsed = 0;
+  let retryTrace: NonNullable<WebSearchTracePayload["retry"]> | undefined;
+  const providerIdsByQuery = queries.map(() => [primary.id]);
 
   const groups = await Promise.all(
     queries.map(async (query) => {
@@ -778,10 +842,18 @@ async function executeOrdinarySearchPlan(
       const current = groups[retryIndex] ?? [];
       const quality = assessSearchEvidence(current);
       const retryReason = current.length === 0 ? "primary_failed" : "sparse_evidence";
+      retryTrace = {
+        used: true,
+        queryIndex: retryIndex,
+        reason: retryReason,
+        fromProviderId: primary.id,
+        toProviderId: alternative.id,
+      };
       console.info(
         `[web-search] retry reason=${retryReason} from=${primary.id} to=${alternative.id} query_index=${retryIndex} uniqueUrls=${quality.uniqueUrls} uniqueHosts=${quality.uniqueHosts}`,
       );
       callsUsed += 1;
+      providerIdsByQuery[retryIndex]!.push(alternative.id);
       try {
         const complement = await searchFn(
           queries[retryIndex]!,
@@ -803,7 +875,12 @@ async function executeOrdinarySearchPlan(
   console.info(
     `[web-search] retrieval queries=${queries.length} provider_calls=${callsUsed}/${MAX_ORDINARY_SEARCH_PROVIDER_CALLS}`,
   );
-  return groups;
+  return {
+    groups,
+    providerCalls: callsUsed,
+    providerIdsByQuery,
+    ...(retryTrace ? { retry: retryTrace } : {}),
+  };
 }
 
 export async function runWebSearchTurn(
@@ -823,8 +900,22 @@ export async function runWebSearchTurn(
   const cfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);
   const { tools: _tools, tool_choice: _toolChoice, ...rest } = baseBody;
 
-  const respondWithoutSearch = async (reason: string): Promise<Response> => {
+  const respondWithoutSearch = async (
+    reason: string,
+    details: { resolvedQuery?: string; queryResolutionMs?: number } = {},
+  ): Promise<Response> => {
     console.info(`[web-search] skipped search-first (reason=${reason})`);
+    const trace: WebSearchTracePayload = {
+      version: 1,
+      decision: "skip",
+      reason,
+      ...(details.resolvedQuery ? { resolvedQuery: details.resolvedQuery } : {}),
+      providerCalls: 0,
+      timings: {
+        queryResolutionMs: Math.max(0, details.queryResolutionMs ?? 0),
+        retrievalMs: 0,
+      },
+    };
     try {
       const directMessages =
         reason === "assistant_meta"
@@ -837,7 +928,9 @@ export async function runWebSearchTurn(
         stream: true,
         messages: directMessages,
       });
-      return pipeUpstreamSse(upstream, {});
+      return pipeUpstreamSse(upstream, {
+        traceFrame: formatWebSearchTraceSse(trace),
+      });
     } catch (error) {
       return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
     }
@@ -850,7 +943,13 @@ export async function runWebSearchTurn(
         stream: true,
         messages: withCurrentTimeContext(originalMessages),
       });
-      return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT);
+      return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT, {
+        version: 1,
+        decision: "skip",
+        reason: "admin_disabled",
+        providerCalls: 0,
+        timings: { queryResolutionMs: 0, retrievalMs: 0 },
+      });
     } catch (error) {
       return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
     }
@@ -867,20 +966,27 @@ export async function runWebSearchTurn(
         rawQuery: extractLastUserRawText(originalMessages),
       });
   if (skip?.need === "skip") {
-    return respondWithoutSearch(skip.reason);
+    return respondWithoutSearch(skip.reason, { resolvedQuery: queryForSkip });
   }
 
   const modelName = typeof rest.model === "string" ? rest.model : undefined;
+  const queryResolutionStartedAt = Date.now();
   const queryResolution = await resolveStandaloneSearchQuery(
     originalMessages,
     modelName,
     deps,
   );
+  const queryResolutionMs = Date.now() - queryResolutionStartedAt;
   if (queryResolution.kind === "unresolved") {
-    return respondWithoutSearch(`context_query_${queryResolution.reason}`);
+    return respondWithoutSearch(`context_query_${queryResolution.reason}`, {
+      queryResolutionMs,
+    });
   }
   if (!queryResolution.value.needSearch) {
-    return respondWithoutSearch("semantic_no_search");
+    return respondWithoutSearch("semantic_no_search", {
+      resolvedQuery: queryResolution.value.query,
+      queryResolutionMs,
+    });
   }
   const query = queryResolution.value.query;
   const searchQueries = (
@@ -893,16 +999,27 @@ export async function runWebSearchTurn(
 
   const searchFn = deps.executeSearch ?? executeWebSearch;
   let hits: WebSearchHit[] = [];
+  let rankedGroups: WebSearchHit[][] = searchQueries.map(() => []);
   let searchFailed = false;
+  let providerCalls = 0;
+  let providerIdsByQuery: string[][] = searchQueries.map(() => []);
+  let retryTrace: WebSearchTracePayload["retry"];
+  const retrievalStartedAt = Date.now();
 
   if (!query) {
     searchFailed = true;
     console.warn("[web-search] search failed, degrading: missing user query for web search");
   } else {
     try {
-      const groups = await executeOrdinarySearchPlan(searchQueries, cfg, searchFn);
-      const rankedGroups = groups.map((group, index) =>
-        rerankHits(searchQueries[index]!, group).map((hit) =>
+      const planResult = await executeOrdinarySearchPlan(searchQueries, cfg, searchFn);
+      providerCalls = planResult.providerCalls;
+      providerIdsByQuery = planResult.providerIdsByQuery;
+      retryTrace = planResult.retry;
+      rankedGroups = planResult.groups.map((group, index) =>
+        diversifyBySourceHost(
+          rerankHits(searchQueries[index]!, group),
+          (hit) => hit.url,
+        ).map((hit) =>
           searchQueries.length > 1
             ? { ...hit, searchQuery: searchQueries[index]! }
             : hit,
@@ -932,8 +1049,42 @@ export async function runWebSearchTurn(
     );
   }
 
+  // Interleaving assigns a duplicate URL to its first facet only. Preserve that
+  // ownership here so a shared page cannot make another facet look covered.
+  const evidence = summarizeSelectedEvidence(searchQueries, selected);
+  const traceFacetStats = searchQueries.map((facet, index) => {
+    const summary = summarizeEvidenceFacet(facet, rankedGroups[index] ?? []);
+    return {
+      query: facet,
+      ...(providerIdsByQuery[index]?.length
+        ? { providerIds: providerIdsByQuery[index] }
+        : {}),
+      hitCount: summary.selectedHits,
+      uniqueHosts: summary.uniqueHosts,
+      ...(summary.dateFrom ? { dateFrom: summary.dateFrom } : {}),
+      ...(summary.dateTo ? { dateTo: summary.dateTo } : {}),
+    };
+  });
+  const trace: WebSearchTracePayload = {
+    version: 1,
+    decision: "search",
+    reason: searchFailed
+      ? "retrieval_failed"
+      : alwaysSearch
+        ? "always_search"
+        : "automatic_search",
+    resolvedQuery: query,
+    facets: traceFacetStats,
+    providerCalls,
+    ...(retryTrace ? { retry: retryTrace } : {}),
+    timings: {
+      queryResolutionMs: Math.max(0, queryResolutionMs),
+      retrievalMs: Math.max(0, Date.now() - retrievalStartedAt),
+    },
+  };
+
   const messages = withCurrentTimeContext(
-    searchFailed ? originalMessages : withSearchContext(originalMessages, selected),
+    searchFailed ? originalMessages : withSearchContext(originalMessages, selected, evidence),
   );
 
   let upstream: Response;
@@ -948,7 +1099,7 @@ export async function runWebSearchTurn(
   }
 
   if (searchFailed) {
-    return pipeWithPrefix(upstream, UNAVAILABLE_HINT);
+    return pipeWithPrefix(upstream, UNAVAILABLE_HINT, trace);
   }
-  return pipeWithSourcesAppendix(upstream, selected, remainder);
+  return pipeWithSourcesAppendix(upstream, selected, remainder, trace);
 }

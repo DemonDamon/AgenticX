@@ -98,6 +98,42 @@ describe("memory run store", () => {
     expect(row!.phase).toBe("plan");
   });
 
+  it("round-trips optional lane retrieval trace", async () => {
+    const store = createMemoryRunStore();
+    await store.create({
+      runId: "r1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "主题",
+    });
+    const event: DeepResearchEvent = {
+      type: "lane_sources",
+      laneId: "l1",
+      sources: [],
+      trace: {
+        queries: [
+          {
+            query: "主题 最新",
+            kind: "recency",
+            status: "empty",
+            hitCount: 0,
+            providerIds: ["customer-primary"],
+          },
+          { query: "主题 论文", kind: "authority", status: "skipped", hitCount: 0 },
+        ],
+        topLevelQueriesRun: 1,
+        providerCalls: 1,
+        candidateCount: 0,
+        selectedCount: 0,
+        uniqueHosts: 0,
+      },
+    };
+    await store.appendEvents("r1", [event]);
+    const row = await store.get("t1", "u1", "r1");
+    expect(row?.events[0]).toEqual(event);
+  });
+
   it("drops lane_progress first when over MAX_EVENTS_PER_RUN", async () => {
     const store = createMemoryRunStore();
     await store.create({
@@ -172,6 +208,7 @@ describe("memory run store", () => {
             path: "research/r1/final-report.md",
             title: "终稿",
             kind: "report",
+            bytes: 1,
           },
         ],
       }),

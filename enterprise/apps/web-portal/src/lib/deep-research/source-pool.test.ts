@@ -66,6 +66,19 @@ describe("authorityBoost / scorePool / selectTopSources", () => {
     expect(selectTopSources(scored.slice(0, 1), 10, 2)).toHaveLength(1);
   });
 
+  it("represents each host before taking a second page from one host", () => {
+    const scored = [
+      { hit: { title: "a1", url: "https://a.example/1", snippet: "s" }, score: 1 },
+      { hit: { title: "a2", url: "https://a.example/2", snippet: "s" }, score: 0.99 },
+      { hit: { title: "b1", url: "https://b.example/1", snippet: "s" }, score: 0.8 },
+    ].map((row) => ({ ...row, matchedQueries: ["q"], hitCount: 1 }));
+
+    expect(selectTopSources(scored, 2, 3).map((row) => row.hit.title)).toEqual([
+      "a1",
+      "b1",
+    ]);
+  });
+
   it("relaxes the per-domain quota when the candidate pool is thin", () => {
     expect(adaptiveMaxPerDomain(6)).toBe(5);
     expect(adaptiveMaxPerDomain(12)).toBe(5);

@@ -1,6 +1,7 @@
 import type { AuthUser } from "@agenticx/auth";
 import {
   buildAutoTitleFromFirstUserMessage,
+  sanitizeWebSearchTrace,
   sessionTitleNeedsAutoFill,
   type ChatMessage,
   type ChatMessageRole,
@@ -79,6 +80,7 @@ function mapSession(row: Record<string, unknown>): ChatSession {
 type MessageMetadata = {
   attachments?: ChatMessage["attachments"];
   web_search_sources?: ChatMessage["web_search_sources"];
+  web_search_trace?: unknown;
   deep_research?: ChatMessage["deep_research"];
 };
 
@@ -103,6 +105,10 @@ export function serializeMessageMetadata(message: ChatMessage): string | null {
   if (message.web_search_sources?.length) {
     metadata.web_search_sources = message.web_search_sources;
   }
+  const webSearchTrace = sanitizeWebSearchTrace(message.web_search_trace);
+  if (webSearchTrace) {
+    metadata.web_search_trace = webSearchTrace;
+  }
   if (message.deep_research) {
     const events = Array.isArray(message.deep_research.events)
       ? message.deep_research.events.slice(-200)
@@ -126,6 +132,7 @@ function mapMessage(row: Record<string, unknown>): ChatMessage {
     content: String(row.content),
     attachments: metadata?.attachments,
     web_search_sources: metadata?.web_search_sources,
+    web_search_trace: sanitizeWebSearchTrace(metadata?.web_search_trace),
     deep_research: metadata?.deep_research,
     model: row.model == null ? undefined : String(row.model),
     created_at: toDate(row.created_at).toISOString(),

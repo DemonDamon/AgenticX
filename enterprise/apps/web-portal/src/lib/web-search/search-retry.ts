@@ -5,7 +5,7 @@ import type { WebSearchHit, WebSearchProviderConfig } from "./providers";
 /** A successful result must be this sparse before a second provider call is allowed. */
 export const SPARSE_RESULT_MAX_UNIQUE_URLS = 2;
 
-function canonicalUrl(raw: string): string {
+export function canonicalSearchHitUrl(raw: string): string {
   const trimmed = raw.trim();
   try {
     const url = new URL(trimmed);
@@ -36,7 +36,7 @@ export type SearchEvidenceQuality = {
  * at most two unique URLs and every valid URL came from the same host.
  */
 export function assessSearchEvidence(hits: WebSearchHit[]): SearchEvidenceQuality {
-  const urls = new Set(hits.map((hit) => canonicalUrl(hit.url)).filter(Boolean));
+  const urls = new Set(hits.map((hit) => canonicalSearchHitUrl(hit.url)).filter(Boolean));
   const hosts = new Set(hits.map((hit) => sourceHost(hit.url)).filter(Boolean));
   return {
     retry:
@@ -71,7 +71,7 @@ export function mergeSearchHits(
   const merged: WebSearchHit[] = [];
   const seen = new Set<string>();
   for (const hit of [...primary, ...complement]) {
-    const key = canonicalUrl(hit.url);
+    const key = canonicalSearchHitUrl(hit.url);
     if (!key || seen.has(key)) continue;
     seen.add(key);
     merged.push(hit);
@@ -91,7 +91,7 @@ export function interleaveSearchHitGroups<T extends WebSearchHit>(groups: T[][])
     for (const group of groups) {
       const hit = group[rank];
       if (!hit) continue;
-      const key = canonicalUrl(hit.url);
+      const key = canonicalSearchHitUrl(hit.url);
       if (!key || seen.has(key)) continue;
       seen.add(key);
       merged.push(hit);

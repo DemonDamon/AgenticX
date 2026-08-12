@@ -5,6 +5,7 @@ import {
   extractLastUserQuery,
   pipeUpstreamSse,
   runWebSearchTurn,
+  summarizeSelectedEvidence,
   synthesizeTextSse,
   WEB_SEARCH_CONTEXT_SNIPPET_CHARS,
   WEB_SEARCH_SYSTEM_HINT,
@@ -87,6 +88,19 @@ describe("web search tool loop", () => {
     ).toBe("广州南沙");
   });
 
+  it("attributes a globally deduped URL only to the facet that kept it", () => {
+    const summaries = summarizeSelectedEvidence(
+      ["甲 原因", "乙 原因"],
+      [{
+        title: "共同报道",
+        url: "https://news.example/shared",
+        snippet: "s",
+        searchQuery: "甲 原因",
+      }],
+    );
+    expect(summaries.map((summary) => summary.coverage)).toEqual(["covered", "missing"]);
+  });
+
   it("grounded hint forbids channel-list answers", () => {
     expect(WEB_SEARCH_SYSTEM_HINT).toContain("推荐查询渠道");
     expect(WEB_SEARCH_SYSTEM_HINT).toMatch(/禁止声称无法联网|仍禁止声称无法联网/);
@@ -100,6 +114,8 @@ describe("web search tool loop", () => {
 
   it("grounded hint requires handling stale publishedAt", () => {
     expect(WEB_SEARCH_SYSTEM_HINT).toContain("发布时间");
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("多实体须逐项取证");
+    expect(WEB_SEARCH_SYSTEM_HINT).toContain("风评转变");
   });
 
   it("grounded hint scopes [N] to current turn and allows off-topic escape", () => {
@@ -1075,9 +1091,15 @@ describe("web search tool loop", () => {
     const system = String(bodies.find((body) => body.stream === true)?.messages?.[0]?.content);
     expect(system).toContain("检索子问题: 王虹 离开北京大学 原因");
     expect(system).toContain("检索子问题: 邓煜 离开北京大学 原因");
+    expect(system).toContain("证据覆盖提醒");
+    expect(system).toContain("正文验证可比时间状态");
     const text = await response.text();
     expect(text).toContain("https://wang.example/leave");
     expect(text).toContain("https://deng.example/leave");
+    expect(text).toContain("agenticx_web_search_trace");
+    expect(text).toContain('"providerCalls":2');
+    expect(text).toContain('"providerIds":["duckduckgo"]');
+    expect(text).toContain('"resolvedQuery":"王虹和邓煜为什么分别离开北京大学"');
   });
 
   it("shares one retry across two facets and caps provider calls at three", async () => {
@@ -1114,7 +1136,7 @@ describe("web search tool loop", () => {
       return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
     });
 
-    await runWebSearchTurn(
+    const response = await runWebSearchTurn(
       {
         model: "m",
         messages: [
@@ -1161,6 +1183,11 @@ describe("web search tool loop", () => {
       { query: "乙 离职 原因", providerId: "primary" },
       { query: "甲 离职 原因", providerId: "secondary" },
     ]);
+    const text = await response.text();
+    expect(text).toContain('"providerCalls":3');
+    expect(text).toContain('"fromProviderId":"primary"');
+    expect(text).toContain('"toProviderId":"secondary"');
+    expect(text).toContain('"providerIds":["primary","secondary"]');
   });
 
   it("rewrites only the current query, not the prior question", async () => {

@@ -36,6 +36,26 @@ export type DeepResearchEvent =
         /** Whether the full text was fetched successfully. */
         fetched?: boolean;
       }>;
+      /** Optional cost/coverage diagnostics, captured from calls already made. */
+      trace?: {
+        queries: Array<{
+          query: string;
+          kind: "primary" | "term" | "english" | "authority" | "recency" | "contrarian";
+          status: "ok" | "empty" | "failed" | "skipped";
+          hitCount: number;
+          /** Actual configured provider instances attempted by the default search executor. */
+          providerIds?: string[];
+        }>;
+        /** Top-level search queries run; provider adapters may internally fail over. */
+        topLevelQueriesRun: number;
+        /** Actual provider attempts observed; may be 0 for a custom injected search function. */
+        providerCalls: number;
+        candidateCount: number;
+        selectedCount: number;
+        uniqueHosts: number;
+        dateFrom?: string;
+        dateTo?: string;
+      };
     }
   | {
       type: "artifact";

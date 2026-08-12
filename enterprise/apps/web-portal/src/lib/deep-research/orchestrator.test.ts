@@ -24,6 +24,9 @@ import type { ResearchPlan } from "./planner";
 import type { Citation } from "./registry";
 import { emptyFetchStats } from "../web-search/page-fetch";
 import { directFetch } from "../web-search/direct-fetch";
+import type { executeWebSearch } from "../web-search/providers";
+
+type ExecuteSearchArgs = Parameters<typeof executeWebSearch>;
 
 async function readSsePayload(response: Response): Promise<{
   text: string;
@@ -1205,7 +1208,22 @@ describe("formatEvidencePack / formatSourcesAppendix", () => {
     expect(pack).toContain("研究主题：主题");
     expect(pack).toContain("[1] A");
     expect(pack).toContain("摘要：sa");
+    expect(pack).toContain("证据覆盖提醒：当前仅 1 个来源域名");
     expect(formatSourcesAppendix(citations)).toContain("**来源**");
+  });
+
+  it("keeps provider dates without declaring a trend from metadata", () => {
+    const citations: Citation[] = [
+      { index: 1, title: "A", url: "https://a.com", snippet: "sa", publishedAt: "2026-08-01" },
+      { index: 2, title: "B", url: "https://b.com", snippet: "sb", publishedAt: "2026-08-10" },
+    ];
+    const pack = formatEvidencePack(
+      { topic: "主题", complexity: "moderate", subQuestions: ["子问"] },
+      [{ question: "子问", citations }],
+    );
+    expect(pack).not.toContain("证据覆盖提醒");
+    expect(pack).not.toContain("达到趋势陈述最低门槛");
+    expect(pack).toContain("发布时间: 2026-08-10");
   });
 
   it("prefers fullText body in lane evidence", () => {
@@ -1254,15 +1272,41 @@ describe("P1 multi-variant + reflect", () => {
             { query: `${subQuestion} paper`, kind: "authority" as const },
             { query: `${subQuestion} english`, kind: "english" as const },
           ],
-          executeSearch: async (query: string) => {
+          executeSearch: async (
+            query: ExecuteSearchArgs[0],
+            _max: ExecuteSearchArgs[1],
+            _cfg: ExecuteSearchArgs[2],
+            _fetch: ExecuteSearchArgs[3],
+            diagnostics: ExecuteSearchArgs[4],
+          ) => {
             calls.push(query);
+            diagnostics?.onProviderAttempt?.({
+              providerId: "customer-primary",
+              outcome: "ok",
+              hitCount: 1,
+              durationMs: 1,
+            });
             return [{ title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" }];
           },
         }),
       },
     );
-    await readSsePayload(response);
+    const { events } = await readSsePayload(response);
     expect(calls).toHaveLength(6);
+    const sourceEvents = events.filter((event) => event.type === "lane_sources");
+    expect(sourceEvents).toHaveLength(2);
+    const trace = sourceEvents[0]?.trace as {
+      topLevelQueriesRun?: number;
+      providerCalls?: number;
+      queries?: Array<{ status?: string; hitCount?: number; providerIds?: string[] }>;
+    };
+    expect(trace.topLevelQueriesRun).toBe(3);
+    expect(trace.providerCalls).toBe(3);
+    expect(trace.queries).toEqual([
+      expect.objectContaining({ status: "ok", hitCount: 1, providerIds: ["customer-primary"] }),
+      expect.objectContaining({ status: "ok", hitCount: 1, providerIds: ["customer-primary"] }),
+      expect.objectContaining({ status: "ok", hitCount: 1, providerIds: ["customer-primary"] }),
+    ]);
   });
 
   it("skips remaining queries once a lane has more candidates than it can adopt", async () => {
@@ -1319,6 +1363,18 @@ describe("P1 multi-variant + reflect", () => {
     // Reported spend must be what actually ran (2 lanes × probe), not the 4
     // queries each lane expanded.
     expect(stats?.queriesPlanned).toBe(EARLY_STOP_PROBE_VARIANTS * 2);
+    const laneSources = events.find(
+      (event) => event.type === "lane_sources" && String(event.laneId).includes("q1"),
+    );
+    const trace = laneSources?.trace as {
+      topLevelQueriesRun?: number;
+      queries?: Array<{ status?: string }>;
+    };
+    expect(trace.topLevelQueriesRun).toBe(EARLY_STOP_PROBE_VARIANTS);
+    expect(trace.queries?.slice(EARLY_STOP_PROBE_VARIANTS)).toEqual([
+      expect.objectContaining({ status: "skipped" }),
+      expect.objectContaining({ status: "skipped" }),
+    ]);
   });
 
   it("runs every query when candidates stay below the adopt budget", async () => {

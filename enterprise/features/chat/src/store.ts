@@ -93,6 +93,7 @@ export type AssistantResponseVersion = {
   retryAttempt: number;
   queryText: string;
   web_search_sources?: ChatMessage["web_search_sources"];
+  web_search_trace?: ChatMessage["web_search_trace"];
   deep_research?: ChatMessage["deep_research"];
 };
 
@@ -358,6 +359,7 @@ function toAssistantVersion(
     retryAttempt: meta?.retryAttempt ?? 0,
     queryText: meta?.queryText ?? "",
     web_search_sources: message.web_search_sources,
+    web_search_trace: message.web_search_trace,
     deep_research: message.deep_research,
   };
 }
@@ -469,6 +471,43 @@ function preserveStreamedWebSearchSources(
 ): ChatMessage {
   if (message.id !== assistantId || !sources?.length) return message;
   return { ...message, web_search_sources: sources };
+}
+
+function applyWebSearchTraceToAssistant(
+  set: ChatStoreSet,
+  assistantId: string,
+  userMessageId: string | undefined,
+  trace: NonNullable<ChatMessage["web_search_trace"]>,
+) {
+  set((prev) => {
+    const nextMessages = prev.messages.map((message) =>
+      message.id === assistantId ? { ...message, web_search_trace: trace } : message,
+    );
+    if (!userMessageId) return { messages: nextMessages };
+    const current = prev.responseVersionsByUserMessageId[userMessageId];
+    if (!current) return { messages: nextMessages };
+    return {
+      messages: nextMessages,
+      responseVersionsByUserMessageId: {
+        ...prev.responseVersionsByUserMessageId,
+        [userMessageId]: {
+          ...current,
+          versions: current.versions.map((version, index) =>
+            index === current.activeIndex ? { ...version, web_search_trace: trace } : version,
+          ),
+        },
+      },
+    };
+  });
+}
+
+function preserveStreamedWebSearchTrace(
+  message: ChatMessage,
+  assistantId: string,
+  trace: ChatMessage["web_search_trace"],
+): ChatMessage {
+  if (message.id !== assistantId || !trace) return message;
+  return { ...message, web_search_trace: trace };
 }
 
 function findVersionIndexByAssistantId(versions: AssistantResponseVersion[], assistantId: string): number {
@@ -1321,6 +1360,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     try {
       let streamedWebSearchSources: ChatMessage["web_search_sources"];
+      let streamedWebSearchTrace: ChatMessage["web_search_trace"];
       const request = toSdkRequest(
         sessionId,
         get().activeModel,
@@ -1398,6 +1438,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           applyWebSearchSourcesToAssistant(set, assistantMessage.id, userMessage.id, chunk.webSearchSources);
         }
 
+        if (chunk.webSearchTrace) {
+          streamedWebSearchTrace = chunk.webSearchTrace;
+          applyWebSearchTraceToAssistant(
+            set,
+            assistantMessage.id,
+            userMessage.id,
+            chunk.webSearchTrace,
+          );
+        }
+
         if (chunk.deepResearchEvent) {
           applyDeepResearchEventToAssistant(
             set,
@@ -1420,15 +1470,27 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           streamedWebSearchSources,
         );
       }
+      if (streamedWebSearchTrace) {
+        applyWebSearchTraceToAssistant(
+          set,
+          assistantMessage.id,
+          userMessage.id,
+          streamedWebSearchTrace,
+        );
+      }
       const after = get();
       if (after.status !== "error" && after.hydrated) {
         const u = after.messages.find((m) => m.id === userMessage.id);
         const a = after.messages.find((m) => m.id === assistantMessage.id);
         if (u && a && u.role === "user" && a.role === "assistant") {
-          const assistantToPersist = preserveStreamedWebSearchSources(
-            a,
+          const assistantToPersist = preserveStreamedWebSearchTrace(
+            preserveStreamedWebSearchSources(
+              a,
+              assistantMessage.id,
+              streamedWebSearchSources,
+            ),
             assistantMessage.id,
-            streamedWebSearchSources,
+            streamedWebSearchTrace,
           );
           // Yield one tick after SSE teardown so the portal can accept the follow-up POST.
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -1573,6 +1635,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     try {
       let streamedWebSearchSources: ChatMessage["web_search_sources"];
+      let streamedWebSearchTrace: ChatMessage["web_search_trace"];
       const request = toSdkRequest(
         sessionId,
         state.activeModel,
@@ -1659,6 +1722,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           );
         }
 
+        if (chunk.webSearchTrace) {
+          streamedWebSearchTrace = chunk.webSearchTrace;
+          applyWebSearchTraceToAssistant(
+            set,
+            replacementAssistant.id,
+            input.messageId,
+            chunk.webSearchTrace,
+          );
+        }
+
         if (chunk.deepResearchEvent) {
           applyDeepResearchEventToAssistant(
             set,
@@ -1681,13 +1754,25 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           streamedWebSearchSources,
         );
       }
+      if (streamedWebSearchTrace) {
+        applyWebSearchTraceToAssistant(
+          set,
+          replacementAssistant.id,
+          input.messageId,
+          streamedWebSearchTrace,
+        );
+      }
       const afterEdit = get();
       if (afterEdit.status !== "error" && afterEdit.hydrated) {
         const snapshot = getSessionMessages(afterEdit.messages, sessionId).map((message) =>
-          preserveStreamedWebSearchSources(
-            message,
+          preserveStreamedWebSearchTrace(
+            preserveStreamedWebSearchSources(
+              message,
+              replacementAssistant.id,
+              streamedWebSearchSources,
+            ),
             replacementAssistant.id,
-            streamedWebSearchSources,
+            streamedWebSearchTrace,
           ),
         );
         try {
@@ -1806,6 +1891,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     try {
       let streamedWebSearchSources: ChatMessage["web_search_sources"];
+      let streamedWebSearchTrace: ChatMessage["web_search_trace"];
       const request = toSdkRequest(
         sessionId,
         state.activeModel,
@@ -1892,6 +1978,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           );
         }
 
+        if (chunk.webSearchTrace) {
+          streamedWebSearchTrace = chunk.webSearchTrace;
+          applyWebSearchTraceToAssistant(
+            set,
+            replacementAssistant.id,
+            targetUserMessageId,
+            chunk.webSearchTrace,
+          );
+        }
+
         if (chunk.deepResearchEvent) {
           applyDeepResearchEventToAssistant(
             set,
@@ -1914,13 +2010,25 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           streamedWebSearchSources,
         );
       }
+      if (streamedWebSearchTrace) {
+        applyWebSearchTraceToAssistant(
+          set,
+          replacementAssistant.id,
+          targetUserMessageId,
+          streamedWebSearchTrace,
+        );
+      }
       const afterRegen = get();
       if (afterRegen.status !== "error" && afterRegen.hydrated) {
         const snapshot = getSessionMessages(afterRegen.messages, sessionId).map((message) =>
-          preserveStreamedWebSearchSources(
-            message,
+          preserveStreamedWebSearchTrace(
+            preserveStreamedWebSearchSources(
+              message,
+              replacementAssistant.id,
+              streamedWebSearchSources,
+            ),
             replacementAssistant.id,
-            streamedWebSearchSources,
+            streamedWebSearchTrace,
           ),
         );
         try {
@@ -1995,6 +2103,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
               }
             : index === userIndex
@@ -2050,6 +2159,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
               }
             : index === userIndex
@@ -2097,6 +2207,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
               }
             : message
@@ -2142,6 +2253,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
               }
             : message

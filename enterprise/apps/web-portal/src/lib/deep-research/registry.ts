@@ -9,6 +9,8 @@ export type Citation = {
   title: string;
   url: string;
   snippet: string;
+  /** Provider publication timestamp, when available; never inferred from snippets. */
+  publishedAt?: string;
   /** 抓取成功的网页正文；失败时 undefined，证据包降级用 snippet。 */
   fullText?: string;
 };
@@ -39,12 +41,18 @@ export class CitationRegistry {
   add(hit: WebSearchHit): Citation {
     const key = normalizeCitationUrl(hit.url);
     const existing = this.byKey.get(key);
-    if (existing) return existing;
+    if (existing) {
+      if (!existing.publishedAt && hit.publishedAt) {
+        existing.publishedAt = hit.publishedAt;
+      }
+      return existing;
+    }
     const citation: Citation = {
       index: this.nextIndex,
       title: hit.title,
       url: hit.url,
       snippet: hit.snippet,
+      ...(hit.publishedAt ? { publishedAt: hit.publishedAt } : {}),
     };
     this.nextIndex += 1;
     this.byKey.set(key, citation);
