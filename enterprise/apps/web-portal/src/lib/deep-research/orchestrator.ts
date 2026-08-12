@@ -213,6 +213,8 @@ export type DeepResearchDeps = {
   userId?: string;
   sessionId?: string;
   runId?: string;
+  /** Standalone AI-resolved retrieval query shared with normal web search. */
+  resolvedUserQuery?: string;
   clarifyTimeoutMs?: number;
   /** Skip clarify wait (tests). When false and clarifier needed, still emits clarify then continues with skip. */
   awaitClarify?: boolean;
@@ -541,8 +543,8 @@ export async function runDeepResearchTurn(
   const originalMessages = Array.isArray(baseBody.messages)
     ? (baseBody.messages as ChatMessage[])
     : [];
-  let userQuery = extractLastUserQuery(originalMessages);
-  const originalUserQuery = userQuery;
+  const userQuery =
+    deps.resolvedUserQuery?.trim() || extractLastUserQuery(originalMessages);
   const now = deps.now ?? Date.now;
   const startedAt = now();
   // Clarify wait can last up to CLARIFY_TIMEOUT_MS (5m) and must NOT burn the
@@ -802,7 +804,7 @@ export async function runDeepResearchTurn(
         let clarifyResume: ClarifyResumePayload = { answers: {}, skip: true };
         const directionQuestions = clarifyResult.needed ? clarifyResult.questions : [];
         const askDelivery =
-          clarifyResult.needed || looksOpenEndedResearchQuery(originalUserQuery);
+          clarifyResult.needed || looksOpenEndedResearchQuery(userQuery);
         const clarifyQuestions = askDelivery
           ? [...directionQuestions, ...deliveryClarifyQuestions()].slice(0, 4)
           : [];
@@ -854,7 +856,7 @@ export async function runDeepResearchTurn(
             (q) => !isDeliveryClarifyQuestionId(q.id),
           );
           clarifyExpandedLanes = expandLanesFromClarifyAnswers(
-            originalUserQuery,
+            userQuery,
             laneQuestions,
             clarifyResume,
           );
@@ -863,7 +865,7 @@ export async function runDeepResearchTurn(
         // Clarify + delivery prefs are planner/writer hints only — never mutate the
         // display topic / final-report title via userQuery concatenation.
         let planningContext = applyClarifyAnswers(
-          originalUserQuery,
+          userQuery,
           clarifyQuestions,
           clarifyResume,
         );
@@ -880,11 +882,11 @@ export async function runDeepResearchTurn(
         let plan: ResearchPlan;
         if (searchBudgetLeft() <= 0) {
           plan = {
-            topic: sanitizeResearchTopic(originalUserQuery || "研究主题"),
+            topic: sanitizeResearchTopic(userQuery || "研究主题"),
             complexity: "moderate",
             subQuestions: clarifyExpandedLanes?.length
               ? clarifyExpandedLanes
-              : [originalUserQuery || "研究该主题"],
+              : [userQuery || "研究该主题"],
           };
         } else {
           plan = await planFn({
@@ -913,11 +915,11 @@ export async function runDeepResearchTurn(
           };
         } else {
           // Injected buildPlan mocks / budget fallback can still collapse open asks.
-          plan = enforcePlanBreadth(plan, originalUserQuery);
+          plan = enforcePlanBreadth(plan, userQuery);
         }
         plan = {
           ...plan,
-          topic: sanitizeResearchTopic(plan.topic || originalUserQuery || "研究主题"),
+          topic: sanitizeResearchTopic(plan.topic || userQuery || "研究主题"),
         };
 
         if (runSignal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -987,7 +989,7 @@ export async function runDeepResearchTurn(
               variants = args.skipExpand
                 ? [{ query: question, kind: "primary" }]
                 : await expandFn({
-                    topic: plan.topic || originalUserQuery,
+                    topic: plan.topic || userQuery,
                     subQuestion: question,
                     todayLine,
                     callJson: async (messages) => {
@@ -1071,7 +1073,7 @@ export async function runDeepResearchTurn(
               return { ...empty, queriesPlanned: variantsRun };
             }
 
-            const scored = scorePool(plan.topic || originalUserQuery, pool.list());
+            const scored = scorePool(plan.topic || userQuery, pool.list());
             const selected = selectTopSources(
               scored,
               resolveLaneAdoptCap(registry.size),
@@ -1313,7 +1315,7 @@ export async function runDeepResearchTurn(
           let reflectPolicyError: DeepResearchPolicyError | null = null;
           try {
             gaps = await reflectFn({
-              topic: plan.topic || originalUserQuery,
+              topic: plan.topic || userQuery,
               todayLine,
               laneMemos: citationsByQuestion.map((r) => ({
                 question: r.question,
@@ -1414,7 +1416,7 @@ export async function runDeepResearchTurn(
         ].join("\n");
         let outlinePolicyError: DeepResearchPolicyError | null = null;
         const outline = await buildReportOutline({
-          topic: sanitizeResearchTopic(plan.topic || originalUserQuery || "调研报告"),
+          topic: sanitizeResearchTopic(plan.topic || userQuery || "调研报告"),
           evidence,
           callJson: async (messages) => {
             try {
@@ -1590,7 +1592,7 @@ export async function runDeepResearchTurn(
         // Once the markdown body exists, later wrap-up failures must not look like
         // a search failure — the user already has a usable report artifact.
         const summaryInput = {
-          topic: sanitizeResearchTopic(plan.topic || originalUserQuery || "调研报告"),
+          topic: sanitizeResearchTopic(plan.topic || userQuery || "调研报告"),
           outline: {
             ...outline,
             title: sanitizeResearchTopic(outline.title),
@@ -1671,7 +1673,7 @@ export async function runDeepResearchTurn(
               userId,
               sessionId,
               runId,
-              topic: plan.topic || originalUserQuery || "调研报告",
+              topic: plan.topic || userQuery || "调研报告",
               outline,
               markdown: finalReport,
               citations,

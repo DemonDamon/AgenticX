@@ -134,6 +134,8 @@ export type ChatStoreState = {
   lastWebSearchBySessionId: Record<string, boolean>;
   /** Last composer deep-research toggle per session (retry / regenerate / queue). */
   lastDeepResearchBySessionId: Record<string, boolean>;
+  /** Last automatic deep-research toggle per session (retry / regenerate / queue). */
+  lastDeepResearchAutoBySessionId: Record<string, boolean>;
 };
 
 const EMPTY_USAGE: SessionTokenUsage = {
@@ -751,6 +753,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   streamStateBySessionId: {},
   lastWebSearchBySessionId: {},
   lastDeepResearchBySessionId: {},
+  lastDeepResearchAutoBySessionId: {},
 
   setHistoryPrincipal(principal) {
     set({ historyPrincipal: principal });
@@ -823,6 +826,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         attachments: item.attachments,
         webSearch: get().lastWebSearchBySessionId[item.sessionId],
         deepResearch: get().lastDeepResearchBySessionId[item.sessionId],
+        deepResearchAuto: get().lastDeepResearchAutoBySessionId[item.sessionId],
       },
       { forceSend: true }
     );
@@ -1286,6 +1290,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         ...prev.lastDeepResearchBySessionId,
         [sessionId]: deepResearchEnabled,
       },
+      lastDeepResearchAutoBySessionId: {
+        ...prev.lastDeepResearchAutoBySessionId,
+        [sessionId]: deepResearchAuto,
+      },
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
         [userMessage.id]: {
@@ -1455,6 +1463,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           attachments: next.attachments,
           webSearch: get().lastWebSearchBySessionId[next.sessionId],
           deepResearch: get().lastDeepResearchBySessionId[next.sessionId],
+          deepResearchAuto: get().lastDeepResearchAutoBySessionId[next.sessionId],
         });
       });
     }
@@ -1570,6 +1579,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         truncatedSessionMessages,
         Boolean(state.lastWebSearchBySessionId[sessionId]),
         Boolean(state.lastDeepResearchBySessionId[sessionId]),
+        Boolean(state.lastDeepResearchAutoBySessionId[sessionId]),
       );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
@@ -1802,6 +1812,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         regenerateRequestMessages,
         Boolean(state.lastWebSearchBySessionId[sessionId]),
         Boolean(state.lastDeepResearchBySessionId[sessionId]),
+        Boolean(state.lastDeepResearchAutoBySessionId[sessionId]),
       );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });

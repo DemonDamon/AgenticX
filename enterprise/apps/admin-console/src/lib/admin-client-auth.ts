@@ -51,3 +51,20 @@ export async function adminFetch(input: RequestInfo | URL, init?: RequestInit): 
   }
   return res;
 }
+
+/** Parse an admin API response without leaking the browser's opaque JSON error. */
+export async function readAdminJsonResponse<T>(
+  response: Response,
+  fallbackMessage = "请求失败",
+): Promise<T> {
+  const text = await response.text();
+  const status = response.status || 500;
+  if (!text.trim()) {
+    throw new Error(`${fallbackMessage}：服务未返回结果（HTTP ${status}）`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`${fallbackMessage}：服务返回格式异常（HTTP ${status}）`);
+  }
+}

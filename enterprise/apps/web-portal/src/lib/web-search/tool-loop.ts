@@ -103,13 +103,15 @@ const QUERY_REWRITE_MAX_TOKENS = 256;
 /** @deprecated Prefer WEB_SEARCH_SNIPPET_CHARS from context-budget; kept for test imports. */
 export const WEB_SEARCH_CONTEXT_SNIPPET_CHARS = WEB_SEARCH_SNIPPET_CHARS;
 
-type ChatMessage = {
+export type WebSearchChatMessage = {
   role: string;
   content?: string | null;
   tool_calls?: unknown;
   tool_call_id?: string;
   name?: string;
 };
+
+type ChatMessage = WebSearchChatMessage;
 
 export type GatewayFetchDeps = {
   url: string;
@@ -431,10 +433,12 @@ async function callGatewayJson(
   }
 }
 
-type SearchQueryResolution = SearchQueryRewrite & { source: "ai" };
+export type StandaloneSearchQueryResolution = SearchQueryRewrite & {
+  source: "ai" | "current";
+};
 
-type SearchQueryRewriteOutcome =
-  | { kind: "resolved"; value: SearchQueryResolution }
+export type StandaloneSearchQueryOutcome =
+  | { kind: "resolved"; value: StandaloneSearchQueryResolution }
   | { kind: "unresolved"; reason: "agent_unresolved" | "rewrite_unavailable" };
 
 async function rewriteSearchQueryWithAi(
@@ -442,7 +446,7 @@ async function rewriteSearchQueryWithAi(
   rewriteMessages: NonNullable<ReturnType<typeof buildSearchQueryRewriteMessages>>,
   model: string | undefined,
   deps: GatewayFetchDeps,
-): Promise<SearchQueryRewriteOutcome> {
+): Promise<StandaloneSearchQueryOutcome> {
   let lastError = "unknown error";
   for (let attempt = 1; attempt <= QUERY_REWRITE_MAX_ATTEMPTS; attempt += 1) {
     try {
@@ -495,6 +499,31 @@ async function rewriteSearchQueryWithAi(
     lastError,
   );
   return { kind: "unresolved", reason: "rewrite_unavailable" };
+}
+
+/**
+ * Resolve the current turn into a standalone retrieval query.
+ *
+ * Both normal web search and deep research must go through this function so a
+ * contextual follow-up can never fall back to searching its raw pronoun or
+ * ellipsis. A first user turn has no missing context and can be used verbatim.
+ */
+export async function resolveStandaloneSearchQuery(
+  messages: WebSearchChatMessage[],
+  model: string | undefined,
+  deps: GatewayFetchDeps,
+): Promise<StandaloneSearchQueryOutcome> {
+  const rewriteMessages = buildSearchQueryRewriteMessages(messages);
+  if (rewriteMessages) {
+    return rewriteSearchQueryWithAi(messages, rewriteMessages, model, deps);
+  }
+
+  const query = buildWebSearchQuery(messages);
+  if (!query) return { kind: "unresolved", reason: "agent_unresolved" };
+  return {
+    kind: "resolved",
+    value: { query, confidence: 1, source: "current" },
+  };
 }
 
 type PipeOptions = {
@@ -737,20 +766,15 @@ export async function runWebSearchTurn(
   }
 
   const modelName = typeof rest.model === "string" ? rest.model : undefined;
-  const rewriteMessages = buildSearchQueryRewriteMessages(originalMessages);
-  let query = buildWebSearchQuery(originalMessages);
-  if (rewriteMessages) {
-    const outcome = await rewriteSearchQueryWithAi(
-      originalMessages,
-      rewriteMessages,
-      modelName,
-      deps,
-    );
-    if (outcome.kind === "unresolved") {
-      return respondWithoutSearch(`context_query_${outcome.reason}`);
-    }
-    query = outcome.value.query;
+  const queryResolution = await resolveStandaloneSearchQuery(
+    originalMessages,
+    modelName,
+    deps,
+  );
+  if (queryResolution.kind === "unresolved") {
+    return respondWithoutSearch(`context_query_${queryResolution.reason}`);
   }
+  const query = queryResolution.value.query;
   // Only the first user turn may search the current text verbatim. Once recent
   // context exists, provider retrieval is gated on a standalone agent rewrite.
 

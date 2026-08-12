@@ -161,6 +161,8 @@ describe("runDeepResearchTurn", () => {
       url: `https://ex.com/${i + 1}`,
       snippet: `s${i + 1}`,
     }));
+    const executeSearch = vi.fn(async () => hits);
+    const runReconFn = vi.fn(async (_input: { query: string }) => ({ brief: "", hits: [] }));
 
     const response = await runDeepResearchTurn(
       {
@@ -172,8 +174,10 @@ describe("runDeepResearchTurn", () => {
         ...baseDeps({
           fetchImpl: fetchImpl as unknown as typeof fetch,
           buildPlan: async () => plan,
-          executeSearch: async () => hits,
+          executeSearch,
+          runReconFn,
         }),
+        resolvedUserQuery: "数学家 王虹 最近几天 新闻",
       },
     );
 
@@ -196,6 +200,7 @@ describe("runDeepResearchTurn", () => {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     expect(lastUser?.content).toContain("子问1");
     expect(lastUser?.content).toContain("[1]");
+    expect(runReconFn.mock.calls[0]?.[0]?.query).toBe("数学家 王虹 最近几天 新闻");
   });
 
   it("refreshes gateway bearer before synthesize so section writes use the new token", async () => {

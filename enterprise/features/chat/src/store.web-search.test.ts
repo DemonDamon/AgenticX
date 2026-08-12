@@ -104,6 +104,7 @@ describe("chat store webSearch request wiring", () => {
       pendingMessages: [],
       lastWebSearchBySessionId: {},
       lastDeepResearchBySessionId: {},
+      lastDeepResearchAutoBySessionId: {},
     });
   });
 

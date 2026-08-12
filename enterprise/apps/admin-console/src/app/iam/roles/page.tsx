@@ -117,6 +117,8 @@ function userStatusMeta(status: UserQuotaOverview["status"]) {
 
 export default function RolesPage() {
   const searchParams = useSearchParams();
+  const requestedDeptId = searchParams.get("dept")?.trim() ?? "";
+  const createRequested = searchParams.get("create") === "1";
   const [items, setItems] = useState<UserQuotaOverview[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -133,7 +135,7 @@ export default function RolesPage() {
   const [saving, setSaving] = useState(false);
   const [resetPasswordPending, setResetPasswordPending] = useState(false);
   const [newPassword, setNewPassword] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(createRequested);
   const [userFormOpen, setUserFormOpen] = useState(false);
   const [userFormLoading, setUserFormLoading] = useState(false);
   const [userFormInitial, setUserFormInitial] = useState<UserFormValues | null>(null);
@@ -234,7 +236,7 @@ export default function RolesPage() {
     }
   }, []);
 
-  const openUserManagement = async (user?: UserQuotaOverview) => {
+  const openUserManagement = useCallback(async (user?: UserQuotaOverview) => {
     const target = user ?? selected;
     if (!target || userFormLoading) return;
     setUserFormUser(target);
@@ -287,7 +289,7 @@ export default function RolesPage() {
     } finally {
       setUserFormLoading(false);
     }
-  };
+  }, [selected, userFormLoading]);
 
   const saveUserDetails = async (values: UserFormValues) => {
     const target = userFormUser ?? selected;
@@ -376,8 +378,12 @@ export default function RolesPage() {
     const user = items.find((item) => item.id === userId);
     if (!user) return;
     openedFromQueryRef.current = userId;
-    void openEditor(user);
-  }, [items, loading, openEditor, searchParams]);
+    void openUserManagement(user);
+  }, [items, loading, openUserManagement, searchParams]);
+
+  useEffect(() => {
+    if (createRequested) setCreateOpen(true);
+  }, [createRequested]);
 
   const groupModelIdSet = useMemo(() => new Set(modelAccess?.groupModelIds ?? []), [modelAccess]);
   const excludedGroupModelIdSet = useMemo(() => new Set(excludedGroupModelIds), [excludedGroupModelIds]);
@@ -547,24 +553,25 @@ export default function RolesPage() {
 
   const visibleItems = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
-    if (!query) return items;
-    return items.filter((user) =>
-      [
-        user.displayName,
-        user.email,
-        user.departmentName,
-        user.departmentPath,
-        user.jobTitle,
-        user.employeeNo,
-        user.phone,
-        ...user.groupNames,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(query),
-    );
-  }, [items, searchQuery]);
+    return items.filter((user) => {
+      if (requestedDeptId && user.deptId !== requestedDeptId) return false;
+      if (!query) return true;
+      return [
+          user.displayName,
+          user.email,
+          user.departmentName,
+          user.departmentPath,
+          user.jobTitle,
+          user.employeeNo,
+          user.phone,
+          ...user.groupNames,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query);
+    });
+  }, [items, requestedDeptId, searchQuery]);
 
   const toolbarButtonClass =
     "h-10 !rounded-xl shadow-sm focus-visible:!rounded-xl focus-visible:!outline-none focus-visible:ring-0";
@@ -1036,6 +1043,7 @@ export default function RolesPage() {
       <CreateUserDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
+        defaultDeptId={requestedDeptId || undefined}
         onCreated={load}
       />
     </div>

@@ -13,7 +13,11 @@ import { toChatHistoryContext } from "../../../../lib/chat-history-http";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
 import { stripEmptyAssistantMessages } from "../../../../lib/chat-completion-sanitize";
 import { withCurrentTimeContext } from "../../../../lib/current-time";
-import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
+import {
+  resolveStandaloneSearchQuery,
+  runWebSearchTurn,
+  type WebSearchChatMessage,
+} from "../../../../lib/web-search/tool-loop";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
@@ -94,6 +98,7 @@ export async function POST(request: Request) {
   let enableWebSearch = false;
   let enableDeepResearch = false;
   let enableDeepResearchAuto = false;
+  let resolvedDeepResearchQuery: string | undefined;
   let parsedBody: Record<string, unknown> | null = null;
   // portal 把模型 id 编码为 "<provider>/<model>"；admin 配置好的 provider 与上游 endpoint 一一对应。
   // gateway 用 model 字段查表，所以这里把 provider 拆出来放请求头，body.model 仅保留模型名。
@@ -177,6 +182,35 @@ export async function POST(request: Request) {
   }
 
   if (enableDeepResearch && parsedBody) {
+    const queryResolution = await resolveStandaloneSearchQuery(
+      Array.isArray(parsedBody.messages)
+        ? (parsedBody.messages as WebSearchChatMessage[])
+        : [],
+      typeof parsedBody.model === "string" ? parsedBody.model : undefined,
+      {
+        url: GATEWAY_COMPLETIONS_URL,
+        headers: gatewayHeaders,
+        signal: request.signal,
+      },
+    );
+    if (queryResolution.kind === "unresolved") {
+      console.warn(
+        `[deep-research] standalone query unresolved (${queryResolution.reason}); using contextual normal chat`,
+      );
+      enableDeepResearch = false;
+      // Normal web search uses the same resolver and would only repeat the
+      // failed rewrite. Keep the conversation intact and answer without a raw
+      // pronoun/ellipsis search instead.
+      enableWebSearch = false;
+    } else {
+      resolvedDeepResearchQuery = queryResolution.value.query;
+      console.info(
+        `[deep-research] standalone query source=${queryResolution.value.source} confidence=${queryResolution.value.confidence.toFixed(2)} chars=${resolvedDeepResearchQuery.length}`,
+      );
+    }
+  }
+
+  if (enableDeepResearch && parsedBody) {
     return runDeepResearchTurn(withSanitizedMessages(parsedBody), {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
@@ -186,6 +220,7 @@ export async function POST(request: Request) {
       tenantId: session.tenantId,
       userId: session.userId,
       sessionId: chatSessionId,
+      resolvedUserQuery: resolvedDeepResearchQuery,
       refreshAccessToken: async () => {
         if (!refreshToken) return null;
         try {

@@ -536,7 +536,7 @@ export default function DepartmentsPage() {
                     <h2 className="flex flex-wrap items-center gap-3 text-xl font-bold text-foreground">
                       {currentNode.name}
                       <Link
-                        href={`/iam/users?dept=${currentNode.id}`}
+                        href={`/iam/roles?dept=${currentNode.id}`}
                         title={t("membersLinkTitle")}
                       >
                         <Badge variant="secondary" className="cursor-pointer bg-muted hover:bg-muted/80 shadow-none">
@@ -587,7 +587,7 @@ export default function DepartmentsPage() {
                       <Plus className="h-4 w-4" />
                     </Button>
                     <Button size="sm" variant="outline" asChild>
-                      <Link href={`/iam/users?dept=${encodeURIComponent(currentNode.id)}&create=1`}>
+                      <Link href={`/iam/roles?dept=${encodeURIComponent(currentNode.id)}&create=1`}>
                         <UserPlus className="mr-1.5 h-4 w-4" />
                         {tu("newUser")}
                       </Link>
@@ -608,7 +608,7 @@ export default function DepartmentsPage() {
                       title={t("membersViewAll")}
                       asChild
                     >
-                      <Link href={`/iam/users?dept=${currentNode.id}`}>
+                      <Link href={`/iam/roles?dept=${currentNode.id}`}>
                         <Users className="h-4 w-4" />
                       </Link>
                     </Button>
@@ -650,7 +650,7 @@ export default function DepartmentsPage() {
                         className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
                       >
                         <Link
-                          href={`/iam/users?dept=${encodeURIComponent(currentDeptId ?? "")}&userId=${encodeURIComponent(member.id)}`}
+                          href={`/iam/roles?dept=${encodeURIComponent(currentDeptId ?? "")}&user=${encodeURIComponent(member.id)}&edit=1`}
                           className="flex min-w-0 flex-1 items-center gap-3 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary"
                           title={t("membersManage")}
                         >
@@ -677,7 +677,7 @@ export default function DepartmentsPage() {
                             asChild
                           >
                             <Link
-                              href={`/iam/users?dept=${encodeURIComponent(currentNode.id)}&userId=${encodeURIComponent(member.id)}&edit=1`}
+                              href={`/iam/roles?dept=${encodeURIComponent(currentNode.id)}&user=${encodeURIComponent(member.id)}&edit=1`}
                               title={tu("actions.edit")}
                               aria-label={tu("actions.edit")}
                               onClick={(event) => event.stopPropagation()}
@@ -838,7 +838,7 @@ export default function DepartmentsPage() {
             </div>
             {currentNode ? (
               <Button size="sm" asChild>
-                <Link href={`/iam/users?dept=${encodeURIComponent(currentNode.id)}&create=1`}>
+                <Link href={`/iam/roles?dept=${encodeURIComponent(currentNode.id)}&create=1`}>
                   <UserPlus className="mr-1.5 h-4 w-4" />
                   {tu("newUser")}
                 </Link>

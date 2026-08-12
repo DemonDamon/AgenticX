@@ -59,7 +59,7 @@ function rowSnapshot(row: BulkRow): Pick<
   };
 }
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const auth = await requireAdminScope(["user:create"]);
   if (!auth.ok) return auth.response;
 
@@ -153,4 +153,22 @@ export async function POST(request: Request) {
     message: failures.length ? "partial failure" : "ok",
     data: { success, failed: failures.length, failures },
   });
+}
+
+export async function POST(request: Request) {
+  try {
+    return await handlePost(request);
+  } catch (error) {
+    console.error(
+      "[admin/iam/bulk-import] request failed:",
+      error instanceof Error ? error.stack ?? error.message : error,
+    );
+    return NextResponse.json(
+      {
+        code: "50001",
+        message: "批量导入失败，请稍后重试；如持续失败请联系管理员",
+      },
+      { status: 500 },
+    );
+  }
 }

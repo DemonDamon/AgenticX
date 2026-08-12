@@ -92,6 +92,7 @@ describe("chat store deepResearch request wiring", () => {
       pendingMessages: [],
       lastWebSearchBySessionId: {},
       lastDeepResearchBySessionId: {},
+      lastDeepResearchAutoBySessionId: {},
     });
   });
 
@@ -107,6 +108,24 @@ describe("chat store deepResearch request wiring", () => {
     await useChatStore.getState().sendMessage(client, { content: "no research", deepResearch: false });
     expect(client.requests[0]?.deepResearch).toBeUndefined();
     expect(useChatStore.getState().lastDeepResearchBySessionId.A).toBe(false);
+  });
+
+  it("keeps automatic deep research enabled on regenerate", async () => {
+    const client = new CapturingClient();
+    await useChatStore.getState().sendMessage(client, {
+      content: "research when needed",
+      deepResearch: false,
+      deepResearchAuto: true,
+    });
+
+    expect(client.requests[0]?.deepResearch).toBeUndefined();
+    expect(client.requests[0]?.deepResearchAuto).toBe(true);
+    expect(useChatStore.getState().lastDeepResearchAutoBySessionId.A).toBe(true);
+
+    const assistantId = useChatStore.getState().messages.find((m) => m.role === "assistant")?.id;
+    expect(assistantId).toBeTruthy();
+    await useChatStore.getState().regenerateAssistantResponse(client, assistantId!);
+    expect(client.requests.at(-1)?.deepResearchAuto).toBe(true);
   });
 
   it("keeps deepResearch=true on regenerateAssistantResponse", async () => {
