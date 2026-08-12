@@ -11608,16 +11608,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   </span>
                 )}
               </div>
-              {visibleMessages.length > 0 || pane.contextInherited ? (
+              {pane.contextInherited ? (
                 <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
-                  {visibleMessages.length > 0 && (
-                    <span className="rounded bg-surface-card px-1 text-text-subtle">
-                      {visibleMessages.length} 条
-                    </span>
-                  )}
-                  {pane.contextInherited && (
-                    <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
-                  )}
+                  <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
                 </div>
               ) : null}
             </div>
