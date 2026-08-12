@@ -56,6 +56,19 @@ describe("contextual search-query rewrite", () => {
     ).toEqual({ query: "她最近怎么样", confidence: 0.96 });
   });
 
+  it("extracts the JSON contract from reasoning wrappers and surrounding prose", () => {
+    expect(
+      parseSearchQueryRewrite(
+        '<think>先消解主语</think>\n```json\n{"resolved_query":"数学家 王虹 最近几天 新闻","confidence":0.97}\n```',
+      ),
+    ).toEqual({ query: "数学家 王虹 最近几天 新闻", confidence: 0.97 });
+    expect(
+      parseSearchQueryRewrite(
+        '结果如下：{"resolved_query":"王虹 近期新闻","confidence":0.9}。',
+      ),
+    ).toEqual({ query: "王虹 近期新闻", confidence: 0.9 });
+  });
+
   it("accepts an explicit unresolved decision and rejects malformed confidence", () => {
     expect(
       parseSearchQueryRewrite('{"resolved_query":"","confidence":0}'),

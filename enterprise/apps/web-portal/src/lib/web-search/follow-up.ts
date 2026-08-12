@@ -19,6 +19,7 @@ export type SearchQueryRewrite = {
 
 const QUERY_REWRITE_SYSTEM_PROMPT =
   "你是搜索查询补全代理，不回答用户问题，也不执行搜索。" +
+  "不要输出思考过程、解释或 Markdown，立即返回要求的 JSON。" +
   "阅读最近几条对话，只把当前用户问题改写成一条脱离上下文也能准确检索的查询。" +
   "当前问题已经完整时，保持其原意并返回精简的等价查询；存在省略主语、代词、地点、对象或限定条件时，" +
   "从历史中补齐缺失部分，必要时加入身份或领域锚点来消除重名。" +
@@ -113,10 +114,52 @@ export function buildSearchQueryRewriteMessages(
   ];
 }
 
+function sliceBalancedJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const char = text[i]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && inString) {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function unwrapJsonCandidate(raw: string): string {
-  const trimmed = raw.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  return (fenced?.[1] ?? trimmed).trim();
+  const strict = stripThinkBlocks(raw).trim();
+  const fenced = strict.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const strictCandidate = fenced ?? strict;
+  const balanced = sliceBalancedJsonObject(strictCandidate);
+  if (balanced) return balanced;
+
+  // Some reasoning providers leave an unmatched think marker before the final
+  // payload. Removing protocol markers is safe here; semantic query resolution
+  // still belongs entirely to the rewrite agent.
+  const lenient = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, " ")
+    .replace(/<\/?think>/gi, " ")
+    .trim();
+  return sliceBalancedJsonObject(lenient) ?? strictCandidate;
 }
 
 /** Parse and validate the small JSON contract returned by the query rewriter. */

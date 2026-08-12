@@ -96,6 +96,9 @@ export const WEB_SEARCH_TOOL_CHOICE = {
 
 const ADMIN_DISABLED_HINT = "> 管理员已关闭联网搜索。\n\n";
 const UNAVAILABLE_HINT = "> 联网搜索暂不可用，以下回答基于模型已有知识。\n\n";
+const QUERY_REWRITE_TIMEOUT_MS = 15_000;
+const QUERY_REWRITE_MAX_ATTEMPTS = 2;
+const QUERY_REWRITE_MAX_TOKENS = 256;
 
 /** @deprecated Prefer WEB_SEARCH_SNIPPET_CHARS from context-budget; kept for test imports. */
 export const WEB_SEARCH_CONTEXT_SNIPPET_CHARS = WEB_SEARCH_SNIPPET_CHARS;
@@ -428,44 +431,70 @@ async function callGatewayJson(
   }
 }
 
-type SearchQueryResolution = SearchQueryRewrite & {
-  source: "ai";
-};
+type SearchQueryResolution = SearchQueryRewrite & { source: "ai" };
+
+type SearchQueryRewriteOutcome =
+  | { kind: "resolved"; value: SearchQueryResolution }
+  | { kind: "unresolved"; reason: "agent_unresolved" | "rewrite_unavailable" };
 
 async function rewriteSearchQueryWithAi(
   messages: ChatMessage[],
+  rewriteMessages: NonNullable<ReturnType<typeof buildSearchQueryRewriteMessages>>,
   model: string | undefined,
   deps: GatewayFetchDeps,
-): Promise<SearchQueryResolution | null> {
-  const rewriteMessages = buildSearchQueryRewriteMessages(messages);
-  if (!rewriteMessages) return null;
-
-  try {
-    const payload = await callGatewayJson(deps, {
-      ...(model ? { model } : {}),
-      messages: rewriteMessages,
-      stream: false,
-      temperature: 0,
-      max_tokens: 96,
-    });
-    const rewrite = parseSearchQueryRewrite(extractCompletionContent(payload));
-    if (rewrite?.query && hasPriorSearchQueryLeakage(rewrite.query, messages)) {
-      throw new Error("query rewrite copied the prior question");
-    }
-    if (rewrite) {
-      console.info(
-        `[web-search] contextual query rewrite confidence=${rewrite.confidence.toFixed(2)} chars=${rewrite.query.length}`,
+): Promise<SearchQueryRewriteOutcome> {
+  let lastError = "unknown error";
+  for (let attempt = 1; attempt <= QUERY_REWRITE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const retryMessages =
+        attempt === 1
+          ? rewriteMessages
+          : rewriteMessages.map((message, index) =>
+              index === 0
+                ? {
+                    ...message,
+                    content: `${message.content}上一次输出未能解析；本次只输出一行合法 JSON。`,
+                  }
+                : message,
+            );
+      const payload = await callGatewayJson(
+        deps,
+        {
+          ...(model ? { model } : {}),
+          messages: retryMessages,
+          stream: false,
+          temperature: 0,
+          max_tokens: QUERY_REWRITE_MAX_TOKENS,
+        },
+        QUERY_REWRITE_TIMEOUT_MS,
       );
-      return { ...rewrite, source: "ai" };
+      const rewrite = parseSearchQueryRewrite(extractCompletionContent(payload));
+      if (rewrite?.query && hasPriorSearchQueryLeakage(rewrite.query, messages)) {
+        throw new Error("query rewrite copied the prior question");
+      }
+      if (!rewrite) throw new Error("query rewrite output failed validation");
+      if (!rewrite.query) {
+        console.info("[web-search] contextual query rewrite explicitly unresolved");
+        return { kind: "unresolved", reason: "agent_unresolved" };
+      }
+      console.info(
+        `[web-search] contextual query rewrite confidence=${rewrite.confidence.toFixed(2)} chars=${rewrite.query.length} attempt=${attempt}`,
+      );
+      return { kind: "resolved", value: { ...rewrite, source: "ai" } };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[web-search] contextual query rewrite attempt ${attempt}/${QUERY_REWRITE_MAX_ATTEMPTS} failed:`,
+        lastError,
+      );
+      if (deps.signal?.aborted) break;
     }
-    throw new Error("query rewrite output failed validation");
-  } catch (error) {
-    console.warn(
-      "[web-search] contextual query rewrite unavailable, using current query:",
-      error instanceof Error ? error.message : error,
-    );
-    return null;
   }
+  console.warn(
+    "[web-search] contextual query rewrite unavailable; refusing raw contextual search:",
+    lastError,
+  );
+  return { kind: "unresolved", reason: "rewrite_unavailable" };
 }
 
 type PipeOptions = {
@@ -666,6 +695,8 @@ export async function runWebSearchTurn(
       const directMessages =
         reason === "assistant_meta"
           ? withAssistantCapabilityContext(withCurrentTimeContext(originalMessages))
+          : reason.startsWith("context_query_")
+            ? withCurrentTimeContext(originalMessages)
           : withTrivialTurnContext(withCurrentTimeContext(originalMessages));
       const upstream = await callGatewayStream(deps, {
         ...rest,
@@ -706,13 +737,22 @@ export async function runWebSearchTurn(
   }
 
   const modelName = typeof rest.model === "string" ? rest.model : undefined;
-  const resolved = await rewriteSearchQueryWithAi(originalMessages, modelName, deps);
-  if (resolved && !resolved.query && !alwaysSearch) {
-    return respondWithoutSearch("context_query_unresolved");
+  const rewriteMessages = buildSearchQueryRewriteMessages(originalMessages);
+  let query = buildWebSearchQuery(originalMessages);
+  if (rewriteMessages) {
+    const outcome = await rewriteSearchQueryWithAi(
+      originalMessages,
+      rewriteMessages,
+      modelName,
+      deps,
+    );
+    if (outcome.kind === "unresolved") {
+      return respondWithoutSearch(`context_query_${outcome.reason}`);
+    }
+    query = outcome.value.query;
   }
-  // First turns have no rewrite call. A failed/malformed rewrite also falls back
-  // to the current turn verbatim — never to regex-based intent reconstruction.
-  const query = resolved?.query || buildWebSearchQuery(originalMessages);
+  // Only the first user turn may search the current text verbatim. Once recent
+  // context exists, provider retrieval is gated on a standalone agent rewrite.
 
   const searchFn = deps.executeSearch ?? executeWebSearch;
   let hits: WebSearchHit[] = [];

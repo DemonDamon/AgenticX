@@ -920,7 +920,54 @@ describe("web search tool loop", () => {
     expect(system).not.toContain("联网搜索结果");
   });
 
-  it("AGENTICX_WEB_SEARCH_ALWAYS still searches when contextual completion is unresolved", async () => {
+  it("never searches the raw contextual query when the rewrite call fails", async () => {
+    const executeSearch = vi.fn(async () => [
+      { title: "不应调用", url: "https://ex.com/no", snippet: "raw" },
+    ]);
+    const bodies: Array<{ stream?: boolean; messages?: Array<{ content?: string }> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        messages?: Array<{ content?: string }>;
+      };
+      bodies.push(body);
+      if (body.stream === false) {
+        return new Response("upstream unavailable", { status: 503 });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"基于已有对话回答"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "王虹到底解决了什么数学难题" },
+          { role: "assistant", content: "数学家王虹研究三维挂谷猜想。" },
+          { role: "user", content: "搜一下这几天关于她的新闻" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "k",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    expect(bodies.filter((body) => body.stream === false)).toHaveLength(2);
+    const directBody = bodies.find((body) => body.stream === true);
+    expect(directBody?.messages?.[0]?.content).not.toContain("本轮是寒暄");
+  });
+
+  it("AGENTICX_WEB_SEARCH_ALWAYS does not bypass contextual query resolution", async () => {
     const prev = process.env.AGENTICX_WEB_SEARCH_ALWAYS;
     process.env.AGENTICX_WEB_SEARCH_ALWAYS = "1";
     try {
@@ -965,7 +1012,7 @@ describe("web search tool loop", () => {
         },
       );
 
-      expect(executeSearch).toHaveBeenCalledTimes(1);
+      expect(executeSearch).not.toHaveBeenCalled();
     } finally {
       if (prev === undefined) delete process.env.AGENTICX_WEB_SEARCH_ALWAYS;
       else process.env.AGENTICX_WEB_SEARCH_ALWAYS = prev;
