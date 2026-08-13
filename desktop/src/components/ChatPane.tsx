@@ -133,6 +133,12 @@ import {
   stripComposerQuotePlaceholders,
   type QuotePayloadItem,
 } from "../utils/user-quote-display";
+import {
+  AT_MENTION_SEARCH_DEBOUNCE_MS,
+  domTextLooksNonEmpty,
+  isComposerNonEmpty,
+  nextComposerAtMentionState,
+} from "../utils/composer-input-sync";
 import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
@@ -2868,7 +2874,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     () => newTopicTriggerLabel({ displayName: paneAvatarMeta.name, isGroup: isGroupPane }),
     [isGroupPane, paneAvatarMeta.name],
   );
-  const [input, setInput] = useState("");
+  const [composerHasText, setComposerHasText] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceTranscribing, setVoiceTranscribing] = useState(false);
@@ -2972,6 +2978,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const sendChatInFlightRef = useRef<{ paneId: string; sessionId: string } | null>(null);
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const imeComposingRef = useRef(false);
+  const atSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAtCandidatesRef = useRef<(queryText: string) => void | Promise<void>>(() => {});
   const [atOpen, setAtOpen] = useState(false);
   const [atQuery, setAtQuery] = useState("");
   const [atCandidates, setAtCandidates] = useState<AtCandidate[]>([]);
@@ -4090,6 +4098,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           .slice(0, 8);
     setAtCandidates([...avatarCandidates, ...filteredFolders, ...filteredFiles].slice(0, 24));
   };
+  searchAtCandidatesRef.current = searchAtCandidates;
 
   const triggerCcBridgeVisibleTerminal = useCallback(
     async (toolCallKey: string) => {
@@ -4251,20 +4260,33 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, openSidePanel, addPaneTerminalTab, paneWidth]
   );
 
-  const updateAtStateFromText = useCallback(
+  const updateAtStateFromText = useCallback((value: string) => {
+    const next = nextComposerAtMentionState(value);
+    setAtOpen((prev) => (prev === next.open ? prev : next.open));
+    setAtQuery((prev) => (prev === next.query ? prev : next.query));
+    if (next.shouldSearch) {
+      if (atSearchTimerRef.current != null) clearTimeout(atSearchTimerRef.current);
+      atSearchTimerRef.current = setTimeout(() => {
+        atSearchTimerRef.current = null;
+        void searchAtCandidatesRef.current(next.query);
+      }, AT_MENTION_SEARCH_DEBOUNCE_MS);
+      return;
+    }
+    if (atSearchTimerRef.current != null) {
+      clearTimeout(atSearchTimerRef.current);
+      atSearchTimerRef.current = null;
+    }
+  }, []);
+
+  const syncComposerFromValue = useCallback(
     (value: string) => {
-      const match = value.match(/(?:^|\s)@([^\s@]*)$/);
-      if (match) {
-        const query = match[1] ?? "";
-        setAtOpen(true);
-        setAtQuery(query);
-        void searchAtCandidates(query);
-      } else {
-        setAtOpen(false);
-        setAtQuery("");
-      }
+      setComposerHasText((prev) => {
+        const next = isComposerNonEmpty(value);
+        return prev === next ? prev : next;
+      });
+      updateAtStateFromText(value);
     },
-    [searchAtCandidates]
+    [updateAtStateFromText]
   );
 
   const extractComposerText = useCallback((): string => {
@@ -4334,9 +4356,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       el.appendChild(skillToken);
       el.appendChild(space);
       focusComposerEnd();
-      setInput(extractComposerSendText());
+      syncComposerFromValue(extractComposerSendText());
     },
-    [focusComposerEnd, setInput]
+    [focusComposerEnd, extractComposerSendText, syncComposerFromValue]
   );
 
   const saveComposerCaret = useCallback(() => {
@@ -4354,6 +4376,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
   }, [saveComposerCaret]);
+
+  useEffect(() => {
+    return () => {
+      if (atSearchTimerRef.current != null) clearTimeout(atSearchTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const root = composerRef.current;
@@ -4429,7 +4457,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       composerRefTipTargetRef.current = null;
       setComposerRefTip(null);
     };
-  }, [composerExpanded, contextFiles, input, pane.id]);
+  }, [composerExpanded, contextFiles, pane.id]);
 
   const patchComposerRefTokenPaths = useCallback(() => {
     const root = composerRef.current;
@@ -4456,7 +4484,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   useEffect(() => {
     patchComposerRefTokenPaths();
-  }, [patchComposerRefTokenPaths, input, contextFiles]);
+  }, [patchComposerRefTokenPaths]);
 
   const resolveRefMetaForLabel = useCallback(
     (label: string) => {
@@ -4667,15 +4695,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const target = quoteTargets.find((q) => q.id === pendingId);
     if (!target) return;
     insertQuoteTokenAtCaret(target);
-    const value = extractComposerSendText();
-    setInput(value);
-    updateAtStateFromText(value);
+    syncComposerFromValue(extractComposerSendText());
   }, [
     quoteTargets,
     insertQuoteTokenAtCaret,
     removeComposerQuoteTokens,
     extractComposerSendText,
-    updateAtStateFromText,
+    syncComposerFromValue,
   ]);
 
   const buildQuotedPayload = useCallback((): {
@@ -4714,8 +4740,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     (value: string, options?: { tokenNames?: string[]; refSourcePaths?: Record<string, string> }) => {
       const el = composerRef.current;
       if (!el) {
-        setInput(value);
-        updateAtStateFromText(value);
+        syncComposerFromValue(value);
         return;
       }
       composerRefPathsRef.current = buildComposerRefPathLookup(
@@ -4797,8 +4822,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         el.appendChild(document.createTextNode(textBuffer));
       }
       const visible = stripComposerQuotePlaceholders(value);
-      setInput(visible);
-      updateAtStateFromText(visible);
+      syncComposerFromValue(visible);
       focusComposerEnd();
     },
     [
@@ -4807,7 +4831,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       createSkillRefToken,
       createQuoteRefToken,
       focusComposerEnd,
-      updateAtStateFromText,
+      syncComposerFromValue,
     ]
   );
 
@@ -8047,7 +8071,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupActivityHint, groupedVisibleMessages, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupActivityHint, groupedVisibleMessages, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -8212,7 +8236,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const { pttActive, pttLiveText, cancelPtt } = useVoicePushToTalk({
     enabled: Boolean(pane.sessionId),
-    composerEmpty: !input.trim(),
+    composerEmpty: !composerHasText,
     apiBase,
     apiToken,
     language: "zh-CN",
@@ -10999,7 +11023,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const draft = buildBudgetResumeDraft(pane.messages ?? []);
     createNewTopic(false, pane.sessionMode ?? "daily_office");
     setBudgetExceededInfo(null);
-    setInput(draft);
+    setComposerHasText(isComposerNonEmpty(draft));
   };
 
   // "新建任务" nav button dispatches this event to start a fresh conversation
@@ -11014,7 +11038,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       createNewTopicRef.current(false, pane.sessionMode ?? "daily_office");
       const draftText = detail?.draftText;
       if (draftText) {
-        // setInput alone only flips React state; the contenteditable composer
+        // syncComposerFromValue alone only flips React emptiness/@ state; the contenteditable composer
         // renders from direct DOM writes, so we must go through
         // setComposerText to actually show the draft text in the box.
         window.setTimeout(() => setComposerText(draftText), 0);
@@ -12321,7 +12345,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </span>
             </div>
           ) : null}
-          <div className="agx-pane-composer-body agx-theme-focus-ring relative rounded-2xl border border-transparent bg-surface-card transition-all duration-300 ease-out">
+          <div className="agx-pane-composer-body agx-theme-focus-ring relative rounded-2xl border border-transparent bg-surface-card transition-[border-color,box-shadow] duration-200 ease-out">
             <VoicePttOverlay text={pttLiveText} visible={pttActive} />
             {visibleAttachmentEntries.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
@@ -12359,9 +12383,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               suppressContentEditableWarning
               onInput={() => {
                 syncQuoteTargetsFromComposer();
-                const value = extractComposerSendText();
-                setInput(value);
-                updateAtStateFromText(value);
+                if (imeComposingRef.current) {
+                  setComposerHasText((prev) => {
+                    const next = domTextLooksNonEmpty(composerRef.current?.textContent);
+                    return prev === next ? prev : next;
+                  });
+                  saveComposerCaret();
+                  return;
+                }
+                const live = (composerRef.current?.innerText || "").replace(/\u00a0/g, " ");
+                syncComposerFromValue(live);
                 saveComposerCaret();
               }}
               onKeyUp={() => saveComposerCaret()}
@@ -12370,6 +12401,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 imeComposingRef.current = true;
               }}
               onCompositionEnd={() => {
+                const live = (composerRef.current?.innerText || "").replace(/\u00a0/g, " ");
+                syncComposerFromValue(live);
+                saveComposerCaret();
                 window.setTimeout(() => {
                   imeComposingRef.current = false;
                 }, 0);
@@ -12437,9 +12471,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   const files = withClipboardImageNames(raw);
                   if (plainText) {
                     document.execCommand("insertText", false, plainText);
-                    const value = extractComposerSendText();
-                    setInput(value);
-                    updateAtStateFromText(value);
+                    syncComposerFromValue(extractComposerSendText());
                   }
                   for (const file of files) {
                     const key = `${file.name}:${file.size}:${file.lastModified}`;
@@ -12452,9 +12484,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if (!plainText.trim()) return;
                 e.preventDefault();
                 document.execCommand("insertText", false, plainText);
-                const value = extractComposerSendText();
-                setInput(value);
-                updateAtStateFromText(value);
+                syncComposerFromValue(extractComposerSendText());
               }}
               onKeyDown={(e) => {
                 const isImeComposing =
@@ -12556,7 +12586,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 composerExpanded ? "max-h-[62vh] min-h-[260px] pr-40" : "max-h-[220px] min-h-[72px] pr-14"
               }`}
             />
-            {input.trim().length === 0 && quoteTargets.length === 0 ? (
+            {!composerHasText && quoteTargets.length === 0 ? (
               <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[15px] text-text-faint">
                 发消息...
               </div>
@@ -12657,7 +12687,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 </div>
                 <ActionCircleButton
                   hasInput={
-                    (!!input.trim() || readyAttachments.length > 0 || quoteTargets.length > 0)
+                    (!!composerHasText || readyAttachments.length > 0 || quoteTargets.length > 0)
                   }
                   /* `canInterruptCurrentSession` 只覆盖"当前 pane 自己发起 SSE"的场景。
                    * 分身被 Meta 委派时，分身 pane 自己没有 SSE，但任务确实在跑。
