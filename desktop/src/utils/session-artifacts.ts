@@ -43,8 +43,23 @@ const JSON_OUTPUT_PATH_RE =
 
 const BASH_REDIRECT_RE = /(?:>>?|\btee\b(?:\s+-a)?)\s+(['"]?)([^\s'"|;&<>]+)\1/g;
 
-/** Markdown table cell that looks like a bare filename with extension. */
-const TABLE_FILENAME_RE = /^\|\s*`?([^`|/\\]+\.[a-zA-Z0-9]{1,12})`?\s*\|/gm;
+/** Markdown table cell that looks like a bare filename with extension (any column). */
+const TABLE_FILENAME_RE =
+  /\|[ \t]*`?([^`|/\s\\]+\.[a-zA-Z0-9]{1,12})`?[ \t]*(?=\|)/g;
+
+/** Skill/source trees listed by find/ls must not become task artifacts. */
+const ARTIFACT_SOURCE_EXCLUDE_RE =
+  /\/(?:\.agenticx\/skills|\.git|node_modules|site-packages)\//i;
+
+const PREVIEW_IMAGE_RANK: Record<string, number> = {
+  gif: 0,
+  webp: 1,
+  png: 2,
+  jpg: 3,
+  jpeg: 3,
+  bmp: 4,
+  svg: 5,
+};
 
 function looksLikeArtifactFile(path: string): boolean {
   const base = path.split("/").pop() || "";
@@ -201,6 +216,22 @@ function extractBashRedirectPaths(command: string, paths: string[], seen: Set<st
     if (raw.startsWith("/") || raw.startsWith("~/") || /^[a-zA-Z]:[\\/]/.test(raw)) {
       addPath(paths, seen, raw);
     }
+  }
+}
+
+/** Pull absolute artifact files from bash stdout (echoed PNG:/GIF: paths, ls -lh, etc.). */
+function extractAbsArtifactPathsFromText(
+  content: string,
+  paths: string[],
+  seen: Set<string>,
+): void {
+  INLINE_ABS_PATH_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = INLINE_ABS_PATH_RE.exec(content)) !== null) {
+    const candidate = normalizeArtifactPath(match[1] ?? "");
+    if (!candidate || !looksLikeArtifactFile(candidate)) continue;
+    if (ARTIFACT_SOURCE_EXCLUDE_RE.test(candidate.replace(/\\/g, "/"))) continue;
+    addPath(paths, seen, candidate);
   }
 }
 
@@ -395,6 +426,8 @@ export function collectSessionArtifactPaths(
         if (command) extractBashRedirectPaths(command, paths, seen);
         extractJsonOutputArtifactPaths(String(message.content || ""), paths, seen);
         extractJsonOutputArtifactPaths(String(message.toolResultPreview || ""), paths, seen);
+        extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
+        extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
       } else {
         // Formatted tool rows may still embed OK: wrote even if toolName was lost.
         extractOkWritePaths(String(message.content || ""), paths, seen);
@@ -421,6 +454,84 @@ export function collectSessionArtifactPaths(
   for (const extra of extraPaths ?? []) addPath(paths, seen, extra);
 
   return paths;
+}
+
+export function isPreviewImageArtifactPath(path: string): boolean {
+  const base = artifactBaseName(path).toLowerCase();
+  const ext = base.match(/\.([a-z0-9]{1,12})$/)?.[1] ?? "";
+  return Object.prototype.hasOwnProperty.call(PREVIEW_IMAGE_RANK, ext);
+}
+
+function previewImageRank(path: string): number {
+  const base = artifactBaseName(path).toLowerCase();
+  const ext = base.match(/\.([a-z0-9]{1,12})$/)?.[1] ?? "";
+  return PREVIEW_IMAGE_RANK[ext] ?? 99;
+}
+
+/**
+ * Same-stem PNG/GIF/SVG → keep the most useful preview (animated GIF first).
+ * Non-image paths are dropped.
+ */
+export function preferAnimatedPreviewImages(paths: string[]): string[] {
+  const groups = new Map<string, string[]>();
+  const order: string[] = [];
+  for (const raw of paths) {
+    const path = String(raw || "").trim();
+    if (!path || !isPreviewImageArtifactPath(path)) continue;
+    const normalized = path.replace(/\\/g, "/");
+    const base = artifactBaseName(normalized);
+    const stem = base.replace(/\.[a-zA-Z0-9]{1,12}$/, "");
+    const dir = normalized.slice(0, Math.max(0, normalized.length - base.length));
+    const key = `${dir}${stem}`;
+    const bucket = groups.get(key);
+    if (!bucket) {
+      groups.set(key, [path]);
+      order.push(key);
+    } else {
+      bucket.push(path);
+    }
+  }
+  return order.map((key) => {
+    const files = groups.get(key) ?? [];
+    files.sort((a, b) => previewImageRank(a) - previewImageRank(b));
+    return files[0] ?? "";
+  }).filter(Boolean);
+}
+
+/** Inject `![name](path)` for generated images not already present in markdown. */
+export function appendMissingImageMarkdown(content: string, imagePaths: string[]): string {
+  const body = String(content || "");
+  const missing = imagePaths.filter((raw) => {
+    const path = String(raw || "").trim();
+    if (!path) return false;
+    return !body.includes(`](${path})`);
+  });
+  if (missing.length === 0) return body;
+  const block = missing.map((path) => `![${artifactBaseName(path)}](${path})`).join("\n\n");
+  return `${body.replace(/\s+$/, "")}\n\n${block}`;
+}
+
+/** Image previews produced in the same user turn as this assistant message. */
+export function collectTurnPreviewImagePaths(
+  messages: Message[] | undefined | null,
+  assistantMessageId: string,
+): string[] {
+  const list = messages ?? [];
+  const idx = list.findIndex((row) => row.id === assistantMessageId);
+  if (idx < 0) return [];
+  // Only the last assistant in the turn should embed the gallery (avoid duplicates).
+  for (let i = idx + 1; i < list.length; i += 1) {
+    if (list[i]?.role === "user") break;
+    if (list[i]?.role === "assistant") return [];
+  }
+  let start = 0;
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    if (list[i]?.role === "user") {
+      start = i + 1;
+      break;
+    }
+  }
+  return preferAnimatedPreviewImages(collectSessionArtifactPaths(list.slice(start, idx + 1)));
 }
 
 export function artifactBaseName(path: string): string {

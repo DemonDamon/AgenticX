@@ -37,6 +37,10 @@ import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseTodoMessage } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
+import {
+  appendMissingImageMarkdown,
+  collectTurnPreviewImagePaths,
+} from "../../utils/session-artifacts";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
 import { HistoricalSubAgentClusterCard } from "../subagent";
@@ -273,6 +277,14 @@ export function MessageRenderer({
     if (message.role !== "assistant") return undefined;
     return resolveReferencesForAssistant(message, allMessages);
   }, [message, allMessages]);
+  const displayMessage = useMemo(() => {
+    if (message.role !== "assistant") return message;
+    const images = collectTurnPreviewImagePaths(allMessages, message.id);
+    if (images.length === 0) return message;
+    const next = appendMissingImageMarkdown(message.content, images);
+    if (next === message.content) return message;
+    return { ...message, content: next };
+  }, [message, allMessages]);
   if (isViewImageInjectMessage(message)) {
     return <ViewImageInjectCard message={message} />;
   }
@@ -298,10 +310,10 @@ export function MessageRenderer({
       return <HookBlockNoticeLine text={buildHookBlockFriendlyNotice(toolCtx)} />;
     }
     if (chatStyle === "terminal") {
-      return <TerminalLine message={message} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
+      return <TerminalLine message={displayMessage} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
     }
     if (chatStyle === "clean") {
-      return <CleanBlock message={message} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
+      return <CleanBlock message={displayMessage} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
     }
     const rawAssist = (message.avatarName ?? "").trim();
     const metaLeaderRow = message.role === "assistant" && isMetaLeaderIdentity(message.agentId, rawAssist);
@@ -318,7 +330,7 @@ export function MessageRenderer({
       : message.avatarUrl || assistantAvatarUrl;
     return (
       <ImBubble
-        message={message}
+        message={displayMessage}
         resolvedReferences={resolvedReferences}
         highlightTerms={highlightTerms}
         badge={assistantBadge}
