@@ -95,7 +95,7 @@ export function StickyTaskBar({
   if (dismissed && runEnded) return null;
 
   return (
-    <div className="mb-2 rounded-lg border border-border bg-surface-card text-text-primary shadow-sm">
+    <div className="mb-2 overflow-hidden rounded-2xl border border-transparent bg-surface-card text-text-primary">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -216,7 +216,7 @@ export function StickyTaskBar({
                 <div
                   className={
                     item.status === "completed"
-                      ? "text-[12px] leading-snug text-text-primary"
+                      ? "text-[12px] leading-snug text-text-muted line-through"
                       : item.status === "in_progress"
                         ? "text-[12px] font-medium leading-snug text-text-strong"
                         : "text-[12px] leading-snug text-text-muted"
