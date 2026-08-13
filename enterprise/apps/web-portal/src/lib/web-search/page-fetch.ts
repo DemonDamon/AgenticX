@@ -17,6 +17,7 @@ import {
   type PageFetchFailure,
 } from "./page-fetch-backends";
 export {
+  extractDocumentTitle,
   extractMainText,
   MAX_PAGE_CHARS,
   MIN_USABLE_PAGE_CHARS,
@@ -55,6 +56,8 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
 export type PageContent = {
   url: string;
+  /** Standard page title when the selected backend exposes one. */
+  title?: string;
   /** 提取后的纯文本正文，默认截断到 MAX_PAGE_CHARS。 */
   text: string;
   /** 提取字符数（截断前），用于可观测性。 */
@@ -182,6 +185,7 @@ async function fetchPageContentWithReason(
         return {
           page: {
             url,
+            ...(result.title ? { title: result.title } : {}),
             text: result.text,
             rawChars: result.rawChars,
             backend: name,

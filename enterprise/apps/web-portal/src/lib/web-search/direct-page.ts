@@ -353,7 +353,10 @@ export function replaceCurrentQuestion(
 }
 
 function titleFromText(text: string, fallback: string): string {
-  const firstLine = text.split("\n").find((line) => line.trim().length >= 8)?.trim();
+  const firstLine = text
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length >= 8 && !line.startsWith("\\"));
   return firstLine?.slice(0, 180) || fallback;
 }
 
@@ -376,7 +379,7 @@ export async function readDirectPage(
   if (page) {
     return {
       reference,
-      title: titleFromText(page.text, reference.displayUrl),
+      title: page.title?.trim() || titleFromText(page.text, reference.displayUrl),
       text: page.text,
       rawChars: page.rawChars,
       coverage: "full_html",
@@ -393,7 +396,7 @@ export async function readDirectPage(
   if (!abstractPage) return null;
   return {
     reference,
-    title: titleFromText(abstractPage.text, reference.displayUrl),
+    title: abstractPage.title?.trim() || titleFromText(abstractPage.text, reference.displayUrl),
     text: abstractPage.text,
     rawChars: abstractPage.rawChars,
     coverage: "abstract_only",

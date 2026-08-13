@@ -5,6 +5,7 @@
 
 import type { DirectFetch } from "./direct-fetch";
 import {
+  extractDocumentTitle,
   extractMainText,
   MAX_PAGE_CHARS,
   MIN_USABLE_PAGE_CHARS,
@@ -24,7 +25,7 @@ export type PageFetchFailure =
   | "network_error";
 
 export type BackendResult =
-  | { ok: true; text: string; rawChars: number }
+  | { ok: true; text: string; rawChars: number; title?: string }
   | { ok: false; reason: PageFetchFailure };
 
 export type BackendDeps = {
@@ -115,7 +116,8 @@ export const nativeBackend: PageFetchBackend = async (url, deps) => {
       return { ok: false, reason: "too_short" };
     }
     const { text, rawChars } = truncateText(extracted, maxChars);
-    return { ok: true, text, rawChars };
+    const title = extractDocumentTitle(rawHtml);
+    return { ok: true, text, rawChars, ...(title ? { title } : {}) };
   } catch (error) {
     return { ok: false, reason: classifyFetchError(error) };
   }
@@ -192,7 +194,7 @@ export const firecrawlBackend: PageFetchBackend = async (url, deps) => {
 
     if (!res.ok) return { ok: false, reason: "http_error" };
     const payload = (await res.json()) as {
-      data?: { markdown?: string };
+      data?: { markdown?: string; metadata?: { title?: string } };
       markdown?: string;
     };
     const extracted = (payload.data?.markdown ?? payload.markdown ?? "").trim();
@@ -200,7 +202,8 @@ export const firecrawlBackend: PageFetchBackend = async (url, deps) => {
       return { ok: false, reason: "too_short" };
     }
     const { text, rawChars } = truncateText(extracted, deps.maxChars);
-    return { ok: true, text, rawChars };
+    const title = payload.data?.metadata?.title?.trim().slice(0, 300);
+    return { ok: true, text, rawChars, ...(title ? { title } : {}) };
   } catch (error) {
     return { ok: false, reason: classifyFetchError(error) };
   }

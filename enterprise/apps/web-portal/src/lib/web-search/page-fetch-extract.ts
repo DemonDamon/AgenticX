@@ -31,6 +31,21 @@ function decodeEntities(text: string): string {
     .replace(/&#39;/gi, "'");
 }
 
+/** Extract the standard HTML document title without coupling to a site layout. */
+export function extractDocumentTitle(html: string): string | undefined {
+  const lower = html.toLowerCase();
+  const titleStart = lower.indexOf("<title");
+  if (titleStart < 0) return undefined;
+  const contentStart = lower.indexOf(">", titleStart);
+  if (contentStart < 0) return undefined;
+  const contentEnd = lower.indexOf("</title>", contentStart + 1);
+  if (contentEnd < 0) return undefined;
+  const title = normalizeWhitespace(
+    decodeEntities(html.slice(contentStart + 1, contentEnd)),
+  );
+  return title ? title.slice(0, 300) : undefined;
+}
+
 function stripNoiseTags(html: string): string {
   let out = html;
   for (const tag of NOISE_TAGS) {
