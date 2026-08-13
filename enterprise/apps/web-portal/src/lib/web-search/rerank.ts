@@ -7,6 +7,32 @@ const BM25_B = 0.75;
 const CJK_CHAR = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
 const ASCII_WORD = /[a-z0-9]+/gi;
 
+function isAsciiDigit(char: string | undefined): boolean {
+  return Boolean(char && char >= "0" && char <= "9");
+}
+
+/** Keep the original token and add generic letter/number boundary variants. */
+function pushAsciiTokens(tokens: string[], value: string): void {
+  const word = value.toLowerCase();
+  tokens.push(word);
+  if (!word) return;
+
+  const variants = new Set<string>();
+  let start = 0;
+  let digitRun = isAsciiDigit(word[0]);
+  for (let index = 1; index < word.length; index += 1) {
+    const nextDigitRun = isAsciiDigit(word[index]);
+    if (nextDigitRun === digitRun) continue;
+    variants.add(word.slice(start, index));
+    start = index;
+    digitRun = nextDigitRun;
+  }
+  variants.add(word.slice(start));
+  for (const variant of variants) {
+    if (variant && variant !== word) tokens.push(variant);
+  }
+}
+
 /** CJK 无分词：中文按 bigram，ASCII 按小写单词。 */
 export function tokenize(text: string): string[] {
   const raw = text.normalize("NFKC").trim();
@@ -32,7 +58,7 @@ export function tokenize(text: string): string[] {
     ASCII_WORD.lastIndex = i;
     const m = ASCII_WORD.exec(raw);
     if (m && m.index === i) {
-      tokens.push(m[0]!.toLowerCase());
+      pushAsciiTokens(tokens, m[0]!);
       i = m.index + m[0]!.length;
       continue;
     }

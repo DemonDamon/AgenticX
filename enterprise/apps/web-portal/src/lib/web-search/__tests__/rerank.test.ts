@@ -13,6 +13,12 @@ describe("tokenize", () => {
     expect(tokenize("广州 Nansha 天气")).toContain("广州");
     expect(tokenize("广州 Nansha 天气")).toContain("nansha");
   });
+
+  it("expands compact letter-number identifiers without a domain keyword list", () => {
+    expect(tokenize("Figure11")).toEqual(["figure11", "figure", "11"]);
+    expect(tokenize("abc123def")).toEqual(["abc123def", "abc", "123", "def"]);
+    expect(tokenize("2026")).toEqual(["2026"]);
+  });
 });
 
 describe("rerankHits", () => {
@@ -80,5 +86,14 @@ describe("rankTextPassages", () => {
         "Pass Rate 80 percent",
       ]),
     );
+  });
+
+  it("matches a compact identifier against a spaced document label", () => {
+    const ranked = rankTextPassages("figure11", [
+      "11 11 11 unrelated numeric results",
+      "Figure 11: Win-rate comparison across analysis and editing tasks.",
+    ]);
+    expect(ranked[0]?.text).toContain("Figure 11: Win-rate comparison");
+    expect(ranked[0]?.score).toBeGreaterThan(ranked[1]?.score ?? 0);
   });
 });

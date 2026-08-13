@@ -109,6 +109,31 @@ describe("direct public page", () => {
     expect(matchesDirectPage(reference, "https://arxiv.org/html/2606.19348")).toBe(true);
   });
 
+  it("retrieves a spaced figure caption from a compact follow-up identifier", () => {
+    const text = [
+      "Paper title and abstract about coding agents.",
+      "11 11 11 unrelated numeric benchmark cells.",
+      "Figure 11: Win-rate comparison across analysis, generation, editing tasks, and overall performance.",
+      "Conclusion and future work.",
+    ].join("\n\n");
+    const reference = resolveDirectPageReference([
+      { role: "user", content: "https://arxiv.org/pdf/2606.19348" },
+    ])!;
+    const view: DirectPageView = {
+      reference,
+      title: "Paper",
+      text,
+      rawChars: text.length,
+      coverage: "full_html",
+      backend: "native",
+    };
+
+    const evidence = selectDirectPageEvidence(view, ["figure11 讲了啥"], 4_000);
+
+    expect(evidence.matched).toBe(true);
+    expect(evidence.text).toContain("Figure 11: Win-rate comparison");
+  });
+
   it("falls back to leading passages when lexical retrieval has no match", () => {
     const passages = chunkDirectPageText(
       "Title\n\nAbstract text\n\nIntroduction text\n\nLate appendix sentinel",
