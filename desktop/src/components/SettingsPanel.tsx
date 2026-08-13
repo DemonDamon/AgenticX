@@ -197,7 +197,7 @@ export type FavoriteForwardContext = {
 
 const ALL_PROVIDERS = [
   "openai", "anthropic", "volcengine", "bailian",
-  "zhipu", "qianfan", "minimax", "kimi", "ollama",
+  "zhipu", "qianfan", "minimax", "kimi", "deepseek", "ollama",
 ] as const;
 
 /** LiteLLM routes: show optional drop_params toggle for strict OpenAI-compatible gateways. */
@@ -973,7 +973,7 @@ function ProviderAvatar({
       style={{ width: size, height: size, backgroundColor: bg, color }}
     >
       {IconComp ? (
-        <IconComp size={Math.round(size * 0.55)} className="shrink-0" />
+        <IconComp size={Math.round(size * 0.64)} className="shrink-0" />
       ) : (
         <span style={{ fontSize: Math.round(size * 0.4), fontWeight: 700, lineHeight: 1 }}>
           {getProviderInitials(providerId, entry)}
