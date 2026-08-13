@@ -172,6 +172,21 @@ describe("buildCompletionSummary", () => {
     expect(callJson).toHaveBeenCalledOnce();
   });
 
+  it("does not prompt the summary model with a zero full-text metric", async () => {
+    const callJson = vi.fn(async () => "调研完成。");
+    await buildCompletionSummary(
+      {
+        ...baseInput,
+        stats: { ...baseInput.stats, pagesFetched: 0 },
+      },
+      { callJson },
+    );
+
+    const messages = callJson.mock.calls[0]?.[0] ?? [];
+    expect(messages[1]?.content).toContain("选用来源 10 个");
+    expect(messages[1]?.content).not.toContain("抓取正文");
+  });
+
   it("appends html primary link when format is html and model omits it", async () => {
     const out = await buildCompletionSummary(
       {
@@ -262,6 +277,18 @@ describe("fallbackSummary", () => {
     expect(out).toContain(`[DeepSeek V4 核心技术点](${ARTIFACT_HREF_PREFIX}art-final)`);
     expect(out).not.toContain(ARTIFACT_HREF_PREFIX + "art-html");
     expect(out).not.toContain(ARTIFACT_HREF_PREFIX + "art-md-dup");
+  });
+
+  it("hides a zero full-text metric while retaining the other stats", () => {
+    const out = fallbackSummary({
+      ...baseInput,
+      stats: { ...baseInput.stats, pagesFetched: 0 },
+    });
+
+    expect(out).toContain("规划检索 12 次");
+    expect(out).toContain("选用来源 10 个");
+    expect(out).toContain("引用源 26 个");
+    expect(out).not.toContain("抓取正文");
   });
 
   it("sanitizes polluted topic and does not emit multi-line link labels", () => {
