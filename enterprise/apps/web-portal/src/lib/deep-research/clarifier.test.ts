@@ -133,4 +133,34 @@ describe("proposeClarification grounding", () => {
       expect(result.questions[0]?.question).toContain("方向");
     }
   });
+
+  it("respects an explicit no-clarification decision for trusted upstream context", async () => {
+    const result = await proposeClarification({
+      url: "http://gw",
+      headers: {},
+      body: { model: "m" },
+      userQuery: "比较两个方案的成本、风险、迁移时间和回滚路径",
+      respectModelNoClarification: true,
+      fetchImpl: stubGateway() as unknown as typeof fetch,
+    });
+
+    expect(result).toEqual({ needed: false });
+  });
+
+  it("keeps the open-ended fallback when a trusted clarifier response is malformed", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: "not-json" } }] }),
+    });
+    const result = await proposeClarification({
+      url: "http://gw",
+      headers: {},
+      body: { model: "m" },
+      userQuery: "全面调研某个行业",
+      respectModelNoClarification: true,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(result.needed).toBe(true);
+  });
 });

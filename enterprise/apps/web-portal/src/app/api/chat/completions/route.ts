@@ -27,6 +27,7 @@ import {
   decideAutoRunDeepResearch,
   resolveManualDeepResearchQuery,
 } from "../../../../lib/deep-research/auto-need";
+import type { DeepResearchIntentConfidence } from "../../../../lib/deep-research/clarification-policy";
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.messages)) return body;
@@ -104,6 +105,7 @@ export async function POST(request: Request) {
   let enableDeepResearch = false;
   let enableDeepResearchAuto = false;
   let resolvedDeepResearchQuery: string | undefined;
+  let deepResearchIntentConfidence: DeepResearchIntentConfidence | undefined;
   let parsedBody: Record<string, unknown> | null = null;
   // portal 把模型 id 编码为 "<provider>/<model>"；admin 配置好的 provider 与上游 endpoint 一一对应。
   // gateway 用 model 字段查表，所以这里把 provider 拆出来放请求头，body.model 仅保留模型名。
@@ -274,6 +276,10 @@ export async function POST(request: Request) {
     enableDeepResearch = decision.runDeepResearch;
     if (decision.runDeepResearch) {
       resolvedDeepResearchQuery = decision.resolvedQuery;
+      deepResearchIntentConfidence = {
+        routeConfidence: decision.routeConfidence,
+        queryConfidence: decision.queryConfidence,
+      };
     }
     console.info(
       `[deep-research] automatic route run=${decision.runDeepResearch} route_confidence=${decision.routeConfidence.toFixed(2)} query_confidence=${decision.queryConfidence.toFixed(2)} query_chars=${decision.resolvedQuery.length} reason=${decision.reason || "unspecified"}`,
@@ -315,6 +321,12 @@ export async function POST(request: Request) {
       );
     } else {
       resolvedDeepResearchQuery = queryResolution.value.query;
+      // Manual activation is an explicit high-confidence routing choice; the
+      // existing resolver confidence still decides whether its context is safe.
+      deepResearchIntentConfidence = {
+        routeConfidence: 1,
+        queryConfidence: queryResolution.value.confidence,
+      };
       console.info(
         `[deep-research] standalone query source=${queryResolution.value.source} confidence=${queryResolution.value.confidence.toFixed(2)} chars=${resolvedDeepResearchQuery.length}`,
       );
@@ -332,6 +344,7 @@ export async function POST(request: Request) {
       userId: session.userId,
       sessionId: chatSessionId,
       resolvedUserQuery: resolvedDeepResearchQuery,
+      intentConfidence: deepResearchIntentConfidence,
       refreshAccessToken: async () => {
         if (!refreshToken) return null;
         try {

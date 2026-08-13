@@ -36,6 +36,10 @@ import {
   type ClarifyQuestion,
 } from "./clarifier";
 import {
+  canTrustNoClarification,
+  type DeepResearchIntentConfidence,
+} from "./clarification-policy";
+import {
   DEFAULT_DELIVERY_PREFS,
   deliveryClarifyQuestions,
   deliveryPrefsPromptBlock,
@@ -227,6 +231,8 @@ export type DeepResearchDeps = {
   runId?: string;
   /** Standalone research request resolved from the current conversation. */
   resolvedUserQuery?: string;
+  /** Existing route/query confidence; used only to trust a valid clarifier skip. */
+  intentConfidence?: DeepResearchIntentConfidence;
   clarifyTimeoutMs?: number;
   /** Skip clarify wait (tests). When false and clarifier needed, still emits clarify then continues with skip. */
   awaitClarify?: boolean;
@@ -586,6 +592,7 @@ export async function runDeepResearchTurn(
   const runStore = deps.runStore ?? defaultRunStore;
   const awaitClarify = deps.awaitClarify !== false;
   const clarifyTimeoutMs = deps.clarifyTimeoutMs ?? CLARIFY_TIMEOUT_MS;
+  const trustNoClarification = canTrustNoClarification(deps.intentConfidence);
 
   const tenant = deps.tenantConfig ?? (deps.loadTenantConfig ? await deps.loadTenantConfig() : null);
   const deepResearchEnabled = tenant?.deepResearchEnabled ?? true;
@@ -799,6 +806,7 @@ export async function runDeepResearchTurn(
         enqueueEvent({ type: "phase", phase: "clarify", message: "正在判断是否需要澄清…" });
         enqueueFlush();
         let clarifyResult: ClarifierResult = { needed: false };
+        let clarifierCompleted = false;
         if (budgetLeft() > 0) {
           // Bound clarifier so a slow gateway cannot leave the UI silent for minutes.
           const clarifyAbort = new AbortController();
@@ -813,9 +821,11 @@ export async function runDeepResearchTurn(
               userQuery,
               todayLine,
               reconBrief: recon.brief,
+              respectModelNoClarification: trustNoClarification,
               fetchImpl: deps.fetchImpl,
               signal: clarifyAbort.signal,
             });
+            clarifierCompleted = true;
           } catch {
             clarifyResult = { needed: false };
           } finally {
@@ -828,8 +838,11 @@ export async function runDeepResearchTurn(
         let deliveryPrefs: DeliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
         let clarifyResume: ClarifyResumePayload = { answers: {}, skip: true };
         const directionQuestions = clarifyResult.needed ? clarifyResult.questions : [];
+        const trustedNoClarificationDecision =
+          trustNoClarification && clarifierCompleted && !clarifyResult.needed;
         const askDelivery =
-          clarifyResult.needed || looksOpenEndedResearchQuery(userQuery);
+          clarifyResult.needed ||
+          (!trustedNoClarificationDecision && looksOpenEndedResearchQuery(userQuery));
         const clarifyQuestions = askDelivery
           ? [...directionQuestions, ...deliveryClarifyQuestions()].slice(0, 4)
           : [];

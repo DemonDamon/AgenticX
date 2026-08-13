@@ -944,15 +944,18 @@ describe("recon cold-start", () => {
     expect(pack).toContain("[2] B");
   });
 
-  it("still fans out open-ended asks when clarify is skipped and planner collapses", async () => {
+  it("skips the card after a trusted no-clarification decision without shrinking research breadth", async () => {
+    const clarifyDeps: Array<Record<string, unknown>> = [];
     const response = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
       {
         ...baseDeps({
           fetchImpl: gatewayStub("fanout-report") as unknown as typeof fetch,
-          // Model over-skips after recon — proposeClarification floor should still ask,
-          // but even if the injected clarifier skips, lane breadth must hold.
-          proposeClarify: async () => ({ needed: false as const }),
+          intentConfidence: { routeConfidence: 0.95, queryConfidence: 0.96 },
+          proposeClarify: async (deps: Record<string, unknown>) => {
+            clarifyDeps.push(deps);
+            return { needed: false as const };
+          },
           buildPlan: async () => ({
             topic: "deepseek v4 核心技术点",
             complexity: "simple" as const,
@@ -966,10 +969,104 @@ describe("recon cold-start", () => {
     );
 
     const { events } = await readSsePayload(response);
+    expect(clarifyDeps[0]?.respectModelNoClarification).toBe(true);
+    expect(events.some((e) => e.type === "clarify")).toBe(false);
     const researchLanes = events.filter(
       (e) => e.type === "lane_started" && e.laneId !== "recon-cold-start",
     );
     expect(researchLanes.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("keeps the card when either upstream confidence is below the stricter threshold", async () => {
+    const clarifyDeps: Array<Record<string, unknown>> = [];
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
+      {
+        ...baseDeps({
+          fetchImpl: gatewayStub("low-confidence-report") as unknown as typeof fetch,
+          intentConfidence: { routeConfidence: 0.89, queryConfidence: 0.99 },
+          proposeClarify: async (deps: Record<string, unknown>) => {
+            clarifyDeps.push(deps);
+            return { needed: false as const };
+          },
+          buildPlan: async () => ({
+            topic: "deepseek v4 核心技术点",
+            complexity: "simple" as const,
+            subQuestions: ["deepseek v4 核心技术点"],
+          }),
+          executeSearch: async () => [
+            { title: "t", url: "https://ex.com/low-confidence", snippet: "s" },
+          ],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(clarifyDeps[0]?.respectModelNoClarification).toBe(false);
+    expect(events.some((e) => e.type === "clarify")).toBe(true);
+  });
+
+  it("keeps the card when the clarifier requests input despite high confidence", async () => {
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
+      {
+        ...baseDeps({
+          fetchImpl: gatewayStub("clarify-report") as unknown as typeof fetch,
+          intentConfidence: { routeConfidence: 0.99, queryConfidence: 0.99 },
+          proposeClarify: async () => ({
+            needed: true as const,
+            questions: [
+              {
+                id: "focus",
+                question: "优先研究哪个方向？",
+                options: [
+                  { id: "architecture", label: "架构" },
+                  { id: "deployment", label: "部署" },
+                ],
+                allowCustom: true,
+              },
+            ],
+          }),
+          buildPlan: async () => ({
+            topic: "deepseek v4 核心技术点",
+            complexity: "simple" as const,
+            subQuestions: ["deepseek v4 核心技术点"],
+          }),
+          executeSearch: async () => [
+            { title: "t", url: "https://ex.com/clarify", snippet: "s" },
+          ],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(events.some((e) => e.type === "clarify" && e.questionId === "focus")).toBe(true);
+  });
+
+  it("keeps the card when the clarifier fails despite high confidence", async () => {
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
+      {
+        ...baseDeps({
+          fetchImpl: gatewayStub("clarifier-failure-report") as unknown as typeof fetch,
+          intentConfidence: { routeConfidence: 0.99, queryConfidence: 0.99 },
+          proposeClarify: async () => {
+            throw new Error("clarifier unavailable");
+          },
+          buildPlan: async () => ({
+            topic: "deepseek v4 核心技术点",
+            complexity: "simple" as const,
+            subQuestions: ["deepseek v4 核心技术点"],
+          }),
+          executeSearch: async () => [
+            { title: "t", url: "https://ex.com/fallback", snippet: "s" },
+          ],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(events.some((e) => e.type === "clarify")).toBe(true);
   });
 
   it("completes the run even when recon throws", async () => {

@@ -126,7 +126,10 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     expect(mocks.resolveManualDeepResearchQuery).toHaveBeenCalledTimes(1);
     expect(mocks.runDeepResearchTurn).toHaveBeenCalledWith(
       expect.any(Object),
-      expect.objectContaining({ resolvedUserQuery: "补全后的研究请求" }),
+      expect.objectContaining({
+        resolvedUserQuery: "补全后的研究请求",
+        intentConfidence: { routeConfidence: 1, queryConfidence: 0.95 },
+      }),
     );
   });
 
@@ -161,6 +164,25 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       expect.any(Object),
       expect.objectContaining({
         resolvedUserQuery: "两位人物截至当前日期的近期风评变化",
+        intentConfidence: { routeConfidence: 0.94, queryConfidence: 0.96 },
+      }),
+    );
+  });
+
+  it("keeps a manual fallback on the clarification-safe path", async () => {
+    mocks.resolveManualDeepResearchQuery.mockResolvedValue({
+      kind: "resolved",
+      value: { query: "当前问题", confidence: 0, source: "fallback" },
+    });
+
+    const response = await POST(request({ agenticx_deep_research: true }));
+
+    expect(await response.text()).toBe("deep");
+    expect(mocks.runDeepResearchTurn).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        resolvedUserQuery: "当前问题",
+        intentConfidence: { routeConfidence: 1, queryConfidence: 0 },
       }),
     );
   });
