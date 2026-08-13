@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { ArrowLeft, ExternalLink, ShieldAlert } from "lucide-react";
 import { Button } from "@agenticx/ui";
 import { EnterpriseBrandMark } from "../../components/EnterpriseBrandMark";
@@ -28,26 +28,28 @@ function parseTarget(raw: string | null, title: string | null): ExternalTarget |
 }
 
 function ExternalLinkPageContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const target = React.useMemo(
     () => parseTarget(searchParams.get("url"), searchParams.get("title")),
     [searchParams],
   );
-  const [opened, setOpened] = React.useState(false);
-
   const goBack = React.useCallback(() => {
-    if (window.history.length > 1) {
-      router.back();
-    } else {
-      router.replace("/workspace");
-    }
-  }, [router]);
+    window.close();
+    // Script-opened tabs normally close synchronously. Keep a safe fallback
+    // for browsers that block window.close() or for directly opened URLs.
+    window.setTimeout(() => {
+      if (window.closed) return;
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.location.replace("/workspace");
+      }
+    }, 100);
+  }, []);
 
   const continueToExternalSite = React.useCallback(() => {
     if (!target) return;
-    window.open(target.href, "_blank", "noopener,noreferrer");
-    setOpened(true);
+    window.location.replace(target.href);
   }, [target]);
 
   return (
@@ -89,15 +91,9 @@ function ExternalLinkPageContent() {
               </div>
             )}
 
-            {opened ? (
-              <p className="text-sm leading-6 text-muted-foreground" role="status">
-                外部网页已在新标签页打开。你可以返回当前工作区继续查看内容。
-              </p>
-            ) : (
-              <p className="text-xs leading-5 text-muted-foreground">
-                外部网页的内容和安全性由目标网站负责，请不要在不熟悉的网站中输入敏感信息。
-              </p>
-            )}
+            <p className="text-xs leading-5 text-muted-foreground">
+              外部网页的内容和安全性由目标网站负责，请不要在不熟悉的网站中输入敏感信息。
+            </p>
 
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button type="button" variant="outline" onClick={goBack}>
