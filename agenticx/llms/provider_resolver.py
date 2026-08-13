@@ -13,6 +13,7 @@ from agenticx.cli.config_manager import ConfigManager
 from agenticx.llms.ark_provider import ArkLLMProvider
 from agenticx.llms.bailian_provider import BailianProvider
 from agenticx.llms.base import BaseLLMProvider
+from agenticx.llms.deepseek_provider import DeepSeekProvider
 from agenticx.llms.kimi_provider import KimiProvider
 from agenticx.llms.litellm_provider import (
     LiteLLMProvider,
@@ -36,6 +37,7 @@ class ProviderResolver:
         "qianfan": QianfanProvider,
         "kimi": KimiProvider,
         "minimax": MiniMaxProvider,
+        "deepseek": DeepSeekProvider,
         "ollama": LiteLLMProvider,
     }
 

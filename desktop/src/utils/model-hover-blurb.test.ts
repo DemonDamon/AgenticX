@@ -31,6 +31,13 @@ describe("describeModelForPicker", () => {
     expect(blurb.supportsReasoningEffort).toBe(false);
   });
 
+  it("uses a distinctive blurb for DeepSeek V4", () => {
+    const blurb = describeModelForPicker("deepseek", "deepseek-v4-pro", "DeepSeek");
+    expect(blurb.description).toContain("旗舰");
+    expect(blurb.supportsReasoningEffort).toBe(false);
+    expect(blurb.metaValue).toBe("DeepSeek");
+  });
+
   it("does not invent a consumption multiplier", () => {
     const blurb = describeModelForPicker("custom_openai_caiyun", "glm-5.2", "彩讯-外网");
     expect(blurb.metaLabel).toBe("服务渠道");

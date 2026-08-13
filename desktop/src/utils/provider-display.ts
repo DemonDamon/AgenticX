@@ -2,20 +2,24 @@
 
 /** 品牌专属颜色（纯色背景用于 logo 头像）；未匹配的自定义厂商按名称 hash 取色 */
 const PROVIDER_BRAND_COLOR: Record<string, string> = {
-  openai: "#10a37f",
+  openai: "#ffffff",
   anthropic: "#d97757",
-  volcengine: "#1664ff",
-  bailian: "#ff6a00",
-  zhipu: "#6154ec",
-  qianfan: "#3264ff",
-  minimax: "#1a1a1a",
-  kimi: "#1d6af4",
+  volcengine: "#ffffff",
+  bailian: "#ffffff",
+  zhipu: "#ffffff",
+  qianfan: "#ffffff",
+  minimax: "#ffffff",
+  kimi: "#ffffff",
+  deepseek: "#ffffff",
   ollama: "#ffffff",
 };
 
 const PROVIDER_BRAND_TEXT_COLOR: Record<string, string> = {
-  minimax: "#ffffff",
+  openai: "#111111",
   ollama: "#18181b",
+  deepseek: "#4d6bfe",
+  kimi: "#111111",
+  zhipu: "#3859FF",
 };
 
 const PALETTE = [
@@ -48,6 +52,7 @@ const BUILTIN_PROVIDER_IDS = new Set([
   "qianfan",
   "minimax",
   "kimi",
+  "deepseek",
   "ollama",
 ]);
 
@@ -60,6 +65,7 @@ const PROVIDER_DISPLAY_NAME: Record<string, string> = {
   qianfan: "百度千帆",
   minimax: "MiniMax",
   kimi: "月之暗面",
+  deepseek: "DeepSeek",
   ollama: "Ollama",
 };
 

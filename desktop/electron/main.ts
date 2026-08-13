@@ -1215,6 +1215,7 @@ const KNOWN_BASE_URLS: Record<string, string> = {
   qianfan: "https://aip.baidubce.com/rpc/2.0/ai_custom/v1",
   minimax: "https://api.minimax.chat/v1",
   kimi: "https://api.moonshot.cn/v1",
+  deepseek: "https://api.deepseek.com/v1",
 };
 
 /** Treat UI placeholders as empty so we do not send `Bearer sk-...` to intranet gateways. */
@@ -1412,6 +1413,10 @@ const PROVIDER_FALLBACK_MODELS: Record<string, string[]> = {
     "MiniMax-M2.1-highspeed",
     "MiniMax-M2.1-lightning",
     "MiniMax-M2",
+  ],
+  deepseek: [
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
   ],
 };
 

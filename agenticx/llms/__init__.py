@@ -14,6 +14,7 @@ try:  # sandbox may block SSL when importing litellm/requests
     from .zhipu_provider import ZhipuProvider
     from .qianfan_provider import QianfanProvider
     from .minimax_provider import MiniMaxProvider
+    from .deepseek_provider import DeepSeekProvider
     from .provider_resolver import ProviderResolver
     from .llm_factory import LlmFactory
 except Exception:  # pragma: no cover
@@ -24,6 +25,7 @@ except Exception:  # pragma: no cover
     ZhipuProvider = None  # type: ignore
     QianfanProvider = None  # type: ignore
     MiniMaxProvider = None  # type: ignore
+    DeepSeekProvider = None  # type: ignore
     ProviderResolver = None  # type: ignore
     LlmFactory = None  # type: ignore
 
@@ -96,6 +98,7 @@ __all__ = [
     "ZhipuProvider",
     "QianfanProvider",
     "MiniMaxProvider",
+    "DeepSeekProvider",
     "ProviderResolver",
     "LlmFactory",
 
