@@ -21,6 +21,77 @@ DOWN_ONLY=0
 DB_DIALECT="postgresql"
 APP_ARGS=()
 
+database_url_matches_dialect() {
+  local dialect="$1"
+  local candidate="$2"
+  if [ "$dialect" = "mysql" ]; then
+    [[ "$candidate" == mysql://* ]]
+  else
+    [[ "$candidate" == postgresql://* || "$candidate" == postgres://* ]]
+  fi
+}
+
+database_url_is_loopback() {
+  local candidate="$1"
+  local authority="${candidate#*://}"
+  local host_port="${authority%%/*}"
+  local host=""
+  local first second third fourth
+  host_port="${host_port##*@}"
+  if [[ "$host_port" == \[* ]]; then
+    host="${host_port%%]*}"
+    host="${host#[}"
+  else
+    host="${host_port%%:*}"
+  fi
+  case "$host" in
+    [lL][oO][cC][aA][lL][hH][oO][sS][tT]|::1) return 0 ;;
+  esac
+  IFS=. read -r first second third fourth <<EOF
+$host
+EOF
+  [ "$first" = "127" ] || return 1
+  for octet in "$second" "$third" "$fourth"; do
+    [[ "$octet" =~ ^[0-9]{1,3}$ ]] || return 1
+    [ "$octet" -le 255 ] || return 1
+  done
+  [ -n "$fourth" ]
+}
+
+read_local_database_url() {
+  local env_file="$ENTERPRISE_DIR/.env.local"
+  [ -f "$env_file" ] || return 1
+  (
+    set +u
+    set +x
+    unset DATABASE_URL
+    # start-dev.sh already treats this file as trusted shell configuration.
+    # Suppress any incidental output and return only DATABASE_URL.
+    source "$env_file" >/dev/null 2>&1 || exit 1
+    set +x
+    printf '%s' "${DATABASE_URL:-}"
+  )
+}
+
+select_database_url() {
+  local dialect="$1"
+  local fallback="$2"
+  local configured=""
+
+  configured="$(read_local_database_url || true)"
+  if database_url_matches_dialect "$dialect" "$configured"; then
+    if ! database_url_is_loopback "$configured"; then
+      echo "[start-dev-with-infra] 拒绝连接非本机数据库；本地基础设施脚本仅接受 loopback DATABASE_URL。" >&2
+      return 1
+    fi
+    DATABASE_URL_SOURCE=".env.local"
+    SELECTED_DATABASE_URL="$configured"
+    return 0
+  fi
+  DATABASE_URL_SOURCE="local default"
+  SELECTED_DATABASE_URL="$fallback"
+}
+
 print_help() {
   cat <<'EOF'
 start-dev-with-infra.sh — 本地开发一键启动（中间件 + 应用）
@@ -135,13 +206,16 @@ if [ "$SKIP_INFRA" -eq 0 ]; then
       fi
       sleep 1
     done
-    # Force dialect+URL for this --db selection. start-dev.sh sources .env.local
-    # afterwards and would otherwise overwrite with a stale postgresql:// URL.
+    # Pin the selected dialect so start-dev.sh cannot restore a stale URL of
+    # another dialect. Preserve a matching environment/.env.local database so
+    # customer-specific local schemas are not silently replaced by /agenticx.
     export DATABASE_DIALECT=mysql
-    export DATABASE_URL='mysql://agenticx:agenticx@127.0.0.1:3306/agenticx'
+    select_database_url mysql 'mysql://agenticx:agenticx@127.0.0.1:3306/agenticx'
+    DATABASE_URL="$SELECTED_DATABASE_URL"
+    export DATABASE_URL
     export AGX_INFRA_DATABASE_DIALECT="$DATABASE_DIALECT"
     export AGX_INFRA_DATABASE_URL="$DATABASE_URL"
-    echo "[start-dev-with-infra] DATABASE_DIALECT=$DATABASE_DIALECT DATABASE_URL=$DATABASE_URL"
+    echo "[start-dev-with-infra] DATABASE_DIALECT=$DATABASE_DIALECT DATABASE_URL_SOURCE=$DATABASE_URL_SOURCE"
   else
     echo "[start-dev-with-infra] waiting postgres health..."
     for i in $(seq 1 60); do
@@ -157,10 +231,12 @@ if [ "$SKIP_INFRA" -eq 0 ]; then
       sleep 1
     done
     export DATABASE_DIALECT=postgresql
-    export DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/agenticx'
+    select_database_url postgresql 'postgresql://postgres:postgres@127.0.0.1:5432/agenticx'
+    DATABASE_URL="$SELECTED_DATABASE_URL"
+    export DATABASE_URL
     export AGX_INFRA_DATABASE_DIALECT="$DATABASE_DIALECT"
     export AGX_INFRA_DATABASE_URL="$DATABASE_URL"
-    echo "[start-dev-with-infra] DATABASE_DIALECT=$DATABASE_DIALECT DATABASE_URL=$DATABASE_URL"
+    echo "[start-dev-with-infra] DATABASE_DIALECT=$DATABASE_DIALECT DATABASE_URL_SOURCE=$DATABASE_URL_SOURCE"
   fi
 
   echo "[start-dev-with-infra] waiting redis health..."

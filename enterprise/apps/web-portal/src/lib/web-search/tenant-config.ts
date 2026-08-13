@@ -69,7 +69,7 @@ type StoredWebSearchConfigRow = {
   enabled: unknown;
   provider: string;
   apiKeyCipher?: string | null;
-  providers: unknown;
+  providers?: unknown;
   maxResults: unknown;
   maxSearchCalls?: unknown;
   deepResearchEnabled: unknown;
@@ -78,6 +78,7 @@ type StoredWebSearchConfigRow = {
 type WebSearchConfigRead = {
   rows: StoredWebSearchConfigRow[];
   usedLegacySearchCallBudget: boolean;
+  usedLegacyProviderPool: boolean;
 };
 
 const MAX_PROVIDER_ID_CHARS = 128;
@@ -92,12 +93,10 @@ export class WebSearchConfigValidationError extends Error {
   }
 }
 
-/**
- * Recognize only the rolling-deploy failure introduced by the new budget
- * column. Other missing columns and all connectivity failures must remain
- * visible to strict callers.
- */
-export function isMissingMaxSearchCallsColumnError(error: unknown): boolean {
+function isMissingWebSearchConfigColumnError(
+  error: unknown,
+  columnName: "max_search_calls" | "providers",
+): boolean {
   const visited = new Set<object>();
   let current: unknown = error;
 
@@ -120,28 +119,59 @@ export function isMissingMaxSearchCallsColumnError(error: unknown): boolean {
       .join(" ")
       .toLowerCase();
 
-    if (isUndefinedColumn && details.includes("max_search_calls")) return true;
+    if (isUndefinedColumn && details.includes(columnName)) return true;
     current = row.cause;
   }
 
   return false;
 }
 
+/** Recognize only the expected rolling-deploy failure for the budget column. */
+export function isMissingMaxSearchCallsColumnError(error: unknown): boolean {
+  return isMissingWebSearchConfigColumnError(error, "max_search_calls");
+}
+
+/** Recognize only the expected rolling-deploy failure for the provider-pool column. */
+export function isMissingProviderPoolColumnError(error: unknown): boolean {
+  return isMissingWebSearchConfigColumnError(error, "providers");
+}
+
 export async function readWebSearchConfigWithLegacyColumnFallback(
   readCurrent: () => Promise<StoredWebSearchConfigRow[]>,
-  readLegacy: () => Promise<StoredWebSearchConfigRow[]>,
+  readBeforeSearchBudget: () => Promise<StoredWebSearchConfigRow[]>,
+  readBeforeProviderPool?: () => Promise<StoredWebSearchConfigRow[]>,
 ): Promise<WebSearchConfigRead> {
   try {
     return {
       rows: await readCurrent(),
       usedLegacySearchCallBudget: false,
+      usedLegacyProviderPool: false,
     };
   } catch (error) {
+    if (isMissingProviderPoolColumnError(error) && readBeforeProviderPool) {
+      return {
+        rows: await readBeforeProviderPool(),
+        usedLegacySearchCallBudget: true,
+        usedLegacyProviderPool: true,
+      };
+    }
     if (!isMissingMaxSearchCallsColumnError(error)) throw error;
-    return {
-      rows: await readLegacy(),
-      usedLegacySearchCallBudget: true,
-    };
+    try {
+      return {
+        rows: await readBeforeSearchBudget(),
+        usedLegacySearchCallBudget: true,
+        usedLegacyProviderPool: false,
+      };
+    } catch (legacyError) {
+      if (!isMissingProviderPoolColumnError(legacyError) || !readBeforeProviderPool) {
+        throw legacyError;
+      }
+      return {
+        rows: await readBeforeProviderPool(),
+        usedLegacySearchCallBudget: true,
+        usedLegacyProviderPool: true,
+      };
+    }
   }
 }
 
@@ -375,7 +405,7 @@ export async function loadTenantWebSearchConfigStrict(
   const config = resolveDatabaseConfig();
   if (config.dialect === "mysql") {
     const { raw: db } = await createMysqlDb(config);
-    const { rows, usedLegacySearchCallBudget } =
+    const { rows, usedLegacySearchCallBudget, usedLegacyProviderPool } =
       await readWebSearchConfigWithLegacyColumnFallback(
         () => db.select().from(mysqlTable).where(eq(mysqlTable.tenantId, tid)).limit(1),
         () =>
@@ -391,14 +421,29 @@ export async function loadTenantWebSearchConfigStrict(
             .from(mysqlTable)
             .where(eq(mysqlTable.tenantId, tid))
             .limit(1),
+        () =>
+          db
+            .select({
+              enabled: mysqlTable.enabled,
+              provider: mysqlTable.provider,
+              apiKeyCipher: mysqlTable.apiKeyCipher,
+              maxResults: mysqlTable.maxResults,
+              deepResearchEnabled: mysqlTable.deepResearchEnabled,
+            })
+            .from(mysqlTable)
+            .where(eq(mysqlTable.tenantId, tid))
+            .limit(1),
       );
     const row = rows[0];
     if (!row) return null;
-    return mapStoredWebSearchConfigRow(row, usedLegacySearchCallBudget);
+    return mapStoredWebSearchConfigRow(
+      row,
+      usedLegacySearchCallBudget || usedLegacyProviderPool,
+    );
   }
 
   const db = getIamDb();
-  const { rows, usedLegacySearchCallBudget } =
+  const { rows, usedLegacySearchCallBudget, usedLegacyProviderPool } =
     await readWebSearchConfigWithLegacyColumnFallback(
       () => db.select().from(pgTable).where(eq(pgTable.tenantId, tid)).limit(1),
       () =>
@@ -414,10 +459,25 @@ export async function loadTenantWebSearchConfigStrict(
           .from(pgTable)
           .where(eq(pgTable.tenantId, tid))
           .limit(1),
+      () =>
+        db
+          .select({
+            enabled: pgTable.enabled,
+            provider: pgTable.provider,
+            apiKeyCipher: pgTable.apiKeyCipher,
+            maxResults: pgTable.maxResults,
+            deepResearchEnabled: pgTable.deepResearchEnabled,
+          })
+          .from(pgTable)
+          .where(eq(pgTable.tenantId, tid))
+          .limit(1),
     );
   const row = rows[0];
   if (!row) return null;
-  return mapStoredWebSearchConfigRow(row, usedLegacySearchCallBudget);
+  return mapStoredWebSearchConfigRow(
+    row,
+    usedLegacySearchCallBudget || usedLegacyProviderPool,
+  );
 }
 
 /** Ordinary-search runtime read; storage/decryption failures disable outbound search. */
