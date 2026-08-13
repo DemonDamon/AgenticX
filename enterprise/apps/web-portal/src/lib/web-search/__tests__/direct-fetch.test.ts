@@ -50,7 +50,13 @@ describe("directFetch", () => {
       });
       req.on("end", () => {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ contentType: req.headers["content-type"] ?? null, raw }));
+        res.end(
+          JSON.stringify({
+            contentType: req.headers["content-type"] ?? null,
+            authorization: req.headers.authorization ?? null,
+            raw,
+          }),
+        );
       });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -64,8 +70,13 @@ describe("directFetch", () => {
         headers: { "content-type": "application/json", authorization: "Bearer k" },
         body,
       });
-      const json = (await res.json()) as { contentType: string | null; raw: string };
+      const json = (await res.json()) as {
+        contentType: string | null;
+        authorization: string | null;
+        raw: string;
+      };
       expect(json.contentType).toMatch(/application\/json/i);
+      expect(json.authorization).toBe("Bearer k");
       expect(json.raw).toBe(body);
     } finally {
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
