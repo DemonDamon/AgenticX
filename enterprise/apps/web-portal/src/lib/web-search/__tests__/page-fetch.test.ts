@@ -109,6 +109,27 @@ describe("fetchPageContent", () => {
     expect(page!.backend).toBe("native");
   });
 
+  it("keeps the legacy 12k default but accepts a bounded explicit-read ceiling", async () => {
+    const body = "A".repeat(20_000);
+    const fetchImpl: DirectFetch = async () =>
+      new Response(`<article><p>${body}</p></article>`, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    const legacy = await fetchPageContent("https://example.com/default", {
+      fetchImpl,
+      backends: ["native"],
+    });
+    const expanded = await fetchPageContent("https://example.com/expanded", {
+      fetchImpl,
+      backends: ["native"],
+      maxChars: 30_000,
+    });
+    expect(legacy?.text.length).toBeLessThan(20_000);
+    expect(expanded?.text.length).toBe(20_000);
+    expect(expanded?.rawChars).toBe(20_000);
+  });
+
   it("falls back to jina when native returns too_short", async () => {
     const short = "x".repeat(MIN_USABLE_PAGE_CHARS - 1);
     const jinaBody = "Jina 回退正文".repeat(80);

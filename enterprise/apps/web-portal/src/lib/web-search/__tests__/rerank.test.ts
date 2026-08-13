@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WebSearchHit } from "../providers";
-import { rerankHits, tokenize } from "../rerank";
+import { rankTextPassages, rerankHits, tokenize } from "../rerank";
 
 function hit(title: string, url: string, snippet = ""): WebSearchHit {
   return { title, url, snippet };
@@ -64,5 +64,21 @@ describe("rerankHits", () => {
       "https://b.com",
       "https://c.com",
     ]);
+  });
+});
+
+describe("rankTextPassages", () => {
+  it("uses the same lexical scorer for arbitrary document passages", () => {
+    const ranked = rankTextPassages("Table 8 Pass Rate", [
+      "Introduction and motivation",
+      "Table 8 R&D coding benchmark",
+      "Pass Rate 80 percent",
+    ]);
+    expect(ranked.slice(0, 2).map((row) => row.text)).toEqual(
+      expect.arrayContaining([
+        "Table 8 R&D coding benchmark",
+        "Pass Rate 80 percent",
+      ]),
+    );
   });
 });

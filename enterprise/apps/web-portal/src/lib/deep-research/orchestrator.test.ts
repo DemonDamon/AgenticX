@@ -25,6 +25,7 @@ import type { Citation } from "./registry";
 import { emptyFetchStats } from "../web-search/page-fetch";
 import { directFetch } from "../web-search/direct-fetch";
 import type { executeWebSearch } from "../web-search/providers";
+import type { DirectPageView } from "../web-search/direct-page";
 
 type ExecuteSearchArgs = Parameters<typeof executeWebSearch>;
 
@@ -134,6 +135,85 @@ describe("mapPool concurrency", () => {
 });
 
 describe("runDeepResearchTurn", () => {
+  it("reads an explicit page once and reuses question-ranked passages across lanes", async () => {
+    const gatewayBodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      gatewayBodies.push(body);
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: "lane memo" } }] }),
+        } as Response;
+      }
+      return synthUpstream("report");
+    });
+    const readPage = vi.fn(async (reference): Promise<DirectPageView> => ({
+      reference,
+      title: "Paper title",
+      text: [
+        "Paper title and abstract.",
+        "Introduction and background.",
+        "Method section.",
+        "Table 8: R&D coding benchmark.",
+        "Pass Rate Internal Engineers 80 percent.",
+      ].join("\n\n"),
+      rawChars: 180,
+      coverage: "full_html",
+      backend: "native",
+    }));
+    const fetchPagesFn = vi.fn(async (urls: string[]) => ({
+      pages: urls.map(() => null),
+      stats: emptyFetchStats(),
+    }));
+
+    const response = await runDeepResearchTurn(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: "https://arxiv.org/pdf/2606.19348请研究这篇文章",
+          },
+        ],
+        agenticx_deep_research: true,
+      },
+      {
+        ...baseDeps({
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          readPage,
+          fetchPagesFn,
+          buildPlan: async () => ({
+            topic: "Paper",
+            complexity: "simple" as const,
+            subQuestions: ["Table 8 Pass Rate"],
+          }),
+          executeSearch: async () => [
+            {
+              title: "duplicate paper",
+              url: "https://arxiv.org/abs/2606.19348v1",
+              snippet: "duplicate",
+            },
+            { title: "external", url: "https://example.com/context", snippet: "context" },
+          ],
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(readPage.mock.calls[0]?.[0]).toMatchObject({
+      readUrl: "https://arxiv.org/html/2606.19348",
+      question: "请研究这篇文章",
+    });
+    expect(fetchPagesFn).toHaveBeenCalled();
+    const pageFetchUrls = fetchPagesFn.mock.calls.flatMap((call) => call[0]);
+    expect(pageFetchUrls.length).toBeGreaterThan(0);
+    expect(new Set(pageFetchUrls)).toEqual(new Set(["https://example.com/context"]));
+    expect(JSON.stringify(gatewayBodies)).toContain("Table 8: R&D coding benchmark");
+    expect(JSON.stringify(gatewayBodies)).toContain("Pass Rate Internal Engineers 80 percent");
+  });
+
   it("emits structured events, streams report, and sources frame without gray progress", async () => {
     const plan: ResearchPlan = {
       topic: "主题",

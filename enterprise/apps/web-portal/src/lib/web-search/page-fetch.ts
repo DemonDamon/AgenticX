@@ -55,7 +55,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
 export type PageContent = {
   url: string;
-  /** 提取后的纯文本正文，已截断到 MAX_PAGE_CHARS。 */
+  /** 提取后的纯文本正文，默认截断到 MAX_PAGE_CHARS。 */
   text: string;
   /** 提取字符数（截断前），用于可观测性。 */
   rawChars: number;
@@ -66,6 +66,13 @@ export type PageContent = {
 export type PageFetchDeps = {
   fetchImpl?: DirectFetch;
   timeoutMs?: number;
+  /** Optional larger bound for explicit-document reads; server-clamped to 240k. */
+  maxChars?: number;
+  /**
+   * Skip DNS admission only for a URL built from a trusted site adapter.
+   * Never set this for an arbitrary user/provider URL.
+   */
+  canonicalPublicUrl?: boolean;
   signal?: AbortSignal;
   /** 依次尝试，首个成功即返回；缺省用 DEFAULT_BACKEND_CHAIN。 */
   backends?: PageFetchBackendName[];
@@ -150,7 +157,7 @@ async function fetchPageContentWithReason(
     // Production native fetches pin the same public DNS answer that passed the
     // SSRF check. Injected test/custom transports remain responsible for their
     // own connection semantics but still receive the synchronous URL policy.
-    if (fetchImpl === directFetch) {
+    if (fetchImpl === directFetch && !deps?.canonicalPublicUrl) {
       const resolved = await resolveSafeWebSearchResultUrl(safeUrl);
       safeUrl = resolved.url;
       connectAddress = resolved.address;
@@ -165,6 +172,7 @@ async function fetchPageContentWithReason(
       const result = await backend(safeUrl, {
         fetchImpl,
         timeoutMs,
+        maxChars: deps?.maxChars,
         signal: deps?.signal,
         apiKey: deps?.apiKeys?.[name],
         ...(name === "native" && connectAddress ? { connectAddress } : {}),

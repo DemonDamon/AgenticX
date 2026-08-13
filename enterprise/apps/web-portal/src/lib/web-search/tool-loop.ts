@@ -62,6 +62,16 @@ import {
   normalizeMaxSearchCalls,
 } from "./search-call-budget";
 import { classifyWebSearchNeed } from "./search-necessity";
+import {
+  DIRECT_PAGE_CONTEXT_CHARS,
+  directPageSource,
+  matchesDirectPage,
+  readDirectPage,
+  replaceCurrentQuestion,
+  resolveDirectPageReference,
+  selectDirectPageEvidence,
+  withDirectPageContext,
+} from "./direct-page";
 
 export const WEB_SEARCH_TOOL = {
   type: "function",
@@ -151,6 +161,8 @@ export type GatewayFetchDeps = {
   signal?: AbortSignal;
   loadTenantConfig?: () => Promise<TenantWebSearchRow>;
   executeSearch?: typeof executeWebSearch;
+  /** Test seam; production reuses page-fetch through readDirectPage. */
+  readPage?: typeof readDirectPage;
 };
 
 function sseDataFrame(payload: unknown): string {
@@ -830,6 +842,7 @@ async function executeOrdinarySearchPlan(
   queries: string[],
   cfg: WebSearchRuntimeConfig,
   searchFn: typeof executeWebSearch,
+  options: { acceptHit?: (hit: WebSearchHit) => boolean } = {},
 ): Promise<{
   groups: WebSearchHit[][];
   providerCalls: number;
@@ -852,11 +865,12 @@ async function executeOrdinarySearchPlan(
     boundedQueries.map(async (query) => {
       callsUsed += 1;
       try {
-        return await searchFn(
+        const hits = await searchFn(
           query,
           maxResults,
           configForWebSearchProvider(cfg, primary),
         );
+        return options.acceptHit ? hits.filter(options.acceptHit) : hits;
       } catch (error) {
         console.warn(
           `[web-search] provider=${primary.id} query_chars=${query.length} failed:`,
@@ -891,11 +905,12 @@ async function executeOrdinarySearchPlan(
       callsUsed += 1;
       providerIdsByQuery[retryIndex]!.push(alternative.id);
       try {
-        const complement = await searchFn(
+        const fetched = await searchFn(
           boundedQueries[retryIndex]!,
           maxResults,
           configForWebSearchProvider(cfg, alternative),
         );
+        const complement = options.acceptHit ? fetched.filter(options.acceptHit) : fetched;
         groups[retryIndex] = current.length === 0
           ? complement
           : mergeSearchHits(current, complement);
@@ -993,15 +1008,23 @@ export async function runWebSearchTurn(
     }
   }
 
+  const directReference = resolveDirectPageReference(originalMessages);
+  const queryMessages = directReference?.explicitInCurrentTurn
+    ? replaceCurrentQuestion(
+        originalMessages,
+        directReference.question || directReference.displayUrl,
+      )
+    : originalMessages;
+
   // Decide whether this turn needs search from the current user text only. If it
   // does, contextual completion below is always delegated to the rewrite agent.
-  const queryForSkip = extractLastUserQuery(originalMessages);
+  const queryForSkip = extractLastUserQuery(queryMessages);
   const alwaysSearch = webSearchAlwaysOn();
-  const skip = alwaysSearch
+  const skip = alwaysSearch || directReference?.explicitInCurrentTurn
     ? null
     : classifyWebSearchNeed({
         query: queryForSkip,
-        rawQuery: extractLastUserRawText(originalMessages),
+        rawQuery: extractLastUserRawText(queryMessages),
       });
   if (skip?.need === "skip") {
     return respondWithoutSearch(skip.reason, { resolvedQuery: queryForSkip });
@@ -1009,12 +1032,26 @@ export async function runWebSearchTurn(
 
   const modelName = typeof rest.model === "string" ? rest.model : undefined;
   const queryResolutionStartedAt = Date.now();
-  const queryResolution = await resolveStandaloneSearchQuery(
-    originalMessages,
-    modelName,
-    deps,
-    cfg.maxSearchCalls,
-  );
+  const explicitQuery = directReference?.explicitInCurrentTurn
+    ? directReference.question || directReference.displayUrl
+    : "";
+  const queryResolution = directReference?.explicitInCurrentTurn
+    ? {
+        kind: "resolved" as const,
+        value: {
+          query: explicitQuery,
+          needSearch: true,
+          searchQueries: [explicitQuery],
+          confidence: 1,
+          source: "current" as const,
+        },
+      }
+    : await resolveStandaloneSearchQuery(
+        queryMessages,
+        modelName,
+        deps,
+        cfg.maxSearchCalls,
+      );
   const queryResolutionMs = Date.now() - queryResolutionStartedAt;
   if (queryResolution.kind === "unresolved") {
     return respondWithoutSearch(`context_query_${queryResolution.reason}`, {
@@ -1027,8 +1064,8 @@ export async function runWebSearchTurn(
       queryResolutionMs,
     });
   }
-  const query = queryResolution.value.query;
-  const searchQueries = (
+  let query = queryResolution.value.query;
+  let searchQueries = (
     queryResolution.value.searchQueries.length > 0
       ? queryResolution.value.searchQueries
       : [query]
@@ -1037,6 +1074,76 @@ export async function runWebSearchTurn(
   // context exists, provider retrieval is gated on a standalone agent rewrite.
 
   const searchFn = deps.executeSearch ?? executeWebSearch;
+  const directReadStartedAt = Date.now();
+  if (directReference) {
+    const view = await (deps.readPage ?? readDirectPage)(directReference, {
+      signal: deps.signal,
+    }).catch((error) => {
+      console.warn(
+        "[web-search] direct page read failed:",
+        error instanceof Error ? error.message : error,
+      );
+      return null;
+    });
+    if (view) {
+      const evidenceQueries = [directReference.question, query, ...searchQueries]
+        .map((value) => value.trim())
+        .filter((value, index, all) => value && all.indexOf(value) === index);
+      const evidence = selectDirectPageEvidence(
+        view,
+        evidenceQueries,
+        Math.min(DIRECT_PAGE_CONTEXT_CHARS, resolveInjectionBudgetChars(modelName)),
+      );
+      // An explicit URL always gets a bounded preview. A historical URL is used
+      // only when generic passage retrieval found supporting text; otherwise the
+      // ordinary search lane remains available for a genuine topic change.
+      if (directReference.explicitInCurrentTurn || evidence.matched) {
+        const source = directPageSource(evidence);
+        const trace: WebSearchTracePayload = {
+          version: 1,
+          decision: "search",
+          reason:
+            evidence.coverage === "abstract_only"
+              ? "direct_page_abstract_only"
+              : "direct_page_html",
+          resolvedQuery: query,
+          facets: [
+            {
+              query: query || directReference.displayUrl,
+              providerIds: ["direct-page"],
+              hitCount: 1,
+              uniqueHosts: 1,
+            },
+          ],
+          providerCalls: 0,
+          timings: {
+            queryResolutionMs: Math.max(0, queryResolutionMs),
+            retrievalMs: Math.max(0, Date.now() - directReadStartedAt),
+          },
+        };
+        try {
+          const upstream = await callGatewayStream(deps, {
+            ...rest,
+            stream: true,
+            messages: withCurrentTimeContext(
+              withDirectPageContext(originalMessages, evidence),
+            ),
+          });
+          return pipeWithSourcesAppendix(upstream, [source], [], trace);
+        } catch (error) {
+          return gatewayUnavailableResponse(
+            error instanceof Error ? error.message : "gateway unreachable",
+          );
+        }
+      }
+    }
+
+    if (directReference.explicitInCurrentTurn && directReference.arxivId) {
+      query = `arXiv ${directReference.arxivId}`;
+      searchQueries = [query];
+    }
+  }
+
   let hits: WebSearchHit[] = [];
   let rankedGroups: WebSearchHit[][] = searchQueries.map(() => []);
   let searchFailed = false;
@@ -1050,7 +1157,13 @@ export async function runWebSearchTurn(
     console.warn("[web-search] search failed, degrading: missing user query for web search");
   } else {
     try {
-      const planResult = await executeOrdinarySearchPlan(searchQueries, cfg, searchFn);
+      const exactDocumentFallback =
+        directReference?.explicitInCurrentTurn && directReference.arxivId
+          ? (hit: WebSearchHit) => matchesDirectPage(directReference, hit.url)
+          : undefined;
+      const planResult = await executeOrdinarySearchPlan(searchQueries, cfg, searchFn, {
+        ...(exactDocumentFallback ? { acceptHit: exactDocumentFallback } : {}),
+      });
       providerCalls = planResult.providerCalls;
       providerIdsByQuery = planResult.providerIdsByQuery;
       retryTrace = planResult.retry;

@@ -30,6 +30,8 @@ export type BackendResult =
 export type BackendDeps = {
   fetchImpl: DirectFetch;
   timeoutMs: number;
+  /** Extracted-text ceiling. Defaults to the legacy 12k page budget. */
+  maxChars?: number;
   signal?: AbortSignal;
   apiKey?: string;
   connectAddress?: string;
@@ -55,10 +57,19 @@ function classifyFetchError(error: unknown): PageFetchFailure {
   return "network_error";
 }
 
-function truncateText(extracted: string): { text: string; rawChars: number } {
+function resolveMaxChars(value: number | undefined): number {
+  if (!Number.isFinite(value) || !value || value <= 0) return MAX_PAGE_CHARS;
+  return Math.min(Math.floor(value), 240_000);
+}
+
+function truncateText(
+  extracted: string,
+  maxCharsValue?: number,
+): { text: string; rawChars: number } {
+  const maxChars = resolveMaxChars(maxCharsValue);
   const rawChars = extracted.length;
   const text =
-    rawChars > MAX_PAGE_CHARS ? `${extracted.slice(0, MAX_PAGE_CHARS).trimEnd()}…` : extracted;
+    rawChars > maxChars ? `${extracted.slice(0, maxChars).trimEnd()}…` : extracted;
   return { text, rawChars };
 }
 
@@ -92,12 +103,18 @@ export const nativeBackend: PageFetchBackend = async (url, deps) => {
     }
 
     const rawHtml = await res.text();
-    const cappedHtml = rawHtml.slice(0, MAX_PAGE_CHARS * 8);
+    const maxChars = resolveMaxChars(deps.maxChars);
+    // Keep the default behavior unchanged while allowing the explicit-document
+    // lane to inspect a larger, still bounded HTML body through this same reader.
+    const cappedHtml = rawHtml.slice(
+      0,
+      Math.min(4_000_000, Math.max(MAX_PAGE_CHARS * 8, maxChars * 8)),
+    );
     const extracted = extractMainText(cappedHtml);
     if (extracted.length < MIN_USABLE_PAGE_CHARS) {
       return { ok: false, reason: "too_short" };
     }
-    const { text, rawChars } = truncateText(extracted);
+    const { text, rawChars } = truncateText(extracted, maxChars);
     return { ok: true, text, rawChars };
   } catch (error) {
     return { ok: false, reason: classifyFetchError(error) };
@@ -135,7 +152,7 @@ export const jinaBackend: PageFetchBackend = async (url, deps) => {
     if (extracted.length < MIN_USABLE_PAGE_CHARS) {
       return { ok: false, reason: "too_short" };
     }
-    const { text, rawChars } = truncateText(extracted);
+    const { text, rawChars } = truncateText(extracted, deps.maxChars);
     return { ok: true, text, rawChars };
   } catch (error) {
     return { ok: false, reason: classifyFetchError(error) };
@@ -182,7 +199,7 @@ export const firecrawlBackend: PageFetchBackend = async (url, deps) => {
     if (extracted.length < MIN_USABLE_PAGE_CHARS) {
       return { ok: false, reason: "too_short" };
     }
-    const { text, rawChars } = truncateText(extracted);
+    const { text, rawChars } = truncateText(extracted, deps.maxChars);
     return { ok: true, text, rawChars };
   } catch (error) {
     return { ok: false, reason: classifyFetchError(error) };
