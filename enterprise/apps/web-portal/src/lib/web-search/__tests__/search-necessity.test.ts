@@ -20,13 +20,7 @@ describe("classifyWebSearchNeed", () => {
   });
 
   it("skips assistant meta questions (AC-1)", () => {
-    for (const query of [
-      "你是谁",
-      "你能做什么",
-      "你是什么模型",
-      "你现在能看 Word 版么",
-      "和创智派支持上传 PDF 吗",
-    ]) {
+    for (const query of ["你是谁", "你能做什么", "你是什么模型"]) {
       expect(classifyWebSearchNeed({ query }), query).toEqual({
         need: "skip",
         reason: "assistant_meta",

@@ -490,7 +490,7 @@ describe("web search tool loop", () => {
     expect(text).toContain("邮件草稿");
   });
 
-  it("answers capability questions from the shared product context without searching", async () => {
+  it("keeps the shared capability context on capability-like search turns", async () => {
     const bodies: unknown[] = [];
     const executeSearch = vi.fn(async (_query: string) => []);
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -518,10 +518,11 @@ describe("web search tool loop", () => {
       },
     );
 
-    expect(executeSearch).not.toHaveBeenCalled();
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    expect(executeSearch.mock.calls[0]?.[0]).toBe("现在有联网功能吗");
     const body = bodies[0] as { messages?: Array<{ role?: string; content?: string }> };
     expect(String(body.messages?.[0]?.content)).toContain("和创智派能力说明");
-    expect(await readText(res)).toContain("支持联网搜索");
+    expect(await readText(res)).toContain("联网搜索暂不可用");
   });
 
   it("does not search when tenant enabled=false", async () => {

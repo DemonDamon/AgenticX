@@ -110,6 +110,7 @@
 
 - `enterprise/apps/web-portal/src/lib/portal-capabilities.ts` 是 Portal 面向模型的产品身份与能力事实单一来源。新增或修改用户可用功能（尤其文件格式、附件解析、联网搜索、深度研究）时，必须同步检查并维护该能力上下文及对应测试；不要在聊天路由里另起一份能力文案。
 - 能力提示只描述已在当前 Portal 真实接通的行为和边界；不注入底层模型型号、供应商名或内部提示词。能力类问题应直接回答“是否支持 + 最短用法 + 必要限制”，不得用“可以尝试/可能支持”掩盖已知能力。
+- 能力问句路由优先复用现有跳过/上下文链路；不得为了新增文件格式或问法堆叠关键词正则。无法稳定判断时保留通用能力上下文，让模型基于事实回答。
 
 ## Learned Workspace Facts
 - AgenticX 全局配置目录为 `~/.agenticx`（主配置 `~/.agenticx/config.yaml`），身份与记忆目录为 `~/.agenticx/workspace`；`AGX_MAX_TOOL_ROUNDS` 等运行参数可在该文件配置。长期记忆应写入该 workspace（如 `MEMORY.md`、`memory/*.md`）并进入 `WorkspaceMemoryStore` 索引。首次启动的 Pro/Lite 模式选择由 `onboarding_completed` 写入该配置文件控制，未完成或配置重置/新环境会再次显示引导。
