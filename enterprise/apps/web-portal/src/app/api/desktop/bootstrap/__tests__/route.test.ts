@@ -80,4 +80,30 @@ describe("GET /api/desktop/bootstrap", () => {
     expect(json.data.inferenceTransport).toBeUndefined();
     expect(json.data.reauthRequiredForDirect).toBe(true);
   });
+
+  it("returns client-facing api base behind reverse proxy", async () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL;
+    resolveDesktopIdentity.mockResolvedValue({
+      userId: "u1",
+      tenantId: "t1",
+      deptId: "d1",
+      email: "a@example.invalid",
+      displayName: "A",
+      tokenId: 1,
+      scopes: ["workspace:chat", "desktop:managed"],
+    });
+    const { GET } = await import("../route");
+    const res = await GET(new Request("http://0.0.0.0:3000/api/desktop/bootstrap", {
+      headers: {
+        host: "test-pal.cmccfund.com:3000",
+        "x-forwarded-proto": "https",
+      },
+    }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.apiBaseUrl).toBe("https://test-pal.cmccfund.com:3000/api/desktop/v1");
+    expect(json.data.inferenceApiBaseUrl).toBeUndefined();
+    expect(json.data.reauthRequiredForDirect).toBe(true);
+  });
 });

@@ -11,8 +11,11 @@ export type PrepareGatewayForwardResult =
   | { error: { status: number; code: string; message: string } };
 
 /**
- * Split "<providerId>/<modelName>" for the gateway and enforce live visibility.
- * Shared by Desktop chat proxy (browser route left untouched per no-scope-creep).
+ * Enforce live visibility for managed Desktop models.
+ *
+ * Keep the model id intact for the gateway. Some managed model ids contain
+ * nested slashes, e.g. "chinamobile/kimi/kimi-k3"; splitting them here would
+ * make the gateway see a mismatched provider header and body model.
  */
 export async function prepareGatewayForward(
   rawBody: string,
@@ -37,12 +40,6 @@ export async function prepareGatewayForward(
             message: "该模型已不在您的可见范围内，请刷新模型列表后重新选择",
           },
         };
-      }
-      const [providerId, ...rest] = parsed.model.split("/");
-      const modelName = rest.join("/");
-      if (providerId && modelName) {
-        providerHint = providerId;
-        forwardBody = JSON.stringify({ ...parsed, model: modelName });
       }
     }
   } catch {

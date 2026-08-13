@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
 import { resolveDesktopIdentity } from "../../../../lib/desktop-auth";
 import { resolveDesktopInferenceApiBase } from "../../../../lib/desktop-inference-base";
+import { requestOriginFromRequest } from "../../../../lib/desktop-device-auth";
 
 export async function GET(request: Request) {
   const identity = await resolveDesktopIdentity(request);
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
     identity.deptId,
   );
 
-  const origin = new URL(request.url).origin;
+  const origin = requestOriginFromRequest(request);
   const apiBaseUrl = `${origin}/api/desktop/v1`;
   const directEligible = identity.scopes.includes("desktop:managed");
 
