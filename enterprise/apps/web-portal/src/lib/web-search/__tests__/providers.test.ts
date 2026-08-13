@@ -3,6 +3,7 @@ import {
   configuredWebSearchProviders,
   executeWebSearch,
   formatHits,
+  listWebSearchAdapters,
   looksLikeDdgChallenge,
   parseDuckDuckGoHtml,
   parseDuckDuckGoLite,
@@ -159,6 +160,181 @@ describe("web search providers", () => {
     );
     const tavilyHits = await executeWebSearch("q", 5, { provider: "tavily", apiKey: "k", maxResults: 5 }, tavilyFetch as unknown as typeof fetch);
     expect(tavilyHits[0]?.title).toBe("Tavily Hit");
+  });
+
+  it("registers and maps the standalone Doubao Custom search protocol", async () => {
+    const longQuery = `${"前".repeat(110)}保留结尾约束`;
+    const fetchImpl = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          ResponseMetadata: { RequestId: "request-1" },
+          Result: {
+            WebResults: [
+              {
+                Title: "实时结果",
+                Url: "https://news.example/result",
+                Snippet: "短摘要",
+                Summary: "适合模型使用的长摘要",
+                PublishTime: "2026-08-13T08:00:00+08:00",
+              },
+            ],
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const hits = await executeWebSearch(
+      longQuery,
+      5,
+      { provider: "doubao", apiKey: "search-key", maxResults: 5 },
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    expect(listWebSearchAdapters()).toContainEqual(
+      expect.objectContaining({
+        id: "doubao",
+        requiresApiKey: true,
+        supportsCustomEndpoint: true,
+      }),
+    );
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+      "https://open.feedcoopapi.com/search_api/web_search",
+    );
+    const request = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(Array.from(String(request.Query)).length).toBeLessThanOrEqual(100);
+    expect(String(request.Query)).toContain("保留结尾约束");
+    expect(request).toMatchObject({
+      SearchType: "web",
+      Count: 5,
+      NeedSummary: true,
+    });
+    expect(request).not.toHaveProperty("Filter");
+    expect(request).not.toHaveProperty("QueryControl");
+    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get("x-traffic-tag")).toBe(
+      "skill_web_search_common",
+    );
+    expect(hits).toEqual([
+      {
+        title: "实时结果",
+        url: "https://news.example/result",
+        snippet: "适合模型使用的长摘要",
+        publishedAt: "2026-08-13T08:00:00+08:00",
+      },
+    ]);
+  });
+
+  it("treats structured Doubao provider errors as failed search attempts", async () => {
+    const fetchImpl = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          ResponseMetadata: {
+            Error: { CodeN: 700429, Code: "TooManyRequests", Message: "rate limited" },
+          },
+          Result: null,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(
+      executeWebSearch(
+        "q",
+        5,
+        { provider: "doubao", apiKey: "search-key", maxResults: 5 },
+        fetchImpl as unknown as typeof fetch,
+      ),
+    ).rejects.toThrow(/TooManyRequests/);
+  });
+
+  it("uses a custom endpoint only through a compatible registered protocol", async () => {
+    const fetchImpl = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          data: {
+            webPages: {
+              value: [{ name: "Custom", url: "https://result.example/a", summary: "ok" }],
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const hits = await executeWebSearch(
+      "q",
+      5,
+      {
+        provider: "bocha",
+        apiKey: "legacy",
+        maxResults: 5,
+        providers: [
+          {
+            id: "customer-search",
+            adapter: "bocha",
+            displayName: "Customer search",
+            apiKey: "customer-key",
+            enabled: true,
+            priority: 0,
+            options: { endpoint: "https://1.1.1.1/search" },
+          },
+        ],
+      },
+      fetchImpl as unknown as typeof fetch,
+    );
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://1.1.1.1/search");
+    expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({
+      connectAddress: "1.1.1.1",
+    });
+    expect(hits[0]?.title).toBe("Custom");
+  });
+
+  it("discards provider-returned links to private network targets", async () => {
+    const search = vi.fn(async () => [
+      { title: "Unsafe", url: "http://127.0.0.1/admin", snippet: "private" },
+    ]);
+    registerWebSearchAdapter({
+      id: "test-private-result-protocol",
+      displayName: "Test private result protocol",
+      requiresApiKey: false,
+      search,
+    });
+
+    await expect(
+      executeWebSearch("q", 5, {
+        provider: "test-private-result-protocol",
+        apiKey: "",
+        maxResults: 5,
+      }),
+    ).rejects.toThrow(/no hits/i);
+  });
+
+  it("rejects private custom endpoints before sending credentials", async () => {
+    const fetchImpl = vi.fn();
+    await expect(
+      executeWebSearch(
+        "q",
+        5,
+        {
+          provider: "bocha",
+          apiKey: "legacy",
+          maxResults: 5,
+          providers: [
+            {
+              id: "unsafe-search",
+              adapter: "bocha",
+              displayName: "Unsafe",
+              apiKey: "secret",
+              enabled: true,
+              priority: 0,
+              options: { endpoint: "https://127.0.0.1/private" },
+            },
+          ],
+        },
+        fetchImpl as unknown as typeof fetch,
+      ),
+    ).rejects.toThrow(/私有|保留|内部/);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("routes tenant-defined provider ids through a registered adapter", async () => {

@@ -5,6 +5,10 @@
 
 import { directFetch, type DirectFetch } from "./direct-fetch";
 import {
+  normalizeWebSearchResultUrl,
+  resolveSafeWebSearchResultUrl,
+} from "./provider-endpoint";
+import {
   DEFAULT_BACKEND_CHAIN,
   isTerminalFailure,
   isTransientFailure,
@@ -139,14 +143,31 @@ async function fetchPageContentWithReason(
   // chance without letting a dead one multiply the worst-case latency.
   let transientRetriesLeft = deps?.transientRetries ?? TRANSIENT_RETRIES;
 
+  let safeUrl: string;
+  let connectAddress: string | undefined;
+  try {
+    safeUrl = normalizeWebSearchResultUrl(url);
+    // Production native fetches pin the same public DNS answer that passed the
+    // SSRF check. Injected test/custom transports remain responsible for their
+    // own connection semantics but still receive the synchronous URL policy.
+    if (fetchImpl === directFetch) {
+      const resolved = await resolveSafeWebSearchResultUrl(safeUrl);
+      safeUrl = resolved.url;
+      connectAddress = resolved.address;
+    }
+  } catch {
+    return { page: null, failure: "invalid_url" };
+  }
+
   for (const name of backends) {
     const backend = resolveBackend(name);
     while (true) {
-      const result = await backend(url, {
+      const result = await backend(safeUrl, {
         fetchImpl,
         timeoutMs,
         signal: deps?.signal,
         apiKey: deps?.apiKeys?.[name],
+        ...(name === "native" && connectAddress ? { connectAddress } : {}),
       });
 
       if (result.ok) {

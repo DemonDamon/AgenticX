@@ -18,8 +18,16 @@ import tls from "node:tls";
 import { URL } from "node:url";
 import type { Duplex } from "node:stream";
 
-/** Extra `timeoutMs` is honored by curl `--max-time` (AbortSignal alone is not enough). */
-export type DirectFetchInit = RequestInit & { timeoutMs?: number };
+const DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+const MAX_RESPONSE_BYTES_CAP = 64 * 1024 * 1024;
+
+/** Additional transport controls used by validated BFF outbound requests. */
+export type DirectFetchInit = RequestInit & {
+  timeoutMs?: number;
+  /** Connect to this pre-resolved address while preserving URL Host and TLS SNI. */
+  connectAddress?: string;
+  maxResponseBytes?: number;
+};
 
 export type DirectFetch = (input: string | URL, init?: DirectFetchInit) => Promise<Response>;
 
@@ -78,6 +86,17 @@ function resolveTimeoutMs(init: DirectFetchInit): number {
   return 20_000;
 }
 
+function resolveMaxResponseBytes(init: DirectFetchInit): number {
+  if (
+    typeof init.maxResponseBytes === "number" &&
+    Number.isFinite(init.maxResponseBytes) &&
+    init.maxResponseBytes > 0
+  ) {
+    return Math.min(Math.floor(init.maxResponseBytes), MAX_RESPONSE_BYTES_CAP);
+  }
+  return DEFAULT_MAX_RESPONSE_BYTES;
+}
+
 function isLoopbackHost(hostname: string): boolean {
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
 }
@@ -96,6 +115,8 @@ async function curlFetchWithBody(
   headers: Record<string, string>,
   bodyBuf: Buffer | undefined,
   timeoutMs: number,
+  maxResponseBytes: number,
+  connectAddress?: string,
   signal?: AbortSignal | null,
 ): Promise<Response> {
   const parsed = new URL(url);
@@ -118,25 +139,38 @@ async function curlFetchWithBody(
       "\n__CURL_META__%{http_code}\n%{content_type}",
     ];
     // Local vitals / loopback must not go through Clash etc. (returns 502).
-    if (isLoopbackHost(parsed.hostname)) {
+    if (isLoopbackHost(parsed.hostname) || connectAddress) {
       args.push("--noproxy", "*");
     }
+    if (connectAddress) {
+      const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+      const address = connectAddress.includes(":") ? `[${connectAddress}]` : connectAddress;
+      args.push("--resolve", `${parsed.hostname}:${port}:${address}`);
+    }
+    const headerLines: string[] = [];
     for (const [k, v] of Object.entries(headers)) {
       const key = k.toLowerCase();
       if (key === "content-length") continue;
       // Let curl set form content-type when using -d; an explicit type + --data-binary
       // has been observed to trigger DuckDuckGo HTTP 202 empty SERP pages.
       if (bodyBuf && isFormBody && key === "content-type") continue;
-      args.push("-H", `${k}: ${v}`);
+      headerLines.push(`${k}: ${v}`);
     }
+    // Headers travel over an inherited pipe, never process argv. This preserves
+    // curl/SOCKS compatibility without exposing tenant credentials in `ps`.
+    if (headerLines.length > 0) args.push("-H", "@/dev/fd/3");
     // Prefer -d (application/x-www-form-urlencoded) over --data-binary for search forms.
     if (bodyBuf) args.push(isFormBody ? "-d" : "--data-binary", "@-");
     args.push(url);
 
-    const child = spawn("curl", args, { env: process.env });
+    const child = spawn("curl", args, {
+      env: process.env,
+      stdio: ["pipe", "pipe", "pipe", "pipe"],
+    });
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
     let settled = false;
+    let receivedBytes = 0;
     const settleReject = (err: Error) => {
       if (settled) return;
       settled = true;
@@ -156,7 +190,14 @@ async function curlFetchWithBody(
       return;
     }
     signal?.addEventListener("abort", onAbort, { once: true });
-    child.stdout.on("data", (c) => chunks.push(c));
+    child.stdout.on("data", (c: Buffer) => {
+      receivedBytes += c.byteLength;
+      if (receivedBytes > maxResponseBytes + 1_024) {
+        settleReject(new Error(`response exceeded ${maxResponseBytes} bytes`));
+        return;
+      }
+      chunks.push(c);
+    });
     child.stderr.on("data", (c) => errChunks.push(c));
     child.on("error", (err) => settleReject(err instanceof Error ? err : new Error(String(err))));
     child.on("close", (code) => {
@@ -175,6 +216,10 @@ async function curlFetchWithBody(
         return;
       }
       const body = raw.subarray(0, idx);
+      if (body.byteLength > maxResponseBytes) {
+        reject(new Error(`response exceeded ${maxResponseBytes} bytes`));
+        return;
+      }
       const metaLines = raw.subarray(idx + marker.length).toString("utf8").trim().split("\n");
       const status = Number((metaLines[0] ?? "").trim());
       const contentType = (metaLines[1] ?? "").trim() || "application/octet-stream";
@@ -193,6 +238,14 @@ async function curlFetchWithBody(
       child.stdin.write(bodyBuf);
     }
     child.stdin.end();
+    const headerPipe = child.stdio[3] as NodeJS.WritableStream | null;
+    if (headerPipe) {
+      headerPipe.on("error", () => {
+        // curl may exit before consuming the inherited header pipe.
+      });
+      if (headerLines.length > 0) headerPipe.write(`${headerLines.join("\n")}\n`);
+      headerPipe.end();
+    }
   });
 }
 
@@ -249,7 +302,8 @@ function isCurlAvailable(): Promise<boolean> {
 
 function connectViaHttpProxy(
   proxy: URL,
-  targetHost: string,
+  connectHost: string,
+  authorityHost: string,
   targetPort: number,
   timeoutMs: number,
 ): Promise<Duplex> {
@@ -266,6 +320,7 @@ function connectViaHttpProxy(
     const timer = setTimeout(() => fail(new Error(`proxy connect timeout ${timeoutMs}ms`)), timeoutMs);
     socket.once("error", fail);
     socket.once("connect", () => {
+      const connectAuthority = net.isIP(connectHost) === 6 ? `[${connectHost}]` : connectHost;
       const auth =
         proxy.username || proxy.password
           ? `Proxy-Authorization: Basic ${Buffer.from(
@@ -273,7 +328,7 @@ function connectViaHttpProxy(
             ).toString("base64")}\r\n`
           : "";
       socket.write(
-        `CONNECT ${targetHost}:${targetPort} HTTP/1.1\r\nHost: ${targetHost}:${targetPort}\r\n${auth}\r\n`,
+        `CONNECT ${connectAuthority}:${targetPort} HTTP/1.1\r\nHost: ${authorityHost}:${targetPort}\r\n${auth}\r\n`,
       );
     });
     let buf = Buffer.alloc(0);
@@ -291,7 +346,7 @@ function connectViaHttpProxy(
       settled = true;
       clearTimeout(timer);
       socket.removeAllListeners("data");
-      const tlsSocket = tls.connect({ socket, servername: targetHost });
+      const tlsSocket = tls.connect({ socket, servername: authorityHost });
       tlsSocket.once("secureConnect", () => resolve(tlsSocket));
       tlsSocket.once("error", reject);
     });
@@ -305,10 +360,13 @@ async function httpsViaProxy(
   headers: Record<string, string>,
   bodyBuf: Buffer | undefined,
   timeoutMs: number,
+  maxResponseBytes: number,
+  connectAddress?: string,
   signal?: AbortSignal | null,
 ): Promise<Response> {
   const socket = await connectViaHttpProxy(
     proxy,
+    connectAddress ?? url.hostname,
     url.hostname,
     Number(url.port || 443),
     Math.min(15_000, timeoutMs),
@@ -337,7 +395,15 @@ async function httpsViaProxy(
     req.setTimeout(timeoutMs, onAbort);
     req.on("response", (res) => {
       const chunks: Buffer[] = [];
-      res.on("data", (c) => chunks.push(c));
+      let receivedBytes = 0;
+      res.on("data", (c: Buffer) => {
+        receivedBytes += c.byteLength;
+        if (receivedBytes > maxResponseBytes) {
+          res.destroy(new Error(`response exceeded ${maxResponseBytes} bytes`));
+          return;
+        }
+        chunks.push(c);
+      });
       res.on("end", () => {
         signal?.removeEventListener("abort", onAbort);
         resolve(
@@ -348,6 +414,7 @@ async function httpsViaProxy(
           }),
         );
       });
+      res.on("error", reject);
     });
     req.on("error", reject);
     if (bodyBuf) req.write(bodyBuf);
@@ -361,6 +428,8 @@ function requestDirect(
   headers: Record<string, string>,
   bodyBuf: Buffer | undefined,
   timeoutMs: number,
+  maxResponseBytes: number,
+  connectAddress?: string,
   signal?: AbortSignal | null,
 ): Promise<Response> {
   const isHttps = url.protocol === "https:";
@@ -377,17 +446,26 @@ function requestDirect(
     const req = lib.request(
       {
         protocol: url.protocol,
-        hostname: url.hostname,
+        hostname: connectAddress ?? url.hostname,
         port: url.port || (isHttps ? 443 : 80),
         path: `${url.pathname}${url.search}`,
         method,
-        headers,
+        headers: { ...headers, host: url.host },
+        servername: isHttps ? url.hostname : undefined,
         agent: false,
-        family: 4,
+        family: connectAddress ? undefined : 4,
       },
       (res) => {
         const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        let receivedBytes = 0;
+        res.on("data", (chunk: Buffer) => {
+          receivedBytes += chunk.byteLength;
+          if (receivedBytes > maxResponseBytes) {
+            res.destroy(new Error(`response exceeded ${maxResponseBytes} bytes`));
+            return;
+          }
+          chunks.push(chunk);
+        });
         res.on("end", () => {
           signal?.removeEventListener("abort", onAbort);
           resolve(
@@ -398,6 +476,7 @@ function requestDirect(
             }),
           );
         });
+        res.on("error", reject);
       },
     );
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -418,6 +497,7 @@ export const directFetch: DirectFetch = async (input, init = {}) => {
     headers["content-length"] = String(bodyBuf.byteLength);
   }
   const timeoutMs = resolveTimeoutMs(init);
+  const maxResponseBytes = resolveMaxResponseBytes(init);
 
   // runSignal 等长生命周期 signal 不代表单次抓取超时；必须叠一个硬上界，
   // 否则 curl 失败后掉进 CONNECT / 直连时没有任何时间约束。
@@ -435,6 +515,8 @@ export const directFetch: DirectFetch = async (input, init = {}) => {
         headers,
         bodyBuf,
         timeoutMs,
+        maxResponseBytes,
+        init.connectAddress,
         effectiveSignal,
       );
     } catch {
@@ -453,6 +535,8 @@ export const directFetch: DirectFetch = async (input, init = {}) => {
         headers,
         bodyBuf,
         timeoutMs,
+        maxResponseBytes,
+        init.connectAddress,
         effectiveSignal,
       );
     } catch {
@@ -461,5 +545,14 @@ export const directFetch: DirectFetch = async (input, init = {}) => {
   }
 
   // 3) direct
-  return requestDirect(url, method, headers, bodyBuf, timeoutMs, effectiveSignal);
+  return requestDirect(
+    url,
+    method,
+    headers,
+    bodyBuf,
+    timeoutMs,
+    maxResponseBytes,
+    init.connectAddress,
+    effectiveSignal,
+  );
 };

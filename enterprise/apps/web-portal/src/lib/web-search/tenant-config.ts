@@ -5,7 +5,7 @@
 import { enterpriseRuntimeWebSearch as pgTable } from "@agenticx/db-schema";
 import { enterpriseRuntimeWebSearch as mysqlTable } from "@agenticx/db-schema/mysql";
 import { createMysqlDb, getIamDb, resolveDatabaseConfig } from "@agenticx/iam-core";
-import { decryptProviderApiKey, encryptProviderApiKey } from "@agenticx/iam-core/provider-api-key-crypto";
+import { decryptProviderApiKeyStrict, encryptProviderApiKey } from "@agenticx/iam-core/provider-api-key-crypto";
 import { eq } from "drizzle-orm";
 
 import type { TenantWebSearchRow } from "./config";
@@ -15,7 +15,11 @@ import {
 } from "./search-call-budget";
 import {
   DEFAULT_MAX_RESULTS,
+  getWebSearchAdapter,
+  isConfiguredWebSearchProvider,
   listWebSearchAdapters,
+  MAX_CONFIGURED_WEB_SEARCH_PROVIDERS,
+  publicProviderEndpoint,
   type WebSearchAdapterPublicDefinition,
   type WebSearchProviderConfig,
   type WebSearchProviderName,
@@ -23,6 +27,8 @@ import {
 
 export type PublicWebSearchProvider = Omit<WebSearchProviderConfig, "apiKey" | "options"> & {
   hasApiKey: boolean;
+  /** Safe, non-secret protocol endpoint; arbitrary adapter options stay server-only. */
+  endpoint?: string;
 };
 
 export type WebSearchPublicConfig = {
@@ -32,6 +38,7 @@ export type WebSearchPublicConfig = {
   maxSearchCalls: number;
   hasApiKey: boolean;
   deepResearchEnabled: boolean;
+  primaryProviderId: string;
   providers: PublicWebSearchProvider[];
   availableAdapters: WebSearchAdapterPublicDefinition[];
 };
@@ -72,6 +79,18 @@ type WebSearchConfigRead = {
   rows: StoredWebSearchConfigRow[];
   usedLegacySearchCallBudget: boolean;
 };
+
+const MAX_PROVIDER_ID_CHARS = 128;
+const MAX_PROVIDER_DISPLAY_NAME_CHARS = 80;
+const MAX_PROVIDER_API_KEY_CHARS = 8_192;
+const PROVIDER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
+export class WebSearchConfigValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WebSearchConfigValidationError";
+  }
+}
 
 /**
  * Recognize only the rolling-deploy failure introduced by the new budget
@@ -165,7 +184,7 @@ function parseStoredProviders(raw: unknown): WebSearchProviderConfig[] {
         typeof row.displayName === "string" && row.displayName.trim()
           ? row.displayName.trim()
           : id,
-      apiKey: decryptProviderApiKey(
+      apiKey: decryptProviderApiKeyStrict(
         typeof row.apiKeyCipher === "string" ? row.apiKeyCipher : "",
       ),
       enabled: row.enabled !== false,
@@ -186,7 +205,7 @@ export function mapStoredWebSearchConfigRow(
   return {
     enabled: Boolean(row.enabled),
     provider: row.provider,
-    apiKey: decryptProviderApiKey(row.apiKeyCipher ?? ""),
+    apiKey: decryptProviderApiKeyStrict(row.apiKeyCipher ?? ""),
     providers: parseStoredProviders(row.providers),
     maxResults: Number(row.maxResults) || DEFAULT_MAX_RESULTS,
     maxSearchCalls: usedLegacySearchCallBudget
@@ -221,16 +240,59 @@ function legacyProvider(provider: string, apiKey: string): WebSearchProviderConf
 }
 
 function publicProviders(providers: WebSearchProviderConfig[]): PublicWebSearchProvider[] {
-  return providers.map(({ apiKey, options: _options, ...provider }) => ({
-    ...provider,
-    hasApiKey: Boolean(apiKey.trim()),
-  }));
+  return providers.map(({ apiKey, options: _options, ...provider }) => {
+    const endpoint = publicProviderEndpoint({ adapter: provider.adapter, options: _options });
+    return {
+      ...provider,
+      hasApiKey: Boolean(apiKey.trim()),
+      ...(endpoint ? { endpoint } : {}),
+    };
+  });
+}
+
+function effectivePrimaryProviderId(
+  providers: WebSearchProviderConfig[],
+  fallback: string,
+): string {
+  return (
+    providers.find(isConfiguredWebSearchProvider)?.id ??
+    providers[0]?.id ??
+    normalizeProvider(fallback)
+  );
+}
+
+function normalizeProviderOptions(
+  adapterId: string,
+  raw: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (raw === undefined) return undefined;
+  const keys = Object.keys(raw);
+  if (keys.some((key) => key !== "endpoint")) {
+    throw new WebSearchConfigValidationError("搜索服务包含不支持的配置项");
+  }
+  const endpoint = raw.endpoint;
+  if (endpoint === undefined || endpoint === "") return undefined;
+  const adapter = getWebSearchAdapter(adapterId);
+  if (!adapter?.supportsCustomEndpoint) {
+    throw new WebSearchConfigValidationError("所选搜索协议不支持自定义 API 地址");
+  }
+  // publicProviderEndpoint runs the shared HTTPS/internal-target syntax policy.
+  const normalized = publicProviderEndpoint({ adapter: adapterId, options: { endpoint } });
+  if (!normalized) {
+    throw new WebSearchConfigValidationError("搜索服务 API 地址无效");
+  }
+  return { endpoint: normalized };
 }
 
 function normalizeProviderUpdates(
   updates: WebSearchProviderUpdate[],
   existing: WebSearchProviderConfig[],
 ): WebSearchProviderConfig[] {
+  if (updates.length < 1 || updates.length > MAX_CONFIGURED_WEB_SEARCH_PROVIDERS) {
+    throw new WebSearchConfigValidationError(
+      `搜索服务数量必须为 1 到 ${MAX_CONFIGURED_WEB_SEARCH_PROVIDERS} 个`,
+    );
+  }
   const existingById = new Map(existing.map((provider) => [provider.id, provider]));
   const seen = new Set<string>();
   const providers: WebSearchProviderConfig[] = [];
@@ -238,20 +300,63 @@ function normalizeProviderUpdates(
     const id = typeof update?.id === "string" ? update.id.trim() : "";
     const adapter =
       typeof update?.adapter === "string" ? normalizeProvider(update.adapter) : "";
-    if (!id || !adapter || seen.has(id)) continue;
+    if (
+      !id ||
+      id.length > MAX_PROVIDER_ID_CHARS ||
+      !PROVIDER_ID_RE.test(id) ||
+      !adapter ||
+      !getWebSearchAdapter(adapter)
+    ) {
+      throw new WebSearchConfigValidationError("搜索服务 ID 或接口协议无效");
+    }
+    if (seen.has(id)) {
+      throw new WebSearchConfigValidationError("搜索服务 ID 不能重复");
+    }
     seen.add(id);
     const previous = existingById.get(id);
+    const adapterChanged = Boolean(previous && previous.adapter !== adapter);
+    const displayName = update.displayName?.trim() || previous?.displayName || id;
+    if (displayName.length > MAX_PROVIDER_DISPLAY_NAME_CHARS) {
+      throw new WebSearchConfigValidationError("搜索服务名称过长");
+    }
+    if (
+      update.apiKey !== undefined &&
+      (update.apiKey.length > MAX_PROVIDER_API_KEY_CHARS || /[\r\n]/.test(update.apiKey))
+    ) {
+      throw new WebSearchConfigValidationError("搜索服务 API Key 格式无效或过长");
+    }
+    const submittedOptions = asOptions(update.options);
+    if (update.options !== undefined && !submittedOptions) {
+      throw new WebSearchConfigValidationError("搜索服务配置格式无效");
+    }
+    const nextOptions =
+      update.options !== undefined
+        ? normalizeProviderOptions(adapter, submittedOptions)
+        : adapterChanged
+          ? undefined
+          : previous?.options;
+    const endpointChanged = Boolean(
+      previous &&
+        publicProviderEndpoint(previous) !==
+          publicProviderEndpoint({ adapter, options: nextOptions }),
+    );
     providers.push({
       id,
       adapter,
-      displayName: update.displayName?.trim() || previous?.displayName || id,
-      apiKey: update.apiKey === undefined ? previous?.apiKey ?? "" : update.apiKey,
+      displayName,
+      // Never forward one protocol's credential to another when an id is reused.
+      apiKey:
+        update.apiKey === undefined
+          ? adapterChanged || endpointChanged
+            ? ""
+            : previous?.apiKey ?? ""
+          : update.apiKey,
       enabled: update.enabled ?? previous?.enabled ?? true,
       priority:
         typeof update.priority === "number" && Number.isFinite(update.priority)
           ? update.priority
           : providers.length,
-      options: asOptions(update.options) ?? previous?.options,
+      options: nextOptions,
     });
   }
   return providers.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
@@ -315,12 +420,24 @@ export async function loadTenantWebSearchConfigStrict(
   return mapStoredWebSearchConfigRow(row, usedLegacySearchCallBudget);
 }
 
-/** Best-effort ordinary-search runtime read; policy gates and settings use the strict loader. */
+/** Ordinary-search runtime read; storage/decryption failures disable outbound search. */
 export async function loadTenantWebSearchConfig(tenantId: string): Promise<TenantWebSearchRow> {
   try {
     return await loadTenantWebSearchConfigStrict(tenantId);
-  } catch {
-    return null;
+  } catch (error) {
+    console.error(
+      "[web-search] tenant config unavailable; disabling outbound search:",
+      error instanceof Error ? error.message : error,
+    );
+    return {
+      enabled: false,
+      provider: "duckduckgo",
+      apiKey: "",
+      providers: [],
+      maxResults: DEFAULT_MAX_RESULTS,
+      maxSearchCalls: DEFAULT_MAX_SEARCH_CALLS,
+      deepResearchEnabled: false,
+    };
   }
 }
 
@@ -336,6 +453,7 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
       maxSearchCalls: DEFAULT_MAX_SEARCH_CALLS,
       hasApiKey: false,
       deepResearchEnabled: true,
+      primaryProviderId: "duckduckgo",
       providers: [],
       availableAdapters: listWebSearchAdapters(),
     };
@@ -347,6 +465,10 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
     maxSearchCalls: normalizeMaxSearchCalls(row.maxSearchCalls),
     hasApiKey: Boolean(row.apiKey.trim()),
     deepResearchEnabled: Boolean(row.deepResearchEnabled),
+    primaryProviderId: effectivePrimaryProviderId(
+      row.providers ?? [],
+      row.provider,
+    ),
     providers: publicProviders(
       row.providers?.length ? row.providers : [legacyProvider(row.provider, row.apiKey)],
     ),
@@ -379,10 +501,14 @@ export async function upsertTenantWebSearchConfig(
       : existingProviders.slice();
 
   if (input.provider !== undefined && input.providers === undefined) {
+    const selectedId = input.provider.trim();
     const selectedAdapter = normalizeProvider(input.provider);
     const index = nextProviders.findIndex(
-      (provider) => provider.id === input.provider?.trim() || provider.adapter === selectedAdapter,
+      (provider) => provider.id === selectedId || provider.adapter === selectedAdapter,
     );
+    if (index < 0 && !getWebSearchAdapter(selectedAdapter)) {
+      throw new WebSearchConfigValidationError("所选搜索服务不存在");
+    }
     const selected =
       index >= 0
         ? nextProviders.splice(index, 1)[0]!
@@ -477,6 +603,7 @@ export async function upsertTenantWebSearchConfig(
     maxSearchCalls: nextMaxSearchCalls,
     hasApiKey: Boolean(nextKey.trim()),
     deepResearchEnabled: nextDeepResearch,
+    primaryProviderId: effectivePrimaryProviderId(nextProviders, primary.id),
     providers: publicProviders(nextProviders),
     availableAdapters: listWebSearchAdapters(),
   };

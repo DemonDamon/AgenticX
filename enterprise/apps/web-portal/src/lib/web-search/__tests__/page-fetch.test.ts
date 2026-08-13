@@ -173,6 +173,22 @@ describe("fetchPageContent", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "http://127.0.0.1/admin",
+    "http://169.254.169.254/latest/meta-data",
+    "https://service.internal/private",
+  ])("never fetches a private or internal result URL: %s", async (url) => {
+    const fetchImpl = vi.fn(async () => new Response("x")) as unknown as DirectFetch;
+
+    const page = await fetchPageContent(url, {
+      fetchImpl,
+      backends: ["native", "jina"],
+    });
+
+    expect(page).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("retries a transient failure once on the same backend", async () => {
     const body = "重试后拿到的正文".repeat(80);
     let calls = 0;

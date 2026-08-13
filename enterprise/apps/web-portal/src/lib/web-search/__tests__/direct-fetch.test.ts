@@ -183,4 +183,26 @@ describe("directFetch", () => {
       await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     }
   });
+
+  it("aborts responses that exceed the configured byte limit", async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ payload: "x".repeat(4_096) }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("no port");
+
+    try {
+      await expect(
+        directFetch(`http://127.0.0.1:${addr.port}/large`, {
+          maxResponseBytes: 256,
+        }),
+      ).rejects.toThrow(/exceeded/i);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve())),
+      );
+    }
+  });
 });

@@ -32,6 +32,7 @@ export type BackendDeps = {
   timeoutMs: number;
   signal?: AbortSignal;
   apiKey?: string;
+  connectAddress?: string;
 };
 
 export type PageFetchBackend = (url: string, deps: BackendDeps) => Promise<BackendResult>;
@@ -77,6 +78,7 @@ export const nativeBackend: PageFetchBackend = async (url, deps) => {
       method: "GET",
       timeoutMs: deps.timeoutMs,
       signal: deps.signal,
+      connectAddress: deps.connectAddress,
       headers: {
         "user-agent": DESKTOP_UA,
         accept: "text/html,*/*",
