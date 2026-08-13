@@ -1107,6 +1107,54 @@ function ProviderGlyph({
 
 const MODEL_HOVER_TIP_WIDTH = 220;
 const MODEL_HOVER_TIP_GAP = 8;
+const MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT = 30;
+
+/** Rough height budget for the model hover card (used for first paint before measure). */
+function estimateModelHoverTipHeight(args: {
+  showDeepSeekThinking: boolean;
+  paneThinkingEnabled: boolean;
+  effortMenuOpen: boolean;
+  showEffortControls: boolean;
+  deepSeekEffortCount: number;
+  kimiEffortCount: number;
+}): number {
+  const {
+    showDeepSeekThinking,
+    paneThinkingEnabled,
+    effortMenuOpen,
+    showEffortControls,
+    deepSeekEffortCount,
+    kimiEffortCount,
+  } = args;
+  if (showDeepSeekThinking) {
+    let h = 140;
+    if (paneThinkingEnabled) {
+      h = 172;
+      if (effortMenuOpen) {
+        h += 12 + deepSeekEffortCount * MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT + 8;
+      }
+    }
+    return h;
+  }
+  if (showEffortControls) {
+    let h = 148;
+    if (effortMenuOpen) {
+      h += 12 + kimiEffortCount * MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT + 8;
+    }
+    return h;
+  }
+  return 108;
+}
+
+function clampFixedPopoverTop(top: number, height: number, margin = PANE_MODEL_PICKER_MARGIN): number {
+  const vh = window.innerHeight;
+  let nextTop = top;
+  if (nextTop + height > vh - margin) {
+    nextTop = Math.max(margin, vh - margin - height);
+  }
+  if (nextTop < margin) nextTop = margin;
+  return nextTop;
+}
 
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const settings = useAppStore((s) => s.settings);
@@ -1124,6 +1172,10 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const [hoverRowTop, setHoverRowTop] = useState(0);
   const [effortMenuOpen, setEffortMenuOpen] = useState(false);
   const [collapsedProviders, setCollapsedProviders] = useState<Set<string>>(() => new Set());
+  const hoverTipRef = useRef<HTMLDivElement>(null);
+  const [hoverTipLayout, setHoverTipLayout] = useState<{ top: number; maxHeight: number } | null>(
+    null,
+  );
 
   /** Keep tip visible while moving between list row and tip card. */
   const cancelClearHover = useCallback(() => {
@@ -1311,35 +1363,53 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     if (!hoverBlurb || !panelRef.current) return null;
     const panel = panelRef.current.getBoundingClientRect();
     const vw = window.innerWidth;
-    const vh = window.innerHeight;
     const tipW = MODEL_HOVER_TIP_WIDTH;
     const spaceRight = vw - panel.right - PANE_MODEL_PICKER_MARGIN;
     const placeRight = spaceRight >= tipW + MODEL_HOVER_TIP_GAP;
     const left = placeRight
       ? panel.right + MODEL_HOVER_TIP_GAP
       : Math.max(PANE_MODEL_PICKER_MARGIN, panel.left - MODEL_HOVER_TIP_GAP - tipW);
-    const tipH = showDeepSeekThinking
-      ? paneThinkingEnabled
-        ? effortMenuOpen
-          ? 220
-          : 168
-        : 140
-      : showEffortControls
-        ? effortMenuOpen
-          ? 196
-          : 148
-        : 108;
-    let top = hoverRowTop;
-    if (top + tipH > vh - PANE_MODEL_PICKER_MARGIN) {
-      top = Math.max(PANE_MODEL_PICKER_MARGIN, vh - PANE_MODEL_PICKER_MARGIN - tipH);
-    }
-    if (top < PANE_MODEL_PICKER_MARGIN) top = PANE_MODEL_PICKER_MARGIN;
+    const tipH = estimateModelHoverTipHeight({
+      showDeepSeekThinking,
+      paneThinkingEnabled,
+      effortMenuOpen,
+      showEffortControls,
+      deepSeekEffortCount: DEEPSEEK_REASONING_EFFORT_OPTIONS.length,
+      kimiEffortCount: KIMI_REASONING_EFFORT_OPTIONS.length,
+    });
+    const top = clampFixedPopoverTop(hoverRowTop, tipH);
     return {
       left,
       top,
       width: tipW,
     };
   }, [hoverBlurb, hoverRowTop, showEffortControls, showDeepSeekThinking, paneThinkingEnabled, effortMenuOpen]);
+
+  useLayoutEffect(() => {
+    const el = hoverTipRef.current;
+    if (!hoverBlurb || !hoverTipStyle || !el) {
+      setHoverTipLayout(null);
+      return;
+    }
+    const height = el.getBoundingClientRect().height;
+    const baseTop = typeof hoverTipStyle.top === "number" ? hoverTipStyle.top : PANE_MODEL_PICKER_MARGIN;
+    const top = clampFixedPopoverTop(baseTop, height);
+    const maxHeight = Math.max(
+      MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT,
+      window.innerHeight - top - PANE_MODEL_PICKER_MARGIN,
+    );
+    setHoverTipLayout((prev) =>
+      prev && prev.top === top && prev.maxHeight === maxHeight ? prev : { top, maxHeight },
+    );
+  }, [
+    hoverBlurb,
+    hoverTipStyle,
+    effortMenuOpen,
+    paneThinkingEnabled,
+    hoverKey,
+    showEffortControls,
+    showDeepSeekThinking,
+  ]);
 
   return (
     <div className="relative min-w-0 max-w-full" ref={anchorRef}>
@@ -1496,12 +1566,18 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
             </div>
             {hoverBlurb && hoverTipStyle ? (
               <div
-                className={`agx-menu-pop fixed z-50 rounded-xl border border-border bg-surface-panel px-3.5 py-3 shadow-2xl backdrop-blur-xl ${
+                ref={hoverTipRef}
+                className={`agx-menu-pop fixed z-[9999] overflow-x-hidden overflow-y-auto rounded-xl border border-border bg-surface-panel px-3.5 py-3 shadow-2xl backdrop-blur-xl ${
                   showEffortControls || showDeepSeekThinking
                     ? "pointer-events-auto"
                     : "pointer-events-none"
                 }`}
-                style={hoverTipStyle}
+                style={{
+                  ...hoverTipStyle,
+                  ...(hoverTipLayout
+                    ? { top: hoverTipLayout.top, maxHeight: hoverTipLayout.maxHeight }
+                    : null),
+                }}
                 role="tooltip"
                 onMouseEnter={cancelClearHover}
                 onMouseLeave={scheduleClearHover}
