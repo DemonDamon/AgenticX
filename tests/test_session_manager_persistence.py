@@ -449,6 +449,122 @@ def test_list_sessions_excludes_empty_persisted_sessions(tmp_path: Path) -> None
     assert "empty-session" not in ids
 
 
+def test_list_sessions_by_avatar_skips_unrelated_empty_message_reads(tmp_path: Path) -> None:
+    """Filtered listing must not read other avatars' messages.json (group-open hot path)."""
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    sessions_root.mkdir()
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    for idx in range(8):
+        sid = f"noise-{idx}"
+        store._save_session_summary_sync(
+            sid,
+            "summary",
+            {
+                "session_name": sid,
+                "avatar_id": "avatar-other",
+                "chat_messages": 0,
+                "updated_at": 1.0,
+                "created_at": 1.0,
+            },
+        )
+        msg_dir = sessions_root / sid
+        msg_dir.mkdir()
+        (msg_dir / "messages.json").write_text(
+            '[{"role":"user","content":"noise"}]',
+            encoding="utf-8",
+        )
+
+    store._save_session_summary_sync(
+        "group-session",
+        "summary",
+        {
+            "session_name": "studio-group",
+            "avatar_id": "group:g1",
+            "chat_messages": 3,
+            "updated_at": 2.0,
+            "created_at": 2.0,
+        },
+    )
+
+    reads: list[str] = []
+    orig = manager._messages_path
+
+    def _tracking(session_id: str) -> str:
+        reads.append(str(session_id))
+        return orig(session_id)
+
+    manager._messages_path = _tracking  # type: ignore[method-assign]
+
+    listed = manager.list_sessions(avatar_id="group:g1")
+    ids = {row["session_id"] for row in listed}
+    assert "group-session" in ids
+    assert not any(item.startswith("noise-") for item in ids)
+    assert not any(item.startswith("noise-") for item in reads)
+
+
+def test_list_sessions_by_avatar_skips_sqlite_backed_unrelated_dir_probe(
+    tmp_path: Path,
+) -> None:
+    """Filtered listing must not probe sqlite-backed dirs of other avatars."""
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    sessions_root.mkdir()
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+
+    for idx in range(8):
+        sid = f"noise-{idx}"
+        store._save_session_summary_sync(
+            sid,
+            "summary",
+            {
+                "session_name": sid,
+                "avatar_id": "avatar-other",
+                "chat_messages": 2,
+                "updated_at": 1.0,
+                "created_at": 1.0,
+            },
+        )
+        msg_dir = sessions_root / sid
+        msg_dir.mkdir()
+        (msg_dir / "messages.json").write_text(
+            '[{"role":"user","content":"noise"}]',
+            encoding="utf-8",
+        )
+
+    store._save_session_summary_sync(
+        "group-session",
+        "summary",
+        {
+            "session_name": "studio-group",
+            "avatar_id": "group:g1",
+            "chat_messages": 3,
+            "updated_at": 2.0,
+            "created_at": 2.0,
+        },
+    )
+
+    loads: list[str] = []
+    orig = store._load_latest_session_metadata_sync
+
+    def _tracking(session_id: str):
+        loads.append(str(session_id))
+        return orig(session_id)
+
+    store._load_latest_session_metadata_sync = _tracking  # type: ignore[method-assign]
+
+    listed = manager.list_sessions(avatar_id="group:g1")
+    ids = {row["session_id"] for row in listed}
+    assert "group-session" in ids
+    assert not any(item.startswith("noise-") for item in ids)
+    assert not any(item.startswith("noise-") for item in loads)
+
+
 def test_list_sessions_excludes_in_memory_sessions_with_empty_chat_history(tmp_path: Path) -> None:
     """Memory-only sessions that never received a message should not appear (lazy-create UX)."""
     store = SessionStore(tmp_path / "sessions.sqlite")
