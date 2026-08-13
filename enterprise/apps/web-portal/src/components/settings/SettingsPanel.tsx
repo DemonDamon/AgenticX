@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   Badge,
@@ -31,13 +31,130 @@ import {
   KeyRound,
   Trash2,
 } from "lucide-react";
+import {
+  DEFAULT_MAX_SEARCH_CALLS,
+  isValidMaxSearchCalls,
+  MAX_MAX_SEARCH_CALLS,
+  MIN_MAX_SEARCH_CALLS,
+} from "../../lib/web-search/search-call-budget";
 
 type TabId = "model-service" | "defaults" | "web-search" | "parser" | "chat" | "general";
 type CurrentPasswordStatus = "idle" | "checking" | "valid" | "invalid";
 
 const CHAT_STYLE_STORAGE_KEY = "agx-enterprise-chat-style";
 const CHAT_STYLE_IDS = ["im", "terminal", "clean"] as const;
+const WEB_SEARCH_CALL_OPTIONS = Array.from(
+  { length: MAX_MAX_SEARCH_CALLS - MIN_MAX_SEARCH_CALLS + 1 },
+  (_, index) => MIN_MAX_SEARCH_CALLS + index,
+);
+const MAX_SEARCH_PROVIDER_POOL_SIZE = 2;
+const BUILT_IN_ADAPTER_VALUE_PREFIX = "adapter:";
 type ChatStyleVariant = (typeof CHAT_STYLE_IDS)[number];
+type PublicSearchProvider = {
+  id: string;
+  adapter: string;
+  displayName: string;
+  enabled: boolean;
+  priority: number;
+  hasApiKey: boolean;
+  endpoint?: string;
+};
+type PublicSearchAdapter = {
+  id: string;
+  displayName: string;
+  requiresApiKey: boolean;
+  supportsCustomEndpoint?: boolean;
+  defaultEndpoint?: string;
+};
+type SearchProviderUpdate = Omit<PublicSearchProvider, "hasApiKey" | "endpoint"> & {
+  apiKey?: string;
+  options?: Record<string, unknown>;
+};
+type WebSearchConfigPayload = {
+  enabled?: boolean;
+  provider?: string;
+  primaryProviderId?: string;
+  hasApiKey?: boolean;
+  deepResearchEnabled?: boolean;
+  maxSearchCalls?: number;
+  providers?: PublicSearchProvider[];
+  availableAdapters?: PublicSearchAdapter[];
+  canManage?: boolean;
+};
+type WebSearchSnapshot = {
+  enabled: boolean;
+  provider: string;
+  primaryProviderId?: string;
+  hasApiKey: boolean;
+  deepResearchEnabled: boolean;
+  maxSearchCalls: number;
+  providers: PublicSearchProvider[];
+  availableAdapters: PublicSearchAdapter[];
+  canManage: boolean;
+};
+type WebSearchLoadStatus = "loading" | "loaded" | "error";
+
+function createSearchProviderId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `search-provider-${crypto.randomUUID()}`;
+  }
+  return `search-provider-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function providerUpdates(
+  providers: PublicSearchProvider[],
+): SearchProviderUpdate[] {
+  return providers.map(
+    ({ hasApiKey: _hasApiKey, endpoint, ...providerRow }, priority) => ({
+      ...providerRow,
+      priority,
+      ...(endpoint ? { options: { endpoint } } : {}),
+    }),
+  );
+}
+
+function isSupportedEndpoint(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+function webSearchSnapshot(data: WebSearchConfigPayload): WebSearchSnapshot {
+  const maxSearchCalls = isValidMaxSearchCalls(data.maxSearchCalls)
+    ? data.maxSearchCalls
+    : DEFAULT_MAX_SEARCH_CALLS;
+  const availableAdapters = data.availableAdapters ?? [];
+  const provider = data.provider ?? "duckduckgo";
+  const primaryProviderId = data.primaryProviderId ?? provider;
+  const providers = data.providers?.length
+    ? data.providers
+    : [
+        {
+          id: primaryProviderId,
+          adapter: provider,
+          displayName:
+            availableAdapters.find((adapter) => adapter.id === provider)
+              ?.displayName ?? provider,
+          enabled: true,
+          priority: 0,
+          hasApiKey: Boolean(data.hasApiKey),
+        },
+      ];
+  return {
+    enabled: data.enabled ?? true,
+    provider,
+    primaryProviderId,
+    hasApiKey: Boolean(data.hasApiKey),
+    deepResearchEnabled: data.deepResearchEnabled ?? true,
+    maxSearchCalls,
+    providers,
+    availableAdapters,
+    canManage: data.canManage ?? true,
+  };
+}
 
 export function SettingsPanel() {
   const t = useTranslations("settings");
@@ -47,9 +164,21 @@ export function SettingsPanel() {
   const [webSearchProvider, setWebSearchProvider] = useState("duckduckgo");
   const [webSearchApiKey, setWebSearchApiKey] = useState("");
   const [webSearchHasApiKey, setWebSearchHasApiKey] = useState(false);
+  const [webSearchProviders, setWebSearchProviders] = useState<PublicSearchProvider[]>([]);
+  const [webSearchAdapters, setWebSearchAdapters] = useState<PublicSearchAdapter[]>([]);
+  const [maxSearchCalls, setMaxSearchCalls] = useState(DEFAULT_MAX_SEARCH_CALLS);
+  const [fallbackSearchAdapter, setFallbackSearchAdapter] = useState("");
+  const [fallbackSearchApiKey, setFallbackSearchApiKey] = useState("");
+  const [customSearchName, setCustomSearchName] = useState("");
+  const [customSearchAdapter, setCustomSearchAdapter] = useState("");
+  const [customSearchEndpoint, setCustomSearchEndpoint] = useState("");
+  const [customSearchApiKey, setCustomSearchApiKey] = useState("");
   const [deepResearchOn, setDeepResearchOn] = useState(true);
+  const [canManageWebSearch, setCanManageWebSearch] = useState(true);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
-  const [webSearchLoaded, setWebSearchLoaded] = useState(false);
+  const [webSearchLoadStatus, setWebSearchLoadStatus] = useState<WebSearchLoadStatus>("loading");
+  const confirmedWebSearchRef = useRef<WebSearchSnapshot | null>(null);
+  const webSearchSaveInFlightRef = useRef(false);
   const [streamingOn, setStreamingOn] = useState(true);
   const [autoTitleOn, setAutoTitleOn] = useState(true);
   const [chatStyle, setChatStyle] = useState<ChatStyleVariant>("im");
@@ -111,41 +240,65 @@ export function SettingsPanel() {
     }
   }, []);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch("/api/me/web-search", { cache: "no-store" });
-        const json = (await res.json()) as {
-          data?: {
-            enabled?: boolean;
-            provider?: string;
-            hasApiKey?: boolean;
-            deepResearchEnabled?: boolean;
-          };
-          error?: { message?: string };
-        };
-        if (!res.ok) {
-          toast.error(json.error?.message ?? t("webSearch.loadFailed"));
-          return;
-        }
-        setWebSearchOn(Boolean(json.data?.enabled ?? true));
-        setWebSearchProvider(json.data?.provider ?? "duckduckgo");
-        setWebSearchHasApiKey(Boolean(json.data?.hasApiKey));
-        setDeepResearchOn(json.data?.deepResearchEnabled ?? true);
-        setWebSearchApiKey("");
-        setWebSearchLoaded(true);
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : t("webSearch.loadFailed"));
+  const applyWebSearchSnapshot = useCallback((snapshot: WebSearchSnapshot) => {
+    const primary =
+      snapshot.providers.find(
+        (providerRow) => providerRow.id === snapshot.primaryProviderId,
+      ) ??
+      snapshot.providers.find((providerRow) => providerRow.id === snapshot.provider) ??
+      snapshot.providers.find((providerRow) => providerRow.adapter === snapshot.provider) ??
+      snapshot.providers[0];
+    setWebSearchOn(snapshot.enabled);
+    setWebSearchProvider(primary?.id ?? snapshot.provider);
+    setWebSearchHasApiKey(primary?.hasApiKey ?? snapshot.hasApiKey);
+    setWebSearchProviders(snapshot.providers);
+    setWebSearchAdapters(snapshot.availableAdapters);
+    setDeepResearchOn(snapshot.deepResearchEnabled);
+    setMaxSearchCalls(snapshot.maxSearchCalls);
+    setCanManageWebSearch(snapshot.canManage);
+  }, []);
+
+  const loadWebSearch = useCallback(async () => {
+    setWebSearchLoadStatus("loading");
+    try {
+      const res = await fetch("/api/me/web-search", { cache: "no-store" });
+      const json = (await res.json()) as {
+        data?: WebSearchConfigPayload;
+        error?: { message?: string };
+      };
+      if (!res.ok || !json.data) {
+        throw new Error(json.error?.message ?? t("webSearch.loadFailed"));
       }
-    })();
-  }, [t]);
+      const snapshot = webSearchSnapshot(json.data);
+      confirmedWebSearchRef.current = snapshot;
+      applyWebSearchSnapshot(snapshot);
+      setWebSearchApiKey("");
+      setWebSearchLoadStatus("loaded");
+    } catch (error) {
+      setWebSearchLoadStatus("error");
+      toast.error(error instanceof Error ? error.message : t("webSearch.loadFailed"));
+    }
+  }, [applyWebSearchSnapshot, t]);
+
+  useEffect(() => {
+    void loadWebSearch();
+  }, [loadWebSearch]);
 
   const saveWebSearch = async (patch: {
     enabled?: boolean;
     provider?: string;
     apiKey?: string;
     deepResearchEnabled?: boolean;
-  }) => {
+    maxSearchCalls?: number;
+    providers?: SearchProviderUpdate[];
+  }): Promise<boolean> => {
+    if (webSearchLoadStatus !== "loaded" || webSearchSaveInFlightRef.current) {
+      if (confirmedWebSearchRef.current) {
+        applyWebSearchSnapshot(confirmedWebSearchRef.current);
+      }
+      return false;
+    }
+    webSearchSaveInFlightRef.current = true;
     setWebSearchSaving(true);
     try {
       const res = await fetch("/api/me/web-search", {
@@ -154,35 +307,168 @@ export function SettingsPanel() {
         body: JSON.stringify(patch),
       });
       const json = (await res.json()) as {
-        data?: {
-          enabled?: boolean;
-          provider?: string;
-          hasApiKey?: boolean;
-          deepResearchEnabled?: boolean;
-        };
+        data?: WebSearchConfigPayload;
         error?: { message?: string };
       };
-      if (!res.ok) {
-        toast.error(json.error?.message ?? t("webSearch.saveFailed"));
-        return;
+      if (!res.ok || !json.data) {
+        throw new Error(json.error?.message ?? t("webSearch.saveFailed"));
       }
-      setWebSearchOn(Boolean(json.data?.enabled));
-      setWebSearchProvider(json.data?.provider ?? "duckduckgo");
-      setWebSearchHasApiKey(Boolean(json.data?.hasApiKey));
-      setDeepResearchOn(json.data?.deepResearchEnabled ?? true);
+      const snapshot = webSearchSnapshot(json.data);
+      confirmedWebSearchRef.current = snapshot;
+      applyWebSearchSnapshot(snapshot);
       if (patch.apiKey !== undefined) setWebSearchApiKey("");
       toast.success(t("webSearch.saveSuccess"));
-      if (typeof window !== "undefined" && typeof json.data?.deepResearchEnabled === "boolean") {
+      if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("agenticx:web-search-config", {
-            detail: { deepResearchEnabled: json.data.deepResearchEnabled },
+            detail: { deepResearchEnabled: snapshot.deepResearchEnabled },
           }),
         );
       }
+      return true;
     } catch (error) {
+      if (confirmedWebSearchRef.current) {
+        applyWebSearchSnapshot(confirmedWebSearchRef.current);
+      }
       toast.error(error instanceof Error ? error.message : t("webSearch.saveFailed"));
+      return false;
     } finally {
+      webSearchSaveInFlightRef.current = false;
       setWebSearchSaving(false);
+    }
+  };
+
+  const webSearchControlsDisabled =
+    webSearchLoadStatus !== "loaded" || webSearchSaving || !canManageWebSearch;
+  const webSearchProviderPoolFull =
+    webSearchProviders.length >= MAX_SEARCH_PROVIDER_POOL_SIZE;
+  const customEndpointAdapters = webSearchAdapters.filter(
+    (adapter) => adapter.supportsCustomEndpoint,
+  );
+  const selectedCustomAdapter = webSearchAdapters.find(
+    (adapter) => adapter.id === customSearchAdapter,
+  );
+  const availableBuiltInAdapters = webSearchAdapters.filter(
+    (adapter) =>
+      !webSearchProviders.some(
+        (providerRow) =>
+          providerRow.adapter === adapter.id &&
+          (!providerRow.endpoint || providerRow.endpoint === adapter.defaultEndpoint),
+      ),
+  );
+  const availablePrimaryBuiltInAdapters = availableBuiltInAdapters.filter(
+    (adapter) => !adapter.requiresApiKey,
+  );
+
+  const selectPrimarySearchProvider = (next: string) => {
+    const existingProvider = webSearchProviders.find(
+      (providerRow) => providerRow.id === next,
+    );
+    if (existingProvider) {
+      const orderedProviders = [
+        existingProvider,
+        ...webSearchProviders.filter(
+          (providerRow) => providerRow.id !== existingProvider.id,
+        ),
+      ];
+      setWebSearchProvider(existingProvider.id);
+      setWebSearchHasApiKey(existingProvider.hasApiKey);
+      setWebSearchApiKey("");
+      void saveWebSearch({
+        provider: existingProvider.id,
+        providers: providerUpdates(orderedProviders),
+      });
+      return;
+    }
+
+    if (!next.startsWith(BUILT_IN_ADAPTER_VALUE_PREFIX) || webSearchProviderPoolFull) {
+      return;
+    }
+    const adapterId = next.slice(BUILT_IN_ADAPTER_VALUE_PREFIX.length);
+    const adapter = webSearchAdapters.find((item) => item.id === adapterId);
+    // Credentialed services are added together with their key in the service
+    // form first; this avoids displaying a keyless provider as primary while
+    // runtime silently executes the fallback.
+    if (!adapter || adapter.requiresApiKey) return;
+
+    const providerId = createSearchProviderId();
+    const newProvider: PublicSearchProvider = {
+      id: providerId,
+      adapter: adapter.id,
+      displayName: adapter.displayName,
+      enabled: true,
+      priority: 0,
+      hasApiKey: false,
+    };
+    const orderedProviders = [newProvider, ...webSearchProviders];
+    setWebSearchProvider(providerId);
+    setWebSearchHasApiKey(false);
+    setWebSearchApiKey("");
+    void saveWebSearch({
+      provider: providerId,
+      providers: providerUpdates(orderedProviders),
+    });
+  };
+
+  const addBuiltInFallbackProvider = async () => {
+    const adapter = webSearchAdapters.find(
+      (item) => item.id === fallbackSearchAdapter,
+    );
+    if (!adapter || webSearchProviderPoolFull) return;
+
+    const fallbackId = createSearchProviderId();
+    const updates = providerUpdates(webSearchProviders);
+    updates.push({
+      id: fallbackId,
+      adapter: adapter.id,
+      displayName: adapter.displayName,
+      enabled: true,
+      priority: updates.length,
+      apiKey: fallbackSearchApiKey.trim(),
+    });
+    const saved = await saveWebSearch({
+      provider: webSearchProviders[0]?.id ?? fallbackId,
+      providers: updates,
+    });
+    if (saved) {
+      setFallbackSearchAdapter("");
+      setFallbackSearchApiKey("");
+    }
+  };
+
+  const addCustomSearchProvider = async () => {
+    const name = customSearchName.trim();
+    const endpoint = customSearchEndpoint.trim();
+    if (
+      !name ||
+      !selectedCustomAdapter ||
+      !isSupportedEndpoint(endpoint) ||
+      webSearchProviderPoolFull ||
+      (selectedCustomAdapter.requiresApiKey && !customSearchApiKey.trim())
+    ) {
+      return;
+    }
+
+    const providerId = createSearchProviderId();
+    const updates = providerUpdates(webSearchProviders);
+    updates.push({
+      id: providerId,
+      adapter: selectedCustomAdapter.id,
+      displayName: name,
+      enabled: true,
+      priority: updates.length,
+      apiKey: customSearchApiKey.trim(),
+      options: { endpoint },
+    });
+    const saved = await saveWebSearch({
+      provider: webSearchProviders[0]?.id ?? providerId,
+      providers: updates,
+    });
+    if (saved) {
+      setCustomSearchName("");
+      setCustomSearchAdapter("");
+      setCustomSearchEndpoint("");
+      setCustomSearchApiKey("");
     }
   };
 
@@ -620,20 +906,36 @@ export function SettingsPanel() {
                 description={t("webSearch.sectionDescription")}
                 icon={<Globe className="h-4 w-4" />}
                 highlight={
-                  webSearchOn
+                  webSearchLoadStatus === "loaded" && !webSearchSaving && webSearchOn
                     ? { label: t("webSearch.enabledLabel"), description: t("webSearch.enabledDescription"), variant: "success" }
                     : undefined
                 }
               >
+                {webSearchLoadStatus === "error" ? (
+                  <SettingsRow
+                    label={t("webSearch.loadFailed")}
+                    control={
+                      <Button size="sm" variant="outline" onClick={() => void loadWebSearch()}>
+                        {t("webSearch.retryLoad")}
+                      </Button>
+                    }
+                  />
+                ) : null}
+                {webSearchLoadStatus === "loaded" && !canManageWebSearch ? (
+                  <div className="rounded-lg border border-border/70 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    {t("webSearch.managedByAdmin")}
+                  </div>
+                ) : null}
                 <SettingsRow
                   label={t("webSearch.enableWebSearch")}
                   description={t("webSearch.enableWebSearchDescription")}
                   control={
                     <Switch
                       checked={webSearchOn}
+                      disabled={webSearchControlsDisabled}
                       onChange={(next) => {
                         setWebSearchOn(next);
-                        if (webSearchLoaded) void saveWebSearch({ enabled: next });
+                        void saveWebSearch({ enabled: next });
                       }}
                     />
                   }
@@ -644,9 +946,10 @@ export function SettingsPanel() {
                   control={
                     <Switch
                       checked={deepResearchOn}
+                      disabled={webSearchControlsDisabled}
                       onChange={(next) => {
                         setDeepResearchOn(next);
-                        if (webSearchLoaded) void saveWebSearch({ deepResearchEnabled: next });
+                        void saveWebSearch({ deepResearchEnabled: next });
                       }}
                     />
                   }
@@ -654,23 +957,61 @@ export function SettingsPanel() {
                 {webSearchOn ? (
                   <>
                     <SettingsRow
+                      label={t("webSearch.maxSearchCalls")}
+                      description={t("webSearch.maxSearchCallsDescription")}
+                      control={
+                        <Select
+                          value={String(maxSearchCalls)}
+                          disabled={webSearchControlsDisabled}
+                          onValueChange={(next) => {
+                            const value = Number(next);
+                            setMaxSearchCalls(value);
+                            void saveWebSearch({ maxSearchCalls: value });
+                          }}
+                        >
+                          <SelectTrigger className="w-[120px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {WEB_SEARCH_CALL_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={String(value)}>
+                                {value}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      }
+                    />
+                    <SettingsRow
                       label={t("webSearch.provider")}
                       description={t("webSearch.providerDescription")}
                       control={
                         <Select
                           value={webSearchProvider}
-                          onValueChange={(next) => {
-                            setWebSearchProvider(next);
-                            if (webSearchLoaded) void saveWebSearch({ provider: next });
-                          }}
+                          disabled={webSearchControlsDisabled}
+                          onValueChange={selectPrimarySearchProvider}
                         >
                           <SelectTrigger className="w-[240px]">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="duckduckgo">DuckDuckGo</SelectItem>
-                            <SelectItem value="bocha">Bocha</SelectItem>
-                            <SelectItem value="tavily">Tavily</SelectItem>
+                            {webSearchProviders.map((providerRow) => (
+                              <SelectItem key={providerRow.id} value={providerRow.id}>
+                                {providerRow.displayName}
+                              </SelectItem>
+                            ))}
+                            {!webSearchProviderPoolFull
+                              ? availablePrimaryBuiltInAdapters.map((adapter) => (
+                                  <SelectItem
+                                    key={`${BUILT_IN_ADAPTER_VALUE_PREFIX}${adapter.id}`}
+                                    value={`${BUILT_IN_ADAPTER_VALUE_PREFIX}${adapter.id}`}
+                                  >
+                                    {t("webSearch.addBuiltInProvider", {
+                                      name: adapter.displayName,
+                                    })}
+                                  </SelectItem>
+                                ))
+                              : null}
                           </SelectContent>
                         </Select>
                       }
@@ -686,14 +1027,18 @@ export function SettingsPanel() {
                             }
                             type="password"
                             className="w-full"
+                            disabled={webSearchControlsDisabled}
                             value={webSearchApiKey}
                             onChange={(event) => setWebSearchApiKey(event.target.value)}
                           />
                           <div className="flex gap-2">
                             <Button
                               size="sm"
-                              disabled={webSearchSaving || !webSearchApiKey.trim()}
-                              onClick={() => void saveWebSearch({ apiKey: webSearchApiKey.trim() })}
+                              disabled={webSearchControlsDisabled || !webSearchApiKey.trim()}
+                              onClick={() => void saveWebSearch({
+                                provider: webSearchProvider,
+                                apiKey: webSearchApiKey.trim(),
+                              })}
                             >
                               {t("webSearch.saveApiKey")}
                             </Button>
@@ -701,11 +1046,217 @@ export function SettingsPanel() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                disabled={webSearchSaving}
-                                onClick={() => void saveWebSearch({ apiKey: "" })}
+                                disabled={webSearchControlsDisabled}
+                                onClick={() => void saveWebSearch({
+                                  provider: webSearchProvider,
+                                  apiKey: "",
+                                })}
                               >
                                 {t("webSearch.clearApiKey")}
                               </Button>
+                            ) : null}
+                          </div>
+                        </div>
+                      }
+                      stack
+                    />
+                    <SettingsRow
+                      label={t("webSearch.fallbackProviders")}
+                      description={t("webSearch.fallbackProvidersDescription")}
+                      control={
+                        <div className="flex w-full max-w-[520px] flex-col gap-3">
+                          {webSearchProviders
+                            .filter(
+                              (searchProvider) =>
+                                searchProvider.id !== webSearchProvider,
+                            )
+                            .map((searchProvider) => (
+                              <div
+                                key={searchProvider.id}
+                                className="flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2"
+                              >
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium text-foreground">
+                                    {searchProvider.displayName}
+                                  </div>
+                                  {searchProvider.endpoint ? (
+                                    <div className="max-w-[330px] truncate text-xs text-muted-foreground">
+                                      {searchProvider.endpoint}
+                                    </div>
+                                  ) : null}
+                                  <div className="text-xs text-muted-foreground">
+                                    {searchProvider.hasApiKey
+                                      ? t("webSearch.apiKeyConfigured")
+                                      : t("webSearch.apiKeyNotConfigured")}
+                                  </div>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={webSearchControlsDisabled}
+                                  onClick={() =>
+                                    void saveWebSearch({
+                                      provider: webSearchProvider,
+                                      providers: providerUpdates(
+                                        webSearchProviders.filter(
+                                          (providerRow) =>
+                                            providerRow.id !== searchProvider.id,
+                                        ),
+                                      ),
+                                    })
+                                  }
+                                >
+                                  {t("webSearch.removeFallbackProvider")}
+                                </Button>
+                              </div>
+                            ))}
+                          {!webSearchProviderPoolFull && availableBuiltInAdapters.length ? (
+                            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                              <Select
+                                value={fallbackSearchAdapter}
+                                disabled={webSearchControlsDisabled}
+                                onValueChange={setFallbackSearchAdapter}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder={t("webSearch.selectFallbackProvider")} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {availableBuiltInAdapters.map((adapter) => (
+                                    <SelectItem key={adapter.id} value={adapter.id}>
+                                      {adapter.displayName}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Input
+                                type="password"
+                                disabled={webSearchControlsDisabled}
+                                placeholder={t("webSearch.fallbackApiKeyPlaceholder")}
+                                value={fallbackSearchApiKey}
+                                onChange={(event) => setFallbackSearchApiKey(event.target.value)}
+                              />
+                              <Button
+                                size="sm"
+                                disabled={
+                                  webSearchControlsDisabled ||
+                                  !fallbackSearchAdapter ||
+                                  (webSearchAdapters.find(
+                                    (adapter) => adapter.id === fallbackSearchAdapter,
+                                  )?.requiresApiKey === true && !fallbackSearchApiKey.trim())
+                                }
+                                onClick={() => void addBuiltInFallbackProvider()}
+                              >
+                                {t("webSearch.addFallbackProvider")}
+                              </Button>
+                            </div>
+                          ) : null}
+                          <div className="text-xs text-muted-foreground">
+                            {t("webSearch.providerPoolUsage", {
+                              count: webSearchProviders.length,
+                              max: MAX_SEARCH_PROVIDER_POOL_SIZE,
+                            })}
+                          </div>
+                        </div>
+                      }
+                      stack
+                    />
+                    <SettingsRow
+                      label={t("webSearch.customProvider")}
+                      description={t("webSearch.customProviderDescription")}
+                      control={
+                        <div className="flex w-full max-w-[520px] flex-col gap-3">
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="flex flex-col gap-1.5">
+                              <Label htmlFor="custom-search-name">
+                                {t("webSearch.customProviderName")}
+                              </Label>
+                              <Input
+                                id="custom-search-name"
+                                value={customSearchName}
+                                disabled={webSearchControlsDisabled || webSearchProviderPoolFull}
+                                placeholder={t("webSearch.customProviderNamePlaceholder")}
+                                onChange={(event) => setCustomSearchName(event.target.value)}
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                              <Label>{t("webSearch.compatibleProtocol")}</Label>
+                              <Select
+                                value={customSearchAdapter}
+                                disabled={
+                                  webSearchControlsDisabled ||
+                                  webSearchProviderPoolFull ||
+                                  customEndpointAdapters.length === 0
+                                }
+                                onValueChange={setCustomSearchAdapter}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder={t("webSearch.selectProtocol")} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {customEndpointAdapters.map((adapter) => (
+                                    <SelectItem key={adapter.id} value={adapter.id}>
+                                      {adapter.displayName}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="flex flex-col gap-1.5 sm:col-span-2">
+                              <Label htmlFor="custom-search-endpoint">
+                                {t("webSearch.customEndpoint")}
+                              </Label>
+                              <Input
+                                id="custom-search-endpoint"
+                                inputMode="url"
+                                value={customSearchEndpoint}
+                                disabled={webSearchControlsDisabled || webSearchProviderPoolFull}
+                                placeholder={
+                                  selectedCustomAdapter?.defaultEndpoint ??
+                                  t("webSearch.customEndpointPlaceholder")
+                                }
+                                onChange={(event) => setCustomSearchEndpoint(event.target.value)}
+                              />
+                              {customSearchEndpoint.trim() &&
+                              !isSupportedEndpoint(customSearchEndpoint.trim()) ? (
+                                <span className="text-xs text-destructive">
+                                  {t("webSearch.customEndpointInvalid")}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-col gap-1.5 sm:col-span-2">
+                              <Label htmlFor="custom-search-api-key">
+                                {t("webSearch.customApiKey")}
+                              </Label>
+                              <Input
+                                id="custom-search-api-key"
+                                type="password"
+                                value={customSearchApiKey}
+                                disabled={webSearchControlsDisabled || webSearchProviderPoolFull}
+                                placeholder={t("webSearch.customApiKeyPlaceholder")}
+                                onChange={(event) => setCustomSearchApiKey(event.target.value)}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <Button
+                              size="sm"
+                              disabled={
+                                webSearchControlsDisabled ||
+                                webSearchProviderPoolFull ||
+                                !customSearchName.trim() ||
+                                !selectedCustomAdapter ||
+                                !isSupportedEndpoint(customSearchEndpoint.trim()) ||
+                                (selectedCustomAdapter.requiresApiKey &&
+                                  !customSearchApiKey.trim())
+                              }
+                              onClick={() => void addCustomSearchProvider()}
+                            >
+                              {t("webSearch.addCustomProvider")}
+                            </Button>
+                            {webSearchProviderPoolFull ? (
+                              <span className="text-xs text-muted-foreground">
+                                {t("webSearch.providerLimitReached")}
+                              </span>
                             ) : null}
                           </div>
                         </div>
@@ -883,16 +1434,26 @@ function SettingsRow({
   );
 }
 
-function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
+function Switch({
+  checked,
+  disabled = false,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={[
         "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
         checked ? "bg-primary" : "bg-muted",
+        disabled ? "cursor-not-allowed opacity-50" : "",
       ].join(" ")}
     >
       <span

@@ -47,6 +47,34 @@ export type WebSearchSource = {
   usedByModel?: boolean;
 };
 
+export type WebSearchTrace = {
+  version: 1;
+  decision: "search" | "skip";
+  reason: string;
+  resolvedQuery?: string;
+  facets?: Array<{
+    query: string;
+    /** Configured provider instance ids attempted for this facet, in order. */
+    providerIds?: string[];
+    hitCount: number;
+    uniqueHosts: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }>;
+  providerCalls: number;
+  retry?: {
+    used: true;
+    queryIndex: number;
+    reason: string;
+    fromProviderId: string;
+    toProviderId: string;
+  };
+  timings?: {
+    queryResolutionMs: number;
+    retrievalMs: number;
+  };
+};
+
 export type ChatChunk = {
   requestId: string;
   delta?: string;
@@ -54,6 +82,8 @@ export type ChatChunk = {
   usage?: ChatUsage;
   /** Structured web-search hits from portal BFF (not mixed into delta). */
   webSearchSources?: WebSearchSource[];
+  /** Optional provider-agnostic retrieval diagnostics from portal BFF. */
+  webSearchTrace?: WebSearchTrace;
   /** Structured deep-research progress (not mixed into delta). */
   deepResearchEvent?: DeepResearchEvent;
   /** 用户主动中断（非错误）：保留已生成内容，不视为失败。 */

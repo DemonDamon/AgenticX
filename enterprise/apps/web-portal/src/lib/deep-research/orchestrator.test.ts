@@ -24,6 +24,10 @@ import type { ResearchPlan } from "./planner";
 import type { Citation } from "./registry";
 import { emptyFetchStats } from "../web-search/page-fetch";
 import { directFetch } from "../web-search/direct-fetch";
+import type { executeWebSearch } from "../web-search/providers";
+import type { DirectPageView } from "../web-search/direct-page";
+
+type ExecuteSearchArgs = Parameters<typeof executeWebSearch>;
 
 async function readSsePayload(response: Response): Promise<{
   text: string;
@@ -131,6 +135,85 @@ describe("mapPool concurrency", () => {
 });
 
 describe("runDeepResearchTurn", () => {
+  it("reads an explicit page once and reuses question-ranked passages across lanes", async () => {
+    const gatewayBodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      gatewayBodies.push(body);
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: "lane memo" } }] }),
+        } as Response;
+      }
+      return synthUpstream("report");
+    });
+    const readPage = vi.fn(async (reference): Promise<DirectPageView> => ({
+      reference,
+      title: "Paper title",
+      text: [
+        "Paper title and abstract.",
+        "Introduction and background.",
+        "Method section.",
+        "Table 8: R&D coding benchmark.",
+        "Pass Rate Internal Engineers 80 percent.",
+      ].join("\n\n"),
+      rawChars: 180,
+      coverage: "full_html",
+      backend: "native",
+    }));
+    const fetchPagesFn = vi.fn(async (urls: string[]) => ({
+      pages: urls.map(() => null),
+      stats: emptyFetchStats(),
+    }));
+
+    const response = await runDeepResearchTurn(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: "https://arxiv.org/pdf/2606.19348请研究这篇文章",
+          },
+        ],
+        agenticx_deep_research: true,
+      },
+      {
+        ...baseDeps({
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          readPage,
+          fetchPagesFn,
+          buildPlan: async () => ({
+            topic: "Paper",
+            complexity: "simple" as const,
+            subQuestions: ["Table 8 Pass Rate"],
+          }),
+          executeSearch: async () => [
+            {
+              title: "duplicate paper",
+              url: "https://arxiv.org/abs/2606.19348v1",
+              snippet: "duplicate",
+            },
+            { title: "external", url: "https://example.com/context", snippet: "context" },
+          ],
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(readPage.mock.calls[0]?.[0]).toMatchObject({
+      readUrl: "https://arxiv.org/html/2606.19348",
+      question: "请研究这篇文章",
+    });
+    expect(fetchPagesFn).toHaveBeenCalled();
+    const pageFetchUrls = fetchPagesFn.mock.calls.flatMap((call) => call[0]);
+    expect(pageFetchUrls.length).toBeGreaterThan(0);
+    expect(new Set(pageFetchUrls)).toEqual(new Set(["https://example.com/context"]));
+    expect(JSON.stringify(gatewayBodies)).toContain("Table 8: R&D coding benchmark");
+    expect(JSON.stringify(gatewayBodies)).toContain("Pass Rate Internal Engineers 80 percent");
+  });
+
   it("emits structured events, streams report, and sources frame without gray progress", async () => {
     const plan: ResearchPlan = {
       topic: "主题",
@@ -161,6 +244,8 @@ describe("runDeepResearchTurn", () => {
       url: `https://ex.com/${i + 1}`,
       snippet: `s${i + 1}`,
     }));
+    const executeSearch = vi.fn(async () => hits);
+    const runReconFn = vi.fn(async (_input: { query: string }) => ({ brief: "", hits: [] }));
 
     const response = await runDeepResearchTurn(
       {
@@ -172,8 +257,10 @@ describe("runDeepResearchTurn", () => {
         ...baseDeps({
           fetchImpl: fetchImpl as unknown as typeof fetch,
           buildPlan: async () => plan,
-          executeSearch: async () => hits,
+          executeSearch,
+          runReconFn,
         }),
+        resolvedUserQuery: "数学家 王虹 最近几天 新闻",
       },
     );
 
@@ -196,6 +283,7 @@ describe("runDeepResearchTurn", () => {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     expect(lastUser?.content).toContain("子问1");
     expect(lastUser?.content).toContain("[1]");
+    expect(runReconFn.mock.calls[0]?.[0]?.query).toBe("数学家 王虹 最近几天 新闻");
   });
 
   it("refreshes gateway bearer before synthesize so section writes use the new token", async () => {
@@ -936,15 +1024,18 @@ describe("recon cold-start", () => {
     expect(pack).toContain("[2] B");
   });
 
-  it("still fans out open-ended asks when clarify is skipped and planner collapses", async () => {
+  it("skips the card after a trusted no-clarification decision without shrinking research breadth", async () => {
+    const clarifyDeps: Array<Record<string, unknown>> = [];
     const response = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
       {
         ...baseDeps({
           fetchImpl: gatewayStub("fanout-report") as unknown as typeof fetch,
-          // Model over-skips after recon — proposeClarification floor should still ask,
-          // but even if the injected clarifier skips, lane breadth must hold.
-          proposeClarify: async () => ({ needed: false as const }),
+          intentConfidence: { routeConfidence: 0.95, queryConfidence: 0.96 },
+          proposeClarify: async (deps: Record<string, unknown>) => {
+            clarifyDeps.push(deps);
+            return { needed: false as const };
+          },
           buildPlan: async () => ({
             topic: "deepseek v4 核心技术点",
             complexity: "simple" as const,
@@ -958,10 +1049,104 @@ describe("recon cold-start", () => {
     );
 
     const { events } = await readSsePayload(response);
+    expect(clarifyDeps[0]?.respectModelNoClarification).toBe(true);
+    expect(events.some((e) => e.type === "clarify")).toBe(false);
     const researchLanes = events.filter(
       (e) => e.type === "lane_started" && e.laneId !== "recon-cold-start",
     );
     expect(researchLanes.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("keeps the card when either upstream confidence is below the stricter threshold", async () => {
+    const clarifyDeps: Array<Record<string, unknown>> = [];
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
+      {
+        ...baseDeps({
+          fetchImpl: gatewayStub("low-confidence-report") as unknown as typeof fetch,
+          intentConfidence: { routeConfidence: 0.89, queryConfidence: 0.99 },
+          proposeClarify: async (deps: Record<string, unknown>) => {
+            clarifyDeps.push(deps);
+            return { needed: false as const };
+          },
+          buildPlan: async () => ({
+            topic: "deepseek v4 核心技术点",
+            complexity: "simple" as const,
+            subQuestions: ["deepseek v4 核心技术点"],
+          }),
+          executeSearch: async () => [
+            { title: "t", url: "https://ex.com/low-confidence", snippet: "s" },
+          ],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(clarifyDeps[0]?.respectModelNoClarification).toBe(false);
+    expect(events.some((e) => e.type === "clarify")).toBe(true);
+  });
+
+  it("keeps the card when the clarifier requests input despite high confidence", async () => {
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
+      {
+        ...baseDeps({
+          fetchImpl: gatewayStub("clarify-report") as unknown as typeof fetch,
+          intentConfidence: { routeConfidence: 0.99, queryConfidence: 0.99 },
+          proposeClarify: async () => ({
+            needed: true as const,
+            questions: [
+              {
+                id: "focus",
+                question: "优先研究哪个方向？",
+                options: [
+                  { id: "architecture", label: "架构" },
+                  { id: "deployment", label: "部署" },
+                ],
+                allowCustom: true,
+              },
+            ],
+          }),
+          buildPlan: async () => ({
+            topic: "deepseek v4 核心技术点",
+            complexity: "simple" as const,
+            subQuestions: ["deepseek v4 核心技术点"],
+          }),
+          executeSearch: async () => [
+            { title: "t", url: "https://ex.com/clarify", snippet: "s" },
+          ],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(events.some((e) => e.type === "clarify" && e.questionId === "focus")).toBe(true);
+  });
+
+  it("keeps the card when the clarifier fails despite high confidence", async () => {
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
+      {
+        ...baseDeps({
+          fetchImpl: gatewayStub("clarifier-failure-report") as unknown as typeof fetch,
+          intentConfidence: { routeConfidence: 0.99, queryConfidence: 0.99 },
+          proposeClarify: async () => {
+            throw new Error("clarifier unavailable");
+          },
+          buildPlan: async () => ({
+            topic: "deepseek v4 核心技术点",
+            complexity: "simple" as const,
+            subQuestions: ["deepseek v4 核心技术点"],
+          }),
+          executeSearch: async () => [
+            { title: "t", url: "https://ex.com/fallback", snippet: "s" },
+          ],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(events.some((e) => e.type === "clarify")).toBe(true);
   });
 
   it("completes the run even when recon throws", async () => {
@@ -1200,7 +1385,22 @@ describe("formatEvidencePack / formatSourcesAppendix", () => {
     expect(pack).toContain("研究主题：主题");
     expect(pack).toContain("[1] A");
     expect(pack).toContain("摘要：sa");
+    expect(pack).toContain("证据覆盖提醒：当前仅 1 个来源域名");
     expect(formatSourcesAppendix(citations)).toContain("**来源**");
+  });
+
+  it("keeps provider dates without declaring a trend from metadata", () => {
+    const citations: Citation[] = [
+      { index: 1, title: "A", url: "https://a.com", snippet: "sa", publishedAt: "2026-08-01" },
+      { index: 2, title: "B", url: "https://b.com", snippet: "sb", publishedAt: "2026-08-10" },
+    ];
+    const pack = formatEvidencePack(
+      { topic: "主题", complexity: "moderate", subQuestions: ["子问"] },
+      [{ question: "子问", citations }],
+    );
+    expect(pack).not.toContain("证据覆盖提醒");
+    expect(pack).not.toContain("达到趋势陈述最低门槛");
+    expect(pack).toContain("发布时间: 2026-08-10");
   });
 
   it("prefers fullText body in lane evidence", () => {
@@ -1249,15 +1449,41 @@ describe("P1 multi-variant + reflect", () => {
             { query: `${subQuestion} paper`, kind: "authority" as const },
             { query: `${subQuestion} english`, kind: "english" as const },
           ],
-          executeSearch: async (query: string) => {
+          executeSearch: async (
+            query: ExecuteSearchArgs[0],
+            _max: ExecuteSearchArgs[1],
+            _cfg: ExecuteSearchArgs[2],
+            _fetch: ExecuteSearchArgs[3],
+            diagnostics: ExecuteSearchArgs[4],
+          ) => {
             calls.push(query);
+            diagnostics?.onProviderAttempt?.({
+              providerId: "customer-primary",
+              outcome: "ok",
+              hitCount: 1,
+              durationMs: 1,
+            });
             return [{ title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" }];
           },
         }),
       },
     );
-    await readSsePayload(response);
+    const { events } = await readSsePayload(response);
     expect(calls).toHaveLength(6);
+    const sourceEvents = events.filter((event) => event.type === "lane_sources");
+    expect(sourceEvents).toHaveLength(2);
+    const trace = sourceEvents[0]?.trace as {
+      topLevelQueriesRun?: number;
+      providerCalls?: number;
+      queries?: Array<{ status?: string; hitCount?: number; providerIds?: string[] }>;
+    };
+    expect(trace.topLevelQueriesRun).toBe(3);
+    expect(trace.providerCalls).toBe(3);
+    expect(trace.queries).toEqual([
+      expect.objectContaining({ status: "ok", hitCount: 1, providerIds: ["customer-primary"] }),
+      expect.objectContaining({ status: "ok", hitCount: 1, providerIds: ["customer-primary"] }),
+      expect.objectContaining({ status: "ok", hitCount: 1, providerIds: ["customer-primary"] }),
+    ]);
   });
 
   it("skips remaining queries once a lane has more candidates than it can adopt", async () => {
@@ -1314,6 +1540,18 @@ describe("P1 multi-variant + reflect", () => {
     // Reported spend must be what actually ran (2 lanes × probe), not the 4
     // queries each lane expanded.
     expect(stats?.queriesPlanned).toBe(EARLY_STOP_PROBE_VARIANTS * 2);
+    const laneSources = events.find(
+      (event) => event.type === "lane_sources" && String(event.laneId).includes("q1"),
+    );
+    const trace = laneSources?.trace as {
+      topLevelQueriesRun?: number;
+      queries?: Array<{ status?: string }>;
+    };
+    expect(trace.topLevelQueriesRun).toBe(EARLY_STOP_PROBE_VARIANTS);
+    expect(trace.queries?.slice(EARLY_STOP_PROBE_VARIANTS)).toEqual([
+      expect.objectContaining({ status: "skipped" }),
+      expect.objectContaining({ status: "skipped" }),
+    ]);
   });
 
   it("runs every query when candidates stay below the adopt budget", async () => {

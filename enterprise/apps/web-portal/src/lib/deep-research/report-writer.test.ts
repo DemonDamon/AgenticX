@@ -147,6 +147,8 @@ describe("renderTableOfContents / buildSectionMessages", () => {
     expect(body).toContain(String(SECTION_TARGET_CHARS));
     expect(body).not.toContain("400–800 字");
     expect(lead).not.toBe(body);
+    expect(lead).toContain("多实体须逐项取证");
+    expect(body).toContain("风评转变");
   });
 
   it("injects GFM comparison_table directives for non-lead sections", () => {

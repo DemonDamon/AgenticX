@@ -53,6 +53,19 @@ function createFakeClient(): SqlClient & {
         return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
       }
 
+      if (sql.startsWith("select * from chat_messages") && sql.includes("where session_id")) {
+        const [sessionId, tenantId, userId] = params;
+        const rows = [...messages.values()]
+          .filter(
+            (row) =>
+              row.session_id === sessionId &&
+              row.tenant_id === tenantId &&
+              row.user_id === userId,
+          )
+          .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+        return { rows, rowCount: rows.length };
+      }
+
       if (sql.startsWith("insert into chat_messages")) {
         // values: id, session, tenant, user, role, content, model, status, metadata, created, updated
         for (let i = 0; i + 10 < params.length; i += 11) {
@@ -145,6 +158,49 @@ function seedSession(client: ReturnType<typeof createFakeClient>, sessionId: str
 }
 
 describe.each(["postgresql", "mysql"] as const)("append idempotency (%s)", (dialect) => {
+  it("round-trips web_search_trace through JSON metadata", async () => {
+    const client = createFakeClient();
+    const store = new SqlChatHistoryStore(dialect, client);
+    const sessionId = ulid();
+    seedSession(client, sessionId);
+    const trace = {
+      version: 1 as const,
+      decision: "search" as const,
+      reason: "follow-up needs fresh evidence",
+      resolvedQuery: "two entities recent reputation 2026-08-12",
+      facets: [
+        {
+          query: "entity one reputation",
+          providerIds: ["customer-primary"],
+          hitCount: 10,
+          uniqueHosts: 7,
+        },
+        { query: "entity two reputation", hitCount: 9, uniqueHosts: 6 },
+      ],
+      providerCalls: 2,
+    };
+    await store.appendChatMessages(
+      { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" },
+      sessionId,
+      [{
+        id: ulid(),
+        session_id: sessionId,
+        tenant_id: "01TENANTAAAAAAAAAAAAAAAAAA",
+        user_id: "01USERAAAAAAAAAAAAAAAAAAAA",
+        role: "assistant",
+        content: "answer",
+        created_at: "2026-08-12T00:00:00.000Z",
+        web_search_trace: trace,
+      }],
+    );
+
+    const history = await store.getChatSessionMessages(
+      { tenantId: "01TENANTAAAAAAAAAAAAAAAAAA", userId: "01USERAAAAAAAAAAAAAAAAAAAA" },
+      sessionId,
+    );
+    expect(history[0]?.web_search_trace).toEqual(trace);
+  });
+
   it("same operation_id inserts once and keeps COUNT correct (AC-2)", async () => {
     const client = createFakeClient();
     const store = new SqlChatHistoryStore(dialect, client);

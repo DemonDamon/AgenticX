@@ -1,6 +1,7 @@
 import type { AuthUser } from "@agenticx/auth";
 import {
   buildAutoTitleFromFirstUserMessage,
+  sanitizeWebSearchTrace,
   sessionTitleNeedsAutoFill,
   type ChatMessage,
   type ChatMessageRole,
@@ -43,6 +44,9 @@ const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const SHARE_TOKEN_BYTES = 24;
 const MAX_SHARE_MESSAGES = 200;
 const MAX_SHARE_CONTENT_CHARS = 500_000;
+const HISTORY_PREVIEW_CHARS = 160;
+const THINK_OPEN = "<" + "think" + ">";
+const THINK_CLOSE = "<" + "/" + "think" + ">";
 
 function normalizeRole(role: string): ChatMessageRole {
   if (ALLOWED_ROLES.includes(role as ChatMessageRole)) return role as ChatMessageRole;
@@ -60,7 +64,32 @@ function truncatePreview(value: unknown, max = 160): string | undefined {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+/** Keep internal reasoning searchable in message storage, but never render it in session cards. */
+export function assistantHistoryPreview(value: unknown, max = HISTORY_PREVIEW_CHARS): string | undefined {
+  if (value == null) return undefined;
+  let text = String(value)
+    .replaceAll(THINK_OPEN, "<think>")
+    .replaceAll(THINK_CLOSE, "</think>");
+
+  // Remove balanced blocks first. An orphan close still marks everything before
+  // it as reasoning, while an unclosed open hides its unfinished tail.
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, " ");
+  const lower = text.toLowerCase();
+  const lastOrphanClose = lower.lastIndexOf("</think>");
+  if (lastOrphanClose >= 0) {
+    text = text.slice(lastOrphanClose + "</think>".length);
+  }
+  const unclosedOpen = text.toLowerCase().indexOf("<think>");
+  if (unclosedOpen >= 0) {
+    text = text.slice(0, unclosedOpen);
+  }
+  return truncatePreview(text, max);
+}
+
 function mapSession(row: Record<string, unknown>): ChatSession {
+  const assistantPreview = assistantHistoryPreview(
+    row.assistant_preview_text ?? row.preview_text,
+  );
   return {
     id: String(row.id),
     tenant_id: String(row.tenant_id),
@@ -70,7 +99,7 @@ function mapSession(row: Record<string, unknown>): ChatSession {
     message_count: Number(row.message_count ?? 0),
     last_message_at: row.last_message_at == null ? undefined : toDate(row.last_message_at).toISOString(),
     pinned_at: row.pinned_at == null ? undefined : toDate(row.pinned_at).toISOString(),
-    preview: truncatePreview(row.preview_text),
+    preview: assistantPreview ?? truncatePreview(row.user_preview_text),
     created_at: toDate(row.created_at).toISOString(),
     updated_at: toDate(row.updated_at).toISOString(),
   };
@@ -79,6 +108,7 @@ function mapSession(row: Record<string, unknown>): ChatSession {
 type MessageMetadata = {
   attachments?: ChatMessage["attachments"];
   web_search_sources?: ChatMessage["web_search_sources"];
+  web_search_trace?: unknown;
   deep_research?: ChatMessage["deep_research"];
 };
 
@@ -103,6 +133,10 @@ export function serializeMessageMetadata(message: ChatMessage): string | null {
   if (message.web_search_sources?.length) {
     metadata.web_search_sources = message.web_search_sources;
   }
+  const webSearchTrace = sanitizeWebSearchTrace(message.web_search_trace);
+  if (webSearchTrace) {
+    metadata.web_search_trace = webSearchTrace;
+  }
   if (message.deep_research) {
     const events = Array.isArray(message.deep_research.events)
       ? message.deep_research.events.slice(-200)
@@ -126,6 +160,7 @@ function mapMessage(row: Record<string, unknown>): ChatMessage {
     content: String(row.content),
     attachments: metadata?.attachments,
     web_search_sources: metadata?.web_search_sources,
+    web_search_trace: sanitizeWebSearchTrace(metadata?.web_search_trace),
     deep_research: metadata?.deep_research,
     model: row.model == null ? undefined : String(row.model),
     created_at: toDate(row.created_at).toISOString(),
@@ -194,28 +229,29 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
   public async listChatSessions(ctx: ChatHistoryContext): Promise<ChatSession[]> {
     const p1 = this.dialect === "postgresql" ? "$1" : "?";
     const p2 = this.dialect === "postgresql" ? "$2" : "?";
-    const previewExpr =
+    const assistantPreviewExpr =
       this.dialect === "postgresql"
-        ? `coalesce(
-             (select left(m.content, 160) from chat_messages m
-              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
-                and m.role = 'assistant'
-              order by m.created_at asc limit 1),
-             (select left(m.content, 160) from chat_messages m
-              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
-                and m.role = 'user'
-              order by m.created_at asc limit 1)
-           ) as preview_text`
-        : `coalesce(
-             (select left(m.content, 160) from chat_messages m
-              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
-                and m.role = 'assistant'
-              order by m.created_at asc limit 1),
-             (select left(m.content, 160) from chat_messages m
-              where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
-                and m.role = 'user'
-              order by m.created_at asc limit 1)
-           ) as preview_text`;
+        ? `nullif(btrim(case
+             when strpos(lower(m.content), '</think>') > 0 then
+               left(right(m.content, strpos(reverse(lower(m.content)), '>kniht/<') - 1), ${HISTORY_PREVIEW_CHARS})
+             when strpos(lower(m.content), '<think>') > 0 then ''
+             else left(m.content, ${HISTORY_PREVIEW_CHARS})
+           end), '')`
+        : `nullif(trim(case
+             when locate('</think>', lower(m.content)) > 0 then
+               left(right(m.content, locate('>kniht/<', reverse(lower(m.content))) - 1), ${HISTORY_PREVIEW_CHARS})
+             when locate('<think>', lower(m.content)) > 0 then ''
+             else left(m.content, ${HISTORY_PREVIEW_CHARS})
+           end), '')`;
+    const previewExpr = `
+      (select ${assistantPreviewExpr} from chat_messages m
+       where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
+         and m.role = 'assistant'
+       order by m.created_at asc limit 1) as assistant_preview_text,
+      (select left(m.content, ${HISTORY_PREVIEW_CHARS}) from chat_messages m
+       where m.session_id = s.id and m.tenant_id = s.tenant_id and m.user_id = s.user_id
+         and m.role = 'user'
+       order by m.created_at asc limit 1) as user_preview_text`;
     const orderBy =
       this.dialect === "postgresql"
         ? `(s.pinned_at is null) asc, s.pinned_at desc nulls last, s.created_at desc`

@@ -269,10 +269,18 @@ export function buildDeepResearchSegments(
       }
       case "research_stats": {
         flushCards();
+        const stats = [
+          `检索式 ${event.queriesPlanned} 条`,
+          `发现 ${event.urlsDiscovered} 个来源`,
+          `采用 ${event.sourcesSelected} 个`,
+        ];
+        if (event.pagesFetched > 0) {
+          stats.push(`读取正文 ${event.pagesFetched} 篇`);
+        }
         segments.push({
           kind: "stats",
           id: `stats-${seq++}`,
-          label: `检索式 ${event.queriesPlanned} 条 · 发现 ${event.urlsDiscovered} 个来源 · 采用 ${event.sourcesSelected} 个 · 读取正文 ${event.pagesFetched} 篇`,
+          label: stats.join(" · "),
         });
         break;
       }

@@ -27,11 +27,7 @@ import {
 import { ChevronDown, ChevronRight, FolderTree, MoreHorizontal, MoveRight, Pencil, Plus, RefreshCw, Save, Trash2, UserPlus, Users } from "lucide-react";
 import { adminFetch } from "../lib/admin-client-auth";
 import { CreateUserDialog, type CreateUserDepartmentOption } from "./CreateUserDialog";
-import {
-  UserFormDialog,
-  type UserFormRoleOption,
-  type UserFormValues,
-} from "./UserFormDialog";
+import { UserDetailEditor, type UserDetailTarget } from "./UserDetailEditor";
 import { VisibleModelsEditor } from "./visible-models-editor";
 
 type OrganizationNode = {
@@ -269,7 +265,7 @@ function OrganizationMemberRow({
         <DropdownMenuContent align="end" className="w-40">
           <DropdownMenuLabel>用户操作</DropdownMenuLabel>
           <DropdownMenuItem onClick={() => onEdit(member)}>
-            <Pencil className="mr-2 h-4 w-4" />编辑用户
+            <Pencil className="mr-2 h-4 w-4" />详细编辑
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => onMove(member)}>
             <MoveRight className="mr-2 h-4 w-4" />移动到组织
@@ -312,11 +308,7 @@ export function OrganizationEditor() {
   const [moving, setMoving] = useState(false);
   const [draggingMemberId, setDraggingMemberId] = useState<string | null>(null);
   const [dropTargetDeptId, setDropTargetDeptId] = useState<string | null>(null);
-  const [userFormOpen, setUserFormOpen] = useState(false);
-  const [userFormLoading, setUserFormLoading] = useState(false);
-  const [userFormUserId, setUserFormUserId] = useState<string | null>(null);
-  const [userFormInitial, setUserFormInitial] = useState<UserFormValues | null>(null);
-  const [userFormRoleOptions, setUserFormRoleOptions] = useState<UserFormRoleOption[]>([]);
+  const [editingMember, setEditingMember] = useState<UserDetailTarget | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -389,82 +381,8 @@ export function OrganizationEditor() {
     setMoveTargetDeptId(targetDeptId);
   };
 
-  const openMemberEditor = async (member: OrganizationMember) => {
-    if (userFormLoading) return;
-    setUserFormUserId(member.id);
-    setUserFormLoading(true);
-    try {
-      const [userResponse, roleResponse] = await Promise.all([
-        adminFetch(`/api/admin/users/${encodeURIComponent(member.id)}`, { cache: "no-store" }),
-        adminFetch("/api/admin/roles", { cache: "no-store" }),
-      ]);
-      const userJson = (await userResponse.json()) as ApiEnvelope<{
-        user: {
-          email: string;
-          displayName: string;
-          status: OrganizationMember["status"];
-          deptId: string | null;
-          phone: string | null;
-          employeeNo: string | null;
-          jobTitle: string | null;
-          roleCodes: string[];
-        };
-      }>;
-      const roleJson = (await roleResponse.json()) as ApiEnvelope<{ items: UserFormRoleOption[] }>;
-      if (!userResponse.ok || userJson.code !== "00000" || !userJson.data?.user) {
-        throw new Error(userJson.message || "加载用户信息失败");
-      }
-      if (!roleResponse.ok || roleJson.code !== "00000") {
-        throw new Error(roleJson.message || "加载角色失败");
-      }
-      const user = userJson.data.user;
-      setUserFormInitial({
-        email: user.email,
-        displayName: user.displayName,
-        status: user.status,
-        deptId: user.deptId ?? "",
-        phone: user.phone ?? "",
-        employeeNo: user.employeeNo ?? "",
-        jobTitle: user.jobTitle ?? "",
-        roleCodes: user.roleCodes.length ? user.roleCodes : ["member"],
-        initialPassword: "",
-      });
-      setUserFormRoleOptions(roleJson.data?.items ?? []);
-      setUserFormOpen(true);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载用户信息失败");
-      setUserFormUserId(null);
-    } finally {
-      setUserFormLoading(false);
-    }
-  };
-
-  const saveMemberDetails = async (values: UserFormValues) => {
-    if (!userFormUserId) return;
-    const response = await adminFetch(`/api/admin/users/${encodeURIComponent(userFormUserId)}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        email: values.email.trim(),
-        displayName: values.displayName.trim(),
-        status: values.status,
-        deptId: values.deptId || null,
-        phone: values.phone.trim() || null,
-        employeeNo: values.employeeNo.trim() || null,
-        jobTitle: values.jobTitle.trim() || null,
-        roleCodes: values.roleCodes,
-      }),
-    });
-    const json = (await response.json()) as ApiEnvelope<unknown>;
-    if (!response.ok || json.code !== "00000") {
-      toast.error(json.message || "保存用户信息失败");
-      return;
-    }
-    toast.success("用户信息已保存");
-    setUserFormOpen(false);
-    setUserFormInitial(null);
-    setUserFormUserId(null);
-    await load();
+  const openMemberEditor = (member: OrganizationMember) => {
+    setEditingMember(member);
   };
 
   const handleMemberDrop = (memberId: string, targetDeptId: string) => {
@@ -724,22 +642,12 @@ export function OrganizationEditor() {
         onCreated={load}
       />
 
-      <UserFormDialog
-        open={userFormOpen}
+      <UserDetailEditor
+        target={editingMember}
         onOpenChange={(open) => {
-          setUserFormOpen(open);
-          if (!open) {
-            setUserFormInitial(null);
-            setUserFormUserId(null);
-          }
+          if (!open) setEditingMember(null);
         }}
-        title="编辑用户"
-        description={userFormInitial?.email}
-        submitLabel="保存"
-        initial={userFormInitial ?? undefined}
-        deptOptions={departmentOptions}
-        roleOptions={userFormRoleOptions}
-        onSubmit={saveMemberDetails}
+        onChanged={load}
       />
 
       <Dialog

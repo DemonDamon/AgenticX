@@ -1,5 +1,5 @@
 "use client";
-import { adminFetch } from "../../../lib/admin-client-auth";
+import { adminFetch, readAdminJsonResponse } from "../../../lib/admin-client-auth";
 
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
@@ -30,6 +30,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
+import { CompanyMonthlyTokenLimitCard } from "../../../components/CompanyMonthlyTokenLimitCard";
 import { OrganizationEditor } from "../../../components/OrganizationEditor";
 import {
   Check,
@@ -249,7 +250,10 @@ export default function BulkImportPage() {
         body: JSON.stringify({ rows: buildApiRows() }),
       });
       setProgressPct(90);
-      const json = (await res.json()) as ApiBulkResp;
+      const json = await readAdminJsonResponse<ApiBulkResp>(res, t("execute.requestFailed"));
+      if (!res.ok || !json.data) {
+        throw new Error(json.message || t("execute.requestFailed"));
+      }
       setResult(json.data ?? null);
       setStep(4);
       if (json.data && json.data.failed === 0) toast.success(t("execute.completeSuccess", { count: json.data.success }));
@@ -358,6 +362,8 @@ export default function BulkImportPage() {
           </div>
         }
       />
+
+      <CompanyMonthlyTokenLimitCard />
 
       <OrganizationEditor />
 

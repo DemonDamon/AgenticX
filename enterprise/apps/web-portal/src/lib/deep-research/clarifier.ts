@@ -31,6 +31,8 @@ export type ClarifierDeps = {
   todayLine?: string;
   /** Cold-start search digest (see recon.buildReconBrief). */
   reconBrief?: string;
+  /** High-confidence upstream context may trust a valid model `needed=false`. */
+  respectModelNoClarification?: boolean;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
 };
@@ -40,8 +42,9 @@ const CLARIFIER_SYSTEM = [
   "只输出 JSON，不要 Markdown 围栏。",
   '格式：{"needed":false} 或 {"needed":true,"questions":[{"id":"q1","question":"...","options":[{"id":"a","label":"..."}],"allowCustom":true}]}',
   "questions 最多 2 条；每题 options 2–4 个。用户可对每题多选，options 宜彼此可组合而非互斥。",
-  "对开放式调研题（含『核心技术点』『全面分析』『综述』『对比』『调研』『怎么看』或短主题未限定侧面），默认 needed=true，优先问 1 道『更想了解哪些方向』多选题。",
-  "仅当问题已收窄到单一可检索焦点（如发布时间、是否、具体数值、单一指标）时才 needed=false。",
+  "对研究对象、范围、维度或时间边界仍未明确的开放式调研题，默认 needed=true，优先问 1 道『更想了解哪些方向』多选题。",
+  "若用户已明确足以执行的研究范围，且不存在会显著改变结论的待选约束，则 needed=false；不要仅因出现『调研』『对比』『分析』等任务词而提问。",
+  "单一可检索焦点通常可直接 needed=false；多维任务若研究对象、范围和关键约束已经明确，也可 needed=false。",
   "下方检索现状只用于校准事实（禁止断言『尚未发布/不存在』），不能因为已经搜到资料就跳过澄清。",
 ].join("");
 
@@ -92,13 +95,14 @@ function normalizeQuestions(raw: unknown): ClarifyQuestion[] {
   return out;
 }
 
-export function parseClarifierJson(text: string): ClarifierResult {
+function parseClarifierJsonStrict(text: string): ClarifierResult | null {
   const tryParse = (raw: string): ClarifierResult | null => {
     try {
       const parsed = JSON.parse(raw) as { needed?: unknown; questions?: unknown };
-      if (parsed.needed !== true) return { needed: false };
+      if (parsed.needed === false) return { needed: false };
+      if (parsed.needed !== true) return null;
       const questions = normalizeQuestions(parsed.questions);
-      if (questions.length === 0) return { needed: false };
+      if (questions.length === 0) return null;
       return { needed: true, questions };
     } catch {
       return null;
@@ -107,7 +111,7 @@ export function parseClarifierJson(text: string): ClarifierResult {
 
   // Models wrap payloads in <think> / fences / prose; normalize before the tier chain.
   const trimmed = extractJsonText(text) || text.trim();
-  if (!trimmed) return { needed: false };
+  if (!trimmed) return null;
   const direct = tryParse(trimmed);
   if (direct) return direct;
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -120,7 +124,11 @@ export function parseClarifierJson(text: string): ClarifierResult {
     const fromObject = tryParse(objectMatch[0]);
     if (fromObject) return fromObject;
   }
-  return { needed: false };
+  return null;
+}
+
+export function parseClarifierJson(text: string): ClarifierResult {
+  return parseClarifierJsonStrict(text) ?? { needed: false };
 }
 
 function extractCompletionText(payload: unknown): string {
@@ -157,9 +165,16 @@ export async function proposeClarification(deps: ClarifierDeps): Promise<Clarifi
     });
     if (!response.ok) return openEndedFallback;
     const payload = (await response.json()) as unknown;
-    const parsed = parseClarifierJson(extractCompletionText(payload));
+    const parsed = parseClarifierJsonStrict(extractCompletionText(payload));
+    if (!parsed) return openEndedFallback;
     // Recon grounding made the model over-skip open research asks; keep a floor.
-    if (!parsed.needed && openEndedFallback.needed) return openEndedFallback;
+    if (
+      !parsed.needed &&
+      openEndedFallback.needed &&
+      !deps.respectModelNoClarification
+    ) {
+      return openEndedFallback;
+    }
     return parsed;
   } catch {
     return openEndedFallback;

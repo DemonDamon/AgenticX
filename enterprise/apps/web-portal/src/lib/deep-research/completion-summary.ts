@@ -255,6 +255,19 @@ function cleanTopic(input: CompletionSummaryInput): string {
   return sanitizeResearchTopic(input.topic || input.outline.title || "调研");
 }
 
+function completionStatsParts(stats: CompletionSummaryInput["stats"]): string[] {
+  const parts = [
+    `规划检索 ${stats.queriesPlanned} 次`,
+    `发现 ${stats.urlsDiscovered} 个候选`,
+    `选用来源 ${stats.sourcesSelected} 个`,
+  ];
+  if (stats.pagesFetched > 0) {
+    parts.push(`抓取正文 ${stats.pagesFetched} 篇`);
+  }
+  parts.push(`引用源 ${stats.citationCount} 个`);
+  return parts;
+}
+
 /** 极简兜底，不调模型。 */
 export function fallbackSummary(input: CompletionSummaryInput): string {
   const prefs = input.deliveryPrefs ?? DEFAULT_DELIVERY_PREFS;
@@ -263,9 +276,8 @@ export function fallbackSummary(input: CompletionSummaryInput): string {
   lines.push(`🎉「${topic}」深度调研完成。`);
   lines.push("");
   const s = input.stats;
-  lines.push(
-    `本次规划检索 ${s.queriesPlanned} 次、选用来源 ${s.sourcesSelected} 个、抓取正文 ${s.pagesFetched} 篇，共 ${s.citationCount} 个引用。`,
-  );
+  const stats = completionStatsParts(s).filter((part) => !part.startsWith("发现 "));
+  lines.push(`本次${stats.join("、")}。`);
   lines.push(`报告章节：${sectionList(input.outline)}。`);
   const withId = selectSummaryArtifacts(input.artifacts, prefs);
   if (withId.length > 0) {
@@ -301,7 +313,7 @@ export async function buildCompletionSummary(
     `主题：${topic}`,
     `大纲章节：`,
     sections || "（无）",
-    `统计：规划检索 ${s.queriesPlanned} 次，发现 ${s.urlsDiscovered} 个候选，选用 ${s.sourcesSelected} 个，抓取正文 ${s.pagesFetched} 篇，引用源 ${s.citationCount} 个。`,
+    `统计：${completionStatsParts(s).join("，")}。`,
     `实际产物（链接必须用这些 id；主报告仅此一份；title 已是可用显示名）：`,
     artifacts || "（无）",
     `runId：${input.runId}`,

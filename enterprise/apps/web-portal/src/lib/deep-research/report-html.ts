@@ -217,7 +217,9 @@ function renderStats(stats: HtmlReportInput["stats"]): string {
     ["规划查询", stats.queriesPlanned],
     ["发现链接", stats.urlsDiscovered],
     ["选用来源", stats.sourcesSelected],
-    ["抓取正文", stats.pagesFetched],
+    ...(stats.pagesFetched > 0
+      ? [["抓取正文", stats.pagesFetched] as const]
+      : []),
   ] as const;
   return `<div class="stats">${items
     .map(

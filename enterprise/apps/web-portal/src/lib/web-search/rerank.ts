@@ -7,15 +7,43 @@ const BM25_B = 0.75;
 const CJK_CHAR = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
 const ASCII_WORD = /[a-z0-9]+/gi;
 
+function isAsciiDigit(char: string | undefined): boolean {
+  return Boolean(char && char >= "0" && char <= "9");
+}
+
+/** Keep the original token and add generic letter/number boundary variants. */
+function pushAsciiTokens(tokens: string[], value: string): void {
+  const word = value.toLowerCase();
+  tokens.push(word);
+  if (!word) return;
+
+  const variants = new Set<string>();
+  let start = 0;
+  let digitRun = isAsciiDigit(word[0]);
+  for (let index = 1; index < word.length; index += 1) {
+    const nextDigitRun = isAsciiDigit(word[index]);
+    if (nextDigitRun === digitRun) continue;
+    variants.add(word.slice(start, index));
+    start = index;
+    digitRun = nextDigitRun;
+  }
+  variants.add(word.slice(start));
+  for (const variant of variants) {
+    if (variant && variant !== word) tokens.push(variant);
+  }
+}
+
 /** CJK 无分词：中文按 bigram，ASCII 按小写单词。 */
 export function tokenize(text: string): string[] {
   const raw = text.normalize("NFKC").trim();
   if (!raw) return [];
   const tokens: string[] = [];
+  let previousAscii: { value: string; end: number } | null = null;
   let i = 0;
   while (i < raw.length) {
     const ch = raw[i]!;
     if (CJK_CHAR.test(ch)) {
+      previousAscii = null;
       let j = i;
       while (j < raw.length && CJK_CHAR.test(raw[j]!)) j += 1;
       const run = raw.slice(i, j);
@@ -32,7 +60,20 @@ export function tokenize(text: string): string[] {
     ASCII_WORD.lastIndex = i;
     const m = ASCII_WORD.exec(raw);
     if (m && m.index === i) {
-      tokens.push(m[0]!.toLowerCase());
+      const word = m[0]!.toLowerCase();
+      const inlineGap = previousAscii ? raw.slice(previousAscii.end, i) : "";
+      if (
+        previousAscii &&
+        inlineGap.length <= 3 &&
+        !inlineGap.includes("\n") &&
+        !inlineGap.includes("\r") &&
+        isAsciiDigit(previousAscii.value[previousAscii.value.length - 1]) !==
+          isAsciiDigit(word[0])
+      ) {
+        tokens.push(`${previousAscii.value}${word}`);
+      }
+      pushAsciiTokens(tokens, word);
+      previousAscii = { value: word, end: m.index + m[0]!.length };
       i = m.index + m[0]!.length;
       continue;
     }
@@ -82,6 +123,22 @@ function bm25Scores(queryTokens: string[], docs: string[][]): number[] {
     }
     return score;
   });
+}
+
+export type RankedTextPassage = {
+  index: number;
+  text: string;
+  score: number;
+};
+
+/** Generic lexical passage ranking shared by search hits and direct page reads. */
+export function rankTextPassages(query: string, passages: string[]): RankedTextPassage[] {
+  const queryTokens = tokenize(query);
+  const docs = passages.map(tokenize);
+  const scores = queryTokens.length > 0 ? bm25Scores(queryTokens, docs) : passages.map(() => 0);
+  return passages
+    .map((text, index) => ({ index, text, score: scores[index] ?? 0 }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
 }
 
 /**

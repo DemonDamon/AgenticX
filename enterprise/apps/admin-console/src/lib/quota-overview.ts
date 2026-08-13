@@ -278,6 +278,9 @@ export async function loadGroupQuotaOverview(tenantId: string): Promise<{
     );
     return {
       ...group,
+      // Do not send legacy references to deleted IAM users back into the edit
+      // form. Saving this sanitized list also repairs the persisted group.
+      memberIds: members.map((member) => member.id),
       unlimited: group.monthlyTokens <= 0,
       memberCount: members.length,
       members,

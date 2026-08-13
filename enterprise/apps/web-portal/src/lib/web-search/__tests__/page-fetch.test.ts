@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  extractDocumentTitle,
   extractMainText,
   fetchPageContent,
+  fetchPageContentWithReason,
   fetchPagesBatch,
   MIN_USABLE_PAGE_CHARS,
 } from "../page-fetch";
@@ -48,6 +50,21 @@ describe("extractMainText", () => {
   });
 });
 
+describe("extractDocumentTitle", () => {
+  it("reads and decodes the standard title element without site-specific rules", () => {
+    expect(
+      extractDocumentTitle(
+        "<html><head><TITLE>Research &amp; Engineering</TITLE></head><body></body></html>",
+      ),
+    ).toBe("Research & Engineering");
+  });
+
+  it("returns undefined for a missing or empty title", () => {
+    expect(extractDocumentTitle("<html><body>body</body></html>")).toBeUndefined();
+    expect(extractDocumentTitle("<title>   </title>")).toBeUndefined();
+  });
+});
+
 describe("fetchPageContent", () => {
   it("returns null for non-html content types", async () => {
     const fetchImpl: DirectFetch = async () =>
@@ -78,6 +95,22 @@ describe("fetchPageContent", () => {
     ).resolves.toBeNull();
   });
 
+  it("preserves too_short for callers that need an explicit fallback notice", async () => {
+    const short = "x".repeat(MIN_USABLE_PAGE_CHARS - 1);
+    const fetchImpl: DirectFetch = async () =>
+      new Response(`<article><p>${short}</p></article>`, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+
+    await expect(
+      fetchPageContentWithReason("https://example.com/short", {
+        fetchImpl,
+        backends: ["native"],
+      }),
+    ).resolves.toEqual({ page: null, failure: "too_short" });
+  });
+
   it("returns null without throwing when fetchImpl throws", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const fetchImpl: DirectFetch = async () => {
@@ -95,7 +128,7 @@ describe("fetchPageContent", () => {
   it("returns page content for a usable html document", async () => {
     const body = "核心技术点".repeat(80);
     const fetchImpl: DirectFetch = async () =>
-      new Response(`<article><p>${body}</p></article>`, {
+      new Response(`<html><head><title>论文标题</title></head><body><article><p>${body}</p></article></body></html>`, {
         status: 200,
         headers: { "content-type": "text/html; charset=utf-8" },
       });
@@ -105,8 +138,30 @@ describe("fetchPageContent", () => {
     });
     expect(page).not.toBeNull();
     expect(page!.text).toContain("核心技术点");
+    expect(page!.title).toBe("论文标题");
     expect(page!.rawChars).toBeGreaterThanOrEqual(MIN_USABLE_PAGE_CHARS);
     expect(page!.backend).toBe("native");
+  });
+
+  it("keeps the legacy 12k default but accepts a bounded explicit-read ceiling", async () => {
+    const body = "A".repeat(20_000);
+    const fetchImpl: DirectFetch = async () =>
+      new Response(`<article><p>${body}</p></article>`, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    const legacy = await fetchPageContent("https://example.com/default", {
+      fetchImpl,
+      backends: ["native"],
+    });
+    const expanded = await fetchPageContent("https://example.com/expanded", {
+      fetchImpl,
+      backends: ["native"],
+      maxChars: 30_000,
+    });
+    expect(legacy?.text.length).toBeLessThan(20_000);
+    expect(expanded?.text.length).toBe(20_000);
+    expect(expanded?.rawChars).toBe(20_000);
   });
 
   it("falls back to jina when native returns too_short", async () => {
@@ -169,6 +224,22 @@ describe("fetchPageContent", () => {
       fetchImpl,
       backends: ["native", "jina"],
     });
+    expect(page).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "http://127.0.0.1/admin",
+    "http://169.254.169.254/latest/meta-data",
+    "https://service.internal/private",
+  ])("never fetches a private or internal result URL: %s", async (url) => {
+    const fetchImpl = vi.fn(async () => new Response("x")) as unknown as DirectFetch;
+
+    const page = await fetchPageContent(url, {
+      fetchImpl,
+      backends: ["native", "jina"],
+    });
+
     expect(page).toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
   });

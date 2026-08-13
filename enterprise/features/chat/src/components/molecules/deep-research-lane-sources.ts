@@ -69,7 +69,7 @@ export function parseLaneMetrics(detailLines: string[]): LaneMetric[] {
   if (adopted !== null) {
     out.push({ key: "adopted", text: `采用 ${adopted} 个`, tone: "default" });
   }
-  if (pages !== null) {
+  if (pages !== null && pages > 0) {
     out.push({ key: "pages", text: `读取正文 ${pages} 篇`, tone: "default" });
   }
   // Shortlisted but not adopted can only mean the run-wide source budget ran

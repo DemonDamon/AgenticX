@@ -3,6 +3,7 @@
  * outline → per-section stream → join, to bypass single-completion max_tokens.
  */
 
+import { EVIDENCE_DISCIPLINE_HINT } from "../retrieval/evidence-discipline";
 import { parseLlmJson } from "./llm-json";
 
 export const MIN_SECTIONS = 5;
@@ -64,6 +65,7 @@ const SECTION_SYSTEM = [
   "你是深度研究报告分节写作助手。只写当前这一节的正文，不要重复输出标题，不要写其它章节内容。",
   `目标篇幅 ≥ ${SECTION_TARGET_CHARS} 字：展开论证、给出具体数字与机制细节，禁止空话凑字。`,
   "每条事实必须以 [N] 标注，N 必须在证据包中存在，禁止编造编号。",
+  EVIDENCE_DISCIPLINE_HINT,
   "若提供了「前文已写内容摘要」，避免重复已写过的表述。",
   "本节不要重复首节已给出的结论表述，聚焦本节主题的机制、数据与论证。",
   "只输出本节 Markdown 正文。",
@@ -75,6 +77,7 @@ const LEAD_SECTION_SYSTEM = [
   "本节是全文结论摘要，不是综述：用 4–8 条要点式结论呈现最关键判断，每条 1–3 句。",
   "目标篇幅 400–800 字，禁止展开机制细节与背景铺陈——那些属于后续分项分析章节。",
   "每条结论必须以 [N] 标注支撑证据，N 必须在证据包中存在，禁止编造编号。",
+  EVIDENCE_DISCIPLINE_HINT,
   "只输出本节 Markdown 正文，不要重复输出标题。",
 ].join("\n");
 

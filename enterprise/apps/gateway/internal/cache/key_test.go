@@ -7,21 +7,22 @@ import (
 )
 
 func TestCanonicalKeyStableAcrossFieldOrder(t *testing.T) {
+	temperature := 0.2
 	reqA := openai.ChatCompletionRequest{
 		Model: "gpt-4o",
 		Messages: []openai.ChatMessage{
-			{Role: "user", Content: "hello"},
-			{Role: "assistant", Content: "hi"},
+			{Role: "user", Content: openai.NewStringContent("hello")},
+			{Role: "assistant", Content: openai.NewStringContent("hi")},
 		},
-		Temperature: 0.2,
+		Temperature: &temperature,
 	}
 	reqB := openai.ChatCompletionRequest{
 		Model: "gpt-4o",
 		Messages: []openai.ChatMessage{
-			{Role: "assistant", Content: "hi"},
-			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: openai.NewStringContent("hi")},
+			{Role: "user", Content: openai.NewStringContent("hello")},
 		},
-		Temperature: 0.2,
+		Temperature: &temperature,
 	}
 	keyA, bypassA, _ := CanonicalKey("tenant-1", "user-1", reqA.Model, reqA)
 	keyB, bypassB, _ := CanonicalKey("tenant-1", "user-1", reqB.Model, reqB)
@@ -33,10 +34,29 @@ func TestCanonicalKeyStableAcrossFieldOrder(t *testing.T) {
 	}
 }
 
+func TestCanonicalKeyDistinguishesOmittedAndExplicitZeroTemperature(t *testing.T) {
+	explicitZero := 0.0
+	omitted := openai.ChatCompletionRequest{
+		Model:    "gpt-4o",
+		Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("ping")}},
+	}
+	withZero := omitted
+	withZero.Temperature = &explicitZero
+
+	omittedKey, omittedBypass, _ := CanonicalKey("tenant-1", "user-1", omitted.Model, omitted)
+	zeroKey, zeroBypass, _ := CanonicalKey("tenant-1", "user-1", withZero.Model, withZero)
+	if omittedBypass || zeroBypass {
+		t.Fatal("unexpected cache bypass")
+	}
+	if omittedKey == zeroKey {
+		t.Fatal("omitted and explicit temperature=0 must use different cache keys")
+	}
+}
+
 func TestCanonicalKeyExcludesStream(t *testing.T) {
 	base := openai.ChatCompletionRequest{
 		Model:    "gpt-4o",
-		Messages: []openai.ChatMessage{{Role: "user", Content: "ping"}},
+		Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("ping")}},
 	}
 	stream := base
 	stream.Stream = true
@@ -49,9 +69,9 @@ func TestCanonicalKeyExcludesStream(t *testing.T) {
 
 func TestShouldBypassTools(t *testing.T) {
 	req := openai.ChatCompletionRequest{
-		Model: "gpt-4o",
-		Messages: []openai.ChatMessage{{Role: "user", Content: "call tool"}},
-		Tools: []openai.Tool{{Type: "function", Function: &openai.ToolFunction{Name: "search"}}},
+		Model:      "gpt-4o",
+		Messages:   []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("call tool")}},
+		Tools:      []openai.Tool{{Type: "function", Function: &openai.ToolFunction{Name: "search"}}},
 		ToolChoice: "auto",
 	}
 	if !ShouldBypass(req) {

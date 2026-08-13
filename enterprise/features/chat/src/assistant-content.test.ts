@@ -107,6 +107,37 @@ describe("parseAssistantContent", () => {
     expect(parsed.reasoningContent).toContain("第一步");
     expect(parsed.reasoningContent).toContain("第二步");
   });
+
+  it("keeps literal think tags inside Markdown code samples visible", () => {
+    const parsed = parseAssistantContent({
+      id: "m5",
+      session_id: "s1",
+      tenant_id: "t1",
+      user_id: "u1",
+      role: "assistant",
+      content: [
+        "<think>内部推理</think>",
+        "# 标题",
+        "",
+        "| 组件 | 说明 |",
+        "| --- | --- |",
+        "| 思考路径 | 使用专用 `<think>` 标签 |",
+        "",
+        "```xml",
+        "<think>这是协议示例，不是推理</think>",
+        "```",
+        "",
+        "后续正文",
+      ].join("\n"),
+      created_at: "2026-08-12T00:00:00.000Z",
+    });
+
+    expect(parsed.displayContent).toContain("使用专用 `<think>` 标签");
+    expect(parsed.displayContent).toContain("<think>这是协议示例，不是推理</think>");
+    expect(parsed.displayContent).toContain("后续正文");
+    expect(parsed.reasoningContent).toBe("内部推理");
+    expect(parsed.thinkingInProgress).toBe(false);
+  });
 });
 
 describe("copyable assistant content", () => {

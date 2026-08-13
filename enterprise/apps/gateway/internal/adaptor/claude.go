@@ -109,7 +109,7 @@ type claudeWireRequest struct {
 	MaxTokens     int                    `json:"max_tokens"`
 	Messages      []map[string]any       `json:"messages"`
 	System        any                    `json:"system,omitempty"`
-	Temperature   float64                `json:"temperature,omitempty"`
+	Temperature   *float64               `json:"temperature,omitempty"`
 	TopP          float64                `json:"top_p,omitempty"`
 	StopSequences []string               `json:"stop_sequences,omitempty"`
 	Stream        bool                   `json:"stream,omitempty"`

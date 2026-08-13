@@ -83,6 +83,100 @@ describe("HttpChatClient stream cancel", () => {
     expect(sourcesChunk?.delta).toBeUndefined();
   });
 
+  it("parses bounded web-search trace frames and ignores unknown versions", async () => {
+    const payload =
+      `data: ${JSON.stringify({
+        agenticx_web_search_trace: {
+          version: 1,
+          decision: "search",
+          reason: "follow-up needs current evidence",
+          resolvedQuery: "王虹与邓煜 2026年8月 国内风评变化",
+          facets: [
+            {
+              query: "王虹 国内风评 2026年8月",
+              providerIds: ["provider-instance-a"],
+              hitCount: 10,
+              uniqueHosts: 7,
+            },
+            { query: "邓煜 国内风评 2026年8月", hitCount: 9, uniqueHosts: 6 },
+            { query: "实体三 风评变化", hitCount: 8, uniqueHosts: 5 },
+            { query: "实体四 风评变化", hitCount: 7, uniqueHosts: 4 },
+            { query: "实体五 风评变化", hitCount: 6, uniqueHosts: 3 },
+            { query: "超出硬上限", hitCount: 5, uniqueHosts: 2 },
+          ],
+          providerCalls: 5,
+          retry: {
+            used: true,
+            queryIndex: 4,
+            reason: "primary result set was empty",
+            fromProviderId: "provider-instance-a",
+            toProviderId: "provider-instance-b",
+          },
+          timings: { queryResolutionMs: 24, retrievalMs: 310 },
+        },
+      })}\n\n` +
+      'data: {"agenticx_web_search_trace":{"version":2,"decision":"search","reason":"future","providerCalls":1}}\n\n' +
+      'data: {"choices":[{"delta":{"content":"answer"}}]}\n\n' +
+      "data: [DONE]\n\n";
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(payload, { status: 200 }))));
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+
+    expect(chunks.filter((chunk) => chunk.webSearchTrace)).toHaveLength(1);
+    expect(chunks.find((chunk) => chunk.webSearchTrace)?.webSearchTrace).toMatchObject({
+      version: 1,
+      decision: "search",
+      providerCalls: 5,
+      retry: {
+        used: true,
+        queryIndex: 4,
+        fromProviderId: "provider-instance-a",
+        toProviderId: "provider-instance-b",
+      },
+      facets: [
+        {
+          query: "王虹 国内风评 2026年8月",
+          providerIds: ["provider-instance-a"],
+          hitCount: 10,
+          uniqueHosts: 7,
+        },
+        { query: "邓煜 国内风评 2026年8月", hitCount: 9, uniqueHosts: 6 },
+        { query: "实体三 风评变化", hitCount: 8, uniqueHosts: 5 },
+        { query: "实体四 风评变化", hitCount: 7, uniqueHosts: 4 },
+        { query: "实体五 风评变化", hitCount: 6, uniqueHosts: 3 },
+      ],
+    });
+    expect(chunks.some((chunk) => chunk.delta === "answer")).toBe(true);
+  });
+
+  it("preserves a skip trace with no facets or provider calls", async () => {
+    const payload =
+      'data: {"agenticx_web_search_trace":{"version":1,"decision":"skip","reason":"stable arithmetic","providerCalls":0}}\n\n' +
+      "data: [DONE]\n\n";
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(payload, { status: 200 }))));
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "1+1", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+    expect(chunks.find((chunk) => chunk.webSearchTrace)?.webSearchTrace).toEqual({
+      version: 1,
+      decision: "skip",
+      reason: "stable arithmetic",
+      providerCalls: 0,
+    });
+  });
+
   it("keeps split reasoning inside one balanced think block before visible content", async () => {
     const payload =
       'data: {"choices":[{"delta":{"reasoning_content":"先判断意图。</think>"}}]}\n\n' +

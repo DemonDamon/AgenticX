@@ -24,6 +24,7 @@ import {
 } from "@agenticx/ui";
 import { ArrowUpRight, ChevronDown, ChevronRight, CirclePlus, Pencil, RefreshCw, Trash2, UsersRound } from "lucide-react";
 import { adminFetch } from "../../../lib/admin-client-auth";
+import { UserDetailEditor, type UserDetailTarget } from "../../../components/UserDetailEditor";
 
 type OverviewMember = { id: string; displayName: string; email: string; deptId: string | null; usedTokens: number };
 type GroupMemberOverview = OverviewMember & {
@@ -291,6 +292,7 @@ export default function GroupsPage() {
   const [finiteMonthlyTokens, setFiniteMonthlyTokens] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editingMember, setEditingMember] = useState<UserDetailTarget | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -420,9 +422,16 @@ export default function GroupsPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...form, monthlyTokens: Math.floor(monthlyTokens) }),
       });
-      const json = (await response.json()) as ApiEnvelope<unknown>;
+      const json = (await response.json()) as ApiEnvelope<{ removedMissingMembers?: number }>;
       if (!response.ok || json.code !== "00000") throw new Error(json.message || "保存失败");
-      toast.success(isNew ? "用户组已创建并应用到成员" : "用户组设置已应用到成员");
+      const removedMissingMembers = json.data?.removedMissingMembers ?? 0;
+      toast.success(
+        removedMissingMembers > 0
+          ? `已自动移除 ${removedMissingMembers} 位已删除成员，用户组设置已保存`
+          : isNew
+            ? "用户组已创建并应用到成员"
+            : "用户组设置已应用到成员",
+      );
       setEditing(null);
       await load();
     } catch (error) {
@@ -516,17 +525,20 @@ export default function GroupsPage() {
                 </div>
                 <div className="grid max-h-72 gap-2 overflow-y-auto rounded-xl border border-border p-2 sm:grid-cols-2">
                   {group.members.length ? group.members.map((member) => (
-                    <Link
+                    <button
+                      type="button"
                       key={member.id}
-                      href={`/iam/users?userId=${encodeURIComponent(member.id)}&edit=1`}
-                      onClick={(event) => event.stopPropagation()}
-                      className="flex min-w-0 items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-sm transition-colors hover:border-primary/50 hover:bg-muted"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setEditingMember(member);
+                      }}
+                      className="flex min-w-0 items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-left text-sm transition-colors hover:border-primary/50 hover:bg-muted"
                     >
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">{member.displayName.slice(0, 1)}</span>
                       <span className="min-w-0 flex-1"><span className="block truncate font-medium">{member.displayName}</span><span className="block truncate text-xs text-muted-foreground">{member.email}</span></span>
                       {member.hasIndividualOverride ? <Badge variant="outline" className="shrink-0 border-amber-500/50 px-1 py-0 text-[10px] text-amber-700 dark:text-amber-300">个人特例</Badge> : null}
                       <MemberQuotaRing used={member.usedTokens} limit={member.monthlyTokens} unlimited={member.unlimited} />
-                    </Link>
+                    </button>
                   )) : <span className="p-2 text-sm text-muted-foreground">尚未选择成员</span>}
                 </div>
               </section>
@@ -548,19 +560,14 @@ export default function GroupsPage() {
       </div>
 
       <Sheet open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
-        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-2xl">
+        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden sm:max-w-2xl">
           {editing ? (
             <>
-              <SheetHeader className="border-b border-border pb-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <SheetTitle>{editing === "new" ? "新建用户组" : `编辑 ${editing.name}`}</SheetTitle>
-                    <SheetDescription className="mt-1">保存后会为成员应用每人月额度；基础模型在运行时自动继承，成员可以在用户页面额外开通或关闭模型。</SheetDescription>
-                  </div>
-                  <Button size="sm" onClick={() => void save()} disabled={saving}>{saving ? "保存中…" : "保存并应用"}</Button>
-                </div>
+              <SheetHeader className="shrink-0 border-b border-border pb-5 pr-8">
+                <SheetTitle>{editing === "new" ? "新建用户组" : `编辑 ${editing.name}`}</SheetTitle>
+                <SheetDescription className="mt-1">保存后会为成员应用每人月额度；基础模型在运行时自动继承，成员可以在用户页面额外开通或关闭模型。</SheetDescription>
               </SheetHeader>
-              <div className="space-y-6 py-6">
+              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto py-6 pr-1">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="group-name">用户组名称</Label>
@@ -648,13 +655,22 @@ export default function GroupsPage() {
                   </section>
                 ) : null}
               </div>
-              <div className="mt-auto flex justify-end gap-2 border-t border-border pt-4">
+              <div className="flex shrink-0 justify-end gap-2 border-t border-border pt-4">
                 <Button variant="outline" onClick={() => setEditing(null)}>关闭</Button>
+                <Button onClick={() => void save()} disabled={saving}>{saving ? "保存中…" : "保存并应用"}</Button>
               </div>
             </>
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <UserDetailEditor
+        target={editingMember}
+        onOpenChange={(open) => {
+          if (!open) setEditingMember(null);
+        }}
+        onChanged={load}
+      />
     </div>
   );
 }

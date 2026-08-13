@@ -47,3 +47,38 @@ export function decryptProviderApiKey(ciphertext: string): string {
     return "";
   }
 }
+
+/**
+ * Strict persistence-path decrypt. Empty and explicitly supported legacy
+ * plaintext values remain valid; a versioned ciphertext must authenticate or
+ * the caller must stop instead of silently overwriting the damaged secret.
+ */
+export function decryptProviderApiKeyStrict(ciphertext: string): string {
+  const raw = ciphertext?.trim?.() ?? "";
+  if (!raw) return "";
+  if (!raw.startsWith(PREFIX)) {
+    if (raw.includes("base64")) {
+      throw new Error("provider API key ciphertext format is unsupported");
+    }
+    return raw;
+  }
+  const payload = raw.slice(PREFIX.length);
+  const parts = payload.split(".");
+  if (parts.length !== 3) {
+    throw new Error("provider API key ciphertext is malformed");
+  }
+  try {
+    const iv = Buffer.from(parts[0]!, "base64url");
+    const enc = Buffer.from(parts[1]!, "base64url");
+    const tag = Buffer.from(parts[2]!, "base64url");
+    if (iv.byteLength !== 12 || tag.byteLength !== 16) {
+      throw new Error("invalid encrypted provider API key lengths");
+    }
+    const key = deriveKeyMaterial();
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(enc), decipher.final()]).toString("utf8");
+  } catch (error) {
+    throw new Error("provider API key decryption failed", { cause: error });
+  }
+}

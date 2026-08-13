@@ -171,6 +171,65 @@ describe("sanitizeInboundMessages", () => {
     expect(messages[0]?.web_search_sources?.[1]?.usedByModel).toBe(false);
   });
 
+  it("preserves and bounds valid web_search_trace metadata", () => {
+    const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01HYAAAAAAAAAAAAAAAAAAAAC1",
+        role: "assistant",
+        content: "答案",
+        web_search_trace: {
+          version: 1,
+          decision: "search",
+          reason: "r".repeat(800),
+          resolvedQuery: "王虹与邓煜 国内风评",
+          facets: Array.from({ length: 6 }, (_, index) => ({
+            query: `person ${index}`,
+            providerIds: ["customer-primary", "customer-secondary", "ignored-third"],
+            hitCount: 10,
+            uniqueHosts: 6,
+          })),
+          providerCalls: 5,
+          retry: {
+            used: true,
+            queryIndex: 4,
+            reason: "sparse evidence",
+            fromProviderId: "customer-primary",
+            toProviderId: "customer-secondary",
+          },
+        },
+      },
+    ]);
+    expect(messages[0]?.web_search_trace?.reason).toHaveLength(500);
+    expect(messages[0]?.web_search_trace?.facets).toHaveLength(5);
+    expect(messages[0]?.web_search_trace?.facets?.[0]?.providerIds).toEqual([
+      "customer-primary",
+      "customer-secondary",
+    ]);
+    expect(messages[0]?.web_search_trace?.resolvedQuery).toBe("王虹与邓煜 国内风评");
+    expect(messages[0]?.web_search_trace?.retry?.queryIndex).toBe(4);
+  });
+
+  it("drops malformed or unknown web_search_trace without rejecting the message", () => {
+    const unknown = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01HYAAAAAAAAAAAAAAAAAAAAC2",
+        role: "assistant",
+        content: "still valid",
+        web_search_trace: { version: 2, decision: "search", reason: "future", providerCalls: 1 },
+      },
+    ]);
+    const malformed = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01HYAAAAAAAAAAAAAAAAAAAAC3",
+        role: "assistant",
+        content: "also valid",
+        web_search_trace: { version: 1, decision: "search", reason: "missing calls" },
+      },
+    ]);
+    expect(unknown[0]?.web_search_trace).toBeUndefined();
+    expect(malformed[0]?.web_search_trace).toBeUndefined();
+  });
+
   it("keeps valid attachment_id and drops invalid ones without throwing", () => {
     const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
       {

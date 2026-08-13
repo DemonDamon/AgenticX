@@ -14,7 +14,20 @@
  */
 
 import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
+import type { PreparedSearchPlan } from "../chat-routing/turn-plan";
 import { withCurrentTimeContext } from "../current-time";
+import {
+  PORTAL_CAPABILITY_SYSTEM_HINT,
+  withPortalCapabilityContext,
+} from "../portal-capabilities";
+import type { WebSearchTrace } from "@agenticx/core-api";
+import { EVIDENCE_DISCIPLINE_HINT } from "../retrieval/evidence-discipline";
+import {
+  formatEvidenceCoverage,
+  summarizeEvidenceFacet,
+  type EvidenceFacetSummary,
+} from "../retrieval/evidence-profile";
+import { diversifyBySourceHost } from "../retrieval/source-diversity";
 import {
   resolveInjectionBudgetChars,
   selectHitsWithinBudget,
@@ -24,13 +37,44 @@ import {
   buildSearchQueryRewriteMessages,
   hasPriorSearchQueryLeakage,
   parseSearchQueryRewrite,
+  type SearchQueryRewriteOptions,
   type SearchQueryRewrite,
 } from "./follow-up";
 import { sanitizeHistoryForUpstream } from "./history-sanitize";
-import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeConfig } from "./providers";
+import {
+  configForWebSearchProvider,
+  configuredWebSearchProviders,
+  executeWebSearch,
+  formatHits,
+  primaryWebSearchProvider,
+  WEB_SEARCH_MAX_RESULTS_CAP,
+  type WebSearchHit,
+  type WebSearchRuntimeConfig,
+} from "./providers";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
 import { rerankHits } from "./rerank";
-import { classifyWebSearchNeed } from "./search-necessity";
+import {
+  assessSearchEvidence,
+  interleaveSearchHitGroups,
+  mergeSearchHits,
+  selectAlternativeProvider,
+} from "./search-retry";
+import {
+  DEFAULT_MAX_SEARCH_CALLS,
+  normalizeMaxSearchCalls,
+} from "./search-call-budget";
+import { classifyWebSearchFastPath } from "./search-necessity";
+import {
+  DIRECT_PAGE_CONTEXT_CHARS,
+  directPageSource,
+  matchesDirectPage,
+  readDirectPage,
+  replaceCurrentQuestion,
+  resolveDirectPageReference,
+  selectDirectPageEvidence,
+  withDirectPageContext,
+} from "./direct-page";
+import type { PageFetchFailure } from "./page-fetch";
 
 export const WEB_SEARCH_TOOL = {
   type: "function",
@@ -70,7 +114,8 @@ export const WEB_SEARCH_SYSTEM_HINT =
   "禁止拿历史编号与本轮结果互相比对，也不要因编号对不上而推翻自己此前的结论。" +
   "若本轮结果整体与用户问题无关（例如检索词被泛化、命中的都是同名的其他事物），" +
   "须直接说明「本次检索结果与问题无关」，随后基于对话上下文已确认的事实作答，" +
-  "禁止用无关结果拼凑答案或改写此前结论。";
+  "禁止用无关结果拼凑答案或改写此前结论。" +
+  EVIDENCE_DISCIPLINE_HINT;
 
 /**
  * Injected on search-skip turns so thinking models (Kimi-like) do not narrate
@@ -81,10 +126,8 @@ export const TRIVIAL_TURN_SYSTEM_HINT =
   "用户本轮是寒暄、简单确认或无需外部检索的问题。请直接友好地回复，不要为了凑答案而联网。\n" +
   "思考过程与回复中都不要提及工具、功能调用、联网搜索、function call、tool_call。\n";
 
-export const ASSISTANT_CAPABILITY_SYSTEM_HINT =
-  "## 当前能力说明\n" +
-  "用户正在询问助手或平台的能力。请直接回答当前系统状态；如果用户问联网搜索，说明本平台支持联网搜索，" +
-  "本轮自动模式会按问题需要决定是否检索，不要声称必须手动开启，也不要把本轮未检索误说成平台不支持。\n";
+/** @deprecated Use PORTAL_CAPABILITY_SYSTEM_HINT for the shared capability registry. */
+export const ASSISTANT_CAPABILITY_SYSTEM_HINT = PORTAL_CAPABILITY_SYSTEM_HINT;
 
 const TRIVIAL_TURN_MARKER = "## 本轮说明";
 
@@ -96,6 +139,12 @@ export const WEB_SEARCH_TOOL_CHOICE = {
 
 const ADMIN_DISABLED_HINT = "> 管理员已关闭联网搜索。\n\n";
 const UNAVAILABLE_HINT = "> 联网搜索暂不可用，以下回答基于模型已有知识。\n\n";
+const INCOMPLETE_DIRECT_PAGE_HINT =
+  "> 该页面可能依赖动态渲染或限制自动访问，正文未完整读取；当前回答未使用该页完整正文。\n\n";
+const INCOMPLETE_DIRECT_PAGE_SYSTEM_HINT =
+  "## 本轮链接读取状态\n" +
+  "用户指定页面的正文未能完整提取，可能依赖动态渲染或限制自动访问。" +
+  "不得声称已打开、通读或直接读取该页面；若下方存在搜索结果，只能基于这些结果作答，证据不足时必须明确说明。";
 const QUERY_REWRITE_TIMEOUT_MS = 15_000;
 const QUERY_REWRITE_MAX_ATTEMPTS = 2;
 const QUERY_REWRITE_MAX_TOKENS = 256;
@@ -103,13 +152,16 @@ const QUERY_REWRITE_MAX_TOKENS = 256;
 /** @deprecated Prefer WEB_SEARCH_SNIPPET_CHARS from context-budget; kept for test imports. */
 export const WEB_SEARCH_CONTEXT_SNIPPET_CHARS = WEB_SEARCH_SNIPPET_CHARS;
 
-type ChatMessage = {
+export type WebSearchChatMessage = {
   role: string;
-  content?: string | null;
+  /** Gateway requests may carry OpenAI-style multimodal content parts. */
+  content?: unknown;
   tool_calls?: unknown;
   tool_call_id?: string;
   name?: string;
 };
+
+type ChatMessage = WebSearchChatMessage;
 
 export type GatewayFetchDeps = {
   url: string;
@@ -118,6 +170,8 @@ export type GatewayFetchDeps = {
   signal?: AbortSignal;
   loadTenantConfig?: () => Promise<TenantWebSearchRow>;
   executeSearch?: typeof executeWebSearch;
+  /** Test seam; production reuses page-fetch through readDirectPage. */
+  readPage?: typeof readDirectPage;
 };
 
 function sseDataFrame(payload: unknown): string {
@@ -154,8 +208,16 @@ export function synthesizeTextSse(
 
 /** Keep search keywords short — full document dumps make DDG challenge / return empty. */
 export const MAX_WEB_SEARCH_QUERY_CHARS = 240;
+const PORTAL_ATTACHMENT_AFTER_TEXT = /\n---\s*(?:附件|attachment)\s*[:：]/i;
+const PORTAL_ATTACHMENT_AT_START = /^---\s*(?:附件|attachment)\s*[:：]/i;
+const PORTAL_ATTACHMENT_NAME =
+  /^---\s*(?:附件|attachment)\s*[:：]\s*(.+?)\s*---/i;
 
-function textFromMessageContent(content: unknown): string {
+export function isPortalAttachmentOnlyTurn(raw: string): boolean {
+  return PORTAL_ATTACHMENT_AT_START.test(raw.replace(/\r\n/g, "\n").trim());
+}
+
+export function messageContentToText(content: unknown): string {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
   const parts: string[] = [];
@@ -176,12 +238,12 @@ function textFromMessageContent(content: unknown): string {
 export function sanitizeWebSearchQuery(raw: string, maxChars = MAX_WEB_SEARCH_QUERY_CHARS): string {
   let text = raw.replace(/\r\n/g, "\n").trim();
   if (!text) return "";
-  const attachIdx = text.search(/\n---\s*附件\s*[:：]/);
+  const attachIdx = text.search(PORTAL_ATTACHMENT_AFTER_TEXT);
   if (attachIdx >= 0) {
     text = text.slice(0, attachIdx).trim();
-  } else if (/^---\s*附件\s*[:：]/.test(text)) {
+  } else if (PORTAL_ATTACHMENT_AT_START.test(text)) {
     // User sent attachment-only turn — fall back to filename line if present.
-    const nameMatch = text.match(/^---\s*附件\s*[:：]\s*(.+?)\s*---/);
+    const nameMatch = text.match(PORTAL_ATTACHMENT_NAME);
     text = nameMatch?.[1]?.trim() || "";
   }
   text = text.replace(/\s+/g, " ").trim();
@@ -189,12 +251,28 @@ export function sanitizeWebSearchQuery(raw: string, maxChars = MAX_WEB_SEARCH_QU
   return text.slice(0, Math.max(1, maxChars - 1)).trimEnd();
 }
 
+/**
+ * Research prompts may put output constraints at the end. Keep both boundaries
+ * when bounding them; ordinary provider queries continue using prefix truncation.
+ */
+export function sanitizeResearchRequest(raw: string, maxChars: number): string {
+  const text = sanitizeWebSearchQuery(raw, Number.MAX_SAFE_INTEGER);
+  if (text.length <= maxChars) return text;
+  const separator = " … ";
+  const usable = Math.max(2, maxChars - separator.length);
+  const head = Math.ceil(usable / 2);
+  const tail = Math.floor(usable / 2);
+  return `${text.slice(0, head).trimEnd()}${separator}${text.slice(-tail).trimStart()}`;
+}
+
 export function extractLastUserQuery(messages: ChatMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg?.role !== "user") continue;
-    const text = textFromMessageContent(msg.content);
-    if (text) return sanitizeWebSearchQuery(text);
+    // Only the actual current user turn may define the current query. Falling
+    // through to an older user row would silently search the previous topic on
+    // an image-only or otherwise textless turn.
+    return sanitizeWebSearchQuery(messageContentToText(msg.content));
   }
   return "";
 }
@@ -213,16 +291,47 @@ export function extractLastUserRawText(messages: ChatMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg?.role !== "user") continue;
-    const text = textFromMessageContent(msg.content);
-    if (text) return text;
+    return messageContentToText(msg.content);
   }
   return "";
 }
 
-/** Escape hatch: set AGENTICX_WEB_SEARCH_ALWAYS=1 to restore unconditional search-first. */
-function webSearchAlwaysOn(): boolean {
-  const raw = process.env.AGENTICX_WEB_SEARCH_ALWAYS?.trim().toLowerCase();
+const FAST_SKIP_BYPASS_ENV = "AGENTICX_WEB_SEARCH_BYPASS_FAST_SKIP";
+const LEGACY_FAST_SKIP_BYPASS_ENV = "AGENTICX_WEB_SEARCH_ALWAYS";
+let warnedAboutProductionFastSkipBypass = false;
+
+function isEnabledEnvironmentFlag(name: string): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
   return raw === "1" || raw === "true";
+}
+
+/**
+ * Operations escape hatch for bypassing only the deterministic no-search gate.
+ * Contextual turns still use the semantic query resolver, which may decline to
+ * search. The old ALWAYS name remains compatible but never meant "force".
+ */
+function webSearchFastSkipBypassed(): boolean {
+  const configuredBy = isEnabledEnvironmentFlag(FAST_SKIP_BYPASS_ENV)
+    ? FAST_SKIP_BYPASS_ENV
+    : isEnabledEnvironmentFlag(LEGACY_FAST_SKIP_BYPASS_ENV)
+      ? LEGACY_FAST_SKIP_BYPASS_ENV
+      : "";
+  if (!configuredBy) return false;
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    !warnedAboutProductionFastSkipBypass
+  ) {
+    warnedAboutProductionFastSkipBypass = true;
+    const legacyNotice = configuredBy === LEGACY_FAST_SKIP_BYPASS_ENV
+      ? `; migrate to ${FAST_SKIP_BYPASS_ENV}`
+      : "";
+    console.warn(
+      `[web-search] ${configuredBy} is enabled in production${legacyNotice}; ` +
+        "the deterministic fast-skip gate is bypassed, but contextual query resolution still applies",
+    );
+  }
+  return true;
 }
 
 function stripWebSearchFlag<T extends Record<string, unknown>>(body: T): Omit<T, "agenticx_web_search"> {
@@ -252,6 +361,17 @@ export function formatWebSearchSourcesSse(
   return sseDataFrame({ agenticx_web_search_sources: payload });
 }
 
+export type WebSearchTracePayload = WebSearchTrace;
+
+/** Trace is diagnostics-only: serialization failure must never break a reply. */
+export function formatWebSearchTraceSse(trace: WebSearchTracePayload): string {
+  try {
+    return sseDataFrame({ agenticx_web_search_trace: trace });
+  } catch {
+    return "";
+  }
+}
+
 /**
  * @deprecated Prefer selectHitsWithinBudget + rerankHits. Thin wrapper for older tests.
  */
@@ -259,9 +379,14 @@ export function compactHitsForModel(hits: WebSearchHit[]): WebSearchHit[] {
   return selectHitsWithinBudget(hits, undefined).selected;
 }
 
-export function withSearchContext(messages: ChatMessage[], hits: WebSearchHit[]): ChatMessage[] {
+export function withSearchContext(
+  messages: ChatMessage[],
+  hits: WebSearchHit[],
+  evidence: EvidenceFacetSummary[] = [],
+): ChatMessage[] {
+  const coverage = formatEvidenceCoverage(evidence);
   const resultsBlock =
-    `${WEB_SEARCH_SYSTEM_HINT}\n\n--- 联网搜索结果 ---\n${formatHits(hits)}\n--- 搜索结果结束 ---`;
+    `${WEB_SEARCH_SYSTEM_HINT}${coverage ? `\n\n${coverage}` : ""}\n\n--- 联网搜索结果 ---\n${formatHits(hits)}\n--- 搜索结果结束 ---`;
   const next = messages.map((m) => ({ ...m }));
   if (next[0]?.role === "system") {
     const existing = typeof next[0].content === "string" ? next[0].content : "";
@@ -272,6 +397,37 @@ export function withSearchContext(messages: ChatMessage[], hits: WebSearchHit[])
     return next;
   }
   return [{ role: "system", content: resultsBlock }, ...next];
+}
+
+function withIncompleteDirectPageContext(messages: ChatMessage[]): ChatMessage[] {
+  const next = messages.map((message) => ({ ...message }));
+  if (next[0]?.role === "system") {
+    const existing = typeof next[0].content === "string" ? next[0].content : "";
+    next[0] = {
+      ...next[0],
+      content: existing
+        ? `${existing}\n\n${INCOMPLETE_DIRECT_PAGE_SYSTEM_HINT}`
+        : INCOMPLETE_DIRECT_PAGE_SYSTEM_HINT,
+    };
+    return next;
+  }
+  return [
+    { role: "system", content: INCOMPLETE_DIRECT_PAGE_SYSTEM_HINT },
+    ...next,
+  ];
+}
+
+/** Attribute selected evidence to the facet that survived global URL dedupe. */
+export function summarizeSelectedEvidence(
+  searchQueries: string[],
+  selected: WebSearchHit[],
+): EvidenceFacetSummary[] {
+  return searchQueries.map((facet) =>
+    summarizeEvidenceFacet(
+      facet,
+      selected.filter((hit) => searchQueries.length === 1 || hit.searchQuery === facet),
+    ),
+  );
 }
 
 /** Prepend the trivial-turn hint so skip-path reasoning stays Kimi-clean. */
@@ -297,17 +453,7 @@ export function withTrivialTurnContext(messages: ChatMessage[]): ChatMessage[] {
 }
 
 export function withAssistantCapabilityContext(messages: ChatMessage[]): ChatMessage[] {
-  const next = messages.map((m) => ({ ...m }));
-  const block = ASSISTANT_CAPABILITY_SYSTEM_HINT.trimEnd();
-  if (next[0]?.role === "system") {
-    const existing = typeof next[0].content === "string" ? next[0].content : "";
-    next[0] = {
-      ...next[0],
-      content: existing ? `${block}\n\n${existing}` : block,
-    };
-    return next;
-  }
-  return [{ role: "system", content: block }, ...next];
+  return withPortalCapabilityContext(messages);
 }
 
 function eventStreamResponse(stream: ReadableStream<Uint8Array>): Response {
@@ -431,10 +577,12 @@ async function callGatewayJson(
   }
 }
 
-type SearchQueryResolution = SearchQueryRewrite & { source: "ai" };
+export type StandaloneSearchQueryResolution = SearchQueryRewrite & {
+  source: "ai" | "current" | "auto-route";
+};
 
-type SearchQueryRewriteOutcome =
-  | { kind: "resolved"; value: SearchQueryResolution }
+export type StandaloneSearchQueryOutcome =
+  | { kind: "resolved"; value: StandaloneSearchQueryResolution }
   | { kind: "unresolved"; reason: "agent_unresolved" | "rewrite_unavailable" };
 
 async function rewriteSearchQueryWithAi(
@@ -442,7 +590,8 @@ async function rewriteSearchQueryWithAi(
   rewriteMessages: NonNullable<ReturnType<typeof buildSearchQueryRewriteMessages>>,
   model: string | undefined,
   deps: GatewayFetchDeps,
-): Promise<SearchQueryRewriteOutcome> {
+  maxSearchCalls: number,
+): Promise<StandaloneSearchQueryOutcome> {
   let lastError = "unknown error";
   for (let attempt = 1; attempt <= QUERY_REWRITE_MAX_ATTEMPTS; attempt += 1) {
     try {
@@ -468,8 +617,16 @@ async function rewriteSearchQueryWithAi(
         },
         QUERY_REWRITE_TIMEOUT_MS,
       );
-      const rewrite = parseSearchQueryRewrite(extractCompletionContent(payload));
-      if (rewrite?.query && hasPriorSearchQueryLeakage(rewrite.query, messages)) {
+      const rewrite = parseSearchQueryRewrite(
+        extractCompletionContent(payload),
+        maxSearchCalls,
+      );
+      if (
+        rewrite &&
+        [rewrite.query, ...rewrite.searchQueries].some(
+          (query) => query && hasPriorSearchQueryLeakage(query, messages),
+        )
+      ) {
         throw new Error("query rewrite copied the prior question");
       }
       if (!rewrite) throw new Error("query rewrite output failed validation");
@@ -497,8 +654,54 @@ async function rewriteSearchQueryWithAi(
   return { kind: "unresolved", reason: "rewrite_unavailable" };
 }
 
+/**
+ * Resolve the current turn into a standalone retrieval query.
+ *
+ * Both normal web search and deep research must go through this function so a
+ * contextual follow-up can never fall back to searching its raw pronoun or
+ * ellipsis. A first user turn has no missing context and can be used verbatim.
+ */
+export async function resolveStandaloneSearchQuery(
+  messages: WebSearchChatMessage[],
+  model: string | undefined,
+  deps: GatewayFetchDeps,
+  maxSearchCallsValue: unknown = DEFAULT_MAX_SEARCH_CALLS,
+  rewriteOptions: SearchQueryRewriteOptions = {},
+): Promise<StandaloneSearchQueryOutcome> {
+  const maxSearchCalls = normalizeMaxSearchCalls(maxSearchCallsValue);
+  const rewriteMessages = buildSearchQueryRewriteMessages(
+    messages,
+    new Date(),
+    maxSearchCalls,
+    rewriteOptions,
+  );
+  if (rewriteMessages) {
+    return rewriteSearchQueryWithAi(
+      messages,
+      rewriteMessages,
+      model,
+      deps,
+      maxSearchCalls,
+    );
+  }
+
+  const query = buildWebSearchQuery(messages);
+  if (!query) return { kind: "unresolved", reason: "agent_unresolved" };
+  return {
+    kind: "resolved",
+    value: {
+      query,
+      needSearch: true,
+      searchQueries: [query],
+      confidence: 1,
+      source: "current",
+    },
+  };
+}
+
 type PipeOptions = {
   sourcesFrame?: string;
+  traceFrame?: string;
   prefixText?: string;
 };
 
@@ -536,16 +739,20 @@ function frameHasContentDelta(data: string): boolean {
  */
 export async function pipeUpstreamSse(upstream: Response, options: PipeOptions = {}): Promise<Response> {
   const sourcesFrame = options.sourcesFrame ?? "";
+  const traceFrame = options.traceFrame ?? "";
   const prefixText = options.prefixText ?? "";
 
   if (!upstream.ok || !upstream.body) {
     const errText = await upstream.text().catch(() => "gateway error");
     const message = extractUpstreamErrorMessage(errText, upstream.status);
+    // A diagnostic-only trace must never change HTTP error semantics. Preserve
+    // the legacy SSE recovery only when search sources were already produced.
     if (sourcesFrame) {
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
           const encoder = new TextEncoder();
           controller.enqueue(encoder.encode(sourcesFrame));
+          if (traceFrame) controller.enqueue(encoder.encode(traceFrame));
           controller.enqueue(
             encoder.encode(
               formatSseErrorFrame(`模型回答失败：${message}`, String(upstream.status || 502)),
@@ -577,6 +784,9 @@ export async function pipeUpstreamSse(upstream: Response, options: PipeOptions =
         }
         if (sourcesFrame) {
           controller.enqueue(encoder.encode(sourcesFrame));
+        }
+        if (traceFrame) {
+          controller.enqueue(encoder.encode(traceFrame));
         }
 
         const reader = upstream.body!.getReader();
@@ -658,30 +868,148 @@ export async function pipeUpstreamSse(upstream: Response, options: PipeOptions =
   return eventStreamResponse(stream);
 }
 
-async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<Response> {
-  return pipeUpstreamSse(upstream, { prefixText });
+async function pipeWithPrefix(
+  upstream: Response,
+  prefixText: string,
+  trace?: WebSearchTracePayload,
+): Promise<Response> {
+  return pipeUpstreamSse(upstream, {
+    prefixText,
+    ...(trace ? { traceFrame: formatWebSearchTraceSse(trace) } : {}),
+  });
 }
 
 async function pipeWithSourcesAppendix(
   upstream: Response,
   selected: WebSearchHit[],
   remainder: WebSearchHit[] = [],
+  trace?: WebSearchTracePayload,
+  prefixText = "",
 ): Promise<Response> {
   const sourcesFrame =
     selected.length + remainder.length > 0 ? formatWebSearchSourcesSse(selected, remainder) : "";
-  return pipeUpstreamSse(upstream, { sourcesFrame });
+  return pipeUpstreamSse(upstream, {
+    sourcesFrame,
+    ...(prefixText ? { prefixText } : {}),
+    ...(trace ? { traceFrame: formatWebSearchTraceSse(trace) } : {}),
+  });
+}
+
+function perQueryMaxResults(cfg: WebSearchRuntimeConfig, queryCount: number): number | undefined {
+  if (queryCount <= 1) return undefined;
+  const total = Math.max(1, Math.min(WEB_SEARCH_MAX_RESULTS_CAP, cfg.maxResults));
+  return Math.max(1, Math.floor(total / queryCount));
+}
+
+async function executeOrdinarySearchPlan(
+  queries: string[],
+  cfg: WebSearchRuntimeConfig,
+  searchFn: typeof executeWebSearch,
+  options: { acceptHit?: (hit: WebSearchHit) => boolean } = {},
+): Promise<{
+  groups: WebSearchHit[][];
+  providerCalls: number;
+  providerIdsByQuery: string[][];
+  retry?: NonNullable<WebSearchTracePayload["retry"]>;
+}> {
+  const maxSearchCalls = normalizeMaxSearchCalls(cfg.maxSearchCalls);
+  const boundedQueries = queries.slice(0, maxSearchCalls);
+  const providers = configuredWebSearchProviders(cfg);
+  const primary = primaryWebSearchProvider(cfg);
+  if (!primary) throw new Error("no configured web search provider");
+
+  const alternative = selectAlternativeProvider(providers, primary.id);
+  const maxResults = perQueryMaxResults(cfg, boundedQueries.length);
+  let callsUsed = 0;
+  let retryTrace: NonNullable<WebSearchTracePayload["retry"]> | undefined;
+  const providerIdsByQuery = boundedQueries.map(() => [primary.id]);
+
+  const groups = await Promise.all(
+    boundedQueries.map(async (query) => {
+      callsUsed += 1;
+      try {
+        const hits = await searchFn(
+          query,
+          maxResults,
+          configForWebSearchProvider(cfg, primary),
+        );
+        return options.acceptHit ? hits.filter(options.acceptHit) : hits;
+      } catch (error) {
+        console.warn(
+          `[web-search] provider=${primary.id} query_chars=${query.length} failed:`,
+          error instanceof Error ? error.message : error,
+        );
+        return [];
+      }
+    }),
+  );
+
+  // All facets and the single evidence-quality retry share one provider-call
+  // budget. A plan that consumes the cap cannot expand into per-facet retries.
+  if (alternative && callsUsed < maxSearchCalls) {
+    let retryIndex = groups.findIndex((hits) => hits.length === 0);
+    if (retryIndex < 0) {
+      retryIndex = groups.findIndex((hits) => assessSearchEvidence(hits).retry);
+    }
+    if (retryIndex >= 0) {
+      const current = groups[retryIndex] ?? [];
+      const quality = assessSearchEvidence(current);
+      const retryReason = current.length === 0 ? "primary_failed" : "sparse_evidence";
+      retryTrace = {
+        used: true,
+        queryIndex: retryIndex,
+        reason: retryReason,
+        fromProviderId: primary.id,
+        toProviderId: alternative.id,
+      };
+      console.info(
+        `[web-search] retry reason=${retryReason} from=${primary.id} to=${alternative.id} query_index=${retryIndex} uniqueUrls=${quality.uniqueUrls} uniqueHosts=${quality.uniqueHosts}`,
+      );
+      callsUsed += 1;
+      providerIdsByQuery[retryIndex]!.push(alternative.id);
+      try {
+        const fetched = await searchFn(
+          boundedQueries[retryIndex]!,
+          maxResults,
+          configForWebSearchProvider(cfg, alternative),
+        );
+        const complement = options.acceptHit ? fetched.filter(options.acceptHit) : fetched;
+        groups[retryIndex] = current.length === 0
+          ? complement
+          : mergeSearchHits(current, complement);
+      } catch (error) {
+        console.warn(
+          `[web-search] retry provider=${alternative.id} failed:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+  }
+
+  console.info(
+    `[web-search] retrieval queries=${boundedQueries.length} provider_calls=${callsUsed}/${maxSearchCalls}`,
+  );
+  return {
+    groups,
+    providerCalls: callsUsed,
+    providerIdsByQuery,
+    ...(retryTrace ? { retry: retryTrace } : {}),
+  };
 }
 
 export async function runWebSearchTurn(
   parsedBody: Record<string, unknown>,
   deps: GatewayFetchDeps,
+  options: { preparedSearchPlan?: PreparedSearchPlan } = {},
 ): Promise<Response> {
   const baseBody = stripWebSearchFlag(parsedBody);
   // Sanitize assistant history before search/skip paths so prior <think> chains and
   // stale [N] citation indices never reach the upstream model.
-  const originalMessages = sanitizeHistoryForUpstream(
-    stripEmptyAssistantMessages(
-      Array.isArray(baseBody.messages) ? (baseBody.messages as ChatMessage[]) : [],
+  const originalMessages = withPortalCapabilityContext(
+    sanitizeHistoryForUpstream(
+      stripEmptyAssistantMessages(
+        Array.isArray(baseBody.messages) ? (baseBody.messages as ChatMessage[]) : [],
+      ),
     ),
   );
 
@@ -689,8 +1017,22 @@ export async function runWebSearchTurn(
   const cfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);
   const { tools: _tools, tool_choice: _toolChoice, ...rest } = baseBody;
 
-  const respondWithoutSearch = async (reason: string): Promise<Response> => {
+  const respondWithoutSearch = async (
+    reason: string,
+    details: { resolvedQuery?: string; queryResolutionMs?: number } = {},
+  ): Promise<Response> => {
     console.info(`[web-search] skipped search-first (reason=${reason})`);
+    const trace: WebSearchTracePayload = {
+      version: 1,
+      decision: "skip",
+      reason,
+      ...(details.resolvedQuery ? { resolvedQuery: details.resolvedQuery } : {}),
+      providerCalls: 0,
+      timings: {
+        queryResolutionMs: Math.max(0, details.queryResolutionMs ?? 0),
+        retrievalMs: 0,
+      },
+    };
     try {
       const directMessages =
         reason === "assistant_meta"
@@ -703,7 +1045,9 @@ export async function runWebSearchTurn(
         stream: true,
         messages: directMessages,
       });
-      return pipeUpstreamSse(upstream, {});
+      return pipeUpstreamSse(upstream, {
+        traceFrame: formatWebSearchTraceSse(trace),
+      });
     } catch (error) {
       return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
     }
@@ -716,65 +1060,257 @@ export async function runWebSearchTurn(
         stream: true,
         messages: withCurrentTimeContext(originalMessages),
       });
-      return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT);
+      return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT, {
+        version: 1,
+        decision: "skip",
+        reason: "admin_disabled",
+        providerCalls: 0,
+        timings: { queryResolutionMs: 0, retrievalMs: 0 },
+      });
     } catch (error) {
       return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
     }
   }
 
+  const directReference = resolveDirectPageReference(originalMessages);
+  const queryMessages = directReference?.explicitInCurrentTurn
+    ? replaceCurrentQuestion(
+        originalMessages,
+        directReference.question || directReference.displayUrl,
+      )
+    : originalMessages;
+
   // Decide whether this turn needs search from the current user text only. If it
   // does, contextual completion below is always delegated to the rewrite agent.
-  const queryForSkip = extractLastUserQuery(originalMessages);
-  const alwaysSearch = webSearchAlwaysOn();
-  const skip = alwaysSearch
+  const queryForSkip = extractLastUserQuery(queryMessages);
+  const fastSkipBypassed = webSearchFastSkipBypassed();
+  const fastPath = fastSkipBypassed || directReference?.explicitInCurrentTurn
     ? null
-    : classifyWebSearchNeed({
+    : classifyWebSearchFastPath({
         query: queryForSkip,
-        rawQuery: extractLastUserRawText(originalMessages),
+        rawQuery: extractLastUserRawText(queryMessages),
       });
-  if (skip?.need === "skip") {
-    return respondWithoutSearch(skip.reason);
+  if (fastPath?.action === "skip") {
+    return respondWithoutSearch(fastPath.reason, { resolvedQuery: queryForSkip });
   }
 
   const modelName = typeof rest.model === "string" ? rest.model : undefined;
-  const rewriteMessages = buildSearchQueryRewriteMessages(originalMessages);
-  let query = buildWebSearchQuery(originalMessages);
-  if (rewriteMessages) {
-    const outcome = await rewriteSearchQueryWithAi(
-      originalMessages,
-      rewriteMessages,
+  const directReadStartedAt = Date.now();
+  let directReadFailure: PageFetchFailure | undefined;
+  const directView = directReference
+    ? await (deps.readPage ?? readDirectPage)(directReference, {
+        signal: deps.signal,
+        onFailure: (reason) => {
+          directReadFailure = reason;
+        },
+      }).catch((error) => {
+        console.warn(
+          "[web-search] direct page read failed:",
+          error instanceof Error ? error.message : error,
+        );
+        return null;
+      })
+    : null;
+  const directReadMs = Date.now() - directReadStartedAt;
+  const incompleteDirectPage = Boolean(
+    directReference?.explicitInCurrentTurn &&
+      !directView &&
+      directReadFailure === "too_short",
+  );
+
+  const respondFromDirectPage = async (
+    evidenceQueries: string[],
+    resolvedQuery: string,
+    queryResolutionMs: number,
+  ): Promise<Response | null> => {
+    if (!directReference || !directView) return null;
+    const evidence = selectDirectPageEvidence(
+      directView,
+      evidenceQueries
+        .map((value) => value.trim())
+        .filter((value, index, all) => value && all.indexOf(value) === index),
+      Math.min(DIRECT_PAGE_CONTEXT_CHARS, resolveInjectionBudgetChars(modelName)),
+    );
+    // An explicit URL always gets a bounded preview. A historical URL is used
+    // only when generic passage retrieval found supporting text; otherwise the
+    // contextual rewrite and ordinary search lanes remain available.
+    if (!directReference.explicitInCurrentTurn && !evidence.strongMatch) return null;
+
+    const source = directPageSource(evidence);
+    const trace: WebSearchTracePayload = {
+      version: 1,
+      decision: "search",
+      reason:
+        evidence.coverage === "abstract_only"
+          ? "direct_page_abstract_only"
+          : "direct_page_html",
+      resolvedQuery,
+      facets: [
+        {
+          query: resolvedQuery || directReference.displayUrl,
+          providerIds: ["direct-page"],
+          hitCount: 1,
+          uniqueHosts: 1,
+        },
+      ],
+      providerCalls: 0,
+      timings: {
+        queryResolutionMs: Math.max(0, queryResolutionMs),
+        retrievalMs: Math.max(0, directReadMs),
+      },
+    };
+    try {
+      const upstream = await callGatewayStream(deps, {
+        ...rest,
+        stream: true,
+        messages: withCurrentTimeContext(
+          withDirectPageContext(originalMessages, evidence),
+        ),
+      });
+      return pipeWithSourcesAppendix(upstream, [source], [], trace);
+    } catch (error) {
+      return gatewayUnavailableResponse(
+        error instanceof Error ? error.message : "gateway unreachable",
+      );
+    }
+  };
+
+  if (directReference) {
+    const directQuery = directReference.question || directReference.displayUrl;
+    const directResponse = await respondFromDirectPage([directQuery], directQuery, 0);
+    if (directResponse) return directResponse;
+  }
+
+  const queryResolutionStartedAt = Date.now();
+  const explicitQuery = directReference?.explicitInCurrentTurn
+    ? directReference.question || directReference.displayUrl
+    : "";
+  let queryResolution: StandaloneSearchQueryOutcome;
+  if (directReference?.explicitInCurrentTurn) {
+    queryResolution = {
+      kind: "resolved",
+      value: {
+        query: explicitQuery,
+        needSearch: true,
+        searchQueries: [explicitQuery],
+        confidence: 1,
+        source: "current",
+      },
+    };
+  } else if (options.preparedSearchPlan) {
+    queryResolution = {
+      kind: "resolved",
+      value: {
+        query: options.preparedSearchPlan.query,
+        needSearch: true,
+        searchQueries: [...options.preparedSearchPlan.searchQueries],
+        confidence: options.preparedSearchPlan.confidence,
+        source: options.preparedSearchPlan.source,
+      },
+    };
+  } else {
+    queryResolution = await resolveStandaloneSearchQuery(
+      queryMessages,
       modelName,
       deps,
+      cfg.maxSearchCalls,
+      directReference && directView
+        ? {
+            targetDocument: {
+              title: directView.title,
+              url: directReference.displayUrl,
+              sample: directView.text.slice(0, 2_000),
+            },
+          }
+        : {},
     );
-    if (outcome.kind === "unresolved") {
-      return respondWithoutSearch(`context_query_${outcome.reason}`);
-    }
-    query = outcome.value.query;
   }
+  const queryResolutionMs = Date.now() - queryResolutionStartedAt;
+  if (queryResolution.kind === "unresolved") {
+    return respondWithoutSearch(`context_query_${queryResolution.reason}`, {
+      queryResolutionMs,
+    });
+  }
+  if (!queryResolution.value.needSearch) {
+    return respondWithoutSearch("semantic_no_search", {
+      resolvedQuery: queryResolution.value.query,
+      queryResolutionMs,
+    });
+  }
+  let query = queryResolution.value.query;
+  let searchQueries = (
+    queryResolution.value.searchQueries.length > 0
+      ? queryResolution.value.searchQueries
+      : [query]
+  ).slice(0, normalizeMaxSearchCalls(cfg.maxSearchCalls));
   // Only the first user turn may search the current text verbatim. Once recent
   // context exists, provider retrieval is gated on a standalone agent rewrite.
 
-  const searchFn = deps.executeSearch ?? executeWebSearch;
-  let hits: WebSearchHit[] = [];
-  let searchFailed = false;
-
-  try {
-    if (!query) {
-      throw new Error("missing user query for web search");
-    }
-    hits = await searchFn(query, undefined, cfg);
-    if (hits.length === 0) {
-      throw new Error("search returned no hits");
-    }
-  } catch (error) {
-    searchFailed = true;
-    console.warn("[web-search] search failed, degrading:", error instanceof Error ? error.message : error);
+  if (directReference && directView) {
+    const directResponse = await respondFromDirectPage(
+      [directReference.question, query, ...searchQueries],
+      query,
+      queryResolutionMs,
+    );
+    if (directResponse) return directResponse;
   }
 
-  const ranked = searchFailed ? [] : rerankHits(query, hits);
+  if (directReference?.explicitInCurrentTurn && directReference.arxivId) {
+    query = `arXiv ${directReference.arxivId}`;
+    searchQueries = [query];
+  }
+
+  const searchFn = deps.executeSearch ?? executeWebSearch;
+  let hits: WebSearchHit[] = [];
+  let rankedGroups: WebSearchHit[][] = searchQueries.map(() => []);
+  let searchFailed = false;
+  let providerCalls = 0;
+  let providerIdsByQuery: string[][] = searchQueries.map(() => []);
+  let retryTrace: WebSearchTracePayload["retry"];
+  const retrievalStartedAt = Date.now();
+
+  if (!query) {
+    searchFailed = true;
+    console.warn("[web-search] search failed, degrading: missing user query for web search");
+  } else {
+    try {
+      const exactDocumentFallback =
+        directReference?.explicitInCurrentTurn && directReference.arxivId
+          ? (hit: WebSearchHit) => matchesDirectPage(directReference, hit.url)
+          : undefined;
+      const planResult = await executeOrdinarySearchPlan(searchQueries, cfg, searchFn, {
+        ...(exactDocumentFallback ? { acceptHit: exactDocumentFallback } : {}),
+      });
+      providerCalls = planResult.providerCalls;
+      providerIdsByQuery = planResult.providerIdsByQuery;
+      retryTrace = planResult.retry;
+      rankedGroups = planResult.groups.map((group, index) =>
+        diversifyBySourceHost(
+          rerankHits(searchQueries[index]!, group),
+          (hit) => hit.url,
+        ).map((hit) =>
+          searchQueries.length > 1
+            ? { ...hit, searchQuery: searchQueries[index]! }
+            : hit,
+        ),
+      );
+      hits = interleaveSearchHitGroups(rankedGroups).slice(0, WEB_SEARCH_MAX_RESULTS_CAP);
+      searchFailed = hits.length === 0;
+      if (searchFailed) {
+        console.warn("[web-search] search failed, degrading: no usable hits");
+      }
+    } catch (error) {
+      searchFailed = true;
+      console.warn(
+        "[web-search] search failed, degrading:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
   const { selected, remainder } = searchFailed
     ? { selected: [] as WebSearchHit[], remainder: [] as WebSearchHit[] }
-    : selectHitsWithinBudget(ranked, modelName);
+    : selectHitsWithinBudget(hits, modelName);
   if (!searchFailed) {
     const budget = resolveInjectionBudgetChars(modelName);
     console.info(
@@ -782,8 +1318,49 @@ export async function runWebSearchTurn(
     );
   }
 
+  // Interleaving assigns a duplicate URL to its first facet only. Preserve that
+  // ownership here so a shared page cannot make another facet look covered.
+  const evidence = summarizeSelectedEvidence(searchQueries, selected);
+  const traceFacetStats = searchQueries.map((facet, index) => {
+    const summary = summarizeEvidenceFacet(facet, rankedGroups[index] ?? []);
+    return {
+      query: facet,
+      ...(providerIdsByQuery[index]?.length
+        ? { providerIds: providerIdsByQuery[index] }
+        : {}),
+      hitCount: summary.selectedHits,
+      uniqueHosts: summary.uniqueHosts,
+      ...(summary.dateFrom ? { dateFrom: summary.dateFrom } : {}),
+      ...(summary.dateTo ? { dateTo: summary.dateTo } : {}),
+    };
+  });
+  const trace: WebSearchTracePayload = {
+    version: 1,
+    decision: "search",
+    reason: searchFailed
+      ? "retrieval_failed"
+      : fastSkipBypassed
+        ? "fast_skip_bypassed"
+        : queryResolution.value.source === "auto-route"
+          ? "auto_route_search"
+          : "automatic_search",
+    resolvedQuery: query,
+    facets: traceFacetStats,
+    providerCalls,
+    ...(retryTrace ? { retry: retryTrace } : {}),
+    timings: {
+      queryResolutionMs: Math.max(0, queryResolutionMs),
+      retrievalMs: Math.max(0, Date.now() - retrievalStartedAt),
+    },
+  };
+
+  const groundedMessages = searchFailed
+    ? originalMessages
+    : withSearchContext(originalMessages, selected, evidence);
   const messages = withCurrentTimeContext(
-    searchFailed ? originalMessages : withSearchContext(originalMessages, selected),
+    incompleteDirectPage
+      ? withIncompleteDirectPageContext(groundedMessages)
+      : groundedMessages,
   );
 
   let upstream: Response;
@@ -798,7 +1375,17 @@ export async function runWebSearchTurn(
   }
 
   if (searchFailed) {
-    return pipeWithPrefix(upstream, UNAVAILABLE_HINT);
+    return pipeWithPrefix(
+      upstream,
+      `${incompleteDirectPage ? INCOMPLETE_DIRECT_PAGE_HINT : ""}${UNAVAILABLE_HINT}`,
+      trace,
+    );
   }
-  return pipeWithSourcesAppendix(upstream, selected, remainder);
+  return pipeWithSourcesAppendix(
+    upstream,
+    selected,
+    remainder,
+    trace,
+    incompleteDirectPage ? INCOMPLETE_DIRECT_PAGE_HINT : "",
+  );
 }

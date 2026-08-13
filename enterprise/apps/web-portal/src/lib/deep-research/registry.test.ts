@@ -27,6 +27,18 @@ describe("CitationRegistry", () => {
     expect(normalizeCitationUrl("https://a.com/x/")).toBe(normalizeCitationUrl("https://a.com/x"));
   });
 
+  it("keeps a publication date discovered by a later duplicate hit", () => {
+    const registry = new CitationRegistry();
+    registry.add({ title: "A", url: "https://a.com/x", snippet: "" });
+    registry.add({
+      title: "A dated",
+      url: "https://a.com/x#later",
+      snippet: "",
+      publishedAt: "2026-08-10",
+    });
+    expect(registry.list()[0]?.publishedAt).toBe("2026-08-10");
+  });
+
   it("assigns contiguous indexes", () => {
     const registry = new CitationRegistry();
     registry.add({ title: "1", url: "https://a.com/1", snippet: "" });

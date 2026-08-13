@@ -5,6 +5,7 @@ import type {
   ChatMessageRole,
   WebSearchSource,
 } from "@agenticx/core-api";
+import { sanitizeWebSearchTrace } from "@agenticx/core-api";
 import { ChatHistoryHttpError } from "./history-client";
 
 const DB_NAME = "agx-portal-history-outbox-v1";
@@ -45,6 +46,7 @@ export type HistoryAppendPayload = {
   model?: string;
   created_at: string;
   web_search_sources?: WebSearchSource[];
+  web_search_trace?: ChatMessage["web_search_trace"];
   attachments?: HistoryAppendAttachmentMeta[];
   /** Deep-research workbench state — must survive refresh / session switch. */
   deep_research?: ChatMessageDeepResearch;
@@ -70,6 +72,24 @@ export type HistorySyncSessionState = {
   state: "syncing" | "waiting_retry" | "paused" | "dead_letter" | "idle";
   message?: string;
 };
+
+/**
+ * The outbox briefly reports `syncing` after an append is queued. That is an
+ * expected in-flight transition, not a history-sync warning; rendering it as
+ * an alert makes every normal send flash a yellow banner before the operation
+ * is removed from the outbox. Only states that require waiting, re-auth, or a
+ * manual retry should reach the warning UI.
+ */
+export function shouldShowHistorySyncAlert(
+  sync: HistorySyncSessionState | undefined,
+): boolean {
+  if (!sync || sync.pendingCount <= 0) return false;
+  return (
+    sync.state === "waiting_retry" ||
+    sync.state === "paused" ||
+    sync.state === "dead_letter"
+  );
+}
 
 export type HistoryOutboxTransport = {
   appendMessages(
@@ -207,8 +227,13 @@ export function stripToAppendPayload(message: ChatMessage): HistoryAppendPayload
       title: source.title,
       url: source.url,
       snippet: source.snippet,
+      ...(typeof source.usedByModel === "boolean"
+        ? { usedByModel: source.usedByModel }
+        : {}),
     }));
   }
+  const webSearchTrace = sanitizeWebSearchTrace(message.web_search_trace);
+  if (webSearchTrace) payload.web_search_trace = webSearchTrace;
   if (message.attachments?.length) {
     payload.attachments = message.attachments.map((item) => {
       const meta: HistoryAppendAttachmentMeta = {
@@ -626,6 +651,7 @@ export async function listPendingOverlayMessages(
         model: message.model,
         created_at: message.created_at,
         web_search_sources: message.web_search_sources,
+        web_search_trace: sanitizeWebSearchTrace(message.web_search_trace),
         deep_research: message.deep_research,
         attachments: message.attachments?.map((item) => ({
           name: item.name,

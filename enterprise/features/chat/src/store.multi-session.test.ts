@@ -158,7 +158,9 @@ describe("chat store multi-session stream state", () => {
     const sendB = useChatStore.getState().sendMessage(client, { content: "继续" });
 
     await vi.waitFor(() => {
-      expect(useChatStore.getState().pendingMessages).toHaveLength(0);
+      const current = useChatStore.getState();
+      expect(current.pendingMessages).toHaveLength(0);
+      expect(current.streamStateBySessionId.B?.activeRequestId).toBeTruthy();
     });
 
     const state = useChatStore.getState();

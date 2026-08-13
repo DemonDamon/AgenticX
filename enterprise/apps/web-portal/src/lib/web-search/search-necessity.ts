@@ -1,6 +1,7 @@
 /**
- * Allowlist-style gate: only obviously self-contained turns skip search-first.
- * Anything unrecognized MUST fall through to "search" so info queries never regress.
+ * Allowlist-style fast path: only obviously self-contained turns skip search-first.
+ * Anything unrecognized MUST continue to the semantic planner. `continue` is not
+ * a positive search decision; this module never owns that decision.
  */
 import { isCurrentDateTimeQuery } from "../current-time";
 
@@ -12,9 +13,9 @@ export type WebSearchSkipReason =
   | "arithmetic" // 纯算式
   | "referential_no_entity"; // 指代追问但历史消解不出实体（由 tool-loop 构造）
 
-export type WebSearchNeed =
-  | { need: "search" }
-  | { need: "skip"; reason: WebSearchSkipReason };
+export type WebSearchFastPathDecision =
+  | { action: "continue" }
+  | { action: "skip"; reason: WebSearchSkipReason };
 
 export type ClassifyInput = {
   /** sanitizeWebSearchQuery 之后的短查询（可能为空）。 */
@@ -36,7 +37,7 @@ const ASSISTANT_META =
 const ARITHMETIC = /^[\d\s+\-*/×÷().=%]+$/;
 const ARITHMETIC_OP = /[+\-*/×÷=%]/;
 
-const ATTACHMENT_MARKER = /(^|\n)---\s*附件\s*[:：]/;
+const ATTACHMENT_MARKER = /(^|\n)---\s*(?:附件|attachment)\s*[:：]/i;
 const SHORT_QUERY_MAX = 24;
 const ATTACHMENT_USER_TEXT_MAX = 40;
 
@@ -52,24 +53,26 @@ function normalize(query: string): string {
 /** User prose before / without the portal-injected attachment body block. */
 function userTextWithoutAttachment(rawQuery: string): string {
   const text = rawQuery.replace(/\r\n/g, "\n");
-  const idx = text.search(/\n---\s*附件\s*[:：]/);
+  const idx = text.search(/\n---\s*(?:附件|attachment)\s*[:：]/i);
   if (idx >= 0) return text.slice(0, idx).trim();
-  if (/^---\s*附件\s*[:：]/.test(text.trimStart())) return "";
+  if (/^---\s*(?:附件|attachment)\s*[:：]/i.test(text.trimStart())) return "";
   return text.trim();
 }
 
-export function classifyWebSearchNeed(input: ClassifyInput): WebSearchNeed {
+export function classifyWebSearchFastPath(
+  input: ClassifyInput,
+): WebSearchFastPathDecision {
   const query = (input.query ?? "").trim();
   const rawQuery = input.rawQuery ?? "";
 
   // 1) Informational markers on the sanitized query win first.
   if (query && INFO_MARKERS.test(query)) {
-    return { need: "search" };
+    return { action: "continue" };
   }
 
   // 2) Pure current date/time — ground on local clock.
   if (query && isCurrentDateTimeQuery(query)) {
-    return { need: "skip", reason: "datetime" };
+    return { action: "skip", reason: "datetime" };
   }
 
   // 3) Attachment-only: short self-contained instruction over injected file body.
@@ -79,44 +82,44 @@ export function classifyWebSearchNeed(input: ClassifyInput): WebSearchNeed {
       userText.length <= ATTACHMENT_USER_TEXT_MAX &&
       !INFO_MARKERS.test(userText)
     ) {
-      return { need: "skip", reason: "attachment_only" };
+      return { action: "skip", reason: "attachment_only" };
     }
   }
 
-  // Empty query (and not attachment_only) → keep search / degrade path.
+  // Empty query (and not attachment_only) → continue to the degrade path.
   if (!query) {
-    return { need: "search" };
+    return { action: "continue" };
   }
 
   // Length guard for exact-match skip rules.
   if (query.length > SHORT_QUERY_MAX) {
-    return { need: "search" };
+    return { action: "continue" };
   }
 
   const normalized = normalize(query);
   if (!normalized) {
-    return { need: "search" };
+    return { action: "continue" };
   }
 
   // 4) Greeting / thanks / ack
   if (GREETING.test(normalized)) {
-    return { need: "skip", reason: "greeting" };
+    return { action: "skip", reason: "greeting" };
   }
 
   // 5) Assistant identity / capability
   if (ASSISTANT_META.test(normalized)) {
-    return { need: "skip", reason: "assistant_meta" };
+    return { action: "skip", reason: "assistant_meta" };
   }
 
   // 6) Pure arithmetic
   if (ARITHMETIC.test(normalized) && ARITHMETIC_OP.test(normalized)) {
-    return { need: "skip", reason: "arithmetic" };
+    return { action: "skip", reason: "arithmetic" };
   }
 
-  // 7) Default: search
-  return { need: "search" };
+  // 7) Default: defer the semantic decision to the downstream planner.
+  return { action: "continue" };
 }
 
 export function shouldSkipWebSearch(input: ClassifyInput): boolean {
-  return classifyWebSearchNeed(input).need === "skip";
+  return classifyWebSearchFastPath(input).action === "skip";
 }

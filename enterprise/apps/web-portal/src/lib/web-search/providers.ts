@@ -2,8 +2,14 @@
  * Enterprise portal web search providers (TypeScript, independent of Desktop Python).
  */
 
-import { directFetch } from "./direct-fetch";
+import { directFetch, type DirectFetchInit } from "./direct-fetch";
 import { resolveFreshness, type BochaFreshness } from "./freshness";
+import {
+  normalizeWebSearchEndpoint,
+  normalizeWebSearchResultUrl,
+  resolveSafeWebSearchEndpoint,
+  type ResolvedWebSearchUrl,
+} from "./provider-endpoint";
 
 export const WEB_SEARCH_MAX_RESULTS_CAP = 50;
 export const DEFAULT_MAX_RESULTS = 50;
@@ -15,18 +21,220 @@ export type WebSearchHit = {
   snippet: string;
   /** ISO8601，provider 提供时才有（当前仅 Bocha）。 */
   publishedAt?: string;
+  /** Internal retrieval facet label; provider adapters never need to populate it. */
+  searchQuery?: string;
 };
 
-export type WebSearchProviderName = "duckduckgo" | "bocha" | "tavily";
+/**
+ * A configured provider instance. `id` is tenant-defined identity; `adapter`
+ * names the request/response protocol implementation registered in this BFF.
+ * Retry routing compares only `id`, so it never needs a vendor allowlist.
+ */
+export type WebSearchProviderConfig = {
+  id: string;
+  adapter: string;
+  displayName: string;
+  apiKey: string;
+  enabled: boolean;
+  priority: number;
+  options?: Record<string, unknown>;
+};
+
+/** @deprecated Provider identity is now a configured string, not a closed union. */
+export type WebSearchProviderName = string;
 
 export type WebSearchRuntimeConfig = {
   enabled: boolean;
+  /** Legacy mirror of the primary provider adapter. */
   provider: WebSearchProviderName;
+  /** Legacy mirror of the primary provider secret. */
   apiKey: string;
   maxResults: number;
+  /** Shared cap for standalone query facets plus any fallback-provider search. */
+  maxSearchCalls?: number;
+  primaryProviderId?: string;
+  providers?: WebSearchProviderConfig[];
 };
 
-type FetchLike = typeof fetch;
+type FetchLike = (
+  input: string | URL | Request,
+  init?: DirectFetchInit,
+) => Promise<Response>;
+
+type WebSearchAdapterContext = {
+  query: string;
+  maxResults: number;
+  apiKey: string;
+  options: Record<string, unknown>;
+  fetchImpl: FetchLike;
+};
+
+export type WebSearchAdapterDefinition = {
+  id: string;
+  displayName: string;
+  requiresApiKey: boolean;
+  /** Tenant instances may override the exact endpoint while keeping this protocol. */
+  supportsCustomEndpoint?: boolean;
+  defaultEndpoint?: string;
+  search: (context: WebSearchAdapterContext) => Promise<WebSearchHit[]>;
+};
+
+export type WebSearchAdapterPublicDefinition = Omit<WebSearchAdapterDefinition, "search">;
+
+export type WebSearchProviderAttempt = {
+  providerId: string;
+  outcome: "ok" | "empty" | "failed";
+  hitCount: number;
+  durationMs: number;
+};
+
+export type WebSearchExecutionDiagnostics = {
+  /** Best-effort observability only; observer failures never affect retrieval. */
+  onProviderAttempt?: (attempt: WebSearchProviderAttempt) => void;
+};
+
+const ADAPTERS = new Map<string, WebSearchAdapterDefinition>();
+
+export const MAX_CONFIGURED_WEB_SEARCH_PROVIDERS = 2;
+
+const BOCHA_ENDPOINT = "https://api.bochaai.com/v1/web-search";
+const TAVILY_ENDPOINT = "https://api.tavily.com/search";
+const DOUBAO_CUSTOM_ENDPOINT = "https://open.feedcoopapi.com/search_api/web_search";
+
+/** Adapter registration is the only protocol-specific extension point. */
+export function registerWebSearchAdapter(definition: WebSearchAdapterDefinition): void {
+  const id = definition.id.trim().toLowerCase();
+  if (!id) throw new Error("web search adapter id is required");
+  ADAPTERS.set(id, { ...definition, id });
+}
+
+export function listWebSearchAdapters(): WebSearchAdapterPublicDefinition[] {
+  return [...ADAPTERS.values()].map(({ search: _search, ...definition }) => definition);
+}
+
+export function getWebSearchAdapter(
+  adapterId: string,
+): WebSearchAdapterPublicDefinition | null {
+  const definition = ADAPTERS.get(adapterId.trim().toLowerCase());
+  if (!definition) return null;
+  const { search: _search, ...publicDefinition } = definition;
+  return publicDefinition;
+}
+
+export function publicProviderEndpoint(
+  provider: Pick<WebSearchProviderConfig, "adapter" | "options">,
+): string | undefined {
+  const adapter = ADAPTERS.get(provider.adapter.trim().toLowerCase());
+  if (!adapter?.supportsCustomEndpoint) return undefined;
+  const raw = provider.options?.endpoint;
+  if (typeof raw !== "string" || !raw.trim()) return adapter.defaultEndpoint;
+  try {
+    return normalizeWebSearchEndpoint(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveAdapterEndpoint(
+  options: Record<string, unknown>,
+  defaultEndpoint: string,
+): Promise<Pick<ResolvedWebSearchUrl, "url"> & { address?: string }> {
+  const normalizedDefault = normalizeWebSearchEndpoint(defaultEndpoint);
+  const raw = typeof options.endpoint === "string" && options.endpoint.trim()
+    ? options.endpoint
+    : normalizedDefault;
+  const normalized = normalizeWebSearchEndpoint(raw);
+  if (normalized === normalizedDefault) return { url: normalizedDefault };
+  const resolved = await resolveSafeWebSearchEndpoint(normalized);
+  return { url: resolved.url, address: resolved.address };
+}
+
+const PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+function endpointTransportInit(
+  endpoint: Pick<ResolvedWebSearchUrl, "url"> & { address?: string },
+): Pick<DirectFetchInit, "connectAddress" | "maxResponseBytes"> {
+  return {
+    ...(endpoint.address ? { connectAddress: endpoint.address } : {}),
+    maxResponseBytes: PROVIDER_RESPONSE_BYTES,
+  };
+}
+
+function sanitizeProviderHits(hits: WebSearchHit[]): WebSearchHit[] {
+  return hits.flatMap((hit) => {
+    try {
+      return [{ ...hit, url: normalizeWebSearchResultUrl(hit.url) }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function clampQueryChars(query: string, maxChars: number): string {
+  const chars = Array.from(query.trim());
+  if (chars.length <= maxChars) return chars.join("");
+  const tailChars = Math.min(29, maxChars - 2);
+  const headChars = maxChars - tailChars - 1;
+  return `${chars.slice(0, headChars).join("")} ${chars.slice(-tailChars).join("")}`;
+}
+
+export function isConfiguredWebSearchProvider(provider: WebSearchProviderConfig): boolean {
+  if (!provider.enabled || !provider.id.trim()) return false;
+  const adapter = ADAPTERS.get(provider.adapter.trim().toLowerCase());
+  if (!adapter) return false;
+  return !adapter.requiresApiKey || Boolean(provider.apiKey.trim());
+}
+
+export function configuredWebSearchProviders(
+  config: Pick<
+    WebSearchRuntimeConfig,
+    "provider" | "apiKey" | "maxResults" | "primaryProviderId" | "providers"
+  >,
+): WebSearchProviderConfig[] {
+  const configured = (config.providers ?? [])
+    .filter(isConfiguredWebSearchProvider)
+    .slice()
+    .sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+  // An explicit pool is authoritative, including the case where every entry is
+  // disabled or missing credentials. Never resurrect a disabled legacy mirror.
+  if ((config.providers?.length ?? 0) > 0) return configured;
+
+  const adapter = config.provider.trim().toLowerCase();
+  const legacy: WebSearchProviderConfig = {
+    id: config.primaryProviderId?.trim() || adapter,
+    adapter,
+    displayName: ADAPTERS.get(adapter)?.displayName ?? adapter,
+    apiKey: config.apiKey,
+    enabled: true,
+    priority: 0,
+  };
+  return isConfiguredWebSearchProvider(legacy) ? [legacy] : [];
+}
+
+export function primaryWebSearchProvider(
+  config: Pick<
+    WebSearchRuntimeConfig,
+    "provider" | "apiKey" | "maxResults" | "primaryProviderId" | "providers"
+  >,
+): WebSearchProviderConfig | null {
+  const providers = configuredWebSearchProviders(config);
+  const primaryId = config.primaryProviderId?.trim();
+  return providers.find((provider) => provider.id === primaryId) ?? providers[0] ?? null;
+}
+
+/** Narrow a runtime pool to one exact provider so adapters cannot hide fallback calls. */
+export function configForWebSearchProvider(
+  config: WebSearchRuntimeConfig,
+  provider: WebSearchProviderConfig,
+): WebSearchRuntimeConfig {
+  return {
+    ...config,
+    provider: provider.adapter,
+    apiKey: provider.apiKey,
+    primaryProviderId: provider.id,
+    providers: [provider],
+  };
+}
 
 function clampMaxResults(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_MAX_RESULTS;
@@ -199,11 +407,14 @@ async function searchBocha(
   maxResults: number,
   apiKey: string,
   fetchImpl: FetchLike,
+  options: Record<string, unknown>,
   freshness?: BochaFreshness,
 ): Promise<WebSearchHit[]> {
   const payload: Record<string, unknown> = { query, count: maxResults, summary: true };
   if (freshness) payload.freshness = freshness;
-  const response = await fetchImpl("https://api.bochaai.com/v1/web-search", {
+  const endpoint = await resolveAdapterEndpoint(options, BOCHA_ENDPOINT);
+  const response = await fetchImpl(endpoint.url, {
+    ...endpointTransportInit(endpoint),
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -245,8 +456,11 @@ async function searchTavily(
   maxResults: number,
   apiKey: string,
   fetchImpl: FetchLike,
+  options: Record<string, unknown>,
 ): Promise<WebSearchHit[]> {
-  const response = await fetchImpl("https://api.tavily.com/search", {
+  const endpoint = await resolveAdapterEndpoint(options, TAVILY_ENDPOINT);
+  const response = await fetchImpl(endpoint.url, {
+    ...endpointTransportInit(endpoint),
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -269,12 +483,70 @@ async function searchTavily(
   })).filter((hit) => hit.url);
 }
 
+async function searchDoubaoCustom(
+  query: string,
+  maxResults: number,
+  apiKey: string,
+  fetchImpl: FetchLike,
+  options: Record<string, unknown>,
+): Promise<WebSearchHit[]> {
+  const endpoint = await resolveAdapterEndpoint(options, DOUBAO_CUSTOM_ENDPOINT);
+  const response = await fetchImpl(endpoint.url, {
+    ...endpointTransportInit(endpoint),
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+      "x-traffic-tag": "skill_web_search_common",
+    },
+    body: JSON.stringify({
+      Query: clampQueryChars(query, 100),
+      SearchType: "web",
+      Count: maxResults,
+      NeedSummary: true,
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) {
+    throw new Error(`doubao search http ${response.status}`);
+  }
+  const json = (await response.json()) as {
+    ResponseMetadata?: {
+      Error?: { Code?: string; CodeN?: number; Message?: string } | null;
+    };
+    Result?: {
+      WebResults?: Array<{
+        Title?: string;
+        Url?: string;
+        Snippet?: string;
+        Summary?: string;
+        PublishTime?: string;
+      }>;
+    } | null;
+  };
+  const providerError = json.ResponseMetadata?.Error;
+  if (providerError || !json.Result) {
+    const detail = providerError?.Code ?? providerError?.CodeN ?? "empty result";
+    throw new Error(`doubao search error ${detail}`);
+  }
+  return (json.Result.WebResults ?? [])
+    .slice(0, maxResults)
+    .map((item) => ({
+      title: String(item.Title ?? "").trim() || item.Url || "Untitled",
+      url: String(item.Url ?? "").trim(),
+      snippet: truncateSnippet(String(item.Summary ?? item.Snippet ?? "")),
+      publishedAt: String(item.PublishTime ?? "").trim() || undefined,
+    }))
+    .filter((hit) => hit.url);
+}
+
 export function formatHits(hits: WebSearchHit[]): string {
   if (hits.length === 0) return "No search results found.";
   return hits
     .map((hit, index) => {
       const date = hit.publishedAt ? `\n发布时间: ${hit.publishedAt}` : "";
-      return `[${index + 1}] ${hit.title}\nURL: ${hit.url}${date}\n${hit.snippet}`;
+      const facet = hit.searchQuery ? `\n检索子问题: ${hit.searchQuery}` : "";
+      return `[${index + 1}] ${hit.title}${facet}\nURL: ${hit.url}${date}\n${hit.snippet}`;
     })
     .join("\n\n");
 }
@@ -282,34 +554,99 @@ export function formatHits(hits: WebSearchHit[]): string {
 export async function executeWebSearch(
   query: string,
   maxResults: number | undefined,
-  cfg: Pick<WebSearchRuntimeConfig, "provider" | "apiKey" | "maxResults">,
+  cfg: Pick<
+    WebSearchRuntimeConfig,
+    "provider" | "apiKey" | "maxResults" | "primaryProviderId" | "providers"
+  >,
   fetchImpl: FetchLike = directFetch as FetchLike,
+  diagnostics?: WebSearchExecutionDiagnostics,
 ): Promise<WebSearchHit[]> {
   const q = query.trim();
   if (!q) return [];
   const n = clampMaxResults(maxResults ?? cfg.maxResults ?? DEFAULT_MAX_RESULTS);
-  const provider = cfg.provider || "duckduckgo";
-  const freshness = resolveFreshness(q);
+  const providers = configuredWebSearchProviders(cfg).slice(0, MAX_CONFIGURED_WEB_SEARCH_PROVIDERS);
+  if (providers.length === 0) throw new Error("no configured web search provider");
 
-  try {
-    if (provider === "bocha") {
-      if (!cfg.apiKey.trim()) throw new Error("bocha api key missing");
-      const hits = await searchBocha(q, n, cfg.apiKey, fetchImpl, freshness);
-      if (hits.length > 0) return hits;
-    } else if (provider === "tavily") {
-      if (!cfg.apiKey.trim()) throw new Error("tavily api key missing");
-      const hits = await searchTavily(q, n, cfg.apiKey, fetchImpl);
-      if (hits.length > 0) return hits;
-    } else {
-      return await searchDuckDuckGo(q, n, fetchImpl);
+  let lastError: unknown = new Error("search returned no hits");
+  for (const provider of providers) {
+    const attemptStartedAt = Date.now();
+    const observe = (outcome: WebSearchProviderAttempt["outcome"], hitCount: number) => {
+      try {
+        diagnostics?.onProviderAttempt?.({
+          providerId: provider.id,
+          outcome,
+          hitCount,
+          durationMs: Math.max(0, Date.now() - attemptStartedAt),
+        });
+      } catch {
+        // Diagnostics must never alter provider failover or the user response.
+      }
+    };
+    const adapterId = provider.adapter.trim().toLowerCase();
+    const adapter = ADAPTERS.get(adapterId);
+    if (!adapter) {
+      lastError = new Error(`web search adapter is not registered: ${adapterId}`);
+      observe("failed", 0);
+      continue;
     }
-  } catch (error) {
-    if (provider === "duckduckgo") throw error;
-    console.warn(
-      `[web-search] provider=${provider} failed, falling back to duckduckgo:`,
-      error instanceof Error ? error.message : String(error),
-    );
+    if (adapter.requiresApiKey && !provider.apiKey.trim()) {
+      lastError = new Error(`web search provider is missing credentials: ${provider.id}`);
+      observe("failed", 0);
+      continue;
+    }
+    try {
+      const hits = sanitizeProviderHits(await adapter.search({
+        query: q,
+        maxResults: n,
+        apiKey: provider.apiKey,
+        options: provider.options ?? {},
+        fetchImpl,
+      }));
+      observe(hits.length > 0 ? "ok" : "empty", hits.length);
+      if (hits.length > 0) return hits;
+      lastError = new Error(`web search provider returned no hits: ${provider.id}`);
+    } catch (error) {
+      observe("failed", 0);
+      lastError = error;
+    }
   }
-
-  return searchDuckDuckGo(q, n, fetchImpl);
+  throw lastError;
 }
+
+registerWebSearchAdapter({
+  id: "duckduckgo",
+  displayName: "DuckDuckGo",
+  requiresApiKey: false,
+  search: ({ query, maxResults, fetchImpl }) =>
+    searchDuckDuckGo(query, maxResults, fetchImpl),
+});
+
+registerWebSearchAdapter({
+  id: "bocha",
+  displayName: "Bocha",
+  requiresApiKey: true,
+  supportsCustomEndpoint: true,
+  defaultEndpoint: BOCHA_ENDPOINT,
+  search: ({ query, maxResults, apiKey, options, fetchImpl }) =>
+    searchBocha(query, maxResults, apiKey, fetchImpl, options, resolveFreshness(query)),
+});
+
+registerWebSearchAdapter({
+  id: "tavily",
+  displayName: "Tavily",
+  requiresApiKey: true,
+  supportsCustomEndpoint: true,
+  defaultEndpoint: TAVILY_ENDPOINT,
+  search: ({ query, maxResults, apiKey, options, fetchImpl }) =>
+    searchTavily(query, maxResults, apiKey, fetchImpl, options),
+});
+
+registerWebSearchAdapter({
+  id: "doubao",
+  displayName: "豆包搜索",
+  requiresApiKey: true,
+  supportsCustomEndpoint: true,
+  defaultEndpoint: DOUBAO_CUSTOM_ENDPOINT,
+  search: ({ query, maxResults, apiKey, options, fetchImpl }) =>
+    searchDoubaoCustom(query, maxResults, apiKey, fetchImpl, options),
+});

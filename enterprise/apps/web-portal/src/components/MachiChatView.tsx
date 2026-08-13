@@ -20,6 +20,7 @@ import {
   withClipboardImageNames,
   modelSupportsVision,
   consumeDeepResearchReconnectStream,
+  shouldShowHistorySyncAlert,
   type ActiveDeepResearchRun,
 } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
@@ -96,7 +97,7 @@ function formatActiveModelFallback(modelId: string): string {
 type MachiChatViewProps = {
   client: ChatClient;
   deepResearchMode?: DeepResearchMode;
-  onDeepResearchModeChange?: (next: DeepResearchMode) => void;
+  onDeepResearchModeChange?: (next: DeepResearchMode, sessionId?: string) => void;
 };
 
 function isComplianceError(message: string): boolean {
@@ -650,6 +651,7 @@ export function MachiChatView({
       const trimmed = draft.trim();
       const messageAttachments = toMessageAttachments();
       if (!trimmed && messageAttachments.length === 0) return;
+      const manuallyActivatedDeepResearch = deepResearchMode === "manual";
       void sendMessage(
         client,
         {
@@ -659,11 +661,19 @@ export function MachiChatView({
           deepResearch: deepResearchMode === "manual",
           deepResearchAuto: deepResearchMode === "auto",
         },
-        opts?.forceSend ? { forceSend: true } : undefined,
+        {
+          ...(opts?.forceSend ? { forceSend: true } : {}),
+          onAccepted: (acceptedSessionId) => {
+            if (useChatStore.getState().activeSessionId === acceptedSessionId) {
+              setDraft("");
+              clearAttachments();
+            }
+            if (manuallyActivatedDeepResearch) {
+              onDeepResearchModeChange?.("auto", acceptedSessionId);
+            }
+          },
+        },
       );
-      setDraft("");
-      clearAttachments();
-      if (deepResearchMode === "manual") onDeepResearchModeChange?.("auto");
     },
     [
       clearAttachments,
@@ -685,12 +695,7 @@ export function MachiChatView({
   const activeHistorySync = activeSessionId
     ? historySyncBySessionId[activeSessionId]
     : undefined;
-  const showSessionHistorySync =
-    !!activeHistorySync &&
-    activeHistorySync.state !== "idle" &&
-    (activeHistorySync.pendingCount > 0 ||
-      activeHistorySync.state === "dead_letter" ||
-      activeHistorySync.state === "paused");
+  const showSessionHistorySync = shouldShowHistorySyncAlert(activeHistorySync);
 
   const composer = (
     <div className={cn("mx-auto w-full space-y-3", isEmpty ? "max-w-[46rem]" : "max-w-4xl")}>
@@ -1035,6 +1040,7 @@ export function MachiChatView({
                   styleVariant="im"
                   assistantFrameless
                   scrollToBottomLabel={t("scrollToBottom")}
+                  webSearchGeneratingLabel={t("webSearchGenerating")}
                   responseVersionMetaByUserMessageId={responseVersionMetaByUserMessageId}
                   retryVersionMetaByUserMessageId={retryVersionMetaByUserMessageId}
                   onShowPreviousResponseVersion={showPreviousResponseVersion}
@@ -1049,11 +1055,21 @@ export function MachiChatView({
                     console.log("Copied:", content);
                   }}
                   onRetry={(messageId) => {
-                    void regenerateAssistantResponse(client, messageId);
+                    void regenerateAssistantResponse(client, messageId, {
+                      webSearch: webSearchMode === "auto",
+                      deepResearch: deepResearchMode === "manual",
+                      deepResearchAuto: deepResearchMode === "auto",
+                    });
                   }}
                   onUserEditResend={(messageId, content) => {
                     if (!content.trim()) return;
-                    void editUserMessageAndResend(client, { messageId, content });
+                    void editUserMessageAndResend(client, {
+                      messageId,
+                      content,
+                      webSearch: webSearchMode === "auto",
+                      deepResearch: deepResearchMode === "manual",
+                      deepResearchAuto: deepResearchMode === "auto",
+                    });
                   }}
                   onShare={(messageId) => {
                     openShareDialog(messageId);

@@ -2,8 +2,16 @@
  * Resolve tenant web-search runtime config: PG → env → defaults.
  */
 
-import type { WebSearchProviderName, WebSearchRuntimeConfig } from "./providers";
+import type {
+  WebSearchProviderConfig,
+  WebSearchProviderName,
+  WebSearchRuntimeConfig,
+} from "./providers";
 import { DEFAULT_MAX_RESULTS } from "./providers";
+import {
+  DEFAULT_MAX_SEARCH_CALLS,
+  normalizeMaxSearchCalls,
+} from "./search-call-budget";
 import {
   DEFAULT_BACKEND_CHAIN,
   type PageFetchBackendName,
@@ -14,7 +22,12 @@ export type TenantWebSearchRow = {
   provider: string;
   apiKey: string;
   maxResults: number;
-  /** Opt-in deep research (default false). */
+  /** Shared ordinary-search provider-call cap; absent legacy rows use 3. */
+  maxSearchCalls?: number;
+  /** Ordered, decrypted provider instances; absent rows retain legacy single-provider behavior. */
+  providers?: WebSearchProviderConfig[];
+  primaryProviderId?: string;
+  /** Tenant deep-research switch; missing legacy config currently defaults to enabled. */
   deepResearchEnabled?: boolean;
   /** 逗号分隔的后端链，如 "native,jina"。 */
   pageFetchBackends?: string;
@@ -31,8 +44,52 @@ export type PageFetchRuntimeConfig = {
 
 function normalizeProvider(raw: string | undefined): WebSearchProviderName {
   const value = (raw ?? "duckduckgo").trim().toLowerCase();
-  if (value === "bocha" || value === "tavily" || value === "duckduckgo") return value;
-  return "duckduckgo";
+  return value || "duckduckgo";
+}
+
+function normalizeProviderPool(raw: unknown): WebSearchProviderConfig[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const providers: WebSearchProviderConfig[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const adapter =
+      typeof row.adapter === "string" ? normalizeProvider(row.adapter) : "";
+    if (!id || !adapter || seen.has(id)) continue;
+    seen.add(id);
+    providers.push({
+      id,
+      adapter,
+      displayName:
+        typeof row.displayName === "string" && row.displayName.trim()
+          ? row.displayName.trim()
+          : id,
+      apiKey: typeof row.apiKey === "string" ? row.apiKey : "",
+      enabled: row.enabled !== false,
+      priority:
+        typeof row.priority === "number" && Number.isFinite(row.priority)
+          ? row.priority
+          : providers.length,
+      options:
+        row.options && typeof row.options === "object" && !Array.isArray(row.options)
+          ? (row.options as Record<string, unknown>)
+          : undefined,
+    });
+  }
+  return providers.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+}
+
+function envProviderPool(): WebSearchProviderConfig[] {
+  const raw = process.env.WEB_SEARCH_PROVIDERS_JSON?.trim();
+  if (!raw) return [];
+  try {
+    return normalizeProviderPool(JSON.parse(raw));
+  } catch {
+    console.warn("[web-search] WEB_SEARCH_PROVIDERS_JSON is invalid; using legacy config");
+    return [];
+  }
 }
 
 function isBackendName(raw: string): raw is PageFetchBackendName {
@@ -58,23 +115,32 @@ function parseArchiveFlag(raw: string | undefined, tenantFlag?: boolean): boolea
 
 export function resolveWebSearchConfig(tenant: TenantWebSearchRow): WebSearchRuntimeConfig {
   if (tenant) {
+    const providers = normalizeProviderPool(tenant.providers);
     return {
       enabled: Boolean(tenant.enabled),
       provider: normalizeProvider(tenant.provider),
       apiKey: tenant.apiKey ?? "",
       maxResults: Number.isFinite(tenant.maxResults) ? tenant.maxResults : DEFAULT_MAX_RESULTS,
+      maxSearchCalls: normalizeMaxSearchCalls(tenant.maxSearchCalls),
+      primaryProviderId: tenant.primaryProviderId?.trim() || providers[0]?.id,
+      providers,
     };
   }
 
   const envProvider = process.env.WEB_SEARCH_PROVIDER;
   const envKey = process.env.WEB_SEARCH_API_KEY ?? "";
   const envMax = Number(process.env.WEB_SEARCH_MAX_RESULTS ?? DEFAULT_MAX_RESULTS);
+  const providers = envProviderPool();
 
   return {
     enabled: true,
-    provider: normalizeProvider(envProvider),
-    apiKey: envKey,
+    provider: providers[0]?.adapter ?? normalizeProvider(envProvider),
+    apiKey: providers[0]?.apiKey ?? envKey,
     maxResults: Number.isFinite(envMax) ? envMax : DEFAULT_MAX_RESULTS,
+    maxSearchCalls: DEFAULT_MAX_SEARCH_CALLS,
+    primaryProviderId:
+      process.env.WEB_SEARCH_PRIMARY_PROVIDER_ID?.trim() || providers[0]?.id,
+    providers,
   };
 }
 

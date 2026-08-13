@@ -75,7 +75,7 @@ describe("chat history append persistence", () => {
     });
   });
 
-  it("serializes direct history appends for consecutive completed turns in one session", async () => {
+  it("serializes user-first and assistant-final appends across consecutive turns", async () => {
     let releaseFirstAppend: (() => void) | undefined;
     appendMessages
       .mockImplementationOnce(
@@ -103,6 +103,11 @@ describe("chat history append persistence", () => {
     await firstTurn;
     await secondTurn;
 
-    expect(appendMessages).toHaveBeenCalledTimes(2);
+    expect(appendMessages).toHaveBeenCalledTimes(4);
+    expect(
+      appendMessages.mock.calls.map((call) =>
+        (call[1] as Array<{ role: string; content: string }>).map((message) => message.role),
+      ),
+    ).toEqual([["user"], ["assistant"], ["user"], ["assistant"]]);
   });
 });

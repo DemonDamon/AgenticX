@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WebSearchHit } from "../providers";
-import { rerankHits, tokenize } from "../rerank";
+import { rankTextPassages, rerankHits, tokenize } from "../rerank";
 
 function hit(title: string, url: string, snippet = ""): WebSearchHit {
   return { title, url, snippet };
@@ -12,6 +12,18 @@ describe("tokenize", () => {
     expect(tokenize("Hello World")).toEqual(["hello", "world"]);
     expect(tokenize("广州 Nansha 天气")).toContain("广州");
     expect(tokenize("广州 Nansha 天气")).toContain("nansha");
+  });
+
+  it("expands compact letter-number identifiers without a domain keyword list", () => {
+    expect(tokenize("Figure11")).toEqual(["figure11", "figure", "11"]);
+    expect(tokenize("abc123def")).toEqual(["abc123def", "abc", "123", "def"]);
+    expect(tokenize("2026")).toEqual(["2026"]);
+  });
+
+  it("adds the same compact alias to a spaced identifier", () => {
+    expect(tokenize("Figure 11")).toEqual(["figure", "figure11", "11"]);
+    expect(tokenize("RFC-9110")).toEqual(["rfc", "rfc9110", "9110"]);
+    expect(tokenize("Figure\n11")).not.toContain("figure11");
   });
 });
 
@@ -64,5 +76,30 @@ describe("rerankHits", () => {
       "https://b.com",
       "https://c.com",
     ]);
+  });
+});
+
+describe("rankTextPassages", () => {
+  it("uses the same lexical scorer for arbitrary document passages", () => {
+    const ranked = rankTextPassages("Table 8 Pass Rate", [
+      "Introduction and motivation",
+      "Table 8 R&D coding benchmark",
+      "Pass Rate 80 percent",
+    ]);
+    expect(ranked.slice(0, 2).map((row) => row.text)).toEqual(
+      expect.arrayContaining([
+        "Table 8 R&D coding benchmark",
+        "Pass Rate 80 percent",
+      ]),
+    );
+  });
+
+  it("matches a compact identifier against a spaced document label", () => {
+    const ranked = rankTextPassages("figure11", [
+      "11 11 11 unrelated numeric results",
+      "Figure 11: Win-rate comparison across analysis and editing tasks.",
+    ]);
+    expect(ranked[0]?.text).toContain("Figure 11: Win-rate comparison");
+    expect(ranked[0]?.score).toBeGreaterThan(ranked[1]?.score ?? 0);
   });
 });

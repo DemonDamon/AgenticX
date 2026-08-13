@@ -113,6 +113,120 @@ type ThinkSplit = {
   inProgress: boolean;
 };
 
+type ThinkMarker = {
+  index: number;
+  kind: "open" | "close";
+  length: number;
+};
+
+function repeatedCharLength(raw: string, index: number, char: string): number {
+  let end = index;
+  while (raw[end] === char) end += 1;
+  return end - index;
+}
+
+function isEscaped(raw: string, index: number): boolean {
+  let slashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && raw[cursor] === "\\"; cursor -= 1) {
+    slashCount += 1;
+  }
+  return slashCount % 2 === 1;
+}
+
+function isFencePosition(raw: string, lineStart: number, index: number): boolean {
+  if (index - lineStart > 3) return false;
+  for (let cursor = lineStart; cursor < index; cursor += 1) {
+    if (raw[cursor] !== " ") return false;
+  }
+  return true;
+}
+
+/**
+ * Locate provider reasoning markers without treating Markdown code samples as
+ * protocol. This stays deliberately lexical: a single pass tracks CommonMark
+ * backtick spans and fenced code blocks, so literal `<think>` examples remain
+ * visible without needing a catalog of surrounding words or document types.
+ */
+function collectThinkMarkers(raw: string): ThinkMarker[] {
+  const markers: ThinkMarker[] = [];
+  let cursor = 0;
+  let lineStart = 0;
+  let inlineBacktickLength = 0;
+  let fenceChar: "`" | "~" | null = null;
+  let fenceLength = 0;
+
+  while (cursor < raw.length) {
+    const char = raw[cursor];
+    if (char === "\n") {
+      lineStart = cursor + 1;
+      cursor += 1;
+      continue;
+    }
+
+    if (fenceChar) {
+      if (
+        char === fenceChar &&
+        isFencePosition(raw, lineStart, cursor) &&
+        !isEscaped(raw, cursor)
+      ) {
+        const runLength = repeatedCharLength(raw, cursor, fenceChar);
+        if (runLength >= fenceLength) {
+          fenceChar = null;
+          fenceLength = 0;
+        }
+        cursor += runLength;
+        continue;
+      }
+      cursor += 1;
+      continue;
+    }
+
+    if (inlineBacktickLength > 0) {
+      if (char === "`" && !isEscaped(raw, cursor)) {
+        const runLength = repeatedCharLength(raw, cursor, "`");
+        if (runLength === inlineBacktickLength) inlineBacktickLength = 0;
+        cursor += runLength;
+        continue;
+      }
+      cursor += 1;
+      continue;
+    }
+
+    if ((char === "`" || char === "~") && !isEscaped(raw, cursor)) {
+      const runLength = repeatedCharLength(raw, cursor, char);
+      if (runLength >= 3 && isFencePosition(raw, lineStart, cursor)) {
+        fenceChar = char;
+        fenceLength = runLength;
+        cursor += runLength;
+        continue;
+      }
+      if (char === "`") {
+        inlineBacktickLength = runLength;
+        cursor += runLength;
+        continue;
+      }
+    }
+
+    if (!isEscaped(raw, cursor)) {
+      const candidate = raw.slice(cursor, cursor + REDACTED_CLOSE.length).toLowerCase();
+      if (candidate.startsWith(REDACTED_OPEN)) {
+        markers.push({ index: cursor, kind: "open", length: REDACTED_OPEN.length });
+        cursor += REDACTED_OPEN.length;
+        continue;
+      }
+      if (candidate === REDACTED_CLOSE) {
+        markers.push({ index: cursor, kind: "close", length: REDACTED_CLOSE.length });
+        cursor += REDACTED_CLOSE.length;
+        continue;
+      }
+    }
+
+    cursor += 1;
+  }
+
+  return markers;
+}
+
 function joinReasoningParts(parts: string[]): string {
   let output = "";
   for (const part of parts) {
@@ -135,46 +249,52 @@ function joinReasoningParts(parts: string[]): string {
  * orphan close belongs to reasoning; only text after the final close is visible.
  */
 function splitThinkContent(raw: string): ThinkSplit {
-  const lower = raw.toLowerCase();
+  const markers = collectThinkMarkers(raw);
   const displayParts: string[] = [];
   const reasoningParts: string[] = [];
   let cursor = 0;
+  let markerCursor = 0;
   let started = false;
   let inProgress = false;
 
-  while (cursor < raw.length) {
-    const openIdx = lower.indexOf(REDACTED_OPEN, cursor);
-    const closeIdx = lower.indexOf(REDACTED_CLOSE, cursor);
+  while (cursor < raw.length && markerCursor < markers.length) {
+    const marker = markers[markerCursor];
+    if (!marker) break;
 
-    if (openIdx >= 0 && (closeIdx < 0 || openIdx < closeIdx)) {
-      displayParts.push(raw.slice(cursor, openIdx));
+    if (marker.kind === "open") {
+      displayParts.push(raw.slice(cursor, marker.index));
       started = true;
-      const reasoningStart = openIdx + REDACTED_OPEN.length;
-      const matchingClose = lower.indexOf(REDACTED_CLOSE, reasoningStart);
-      if (matchingClose < 0) {
+      const reasoningStart = marker.index + marker.length;
+      let matchingCloseCursor = markerCursor + 1;
+      while (
+        matchingCloseCursor < markers.length &&
+        markers[matchingCloseCursor]?.kind !== "close"
+      ) {
+        matchingCloseCursor += 1;
+      }
+      const matchingClose = markers[matchingCloseCursor];
+      if (!matchingClose) {
         reasoningParts.push(raw.slice(reasoningStart));
         inProgress = true;
         cursor = raw.length;
         break;
       }
-      reasoningParts.push(raw.slice(reasoningStart, matchingClose));
-      cursor = matchingClose + REDACTED_CLOSE.length;
+      reasoningParts.push(raw.slice(reasoningStart, matchingClose.index));
+      cursor = matchingClose.index + matchingClose.length;
+      markerCursor = matchingCloseCursor + 1;
       continue;
     }
 
-    if (closeIdx >= 0) {
-      // A close tag without a matching open is still an explicit reasoning
-      // boundary. Treat the preceding fragment as reasoning instead of leaking
-      // both the fragment and raw XML marker into the answer body.
-      reasoningParts.push(raw.slice(cursor, closeIdx));
-      started = true;
-      cursor = closeIdx + REDACTED_CLOSE.length;
-      continue;
-    }
-
-    displayParts.push(raw.slice(cursor));
-    break;
+    // A close tag without a matching open is still an explicit reasoning
+    // boundary. Treat the preceding fragment as reasoning instead of leaking
+    // both the fragment and raw XML marker into the answer body.
+    reasoningParts.push(raw.slice(cursor, marker.index));
+    started = true;
+    cursor = marker.index + marker.length;
+    markerCursor += 1;
   }
+
+  if (cursor < raw.length) displayParts.push(raw.slice(cursor));
 
   return {
     display: displayParts.join(""),

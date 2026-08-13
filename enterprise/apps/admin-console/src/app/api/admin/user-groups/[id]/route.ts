@@ -19,10 +19,18 @@ function modelIdsFrom(value: unknown): string[] | undefined {
   return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string" && id.trim().length > 0) : [];
 }
 
-async function resolveKnownMembers(tenantId: string, memberIds: string[]): Promise<UserGroupPolicyMember[]> {
+async function resolveExistingMembers(
+  tenantId: string,
+  memberIds: string[],
+): Promise<{ members: UserGroupPolicyMember[]; missingMemberIds: string[] }> {
   const rows = await Promise.all(memberIds.map((id) => getAdminUser(tenantId, id)));
-  if (rows.some((row) => !row)) throw new Error("one or more members do not exist");
-  return rows.map((row) => ({ id: row!.id }));
+  const members: UserGroupPolicyMember[] = [];
+  const missingMemberIds: string[] = [];
+  rows.forEach((row, index) => {
+    if (row) members.push({ id: row.id });
+    else missingMemberIds.push(memberIds[index]!);
+  });
+  return { members, missingMemberIds };
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -31,7 +39,17 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
   const group = await getUserGroup(id);
   if (!group) return NextResponse.json({ code: "40400", message: "not found" }, { status: 404 });
-  return NextResponse.json({ code: "00000", message: "ok", data: { group } });
+  const resolved = await resolveExistingMembers(auth.session.tenantId, group.memberIds);
+  return NextResponse.json({
+    code: "00000",
+    message: "ok",
+    data: {
+      group: {
+        ...group,
+        memberIds: resolved.members.map((member) => member.id),
+      },
+    },
+  });
 }
 
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -42,17 +60,29 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     const body = (await request.json()) as Record<string, unknown>;
     const memberIds = memberIdsFrom(body.memberIds);
     const modelIds = modelIdsFrom(body.modelIds);
-    if (memberIds) await resolveKnownMembers(auth.session.tenantId, memberIds);
+    const current = await getUserGroup(id);
+    if (!current) throw new Error("user group not found");
+    const resolved = await resolveExistingMembers(
+      auth.session.tenantId,
+      memberIds ?? current.memberIds,
+    );
+    const existingMemberIds = resolved.members.map((member) => member.id);
     const group = await updateUserGroup(id, {
       ...(typeof body.name === "string" ? { name: body.name } : {}),
       ...(typeof body.description === "string" || body.description === null ? { description: body.description as string | null } : {}),
-      ...(memberIds !== undefined ? { memberIds } : {}),
+      memberIds: existingMemberIds,
       ...(body.monthlyTokens !== undefined ? { monthlyTokens: Number(body.monthlyTokens) } : {}),
       ...(modelIds !== undefined ? { modelIds } : {}),
     });
-    const members = await resolveKnownMembers(auth.session.tenantId, group.memberIds);
-    await applyUserGroupPolicy(group, members);
-    return NextResponse.json({ code: "00000", message: "ok", data: { group } });
+    await applyUserGroupPolicy(group, resolved.members);
+    return NextResponse.json({
+      code: "00000",
+      message: "ok",
+      data: {
+        group,
+        removedMissingMembers: resolved.missingMemberIds.length,
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid request";
     const status = message === "user group not found" ? 404 : 400;

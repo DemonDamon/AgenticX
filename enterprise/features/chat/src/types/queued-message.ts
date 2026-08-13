@@ -5,5 +5,9 @@ export type QueuedMessage = {
   sessionId: string;
   content: string;
   attachments?: ChatMessageAttachment[];
+  /** Snapshot composer modes per message; session defaults may change while queued. */
+  webSearch?: boolean;
+  deepResearch?: boolean;
+  deepResearchAuto?: boolean;
   timestamp: number;
 };

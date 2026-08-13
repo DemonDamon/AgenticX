@@ -66,6 +66,10 @@ type SendMessageInput = {
 type SendMessageOptions = {
   /** Interrupt current stream and send immediately (queue send-now / double Enter). */
   forceSend?: boolean;
+  /** Dispatch to this session even when another conversation is currently active. */
+  targetSessionId?: string;
+  /** Fires once accepted, carrying the actual session id after draft promotion. */
+  onAccepted?: (sessionId: string) => void;
 };
 
 type EditUserMessageInput = {
@@ -73,6 +77,15 @@ type EditUserMessageInput = {
   content: string;
   tenantId?: string;
   userId?: string;
+  webSearch?: boolean;
+  deepResearch?: boolean;
+  deepResearchAuto?: boolean;
+};
+
+type RetryRequestMode = {
+  webSearch?: boolean;
+  deepResearch?: boolean;
+  deepResearchAuto?: boolean;
 };
 
 export type SessionTokenUsage = {
@@ -93,6 +106,7 @@ export type AssistantResponseVersion = {
   retryAttempt: number;
   queryText: string;
   web_search_sources?: ChatMessage["web_search_sources"];
+  web_search_trace?: ChatMessage["web_search_trace"];
   deep_research?: ChatMessage["deep_research"];
 };
 
@@ -134,6 +148,8 @@ export type ChatStoreState = {
   lastWebSearchBySessionId: Record<string, boolean>;
   /** Last composer deep-research toggle per session (retry / regenerate / queue). */
   lastDeepResearchBySessionId: Record<string, boolean>;
+  /** Last automatic deep-research toggle per session (retry / regenerate / queue). */
+  lastDeepResearchAutoBySessionId: Record<string, boolean>;
 };
 
 const EMPTY_USAGE: SessionTokenUsage = {
@@ -160,7 +176,11 @@ export type ChatStoreActions = {
   removePendingMessage(messageId: string): void;
   editPendingMessage(messageId: string, content: string): void;
   editUserMessageAndResend(client: ChatClient, input: EditUserMessageInput): Promise<void>;
-  regenerateAssistantResponse(client: ChatClient, assistantMessageId: string): Promise<void>;
+  regenerateAssistantResponse(
+    client: ChatClient,
+    assistantMessageId: string,
+    mode?: RetryRequestMode,
+  ): Promise<void>;
   showPreviousResponseVersion(userMessageId: string): void;
   showNextResponseVersion(userMessageId: string): void;
   showPreviousRetryVersion(userMessageId: string): void;
@@ -356,6 +376,7 @@ function toAssistantVersion(
     retryAttempt: meta?.retryAttempt ?? 0,
     queryText: meta?.queryText ?? "",
     web_search_sources: message.web_search_sources,
+    web_search_trace: message.web_search_trace,
     deep_research: message.deep_research,
   };
 }
@@ -467,6 +488,43 @@ function preserveStreamedWebSearchSources(
 ): ChatMessage {
   if (message.id !== assistantId || !sources?.length) return message;
   return { ...message, web_search_sources: sources };
+}
+
+function applyWebSearchTraceToAssistant(
+  set: ChatStoreSet,
+  assistantId: string,
+  userMessageId: string | undefined,
+  trace: NonNullable<ChatMessage["web_search_trace"]>,
+) {
+  set((prev) => {
+    const nextMessages = prev.messages.map((message) =>
+      message.id === assistantId ? { ...message, web_search_trace: trace } : message,
+    );
+    if (!userMessageId) return { messages: nextMessages };
+    const current = prev.responseVersionsByUserMessageId[userMessageId];
+    if (!current) return { messages: nextMessages };
+    return {
+      messages: nextMessages,
+      responseVersionsByUserMessageId: {
+        ...prev.responseVersionsByUserMessageId,
+        [userMessageId]: {
+          ...current,
+          versions: current.versions.map((version, index) =>
+            index === current.activeIndex ? { ...version, web_search_trace: trace } : version,
+          ),
+        },
+      },
+    };
+  });
+}
+
+function preserveStreamedWebSearchTrace(
+  message: ChatMessage,
+  assistantId: string,
+  trace: ChatMessage["web_search_trace"],
+): ChatMessage {
+  if (message.id !== assistantId || !trace) return message;
+  return { ...message, web_search_trace: trace };
 }
 
 function findVersionIndexByAssistantId(versions: AssistantResponseVersion[], assistantId: string): number {
@@ -596,6 +654,40 @@ async function persistAppendMessagesNow(
     }
     void flushHistoryOutbox();
   }
+}
+
+/**
+ * Durably stage the user half of a turn before opening the long-running model
+ * stream. The outbox write is local/fast and survives refresh; its coordinator
+ * flushes to the portal without adding a history round-trip to TTFT. Tests and
+ * non-portal consumers that have no outbox coordinator retain the direct append
+ * path, chained ahead of the eventual assistant append.
+ */
+async function persistUserMessageBeforeStream(
+  set: (partial: Partial<ChatStoreState> | ((state: ChatStoreState) => Partial<ChatStoreState>)) => void,
+  sessionId: string,
+  message: ChatMessage,
+): Promise<void> {
+  try {
+    const queued = await enqueueAppend(sessionId, [message]);
+    if (queued.enqueued) {
+      void flushHistoryOutbox();
+      return;
+    }
+  } catch {
+    // IndexedDB can be unavailable in private/restricted browser contexts.
+    // Fall through to the existing server-first persistence path.
+  }
+  void persistAppendMessages(set, sessionId, [message]);
+}
+
+function assistantHasPersistableTurnState(message: ChatMessage): boolean {
+  return Boolean(
+    message.content.trim() ||
+      message.reasoning?.trim() ||
+      message.deep_research ||
+      message.web_search_sources?.length,
+  );
 }
 
 function resolveHistoryErrorMessage(error: unknown, fallback: string): string {
@@ -751,6 +843,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   streamStateBySessionId: {},
   lastWebSearchBySessionId: {},
   lastDeepResearchBySessionId: {},
+  lastDeepResearchAutoBySessionId: {},
 
   setHistoryPrincipal(principal) {
     set({ historyPrincipal: principal });
@@ -765,7 +858,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   async refetchSessionMessages(sessionId) {
-    if (!get().hydrated || isDraftSessionId(get(), sessionId)) return;
+    if (
+      !get().hydrated ||
+      isDraftSessionId(get(), sessionId) ||
+      isSessionStreaming(get(), sessionId)
+    ) {
+      return;
+    }
     try {
       const remoteMessages = await portalHistory.getMessages(sessionId);
       const overlay = await listPendingOverlayMessages(sessionId);
@@ -821,10 +920,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       {
         content: item.content,
         attachments: item.attachments,
-        webSearch: get().lastWebSearchBySessionId[item.sessionId],
-        deepResearch: get().lastDeepResearchBySessionId[item.sessionId],
+        webSearch: item.webSearch,
+        deepResearch: item.deepResearch,
+        deepResearchAuto: item.deepResearchAuto,
       },
-      { forceSend: true }
+      { forceSend: true, targetSessionId: item.sessionId }
     );
   },
 
@@ -1149,8 +1249,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   async sendMessage(client, input, options) {
     const state = get();
-    let sessionId = state.activeSessionId;
+    let sessionId = options?.targetSessionId?.trim() || state.activeSessionId;
     if (!sessionId) return;
+    if (
+      options?.targetSessionId &&
+      !isDraftSessionId(state, sessionId) &&
+      !state.sessions.some((session) => session.id === sessionId)
+    ) {
+      return;
+    }
+    let requestModel =
+      state.sessions.find((session) => session.id === sessionId)?.active_model ??
+      state.activeModel;
 
     const content = input.content.trim();
     const attachments =
@@ -1172,15 +1282,20 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             sessionId: enqueueSessionId,
             content: content || "（附件）",
             attachments: attachments.length > 0 ? attachments : undefined,
+            webSearch: Boolean(input.webSearch),
+            deepResearch: Boolean(input.deepResearch),
+            deepResearchAuto: Boolean(input.deepResearchAuto),
             timestamp: Date.now(),
           },
         ],
       }));
+      options?.onAccepted?.(enqueueSessionId);
       return;
     }
 
     if (options?.forceSend && isSessionStreaming(get(), sessionId)) {
-      await get().cancel(client);
+      const requestId = getSessionRequestId(get(), sessionId);
+      if (requestId) await client.cancel(requestId);
     }
 
     let queueSessionId = sessionId;
@@ -1189,9 +1304,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           try {
             const created = await portalHistory.createSession({
               title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
-              activeModel: state.activeModel,
+              activeModel: requestModel,
             });
             sessionId = created.id;
+            requestModel = created.active_model ?? requestModel;
             set((prev) => {
               const draftId = prev.draftSessionId;
               const draftTokens = draftId ? (prev.sessionTokensBySessionId[draftId] ?? { ...EMPTY_USAGE }) : { ...EMPTY_USAGE };
@@ -1200,7 +1316,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               nextTokensMap[created.id] = draftTokens;
               return {
                 draftSessionId: null,
-                activeSessionId: created.id,
+                activeSessionId:
+                  prev.activeSessionId === draftId ? created.id : prev.activeSessionId,
                 sessions: [...prev.sessions, created],
                 sessionTokensBySessionId: nextTokensMap,
               };
@@ -1219,7 +1336,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             tenant_id: input.tenantId ?? DEFAULT_TENANT,
             user_id: input.userId ?? DEFAULT_USER,
             title: buildAutoTitleFromFirstUserMessage(content) || "New chat",
-            active_model: state.activeModel,
+            active_model: requestModel,
             message_count: 0,
             created_at: now(),
             updated_at: now(),
@@ -1257,7 +1374,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       user_id: userId,
       role: "assistant",
       content: "",
-      model: latest.activeModel,
+      model: requestModel,
       created_at: createdAtPair.assistant,
       ...(deepResearchEnabled
         ? {
@@ -1286,6 +1403,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         ...prev.lastDeepResearchBySessionId,
         [sessionId]: deepResearchEnabled,
       },
+      lastDeepResearchAutoBySessionId: {
+        ...prev.lastDeepResearchAutoBySessionId,
+        [sessionId]: deepResearchAuto,
+      },
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
         [userMessage.id]: {
@@ -1309,13 +1430,22 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         };
       }),
     }));
+    options?.onAccepted?.(sessionId);
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
+    // A browser refresh may destroy the streaming JS context before the final
+    // history POST. Stage the user's message first so the conversation never
+    // degrades into an empty persisted session.
+    if (get().hydrated) {
+      await persistUserMessageBeforeStream(set, sessionId, userMessage);
+    }
+
+    let streamedWebSearchSources: ChatMessage["web_search_sources"];
+    let streamedWebSearchTrace: ChatMessage["web_search_trace"];
     try {
-      let streamedWebSearchSources: ChatMessage["web_search_sources"];
       const request = toSdkRequest(
         sessionId,
-        get().activeModel,
+        requestModel,
         nextSessionMessages,
         webSearchEnabled,
         deepResearchEnabled,
@@ -1390,6 +1520,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           applyWebSearchSourcesToAssistant(set, assistantMessage.id, userMessage.id, chunk.webSearchSources);
         }
 
+        if (chunk.webSearchTrace) {
+          streamedWebSearchTrace = chunk.webSearchTrace;
+          applyWebSearchTraceToAssistant(
+            set,
+            assistantMessage.id,
+            userMessage.id,
+            chunk.webSearchTrace,
+          );
+        }
+
         if (chunk.deepResearchEvent) {
           applyDeepResearchEventToAssistant(
             set,
@@ -1412,20 +1552,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           streamedWebSearchSources,
         );
       }
-      const after = get();
-      if (after.status !== "error" && after.hydrated) {
-        const u = after.messages.find((m) => m.id === userMessage.id);
-        const a = after.messages.find((m) => m.id === assistantMessage.id);
-        if (u && a && u.role === "user" && a.role === "assistant") {
-          const assistantToPersist = preserveStreamedWebSearchSources(
-            a,
-            assistantMessage.id,
-            streamedWebSearchSources,
-          );
-          // Yield one tick after SSE teardown so the portal can accept the follow-up POST.
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          await persistAppendMessages(set, sessionId, [u, assistantToPersist]);
-        }
+      if (streamedWebSearchTrace) {
+        applyWebSearchTraceToAssistant(
+          set,
+          assistantMessage.id,
+          userMessage.id,
+          streamedWebSearchTrace,
+        );
       }
     } catch (error) {
       setSessionStream(set, sessionId, null);
@@ -1438,6 +1571,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           : {},
       );
     } finally {
+      const afterStream = get();
+      if (afterStream.hydrated) {
+        const assistant = afterStream.messages.find((message) => message.id === assistantMessage.id);
+        if (assistant?.role === "assistant") {
+          const assistantToPersist = preserveStreamedWebSearchTrace(
+            preserveStreamedWebSearchSources(
+              assistant,
+              assistantMessage.id,
+              streamedWebSearchSources,
+            ),
+            assistantMessage.id,
+            streamedWebSearchTrace,
+          );
+          if (assistantHasPersistableTurnState(assistantToPersist)) {
+            // Yield one tick after SSE teardown so the portal can accept the
+            // follow-up append. The user half is already durable and ordered
+            // ahead of this operation by the outbox/append chain.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            await persistAppendMessages(set, sessionId, [assistantToPersist]);
+          }
+        }
+      }
+
       const after = get();
       const sid = String(queueSessionId ?? "").trim();
       if (!sid) return;
@@ -1450,12 +1606,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         pendingMessages: prev.pendingMessages.filter((_, index) => index !== idx),
       }));
       queueMicrotask(() => {
-        void get().sendMessage(client, {
-          content: next.content,
-          attachments: next.attachments,
-          webSearch: get().lastWebSearchBySessionId[next.sessionId],
-          deepResearch: get().lastDeepResearchBySessionId[next.sessionId],
-        });
+        void get().sendMessage(
+          client,
+          {
+            content: next.content,
+            attachments: next.attachments,
+            webSearch: next.webSearch,
+            deepResearch: next.deepResearch,
+            deepResearchAuto: next.deepResearchAuto,
+          },
+          { targetSessionId: next.sessionId },
+        );
       });
     }
   },
@@ -1479,6 +1640,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const sourceUserMessage = sessionMessages[userIndex];
     const sourceAssistantMessage = assistantIndex >= 0 ? sessionMessages[assistantIndex] : undefined;
     if (!sourceUserMessage || sourceUserMessage.role !== "user") return;
+    const webSearchEnabled =
+      input.webSearch ?? Boolean(state.lastWebSearchBySessionId[sessionId]);
+    const deepResearchEnabled =
+      input.deepResearch ?? Boolean(state.lastDeepResearchBySessionId[sessionId]);
+    const deepResearchAuto =
+      input.deepResearchAuto ?? Boolean(state.lastDeepResearchAutoBySessionId[sessionId]);
 
     const createdAtPair = pairedCreatedAt();
     const replacementAssistant: ChatMessage = {
@@ -1537,6 +1704,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, truncatedSessionMessages),
       errorMessage: null,
+      lastWebSearchBySessionId: {
+        ...prev.lastWebSearchBySessionId,
+        [sessionId]: webSearchEnabled,
+      },
+      lastDeepResearchBySessionId: {
+        ...prev.lastDeepResearchBySessionId,
+        [sessionId]: deepResearchEnabled,
+      },
+      lastDeepResearchAutoBySessionId: {
+        ...prev.lastDeepResearchAutoBySessionId,
+        [sessionId]: deepResearchAuto,
+      },
       responseVersionsByUserMessageId: {
         ...Object.fromEntries(
           Object.entries(prev.responseVersionsByUserMessageId).filter(
@@ -1564,12 +1743,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     try {
       let streamedWebSearchSources: ChatMessage["web_search_sources"];
+      let streamedWebSearchTrace: ChatMessage["web_search_trace"];
       const request = toSdkRequest(
         sessionId,
         state.activeModel,
         truncatedSessionMessages,
-        Boolean(state.lastWebSearchBySessionId[sessionId]),
-        Boolean(state.lastDeepResearchBySessionId[sessionId]),
+        webSearchEnabled,
+        deepResearchEnabled,
+        deepResearchAuto,
       );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
@@ -1649,6 +1830,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           );
         }
 
+        if (chunk.webSearchTrace) {
+          streamedWebSearchTrace = chunk.webSearchTrace;
+          applyWebSearchTraceToAssistant(
+            set,
+            replacementAssistant.id,
+            input.messageId,
+            chunk.webSearchTrace,
+          );
+        }
+
         if (chunk.deepResearchEvent) {
           applyDeepResearchEventToAssistant(
             set,
@@ -1671,13 +1862,25 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           streamedWebSearchSources,
         );
       }
+      if (streamedWebSearchTrace) {
+        applyWebSearchTraceToAssistant(
+          set,
+          replacementAssistant.id,
+          input.messageId,
+          streamedWebSearchTrace,
+        );
+      }
       const afterEdit = get();
       if (afterEdit.status !== "error" && afterEdit.hydrated) {
         const snapshot = getSessionMessages(afterEdit.messages, sessionId).map((message) =>
-          preserveStreamedWebSearchSources(
-            message,
+          preserveStreamedWebSearchTrace(
+            preserveStreamedWebSearchSources(
+              message,
+              replacementAssistant.id,
+              streamedWebSearchSources,
+            ),
             replacementAssistant.id,
-            streamedWebSearchSources,
+            streamedWebSearchTrace,
           ),
         );
         try {
@@ -1707,7 +1910,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
 
-  async regenerateAssistantResponse(client, assistantMessageId) {
+  async regenerateAssistantResponse(client, assistantMessageId, mode) {
     const state = get();
     const sessionId = state.activeSessionId;
     if (!sessionId) return;
@@ -1725,6 +1928,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const tenantId = sourceAssistantMessage.tenant_id ?? sourceUserMessage.tenant_id ?? DEFAULT_TENANT;
     const userId = sourceAssistantMessage.user_id ?? sourceUserMessage.user_id ?? DEFAULT_USER;
     const targetUserMessageId = sourceUserMessage.id;
+    const webSearchEnabled =
+      mode?.webSearch ?? Boolean(state.lastWebSearchBySessionId[sessionId]);
+    const deepResearchEnabled =
+      mode?.deepResearch ?? Boolean(state.lastDeepResearchBySessionId[sessionId]);
+    const deepResearchAuto =
+      mode?.deepResearchAuto ?? Boolean(state.lastDeepResearchAutoBySessionId[sessionId]);
 
     const replacementAssistant: ChatMessage = {
       id: makeId(),
@@ -1774,6 +1983,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       errorMessage: null,
+      lastWebSearchBySessionId: {
+        ...prev.lastWebSearchBySessionId,
+        [sessionId]: webSearchEnabled,
+      },
+      lastDeepResearchBySessionId: {
+        ...prev.lastDeepResearchBySessionId,
+        [sessionId]: deepResearchEnabled,
+      },
+      lastDeepResearchAutoBySessionId: {
+        ...prev.lastDeepResearchAutoBySessionId,
+        [sessionId]: deepResearchAuto,
+      },
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
         [targetUserMessageId]: {
@@ -1796,12 +2017,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     try {
       let streamedWebSearchSources: ChatMessage["web_search_sources"];
+      let streamedWebSearchTrace: ChatMessage["web_search_trace"];
       const request = toSdkRequest(
         sessionId,
         state.activeModel,
         regenerateRequestMessages,
-        Boolean(state.lastWebSearchBySessionId[sessionId]),
-        Boolean(state.lastDeepResearchBySessionId[sessionId]),
+        webSearchEnabled,
+        deepResearchEnabled,
+        deepResearchAuto,
       );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
@@ -1881,6 +2104,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           );
         }
 
+        if (chunk.webSearchTrace) {
+          streamedWebSearchTrace = chunk.webSearchTrace;
+          applyWebSearchTraceToAssistant(
+            set,
+            replacementAssistant.id,
+            targetUserMessageId,
+            chunk.webSearchTrace,
+          );
+        }
+
         if (chunk.deepResearchEvent) {
           applyDeepResearchEventToAssistant(
             set,
@@ -1903,13 +2136,25 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           streamedWebSearchSources,
         );
       }
+      if (streamedWebSearchTrace) {
+        applyWebSearchTraceToAssistant(
+          set,
+          replacementAssistant.id,
+          targetUserMessageId,
+          streamedWebSearchTrace,
+        );
+      }
       const afterRegen = get();
       if (afterRegen.status !== "error" && afterRegen.hydrated) {
         const snapshot = getSessionMessages(afterRegen.messages, sessionId).map((message) =>
-          preserveStreamedWebSearchSources(
-            message,
+          preserveStreamedWebSearchTrace(
+            preserveStreamedWebSearchSources(
+              message,
+              replacementAssistant.id,
+              streamedWebSearchSources,
+            ),
             replacementAssistant.id,
-            streamedWebSearchSources,
+            streamedWebSearchTrace,
           ),
         );
         try {
@@ -1984,6 +2229,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
               }
             : index === userIndex
@@ -2039,6 +2285,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
               }
             : index === userIndex
@@ -2086,6 +2333,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
               }
             : message
@@ -2131,6 +2379,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 ...message,
                 content: targetVersion.content,
                 web_search_sources: targetVersion.web_search_sources,
+                web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
               }
             : message

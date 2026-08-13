@@ -66,7 +66,8 @@ export function resolveInjectionBudgetChars(model: string | undefined): number {
 function hitCostChars(hit: WebSearchHit, index: number, snippetChars: number): number {
   const snippet = truncateSnippet(hit.snippet ?? "", snippetChars);
   const date = hit.publishedAt ? `\n发布时间: ${hit.publishedAt}` : "";
-  const block = `[${index + 1}] ${hit.title}\nURL: ${hit.url}${date}\n${snippet}`;
+  const facet = hit.searchQuery ? `\n检索子问题: ${hit.searchQuery}` : "";
+  const block = `[${index + 1}] ${hit.title}${facet}\nURL: ${hit.url}${date}\n${snippet}`;
   // formatHits joins with "\n\n"; charge separator for every item after the first.
   return block.length + (index > 0 ? 2 : 0);
 }

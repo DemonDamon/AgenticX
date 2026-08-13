@@ -1,6 +1,12 @@
 import type { ChatClient } from "./client";
 import type { DeepResearchEvent } from "../deep-research";
-import type { ChatChunk, ChatMessage, ChatRequest, SendMessageResult } from "../types";
+import type {
+  ChatChunk,
+  ChatMessage,
+  ChatRequest,
+  SendMessageResult,
+  WebSearchTrace,
+} from "../types";
 import { toGatewayMessage } from "./multimodal";
 
 type PendingRequest = {
@@ -77,6 +83,103 @@ function isAbortError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const name = "name" in error ? String((error as { name?: unknown }).name ?? "") : "";
   return name === "AbortError";
+}
+
+const MAX_TRACE_REASON_CHARS = 500;
+const MAX_TRACE_QUERY_CHARS = 2_000;
+const MAX_TRACE_PROVIDER_ID_CHARS = 200;
+const MAX_TRACE_FACETS = 5;
+const MAX_TRACE_COUNT = 10_000;
+const MAX_TRACE_DURATION_MS = 10 * 60 * 1_000;
+
+function traceString(raw: unknown, max: number): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim();
+  return value ? value.slice(0, max) : undefined;
+}
+
+function traceInteger(raw: unknown, max: number): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return undefined;
+  return Math.min(Math.trunc(raw), max);
+}
+
+function parseWebSearchTrace(raw: unknown): WebSearchTrace | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const row = raw as Record<string, unknown>;
+  if (row.version !== 1 || (row.decision !== "search" && row.decision !== "skip")) {
+    return undefined;
+  }
+  const reason = traceString(row.reason, MAX_TRACE_REASON_CHARS);
+  const providerCalls = traceInteger(row.providerCalls, MAX_TRACE_COUNT);
+  if (!reason || providerCalls === undefined) return undefined;
+
+  const resolvedQuery = traceString(row.resolvedQuery, MAX_TRACE_QUERY_CHARS);
+  const sanitizedFacets = Array.isArray(row.facets)
+    ? row.facets.slice(0, MAX_TRACE_FACETS).flatMap((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+        const facet = item as Record<string, unknown>;
+        const query = traceString(facet.query, MAX_TRACE_QUERY_CHARS);
+        const hitCount = traceInteger(facet.hitCount, MAX_TRACE_COUNT);
+        const uniqueHosts = traceInteger(facet.uniqueHosts, MAX_TRACE_COUNT);
+        if (!query || hitCount === undefined || uniqueHosts === undefined) return [];
+        const providerIds = Array.isArray(facet.providerIds)
+          ? facet.providerIds.slice(0, 2).flatMap((providerId) => {
+              const value = traceString(providerId, MAX_TRACE_PROVIDER_ID_CHARS);
+              return value ? [value] : [];
+            })
+          : [];
+        const dateFrom = traceString(facet.dateFrom, 32);
+        const dateTo = traceString(facet.dateTo, 32);
+        return [{
+          query,
+          ...(providerIds.length > 0 ? { providerIds } : {}),
+          hitCount,
+          uniqueHosts,
+          ...(dateFrom ? { dateFrom } : {}),
+          ...(dateTo ? { dateTo } : {}),
+        }];
+      })
+    : [];
+
+  let retry: WebSearchTrace["retry"];
+  if (row.retry && typeof row.retry === "object" && !Array.isArray(row.retry)) {
+    const value = row.retry as Record<string, unknown>;
+    const queryIndex = traceInteger(value.queryIndex, MAX_TRACE_COUNT);
+    const retryReason = traceString(value.reason, MAX_TRACE_REASON_CHARS);
+    const fromProviderId = traceString(value.fromProviderId, MAX_TRACE_PROVIDER_ID_CHARS);
+    const toProviderId = traceString(value.toProviderId, MAX_TRACE_PROVIDER_ID_CHARS);
+    if (
+      value.used === true &&
+      queryIndex !== undefined &&
+      queryIndex < MAX_TRACE_FACETS &&
+      retryReason &&
+      fromProviderId &&
+      toProviderId
+    ) {
+      retry = { used: true, queryIndex, reason: retryReason, fromProviderId, toProviderId };
+    }
+  }
+
+  let timings: WebSearchTrace["timings"];
+  if (row.timings && typeof row.timings === "object" && !Array.isArray(row.timings)) {
+    const value = row.timings as Record<string, unknown>;
+    const queryResolutionMs = traceInteger(value.queryResolutionMs, MAX_TRACE_DURATION_MS);
+    const retrievalMs = traceInteger(value.retrievalMs, MAX_TRACE_DURATION_MS);
+    if (queryResolutionMs !== undefined && retrievalMs !== undefined) {
+      timings = { queryResolutionMs, retrievalMs };
+    }
+  }
+
+  return {
+    version: 1,
+    decision: row.decision,
+    reason,
+    ...(resolvedQuery ? { resolvedQuery } : {}),
+    ...(sanitizedFacets.length > 0 ? { facets: sanitizedFacets } : {}),
+    providerCalls,
+    ...(retry ? { retry } : {}),
+    ...(timings ? { timings } : {}),
+  };
 }
 
 const THINK_OPEN = "<" + "think" + ">";
@@ -251,6 +354,7 @@ export class HttpChatClient implements ChatClient {
               snippet?: string;
               usedByModel?: boolean;
             }>;
+            agenticx_web_search_trace?: unknown;
             agenticx_deep_research_event?: DeepResearchEvent;
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
             error?: { code?: string; message?: string };
@@ -317,6 +421,16 @@ export class HttpChatClient implements ChatClient {
             continue;
           }
 
+          const webSearchTrace = parseWebSearchTrace(chunk.agenticx_web_search_trace);
+          if (webSearchTrace) {
+            yield {
+              requestId,
+              done: false,
+              webSearchTrace,
+            };
+            continue;
+          }
+
           if (chunk.agenticx_deep_research_event && typeof chunk.agenticx_deep_research_event === "object") {
             yield {
               requestId,
@@ -352,7 +466,7 @@ export class HttpChatClient implements ChatClient {
             };
           }
           // Do NOT treat finish_reason=stop as stream end.
-          // Portal BFF appends trailer frames (agenticx_web_search_sources / agenticx_usage)
+          // Portal BFF appends trailer frames (search sources/trace and usage)
           // after the last content chunk and before data: [DONE]. Returning here drops them.
         }
       }

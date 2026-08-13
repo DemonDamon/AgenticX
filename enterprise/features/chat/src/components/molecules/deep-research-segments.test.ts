@@ -309,6 +309,26 @@ describe("reflection / research_stats segments", () => {
     expect(stats && stats.kind === "stats" ? stats.label : "").toContain("检索式 12 条");
   });
 
+  it("omits zero full-text reads from the stats label", () => {
+    const segments = buildDeepResearchSegments(
+      [
+        {
+          type: "research_stats",
+          queriesPlanned: 3,
+          urlsDiscovered: 12,
+          sourcesSelected: 6,
+          pagesFetched: 0,
+        },
+      ],
+      "completed",
+    );
+    const stats = segments[0];
+    const label = stats && stats.kind === "stats" ? stats.label : "";
+
+    expect(label).toBe("检索式 3 条 · 发现 12 个来源 · 采用 6 个");
+    expect(label).not.toContain("读取正文");
+  });
+
   it("puts the gap card above the follow-up search card", () => {
     const events: DeepResearchEvent[] = [
       {

@@ -57,6 +57,22 @@ describe("renderHtmlReport", () => {
     expect(html).not.toMatch(/<a href="#">1<\/a>/);
   });
 
+  it("hides the full-text stat when its value is zero", () => {
+    const html = renderHtmlReport({
+      ...base,
+      stats: {
+        queriesPlanned: 3,
+        urlsDiscovered: 12,
+        sourcesSelected: 6,
+        pagesFetched: 0,
+      },
+    });
+
+    expect(html).toContain("规划查询");
+    expect(html).toContain("选用来源");
+    expect(html).not.toContain("抓取正文");
+  });
+
   it("matches ## heading count in toc and body ids", () => {
     const html = renderHtmlReport(base);
     const headingCount = (base.markdown.match(/^## /gm) ?? []).length;

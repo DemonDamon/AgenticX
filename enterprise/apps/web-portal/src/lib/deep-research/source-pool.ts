@@ -4,6 +4,10 @@
 
 import type { WebSearchHit } from "../web-search/providers";
 import { rerankHits } from "../web-search/rerank";
+import {
+  diversifyBySourceHost,
+  sourceHostname,
+} from "../retrieval/source-diversity";
 import { normalizeCitationUrl } from "./registry";
 
 export type PooledHit = {
@@ -60,17 +64,9 @@ export class SourcePool {
   }
 }
 
-function hostnameOf(url: string): string {
-  try {
-    return new URL(url).hostname.toLowerCase();
-  } catch {
-    return "";
-  }
-}
-
 /** 域名权威度加成，0–1。 */
 export function authorityBoost(url: string): number {
-  const host = hostnameOf(url);
+  const host = sourceHostname(url);
   if (!host) return 0.2;
   if (AUTHORITY_TIERS.high.some((d) => host === d || host.endsWith(`.${d}`))) return 1;
   if (AUTHORITY_TIERS.highSuffix.some((s) => host.endsWith(s))) return 1;
@@ -145,15 +141,8 @@ export function selectTopSources(
     })
     .map((row) => row.item);
 
-  const out: ScoredHit[] = [];
-  const perDomain = new Map<string, number>();
-  for (const row of ordered) {
-    if (out.length >= topN) break;
-    const host = hostnameOf(row.hit.url) || "unknown";
-    const used = perDomain.get(host) ?? 0;
-    if (used >= maxPerDomain) continue;
-    perDomain.set(host, used + 1);
-    out.push(row);
-  }
-  return out;
+  return diversifyBySourceHost(ordered, (row) => row.hit.url, {
+    limit: topN,
+    maxPerHost: maxPerDomain,
+  });
 }

@@ -5,6 +5,10 @@
 
 import { directFetch, type DirectFetch } from "./direct-fetch";
 import {
+  normalizeWebSearchResultUrl,
+  resolveSafeWebSearchResultUrl,
+} from "./provider-endpoint";
+import {
   DEFAULT_BACKEND_CHAIN,
   isTerminalFailure,
   isTransientFailure,
@@ -13,6 +17,7 @@ import {
   type PageFetchFailure,
 } from "./page-fetch-backends";
 export {
+  extractDocumentTitle,
   extractMainText,
   MAX_PAGE_CHARS,
   MIN_USABLE_PAGE_CHARS,
@@ -51,7 +56,9 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
 export type PageContent = {
   url: string;
-  /** 提取后的纯文本正文，已截断到 MAX_PAGE_CHARS。 */
+  /** Standard page title when the selected backend exposes one. */
+  title?: string;
+  /** 提取后的纯文本正文，默认截断到 MAX_PAGE_CHARS。 */
   text: string;
   /** 提取字符数（截断前），用于可观测性。 */
   rawChars: number;
@@ -62,6 +69,13 @@ export type PageContent = {
 export type PageFetchDeps = {
   fetchImpl?: DirectFetch;
   timeoutMs?: number;
+  /** Optional larger bound for explicit-document reads; server-clamped to 240k. */
+  maxChars?: number;
+  /**
+   * Skip DNS admission only for a URL built from a trusted site adapter.
+   * Never set this for an arbitrary user/provider URL.
+   */
+  canonicalPublicUrl?: boolean;
   signal?: AbortSignal;
   /** 依次尝试，首个成功即返回；缺省用 DEFAULT_BACKEND_CHAIN。 */
   backends?: PageFetchBackendName[];
@@ -111,7 +125,7 @@ function safeHost(url: string): string {
   }
 }
 
-type PageFetchAttempt = {
+export type PageFetchAttempt = {
   page: PageContent | null;
   failure?: PageFetchFailure;
 };
@@ -125,7 +139,7 @@ export async function fetchPageContent(
   return attempt.page;
 }
 
-async function fetchPageContentWithReason(
+export async function fetchPageContentWithReason(
   url: string,
   deps?: PageFetchDeps,
 ): Promise<PageFetchAttempt> {
@@ -139,20 +153,39 @@ async function fetchPageContentWithReason(
   // chance without letting a dead one multiply the worst-case latency.
   let transientRetriesLeft = deps?.transientRetries ?? TRANSIENT_RETRIES;
 
+  let safeUrl: string;
+  let connectAddress: string | undefined;
+  try {
+    safeUrl = normalizeWebSearchResultUrl(url);
+    // Production native fetches pin the same public DNS answer that passed the
+    // SSRF check. Injected test/custom transports remain responsible for their
+    // own connection semantics but still receive the synchronous URL policy.
+    if (fetchImpl === directFetch && !deps?.canonicalPublicUrl) {
+      const resolved = await resolveSafeWebSearchResultUrl(safeUrl);
+      safeUrl = resolved.url;
+      connectAddress = resolved.address;
+    }
+  } catch {
+    return { page: null, failure: "invalid_url" };
+  }
+
   for (const name of backends) {
     const backend = resolveBackend(name);
     while (true) {
-      const result = await backend(url, {
+      const result = await backend(safeUrl, {
         fetchImpl,
         timeoutMs,
+        maxChars: deps?.maxChars,
         signal: deps?.signal,
         apiKey: deps?.apiKeys?.[name],
+        ...(name === "native" && connectAddress ? { connectAddress } : {}),
       });
 
       if (result.ok) {
         return {
           page: {
             url,
+            ...(result.title ? { title: result.title } : {}),
             text: result.text,
             rawChars: result.rawChars,
             backend: name,

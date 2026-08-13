@@ -28,7 +28,7 @@ function mapRole(r: typeof roles.$inferSelect, memberCount = 0): RoleRow {
   };
 }
 
-const SYSTEM_ROLE_SEED: Array<{ code: string; name: string; scopes: string[] }> = [
+export const MYSQL_SYSTEM_ROLE_SEED: Array<{ code: string; name: string; scopes: string[] }> = [
   { code: "super_admin", name: "超级管理员", scopes: ["*"] },
   {
     code: "owner",
@@ -62,6 +62,7 @@ const SYSTEM_ROLE_SEED: Array<{ code: string; name: string; scopes: string[] }> 
       "policy:disable",
       "policy:manage",
       "model:read",
+      "provider:update",
       "sso:manage",
     ],
   },
@@ -80,6 +81,7 @@ const SYSTEM_ROLE_SEED: Array<{ code: string; name: string; scopes: string[] }> 
       "audit:read:all",
       "audit:export",
       "metering:read",
+      "provider:update",
     ],
   },
   {
@@ -169,13 +171,24 @@ export const mysqlRolesRepository: RolesRepository = {
   async ensureSystemRoles(tenantId) {
     const db = await getMysqlRepositoryDb();
     const now = new Date();
-    for (const seed of SYSTEM_ROLE_SEED) {
+    for (const seed of MYSQL_SYSTEM_ROLE_SEED) {
       const [existing] = await db
         .select({ id: roles.id })
         .from(roles)
         .where(and(eq(roles.tenantId, tenantId), eq(roles.code, seed.code)))
         .limit(1);
-      if (existing) continue;
+      if (existing) {
+        await db
+          .update(roles)
+          .set({
+            name: seed.name,
+            scopes: seed.scopes,
+            immutable: true,
+            updatedAt: now,
+          })
+          .where(eq(roles.id, existing.id));
+        continue;
+      }
       await db.insert(roles).values({
         id: ulid(),
         tenantId,

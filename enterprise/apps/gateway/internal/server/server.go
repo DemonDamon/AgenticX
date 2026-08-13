@@ -1209,9 +1209,6 @@ func (s *Server) handleStream(
 	}
 
 	if streamErr != nil {
-		if s.useChannelRelay() {
-			s.billingService.RollbackContext(qctx, reservedTokens)
-		}
 		if len(blockedHits) > 0 {
 			ev := audit.Event{
 				ID:            makeID("audit"),
@@ -1241,24 +1238,27 @@ func (s *Server) handleStream(
 			_ = s.writeAuditEvent(ev)
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			partialOutputTokens := estimateTextTokens(responseBuilder.String())
-			s.reportUsage(identity, decision, estimatedInputTokens, partialOutputTokens)
-			if !s.useChannelRelay() {
-				s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, estimatedInputTokens+partialOutputTokens)
-			}
+			s.settleInterruptedStreamUsage(
+				identity,
+				decision,
+				estimatedInputTokens,
+				partialOutputTokens,
+				reservedTokens,
+				budgetCheck,
+				qctx,
+			)
 			return
 		}
 		partialOutputTokens := estimateTextTokens(responseBuilder.String())
-		s.reportUsage(identity, decision, estimatedInputTokens, partialOutputTokens)
-		if s.useChannelRelay() {
-			actualTotal := int64(estimatedInputTokens + partialOutputTokens)
-			s.billingService.SettleContext(
-				qctx,
-				reservedTokens,
-				actualTotal,
-			)
-		} else {
-			s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, estimatedInputTokens+partialOutputTokens)
-		}
+		s.settleInterruptedStreamUsage(
+			identity,
+			decision,
+			estimatedInputTokens,
+			partialOutputTokens,
+			reservedTokens,
+			budgetCheck,
+			qctx,
+		)
 		if code := streamErrorCode(streamErr); code != "" {
 			writeStreamPolicyError(w, flusher, code, formatStreamError(streamErr), nil)
 		} else {
@@ -1679,6 +1679,31 @@ func (s *Server) reportUsage(identity requestIdentity, decision routing.Decision
 		CompletionTokens: outputTokens,
 		TotalTokens:      inputTokens + outputTokens,
 	}, nil)
+}
+
+// settleInterruptedStreamUsage converts a successful reservation into actual
+// partial usage exactly once. Input already sent upstream remains chargeable;
+// ungenerated output capacity and its budget reservation are released.
+func (s *Server) settleInterruptedStreamUsage(
+	identity requestIdentity,
+	decision routing.Decision,
+	estimatedInputTokens int,
+	partialOutputTokens int,
+	reservedTokens int64,
+	budgetCheck quota.CheckResult,
+	qctx quota.RequestContext,
+) {
+	usage := openai.Usage{
+		PromptTokens:     estimatedInputTokens,
+		CompletionTokens: partialOutputTokens,
+		TotalTokens:      estimatedInputTokens + partialOutputTokens,
+	}
+	s.reportUsageDetailed(identity, decision, usage, &budgetCheck)
+	if s.useChannelRelay() {
+		s.billingService.SettleContext(qctx, reservedTokens, int64(usage.TotalTokens))
+		return
+	}
+	s.reconcileQuotaUsage(identity, qctx.Model, estimatedInputTokens, usage.TotalTokens)
 }
 
 func (s *Server) reconcileQuotaUsage(

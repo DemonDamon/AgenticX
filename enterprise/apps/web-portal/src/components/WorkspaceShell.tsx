@@ -77,6 +77,31 @@ type HistorySession = HistoryListItem;
 
 const COLLAPSED_KEY = "agenticx-portal-sidebar-collapsed";
 const HISTORY_SECTION_KEY = "agenticx-portal-history-section-collapsed";
+const DEEP_RESEARCH_SESSIONS_KEY = "agenticx-portal-deep-research-sessions-v1";
+
+function readDeepResearchSessionIds(): Set<string> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(DEEP_RESEARCH_SESSIONS_KEY) ?? "[]");
+    return new Set(
+      Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === "string" && value.length > 0)
+        : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function writeDeepResearchSessionIds(ids: Set<string>): void {
+  try {
+    window.localStorage.setItem(
+      DEEP_RESEARCH_SESSIONS_KEY,
+      JSON.stringify(Array.from(ids).slice(-200)),
+    );
+  } catch {
+    // best-effort UI preference
+  }
+}
 
 export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const router = useRouter();
@@ -117,6 +142,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [panelMode, setPanelMode] = React.useState<PanelMode>("chat");
   const [deepResearchMode, setDeepResearchMode] = React.useState<DeepResearchMode>("off");
+  const manualDeepResearchSessionIdRef = React.useRef<string | null>(null);
   /** Tenant gate: sidebar entry hidden when admin disables deep research. Default ON. */
   const [deepResearchAvailable, setDeepResearchAvailable] = React.useState(true);
 
@@ -125,10 +151,49 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
     return !messages.some((message) => message.session_id === activeSessionId);
   }, [activeSessionId, messages]);
 
+  const setActiveDeepResearchMode = React.useCallback((
+    mode: DeepResearchMode,
+    acceptedSessionId?: string,
+  ) => {
+    const activeId = useChatStore.getState().activeSessionId;
+    const sessionId = acceptedSessionId ?? activeId;
+    if (!acceptedSessionId || acceptedSessionId === activeId) {
+      setDeepResearchMode(mode);
+    }
+    if (!sessionId) return;
+    if (mode === "manual") {
+      manualDeepResearchSessionIdRef.current = sessionId;
+      return;
+    }
+    if (manualDeepResearchSessionIdRef.current === sessionId) {
+      manualDeepResearchSessionIdRef.current = null;
+    }
+    const ids = readDeepResearchSessionIds();
+    if (mode === "auto") ids.add(sessionId);
+    if (mode === "off") ids.delete(sessionId);
+    writeDeepResearchSessionIds(ids);
+  }, []);
+
+  React.useEffect(() => {
+    if (!activeSessionId) {
+      manualDeepResearchSessionIdRef.current = null;
+      setDeepResearchMode("off");
+      return;
+    }
+    if (manualDeepResearchSessionIdRef.current === activeSessionId) {
+      setDeepResearchMode("manual");
+      return;
+    }
+    manualDeepResearchSessionIdRef.current = null;
+    setDeepResearchMode(
+      readDeepResearchSessionIds().has(activeSessionId) ? "auto" : "off",
+    );
+  }, [activeSessionId]);
+
   const applyDeepResearchAvailable = React.useCallback((enabled: boolean) => {
     setDeepResearchAvailable(enabled);
-    if (!enabled) setDeepResearchMode("off");
-  }, []);
+    if (!enabled) setActiveDeepResearchMode("off");
+  }, [setActiveDeepResearchMode]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -192,21 +257,27 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
 
   const onNewChat = React.useCallback(() => {
     void createSession({ defaultModel: activeModel || "deepseek-chat", title: t("newChat") });
+    manualDeepResearchSessionIdRef.current = null;
     setDeepResearchMode("off");
+    // Starting a different conversation must not erase the old conversation's
+    // persisted automatic-research preference.
     setPanelMode("chat");
     setMobileOpen(false);
   }, [createSession, activeModel, t]);
 
   const onDeepResearchNav = React.useCallback(() => {
     void createSession({ defaultModel: activeModel || "deepseek-chat", title: t("newChat") });
+    const draftId = useChatStore.getState().activeSessionId;
+    manualDeepResearchSessionIdRef.current = draftId;
     setDeepResearchMode("manual");
     setPanelMode("chat");
     setMobileOpen(false);
-  }, [createSession, activeModel, t]);
+  }, [createSession, activeModel, setActiveDeepResearchMode, t]);
 
   const onSelectSession = React.useCallback((id: string) => {
     void switchSession(id);
-    setDeepResearchMode("off");
+    manualDeepResearchSessionIdRef.current = null;
+    setDeepResearchMode(readDeepResearchSessionIds().has(id) ? "auto" : "off");
     setPanelMode("chat");
     setMobileOpen(false);
   }, [switchSession]);
@@ -617,7 +688,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
               <MachiChatView
                 client={client}
                 deepResearchMode={deepResearchMode}
-                onDeepResearchModeChange={setDeepResearchMode}
+                onDeepResearchModeChange={setActiveDeepResearchMode}
               />
             ) : (
               <div className="h-full w-full overflow-auto">

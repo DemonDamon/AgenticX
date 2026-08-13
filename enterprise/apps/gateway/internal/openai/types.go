@@ -39,19 +39,22 @@ type ChatMessage struct {
 }
 
 type ChatCompletionRequest struct {
-	Model               string        `json:"model"`
-	Messages            []ChatMessage `json:"messages"`
-	System              string          `json:"system,omitempty"`
-	SystemCacheControl  json.RawMessage `json:"-"`
-	Temperature         float64       `json:"temperature,omitempty"`
-	Stream              bool          `json:"stream,omitempty"`
-	MaxCompletionTokens int           `json:"max_completion_tokens,omitempty"`
-	MaxTokens           int           `json:"max_tokens,omitempty"`
-	TopP                float64       `json:"top_p,omitempty"`
-	Stop                []string      `json:"stop,omitempty"`
-	Tools               []Tool        `json:"tools,omitempty"`
-	ToolChoice          any           `json:"tool_choice,omitempty"`
-	ReasoningEffort     string        `json:"reasoning_effort,omitempty"`
+	Model              string          `json:"model"`
+	Messages           []ChatMessage   `json:"messages"`
+	System             string          `json:"system,omitempty"`
+	SystemCacheControl json.RawMessage `json:"-"`
+	// Temperature is a pointer so an explicitly requested 0 survives the
+	// inbound -> pivot -> provider round trip. A nil value means the caller
+	// omitted the field and lets the upstream provider apply its default.
+	Temperature         *float64 `json:"temperature,omitempty"`
+	Stream              bool     `json:"stream,omitempty"`
+	MaxCompletionTokens int      `json:"max_completion_tokens,omitempty"`
+	MaxTokens           int      `json:"max_tokens,omitempty"`
+	TopP                float64  `json:"top_p,omitempty"`
+	Stop                []string `json:"stop,omitempty"`
+	Tools               []Tool   `json:"tools,omitempty"`
+	ToolChoice          any      `json:"tool_choice,omitempty"`
+	ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
 	// ReasoningSplit requests providers that support split reasoning/content streams.
 	// Pointer distinguishes omitted vs explicit false.
 	ReasoningSplit *bool `json:"reasoning_split,omitempty"`
@@ -123,8 +126,8 @@ type EmbeddingDatum struct {
 }
 
 type EmbeddingResponse struct {
-	Object string          `json:"object"`
-	Model  string          `json:"model"`
+	Object string           `json:"object"`
+	Model  string           `json:"model"`
 	Data   []EmbeddingDatum `json:"data"`
-	Usage  Usage           `json:"usage"`
+	Usage  Usage            `json:"usage"`
 }
