@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_DEEPSEEK_REASONING_EFFORT,
   DEFAULT_KIMI_REASONING_EFFORT,
   describeModelForPicker,
+  labelForDeepSeekReasoningEffort,
   labelForKimiReasoningEffort,
+  normalizeDeepSeekReasoningEffort,
   normalizeKimiReasoningEffort,
+  supportsDeepSeekV4Thinking,
   supportsKimiK3ReasoningEffort,
 } from "./model-hover-blurb";
 
@@ -32,10 +36,17 @@ describe("describeModelForPicker", () => {
   });
 
   it("uses a distinctive blurb for DeepSeek V4", () => {
-    const blurb = describeModelForPicker("deepseek", "deepseek-v4-pro", "DeepSeek");
-    expect(blurb.description).toContain("旗舰");
-    expect(blurb.supportsReasoningEffort).toBe(false);
-    expect(blurb.metaValue).toBe("DeepSeek");
+    const pro = describeModelForPicker("deepseek", "deepseek-v4-pro", "DeepSeek");
+    expect(pro.description).toBe("DeepSeek 旗舰模型，支持 1M 上下文窗口");
+    expect(pro.supportsReasoningEffort).toBe(false);
+    expect(pro.supportsDeepSeekThinking).toBe(true);
+    expect(pro.metaValue).toBe("DeepSeek");
+
+    const flash = describeModelForPicker("deepseek", "deepseek-v4-flash", "DeepSeek");
+    expect(flash.description).toBe("DeepSeek 旗舰模型，支持 1M 上下文窗口");
+    expect(flash.supportsDeepSeekThinking).toBe(true);
+    expect(supportsDeepSeekV4Thinking("openai/deepseek-v4-pro-0813")).toBe(true);
+    expect(supportsDeepSeekV4Thinking("deepseek-chat")).toBe(false);
   });
 
   it("does not invent a consumption multiplier", () => {
@@ -64,5 +75,16 @@ describe("normalizeKimiReasoningEffort", () => {
     expect(normalizeKimiReasoningEffort("nope")).toBe("max");
     expect(labelForKimiReasoningEffort("high")).toBe("高");
     expect(labelForKimiReasoningEffort("max")).toBe("最大");
+  });
+});
+
+describe("normalizeDeepSeekReasoningEffort", () => {
+  it("defaults to high and accepts high/max only", () => {
+    expect(normalizeDeepSeekReasoningEffort(undefined)).toBe(DEFAULT_DEEPSEEK_REASONING_EFFORT);
+    expect(normalizeDeepSeekReasoningEffort("max")).toBe("max");
+    expect(normalizeDeepSeekReasoningEffort("HIGH")).toBe("high");
+    expect(normalizeDeepSeekReasoningEffort("low")).toBe("high");
+    expect(labelForDeepSeekReasoningEffort("high")).toBe("高");
+    expect(labelForDeepSeekReasoningEffort("max")).toBe("超高");
   });
 });
