@@ -283,7 +283,8 @@ import {
   setCachedReasoningDuration,
 } from "./messages/reasoning-duration-cache";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
-import { buildMessagesPdfHtml, expandSelectionForCompletePdfExport } from "../utils/export-pdf-html";
+import { buildMessagesPdfHtml, expandSelectionForCompletePdfExport, messagesForShareExport } from "../utils/export-pdf-html";
+import { ShareImagePreviewModal } from "./ShareImagePreviewModal";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
@@ -2855,6 +2856,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [pane.pendingQuote, pane.id, setPanePendingQuote, addQuoteTarget]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [forwardPickerOpen, setForwardPickerOpen] = useState(false);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [shareImageOpen, setShareImageOpen] = useState(false);
+  const shareBtnRef = useRef<HTMLButtonElement | null>(null);
+  const shareMenuRef = useRef<HTMLDivElement | null>(null);
   const [pendingForwardMessages, setPendingForwardMessages] = useState<ForwardPendingMessage[]>([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
@@ -2893,6 +2898,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const t = window.setTimeout(() => setFavoriteToastOpen(false), 1800);
     return () => window.clearTimeout(t);
   }, [favoriteToastOpen]);
+  useEffect(() => {
+    if (!shareMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (shareBtnRef.current?.contains(t) || shareMenuRef.current?.contains(t)) return;
+      setShareMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShareMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [shareMenuOpen]);
+  useEffect(() => {
+    if (selectedMessageIds.size === 0) setShareMenuOpen(false);
+  }, [selectedMessageIds.size]);
   useEffect(() => {
     ccBridgeLastSessionModeRef.current = "";
   }, [pane.sessionId]);
@@ -5406,6 +5431,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     userBubbleLabel,
     visibleMessages,
   ]);
+
+  const shareSelectedAsText = useCallback(async () => {
+    const exportable = messagesForShareExport(selectedMessages, visibleMessages);
+    if (exportable.length === 0) return;
+    const merged = exportable
+      .map((message) => {
+        const name = message.role === "user" ? "我" : message.avatarName || message.agentId || "AI";
+        const time = message.timestamp
+          ? new Date(message.timestamp).toLocaleTimeString("zh-CN", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "";
+        return `[${name}]${time ? ` ${time}` : ""}\n${messagePlainTextForClipboard(message)}`;
+      })
+      .join("\n\n");
+    try {
+      await navigator.clipboard.writeText(merged);
+      setStallHintToast("已复制文本");
+    } catch {
+      setStallHintToast("复制失败");
+    }
+  }, [selectedMessages, userBubbleLabel, visibleMessages]);
 
   const deleteSelectedMessages = useCallback(async () => {
     if (selectedMessages.length === 0 || !apiBase || !pane.sessionId) return;
@@ -11892,36 +11940,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 转发
               </button>
               <button
+                ref={shareBtnRef}
                 type="button"
                 className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
-                onClick={async () => {
-                  const merged = selectedMessages
-                    .map((message) => {
-                      const name = message.role === "user" ? "我" : message.avatarName || message.agentId || "AI";
-                      const time = message.timestamp
-                        ? new Date(message.timestamp).toLocaleTimeString("zh-CN", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "";
-                      return `[${name}]${time ? ` ${time}` : ""}\n${messagePlainTextForClipboard(message)}`;
-                    })
-                    .join("\n\n");
-                  try {
-                    await navigator.clipboard.writeText(merged);
-                  } catch {
-                    // ignore clipboard failures
-                  }
-                }}
+                aria-expanded={shareMenuOpen}
+                aria-haspopup="menu"
+                onClick={() => setShareMenuOpen((open) => !open)}
               >
-                复制
-              </button>
-              <button
-                type="button"
-                className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
-                onClick={() => void exportSelectedMessagesToPdf()}
-              >
-                保存为 PDF
+                分享
               </button>
               <button
                 type="button"
@@ -11937,6 +11963,55 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               >
                 取消
               </button>
+              {shareMenuOpen && shareBtnRef.current
+                ? createPortal(
+                    <div
+                      ref={shareMenuRef}
+                      role="menu"
+                      aria-label="分享"
+                      className="agx-menu-pop fixed z-[9999] flex min-w-[148px] flex-col gap-0.5 rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
+                      style={{
+                        left: shareBtnRef.current.getBoundingClientRect().left,
+                        bottom: window.innerHeight - shareBtnRef.current.getBoundingClientRect().top + 6,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="rounded-lg px-2.5 py-2 text-left text-[13px] text-text-strong transition-colors hover:bg-surface-hover"
+                        onClick={() => {
+                          setShareMenuOpen(false);
+                          void shareSelectedAsText();
+                        }}
+                      >
+                        复制文本
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="rounded-lg px-2.5 py-2 text-left text-[13px] text-text-strong transition-colors hover:bg-surface-hover"
+                        onClick={() => {
+                          setShareMenuOpen(false);
+                          setShareImageOpen(true);
+                        }}
+                      >
+                        分享为图片
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="rounded-lg px-2.5 py-2 text-left text-[13px] text-text-strong transition-colors hover:bg-surface-hover"
+                        onClick={() => {
+                          setShareMenuOpen(false);
+                          void exportSelectedMessagesToPdf();
+                        }}
+                      >
+                        保存为 PDF
+                      </button>
+                    </div>,
+                    document.body,
+                  )
+                : null}
             </div>
           ) : null}
           <MessageQueuePanel
@@ -12813,6 +12888,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           await executeForward(targetPayload, followUpNote);
           setSelectedMessageIds(new Set());
         }}
+      />
+      <ShareImagePreviewModal
+        open={shareImageOpen}
+        messages={messagesForShareExport(selectedMessages, visibleMessages)}
+        sessionTitle={paneAvatarMeta.name || pane?.avatarName || "对话记录"}
+        userBubbleLabel={userBubbleLabel}
+        onClose={() => setShareImageOpen(false)}
+        onToast={(msg) => setStallHintToast(msg)}
       />
       {avatarSettingsOpen && paneSettingsAvatar ? (
         <AvatarSettingsPanel
