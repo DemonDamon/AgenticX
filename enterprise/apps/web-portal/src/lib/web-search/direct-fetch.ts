@@ -11,9 +11,13 @@
  */
 
 import { spawn } from "node:child_process";
+import { mkdtemp, open, rm, rmdir, unlink, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import tls from "node:tls";
 import { URL } from "node:url";
 import type { Duplex } from "node:stream";
@@ -101,6 +105,32 @@ function isLoopbackHost(hostname: string): boolean {
   return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
 }
 
+type CurlBodyFile = {
+  handle: FileHandle;
+};
+
+async function createCurlBodyFile(body: Buffer): Promise<CurlBodyFile> {
+  const directory = await mkdtemp(join(tmpdir(), "agenticx-curl-body-"));
+  const path = join(directory, "body");
+  let handle: FileHandle | null = null;
+  try {
+    await writeFile(path, body, {
+      flag: "wx",
+      mode: 0o600,
+    });
+    handle = await open(path, "r");
+    // Keep only the open descriptor. The pathname and directory disappear
+    // before curl starts, so a crashed worker cannot strand tenant secrets.
+    await unlink(path);
+    await rmdir(directory);
+    return { handle };
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
 /**
  * curl path must keep the body as raw bytes.
  *
@@ -124,129 +154,153 @@ async function curlFetchWithBody(
   // JSON APIs (Bocha, Tavily) reject form-encoded bodies with HTTP 415, so their
   // content-type must survive; only search forms may fall back to curl's `-d` default.
   const isFormBody = !declaredType || declaredType.includes("application/x-www-form-urlencoded");
-  return new Promise((resolve, reject) => {
-    const args = [
-      "-sS",
-      "-X",
-      method,
-      "--max-time",
-      // curl accepts fractional seconds (e.g. 1.2); keep aligned with AbortSignal budget.
-      String(Math.max(0.2, Math.round(timeoutMs) / 1000)),
-      "--connect-timeout",
-      String(Math.max(0.2, Math.min(5, Math.round(timeoutMs) / 1000 / 2))),
-      // Trailer stays ASCII; body stays binary — never decode the whole stdout as utf8.
-      "-w",
-      "\n__CURL_META__%{http_code}\n%{content_type}",
-    ];
-    // Local vitals / loopback must not go through Clash etc. (returns 502).
-    if (isLoopbackHost(parsed.hostname) || connectAddress) {
-      args.push("--noproxy", "*");
-    }
-    if (connectAddress) {
-      const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
-      const address = connectAddress.includes(":") ? `[${connectAddress}]` : connectAddress;
-      args.push("--resolve", `${parsed.hostname}:${port}:${address}`);
-    }
-    const headerLines: string[] = [];
-    for (const [k, v] of Object.entries(headers)) {
-      const key = k.toLowerCase();
-      if (key === "content-length") continue;
-      // Let curl set form content-type when using -d; an explicit type + --data-binary
-      // has been observed to trigger DuckDuckGo HTTP 202 empty SERP pages.
-      if (bodyBuf && isFormBody && key === "content-type") continue;
-      headerLines.push(`${k}: ${v}`);
-    }
-    // Headers travel over an inherited pipe, never process argv. This preserves
-    // curl/SOCKS compatibility without exposing tenant credentials in `ps`.
-    if (headerLines.length > 0) args.push("-H", "@/dev/fd/3");
-    // Prefer -d (application/x-www-form-urlencoded) over --data-binary for search forms.
-    if (bodyBuf) args.push(isFormBody ? "-d" : "--data-binary", "@-");
-    args.push(url);
+  const headerLines: string[] = [];
+  for (const [k, v] of Object.entries(headers)) {
+    const key = k.toLowerCase();
+    if (key === "content-length") continue;
+    // Let curl set form content-type when using -d; an explicit type + --data-binary
+    // has been observed to trigger DuckDuckGo HTTP 202 empty SERP pages.
+    if (bodyBuf && isFormBody && key === "content-type") continue;
+    headerLines.push(`${k}: ${v}`);
+  }
+  const bodyFile = bodyBuf ? await createCurlBodyFile(bodyBuf) : null;
+  let closeBodyFilePromise: Promise<void> | null = null;
+  const closeBodyFile = () => {
+    if (!bodyFile) return Promise.resolve();
+    closeBodyFilePromise ??= bodyFile.handle.close();
+    return closeBodyFilePromise;
+  };
 
-    const child = spawn("curl", args, {
-      env: process.env,
-      stdio: ["pipe", "pipe", "pipe", "pipe"],
-    });
-    const chunks: Buffer[] = [];
-    const errChunks: Buffer[] = [];
-    let settled = false;
-    let receivedBytes = 0;
-    const settleReject = (err: Error) => {
-      if (settled) return;
-      settled = true;
-      signal?.removeEventListener("abort", onAbort);
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // ignore
+  try {
+    return await new Promise((resolve, reject) => {
+      const args = [
+        "-sS",
+        "-X",
+        method,
+        "--max-time",
+        // curl accepts fractional seconds (e.g. 1.2); keep aligned with AbortSignal budget.
+        String(Math.max(0.2, Math.round(timeoutMs) / 1000)),
+        "--connect-timeout",
+        String(Math.max(0.2, Math.min(5, Math.round(timeoutMs) / 1000 / 2))),
+        // Trailer stays ASCII; body stays binary — never decode the whole stdout as utf8.
+        "-w",
+        "\n__CURL_META__%{http_code}\n%{content_type}",
+      ];
+      // Local vitals / loopback must not go through Clash etc. (returns 502).
+      if (isLoopbackHost(parsed.hostname) || connectAddress) {
+        args.push("--noproxy", "*");
       }
-      reject(err);
-    };
-    const onAbort = () => {
-      settleReject(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
-    };
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
-    signal?.addEventListener("abort", onAbort, { once: true });
-    child.stdout.on("data", (c: Buffer) => {
-      receivedBytes += c.byteLength;
-      if (receivedBytes > maxResponseBytes + 1_024) {
-        settleReject(new Error(`response exceeded ${maxResponseBytes} bytes`));
-        return;
+      if (connectAddress) {
+        const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+        const address = connectAddress.includes(":") ? `[${connectAddress}]` : connectAddress;
+        args.push("--resolve", `${parsed.hostname}:${port}:${address}`);
       }
-      chunks.push(c);
-    });
-    child.stderr.on("data", (c) => errChunks.push(c));
-    child.on("error", (err) => settleReject(err instanceof Error ? err : new Error(String(err))));
-    child.on("close", (code) => {
-      if (settled) return;
-      settled = true;
-      signal?.removeEventListener("abort", onAbort);
-      if (code !== 0) {
-        reject(new Error(`curl exit ${code}: ${Buffer.concat(errChunks).toString("utf8")}`));
-        return;
-      }
-      const raw = Buffer.concat(chunks);
-      const marker = Buffer.from("\n__CURL_META__");
-      const idx = raw.lastIndexOf(marker);
-      if (idx < 0) {
-        reject(new Error("curl missing status trailer"));
-        return;
-      }
-      const body = raw.subarray(0, idx);
-      if (body.byteLength > maxResponseBytes) {
-        reject(new Error(`response exceeded ${maxResponseBytes} bytes`));
-        return;
-      }
-      const metaLines = raw.subarray(idx + marker.length).toString("utf8").trim().split("\n");
-      const status = Number((metaLines[0] ?? "").trim());
-      const contentType = (metaLines[1] ?? "").trim() || "application/octet-stream";
-      if (!Number.isFinite(status) || status <= 0) {
-        reject(new Error(`curl invalid status: ${metaLines[0] ?? ""}`));
-        return;
-      }
-      resolve(
-        new Response(body, {
-          status,
-          headers: { "content-type": contentType },
-        }),
-      );
-    });
-    if (bodyBuf) {
-      child.stdin.write(bodyBuf);
-    }
-    child.stdin.end();
-    const headerPipe = child.stdio[3] as NodeJS.WritableStream | null;
-    if (headerPipe) {
-      headerPipe.on("error", () => {
-        // curl may exit before consuming the inherited header pipe.
+      // curl supports reading its header file from stdin, keeping tenant secrets
+      // out of both argv and disk. Request bodies use an inherited regular fd:
+      // Node's extra `stdio: "pipe"` is a socketpair on Linux, which curl cannot
+      // consume reliably via /dev/fd/3.
+      if (headerLines.length > 0) args.push("-H", "@-");
+      // Prefer -d (application/x-www-form-urlencoded) over --data-binary for search forms.
+      if (bodyFile) args.push(isFormBody ? "-d" : "--data-binary", "@/dev/fd/3");
+      args.push(url);
+
+      const child = spawn("curl", args, {
+        env: process.env,
+        stdio: bodyFile
+          ? ["pipe", "pipe", "pipe", bodyFile.handle.fd]
+          : ["pipe", "pipe", "pipe"],
       });
-      if (headerLines.length > 0) headerPipe.write(`${headerLines.join("\n")}\n`);
-      headerPipe.end();
-    }
-  });
+      // spawn() duplicates numeric descriptors synchronously; close the parent's
+      // descriptor immediately and let the child own its copy.
+      void closeBodyFile().catch(() => undefined);
+      const childStdout = child.stdout;
+      const childStderr = child.stderr;
+      const childStdin = child.stdin;
+      if (!childStdout || !childStderr || !childStdin) {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // ignore
+        }
+        reject(new Error("curl stdio pipes unavailable"));
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      const errChunks: Buffer[] = [];
+      let settled = false;
+      let receivedBytes = 0;
+      const settleReject = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // ignore
+        }
+        reject(err);
+      };
+      const onAbort = () => {
+        settleReject(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+      };
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+      childStdout.on("data", (c: Buffer) => {
+        receivedBytes += c.byteLength;
+        if (receivedBytes > maxResponseBytes + 1_024) {
+          settleReject(new Error(`response exceeded ${maxResponseBytes} bytes`));
+          return;
+        }
+        chunks.push(c);
+      });
+      childStderr.on("data", (c) => errChunks.push(c));
+      child.on("error", (err) =>
+        settleReject(err instanceof Error ? err : new Error(String(err))),
+      );
+      child.on("close", (code) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        if (code !== 0) {
+          reject(new Error(`curl exit ${code}: ${Buffer.concat(errChunks).toString("utf8")}`));
+          return;
+        }
+        const raw = Buffer.concat(chunks);
+        const marker = Buffer.from("\n__CURL_META__");
+        const idx = raw.lastIndexOf(marker);
+        if (idx < 0) {
+          reject(new Error("curl missing status trailer"));
+          return;
+        }
+        const body = raw.subarray(0, idx);
+        if (body.byteLength > maxResponseBytes) {
+          reject(new Error(`response exceeded ${maxResponseBytes} bytes`));
+          return;
+        }
+        const metaLines = raw.subarray(idx + marker.length).toString("utf8").trim().split("\n");
+        const status = Number((metaLines[0] ?? "").trim());
+        const contentType = (metaLines[1] ?? "").trim() || "application/octet-stream";
+        if (!Number.isFinite(status) || status <= 0) {
+          reject(new Error(`curl invalid status: ${metaLines[0] ?? ""}`));
+          return;
+        }
+        resolve(
+          new Response(body, {
+            status,
+            headers: { "content-type": contentType },
+          }),
+        );
+      });
+      if (headerLines.length > 0) childStdin.write(`${headerLines.join("\n")}\n`);
+      childStdin.end();
+    });
+  } finally {
+    await closeBodyFile().catch(() => undefined);
+  }
 }
 
 /**
