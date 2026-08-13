@@ -41,14 +41,12 @@ export async function GET(request: Request) {
       configured: process.env.NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL,
       nodeEnv: process.env.NODE_ENV,
     });
-    if (!inference.ok) {
-      return NextResponse.json(
-        { code: "50302", message: "企业推理入口未配置，请联系管理员" },
-        { status: 503 },
-      );
+    if (inference.ok) {
+      data.inferenceApiBaseUrl = inference.url;
+      data.inferenceTransport = "gateway-direct-v1";
+    } else {
+      data.reauthRequiredForDirect = true;
     }
-    data.inferenceApiBaseUrl = inference.url;
-    data.inferenceTransport = "gateway-direct-v1";
   }
 
   return NextResponse.json({

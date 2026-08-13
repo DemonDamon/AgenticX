@@ -899,7 +899,7 @@ declare global {
           baseUrl?: string;
         }) => void,
       ) => () => void;
-      onUserAccountLoginTimeout: (cb: () => void) => () => void;
+      onUserAccountLoginTimeout: (cb: (payload?: { error?: string }) => void) => () => void;
       updateSplashStage: (
         stage:
           | "initializing"

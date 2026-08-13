@@ -58,4 +58,26 @@ describe("GET /api/desktop/bootstrap", () => {
     expect(json.data.inferenceApiBaseUrl).toBeUndefined();
     expect(json.data.reauthRequiredForDirect).toBe(true);
   });
+
+  it("falls back to portal proxy when direct gateway base is not configured", async () => {
+    process.env.NODE_ENV = "production";
+    delete process.env.NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL;
+    resolveDesktopIdentity.mockResolvedValue({
+      userId: "u1",
+      tenantId: "t1",
+      deptId: "d1",
+      email: "a@example.invalid",
+      displayName: "A",
+      tokenId: 1,
+      scopes: ["workspace:chat", "desktop:managed"],
+    });
+    const { GET } = await import("../route");
+    const res = await GET(new Request("https://portal.example.com/api/desktop/bootstrap"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.apiBaseUrl).toBe("https://portal.example.com/api/desktop/v1");
+    expect(json.data.inferenceApiBaseUrl).toBeUndefined();
+    expect(json.data.inferenceTransport).toBeUndefined();
+    expect(json.data.reauthRequiredForDirect).toBe(true);
+  });
 });

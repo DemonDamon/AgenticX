@@ -3,6 +3,7 @@ import {
   computePollMaxTicks,
   enterpriseFetchErrorMessage,
   isVerificationUrlSameOrigin,
+  normalizeVerificationUrlForPortalOrigin,
   parseDeviceInitPayload,
   validatePortalOriginForBrowserLogin,
 } from "../electron/enterprise-browser-login";
@@ -35,6 +36,21 @@ describe("enterprise-browser-login helpers", () => {
       isVerificationUrlSameOrigin(
         "http://127.0.0.1:3000",
         "http://localhost:3000/auth/desktop?device=abc",
+      ),
+    ).toBe(true);
+  });
+
+  it("normalizes proxy-returned verification URL to the user-entered portal origin", () => {
+    expect(
+      normalizeVerificationUrlForPortalOrigin(
+        "https://test-pal.cmccfund.com:3000",
+        "http://test-pal.cmccfund.com/auth/desktop?device=abc",
+      ),
+    ).toBe("https://test-pal.cmccfund.com:3000/auth/desktop?device=abc");
+    expect(
+      isVerificationUrlSameOrigin(
+        "https://test-pal.cmccfund.com:3000",
+        "http://test-pal.cmccfund.com/auth/desktop?device=abc",
       ),
     ).toBe(true);
   });

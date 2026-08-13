@@ -64,6 +64,7 @@ import {
   computePollMaxTicks,
   enterpriseFetchErrorMessage,
   isVerificationUrlSameOrigin,
+  normalizeVerificationUrlForPortalOrigin,
   normalizePortalOrigin,
   parseDeviceInitPayload,
   validatePortalOriginForBrowserLogin,
@@ -479,29 +480,31 @@ async function finishEnterpriseLogin(
     };
   };
   if (!bootResp.ok || !bootJson.data) {
-    return {
-      ok: false,
-      error:
-        bootResp.status === 401
-          ? "企业登录已失效，请重新登录"
-          : bootResp.status === 503
-            ? bootJson.message || "企业推理入口未配置，请联系管理员"
-            : bootJson.message || `拉取模型失败（HTTP ${bootResp.status}）`,
-    };
+    if (bootResp.status === 401) {
+      return { ok: false, error: "企业登录已失效，请重新登录" };
+    }
+    // 503 = inference base not configured; fall through to portal proxy
+    // so the login is not blocked by gateway infrastructure gaps.
+    if (bootResp.status !== 503) {
+      return {
+        ok: false,
+        error: bootJson.message || `拉取模型失败（HTTP ${bootResp.status}）`,
+      };
+    }
   }
   const inference = selectEnterpriseInferenceBase({
-    apiBaseUrl: bootJson.data.apiBaseUrl || `${baseUrl}/api/desktop/v1`,
-    inferenceApiBaseUrl: bootJson.data.inferenceApiBaseUrl,
-    inferenceTransport: bootJson.data.inferenceTransport,
-    reauthRequiredForDirect: bootJson.data.reauthRequiredForDirect,
+    apiBaseUrl: `${baseUrl}/api/desktop/v1`,
+    inferenceApiBaseUrl: bootJson.data?.inferenceApiBaseUrl,
+    inferenceTransport: bootJson.data?.inferenceTransport,
+    reauthRequiredForDirect: bootJson.data?.reauthRequiredForDirect,
   });
   if (!inference.ok) {
     return { ok: false, error: inference.error };
   }
-  const models = (bootJson.data.models ?? [])
+  const models = (bootJson.data?.models ?? [])
     .map((m) => String(m.id ?? "").trim())
     .filter(Boolean);
-  const user = bootJson.data.user ?? fallbackUser ?? {};
+  const user = bootJson.data?.user ?? fallbackUser ?? {};
   const cfg = loadAgxConfig();
   delete cfg.agx_account;
   applyEnterpriseProvider(cfg, {
@@ -518,7 +521,7 @@ async function finishEnterpriseLogin(
       tenant_id: user.tenantId ?? "",
       dept_id: user.deptId ?? null,
     },
-    strict: bootJson.data.policy?.strict !== false,
+    strict: bootJson.data?.policy?.strict !== false,
   });
   saveAgxConfig(cfg);
   return {
@@ -7346,10 +7349,14 @@ function registerIpc(): void {
             error: initJson.message || `无法开始企业登录（HTTP ${initResp.status}）`,
           };
         }
-        if (!isVerificationUrlSameOrigin(baseUrl, parsed.verificationUrl)) {
+        const verificationUrl = normalizeVerificationUrlForPortalOrigin(
+          baseUrl,
+          parsed.verificationUrl,
+        );
+        if (!verificationUrl || !isVerificationUrlSameOrigin(baseUrl, verificationUrl)) {
           return { ok: false, error: "组织返回的登录地址无效，请检查组织地址" };
         }
-        void shell.openExternal(parsed.verificationUrl);
+        void shell.openExternal(verificationUrl);
         const maxTicks = computePollMaxTicks(parsed.expiresIn, parsed.pollIntervalMs);
         userAccountLoginContext = {
           baseUrl,
@@ -7412,7 +7419,9 @@ function registerIpc(): void {
               clearUserAccountLoginPoll();
               const finished = await finishEnterpriseLogin(ctx.baseUrl, pat, pollJson.data.user);
               if (!finished.ok) {
-                mainWindow?.webContents.send("user-account-login-timeout", {});
+                mainWindow?.webContents.send("user-account-login-timeout", {
+                  error: finished.error,
+                });
                 return;
               }
               mainWindow?.webContents.send("user-account-changed", {
@@ -7429,7 +7438,7 @@ function registerIpc(): void {
         return {
           ok: true,
           deviceId: parsed.deviceId,
-          openUrl: parsed.verificationUrl,
+          openUrl: verificationUrl,
         };
       } catch (err) {
         clearUserAccountLoginPoll();
@@ -7623,30 +7632,29 @@ function registerIpc(): void {
         };
       };
       if (!bootResp.ok || !bootJson.data) {
-        return {
-          ok: false,
-          error:
-            bootResp.status === 401
-              ? "企业登录已失效，请重新登录"
-              : bootResp.status === 503
-                ? bootJson.message || "企业推理入口未配置，请联系管理员"
-                : bootJson.message || `刷新失败（HTTP ${bootResp.status}）`,
-          unauthorized: bootResp.status === 401,
-        };
+        if (bootResp.status === 401) {
+          return { ok: false, error: "企业登录已失效，请重新登录", unauthorized: true };
+        }
+        if (bootResp.status !== 503) {
+          return {
+            ok: false,
+            error: bootJson.message || `刷新失败（HTTP ${bootResp.status}）`,
+          };
+        }
       }
       const inference = selectEnterpriseInferenceBase({
-        apiBaseUrl: bootJson.data.apiBaseUrl || `${baseUrl}/api/desktop/v1`,
-        inferenceApiBaseUrl: bootJson.data.inferenceApiBaseUrl,
-        inferenceTransport: bootJson.data.inferenceTransport,
-        reauthRequiredForDirect: bootJson.data.reauthRequiredForDirect,
+        apiBaseUrl: bootJson.data?.apiBaseUrl || `${baseUrl}/api/desktop/v1`,
+        inferenceApiBaseUrl: bootJson.data?.inferenceApiBaseUrl,
+        inferenceTransport: bootJson.data?.inferenceTransport,
+        reauthRequiredForDirect: bootJson.data?.reauthRequiredForDirect,
       });
       if (!inference.ok) {
         return { ok: false, error: inference.error };
       }
-      const models = (bootJson.data.models ?? [])
+      const models = (bootJson.data?.models ?? [])
         .map((m) => String(m.id ?? "").trim())
         .filter(Boolean);
-      const user = bootJson.data.user ?? ent?.user ?? {};
+      const user = bootJson.data?.user ?? ent?.user ?? {};
       applyEnterpriseProvider(cfg, {
         portalOrigin: baseUrl,
         inferenceBaseUrl: inference.baseUrl,
@@ -7663,7 +7671,7 @@ function registerIpc(): void {
           dept_id:
             (user as { deptId?: string | null }).deptId ?? ent?.user?.dept_id ?? null,
         },
-        strict: bootJson.data.policy?.strict !== false,
+        strict: bootJson.data?.policy?.strict !== false,
       });
       saveAgxConfig(cfg);
       return {

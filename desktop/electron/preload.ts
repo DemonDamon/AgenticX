@@ -975,8 +975,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("user-account-changed", handler);
     return () => ipcRenderer.removeListener("user-account-changed", handler);
   },
-  onUserAccountLoginTimeout: (cb: () => void): (() => void) => {
-    const handler = () => cb();
+  onUserAccountLoginTimeout: (cb: (payload?: { error?: string }) => void): (() => void) => {
+    const handler = (_e: unknown, payload?: { error?: string }) => cb(payload);
     ipcRenderer.on("user-account-login-timeout", handler);
     return () => ipcRenderer.removeListener("user-account-login-timeout", handler);
   },

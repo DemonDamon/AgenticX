@@ -1616,10 +1616,11 @@ export function App() {
         baseUrl: String(payload.baseUrl ?? ""),
       });
     });
-    const offTimeout = window.agenticxDesktop.onUserAccountLoginTimeout(() => {
+    const offTimeout = window.agenticxDesktop.onUserAccountLoginTimeout((payload) => {
+      const error = String(payload?.error ?? "").trim();
       void window.agenticxDesktop.confirmDialog({
-        title: "登录等待超时",
-        message: "未在有效时间内完成企业登录确认。请打开「设置 → 用户账号」重新登录。",
+        title: error ? "企业登录失败" : "登录等待超时",
+        message: error || "未在有效时间内完成企业登录确认。请打开「设置 → 用户账号」重新登录。",
         confirmText: "确定",
       });
     });

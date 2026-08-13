@@ -45,20 +45,40 @@ function isLoopbackHostname(hostname: string): boolean {
 }
 
 export function isVerificationUrlSameOrigin(portalOrigin: string, verificationUrl: string): boolean {
+  return normalizeVerificationUrlForPortalOrigin(portalOrigin, verificationUrl) !== null;
+}
+
+export function normalizeVerificationUrlForPortalOrigin(
+  portalOrigin: string,
+  verificationUrl: string,
+): string | null {
   try {
     const portal = new URL(normalizePortalOrigin(portalOrigin));
     const verify = new URL(String(verificationUrl || "").trim());
-    if (!verify.pathname.startsWith("/auth/desktop")) return false;
-    if (portal.origin === verify.origin) return true;
+    if (!verify.pathname.startsWith("/auth/desktop")) return null;
+    if (portal.origin === verify.origin) return verify.toString();
     // Local org URLs often mix localhost vs 127.0.0.1; treat loopback hosts as equivalent.
-    return (
+    if (
       portal.protocol === verify.protocol &&
       portal.port === verify.port &&
       isLoopbackHostname(portal.hostname) &&
       isLoopbackHostname(verify.hostname)
-    );
+    ) {
+      return verify.toString();
+    }
+
+    // Some external proxies terminate HTTPS but forward X-Forwarded-Proto=http or
+    // strip the public port from X-Forwarded-Host. Keep the user-entered org
+    // origin as the authority while only accepting the expected auth path.
+    const sameHostname = portal.hostname.toLowerCase() === verify.hostname.toLowerCase();
+    const compatiblePort = !verify.port || portal.port === verify.port;
+    if (portal.protocol === "https:" && sameHostname && compatiblePort) {
+      return `${portal.origin}${verify.pathname}${verify.search}${verify.hash}`;
+    }
+
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
