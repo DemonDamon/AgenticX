@@ -274,8 +274,8 @@ describe("web search tool loop", () => {
         model: "m",
         messages: [
           { role: "user", content: "https://arxiv.org/pdf/2606.19348 读一下" },
-          { role: "assistant", content: "已阅读摘要" },
-          { role: "user", content: "Table 8 的通过率是什么？" },
+          { role: "assistant", content: "已阅读摘要，其中还有 Table 8。" },
+          { role: "user", content: "这张表的通过率是什么？" },
         ],
         agenticx_web_search: true,
       },
@@ -298,6 +298,60 @@ describe("web search tool loop", () => {
     expect(readPage).toHaveBeenCalledTimes(1);
     expect(bodies).toHaveLength(2);
     expect(JSON.stringify(bodies[1])).toContain("Table 8 Pass Rate Internal Engineers 80 percent");
+  });
+
+  it("reads a matching historical document before contextual query rewrite", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return sseResponse('data: {"choices":[{"delta":{"content":"Figure 11 compares win rates [1]"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const executeSearch = vi.fn(async () => []);
+    const readPage = vi.fn(async (reference): Promise<DirectPageView> => ({
+      reference,
+      title: "Paper title",
+      text: [
+        "Paper title and abstract.",
+        "Introduction and background.",
+        "Figure 11: Win-rate comparison across analysis, generation, and editing tasks.",
+      ].join("\n\n"),
+      rawChars: 160,
+      coverage: "full_html",
+      backend: "native",
+    }));
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "https://arxiv.org/pdf/2606.19348 读一下" },
+          { role: "assistant", content: "已阅读摘要" },
+          { role: "user", content: "Figure 11 讲了什么？" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+        readPage,
+      },
+    );
+
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(executeSearch).not.toHaveBeenCalled();
+    expect(bodies).toHaveLength(1);
+    expect(JSON.stringify(bodies[0])).toContain("Figure 11: Win-rate comparison");
+    const text = await response.text();
+    expect(text).toContain('"reason":"direct_page_html"');
+    expect(text).toContain('"queryResolutionMs":0');
   });
 
   it("strictly filters arXiv fallback search and uses the alternate provider", async () => {

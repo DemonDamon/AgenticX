@@ -1031,6 +1031,83 @@ export async function runWebSearchTurn(
   }
 
   const modelName = typeof rest.model === "string" ? rest.model : undefined;
+  const directReadStartedAt = Date.now();
+  const directView = directReference
+    ? await (deps.readPage ?? readDirectPage)(directReference, {
+        signal: deps.signal,
+      }).catch((error) => {
+        console.warn(
+          "[web-search] direct page read failed:",
+          error instanceof Error ? error.message : error,
+        );
+        return null;
+      })
+    : null;
+  const directReadMs = Date.now() - directReadStartedAt;
+
+  const respondFromDirectPage = async (
+    evidenceQueries: string[],
+    resolvedQuery: string,
+    queryResolutionMs: number,
+  ): Promise<Response | null> => {
+    if (!directReference || !directView) return null;
+    const evidence = selectDirectPageEvidence(
+      directView,
+      evidenceQueries
+        .map((value) => value.trim())
+        .filter((value, index, all) => value && all.indexOf(value) === index),
+      Math.min(DIRECT_PAGE_CONTEXT_CHARS, resolveInjectionBudgetChars(modelName)),
+    );
+    // An explicit URL always gets a bounded preview. A historical URL is used
+    // only when generic passage retrieval found supporting text; otherwise the
+    // contextual rewrite and ordinary search lanes remain available.
+    if (!directReference.explicitInCurrentTurn && !evidence.matched) return null;
+
+    const source = directPageSource(evidence);
+    const trace: WebSearchTracePayload = {
+      version: 1,
+      decision: "search",
+      reason:
+        evidence.coverage === "abstract_only"
+          ? "direct_page_abstract_only"
+          : "direct_page_html",
+      resolvedQuery,
+      facets: [
+        {
+          query: resolvedQuery || directReference.displayUrl,
+          providerIds: ["direct-page"],
+          hitCount: 1,
+          uniqueHosts: 1,
+        },
+      ],
+      providerCalls: 0,
+      timings: {
+        queryResolutionMs: Math.max(0, queryResolutionMs),
+        retrievalMs: Math.max(0, directReadMs),
+      },
+    };
+    try {
+      const upstream = await callGatewayStream(deps, {
+        ...rest,
+        stream: true,
+        messages: withCurrentTimeContext(
+          withDirectPageContext(originalMessages, evidence),
+        ),
+      });
+      return pipeWithSourcesAppendix(upstream, [source], [], trace);
+    } catch (error) {
+      return gatewayUnavailableResponse(
+        error instanceof Error ? error.message : "gateway unreachable",
+      );
+    }
+  };
+
+  if (directReference) {
+    const directQuery = directReference.question || directReference.displayUrl;
+    const directResponse = await respondFromDirectPage([directQuery], directQuery, 0);
+    if (directResponse) return directResponse;
+  }
+
   const queryResolutionStartedAt = Date.now();
   const explicitQuery = directReference?.explicitInCurrentTurn
     ? directReference.question || directReference.displayUrl
@@ -1073,77 +1150,21 @@ export async function runWebSearchTurn(
   // Only the first user turn may search the current text verbatim. Once recent
   // context exists, provider retrieval is gated on a standalone agent rewrite.
 
-  const searchFn = deps.executeSearch ?? executeWebSearch;
-  const directReadStartedAt = Date.now();
-  if (directReference) {
-    const view = await (deps.readPage ?? readDirectPage)(directReference, {
-      signal: deps.signal,
-    }).catch((error) => {
-      console.warn(
-        "[web-search] direct page read failed:",
-        error instanceof Error ? error.message : error,
-      );
-      return null;
-    });
-    if (view) {
-      const evidenceQueries = [directReference.question, query, ...searchQueries]
-        .map((value) => value.trim())
-        .filter((value, index, all) => value && all.indexOf(value) === index);
-      const evidence = selectDirectPageEvidence(
-        view,
-        evidenceQueries,
-        Math.min(DIRECT_PAGE_CONTEXT_CHARS, resolveInjectionBudgetChars(modelName)),
-      );
-      // An explicit URL always gets a bounded preview. A historical URL is used
-      // only when generic passage retrieval found supporting text; otherwise the
-      // ordinary search lane remains available for a genuine topic change.
-      if (directReference.explicitInCurrentTurn || evidence.matched) {
-        const source = directPageSource(evidence);
-        const trace: WebSearchTracePayload = {
-          version: 1,
-          decision: "search",
-          reason:
-            evidence.coverage === "abstract_only"
-              ? "direct_page_abstract_only"
-              : "direct_page_html",
-          resolvedQuery: query,
-          facets: [
-            {
-              query: query || directReference.displayUrl,
-              providerIds: ["direct-page"],
-              hitCount: 1,
-              uniqueHosts: 1,
-            },
-          ],
-          providerCalls: 0,
-          timings: {
-            queryResolutionMs: Math.max(0, queryResolutionMs),
-            retrievalMs: Math.max(0, Date.now() - directReadStartedAt),
-          },
-        };
-        try {
-          const upstream = await callGatewayStream(deps, {
-            ...rest,
-            stream: true,
-            messages: withCurrentTimeContext(
-              withDirectPageContext(originalMessages, evidence),
-            ),
-          });
-          return pipeWithSourcesAppendix(upstream, [source], [], trace);
-        } catch (error) {
-          return gatewayUnavailableResponse(
-            error instanceof Error ? error.message : "gateway unreachable",
-          );
-        }
-      }
-    }
-
-    if (directReference.explicitInCurrentTurn && directReference.arxivId) {
-      query = `arXiv ${directReference.arxivId}`;
-      searchQueries = [query];
-    }
+  if (directReference && directView) {
+    const directResponse = await respondFromDirectPage(
+      [directReference.question, query, ...searchQueries],
+      query,
+      queryResolutionMs,
+    );
+    if (directResponse) return directResponse;
   }
 
+  if (directReference?.explicitInCurrentTurn && directReference.arxivId) {
+    query = `arXiv ${directReference.arxivId}`;
+    searchQueries = [query];
+  }
+
+  const searchFn = deps.executeSearch ?? executeWebSearch;
   let hits: WebSearchHit[] = [];
   let rankedGroups: WebSearchHit[][] = searchQueries.map(() => []);
   let searchFailed = false;
