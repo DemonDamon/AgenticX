@@ -7,11 +7,11 @@ Suggested-Impl-Model: composer-2.5-fast
 
 ## Goal
 
-Fix Enterprise Desktop account-bound chat failures where managed model ids containing nested slashes are rejected by the Gateway with `managed model must be provider/model`, and prevent Desktop bootstrap from returning an internal `0.0.0.0` API base URL.
+Fix Enterprise Desktop account-bound chat failures where managed model ids containing nested slashes are rejected by the Gateway with `managed model must be provider/model`, prevent Desktop bootstrap from returning an internal or lossy API base URL, and stop Desktop refresh from overwriting a user-entered Portal origin with a bootstrap proxy URL that returns HTTP 502.
 
 ## Architecture
 
-Desktop stores Enterprise-managed models as visible model ids such as `provider/model` or `provider/family/model`. When Desktop talks through the Web Portal proxy, the proxy must enforce visibility but must not destructively split nested model ids before forwarding to the Gateway. Bootstrap must return a client-facing Portal API base derived from request Host / forwarded headers, not from the internal Next.js request URL.
+Desktop stores Enterprise-managed models as visible model ids such as `provider/model` or `provider/family/model`. When Desktop talks through the Web Portal proxy, the proxy must enforce visibility but must not destructively split nested model ids before forwarding to the Gateway. Bootstrap must return a client-facing Portal API base derived from request Host / forwarded headers, not from the internal Next.js request URL. Desktop refresh must prefer the already validated organization origin as the trusted Portal proxy base, using bootstrap `apiBaseUrl` only as a compatibility fallback.
 
 ## Tech Stack
 
@@ -24,6 +24,7 @@ Desktop stores Enterprise-managed models as visible model ids such as `provider/
 - Preserve full Enterprise managed model ids in the Desktop Portal proxy request body.
 - Keep existing live model visibility checks before forwarding.
 - Generate Desktop `apiBaseUrl` from a client-facing origin.
+- Preserve Desktop's user-entered / previously validated organization origin during Enterprise refresh.
 - Add focused regression tests for nested managed model ids and reverse-proxy bootstrap origin.
 
 ## Out of Scope
@@ -47,6 +48,8 @@ The correct proxy behavior is to leave the body model as `chinamobile/kimi/kimi-
 
 The second issue is independent but in the same login/bootstrap path: `enterprise/apps/web-portal/src/app/api/desktop/bootstrap/route.ts` used `new URL(request.url).origin`, which can reflect an internal listener such as `http://0.0.0.0:3000` under container or reverse-proxy deployment. `enterprise/apps/web-portal/src/lib/desktop-device-auth.ts` already provides `requestOriginFromRequest()` for this exact client-facing-origin need.
 
+The follow-up HTTP 502 after the first fix was traced to Desktop config being refreshed to a lossy proxy base such as `http://portal-host/api/desktop/v1`, while the user-entered organization origin `https://portal-host:3000` successfully returned HTTP 200 for the same PAT and model. The login path in `desktop/electron/main.ts` already used the validated `baseUrl`, but `enterprise-refresh` trusted `bootJson.data?.apiBaseUrl` first. Refresh must use the local validated Portal origin for proxy transport.
+
 ## File Structure
 
 - Modify: `enterprise/apps/web-portal/src/lib/gateway-forward.ts`
@@ -57,6 +60,12 @@ The second issue is independent but in the same login/bootstrap path: `enterpris
   - Responsibility: Return Desktop bootstrap metadata, including `apiBaseUrl`.
 - Modify: `enterprise/apps/web-portal/src/app/api/desktop/bootstrap/__tests__/route.test.ts`
   - Responsibility: Regression tests for bootstrap transport and client-facing API base URL.
+- Modify: `desktop/electron/enterprise-routing.ts`
+  - Responsibility: Select the Desktop inference base from direct Gateway, trusted Portal proxy, or legacy bootstrap proxy inputs.
+- Modify: `desktop/electron/main.ts`
+  - Responsibility: Persist Enterprise provider config during login and refresh.
+- Modify: `desktop/tests/enterprise-routing.test.ts`
+  - Responsibility: Regression tests for Desktop Enterprise inference base selection.
 
 ## Functional Requirements
 
@@ -104,6 +113,42 @@ import { requestOriginFromRequest } from "../../../../lib/desktop-device-auth";
 
 const origin = requestOriginFromRequest(request);
 const apiBaseUrl = `${origin}/api/desktop/v1`;
+```
+
+### FR-3: Preserve Trusted Portal Proxy Base During Desktop Refresh
+
+Desktop `enterprise-refresh` must not prefer `bootJson.data?.apiBaseUrl` over the organization origin that the user entered and Desktop already validated. For Portal proxy transport, `${baseUrl}/api/desktop/v1` is the trusted base.
+
+Acceptance criteria:
+
+- When bootstrap returns `apiBaseUrl: "http://portal.example.invalid/api/desktop/v1"` and Desktop has `portalApiBaseUrl: "https://portal.example.invalid:3000/api/desktop/v1"`, the selected inference base is `https://portal.example.invalid:3000/api/desktop/v1`.
+- Direct Gateway transport still wins when `inferenceApiBaseUrl` is present.
+- Existing old-bootstrap fallback behavior remains intact when no trusted Portal base is supplied.
+
+Implementation anchor:
+
+```ts
+// desktop/electron/enterprise-routing.ts
+export type EnterpriseBootstrapTransport = {
+  apiBaseUrl?: string;
+  portalApiBaseUrl?: string;
+  inferenceApiBaseUrl?: string;
+  inferenceTransport?: string;
+  reauthRequiredForDirect?: boolean;
+};
+
+const proxy = String(bootstrap.portalApiBaseUrl ?? bootstrap.apiBaseUrl ?? "").trim();
+```
+
+```ts
+// desktop/electron/main.ts
+const inference = selectEnterpriseInferenceBase({
+  apiBaseUrl: bootJson.data?.apiBaseUrl || `${baseUrl}/api/desktop/v1`,
+  portalApiBaseUrl: `${baseUrl}/api/desktop/v1`,
+  inferenceApiBaseUrl: bootJson.data?.inferenceApiBaseUrl,
+  inferenceTransport: bootJson.data?.inferenceTransport,
+  reauthRequiredForDirect: bootJson.data?.reauthRequiredForDirect,
+});
 ```
 
 ## Tasks
@@ -187,12 +232,28 @@ Steps:
 - [ ] Replace `new URL(request.url).origin` with `requestOriginFromRequest(request)`.
 - [ ] Leave `resolveDesktopInferenceApiBase()` and direct Gateway eligibility logic unchanged.
 
-### Task 5: Verify
+### Task 5: Preserve Trusted Portal Base During Desktop Refresh
+
+**Files:**
+
+- Modify: `desktop/electron/enterprise-routing.ts`
+- Modify: `desktop/electron/main.ts`
+- Modify: `desktop/tests/enterprise-routing.test.ts`
+
+Steps:
+
+- [ ] Extend `EnterpriseBootstrapTransport` with `portalApiBaseUrl`.
+- [ ] Make `selectEnterpriseInferenceBase()` choose `portalApiBaseUrl` before `apiBaseUrl` when direct Gateway is absent.
+- [ ] Pass `${baseUrl}/api/desktop/v1` as `portalApiBaseUrl` from both `finishEnterpriseLogin()` and `enterprise-refresh`.
+- [ ] Add a regression test proving trusted Portal base wins over bootstrap proxy base.
+
+### Task 6: Verify
 
 **Commands:**
 
 ```bash
 pnpm -C enterprise/apps/web-portal test src/lib/gateway-forward.test.ts src/app/api/desktop/bootstrap/__tests__/route.test.ts
+pnpm -C desktop exec vitest run tests/enterprise-routing.test.ts
 ```
 
 Expected output:
@@ -200,6 +261,8 @@ Expected output:
 ```text
 Test Files  2 passed (2)
 Tests  7 passed (7)
+Test Files  1 passed (1)
+Tests  4 passed (4)
 ```
 
 Also run IDE lint diagnostics on:
@@ -208,6 +271,9 @@ Also run IDE lint diagnostics on:
 - `enterprise/apps/web-portal/src/lib/gateway-forward.test.ts`
 - `enterprise/apps/web-portal/src/app/api/desktop/bootstrap/route.ts`
 - `enterprise/apps/web-portal/src/app/api/desktop/bootstrap/__tests__/route.test.ts`
+- `desktop/electron/enterprise-routing.ts`
+- `desktop/electron/main.ts`
+- `desktop/tests/enterprise-routing.test.ts`
 
 Expected result: no linter errors.
 

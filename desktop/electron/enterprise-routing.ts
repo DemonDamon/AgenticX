@@ -1,5 +1,6 @@
 export type EnterpriseBootstrapTransport = {
   apiBaseUrl?: string;
+  portalApiBaseUrl?: string;
   inferenceApiBaseUrl?: string;
   inferenceTransport?: string;
   reauthRequiredForDirect?: boolean;
@@ -29,7 +30,7 @@ export function selectEnterpriseInferenceBase(
   bootstrap: EnterpriseBootstrapTransport,
 ): EnterpriseInferenceSelection | EnterpriseInferenceSelectionError {
   const inference = String(bootstrap.inferenceApiBaseUrl ?? "").trim();
-  const proxy = String(bootstrap.apiBaseUrl ?? "").trim();
+  const proxy = String(bootstrap.portalApiBaseUrl ?? bootstrap.apiBaseUrl ?? "").trim();
   const reauthRequiredForDirect = Boolean(bootstrap.reauthRequiredForDirect);
 
   if (inference) {

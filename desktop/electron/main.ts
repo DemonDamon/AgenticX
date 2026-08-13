@@ -494,6 +494,7 @@ async function finishEnterpriseLogin(
   }
   const inference = selectEnterpriseInferenceBase({
     apiBaseUrl: `${baseUrl}/api/desktop/v1`,
+    portalApiBaseUrl: `${baseUrl}/api/desktop/v1`,
     inferenceApiBaseUrl: bootJson.data?.inferenceApiBaseUrl,
     inferenceTransport: bootJson.data?.inferenceTransport,
     reauthRequiredForDirect: bootJson.data?.reauthRequiredForDirect,
@@ -7644,6 +7645,7 @@ function registerIpc(): void {
       }
       const inference = selectEnterpriseInferenceBase({
         apiBaseUrl: bootJson.data?.apiBaseUrl || `${baseUrl}/api/desktop/v1`,
+        portalApiBaseUrl: `${baseUrl}/api/desktop/v1`,
         inferenceApiBaseUrl: bootJson.data?.inferenceApiBaseUrl,
         inferenceTransport: bootJson.data?.inferenceTransport,
         reauthRequiredForDirect: bootJson.data?.reauthRequiredForDirect,

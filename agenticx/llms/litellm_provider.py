@@ -79,6 +79,37 @@ def normalize_litellm_model_for_openai_compat_gateway(
     return f"openai/{name}"
 
 
+def _bare_model_name(model: str) -> str:
+    return str(model or "").strip().lower().split("/")[-1]
+
+
+def _extract_thinking_type(kwargs: Dict[str, Any]) -> Optional[str]:
+    thinking = kwargs.get("thinking")
+    if isinstance(thinking, dict):
+        thinking_type = thinking.get("type")
+        if isinstance(thinking_type, str):
+            return thinking_type.lower()
+
+    extra_body = kwargs.get("extra_body")
+    if isinstance(extra_body, dict):
+        extra_thinking = extra_body.get("thinking")
+        if isinstance(extra_thinking, dict):
+            thinking_type = extra_thinking.get("type")
+            if isinstance(thinking_type, str):
+                return thinking_type.lower()
+    return None
+
+
+def _normalize_temperature_for_model(model: str, kwargs: Dict[str, Any]) -> None:
+    """Apply model-specific temperature constraints before LiteLLM sends the request."""
+    bare = _bare_model_name(model)
+    if bare.startswith("kimi-k3"):
+        kwargs["temperature"] = 1.0
+        return
+    if bare.startswith("kimi-k2.6") or bare.startswith("kimi-k2.5"):
+        kwargs["temperature"] = 0.6 if _extract_thinking_type(kwargs) == "disabled" else 1.0
+
+
 def _is_private_base_url(base_url: Optional[str]) -> bool:
     """Return True when *base_url* resolves to a private/loopback/intranet address.
 
@@ -204,6 +235,7 @@ class LiteLLMProvider(BaseLLMProvider):
             timeout = _resolve_llm_round_timeout_seconds_from_config()
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        _normalize_temperature_for_model(self.model, kwargs)
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
         _no_proxy_client = _build_no_proxy_openai_client(self.api_key, self.base_url)
@@ -244,6 +276,7 @@ class LiteLLMProvider(BaseLLMProvider):
             timeout = _resolve_llm_round_timeout_seconds_from_config()
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        _normalize_temperature_for_model(self.model, kwargs)
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
         _no_proxy_async_client = _build_no_proxy_async_openai_client(self.api_key, self.base_url)
@@ -283,6 +316,7 @@ class LiteLLMProvider(BaseLLMProvider):
             timeout = _resolve_llm_round_timeout_seconds_from_config()
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        _normalize_temperature_for_model(self.model, kwargs)
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
         response_stream = litellm.completion(
@@ -354,6 +388,7 @@ class LiteLLMProvider(BaseLLMProvider):
             stream_options = {}
         # Ask provider to include usage in streamed chunks when available.
         stream_options["include_usage"] = True
+        _normalize_temperature_for_model(self.model, kwargs)
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
         model_lower = str(self.model or "").lower()
@@ -479,6 +514,7 @@ class LiteLLMProvider(BaseLLMProvider):
             timeout = _resolve_llm_round_timeout_seconds_from_config()
         max_retries = kwargs.pop("max_retries", self.max_retries)
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
+        _normalize_temperature_for_model(self.model, kwargs)
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
         _no_proxy_async_client = _build_no_proxy_async_openai_client(self.api_key, self.base_url)
