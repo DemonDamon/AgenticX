@@ -300,6 +300,87 @@ describe("web search tool loop", () => {
     expect(JSON.stringify(bodies[1])).toContain("Table 8 Pass Rate Internal Engineers 80 percent");
   });
 
+  it("expands a weak cross-language document hit before answering", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      bodies.push(body);
+      const headers = new Headers(init?.headers);
+      if (headers.get("x-agenticx-trace-stage") === "chat.search-query-rewrite") {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  need_search: true,
+                  resolved_query: "注意力机制细节和评测数据",
+                  search_queries: [
+                    "hybrid attention mechanism details",
+                    "evaluation results benchmark figures",
+                  ],
+                  confidence: 0.99,
+                }),
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"已找到相关正文 [1]"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const executeSearch = vi.fn(async () => []);
+    const readPage = vi.fn(async (reference): Promise<DirectPageView> => ({
+      reference,
+      title: "Efficient Long Context Models",
+      text: [
+        "Cited by: Figure 8.",
+        "The hybrid attention mechanism combines compressed sparse attention with heavily compressed attention for efficient long contexts.",
+        "Evaluation results compare model quality, inference efficiency, and long-context benchmark performance across several settings and figures.",
+      ].join("\n\n"),
+      rawChars: 300,
+      coverage: "full_html",
+      backend: "native",
+    }));
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "https://example.com/paper 读一下" },
+          { role: "assistant", content: "已读取摘要。" },
+          {
+            role: "user",
+            content: "我对注意力机制细节和评测数据感兴趣，结合 figure 解读",
+          },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+          maxSearchCalls: 3,
+        }),
+        executeSearch,
+        readPage,
+      },
+    );
+
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(executeSearch).not.toHaveBeenCalled();
+    expect(bodies).toHaveLength(2);
+    expect(JSON.stringify(bodies[0])).toContain("target_document");
+    expect(JSON.stringify(bodies[1])).toContain("hybrid attention mechanism");
+    expect(JSON.stringify(bodies[1])).toContain("Evaluation results compare model quality");
+    const text = await response.text();
+    expect(text).toContain('"reason":"direct_page_html"');
+    expect(text).toContain('"providerCalls":0');
+  });
+
   it("reads a matching historical document before contextual query rewrite", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {

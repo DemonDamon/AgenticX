@@ -47,6 +47,8 @@ export type DirectPageEvidence = {
   text: string;
   coverage: DirectPageView["coverage"];
   matched: boolean;
+  strongMatch: boolean;
+  queryCoverage: number;
   passageIndexes: number[];
 };
 
@@ -415,15 +417,17 @@ function splitLongText(text: string, maxChars: number): string[] {
 export function chunkDirectPageText(text: string, maxChars = PASSAGE_CHARS): string[] {
   const passages: string[] = [];
   let current = "";
+  let pendingParagraphBreak = false;
   const flush = () => {
     const value = current.trim();
     if (value) passages.push(value);
     current = "";
+    pendingParagraphBreak = false;
   };
   for (const raw of text.split("\n")) {
     const paragraph = raw.trim();
     if (!paragraph) {
-      flush();
+      pendingParagraphBreak = current.length > 0;
       continue;
     }
     if (paragraph.length > maxChars) {
@@ -431,8 +435,11 @@ export function chunkDirectPageText(text: string, maxChars = PASSAGE_CHARS): str
       passages.push(...splitLongText(paragraph, maxChars));
       continue;
     }
-    if (current && current.length + paragraph.length + 1 > maxChars) flush();
-    current = current ? `${current}\n${paragraph}` : paragraph;
+    const separator = current ? (pendingParagraphBreak ? "\n\n" : "\n") : "";
+    if (current && current.length + separator.length + paragraph.length > maxChars) flush();
+    const nextSeparator = current ? (pendingParagraphBreak ? "\n\n" : "\n") : "";
+    current = `${current}${nextSeparator}${paragraph}`;
+    pendingParagraphBreak = false;
   }
   flush();
   return passages;
@@ -470,13 +477,57 @@ function isMixedAsciiIdentifier(token: string): boolean {
   return hasLetter && hasDigit;
 }
 
+const DIRECT_PAGE_MIN_QUERY_COVERAGE = 0.35;
+const DIRECT_PAGE_MIN_MATCHED_QUERY_TOKENS = 2;
+const DIRECT_PAGE_MIN_SUBSTANTIVE_TOKENS = 8;
+
+function uniqueTokens(text: string): string[] {
+  return [...new Set(tokenize(text))];
+}
+
+function assessDirectPageQueryCoverage(
+  query: string,
+  documentTokens: Set<string>,
+): { strongMatch: boolean; queryCoverage: number } {
+  const tokens = uniqueTokens(query);
+  if (tokens.length === 0) return { strongMatch: false, queryCoverage: 0 };
+  const matchedTokens = tokens.filter((token) => documentTokens.has(token));
+  const queryCoverage = matchedTokens.length / tokens.length;
+  const identifiers = tokens.filter(isMixedAsciiIdentifier);
+  const exactIdentifiersCovered =
+    identifiers.length > 0 && identifiers.every((identifier) => documentTokens.has(identifier));
+  const enoughMatchedTokens =
+    matchedTokens.length >= Math.min(DIRECT_PAGE_MIN_MATCHED_QUERY_TOKENS, tokens.length);
+  return {
+    strongMatch:
+      exactIdentifiersCovered ||
+      (enoughMatchedTokens && queryCoverage >= DIRECT_PAGE_MIN_QUERY_COVERAGE),
+    queryCoverage,
+  };
+}
+
 export function selectDirectPageEvidence(
   view: DirectPageView,
   queries: string[],
   maxChars = DIRECT_PAGE_CONTEXT_CHARS,
 ): DirectPageEvidence {
   const passages = chunkDirectPageText(view.text);
-  const query = compactWhitespace(queries.filter(Boolean).join(" "));
+  const normalizedQueries = queries
+    .map((value) => compactWhitespace(value))
+    .filter((value, index, all) => value && all.indexOf(value) === index);
+  const query = compactWhitespace(normalizedQueries.join(" "));
+  const passageTokenSets = passages.map((passage) => new Set(tokenize(passage)));
+  const documentTokens = new Set(passageTokenSets.flatMap((tokens) => [...tokens]));
+  const queryQualities = normalizedQueries.map((value) =>
+    assessDirectPageQueryCoverage(value, documentTokens),
+  );
+  const quality = {
+    strongMatch: queryQualities.some((row) => row.strongMatch),
+    queryCoverage: queryQualities.reduce(
+      (best, row) => Math.max(best, row.queryCoverage),
+      0,
+    ),
+  };
   const ranked = rankTextPassages(query, passages);
   const matched = (ranked[0]?.score ?? 0) > 0;
   let indexes: number[];
@@ -502,18 +553,40 @@ export function selectDirectPageEvidence(
     for (let index = 0; index + 1 < queryTokens.length && probes.length < 24; index += 1) {
       probes.push(`${queryTokens[index]} ${queryTokens[index + 1]}`);
     }
+    const isSubstantive = (index: number) =>
+      (passageTokenSets[index]?.size ?? 0) >= DIRECT_PAGE_MIN_SUBSTANTIVE_TOKENS;
+    const facetRankings = normalizedQueries.map((facet, facetIndex) =>
+      queryQualities[facetIndex]?.strongMatch
+        ? rankTextPassages(facet, passages)
+            .filter((row) => row.score > 0 && isSubstantive(row.index))
+            .slice(0, 2)
+        : [],
+    );
+    const facetSeeds: typeof ranked = [];
+    for (let rank = 0; rank < 2; rank += 1) {
+      for (const rows of facetRankings) {
+        const row = rows[rank];
+        if (row) facetSeeds.push(row);
+      }
+    }
     const probeSeeds = probes
       .flatMap((probe) =>
         rankTextPassages(probe, passages)
-          .filter((row) => row.score > 0)
+          .filter((row) => {
+            if (row.score <= 0 || !isSubstantive(row.index)) return false;
+            const passageTokens = passageTokenSets[row.index];
+            return uniqueTokens(probe).every((token) => passageTokens?.has(token));
+          })
           .slice(0, 2),
       )
       .sort((a, b) => b.score - a.score || a.index - b.index)
       .slice(0, 8);
+    const substantiveRanked = ranked.filter((row) => isSubstantive(row.index)).slice(0, 6);
     const seeds = [
+      ...facetSeeds,
       ...identifierSeeds,
       ...probeSeeds,
-      ...ranked.slice(0, 6),
+      ...(substantiveRanked.length > 0 ? substantiveRanked : ranked.slice(0, 6)),
     ];
     // Add every core hit before surrounding context so separate identifiers in
     // one question receive fair coverage under a shared prompt budget.
@@ -533,6 +606,8 @@ export function selectDirectPageEvidence(
     text: rendered.text,
     coverage: view.coverage,
     matched,
+    strongMatch: matched && quality.strongMatch,
+    queryCoverage: quality.queryCoverage,
     passageIndexes: rendered.indexes,
   };
 }

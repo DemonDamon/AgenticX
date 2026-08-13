@@ -159,6 +159,48 @@ describe("direct public page", () => {
     expect(evidence.text).toContain("Table 2: Comparison of three reasoning modes");
   });
 
+  it("marks a one-token cross-language hit weak until document-language facets are added", () => {
+    const text = [
+      "Cited by: Figure 8.",
+      "Cited by: Figure 5 and another unrelated reference.",
+      "The hybrid attention mechanism combines compressed sparse attention with heavily compressed attention for efficient long contexts.",
+      "Evaluation results compare model quality, inference efficiency, and long-context benchmark performance across several settings and figures.",
+    ].join("\n\n");
+    const reference = resolveDirectPageReference([
+      { role: "user", content: "https://arxiv.org/pdf/2606.19348" },
+    ])!;
+    const view: DirectPageView = {
+      reference,
+      title: "Paper",
+      text,
+      rawChars: text.length,
+      coverage: "full_html",
+      backend: "native",
+    };
+
+    const raw = selectDirectPageEvidence(
+      view,
+      ["我想看注意力机制和评测数据，结合 figure 解读"],
+      4_000,
+    );
+    expect(raw.matched).toBe(true);
+    expect(raw.strongMatch).toBe(false);
+    expect(raw.queryCoverage).toBeLessThan(0.2);
+
+    const expanded = selectDirectPageEvidence(
+      view,
+      [
+        "我想看注意力机制和评测数据，结合 figure 解读",
+        "hybrid attention mechanism details",
+        "evaluation results benchmark figures",
+      ],
+      4_000,
+    );
+    expect(expanded.strongMatch).toBe(true);
+    expect(expanded.text).toContain("hybrid attention mechanism");
+    expect(expanded.text).toContain("Evaluation results compare model quality");
+  });
+
   it("falls back to leading passages when lexical retrieval has no match", () => {
     const passages = chunkDirectPageText(
       "Title\n\nAbstract text\n\nIntroduction text\n\nLate appendix sentinel",

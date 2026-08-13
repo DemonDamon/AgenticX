@@ -36,6 +36,7 @@ import {
   buildSearchQueryRewriteMessages,
   hasPriorSearchQueryLeakage,
   parseSearchQueryRewrite,
+  type SearchQueryRewriteOptions,
   type SearchQueryRewrite,
 } from "./follow-up";
 import { sanitizeHistoryForUpstream } from "./history-sanitize";
@@ -607,12 +608,14 @@ export async function resolveStandaloneSearchQuery(
   model: string | undefined,
   deps: GatewayFetchDeps,
   maxSearchCallsValue: unknown = DEFAULT_MAX_SEARCH_CALLS,
+  rewriteOptions: SearchQueryRewriteOptions = {},
 ): Promise<StandaloneSearchQueryOutcome> {
   const maxSearchCalls = normalizeMaxSearchCalls(maxSearchCallsValue);
   const rewriteMessages = buildSearchQueryRewriteMessages(
     messages,
     new Date(),
     maxSearchCalls,
+    rewriteOptions,
   );
   if (rewriteMessages) {
     return rewriteSearchQueryWithAi(
@@ -1061,7 +1064,7 @@ export async function runWebSearchTurn(
     // An explicit URL always gets a bounded preview. A historical URL is used
     // only when generic passage retrieval found supporting text; otherwise the
     // contextual rewrite and ordinary search lanes remain available.
-    if (!directReference.explicitInCurrentTurn && !evidence.matched) return null;
+    if (!directReference.explicitInCurrentTurn && !evidence.strongMatch) return null;
 
     const source = directPageSource(evidence);
     const trace: WebSearchTracePayload = {
@@ -1128,6 +1131,15 @@ export async function runWebSearchTurn(
         modelName,
         deps,
         cfg.maxSearchCalls,
+        directReference && directView
+          ? {
+              targetDocument: {
+                title: directView.title,
+                url: directReference.displayUrl,
+                sample: directView.text.slice(0, 2_000),
+              },
+            }
+          : {},
       );
   const queryResolutionMs = Date.now() - queryResolutionStartedAt;
   if (queryResolution.kind === "unresolved") {

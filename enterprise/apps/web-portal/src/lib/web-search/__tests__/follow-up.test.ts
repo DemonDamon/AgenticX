@@ -76,6 +76,30 @@ describe("contextual search-query rewrite", () => {
     expect(single?.[0]?.content).not.toContain("search_queries 应分别查询");
   });
 
+  it("reuses the query planner for document-language lexical facets", () => {
+    const messages = buildSearchQueryRewriteMessages(
+      [
+        { role: "user", content: "https://example.com/paper 读一下" },
+        { role: "assistant", content: "已读取摘要。" },
+        { role: "user", content: "我想了解注意力机制和评测数据" },
+      ],
+      new Date(2026, 7, 13, 9, 30, 0),
+      3,
+      {
+        targetDocument: {
+          title: "Efficient Long Context Models",
+          url: "https://example.com/paper",
+          sample: "Abstract: We introduce a hybrid attention mechanism.",
+        },
+      },
+    );
+
+    expect(messages?.[0]?.content).toContain("target_document 原文内部的词法选段");
+    expect(messages?.[0]?.content).toContain("search_queries 应使用最可能实际出现在原文中的语言");
+    expect(messages?.[1]?.content).toContain('"target_document"');
+    expect(messages?.[1]?.content).toContain("hybrid attention mechanism");
+  });
+
   it("extracts text from multimodal turns without leaking image payloads", () => {
     const messages = buildSearchQueryRewriteMessages([
       { role: "user", content: "比较王虹和邓煜的经历" },
