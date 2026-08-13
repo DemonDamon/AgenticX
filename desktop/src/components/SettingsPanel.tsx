@@ -65,6 +65,7 @@ import {
 import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt";
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
+import { filterAndRankSkills } from "../utils/skill-search";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
@@ -3639,13 +3640,7 @@ function SkillsTab() {
   );
   const globalSkillPool = items.filter((s) => effectiveSkillLocation(s) !== "project");
   const globalSkills = pinSkillFirst(
-    search.trim()
-      ? globalSkillPool.filter(
-          (s) =>
-            s.name.toLowerCase().includes(search.toLowerCase()) ||
-            s.description.toLowerCase().includes(search.toLowerCase()),
-        )
-      : globalSkillPool,
+    filterAndRankSkills(globalSkillPool, search),
     recentMarketSkillName,
   );
   const hasGlobalSkills = globalSkillPool.length > 0;
