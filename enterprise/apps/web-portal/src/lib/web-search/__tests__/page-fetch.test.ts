@@ -3,6 +3,7 @@ import {
   extractDocumentTitle,
   extractMainText,
   fetchPageContent,
+  fetchPageContentWithReason,
   fetchPagesBatch,
   MIN_USABLE_PAGE_CHARS,
 } from "../page-fetch";
@@ -92,6 +93,22 @@ describe("fetchPageContent", () => {
         backends: ["native"],
       }),
     ).resolves.toBeNull();
+  });
+
+  it("preserves too_short for callers that need an explicit fallback notice", async () => {
+    const short = "x".repeat(MIN_USABLE_PAGE_CHARS - 1);
+    const fetchImpl: DirectFetch = async () =>
+      new Response(`<article><p>${short}</p></article>`, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+
+    await expect(
+      fetchPageContentWithReason("https://example.com/short", {
+        fetchImpl,
+        backends: ["native"],
+      }),
+    ).resolves.toEqual({ page: null, failure: "too_short" });
   });
 
   it("returns null without throwing when fetchImpl throws", async () => {

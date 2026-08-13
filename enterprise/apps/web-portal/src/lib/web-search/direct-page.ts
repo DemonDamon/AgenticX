@@ -7,7 +7,11 @@
  * BM25 ranker.
  */
 
-import { fetchPageContent, type PageContent } from "./page-fetch";
+import {
+  fetchPageContentWithReason,
+  type PageContent,
+  type PageFetchFailure,
+} from "./page-fetch";
 import { normalizeWebSearchResultUrl } from "./provider-endpoint";
 import { rankTextPassages, tokenize } from "./rerank";
 import type { WebSearchHit } from "./providers";
@@ -364,7 +368,11 @@ function titleFromText(text: string, fallback: string): string {
 
 export async function readDirectPage(
   reference: DirectPageReference,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    onFailure?: (reason: PageFetchFailure) => void;
+  } = {},
 ): Promise<DirectPageView | null> {
   const shared = {
     signal: options.signal,
@@ -372,12 +380,13 @@ export async function readDirectPage(
     maxChars: DIRECT_PAGE_MAX_TEXT_CHARS,
     transientRetries: 0,
   };
-  const page = await fetchPageContent(reference.readUrl, {
+  const primaryAttempt = await fetchPageContentWithReason(reference.readUrl, {
     ...shared,
     ...(reference.adapterId === "arxiv"
       ? { backends: ["native"] as const, canonicalPublicUrl: true }
       : {}),
   });
+  const page = primaryAttempt.page;
   if (page) {
     return {
       reference,
@@ -388,14 +397,22 @@ export async function readDirectPage(
       backend: page.backend,
     };
   }
-  if (reference.adapterId !== "arxiv" || !reference.arxivId) return null;
+  if (reference.adapterId !== "arxiv" || !reference.arxivId) {
+    if (primaryAttempt.failure) options.onFailure?.(primaryAttempt.failure);
+    return null;
+  }
   const abstractUrl = `https://arxiv.org/abs/${reference.arxivId}`;
-  const abstractPage = await fetchPageContent(abstractUrl, {
+  const abstractAttempt = await fetchPageContentWithReason(abstractUrl, {
     ...shared,
     backends: ["native"],
     canonicalPublicUrl: true,
   });
-  if (!abstractPage) return null;
+  const abstractPage = abstractAttempt.page;
+  if (!abstractPage) {
+    const failure = abstractAttempt.failure ?? primaryAttempt.failure;
+    if (failure) options.onFailure?.(failure);
+    return null;
+  }
   return {
     reference,
     title: abstractPage.title?.trim() || titleFromText(abstractPage.text, reference.displayUrl),

@@ -125,7 +125,7 @@ function safeHost(url: string): string {
   }
 }
 
-type PageFetchAttempt = {
+export type PageFetchAttempt = {
   page: PageContent | null;
   failure?: PageFetchFailure;
 };
@@ -139,7 +139,7 @@ export async function fetchPageContent(
   return attempt.page;
 }
 
-async function fetchPageContentWithReason(
+export async function fetchPageContentWithReason(
   url: string,
   deps?: PageFetchDeps,
 ): Promise<PageFetchAttempt> {

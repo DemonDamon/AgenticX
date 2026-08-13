@@ -74,6 +74,7 @@ import {
   selectDirectPageEvidence,
   withDirectPageContext,
 } from "./direct-page";
+import type { PageFetchFailure } from "./page-fetch";
 
 export const WEB_SEARCH_TOOL = {
   type: "function",
@@ -138,6 +139,12 @@ export const WEB_SEARCH_TOOL_CHOICE = {
 
 const ADMIN_DISABLED_HINT = "> 管理员已关闭联网搜索。\n\n";
 const UNAVAILABLE_HINT = "> 联网搜索暂不可用，以下回答基于模型已有知识。\n\n";
+const INCOMPLETE_DIRECT_PAGE_HINT =
+  "> 该页面可能依赖动态渲染或限制自动访问，正文未完整读取；当前回答未使用该页完整正文。\n\n";
+const INCOMPLETE_DIRECT_PAGE_SYSTEM_HINT =
+  "## 本轮链接读取状态\n" +
+  "用户指定页面的正文未能完整提取，可能依赖动态渲染或限制自动访问。" +
+  "不得声称已打开、通读或直接读取该页面；若下方存在搜索结果，只能基于这些结果作答，证据不足时必须明确说明。";
 const QUERY_REWRITE_TIMEOUT_MS = 15_000;
 const QUERY_REWRITE_MAX_ATTEMPTS = 2;
 const QUERY_REWRITE_MAX_TOKENS = 256;
@@ -390,6 +397,24 @@ export function withSearchContext(
     return next;
   }
   return [{ role: "system", content: resultsBlock }, ...next];
+}
+
+function withIncompleteDirectPageContext(messages: ChatMessage[]): ChatMessage[] {
+  const next = messages.map((message) => ({ ...message }));
+  if (next[0]?.role === "system") {
+    const existing = typeof next[0].content === "string" ? next[0].content : "";
+    next[0] = {
+      ...next[0],
+      content: existing
+        ? `${existing}\n\n${INCOMPLETE_DIRECT_PAGE_SYSTEM_HINT}`
+        : INCOMPLETE_DIRECT_PAGE_SYSTEM_HINT,
+    };
+    return next;
+  }
+  return [
+    { role: "system", content: INCOMPLETE_DIRECT_PAGE_SYSTEM_HINT },
+    ...next,
+  ];
 }
 
 /** Attribute selected evidence to the facet that survived global URL dedupe. */
@@ -859,11 +884,13 @@ async function pipeWithSourcesAppendix(
   selected: WebSearchHit[],
   remainder: WebSearchHit[] = [],
   trace?: WebSearchTracePayload,
+  prefixText = "",
 ): Promise<Response> {
   const sourcesFrame =
     selected.length + remainder.length > 0 ? formatWebSearchSourcesSse(selected, remainder) : "";
   return pipeUpstreamSse(upstream, {
     sourcesFrame,
+    ...(prefixText ? { prefixText } : {}),
     ...(trace ? { traceFrame: formatWebSearchTraceSse(trace) } : {}),
   });
 }
@@ -1069,9 +1096,13 @@ export async function runWebSearchTurn(
 
   const modelName = typeof rest.model === "string" ? rest.model : undefined;
   const directReadStartedAt = Date.now();
+  let directReadFailure: PageFetchFailure | undefined;
   const directView = directReference
     ? await (deps.readPage ?? readDirectPage)(directReference, {
         signal: deps.signal,
+        onFailure: (reason) => {
+          directReadFailure = reason;
+        },
       }).catch((error) => {
         console.warn(
           "[web-search] direct page read failed:",
@@ -1081,6 +1112,11 @@ export async function runWebSearchTurn(
       })
     : null;
   const directReadMs = Date.now() - directReadStartedAt;
+  const incompleteDirectPage = Boolean(
+    directReference?.explicitInCurrentTurn &&
+      !directView &&
+      directReadFailure === "too_short",
+  );
 
   const respondFromDirectPage = async (
     evidenceQueries: string[],
@@ -1318,8 +1354,13 @@ export async function runWebSearchTurn(
     },
   };
 
+  const groundedMessages = searchFailed
+    ? originalMessages
+    : withSearchContext(originalMessages, selected, evidence);
   const messages = withCurrentTimeContext(
-    searchFailed ? originalMessages : withSearchContext(originalMessages, selected, evidence),
+    incompleteDirectPage
+      ? withIncompleteDirectPageContext(groundedMessages)
+      : groundedMessages,
   );
 
   let upstream: Response;
@@ -1334,7 +1375,17 @@ export async function runWebSearchTurn(
   }
 
   if (searchFailed) {
-    return pipeWithPrefix(upstream, UNAVAILABLE_HINT, trace);
+    return pipeWithPrefix(
+      upstream,
+      `${incompleteDirectPage ? INCOMPLETE_DIRECT_PAGE_HINT : ""}${UNAVAILABLE_HINT}`,
+      trace,
+    );
   }
-  return pipeWithSourcesAppendix(upstream, selected, remainder, trace);
+  return pipeWithSourcesAppendix(
+    upstream,
+    selected,
+    remainder,
+    trace,
+    incompleteDirectPage ? INCOMPLETE_DIRECT_PAGE_HINT : "",
+  );
 }

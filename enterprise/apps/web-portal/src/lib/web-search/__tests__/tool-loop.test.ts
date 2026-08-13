@@ -12,7 +12,7 @@ import {
   withSearchContext,
 } from "../tool-loop";
 import { executeWebSearch, type WebSearchHit } from "../providers";
-import type { DirectPageView } from "../direct-page";
+import { readDirectPage, type DirectPageView } from "../direct-page";
 
 type ExecuteSearchConfig = Parameters<typeof executeWebSearch>[2];
 
@@ -498,6 +498,70 @@ describe("web search tool loop", () => {
     const text = await response.text();
     expect(text).toContain("https://arxiv.org/abs/2606.19348v1");
     expect(text).not.toContain("2606.19349");
+  });
+
+  it("discloses a short dynamic page and constrains the search fallback", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return sseResponse(
+        'data: {"choices":[{"delta":{"content":"基于搜索结果回答 [1]"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+    const executeSearch = vi.fn(async () => [
+      {
+        title: "可核验结果",
+        url: "https://search.example/result",
+        snippet: "搜索结果正文摘要",
+      },
+    ]);
+    const readPage = vi.fn(
+      async (
+        _reference: Parameters<typeof readDirectPage>[0],
+        options: Parameters<typeof readDirectPage>[1],
+      ) => {
+        options?.onFailure?.("too_short");
+        return null;
+      },
+    );
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: "https://example.com/dynamic 帮我总结这个页面",
+          },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+        readPage,
+      },
+    );
+
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    expect(bodies).toHaveLength(1);
+    const gatewayBody = JSON.stringify(bodies[0]);
+    expect(gatewayBody).toContain("正文未能完整提取");
+    expect(gatewayBody).toContain("不得声称已打开、通读或直接读取该页面");
+
+    const text = await response.text();
+    expect(text).toContain("该页面可能依赖动态渲染或限制自动访问");
+    expect(text).toContain("agenticx_web_search_sources");
+    expect(text).toContain("https://search.example/result");
   });
 
   it("runs server-side search first and strips agenticx_web_search / tools on final stream", async () => {
