@@ -62,7 +62,7 @@ import {
   DEFAULT_MAX_SEARCH_CALLS,
   normalizeMaxSearchCalls,
 } from "./search-call-budget";
-import { classifyWebSearchNeed } from "./search-necessity";
+import { classifyWebSearchFastPath } from "./search-necessity";
 import {
   DIRECT_PAGE_CONTEXT_CHARS,
   directPageSource,
@@ -1023,14 +1023,14 @@ export async function runWebSearchTurn(
   // does, contextual completion below is always delegated to the rewrite agent.
   const queryForSkip = extractLastUserQuery(queryMessages);
   const alwaysSearch = webSearchAlwaysOn();
-  const skip = alwaysSearch || directReference?.explicitInCurrentTurn
+  const fastPath = alwaysSearch || directReference?.explicitInCurrentTurn
     ? null
-    : classifyWebSearchNeed({
+    : classifyWebSearchFastPath({
         query: queryForSkip,
         rawQuery: extractLastUserRawText(queryMessages),
       });
-  if (skip?.need === "skip") {
-    return respondWithoutSearch(skip.reason, { resolvedQuery: queryForSkip });
+  if (fastPath?.action === "skip") {
+    return respondWithoutSearch(fastPath.reason, { resolvedQuery: queryForSkip });
   }
 
   const modelName = typeof rest.model === "string" ? rest.model : undefined;

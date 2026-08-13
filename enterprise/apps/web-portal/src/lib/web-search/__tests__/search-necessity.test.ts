@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { classifyWebSearchNeed, shouldSkipWebSearch } from "../search-necessity";
+import {
+  classifyWebSearchFastPath,
+  shouldSkipWebSearch,
+} from "../search-necessity";
 
-describe("classifyWebSearchNeed", () => {
+describe("classifyWebSearchFastPath", () => {
   it("skips greetings / thanks / confirmations (AC-1)", () => {
     const cases: Array<[string, "greeting"]> = [
       ["你好", "greeting"],
@@ -15,14 +18,17 @@ describe("classifyWebSearchNeed", () => {
       ["晚安", "greeting"],
     ];
     for (const [query, reason] of cases) {
-      expect(classifyWebSearchNeed({ query }), query).toEqual({ need: "skip", reason });
+      expect(classifyWebSearchFastPath({ query }), query).toEqual({
+        action: "skip",
+        reason,
+      });
     }
   });
 
   it("skips assistant meta questions (AC-1)", () => {
     for (const query of ["你是谁", "你能做什么", "你是什么模型"]) {
-      expect(classifyWebSearchNeed({ query }), query).toEqual({
-        need: "skip",
+      expect(classifyWebSearchFastPath({ query }), query).toEqual({
+        action: "skip",
         reason: "assistant_meta",
       });
     }
@@ -30,8 +36,8 @@ describe("classifyWebSearchNeed", () => {
 
   it("skips pure datetime questions (AC-1)", () => {
     for (const query of ["今天几号啊", "现在几点"]) {
-      expect(classifyWebSearchNeed({ query }), query).toEqual({
-        need: "skip",
+      expect(classifyWebSearchFastPath({ query }), query).toEqual({
+        action: "skip",
         reason: "datetime",
       });
     }
@@ -39,8 +45,8 @@ describe("classifyWebSearchNeed", () => {
 
   it("skips pure arithmetic (AC-1)", () => {
     for (const query of ["1+1=?", "(3+4)*2"]) {
-      expect(classifyWebSearchNeed({ query }), query).toEqual({
-        need: "skip",
+      expect(classifyWebSearchFastPath({ query }), query).toEqual({
+        action: "skip",
         reason: "arithmetic",
       });
     }
@@ -48,25 +54,25 @@ describe("classifyWebSearchNeed", () => {
 
   it("skips attachment-only turns (AC-2)", () => {
     expect(
-      classifyWebSearchNeed({
+      classifyWebSearchFastPath({
         query: "2026年度预算.xlsx",
         rawQuery: "--- 附件: 2026年度预算.xlsx ---\n<table text>",
       }),
-    ).toEqual({ need: "skip", reason: "attachment_only" });
+    ).toEqual({ action: "skip", reason: "attachment_only" });
 
     expect(
-      classifyWebSearchNeed({
+      classifyWebSearchFastPath({
         query: "总结一下",
         rawQuery: "总结一下\n--- 附件: a.pdf ---\nlong body",
       }),
-    ).toEqual({ need: "skip", reason: "attachment_only" });
+    ).toEqual({ action: "skip", reason: "attachment_only" });
 
     expect(
-      classifyWebSearchNeed({
+      classifyWebSearchFastPath({
         query: "Summarize",
         rawQuery: "Summarize\n--- Attachment: a.pdf ---\nlong body",
       }),
-    ).toEqual({ need: "skip", reason: "attachment_only" });
+    ).toEqual({ action: "skip", reason: "attachment_only" });
   });
 
   it("does not skip informational queries (AC-3)", () => {
@@ -80,32 +86,40 @@ describe("classifyWebSearchNeed", () => {
       "2026 年 AI 大事件",
     ];
     for (const query of mustSearch) {
-      expect(classifyWebSearchNeed({ query }), query).toEqual({ need: "search" });
+      expect(classifyWebSearchFastPath({ query }), query).toEqual({
+        action: "continue",
+      });
     }
 
     expect(
-      classifyWebSearchNeed({
+      classifyWebSearchFastPath({
         query: "结合这个文件，再帮我搜一下最新的行业政策",
         rawQuery:
           "结合这个文件，再帮我搜一下最新的行业政策\n--- 附件: a.pdf ---\nbody",
       }),
-    ).toEqual({ need: "search" });
+    ).toEqual({ action: "continue" });
   });
 
   it("does not skip implicit factual queries without lookup keywords", () => {
     for (const query of ["王虹最近怎么样", "介绍一下王虹的工作经历", "深圳有什么好吃的"]) {
-      expect(classifyWebSearchNeed({ query }), query).toEqual({ need: "search" });
+      expect(classifyWebSearchFastPath({ query }), query).toEqual({
+        action: "continue",
+      });
     }
   });
 
   it("length guard: long text containing 你好 still searches (AC-4)", () => {
     const long = `${"你好，".repeat(10)}${"这是一段很长的用户问题，需要联网核实事实。".repeat(12)}`;
     expect(long.length).toBeGreaterThan(200);
-    expect(classifyWebSearchNeed({ query: long })).toEqual({ need: "search" });
+    expect(classifyWebSearchFastPath({ query: long })).toEqual({
+      action: "continue",
+    });
   });
 
   it("empty query without attachment falls through to search", () => {
-    expect(classifyWebSearchNeed({ query: "" })).toEqual({ need: "search" });
+    expect(classifyWebSearchFastPath({ query: "" })).toEqual({
+      action: "continue",
+    });
   });
 
   it("shouldSkipWebSearch mirrors classify", () => {

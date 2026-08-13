@@ -15,6 +15,13 @@ import { stripEmptyAssistantMessages } from "../../../../lib/chat-completion-san
 import { withCurrentTimeContext } from "../../../../lib/current-time";
 import { withPortalCapabilityContext } from "../../../../lib/portal-capabilities";
 import {
+  NO_TURN_REQUESTS,
+  selectTurnPlan,
+  type AutomaticDeepResearchSelection,
+  type TurnPlan,
+  type TurnRequests,
+} from "../../../../lib/chat-routing/turn-plan";
+import {
   runWebSearchTurn,
   type WebSearchChatMessage,
 } from "../../../../lib/web-search/tool-loop";
@@ -102,11 +109,7 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   let providerHint = "";
   let forwardBody = rawBody;
-  let enableWebSearch = false;
-  let enableDeepResearch = false;
-  let enableDeepResearchAuto = false;
-  let resolvedDeepResearchQuery: string | undefined;
-  let deepResearchIntentConfidence: DeepResearchIntentConfidence | undefined;
+  let turnRequests: TurnRequests = NO_TURN_REQUESTS;
   let parsedBody: Record<string, unknown> | null = null;
   // portal 把模型 id 编码为 "<provider>/<model>"；admin 配置好的 provider 与上游 endpoint 一一对应。
   // gateway 用 model 字段查表，所以这里把 provider 拆出来放请求头，body.model 仅保留模型名。
@@ -129,9 +132,11 @@ export async function POST(request: Request) {
 
   if (parsedRequest) {
     const parsed = parsedRequest;
-    enableWebSearch = parsed.agenticx_web_search === true;
-    enableDeepResearch = parsed.agenticx_deep_research === true;
-    enableDeepResearchAuto = parsed.agenticx_deep_research_auto === true;
+    turnRequests = {
+      webSearchRequested: parsed.agenticx_web_search === true,
+      manualDeepResearchRequested: parsed.agenticx_deep_research === true,
+      automaticDeepResearchRequested: parsed.agenticx_deep_research_auto === true,
+    };
     const {
       agenticx_web_search: _stripWs,
       agenticx_deep_research: _stripDr,
@@ -220,18 +225,22 @@ export async function POST(request: Request) {
     ordinaryTenantConfigPromise ??= loadTenantWebSearchConfig(session.tenantId);
     return ordinaryTenantConfigPromise;
   };
-  let deepResearchAvailable = true;
-  if ((enableDeepResearch || enableDeepResearchAuto) && parsedBody) {
+  let tenantDeepResearchEnabled = true;
+  if (
+    (turnRequests.manualDeepResearchRequested ||
+      turnRequests.automaticDeepResearchRequested) &&
+    parsedBody
+  ) {
     try {
       tenantSearchConfigSnapshot = await loadTenantWebSearchConfigStrict(session.tenantId);
       tenantSearchConfigLoaded = true;
-      deepResearchAvailable = tenantSearchConfigSnapshot?.deepResearchEnabled ?? true;
+      tenantDeepResearchEnabled = tenantSearchConfigSnapshot?.deepResearchEnabled ?? true;
     } catch (error) {
       console.error(
         "[deep-research] tenant policy unavailable:",
         error instanceof Error ? error.message : error,
       );
-      if (enableDeepResearch) {
+      if (turnRequests.manualDeepResearchRequested) {
         return NextResponse.json(
           {
             error: {
@@ -244,23 +253,27 @@ export async function POST(request: Request) {
       }
       // Automatic mode is fail-closed for the expensive path. Ordinary web
       // search may still use its established best-effort configuration path.
-      deepResearchAvailable = false;
-      enableDeepResearchAuto = false;
+      tenantDeepResearchEnabled = false;
       console.info("[deep-research] automatic route skipped (policy_unavailable)");
     }
-    if (!deepResearchAvailable && enableDeepResearchAuto && !enableDeepResearch) {
+    if (
+      tenantSearchConfigLoaded &&
+      !tenantDeepResearchEnabled &&
+      turnRequests.automaticDeepResearchRequested &&
+      !turnRequests.manualDeepResearchRequested
+    ) {
       // Automatic mode silently falls back to the ordinary web-search policy.
       // A manual request stays enabled so the orchestrator can return its
       // existing administrator-disabled explanation without a router call.
-      enableDeepResearchAuto = false;
       console.info("[deep-research] automatic route skipped (tenant_disabled)");
     }
   }
 
+  let automaticDeepResearchSelection: AutomaticDeepResearchSelection | undefined;
   if (
-    deepResearchAvailable &&
-    enableDeepResearchAuto &&
-    !enableDeepResearch &&
+    tenantDeepResearchEnabled &&
+    turnRequests.automaticDeepResearchRequested &&
+    !turnRequests.manualDeepResearchRequested &&
     parsedBody
   ) {
     const decision = await decideAutoRunDeepResearch(
@@ -274,12 +287,13 @@ export async function POST(request: Request) {
         model: typeof parsedBody.model === "string" ? parsedBody.model : undefined,
       },
     );
-    enableDeepResearch = decision.runDeepResearch;
     if (decision.runDeepResearch) {
-      resolvedDeepResearchQuery = decision.resolvedQuery;
-      deepResearchIntentConfidence = {
-        routeConfidence: decision.routeConfidence,
-        queryConfidence: decision.queryConfidence,
+      automaticDeepResearchSelection = {
+        researchQuery: decision.resolvedQuery,
+        intentConfidence: {
+          routeConfidence: decision.routeConfidence,
+          queryConfidence: decision.queryConfidence,
+        },
       };
     }
     console.info(
@@ -287,14 +301,20 @@ export async function POST(request: Request) {
     );
   }
 
+  let turnPlan: TurnPlan = selectTurnPlan(
+    turnRequests,
+    automaticDeepResearchSelection,
+  );
+
   // Automatic routing already resolved the contextual query in its one model
   // call. Manual activation intentionally skips the decision gate, but still
   // uses the shared resolver when history is needed to fill missing context.
   if (
-    deepResearchAvailable &&
-    enableDeepResearch &&
+    tenantDeepResearchEnabled &&
+    turnPlan.mode === "deep" &&
+    turnPlan.source === "manual" &&
     parsedBody &&
-    !resolvedDeepResearchQuery
+    !turnPlan.researchQuery
   ) {
     const queryResolution = await resolveManualDeepResearchQuery(
       Array.isArray(parsedBody.messages)
@@ -321,20 +341,29 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     } else {
-      resolvedDeepResearchQuery = queryResolution.value.query;
       // Manual activation is an explicit high-confidence routing choice; the
       // existing resolver confidence still decides whether its context is safe.
-      deepResearchIntentConfidence = {
+      const intentConfidence: DeepResearchIntentConfidence = {
         routeConfidence: 1,
         queryConfidence: queryResolution.value.confidence,
       };
+      turnPlan = {
+        mode: "deep",
+        source: "manual",
+        researchQuery: queryResolution.value.query,
+        intentConfidence,
+      };
       console.info(
-        `[deep-research] standalone query source=${queryResolution.value.source} confidence=${queryResolution.value.confidence.toFixed(2)} chars=${resolvedDeepResearchQuery.length}`,
+        `[deep-research] standalone query source=${queryResolution.value.source} confidence=${queryResolution.value.confidence.toFixed(2)} chars=${queryResolution.value.query.length}`,
       );
     }
   }
 
-  if (enableDeepResearch && parsedBody) {
+  console.info(
+    `[chat-routing] selected mode=${turnPlan.mode} source=${turnPlan.source}`,
+  );
+
+  if (turnPlan.mode === "deep" && parsedBody) {
     return runDeepResearchTurn(withSanitizedMessages(parsedBody), {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
@@ -344,8 +373,8 @@ export async function POST(request: Request) {
       tenantId: session.tenantId,
       userId: session.userId,
       sessionId: chatSessionId,
-      resolvedUserQuery: resolvedDeepResearchQuery,
-      intentConfidence: deepResearchIntentConfidence,
+      resolvedUserQuery: turnPlan.researchQuery,
+      intentConfidence: turnPlan.intentConfidence,
       refreshAccessToken: async () => {
         if (!refreshToken) return null;
         try {
@@ -380,7 +409,7 @@ export async function POST(request: Request) {
     });
   }
 
-  if (enableWebSearch && parsedBody) {
+  if (turnPlan.mode === "web" && parsedBody) {
     try {
       return await runWebSearchTurn(withSanitizedMessages(parsedBody), {
         url: GATEWAY_COMPLETIONS_URL,
