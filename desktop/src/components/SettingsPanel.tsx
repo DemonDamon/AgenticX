@@ -61,6 +61,7 @@ import {
   RECOMMENDED_TIER_LABEL,
   type RecommendedSkillTier,
 } from "../data/recommended-skills";
+import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt";
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
@@ -3358,7 +3359,17 @@ function SkillsTab() {
         }
         const sid = created.session_id;
         const paneId = addPane(null, "Near", sid);
-        setForwardAutoReply({ paneId, sessionId: sid, text });
+        // Skill-market install is a real user-initiated turn. Do not inherit
+        // forwardAutoReply's merge-forward defaults (suppressUserEcho /
+        // skipUserHistory = true), or the pane looks like it started with no
+        // instruction while bash_exec already runs.
+        setForwardAutoReply({
+          paneId,
+          sessionId: sid,
+          text,
+          suppressUserEcho: false,
+          skipUserHistory: false,
+        });
         closeSettings();
       } catch (e) {
         const msg = String(e);
@@ -3377,12 +3388,14 @@ function SkillsTab() {
   };
 
   const onRecommendedSkillInstall = (skillId: string) => {
-    if (skillId === "officecli") {
-      const prompt = buildOfficeCliInstallPrompt();
-      if (!prompt.trim()) return;
-      void runInstallPromptInMetaAgent(prompt);
-      return;
-    }
+    const prompt =
+      skillId === "officecli"
+        ? buildOfficeCliInstallPrompt()
+        : skillId === "archscribe"
+          ? buildArchscribeInstallPrompt()
+          : "";
+    if (!prompt.trim()) return;
+    void runInstallPromptInMetaAgent(prompt);
   };
 
   const filteredRecommendedSkills =
