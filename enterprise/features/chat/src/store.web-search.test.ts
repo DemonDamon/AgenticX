@@ -159,6 +159,55 @@ describe("chat store webSearch request wiring", () => {
     expect(client.requests.at(-1)?.webSearch).toBe(true);
   });
 
+  it("uses the explicit composer mode when retrying after volatile mode state was lost", async () => {
+    const client = new CapturingClient();
+    await useChatStore.getState().sendMessage(client, { content: "read this URL", webSearch: true });
+
+    const assistantId = useChatStore.getState().messages.find((m) => m.role === "assistant")?.id;
+    expect(assistantId).toBeTruthy();
+    useChatStore.setState({ lastWebSearchBySessionId: {} });
+
+    await useChatStore
+      .getState()
+      .regenerateAssistantResponse(client, assistantId!, { webSearch: true });
+
+    expect(client.requests.at(-1)?.webSearch).toBe(true);
+    expect(useChatStore.getState().lastWebSearchBySessionId.A).toBe(true);
+  });
+
+  it("uses the explicit composer mode when editing after volatile mode state was lost", async () => {
+    const client = new CapturingClient();
+    await useChatStore.getState().sendMessage(client, { content: "read this URL", webSearch: true });
+
+    const userId = useChatStore.getState().messages.find((m) => m.role === "user")?.id;
+    expect(userId).toBeTruthy();
+    useChatStore.setState({ lastWebSearchBySessionId: {} });
+
+    await useChatStore.getState().editUserMessageAndResend(client, {
+      messageId: userId!,
+      content: "read this URL carefully",
+      webSearch: true,
+    });
+
+    expect(client.requests.at(-1)?.webSearch).toBe(true);
+    expect(useChatStore.getState().lastWebSearchBySessionId.A).toBe(true);
+  });
+
+  it("allows the current composer mode to disable search on retry", async () => {
+    const client = new CapturingClient();
+    await useChatStore.getState().sendMessage(client, { content: "latest news", webSearch: true });
+
+    const assistantId = useChatStore.getState().messages.find((m) => m.role === "assistant")?.id;
+    expect(assistantId).toBeTruthy();
+
+    await useChatStore
+      .getState()
+      .regenerateAssistantResponse(client, assistantId!, { webSearch: false });
+
+    expect(client.requests.at(-1)?.webSearch).toBeUndefined();
+    expect(useChatStore.getState().lastWebSearchBySessionId.A).toBe(false);
+  });
+
   it("attaches webSearchSources from stream chunks onto the assistant message", async () => {
     const client = new CapturingClient();
     client.streamSources = true;

@@ -77,6 +77,15 @@ type EditUserMessageInput = {
   content: string;
   tenantId?: string;
   userId?: string;
+  webSearch?: boolean;
+  deepResearch?: boolean;
+  deepResearchAuto?: boolean;
+};
+
+type RetryRequestMode = {
+  webSearch?: boolean;
+  deepResearch?: boolean;
+  deepResearchAuto?: boolean;
 };
 
 export type SessionTokenUsage = {
@@ -167,7 +176,11 @@ export type ChatStoreActions = {
   removePendingMessage(messageId: string): void;
   editPendingMessage(messageId: string, content: string): void;
   editUserMessageAndResend(client: ChatClient, input: EditUserMessageInput): Promise<void>;
-  regenerateAssistantResponse(client: ChatClient, assistantMessageId: string): Promise<void>;
+  regenerateAssistantResponse(
+    client: ChatClient,
+    assistantMessageId: string,
+    mode?: RetryRequestMode,
+  ): Promise<void>;
   showPreviousResponseVersion(userMessageId: string): void;
   showNextResponseVersion(userMessageId: string): void;
   showPreviousRetryVersion(userMessageId: string): void;
@@ -1627,6 +1640,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const sourceUserMessage = sessionMessages[userIndex];
     const sourceAssistantMessage = assistantIndex >= 0 ? sessionMessages[assistantIndex] : undefined;
     if (!sourceUserMessage || sourceUserMessage.role !== "user") return;
+    const webSearchEnabled =
+      input.webSearch ?? Boolean(state.lastWebSearchBySessionId[sessionId]);
+    const deepResearchEnabled =
+      input.deepResearch ?? Boolean(state.lastDeepResearchBySessionId[sessionId]);
+    const deepResearchAuto =
+      input.deepResearchAuto ?? Boolean(state.lastDeepResearchAutoBySessionId[sessionId]);
 
     const createdAtPair = pairedCreatedAt();
     const replacementAssistant: ChatMessage = {
@@ -1685,6 +1704,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, truncatedSessionMessages),
       errorMessage: null,
+      lastWebSearchBySessionId: {
+        ...prev.lastWebSearchBySessionId,
+        [sessionId]: webSearchEnabled,
+      },
+      lastDeepResearchBySessionId: {
+        ...prev.lastDeepResearchBySessionId,
+        [sessionId]: deepResearchEnabled,
+      },
+      lastDeepResearchAutoBySessionId: {
+        ...prev.lastDeepResearchAutoBySessionId,
+        [sessionId]: deepResearchAuto,
+      },
       responseVersionsByUserMessageId: {
         ...Object.fromEntries(
           Object.entries(prev.responseVersionsByUserMessageId).filter(
@@ -1717,9 +1748,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         sessionId,
         state.activeModel,
         truncatedSessionMessages,
-        Boolean(state.lastWebSearchBySessionId[sessionId]),
-        Boolean(state.lastDeepResearchBySessionId[sessionId]),
-        Boolean(state.lastDeepResearchAutoBySessionId[sessionId]),
+        webSearchEnabled,
+        deepResearchEnabled,
+        deepResearchAuto,
       );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
@@ -1879,7 +1910,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
   },
 
-  async regenerateAssistantResponse(client, assistantMessageId) {
+  async regenerateAssistantResponse(client, assistantMessageId, mode) {
     const state = get();
     const sessionId = state.activeSessionId;
     if (!sessionId) return;
@@ -1897,6 +1928,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     const tenantId = sourceAssistantMessage.tenant_id ?? sourceUserMessage.tenant_id ?? DEFAULT_TENANT;
     const userId = sourceAssistantMessage.user_id ?? sourceUserMessage.user_id ?? DEFAULT_USER;
     const targetUserMessageId = sourceUserMessage.id;
+    const webSearchEnabled =
+      mode?.webSearch ?? Boolean(state.lastWebSearchBySessionId[sessionId]);
+    const deepResearchEnabled =
+      mode?.deepResearch ?? Boolean(state.lastDeepResearchBySessionId[sessionId]);
+    const deepResearchAuto =
+      mode?.deepResearchAuto ?? Boolean(state.lastDeepResearchAutoBySessionId[sessionId]);
 
     const replacementAssistant: ChatMessage = {
       id: makeId(),
@@ -1946,6 +1983,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       errorMessage: null,
+      lastWebSearchBySessionId: {
+        ...prev.lastWebSearchBySessionId,
+        [sessionId]: webSearchEnabled,
+      },
+      lastDeepResearchBySessionId: {
+        ...prev.lastDeepResearchBySessionId,
+        [sessionId]: deepResearchEnabled,
+      },
+      lastDeepResearchAutoBySessionId: {
+        ...prev.lastDeepResearchAutoBySessionId,
+        [sessionId]: deepResearchAuto,
+      },
       responseVersionsByUserMessageId: {
         ...prev.responseVersionsByUserMessageId,
         [targetUserMessageId]: {
@@ -1973,9 +2022,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         sessionId,
         state.activeModel,
         regenerateRequestMessages,
-        Boolean(state.lastWebSearchBySessionId[sessionId]),
-        Boolean(state.lastDeepResearchBySessionId[sessionId]),
-        Boolean(state.lastDeepResearchAutoBySessionId[sessionId]),
+        webSearchEnabled,
+        deepResearchEnabled,
+        deepResearchAuto,
       );
       const { requestId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });

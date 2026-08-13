@@ -1059,11 +1059,21 @@ export function MachiChatView({
                     console.log("Copied:", content);
                   }}
                   onRetry={(messageId) => {
-                    void regenerateAssistantResponse(client, messageId);
+                    void regenerateAssistantResponse(client, messageId, {
+                      webSearch: webSearchMode === "auto",
+                      deepResearch: deepResearchMode === "manual",
+                      deepResearchAuto: deepResearchMode === "auto",
+                    });
                   }}
                   onUserEditResend={(messageId, content) => {
                     if (!content.trim()) return;
-                    void editUserMessageAndResend(client, { messageId, content });
+                    void editUserMessageAndResend(client, {
+                      messageId,
+                      content,
+                      webSearch: webSearchMode === "auto",
+                      deepResearch: deepResearchMode === "manual",
+                      deepResearchAuto: deepResearchMode === "auto",
+                    });
                   }}
                   onShare={(messageId) => {
                     openShareDialog(messageId);
