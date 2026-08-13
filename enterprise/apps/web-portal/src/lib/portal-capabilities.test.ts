@@ -10,6 +10,10 @@ describe("portal capability context", () => {
     expect(PORTAL_CAPABILITY_SYSTEM_HINT).toContain(PORTAL_PRODUCT_NAME);
     expect(PORTAL_CAPABILITY_SYSTEM_HINT).toContain("DOC/DOCX");
     expect(PORTAL_CAPABILITY_SYSTEM_HINT).toContain("PDF");
+    expect(PORTAL_CAPABILITY_SYSTEM_HINT).toContain("HTTP(S)");
+    expect(PORTAL_CAPABILITY_SYSTEM_HINT).toContain("按用户问题提取相关段落");
+    expect(PORTAL_CAPABILITY_SYSTEM_HINT).toContain("不能一概声称");
+    expect(PORTAL_CAPABILITY_SYSTEM_HINT).toContain("只有收到本轮检索或直读证据");
     expect(PORTAL_CAPABILITY_SYSTEM_HINT).not.toContain("glm-");
     expect(PORTAL_CAPABILITY_SYSTEM_HINT).not.toContain("gpt-");
   });
