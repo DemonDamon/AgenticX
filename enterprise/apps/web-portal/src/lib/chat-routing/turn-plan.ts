@@ -13,10 +13,30 @@ export const NO_TURN_REQUESTS: TurnRequests = Object.freeze({
   automaticDeepResearchRequested: false,
 });
 
-export type AutomaticDeepResearchSelection = {
-  readonly researchQuery: string;
-  readonly intentConfidence: DeepResearchIntentConfidence;
+export type PreparedSearchPlan = {
+  readonly query: string;
+  readonly needSearch: true;
+  readonly searchQueries: readonly string[];
+  readonly confidence: number;
+  readonly source: "auto-route";
 };
+
+export type AutomaticTurnPlan =
+  | {
+      readonly mode: "plain";
+      readonly reason: string;
+    }
+  | {
+      readonly mode: "web";
+      readonly searchPlan: PreparedSearchPlan;
+      readonly reason: string;
+    }
+  | {
+      readonly mode: "deep";
+      readonly researchQuery: string;
+      readonly intentConfidence: DeepResearchIntentConfidence;
+      readonly reason: string;
+    };
 
 /**
  * The one executable lane selected for a chat turn. Request flags never double
@@ -36,23 +56,47 @@ export type TurnPlan =
       readonly researchQuery: string;
       readonly intentConfidence: DeepResearchIntentConfidence;
     }
-  | { readonly mode: "web"; readonly source: "requested" }
-  | { readonly mode: "plain"; readonly source: "default" };
+  | {
+      readonly mode: "web";
+      readonly source: "requested" | "auto-route";
+      readonly searchPlan?: PreparedSearchPlan;
+    }
+  | {
+      readonly mode: "plain";
+      readonly source: "default" | "auto-route";
+      readonly reason?: string;
+    };
 
 export function selectTurnPlan(
   requests: TurnRequests,
-  automaticSelection?: AutomaticDeepResearchSelection,
+  automaticPlan?: AutomaticTurnPlan,
 ): TurnPlan {
   if (requests.manualDeepResearchRequested) {
     return { mode: "deep", source: "manual" };
   }
-  if (requests.automaticDeepResearchRequested && automaticSelection) {
-    return {
-      mode: "deep",
-      source: "auto-route",
-      researchQuery: automaticSelection.researchQuery,
-      intentConfidence: automaticSelection.intentConfidence,
-    };
+  if (requests.automaticDeepResearchRequested && automaticPlan) {
+    if (automaticPlan.mode === "plain") {
+      return {
+        mode: "plain",
+        source: "auto-route",
+        reason: automaticPlan.reason,
+      };
+    }
+    if (automaticPlan.mode === "deep") {
+      return {
+        mode: "deep",
+        source: "auto-route",
+        researchQuery: automaticPlan.researchQuery,
+        intentConfidence: automaticPlan.intentConfidence,
+      };
+    }
+    if (requests.webSearchRequested) {
+      return {
+        mode: "web",
+        source: "auto-route",
+        searchPlan: automaticPlan.searchPlan,
+      };
+    }
   }
   if (requests.webSearchRequested) {
     return { mode: "web", source: "requested" };

@@ -14,6 +14,7 @@
  */
 
 import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
+import type { PreparedSearchPlan } from "../chat-routing/turn-plan";
 import { withCurrentTimeContext } from "../current-time";
 import {
   PORTAL_CAPABILITY_SYSTEM_HINT,
@@ -520,7 +521,7 @@ async function callGatewayJson(
 }
 
 export type StandaloneSearchQueryResolution = SearchQueryRewrite & {
-  source: "ai" | "current";
+  source: "ai" | "current" | "auto-route";
 };
 
 export type StandaloneSearchQueryOutcome =
@@ -940,6 +941,7 @@ async function executeOrdinarySearchPlan(
 export async function runWebSearchTurn(
   parsedBody: Record<string, unknown>,
   deps: GatewayFetchDeps,
+  options: { preparedSearchPlan?: PreparedSearchPlan } = {},
 ): Promise<Response> {
   const baseBody = stripWebSearchFlag(parsedBody);
   // Sanitize assistant history before search/skip paths so prior <think> chains and
@@ -1115,32 +1117,46 @@ export async function runWebSearchTurn(
   const explicitQuery = directReference?.explicitInCurrentTurn
     ? directReference.question || directReference.displayUrl
     : "";
-  const queryResolution = directReference?.explicitInCurrentTurn
-    ? {
-        kind: "resolved" as const,
-        value: {
-          query: explicitQuery,
-          needSearch: true,
-          searchQueries: [explicitQuery],
-          confidence: 1,
-          source: "current" as const,
-        },
-      }
-    : await resolveStandaloneSearchQuery(
-        queryMessages,
-        modelName,
-        deps,
-        cfg.maxSearchCalls,
-        directReference && directView
-          ? {
-              targetDocument: {
-                title: directView.title,
-                url: directReference.displayUrl,
-                sample: directView.text.slice(0, 2_000),
-              },
-            }
-          : {},
-      );
+  let queryResolution: StandaloneSearchQueryOutcome;
+  if (directReference?.explicitInCurrentTurn) {
+    queryResolution = {
+      kind: "resolved",
+      value: {
+        query: explicitQuery,
+        needSearch: true,
+        searchQueries: [explicitQuery],
+        confidence: 1,
+        source: "current",
+      },
+    };
+  } else if (options.preparedSearchPlan) {
+    queryResolution = {
+      kind: "resolved",
+      value: {
+        query: options.preparedSearchPlan.query,
+        needSearch: true,
+        searchQueries: [...options.preparedSearchPlan.searchQueries],
+        confidence: options.preparedSearchPlan.confidence,
+        source: options.preparedSearchPlan.source,
+      },
+    };
+  } else {
+    queryResolution = await resolveStandaloneSearchQuery(
+      queryMessages,
+      modelName,
+      deps,
+      cfg.maxSearchCalls,
+      directReference && directView
+        ? {
+            targetDocument: {
+              title: directView.title,
+              url: directReference.displayUrl,
+              sample: directView.text.slice(0, 2_000),
+            },
+          }
+        : {},
+    );
+  }
   const queryResolutionMs = Date.now() - queryResolutionStartedAt;
   if (queryResolution.kind === "unresolved") {
     return respondWithoutSearch(`context_query_${queryResolution.reason}`, {
@@ -1257,7 +1273,9 @@ export async function runWebSearchTurn(
       ? "retrieval_failed"
       : alwaysSearch
         ? "always_search"
-        : "automatic_search",
+        : queryResolution.value.source === "auto-route"
+          ? "auto_route_search"
+          : "automatic_search",
     resolvedQuery: query,
     facets: traceFacetStats,
     providerCalls,

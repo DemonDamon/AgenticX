@@ -17,7 +17,7 @@ import { withPortalCapabilityContext } from "../../../../lib/portal-capabilities
 import {
   NO_TURN_REQUESTS,
   selectTurnPlan,
-  type AutomaticDeepResearchSelection,
+  type AutomaticTurnPlan,
   type TurnPlan,
   type TurnRequests,
 } from "../../../../lib/chat-routing/turn-plan";
@@ -32,7 +32,7 @@ import {
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
 import {
-  decideAutoRunDeepResearch,
+  planAutomaticTurn,
   resolveManualDeepResearchQuery,
 } from "../../../../lib/deep-research/auto-need";
 import type { DeepResearchIntentConfidence } from "../../../../lib/deep-research/clarification-policy";
@@ -269,14 +269,14 @@ export async function POST(request: Request) {
     }
   }
 
-  let automaticDeepResearchSelection: AutomaticDeepResearchSelection | undefined;
+  let automaticTurnPlan: AutomaticTurnPlan | undefined;
   if (
     tenantDeepResearchEnabled &&
     turnRequests.automaticDeepResearchRequested &&
     !turnRequests.manualDeepResearchRequested &&
     parsedBody
   ) {
-    const decision = await decideAutoRunDeepResearch(
+    const outcome = await planAutomaticTurn(
       Array.isArray(parsedBody.messages)
         ? (parsedBody.messages as WebSearchChatMessage[])
         : [],
@@ -286,25 +286,22 @@ export async function POST(request: Request) {
         signal: request.signal,
         model: typeof parsedBody.model === "string" ? parsedBody.model : undefined,
       },
+      {
+        allowWebSearch: turnRequests.webSearchRequested,
+        maxSearchCalls: tenantSearchConfigSnapshot?.maxSearchCalls,
+      },
     );
-    if (decision.runDeepResearch) {
-      automaticDeepResearchSelection = {
-        researchQuery: decision.resolvedQuery,
-        intentConfidence: {
-          routeConfidence: decision.routeConfidence,
-          queryConfidence: decision.queryConfidence,
-        },
-      };
+    if (outcome.kind === "planned") {
+      automaticTurnPlan = outcome.plan;
+      console.info(`[chat-routing] automatic plan mode=${outcome.plan.mode}`);
+    } else {
+      console.info(
+        `[chat-routing] automatic plan fallback reason=${outcome.reason}`,
+      );
     }
-    console.info(
-      `[deep-research] automatic route run=${decision.runDeepResearch} route_confidence=${decision.routeConfidence.toFixed(2)} query_confidence=${decision.queryConfidence.toFixed(2)} query_chars=${decision.resolvedQuery.length} reason=${decision.reason || "unspecified"}`,
-    );
   }
 
-  let turnPlan: TurnPlan = selectTurnPlan(
-    turnRequests,
-    automaticDeepResearchSelection,
-  );
+  let turnPlan: TurnPlan = selectTurnPlan(turnRequests, automaticTurnPlan);
 
   // Automatic routing already resolved the contextual query in its one model
   // call. Manual activation intentionally skips the decision gate, but still
@@ -411,12 +408,18 @@ export async function POST(request: Request) {
 
   if (turnPlan.mode === "web" && parsedBody) {
     try {
-      return await runWebSearchTurn(withSanitizedMessages(parsedBody), {
-        url: GATEWAY_COMPLETIONS_URL,
-        headers: gatewayHeaders,
-        signal: request.signal,
-        loadTenantConfig: loadTenantSearchConfigForWeb,
-      });
+      return await runWebSearchTurn(
+        withSanitizedMessages(parsedBody),
+        {
+          url: GATEWAY_COMPLETIONS_URL,
+          headers: gatewayHeaders,
+          signal: request.signal,
+          loadTenantConfig: loadTenantSearchConfigForWeb,
+        },
+        turnPlan.searchPlan
+          ? { preparedSearchPlan: turnPlan.searchPlan }
+          : {},
+      );
     } catch (error) {
       const detail = error instanceof Error ? error.message : "web search turn failed";
       return NextResponse.json(

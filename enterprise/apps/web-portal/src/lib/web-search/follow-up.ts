@@ -301,6 +301,17 @@ export function parseSearchQueryRewrite(
   } catch {
     return null;
   }
+  return parseSearchQueryRewriteValue(parsed, maxSearchCallsValue);
+}
+
+/**
+ * Validate an already-parsed search plan. Automatic turn routing reuses this
+ * exact contract instead of maintaining a second query sanitizer and budget.
+ */
+export function parseSearchQueryRewriteValue(
+  parsed: unknown,
+  maxSearchCallsValue: unknown = DEFAULT_MAX_SEARCH_CALLS,
+): SearchQueryRewrite | null {
   if (!parsed || typeof parsed !== "object") return null;
 
   const row = parsed as {

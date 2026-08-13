@@ -214,6 +214,15 @@ describe("web search tool loop", () => {
         executeSearch,
         readPage,
       },
+      {
+        preparedSearchPlan: {
+          query: "read arXiv 2606.19348",
+          needSearch: true,
+          searchQueries: ["arXiv 2606.19348"],
+          confidence: 0.98,
+          source: "auto-route",
+        },
+      },
     );
 
     expect(executeSearch).not.toHaveBeenCalled();
@@ -1712,6 +1721,68 @@ describe("web search tool loop", () => {
     ]);
     expect(attempted[4]).toEqual({ query: "甲 近况", providerId: "secondary" });
     expect((await response.text())).toContain('"providerCalls":5');
+  });
+
+  it("executes an automatic prepared plan without another query-rewrite call", async () => {
+    const gatewayBodies: Array<{ stream?: boolean }> = [];
+    const executeSearch = vi.fn(async (query: string) => [
+      {
+        title: "Prepared result",
+        url: "https://example.com/prepared",
+        snippet: query,
+      },
+    ]);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      gatewayBodies.push({ stream: body.stream });
+      return sseResponse(
+        'data: {"choices":[{"delta":{"content":"prepared"}}]}\n\ndata: [DONE]\n\n',
+      );
+    });
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "王虹是谁" },
+          { role: "assistant", content: "她是一位数学家。" },
+          { role: "user", content: "她最近有什么新闻" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+          maxSearchCalls: 1,
+        }),
+        executeSearch,
+      },
+      {
+        preparedSearchPlan: {
+          query: "数学家 王虹 近期新闻",
+          needSearch: true,
+          searchQueries: ["数学家 王虹 近期新闻", "王虹 最新动态"],
+          confidence: 0.97,
+          source: "auto-route",
+        },
+      },
+    );
+
+    expect(gatewayBodies).toEqual([{ stream: true }]);
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    expect(executeSearch).toHaveBeenCalledWith(
+      "数学家 王虹 近期新闻",
+      undefined,
+      expect.anything(),
+    );
+    const text = await response.text();
+    expect(text).toContain('"reason":"auto_route_search"');
   });
 
   it("rewrites only the current query, not the prior question", async () => {

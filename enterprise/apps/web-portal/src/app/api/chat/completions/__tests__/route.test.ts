@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   listAvailableModelsForUser: vi.fn(),
   loadTenantWebSearchConfig: vi.fn(),
   loadTenantWebSearchConfigStrict: vi.fn(),
-  decideAutoRunDeepResearch: vi.fn(),
+  planAutomaticTurn: vi.fn(),
   resolveManualDeepResearchQuery: vi.fn(),
   runDeepResearchTurn: vi.fn(),
   runWebSearchTurn: vi.fn(),
@@ -48,7 +48,7 @@ vi.mock("../../../../../lib/deep-research/artifact-store", () => ({
   defaultArtifactStore: {},
 }));
 vi.mock("../../../../../lib/deep-research/auto-need", () => ({
-  decideAutoRunDeepResearch: mocks.decideAutoRunDeepResearch,
+  planAutomaticTurn: mocks.planAutomaticTurn,
   resolveManualDeepResearchQuery: mocks.resolveManualDeepResearchQuery,
 }));
 
@@ -97,6 +97,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       provider: "duckduckgo",
       apiKey: "",
       maxResults: 5,
+      maxSearchCalls: 3,
       deepResearchEnabled: true,
     });
     mocks.loadTenantWebSearchConfigStrict.mockResolvedValue({
@@ -104,10 +105,15 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       provider: "duckduckgo",
       apiKey: "",
       maxResults: 5,
+      maxSearchCalls: 3,
       deepResearchEnabled: true,
     });
     mocks.runDeepResearchTurn.mockResolvedValue(new Response("deep"));
     mocks.runWebSearchTurn.mockResolvedValue(new Response("web"));
+    mocks.planAutomaticTurn.mockResolvedValue({
+      kind: "fallback",
+      reason: "classifier_unavailable",
+    });
   });
 
   it("gives manual activation priority and skips the automatic gate", async () => {
@@ -122,7 +128,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     }));
 
     expect(await response.text()).toBe("deep");
-    expect(mocks.decideAutoRunDeepResearch).not.toHaveBeenCalled();
+    expect(mocks.planAutomaticTurn).not.toHaveBeenCalled();
     expect(mocks.resolveManualDeepResearchQuery).toHaveBeenCalledTimes(1);
     expect(mocks.runDeepResearchTurn).toHaveBeenCalledWith(
       expect.any(Object),
@@ -147,18 +153,25 @@ describe("POST /api/chat/completions deep-research preflight", () => {
   });
 
   it("uses one automatic decision and passes its resolved query directly", async () => {
-    mocks.decideAutoRunDeepResearch.mockResolvedValue({
-      runDeepResearch: true,
-      resolvedQuery: "两位人物截至当前日期的近期风评变化",
-      routeConfidence: 0.94,
-      queryConfidence: 0.96,
-      reason: "需要多源趋势核验",
+    mocks.planAutomaticTurn.mockResolvedValue({
+      kind: "planned",
+      plan: {
+        mode: "deep",
+        researchQuery: "两位人物截至当前日期的近期风评变化",
+        intentConfidence: { routeConfidence: 0.94, queryConfidence: 0.96 },
+        reason: "需要多源趋势核验",
+      },
     });
 
     const response = await POST(request({ agenticx_deep_research_auto: true }));
 
     expect(await response.text()).toBe("deep");
-    expect(mocks.decideAutoRunDeepResearch).toHaveBeenCalledTimes(1);
+    expect(mocks.planAutomaticTurn).toHaveBeenCalledTimes(1);
+    expect(mocks.planAutomaticTurn).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(Object),
+      { allowWebSearch: false, maxSearchCalls: 3 },
+    );
     expect(mocks.resolveManualDeepResearchQuery).not.toHaveBeenCalled();
     expect(mocks.runDeepResearchTurn).toHaveBeenCalledWith(
       expect.any(Object),
@@ -187,13 +200,21 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     );
   });
 
-  it("falls through to ordinary web search when automatic deep research declines", async () => {
-    mocks.decideAutoRunDeepResearch.mockResolvedValue({
-      runDeepResearch: false,
-      resolvedQuery: "当前问题",
-      routeConfidence: 0.98,
-      queryConfidence: 0.98,
-      reason: "单次检索足够",
+  it("passes an automatic web plan directly to ordinary search", async () => {
+    const searchPlan = {
+      query: "补全后的当前问题",
+      needSearch: true as const,
+      searchQueries: ["补全后的当前问题"],
+      confidence: 0.98,
+      source: "auto-route" as const,
+    };
+    mocks.planAutomaticTurn.mockResolvedValue({
+      kind: "planned",
+      plan: {
+        mode: "web",
+        searchPlan,
+        reason: "单次检索足够",
+      },
     });
 
     const response = await POST(request({
@@ -202,10 +223,62 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     }));
 
     expect(await response.text()).toBe("web");
-    expect(mocks.decideAutoRunDeepResearch).toHaveBeenCalledTimes(1);
+    expect(mocks.planAutomaticTurn).toHaveBeenCalledTimes(1);
+    expect(mocks.planAutomaticTurn).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(Object),
+      { allowWebSearch: true, maxSearchCalls: 3 },
+    );
     expect(mocks.resolveManualDeepResearchQuery).not.toHaveBeenCalled();
     expect(mocks.runDeepResearchTurn).not.toHaveBeenCalled();
-    expect(mocks.runWebSearchTurn).toHaveBeenCalledTimes(1);
+    expect(mocks.runWebSearchTurn).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      { preparedSearchPlan: searchPlan },
+    );
+  });
+
+  it("uses plain chat directly when the automatic planner selects plain", async () => {
+    mocks.planAutomaticTurn.mockResolvedValue({
+      kind: "planned",
+      plan: { mode: "plain", reason: "现有上下文足够" },
+    });
+    const fetchMock = vi.fn(async () => new Response("plain"));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const response = await POST(request({
+        agenticx_web_search: true,
+        agenticx_deep_research_auto: true,
+      }));
+
+      expect(await response.text()).toBe("plain");
+      expect(mocks.planAutomaticTurn).toHaveBeenCalledTimes(1);
+      expect(mocks.runWebSearchTurn).not.toHaveBeenCalled();
+      expect(mocks.runDeepResearchTurn).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("falls back to the established ordinary web planner when automatic planning fails", async () => {
+    mocks.planAutomaticTurn.mockResolvedValue({
+      kind: "fallback",
+      reason: "invalid_output",
+    });
+
+    const response = await POST(request({
+      agenticx_web_search: true,
+      agenticx_deep_research_auto: true,
+    }));
+
+    expect(await response.text()).toBe("web");
+    expect(mocks.runDeepResearchTurn).not.toHaveBeenCalled();
+    expect(mocks.runWebSearchTurn).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      {},
+    );
   });
 
   it("skips the automatic model call when the tenant disables deep research", async () => {
@@ -223,7 +296,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     }));
 
     expect(await response.text()).toBe("web");
-    expect(mocks.decideAutoRunDeepResearch).not.toHaveBeenCalled();
+    expect(mocks.planAutomaticTurn).not.toHaveBeenCalled();
     expect(mocks.resolveManualDeepResearchQuery).not.toHaveBeenCalled();
   });
 
@@ -239,7 +312,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     const response = await POST(request({ agenticx_deep_research: true }));
 
     expect(await response.text()).toBe("deep");
-    expect(mocks.decideAutoRunDeepResearch).not.toHaveBeenCalled();
+    expect(mocks.planAutomaticTurn).not.toHaveBeenCalled();
     expect(mocks.resolveManualDeepResearchQuery).not.toHaveBeenCalled();
     expect(mocks.runDeepResearchTurn).toHaveBeenCalledWith(
       expect.any(Object),
@@ -261,7 +334,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     }));
 
     expect(response.status).toBe(403);
-    expect(mocks.decideAutoRunDeepResearch).not.toHaveBeenCalled();
+    expect(mocks.planAutomaticTurn).not.toHaveBeenCalled();
   });
 
   it("fails closed when effective model policy cannot be read", async () => {
@@ -271,7 +344,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
 
     expect(response.status).toBe(503);
     expect(mocks.loadTenantWebSearchConfigStrict).not.toHaveBeenCalled();
-    expect(mocks.decideAutoRunDeepResearch).not.toHaveBeenCalled();
+    expect(mocks.planAutomaticTurn).not.toHaveBeenCalled();
   });
 
   it("skips automatic deep research when tenant policy cannot be read", async () => {
@@ -285,7 +358,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     }));
 
     expect(await response.text()).toBe("web");
-    expect(mocks.decideAutoRunDeepResearch).not.toHaveBeenCalled();
+    expect(mocks.planAutomaticTurn).not.toHaveBeenCalled();
     expect(mocks.runWebSearchTurn).toHaveBeenCalledTimes(1);
   });
 
