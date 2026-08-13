@@ -53,6 +53,7 @@ import { Panel } from "./ds/Panel";
 import { SettingsDropdown } from "./ds/SettingsDropdown";
 import { Modal } from "./ds/Modal";
 import { HoverTip } from "./ds/HoverTip";
+import { ClampToFitText } from "./ds/ClampToFitText";
 import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
 import { useAppStore } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
@@ -4069,9 +4070,16 @@ function SkillsTab() {
                         </span>
                       </button>
                     </div>
-                    <p className="mt-2.5 line-clamp-2 flex-1 text-[12px] leading-relaxed text-text-muted">
-                      {skill.description}
-                    </p>
+                    <HoverTip
+                      label={skill.description}
+                      delayMs={280}
+                      className="mt-2.5 min-h-0 w-full flex-1 flex-col"
+                    >
+                      <ClampToFitText
+                        text={skill.description}
+                        className="min-h-0 w-full min-w-0 flex-1 break-words text-[12px] leading-4 text-text-muted"
+                      />
+                    </HoverTip>
                     {!canInstall ? (
                       <button
                         type="button"
