@@ -557,6 +557,9 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                 "The avatar is written to the registry and immediately appears in "
                 "the sidebar/gallery. Do NOT just write a markdown file — this tool "
                 "actually creates it. "
+                "The portrait is generated from name, role, and description: put "
+                "appearance cues there when the user specifies them (gender, "
+                "hairstyle, clothing, glasses). "
                 "IMPORTANT: before calling this tool, you MUST first call "
                 "request_action_confirmation with a summary showing the proposed "
                 "name/role/description/tags/working style, and only proceed after "
@@ -579,7 +582,8 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "Short gallery-card blurb (1-2 sentences) describing what "
-                            "this avatar does. Distinct from system_prompt."
+                            "this avatar does. Distinct from system_prompt. Include "
+                            "appearance hints when known, e.g. 女工程师、短发、戴眼镜."
                         ),
                     },
                     "tags": {

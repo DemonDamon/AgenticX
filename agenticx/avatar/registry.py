@@ -11,12 +11,20 @@ from __future__ import annotations
 
 import shutil
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import yaml
+
+from agenticx.avatar.portrait import (
+    collection_fetch_enabled,
+    fetch_collection_portrait_url,
+    generate_avatar_portrait_url,
+    needs_portrait_refresh,
+)
 
 AVATARS_ROOT = Path.home() / ".agenticx" / "avatars"
 AVATAR_CONFIG_FILE = "avatar.yaml"
@@ -168,8 +176,36 @@ class AvatarRegistry:
             cfg = self._read_config(child.name)
             if cfg is not None:
                 avatars.append(cfg)
+        missing = [item for item in avatars if needs_portrait_refresh(item.avatar_url)]
+        if missing and collection_fetch_enabled():
+            workers = min(6, len(missing))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(self._ensure_portrait, missing))
         avatars.sort(key=lambda a: (not a.pinned, a.created_at or ""), reverse=False)
         return avatars
+
+    def _ensure_portrait(self, config: AvatarConfig) -> AvatarConfig:
+        """Fill an illustrated portrait once if the avatar has no image yet.
+
+        Existing avatars without a picture are only updated when the illustrated
+        collection is reachable. Offline / test runs leave them unchanged.
+        """
+        if not needs_portrait_refresh(config.avatar_url):
+            return config
+        if not collection_fetch_enabled():
+            return config
+        fetched = fetch_collection_portrait_url(
+            name=config.name,
+            role=config.role,
+            description=config.description,
+            tags=list(config.tags or []),
+            avatar_id=config.id,
+        )
+        if not fetched:
+            return config
+        config.avatar_url = fetched
+        self._write_config(config)
+        return config
 
     def get_avatar(self, avatar_id: str) -> Optional[AvatarConfig]:
         return self._read_config(avatar_id)
@@ -208,11 +244,20 @@ class AvatarRegistry:
         se: Optional[Dict[str, bool]] = None
         if skills_enabled is not None and len(skills_enabled) > 0:
             se = {str(k): bool(v) for k, v in skills_enabled.items() if str(k).strip()}
+        resolved_avatar_url = str(avatar_url or "").strip()
+        if not resolved_avatar_url:
+            resolved_avatar_url = generate_avatar_portrait_url(
+                name=name,
+                role=role,
+                description=str(description or "").strip(),
+                tags=normalize_avatar_tags(tags),
+                avatar_id=avatar_id,
+            )
         config = AvatarConfig(
             id=avatar_id,
             name=name,
             role=role,
-            avatar_url=avatar_url,
+            avatar_url=resolved_avatar_url,
             system_prompt=system_prompt,
             description=str(description or "").strip(),
             tags=normalize_avatar_tags(tags),
