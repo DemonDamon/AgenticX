@@ -73,6 +73,24 @@ export type HistorySyncSessionState = {
   message?: string;
 };
 
+/**
+ * The outbox briefly reports `syncing` after an append is queued. That is an
+ * expected in-flight transition, not a history-sync warning; rendering it as
+ * an alert makes every normal send flash a yellow banner before the operation
+ * is removed from the outbox. Only states that require waiting, re-auth, or a
+ * manual retry should reach the warning UI.
+ */
+export function shouldShowHistorySyncAlert(
+  sync: HistorySyncSessionState | undefined,
+): boolean {
+  if (!sync || sync.pendingCount <= 0) return false;
+  return (
+    sync.state === "waiting_retry" ||
+    sync.state === "paused" ||
+    sync.state === "dead_letter"
+  );
+}
+
 export type HistoryOutboxTransport = {
   appendMessages(
     sessionId: string,

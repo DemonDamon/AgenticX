@@ -20,6 +20,7 @@ import {
   withClipboardImageNames,
   modelSupportsVision,
   consumeDeepResearchReconnectStream,
+  shouldShowHistorySyncAlert,
   type ActiveDeepResearchRun,
 } from "@agenticx/feature-chat";
 import { type ChatClient } from "@agenticx/sdk-ts";
@@ -694,12 +695,7 @@ export function MachiChatView({
   const activeHistorySync = activeSessionId
     ? historySyncBySessionId[activeSessionId]
     : undefined;
-  const showSessionHistorySync =
-    !!activeHistorySync &&
-    activeHistorySync.state !== "idle" &&
-    (activeHistorySync.pendingCount > 0 ||
-      activeHistorySync.state === "dead_letter" ||
-      activeHistorySync.state === "paused");
+  const showSessionHistorySync = shouldShowHistorySyncAlert(activeHistorySync);
 
   const composer = (
     <div className={cn("mx-auto w-full space-y-3", isEmpty ? "max-w-[46rem]" : "max-w-4xl")}>

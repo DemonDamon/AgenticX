@@ -13,6 +13,7 @@ import {
   startHistoryOutboxCoordinator,
   disposeHistoryOutbox,
   stripToAppendPayload,
+  shouldShowHistorySyncAlert,
   type HistoryAppendPayload,
 } from "./history-outbox";
 
@@ -38,6 +39,18 @@ describe("history-outbox", () => {
   afterEach(() => {
     disposeHistoryOutbox();
     __resetHistoryOutboxForTests();
+  });
+
+  it.each([
+    ["syncing", false],
+    ["idle", false],
+    ["waiting_retry", true],
+    ["paused", true],
+    ["dead_letter", true],
+  ] as const)("only shows an alert for %s history state", (state, expected) => {
+    expect(
+      shouldShowHistorySyncAlert({ pendingCount: 1, state }),
+    ).toBe(expected);
   });
 
   it("does not flush without principal/coordinator", async () => {
