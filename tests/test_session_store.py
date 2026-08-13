@@ -114,3 +114,18 @@ def test_session_summary_history_is_bounded(tmp_path: Path) -> None:
     # The latest write must still be the one returned for metadata lookups.
     meta = asyncio.run(store.load_latest_session_metadata("bounded"))
     assert meta.get("i") == writes - 1
+
+
+def test_list_latest_sessions_filters_by_avatar_id(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    store._save_session_summary_sync(
+        "group-sid", "g", {"avatar_id": "group:g1", "session_name": "g"}
+    )
+    store._save_session_summary_sync(
+        "other-sid", "o", {"avatar_id": "avatar-other", "session_name": "o"}
+    )
+    filtered = store._list_latest_sessions_sync(limit=0, avatar_id="group:g1")
+    assert {row["session_id"] for row in filtered} == {"group-sid"}
+    unfiltered = store._list_latest_sessions_sync(limit=0)
+    assert {row["session_id"] for row in unfiltered} == {"group-sid", "other-sid"}
+    assert store._list_all_session_ids_sync() == {"group-sid", "other-sid"}
