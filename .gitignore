@@ -2,6 +2,7 @@
 .cursor/*
 .vscode/
 !.cursor/plans/
+!.cursor/plans/**
 .cursor/commands/
 .qoder/
 .trae/
