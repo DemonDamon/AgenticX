@@ -134,6 +134,31 @@ describe("direct public page", () => {
     expect(evidence.text).toContain("Figure 11: Win-rate comparison");
   });
 
+  it("keeps distinct compact identifiers covered in one bounded response", () => {
+    const text = [
+      "Paper title and abstract.",
+      "Table 1: Comparison of three base models under the same evaluation setting.",
+      "Unrelated middle section with many results.",
+      "Table 2: Comparison of three reasoning modes.",
+    ].join("\n\n");
+    const reference = resolveDirectPageReference([
+      { role: "user", content: "https://arxiv.org/pdf/2606.19348" },
+    ])!;
+    const view: DirectPageView = {
+      reference,
+      title: "Paper",
+      text,
+      rawChars: text.length,
+      coverage: "full_html",
+      backend: "native",
+    };
+
+    const evidence = selectDirectPageEvidence(view, ["描述一下 table1 和 table2"], 4_000);
+
+    expect(evidence.text).toContain("Table 1: Comparison of three base models");
+    expect(evidence.text).toContain("Table 2: Comparison of three reasoning modes");
+  });
+
   it("falls back to leading passages when lexical retrieval has no match", () => {
     const passages = chunkDirectPageText(
       "Title\n\nAbstract text\n\nIntroduction text\n\nLate appendix sentinel",

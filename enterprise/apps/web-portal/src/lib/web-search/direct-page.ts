@@ -457,6 +457,16 @@ function renderPassages(
   return { text: parts.join("\n\n"), indexes: included };
 }
 
+function isMixedAsciiIdentifier(token: string): boolean {
+  let hasLetter = false;
+  let hasDigit = false;
+  for (const char of token) {
+    if (char >= "a" && char <= "z") hasLetter = true;
+    else if (char >= "0" && char <= "9") hasDigit = true;
+  }
+  return hasLetter && hasDigit;
+}
+
 export function selectDirectPageEvidence(
   view: DirectPageView,
   queries: string[],
@@ -472,6 +482,19 @@ export function selectDirectPageEvidence(
   } else {
     const selected = new Set<number>();
     const queryTokens = tokenize(query);
+    const identifiers = [...new Set(queryTokens.filter(isMixedAsciiIdentifier))].slice(0, 6);
+    const identifierRankings = identifiers.map((identifier) =>
+      rankTextPassages(identifier, passages)
+        .filter((row) => row.score > 0)
+        .slice(0, 2),
+    );
+    const identifierSeeds: typeof ranked = [];
+    for (let rank = 0; rank < 2; rank += 1) {
+      for (const rows of identifierRankings) {
+        const row = rows[rank];
+        if (row) identifierSeeds.push(row);
+      }
+    }
     const probes: string[] = [];
     for (let index = 0; index + 1 < queryTokens.length && probes.length < 24; index += 1) {
       probes.push(`${queryTokens[index]} ${queryTokens[index + 1]}`);
@@ -485,11 +508,16 @@ export function selectDirectPageEvidence(
       .sort((a, b) => b.score - a.score || a.index - b.index)
       .slice(0, 8);
     const seeds = [
+      ...identifierSeeds,
       ...probeSeeds,
       ...ranked.slice(0, 6),
     ];
+    // Add every core hit before surrounding context so separate identifiers in
+    // one question receive fair coverage under a shared prompt budget.
     for (const row of seeds) {
       selected.add(row.index);
+    }
+    for (const row of seeds) {
       if (row.index > 0) selected.add(row.index - 1);
       if (row.index + 1 < passages.length) selected.add(row.index + 1);
     }

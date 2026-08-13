@@ -38,10 +38,12 @@ export function tokenize(text: string): string[] {
   const raw = text.normalize("NFKC").trim();
   if (!raw) return [];
   const tokens: string[] = [];
+  let previousAscii: { value: string; end: number } | null = null;
   let i = 0;
   while (i < raw.length) {
     const ch = raw[i]!;
     if (CJK_CHAR.test(ch)) {
+      previousAscii = null;
       let j = i;
       while (j < raw.length && CJK_CHAR.test(raw[j]!)) j += 1;
       const run = raw.slice(i, j);
@@ -58,7 +60,20 @@ export function tokenize(text: string): string[] {
     ASCII_WORD.lastIndex = i;
     const m = ASCII_WORD.exec(raw);
     if (m && m.index === i) {
-      pushAsciiTokens(tokens, m[0]!);
+      const word = m[0]!.toLowerCase();
+      const inlineGap = previousAscii ? raw.slice(previousAscii.end, i) : "";
+      if (
+        previousAscii &&
+        inlineGap.length <= 3 &&
+        !inlineGap.includes("\n") &&
+        !inlineGap.includes("\r") &&
+        isAsciiDigit(previousAscii.value[previousAscii.value.length - 1]) !==
+          isAsciiDigit(word[0])
+      ) {
+        tokens.push(`${previousAscii.value}${word}`);
+      }
+      pushAsciiTokens(tokens, word);
+      previousAscii = { value: word, end: m.index + m[0]!.length };
       i = m.index + m[0]!.length;
       continue;
     }

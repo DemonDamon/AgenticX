@@ -19,6 +19,12 @@ describe("tokenize", () => {
     expect(tokenize("abc123def")).toEqual(["abc123def", "abc", "123", "def"]);
     expect(tokenize("2026")).toEqual(["2026"]);
   });
+
+  it("adds the same compact alias to a spaced identifier", () => {
+    expect(tokenize("Figure 11")).toEqual(["figure", "figure11", "11"]);
+    expect(tokenize("RFC-9110")).toEqual(["rfc", "rfc9110", "9110"]);
+    expect(tokenize("Figure\n11")).not.toContain("figure11");
+  });
 });
 
 describe("rerankHits", () => {
