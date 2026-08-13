@@ -15,6 +15,10 @@
 
 import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
 import { withCurrentTimeContext } from "../current-time";
+import {
+  PORTAL_CAPABILITY_SYSTEM_HINT,
+  withPortalCapabilityContext,
+} from "../portal-capabilities";
 import type { WebSearchTrace } from "@agenticx/core-api";
 import { EVIDENCE_DISCIPLINE_HINT } from "../retrieval/evidence-discipline";
 import {
@@ -109,10 +113,8 @@ export const TRIVIAL_TURN_SYSTEM_HINT =
   "用户本轮是寒暄、简单确认或无需外部检索的问题。请直接友好地回复，不要为了凑答案而联网。\n" +
   "思考过程与回复中都不要提及工具、功能调用、联网搜索、function call、tool_call。\n";
 
-export const ASSISTANT_CAPABILITY_SYSTEM_HINT =
-  "## 当前能力说明\n" +
-  "用户正在询问助手或平台的能力。请直接回答当前系统状态；如果用户问联网搜索，说明本平台支持联网搜索，" +
-  "本轮自动模式会按问题需要决定是否检索，不要声称必须手动开启，也不要把本轮未检索误说成平台不支持。\n";
+/** @deprecated Use PORTAL_CAPABILITY_SYSTEM_HINT for the shared capability registry. */
+export const ASSISTANT_CAPABILITY_SYSTEM_HINT = PORTAL_CAPABILITY_SYSTEM_HINT;
 
 const TRIVIAL_TURN_MARKER = "## 本轮说明";
 
@@ -380,17 +382,7 @@ export function withTrivialTurnContext(messages: ChatMessage[]): ChatMessage[] {
 }
 
 export function withAssistantCapabilityContext(messages: ChatMessage[]): ChatMessage[] {
-  const next = messages.map((m) => ({ ...m }));
-  const block = ASSISTANT_CAPABILITY_SYSTEM_HINT.trimEnd();
-  if (next[0]?.role === "system") {
-    const existing = typeof next[0].content === "string" ? next[0].content : "";
-    next[0] = {
-      ...next[0],
-      content: existing ? `${block}\n\n${existing}` : block,
-    };
-    return next;
-  }
-  return [{ role: "system", content: block }, ...next];
+  return withPortalCapabilityContext(messages);
 }
 
 function eventStreamResponse(stream: ReadableStream<Uint8Array>): Response {
@@ -934,9 +926,11 @@ export async function runWebSearchTurn(
   const baseBody = stripWebSearchFlag(parsedBody);
   // Sanitize assistant history before search/skip paths so prior <think> chains and
   // stale [N] citation indices never reach the upstream model.
-  const originalMessages = sanitizeHistoryForUpstream(
-    stripEmptyAssistantMessages(
-      Array.isArray(baseBody.messages) ? (baseBody.messages as ChatMessage[]) : [],
+  const originalMessages = withPortalCapabilityContext(
+    sanitizeHistoryForUpstream(
+      stripEmptyAssistantMessages(
+        Array.isArray(baseBody.messages) ? (baseBody.messages as ChatMessage[]) : [],
+      ),
     ),
   );
 

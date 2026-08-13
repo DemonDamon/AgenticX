@@ -13,6 +13,7 @@ import { toChatHistoryContext } from "../../../../lib/chat-history-http";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
 import { stripEmptyAssistantMessages } from "../../../../lib/chat-completion-sanitize";
 import { withCurrentTimeContext } from "../../../../lib/current-time";
+import { withPortalCapabilityContext } from "../../../../lib/portal-capabilities";
 import {
   runWebSearchTurn,
   type WebSearchChatMessage,
@@ -37,7 +38,7 @@ function withSanitizedMessages(body: Record<string, unknown>): Record<string, un
   return {
     ...body,
     // Direct (non-web-search) turns still need clock grounding — same as Desktop/Kimi.
-    messages: withCurrentTimeContext(cleaned),
+    messages: withPortalCapabilityContext(withCurrentTimeContext(cleaned)),
   };
 }
 

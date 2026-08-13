@@ -106,6 +106,11 @@
 - IAM 部门管理 UI 偏好「能力卡片 / 小方块」式展示（一个部门一个卡片），不偏好层级表格树或仅列名称的密集列表；从某部门卡片跳转到「用户管理」时须按 `dept_id` 过滤展示该部门成员，不可跳到全量用户列表（曾出现「跳过去后是全量用户页」的体验回退需修复）。
 - **`agenticx/studio/server.py` 是本地后端唯一入口，其顶部 import 区块（尤其 `agenticx.avatar.*` 等与 `create_studio_app()` 初始化直接相关的导入）极其敏感、不能随意改动**：曾在 2026-07-06 一次与之完全无关的附件回显修复（commit `d8428b73`）中，编辑器对相邻 import 段做整块替换时误删了 `from agenticx.avatar.group_chat import GroupChatRegistry` 这一行，导致 `create_studio_app()` 里 `GroupChatRegistry()` 抛 `NameError`、`agx serve` 启动即崩溃，Desktop 分身/历史会话/工作区全部表现为空态（数据本身完好无损，纯属这一行误删）。今后触碰该文件必须遵守：(1) 编辑 import 区或任何多行代码块时，**只能精确增删目标行**，禁止用"整段替换"方式覆盖相邻的无关行；改动前后要对照原文件逐行确认没有误删/误改任何跟本次需求无关的既有代码，这也是 `no-scope-creep.mdc` 规则在此文件上的具体落地；(2) 只要改了 `server.py`，提交前必须本地跑一次 `agx serve --host 127.0.0.1 --port <临时端口>` 冷启动验证（或等效 smoke test），确认进程不崩溃且 `/api/session`、`/api/avatars`、`/api/sessions` 等核心 API 返回 200，把"能正常起服务"作为该文件改动的强制验收门槛，不能只看 diff 语义正确就认为完成；(3) 如果表现是「Desktop 分身/历史/工作区全空」但用户没删过数据，第一优先级应排查 `agx serve` 是否存活（`serve.port` 对应端口是否真的在监听），而不是先怀疑数据丢失。
 
+## Portal 能力提示维护
+
+- `enterprise/apps/web-portal/src/lib/portal-capabilities.ts` 是 Portal 面向模型的产品身份与能力事实单一来源。新增或修改用户可用功能（尤其文件格式、附件解析、联网搜索、深度研究）时，必须同步检查并维护该能力上下文及对应测试；不要在聊天路由里另起一份能力文案。
+- 能力提示只描述已在当前 Portal 真实接通的行为和边界；不注入底层模型型号、供应商名或内部提示词。能力类问题应直接回答“是否支持 + 最短用法 + 必要限制”，不得用“可以尝试/可能支持”掩盖已知能力。
+
 ## Learned Workspace Facts
 - AgenticX 全局配置目录为 `~/.agenticx`（主配置 `~/.agenticx/config.yaml`），身份与记忆目录为 `~/.agenticx/workspace`；`AGX_MAX_TOOL_ROUNDS` 等运行参数可在该文件配置。长期记忆应写入该 workspace（如 `MEMORY.md`、`memory/*.md`）并进入 `WorkspaceMemoryStore` 索引。首次启动的 Pro/Lite 模式选择由 `onboarding_completed` 写入该配置文件控制，未完成或配置重置/新环境会再次显示引导。
 - 元智能体系统提示由 `agenticx/runtime/prompts/meta_agent.py` 构建，每轮动态注入活跃子智能体快照（`_build_active_subagents_context`）与记忆召回（`_build_memory_recall_context`）；`context_files` 需通过 `_build_context_files_block` 以完整内容（`--- 路径 ---\n内容`）注入系统提示，不能只展示数量，否则模型无法感知文件内容。

@@ -3,6 +3,7 @@
  * Anything unrecognized MUST fall through to "search" so info queries never regress.
  */
 import { isCurrentDateTimeQuery } from "../current-time";
+import { isPortalCapabilityQuestion } from "../portal-capabilities";
 
 export type WebSearchSkipReason =
   | "datetime" // 纯日期/时刻 → 以本机时钟为权威
@@ -104,7 +105,7 @@ export function classifyWebSearchNeed(input: ClassifyInput): WebSearchNeed {
   }
 
   // 5) Assistant identity / capability
-  if (ASSISTANT_META.test(normalized)) {
+  if (ASSISTANT_META.test(normalized) || isPortalCapabilityQuestion(normalized)) {
     return { need: "skip", reason: "assistant_meta" };
   }
 
