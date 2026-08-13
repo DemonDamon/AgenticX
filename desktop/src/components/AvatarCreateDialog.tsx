@@ -26,7 +26,7 @@ type Props = {
 
 type Mode = "manual" | "ai";
 export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }: Props) {
-  const [mode, setMode] = useState<Mode>("manual");
+  const [mode, setMode] = useState<Mode>("ai");
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -47,6 +47,12 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
   const [workspaceDir, setWorkspaceDir] = useState("");
   const customizedCount = Object.keys(toolsEnabled).filter((key) => toolsEnabled[key] !== undefined).length;
   const skillsCustomizedCount = Object.keys(skillsEnabledDraft).filter((k) => skillsEnabledDraft[k] === false).length;
+
+  useEffect(() => {
+    if (!open) return;
+    setMode("ai");
+    setAiError("");
+  }, [open]);
 
   useEffect(() => {
     if (!open || mode !== "manual" || !skillsSectionOpen) return;
