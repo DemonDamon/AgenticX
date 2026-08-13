@@ -220,6 +220,33 @@ describe("automatic turn routing", () => {
     ).toBeNull();
   });
 
+  it("accepts deep only when both confidence values reach the 0.8 boundary", () => {
+    const plan = (routeConfidence: number, queryConfidence: number) =>
+      parseAutoTurnPlan(
+        JSON.stringify({
+          mode: "deep",
+          research_query: "系统比较三种迁移方案",
+          route_confidence: routeConfidence,
+          query_confidence: queryConfidence,
+          reason: "需要多来源核验",
+        }),
+        AUTO_OPTIONS,
+      );
+
+    expect(plan(0.8, 0.8)).toMatchObject({
+      kind: "planned",
+      plan: { mode: "deep" },
+    });
+    expect(plan(0.79, 0.99)).toEqual({
+      kind: "fallback",
+      reason: "low_deep_confidence",
+    });
+    expect(plan(0.99, 0.79)).toEqual({
+      kind: "fallback",
+      reason: "low_deep_confidence",
+    });
+  });
+
   it("requires native deep-route confidence values", () => {
     const base = {
       mode: "deep",
@@ -490,5 +517,40 @@ describe("automatic turn routing", () => {
       AUTO_OPTIONS,
     );
     expect(noQuery).toEqual({ kind: "fallback", reason: "missing_current_query" });
+  });
+
+  it("falls back after the automatic planner timeout", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const fetchImpl = vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            const abort = () => reject(new Error("aborted"));
+            if (init?.signal?.aborted) abort();
+            else init?.signal?.addEventListener("abort", abort, { once: true });
+          }),
+      );
+      const pending = planAutomaticTurn(
+        [{ role: "user", content: "帮我系统比较这几个方案" }],
+        {
+          url: "http://gateway.test/v1/chat/completions",
+          headers: {},
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+        },
+        AUTO_OPTIONS,
+      );
+
+      await vi.advanceTimersByTimeAsync(8_000);
+
+      await expect(pending).resolves.toEqual({
+        kind: "fallback",
+        reason: "classifier_unavailable",
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

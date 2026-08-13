@@ -289,10 +289,42 @@ export function extractLastUserRawText(messages: ChatMessage[]): string {
   return "";
 }
 
-/** Escape hatch: set AGENTICX_WEB_SEARCH_ALWAYS=1 to restore unconditional search-first. */
-function webSearchAlwaysOn(): boolean {
-  const raw = process.env.AGENTICX_WEB_SEARCH_ALWAYS?.trim().toLowerCase();
+const FAST_SKIP_BYPASS_ENV = "AGENTICX_WEB_SEARCH_BYPASS_FAST_SKIP";
+const LEGACY_FAST_SKIP_BYPASS_ENV = "AGENTICX_WEB_SEARCH_ALWAYS";
+let warnedAboutProductionFastSkipBypass = false;
+
+function isEnabledEnvironmentFlag(name: string): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
   return raw === "1" || raw === "true";
+}
+
+/**
+ * Operations escape hatch for bypassing only the deterministic no-search gate.
+ * Contextual turns still use the semantic query resolver, which may decline to
+ * search. The old ALWAYS name remains compatible but never meant "force".
+ */
+function webSearchFastSkipBypassed(): boolean {
+  const configuredBy = isEnabledEnvironmentFlag(FAST_SKIP_BYPASS_ENV)
+    ? FAST_SKIP_BYPASS_ENV
+    : isEnabledEnvironmentFlag(LEGACY_FAST_SKIP_BYPASS_ENV)
+      ? LEGACY_FAST_SKIP_BYPASS_ENV
+      : "";
+  if (!configuredBy) return false;
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    !warnedAboutProductionFastSkipBypass
+  ) {
+    warnedAboutProductionFastSkipBypass = true;
+    const legacyNotice = configuredBy === LEGACY_FAST_SKIP_BYPASS_ENV
+      ? `; migrate to ${FAST_SKIP_BYPASS_ENV}`
+      : "";
+    console.warn(
+      `[web-search] ${configuredBy} is enabled in production${legacyNotice}; ` +
+        "the deterministic fast-skip gate is bypassed, but contextual query resolution still applies",
+    );
+  }
+  return true;
 }
 
 function stripWebSearchFlag<T extends Record<string, unknown>>(body: T): Omit<T, "agenticx_web_search"> {
@@ -1024,8 +1056,8 @@ export async function runWebSearchTurn(
   // Decide whether this turn needs search from the current user text only. If it
   // does, contextual completion below is always delegated to the rewrite agent.
   const queryForSkip = extractLastUserQuery(queryMessages);
-  const alwaysSearch = webSearchAlwaysOn();
-  const fastPath = alwaysSearch || directReference?.explicitInCurrentTurn
+  const fastSkipBypassed = webSearchFastSkipBypassed();
+  const fastPath = fastSkipBypassed || directReference?.explicitInCurrentTurn
     ? null
     : classifyWebSearchFastPath({
         query: queryForSkip,
@@ -1271,8 +1303,8 @@ export async function runWebSearchTurn(
     decision: "search",
     reason: searchFailed
       ? "retrieval_failed"
-      : alwaysSearch
-        ? "always_search"
+      : fastSkipBypassed
+        ? "fast_skip_bypassed"
         : queryResolution.value.source === "auto-route"
           ? "auto_route_search"
           : "automatic_search",

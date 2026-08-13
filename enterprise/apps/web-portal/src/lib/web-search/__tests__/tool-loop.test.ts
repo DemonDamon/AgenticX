@@ -1042,9 +1042,13 @@ describe("web search tool loop", () => {
     expect(text).toContain("https://news.example/ai");
   });
 
-  it("AGENTICX_WEB_SEARCH_ALWAYS forces search even for greetings", async () => {
-    const prev = process.env.AGENTICX_WEB_SEARCH_ALWAYS;
-    process.env.AGENTICX_WEB_SEARCH_ALWAYS = "1";
+  it.each([
+    "AGENTICX_WEB_SEARCH_BYPASS_FAST_SKIP",
+    "AGENTICX_WEB_SEARCH_ALWAYS",
+  ])("%s bypasses the deterministic greeting skip", async (envName) => {
+    vi.stubEnv("AGENTICX_WEB_SEARCH_BYPASS_FAST_SKIP", "");
+    vi.stubEnv("AGENTICX_WEB_SEARCH_ALWAYS", "");
+    vi.stubEnv(envName, "1");
     try {
       const executeSearch = vi.fn(async () => [
         { title: "Hello", url: "https://ex.com/hi", snippet: "greeting" },
@@ -1077,9 +1081,54 @@ describe("web search tool loop", () => {
       const text = await readText(res);
       expect(text).toContain("agenticx_web_search_sources");
       expect(text).toContain("forced");
+      expect(text).toContain('"reason":"fast_skip_bypassed"');
     } finally {
-      if (prev === undefined) delete process.env.AGENTICX_WEB_SEARCH_ALWAYS;
-      else process.env.AGENTICX_WEB_SEARCH_ALWAYS = prev;
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("warns once when the fast-skip bypass is enabled in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AGENTICX_WEB_SEARCH_BYPASS_FAST_SKIP", "1");
+    vi.stubEnv("AGENTICX_WEB_SEARCH_ALWAYS", "");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const executeSearch = vi.fn(async () => [
+        { title: "Hello", url: "https://ex.com/hi", snippet: "greeting" },
+      ]);
+      const fetchImpl = vi.fn(async () =>
+        sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'),
+      );
+      const run = () => runWebSearchTurn(
+        {
+          model: "m",
+          messages: [{ role: "user", content: "你好" }],
+          agenticx_web_search: true,
+        },
+        {
+          url: "http://gateway.test/v1/chat/completions",
+          headers: {},
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          loadTenantConfig: async () => ({
+            enabled: true,
+            provider: "duckduckgo",
+            apiKey: "",
+            maxResults: 5,
+          }),
+          executeSearch,
+        },
+      );
+
+      await (await run()).text();
+      await (await run()).text();
+
+      const productionWarnings = warn.mock.calls.filter((args) =>
+        String(args[0]).includes("enabled in production"),
+      );
+      expect(productionWarnings).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+      vi.unstubAllEnvs();
     }
   });
 
@@ -1991,9 +2040,9 @@ describe("web search tool loop", () => {
     expect(directBody?.messages?.[0]?.content).not.toContain("本轮是寒暄");
   });
 
-  it("AGENTICX_WEB_SEARCH_ALWAYS does not bypass contextual query resolution", async () => {
-    const prev = process.env.AGENTICX_WEB_SEARCH_ALWAYS;
-    process.env.AGENTICX_WEB_SEARCH_ALWAYS = "1";
+  it("the legacy bypass does not override contextual query resolution", async () => {
+    vi.stubEnv("AGENTICX_WEB_SEARCH_BYPASS_FAST_SKIP", "");
+    vi.stubEnv("AGENTICX_WEB_SEARCH_ALWAYS", "1");
     try {
       const executeSearch = vi.fn(async (q: string) => [
         { title: "T", url: "https://ex.com/t", snippet: String(q) },
@@ -2038,8 +2087,7 @@ describe("web search tool loop", () => {
 
       expect(executeSearch).not.toHaveBeenCalled();
     } finally {
-      if (prev === undefined) delete process.env.AGENTICX_WEB_SEARCH_ALWAYS;
-      else process.env.AGENTICX_WEB_SEARCH_ALWAYS = prev;
+      vi.unstubAllEnvs();
     }
   });
 
