@@ -170,6 +170,7 @@
     "welcomeTitle": "我是和创智派",
     "welcomeSubtitle": "很高兴见到你，有什么我可以帮忙的吗？",
     "loadingMessages": "加载消息…",
+    "webSearchGenerating": "已完成检索，正在生成回答",
     "scrollToBottom": "回到底部"
   },
   "settings": {

@@ -89,6 +89,27 @@ describe("chat store history hydration", () => {
     expect(state.sessions.some((session) => session.id === state.draftSessionId)).toBe(false);
   });
 
+  it("does not replace an in-flight assistant with a history refresh", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    useChatStore.setState({
+      streamStateBySessionId: {
+        A: { status: "streaming", activeRequestId: "req-a" },
+      },
+      streamingSessionId: "A",
+      status: "streaming",
+      activeRequestId: "req-a",
+      messages: [assistantMessage("A", "partial answer")],
+    });
+
+    await useChatStore.getState().refetchSessionMessages("A");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messages).toEqual([
+      assistantMessage("A", "partial answer"),
+    ]);
+  });
+
   it("ignores stale switchSession failures after a newer session is selected", async () => {
     const b = deferred<Response>();
     vi.stubGlobal(

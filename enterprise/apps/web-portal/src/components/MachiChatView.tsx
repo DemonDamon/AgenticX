@@ -1044,6 +1044,7 @@ export function MachiChatView({
                   styleVariant="im"
                   assistantFrameless
                   scrollToBottomLabel={t("scrollToBottom")}
+                  webSearchGeneratingLabel={t("webSearchGenerating")}
                   responseVersionMetaByUserMessageId={responseVersionMetaByUserMessageId}
                   retryVersionMetaByUserMessageId={retryVersionMetaByUserMessageId}
                   onShowPreviousResponseVersion={showPreviousResponseVersion}

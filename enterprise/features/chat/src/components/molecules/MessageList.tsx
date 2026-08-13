@@ -159,6 +159,8 @@ type MessageListProps = {
   /** Kimi-style jump-to-bottom control when user scrolls up during streaming. */
   showScrollToBottomFab?: boolean;
   scrollToBottomLabel?: string;
+  /** Shown after web-search sources arrive and before the first answer token. */
+  webSearchGeneratingLabel?: string;
   /**
    * When set, file preview is owned by the parent (docked next to chat).
    * MessageList will not render DeepResearchFilesPanel itself.
@@ -181,6 +183,24 @@ function ThinkingDotsPlaceholder() {
       <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70" />
       <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70 [animation-delay:160ms]" />
       <span className="agx-thinking-dot h-2.5 w-2.5 rounded-full bg-muted-foreground/70 [animation-delay:320ms]" />
+    </div>
+  );
+}
+
+function WebSearchAnsweringPlaceholder({ label }: { label: string }) {
+  return (
+    <div
+      className="inline-flex min-h-[40px] items-center gap-2 py-1 text-sm text-muted-foreground"
+      role="status"
+      aria-live="polite"
+    >
+      <IconGlobe className="h-4 w-4 shrink-0" />
+      <span>{label}</span>
+      <span className="inline-flex items-center gap-1" aria-hidden="true">
+        <span className="agx-thinking-dot h-1.5 w-1.5 rounded-full bg-current" />
+        <span className="agx-thinking-dot h-1.5 w-1.5 rounded-full bg-current [animation-delay:160ms]" />
+        <span className="agx-thinking-dot h-1.5 w-1.5 rounded-full bg-current [animation-delay:320ms]" />
+      </span>
     </div>
   );
 }
@@ -371,6 +391,7 @@ export function MessageList({
   onFeedback,
   showScrollToBottomFab = true,
   scrollToBottomLabel = "回到底部",
+  webSearchGeneratingLabel = "已完成检索，正在生成回答",
   onRequestDeepResearchFiles,
   onRequestDeepResearchLaneSources,
   onOpenExternalUrl,
@@ -705,6 +726,14 @@ export function MessageList({
             const displayText = displayContent?.trim() ?? "";
             const hasVisibleContent = displayText.length > 0;
             const hasDeepResearchWorkbench = isAssistant && Boolean(message.deep_research);
+            const showWebSearchAnswering =
+              isAssistant &&
+              message.id === inFlightAssistantId &&
+              !hasVisibleContent &&
+              !parsedAssistant?.thinkingStarted &&
+              !message.reasoning?.trim() &&
+              !hasDeepResearchWorkbench &&
+              Boolean(message.web_search_sources?.length);
             // Deep-research workbench (timeline / clarify / files) must not be replaced by bare dots.
             const showThinkingDots =
               isAssistant &&
@@ -812,7 +841,11 @@ export function MessageList({
                   >
                     <div className="min-w-0 w-full pl-1">
                       <div className="w-full">
-                        <ThinkingDotsPlaceholder />
+                        {showWebSearchAnswering ? (
+                          <WebSearchAnsweringPlaceholder label={webSearchGeneratingLabel} />
+                        ) : (
+                          <ThinkingDotsPlaceholder />
+                        )}
                       </div>
                     </div>
                   </div>

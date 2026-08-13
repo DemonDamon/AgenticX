@@ -170,6 +170,7 @@
     "welcomeTitle": "I'm 和创智派",
     "welcomeSubtitle": "Nice to meet you. What can I help with?",
     "loadingMessages": "Loading messages…",
+    "webSearchGenerating": "Search complete. Generating the answer",
     "scrollToBottom": "Scroll to bottom"
   },
   "settings": {

@@ -45,6 +45,8 @@ class CapturingClient implements ChatClient {
   private seq = 0;
   public streamSources = false;
   public streamTrace = false;
+  public streamError: { code: string; message: string } | undefined;
+  public cancelAfterSources = false;
   public afterSources: (() => void) | undefined;
 
   async sendMessage(req: ChatRequest): Promise<SendMessageResult> {
@@ -63,6 +65,10 @@ class CapturingClient implements ChatClient {
         ],
       };
       this.afterSources?.();
+      if (this.cancelAfterSources) {
+        yield { requestId, done: true, cancelled: true };
+        return;
+      }
     }
     if (this.streamTrace) {
       yield {
@@ -77,6 +83,10 @@ class CapturingClient implements ChatClient {
           providerCalls: 1,
         },
       };
+    }
+    if (this.streamError) {
+      yield { requestId, done: true, error: this.streamError };
+      return;
     }
     yield { requestId, done: false, delta: "ok" };
     yield { requestId, done: true };
@@ -205,5 +215,58 @@ describe("chat store webSearch request wiring", () => {
     expect(appendPayload?.find((message) => message.role === "assistant")?.web_search_trace).toEqual(
       assistant?.web_search_trace,
     );
+  });
+
+  it("persists the user first and retains a source-first stream error", async () => {
+    const client = new CapturingClient();
+    client.streamSources = true;
+    client.streamError = { code: "50000", message: "answer model timed out" };
+
+    await useChatStore.getState().sendMessage(client, {
+      content: "latest paper",
+      webSearch: true,
+    });
+
+    expect(historyClientMocks.appendMessages).toHaveBeenCalledTimes(2);
+    const firstPayload = historyClientMocks.appendMessages.mock.calls[0]?.[1] as
+      | Array<{ role: string; content: string }>
+      | undefined;
+    const secondPayload = historyClientMocks.appendMessages.mock.calls[1]?.[1] as
+      | Array<{ role: string; content: string; web_search_sources?: unknown[] }>
+      | undefined;
+    expect(firstPayload).toEqual([
+      expect.objectContaining({ role: "user", content: "latest paper" }),
+    ]);
+    expect(secondPayload).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: expect.stringContaining("answer model timed out"),
+        web_search_sources: [
+          expect.objectContaining({ url: "https://example.com/a" }),
+        ],
+      }),
+    ]);
+  });
+
+  it("persists retrieved sources when cancellation happens before the first answer token", async () => {
+    const client = new CapturingClient();
+    client.streamSources = true;
+    client.cancelAfterSources = true;
+
+    await useChatStore.getState().sendMessage(client, {
+      content: "latest paper",
+      webSearch: true,
+    });
+
+    expect(historyClientMocks.appendMessages).toHaveBeenCalledTimes(2);
+    expect(historyClientMocks.appendMessages.mock.calls[1]?.[1]).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: "",
+        web_search_sources: [
+          expect.objectContaining({ url: "https://example.com/a" }),
+        ],
+      }),
+    ]);
   });
 });

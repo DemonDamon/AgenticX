@@ -98,13 +98,20 @@ describe("chat store stream interrupt", () => {
     expect(assistant?.content).toBe(partialBeforeCancel);
     expect(assistant?.content).not.toContain("request cancelled");
     expect(assistant?.content.length).toBeGreaterThan(0);
-    expect(appendMessages).toHaveBeenCalledTimes(1);
-    expect(appendMessages).toHaveBeenCalledWith(
+    expect(appendMessages).toHaveBeenCalledTimes(2);
+    expect(appendMessages).toHaveBeenNthCalledWith(
+      1,
       "A",
-      expect.arrayContaining([
-        expect.objectContaining({ role: "user", content: "hello" }),
-        expect.objectContaining({ role: "assistant", content: partialBeforeCancel }),
-      ]),
+      [expect.objectContaining({ role: "user", content: "hello" })],
+      expect.objectContaining({
+        operationId: expect.any(String),
+        payloadHash: expect.any(String),
+      }),
+    );
+    expect(appendMessages).toHaveBeenNthCalledWith(
+      2,
+      "A",
+      [expect.objectContaining({ role: "assistant", content: partialBeforeCancel })],
       expect.objectContaining({
         operationId: expect.any(String),
         payloadHash: expect.any(String),

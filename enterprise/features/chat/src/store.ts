@@ -643,6 +643,40 @@ async function persistAppendMessagesNow(
   }
 }
 
+/**
+ * Durably stage the user half of a turn before opening the long-running model
+ * stream. The outbox write is local/fast and survives refresh; its coordinator
+ * flushes to the portal without adding a history round-trip to TTFT. Tests and
+ * non-portal consumers that have no outbox coordinator retain the direct append
+ * path, chained ahead of the eventual assistant append.
+ */
+async function persistUserMessageBeforeStream(
+  set: (partial: Partial<ChatStoreState> | ((state: ChatStoreState) => Partial<ChatStoreState>)) => void,
+  sessionId: string,
+  message: ChatMessage,
+): Promise<void> {
+  try {
+    const queued = await enqueueAppend(sessionId, [message]);
+    if (queued.enqueued) {
+      void flushHistoryOutbox();
+      return;
+    }
+  } catch {
+    // IndexedDB can be unavailable in private/restricted browser contexts.
+    // Fall through to the existing server-first persistence path.
+  }
+  void persistAppendMessages(set, sessionId, [message]);
+}
+
+function assistantHasPersistableTurnState(message: ChatMessage): boolean {
+  return Boolean(
+    message.content.trim() ||
+      message.reasoning?.trim() ||
+      message.deep_research ||
+      message.web_search_sources?.length,
+  );
+}
+
 function resolveHistoryErrorMessage(error: unknown, fallback: string): string {
   const unauthorized =
     (error instanceof ChatHistoryHttpError && error.status === 401) ||
@@ -811,7 +845,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   async refetchSessionMessages(sessionId) {
-    if (!get().hydrated || isDraftSessionId(get(), sessionId)) return;
+    if (
+      !get().hydrated ||
+      isDraftSessionId(get(), sessionId) ||
+      isSessionStreaming(get(), sessionId)
+    ) {
+      return;
+    }
     try {
       const remoteMessages = await portalHistory.getMessages(sessionId);
       const overlay = await listPendingOverlayMessages(sessionId);
@@ -1380,9 +1420,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     options?.onAccepted?.(sessionId);
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
+    // A browser refresh may destroy the streaming JS context before the final
+    // history POST. Stage the user's message first so the conversation never
+    // degrades into an empty persisted session.
+    if (get().hydrated) {
+      await persistUserMessageBeforeStream(set, sessionId, userMessage);
+    }
+
+    let streamedWebSearchSources: ChatMessage["web_search_sources"];
+    let streamedWebSearchTrace: ChatMessage["web_search_trace"];
     try {
-      let streamedWebSearchSources: ChatMessage["web_search_sources"];
-      let streamedWebSearchTrace: ChatMessage["web_search_trace"];
       const request = toSdkRequest(
         sessionId,
         requestModel,
@@ -1500,25 +1547,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           streamedWebSearchTrace,
         );
       }
-      const after = get();
-      if (after.status !== "error" && after.hydrated) {
-        const u = after.messages.find((m) => m.id === userMessage.id);
-        const a = after.messages.find((m) => m.id === assistantMessage.id);
-        if (u && a && u.role === "user" && a.role === "assistant") {
-          const assistantToPersist = preserveStreamedWebSearchTrace(
-            preserveStreamedWebSearchSources(
-              a,
-              assistantMessage.id,
-              streamedWebSearchSources,
-            ),
-            assistantMessage.id,
-            streamedWebSearchTrace,
-          );
-          // Yield one tick after SSE teardown so the portal can accept the follow-up POST.
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          await persistAppendMessages(set, sessionId, [u, assistantToPersist]);
-        }
-      }
     } catch (error) {
       setSessionStream(set, sessionId, null);
       set((prev) =>
@@ -1530,6 +1558,29 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           : {},
       );
     } finally {
+      const afterStream = get();
+      if (afterStream.hydrated) {
+        const assistant = afterStream.messages.find((message) => message.id === assistantMessage.id);
+        if (assistant?.role === "assistant") {
+          const assistantToPersist = preserveStreamedWebSearchTrace(
+            preserveStreamedWebSearchSources(
+              assistant,
+              assistantMessage.id,
+              streamedWebSearchSources,
+            ),
+            assistantMessage.id,
+            streamedWebSearchTrace,
+          );
+          if (assistantHasPersistableTurnState(assistantToPersist)) {
+            // Yield one tick after SSE teardown so the portal can accept the
+            // follow-up append. The user half is already durable and ordered
+            // ahead of this operation by the outbox/append chain.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            await persistAppendMessages(set, sessionId, [assistantToPersist]);
+          }
+        }
+      }
+
       const after = get();
       const sid = String(queueSessionId ?? "").trim();
       if (!sid) return;
