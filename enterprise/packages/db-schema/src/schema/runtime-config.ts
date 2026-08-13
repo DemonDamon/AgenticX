@@ -165,6 +165,7 @@ export const enterpriseRuntimeWebSearch = pgTable("enterprise_runtime_web_search
     .notNull()
     .$type<Array<Record<string, unknown>>>(),
   maxResults: integer("max_results").default(50).notNull(),
+  maxSearchCalls: integer("max_search_calls").default(3).notNull(),
   deepResearchEnabled: boolean("deep_research_enabled").default(true).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

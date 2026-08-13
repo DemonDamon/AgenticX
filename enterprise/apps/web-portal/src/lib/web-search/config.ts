@@ -9,6 +9,10 @@ import type {
 } from "./providers";
 import { DEFAULT_MAX_RESULTS } from "./providers";
 import {
+  DEFAULT_MAX_SEARCH_CALLS,
+  normalizeMaxSearchCalls,
+} from "./search-call-budget";
+import {
   DEFAULT_BACKEND_CHAIN,
   type PageFetchBackendName,
 } from "./page-fetch-backends";
@@ -18,6 +22,8 @@ export type TenantWebSearchRow = {
   provider: string;
   apiKey: string;
   maxResults: number;
+  /** Shared ordinary-search provider-call cap; absent legacy rows use 3. */
+  maxSearchCalls?: number;
   /** Ordered, decrypted provider instances; absent rows retain legacy single-provider behavior. */
   providers?: WebSearchProviderConfig[];
   primaryProviderId?: string;
@@ -115,6 +121,7 @@ export function resolveWebSearchConfig(tenant: TenantWebSearchRow): WebSearchRun
       provider: normalizeProvider(tenant.provider),
       apiKey: tenant.apiKey ?? "",
       maxResults: Number.isFinite(tenant.maxResults) ? tenant.maxResults : DEFAULT_MAX_RESULTS,
+      maxSearchCalls: normalizeMaxSearchCalls(tenant.maxSearchCalls),
       primaryProviderId: tenant.primaryProviderId?.trim() || providers[0]?.id,
       providers,
     };
@@ -130,6 +137,7 @@ export function resolveWebSearchConfig(tenant: TenantWebSearchRow): WebSearchRun
     provider: providers[0]?.adapter ?? normalizeProvider(envProvider),
     apiKey: providers[0]?.apiKey ?? envKey,
     maxResults: Number.isFinite(envMax) ? envMax : DEFAULT_MAX_RESULTS,
+    maxSearchCalls: DEFAULT_MAX_SEARCH_CALLS,
     primaryProviderId:
       process.env.WEB_SEARCH_PRIMARY_PROVIDER_ID?.trim() || providers[0]?.id,
     providers,

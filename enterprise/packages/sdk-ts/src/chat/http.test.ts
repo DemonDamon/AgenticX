@@ -99,11 +99,15 @@ describe("HttpChatClient stream cancel", () => {
               uniqueHosts: 7,
             },
             { query: "邓煜 国内风评 2026年8月", hitCount: 9, uniqueHosts: 6 },
+            { query: "实体三 风评变化", hitCount: 8, uniqueHosts: 5 },
+            { query: "实体四 风评变化", hitCount: 7, uniqueHosts: 4 },
+            { query: "实体五 风评变化", hitCount: 6, uniqueHosts: 3 },
+            { query: "超出硬上限", hitCount: 5, uniqueHosts: 2 },
           ],
-          providerCalls: 2,
+          providerCalls: 5,
           retry: {
             used: true,
-            queryIndex: 1,
+            queryIndex: 4,
             reason: "primary result set was empty",
             fromProviderId: "provider-instance-a",
             toProviderId: "provider-instance-b",
@@ -129,10 +133,10 @@ describe("HttpChatClient stream cancel", () => {
     expect(chunks.find((chunk) => chunk.webSearchTrace)?.webSearchTrace).toMatchObject({
       version: 1,
       decision: "search",
-      providerCalls: 2,
+      providerCalls: 5,
       retry: {
         used: true,
-        queryIndex: 1,
+        queryIndex: 4,
         fromProviderId: "provider-instance-a",
         toProviderId: "provider-instance-b",
       },
@@ -144,6 +148,9 @@ describe("HttpChatClient stream cancel", () => {
           uniqueHosts: 7,
         },
         { query: "邓煜 国内风评 2026年8月", hitCount: 9, uniqueHosts: 6 },
+        { query: "实体三 风评变化", hitCount: 8, uniqueHosts: 5 },
+        { query: "实体四 风评变化", hitCount: 7, uniqueHosts: 4 },
+        { query: "实体五 风评变化", hitCount: 6, uniqueHosts: 3 },
       ],
     });
     expect(chunks.some((chunk) => chunk.delta === "answer")).toBe(true);

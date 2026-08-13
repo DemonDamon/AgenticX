@@ -5,6 +5,11 @@ import {
   upsertTenantWebSearchConfig,
   type WebSearchProviderUpdate,
 } from "../../../../lib/web-search/tenant-config";
+import {
+  isValidMaxSearchCalls,
+  MAX_MAX_SEARCH_CALLS,
+  MIN_MAX_SEARCH_CALLS,
+} from "../../../../lib/web-search/search-call-budget";
 
 function providerUpdates(raw: unknown): WebSearchProviderUpdate[] | undefined {
   if (!Array.isArray(raw)) return undefined;
@@ -80,6 +85,7 @@ export async function PUT(request: Request) {
     enabled?: unknown;
     provider?: unknown;
     maxResults?: unknown;
+    maxSearchCalls?: unknown;
     apiKey?: unknown;
     deepResearchEnabled?: unknown;
     providers?: unknown;
@@ -98,11 +104,27 @@ export async function PUT(request: Request) {
     );
   }
 
+  if (
+    body.maxSearchCalls !== undefined &&
+    !isValidMaxSearchCalls(body.maxSearchCalls)
+  ) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "40002",
+          message: `单轮搜索上限必须为 ${MIN_MAX_SEARCH_CALLS} 到 ${MAX_MAX_SEARCH_CALLS} 之间的整数`,
+        },
+      },
+      { status: 400 },
+    );
+  }
+
   try {
     const data = await upsertTenantWebSearchConfig(session.tenantId, {
       enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
       provider: typeof body.provider === "string" ? body.provider : undefined,
       maxResults: typeof body.maxResults === "number" ? body.maxResults : undefined,
+      maxSearchCalls: body.maxSearchCalls,
       apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
       deepResearchEnabled:
         typeof body.deepResearchEnabled === "boolean" ? body.deepResearchEnabled : undefined,

@@ -1210,6 +1210,190 @@ describe("web search tool loop", () => {
     expect(text).toContain('"providerIds":["primary","secondary"]');
   });
 
+  it("uses one- and two-call budgets without adding a fallback retry", async () => {
+    const runWithBudget = async (maxSearchCalls: number) => {
+      const attempted: Array<{ query: string; providerId?: string }> = [];
+      const executeSearch = vi.fn(async (
+        query: string,
+        _max: number | undefined,
+        cfg: ExecuteSearchConfig,
+      ) => {
+        attempted.push({ query, providerId: cfg.primaryProviderId });
+        return [];
+      });
+      const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+        if (body.stream === false) {
+          return jsonResponse({
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  need_search: true,
+                  resolved_query: "甲和乙的近况",
+                  search_queries: ["甲 近况", "乙 近况"],
+                  confidence: 0.99,
+                }),
+              },
+            }],
+          });
+        }
+        return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+      });
+
+      const response = await runWebSearchTurn(
+        {
+          model: "m",
+          messages: [
+            { role: "user", content: "甲和乙是同事" },
+            { role: "assistant", content: "是的。" },
+            { role: "user", content: "他们最近怎么样？" },
+          ],
+          agenticx_web_search: true,
+        },
+        {
+          url: "http://gateway.test/v1/chat/completions",
+          headers: {},
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          loadTenantConfig: async () => ({
+            enabled: true,
+            provider: "bocha",
+            apiKey: "primary-key",
+            maxResults: 50,
+            maxSearchCalls,
+            providers: [
+              {
+                id: "primary",
+                adapter: "bocha",
+                displayName: "Primary",
+                apiKey: "primary-key",
+                enabled: true,
+                priority: 0,
+              },
+              {
+                id: "secondary",
+                adapter: "tavily",
+                displayName: "Secondary",
+                apiKey: "secondary-key",
+                enabled: true,
+                priority: 1,
+              },
+            ],
+          }),
+          executeSearch,
+        },
+      );
+      return { attempted, text: await response.text() };
+    };
+
+    const one = await runWithBudget(1);
+    expect(one.attempted).toEqual([
+      { query: "甲和乙的近况", providerId: "primary" },
+    ]);
+    expect(one.text).toContain('"providerCalls":1');
+    expect(one.text).not.toContain('"toProviderId":"secondary"');
+
+    const two = await runWithBudget(2);
+    expect(two.attempted).toEqual([
+      { query: "甲 近况", providerId: "primary" },
+      { query: "乙 近况", providerId: "primary" },
+    ]);
+    expect(two.text).toContain('"providerCalls":2');
+    expect(two.text).not.toContain('"toProviderId":"secondary"');
+  });
+
+  it("executes four facets and at most one retry within a five-call budget", async () => {
+    const attempted: Array<{ query: string; providerId?: string }> = [];
+    const rewriteBodies: Array<{ messages?: Array<{ content?: string }> }> = [];
+    const executeSearch = vi.fn(async (
+      query: string,
+      _max: number | undefined,
+      cfg: ExecuteSearchConfig,
+    ) => {
+      attempted.push({ query, providerId: cfg.primaryProviderId });
+      return [{
+        title: `${cfg.primaryProviderId} ${query}`,
+        url: `https://${cfg.primaryProviderId}.example/${encodeURIComponent(query)}`,
+        snippet: query,
+      }];
+    });
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        messages?: Array<{ content?: string }>;
+      };
+      if (body.stream === false) {
+        rewriteBodies.push(body);
+        return jsonResponse({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                need_search: true,
+                resolved_query: "甲乙丙丁的近况",
+                search_queries: ["甲 近况", "乙 近况", "丙 近况", "丁 近况"],
+                confidence: 0.99,
+              }),
+            },
+          }],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "甲乙丙丁都是研究员" },
+          { role: "assistant", content: "明白。" },
+          { role: "user", content: "分别看看他们的近况" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "primary-key",
+          maxResults: 50,
+          maxSearchCalls: 5,
+          providers: [
+            {
+              id: "primary",
+              adapter: "bocha",
+              displayName: "Primary",
+              apiKey: "primary-key",
+              enabled: true,
+              priority: 0,
+            },
+            {
+              id: "secondary",
+              adapter: "tavily",
+              displayName: "Secondary",
+              apiKey: "secondary-key",
+              enabled: true,
+              priority: 1,
+            },
+          ],
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(rewriteBodies[0]?.messages?.[0]?.content).toContain("1 到 5 条可直接检索查询");
+    expect(attempted).toHaveLength(5);
+    expect(attempted.slice(0, 4)).toEqual([
+      { query: "甲 近况", providerId: "primary" },
+      { query: "乙 近况", providerId: "primary" },
+      { query: "丙 近况", providerId: "primary" },
+      { query: "丁 近况", providerId: "primary" },
+    ]);
+    expect(attempted[4]).toEqual({ query: "甲 近况", providerId: "secondary" });
+    expect((await response.text())).toContain('"providerCalls":5');
+  });
+
   it("rewrites only the current query, not the prior question", async () => {
     const executeSearch = vi.fn(async (q: string) => [
       { title: "王虹", url: "https://ex.com/wang-hong", snippet: q },

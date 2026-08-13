@@ -53,6 +53,10 @@ import {
   mergeSearchHits,
   selectAlternativeProvider,
 } from "./search-retry";
+import {
+  DEFAULT_MAX_SEARCH_CALLS,
+  normalizeMaxSearchCalls,
+} from "./search-call-budget";
 import { classifyWebSearchNeed } from "./search-necessity";
 
 export const WEB_SEARCH_TOOL = {
@@ -523,6 +527,7 @@ async function rewriteSearchQueryWithAi(
   rewriteMessages: NonNullable<ReturnType<typeof buildSearchQueryRewriteMessages>>,
   model: string | undefined,
   deps: GatewayFetchDeps,
+  maxSearchCalls: number,
 ): Promise<StandaloneSearchQueryOutcome> {
   let lastError = "unknown error";
   for (let attempt = 1; attempt <= QUERY_REWRITE_MAX_ATTEMPTS; attempt += 1) {
@@ -549,7 +554,10 @@ async function rewriteSearchQueryWithAi(
         },
         QUERY_REWRITE_TIMEOUT_MS,
       );
-      const rewrite = parseSearchQueryRewrite(extractCompletionContent(payload));
+      const rewrite = parseSearchQueryRewrite(
+        extractCompletionContent(payload),
+        maxSearchCalls,
+      );
       if (
         rewrite &&
         [rewrite.query, ...rewrite.searchQueries].some(
@@ -594,10 +602,22 @@ export async function resolveStandaloneSearchQuery(
   messages: WebSearchChatMessage[],
   model: string | undefined,
   deps: GatewayFetchDeps,
+  maxSearchCallsValue: unknown = DEFAULT_MAX_SEARCH_CALLS,
 ): Promise<StandaloneSearchQueryOutcome> {
-  const rewriteMessages = buildSearchQueryRewriteMessages(messages);
+  const maxSearchCalls = normalizeMaxSearchCalls(maxSearchCallsValue);
+  const rewriteMessages = buildSearchQueryRewriteMessages(
+    messages,
+    new Date(),
+    maxSearchCalls,
+  );
   if (rewriteMessages) {
-    return rewriteSearchQueryWithAi(messages, rewriteMessages, model, deps);
+    return rewriteSearchQueryWithAi(
+      messages,
+      rewriteMessages,
+      model,
+      deps,
+      maxSearchCalls,
+    );
   }
 
   const query = buildWebSearchQuery(messages);
@@ -808,8 +828,6 @@ async function pipeWithSourcesAppendix(
   });
 }
 
-export const MAX_ORDINARY_SEARCH_PROVIDER_CALLS = 3;
-
 function perQueryMaxResults(cfg: WebSearchRuntimeConfig, queryCount: number): number | undefined {
   if (queryCount <= 1) return undefined;
   const total = Math.max(1, Math.min(WEB_SEARCH_MAX_RESULTS_CAP, cfg.maxResults));
@@ -826,18 +844,20 @@ async function executeOrdinarySearchPlan(
   providerIdsByQuery: string[][];
   retry?: NonNullable<WebSearchTracePayload["retry"]>;
 }> {
+  const maxSearchCalls = normalizeMaxSearchCalls(cfg.maxSearchCalls);
+  const boundedQueries = queries.slice(0, maxSearchCalls);
   const providers = configuredWebSearchProviders(cfg);
   const primary = primaryWebSearchProvider(cfg);
   if (!primary) throw new Error("no configured web search provider");
 
   const alternative = selectAlternativeProvider(providers, primary.id);
-  const maxResults = perQueryMaxResults(cfg, queries.length);
+  const maxResults = perQueryMaxResults(cfg, boundedQueries.length);
   let callsUsed = 0;
   let retryTrace: NonNullable<WebSearchTracePayload["retry"]> | undefined;
-  const providerIdsByQuery = queries.map(() => [primary.id]);
+  const providerIdsByQuery = boundedQueries.map(() => [primary.id]);
 
   const groups = await Promise.all(
-    queries.map(async (query) => {
+    boundedQueries.map(async (query) => {
       callsUsed += 1;
       try {
         return await searchFn(
@@ -855,9 +875,9 @@ async function executeOrdinarySearchPlan(
     }),
   );
 
-  // All facets share one retry budget. Two facets may consume 2+1 calls; three
-  // facets already consume the complete budget and never expand to six calls.
-  if (alternative && callsUsed < MAX_ORDINARY_SEARCH_PROVIDER_CALLS) {
+  // All facets and the single evidence-quality retry share one provider-call
+  // budget. A plan that consumes the cap cannot expand into per-facet retries.
+  if (alternative && callsUsed < maxSearchCalls) {
     let retryIndex = groups.findIndex((hits) => hits.length === 0);
     if (retryIndex < 0) {
       retryIndex = groups.findIndex((hits) => assessSearchEvidence(hits).retry);
@@ -880,7 +900,7 @@ async function executeOrdinarySearchPlan(
       providerIdsByQuery[retryIndex]!.push(alternative.id);
       try {
         const complement = await searchFn(
-          queries[retryIndex]!,
+          boundedQueries[retryIndex]!,
           maxResults,
           configForWebSearchProvider(cfg, alternative),
         );
@@ -897,7 +917,7 @@ async function executeOrdinarySearchPlan(
   }
 
   console.info(
-    `[web-search] retrieval queries=${queries.length} provider_calls=${callsUsed}/${MAX_ORDINARY_SEARCH_PROVIDER_CALLS}`,
+    `[web-search] retrieval queries=${boundedQueries.length} provider_calls=${callsUsed}/${maxSearchCalls}`,
   );
   return {
     groups,
@@ -999,6 +1019,7 @@ export async function runWebSearchTurn(
     originalMessages,
     modelName,
     deps,
+    cfg.maxSearchCalls,
   );
   const queryResolutionMs = Date.now() - queryResolutionStartedAt;
   if (queryResolution.kind === "unresolved") {
@@ -1017,7 +1038,7 @@ export async function runWebSearchTurn(
     queryResolution.value.searchQueries.length > 0
       ? queryResolution.value.searchQueries
       : [query]
-  ).slice(0, MAX_ORDINARY_SEARCH_PROVIDER_CALLS);
+  ).slice(0, normalizeMaxSearchCalls(cfg.maxSearchCalls));
   // Only the first user turn may search the current text verbatim. Once recent
   // context exists, provider retrieval is gated on a standalone agent rewrite.
 

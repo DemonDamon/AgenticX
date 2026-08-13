@@ -50,6 +50,32 @@ describe("contextual search-query rewrite", () => {
     ).toBeNull();
   });
 
+  it("tells the planner the configured per-turn search limit", () => {
+    const conversation = [
+      { role: "user", content: "甲乙丙最近分别发生了什么" },
+      { role: "assistant", content: "你想继续了解这三个人。" },
+      { role: "user", content: "分别查一下他们的近况" },
+    ];
+    const messages = buildSearchQueryRewriteMessages(
+      conversation,
+      new Date(2026, 7, 13, 9, 30, 0),
+      2,
+    );
+
+    expect(messages?.[0]?.content).toContain("1 到 2 条可直接检索查询");
+    expect(messages?.[0]?.content).not.toContain("1 到 3 条可直接检索查询");
+
+    const single = buildSearchQueryRewriteMessages(
+      conversation,
+      new Date(2026, 7, 13, 9, 30, 0),
+      1,
+    );
+    expect(single?.[0]?.content).toContain("合并进唯一一条自包含查询");
+    expect(single?.[0]?.content).toContain("不得遗漏任何检索目标");
+    expect(single?.[0]?.content).toContain("王虹 邓煜 分别离开北京大学 原因");
+    expect(single?.[0]?.content).not.toContain("search_queries 应分别查询");
+  });
+
   it("extracts text from multimodal turns without leaking image payloads", () => {
     const messages = buildSearchQueryRewriteMessages([
       { role: "user", content: "比较王虹和邓煜的经历" },
@@ -156,6 +182,35 @@ describe("contextual search-query rewrite", () => {
       ],
       confidence: 0.98,
     });
+  });
+
+  it("caps and deduplicates facets with the configured shared search budget", () => {
+    const raw = JSON.stringify({
+      need_search: true,
+      resolved_query: "甲乙丙丁分别发生了什么",
+      search_queries: ["甲 近况", "甲 近况", "乙 近况", "丙 近况", "丁 近况"],
+      confidence: 0.98,
+    });
+
+    expect(parseSearchQueryRewrite(raw, 2)?.searchQueries).toEqual([
+      "甲 近况",
+      "乙 近况",
+    ]);
+    expect(parseSearchQueryRewrite(raw, 1)?.searchQueries).toEqual([
+      "甲乙丙丁分别发生了什么",
+    ]);
+    expect(parseSearchQueryRewrite(raw, 5)?.searchQueries).toEqual([
+      "甲 近况",
+      "乙 近况",
+      "丙 近况",
+      "丁 近况",
+    ]);
+    // Runtime corruption never widens the paid-call budget.
+    expect(parseSearchQueryRewrite(raw, 99)?.searchQueries).toEqual([
+      "甲 近况",
+      "乙 近况",
+      "丙 近况",
+    ]);
   });
 
   it("accepts a semantic no-search decision without adding regex rules", () => {

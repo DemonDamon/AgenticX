@@ -266,6 +266,8 @@
       "enableWebSearchDescription": "Allow chat messages to call the Web Search tool",
       "enableDeepResearch": "Deep research",
       "enableDeepResearchDescription": "Enable multi-stage research in chat; uses significantly more tokens and is on by default",
+      "maxSearchCalls": "Search limit per turn",
+      "maxSearchCallsDescription": "Maximum number of web searches for each message",
       "provider": "Search provider",
       "providerDescription": "Choose the primary search provider from services connected by your administrator",
       "searchApiKey": "Search Provider API Key",
@@ -283,7 +285,8 @@
       "removeFallbackProvider": "Remove",
       "saveSuccess": "Web search settings saved",
       "saveFailed": "Failed to save web search settings",
-      "loadFailed": "Failed to load web search settings"
+      "loadFailed": "Failed to load web search settings",
+      "retryLoad": "Retry"
     },
     "parser": {
       "sectionDescription": "Parsing strategy for uploaded files",

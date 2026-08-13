@@ -88,7 +88,7 @@ function isAbortError(error: unknown): boolean {
 const MAX_TRACE_REASON_CHARS = 500;
 const MAX_TRACE_QUERY_CHARS = 2_000;
 const MAX_TRACE_PROVIDER_ID_CHARS = 200;
-const MAX_TRACE_FACETS = 3;
+const MAX_TRACE_FACETS = 5;
 const MAX_TRACE_COUNT = 10_000;
 const MAX_TRACE_DURATION_MS = 10 * 60 * 1_000;
 

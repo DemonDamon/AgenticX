@@ -44,6 +44,8 @@ export type WebSearchRuntimeConfig = {
   /** Legacy mirror of the primary provider secret. */
   apiKey: string;
   maxResults: number;
+  /** Shared cap for standalone query facets plus any fallback-provider search. */
+  maxSearchCalls?: number;
   primaryProviderId?: string;
   providers?: WebSearchProviderConfig[];
 };

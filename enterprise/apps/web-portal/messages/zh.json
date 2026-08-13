@@ -266,6 +266,8 @@
       "enableWebSearchDescription": "开启后聊天消息可调用 Web Search 工具",
       "enableDeepResearch": "深度研究",
       "enableDeepResearchDescription": "开启后对话可走多阶段研究流水线；单次消耗显著更高，默认开启",
+      "maxSearchCalls": "单轮搜索上限",
+      "maxSearchCallsDescription": "每条消息最多进行几次联网搜索",
       "provider": "搜索服务商",
       "providerDescription": "选择首轮使用的搜索服务；可用项由管理员已接入的服务决定",
       "searchApiKey": "Search Provider API Key",
@@ -283,7 +285,8 @@
       "removeFallbackProvider": "移除",
       "saveSuccess": "联网搜索配置已保存",
       "saveFailed": "保存联网搜索配置失败",
-      "loadFailed": "加载联网搜索配置失败"
+      "loadFailed": "加载联网搜索配置失败",
+      "retryLoad": "重试"
     },
     "parser": {
       "sectionDescription": "文件上传时的解析策略",
