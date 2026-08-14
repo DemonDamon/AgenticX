@@ -10,6 +10,12 @@
 
 import { selectRelevantEvidenceExcerpt } from "./evidence-pack";
 import { parseLlmJson } from "./llm-json";
+import {
+  isMarkdownFenceLine,
+  isMarkdownHeadingLine,
+  isMarkdownTableDividerLine,
+  splitMarkdownSentences,
+} from "./markdown-structure";
 import type { Citation } from "./registry";
 
 /** Cap the audit itself: the check must not cost more than a section write. */
@@ -24,16 +30,10 @@ export const VERIFY_MAX_TOKENS = 4_096;
 export const CITATION_VERIFY_PHASE_MESSAGE = "正在复核引用与关键断言…";
 
 const CITATION_RE = /\[(\d{1,3})\]/gu;
-const FENCE_RE = /^\s*(?:```|~~~)/u;
-const HEADING_RE = /^\s{0,3}#{1,6}\s/u;
-const TABLE_DIVIDER_RE = /^\s*\|?[\s:|-]*-{3,}[\s:|-]*\|?\s*$/u;
 const LIST_MARKER_RE = /^\s*(?:[-*+]|\d{1,3}[.)])\s+/u;
 const BLOCKQUOTE_RE = /^\s*>+\s?/u;
 /** Nothing but whitespace and list/quote markers is left on the line. */
 const ORPHAN_LINE_RE = /^\s*(?:[-*+]|\d{1,3}[.)]|>)*\s*$/u;
-/** Sentence terminators for CJK and Latin prose. */
-const SENTENCE_SPLIT_RE = /(?<=[。！？；!?;])\s*|(?<=\.)\s+(?=[A-Z(\[])/u;
-
 const NUMERIC_RE = /\d|[%％]|亿|万|千|百分/u;
 const DATE_RE = /(?:\d{4}\s*年|\d{1,2}\s*月|\d{4}-\d{2}|Q[1-4]\b|\b(?:19|20)\d{2}\b)/u;
 const COMPARISON_RE =
@@ -104,16 +104,16 @@ export function extractCitedClaims(markdown: string): ClaimUnit[] {
     const lineEnd = cursor + line.length;
     cursor = lineEnd + 1;
 
-    if (FENCE_RE.test(line)) {
+    if (isMarkdownFenceLine(line)) {
       inFence = !inFence;
       continue;
     }
     if (inFence) continue;
-    if (HEADING_RE.test(line)) {
+    if (isMarkdownHeadingLine(line)) {
       sectionIndex += 1;
       continue;
     }
-    if (TABLE_DIVIDER_RE.test(line)) continue;
+    if (isMarkdownTableDividerLine(line)) continue;
     if (citationIndexes(line).length === 0) continue;
 
     const isTable = line.trimStart().startsWith("|");
@@ -124,7 +124,7 @@ export function extractCitedClaims(markdown: string): ClaimUnit[] {
     const prefixLength = isTable ? 0 : (listPrefix || quotePrefix).length;
 
     const body = line.slice(prefixLength);
-    const pieces = isTable ? [body] : body.split(SENTENCE_SPLIT_RE);
+    const pieces = isTable ? [body] : splitMarkdownSentences(body);
     let within = prefixLength;
     for (const piece of pieces) {
       const start = line.indexOf(piece, within);
@@ -370,8 +370,8 @@ export function parseVerificationFindings(
     if (replacement) {
       // Structural additions would corrupt the report layout.
       if (/[\r\n]/u.test(replacement)) continue;
-      if (FENCE_RE.test(replacement) || replacement.includes("```")) continue;
-      if (HEADING_RE.test(replacement)) continue;
+      if (isMarkdownFenceLine(replacement) || replacement.includes("```")) continue;
+      if (isMarkdownHeadingLine(replacement)) continue;
       if (claim.kind !== "table" && replacement.includes("|")) continue;
       const allowed = new Set(claim.citations);
       const used = citationIndexes(replacement);

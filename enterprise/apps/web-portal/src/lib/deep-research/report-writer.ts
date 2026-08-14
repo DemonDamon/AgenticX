@@ -6,6 +6,12 @@
 import { EVIDENCE_DISCIPLINE_HINT } from "../retrieval/evidence-discipline";
 import { UNTRUSTED_EVIDENCE_SYSTEM_HINT } from "./evidence-pack";
 import { parseLlmJson } from "./llm-json";
+import {
+  isMarkdownFenceLine,
+  isMarkdownHeadingLine,
+  isMarkdownTableDividerLine,
+  splitMarkdownSentences,
+} from "./markdown-structure";
 
 export const MIN_SECTIONS = 5;
 export const MAX_SECTIONS = 9;
@@ -472,29 +478,25 @@ export const MAX_SECTION_CONTINUITY_CHARS = 420;
 export const MAX_REPORT_CONTINUITY_CHARS = 4_000;
 const MAX_CONTINUITY_CLAIMS = 3;
 
-const CONTINUITY_FENCE_RE = /^\s*(?:```|~~~)/u;
-const CONTINUITY_HEADING_RE = /^\s{0,3}#{1,6}\s/u;
-const CONTINUITY_TABLE_DIVIDER_RE = /^\s*\|?[\s:|-]*-{3,}[\s:|-]*\|?\s*$/u;
 /** Fresh instance per scan: a shared global regex carries lastIndex across calls. */
 const continuityCitationRe = () => /\[(\d{1,3})\]/gu;
 const HAS_CONTINUITY_CITATION_RE = /\[\d{1,3}\]/u;
-const CONTINUITY_SENTENCE_RE = /(?<=[。！？；!?;])\s*/u;
 
 /** Drop code, headings and table rules; keep readable statements in order. */
 function continuityStatements(body: string): string[] {
   const statements: string[] = [];
   let inFence = false;
   for (const line of body.split("\n")) {
-    if (CONTINUITY_FENCE_RE.test(line)) {
+    if (isMarkdownFenceLine(line)) {
       inFence = !inFence;
       continue;
     }
     if (inFence) continue;
-    if (CONTINUITY_HEADING_RE.test(line)) continue;
-    if (CONTINUITY_TABLE_DIVIDER_RE.test(line)) continue;
+    if (isMarkdownHeadingLine(line)) continue;
+    if (isMarkdownTableDividerLine(line)) continue;
     const text = line.replace(/^\s*(?:[-*+]|\d{1,3}[.)]|>)\s*/u, "").trim();
     if (!text) continue;
-    for (const piece of text.split(CONTINUITY_SENTENCE_RE)) {
+    for (const piece of splitMarkdownSentences(text)) {
       const statement = piece.trim();
       // Short enough to be a fragment ("是的。", "见下表") carries no conclusion.
       if (statement.length >= 4) statements.push(statement);
