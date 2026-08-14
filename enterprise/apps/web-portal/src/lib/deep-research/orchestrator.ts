@@ -281,6 +281,8 @@ type LaneResult = {
   queriesExecuted: string[];
 };
 
+type LaneVisibility = "public" | "internal";
+
 function sseDataFrame(payload: unknown): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
 }
@@ -1163,8 +1165,13 @@ export async function runDeepResearchTurn(
           variants?: QueryVariant[];
           skipExpand?: boolean;
           variantExecution?: "wave" | "sequential_early_stop";
+          visibility?: LaneVisibility;
         }): Promise<LaneResult> => {
           const { question, laneId, index, total } = args;
+          const visibility = args.visibility ?? "public";
+          const enqueueLaneEvent = (event: DeepResearchEvent) => {
+            if (visibility === "public") enqueueEvent(event);
+          };
           const laneDocumentCitations: Citation[] = [];
           if (directPageView && directPageCitation) {
             const evidence = selectDirectPageEvidence(
@@ -1203,7 +1210,7 @@ export async function runDeepResearchTurn(
             question,
             laneDocumentCitations,
           );
-          enqueueEvent({
+          enqueueLaneEvent({
             type: "lane_started",
             laneId,
             title: question,
@@ -1229,7 +1236,7 @@ export async function runDeepResearchTurn(
           try {
             if (runSignal?.aborted) throw new DOMException("Aborted", "AbortError");
             if (searchBudgetLeft() <= 0) {
-              enqueueEvent({
+              enqueueLaneEvent({
                 type: "lane_sources",
                 laneId,
                 sources: laneWebDocumentCitations.map((citation) => ({
@@ -1247,7 +1254,7 @@ export async function runDeepResearchTurn(
                   uniqueHosts: laneDocumentEvidence.uniqueHosts,
                 },
               });
-              enqueueEvent({
+              enqueueLaneEvent({
                 type: "lane_done",
                 laneId,
                 status: laneDocumentCitations.length > 0 ? "ok" : "failed",
@@ -1278,7 +1285,7 @@ export async function runDeepResearchTurn(
                   });
               if (expandPolicyError) throw expandPolicyError;
             }
-            enqueueEvent({
+            enqueueLaneEvent({
               type: "lane_progress",
               laneId,
               message: `已展开 ${variants.length} 条检索式`,
@@ -1373,7 +1380,7 @@ export async function runDeepResearchTurn(
             const deferredVariants = indexedVariants.slice(probeVariantCount);
             if (deferredVariants.length > 0) {
               if (pool.size >= enoughCandidates) {
-                enqueueEvent({
+                enqueueLaneEvent({
                   type: "lane_progress",
                   laneId,
                   message: `候选已够用，实际检索 ${variantsRun} 条，省去 ${deferredVariants.length} 条检索式`,
@@ -1385,7 +1392,7 @@ export async function runDeepResearchTurn(
                 }
                 const skipped = indexedVariants.length - variantsRun;
                 if (skipped > 0) {
-                  enqueueEvent({
+                  enqueueLaneEvent({
                     type: "lane_progress",
                     laneId,
                     message: `候选已够用，实际检索 ${variantsRun} 条，省去 ${skipped} 条检索式`,
@@ -1396,7 +1403,7 @@ export async function runDeepResearchTurn(
               }
             }
 
-            enqueueEvent({
+            enqueueLaneEvent({
               type: "lane_progress",
               laneId,
               message: `发现 ${pool.size} 个候选来源`,
@@ -1404,7 +1411,7 @@ export async function runDeepResearchTurn(
 
             if (pool.size === 0 && variantsRun > 0 && variantFailures >= variantsRun) {
               searchFailures += 1;
-              enqueueEvent({
+              enqueueLaneEvent({
                 type: "lane_sources",
                 laneId,
                 sources: laneWebDocumentCitations.map((citation) => ({
@@ -1422,7 +1429,7 @@ export async function runDeepResearchTurn(
                   uniqueHosts: laneDocumentEvidence.uniqueHosts,
                 },
               });
-              enqueueEvent({
+              enqueueLaneEvent({
                 type: "lane_done",
                 laneId,
                 status: laneDocumentCitations.length > 0 ? "ok" : "failed",
@@ -1436,7 +1443,7 @@ export async function runDeepResearchTurn(
               resolveLaneAdoptCap(registry.size),
               adaptiveMaxPerDomain(pool.size),
             );
-            enqueueEvent({
+            enqueueLaneEvent({
               type: "lane_progress",
               laneId,
               message: `筛选出 ${selected.length}/${pool.size} 个高质量来源`,
@@ -1449,7 +1456,7 @@ export async function runDeepResearchTurn(
               questionCitations.push(registry.add(row.hit));
             }
 
-            enqueueEvent({
+            enqueueLaneEvent({
               type: "lane_progress",
               laneId,
               message: `已收集 ${questionCitations.length} 个来源，正在读取正文…`,
@@ -1508,7 +1515,7 @@ export async function runDeepResearchTurn(
                 }
                 const failureNote = summarizeFetchFailures(stats);
                 const readableCount = pagesFetched + laneDocumentCitations.length;
-                enqueueEvent({
+                enqueueLaneEvent({
                   type: "lane_progress",
                   laneId,
                   message: failureNote
@@ -1525,7 +1532,7 @@ export async function runDeepResearchTurn(
             }
 
             const laneEvidence = summarizeEvidenceFacet(question, questionCitations);
-            enqueueEvent({
+            enqueueLaneEvent({
               type: "lane_sources",
               laneId,
               sources: questionCitations
@@ -1588,7 +1595,11 @@ export async function runDeepResearchTurn(
             // so lane memos cannot exhaust the run quota before primary deliverables.
             const reservedPrimarySlots = deliveryPrefs.format === "docx" ? 3 : 2;
             const memoQuota = Math.max(0, MAX_ARTIFACTS_PER_RUN - reservedPrimarySlots);
-            if (memo.trim() && artifactsWritten < memoQuota) {
+            if (
+              visibility === "public" &&
+              memo.trim() &&
+              artifactsWritten < memoQuota
+            ) {
               const path = `research/${runId}/lanes/${laneId}/memo.md`;
               const record = await artifactStore.write({
                 tenantId,
@@ -1602,7 +1613,7 @@ export async function runDeepResearchTurn(
               });
               artifactsWritten += 1;
               artifactPath = record.path;
-              enqueueEvent({
+              enqueueLaneEvent({
                 type: "artifact",
                 id: record.id,
                 path: record.path,
@@ -1612,7 +1623,7 @@ export async function runDeepResearchTurn(
               });
             }
 
-            enqueueEvent({
+            enqueueLaneEvent({
               type: "lane_done",
               laneId,
               artifactPath,
@@ -1636,7 +1647,7 @@ export async function runDeepResearchTurn(
               "[deep-research] lane failed:",
               error instanceof Error ? error.message : error,
             );
-            enqueueEvent({ type: "lane_done", laneId, status: "failed" });
+            enqueueLaneEvent({ type: "lane_done", laneId, status: "failed" });
             return empty;
           }
         };
@@ -1685,7 +1696,7 @@ export async function runDeepResearchTurn(
           enqueueEvent({
             type: "phase",
             phase: "reflect",
-            message: "正在复盘已收集证据，识别信息缺口…",
+            message: "正在复核并补充关键证据…",
           });
           const seenGapKeys = new Set<string>();
           const seenQueryKeys = new Set<string>();
@@ -1740,25 +1751,7 @@ export async function runDeepResearchTurn(
               seenQueryKeys,
               remainingQueries: MAX_FOLLOWUP_QUERIES - followupQueriesUsed,
             });
-            if (novelGaps.length === 0) {
-              if (round === 1) {
-                enqueueEvent({
-                  type: "narrative",
-                  text: "证据交叉验证充分，未发现需要补搜的缺口。",
-                });
-              }
-              break;
-            }
-
-            enqueueEvent({
-              type: "reflection",
-              gaps: novelGaps.map((gap) => gap.description),
-            });
-            enqueueEvent({
-              type: "phase",
-              phase: "lanes",
-              message: `正在针对 ${novelGaps.length} 处缺口补充检索…`,
-            });
+            if (novelGaps.length === 0) break;
 
             const gapResults = await mapPool(
               novelGaps,
@@ -1774,6 +1767,7 @@ export async function runDeepResearchTurn(
                   ),
                   skipExpand: true,
                   variantExecution: "sequential_early_stop",
+                  visibility: "internal",
                 }),
               runSignal,
             );

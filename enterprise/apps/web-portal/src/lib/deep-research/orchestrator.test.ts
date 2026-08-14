@@ -1774,13 +1774,17 @@ describe("P1 multi-variant + reflect", () => {
     expect(calls.filter((q) => q.startsWith("q1"))).toHaveLength(3);
   });
 
-  it("deduplicates a repeated gap query across reflection rounds", async () => {
+  it("deduplicates repeated gap queries while keeping refinement events internal", async () => {
     let reflectCalls = 0;
     const searchCalls: string[] = [];
+    const artifactStore = createMemoryArtifactStore();
+    const runId = "internal-refinement-run";
     const response = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "主题调研" }] },
       {
         ...baseDeps({
+          artifactStore,
+          runId,
           fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
             const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
             if (body.stream === false) {
@@ -1815,37 +1819,31 @@ describe("P1 multi-variant + reflect", () => {
         }),
       },
     );
-    const { events } = await readSsePayload(response);
+    const { events, sourcesCount } = await readSsePayload(response);
     expect(reflectCalls).toBe(2);
     expect(searchCalls.filter((query) => query === "official paper")).toHaveLength(1);
-    expect(events.some((e) => e.type === "reflection")).toBe(true);
-    expect(
-      events.some((e) => e.type === "lane_started" && e.laneId === "gap-r1-g1"),
-    ).toBe(true);
-    expect(events.some((e) => e.type === "research_stats")).toBe(true);
-    // Gap card first, then the follow-up search card — no narrative saying both.
-    const reflectionIdx = events.findIndex((e) => e.type === "reflection");
-    const followUpIdx = events.findIndex(
-      (e) =>
-        e.type === "phase" &&
-        e.phase === "lanes" &&
-        typeof e.message === "string" &&
-        e.message.includes("补充检索"),
+    const stats = events.find((event) => event.type === "research_stats");
+    expect(stats?.queriesPlanned).toBe(3);
+    expect(stats?.sourcesSelected).toBe(3);
+    expect(sourcesCount).toBe(3);
+    const reflectPhases = events.filter(
+      (event) => event.type === "phase" && event.phase === "reflect",
     );
-    const gapLaneIdx = events.findIndex(
-      (e) => e.type === "lane_started" && e.laneId === "gap-r1-g1",
-    );
-    expect(reflectionIdx).toBeGreaterThanOrEqual(0);
-    expect(followUpIdx).toBeGreaterThan(reflectionIdx);
-    expect(gapLaneIdx).toBeGreaterThan(followUpIdx);
+    expect(reflectPhases).toEqual([
+      expect.objectContaining({ message: "正在复核并补充关键证据…" }),
+    ]);
+    expect(events.some((event) => event.type === "reflection")).toBe(false);
     expect(
       events.some(
-        (e) =>
-          e.type === "narrative" &&
-          typeof e.text === "string" &&
-          e.text.includes("信息缺口，正在补充检索"),
+        (event) =>
+          typeof event.laneId === "string" && event.laneId.startsWith("gap-"),
       ),
     ).toBe(false);
+    expect(JSON.stringify(events)).not.toContain("缺官方论文");
+    expect(JSON.stringify(events)).not.toContain("official paper");
+
+    const artifacts = await artifactStore.listByRun("t1", "u1", runId);
+    expect(artifacts.some((artifact) => artifact.path.includes("/lanes/gap-"))).toBe(false);
   });
 
   it("feeds each follow-up memo into the next longitudinal reflection", async () => {
