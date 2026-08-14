@@ -85,6 +85,13 @@ describe("deliveryPrefsPromptBlock", () => {
     expect(block).toContain("决策建议");
     expect(block).toContain("可视化网页（html）");
   });
+
+  it("keeps the default report focused on the requested result", () => {
+    const block = deliveryPrefsPromptBlock(DEFAULT_DELIVERY_PREFS);
+    expect(block).toContain("直接回答用户问题");
+    expect(block).toContain("就近说明");
+    expect(block).not.toContain("不可省略核心结论与信息缺口");
+  });
 });
 
 describe("sanitizeResearchTopic", () => {

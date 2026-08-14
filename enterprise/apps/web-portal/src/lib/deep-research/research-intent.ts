@@ -41,7 +41,8 @@ export function defaultFocusOptions(query: string): Array<{ id: string; label: s
     { id: "overview", label: "基本定义与最新进展" },
     { id: "mechanism", label: "关键机制与细节" },
     { id: "practice", label: "实践应用与落地" },
-    { id: "gaps", label: "局限、争议与信息缺口" },
+    // 保留稳定 option id，避免已持久化澄清答案失配；只收敛默认展示语义。
+    { id: "gaps", label: "关键表现、直接证据与适用条件" },
   ];
 }
 

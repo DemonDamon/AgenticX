@@ -2127,7 +2127,9 @@ describe("page fetch + sectioned report", () => {
     const report = rows.find((r) => r.path.endsWith("final-report.md"));
     expect(report).toBeDefined();
     expect(report!.content).not.toContain("因时间预算截断");
-    expect(report!.content).toContain("不确定性与信息缺口");
+    expect(report!.content).toContain("核心结论");
+    expect(report!.content).toContain("分项分析");
+    expect(report!.content).not.toContain("不确定性与信息缺口");
   });
 
   it("archives fetched pages under research/<runId>/pages/", async () => {

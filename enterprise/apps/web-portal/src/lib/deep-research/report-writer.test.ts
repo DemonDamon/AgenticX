@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_SECTIONS,
   SECTION_TARGET_CHARS,
+  applyReportContentPolicy,
+  buildReportOutline,
   buildSectionMessages,
+  deriveReportContentPolicy,
   ensureRichOutlineFormats,
   linkifyCitations,
   parseOutlineJson,
@@ -61,7 +64,7 @@ describe("parseOutlineJson", () => {
     expect(outline.title).toBe("X");
     expect(outline.sections).toHaveLength(3);
     expect(outline.sections[0]?.title).toBe("核心结论");
-    expect(outline.sections[2]?.title).toBe("不确定性与信息缺口");
+    expect(outline.sections[2]?.title).toBe("机制、条件与适用范围");
   });
 
   it("falls back on non-json without throwing", () => {
@@ -79,6 +82,173 @@ describe("parseOutlineJson", () => {
     }));
     const outline = parseOutlineJson(JSON.stringify({ title: "T", sections }), "T");
     expect(outline.sections).toHaveLength(MAX_SECTIONS);
+  });
+
+  it("filters internal meta and unrequested decision sections deterministically", () => {
+    const policy = deriveReportContentPolicy({
+      originalUserQuery: "研究某模型的实际表现",
+      deliveryShapes: ["structured"],
+    });
+    const outline = parseOutlineJson(
+      JSON.stringify({
+        title: "T",
+        sections: [
+          { id: "s1", title: "核心结论", brief: "回答表现", format: "prose" },
+          {
+            id: "s2",
+            title: "性能与公开证据",
+            brief: "比较关键指标与评测条件",
+            format: "comparison_table",
+          },
+          {
+            id: "s3",
+            title: "来源置信度与信息缺口",
+            brief: "介绍检索过程",
+            format: "prose",
+          },
+          {
+            id: "s4",
+            title: "推荐 / 不推荐 / 风险评估",
+            brief: "给出决策建议",
+            format: "tradeoff",
+          },
+        ],
+      }),
+      "T",
+      policy,
+    );
+    expect(outline.sections.map((section) => section.title)).toEqual([
+      "核心结论",
+      "性能与公开证据",
+    ]);
+    expect(outline.sections.some((section) => section.format === "tradeoff")).toBe(
+      false,
+    );
+  });
+
+  it("keeps limitations and decision formats only when explicitly requested", () => {
+    const limitations = deriveReportContentPolicy({
+      originalUserQuery: "这项能力有哪些局限和风险？",
+    });
+    const limitationOutline = parseOutlineJson(
+      JSON.stringify({
+        title: "T",
+        sections: [
+          { id: "s1", title: "核心结论", brief: "总结", format: "prose" },
+          {
+            id: "s2",
+            title: "不确定性与信息缺口",
+            brief: "回答用户明确询问的局限",
+            format: "prose",
+          },
+        ],
+      }),
+      "T",
+      limitations,
+    );
+    expect(limitationOutline.sections[1]?.title).toBe("不确定性与信息缺口");
+
+    const decision = deriveReportContentPolicy({
+      originalUserQuery: "比较两个方案",
+      deliveryShapes: ["decision"],
+    });
+    const decisionOutline = parseOutlineJson(
+      JSON.stringify({
+        title: "T",
+        sections: [
+          { id: "s1", title: "核心结论", brief: "总结", format: "prose" },
+          {
+            id: "s2",
+            title: "方案对比与推荐",
+            brief: "说明推荐、不推荐与风险",
+            format: "tradeoff",
+          },
+        ],
+      }),
+      "T",
+      decision,
+    );
+    expect(decisionOutline.sections[1]?.format).toBe("tradeoff");
+  });
+
+  it("normalizes substantive comparisons instead of dropping them", () => {
+    const outline: ReportOutline = {
+      title: "T",
+      sections: [
+        { id: "s1", title: "核心结论", brief: "总结", citationIndexes: [], format: "prose" },
+        {
+          id: "s2",
+          title: "方案对比与推荐",
+          brief: "比较性能数据并给出选型建议",
+          citationIndexes: [],
+          format: "tradeoff",
+        },
+      ],
+    };
+    const fixed = applyReportContentPolicy(outline, {
+      allowDecisionSections: false,
+      allowLimitationsSections: false,
+    });
+    expect(fixed.sections[1]?.title).toBe("方案对比与比较结论");
+    expect(fixed.sections[1]?.brief).not.toContain("选型建议");
+    expect(fixed.sections[1]?.format).toBe("comparison_table");
+  });
+
+  it("falls back to a result-focused outline when every model section is meta", () => {
+    const outline = parseOutlineJson(
+      JSON.stringify({
+        title: "T",
+        sections: [
+          {
+            id: "s1",
+            title: "不确定性与信息缺口",
+            brief: "评估来源置信度",
+            format: "prose",
+          },
+        ],
+      }),
+      "T",
+    );
+    expect(outline.sections).toHaveLength(3);
+    expect(outline.sections.map((section) => section.title)).not.toContain(
+      "不确定性与信息缺口",
+    );
+  });
+});
+
+describe("report content policy", () => {
+  it("does not infer decision or limitations from a broad performance question", () => {
+    expect(
+      deriveReportContentPolicy({
+        originalUserQuery: "某模型 harness 表现怎么样？",
+        deliveryShapes: ["structured"],
+      }),
+    ).toEqual({
+      allowDecisionSections: false,
+      allowLimitationsSections: false,
+    });
+  });
+
+  it("passes the deterministic policy to the outline model prompt", async () => {
+    let prompt = "";
+    await buildReportOutline({
+      topic: "某项能力表现",
+      evidence: "[1] evidence",
+      contentPolicy: {
+        allowDecisionSections: false,
+        allowLimitationsSections: false,
+      },
+      callJson: async (messages) => {
+        prompt = messages.map((message) => message.content).join("\n");
+        return JSON.stringify({
+          title: "T",
+          sections: [{ id: "s1", title: "核心结论", brief: "总结" }],
+        });
+      },
+    });
+    expect(prompt).toContain("【报告内容策略】");
+    expect(prompt).toContain("禁止推荐、不推荐");
+    expect(prompt).toContain("禁止独立的信息缺口");
   });
 });
 
@@ -119,6 +289,7 @@ describe("renderTableOfContents / buildSectionMessages", () => {
     expect(user).toContain("证据包正文");
     expect(user).toContain("前文摘要一段");
     expect(user).toContain("2");
+    expect(user).toContain("【报告内容策略】");
   });
 
   it("gives the lead section a distinct, shorter brief than later sections", () => {

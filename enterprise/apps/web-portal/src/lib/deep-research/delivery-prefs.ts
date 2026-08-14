@@ -147,7 +147,7 @@ export function deliveryPrefsPromptBlock(prefs: DeliveryPrefs): string {
     "【交付偏好】",
     `- 内容形态：${shapes || SHAPE_LABELS.structured}`,
     `- 主格式：${format}`,
-    "写作时优先满足上述形态；完整论证链不可省略核心结论与信息缺口。",
+    "写作时优先满足上述形态并直接回答用户问题；证据限制仅在会改变结论时就近说明，不得单列内部信息缺口或置信度清单。",
   ].join("\n");
 }
 

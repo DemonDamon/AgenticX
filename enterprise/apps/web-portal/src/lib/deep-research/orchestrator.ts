@@ -84,6 +84,7 @@ import {
 import {
   buildReportOutline,
   buildSectionMessages,
+  deriveReportContentPolicy,
   linkifyCitations,
   renderTableOfContents,
   sectionMeetsFormat,
@@ -1714,10 +1715,15 @@ export async function runDeepResearchTurn(
           prefsWritingHint,
           formatEvidencePack(plan, citationsByQuestion, reconCitations),
         ].join("\n");
+        const reportContentPolicy = deriveReportContentPolicy({
+          originalUserQuery: userQuery,
+          deliveryShapes: deliveryPrefs.shapes,
+        });
         let outlinePolicyError: DeepResearchPolicyError | null = null;
         const outline = await buildReportOutline({
           topic: sanitizeResearchTopic(plan.topic || userQuery || "调研报告"),
           evidence,
+          contentPolicy: reportContentPolicy,
           callJson: async (messages) => {
             try {
               return await callGatewayJson(toolDeps, {
@@ -1863,6 +1869,7 @@ export async function runDeepResearchTurn(
               sectionIndex: i,
               evidence,
               previousSummaries,
+              contentPolicy: reportContentPolicy,
             }),
           );
           const tableLike =
