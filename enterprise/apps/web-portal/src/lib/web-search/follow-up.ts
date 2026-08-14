@@ -399,6 +399,50 @@ export function parseSearchQueryRewriteValue(
   return { query, needSearch: true, searchQueries, confidence };
 }
 
+/**
+ * Anaphora that only resolves against earlier turns. Deliberately broad: a false
+ * reject just means no search, while a false accept searches the wrong subject.
+ */
+const CONTEXT_DEPENDENT_RE =
+  /(他们|她们|它们|他|她|它|这篇|这个|这些|这项|这家|这次|那篇|那个|那些|上述|前者|后者|该(?:公司|模型|产品|方案|文章|论文|项目|版本|团队)?|此(?:外|前|事|文)?|继续|再查|再搜|刚才|上面|前面|同样的|一样的)/u;
+const CONTEXT_DEPENDENT_EN_RE =
+  /\b(it|its|it's|they|them|their|this|that|these|those|he|she|his|her|him|the former|the latter|same one|the above|again|more about)\b/iu;
+
+/** Signals that a question names its own subject rather than borrowing one. */
+const EXPLICIT_URL_RE = /\bhttps?:\/\/\S+|\bwww\.[a-z0-9-]+\.[a-z]{2,}/iu;
+const EXPLICIT_DOI_RE = /\b10\.\d{4,9}\/\S+/u;
+const EXPLICIT_ARXIV_RE = /\barxiv[:\s/]*\d{4}\.\d{4,5}\b|\b\d{4}\.\d{4,5}(?:v\d+)?\b/iu;
+const EXPLICIT_TITLE_RE = /《[^》]{2,}》|「[^」]{2,}」|“[^”]{2,}”|"[^"]{2,}"/u;
+/** Mixed letters+digits: GPT-4o, H100, V3, Llama3. */
+const EXPLICIT_ALNUM_ID_RE =
+  /\b(?=[A-Za-z0-9][A-Za-z0-9.\-_]*\d)(?=[A-Za-z0-9.\-_]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9.\-_]{2,}\b/u;
+/** Distinctive internal capitalisation: DeepSeek, MiniMax, OpenAI. */
+const EXPLICIT_CASED_ID_RE = /\b[A-Z][a-z]{1,}[A-Z][A-Za-z]{1,}\b/u;
+
+/**
+ * Whether the current question may be searched verbatim when the rewrite agent
+ * is unreachable.
+ *
+ * This is NOT a "looks long enough" heuristic: a long sentence built entirely
+ * out of pronouns is exactly the case that must not reach a provider. The query
+ * has to carry its own subject — a URL, a DOI/arXiv id, a quoted title, or an
+ * unambiguous product identifier — and carry no anaphora at all.
+ */
+export function canSafelyFallbackToCurrentQuery(query: string): boolean {
+  const text = sanitizeWebSearchQuery(query);
+  if (!text) return false;
+  if (CONTEXT_DEPENDENT_RE.test(text)) return false;
+  if (CONTEXT_DEPENDENT_EN_RE.test(text)) return false;
+  return (
+    EXPLICIT_URL_RE.test(text) ||
+    EXPLICIT_DOI_RE.test(text) ||
+    EXPLICIT_ARXIV_RE.test(text) ||
+    EXPLICIT_TITLE_RE.test(text) ||
+    EXPLICIT_ALNUM_ID_RE.test(text) ||
+    EXPLICIT_CASED_ID_RE.test(text)
+  );
+}
+
 /** Reject a rewrite that copied a complete prior user question into the new query. */
 export function hasPriorSearchQueryLeakage(
   query: string,

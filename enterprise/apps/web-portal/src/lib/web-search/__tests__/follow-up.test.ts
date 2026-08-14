@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSearchQueryRewriteMessages,
+  canSafelyFallbackToCurrentQuery,
   hasPriorSearchQueryLeakage,
   normalizeSelfContainedSearchQueries,
   parseSearchQueryRewrite,
@@ -322,5 +323,51 @@ describe("contextual search-query rewrite", () => {
     ];
     expect(hasPriorSearchQueryLeakage("王虹是谁 最近怎么样", messages)).toBe(true);
     expect(hasPriorSearchQueryLeakage("王虹 最近怎么样", messages)).toBe(false);
+  });
+});
+
+describe("canSafelyFallbackToCurrentQuery", () => {
+  it("refuses anything carrying anaphora, however long", () => {
+    for (const query of [
+      "她最近发表的那篇论文有什么新结论",
+      "他们在 2026 年的 GPT-4o 部署结果如何",
+      "这篇文章提到的 H100 集群规模是多少",
+      "上述方案和前者相比有什么优势",
+      "再查一下 DeepSeek-V3 的定价",
+      "刚才说的那个版本什么时候发布",
+      "what did they publish about GPT-4o last month",
+      "tell me more about it",
+    ]) {
+      expect(canSafelyFallbackToCurrentQuery(query)).toBe(false);
+    }
+  });
+
+  it("refuses a long but subject-less question", () => {
+    expect(
+      canSafelyFallbackToCurrentQuery(
+        "请详细说明一下最近几个月里业界普遍关注的那些变化以及可能带来的长期影响和风险",
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts a question that names its own subject", () => {
+    for (const query of [
+      "DeepSeek-V3 在 2026 年 3 月的定价是多少",
+      "MiniMax M2 的上下文窗口有多大",
+      "https://example.com/paper 讲了什么",
+      "arXiv:2401.12345 的主要结论",
+      "doi 10.1038/s41586-024-07123-4 的实验设计",
+      "《三体》英文版销量数据",
+      "H100 与 H200 的显存带宽差异",
+    ]) {
+      expect(canSafelyFallbackToCurrentQuery(query)).toBe(true);
+    }
+  });
+
+  it("refuses an empty or purely generic query", () => {
+    expect(canSafelyFallbackToCurrentQuery("")).toBe(false);
+    expect(canSafelyFallbackToCurrentQuery("   ")).toBe(false);
+    expect(canSafelyFallbackToCurrentQuery("最新进展")).toBe(false);
+    expect(canSafelyFallbackToCurrentQuery("2026 年的情况")).toBe(false);
   });
 });

@@ -35,6 +35,7 @@ import {
 } from "./context-budget";
 import {
   buildSearchQueryRewriteMessages,
+  canSafelyFallbackToCurrentQuery,
   hasPriorSearchQueryLeakage,
   parseSearchQueryRewrite,
   type SearchQueryRewriteOptions,
@@ -585,7 +586,8 @@ async function callGatewayJson(
 }
 
 export type StandaloneSearchQueryResolution = SearchQueryRewrite & {
-  source: "ai" | "current" | "auto-route";
+  /** `current-fallback`: rewriter unreachable, self-contained question reused once. */
+  source: "ai" | "current" | "auto-route" | "current-fallback";
 };
 
 export type StandaloneSearchQueryOutcome =
@@ -654,6 +656,30 @@ async function rewriteSearchQueryWithAi(
       if (deps.signal?.aborted) break;
     }
   }
+
+  // Reaching here means the rewriter was *unreachable* (timeout / HTTP / parse),
+  // which is different from the model deciding the turn is unresolvable — that
+  // case returned agent_unresolved above and never searches.
+  if (!deps.signal?.aborted) {
+    const current = sanitizeWebSearchQuery(buildWebSearchQuery(messages));
+    if (current && canSafelyFallbackToCurrentQuery(current)) {
+      console.info(
+        `[web-search] query rewrite unavailable; searching the self-contained current question once chars=${current.length}`,
+      );
+      return {
+        kind: "resolved",
+        value: {
+          query: current,
+          needSearch: true,
+          // One query, no facet split, no history concatenation.
+          searchQueries: [current],
+          confidence: 0.5,
+          source: "current-fallback",
+        },
+      };
+    }
+  }
+
   console.warn(
     "[web-search] contextual query rewrite unavailable; refusing raw contextual search:",
     lastError,
@@ -1368,7 +1394,9 @@ export async function runWebSearchTurn(
         ? "fast_skip_bypassed"
         : queryResolution.value.source === "auto-route"
           ? "auto_route_search"
-          : "automatic_search",
+          : queryResolution.value.source === "current-fallback"
+            ? "rewrite_fallback_search"
+            : "automatic_search",
     resolvedQuery: query,
     facets: traceFacetStats,
     providerCalls,

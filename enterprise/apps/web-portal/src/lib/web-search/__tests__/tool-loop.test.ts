@@ -2259,6 +2259,137 @@ describe("web search tool loop", () => {
     expect(directBody?.messages?.[0]?.content).not.toContain("本轮是寒暄");
   });
 
+  it("searches the self-contained current question once when the rewriter is down", async () => {
+    const executeSearch = vi.fn(async (q: string) => [
+      { title: "定价页", url: "https://ex.com/pricing", snippet: String(q) },
+    ]);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return new Response("upstream unavailable", { status: 503 });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "帮我看看国产大模型的定价" },
+          { role: "assistant", content: "好的。" },
+          { role: "user", content: "DeepSeek-V3 在 2026 年 3 月的定价是多少" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "k",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    // Exactly one query, no facet split, no history concatenation.
+    expect(executeSearch).toHaveBeenCalledTimes(1);
+    expect(executeSearch.mock.calls[0]?.[0]).toBe("DeepSeek-V3 在 2026 年 3 月的定价是多少");
+    const text = await response.text();
+    expect(text).toContain('"reason":"rewrite_fallback_search"');
+  });
+
+  it("does not fall back when the rewriter explicitly resolved nothing", async () => {
+    const executeSearch = vi.fn(async () => []);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        // A confident "cannot resolve" is a decision, not an outage.
+        return jsonResponse({
+          choices: [{ message: { content: '{"resolved_query":"","confidence":0}' } }],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "帮我看看国产大模型的定价" },
+          { role: "assistant", content: "好的。" },
+          { role: "user", content: "DeepSeek-V3 在 2026 年 3 月的定价是多少" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "k",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back after the turn was aborted", async () => {
+    const executeSearch = vi.fn(async () => []);
+    const controller = new AbortController();
+    controller.abort();
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "帮我看看国产大模型的定价" },
+          { role: "assistant", content: "好的。" },
+          { role: "user", content: "DeepSeek-V3 在 2026 年 3 月的定价是多少" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        signal: controller.signal,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "k",
+          maxResults: 50,
+        }),
+        executeSearch,
+      },
+    );
+
+    // The rewrite was attempted and failed; the abort — not the query — is what
+    // blocks the fallback.
+    expect(
+      fetchImpl.mock.calls.some(
+        ([, init]) =>
+          (JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean }).stream === false,
+      ),
+    ).toBe(true);
+    expect(executeSearch).not.toHaveBeenCalled();
+  });
+
   it("the legacy bypass does not override contextual query resolution", async () => {
     vi.stubEnv("AGENTICX_WEB_SEARCH_BYPASS_FAST_SKIP", "");
     vi.stubEnv("AGENTICX_WEB_SEARCH_ALWAYS", "1");
