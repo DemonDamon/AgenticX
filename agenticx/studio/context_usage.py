@@ -103,9 +103,12 @@ def estimate_session_context_usage(
     except Exception:
         tools_chars = 0
 
-    chat_history = getattr(session, "chat_history", None) or []
+    # Estimate from the model-facing history (post-compaction agent_messages),
+    # not the full UI transcript (chat_history), so the chip tracks what the
+    # next request would actually send and drops after compaction.
+    agent_messages = getattr(session, "agent_messages", None) or []
     messages_chars = 0
-    for item in chat_history:
+    for item in agent_messages:
         try:
             messages_chars += len(json.dumps(item, ensure_ascii=False, default=str))
         except Exception:

@@ -16,6 +16,8 @@ MODEL_CONTEXT_WINDOWS: list[tuple[str, int]] = [
     ("o3", 200_000),
     ("deepseek", 128_000),
     ("qwen", 128_000),
+    ("glm-5.2", 1_000_000),
+    ("glm-5.1", 200_000),
     ("glm", 128_000),
     ("kimi", 256_000),
     ("minimax", 192_000),
