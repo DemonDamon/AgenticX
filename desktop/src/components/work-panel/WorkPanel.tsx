@@ -25,11 +25,18 @@ import {
   PanelRight,
   Plus,
   RefreshCw,
+  Share2,
   Terminal as TerminalIcon,
+  BarChart3,
   X,
 } from "lucide-react";
-import { useAppStore, type Message, type PaneTerminalTab, type SubAgent } from "../../store";
+import { useAppStore, type Avatar, type ChatPane, type Message, type PaneTerminalTab, type SubAgent } from "../../store";
 import { WorkspacePanel } from "../WorkspacePanel";
+import { RunGraphPanel } from "../graph/RunGraphPanel";
+import { ExecutionTimeline } from "../graph/ExecutionTimeline";
+import { GroupMembersSummaryList } from "./GroupMembersSummaryList";
+import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
+import { SHOW_DESKTOP_RUN_GRAPH } from "../../constants/desktop-feature-visibility";
 import {
   loadAbsoluteFilePreview,
   type WorkspacePreview,
@@ -374,9 +381,16 @@ function RemoteBrowserPane({
   );
 }
 
-export type WorkPanelTabKind = "summary" | "workspace" | "terminal" | "browser" | "preview";
+export type WorkPanelTabKind =
+  | "summary"
+  | "workspace"
+  | "terminal"
+  | "browser"
+  | "preview"
+  | "graph"
+  | "timeline";
 
-export type SummarySectionId = "todo" | "artifacts" | "spawns" | "refs";
+export type SummarySectionId = "todo" | "artifacts" | "spawns" | "refs" | "members";
 
 export type WorkPanelFocus =
   | { kind: "summary"; section?: SummarySectionId; highlightPath?: string }
@@ -398,6 +412,9 @@ export type WorkPanelFocus =
       title?: string;
       lineRange?: WorkspacePreviewLineRange;
     }
+  /** Run Graph God-View tab (same shell as browser / summary). */
+  | { kind: "graph" }
+  | { kind: "timeline" }
   | null;
 
 type BrowserHistoryEntry = {
@@ -539,6 +556,10 @@ type Props = {
   /** Align「待办」status with StickyTaskBar (in_progress spinner + idle promote). */
   todoLiveness?: "active" | "stalled" | "idle";
   todoExecutionState?: string;
+  /** Group chat id; when set, WorkPanel exposes 成员 / 执行时间线 tabs. */
+  groupId?: string | null;
+  avatarList?: Avatar[];
+  metaLeaderLabel?: string;
 };
 
 function uid(): string {
@@ -661,7 +682,11 @@ export function WorkPanel({
   onConfirmResolveSubAgent,
   todoLiveness = "idle",
   todoExecutionState,
+  groupId = null,
+  avatarList = [],
+  metaLeaderLabel = META_AGENT_DISPLAY_NAME,
 }: Props) {
+  const isGroupPane = Boolean(groupId);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
   const setActivePaneTerminalTab = useAppStore((s) => s.setActivePaneTerminalTab);
@@ -684,6 +709,25 @@ export function WorkPanel({
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previewTabs, setPreviewTabs] = useState<PreviewTab[]>([]);
   const [workspaceTabOpen, setWorkspaceTabOpen] = useState(false);
+  const [graphTabOpen, setGraphTabOpen] = useState(false);
+  const [timelineTabOpen, setTimelineTabOpen] = useState(false);
+  const paneForGraph = useAppStore(
+    (s) => s.panes.find((p) => p.id === paneId) ?? null,
+  );
+  const groups = useAppStore((s) => s.groups);
+  const groupAvatarIds = useMemo(() => {
+    if (!groupId) return [] as string[];
+    return groups.find((g) => g.id === groupId)?.avatarIds ?? [];
+  }, [groupId, groups]);
+  const timelineAvatarById = useMemo(() => {
+    const map = new Map<string, Avatar>();
+    for (const item of avatarList) map.set(item.id, item);
+    return map;
+  }, [avatarList]);
+  const timelineAgentIds = useMemo(
+    () => ["__meta__", ...groupAvatarIds],
+    [groupAvatarIds],
+  );
   const [plusOpen, setPlusOpen] = useState(false);
   const [plusPos, setPlusPos] = useState<{ left: number; top: number } | null>(null);
   const plusBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -699,6 +743,7 @@ export function WorkPanel({
     artifacts: false,
     spawns: false,
     refs: false,
+    members: false,
   });
   const [extraArtifactPaths, setExtraArtifactPaths] = useState<string[]>([]);
   /** Paths only present in agent_messages.json (ahead of chat messages.json). */
@@ -856,6 +901,8 @@ export function WorkPanel({
   const hasAnyTab =
     summaryTabOpen ||
     workspaceTabOpen ||
+    (SHOW_DESKTOP_RUN_GRAPH && graphTabOpen) ||
+    (isGroupPane && timelineTabOpen) ||
     terminalTabs.length > 0 ||
     browserTabs.length > 0 ||
     previewTabs.length > 0;
@@ -863,11 +910,15 @@ export function WorkPanel({
   const resolveFallbackKind = (opts?: {
     excludeSummary?: boolean;
     excludeWorkspace?: boolean;
+    excludeGraph?: boolean;
+    excludeTimeline?: boolean;
     excludeTerminalId?: string;
     excludeBrowserId?: string;
     excludePreviewId?: string;
   }): WorkPanelTabKind | null => {
     if (!opts?.excludeSummary && summaryTabOpen) return "summary";
+    if (!opts?.excludeGraph && SHOW_DESKTOP_RUN_GRAPH && graphTabOpen) return "graph";
+    if (!opts?.excludeTimeline && isGroupPane && timelineTabOpen) return "timeline";
     const nextPreview = previewTabs.find((t) => t.id !== opts?.excludePreviewId);
     if (nextPreview) {
       setActivePreviewId(nextPreview.id);
@@ -1069,9 +1120,23 @@ export function WorkPanel({
       setActiveKind("browser");
     } else if (focusRequest.kind === "preview") {
       openLocalFilePreview(focusRequest.absolutePath, focusRequest.title, focusRequest.lineRange);
+    } else if (focusRequest.kind === "graph" && SHOW_DESKTOP_RUN_GRAPH) {
+      setGraphTabOpen(true);
+      setActiveKind("graph");
+    } else if (focusRequest.kind === "timeline" && isGroupPane) {
+      setTimelineTabOpen(true);
+      setActiveKind("timeline");
     }
     onFocusRequestHandled?.();
   }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab]);
+
+  useEffect(() => {
+    if (isGroupPane || !timelineTabOpen) return;
+    setTimelineTabOpen(false);
+    if (activeKind === "timeline") {
+      setActiveKind(resolveFallbackKind({ excludeTimeline: true }));
+    }
+  }, [activeKind, isGroupPane, timelineTabOpen]);
 
   useEffect(() => {
     if (subAgents.length > 0) {
@@ -1080,6 +1145,15 @@ export function WorkPanel({
       setOpenSections((prev) => (!prev.spawns ? prev : { ...prev, spawns: false }));
     }
   }, [subAgents.length]);
+
+  // Group panes always have Meta + members; keep the summary section expanded by default.
+  useEffect(() => {
+    if (!isGroupPane) {
+      setOpenSections((prev) => (!prev.members ? prev : { ...prev, members: false }));
+      return;
+    }
+    setOpenSections((prev) => (prev.members ? prev : { ...prev, members: true }));
+  }, [isGroupPane]);
 
   useEffect(() => {
     if (presentArtifactPaths.length > 0) {
@@ -1139,6 +1213,34 @@ export function WorkPanel({
     setSummaryTabOpen(false);
     if (activeKind === "summary") {
       setActiveKind(resolveFallbackKind({ excludeSummary: true }));
+    }
+  };
+
+  const openGraphTab = () => {
+    if (!SHOW_DESKTOP_RUN_GRAPH) return;
+    setGraphTabOpen(true);
+    setActiveKind("graph");
+    closePlus();
+  };
+
+  const closeGraphTab = () => {
+    setGraphTabOpen(false);
+    if (activeKind === "graph") {
+      setActiveKind(resolveFallbackKind({ excludeGraph: true }));
+    }
+  };
+
+  const openTimelineTab = () => {
+    if (!isGroupPane) return;
+    setTimelineTabOpen(true);
+    setActiveKind("timeline");
+    closePlus();
+  };
+
+  const closeTimelineTab = () => {
+    setTimelineTabOpen(false);
+    if (activeKind === "timeline") {
+      setActiveKind(resolveFallbackKind({ excludeTimeline: true }));
     }
   };
 
@@ -1360,6 +1462,26 @@ export function WorkPanel({
               <Globe className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
               浏览器
             </button>
+            {SHOW_DESKTOP_RUN_GRAPH ? (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+                onClick={openGraphTab}
+              >
+                <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
+                运行图
+              </button>
+            ) : null}
+            {isGroupPane ? (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+                onClick={openTimelineTab}
+              >
+                <BarChart3 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
+                执行时间线
+              </button>
+            ) : null}
             <button
               type="button"
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
@@ -1396,6 +1518,28 @@ export function WorkPanel({
       subtitle: "浏览及调试网页",
       onClick: openBrowserTab,
     },
+    ...(SHOW_DESKTOP_RUN_GRAPH
+      ? [
+          {
+            key: "graph",
+            icon: <Share2 className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+            title: "运行图",
+            subtitle: "任务拆解时观察分工与依赖，并做注入 / 改派干预",
+            onClick: openGraphTab,
+          },
+        ]
+      : []),
+    ...(isGroupPane
+      ? [
+          {
+            key: "timeline",
+            icon: <BarChart3 className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+            title: "执行时间线",
+            subtitle: "按时间轴查看各成员的工具执行过程",
+            onClick: openTimelineTab,
+          },
+        ]
+      : []),
     {
       key: "terminal",
       icon: <TerminalIcon className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
@@ -1403,7 +1547,7 @@ export function WorkPanel({
       subtitle: "运行命令及脚本",
       onClick: openTerminalTab,
     },
-  ] as const;
+  ];
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-panel">
@@ -1477,6 +1621,74 @@ export function WorkPanel({
                 }
               }}
               aria-label="关闭工作区标签"
+            >
+              <X className="h-3 w-3" strokeWidth={2} />
+            </span>
+          </button>
+        ) : null}
+
+        {SHOW_DESKTOP_RUN_GRAPH && graphTabOpen ? (
+          <button
+            type="button"
+            className={`flex h-7 max-w-[110px] items-center gap-1.5 rounded-full px-2 text-[12px] ${
+              activeKind === "graph"
+                ? "bg-surface-card-strong text-text-strong"
+                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+            }`}
+            onClick={() => setActiveKind("graph")}
+          >
+            <Share2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <span className="truncate">运行图</span>
+            <span
+              role="button"
+              tabIndex={0}
+              className="rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+              onClick={(e) => {
+                e.stopPropagation();
+                closeGraphTab();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeGraphTab();
+                }
+              }}
+              aria-label="关闭运行图标签"
+            >
+              <X className="h-3 w-3" strokeWidth={2} />
+            </span>
+          </button>
+        ) : null}
+
+        {isGroupPane && timelineTabOpen ? (
+          <button
+            type="button"
+            className={`flex h-7 max-w-[120px] items-center gap-1.5 rounded-full px-2 text-[12px] ${
+              activeKind === "timeline"
+                ? "bg-surface-card-strong text-text-strong"
+                : "text-text-subtle hover:bg-surface-hover hover:text-text-strong"
+            }`}
+            onClick={() => setActiveKind("timeline")}
+          >
+            <BarChart3 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <span className="truncate">执行时间线</span>
+            <span
+              role="button"
+              tabIndex={0}
+              className="rounded p-0.5 text-text-faint hover:bg-surface-hover hover:text-text-strong"
+              onClick={(e) => {
+                e.stopPropagation();
+                closeTimelineTab();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  closeTimelineTab();
+                }
+              }}
+              aria-label="关闭执行时间线标签"
             >
               <X className="h-3 w-3" strokeWidth={2} />
             </span>
@@ -1605,7 +1817,11 @@ export function WorkPanel({
           ref={plusBtnRef}
           type="button"
           className="agx-topbar-btn !px-[5px]"
-          title="打开任务摘要 / 浏览器 / 终端 / 工作区"
+          title={
+            SHOW_DESKTOP_RUN_GRAPH
+              ? "打开任务摘要 / 浏览器 / 运行图 / 执行时间线 / 终端 / 工作区"
+              : "打开任务摘要 / 浏览器 / 执行时间线 / 终端 / 工作区"
+          }
           aria-label="新建工作台标签"
           onClick={openPlusMenu}
         >
@@ -1756,6 +1972,22 @@ export function WorkPanel({
               )}
             </Section>
 
+            {isGroupPane && groupId ? (
+              <Section
+                id="members"
+                title="成员"
+                count={1 + groupAvatarIds.length}
+                open={openSections.members}
+                onToggle={toggleSection}
+              >
+                <GroupMembersSummaryList
+                  groupId={groupId}
+                  avatarList={avatarList}
+                  metaLeaderLabel={metaLeaderLabel}
+                />
+              </Section>
+            ) : null}
+
             <Section
               id="spawns"
               title="子智能体"
@@ -1870,6 +2102,24 @@ export function WorkPanel({
             previewOpenRequest={previewOpenRequest}
             onPreviewOpenRequestHandled={onPreviewOpenRequestHandled}
             onEnsureSessionForWorkspace={onEnsureSessionForWorkspace}
+          />
+        ) : null}
+
+        {hasAnyTab && SHOW_DESKTOP_RUN_GRAPH && activeKind === "graph" && graphTabOpen && paneForGraph ? (
+          <RunGraphPanel
+            pane={paneForGraph}
+            onClose={closeGraphTab}
+            tintColor={tintColor}
+            embedded
+          />
+        ) : null}
+
+        {hasAnyTab && isGroupPane && activeKind === "timeline" && timelineTabOpen ? (
+          <ExecutionTimeline
+            paneId={paneId}
+            agentIds={timelineAgentIds}
+            avatarById={timelineAvatarById}
+            metaLeaderLabel={metaLeaderLabel}
           />
         ) : null}
 

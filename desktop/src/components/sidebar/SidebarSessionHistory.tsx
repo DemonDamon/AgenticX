@@ -36,14 +36,17 @@ import {
   SIDEBAR_HISTORY_COLLAPSE_KEY,
   SIDEBAR_HISTORY_FILTER_KEY,
   SIDEBAR_HISTORY_PAGE_SIZE,
+  activeAvatarIdForSidebarRow,
   applySidebarSessionHistoryHints,
   bucketSidebarHistoryRows,
+  findPaneForSidebarSession,
   formatSidebarRelativeTime,
   getSidebarSessionActivityTs,
   matchesSidebarAvatarFilter,
   normalizeSidebarSessionRows,
   parseDesktopBoundSessionId,
   resolveSidebarAvatarChipName,
+  sidebarSessionHasRenderableMessages,
   sidebarSessionLabel,
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
@@ -566,22 +569,16 @@ export function SidebarSessionHistory() {
       const avatarId = String(row.avatar_id ?? "").trim() || null;
       const avatarName = resolveSidebarAvatarChipName(row, avatarNameById);
       const state = useAppStore.getState();
-      let pane = forcePaneId
-        ? state.panes.find((p) => p.id === forcePaneId)
-        : state.panes.find((p) => {
-            const pa = String(p.avatarId ?? "").trim();
-            const target = avatarId ?? "";
-            return pa === target;
-          });
-      let paneId = pane?.id ?? "";
-      if (!pane) {
+      const matched = findPaneForSidebarSession(state.panes, row, forcePaneId);
+      let paneId = matched?.id ?? "";
+      if (!matched) {
         paneId = addPane(avatarId, avatarName, "");
-        pane = useAppStore.getState().panes.find((p) => p.id === paneId);
       }
+      const pane = useAppStore.getState().panes.find((p) => p.id === paneId);
       if (!paneId || !pane) return null;
 
       setActivePaneId(paneId);
-      setActiveAvatarId(avatarId);
+      setActiveAvatarId(activeAvatarIdForSidebarRow(avatarId));
       rememberSessionForAvatar(avatarId, row.session_id);
 
       const previousSessionId = String(pane.sessionId ?? "").trim();
@@ -596,7 +593,11 @@ export function SidebarSessionHistory() {
         setPaneSessionMode(paneId, row.session_mode);
       }
 
-      if (isSameSession && existingMessages.length > 0) return paneId;
+      // Do not trust raw messages.length: owner-mismatched / untagged rows render blank.
+      if (isSameSession && sidebarSessionHasRenderableMessages(existingMessages, row.session_id)) {
+        setPaneLoadingMessages(paneId, false);
+        return paneId;
+      }
 
       const paneStillOn = (sid: string) =>
         isPaneStillOnSession(useAppStore.getState().panes, paneId, sid);
@@ -688,10 +689,7 @@ export function SidebarSessionHistory() {
     const avatarId = String(row.avatar_id ?? "").trim() || null;
     const avatarName = resolveSidebarAvatarChipName(row, avatarNameById);
     const state = useAppStore.getState();
-    let pane = state.panes.find((p) => {
-      const pa = String(p.avatarId ?? "").trim();
-      return pa === (avatarId ?? "");
-    });
+    let pane = findPaneForSidebarSession(state.panes, row);
     let paneId = pane?.id ?? "";
     if (!pane) {
       paneId = addPane(avatarId, avatarName, "");
@@ -699,7 +697,7 @@ export function SidebarSessionHistory() {
     }
     if (!paneId || !pane) return null;
     setActivePaneId(paneId);
-    setActiveAvatarId(avatarId);
+    setActiveAvatarId(activeAvatarIdForSidebarRow(avatarId));
     rememberSessionForAvatar(avatarId, row.session_id);
     setPaneSessionId(paneId, row.session_id, {
       provider: row.provider,
@@ -924,35 +922,37 @@ export function SidebarSessionHistory() {
             aria-label={`选择 ${title}`}
           />
         ) : null}
-        <span
-          className="relative shrink-0 overflow-hidden rounded px-1.5 py-px pl-2 text-[10px] font-medium leading-tight text-text-primary bg-surface-card"
-          title={chip}
-        >
-          <span
-            aria-hidden
-            className="absolute inset-y-0 left-0 w-[2px]"
-            style={{ backgroundColor: stripeColor }}
-          />
-          {chip}
-        </span>
         {isEditing ? (
-          <input
-            ref={renameInputRef}
-            value={editingName}
-            onChange={(e) => setEditingName(e.target.value)}
-            onBlur={() => void commitRename(row)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void commitRename(row);
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                setEditingId(null);
-              }
-            }}
-            className="min-w-0 flex-1 rounded border border-border bg-surface-card px-1.5 py-0.5 text-[12px] text-text-primary outline-none focus:border-[rgba(var(--theme-color-rgb,59,130,246),0.55)]"
-            aria-label="重命名会话"
-          />
+          <>
+            <span
+              className="relative shrink-0 overflow-hidden rounded px-1.5 py-px pl-2 text-[10px] font-medium leading-tight text-text-primary bg-surface-card"
+              title={chip}
+            >
+              <span
+                aria-hidden
+                className="absolute inset-y-0 left-0 w-[2px]"
+                style={{ backgroundColor: stripeColor }}
+              />
+              {chip}
+            </span>
+            <input
+              ref={renameInputRef}
+              value={editingName}
+              onChange={(e) => setEditingName(e.target.value)}
+              onBlur={() => void commitRename(row)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void commitRename(row);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setEditingId(null);
+                }
+              }}
+              className="min-w-0 flex-1 rounded border border-border bg-surface-card px-1.5 py-0.5 text-[12px] text-text-primary outline-none focus:border-[rgba(var(--theme-color-rgb,59,130,246),0.55)]"
+              aria-label="重命名会话"
+            />
+          </>
         ) : (
           <button
             type="button"
@@ -968,15 +968,29 @@ export function SidebarSessionHistory() {
               selectMode
                 ? "点击勾选"
                 : isRunning
-                  ? `${title} · 正在生成`
+                  ? `${chip} · ${title} · 正在生成`
                   : isInterrupted
-                    ? `${title} · 已中断`
-                    : title
+                    ? `${chip} · ${title} · 已中断`
+                    : `${chip} · ${title}`
             }
             aria-label={
-              isRunning ? `${title} · 正在生成` : isInterrupted ? `${title} · 已中断` : title
+              isRunning
+                ? `${chip} ${title} · 正在生成`
+                : isInterrupted
+                  ? `${chip} ${title} · 已中断`
+                  : `${chip} ${title}`
             }
           >
+            <span
+              className="relative shrink-0 overflow-hidden rounded px-1.5 py-px pl-2 text-[10px] font-medium leading-tight text-text-primary bg-surface-card"
+            >
+              <span
+                aria-hidden
+                className="absolute inset-y-0 left-0 w-[2px]"
+                style={{ backgroundColor: stripeColor }}
+              />
+              {chip}
+            </span>
             {isRunning ? (
               <span
                 className="flex h-4 w-4 shrink-0 items-center justify-center text-text-muted"

@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, ExternalLink, Search } from "lucide-react";
 import type { SearchReference } from "../../types/search-references";
 import { openSearchReference } from "../../utils/open-kb-reference";
 import { dedupeReferencesByDoc, type DocGroup } from "../../utils/citation-doc-grouping";
-import { REACT_RAIL_TITLE_CLASS } from "./im-layout";
+import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS, REACT_RAIL_TITLE_CLASS } from "./im-layout";
 
 type Props = {
   references: SearchReference[];
@@ -136,25 +136,21 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
     <div className="bg-transparent text-text-primary">
       <button
         type="button"
-        className="flex w-full max-w-full items-center justify-start gap-2 px-0 py-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,6,182,212),0.30)]"
+        className="inline-flex w-full max-w-full items-center justify-start gap-2 px-0 py-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.30)]"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
-        <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
-          <Search
-            className="h-[18px] w-[18px] text-[rgb(var(--theme-color-rgb,6,182,212))]"
-            strokeWidth={2.2}
-          />
+        <span className={ASSISTANT_ICON_RAIL_CLASS} aria-hidden>
+          <Search className={`h-[18px] w-[18px] ${REACT_RAIL_ICON_CLASS}`} strokeWidth={2.2} />
         </span>
-        <span className="flex min-w-0 flex-1 items-center gap-1">
-          <span className={`truncate ${REACT_RAIL_TITLE_CLASS}`}>{summary}</span>
-          <span className="shrink-0" aria-hidden>
-            {expanded ? (
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
-            )}
-          </span>
+        {/* Match ReasoningBlock / tool-group: title + chevron left-clustered, no flex-1 gap */}
+        <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>{summary}</span>
+        <span className="shrink-0" aria-hidden>
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
+          )}
         </span>
       </button>
 

@@ -66,6 +66,14 @@ body {
   @apply font-semibold;
   color: var(--text-strong);
 }
+.msg-content a {
+  color: rgb(var(--theme-color-rgb, 59, 130, 246));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.msg-content a:hover {
+  opacity: 0.9;
+}
 .msg-content h1, .msg-content h2, .msg-content h3 {
   @apply font-semibold mt-4 mb-2;
   color: var(--text-strong);
@@ -79,6 +87,20 @@ body {
   border: none;
   margin: 0.625em 0;
   height: 0;
+}
+
+/*
+ * Group expert replies: label → body gap should match plain-text experts (~p 0.5em).
+ * Meta/PM reports often start with `---` + ## heading; default h2 mt-4 left a huge hole.
+ * Depth-agnostic (CitationMarkdownBody nests wrappers under .msg-content).
+ */
+.agx-expert-body .msg-content hr:first-child {
+  display: none !important;
+  margin: 0 !important;
+}
+.agx-expert-body .msg-content :is(h1, h2, h3):first-of-type {
+  /* Match .msg-content p { margin: 0.5em 0 } so ## titles sit like “收到。” openers. */
+  margin-top: 0.5em !important;
 }
 
 /* GFM tables (react-markdown + remark-gfm) — default UA styles are invisible on dark bubbles */
@@ -213,10 +235,10 @@ body {
   color: rgb(37, 99, 235);
 }
 
-/* 助手推荐问 chip：浅色消息区白底时需独立底色，避免与页面融为一体 */
+/* 助手推荐问：柔和填充胶囊、无描边，宽度贴合文字 */
 .agx-followup-chip {
-  background-color: var(--chat-followup-chip-bg, var(--surface-popover));
-  border-color: var(--chat-followup-chip-border, var(--border-subtle));
+  background-color: var(--chat-followup-chip-bg, var(--surface-card));
+  border: none;
 }
 .agx-followup-chip:hover {
   background-color: var(--chat-followup-chip-bg-hover, var(--surface-hover));
@@ -733,8 +755,9 @@ body.agx-settings-nav-resizing {
   background: var(--surface-hover);
 }
 
+/* 用户气泡：纯填充、无描边（描边会在浅色主题下叠出双层边缘） */
 .agx-im-user-bubble {
-  border-color: var(--chat-im-user-border);
+  border: none;
   box-shadow: none;
 }
 
@@ -777,6 +800,15 @@ input[type="radio"] {
   outline: none !important;
   border-color: rgba(var(--theme-color-rgb, 59, 130, 246), 0.5) !important;
   box-shadow: 0 0 0 1px rgba(var(--theme-color-rgb, 59, 130, 246), 0.5) !important;
+}
+
+/* Model picker menu: scales from the trigger edge, never from nothing */
+@keyframes agx-menu-pop {
+  0% { opacity: 0; transform: translateY(4px) scale(0.985); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.agx-menu-pop {
+  animation: agx-menu-pop 0.14s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Codex-style file preview popover animation */

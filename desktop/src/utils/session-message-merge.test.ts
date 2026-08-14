@@ -335,4 +335,76 @@ describe("mergeSessionMessagesTail", () => {
     );
     expect(out.map((m) => m.content)).toEqual(["old q", "old a", "latest q", "latest a"]);
   });
+
+  it("matches live args-only tool rows to disk results by toolCallId (no trailing running card)", () => {
+    const callId = "call_web_search_1";
+    const existing: Message[] = [
+      uidMsg("user", "附近楼盘", "uid-u"),
+      {
+        id: "uid-tool",
+        role: "tool",
+        content: JSON.stringify({ query: "南沙横沥楼盘" }),
+        agentId: "meta",
+        toolCallId: callId,
+        toolName: "web_search",
+        toolStatus: "running",
+      } as Message,
+      {
+        id: "uid-a",
+        role: "assistant",
+        content: "补充说明：周边楼盘如下。",
+        agentId: "meta",
+      } as Message,
+    ];
+    const diskRows: LoadedSessionMessage[] = [
+      diskRow("user", "附近楼盘"),
+      {
+        role: "tool",
+        content: "1. 楼盘结果摘要",
+        tool_call_id: callId,
+        tool_name: "web_search",
+        tool_status: "done",
+        tool_args: { query: "南沙横沥楼盘" },
+      },
+      diskRow("assistant", "补充说明：周边楼盘如下。"),
+    ];
+
+    const out = mergeSessionMessagesTail(existing, diskRows, sid);
+    const tools = out.filter((m) => m.role === "tool");
+
+    expect(out.map((m) => m.role)).toEqual(["user", "tool", "assistant"]);
+    expect(tools).toHaveLength(1);
+    expect(tools[0].id).toBe("uid-tool");
+    expect(tools[0].toolStatus).toBe("done");
+    expect(tools[0].content).toBe("1. 楼盘结果摘要");
+    expect(out[out.length - 1].role).toBe("assistant");
+  });
+
+  it("prefers disk terminal toolStatus over stale memory running when overlaying", () => {
+    const callId = "call_same_id";
+    const existing: Message[] = [
+      {
+        id: `${sid}-i1`,
+        role: "tool",
+        content: "1. 楼盘结果摘要",
+        agentId: "meta",
+        toolCallId: callId,
+        toolName: "web_search",
+        toolStatus: "running",
+      } as Message,
+    ];
+    const diskRows: LoadedSessionMessage[] = [
+      {
+        role: "tool",
+        content: "1. 楼盘结果摘要",
+        tool_call_id: callId,
+        tool_name: "web_search",
+        tool_status: "done",
+      },
+    ];
+
+    const out = mergeSessionMessagesTail(existing, diskRows, sid);
+    expect(out).toHaveLength(1);
+    expect(out[0].toolStatus).toBe("done");
+  });
 });

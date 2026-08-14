@@ -7,8 +7,9 @@ import tencentDocsIcon from "../assets/recommended/tencent-docs.svg";
 import tencentImaIcon from "../assets/recommended/tencent-ima.svg";
 import tencentMeetingIcon from "../assets/recommended/tencent-meeting.svg";
 import officecliIcon from "../assets/recommended/officecli.svg";
+import archscribeIcon from "../assets/recommended/archscribe.svg";
 
-/** 推荐位来源档：企业官方（Near 背书）vs 第三方（外部厂商/开源）。 */
+/** 推荐位来源档：企业官方（当前 Desktop 背书）vs 第三方（外部厂商/开源）。 */
 export type RecommendedSkillTier = "enterprise" | "third_party";
 
 export type RecommendedSkillCta = "official_site" | "install";
@@ -42,6 +43,18 @@ export const RECOMMENDED_SKILLS: RecommendedSkill[] = [
     icon_src: officecliIcon,
     official_url: "https://github.com/iOfficeAI/OfficeCLI",
     category: "Office 创作",
+    tier: "third_party",
+    cta: "install",
+  },
+  {
+    id: "archscribe",
+    name: "Archscribe",
+    provider: "lazypay",
+    description:
+      "手绘风动态架构/流程图（深色霓虹或浅色纸面）；输出可编辑 Excalidraw、PNG 与动画 GIF。点安装后由 Meta-Agent 克隆仓库并安装 Python 依赖。",
+    icon_src: archscribeIcon,
+    official_url: "https://github.com/lazypay/Archscribe",
+    category: "架构可视化",
     tier: "third_party",
     cta: "install",
   },

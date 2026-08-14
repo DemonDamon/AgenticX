@@ -1,7 +1,9 @@
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { Shimmer } from "../ds/Shimmer";
 import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS, REACT_RAIL_TITLE_CLASS } from "./im-layout";
+import { formatToolElapsedSeconds } from "./tool-elapsed-timer";
 import {
   formatReasoningTitle,
   getCachedReasoningDuration,
@@ -57,11 +59,14 @@ export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
   const startedAtRef = React.useRef<number | null>(null);
   const finishedAtRef = React.useRef<number | null>(null);
 
+  // Start the clock on the first streaming paint so "思考中 · 1 秒" appears
+  // immediately (mirrors tool-group live elapsed), not after the first effect.
+  if (streaming && startedAtRef.current === null) {
+    startedAtRef.current = Date.now();
+  }
+
   React.useEffect(() => {
     if (streaming) {
-      if (startedAtRef.current === null) {
-        startedAtRef.current = Date.now();
-      }
       finishedAtRef.current = null;
       setOpen(true);
       return;
@@ -115,6 +120,11 @@ export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
   }
 
   const title = formatReasoningTitle({ streaming, elapsedSeconds, hasReliableDuration });
+  // Same meta typography as TurnToolGroupCard "运行中 · 1s".
+  const streamingMeta =
+    hasReliableDuration && elapsedSeconds >= 1
+      ? `思考中 · ${formatToolElapsedSeconds(elapsedSeconds)}`
+      : "思考中 · …";
   const showContent = open && (content.length > 0 || streaming);
 
   return (
@@ -122,20 +132,26 @@ export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full max-w-full items-center justify-start gap-2 px-0 py-1 text-left"
+        className="inline-flex w-full max-w-full items-center justify-start gap-2 px-0 py-1 text-left"
       >
-        <span className={ASSISTANT_ICON_RAIL_CLASS}>
+        <span className={`${ASSISTANT_ICON_RAIL_CLASS}${streaming ? " opacity-70" : ""}`}>
           <ThinkingGlyph />
         </span>
-        <span className="flex min-w-0 flex-1 items-center gap-1">
-          <span className={`truncate ${REACT_RAIL_TITLE_CLASS}`}>{title}</span>
-          <span className="shrink-0" aria-hidden>
-            {open ? (
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
-            )}
-          </span>
+        {streaming ? (
+          <Shimmer
+            variant="status"
+            text={streamingMeta}
+            className="min-w-0 truncate whitespace-nowrap text-[12px] font-normal tabular-nums"
+          />
+        ) : (
+          <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>{title}</span>
+        )}
+        <span className="shrink-0" aria-hidden>
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
+          )}
         </span>
       </button>
       {showContent && (

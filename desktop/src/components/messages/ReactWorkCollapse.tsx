@@ -37,20 +37,18 @@ export function ReactWorkCollapse({ toolCount, active, threshold = 5, children }
       <button
         type="button"
         onClick={() => setCollapsed((v) => !v)}
-        className="flex w-full max-w-full items-center justify-start gap-2 px-3 py-1 text-left"
+        className="inline-flex w-full max-w-full items-center justify-start gap-2 px-3 py-1 text-left"
       >
         <span className={ASSISTANT_ICON_RAIL_CLASS}>
           <ListTree className={`h-[18px] w-[18px] shrink-0 ${REACT_RAIL_ICON_CLASS}`} strokeWidth={2.2} aria-hidden />
         </span>
-        <span className="flex min-w-0 flex-1 items-center gap-1">
-          <span className={`truncate ${REACT_RAIL_TITLE_CLASS}`}>已思考并调用 {toolCount} 次工具</span>
-          <span className="shrink-0" aria-hidden>
-            {collapsed ? (
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
-            )}
-          </span>
+        <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>已思考并调用 {toolCount} 次工具</span>
+        <span className="shrink-0" aria-hidden>
+          {collapsed ? (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />
+          )}
         </span>
       </button>
       {!collapsed && (

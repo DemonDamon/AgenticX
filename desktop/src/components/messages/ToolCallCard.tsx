@@ -191,7 +191,7 @@ function renderHighlightedText(content: string, terms: string[]): ReactNode {
           href={seg.value}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-cyan-600 underline underline-offset-2 break-all hover:text-cyan-500 dark:text-cyan-400 dark:hover:text-cyan-300"
+          className="break-all text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
           onClick={(e) => {
             e.preventDefault();
             openExternalUrl(seg.value);
@@ -409,9 +409,11 @@ export function ToolCallCard({
   );
 
   const metaRight = toolIsActive ? (
-    <span className="shrink-0 text-[12px] text-text-faint tabular-nums">
-      运行中 · {formatToolElapsedSeconds(liveElapsedSec)}
-    </span>
+    <Shimmer
+      variant="status"
+      text={`运行中 · ${formatToolElapsedSeconds(liveElapsedSec)}`}
+      className="shrink-0 whitespace-nowrap text-[12px] font-normal tabular-nums"
+    />
   ) : null;
 
   const expandedDetailClass =
@@ -476,7 +478,7 @@ export function ToolCallCard({
               <div key={url} className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  className="break-all text-left text-cyan-500 underline underline-offset-2 hover:text-cyan-400"
+                  className="break-all text-left text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
                   onClick={() => openExternalUrl(url)}
                 >
                   {url}
@@ -581,10 +583,8 @@ export function ToolCallCard({
           <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
             <Icon className={`h-3.5 w-3.5 ${iconColorClass}`} aria-hidden />
           </span>
-          <span className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className="min-w-0 flex-1 truncate text-left">{titleEl}</span>
-            {metaRight}
-          </span>
+          <span className="min-w-0 truncate text-left">{titleEl}</span>
+          {metaRight}
           {hasDetail ? (
             expanded ? (
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
@@ -618,7 +618,7 @@ export function ToolCallCard({
                 <ChevronRight className="h-3 w-3 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
               ))}
             <Icon className={`h-3.5 w-3.5 shrink-0 ${iconColorClass}`} />
-            <span className="min-w-0 flex-1 truncate">{titleEl}</span>
+            <span className="min-w-0 truncate">{titleEl}</span>
             {metaRight}
           </button>
         </div>
@@ -640,7 +640,7 @@ export function ToolCallCard({
           type="button"
           className={`mt-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition ${
             selected
-              ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-white"
+              ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-[var(--theme-color-text)]"
               : "border-text-faint bg-transparent text-transparent"
           }`}
           onClick={() => onToggleSelectMessage?.(message)}

@@ -57,4 +57,15 @@ describe("parseSseFrame", () => {
   it("ignores non-numeric id", () => {
     expect(parseSseFrame("id: abc\ndata: {}").eventId).toBeNull();
   });
+
+  it("parses group_reply frames used by live reattach", () => {
+    const frame =
+      'id: 12\ndata: {"type":"group_reply","data":{"agent_id":"a1","content":"hi"}}';
+    const { eventId, payload } = parseSseFrame(frame);
+    expect(eventId).toBe(12);
+    expect(payload).toEqual({
+      type: "group_reply",
+      data: { agent_id: "a1", content: "hi" },
+    });
+  });
 });

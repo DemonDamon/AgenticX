@@ -1,14 +1,14 @@
-import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
+import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent, CSSProperties } from "react";
+import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent, CSSProperties, RefObject } from "react";
 import {
   Bookmark,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Copy,
   Database,
-  GitBranch,
   GripVertical,
   LayoutList,
   Quote,
@@ -17,13 +17,12 @@ import {
   Sparkles,
   Radar,
   SquarePen,
+  Plus,
   Wrench,
-  Users,
   History,
   Settings,
   X,
   PanelRight,
-  PanelRightClose,
   ArrowRight,
   Loader2,
 } from "lucide-react";
@@ -35,8 +34,11 @@ import {
   type MessageAttachment,
   type PendingConfirm,
   type QueuedMessage,
+  type SidePanelTab,
 } from "../store";
 import { VOICE_UI_ENABLED } from "../constants/feature-flags";
+import { useGraphRunStore } from "./graph/useGraphRun";
+import { graphHasTaskNodes } from "./graph/graph-types";
 import {
   appendDictationText,
   cancelDictation,
@@ -80,14 +82,22 @@ import {
 } from "../utils/noisy-chat-messages";
 import { isStreamToolLabelOnlyText, shouldSkipFormattedToolResultFallback } from "../utils/orphan-formatted-tool";
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
-import { expandMessagesToTopLevelRows } from "./messages/react-blocks";
+import {
+  collectTurnLinkedIds,
+  collectTurnLinkedIdsForBlock,
+  countSelectedConversationTurns,
+  expandMessagesToTopLevelRows,
+  expandSelectionToCompleteTurns,
+} from "./messages/react-blocks";
 import { isSubAgentLiveStatus, shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
+import { StallWaitChip } from "./messages/StallWaitChip";
+import { parseStallWaitPayload, type StallWaitInfo } from "../utils/stall-wait-chip";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
-import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
+import { ImBubble } from "./messages/ImBubble";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
 import {
   ASSISTANT_ACTION_ICON_ROW_CLASS,
@@ -207,7 +217,6 @@ import {
 import { resolveReferencesForAssistant } from "../utils/turn-reference-context";
 import { reattachSessionStreamUrl, parseSseFrame } from "../utils/session-reattach";
 import {
-  attachmentsFromSessionRow,
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
@@ -226,7 +235,7 @@ import {
 } from "../utils/reference-attachment";
 import { NEAR_ARTIFACT_TASKSPACES_SYNCED } from "../utils/workspace-sidebar-events";
 import { isLikelyTextFile } from "../utils/text-attachment";
-import { isViewImageInjectMessage, viewImageInjectRowFromSession } from "../utils/view-image-inject";
+import { isViewImageInjectMessage } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
 import { maxContinuationRound } from "../utils/continuation-notice";
@@ -240,9 +249,26 @@ import { StreamCommitRegistry } from "../utils/stream-commit-registry";
 import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
-import { formatModelOptionLabel } from "../utils/model-display";
-import { collectSelectableModelOptions, coerceSelectableModel, isModelSelectable } from "../utils/model-options";
+import { formatModelDisplayParts, formatModelOptionLabel } from "../utils/model-display";
+import {
+  DEFAULT_KIMI_REASONING_EFFORT,
+  describeModelForPicker,
+  KIMI_REASONING_EFFORT_OPTIONS,
+  labelForKimiReasoningEffort,
+  normalizeKimiReasoningEffort,
+  supportsKimiK3ReasoningEffort,
+  type KimiReasoningEffort,
+} from "../utils/model-hover-blurb";
+import { getProviderDisplayName } from "../utils/provider-display";
+import {
+  collectSelectableModelOptions,
+  coerceSelectableModel,
+  isModelSelectable,
+  isProviderCredentialed,
+} from "../utils/model-options";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
+import { sessionCreateAvatarId } from "../utils/session-create-avatar";
+import { NEW_TOPIC_INHERITS_CONTEXT, newTopicTriggerLabel } from "../utils/new-topic-label";
 import {
   ccBridgeSendToolProgressLabel,
   parseCcBridgeModeFromPayload,
@@ -256,11 +282,15 @@ import {
   setCachedReasoningDuration,
 } from "./messages/reasoning-duration-cache";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
-import { buildMessagesPdfHtml, expandSelectionForCompletePdfExport } from "../utils/export-pdf-html";
+import { buildMessagesPdfHtml, expandSelectionForCompletePdfExport, messagesForShareExport } from "../utils/export-pdf-html";
+import { ShareImagePreviewModal } from "./ShareImagePreviewModal";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
-import { SHOW_DESKTOP_EXTERNAL_IM } from "../constants/desktop-feature-visibility";
+import {
+  SHOW_DESKTOP_EXTERNAL_IM,
+  SHOW_DESKTOP_RUN_GRAPH,
+} from "../constants/desktop-feature-visibility";
 import { APP_DISPLAY_NAME, APP_TAGLINE, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../utils/display-name";
@@ -467,7 +497,7 @@ const CHATPANE_SIDE_OVERLAY_BREAK = 760;
 function openWorkspaceSidebarForPane(
   paneId: string,
   paneOuterWidthPx: number,
-  openSidePanel: (paneId: string, tab: "workspace" | "members") => void,
+  openSidePanel: (paneId: string, tab: SidePanelTab) => void,
 ) {
   const compact =
     paneOuterWidthPx > 0 && paneOuterWidthPx < CHATPANE_SIDE_OVERLAY_BREAK;
@@ -486,6 +516,7 @@ function openWorkspaceSidebarForPane(
             historyOpen: false,
             memoryGraphOpen: false,
             membersPanelOpen: false,
+            graphPanelOpen: false,
             spawnsColumnOpen: false,
           },
     ),
@@ -505,6 +536,8 @@ const FALLBACK_PANE: ChatPaneState = {
   contextInherited: false,
   taskspacePanelOpen: false,
   membersPanelOpen: false,
+  graphPanelOpen: false,
+  activeGraphRunId: null,
   sidePanelTab: "workspace",
   activeTaskspaceId: null,
   spawnsColumnOpen: false,
@@ -523,153 +556,153 @@ const FALLBACK_PANE: ChatPaneState = {
   runDrawerRunId: null,
 };
 
-/** Compose-style primary action (豆包式「撰写」语义) + 下拉切换「全新对话」/「继承上下文」，默认前者。 */
-function NewTopicSplitControl({
+/** 输入区能力菜单的浮层宽度。 */
+const KB_MODE_SUBMENU_WIDTH = 200;
+
+/** 将「更多操作」的二级菜单与一级菜单同顶并排，空间不足时翻到左侧。 */
+function positionEmbeddedComposerFlyout(
+  triggerEl: HTMLElement,
+  flyoutWidth: number,
+): { top: number; left: number; maxHeight: number } {
+  const parent = triggerEl.closest(".agx-menu-pop");
+  const band = (parent ?? triggerEl).getBoundingClientRect();
+  const gap = 8;
+  let left = band.right + gap;
+  if (left + flyoutWidth > window.innerWidth - gap) {
+    left = band.left - flyoutWidth - gap;
+  }
+  left = Math.max(gap, Math.min(left, window.innerWidth - flyoutWidth - gap));
+  return {
+    top: band.top,
+    left,
+    maxHeight: Math.max(120, band.height),
+  };
+}
+
+/** 顶栏单一主操作：始终在当前元智能体、数字专家或群聊下开启全新上下文。 */
+function NewTopicButton({
   onNewTopic,
+  triggerLabel,
 }: {
   onNewTopic: (inherit: boolean, sessionMode?: PaneSessionMode) => void;
+  triggerLabel: string;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [inheritMode, setInheritMode] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const chevronRef = useRef<HTMLButtonElement>(null);
+  return (
+    <HoverTip label={triggerLabel}>
+      <button
+        type="button"
+        className="agx-topbar-btn !px-[5px]"
+        aria-label={triggerLabel}
+        onClick={() => onNewTopic(NEW_TOPIC_INHERITS_CONTEXT, "daily_office")}
+      >
+        <SquarePen className="h-[18px] w-[18px]" strokeWidth={1.8} aria-hidden />
+      </button>
+    </HoverTip>
+  );
+}
 
-  const openMenu = () => {
-    if (rootRef.current) {
-      const rect = rootRef.current.getBoundingClientRect();
-      setMenuPos({
-        bottom: window.innerHeight - rect.top + 4,
-        left: rect.left,
-      });
-    }
-    setMenuOpen(true);
-  };
+/** 「更多操作」只承载当前消息的附件与能力，不混入会话级的新对话操作。 */
+function ComposerMoreActionsButton({
+  onPickFile,
+  renderSkillPicker,
+  renderKbRetrieval,
+  renderConnectors,
+}: {
+  onPickFile: () => void;
+  renderSkillPicker: () => ReactNode;
+  renderKbRetrieval: () => ReactNode;
+  renderConnectors: () => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [panelPos, setPanelPos] = useState<{ bottom: number; left: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const syncPosition = useCallback(() => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPanelPos({ bottom: window.innerHeight - rect.top + 6, left: rect.left });
+  }, []);
+
+  const toggleOpen = useCallback(() => {
+    setOpen((prev) => {
+      const next = !prev;
+      if (next) syncPosition();
+      return next;
+    });
+  }, [syncPosition]);
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (rootRef.current?.contains(t)) return;
-      if (menuRef.current?.contains(t)) return;
-      setMenuOpen(false);
+    if (!open) return;
+    const onDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      for (const id of [
+        "agx-skill-picker-dropdown",
+        "agx-kb-retrieval-mode-menu",
+        "agx-connectors-menu-dropdown",
+      ]) {
+        if (document.getElementById(id)?.contains(target)) return;
+      }
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
+  }, [open]);
 
-  const panel =
-    menuOpen && menuPos
-      ? createPortal(
-          <div
-            ref={menuRef}
-            style={{ bottom: menuPos.bottom, left: menuPos.left }}
-            className="fixed z-[9999] w-[160px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
-            role="listbox"
-            aria-label="新建对话方式"
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("resize", syncPosition);
+    window.addEventListener("scroll", syncPosition, true);
+    return () => {
+      window.removeEventListener("resize", syncPosition);
+      window.removeEventListener("scroll", syncPosition, true);
+    };
+  }, [open, syncPosition]);
+
+  const panel = open && panelPos
+    ? createPortal(
+        <div
+          ref={panelRef}
+          style={{ bottom: panelPos.bottom, left: panelPos.left, transformOrigin: "bottom left" }}
+          className="agx-menu-pop fixed z-[9999] flex w-56 flex-col gap-0.5 rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
+          role="menu"
+          aria-label="更多操作"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+            onClick={() => {
+              onPickFile();
+              setOpen(false);
+            }}
           >
-            <button
-              type="button"
-              role="option"
-              aria-selected={!inheritMode}
-              className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                !inheritMode ? "bg-surface-hover" : "hover:bg-surface-hover"
-              }`}
-              onClick={() => {
-                setInheritMode(false);
-                setMenuOpen(false);
-              }}
-            >
-              <SquarePen
-                className={`h-[15px] w-[15px] shrink-0 ${
-                  !inheritMode ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
-                }`}
-                strokeWidth={2}
-              />
-              <span className="flex flex-1 flex-col gap-0.5">
-                <span
-                  className={`text-[13px] font-medium leading-none ${
-                    !inheritMode ? "text-text-strong" : "text-text-standard"
-                  }`}
-                >
-                  全新对话
-                </span>
-                <span className="text-[11px] leading-none text-text-faint">不继承上下文</span>
-              </span>
-              <span className="flex w-4 shrink-0 justify-end">
-                {!inheritMode && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
-              </span>
-            </button>
-            <button
-              type="button"
-              role="option"
-              aria-selected={inheritMode}
-              className={`group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                inheritMode ? "bg-surface-hover" : "hover:bg-surface-hover"
-              }`}
-              onClick={() => {
-                setInheritMode(true);
-                setMenuOpen(false);
-              }}
-            >
-              <GitBranch
-                className={`h-[15px] w-[15px] shrink-0 ${
-                  inheritMode ? "text-text-strong" : "text-text-muted group-hover:text-text-standard"
-                }`}
-                strokeWidth={2}
-              />
-              <span className="flex flex-1 flex-col gap-0.5">
-                <span
-                  className={`text-[13px] font-medium leading-none ${
-                    inheritMode ? "text-text-strong" : "text-text-standard"
-                  }`}
-                >
-                  继承上下文
-                </span>
-                <span className="text-[11px] leading-none text-text-faint">携带摘要接续</span>
-              </span>
-              <span className="flex w-4 shrink-0 justify-end">
-                {inheritMode && <Check className="h-3.5 w-3.5 text-text-strong" strokeWidth={2.5} />}
-              </span>
-            </button>
-          </div>,
-          document.body
-        )
-      : null;
-
-  const baseTip = inheritMode ? "新对话 · 继承上下文（当前选项）" : "全新对话 · 不继承上下文（当前选项）";
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px] shrink-0 text-text-muted">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+            </svg>
+            <span className="flex-1">添加文件</span>
+          </button>
+          {renderSkillPicker()}
+          {renderKbRetrieval()}
+          {renderConnectors()}
+        </div>,
+        document.body,
+      )
+    : null;
 
   return (
     <>
-      <div ref={rootRef} className="flex h-[26px] shrink-0 items-stretch overflow-hidden rounded-md bg-transparent transition-colors hover:bg-surface-hover">
-        <HoverTip label={baseTip}>
-          <button
-            type="button"
-            className="flex h-full w-7 shrink-0 items-center justify-center text-text-muted transition-colors hover:text-text-strong"
-            aria-label={inheritMode ? "新建对话：继承上下文" : "新建对话：全新对话"}
-            onClick={() => onNewTopic(inheritMode, inheritMode ? "daily_office" : "daily_office")}
-          >
-            {inheritMode ? (
-              <GitBranch className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
-            ) : (
-              <SquarePen className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden />
-            )}
-          </button>
-        </HoverTip>
-        <div className="my-1.5 w-[1px] shrink-0 self-stretch bg-border" aria-hidden />
-        <HoverTip label="切换新建方式">
-          <button
-            ref={chevronRef}
-            type="button"
-            className="flex h-full w-[18px] shrink-0 items-center justify-center text-text-muted transition-colors hover:text-text-strong"
-            aria-label="展开新建对话选项"
-            aria-expanded={menuOpen}
-            onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
-          >
-            <ChevronDown className={`h-3 w-3 transition-transform ${menuOpen ? "rotate-180" : ""}`} strokeWidth={2.5} aria-hidden />
-          </button>
-        </HoverTip>
+      <div ref={rootRef} className="flex shrink-0 items-center">
+        <button
+          type="button"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-strong transition hover:bg-surface-hover"
+          aria-label="更多操作"
+          aria-expanded={open}
+          onClick={toggleOpen}
+        >
+          <Plus className={`h-[17px] w-[17px] transition-transform ${open ? "rotate-45" : ""}`} strokeWidth={1.85} aria-hidden />
+        </button>
       </div>
       {panel}
     </>
@@ -688,16 +721,20 @@ interface SkillPickerButtonProps {
   apiBase: string;
   apiToken: string;
   onSelect: (skill: SkillItem) => void;
+  /** Render as a full-width row inside「更多操作」and open a side flyout. */
+  embedded?: boolean;
 }
 
 const SKILL_DROPDOWN_WIDTH = 288; // w-72
 
-function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonProps) {
+function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: SkillPickerButtonProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [dropdownPos, setDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<
+    { left: number; top?: number; bottom?: number; maxHeight?: number } | null
+  >(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const iconBtn =
@@ -724,14 +761,13 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
 
   const handleOpen = async () => {
     if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      // Left-align the dropdown to the button so it opens rightward, staying within the chat pane.
-      // Clamp: don't let right edge go off screen (8px margin).
-      const left = Math.min(rect.left, window.innerWidth - SKILL_DROPDOWN_WIDTH - 8);
-      setDropdownPos({
-        bottom: window.innerHeight - rect.top + 6,
-        left: Math.max(8, left),
-      });
+      if (embedded) {
+        setDropdownPos(positionEmbeddedComposerFlyout(btnRef.current, SKILL_DROPDOWN_WIDTH));
+      } else {
+        const rect = btnRef.current.getBoundingClientRect();
+        const left = Math.max(8, Math.min(rect.right + 8, window.innerWidth - SKILL_DROPDOWN_WIDTH - 8));
+        setDropdownPos({ bottom: window.innerHeight - rect.top + 6, left });
+      }
     }
     setOpen(true);
     setQuery("");
@@ -771,10 +807,16 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
       ? createPortal(
           <div
             id="agx-skill-picker-dropdown"
-            style={{ bottom: dropdownPos.bottom, left: dropdownPos.left }}
-            className="fixed z-[9999] w-72 rounded-xl border border-border bg-surface-panel shadow-xl backdrop-blur-md"
+            style={{
+              left: dropdownPos.left,
+              width: SKILL_DROPDOWN_WIDTH,
+              ...(dropdownPos.top != null
+                ? { top: dropdownPos.top, maxHeight: dropdownPos.maxHeight }
+                : { bottom: dropdownPos.bottom }),
+            }}
+            className="fixed z-[9999] flex w-72 flex-col overflow-hidden rounded-xl border border-border bg-surface-panel shadow-xl backdrop-blur-md"
           >
-            <div className="border-b border-border p-2">
+            <div className="shrink-0 border-b border-border p-2">
               <input
                 ref={searchRef}
                 type="text"
@@ -787,7 +829,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
                 }}
               />
             </div>
-            <div className="max-h-60 overflow-y-auto p-1">
+            <div className="min-h-0 flex-1 overflow-y-auto p-1">
               {loading ? (
                 <div className="px-3 py-4 text-center text-[11px] text-text-faint">加载中…</div>
               ) : filtered.length === 0 ? (
@@ -826,6 +868,27 @@ function SkillPickerButton({ apiBase, apiToken, onSelect }: SkillPickerButtonPro
           document.body
         )
       : null;
+
+  if (embedded) {
+    return (
+      <>
+        <button
+          ref={btnRef}
+          type="button"
+          role="menuitem"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+          aria-label="技能"
+          aria-expanded={open}
+          onClick={open ? handleClose : handleOpen}
+        >
+          <SkillPuzzleIcon className="h-[15px] w-[15px] shrink-0 text-text-muted" />
+          <span className="flex-1">技能</span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
+        </button>
+        {dropdown}
+      </>
+    );
+  }
 
   return (
     <>
@@ -997,24 +1060,78 @@ function historyPanelPopoverStyle(anchor: DOMRect): CSSProperties {
   };
 }
 
+/** Monochrome provider mark: shape carries identity while color follows the active theme. */
+function ProviderGlyph({ provider, model }: { provider: string; model?: string }) {
+  return (
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center text-text-strong" aria-hidden>
+      <ProviderIcon provider={provider} model={model} className="h-[15px] w-[15px]" />
+    </span>
+  );
+}
+
+const MODEL_HOVER_TIP_WIDTH = 220;
+const MODEL_HOVER_TIP_GAP = 8;
+
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const settings = useAppStore((s) => s.settings);
   const setPaneModel = useAppStore((s) => s.setPaneModel);
+  const setPaneReasoningEffort = useAppStore((s) => s.setPaneReasoningEffort);
   const paneModel = useAppStore((s) => s.panes.find((pane) => pane.id === paneId));
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const activeModelRowRef = useRef<HTMLButtonElement | null>(null);
+  const hoverClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const [hoverRowTop, setHoverRowTop] = useState(0);
+  const [effortMenuOpen, setEffortMenuOpen] = useState(false);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+
+  /** Keep tip visible while moving between list row and tip card. */
+  const cancelClearHover = useCallback(() => {
+    if (hoverClearTimerRef.current != null) {
+      clearTimeout(hoverClearTimerRef.current);
+      hoverClearTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleClearHover = useCallback(() => {
+    cancelClearHover();
+    hoverClearTimerRef.current = setTimeout(() => {
+      setHoverKey(null);
+      setEffortMenuOpen(false);
+      hoverClearTimerRef.current = null;
+    }, 120);
+  }, [cancelClearHover]);
+
+  useEffect(() => {
+    return () => {
+      if (hoverClearTimerRef.current != null) {
+        clearTimeout(hoverClearTimerRef.current);
+        hoverClearTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleSelect = (provider: string, model: string) => {
     setPaneModel(paneId, provider, model);
     setOpen(false);
     // Persist the current pane model as global fallback for restarts.
-    void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model });
+    void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model }).then((result) => {
+      if (!result.ok) {
+        console.warn("[ChatPane] global model persistence failed", result.error);
+      }
+    });
     // If this pane is bound to a real session, record the model against that
     // session so a cold restart + jump-back restores the exact pick.
     const sid = String(paneModel?.sessionId ?? "").trim();
     if (sid) {
-      void window.agenticxDesktop.setSessionModel({ sessionId: sid, provider, model });
+      void window.agenticxDesktop.setSessionModel({ sessionId: sid, provider, model }).then((result) => {
+        if (!result.ok) {
+          console.warn("[ChatPane] session model persistence failed", result.error);
+        }
+      });
     }
   };
 
@@ -1023,17 +1140,61 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     [settings.providers],
   );
 
+  /**
+   * Group by vendor. Seed every enabled+credentialed provider first so「已启动」渠道
+   * (e.g. MOMA with only legacy `model` / empty visible `models`) still gets a section.
+   */
+  const groups = useMemo(() => {
+    const byProvider = new Map<string, typeof options>();
+    for (const [provider, entry] of Object.entries(settings.providers)) {
+      if (entry.enabled === false) continue;
+      if (!isProviderCredentialed(entry)) continue;
+      byProvider.set(provider, []);
+    }
+    for (const opt of options) {
+      const bucket = byProvider.get(opt.provider);
+      if (bucket) bucket.push(opt);
+      else byProvider.set(opt.provider, [opt]);
+    }
+    return [...byProvider.entries()].map(([provider, items]) => ({
+      provider,
+      providerLabel: getProviderDisplayName(provider, settings.providers[provider]),
+      items,
+    }));
+  }, [options, settings.providers]);
+  const selectedProviderGroup = selectedProviderId
+    ? groups.find((group) => group.provider === selectedProviderId) ?? null
+    : null;
+
+  /** Same model id served by several vendors — only then does the row need its vendor spelled out. */
+  const ambiguousModelNames = useMemo(() => {
+    const seen = new Map<string, Set<string>>();
+    for (const opt of options) {
+      const { modelName } = formatModelDisplayParts(opt.provider, opt.model, settings.providers[opt.provider]);
+      const providers = seen.get(modelName) ?? new Set<string>();
+      providers.add(opt.provider);
+      seen.set(modelName, providers);
+    }
+    return new Set([...seen.entries()].filter(([, p]) => p.size > 1).map(([name]) => name));
+  }, [options, settings.providers]);
+
   const currentProvider = (paneModel?.modelProvider || "").trim();
   const currentModel = (paneModel?.modelName || "").trim();
+  const currentSelectable =
+    Boolean(currentModel)
+    && Boolean(currentProvider)
+    && isModelSelectable(currentProvider, currentModel, settings.providers);
+  const currentParts = useMemo(() => {
+    if (!currentSelectable) return null;
+    return formatModelDisplayParts(currentProvider, currentModel, settings.providers[currentProvider]);
+  }, [currentSelectable, currentModel, currentProvider, settings.providers]);
   const currentLabel = useMemo(() => {
     if (!currentModel) return "未选模型";
     if (!currentProvider) return currentModel;
-    if (!isModelSelectable(currentProvider, currentModel, settings.providers)) {
-      return "未选模型";
-    }
+    if (!currentSelectable) return "未选模型";
     const entry = settings.providers[currentProvider];
     return formatModelOptionLabel(currentProvider, currentModel, entry);
-  }, [currentModel, currentProvider, settings.providers]);
+  }, [currentModel, currentProvider, currentSelectable, settings.providers]);
 
   const syncPanelPosition = useCallback(() => {
     const el = anchorRef.current;
@@ -1053,55 +1214,305 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     };
   }, [open, syncPanelPosition, options.length]);
 
+  useEffect(() => {
+    if (!open) {
+      setHoverKey(null);
+      setEffortMenuOpen(false);
+      setSelectedProviderId(null);
+      cancelClearHover();
+    }
+  }, [open, cancelClearHover]);
+
+  // 进入当前渠道的模型列表后，把当前模型滚进可视区。
+  useLayoutEffect(() => {
+    if (!open || selectedProviderId !== currentProvider) return;
+    const row = activeModelRowRef.current;
+    if (!row) return;
+    row.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [open, selectedProviderId, currentProvider, currentModel]);
+
+  const hoverOpt = useMemo(() => {
+    if (!hoverKey) return null;
+    return options.find((o) => `${o.provider}:${o.model}` === hoverKey) ?? null;
+  }, [hoverKey, options]);
+
+  const hoverBlurb = useMemo(() => {
+    if (!hoverOpt) return null;
+    const providerLabel = getProviderDisplayName(hoverOpt.provider, settings.providers[hoverOpt.provider]);
+    return describeModelForPicker(hoverOpt.provider, hoverOpt.model, providerLabel);
+  }, [hoverOpt, settings.providers]);
+
+  const paneReasoningEffort = normalizeKimiReasoningEffort(paneModel?.reasoningEffort);
+  const showEffortControls = Boolean(hoverBlurb?.supportsReasoningEffort);
+
+  const hoverTipStyle = useMemo((): CSSProperties | null => {
+    if (!hoverBlurb || !panelRef.current) return null;
+    const panel = panelRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const tipW = MODEL_HOVER_TIP_WIDTH;
+    const spaceRight = vw - panel.right - PANE_MODEL_PICKER_MARGIN;
+    const placeRight = spaceRight >= tipW + MODEL_HOVER_TIP_GAP;
+    const left = placeRight
+      ? panel.right + MODEL_HOVER_TIP_GAP
+      : Math.max(PANE_MODEL_PICKER_MARGIN, panel.left - MODEL_HOVER_TIP_GAP - tipW);
+    const tipH = showEffortControls ? (effortMenuOpen ? 196 : 148) : 108;
+    let top = hoverRowTop;
+    if (top + tipH > vh - PANE_MODEL_PICKER_MARGIN) {
+      top = Math.max(PANE_MODEL_PICKER_MARGIN, vh - PANE_MODEL_PICKER_MARGIN - tipH);
+    }
+    if (top < PANE_MODEL_PICKER_MARGIN) top = PANE_MODEL_PICKER_MARGIN;
+    return {
+      left,
+      top,
+      width: tipW,
+    };
+  }, [hoverBlurb, hoverRowTop, showEffortControls, effortMenuOpen]);
+
   return (
     <div className="relative min-w-0 max-w-full" ref={anchorRef}>
       <button
         type="button"
-        className="flex h-8 min-h-8 max-w-full min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)] transition hover:bg-surface-hover"
+        className={`group flex h-8 min-h-8 max-w-full min-w-0 items-center gap-2 rounded-lg px-1.5 text-[13px] font-medium leading-none transition-colors focus:outline-none focus-visible:bg-surface-hover ${
+          open ? "bg-surface-hover" : "hover:bg-surface-hover"
+        }`}
         onClick={() => setOpen((v) => !v)}
         title={currentLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >
-        <ProviderIcon provider={currentProvider} className="h-[13px] w-[13px] shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-left">{currentLabel}</span>
-        <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2} aria-hidden />
+        <ProviderGlyph provider={currentProvider} model={currentModel} />
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5 text-left">
+          <span className="min-w-0 truncate text-text-strong">
+            {currentParts?.modelName ?? currentLabel}
+          </span>
+          {currentParts && ambiguousModelNames.has(currentParts.modelName) ? (
+            <span className="shrink-0 truncate text-[11px] font-normal text-text-muted">{currentParts.providerLabel}</span>
+          ) : null}
+        </span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 shrink-0 text-text-muted transition-transform duration-fast ease-out ${open ? "rotate-180" : ""}`}
+          strokeWidth={2}
+          aria-hidden
+        />
       </button>
       {open &&
         createPortal(
           <>
             <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
             <div
-              className="fixed z-40 overflow-y-auto rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
-              style={panelStyle}
+              ref={panelRef}
+              className="agx-menu-pop fixed z-40 flex flex-col overflow-hidden rounded-2xl border border-border bg-surface-panel shadow-2xl backdrop-blur-xl"
+              style={{
+                ...panelStyle,
+                display: "flex",
+                flexDirection: "column",
+              }}
+              role="listbox"
+              onMouseEnter={cancelClearHover}
+              onMouseLeave={scheduleClearHover}
             >
-              {options.length === 0 ? (
-                <div className="px-3 py-3 text-center text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)]">
-                  请先在设置中配置模型
-                </div>
-              ) : (
-                options.map((opt) => {
-                  const isActive = opt.provider === currentProvider && opt.model === currentModel;
-                  return (
+              <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+                {options.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-[12px] leading-relaxed text-text-muted">
+                    还没有可用模型
+                    <span className="mt-1 block text-[11px] text-text-subtle">请先在设置中配置服务商</span>
+                  </div>
+                ) : !selectedProviderGroup ? (
+                  <>
+                    <div className="px-2.5 pb-1.5 pt-1 text-[11px] text-text-faint">
+                      先选择模型提供商
+                    </div>
+                    {groups.map((group) => {
+                      const isCurrentProvider = group.provider === currentProvider;
+                      return (
+                        <button
+                          key={group.provider}
+                          type="button"
+                          className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition-colors ${
+                            isCurrentProvider
+                              ? "bg-surface-cardStrong"
+                              : "hover:bg-surface-hover"
+                          }`}
+                          onClick={() => {
+                            setSelectedProviderId(group.provider);
+                            setHoverKey(null);
+                            setEffortMenuOpen(false);
+                          }}
+                        >
+                          <ProviderGlyph provider={group.provider} model={group.items[0]?.model ?? ""} />
+                          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-text-strong">
+                            {group.providerLabel}
+                          </span>
+                          <span className="shrink-0 text-[11px] tabular-nums text-text-faint">
+                            {group.items.length} 个模型
+                          </span>
+                          <span className="text-[14px] text-text-faint" aria-hidden>›</span>
+                        </button>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <>
                     <button
-                      key={`${opt.provider}:${opt.model}`}
                       type="button"
-                      className={`group flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-2 pr-3 text-left text-[13px] font-normal leading-relaxed text-[color:var(--chat-im-assistant-text)] transition-colors ${
-                        isActive ? "bg-surface-hover" : "hover:bg-surface-hover"
-                      }`}
-                      title={opt.label}
-                      onClick={() => handleSelect(opt.provider, opt.model)}
+                      className="mb-1 flex w-full min-w-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-text-subtle transition-colors hover:bg-surface-hover hover:text-text-strong"
+                      onClick={() => {
+                        setSelectedProviderId(null);
+                        setHoverKey(null);
+                        setEffortMenuOpen(false);
+                      }}
                     >
-                      <span className="flex flex-1 items-center gap-2">
-                        <ProviderIcon provider={opt.provider} className="h-[13px] w-[13px] shrink-0" />
-                        <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-                      </span>
-                      <span className="flex w-4 shrink-0 justify-end">
-                        {isActive && <Check className="h-[13px] w-[13px] text-[color:var(--chat-im-assistant-text)]" strokeWidth={2} />}
+                      <span aria-hidden>‹</span>
+                      <span>全部提供商</span>
+                    </button>
+                    <div className="px-2.5 pb-1 text-[11px] font-medium text-text-faint">
+                      {selectedProviderGroup.providerLabel} · 选择模型
+                    </div>
+                    {selectedProviderGroup.items.length === 0 ? (
+                      <div className="px-2.5 py-2 text-[12px] text-text-faint">
+                        暂无可见模型，请在设置中添加
+                      </div>
+                    ) : (
+                      selectedProviderGroup.items.map((opt) => {
+                        const rowKey = `${opt.provider}:${opt.model}`;
+                        const isActive =
+                          opt.provider === currentProvider && opt.model === currentModel;
+                        const isHover = hoverKey === rowKey;
+                        const { modelName } = formatModelDisplayParts(
+                          opt.provider,
+                          opt.model,
+                          settings.providers[opt.provider],
+                        );
+                        return (
+                          <button
+                            key={rowKey}
+                            ref={isActive ? activeModelRowRef : undefined}
+                            type="button"
+                            role="option"
+                            aria-selected={isActive}
+                            className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-none transition-colors ${
+                              isActive || isHover
+                                ? "bg-surface-cardStrong"
+                                : "hover:bg-surface-hover"
+                            }`}
+                            onMouseEnter={(e) => {
+                              cancelClearHover();
+                              setHoverKey(rowKey);
+                              setEffortMenuOpen(false);
+                              setHoverRowTop(e.currentTarget.getBoundingClientRect().top);
+                            }}
+                            onClick={() => handleSelect(opt.provider, opt.model)}
+                          >
+                            <ProviderGlyph provider={opt.provider} model={opt.model} />
+                            <span className="min-w-0 flex-1 truncate font-semibold text-text-strong">
+                              {modelName}
+                            </span>
+                            <span className="flex w-3.5 shrink-0 justify-end">
+                              {isActive ? (
+                                <Check
+                                  className="h-3.5 w-3.5 text-status-success"
+                                  strokeWidth={2.5}
+                                />
+                              ) : null}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </>
+                )}
+              </div>
+              <div className="shrink-0 border-t border-border p-1.5">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-surface-cardStrong px-2.5 py-2 text-[12.5px] font-medium text-text-strong transition-colors hover:bg-surface-hover"
+                  onMouseEnter={() => setHoverKey(null)}
+                  onClick={() => {
+                    setOpen(false);
+                    useAppStore.getState().openSettings("provider");
+                  }}
+                >
+                  <SquarePen className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+                  配置模型
+                </button>
+              </div>
+            </div>
+            {hoverBlurb && hoverTipStyle ? (
+              <div
+                className={`agx-menu-pop fixed z-50 rounded-xl border border-border bg-surface-panel px-3.5 py-3 shadow-2xl backdrop-blur-xl ${
+                  showEffortControls ? "pointer-events-auto" : "pointer-events-none"
+                }`}
+                style={hoverTipStyle}
+                role="tooltip"
+                onMouseEnter={cancelClearHover}
+                onMouseLeave={scheduleClearHover}
+              >
+                <div className="truncate text-[13px] font-semibold leading-snug text-text-strong">
+                  {hoverBlurb.title}
+                </div>
+                <div className="mt-1 text-[12px] leading-relaxed text-text-muted">
+                  {hoverBlurb.description}
+                </div>
+                <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-border pt-2.5 text-[11px]">
+                  <span className="text-text-muted">{hoverBlurb.metaLabel}</span>
+                  <span className="truncate font-medium text-text-strong">{hoverBlurb.metaValue}</span>
+                </div>
+                {showEffortControls ? (
+                  <div className="relative mt-2 border-t border-border pt-2">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 text-[11px] transition-colors hover:text-text-strong"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEffortMenuOpen((v) => !v);
+                      }}
+                    >
+                      <span className="text-text-muted">思考强度</span>
+                      <span className="inline-flex items-center gap-0.5 font-medium text-text-strong">
+                        {labelForKimiReasoningEffort(paneReasoningEffort)}
+                        <ChevronRight
+                          className={`h-3 w-3 text-text-muted transition-transform ${
+                            effortMenuOpen ? "rotate-90" : ""
+                          }`}
+                          strokeWidth={2}
+                          aria-hidden
+                        />
                       </span>
                     </button>
-                  );
-                })
-              )}
-            </div>
+                    {effortMenuOpen ? (
+                      <div className="mt-1.5 overflow-hidden rounded-lg border border-border bg-surface-cardStrong p-0.5">
+                        {KIMI_REASONING_EFFORT_OPTIONS.map((opt) => {
+                          const active = paneReasoningEffort === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                                active
+                                  ? "bg-surface-hover font-medium text-text-strong"
+                                  : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                              }`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const next = opt.value as KimiReasoningEffort;
+                                setPaneReasoningEffort(paneId, next);
+                                setEffortMenuOpen(false);
+                              }}
+                            >
+                              <span>{opt.label}</span>
+                              {active ? (
+                                <Check className="h-3 w-3 text-status-success" strokeWidth={2.5} />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </>,
           document.body,
         )}
@@ -1116,6 +1527,8 @@ function PaneKnowledgeRetrievalModeSwitch({
   paneId,
   globalDefaultMode,
   onNewSessionDefaultChange,
+  /** True when rendered as a row inside「更多操作」vertical menu (full-width row + right flyout). */
+  embedded = false,
 }: {
   apiToken: string;
   apiBase: string;
@@ -1123,6 +1536,7 @@ function PaneKnowledgeRetrievalModeSwitch({
   paneId: string;
   globalDefaultMode: KbRetrievalMode;
   onNewSessionDefaultChange?: (mode: KbRetrievalMode) => void;
+  embedded?: boolean;
 }) {
   const resolveApiBase = useCallback(async () => {
     const base = String(apiBase ?? "").trim();
@@ -1136,8 +1550,10 @@ function PaneKnowledgeRetrievalModeSwitch({
   );
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<
+    { left: number; top?: number; bottom?: number; maxHeight?: number } | null
+  >(null);
+  const rootRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const refreshGenRef = useRef(0);
 
@@ -1168,13 +1584,17 @@ function PaneKnowledgeRetrievalModeSwitch({
     void refresh();
   }, [refresh]);
 
-  const openMenu = useCallback(() => {
+  const openMenu = useCallback((flyoutRight = false) => {
     if (rootRef.current) {
-      const rect = rootRef.current.getBoundingClientRect();
-      setMenuPos({
-        bottom: window.innerHeight - rect.top + 4,
-        left: rect.left,
-      });
+      if (flyoutRight) {
+        setMenuPos(positionEmbeddedComposerFlyout(rootRef.current, KB_MODE_SUBMENU_WIDTH));
+      } else {
+        const rect = rootRef.current.getBoundingClientRect();
+        setMenuPos({
+          bottom: window.innerHeight - rect.top + 4,
+          left: rect.left,
+        });
+      }
     }
     setOpen(true);
   }, []);
@@ -1219,14 +1639,20 @@ function PaneKnowledgeRetrievalModeSwitch({
     KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索";
 
   // Portal to document.body — composer toolbar has overflow-hidden and would clip
-  // an absolute dropdown (same pattern as NewTopicSplitControl).
+  // an absolute dropdown.
   const panel =
     open && menuPos
       ? createPortal(
           <div
+            id="agx-kb-retrieval-mode-menu"
             ref={menuRef}
-            style={{ bottom: menuPos.bottom, left: menuPos.left }}
-            className="fixed z-[9999] w-[200px] overflow-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
+            style={{
+              left: menuPos.left,
+              ...(menuPos.top != null
+                ? { top: menuPos.top, maxHeight: menuPos.maxHeight }
+                : { bottom: menuPos.bottom }),
+            }}
+            className="fixed z-[9999] w-[200px] overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
             role="listbox"
             aria-label="知识库检索模式"
           >
@@ -1277,9 +1703,36 @@ function PaneKnowledgeRetrievalModeSwitch({
         )
       : null;
 
+  if (embedded) {
+    return (
+      <>
+        <button
+          ref={rootRef as unknown as RefObject<HTMLButtonElement>}
+          type="button"
+          role="menuitem"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+          disabled={saving}
+          aria-label="知识库检索"
+          aria-expanded={open}
+          onClick={() => (open ? setOpen(false) : openMenu(true))}
+        >
+          {mode === "auto" ? (
+            <Sparkles className="h-[15px] w-[15px] shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+          ) : (
+            <Radar className="h-[15px] w-[15px] shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
+          )}
+          <span className="flex-1">知识库检索</span>
+          <span className="text-[11px] text-text-faint">{activeLabel}</span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
+        </button>
+        {panel}
+      </>
+    );
+  }
+
   return (
     <>
-      <div ref={rootRef} className="relative">
+      <div ref={rootRef as unknown as RefObject<HTMLDivElement>} className="relative">
         <HoverTip label={`知识库检索模式：${activeLabel}`}>
           <button
             type="button"
@@ -2019,458 +2472,6 @@ type AtCandidate =
       alias: string;
     };
 
-const MEMBER_PALETTE = [
-  "bg-cyan-600",
-  "bg-violet-600",
-  "bg-rose-600",
-  "bg-amber-600",
-  "bg-emerald-600",
-  "bg-sky-600",
-  "bg-fuchsia-600",
-];
-
-function memberInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase() || "?";
-}
-
-function memberColorClass(id: string): string {
-  let h = 0;
-  for (const ch of id) h = ((h << 5) - h + ch.charCodeAt(0)) | 0;
-  return MEMBER_PALETTE[Math.abs(h) % MEMBER_PALETTE.length];
-}
-
-const GroupMembersSidePanel = memo(function GroupMembersSidePanel({
-  groupId,
-  avatarList,
-  metaLeaderLabel,
-  onClose,
-}: {
-  groupId: string;
-  avatarList: Avatar[];
-  /** Meta-Agent pane title; shown as group coordinator in member grid. */
-  metaLeaderLabel: string;
-  onClose?: () => void;
-}) {
-  const [search, setSearch] = useState("");
-  const [mode, setMode] = useState<"browse" | "add" | "remove">("browse");
-  const [saving, setSaving] = useState(false);
-  const [errorText, setErrorText] = useState("");
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const [panelWidth, setPanelWidth] = useState(0);
-  const groups = useAppStore((s) => s.groups);
-  const setGroups = useAppStore((s) => s.setGroups);
-  const group = groups.find((g) => g.id === groupId);
-
-  useEffect(() => {
-    if (!panelRef.current) return;
-    const target = panelRef.current;
-    const update = () => setPanelWidth(target.clientWidth);
-    const { schedule, cancel } = createResizeRafScheduler(update);
-    update();
-    const observer = new ResizeObserver(schedule);
-    observer.observe(target);
-    return () => {
-      cancel();
-      observer.disconnect();
-    };
-  }, []);
-
-  const avatarById = useMemo(() => {
-    const map = new Map<string, Avatar>();
-    for (const item of avatarList) map.set(item.id, item);
-    return map;
-  }, [avatarList]);
-
-  const showMetaAgent = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return true;
-    const label = metaLeaderLabel.trim().toLowerCase();
-    return (
-      "meta-agent".includes(q) ||
-      "meta agent".includes(q) ||
-      "元智能体".includes(q) ||
-      "组长".includes(q) ||
-      (label.length > 0 && label.includes(q))
-    );
-  }, [search, metaLeaderLabel]);
-
-  const filteredIds = useMemo(() => {
-    if (!group) return [];
-    const q = search.trim().toLowerCase();
-    if (!q) return group.avatarIds;
-    return group.avatarIds.filter((id) => {
-      const a = avatarById.get(id);
-      const name = (a?.name ?? id).toLowerCase();
-      const role = (a?.role ?? "").toLowerCase();
-      return name.includes(q) || role.includes(q);
-    });
-  }, [group, avatarById, search]);
-
-  const addCandidates = useMemo(() => {
-    if (!group) return [];
-    const selected = new Set(group.avatarIds);
-    const q = search.trim().toLowerCase();
-    return avatarList.filter((a) => {
-      if (selected.has(a.id)) return false;
-      if (!q) return true;
-      return a.name.toLowerCase().includes(q) || a.role.toLowerCase().includes(q);
-    });
-  }, [group, avatarList, search]);
-
-  const memberGrid = useMemo(() => {
-    const width = panelWidth || 320;
-    const columns = width <= 250 ? 2 : width <= 360 ? 3 : 4;
-    const avatarSize = width <= 250 ? 38 : width <= 360 ? 44 : 48;
-    const nameClass = width <= 250 ? "text-[10px]" : "text-[11px]";
-    return { columns, avatarSize, nameClass };
-  }, [panelWidth]);
-
-  const [dialogChecked, setDialogChecked] = useState<Set<string>>(new Set());
-  const [dialogSearch, setDialogSearch] = useState("");
-
-  const dialogCandidates = useMemo(() => {
-    if (mode !== "add" || !group) return [];
-    const existing = new Set(group.avatarIds);
-    const q = dialogSearch.trim().toLowerCase();
-    return avatarList.filter((a) => {
-      if (existing.has(a.id)) return false;
-      if (!q) return true;
-      return a.name.toLowerCase().includes(q) || a.role.toLowerCase().includes(q);
-    });
-  }, [mode, group, avatarList, dialogSearch]);
-
-  if (!group) {
-    return (
-      <div ref={panelRef} className="flex h-full flex-col bg-surface-card p-3">
-        <p className="text-xs text-text-faint">未找到该群配置，可在侧栏刷新群列表后重试。</p>
-      </div>
-    );
-  }
-
-  const persistMembers = async (nextAvatarIds: string[]) => {
-    if (!group || saving) return;
-    setSaving(true);
-    setErrorText("");
-    const prevAvatarIds = group.avatarIds;
-    setGroups(
-      groups.map((item) => (item.id === group.id ? { ...item, avatarIds: nextAvatarIds } : item))
-    );
-    try {
-      const res = await window.agenticxDesktop.updateGroup({
-        id: group.id,
-        avatar_ids: nextAvatarIds,
-      });
-      if (!res.ok) {
-        throw new Error(res.error || "更新群成员失败");
-      }
-    } catch (err) {
-      setGroups(
-        groups.map((item) => (item.id === group.id ? { ...item, avatarIds: prevAvatarIds } : item))
-      );
-      setErrorText(err instanceof Error ? err.message : "更新群成员失败");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAddMember = (avatarId: string) => {
-    if (!group || group.avatarIds.includes(avatarId)) return;
-    void persistMembers([...group.avatarIds, avatarId]);
-  };
-
-  const handleRemoveMember = (avatarId: string) => {
-    if (!group || !group.avatarIds.includes(avatarId)) return;
-    void persistMembers(group.avatarIds.filter((id) => id !== avatarId));
-  };
-
-  const openAddDialog = () => {
-    setDialogChecked(new Set());
-    setDialogSearch("");
-    setMode("add");
-  };
-
-  const handleDialogConfirm = () => {
-    if (!group || dialogChecked.size === 0) return;
-    void persistMembers([...group.avatarIds, ...Array.from(dialogChecked)]);
-    setMode("browse");
-  };
-
-  return (
-    <div ref={panelRef} className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-card">
-      <div className="shrink-0 space-y-2 border-b border-border px-3 py-2">
-        <div className="flex items-center gap-1">
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索群成员"
-            className="min-w-0 flex-1 rounded-lg border border-border bg-surface-panel px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-faint focus:border-border-strong"
-          />
-          {onClose && (
-            <button
-              type="button"
-              className="shrink-0 rounded p-1 text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
-              onClick={onClose}
-              title="关闭成员面板"
-            >
-              <PanelRightClose className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            </button>
-          )}
-        </div>
-        {errorText ? <p className="text-[10px] text-rose-300">{errorText}</p> : null}
-        {mode === "remove" ? (
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-rose-300">点击成员头像移出群聊</span>
-            <button
-              type="button"
-              className="rounded px-2 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-              onClick={() => setMode("browse")}
-            >
-              完成
-            </button>
-          </div>
-        ) : null}
-      </div>
-      <div className="relative min-h-0 flex-1 overflow-y-auto">
-        {filteredIds.length === 0 && !showMetaAgent && search.trim() ? (
-          <p className="p-3 text-xs text-text-faint">无匹配成员，换个关键词试试。</p>
-        ) : (
-          <div
-            className="grid gap-x-1 gap-y-3 px-2 py-3"
-            style={{ gridTemplateColumns: `repeat(${memberGrid.columns}, minmax(0, 1fr))` }}
-          >
-            {/* Meta-Agent: 固定首位、不可移除 */}
-            {showMetaAgent ? (
-              <div className="relative flex flex-col items-center gap-1.5 rounded-lg text-center">
-                <div
-                  className="flex shrink-0 items-center justify-center rounded-xl bg-cyan-600 text-[10px] font-bold leading-tight text-white"
-                  style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
-                >
-                  {memberInitials(metaLeaderLabel)}
-                </div>
-                <span
-                  className={`w-full truncate px-0.5 text-text-muted ${memberGrid.nameClass}`}
-                  title={`${metaLeaderLabel} · 群聊协调者`}
-                >
-                  {metaLeaderLabel}
-                </span>
-              </div>
-            ) : null}
-            {filteredIds.map((id) => {
-              const a = avatarById.get(id);
-              const label = a?.name ?? id.slice(0, 6);
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => {
-                    if (mode === "remove") handleRemoveMember(id);
-                  }}
-                  disabled={saving}
-                  className={`relative flex flex-col items-center gap-1.5 rounded-lg text-center transition ${
-                    mode === "remove" ? "cursor-pointer hover:bg-surface-hover" : "cursor-default"
-                  } disabled:opacity-60`}
-                >
-                  {a?.avatarUrl ? (
-                    <img
-                      src={a.avatarUrl}
-                      alt=""
-                      className="shrink-0 rounded-xl object-cover"
-                      style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
-                    />
-                  ) : (
-                    <div
-                      className={`flex shrink-0 items-center justify-center rounded-xl font-bold text-white ${memberColorClass(id)}`}
-                      style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
-                    >
-                      {memberInitials(label)}
-                    </div>
-                  )}
-                  <span className={`w-full truncate px-0.5 text-text-muted ${memberGrid.nameClass}`} title={`${label}${a?.role ? ` · ${a.role}` : ""}\n${id}`}>
-                    {label}
-                  </span>
-                  {mode === "remove" ? (
-                    <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-[11px] font-bold leading-none text-white shadow">−</span>
-                  ) : null}
-                </button>
-              );
-            })}
-            {/* ── 微信风格: 添加 / 移出 两个虚线方块 ── */}
-            {!search.trim() ? (
-              <>
-                <div className="relative flex flex-col items-center gap-1.5 text-center">
-                  <button
-                    type="button"
-                    onClick={openAddDialog}
-                    disabled={saving}
-                    className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-2xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
-                    style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
-                    title="添加成员"
-                  >
-                    +
-                  </button>
-                  <span className={`text-text-muted ${memberGrid.nameClass}`}>添加</span>
-                </div>
-                <div className="relative flex flex-col items-center gap-1.5 text-center">
-                  <button
-                    type="button"
-                    onClick={() => setMode((prev) => (prev === "remove" ? "browse" : "remove"))}
-                    disabled={saving || group.avatarIds.length === 0}
-                    className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-2xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
-                    style={{ width: memberGrid.avatarSize, height: memberGrid.avatarSize }}
-                    title="移出成员"
-                  >
-                    −
-                  </button>
-                  <span className={`text-text-muted ${memberGrid.nameClass}`}>移出</span>
-                </div>
-              </>
-            ) : null}
-          </div>
-        )}
-      </div>
-
-      {/* ── 添加成员 模态对话框（微信风格） ── */}
-      {mode === "add" ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setMode("browse")}>
-          <div
-            className="flex h-[480px] w-[520px] max-w-[90vw] flex-col overflow-hidden rounded-xl border border-border bg-surface-panel shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* 标题栏 */}
-            <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
-              <span className="text-sm font-semibold text-text-strong">添加群成员</span>
-              <span className="text-xs text-text-faint">
-                {dialogChecked.size > 0 ? `已选 ${dialogChecked.size} 人` : ""}
-              </span>
-            </div>
-
-            {/* 主体区域：左列表 + 右已选 */}
-            <div className="flex min-h-0 flex-1">
-              {/* 左侧：搜索 + 可选列表 */}
-              <div className="flex min-h-0 flex-1 flex-col border-r border-border">
-                <div className="shrink-0 px-3 py-2">
-                  <input
-                    type="search"
-                    value={dialogSearch}
-                    onChange={(e) => setDialogSearch(e.target.value)}
-                    placeholder="搜索"
-                    autoFocus
-                    className="w-full rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-faint focus:border-border-strong"
-                  />
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto px-1">
-                  {dialogCandidates.length === 0 ? (
-                    <p className="px-3 py-4 text-center text-xs text-text-faint">
-                      {dialogSearch.trim() ? "无匹配结果" : "所有分身都已在群里"}
-                    </p>
-                  ) : (
-                    <div className="flex flex-col">
-                      {dialogCandidates.map((a) => {
-                        const checked = dialogChecked.has(a.id);
-                        return (
-                          <label
-                            key={a.id}
-                            className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 transition hover:bg-surface-hover"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setDialogChecked((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(a.id)) next.delete(a.id);
-                                  else next.add(a.id);
-                                  return next;
-                                });
-                              }}
-                              className="h-4 w-4 shrink-0 accent-cyan-500"
-                            />
-                            {a.avatarUrl ? (
-                              <img src={a.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-lg object-cover" />
-                            ) : (
-                              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white ${memberColorClass(a.id)}`}>
-                                {memberInitials(a.name || a.id)}
-                              </div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-xs text-text-primary">{a.name || a.id}</div>
-                              {a.role ? <div className="truncate text-[10px] text-text-faint">{a.role}</div> : null}
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 右侧：已选预览 */}
-              <div className="flex w-[160px] shrink-0 flex-col bg-surface-card">
-                <div className="shrink-0 px-3 py-2">
-                  <span className="text-[11px] text-text-faint">已选成员</span>
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto px-2">
-                  {dialogChecked.size === 0 ? (
-                    <p className="px-1 text-[11px] text-text-faint">勾选左侧分身</p>
-                  ) : (
-                    <div className="flex flex-col gap-1.5">
-                      {Array.from(dialogChecked).map((id) => {
-                        const a = avatarById.get(id);
-                        const label = a?.name ?? id.slice(0, 6);
-                        return (
-                          <div key={id} className="flex items-center gap-2 rounded-md px-1 py-1">
-                            {a?.avatarUrl ? (
-                              <img src={a.avatarUrl} alt="" className="h-7 w-7 shrink-0 rounded-md object-cover" />
-                            ) : (
-                              <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white ${memberColorClass(id)}`}>
-                                {memberInitials(label)}
-                              </div>
-                            )}
-                            <span className="min-w-0 flex-1 truncate text-[11px] text-text-muted">{label}</span>
-                            <button
-                              type="button"
-                              className="shrink-0 text-xs text-text-faint transition hover:text-rose-400"
-                              onClick={() => setDialogChecked((prev) => { const n = new Set(prev); n.delete(id); return n; })}
-                            >
-                              ×
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* 底部按钮 */}
-            <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border px-4 py-3">
-              <button
-                type="button"
-                className="rounded-lg border border-border px-4 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-                onClick={() => setMode("browse")}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="rounded-lg bg-cyan-600 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
-                disabled={dialogChecked.size === 0 || saving}
-                onClick={handleDialogConfirm}
-              >
-                添加{dialogChecked.size > 0 ? ` (${dialogChecked.size})` : ""}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-});
-
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
   const paneSortableListeners = usePaneSortableHandle();
@@ -2521,6 +2522,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const toolRoundCount = useMemo(
     () => (pane.messages ?? []).filter((m) => m.role === "tool" && (m.toolName ?? "").trim()).length,
     [pane.messages]
+  );
+  /** Hide context usage until the user has actually started chatting. */
+  const hasStartedChat = useMemo(
+    () =>
+      (pane.messages ?? []).some(
+        (m) => m.role === "user" && String(m.content ?? "").trim().length > 0,
+      ),
+    [pane.messages],
   );
   const toolRoundBudget = 60;
   const queuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
@@ -2661,6 +2670,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       url: found?.avatarUrl || undefined,
     };
   }, [pane?.avatarId, pane?.avatarName, avatars, metaAvatarUrl]);
+  const newTopicLabel = useMemo(
+    () => newTopicTriggerLabel({ displayName: paneAvatarMeta.name, isGroup: isGroupPane }),
+    [isGroupPane, paneAvatarMeta.name],
+  );
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -2681,6 +2694,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const retryInFlightRef = useRef<Record<string, boolean>>({});
   /** Live-reattach (FR-4): per-session abort controllers for read-only reattach streams. */
   const reattachControllersRef = useRef<Record<string, AbortController>>({});
+  /** Debounce timers for mid-reattach group disk merges (keyed by session id). */
+  const reattachGroupMergeTimersRef = useRef<Record<string, number>>({});
   const liveReattachEnabledRef = useRef(false);
   /** RAF mirror for the currently displayed session's stream overlay only. */
   const streamTextRef = useRef("");
@@ -2713,6 +2728,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const userStoppedSessionRef = useRef<Record<string, boolean>>({});
   const stopInFlightRef = useRef<Record<string, boolean>>({});
   const [lastToolProgress, setLastToolProgress] = useState<{ name: string; sec: number } | null>(null);
+  const [stallWait, setStallWait] = useState<StallWaitInfo | null>(null);
   const [contextLoopStats, setContextLoopStats] = useState<{
     round: number;
     tool_result_tokens_session: number;
@@ -2766,6 +2782,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [atQuery, setAtQuery] = useState("");
   const [atCandidates, setAtCandidates] = useState<AtCandidate[]>([]);
   const [groupTyping, setGroupTyping] = useState<Record<string, string>>({});
+  /** One-line activity hint per group member (tool progress); not a chat message. */
+  const [groupActivityHint, setGroupActivityHint] = useState<Record<string, string>>({});
   const lastGroupProgressRef = useRef<Record<string, string>>({});
   type QuoteTarget = { id: string; message: Message; body: string };
   const [quoteTargets, setQuoteTargets] = useState<QuoteTarget[]>([]);
@@ -2805,9 +2823,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [pane.pendingQuote, pane.id, setPanePendingQuote, addQuoteTarget]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [forwardPickerOpen, setForwardPickerOpen] = useState(false);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const [shareImageOpen, setShareImageOpen] = useState(false);
+  const shareBtnRef = useRef<HTMLButtonElement | null>(null);
+  const shareMenuRef = useRef<HTMLDivElement | null>(null);
   const [pendingForwardMessages, setPendingForwardMessages] = useState<ForwardPendingMessage[]>([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
+  const [debateNudgeText, setDebateNudgeText] = useState("");
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
   const [feishuDesktopBound, setFeishuDesktopBound] = useState(false);
@@ -2842,6 +2865,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const t = window.setTimeout(() => setFavoriteToastOpen(false), 1800);
     return () => window.clearTimeout(t);
   }, [favoriteToastOpen]);
+  useEffect(() => {
+    if (!shareMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (shareBtnRef.current?.contains(t) || shareMenuRef.current?.contains(t)) return;
+      setShareMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShareMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [shareMenuOpen]);
+  useEffect(() => {
+    if (selectedMessageIds.size === 0) setShareMenuOpen(false);
+  }, [selectedMessageIds.size]);
   useEffect(() => {
     ccBridgeLastSessionModeRef.current = "";
   }, [pane.sessionId]);
@@ -3217,26 +3260,30 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (result.ok && Array.isArray(result.messages) && result.messages.length > 0) {
           if (result.messages.length <= lastPollCountRef.current) return;
           lastPollCountRef.current = result.messages.length;
-          const seen = new Set<string>();
-          const deduped: Message[] = [];
-          for (let idx = 0; idx < result.messages.length; idx++) {
-            const item = result.messages[idx];
-            const role = String(item.role ?? "");
-            const content = String(item.content ?? "").trim();
-            const rowAtts = attachmentsFromSessionRow(
-              (item as { attachments?: unknown }).attachments
-            );
-            if (!content && !rowAtts?.length && !viewImageInjectRowFromSession(item)) continue;
-            const attSig =
-              rowAtts?.length && rowAtts[0]?.dataUrl
-                ? rowAtts[0].dataUrl.slice(0, 72)
-                : "";
-            const key = `${role}::${content.slice(0, 300)}::${attSig}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            deduped.push(mapLoadedSessionMessage(item as LoadedSessionMessage, `dlgpoll-${currentSid}`, idx, currentSid));
+          // 增量合并而非整表替换：mergeSessionMessagesTail 以 sid 为 id 前缀并
+          // 复用内存行 id，已有气泡的 React key 稳定，不会整列表重挂载闪烁。
+          const livePane = useAppStore.getState().panes.find((p) => p.id === pane.id);
+          const current = livePane?.messages ?? [];
+          const merged = mergeSessionMessagesTail(
+            current,
+            result.messages as LoadedSessionMessage[],
+            currentSid
+          );
+          const changed =
+            merged.length !== current.length ||
+            String(merged[merged.length - 1]?.content ?? "") !==
+              String(current[current.length - 1]?.content ?? "");
+          if (!changed) return;
+          setPaneMessages(pane.id, merged);
+          // 全量合并后内存已覆盖完整磁盘历史，复位分页游标，避免顶部
+          // 「加载更早消息」按旧 oldestLoadedIndex 拉取与内存同 id 的行。
+          if (livePane?.hasOlderMessages || (livePane?.oldestLoadedIndex ?? 0) > 0) {
+            setPaneMessagePaging(pane.id, {
+              oldestLoadedIndex: 0,
+              hasOlderMessages: false,
+              loadingOlderMessages: false,
+            });
           }
-          setPaneMessages(pane.id, deduped);
         }
       } catch {
         // ignore polling failures
@@ -3277,6 +3324,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     pane?.messages?.length,
     panes,
     setPaneMessages,
+    setPaneMessagePaging,
   ]);
 
   useEffect(() => {
@@ -3745,7 +3793,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const searchAtCandidates = async (queryText: string) => {
     const lowered = queryText.trim().toLowerCase();
-    const avatarCandidates: AtCandidate[] = isGroupPane
+    const metaLabel = metaLeaderDisplayName.trim() || META_AGENT_DISPLAY_NAME;
+    const metaAtAliases = [metaLabel, META_AGENT_DISPLAY_NAME, "组长", "Machi", "machi", "meta", "meta-agent"];
+    const metaMatchesQuery =
+      !lowered ||
+      metaAtAliases.some((alias) => alias.toLowerCase().includes(lowered)) ||
+      "群聊协调者".includes(lowered) ||
+      "项目经理".includes(lowered);
+    const metaCandidate: AtCandidate | null =
+      isGroupPane && metaMatchesQuery
+        ? {
+            kind: "avatar",
+            avatarId: "__meta__",
+            label: metaLabel,
+            role: "群聊协调者",
+            avatarUrl: metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL,
+          }
+        : null;
+    const memberCandidates: AtCandidate[] = isGroupPane
       ? groupMembers
           .filter((a) => !lowered || a.name.toLowerCase().includes(lowered) || a.role.toLowerCase().includes(lowered))
           .map((a) => ({
@@ -3756,6 +3821,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             avatarUrl: a.avatarUrl || undefined,
           }))
       : [];
+    // Near (meta leader) first — always @-able in group chat, matching members panel.
+    const avatarCandidates: AtCandidate[] = metaCandidate
+      ? [metaCandidate, ...memberCandidates]
+      : memberCandidates;
 
     const apiSessionId = resolveTaskspaceApiSessionId();
     if (!apiSessionId) {
@@ -4060,6 +4129,29 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     selection.addRange(range);
     composerSavedRangeRef.current = range.cloneRange();
   }, []);
+
+  const handleSkillSelect = useCallback((skill: SkillItem) => {
+    const el = composerRef.current;
+    if (!el) return;
+    const skillToken = createSkillRefToken(skill.name);
+    const space = document.createTextNode(" ");
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0 && el.contains(selection.anchorNode)) {
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      range.insertNode(space);
+      range.insertNode(skillToken);
+      range.setStartAfter(space);
+      range.setEndAfter(space);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } else {
+      el.appendChild(skillToken);
+      el.appendChild(space);
+      focusComposerEnd();
+    }
+    setInput(extractComposerSendText());
+  }, [extractComposerSendText, focusComposerEnd]);
 
   const saveComposerCaret = useCallback(() => {
     const el = composerRef.current;
@@ -5093,22 +5185,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const toggleSelectMessage = useCallback((message: Message) => {
     setSelectedMessageIds((prev) => {
       const next = new Set(prev);
-      const linkedIds = new Set<string>([message.id]);
-      // In IM ReAct layout, selecting a user message should also toggle its following assistant/tool block.
-      if (useReActImLayout && topLevelRowsIm && message.role === "user") {
-        for (let i = 0; i < topLevelRowsIm.length; i++) {
-          const row = topLevelRowsIm[i];
-          if (row.kind === "user" && row.message.id === message.id) {
-            const nextRow = topLevelRowsIm[i + 1];
-            if (nextRow && nextRow.kind === "react") {
-              for (const m of nextRow.block.workMessages) linkedIds.add(m.id);
-              if (nextRow.block.finalAssistant) linkedIds.add(nextRow.block.finalAssistant.id);
-            }
-            break;
-          }
-        }
-      }
+      // Pair user question + following ReAct/assistant block as one turn (and vice versa).
+      const linkedIds = collectTurnLinkedIds(
+        message,
+        useReActImLayout ? topLevelRowsIm : null,
+        visibleMessages,
+      );
       const allSelected = Array.from(linkedIds).every((id) => next.has(id));
+      if (allSelected) {
+        for (const id of linkedIds) next.delete(id);
+      } else {
+        for (const id of linkedIds) next.add(id);
+      }
+      return next;
+    });
+  }, [topLevelRowsIm, useReActImLayout, visibleMessages]);
+
+  /** Toggle a full conversation turn: ReAct block + preceding user question. */
+  const toggleSelectBlock = useCallback((messages: Message[]) => {
+    setSelectedMessageIds((prev) => {
+      const linkedIds = collectTurnLinkedIdsForBlock(
+        messages,
+        useReActImLayout ? topLevelRowsIm : null,
+      );
+      const allSelected = Array.from(linkedIds).every((id) => prev.has(id));
+      const next = new Set(prev);
       if (allSelected) {
         for (const id of linkedIds) next.delete(id);
       } else {
@@ -5118,41 +5219,53 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     });
   }, [topLevelRowsIm, useReActImLayout]);
 
-  /** Toggle the entire ReAct block: if any message in the block is selected, deselect all; otherwise select all. */
-  const toggleSelectBlock = useCallback((messages: Message[]) => {
-    setSelectedMessageIds((prev) => {
-      const anySelected = messages.some((m) => prev.has(m.id));
-      const next = new Set(prev);
-      if (anySelected) {
-        for (const m of messages) next.delete(m.id);
-      } else {
-        for (const m of messages) next.add(m.id);
-      }
-      return next;
-    });
-  }, []);
-
   const selectUpTo = useCallback((targetMessage: Message) => {
     setSelectedMessageIds((prev) => {
-      if (prev.size === 0) return new Set([targetMessage.id]);
+      if (prev.size === 0) {
+        return collectTurnLinkedIds(
+          targetMessage,
+          useReActImLayout ? topLevelRowsIm : null,
+          visibleMessages,
+        );
+      }
       let lastSelectedIdx = -1;
       for (let i = visibleMessages.length - 1; i >= 0; i--) {
         if (prev.has(visibleMessages[i].id)) { lastSelectedIdx = i; break; }
       }
       const targetIdx = visibleMessages.findIndex((m) => m.id === targetMessage.id);
       if (targetIdx < 0) return prev;
-      if (lastSelectedIdx < 0) return new Set([targetMessage.id]);
+      if (lastSelectedIdx < 0) {
+        return collectTurnLinkedIds(
+          targetMessage,
+          useReActImLayout ? topLevelRowsIm : null,
+          visibleMessages,
+        );
+      }
       const lo = Math.min(lastSelectedIdx, targetIdx);
       const hi = Math.max(lastSelectedIdx, targetIdx);
       const next = new Set(prev);
       for (let i = lo; i <= hi; i++) next.add(visibleMessages[i].id);
-      return next;
+      return expandSelectionToCompleteTurns(
+        next,
+        useReActImLayout ? topLevelRowsIm : null,
+        visibleMessages,
+      );
     });
-  }, [visibleMessages]);
+  }, [topLevelRowsIm, useReActImLayout, visibleMessages]);
 
   const selectedMessages = useMemo(
     () => visibleMessages.filter((m) => selectedMessageIds.has(m.id)),
     [visibleMessages, selectedMessageIds]
+  );
+
+  const selectedTurnCount = useMemo(
+    () =>
+      countSelectedConversationTurns(
+        useReActImLayout ? topLevelRowsIm : null,
+        selectedMessageIds,
+        visibleMessages,
+      ),
+    [selectedMessageIds, topLevelRowsIm, useReActImLayout, visibleMessages],
   );
 
   const resolveForwardTarget = useCallback(
@@ -5294,14 +5407,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     visibleMessages,
   ]);
 
+  const shareSelectedAsText = useCallback(async () => {
+    const exportable = messagesForShareExport(selectedMessages, visibleMessages);
+    if (exportable.length === 0) return;
+    const merged = exportable
+      .map((message) => {
+        const name = message.role === "user" ? "我" : message.avatarName || message.agentId || "AI";
+        const time = message.timestamp
+          ? new Date(message.timestamp).toLocaleTimeString("zh-CN", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "";
+        return `[${name}]${time ? ` ${time}` : ""}\n${messagePlainTextForClipboard(message)}`;
+      })
+      .join("\n\n");
+    try {
+      await navigator.clipboard.writeText(merged);
+      setStallHintToast("已复制文本");
+    } catch {
+      setStallHintToast("复制失败");
+    }
+  }, [selectedMessages, userBubbleLabel, visibleMessages]);
+
   const deleteSelectedMessages = useCallback(async () => {
     if (selectedMessages.length === 0 || !apiBase || !pane.sessionId) return;
     const desktop = window.agenticxDesktop;
+    const deleteLabel =
+      selectedTurnCount > 0
+        ? `确认删除已选中的 ${selectedTurnCount} 轮对话？`
+        : `确认删除已选中的 ${selectedMessages.length} 条消息？`;
     const confirmResult =
       typeof desktop.confirmDialog === "function"
         ? await desktop.confirmDialog({
             title: "确认删除消息",
-            message: `确认删除已选中的 ${selectedMessages.length} 条消息？`,
+            message: deleteLabel,
             detail: "删除后不可恢复。",
             confirmText: "删除",
             cancelText: "取消",
@@ -5309,7 +5449,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           })
         : {
             ok: true,
-            confirmed: window.confirm(`确认删除已选中的 ${selectedMessages.length} 条消息？删除后不可恢复。`),
+            confirmed: window.confirm(`${deleteLabel}删除后不可恢复。`),
           };
     if (!confirmResult.confirmed) return;
     try {
@@ -5352,7 +5492,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     } catch (err) {
       console.error("[ChatPane] delete selected messages failed:", err);
     }
-  }, [apiBase, apiToken, pane.id, pane.messages, pane.sessionId, selectedMessages, setPaneMessages]);
+  }, [
+    apiBase,
+    apiToken,
+    pane.id,
+    pane.messages,
+    pane.sessionId,
+    selectedMessages,
+    selectedTurnCount,
+    setPaneMessages,
+  ]);
 
   const reloadSessionFromDisk = useCallback(
     async (sid: string) => {
@@ -5548,8 +5697,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       String(
         useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
       ).trim() === sid;
+    // 骨架屏只在首次尝试点亮；失败/空会话的退避重试在后台静默进行，
+    // 避免「正在加载会话…」与空态来回切换造成频闪。
+    const showSkeleton = sessionBootstrapAttemptRef.current === 0;
     void (async () => {
-      setPaneLoadingMessages(pane.id, true);
+      if (showSkeleton) setPaneLoadingMessages(pane.id, true);
       try {
         const entry = await resolveSessionTailForSwitch(sid);
         if (cancelled || !paneStillOnSid()) return;
@@ -5563,20 +5715,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           sessionBootstrapRef.current = sid;
           return;
         }
-        // Tail page empty/unavailable — fall back to a full load so a transient
-        // pagination miss never leaves the pane blank (mirrors history panel).
-        const full = await window.agenticxDesktop.loadSessionMessages(sid);
-        if (cancelled || !paneStillOnSid()) return;
-        if (full.ok && Array.isArray(full.messages) && full.messages.length > 0) {
-          const mapped = full.messages.map((item, index) =>
-            mapLoadedSessionMessage(item as LoadedSessionMessage, sid, index, sid)
-          );
-          setPaneMessages(pane.id, mapped);
+        // Tail succeeded with an empty window and no older pages → session is
+        // authoritatively empty (brand-new group / never chatted). Skip the
+        // full-load fallback and do not schedule empty-session retries — both
+        // previously kept the skeleton up for an extra IPC round-trip (and up
+        // to ~8s of silent refetch) even though there was nothing to load.
+        if (entry && !entry.hasOlder) {
           setPaneMessagePaging(pane.id, {
             oldestLoadedIndex: 0,
             hasOlderMessages: false,
             loadingOlderMessages: false,
           });
+          sessionBootstrapRef.current = sid;
+          return;
+        }
+        // Tail unavailable (null) or suspicious empty-with-older — full load so
+        // a transient pagination miss never leaves the pane blank.
+        const full = await window.agenticxDesktop.loadSessionMessages(sid);
+        if (cancelled || !paneStillOnSid()) return;
+        if (full.ok && Array.isArray(full.messages)) {
+          if (full.messages.length > 0) {
+            const mapped = full.messages.map((item, index) =>
+              mapLoadedSessionMessage(item as LoadedSessionMessage, sid, index, sid)
+            );
+            setPaneMessages(pane.id, mapped);
+          }
+          setPaneMessagePaging(pane.id, {
+            oldestLoadedIndex: 0,
+            hasOlderMessages: false,
+            loadingOlderMessages: false,
+          });
+          // Mark bootstrapped on authoritative empty too — otherwise the
+          // finally-block retry loop keeps re-fetching an empty session.
           sessionBootstrapRef.current = sid;
         }
       } catch {
@@ -5586,12 +5756,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           sessionBootstrapInflightRef.current = "";
         }
         if (!cancelled && paneStillOnSid()) {
-          const hydrated =
-            visibleMessagesForSession(
-              useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [],
-              sid
-            ).length > 0;
-          if (!hydrated && sessionBootstrapAttemptRef.current < 4) {
+          // Only retry when the load itself failed — not when the session is
+          // confirmed empty (sessionBootstrapRef already set above).
+          const bootstrapped = sessionBootstrapRef.current === sid;
+          if (!bootstrapped && sessionBootstrapAttemptRef.current < 4) {
             sessionBootstrapAttemptRef.current += 1;
             window.setTimeout(() => {
               const stillSid =
@@ -5603,14 +5771,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }, 800 * sessionBootstrapAttemptRef.current);
           }
         }
-        if (!cancelled) setPaneLoadingMessages(pane.id, false);
+        if (!cancelled && showSkeleton) setPaneLoadingMessages(pane.id, false);
       }
     })();
     return () => {
       cancelled = true;
       if (sessionBootstrapInflightRef.current === sid) {
         sessionBootstrapInflightRef.current = "";
-        setPaneLoadingMessages(pane.id, false);
+        if (showSkeleton) setPaneLoadingMessages(pane.id, false);
       }
     };
   }, [
@@ -6098,12 +6266,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   /** Returns true only when disk merge actually added/changed rows (used to gate progress timer). */
   const mergeTailFromDisk = useCallback(
-    async (sid: string): Promise<boolean> => {
+    async (sid: string, opts?: { allowDuringStream?: boolean }): Promise<boolean> => {
       // A foreground SSE stream is the single source of truth while it runs;
       // disk lags and uses a positional id scheme incompatible with the live
       // `uid()` rows, so merging mid-stream re-introduces the just-truncated
       // old reply (the retry "拼接"). Let the stream own the in-memory state.
-      if (sessionStreamStateRef.current[sid]?.active) return false;
+      // Reattach may opt in via allowDuringStream for mid-turn group replies.
+      if (!opts?.allowDuringStream && sessionStreamStateRef.current[sid]?.active) return false;
       try {
         const msgs = await window.agenticxDesktop.loadSessionMessages(sid);
         if (!msgs.ok || !Array.isArray(msgs.messages)) return false;
@@ -6193,12 +6362,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               if (st) st.text = liveText;
               if (isCurrent()) setStreamedAssistantText(liveText);
             }
-            // done/final/replay_gap: reconciled from disk in finally.
+            if (p.type === "group_reply" || p.type === "group_skipped") {
+              // Group replies are persisted mid-turn; merge via disk so ids stay
+              // aligned instead of minting live rows. Debounce to avoid thrash.
+              const prevTimer = reattachGroupMergeTimersRef.current[sid];
+              if (prevTimer != null) window.clearTimeout(prevTimer);
+              reattachGroupMergeTimersRef.current[sid] = window.setTimeout(() => {
+                delete reattachGroupMergeTimersRef.current[sid];
+                void mergeTailFromDisk(sid, { allowDuringStream: true });
+              }, 300);
+              continue;
+            }
+            // done/final/replay_gap/graph.*/group_typing: disk merge in finally.
           }
         }
       } catch {
         /* aborted or network error — disk merge below reconciles state */
       } finally {
+        const mergeTimer = reattachGroupMergeTimersRef.current[sid];
+        if (mergeTimer != null) {
+          window.clearTimeout(mergeTimer);
+          delete reattachGroupMergeTimersRef.current[sid];
+        }
         delete reattachControllersRef.current[sid];
         const st = sessionStreamStateRef.current[sid];
         if (st) st.active = false;
@@ -6226,6 +6411,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       setStallTick((t) => t + 1);
       setSessionExecutionState("idle");
       setLastToolProgress(null);
+      setStallWait(null);
       setContextLoopStats(null);
 
       if (sid) {
@@ -6838,7 +7024,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return () => window.clearTimeout(t);
   }, [stallHintToast]);
 
-  const resumeCurrentTask = useCallback(async () => {
+  const resumeCurrentTask = useCallback(async (modelOverride?: { provider: string; model: string }) => {
     const sid = (pane.sessionId || "").trim();
     if (!sid || resumeInFlightRef.current[sid]) return;
 
@@ -6885,6 +7071,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     });
     void sendChatRef.current("", {
       lockedSessionId: sid,
+      provider: modelOverride?.provider,
+      model: modelOverride?.model,
       continuation: { reason, source: "desktop_manual" },
     });
   }, [addPaneMessage, beginResumeInFlight, interruptForResume, pane.avatarId, pane.id, pane.messages, pane.sessionId, sessionExecutionState, stallState]);
@@ -6892,12 +7080,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const resumeWithModel = useCallback(
     async (provider: string, model: string) => {
       setPaneModel(pane.id, provider, model);
-      void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model });
+      void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model }).then((result) => {
+        if (!result.ok) {
+          console.warn("[ChatPane] global model persistence failed", result.error);
+        }
+      });
       const sid = (pane.sessionId || "").trim();
       if (sid) {
-        void window.agenticxDesktop.setSessionModel({ sessionId: sid, provider, model });
+        const persisted = await window.agenticxDesktop.setSessionModel({ sessionId: sid, provider, model });
+        if (!persisted.ok) {
+          console.warn("[ChatPane] session model persistence failed; continuing with explicit override", persisted.error);
+        }
       }
-      await resumeCurrentTask();
+      await resumeCurrentTask({ provider, model });
     },
     [pane.id, pane.sessionId, resumeCurrentTask, setPaneModel]
   );
@@ -7339,7 +7534,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       type="button"
                       className={`mt-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition ${
                         blockAnySelected
-                          ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-white"
+                          ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-[var(--theme-color-text)]"
                           : "border-text-faint bg-transparent text-transparent"
                       }`}
                       onClick={() => toggleSelectBlock(workMessages)}
@@ -7430,7 +7625,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                             <button
                               type="button"
                               className={`rounded p-1 hover:bg-surface-hover ${
-                                blockAnySelected ? "text-cyan-400 hover:text-cyan-300" : "hover:text-text-strong"
+                                blockAnySelected
+                                  ? "text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-90"
+                                  : "hover:text-text-strong"
                               }`}
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={() => toggleSelectBlock(workMessages)}
@@ -7560,10 +7757,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           avatarUrl: undefined,
           agentId,
         });
+        const activityHint = String(groupActivityHint[agentId] ?? "").trim();
         return (
           <ImBubble
             key={`typing-${agentId}`}
-            message={{ id: `typing-${agentId}`, role: "assistant", content: "", avatarName: name, agentId }}
+            message={{
+              id: `typing-${agentId}`,
+              role: "assistant",
+              content: activityHint,
+              avatarName: name,
+              agentId,
+            }}
             assistantName={typingSender.name}
             assistantAvatarUrl={typingSender.url}
             showSenderIdentity={isGroupPane}
@@ -7666,7 +7870,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupedVisibleMessages, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupActivityHint, groupedVisibleMessages, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, input, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -7891,6 +8095,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       forceSend?: boolean;
       queueDrain?: boolean;
       lockedSessionId?: string;
+      provider?: string;
+      model?: string;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => Promise<void>>(
@@ -7904,8 +8110,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (existing) return existing;
 
     try {
-      const avatarId =
-        pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+      const avatarId = sessionCreateAvatarId(pane.avatarId);
       const inheritFrom = peekPaneLazyInheritParent(pane.id);
       const pendingMode = peekPanePendingSessionMode(pane.id) ?? pane.sessionMode ?? "daily_office";
       const created = await window.agenticxDesktop.createSession({
@@ -7974,11 +8179,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       forceSend?: boolean;
       queueDrain?: boolean;
       lockedSessionId?: string;
+      /** Explicit model for a recovery/retry turn; avoids reading stale pane state. */
+      provider?: string;
+      model?: string;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => {
     const continuation = options?.continuation;
     const isContinuation = !!continuation;
+    const requestProvider = String(options?.provider ?? chatProvider ?? "").trim();
+    const requestModel = String(options?.model ?? chatModel ?? "").trim();
     const composerDisplayText = buildComposerDisplayText();
     const text = userText.trim();
     const hasQuotePayloadEarly = quoteTargetsRef.current.length > 0;
@@ -8131,7 +8341,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
     }
 
-    const useLazySession = !isGroupPane && !isAutomationTaskPane;
     let requestSessionId = resolveSendSessionId(options?.lockedSessionId, pane.sessionId);
     // Dev-only invariant: every async/system send (continuation / retry / queued /
     // forward) MUST lock the session id captured at dispatch time. Reading the live
@@ -8156,10 +8365,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     };
 
     if (!requestSessionId) {
-      if (!useLazySession) {
-        releaseSendLock();
-        return;
-      }
+      // Meta lazy-creates on first send; group/automation must also materialize
+      // here (createNewTopic clears sessionId — previously bailed and looked stuck).
       const materializedSessionId = await materializeLazySession();
       if (!materializedSessionId) {
         addPaneMessage(
@@ -8193,8 +8400,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       // Claim the visible partial before abort/overlay cleanup (same helper as Stop).
       const preservedVisiblePartial = preserveUncommittedStreamPartial(
         requestSessionId,
-        chatProvider || undefined,
-        chatModel || undefined,
+        requestProvider || undefined,
+        requestModel || undefined,
       );
       try {
         await window.agenticxDesktop.interruptSession?.(requestSessionId);
@@ -8229,7 +8436,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const lastNonTool = tailMsgs[tailMsgs.length - 1];
       if (!preservedVisiblePartial && (!lastNonTool || lastNonTool.role === "user")) {
         const interruptedNote = "（已中断）";
-        addPaneMessage(pane.id, "assistant", interruptedNote, "meta", chatProvider, chatModel);
+        addPaneMessage(pane.id, "assistant", interruptedNote, "meta", requestProvider, requestModel);
         try {
           await fetch(`${apiBase}/api/session/messages/append`, {
             method: "POST",
@@ -8266,8 +8473,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         otherPanesWithSameSession.length,
       );
       try {
-        const avatarId =
-          pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+        const avatarId = sessionCreateAvatarId(pane.avatarId);
         const created = await window.agenticxDesktop.createSession({ avatar_id: avatarId });
         if (created.ok && created.session_id) {
           requestSessionId = created.session_id;
@@ -8369,6 +8575,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const mentionMap = new Map(
       groupMembers.map((a) => [a.name.trim().toLowerCase(), a.id])
     );
+    if (isGroupPane) {
+      const metaLabel = metaLeaderDisplayName.trim() || META_AGENT_DISPLAY_NAME;
+      for (const alias of [metaLabel, META_AGENT_DISPLAY_NAME, "组长", "Machi", "machi", "meta", "meta-agent"]) {
+        const key = alias.trim().toLowerCase();
+        if (key) mentionMap.set(key, "__meta__");
+      }
+    }
     const mentionRegex = /@([^\s@]+)/g;
     const mentionedAvatarIds: string[] = [];
     if (isGroupPane) {
@@ -8476,8 +8689,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     sessionStreamStateRef.current[requestSessionId] = {
       active: true,
       text: "",
-      provider: chatProvider,
-      model: chatModel,
+      provider: requestProvider,
+      model: requestModel,
     };
     clearStopSuppressForSession(requestSessionId);
     setRunGuardSessionId(requestSessionId);
@@ -8658,8 +8871,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         "assistant",
         "",
         "meta",
-        chatProvider,
-        chatModel,
+        requestProvider,
+        requestModel,
         undefined,
         commitExtras,
       );
@@ -8706,8 +8919,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         "assistant",
         commitContent,
         "meta",
-        chatProvider,
-        chatModel,
+        requestProvider,
+        requestModel,
         undefined,
         Object.keys(commitExtras).length > 0 ? commitExtras : undefined,
       );
@@ -8758,8 +8971,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           body.user_display_content = composerDisplayText;
         }
       }
-      if (chatProvider) body.provider = chatProvider;
-      if (chatModel) body.model = chatModel;
+      if (requestProvider) body.provider = requestProvider;
+      if (requestModel) body.model = requestModel;
+      if (requestModel && supportsKimiK3ReasoningEffort(requestModel)) {
+        body.reasoning_effort = normalizeKimiReasoningEffort(
+          pane.reasoningEffort ?? DEFAULT_KIMI_REASONING_EFFORT,
+        );
+      }
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
       // Per-session KB retrieval mode: carry the session's explicit choice so the
       // backend prompt honors it instead of the single global config value.
@@ -8824,6 +9042,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           if (fromFile) {
             contextFilePayload[key] = fromFile;
           } else {
+            // materializeSessionAttachments rewrote sourcePath after parse;
+            // resolveReadyAttachment then misses readyEntries and the body is
+            // lost. Warn so this silent degradation is observable in devtools.
+            console.warn(
+              "[ChatPane] attachment body lost after materialize, key=",
+              key,
+              "sourcePath=",
+              file.sourcePath,
+            );
             contextFilePayload[key] = `[附件] ${file.name}`;
           }
         }
@@ -8840,6 +9067,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               reason: continuation.reason,
               source: continuation.source,
               suppress_user_echo: true,
+              ...(requestProvider ? { provider: requestProvider } : {}),
+              ...(requestModel ? { model: requestModel } : {}),
             }),
             signal: abortController.signal,
           });
@@ -8857,7 +9086,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (resp.status === 404) {
         // Recover from stale bound session IDs (e.g. old WeChat binding points to removed session).
         const created = await window.agenticxDesktop.createSession({
-          avatar_id: pane.avatarId && !pane.avatarId.startsWith("group:") ? pane.avatarId : undefined,
+          avatar_id: sessionCreateAvatarId(pane.avatarId),
         });
         if (created.ok && created.session_id) {
           const oldSessionId = requestSessionId;
@@ -8993,38 +9222,33 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "group_progress") {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
-              const avatarUrl = String(payload.data?.avatar_url ?? "");
+              const nodeId = String(payload.data?.graph_node_id ?? "").trim();
+              const callId = String(payload.data?.tool_call_id ?? "").trim();
+              const toolName = String(payload.data?.tool_name ?? "").trim();
+              const phase = String(payload.data?.tool_phase ?? "").trim();
               const progressText = String(payload.data?.content ?? "").trim();
-              const progressTitle = `${avatarName}：${progressText}`;
-              const progressCallId = `${groupProgressRunId}:group-progress:${eventAgentId}`;
+
+              // Light status: one row per member, in-place update (not a chat message).
               setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
-              if (!progressText) continue;
-              const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
-              if (prevText === progressText) continue;
-              lastGroupProgressRef.current[eventAgentId] = progressText;
-              const merged = updatePaneToolMessageForSession(progressCallId, {
-                content: "",
-                toolStatus: "running",
-                toolResultPreview: progressTitle,
-              });
-              if (!merged) {
-                addPaneMessageIfSessionActive(
-                  pane.id,
-                  "tool",
-                  "",
-                  eventAgentId,
-                  chatProvider,
-                  chatModel,
-                  undefined,
-                  {
-                    avatarName,
-                    avatarUrl: avatarUrl || undefined,
-                    toolCallId: progressCallId,
-                    toolName: "group_progress",
-                    toolStatus: "running",
-                    toolResultPreview: progressTitle,
-                  }
-                );
+              // Round-start chatter is covered by expert label + stream dots.
+              if (
+                progressText &&
+                !/^开始处理任务/.test(progressText) &&
+                !/^已接收任务/.test(progressText)
+              ) {
+                setGroupActivityHint((prev) => ({ ...prev, [eventAgentId]: progressText }));
+              }
+
+              // Detail: write graph store for member activity side panel / run graph.
+              if (nodeId && callId && (phase === "calling" || phase === "done")) {
+                const now = Date.now();
+                useGraphRunStore.getState().applyToolStep(pane.id, nodeId, {
+                  callId,
+                  toolName,
+                  phase,
+                  startedAt: now,
+                  updatedAt: now,
+                });
               }
               continue;
             }
@@ -9034,6 +9258,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const blockedText = String(payload.data?.content ?? "").trim();
               const requestId = String(payload.data?.confirm_request_id ?? "").trim();
               setGroupTyping((prev) => {
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
+              setGroupActivityHint((prev) => {
+                if (!(eventAgentId in prev)) return prev;
                 const next = { ...prev };
                 delete next[eventAgentId];
                 return next;
@@ -9102,6 +9332,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 delete next[eventAgentId];
                 return next;
               });
+              setGroupActivityHint((prev) => {
+                if (!(eventAgentId in prev)) return prev;
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
               if (content.trim()) {
                 addPaneMessageIfSessionActive(
                   pane.id,
@@ -9154,6 +9390,63 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 delete next[eventAgentId];
                 return next;
               });
+              setGroupActivityHint((prev) => {
+                if (!(eventAgentId in prev)) return prev;
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
+              continue;
+            }
+            // Graph Runtime events → Run Graph panel store (do not render as chat bubbles).
+            // Group SSE wraps graph payloads as { type, data: { content: "<json>" } }.
+            if (typeof payload.type === "string" && payload.type.startsWith("graph.")) {
+              let graphPayload: Record<string, unknown> = { type: payload.type };
+              const rawContent = payload.data?.content;
+              if (typeof rawContent === "string" && rawContent.trim().startsWith("{")) {
+                try {
+                  const inner = JSON.parse(rawContent) as Record<string, unknown>;
+                  graphPayload = { ...inner, type: payload.type || inner.type };
+                } catch {
+                  graphPayload = { type: payload.type, content: rawContent };
+                }
+              } else if (payload.data && typeof payload.data === "object") {
+                graphPayload = { type: payload.type, ...(payload.data as Record<string, unknown>) };
+              }
+              useGraphRunStore.getState().applyEvent(pane.id, graphPayload);
+              const rid = String(graphPayload.run_id || "").trim();
+              if (payload.type === "graph.run_created" && rid) {
+                useAppStore.setState((s) => ({
+                  panes: s.panes.map((row) =>
+                    row.id === pane.id ? { ...row, activeGraphRunId: rid } : row,
+                  ),
+                }));
+              }
+              // Autopen only when a real task DAG exists — presence-only graphs
+              // (human + agent nodes) must not steal focus in ordinary group chat.
+              if (
+                SHOW_DESKTOP_RUN_GRAPH &&
+                (payload.type === "graph.node_updated" || payload.type === "graph.run_created") &&
+                graphHasTaskNodes(useGraphRunStore.getState().byPane[pane.id]?.nodes)
+              ) {
+                try {
+                  if (localStorage.getItem("agx-graph-panel-autopen-v1") !== "done") {
+                    openWorkspaceSidebarForPane(
+                      pane.id,
+                      paneRef.current?.clientWidth ?? paneWidth,
+                      openSidePanel,
+                    );
+                    setWorkPanelFocus({ kind: "graph" });
+                    localStorage.setItem("agx-graph-panel-autopen-v1", "done");
+                  }
+                } catch {
+                  /* ignore */
+                }
+              }
+              if (payload.type === "graph.debate_nudge") {
+                const tip = String(payload.data?.content ?? "").trim();
+                if (tip) setDebateNudgeText(tip);
+              }
               continue;
             }
             // ── workforce.* events (routing="team") ──────────────────────
@@ -9241,6 +9534,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "tool_progress") {
               recordProgressActivity(requestSessionId);
+              const progressPhase = String(payload.data?.phase ?? "");
+              if (progressPhase === "stall_patient_wait") {
+                if (sessionStillActive) {
+                  const info = parseStallWaitPayload(payload.data, Date.now());
+                  if (info) setStallWait(info);
+                }
+                continue;
+              }
+              if (progressPhase === "stall_patient_recovered") {
+                if (sessionStillActive) setStallWait(null);
+                continue;
+              }
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
               if (eventAgentId === "meta" && sessionStillActive) {
@@ -9288,6 +9593,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }
                 full += tokenText;
                 cumulativeFull += tokenText;
+                setStallWait(null);
                 if (/<think>/i.test(full) && streamReasoningStartedAt === null) {
                   streamReasoningStartedAt = Date.now();
                 }
@@ -9304,6 +9610,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
             }
             if (payload.type === "tool_call") {
+              setStallWait(null);
               const toolNameStr = String(payload.data?.name ?? "tool");
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
@@ -9485,12 +9792,33 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   // Ignore parse errors; tool card still renders via formatter.
                 }
               }
+              if (toolName === "create_group_chat") {
+                try {
+                  const rawResult = payload.data?.result;
+                  const parsed =
+                    typeof rawResult === "string"
+                      ? (JSON.parse(rawResult) as Record<string, unknown>)
+                      : (rawResult as Record<string, unknown> | null | undefined);
+                  if (parsed && parsed.ok) {
+                    const group = parsed.group as Record<string, unknown> | undefined;
+                    window.dispatchEvent(
+                      new CustomEvent("agenticx:groups:changed", {
+                        detail: { groupId: String(group?.id ?? "").trim() },
+                      })
+                    );
+                  }
+                } catch {
+                  // Ignore parse errors; tool card still renders via formatter.
+                }
+              }
               const formatted = formatToolResultMessage(toolName, payload.data?.result, settings.providers);
               if (formatted.silent) continue;
               const resultCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
               const rawContent = serializeToolResultRaw(payload.data?.result);
               const preview = formatted.content.replace(/\s+/g, " ").trim().slice(0, 160);
-              const mergedStatus = deriveToolStatusFromResult(payload.data?.result);
+              const mergedStatus = payload.data?.is_error === true
+                ? "error"
+                : deriveToolStatusFromResult(payload.data?.result);
               if (eventAgentId === "meta") {
                 const resultPatch = {
                   content: rawContent,
@@ -10057,6 +10385,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "final") {
               receivedFinalEvent = true;
+              setStallWait(null);
               if (eventAgentId === "meta") {
                 useAppStore.getState().clearSessionHistoryHint(requestSessionId);
                 const normalizedFinal = normalizeFinalAssistantPayload(
@@ -10140,6 +10469,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               setContextLoopStats({ round, tool_result_tokens_session: toolSession, archived_tool_calls: archived });
             }
             if (payload.type === "error") {
+              setStallWait(null);
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
@@ -10199,9 +10529,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 setStallState("exhausted");
                 addPaneMessageIfSessionActive(pane.id, "tool", errText, "meta");
               } else if (!isEphemeralStopErrorText(errText)) {
-                // Hook-blocked: merge into existing ToolCallCard to avoid duplicate bubble.
+                // Merge tool-scoped errors into the existing ToolCallCard when possible
+                // (hook-block / not-loaded / permission deny all share tool_call_id).
                 const errToolCallId = String(payload.data?.tool_call_id ?? "").trim();
-                if (HOOK_BLOCK_RE.test(errText) && errToolCallId) {
+                if (errToolCallId) {
                   const merged = updatePaneToolMessageForSession(errToolCallId, {
                     content: errText,
                     toolStatus: "error",
@@ -10209,7 +10540,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     toolStreamLines: [],
                   });
                   if (!merged) {
-                    addPaneMessageIfSessionActive(pane.id, "tool", errText, "meta");
+                    addPaneMessageIfSessionActive(pane.id, "tool", `❌ ${errText}`, "meta");
                   }
                 } else {
                   addPaneMessageIfSessionActive(pane.id, "tool", `❌ ${errText}`, "meta");
@@ -10384,6 +10715,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           streamTextRef.current = "";
         }
         setGroupTyping({});
+        setGroupActivityHint({});
         setContextFiles({});
         if (!abortController.signal.aborted) {
           useAppStore.getState().clearSessionHistoryHint(requestSessionId);
@@ -10428,8 +10760,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [forwardAutoReply, paneId, pane.sessionId]);
 
   const initSession = async (inherit = false, prevSessionId?: string) => {
-    const avatarId =
-      pane.avatarId && pane.avatarId.startsWith("group:") ? undefined : pane.avatarId ?? undefined;
+    const avatarId = sessionCreateAvatarId(pane.avatarId);
     const pendingMode = peekPanePendingSessionMode(pane.id) ?? pane.sessionMode ?? "daily_office";
     try {
       const result = await window.agenticxDesktop.createSession({
@@ -10481,8 +10812,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     markPaneAwaitingFreshSession(pane.id);
     setPaneSessionId(pane.id, "");
     setPaneLazyInheritParent(pane.id, inherit && prevSessionId ? prevSessionId : undefined);
-    // Defer server createSession until the user sends the first message so an
-    // empty session never appears in the history sidebar with an id-only title.
+    if (isGroupPane || isAutomationTaskPane) {
+      // Group/automation UI requires a bound session_id (no lazy empty composer).
+      // Eager create with the pane's group:/automation: avatar_id.
+      void initSession(inherit, prevSessionId || undefined);
+      return;
+    }
+    // Meta/avatar: defer createSession until the first send so an empty session
+    // never appears in the history sidebar with an id-only title.
   };
 
   resumeInNewSessionRef.current = () => {
@@ -10976,50 +11313,40 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const paneTint = (() => {
     if (!pane.avatarId) return undefined;
-    if (pane.avatarId.startsWith("group:")) {
-      const rawId = pane.avatarId.slice(6);
-      const idx = groups.findIndex((g) => g.id === rawId);
-      if (idx >= 0) {
-        // reuse GROUP_TINT colors in same order as groupColorByIndex
-        const GROUP_TINT_LIST = [
-          "rgba(99,102,241,0.07)",   // indigo
-          "rgba(20,184,166,0.07)",   // teal
-          "rgba(236,72,153,0.07)",   // pink
-          "rgba(132,204,22,0.07)",   // lime
-          "rgba(239,68,68,0.07)",    // red
-          "rgba(59,130,246,0.07)",   // blue
-          "rgba(234,179,8,0.07)",    // yellow
-          "rgba(168,85,247,0.07)",   // purple
-        ];
-        return GROUP_TINT_LIST[idx % GROUP_TINT_LIST.length];
-      }
-    }
+    // Group chat: same as Meta — page surface, no per-group tint wash.
+    if (pane.avatarId.startsWith("group:")) return undefined;
     const avatarColor = avatars.find((a) => a.id === pane.avatarId)?.color;
     return avatarTintBg(pane.avatarId, avatarColor);
   })();
 
   useEffect(() => {
     // 历史面板已改为不挤占布局的锚定浮层（不再计入互斥占位），此处仅在工作区/记忆图谱/
-    // 成员列表/Spawns/落盘 drawer 之间做单选互斥（窄窗格 overlay 模式）。
+    // 运行图/Spawns/落盘 drawer 之间做单选互斥（窄窗格 overlay 模式）。
+    // 群成员已迁入工作台 tab，不再占用独立右侧面板。
     if (!compactSidePanels) return;
     const p = pane;
     const stacked =
       Number(!!p.taskspacePanelOpen) +
       Number(!!p.memoryGraphOpen) +
-      Number(!!p.membersPanelOpen) +
+      Number(!!p.graphPanelOpen) +
       Number(!!p.spawnsColumnOpen) +
       Number(!!p.runDrawerOpen);
     if (stacked <= 1) return;
-    let keep: "workspace" | "memory-graph" | "members" | "spawns" | "run-drawer" = "run-drawer";
+    let keep:
+      | "workspace"
+      | "memory-graph"
+      | "graph"
+      | "spawns"
+      | "run-drawer" = "run-drawer";
     if (p.runDrawerOpen) keep = "run-drawer";
+    else if (p.graphPanelOpen) keep = "graph";
     else if (p.taskspacePanelOpen) keep = "workspace";
     else if (p.memoryGraphOpen) keep = "memory-graph";
-    else if (p.membersPanelOpen) keep = "members";
     else keep = "spawns";
     const desired = {
       taskspacePanelOpen: keep === "workspace",
       memoryGraphOpen: keep === "memory-graph",
-      membersPanelOpen: keep === "members",
+      graphPanelOpen: keep === "graph",
       spawnsColumnOpen: keep === "spawns",
       runDrawerOpen: keep === "run-drawer",
     };
@@ -11029,7 +11356,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (
         row.taskspacePanelOpen === desired.taskspacePanelOpen &&
         row.memoryGraphOpen === desired.memoryGraphOpen &&
-        row.membersPanelOpen === desired.membersPanelOpen &&
+        !!row.graphPanelOpen === desired.graphPanelOpen &&
         row.spawnsColumnOpen === desired.spawnsColumnOpen &&
         row.runDrawerOpen === desired.runDrawerOpen
       ) {
@@ -11044,7 +11371,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     pane.id,
     pane.taskspacePanelOpen,
     pane.memoryGraphOpen,
-    pane.membersPanelOpen,
+    pane.graphPanelOpen,
     pane.spawnsColumnOpen,
     pane.runDrawerOpen,
   ]);
@@ -11060,6 +11387,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               historyOpen: false,
               memoryGraphOpen: false,
               membersPanelOpen: false,
+              graphPanelOpen: false,
               spawnsColumnOpen: false,
               runDrawerOpen: false,
             }
@@ -11086,12 +11414,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const toggleWorkPanelExpand = () => {
     setWorkPanelExpanded((prev) => !prev);
-  };
-
-  const closeMembersPanelOnly = () => {
-    useAppStore.setState((s) => ({
-      panes: s.panes.map((row) => (row.id !== pane.id ? row : { ...row, membersPanelOpen: false })),
-    }));
   };
 
   const closeHistoryPanelOnly = () => {
@@ -11121,6 +11443,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               historyOpen: false,
               memoryGraphOpen: false,
               membersPanelOpen: false,
+              graphPanelOpen: false,
               spawnsColumnOpen: false,
             }
           : { ...p, taskspacePanelOpen: false };
@@ -11173,6 +11496,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 historyOpen: false,
                 memoryGraphOpen: false,
                 membersPanelOpen: false,
+                graphPanelOpen: false,
                 spawnsColumnOpen: false,
               }
             : { ...p, taskspacePanelOpen: false };
@@ -11200,31 +11524,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [pane.historyOpen]);
-
-  const toggleMembersSidePanel = () => {
-    if (!compactSidePanels) {
-      if (!pane.membersPanelOpen) closeHistoryPanelOnly();
-      cycleSidePanel(pane.id, "members");
-      return;
-    }
-    useAppStore.setState((s) => ({
-      panes: s.panes.map((p) => {
-        if (p.id !== pane.id) return p;
-        const opening = !p.membersPanelOpen;
-        return opening
-          ? {
-              ...p,
-              membersPanelOpen: true,
-              sidePanelTab: "members",
-              taskspacePanelOpen: false,
-              historyOpen: false,
-              memoryGraphOpen: false,
-              spawnsColumnOpen: false,
-            }
-          : { ...p, membersPanelOpen: false };
-      }),
-    }));
-  };
 
   return (
     <div
@@ -11289,21 +11588,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   </span>
                 )}
               </div>
-              {visibleMessages.length > 0 || pane.contextInherited ? (
+              {pane.contextInherited ? (
                 <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
-                  {visibleMessages.length > 0 && (
-                    <span className="rounded bg-surface-card px-1 text-text-subtle">
-                      {visibleMessages.length} 条
-                    </span>
-                  )}
-                  {pane.contextInherited && (
-                    <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
-                  )}
+                  <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
                 </div>
               ) : null}
             </div>
           </div>
           <div className="no-drag flex shrink-0 items-center gap-1">
+            <NewTopicButton onNewTopic={createNewTopic} triggerLabel={newTopicLabel} />
             {sessionFindOpen ? (
               <div
                 className="flex h-8 items-center gap-1 rounded-lg border border-border bg-surface-card px-1.5 shadow-sm"
@@ -11383,15 +11676,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 aria-label="会话内搜索"
               >
                 <Search className="h-[18px] w-[18px]" strokeWidth={1.8} />
-              </button>
-            )}
-            {isGroupPane && (
-              <button
-                className={`agx-topbar-btn !px-[5px] ${pane.membersPanelOpen ? "agx-topbar-btn--active" : ""}`}
-                onClick={toggleMembersSidePanel}
-                title="切换群成员面板"
-              >
-                <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             )}
             {paneSettingsAvatar ? (
@@ -11523,6 +11807,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               {renderedMessages}
             </div>
           )}
+          {SHOW_DESKTOP_RUN_GRAPH && debateNudgeText ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center px-4">
+              <div className="pointer-events-auto flex max-w-md items-center gap-2 rounded-lg border border-amber-500/35 bg-surface-card-strong/95 px-3 py-2 text-[11px] text-amber-700 shadow-lg backdrop-blur-sm dark:text-amber-200">
+                <span className="min-w-0 flex-1 leading-relaxed">{debateNudgeText}</span>
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-2 py-1 text-[11px] text-white"
+                  style={{ background: "var(--ui-btn-primary-bg)" }}
+                  onClick={() => {
+                    setDebateNudgeText("");
+                    openWorkspaceSidebarForPane(
+                      pane.id,
+                      paneRef.current?.clientWidth ?? paneWidth,
+                      openSidePanel,
+                    );
+                    setWorkPanelFocus({ kind: "graph" });
+                  }}
+                >
+                  打开运行图
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-1 text-text-faint hover:bg-surface-hover"
+                  aria-label="关闭提示"
+                  onClick={() => setDebateNudgeText("")}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ) : null}
           <Toast
             placement="inline-bottom-center"
             variant="warning"
@@ -11609,40 +11924,88 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </div>
           ) : null}
           {selectedMessageIds.size > 0 ? (
-            <div className="mb-1 flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-1 text-xs text-text-muted">
-              <span>已多选 {selectedMessageIds.size} 条</span>
-              <button className="rounded px-1 hover:bg-surface-hover" onClick={forwardSelectedMessages}>转发</button>
+            <div className="mb-1.5 flex items-center gap-1 rounded-2xl border border-transparent bg-surface-card px-3 py-2 text-xs text-text-muted">
+              <span className="mr-1 shrink-0">已多选 {selectedTurnCount} 轮</span>
               <button
-                className="rounded px-1 hover:bg-surface-hover"
-                onClick={async () => {
-                  const merged = selectedMessages
-                    .map((message) => {
-                      const name = message.role === "user" ? "我" : message.avatarName || message.agentId || "AI";
-                      const time = message.timestamp
-                        ? new Date(message.timestamp).toLocaleTimeString("zh-CN", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "";
-                      return `[${name}]${time ? ` ${time}` : ""}\n${messagePlainTextForClipboard(message)}`;
-                    })
-                    .join("\n\n");
-                  try {
-                    await navigator.clipboard.writeText(merged);
-                  } catch {
-                    // ignore clipboard failures
-                  }
-                }}
+                type="button"
+                className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
+                onClick={forwardSelectedMessages}
               >
-                复制
+                转发
               </button>
-              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => void exportSelectedMessagesToPdf()}>
-                保存为 PDF
+              <button
+                ref={shareBtnRef}
+                type="button"
+                className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
+                aria-expanded={shareMenuOpen}
+                aria-haspopup="menu"
+                onClick={() => setShareMenuOpen((open) => !open)}
+              >
+                分享
               </button>
-              <button className="rounded px-1 hover:bg-surface-hover text-rose-300" onClick={() => void deleteSelectedMessages()}>
+              <button
+                type="button"
+                className="rounded-xl px-2 py-1 text-rose-300 transition-colors hover:bg-surface-hover"
+                onClick={() => void deleteSelectedMessages()}
+              >
                 删除
               </button>
-              <button className="rounded px-1 hover:bg-surface-hover" onClick={() => setSelectedMessageIds(new Set())}>取消</button>
+              <button
+                type="button"
+                className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
+                onClick={() => setSelectedMessageIds(new Set())}
+              >
+                取消
+              </button>
+              {shareMenuOpen && shareBtnRef.current
+                ? createPortal(
+                    <div
+                      ref={shareMenuRef}
+                      role="menu"
+                      aria-label="分享"
+                      className="agx-menu-pop fixed z-[9999] flex min-w-[148px] flex-col gap-0.5 rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
+                      style={{
+                        left: shareBtnRef.current.getBoundingClientRect().left,
+                        bottom: window.innerHeight - shareBtnRef.current.getBoundingClientRect().top + 6,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="rounded-lg px-2.5 py-2 text-left text-[13px] text-text-strong transition-colors hover:bg-surface-hover"
+                        onClick={() => {
+                          setShareMenuOpen(false);
+                          void shareSelectedAsText();
+                        }}
+                      >
+                        复制文本
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="rounded-lg px-2.5 py-2 text-left text-[13px] text-text-strong transition-colors hover:bg-surface-hover"
+                        onClick={() => {
+                          setShareMenuOpen(false);
+                          setShareImageOpen(true);
+                        }}
+                      >
+                        分享为图片
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="rounded-lg px-2.5 py-2 text-left text-[13px] text-text-strong transition-colors hover:bg-surface-hover"
+                        onClick={() => {
+                          setShareMenuOpen(false);
+                          void exportSelectedMessagesToPdf();
+                        }}
+                      >
+                        保存为 PDF
+                      </button>
+                    </div>,
+                    document.body,
+                  )
+                : null}
             </div>
           ) : null}
           <MessageQueuePanel
@@ -11679,6 +12042,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   .filter(Boolean)
                   .join(" · ")}
               </span>
+              {stallWait ? <StallWaitChip info={stallWait} /> : null}
               {sessionHealth !== "normal" ? (
                 <span
                   className={`rounded-full px-2 py-0.5 ${
@@ -12050,63 +12414,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     e.target.value = "";
                   }}
                 />
-                <button
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-                  title="上传附件"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px]">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-                  </svg>
-                </button>
-                <NewTopicSplitControl onNewTopic={createNewTopic} />
-                <SkillPickerButton
-                  apiBase={apiBase}
-                  apiToken={apiToken}
-                  onSelect={(skill) => {
-                    const el = composerRef.current;
-                    if (!el) return;
-                    const skillToken = createSkillRefToken(skill.name);
-                    const space = document.createTextNode(" ");
-                    // Insert at current caret or append to end
-                    const sel = window.getSelection();
-                    if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
-                      const range = sel.getRangeAt(0);
-                      range.deleteContents();
-                      range.insertNode(space);
-                      range.insertNode(skillToken);
-                      range.setStartAfter(space);
-                      range.setEndAfter(space);
-                      sel.removeAllRanges();
-                      sel.addRange(range);
-                    } else {
-                      el.appendChild(skillToken);
-                      el.appendChild(space);
-                      focusComposerEnd();
-                    }
-                    // Sync input state
-                    setInput(extractComposerSendText());
-                  }}
+                <ComposerMoreActionsButton
+                  onPickFile={() => fileInputRef.current?.click()}
+                  renderSkillPicker={() => (
+                    <SkillPickerButton apiBase={apiBase} apiToken={apiToken} onSelect={handleSkillSelect} embedded />
+                  )}
+                  renderKbRetrieval={() => (
+                    <PaneKnowledgeRetrievalModeSwitch
+                      apiToken={apiToken}
+                      apiBase={apiBase}
+                      sessionId={pane.sessionId}
+                      paneId={paneId}
+                      globalDefaultMode={kbGlobalDefaultMode}
+                      onNewSessionDefaultChange={onKbNewSessionDefaultChange}
+                      embedded
+                    />
+                  )}
+                  renderConnectors={() => (
+                    <ConnectorsMenuButton sessionId={pane.sessionId} embedded />
+                  )}
                 />
-                <div className="flex items-center">
-                  <PaneKnowledgeRetrievalModeSwitch
-                    apiToken={apiToken}
-                    apiBase={apiBase}
-                    sessionId={pane.sessionId}
-                    paneId={paneId}
-                    globalDefaultMode={kbGlobalDefaultMode}
-                    onNewSessionDefaultChange={onKbNewSessionDefaultChange}
-                  />
-                </div>
-                <div className="flex items-center">
-                  <ContextUsageButton
-                    paneId={pane.id}
-                    sessionId={pane.sessionId ?? ""}
-                    apiBase={apiBase}
-                    apiToken={apiToken}
-                  />
-                </div>
-                <ConnectorsMenuButton sessionId={pane.sessionId} />
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
               <div className="flex min-w-0 shrink-0 items-center gap-1.5">
@@ -12142,7 +12469,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     ) : null}
                   </div>
                 )}
-                <PaneModelPicker paneId={pane.id} />
+                <div className="flex min-w-0 items-center gap-0.5">
+                  {hasStartedChat ? (
+                    <ContextUsageButton
+                      paneId={pane.id}
+                      sessionId={pane.sessionId ?? ""}
+                      apiBase={apiBase}
+                      apiToken={apiToken}
+                    />
+                  ) : null}
+                  <PaneModelPicker paneId={pane.id} />
+                </div>
                 <ActionCircleButton
                   hasInput={
                     (!!input.trim() || readyAttachments.length > 0 || quoteTargets.length > 0)
@@ -12164,6 +12501,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
             </div>
           </div>
+          {/* AI 免责声明：仅非空会话显示（对齐 Work Buddy，空新建会话不打扰） */}
+          {(pane.messages ?? []).some(
+            (m) => m.role === "user" || m.role === "assistant"
+          ) ? (
+            <div className="mt-1.5 flex justify-center px-0.5">
+              <p className="select-none text-[11px] leading-none text-text-faint">
+                内容由 AI 生成，请核实重要信息
+              </p>
+            </div>
+          ) : null}
           {composerRefTip
             ? createPortal(
                 <div
@@ -12231,23 +12578,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         </div>
       </div>
 
-      {!compactSidePanels && isGroupPane && pane.membersPanelOpen ? (
-        <div className="relative h-full shrink-0 overflow-hidden" style={{ width: taskspaceWidth }}>
-          <div
-            className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
-            onMouseDown={startResizeTaskspace}
-            title="拖拽调整面板宽度"
-          >
-            <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
-          </div>
-          <GroupMembersSidePanel
-            groupId={groupChatId}
-            avatarList={avatars}
-            metaLeaderLabel={metaLeaderDisplayName}
-            onClose={closeMembersPanelOnly}
-          />
-        </div>
-      ) : null}
       {!compactSidePanels && workspacePanelOpen ? (
         <div
           className={
@@ -12337,6 +12667,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             todoLiveness={taskLiveness}
             todoExecutionState={sessionExecutionState}
+            groupId={isGroupPane ? groupChatId : null}
+            avatarList={avatars}
+            metaLeaderLabel={metaLeaderDisplayName}
           />
         </div>
       ) : null}
@@ -12368,7 +12701,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       {compactSidePanels &&
       (workspacePanelOpen ||
         pane.memoryGraphOpen ||
-        (isGroupPane && pane.membersPanelOpen) ||
         pane.spawnsColumnOpen ||
         pane.runDrawerOpen) ? (
         <>
@@ -12379,26 +12711,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
             onClick={dismissAuxiliaryOverlays}
           />
-          {isGroupPane && pane.membersPanelOpen ? (
-            <div
-              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
-              style={{ width: overlayTaskspaceWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
-            >
-              <div
-                className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
-                onMouseDown={startResizeTaskspace}
-                title="拖拽调整面板宽度"
-              >
-                <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
-              </div>
-              <GroupMembersSidePanel
-                groupId={groupChatId}
-                avatarList={avatars}
-                metaLeaderLabel={metaLeaderDisplayName}
-                onClose={closeMembersPanelOnly}
-              />
-            </div>
-          ) : null}
           {workspacePanelOpen ? (
             <div
               className={
@@ -12492,6 +12804,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }
                 todoLiveness={taskLiveness}
                 todoExecutionState={sessionExecutionState}
+                groupId={isGroupPane ? groupChatId : null}
+                avatarList={avatars}
+                metaLeaderLabel={metaLeaderDisplayName}
               />
             </div>
           ) : null}
@@ -12565,6 +12880,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           await executeForward(targetPayload, followUpNote);
           setSelectedMessageIds(new Set());
         }}
+      />
+      <ShareImagePreviewModal
+        open={shareImageOpen}
+        messages={messagesForShareExport(selectedMessages, visibleMessages)}
+        sessionTitle={paneAvatarMeta.name || pane?.avatarName || "对话记录"}
+        userBubbleLabel={userBubbleLabel}
+        onClose={() => setShareImageOpen(false)}
+        onToast={(msg) => setStallHintToast(msg)}
       />
       {avatarSettingsOpen && paneSettingsAvatar ? (
         <AvatarSettingsPanel

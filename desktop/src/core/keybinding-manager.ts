@@ -22,7 +22,17 @@ const RULES: MatchRule[] = [
   { action: "clear-messages", key: "l", ctrlOrMeta: true, mode: "pro" },
   { action: "toggle-mode", key: "m", ctrlOrMeta: true, shift: true, mode: "both" },
   { action: "toggle-plan-mode", key: "p", ctrlOrMeta: true, shift: true, mode: "pro" },
-  { action: "toggle-focus-mode", key: "f", ctrlOrMeta: true, shift: true, mode: "pro" },
+  ...(VOICE_UI_ENABLED
+    ? [
+        {
+          action: "toggle-focus-mode" as const,
+          key: "f",
+          ctrlOrMeta: true,
+          shift: true,
+          mode: "pro" as const,
+        },
+      ]
+    : []),
   { action: "open-keybindings", key: "/", ctrlOrMeta: true, mode: "pro" },
 ];
 
@@ -37,3 +47,4 @@ export function matchKeybinding(event: KeyboardEvent, mode: UserMode): Keybindin
   }
   return null;
 }
+import { VOICE_UI_ENABLED } from "../constants/feature-flags";

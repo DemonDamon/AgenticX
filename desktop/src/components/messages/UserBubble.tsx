@@ -10,10 +10,9 @@ export function UserBubble({ message }: Props) {
   const referenceAttachments = (message.attachments ?? []).filter((a) => isWorkspaceReferenceAttachment(a));
   return (
     <div
-      className="agx-im-user-bubble ml-8 min-w-0 overflow-hidden rounded-xl rounded-tr-sm border px-3.5 py-2.5 text-[15px] leading-relaxed"
+      className="agx-im-user-bubble ml-8 min-w-0 overflow-hidden rounded-xl rounded-tr-sm border-0 px-3.5 py-2.5 text-[15px] leading-relaxed"
       style={{
         background: "var(--chat-im-user-bg)",
-        borderColor: "var(--chat-im-user-border)",
         color: "var(--chat-im-user-text)",
       }}
     >

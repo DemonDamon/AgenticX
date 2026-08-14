@@ -24,6 +24,8 @@
   }
 }
 
+/* Slow left→right spotlight. Must tile (default repeat) so glyphs never lose paint —
+   no-repeat + sliding position leaves transparent gaps (reads as blacked-out on dark UI). */
 @keyframes agx-working-shimmer {
   0% {
     background-position: 200% 0;
@@ -47,18 +49,40 @@
 }
 
 .agx-working-shimmer {
-  color: transparent;
-  /* 跟随主题 token；勿用固定白色渐变，浅色背景下会不可读 */
-  background: linear-gradient(
+  /* Fallback if clip unsupported; fill is cleared only when gradient paints glyphs. */
+  color: var(--text-subtle);
+  -webkit-text-fill-color: transparent;
+  background-image: linear-gradient(
     90deg,
-    var(--text-subtle),
-    var(--text-strong),
-    var(--text-subtle)
+    var(--text-subtle) 0%,
+    var(--text-subtle) 38%,
+    var(--text-strong) 50%,
+    var(--text-subtle) 62%,
+    var(--text-subtle) 100%
   );
-  background-size: 200% 100%;
+  background-size: 220% 100%;
   -webkit-background-clip: text;
   background-clip: text;
-  animation: agx-working-shimmer 2.2s ease-in-out infinite;
+  animation: agx-working-shimmer 4.2s linear infinite;
+}
+
+/* Status meta (运行中 / 思考中): muted base + sharp peak, slow linear sweep. */
+.agx-working-shimmer.agx-status-shimmer {
+  color: var(--text-faint);
+  background-image: linear-gradient(
+    90deg,
+    var(--text-faint) 0%,
+    var(--text-faint) 40%,
+    var(--text-subtle) 46%,
+    var(--text-strong) 50%,
+    var(--text-subtle) 54%,
+    var(--text-faint) 60%,
+    var(--text-faint) 100%
+  );
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: agx-working-shimmer 5.4s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -78,9 +102,15 @@
 
   .agx-working-shimmer {
     color: var(--text-subtle);
+    -webkit-text-fill-color: var(--text-subtle);
     background: none;
     -webkit-background-clip: unset;
     background-clip: unset;
     animation: none;
+  }
+
+  .agx-working-shimmer.agx-status-shimmer {
+    color: var(--text-faint);
+    -webkit-text-fill-color: var(--text-faint);
   }
 }

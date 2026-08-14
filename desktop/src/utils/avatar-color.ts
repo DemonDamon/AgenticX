@@ -87,17 +87,6 @@ const AVATAR_TINT: Record<AvatarPaletteKey, string> = {
   black: "rgba(15,23,42,0.07)",
 };
 
-const GROUP_TINT: Record<GroupPaletteKey, string> = {
-  indigo:  "rgba(99,102,241,0.07)",
-  teal:    "rgba(20,184,166,0.07)",
-  pink:    "rgba(236,72,153,0.07)",
-  lime:    "rgba(132,204,22,0.07)",
-  red:     "rgba(239,68,68,0.07)",
-  blue:    "rgba(59,130,246,0.07)",
-  yellow:  "rgba(234,179,8,0.07)",
-  purple:  "rgba(168,85,247,0.07)",
-};
-
 // Solid bg color for avatar icon (60% opacity equivalent as CSS rgba)
 const GROUP_SOLID: Record<GroupPaletteKey, string> = {
   indigo:  "rgba(99,102,241,0.75)",
@@ -139,8 +128,8 @@ export const AVATAR_COLOR_SWATCH: Record<AvatarPaletteKey, string> = {
 
 /**
  * Transparent background tint for pane.
- * - group ids → group palette
- * - avatar with empty color → blue tint
+ * - group ids → undefined (same page surface as Meta; no per-group wash)
+ * - avatar with empty color → undefined (Meta / default surface)
  * - avatar with palette color → that tint
  */
 export function avatarTintBg(
@@ -148,8 +137,9 @@ export function avatarTintBg(
   color?: string | null,
 ): string | undefined {
   if (!id) return undefined;
-  if (isGroupId(id)) return GROUP_TINT[groupColorKey(id)];
-  const key = normalizeAvatarColor(color) || "blue";
+  if (isGroupId(id)) return undefined;
+  const key = normalizeAvatarColor(color);
+  if (!key) return undefined;
   return AVATAR_TINT[key];
 }
 
@@ -196,4 +186,56 @@ export function avatarTintBorder(
     black: "rgba(15,23,42,0.15)",
   };
   return AVATAR_BORDER[key];
+}
+
+/** sRGB triples matching AVATAR_COLOR_SWATCH — for soft chips with theme-aware alpha. */
+const AVATAR_RGB: Record<AvatarPaletteKey, readonly [number, number, number]> = {
+  blue:  [59, 130, 246],
+  white: [255, 255, 255],
+  black: [15, 23, 42],
+};
+
+export type ExpertLabelChipStyle = {
+  backgroundColor: string;
+  borderColor: string;
+  /** Applied only to the expert name text — chevron / 展开 stay neutral. */
+  color: string;
+};
+
+function rgba(rgb: readonly [number, number, number], alpha: number): string {
+  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
+}
+
+/**
+ * Soft name chip for group-chat expert labels.
+ * - Prefer configured avatar color; else hash id into AVATAR_PALETTE.
+ * - Meta / missing id → theme accent via CSS vars (works in light/dim/dark).
+ */
+export function expertLabelChipStyle(
+  id: string | null | undefined,
+  color?: string | null,
+  theme: "light" | "dim" | "dark" = "dark",
+): ExpertLabelChipStyle {
+  const light = theme === "light";
+  const aid = String(id ?? "").trim();
+  if (!aid || aid === "meta") {
+    return {
+      backgroundColor: light
+        ? "rgba(var(--theme-color-rgb, 59, 130, 246), 0.10)"
+        : "rgba(var(--theme-color-rgb, 59, 130, 246), 0.16)",
+      borderColor: light
+        ? "rgba(var(--theme-color-rgb, 59, 130, 246), 0.22)"
+        : "rgba(var(--theme-color-rgb, 59, 130, 246), 0.34)",
+      color: "rgb(var(--theme-color-rgb, 59, 130, 246))",
+    };
+  }
+  const key =
+    normalizeAvatarColor(color) ||
+    AVATAR_PALETTE[hashToIndex(aid, AVATAR_PALETTE.length)];
+  const rgb = AVATAR_RGB[key];
+  return {
+    backgroundColor: rgba(rgb, light ? 0.10 : 0.16),
+    borderColor: rgba(rgb, light ? 0.22 : 0.34),
+    color: light ? AVATAR_COLOR_SWATCH[key] : AVATAR_DOT[key],
+  };
 }

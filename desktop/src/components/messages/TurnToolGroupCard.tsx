@@ -12,6 +12,7 @@ import {
   useLiveToolElapsedSeconds,
 } from "./tool-elapsed-timer";
 import { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
+import { Shimmer } from "../ds/Shimmer";
 
 type Props = {
   messages: Message[];
@@ -151,21 +152,23 @@ export function TurnToolGroupCard({
             </span>
           )}
         </span>
-        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+        <span className="flex min-w-0 items-center gap-1.5">
           {inProgress ? (
             <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>
-              正在调用 {activeToolTitle}
+              调用 {activeToolTitle}
               {activeTools.length > 1 ? ` 等 ${activeTools.length} 个工具` : ""}
             </span>
           ) : (
             <CompletedToolSummary messages={visibleMessages} />
           )}
+          {activeTool ? (
+            <Shimmer
+              variant="status"
+              text={`运行中 · ${formatToolElapsedSeconds(liveElapsedSec)}`}
+              className="shrink-0 whitespace-nowrap text-[12px] font-normal tabular-nums"
+            />
+          ) : null}
         </span>
-        {activeTool ? (
-          <span className="shrink-0 text-[12px] text-text-faint tabular-nums">
-            运行中 · {formatToolElapsedSeconds(liveElapsedSec)}
-          </span>
-        ) : null}
         {expanded ? (
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
         ) : (

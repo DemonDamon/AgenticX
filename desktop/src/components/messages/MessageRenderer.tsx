@@ -147,6 +147,8 @@ function extractClarificationAnswerFromMeta(
 function GroupProgressLine({ message }: { message: Message }) {
   const text = String(message.toolResultPreview || message.content || "").trim();
   if (!text) return null;
+  // Drop low-signal round-start chatter (historical + live). Expert label + stream covers it.
+  if (/(?:^|：|:)\s*开始处理任务/.test(text) || /已接收任务/.test(text)) return null;
   const running = message.toolStatus === "running" || message.toolStatus === "pending";
   return (
     <div className="flex min-w-0 items-center gap-2 px-3 py-1 text-[13px] text-text-muted">

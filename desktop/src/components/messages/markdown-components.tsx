@@ -19,6 +19,8 @@ import type { SearchReference } from "../../types/search-references";
 export { normalizeChatMarkdownContent, normalizeLenientEmphasisInText } from "./markdown-normalize";
 import { openExternalUrl } from "../../utils/open-external";
 import { isAbsoluteFilePath, resolveRelativeAssetPath } from "../../utils/workspace-file-path";
+import { parseLocalArtifactPath } from "../../utils/sandbox-artifact-link";
+import { ArtifactFileLink } from "./ArtifactFileLink";
 import { buildSvgCharsetDataUrl } from "../../utils/svg-markup";
 
 export const MarkdownContext = createContext<{
@@ -558,12 +560,19 @@ export const chatMarkdownComponents: Partial<Components> = {
   a({ href, children, ...rest }) {
     const url = String(href ?? "").trim();
     const external = /^https?:\/\//i.test(url);
+    const localArtifactPath = external ? null : parseLocalArtifactPath(url);
+    if (localArtifactPath) {
+      return <ArtifactFileLink path={localArtifactPath}>{children}</ArtifactFileLink>;
+    }
     return (
       <a
         {...rest}
         href={url || undefined}
         target={external ? "_blank" : rest.target}
         rel={external ? "noopener noreferrer" : rest.rel}
+        className={`text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90 ${
+          typeof rest.className === "string" ? rest.className : ""
+        }`.trim()}
         onClick={
           external
             ? (event) => {

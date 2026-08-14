@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeAvatarIdForSidebarRow,
   applySidebarSessionHistoryHints,
   bucketSidebarHistoryRows,
+  findPaneForSidebarSession,
   formatSidebarRelativeTime,
   matchesSidebarAvatarFilter,
   normalizeSidebarSessionRows,
   resolveSidebarAvatarChipName,
+  sidebarSessionHasRenderableMessages,
   sidebarSessionLabel,
 } from "./sidebar-session-history";
 
@@ -84,12 +87,21 @@ describe("sidebar-session-history utils", () => {
   });
 
   it("resolves chip names", () => {
-    const map = new Map([["av1", "飞廉"]]);
+    const map = new Map([
+      ["av1", "飞廉"],
+      ["group:g1", "Graph难用例突击队"],
+    ]);
     expect(resolveSidebarAvatarChipName({ avatar_id: null }, map)).toBe("和创智派");
     expect(resolveSidebarAvatarChipName({ avatar_id: "av1" }, map)).toBe("飞廉");
     expect(
       resolveSidebarAvatarChipName({ avatar_id: "group:g1", avatar_name: "项目组" }, map)
-    ).toBe("项目组");
+    ).toBe("Graph难用例突击队");
+    expect(
+      resolveSidebarAvatarChipName({ avatar_id: "group:g1", avatar_name: null }, map)
+    ).toBe("Graph难用例突击队");
+    expect(
+      resolveSidebarAvatarChipName({ avatar_id: "group:unknown", avatar_name: null }, map)
+    ).toBe("群聊");
   });
 
   it("formats relative activity time", () => {
@@ -149,5 +161,36 @@ describe("sidebar-session-history utils", () => {
       { s1: { activityAt: 200, running: true } }
     );
     expect(caughtUp[0]?.execution_state).toBe("idle");
+  });
+
+  it("finds sidebar open target by session before avatar", () => {
+    const panes = [
+      { id: "zombie", sessionId: "old", avatarId: "group:g1" },
+      { id: "live", sessionId: "sid-1", avatarId: "group:g1" },
+    ];
+    const found = findPaneForSidebarSession(panes, {
+      session_id: "sid-1",
+      avatar_id: "group:g1",
+    });
+    expect(found?.id).toBe("live");
+  });
+
+  it("treats untagged messages as non-renderable for early-open skip", () => {
+    expect(
+      sidebarSessionHasRenderableMessages(
+        [{ ownerSessionId: undefined }, { ownerSessionId: "other" }],
+        "sid-1"
+      )
+    ).toBe(false);
+    expect(
+      sidebarSessionHasRenderableMessages([{ ownerSessionId: "sid-1" }], "sid-1")
+    ).toBe(true);
+  });
+
+  it("clears activeAvatarId for group/automation rows", () => {
+    expect(activeAvatarIdForSidebarRow("group:g1")).toBeNull();
+    expect(activeAvatarIdForSidebarRow("automation:t1")).toBeNull();
+    expect(activeAvatarIdForSidebarRow("av1")).toBe("av1");
+    expect(activeAvatarIdForSidebarRow(null)).toBeNull();
   });
 });

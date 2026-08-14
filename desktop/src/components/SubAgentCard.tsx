@@ -6,6 +6,7 @@ import type { SubAgent } from "../store";
 import { useAppStore } from "../store";
 import { formatModelOptionLabel } from "../utils/model-display";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
+import { getProviderDisplayName } from "../utils/provider-display";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { fetchArtifactPreview, type ArtifactPreviewResponse } from "./subagent/run-drawer-api";
 import { previewBaseName } from "./workspace/workspace-preview-types";
@@ -345,8 +346,25 @@ function SubAgentModelPicker({
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 
   const options = useMemo(() => collectSelectableModelOptions(settings), [settings]);
+  const providerGroups = useMemo(() => {
+    const byProvider = new Map<string, typeof options>();
+    for (const option of options) {
+      const items = byProvider.get(option.provider) ?? [];
+      items.push(option);
+      byProvider.set(option.provider, items);
+    }
+    return [...byProvider.entries()].map(([providerId, items]) => ({
+      provider: providerId,
+      items,
+      label: getProviderDisplayName(providerId, settings[providerId]),
+    }));
+  }, [options, settings]);
+  const selectedProviderGroup = expandedProvider
+    ? providerGroups.find((group) => group.provider === expandedProvider) ?? null
+    : null;
   const currentProvider = (provider ?? "").trim();
   const currentModel = (model ?? "").trim();
   const label = useMemo(() => {
@@ -383,7 +401,10 @@ function SubAgentModelPicker({
         title={label}
         onClick={(e) => {
           e.stopPropagation();
-          setOpen((v) => !v);
+          setOpen((v) => {
+            if (!v) setExpandedProvider(null);
+            return !v;
+          });
         }}
       >
         <ProviderIcon provider={currentProvider} className="h-3 w-3 shrink-0" />
@@ -400,8 +421,35 @@ function SubAgentModelPicker({
             >
               {options.length === 0 ? (
                 <div className="px-3 py-2 text-center text-[11px] text-text-muted">请先在设置中配置模型</div>
+              ) : !selectedProviderGroup ? (
+                <>
+                  <div className="px-2 pb-1.5 text-[10px] text-text-faint">先选择模型提供商</div>
+                  {providerGroups.map((group) => (
+                    <button
+                      key={group.provider}
+                      type="button"
+                      className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] text-text-primary transition-colors hover:bg-surface-hover"
+                      onClick={() => setExpandedProvider(group.provider)}
+                    >
+                      <ProviderIcon provider={group.provider} className="h-3 w-3 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate font-medium">{group.label}</span>
+                      <span className="shrink-0 text-[10px] text-text-faint">{group.items.length}</span>
+                      <span className="text-xs text-text-faint">›</span>
+                    </button>
+                  ))}
+                </>
               ) : (
-                options.map((opt) => {
+                <>
+                  <button
+                    type="button"
+                    className="mb-1 flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[10px] text-text-subtle transition-colors hover:bg-surface-hover hover:text-text-strong"
+                    onClick={() => setExpandedProvider(null)}
+                  >
+                    <span aria-hidden>‹</span>
+                    <span>全部提供商</span>
+                  </button>
+                  <div className="px-2 pb-1 text-[10px] font-medium text-text-faint">{selectedProviderGroup.label} · 选择模型</div>
+                  {selectedProviderGroup.items.map((opt) => {
                   const isActive = opt.provider === currentProvider && opt.model === currentModel;
                   return (
                     <button
@@ -417,11 +465,12 @@ function SubAgentModelPicker({
                       }}
                     >
                       <ProviderIcon provider={opt.provider} className="h-3 w-3 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">{opt.label}</span>
+                      <span className="min-w-0 flex-1 truncate">{opt.model}</span>
                       {isActive ? <Check className="h-3 w-3 shrink-0" strokeWidth={2} /> : null}
                     </button>
                   );
-                })
+                  })}
+                </>
               )}
             </div>
           </>,

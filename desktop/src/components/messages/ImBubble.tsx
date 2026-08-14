@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus } from "lucide-react";
+import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus, ChevronDown, ChevronRight } from "lucide-react";
 import type { Message, MessageAttachment } from "../../store";
 import { useAppStore } from "../../store";
 import type { SearchReference } from "../../types/search-references";
@@ -34,7 +34,7 @@ import {
   getAssistantTextStyle,
 } from "./im-layout";
 import { resolveMetaDisplayName } from "../../utils/display-name";
-import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
+import { avatarBgClass, avatarFgClass, expertLabelChipStyle } from "../../utils/avatar-color";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 import { MessageTimestamp } from "./MessageTimestamp";
 
@@ -78,9 +78,12 @@ type Props = {
   actionRhythmBodyTail?: boolean;
   /** Render-only hint when this assistant reply was cut off by session token budget. */
   budgetIncompleteHint?: boolean;
-  /** Group chat: show avatar + display name on every bubble (WeChat-style). */
+  /**
+   * Group chat: show a prominent expert name label (no avatar rail).
+   * User bubbles match Meta layout (no name/avatar chrome).
+   */
   showSenderIdentity?: boolean;
-  /** Group member avatars use rounded square; user stays circular. */
+  /** @deprecated Avatars removed from group chat; kept for API compat. */
   senderAvatarVariant?: "circle" | "rounded-square";
   /** Fallback tint when no imageUrl (avatar id for color hash). */
   senderAvatarId?: string;
@@ -91,22 +94,6 @@ type Props = {
   streamStalled?: boolean;
   streamStalledSeconds?: number;
 };
-
-/** Cycling 1→3 dots for group-chat typing rows (name shown in header only). */
-function TypingDots() {
-  const [count, setCount] = useState(1);
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      setCount((c) => (c >= 3 ? 1 : c + 1));
-    }, 400);
-    return () => clearInterval(id);
-  }, []);
-  return (
-    <span className="inline-block min-w-[1em] tabular-nums" aria-hidden>
-      {".".repeat(count)}
-    </span>
-  );
-}
 
 function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
   return (
@@ -222,16 +209,24 @@ export function ImBubble({
   actionRhythmBodyTail = false,
   budgetIncompleteHint = false,
   showSenderIdentity = false,
-  senderAvatarVariant = "circle",
+  senderAvatarVariant: _senderAvatarVariant = "circle",
   senderAvatarId,
   sessionBusy = false,
   isLastAssistantInPane = false,
   streamStalled = false,
   streamStalledSeconds = 0,
 }: Props) {
+  void _senderAvatarVariant;
+  void userAvatarUrl;
+  void assistantAvatarUrl;
+  const theme = useAppStore((s) => s.theme);
+  const senderStoreColor = useAppStore((s) =>
+    senderAvatarId && senderAvatarId !== "meta"
+      ? s.avatars.find((a) => a.id === senderAvatarId)?.color
+      : undefined,
+  );
   const isUser = message.role === "user";
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
-  const avatarUrl = isUser ? userAvatarUrl : assistantAvatarUrl;
   const isStreaming = message.id === "__stream__";
   const isMetaPendingWork = !isUser && message.id === "typing-meta";
   const isGroupTyping =
@@ -244,8 +239,13 @@ export function ImBubble({
     (assistantVisual === "compact-inline" || assistantVisual === "compact-inline-with-actions") &&
     !isGroupTyping &&
     !isMetaPendingWork;
-  const showIdentityRail = showSenderIdentity && !compactAssistant;
+  /** Group expert label only — no WeChat avatar rail (align with Meta chrome). */
+  const showExpertLabel = showSenderIdentity && !isUser && !compactAssistant;
+  const expertChip = showExpertLabel
+    ? expertLabelChipStyle(senderAvatarId, senderStoreColor, theme)
+    : null;
   const hideActions = compactAssistant && assistantVisual !== "compact-inline-with-actions";
+  const [expertCollapsed, setExpertCollapsed] = useState(false);
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
   const protocolParsed = !isUser ? parseAssistantOutputForUi(message.content) : null;
   const hasThinkTag = parsed?.hasReasoningTag ?? false;
@@ -258,9 +258,14 @@ export function ImBubble({
   const userQuoteDisplay = isUser
     ? resolveUserMessageQuoteDisplay(message.content, message.quotedContent)
     : null;
-  const bodyText = !isUser
+  const rawBodyText = !isUser
     ? (protocolParsed?.visibleBody ?? (hasThinkTag ? (parsed?.response ?? "") : message.content))
     : (userQuoteDisplay?.body ?? message.content);
+  /** Drop leading `---` so Meta/PM reports don't leave a hole under the expert label. */
+  const bodyText =
+    showExpertLabel && !isUser
+      ? String(rawBodyText ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
+      : rawBodyText;
   const displayQuotedItems = isUser
     ? (userQuoteDisplay?.quotedItems ?? [])
     : parseQuotedContentItems(message.quotedContent);
@@ -276,7 +281,6 @@ export function ImBubble({
   const bubbleStyle: CSSProperties = isUser
     ? {
         background: "var(--chat-im-user-bg)",
-        borderColor: "var(--chat-im-user-border)",
         color: "var(--chat-im-user-text)",
       }
     : {
@@ -419,10 +423,11 @@ export function ImBubble({
     : undefined;
   const assistantActionStyle = getAssistantActionStyle({ inReActRow: compactAssistant });
   const USER_BUBBLE_GUTTER_PX = 14;
-  const groupIdentityLayout = showIdentityRail && !compactAssistant;
-  const headerBadge = groupIdentityLayout && !isUser ? badge : null;
+  const headerBadge = showExpertLabel ? badge : null;
   const contentBadge = headerBadge ? null : badge;
-  const userBubbleGutterPx = groupIdentityLayout && isUser ? 0 : USER_BUBBLE_GUTTER_PX;
+  const userBubbleGutterPx = USER_BUBBLE_GUTTER_PX;
+  const canFoldExpertReply =
+    showExpertLabel && !isStreaming && !isGroupTyping && !isMetaPendingWork && hasBody;
   // Gutter 挂在 stack 上（非整气泡 margin），保证操作栏与气泡边框同宽、左右缘对齐。
   const userStackStyle = isUser
     ? {
@@ -490,7 +495,11 @@ export function ImBubble({
         <HoverTip label="多选">
           <button
             type="button"
-            className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+            className={`rounded p-1 hover:bg-surface-hover ${
+              selected
+                ? "text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-90"
+                : "hover:text-text-strong"
+            }`}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onToggleSelectMessage?.(message)}
           >
@@ -536,9 +545,7 @@ export function ImBubble({
     <div
       className={`group relative flex min-w-0 items-start gap-2${
         !railRow && isStreaming && !pendingWorkCompact ? " !mt-1" : ""
-      }${!railRow && pendingWorkCompact ? " -mt-1" : ""}${
-        groupIdentityLayout && !isUser ? " pl-4" : ""
-      }`}
+      }${!railRow && pendingWorkCompact ? " -mt-1" : ""}`}
       onContextMenu={openContextMenu}
     >
       {selectable ? (
@@ -546,7 +553,7 @@ export function ImBubble({
           type="button"
           className={`mt-8 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition ${
             selected
-              ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-white"
+              ? "border-[rgb(var(--theme-color-rgb,6,182,212))] bg-[rgb(var(--theme-color-rgb,6,182,212))] text-[var(--theme-color-text)]"
               : "border-text-faint bg-transparent text-transparent"
           }`}
           onClick={() => onToggleSelectMessage?.(message)}
@@ -557,28 +564,58 @@ export function ImBubble({
           </svg>
         </button>
       ) : null}
-      {groupIdentityLayout && isUser ? <div className="min-h-px min-w-0 flex-1" aria-hidden /> : null}
-      {groupIdentityLayout && !isUser ? (
-        <div className="mt-0.5 shrink-0 self-start">
-          <ChatImAvatar
-            label={displayName}
-            imageUrl={avatarUrl}
-            variant={senderAvatarVariant}
-            avatarId={senderAvatarId}
-          />
-        </div>
-      ) : null}
       <div
-        className={`flex min-w-0 flex-col ${isUser ? "items-end" : "items-start"}${groupIdentityLayout && isUser ? " w-auto max-w-[calc(100%-2.5rem)] shrink-0" : " min-w-0 flex-1"}${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`}
+        className={`flex min-w-0 flex-1 flex-col ${isUser ? "items-end" : "items-start"}${assistantActionRhythmStack ? ` agx-assistant-action-rhythm mb-6 ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS}` : ""}`}
       >
-        {groupIdentityLayout && isUser ? (
-          <div className="mb-1 w-full min-w-0 text-right">
-            <span className="max-w-full truncate text-[12px] font-medium text-text-muted">{displayName}</span>
-          </div>
-        ) : groupIdentityLayout && !isUser ? (
-          <div className="mb-0.5 flex max-w-full items-center gap-2 px-3 text-[12px] font-medium text-text-muted">
-            <span className="min-w-0 truncate">{displayName}</span>
-            {headerBadge ? <span className="shrink-0">{headerBadge}</span> : null}
+        {showExpertLabel && expertChip ? (
+          <div className="mb-1 flex max-w-full items-center gap-2 px-3">
+            {canFoldExpertReply ? (
+              <button
+                type="button"
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-semibold transition hover:opacity-90"
+                style={{
+                  backgroundColor: expertChip.backgroundColor,
+                  borderColor: expertChip.borderColor,
+                }}
+                onClick={() => setExpertCollapsed((v) => !v)}
+                aria-expanded={!expertCollapsed}
+                title={expertCollapsed ? "展开回复" : "折叠回复"}
+              >
+                {expertCollapsed ? (
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-subtle" strokeWidth={2.2} />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-subtle" strokeWidth={2.2} />
+                )}
+                <span className="min-w-0 truncate" style={{ color: expertChip.color }}>
+                  {displayName}
+                </span>
+                {headerBadge ? (
+                  <span className="shrink-0 font-medium" style={{ color: expertChip.color }}>
+                    {headerBadge}
+                  </span>
+                ) : null}
+                <span className="shrink-0 text-[11px] font-medium text-text-subtle">
+                  {expertCollapsed ? "展开" : "折叠"}
+                </span>
+              </button>
+            ) : (
+              <span
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-semibold"
+                style={{
+                  backgroundColor: expertChip.backgroundColor,
+                  borderColor: expertChip.borderColor,
+                }}
+              >
+                <span className="min-w-0 truncate" style={{ color: expertChip.color }}>
+                  {displayName}
+                </span>
+                {headerBadge ? (
+                  <span className="shrink-0 font-medium" style={{ color: expertChip.color }}>
+                    {headerBadge}
+                  </span>
+                ) : null}
+              </span>
+            )}
           </div>
         ) : null}
         {isEditing ? (
@@ -650,7 +687,7 @@ export function ImBubble({
             ) : null}
             {hasBody || message.forwardedHistory || contentBadge ? (
             <div
-              className="agx-im-user-bubble relative min-w-0 max-w-full rounded-xl border px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
+              className="agx-im-user-bubble relative min-w-0 max-w-full rounded-xl border-0 px-3.5 py-2.5 text-[var(--agx-chat-im-body-font-size)] leading-relaxed rounded-tr-[4px]"
               style={userBubbleStyle}
             >
               <div ref={msgContentRef} className="msg-content min-w-0 break-words">
@@ -747,6 +784,11 @@ export function ImBubble({
                   <HoverTip label="多选" tooltipAlign="end">
                     <button
                       type="button"
+                      className={
+                        selected
+                          ? "text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-90"
+                          : undefined
+                      }
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => onToggleSelectMessage?.(message)}
                     >
@@ -757,6 +799,21 @@ export function ImBubble({
               </div>
             )}
           </div>
+        ) : expertCollapsed && canFoldExpertReply ? (
+          <>
+            {/* Body hidden while folded — expand via expert label. Keep root for copy/quote. */}
+            <div ref={msgContentRef} className="hidden" aria-hidden>
+              {bodyText}
+            </div>
+            {hideActions || !assistantIconButtons ? null : (
+              <div className={ASSISTANT_ACTION_ICON_ONLY_CLASS}>
+                <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
+                  {assistantIconButtons}
+                  <MessageTimestamp ts={message.timestamp} align="left" />
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <>
             <div
@@ -765,8 +822,8 @@ export function ImBubble({
                   ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                   : isMetaPendingWork
                     ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                    : groupIdentityLayout
-                      ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                    : showExpertLabel
+                      ? `agx-expert-body relative min-w-0 w-full px-3 pt-0 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                       : (message.references?.length ?? 0) > 0
                         ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                         : `relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
@@ -813,10 +870,14 @@ export function ImBubble({
                     <StreamingDots compact />
                   )
                 ) : isGroupTyping ? (
-                  <span className="inline-flex items-baseline gap-0.5" aria-live="polite" aria-label="正在输入">
-                    <span>正在输入</span>
-                    <TypingDots />
-                  </span>
+                  bodyText?.trim() ? (
+                    <div className="flex min-w-0 items-center gap-2 text-[13px] text-text-muted">
+                      <span className="min-w-0 break-words leading-[1.65]">{bodyText.trim()}</span>
+                      <StreamingDots compact />
+                    </div>
+                  ) : (
+                    <StreamingDots compact />
+                  )
                 ) : (
                   <>
                     {(citationReferences?.length ?? 0) > 0 ? (
@@ -854,7 +915,10 @@ export function ImBubble({
                       )
                     ) : null}
                     {hasBody ? (
-                      <div className={assistantTextClassName} style={assistantTextStyle}>
+                      <div
+                        className={showExpertLabel ? undefined : assistantTextClassName}
+                        style={assistantTextStyle}
+                      >
                         <CitationMarkdownBody
                           content={bodyText}
                           references={citationReferences}
@@ -906,18 +970,7 @@ export function ImBubble({
           </>
         )}
       </div>
-      {groupIdentityLayout && isUser ? (
-        <div className="mt-0.5 shrink-0 self-start">
-          <ChatImAvatar
-            label={displayName}
-            imageUrl={avatarUrl}
-            variant={senderAvatarVariant}
-            avatarId={senderAvatarId ?? "user-self"}
-          />
-        </div>
-      ) : null}
-      {menuOpen
-        ? createPortal(
+      {menuOpen ? createPortal(
         <div
           ref={menuRef}
           className="fixed z-[200] w-44 rounded-lg border border-border bg-surface-base p-1 shadow-2xl"
@@ -1011,8 +1064,7 @@ export function ImBubble({
           </button>
         </div>,
         document.body,
-      )
-        : null}
+      ) : null}
     </div>
   );
 }

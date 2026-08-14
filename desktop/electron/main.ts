@@ -9342,6 +9342,23 @@ function registerIpc(): void {
     };
   };
 
+  // LLM round-timeout patience mode (patient wait + auto resume).
+  // The backend honors AGX_LLM_STALL_PATIENCE_* env overrides at call time;
+  // these keys are the persisted config.yaml runtime.* source.
+  const readStallPatienceRuntime = (raw: Record<string, unknown>) => {
+    const maxRaw = Number(raw.llm_stall_patience_max_attempts ?? 3);
+    const budgetRaw = Number(raw.llm_stall_patience_budget_seconds ?? 900);
+    return {
+      llm_stall_patience_enabled: Boolean(raw.llm_stall_patience_enabled ?? true),
+      llm_stall_patience_max_attempts: Number.isFinite(maxRaw)
+        ? Math.max(1, Math.min(10, Math.round(maxRaw)))
+        : 3,
+      llm_stall_patience_budget_seconds: Number.isFinite(budgetRaw)
+        ? Math.max(60, Math.min(3600, Math.round(budgetRaw)))
+        : 900,
+    };
+  };
+
   const readTokenBudgetRuntime = (raw: Record<string, unknown>) => {
     const nested =
       raw.token_budget && typeof raw.token_budget === "object" && !Array.isArray(raw.token_budget)
@@ -9403,6 +9420,7 @@ function registerIpc(): void {
         tool_search_threshold_strategy: toolSearchStrategy,
         tool_search_context_budget_ratio: toolSearchRatio,
         ...readStallNudgeRuntime(raw),
+        ...readStallPatienceRuntime(raw),
         ...readUnattendedRuntime(raw),
         ...readTokenBudgetRuntime(raw),
         live_reattach_enabled: Boolean(raw.live_reattach_enabled ?? false),
@@ -9423,6 +9441,9 @@ function registerIpc(): void {
         stall_auto_nudge_enabled: false,
         stall_auto_nudge_after_seconds: 120,
         stall_auto_nudge_max_per_session: 2,
+        llm_stall_patience_enabled: true,
+        llm_stall_patience_max_attempts: 3,
+        llm_stall_patience_budget_seconds: 900,
         unattended_enabled: false,
         unattended_max_continuations_per_session: 20,
         unattended_max_wall_clock_hours: 6,
@@ -9490,6 +9511,21 @@ function registerIpc(): void {
         const v = Number(p.stall_auto_nudge_max_per_session);
         if (Number.isFinite(v)) {
           merged.stall_auto_nudge_max_per_session = Math.max(1, Math.min(5, Math.round(v)));
+        }
+      }
+      if (p.llm_stall_patience_enabled !== undefined) {
+        merged.llm_stall_patience_enabled = Boolean(p.llm_stall_patience_enabled);
+      }
+      if (p.llm_stall_patience_max_attempts !== undefined) {
+        const v = Number(p.llm_stall_patience_max_attempts);
+        if (Number.isFinite(v)) {
+          merged.llm_stall_patience_max_attempts = Math.max(1, Math.min(10, Math.round(v)));
+        }
+      }
+      if (p.llm_stall_patience_budget_seconds !== undefined) {
+        const v = Number(p.llm_stall_patience_budget_seconds);
+        if (Number.isFinite(v)) {
+          merged.llm_stall_patience_budget_seconds = Math.max(60, Math.min(3600, Math.round(v)));
         }
       }
       const unattendedPrev =

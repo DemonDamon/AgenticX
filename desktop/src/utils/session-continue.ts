@@ -7,6 +7,8 @@ export type ContinueRequestBody = {
   reason: ContinueReason;
   source: ContinueSource;
   suppress_user_echo?: boolean;
+  provider?: string;
+  model?: string;
 };
 
 export function continueSessionUrl(apiBase: string, sessionId: string): string {

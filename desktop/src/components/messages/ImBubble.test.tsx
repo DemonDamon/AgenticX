@@ -100,6 +100,29 @@ describe("shouldShowAssistantFollowups", () => {
   });
 });
 
+describe("ImBubble group expert identity", () => {
+  it("shows a prominent expert label without avatar chrome when showSenderIdentity", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "expert-1",
+          role: "assistant",
+          content: "收到，按 T1–T5 拆解。\n\n## 结论\n1. T1\n2. T2",
+          avatarName: "架构师·阿析",
+        }}
+        showSenderIdentity
+        senderAvatarId="avatar-architect"
+        assistantName="架构师·阿析"
+      />,
+    );
+
+    expect(html).toContain("架构师·阿析");
+    expect(html).toContain("折叠");
+    expect(html).toContain("border-color:");
+    expect(html).not.toContain("agx-im-avatar");
+  });
+});
+
 // Ported-ref: fix/glm-stream-common-finalization@5bf63d3e
 describe("ImBubble assistant protocol boundary", () => {
   it("does not render an unclosed followups tail from historical messages", () => {

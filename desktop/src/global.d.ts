@@ -657,6 +657,9 @@ declare global {
         stall_auto_nudge_enabled?: boolean;
         stall_auto_nudge_after_seconds?: number;
         stall_auto_nudge_max_per_session?: number;
+        llm_stall_patience_enabled?: boolean;
+        llm_stall_patience_max_attempts?: number;
+        llm_stall_patience_budget_seconds?: number;
         unattended_enabled?: boolean;
         unattended_max_continuations_per_session?: number;
         unattended_max_wall_clock_hours?: number;
@@ -683,6 +686,9 @@ declare global {
         stall_auto_nudge_enabled?: boolean;
         stall_auto_nudge_after_seconds?: number;
         stall_auto_nudge_max_per_session?: number;
+        llm_stall_patience_enabled?: boolean;
+        llm_stall_patience_max_attempts?: number;
+        llm_stall_patience_budget_seconds?: number;
         unattended_enabled?: boolean;
         unattended_max_continuations_per_session?: number;
         unattended_max_wall_clock_hours?: number;
@@ -1328,7 +1334,7 @@ declare global {
         apiKey?: string;
         activeProvider?: string;
         activeModel?: string;
-      }) => Promise<{ ok: boolean; path: string }>;
+      }) => Promise<{ ok: boolean; path: string; error?: string }>;
       nativeSay: (text: string) => Promise<{ ok: boolean; reason?: string }>;
 
       loadSkills: () => Promise<SkillListResult>;

@@ -5,6 +5,7 @@ import {
   expandSelectionForCompletePdfExport,
   isThinkOnlyAssistantMessage,
   messageContributesToPdfExport,
+  messagesForShareExport,
 } from "./export-pdf-html";
 import { isShowWidgetToolMessage } from "../components/messages/widget-preview";
 
@@ -173,5 +174,43 @@ describe("export-pdf-html complete export", () => {
     });
     expect(html).toContain("[图表：任务执行链路]（Mermaid 静态渲染失败，请在应用内查看）");
     expect(html).not.toContain("FAIL flowchart");
+  });
+});
+
+describe("messagesForShareExport", () => {
+  it("keeps user + final assistant and drops ordinary tool fragments", () => {
+    const user = msg({ id: "u1", role: "user", content: "分析一下" });
+    const think = msg({
+      id: "t1",
+      role: "assistant",
+      content: "<think>planning the tools</think>",
+    });
+    const tool = msg({
+      id: "tool1",
+      role: "tool",
+      toolName: "web_search",
+      content: "search hits",
+    });
+    const finalAnswer = msg({
+      id: "a1",
+      role: "assistant",
+      content: "完整分析如下",
+    });
+    const all = [user, think, tool, finalAnswer];
+    const shared = messagesForShareExport([finalAnswer], all);
+    expect(shared.map((m) => m.id)).toEqual(["u1", "a1"]);
+  });
+
+  it("omits think-only assistant scraps from the share list", () => {
+    const user = msg({ id: "u1", role: "user", content: "hi" });
+    const thinkOnly = msg({
+      id: "t1",
+      role: "assistant",
+      content: "<think>internal only</think>",
+    });
+    const answer = msg({ id: "a1", role: "assistant", content: "hello" });
+    const shared = messagesForShareExport([user], [user, thinkOnly, answer]);
+    expect(shared.map((m) => m.id)).toEqual(["u1", "a1"]);
+    expect(shared.some((m) => isThinkOnlyAssistantMessage(m))).toBe(false);
   });
 });

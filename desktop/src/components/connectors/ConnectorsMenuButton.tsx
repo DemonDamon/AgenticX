@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ExternalLink, Link2, Loader2, SquareArrowOutUpRight } from "lucide-react";
+import { ChevronRight, ExternalLink, Link2, Loader2, SquareArrowOutUpRight } from "lucide-react";
 
 import { nativeConnectorAvailability, resolveConnectedConnectorIds } from "../../../electron/native-connectors-core";
 import {
@@ -16,9 +16,31 @@ import { useAppStore } from "../../store";
 
 const DROPDOWN_WIDTH = 260;
 
+/** 与「更多操作」主菜单同顶同高并排，避免向下挡住滚到底 FAB / 输入区。 */
+function positionEmbeddedComposerFlyout(
+  triggerEl: HTMLElement,
+  flyoutWidth: number,
+): { top: number; left: number; maxHeight: number } {
+  const parent = triggerEl.closest(".agx-menu-pop");
+  const band = (parent ?? triggerEl).getBoundingClientRect();
+  const gap = 8;
+  let left = band.right + gap;
+  if (left + flyoutWidth > window.innerWidth - gap) {
+    left = band.left - flyoutWidth - gap;
+  }
+  left = Math.max(gap, Math.min(left, window.innerWidth - flyoutWidth - gap));
+  return {
+    top: band.top,
+    left,
+    maxHeight: Math.max(120, band.height),
+  };
+}
+
 type Props = {
   /** Falls back to the global session id when the pane has not bound one yet. */
   sessionId?: string;
+  /** True when rendered as a row inside「更多操作」vertical menu (full-width row + right flyout). */
+  embedded?: boolean;
 };
 
 type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu" | "wecom" | "qqmail";
@@ -29,7 +51,7 @@ type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu" | "wecom" | "qq
  * - Popup list only shows truly connected connectors (with disconnect toggle).
  * - 「选择更多连接器」jumps to Settings → 连接器 marketplace (same as「管理」).
  */
-export function ConnectorsMenuButton({ sessionId }: Props) {
+export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
   const mcpServers = useAppStore((state) => state.mcpServers);
   const setMcpServers = useAppStore((state) => state.setMcpServers);
   const globalSessionId = useAppStore((state) => state.sessionId);
@@ -41,7 +63,9 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
   const [wecomConnected, setWecomConnected] = useState(false);
   const [qqmailConnected, setQqmailConnected] = useState(false);
   const [open, setOpen] = useState(false);
-  const [dropdownPos, setDropdownPos] = useState<{ bottom: number; left: number } | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<
+    { left: number; top?: number; bottom?: number; maxHeight?: number } | null
+  >(null);
   const [pendingId, setPendingId] = useState<NativeId | null>(null);
   const [tmeetPhase, setTmeetPhase] = useState("");
   const [tapdModalOpen, setTapdModalOpen] = useState(false);
@@ -244,9 +268,16 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
 
   const handleOpen = () => {
     if (btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      const left = Math.min(rect.left, window.innerWidth - DROPDOWN_WIDTH - 8);
-      setDropdownPos({ bottom: window.innerHeight - rect.top + 6, left: Math.max(8, left) });
+      if (embedded) {
+        setDropdownPos(positionEmbeddedComposerFlyout(btnRef.current, DROPDOWN_WIDTH));
+      } else {
+        const rect = btnRef.current.getBoundingClientRect();
+        const left = Math.max(
+          8,
+          Math.min(rect.left, window.innerWidth - DROPDOWN_WIDTH - 8),
+        );
+        setDropdownPos({ bottom: window.innerHeight - rect.top + 6, left });
+      }
     }
     setOpen((prev) => !prev);
   };
@@ -445,10 +476,16 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
       ? createPortal(
           <div
             id="agx-connectors-menu-dropdown"
-            style={{ bottom: dropdownPos.bottom, left: dropdownPos.left, width: DROPDOWN_WIDTH }}
-            className="fixed z-[9999] rounded-xl border border-border bg-surface-panel shadow-xl backdrop-blur-md"
+            style={{
+              left: dropdownPos.left,
+              width: DROPDOWN_WIDTH,
+              ...(dropdownPos.top != null
+                ? { top: dropdownPos.top, maxHeight: dropdownPos.maxHeight }
+                : { bottom: dropdownPos.bottom }),
+            }}
+            className="fixed z-[9999] flex flex-col overflow-hidden rounded-xl border border-border bg-surface-panel shadow-xl backdrop-blur-md"
           >
-            <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
               <span className="text-[12px] font-semibold text-text-strong">连接器</span>
               <button
                 type="button"
@@ -458,7 +495,7 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
                 管理
               </button>
             </div>
-            <div className="max-h-80 overflow-y-auto p-1.5">
+            <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
               {visibleConnectors.length === 0 ? (
                 <div className="px-2 py-4 text-center text-[12px] text-text-faint">
                   暂无已连接的连接器
@@ -505,7 +542,7 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
                 })
               )}
             </div>
-            <div className="border-t border-border p-1.5">
+            <div className="shrink-0 border-t border-border p-1.5">
               <button
                 type="button"
                 className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-surface-card px-2 py-2 text-[12px] font-medium text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
@@ -524,6 +561,25 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
           document.body,
         )
       : null;
+
+  const embeddedRow = (
+    <button
+      ref={btnRef}
+      type="button"
+      role="menuitem"
+      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+      aria-label="连接器"
+      aria-expanded={open}
+      onClick={handleOpen}
+    >
+      <Link2 className="h-[15px] w-[15px] shrink-0 text-text-muted" aria-hidden />
+      <span className="flex-1">连接器</span>
+      {connectedIds.length > 0 ? (
+        <span className="text-[11px] text-text-faint">已连接 {connectedIds.length}</span>
+      ) : null}
+      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
+    </button>
+  );
 
   const toolbarButton = (
     <button
@@ -562,7 +618,9 @@ export function ConnectorsMenuButton({ sessionId }: Props) {
 
   return (
     <>
-      {connectedIds.length > 0 ? (
+      {embedded ? (
+        embeddedRow
+      ) : connectedIds.length > 0 ? (
         <HoverTip label={`已连接：${connectedLabel}`}>{toolbarButton}</HoverTip>
       ) : (
         toolbarButton

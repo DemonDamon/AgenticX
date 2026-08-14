@@ -2,6 +2,7 @@
 
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { isAutomationPaneAvatarId } from "./automation-pane";
+import { visibleMessagesForSession, type OwnedMessage } from "./message-ownership";
 
 export type SidebarSessionExecutionState = "idle" | "running" | "interrupted" | "failed";
 
@@ -170,6 +171,10 @@ export function resolveSidebarAvatarChipName(
   const aid = String(row.avatar_id ?? "").trim();
   if (!aid) return META_AGENT_DISPLAY_NAME;
   if (aid.startsWith("group:")) {
+    // Prefer live group registry name so every session of the same group
+    // shares one chip (new sessions often omit avatar_name → used to show「群聊」).
+    const fromMap = String(avatarNameById.get(aid) ?? "").trim();
+    if (fromMap) return fromMap;
     const fromRow = String(row.avatar_name ?? "").trim();
     if (fromRow) return fromRow;
     return "群聊";
@@ -179,6 +184,56 @@ export function resolveSidebarAvatarChipName(
   const fromRow = String(row.avatar_name ?? "").trim();
   if (fromRow) return fromRow;
   return aid.slice(0, 8);
+}
+
+/** Sidebar `activeAvatarId` only tracks real avatars — never group/automation pane ids. */
+export function activeAvatarIdForSidebarRow(avatarId: string | null | undefined): string | null {
+  const aid = String(avatarId ?? "").trim();
+  if (!aid) return null;
+  if (aid.startsWith("group:") || aid.startsWith("automation:")) return null;
+  return aid;
+}
+
+type SidebarPaneRef = {
+  id: string;
+  sessionId?: string;
+  avatarId?: string | null;
+};
+
+/**
+ * Resolve which pane should host a sidebar history open.
+ * Prefer an existing pane already bound to the session (avoids hijacking a
+ * same-avatar zombie pane), then fall back to avatar identity match.
+ */
+export function findPaneForSidebarSession(
+  panes: ReadonlyArray<SidebarPaneRef>,
+  row: Pick<SidebarSessionRow, "session_id" | "avatar_id">,
+  forcePaneId?: string
+): SidebarPaneRef | undefined {
+  if (forcePaneId) {
+    return panes.find((p) => p.id === forcePaneId);
+  }
+  const sid = String(row.session_id ?? "").trim();
+  if (sid) {
+    const bySession = panes.find((p) => String(p.sessionId ?? "").trim() === sid);
+    if (bySession) return bySession;
+  }
+  const target = String(row.avatar_id ?? "").trim();
+  return panes.find((p) => String(p.avatarId ?? "").trim() === target);
+}
+
+/**
+ * Early-return is only safe when the pane already has *renderable* rows for
+ * this session. Raw `messages.length > 0` is insufficient: untagged / wrong
+ * `ownerSessionId` rows are filtered out and leave a blank chat (common on
+ * group panes after stream/reattach), while "open in new tab" still works
+ * because it bootstraps from disk into a fresh pane.
+ */
+export function sidebarSessionHasRenderableMessages(
+  messages: ReadonlyArray<OwnedMessage>,
+  sessionId: string
+): boolean {
+  return visibleMessagesForSession(messages, sessionId).length > 0;
 }
 
 export function startOfLocalDay(d = new Date()): number {

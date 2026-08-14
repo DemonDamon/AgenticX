@@ -114,10 +114,18 @@ export function isThinkOnlyAssistantMessage(message: Message): boolean {
 
 /** Export keeps user/assistant answers + `show_widget` graphics. Other tools and
  * think-only assistant scraps are dropped so the PDF matches the visible conversation. */
-function isExportableMessage(message: Message): boolean {
+export function isExportableMessage(message: Message): boolean {
   if (message.role === "tool") return isShowWidgetToolMessage(message);
   if (isThinkOnlyAssistantMessage(message)) return false;
   return true;
+}
+
+/** Selected messages expanded to complete turns, then stripped of tool/think scraps. */
+export function messagesForShareExport(
+  selected: Message[],
+  allVisible: Message[],
+): Message[] {
+  return expandSelectionForCompletePdfExport(selected, allVisible).filter(isExportableMessage);
 }
 
 /**

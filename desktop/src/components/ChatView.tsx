@@ -3,6 +3,7 @@ import { useAppStore, type Message, type QueuedMessage } from "../store";
 import { VOICE_UI_ENABLED } from "../constants/feature-flags";
 import { formatModelOptionLabel } from "../utils/model-display";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
+import { getProviderDisplayName } from "../utils/provider-display";
 import { SubAgentPanel } from "./SubAgentPanel";
 import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
 import { speak } from "../voice/tts";
@@ -55,6 +56,8 @@ import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildCompactionNoticeText } from "../utils/context-notice";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
+import { StallWaitChip } from "./messages/StallWaitChip";
+import { parseStallWaitPayload, type StallWaitInfo } from "../utils/stall-wait-chip";
 import {
   isDoubleEnterWithinWindow,
   shouldEnqueueOnResend,
@@ -76,7 +79,7 @@ import {
   type ContinueSource,
 } from "../utils/session-continue";
 import { shouldDropDuplicateUserSend, type SendDedupeEntry } from "../utils/send-dedupe";
-import { ChatImAvatar, ImBubble } from "./messages/ImBubble";
+import { ImBubble } from "./messages/ImBubble";
 import { TerminalLine } from "./messages/TerminalLine";
 import { CleanBlock } from "./messages/CleanBlock";
 import { MessageQueuePanel } from "./messages/MessageQueuePanel";
@@ -479,6 +482,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     stall_auto_nudge_after_seconds: 120,
     stall_auto_nudge_max_per_session: 2,
   });
+  const [stallWait, setStallWait] = useState<StallWaitInfo | null>(null);
   const [autoNudgeCount, setAutoNudgeCount] = useState(0);
   const autoNudgeTriggeredRef = useRef<Record<string, number>>({});
   const autoNudgeBucketRef = useRef<Record<string, number>>({});
@@ -698,9 +702,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     streamingModel?.model,
   ]);
 
-  const modelLabel = activeModel
-    ? (activeProvider ? `${activeProvider} / ${activeModel}` : activeModel)
-    : "未选择模型";
+  const modelLabel = currentModelLabel;
   const selectedSubAgentName = useMemo(() => {
     if (!selectedSubAgent) return "";
     return subAgents.find((item) => item.id === selectedSubAgent)?.name ?? selectedSubAgent;
@@ -1366,6 +1368,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               reason: opts.continuation.reason,
               source: opts.continuation.source,
               suppress_user_echo: true,
+              ...(reqProvider ? { provider: reqProvider } : {}),
+              ...(reqModel ? { model: reqModel } : {}),
             }),
             signal: abortController.signal,
           })
@@ -1426,6 +1430,16 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             if (payload.type === "tool_progress") {
               if (!isCurrentRequest()) continue;
               recordProgressActivity();
+              const progressPhase = String(payload.data?.phase ?? "");
+              if (progressPhase === "stall_patient_wait") {
+                const info = parseStallWaitPayload(payload.data, Date.now());
+                if (info) setStallWait(info);
+                continue;
+              }
+              if (progressPhase === "stall_patient_recovered") {
+                setStallWait(null);
+                continue;
+              }
               const name = String(payload.data?.name ?? "tool");
               const sec = Number(payload.data?.elapsed_seconds ?? 0);
               const outputLine = payload.data?.line as string | undefined;
@@ -1465,9 +1479,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               if (!tokenText) continue;
               full += tokenText;
               cumulativeFull += tokenText;
+              setStallWait(null);
               scheduleStreamTextUpdate(full);
             }
             if (payload.type === "tool_call") {
+              setStallWait(null);
               const toolNameStr = String(payload.data?.name ?? "tool");
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
@@ -1611,7 +1627,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               const resultCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
               const rawContent = serializeToolResultRaw(resultRaw);
               const preview = formatted.content.replace(/\s+/g, " ").trim().slice(0, 160);
-              const mergedStatus = deriveToolStatusFromResult(resultRaw);
+              const mergedStatus = payload.data?.is_error === true
+                ? "error"
+                : deriveToolStatusFromResult(resultRaw);
               if (eventAgentId === "meta") {
                 const resultPatch = {
                   content: rawContent,
@@ -1823,6 +1841,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               }
             }
             if (payload.type === "final") {
+              setStallWait(null);
               if (eventAgentId !== "meta") {
                 flushSubAgentLiveOutput(eventAgentId);
                 updateSubAgent(eventAgentId, { status: "completed", currentAction: "已完成" });
@@ -1961,6 +1980,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               }
             }
             if (payload.type === "error") {
+              setStallWait(null);
               const errText = String(payload.data?.text ?? "未知错误");
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
@@ -1991,9 +2011,10 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                     noticeKind,
                   });
                 } else if (!isEphemeralStopErrorText(errText)) {
-                  // Hook-blocked: merge into existing ToolCallCard to avoid duplicate bubble.
+                  // Merge tool-scoped errors into the existing ToolCallCard when possible
+                  // (hook-block / not-loaded / permission deny all share tool_call_id).
                   const errToolCallId = String(payload.data?.tool_call_id ?? "").trim();
-                  if (HOOK_BLOCK_RE.test(errText) && errToolCallId) {
+                  if (errToolCallId) {
                     const merged = updateMessageByToolCallId(errToolCallId, {
                       content: errText,
                       toolStatus: "error",
@@ -2001,7 +2022,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                       toolStreamLines: [],
                     });
                     if (!merged) {
-                      addMessage("tool", errText, "meta");
+                      addMessage("tool", `❌ ${errText}`, "meta");
                     }
                   } else {
                     addMessage("tool", `❌ ${errText}`, "meta");
@@ -2160,7 +2181,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     });
   }, [sessionExecutionState, sessionId, stallNudgeConfig, stallState, stallTick]);
 
-  const resumeCurrentTask = useCallback(async () => {
+  const resumeCurrentTask = useCallback(async (modelOverride?: { provider: string; model: string }) => {
     if (!sessionId) return;
     let state: SessionExecutionState = sessionExecutionState;
     try {
@@ -2180,6 +2201,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       executionState: state,
     });
     await sendChatRef.current("", {
+      provider: modelOverride?.provider,
+      model: modelOverride?.model,
       continuation: { reason, source: "desktop_manual" },
     });
   }, [sessionExecutionState, sessionId, stallState]);
@@ -2187,10 +2210,20 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const resumeWithModel = useCallback(
     async (provider: string, model: string) => {
       setActiveModel(provider, model);
-      void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model });
-      await resumeCurrentTask();
+      void window.agenticxDesktop.saveConfig({ activeProvider: provider, activeModel: model }).then((result) => {
+        if (!result.ok) {
+          console.warn("[ChatView] global model persistence failed", result.error);
+        }
+      });
+      if (sessionId) {
+        const persisted = await window.agenticxDesktop.setSessionModel({ sessionId, provider, model });
+        if (!persisted.ok) {
+          console.warn("[ChatView] session model persistence failed; continuing with explicit override", persisted.error);
+        }
+      }
+      await resumeCurrentTask({ provider, model });
     },
-    [resumeCurrentTask, setActiveModel]
+    [resumeCurrentTask, sessionId, setActiveModel]
   );
 
   const send = async (manualInput?: string) => {
@@ -2467,7 +2500,18 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                     onSelect={(p, m) => {
                       setActiveModel(p, m);
                       setHeaderModelPickerOpen(false);
-                      void window.agenticxDesktop.saveConfig({ activeProvider: p, activeModel: m });
+                      void window.agenticxDesktop.saveConfig({ activeProvider: p, activeModel: m }).then((result) => {
+                        if (!result.ok) {
+                          console.warn("[ChatView] global model persistence failed", result.error);
+                        }
+                      });
+                      if (sessionId) {
+                        void window.agenticxDesktop.setSessionModel({ sessionId, provider: p, model: m }).then((result) => {
+                          if (!result.ok) {
+                            console.warn("[ChatView] session model persistence failed", result.error);
+                          }
+                        });
+                      }
                     }}
                     onClose={() => setHeaderModelPickerOpen(false)}
                   />
@@ -2703,6 +2747,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               />
             </div>
           ) : null}
+          {stallWait ? (
+            <div className="mb-2 flex justify-start">
+              <StallWaitChip info={stallWait} />
+            </div>
+          ) : null}
           {stallState === "stall" ? (
             <StallRecoveryCard
               kind="stall"
@@ -2846,6 +2895,13 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             <button className="flex h-10 shrink-0 items-center rounded-xl bg-btnPrimary px-4 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40 disabled:hover:bg-btnPrimary" disabled={!canSend || !input.trim()} onClick={() => void send()}>发送</button>
           )}
           </div>
+          {messages.some((m) => m.role === "user" || m.role === "assistant") ? (
+            <div className="mt-1.5 flex justify-center px-0.5">
+              <p className="select-none text-[11px] leading-none text-text-faint">
+                内容由 AI 生成，请核实重要信息
+              </p>
+            </div>
+          ) : null}
         </div>
         {!isLite && <ShortcutHints />}
       </div>
@@ -2884,13 +2940,63 @@ function ModelPickerDropdown({ onSelect, onClose }: { onSelect: (p: string, m: s
     () => collectSelectableModelOptions(settings.providers, " | "),
     [settings.providers],
   );
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+
+  const groups = useMemo(() => {
+    const byProvider = new Map<string, typeof options>();
+    for (const option of options) {
+      const items = byProvider.get(option.provider) ?? [];
+      items.push(option);
+      byProvider.set(option.provider, items);
+    }
+    return [...byProvider.entries()].map(([provider, items]) => ({
+      provider,
+      items,
+      label: getProviderDisplayName(provider, settings.providers[provider]),
+    }));
+  }, [options, settings.providers]);
 
   if (options.length === 0) {
     return <div className="px-3 py-4 text-center text-xs text-text-faint">请先在设置中配置 Provider 和模型</div>;
   }
+
+  const selectedGroup = expandedProvider
+    ? groups.find((group) => group.provider === expandedProvider) ?? null
+    : null;
+
+  if (!selectedGroup) {
+    return (
+      <div className="max-h-[240px] overflow-y-auto">
+        <div className="px-3 pb-2 text-[11px] text-text-faint">先选择模型提供商</div>
+        {groups.map((group) => (
+          <button
+            key={group.provider}
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+            onClick={() => setExpandedProvider(group.provider)}
+          >
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+            <span className="min-w-0 flex-1 truncate font-medium">{group.label}</span>
+            <span className="shrink-0 text-[11px] text-text-faint">{group.items.length} 个模型</span>
+            <span className="text-xs text-text-faint">›</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="max-h-[240px] overflow-y-auto">
-      {options.map((opt) => (
+      <button
+        type="button"
+        className="mb-1 flex w-full items-center gap-1.5 rounded-md px-3 py-1.5 text-left text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
+        onClick={() => setExpandedProvider(null)}
+      >
+        <span aria-hidden>‹</span>
+        <span>全部提供商</span>
+      </button>
+      <div className="px-3 pb-1 text-[11px] font-medium text-text-faint">{selectedGroup.label} · 选择模型</div>
+      {selectedGroup.items.map((opt) => (
         <button
           key={`${opt.provider}:${opt.model}`}
           type="button"
@@ -2898,7 +3004,7 @@ function ModelPickerDropdown({ onSelect, onClose }: { onSelect: (p: string, m: s
           onClick={() => { onSelect(opt.provider, opt.model); onClose(); }}
         >
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-          <span className="truncate">{opt.label}</span>
+          <span className="truncate">{opt.model}</span>
         </button>
       ))}
     </div>

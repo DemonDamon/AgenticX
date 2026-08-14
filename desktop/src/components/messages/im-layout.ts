@@ -95,9 +95,9 @@ export const ASSISTANT_TIMELINE_PX = {
 export const ASSISTANT_INLINE_CARD_SHELL_CLASS =
   "my-2 ml-3 min-w-0 w-full max-w-[min(calc(100%-0.75rem),520px)]";
 
-/** Group chat: skip avatar column (w-8 + gap-2) before the same content inset. */
+/** Group chat: same content inset as Meta (no avatar column). */
 export const GROUP_INLINE_CARD_SHELL_CLASS =
-  "my-2 ml-10 min-w-0 w-full max-w-[min(calc(100%-2.5rem),520px)]";
+  "my-2 ml-3 min-w-0 w-full max-w-[min(calc(100%-0.75rem),520px)]";
 
 /** Uniform vertical gap: body → icon row → follow-up chips (matches composer pt-2.5 rhythm). */
 export const ASSISTANT_ACTION_RHYTHM_GAP_CLASS = "gap-2.5";
@@ -133,8 +133,11 @@ export const ASSISTANT_ACTION_ICON_ONLY_CLASS = "mb-6 mt-2.5 min-w-0 self-stretc
 
 /** Stack of follow-up chips — chip-to-chip spacing only (icon→first chip uses parent gap). */
 export const ASSISTANT_FOLLOWUP_LIST_CLASS =
-  "flex min-w-0 flex-col items-start gap-2.5 self-stretch";
+  "flex min-w-0 flex-col items-start gap-2 self-stretch";
 
-/** Elevated pill for suggested follow-up questions — solid fill vs page bg (Doubao-like). */
+/**
+ * Soft filled pill for suggested follow-ups (Doubao-like): tinted fill, no stroke,
+ * width hugs the text so the block never reads as full-width buttons.
+ */
 export const ASSISTANT_FOLLOWUP_CHIP_CLASS =
-  "agx-followup-chip group flex max-w-full w-fit items-center gap-1.5 rounded-xl border px-4 py-2.5 text-left text-[13px] leading-snug text-text-subtle transition-colors duration-150 hover:text-text-primary whitespace-normal";
+  "agx-followup-chip group flex max-w-full w-fit items-center gap-3 rounded-2xl border-0 px-4 py-2 text-left text-[13px] leading-snug text-text-subtle transition-colors duration-150 hover:text-text-primary whitespace-normal";
