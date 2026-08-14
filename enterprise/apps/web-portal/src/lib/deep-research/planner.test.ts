@@ -180,6 +180,7 @@ describe("buildResearchPlan", () => {
       messages: Array<{ role: string; content: string }>;
     };
     expect(body.messages).toHaveLength(4);
+    expect(body.messages[0]?.content).toContain("所有调研车道必须严格围绕该文档本身展开");
     expect(body.messages[1]?.content).toContain("2026-08-02");
     expect(body.messages[2]?.content).toContain("已发布");
     expect(body.messages[3]?.role).toBe("user");

@@ -3,6 +3,7 @@
  */
 
 import { parseLlmJson } from "./llm-json";
+import { DIRECT_DOCUMENT_RESEARCH_ANCHOR_POLICY } from "./direct-document-intent";
 
 export const MIN_VARIANTS_PER_LANE = 2;
 export const MAX_VARIANTS_PER_LANE = 4;
@@ -27,6 +28,7 @@ const EXPAND_SYSTEM = [
   `条数 ${MIN_VARIANTS_PER_LANE}-${MAX_VARIANTS_PER_LANE}。必须包含一条 kind=primary（子问题原文）。`,
   "变体应覆盖：术语同义、英文检索、权威源（论文/官方文档/技术报告）、时效限定、反面/质疑向。",
   "每条变体必须换检索角度：改换关键词、语言或限定源。仅增删助词、标点、语序的变体一律不要——它们会命中同一批网页，等于白花检索配额。",
+  DIRECT_DOCUMENT_RESEARCH_ANCHOR_POLICY,
   "kind 取值：primary|term|english|authority|recency|contrarian。",
 ].join("\n");
 

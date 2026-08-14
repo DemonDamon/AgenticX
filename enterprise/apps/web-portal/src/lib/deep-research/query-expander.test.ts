@@ -1,11 +1,30 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_VARIANTS_PER_LANE,
+  expandQueries,
   heuristicVariants,
   isNearDuplicateQuery,
   parseVariantsJson,
   querySimilarity,
 } from "./query-expander";
+
+describe("expandQueries", () => {
+  it("anchors generated variants to an explicitly specified document", async () => {
+    let captured: Array<{ role: string; content: string }> = [];
+    await expandQueries({
+      callJson: async (messages) => {
+        captured = messages;
+        return '[{"query":"arXiv 2606.19348 limitations","kind":"primary"}]';
+      },
+      topic: "arXiv 2606.19348",
+      subQuestion: "这篇文章的局限性是什么？",
+      todayLine: "今天是 2026-08-14（UTC+8）。",
+    });
+
+    expect(captured[0]?.content).toContain("所有调研车道必须严格围绕该文档本身展开");
+    expect(captured[0]?.content).toContain("严禁泛化");
+  });
+});
 
 describe("heuristicVariants", () => {
   it("adds english variant for CJK queries", () => {

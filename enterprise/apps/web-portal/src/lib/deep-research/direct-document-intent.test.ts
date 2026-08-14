@@ -38,7 +38,30 @@ describe("direct document research intent", () => {
     ]);
 
     expect(reference).not.toBeNull();
-    expect(resolveDirectDocumentResearchQuery(reference!)).toBe("Table 8 的通过率是多少？");
+    expect(resolveDirectDocumentResearchQuery(reference!)).toBe(
+      "围绕用户指定的论文（arXiv 2606.19348）回答：Table 8 的通过率是多少？",
+    );
+  });
+
+  it("restores the unique document identity for a specific multi-turn follow-up", () => {
+    const reference = resolveDirectPageReference([
+      {
+        role: "user",
+        content: "https://arxiv.org/pdf/2606.19348 你能读懂这篇文章吗？",
+      },
+      { role: "assistant", content: "可以，我已经读完并总结了这篇论文。" },
+      { role: "user", content: "那这篇文章的局限性是什么？" },
+    ]);
+
+    expect(reference).toMatchObject({
+      identity: "arxiv:2606.19348",
+      question: "那这篇文章的局限性是什么？",
+      explicitInCurrentTurn: false,
+    });
+    expect(isGenericDirectDocumentPrompt(reference!.question)).toBe(false);
+    expect(resolveDirectDocumentResearchQuery(reference!)).toBe(
+      "围绕用户指定的论文（arXiv 2606.19348）回答：那这篇文章的局限性是什么？",
+    );
   });
 
   it("does not classify a scoped analysis request as generic", () => {

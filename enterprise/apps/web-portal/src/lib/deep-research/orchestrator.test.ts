@@ -225,6 +225,60 @@ describe("runDeepResearchTurn", () => {
     expect(JSON.stringify(gatewayBodies)).toContain("Pass Rate Internal Engineers 80 percent");
   });
 
+  it("keeps a unique historical paper identity in recon and planning for a follow-up", async () => {
+    const runReconFn = vi.fn(async (_deps: ReconDeps) => ({ brief: "", hits: [] }));
+    const buildPlan = vi.fn(async (_deps: PlannerDeps) => ({
+      topic: "论文局限",
+      complexity: "simple" as const,
+      subQuestions: ["arXiv 2606.19348 的局限"],
+    }));
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: "lane memo" } }] }),
+        } as Response;
+      }
+      return synthUpstream("report");
+    });
+
+    const response = await runDeepResearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "https://arxiv.org/pdf/2606.19348 你能读懂这篇文章吗？" },
+          { role: "assistant", content: "可以，下面是论文概览。" },
+          { role: "user", content: "那这篇文章的局限性是什么？" },
+        ],
+        agenticx_deep_research: true,
+      },
+      {
+        ...baseDeps({
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          runReconFn,
+          buildPlan,
+          readPage: async (reference: DirectPageView["reference"]): Promise<DirectPageView> => ({
+            reference,
+            title: "Paper",
+            text: "Abstract. Limitations include evaluation scope and benchmark coverage.",
+            rawChars: 72,
+            coverage: "full_html",
+            backend: "native",
+          }),
+          executeSearch: async () => [],
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    const groundedQuery =
+      "围绕用户指定的论文（arXiv 2606.19348）回答：那这篇文章的局限性是什么？";
+    expect(runReconFn.mock.calls[0]?.[0]?.query).toBe(groundedQuery);
+    expect(buildPlan.mock.calls[0]?.[0]?.userQuery).toContain(groundedQuery);
+    expect(buildPlan.mock.calls[0]?.[0]?.userQuery).not.toContain("通用阅读");
+  });
+
   it("emits structured events, streams report, and sources frame without gray progress", async () => {
     const plan: ResearchPlan = {
       topic: "主题",
