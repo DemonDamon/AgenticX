@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  assessDeepResearchShape,
   buildAutoTurnPlanMessages,
   MAX_DEEP_RESEARCH_QUERY_CHARS,
   MIN_AUTO_DEEP_RESEARCH_CONFIDENCE,
+  MIN_RULE_ASSISTED_ROUTE_CONFIDENCE,
   parseAutoTurnPlan,
   parseDeepResearchQueryResolution,
   planAutomaticTurn,
@@ -19,6 +21,20 @@ function gatewayJson(content: string, status = 200): Response {
 }
 
 describe("automatic turn routing", () => {
+  it("uses independent structural signals for deterministic calibration", () => {
+    expect(
+      assessDeepResearchShape(
+        "系统比较 A 与 B，交叉核验多个来源，并输出带引用的证据报告",
+      ),
+    ).toBe("strong");
+    expect(assessDeepResearchShape("研究一下天气")).toBe("reject");
+    expect(assessDeepResearchShape("什么是深度研究报告？")).toBe("reject");
+    expect(
+      assessDeepResearchShape("请总结 https://example.com/paper 这篇文章"),
+    ).toBe("reject");
+    expect(assessDeepResearchShape("把这段话翻译成英文")).toBe("reject");
+  });
+
   it("sends recent conversation context and current query to the routing agent", () => {
     const messages = buildAutoTurnPlanMessages(
       [
@@ -447,6 +463,79 @@ describe("automatic turn routing", () => {
     expect((init.headers as Record<string, string>)["x-agenticx-trace-stage"]).toBe(
       "chat.deep-research-auto-route",
     );
+  });
+
+  it("rescues a strong first-turn request at the route-confidence floor", async () => {
+    const currentQuery =
+      "系统比较 A 与 B，交叉核验多个来源，并输出带引用的证据报告";
+    const outcome = await planAutomaticTurn(
+      [{ role: "user", content: currentQuery }],
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: vi.fn(async () =>
+          gatewayJson(
+            JSON.stringify({
+              mode: "deep",
+              research_query: "",
+              route_confidence: MIN_RULE_ASSISTED_ROUTE_CONFIDENCE,
+              query_confidence: 0.5,
+              reason: "可能需要多源核验",
+            }),
+          )) as unknown as typeof fetch,
+      },
+      AUTO_OPTIONS,
+    );
+
+    expect(outcome).toMatchObject({
+      kind: "planned",
+      plan: {
+        mode: "deep",
+        researchQuery: currentQuery,
+        intentConfidence: {
+          routeConfidence: MIN_RULE_ASSISTED_ROUTE_CONFIDENCE,
+          queryConfidence: 1,
+        },
+      },
+    });
+  });
+
+  it("does not rescue a context-dependent query when its rewrite is uncertain", async () => {
+    const outcome = await planAutomaticTurn(
+      [
+        { role: "user", content: "比较 A 与 B 的市场表现" },
+        { role: "assistant", content: "上一轮结果" },
+        { role: "user", content: "继续系统比较这些方案并输出证据报告" },
+      ],
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: vi.fn(async () =>
+          gatewayJson(
+            '{"mode":"deep","research_query":"可能补错的研究对象","route_confidence":0.65,"query_confidence":0.5,"reason":"对象不确定"}',
+          )) as unknown as typeof fetch,
+      },
+      AUTO_OPTIONS,
+    );
+
+    expect(outcome).toEqual({ kind: "fallback", reason: "low_deep_confidence" });
+  });
+
+  it("vetoes a lightweight task even when the model reports 0.99", async () => {
+    const outcome = await planAutomaticTurn(
+      [{ role: "user", content: "把这段话翻译成英文" }],
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: vi.fn(async () =>
+          gatewayJson(
+            '{"mode":"deep","research_query":"翻译这段话","route_confidence":0.99,"query_confidence":0.99,"reason":"误判"}',
+          )) as unknown as typeof fetch,
+      },
+      AUTO_OPTIONS,
+    );
+
+    expect(outcome).toEqual({ kind: "fallback", reason: "rule_rejected_deep" });
   });
 
   it("trusts the agent's normal-chat decision even when the text sounds research-like", async () => {

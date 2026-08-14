@@ -4,6 +4,7 @@ import {
   buildContextualQueryPayload,
   hasPriorSearchQueryLeakage,
   parseSearchQueryRewriteValue,
+  type ContextualQueryPayload,
 } from "../web-search/follow-up";
 import {
   sanitizeResearchRequest,
@@ -31,6 +32,7 @@ export type AutoTurnPlanOutcome =
         | "invalid_output"
         | "low_plain_confidence"
         | "low_deep_confidence"
+        | "rule_rejected_deep"
         | "web_not_allowed"
         | "web_query_leakage";
     };
@@ -70,6 +72,8 @@ export type DeepResearchAutoPromptMessage = {
 
 const CLASSIFIER_TIMEOUT_MS = 8000;
 export const MIN_AUTO_DEEP_RESEARCH_CONFIDENCE = 0.8;
+/** Strong request structure may rescue only a borderline route score above this floor. */
+export const MIN_RULE_ASSISTED_ROUTE_CONFIDENCE = 0.5;
 export const MIN_AUTO_PLAIN_CONFIDENCE = 0.7;
 export const MIN_DEEP_RESEARCH_QUERY_CONFIDENCE = 0.7;
 export const MAX_DEEP_RESEARCH_QUERY_CHARS = 1_200;
@@ -80,6 +84,32 @@ const DEEP_RESEARCH_CONTEXT_BUDGET = {
   maxCurrentQueryChars: 1_600,
   preserveTail: true,
 } as const;
+
+export type DeepResearchShapeVerdict = "strong" | "neutral" | "reject";
+
+const EXPLICIT_RESEARCH_RE =
+  /深度研究|深入调研|系统调研|全面调研|专项调研|研究报告|尽职调查|deep research|in-depth research|due diligence/iu;
+const MULTI_SOURCE_RE =
+  /多(?:个|方|源)?来源|交叉核验|相互印证|证据链|引用来源|参考文献|文献综述|原始资料|multi[- ]source|cross[- ]check|triangulat|citation|bibliograph/iu;
+const COMPARATIVE_RE =
+  /比较|对比|差异|优劣|利弊|取舍|竞争格局|横向评测|基准测试|失败模式|风险评估|成本分析|方案评估|versus|\bvs\.?\b|compar(?:e|ison|ative)|benchmark|trade[- ]?off|failure mode|risk assessment/iu;
+const MULTI_DIMENSION_RE =
+  /(?:现状|趋势|原因|影响|风险|成本|方法|证据|结论|建议|局限|案例).{0,20}(?:现状|趋势|原因|影响|风险|成本|方法|证据|结论|建议|局限|案例)|多个维度|系统性|全景|产业链|时间线|multi[- ]dimensional|landscape|timeline/iu;
+const RESEARCH_DELIVERABLE_RE =
+  /(?:输出|形成|撰写|给出|生成).{0,16}(?:研究报告|评估报告|调研报告|证据报告|分析报告|章节|表格|路线图)|不少于\s*\d+\s*字|附(?:上)?引用|标注来源|executive summary|research report|assessment report|with citations/iu;
+
+const SIMPLE_LOOKUP_RE =
+  /^(?:请|麻烦|帮我|能否|可以|你能)?\s*(?:告诉我|查一下|搜一下|解释一下)?\s*(?:什么是|谁是|哪一年|何时|什么时候|几点|多少度|今天天气|明天天气|汇率是多少|价格是多少|现在多少钱|what is|who is|when is|what time|weather|how much)/iu;
+const UTILITY_TASK_RE =
+  /翻译|润色|改写|续写|校对|纠错|摘要(?:一下|上面|上述|这段|本文)|总结(?:一下|上面|上述|这段|本文)|解释(?:一下|上面|上述|这段)|写一封|写邮件|生成标题|起标题|计算|算一下|translate|proofread|polish|rewrite|paraphrase|summari[sz]e (?:this|the above)|explain (?:this|the above)|draft (?:an? )?email|calculate/iu;
+const SIMPLE_FACT_TOPIC_RE =
+  /天气|气温|几点|当前时间|现在时间|汇率|多少钱|股价|weather|temperature|current time|exchange rate|stock price/iu;
+const DIRECT_PAGE_RE =
+  /https?:\/\/|\barxiv\s*[:：]?\s*\d{4}\.\d{4,5}\b|\bdoi\s*[:：]?\s*10\.\d{4,9}\//iu;
+const SINGLE_PAGE_TASK_RE =
+  /读懂|阅读|总结|概括|摘要|讲解|解释|主要内容|核心观点|这篇(?:文章|论文)|该(?:文章|论文)|summari[sz]e|explain|read this|key points/iu;
+const CONTEXT_DEPENDENCY_RE =
+  /这(?:个|些|篇|份|项|几家)|那(?:个|些|篇|份|项|几家)|上述|前述|前者|后者|上面|刚才|之前|继续|再查|再研究|它(?:们)?|他(?:们)?|她(?:们)?|其中|同一个|\b(?:this|that|these|those|it|they|them|former|latter|above|previous|same one|continue)\b/iu;
 
 function buildAutoTurnSystemPrompt(options: AutoTurnPlanOptions): string {
   const maxSearchCalls = normalizeMaxSearchCalls(
@@ -143,6 +173,69 @@ function collapseWhitespace(text: string): string {
   return output.trim();
 }
 
+/**
+ * Calibrate an uncalibrated model score with request structure, not keywords.
+ * A single word such as “研究” or “报告” is never sufficient: strong requires
+ * at least two independent signals. Obvious lightweight tasks veto an expensive
+ * lane even when a small model reports an overconfident score.
+ */
+export function assessDeepResearchShape(query: string): DeepResearchShapeVerdict {
+  const text = collapseWhitespace(query);
+  if (!text) return "reject";
+
+  const hasMultiSource = MULTI_SOURCE_RE.test(text);
+  const hasComparison = COMPARATIVE_RE.test(text);
+  const hasDimensions = MULTI_DIMENSION_RE.test(text);
+  const hasExplicitResearch = EXPLICIT_RESEARCH_RE.test(text);
+  const hasDeliverable = RESEARCH_DELIVERABLE_RE.test(text);
+  const substantiveSignals = [
+    hasMultiSource,
+    hasComparison,
+    hasDimensions,
+    hasExplicitResearch,
+    hasDeliverable,
+  ].filter(Boolean).length;
+
+  // “什么是深度研究报告” contains research nouns but is still a simple
+  // concept lookup. Only actual evidence/comparison/dimensional structure may
+  // override this lightweight shape.
+  if (
+    SIMPLE_LOOKUP_RE.test(text) &&
+    !hasMultiSource &&
+    !hasComparison &&
+    !hasDimensions
+  ) {
+    return "reject";
+  }
+  if (UTILITY_TASK_RE.test(text) && substantiveSignals < 2) return "reject";
+  if (
+    SIMPLE_FACT_TOPIC_RE.test(text) &&
+    !hasMultiSource &&
+    !hasComparison &&
+    !hasDimensions
+  ) {
+    return "reject";
+  }
+  if (
+    DIRECT_PAGE_RE.test(text) &&
+    SINGLE_PAGE_TASK_RE.test(text) &&
+    !hasMultiSource &&
+    !hasComparison &&
+    !hasDimensions
+  ) {
+    return "reject";
+  }
+  if (substantiveSignals >= 2) return "strong";
+  return "neutral";
+}
+
+function canUseCurrentQueryWithoutModelRewrite(
+  payload: ContextualQueryPayload,
+): boolean {
+  if (payload.conversation.length < 2) return true;
+  return !CONTEXT_DEPENDENCY_RE.test(payload.current_query);
+}
+
 export function buildAutoTurnPlanMessages(
   messages: ResearchMessage[],
   options: AutoTurnPlanOptions,
@@ -182,6 +275,7 @@ function parsePlanReason(value: unknown): string {
 export function parseAutoTurnPlan(
   raw: string,
   options: AutoTurnPlanOptions,
+  calibrationPayload?: ContextualQueryPayload,
 ): AutoTurnPlanOutcome | null {
   const parsed = parseLlmJson<Record<string, unknown>>(raw);
   if (!parsed || typeof parsed.mode !== "string") return null;
@@ -236,19 +330,63 @@ export function parseAutoTurnPlan(
     parsed.research_query,
     MAX_DEEP_RESEARCH_QUERY_CHARS,
   );
-  if (!researchQuery) return null;
-  if (
-    routeConfidence < MIN_AUTO_DEEP_RESEARCH_CONFIDENCE ||
-    queryConfidence < MIN_AUTO_DEEP_RESEARCH_CONFIDENCE
-  ) {
-    return { kind: "fallback", reason: "low_deep_confidence" };
+
+  const shapeVerdict = calibrationPayload
+    ? assessDeepResearchShape(calibrationPayload.current_query)
+    : "neutral";
+  if (shapeVerdict === "reject") {
+    console.info("[deep-research] automatic deep route vetoed by request shape");
+    return { kind: "fallback", reason: "rule_rejected_deep" };
   }
+
+  const modelAccepted =
+    routeConfidence >= MIN_AUTO_DEEP_RESEARCH_CONFIDENCE &&
+    queryConfidence >= MIN_AUTO_DEEP_RESEARCH_CONFIDENCE;
+  if (modelAccepted && !researchQuery) return null;
+  let resolvedResearchQuery = researchQuery;
+  let effectiveQueryConfidence = queryConfidence;
+
+  if (!modelAccepted) {
+    const ruleAssisted =
+      calibrationPayload !== undefined &&
+      shapeVerdict === "strong" &&
+      routeConfidence >= MIN_RULE_ASSISTED_ROUTE_CONFIDENCE;
+    if (!ruleAssisted) {
+      return { kind: "fallback", reason: "low_deep_confidence" };
+    }
+
+    if (
+      queryConfidence < MIN_AUTO_DEEP_RESEARCH_CONFIDENCE ||
+      !resolvedResearchQuery
+    ) {
+      if (!canUseCurrentQueryWithoutModelRewrite(calibrationPayload)) {
+        return { kind: "fallback", reason: "low_deep_confidence" };
+      }
+      resolvedResearchQuery = sanitizeResearchRequest(
+        calibrationPayload.current_query,
+        MAX_DEEP_RESEARCH_QUERY_CHARS,
+      );
+      if (!resolvedResearchQuery) return null;
+      // The original user-authored query does not depend on the model rewrite.
+      // Keep the low route score so clarification is still conservative.
+      effectiveQueryConfidence = 1;
+    }
+    console.info(
+      `[deep-research] automatic deep route rule-assisted route_confidence=${routeConfidence.toFixed(
+        2,
+      )} query_source=${effectiveQueryConfidence === 1 && queryConfidence < 1 ? "current" : "model"}`,
+    );
+  }
+  if (!resolvedResearchQuery) return null;
   return {
     kind: "planned",
     plan: {
       mode: "deep",
-      researchQuery,
-      intentConfidence: { routeConfidence, queryConfidence },
+      researchQuery: resolvedResearchQuery,
+      intentConfidence: {
+        routeConfidence,
+        queryConfidence: effectiveQueryConfidence,
+      },
       reason,
     },
   };
@@ -416,17 +554,25 @@ export async function planAutomaticTurn(
   options: AutoTurnPlanOptions,
 ): Promise<AutoTurnPlanOutcome> {
   try {
-    const promptMessages = buildAutoTurnPlanMessages(messages, options, deps.now);
-    if (!promptMessages) {
+    const payload = buildContextualQueryPayload(
+      messages,
+      deps.now,
+      DEEP_RESEARCH_CONTEXT_BUDGET,
+    );
+    if (!payload) {
       return { kind: "fallback", reason: "missing_current_query" };
     }
+    const promptMessages: DeepResearchAutoPromptMessage[] = [
+      { role: "system", content: buildAutoTurnSystemPrompt(options) },
+      { role: "user", content: JSON.stringify(payload) },
+    ];
     const raw = await callDeepResearchRoutingAgent(
       promptMessages,
       deps,
       "chat.deep-research-auto-route",
       384,
     );
-    const outcome = parseAutoTurnPlan(raw, options);
+    const outcome = parseAutoTurnPlan(raw, options, payload);
     if (!outcome) return { kind: "fallback", reason: "invalid_output" };
     if (
       outcome.kind === "planned" &&
