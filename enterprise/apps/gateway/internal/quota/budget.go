@@ -33,13 +33,21 @@ type BudgetRule struct {
 	FallbackModel    string  `json:"fallbackModel,omitempty"`
 }
 
+// CompanyMonthlyLimits are independent hard stops applied before scoped budget rules.
+// Tokens remain authoritative even when model prices are missing or incorrect.
+type CompanyMonthlyLimits struct {
+	Tokens  int64   `json:"tokens"`
+	CostUSD float64 `json:"costUsd"`
+}
+
 // BudgetConfig is the admin-published budget bundle.
 type BudgetConfig struct {
-	UpdatedAt   string                `json:"updatedAt,omitempty"`
-	Defaults    BudgetRule            `json:"defaults"`
-	Tenants     map[string]BudgetRule `json:"tenants"`
-	Departments map[string]BudgetRule `json:"departments"`
-	Users       map[string]BudgetRule `json:"users"`
+	UpdatedAt     string                `json:"updatedAt,omitempty"`
+	CompanyLimits CompanyMonthlyLimits  `json:"companyLimits,omitempty"`
+	Defaults      BudgetRule            `json:"defaults"`
+	Tenants       map[string]BudgetRule `json:"tenants"`
+	Departments   map[string]BudgetRule `json:"departments"`
+	Users         map[string]BudgetRule `json:"users"`
 }
 
 // BudgetDecision is the outcome of a budget check.
@@ -155,6 +163,12 @@ func (t *Tracker) loadBudgetConfig() BudgetConfig {
 }
 
 func normalizeBudgetConfig(cfg BudgetConfig) BudgetConfig {
+	if cfg.CompanyLimits.Tokens < 0 {
+		cfg.CompanyLimits.Tokens = 0
+	}
+	if cfg.CompanyLimits.CostUSD < 0 {
+		cfg.CompanyLimits.CostUSD = 0
+	}
 	if cfg.Tenants == nil {
 		cfg.Tenants = map[string]BudgetRule{}
 	}
@@ -241,6 +255,50 @@ func selectBudgetRule(cfg BudgetConfig, ctx RequestContext) (BudgetRule, string,
 	return BudgetRule{}, "", ""
 }
 
+type budgetTarget struct {
+	rule      BudgetRule
+	dimension string
+	key       string
+}
+
+func selectBudgetTargets(cfg BudgetConfig, ctx RequestContext) []budgetTarget {
+	key := strings.TrimSpace(ctx.TenantID)
+	if key == "" {
+		key = "default"
+	}
+	targets := make([]budgetTarget, 0, 3)
+	if cfg.CompanyLimits.Tokens > 0 {
+		targets = append(targets, budgetTarget{
+			rule: BudgetRule{
+				Unit:             BudgetUnitTokens,
+				Period:           BudgetPeriodMonth,
+				Limit:            float64(cfg.CompanyLimits.Tokens),
+				WarnThresholdPct: 80,
+				Action:           ActionBlock,
+			},
+			dimension: "company",
+			key:       key,
+		})
+	}
+	if cfg.CompanyLimits.CostUSD > 0 {
+		targets = append(targets, budgetTarget{
+			rule: BudgetRule{
+				Unit:             BudgetUnitCostUSD,
+				Period:           BudgetPeriodMonth,
+				Limit:            cfg.CompanyLimits.CostUSD,
+				WarnThresholdPct: 80,
+				Action:           ActionBlock,
+			},
+			dimension: "company",
+			key:       key,
+		})
+	}
+	if rule, dimension, dimKey := selectBudgetRule(cfg, ctx); rule.Limit > 0 {
+		targets = append(targets, budgetTarget{rule: rule, dimension: dimension, key: dimKey})
+	}
+	return targets
+}
+
 func budgetPeriodKey(period string, at time.Time) string {
 	switch period {
 	case BudgetPeriodDay:
@@ -266,19 +324,14 @@ func budgetDelta(rule BudgetRule, tokens int64, costUSD float64) float64 {
 	return costUSD
 }
 
-// CheckBudget evaluates budget before a request. Storage failures fail-open.
+// CheckBudget evaluates independent company token/cost limits plus the selected
+// scoped budget rule. Storage failures fail-open.
 func (t *Tracker) CheckBudget(ctx RequestContext, tokens int64, costUSD float64) BudgetDecision {
 	cfg := t.loadBudgetConfig()
-	rule, dimension, dimKey := selectBudgetRule(cfg, ctx)
-	if rule.Limit <= 0 {
+	targets := selectBudgetTargets(cfg, ctx)
+	if len(targets) == 0 {
 		return BudgetDecision{Allowed: true, Description: "no budget"}
 	}
-	delta := budgetDelta(rule, tokens, costUSD)
-	if delta <= 0 {
-		return BudgetDecision{Allowed: true, Description: "no budget delta"}
-	}
-	at := time.Now().UTC()
-	period := budgetPeriodKey(rule.Period, at)
 
 	unlock, lockOK := t.lockBudgetUsageFile()
 	if !lockOK {
@@ -286,68 +339,88 @@ func (t *Tracker) CheckBudget(ctx RequestContext, tokens int64, costUSD float64)
 	}
 	defer unlock()
 
-	used := t.readBudgetUsedLocked(rule, dimension, dimKey, period)
-	after := used + delta
-	warnAt := rule.Limit * rule.WarnThresholdPct / 100
-
-	decision := BudgetDecision{
+	type pendingBudget struct {
+		target   budgetTarget
+		period   string
+		delta    float64
+		decision BudgetDecision
+	}
+	pending := make([]pendingBudget, 0, len(targets))
+	var notable *BudgetDecision
+	for _, target := range targets {
+		delta := budgetDelta(target.rule, tokens, costUSD)
+		if delta <= 0 {
+			continue
+		}
+		period := budgetPeriodKey(target.rule.Period, time.Now().UTC())
+		used := t.readBudgetUsedLocked(target.rule, target.dimension, target.key, period)
+		after := used + delta
+		warnAt := target.rule.Limit * target.rule.WarnThresholdPct / 100
+		decision := BudgetDecision{
+			Allowed:      true,
+			Unit:         target.rule.Unit,
+			Period:       period,
+			Dimension:    target.dimension,
+			DimensionKey: target.key,
+			Used:         after,
+			Limit:        target.rule.Limit,
+			WarnPct:      target.rule.WarnThresholdPct,
+			Action:       target.rule.Action,
+		}
+		if after > target.rule.Limit {
+			switch target.rule.Action {
+			case ActionBlock:
+				decision.Allowed = false
+				decision.Blocked = true
+				decision.Description = "policy:budget:exceeded"
+				t.emitBudgetAlert(ctx, decision, "block")
+				return decision
+			case ActionFallback:
+				decision.FallbackModel = target.rule.FallbackModel
+				decision.Description = "policy:budget:fallback"
+			default:
+				decision.Warn = true
+				decision.Description = "policy:budget:exceeded_warn"
+			}
+		} else if warnAt > 0 && used < warnAt && after >= warnAt {
+			decision.Warn = true
+			decision.Description = "policy:budget:warn"
+		}
+		pending = append(pending, pendingBudget{target: target, period: period, delta: delta, decision: decision})
+		if notable == nil && (decision.Warn || decision.FallbackModel != "") {
+			copy := decision
+			notable = &copy
+		}
+	}
+	if len(pending) == 0 {
+		return BudgetDecision{Allowed: true, Description: "no budget delta"}
+	}
+	for _, item := range pending {
+		if !t.addBudgetUsageLocked(item.target.rule, item.target.dimension, item.target.key, item.period, item.delta) {
+			return BudgetDecision{Allowed: true, Description: "budget persist fail-open"}
+		}
+		if item.decision.Warn {
+			t.emitBudgetAlert(ctx, item.decision, "warn")
+		}
+	}
+	if notable != nil {
+		notable.ReservedTokens = tokens
+		notable.ReservedCost = costUSD
+		return *notable
+	}
+	return BudgetDecision{
 		Allowed:        true,
-		Unit:           rule.Unit,
-		Period:         period,
-		Dimension:      dimension,
-		DimensionKey:   dimKey,
-		Used:           after,
-		Limit:          rule.Limit,
-		WarnPct:        rule.WarnThresholdPct,
-		Action:         rule.Action,
+		Description:    "ok",
 		ReservedTokens: tokens,
 		ReservedCost:   costUSD,
 	}
-
-	emitWarn := warnAt > 0 && used < warnAt && after >= warnAt
-	if after > rule.Limit {
-		switch rule.Action {
-		case ActionBlock:
-			decision.Allowed = false
-			decision.Blocked = true
-			decision.Description = "policy:budget:exceeded"
-			t.emitBudgetAlert(ctx, decision, "block")
-			return decision
-		case ActionFallback:
-			decision.FallbackModel = rule.FallbackModel
-			decision.Description = "policy:budget:fallback"
-		default:
-			decision.Warn = true
-			decision.Description = "policy:budget:exceeded_warn"
-		}
-	} else if emitWarn {
-		decision.Warn = true
-		if decision.Description == "" {
-			decision.Description = "policy:budget:warn"
-		}
-	}
-
-	if !t.addBudgetUsageLocked(rule, dimension, dimKey, period, delta) {
-		return BudgetDecision{Allowed: true, Description: "budget persist fail-open"}
-	}
-
-	if decision.Warn {
-		t.emitBudgetAlert(ctx, decision, "warn")
-	}
-	return decision
 }
 
 // SettleBudget adjusts reserved budget usage after the actual cost/tokens are known.
 func (t *Tracker) SettleBudget(ctx RequestContext, reservedTokens int64, reservedCost float64, actualTokens int64, actualCost float64) {
 	cfg := t.loadBudgetConfig()
-	rule, dimension, dimKey := selectBudgetRule(cfg, ctx)
-	if rule.Limit <= 0 {
-		return
-	}
-	reserved := budgetDelta(rule, reservedTokens, reservedCost)
-	actual := budgetDelta(rule, actualTokens, actualCost)
-	delta := actual - reserved
-	if delta == 0 {
+	targets := selectBudgetTargets(cfg, ctx)
+	if len(targets) == 0 {
 		return
 	}
 	unlock, lockOK := t.lockBudgetUsageFile()
@@ -355,19 +428,23 @@ func (t *Tracker) SettleBudget(ctx RequestContext, reservedTokens int64, reserve
 		return
 	}
 	defer unlock()
-	period := budgetPeriodKey(rule.Period, time.Now().UTC())
-	_ = t.addBudgetUsageLocked(rule, dimension, dimKey, period, delta)
+	for _, target := range targets {
+		reserved := budgetDelta(target.rule, reservedTokens, reservedCost)
+		actual := budgetDelta(target.rule, actualTokens, actualCost)
+		delta := actual - reserved
+		if delta == 0 {
+			continue
+		}
+		period := budgetPeriodKey(target.rule.Period, time.Now().UTC())
+		_ = t.addBudgetUsageLocked(target.rule, target.dimension, target.key, period, delta)
+	}
 }
 
 // RollbackBudget releases a reserved budget delta when a request fails before completion.
 func (t *Tracker) RollbackBudget(ctx RequestContext, tokens int64, costUSD float64) {
 	cfg := t.loadBudgetConfig()
-	rule, dimension, dimKey := selectBudgetRule(cfg, ctx)
-	if rule.Limit <= 0 {
-		return
-	}
-	delta := budgetDelta(rule, tokens, costUSD)
-	if delta <= 0 {
+	targets := selectBudgetTargets(cfg, ctx)
+	if len(targets) == 0 {
 		return
 	}
 	unlock, lockOK := t.lockBudgetUsageFile()
@@ -375,8 +452,14 @@ func (t *Tracker) RollbackBudget(ctx RequestContext, tokens int64, costUSD float
 		return
 	}
 	defer unlock()
-	period := budgetPeriodKey(rule.Period, time.Now().UTC())
-	_ = t.addBudgetUsageLocked(rule, dimension, dimKey, period, -delta)
+	for _, target := range targets {
+		delta := budgetDelta(target.rule, tokens, costUSD)
+		if delta <= 0 {
+			continue
+		}
+		period := budgetPeriodKey(target.rule.Period, time.Now().UTC())
+		_ = t.addBudgetUsageLocked(target.rule, target.dimension, target.key, period, -delta)
+	}
 }
 
 func (t *Tracker) emitBudgetAlert(ctx RequestContext, decision BudgetDecision, alertType string) {

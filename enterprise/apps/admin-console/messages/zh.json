@@ -928,6 +928,20 @@
         "bulkProvisioningDescription": "使用 CSV 映射、预检和批量写入一次性开通成员。",
         "templateDownload": "模板下载",
         "restart": "重新开始",
+        "monthlyLimits": {
+          "title": "公司月度用量上限",
+          "description": "Token 与成本预算是相互独立的两道硬上限，任一达到上限都会停止新的模型请求。设置为 0 表示不限额。",
+          "tokenLabel": "每月 Token 上限",
+          "tokenDescription": "第一道硬上限，不依赖模型价格配置，价格尚未维护时仍然生效。",
+          "costLabel": "每月预算上限（USD）",
+          "costDescription": "第二道硬上限，按模型实际输入、输出 Token 与已配置单价累计。",
+          "unlimitedPlaceholder": "0（不限额）",
+          "save": "保存",
+          "saving": "保存中…",
+          "saved": "公司月度用量上限已保存",
+          "loadFailed": "加载公司月度上限失败",
+          "saveFailed": "保存公司月度上限失败"
+        },
         "csvParseFailed": "CSV 解析失败",
         "statusDisabledKeyword": "停用",
         "steps": {

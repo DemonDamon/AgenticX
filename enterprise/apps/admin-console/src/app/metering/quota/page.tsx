@@ -88,6 +88,7 @@ type BudgetRule = {
 };
 type BudgetConfig = {
   updatedAt: string;
+  companyLimits?: { tokens: number; costUsd: number };
   defaults?: BudgetRule;
   tenants?: Record<string, BudgetRule>;
   departments?: Record<string, BudgetRule>;
@@ -109,6 +110,7 @@ type BudgetAlert = {
 
 const EMPTY_BUDGET: BudgetConfig = {
   updatedAt: "",
+  companyLimits: { tokens: 0, costUsd: 0 },
   defaults: { unit: "cost_usd", period: "month", limit: 0, warnThresholdPct: 80, action: "warn" },
   tenants: {},
   departments: {},

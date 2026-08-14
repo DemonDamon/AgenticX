@@ -30,7 +30,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
-import { CompanyMonthlyTokenLimitCard } from "../../../components/CompanyMonthlyTokenLimitCard";
+import { CompanyMonthlyLimitsCard } from "../../../components/CompanyMonthlyLimitsCard";
 import { OrganizationEditor } from "../../../components/OrganizationEditor";
 import {
   Check,
@@ -363,7 +363,7 @@ export default function BulkImportPage() {
         }
       />
 
-      <CompanyMonthlyTokenLimitCard />
+      <CompanyMonthlyLimitsCard />
 
       <OrganizationEditor />
 

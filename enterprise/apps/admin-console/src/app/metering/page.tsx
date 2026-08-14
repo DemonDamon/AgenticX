@@ -39,7 +39,7 @@ import {
 import { useTranslations } from "next-intl";
 import { BarChart3, Download, FileSpreadsheet, Filter, RefreshCcw, Search, Trash2 } from "lucide-react";
 import { TokenHeatmap, type HeatmapCell } from "../../components/metering/TokenHeatmap";
-import { companyMonthlyTokenLimit, type BudgetConfig } from "../../lib/company-token-budget";
+import { companyMonthlyLimits, type BudgetConfig } from "../../lib/company-monthly-limits";
 
 type MeteringRow = {
   dims: Record<string, string | null>;
@@ -122,6 +122,7 @@ export default function MeteringPage() {
   const [patOptions, setPatOptions] = useState<PatOption[]>([]);
   const [providersData, setProvidersData] = useState<ProviderOption[]>([]);
   const [companyTokenLimit, setCompanyTokenLimit] = useState(0);
+  const [companyCostLimit, setCompanyCostLimit] = useState(0);
   const [loading, setLoading] = useState(false);
 
   const deptOptions = useMemo(() => {
@@ -203,19 +204,22 @@ export default function MeteringPage() {
     };
   }, []);
 
-  const loadCompanyTokenLimit = useCallback(async () => {
+  const loadCompanyCostLimit = useCallback(async () => {
     try {
       const response = await adminFetch("/api/metering/budget", { cache: "no-store" });
       const payload = await readJsonBody<{ data?: { budget?: BudgetConfig } }>(response, {});
-      setCompanyTokenLimit(response.ok ? companyMonthlyTokenLimit(payload.data?.budget) : 0);
+      const limits = response.ok ? companyMonthlyLimits(payload.data?.budget) : { tokens: 0, costUsd: 0 };
+      setCompanyTokenLimit(limits.tokens);
+      setCompanyCostLimit(limits.costUsd);
     } catch {
       setCompanyTokenLimit(0);
+      setCompanyCostLimit(0);
     }
   }, []);
 
   useEffect(() => {
-    void loadCompanyTokenLimit();
-  }, [loadCompanyTokenLimit]);
+    void loadCompanyCostLimit();
+  }, [loadCompanyCostLimit]);
 
   useEffect(() => {
     if (user !== ALL && !users.find((item) => item.id === user)) {
@@ -499,7 +503,7 @@ export default function MeteringPage() {
                 void queryHeatmap();
                 void queryRoi();
                 void loadRevenues();
-                void loadCompanyTokenLimit();
+                void loadCompanyCostLimit();
               }}
               disabled={loading || heatmapLoading || roiLoading}
             >
@@ -639,7 +643,11 @@ export default function MeteringPage() {
             </span>
             <div>
               <div className="text-xs text-muted-foreground">{t("totalCost")}</div>
-              <div className="text-xl font-semibold">${totalCost.toFixed(4)}</div>
+              <div className="text-xl font-semibold">
+                {companyCostLimit > 0
+                  ? `$${totalCost.toFixed(4)} / $${companyCostLimit.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                  : `$${totalCost.toFixed(4)}`}
+              </div>
             </div>
           </CardContent>
         </Card>

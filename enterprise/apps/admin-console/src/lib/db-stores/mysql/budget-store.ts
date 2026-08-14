@@ -15,6 +15,10 @@ export type BudgetRule = {
 
 export type BudgetConfig = {
   updatedAt: string;
+  companyLimits?: {
+    tokens: number;
+    costUsd: number;
+  };
   defaults?: BudgetRule;
   tenants?: Record<string, BudgetRule>;
   departments?: Record<string, BudgetRule>;
@@ -23,6 +27,7 @@ export type BudgetConfig = {
 
 const DEFAULT_CONFIG: BudgetConfig = {
   updatedAt: new Date().toISOString(),
+  companyLimits: { tokens: 0, costUsd: 0 },
   defaults: {
     unit: "cost_usd",
     period: "month",
@@ -58,8 +63,14 @@ function normalizeRule(input: Partial<BudgetRule> | undefined): BudgetRule {
 }
 
 function normalizeBudget(input: Partial<BudgetConfig> | undefined): BudgetConfig {
+  const tokenLimit = Number(input?.companyLimits?.tokens ?? 0);
+  const costLimit = Number(input?.companyLimits?.costUsd ?? 0);
   const next: BudgetConfig = {
     updatedAt: new Date().toISOString(),
+    companyLimits: {
+      tokens: Number.isFinite(tokenLimit) && tokenLimit > 0 ? Math.floor(tokenLimit) : 0,
+      costUsd: Number.isFinite(costLimit) && costLimit > 0 ? costLimit : 0,
+    },
     defaults: normalizeRule(input?.defaults ?? DEFAULT_CONFIG.defaults),
     tenants: {},
     departments: {},

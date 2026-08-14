@@ -197,3 +197,54 @@ func TestSanitizeBudgetRuleWeek(t *testing.T) {
 		t.Fatalf("expected week period, got %+v", r)
 	}
 }
+
+func TestCompanyMonthlyTokenAndCostLimitsCoexist(t *testing.T) {
+	dir := t.TempDir()
+	usagePath := filepath.Join(dir, "budget-usage.json")
+	cfgPath := writeBudgetConfig(t, dir, BudgetConfig{
+		CompanyLimits: CompanyMonthlyLimits{Tokens: 100, CostUSD: 10},
+	})
+	tracker := NewTracker(filepath.Join(dir, "quotas.json"), usagePath, nil)
+	tracker.budgetCfgPath = cfgPath
+	tracker.budgetUsagePath = usagePath
+	ctx := RequestContext{TenantID: "t1", UserID: "u1"}
+
+	first := tracker.CheckBudget(ctx, 60, 4)
+	if !first.Allowed || first.ReservedTokens != 60 || first.ReservedCost != 4 {
+		t.Fatalf("expected both company limits to reserve usage: %+v", first)
+	}
+
+	if blocked := tracker.CheckBudget(ctx, 41, 1); blocked.Allowed || blocked.Unit != BudgetUnitTokens {
+		t.Fatalf("expected token hard limit to block independently: %+v", blocked)
+	}
+	if blocked := tracker.CheckBudget(ctx, 40, 7); blocked.Allowed || blocked.Unit != BudgetUnitCostUSD {
+		t.Fatalf("expected cost hard limit to block independently: %+v", blocked)
+	}
+
+	tracker.SettleBudget(ctx, 60, 4, 50, 3)
+	rows := tracker.readBudgetUsageLocked()
+	if len(rows) != 2 {
+		t.Fatalf("expected separate token and cost ledgers, got %+v", rows)
+	}
+	for _, row := range rows {
+		switch row.Unit {
+		case BudgetUnitTokens:
+			if row.Used != 50 {
+				t.Fatalf("token settlement=%v want 50", row.Used)
+			}
+		case BudgetUnitCostUSD:
+			if row.Used != 3 {
+				t.Fatalf("cost settlement=%v want 3", row.Used)
+			}
+		default:
+			t.Fatalf("unexpected ledger unit: %+v", row)
+		}
+	}
+
+	tracker.RollbackBudget(ctx, 50, 3)
+	for _, row := range tracker.readBudgetUsageLocked() {
+		if row.Used != 0 {
+			t.Fatalf("rollback did not release both ledgers: %+v", row)
+		}
+	}
+}

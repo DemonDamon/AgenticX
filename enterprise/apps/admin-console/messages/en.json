@@ -928,6 +928,20 @@
         "bulkProvisioningDescription": "Use CSV mapping, prechecks, and a batched write to provision members at once.",
         "templateDownload": "Download template",
         "restart": "Start over",
+        "monthlyLimits": {
+          "title": "Company monthly usage limits",
+          "description": "Token and cost budgets are independent hard limits. New model requests stop when either limit is reached. Set 0 for unlimited.",
+          "tokenLabel": "Monthly token limit",
+          "tokenDescription": "The primary hard limit works even when model prices have not been configured.",
+          "costLabel": "Monthly budget limit (USD)",
+          "costDescription": "The secondary hard limit uses actual input/output tokens and configured model prices.",
+          "unlimitedPlaceholder": "0 (unlimited)",
+          "save": "Save",
+          "saving": "Saving…",
+          "saved": "Company monthly usage limits saved",
+          "loadFailed": "Failed to load company monthly limits",
+          "saveFailed": "Failed to save company monthly limits"
+        },
         "csvParseFailed": "CSV parse failed",
         "statusDisabledKeyword": "disabled",
         "steps": {
