@@ -39,6 +39,7 @@ export type RunRecord = {
   phase: string;
   topic: string;
   events: DeepResearchEvent[];
+  /** Chat-visible delta buffer used when reconnecting; the canonical report lives in artifacts. */
   reportMarkdown: string;
   citations: Citation[];
   errorMessage?: string;
@@ -149,13 +150,6 @@ function mapRow(row: {
 }
 
 /**
- * Report body long enough that synthesize clearly produced a usable draft.
- * Used when the handler died after writing reportMarkdown / artifacts but before
- * flushing final-report artifact events + `finish()`.
- */
-export const FINISHED_REPORT_MARKDOWN_MIN_CHARS = 2_000;
-
-/**
  * True when the run already delivered a terminal outcome but status may still be
  * `running` (e.g. Next.js killed the handler after client disconnect mid-wrap-up).
  */
@@ -169,8 +163,6 @@ export function runLooksFinished(row: Pick<RunRecord, "phase" | "events" | "repo
         (typeof e.path === "string" && e.path.includes("final-report"))),
   );
   if (hasFinalReportArtifact) return true;
-  // Artifact events may be missing even though reportMarkdown was flushed.
-  if (row.reportMarkdown.trim().length >= FINISHED_REPORT_MARKDOWN_MIN_CHARS) return true;
   return false;
 }
 

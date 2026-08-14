@@ -219,7 +219,7 @@ describe("memory run store", () => {
         reportMarkdown: "x".repeat(2_500),
         events: [{ type: "phase", phase: "synthesize", message: "撰写中" }],
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       runLooksFinished({
         phase: "lanes",

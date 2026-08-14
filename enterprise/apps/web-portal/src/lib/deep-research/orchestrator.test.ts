@@ -1007,16 +1007,25 @@ describe("runDeepResearchTurn", () => {
 
   it("writes one memo artifact per successful lane", async () => {
     const store = createMemoryArtifactStore();
+    const runStore = createMemoryRunStore();
     const plan: ResearchPlan = { topic: "T", complexity: "moderate", subQuestions: ["q1", "q2"] };
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
       if (body.stream === false) {
         return {
           ok: true,
-          json: async () => ({ choices: [{ message: { content: "memo body" } }] }),
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: "<think>internal memo reasoning</think>memo body",
+                },
+              },
+            ],
+          }),
         } as Response;
       }
-      return synthUpstream("final");
+      return synthUpstream("<think>internal section reasoning</think>final</think>");
     });
 
     const response = await runDeepResearchTurn(
@@ -1024,6 +1033,7 @@ describe("runDeepResearchTurn", () => {
       {
         ...baseDeps({
           artifactStore: store,
+          runStore,
           runId: "run-art-1",
           fetchImpl: fetchImpl as unknown as typeof fetch,
           buildPlan: async () => plan,
@@ -1047,6 +1057,16 @@ describe("runDeepResearchTurn", () => {
     expect(reports.some((a) => a.path.endsWith("/report.md") || a.path === "report.md")).toBe(
       false,
     );
+    expect(memos.every((a) => a.content.includes("memo body"))).toBe(true);
+    expect(memos.every((a) => !a.content.includes("internal memo reasoning"))).toBe(true);
+    const markdownReport = reports.find((a) => a.path.endsWith("final-report.md"));
+    expect(markdownReport?.content).toContain("final");
+    expect(markdownReport?.content).not.toContain("internal section reasoning");
+    expect(markdownReport?.content).not.toContain("</think>");
+
+    const run = await runStore.get("t1", "u1", "run-art-1");
+    expect(run?.reportMarkdown).not.toContain("final");
+    expect(run?.reportMarkdown).not.toContain("internal");
   });
 
   it("honors clarify html format: report.html is written and summary links to it", async () => {

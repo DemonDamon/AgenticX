@@ -1569,16 +1569,18 @@ export async function runDeepResearchTurn(
                   return `[${c.index}] ${c.title}\n${body}`;
                 })
                 .join("\n\n");
-              memo = await callGatewayJson(toolDeps, {
-                ...baseBody,
-                messages: [
-                  { role: "system", content: LANE_SUMMARY_SYSTEM },
-                  {
-                    role: "user",
-                    content: `子问题：${question}\n\n摘录：\n${evidenceBits}`,
-                  },
-                ],
-              });
+              memo = stripThinkBlocks(
+                await callGatewayJson(toolDeps, {
+                  ...baseBody,
+                  messages: [
+                    { role: "system", content: LANE_SUMMARY_SYSTEM },
+                    {
+                      role: "user",
+                      content: `子问题：${question}\n\n摘录：\n${evidenceBits}`,
+                    },
+                  ],
+                }),
+              );
               if (!memo.trim()) {
                 memo = questionCitations
                   .map((c) => `- [${c.index}] ${c.title}: ${c.snippet}`)
@@ -1930,8 +1932,6 @@ export async function runDeepResearchTurn(
               const piece = parsed?.choices?.[0]?.delta?.content;
               if (typeof piece === "string") {
                 sectionParts.push(piece);
-                reportContentParts.push(piece);
-                writer?.pushReport(piece);
                 isContentDelta = true;
               }
               // Report content deltas are NOT forwarded to the chat transport —
@@ -1944,7 +1944,8 @@ export async function runDeepResearchTurn(
           return stripThinkBlocks(sectionParts.join(""));
         };
 
-        // Build report content silently: accumulate into reportContentParts + run-store only.
+        // Build the canonical report silently. The run-store delta buffer is reserved
+        // for chat-visible reconnect output; report bodies live in artifacts.
         const titleBlock = `# ${sanitizeResearchTopic(outline.title)}\n\n`;
         reportContentParts.push(titleBlock);
         const toc = renderTableOfContents(outline);
@@ -1981,6 +1982,9 @@ export async function runDeepResearchTurn(
               contentPolicy: reportContentPolicy,
             }),
           );
+          if (sectionBody) {
+            reportContentParts.push(sectionBody);
+          }
           const tableLike =
             section.format === "comparison_table" || section.format === "tradeoff";
           const noEvidence = registrySnapshot().length === 0;

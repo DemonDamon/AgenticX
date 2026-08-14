@@ -12,5 +12,8 @@ export function stripThinkBlocks(raw: string): string {
   if (openIdx >= 0) {
     text = text.slice(0, openIdx);
   }
+  // A model can emit an unmatched closing tag in a later streaming chunk.
+  // Never leak that transport residue into Markdown / HTML deliverables.
+  text = text.replace(/<\/think>/gi, "");
   return text.replace(/^\s*\n+/, "").trim();
 }
