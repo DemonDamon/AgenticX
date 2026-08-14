@@ -6,6 +6,7 @@ import {
   MIN_VERIFY_REMAINING_MS,
   applyVerificationFindings,
   buildVerificationEvidence,
+  buildVerificationEvidenceBundle,
   extractCitedClaims,
   parseVerificationFindings,
   selectClaimsForVerification,
@@ -149,6 +150,23 @@ describe("buildVerificationEvidence", () => {
 
     const evidence = buildVerificationEvidence(claims, citations);
     expect(evidence.length).toBeLessThanOrEqual(MAX_VERIFY_EVIDENCE_CHARS);
+  });
+
+  it("reports which citations survived the global evidence cap", () => {
+    const claims = extractCitedClaims(
+      Array.from({ length: 6 }, (_, i) => `断言 ${i} [${i + 1}]。`).join(""),
+    );
+    const citations = Array.from({ length: 6 }, (_, i) =>
+      citation(i + 1, { fullText: `来源 ${i + 1} ` + "长正文。".repeat(300) }),
+    );
+
+    const bundle = buildVerificationEvidenceBundle(claims, citations, 1_200, 800);
+    expect(bundle.evidence.length).toBeLessThanOrEqual(1_200);
+    expect(bundle.includedCitationIndexes.size).toBeGreaterThan(0);
+    expect(bundle.includedCitationIndexes.size).toBeLessThan(citations.length);
+    for (const index of bundle.includedCitationIndexes) {
+      expect(bundle.evidence).toContain(`citation="${index}"`);
+    }
   });
 });
 
@@ -360,5 +378,30 @@ describe("verifyReportCitations", () => {
 
     expect(result.markdown).not.toMatch(/置信度|信息缺口|复核|verdict|claim_id/u);
     expect(result.markdown).toBe("## 结论\n\n另一句 [2]。");
+  });
+
+  it("never audits a claim whose cited source was omitted by the evidence cap", async () => {
+    const longMarkdown = Array.from(
+      { length: 20 },
+      (_, i) => `第 ${i + 1} 项增长 ${i + 1}% [${i + 1}]。`,
+    ).join("\n");
+    const longCitations = Array.from({ length: 20 }, (_, i) =>
+      citation(i + 1, { fullText: `证据 ${i + 1} ` + "正文片段。".repeat(400) }),
+    );
+    const callJson = vi.fn(async (body: Record<string, unknown>) => {
+      const prompt = JSON.stringify(body.messages ?? []);
+      // c20's source falls beyond the 10K evidence cap, so the claim must not
+      // be exposed to a model that could confuse omission with contradiction.
+      expect(prompt).not.toContain("c20 | 引用 [20]");
+      return '{"findings":[{"claim_id":"c20","verdict":"unsupported","replacement":""}]}';
+    });
+
+    const result = await verifyReportCitations(
+      baseInput({ markdown: longMarkdown, citations: longCitations, callJson }),
+    );
+
+    expect(callJson).toHaveBeenCalledTimes(1);
+    expect(result.markdown).toBe(longMarkdown);
+    expect(result.appliedFindings).toBe(0);
   });
 });

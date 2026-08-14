@@ -72,6 +72,12 @@ export type CitationVerifierResult = {
   appliedFindings: number;
 };
 
+export type VerificationEvidenceBundle = {
+  evidence: string;
+  /** Only claims whose every citation is present in this set may be audited. */
+  includedCitationIndexes: ReadonlySet<number>;
+};
+
 function citationIndexes(text: string): number[] {
   const found: number[] = [];
   for (const match of text.matchAll(CITATION_RE)) {
@@ -207,13 +213,19 @@ function sanitizeForPrompt(value: string): string {
   );
 }
 
-/** One evidence block per distinct citation actually referenced by the claims. */
-export function buildVerificationEvidence(
+/**
+ * One evidence block per distinct citation actually referenced by the claims.
+ *
+ * The included-index set is part of the contract: the total evidence cap may
+ * omit later sources, and a claim must never be sent to the verifier unless all
+ * of its cited evidence travelled with the prompt.
+ */
+export function buildVerificationEvidenceBundle(
   claims: readonly ClaimUnit[],
   citations: readonly Citation[],
   maxChars = MAX_VERIFY_EVIDENCE_CHARS,
   maxSourceChars = MAX_VERIFY_SOURCE_CHARS,
-): string {
+): VerificationEvidenceBundle {
   const byIndex = new Map(citations.map((citation) => [citation.index, citation]));
   const queriesByIndex = new Map<number, string[]>();
   const order: number[] = [];
@@ -229,6 +241,7 @@ export function buildVerificationEvidence(
   }
 
   const blocks: string[] = [];
+  const includedCitationIndexes = new Set<number>();
   let used = 0;
   for (const index of order) {
     const citation = byIndex.get(index)!;
@@ -243,9 +256,13 @@ export function buildVerificationEvidence(
       `<untrusted_evidence citation="${index}" source="${sourceKind}">`,
       `[${index}] ${sanitizeForPrompt(citation.title)}`,
       citation.sourceType === "attachment"
-        ? `来源：用户上传文件（${citation.sourceLabel || citation.title}）`
-        : `URL: ${citation.url}`,
-      citation.publishedAt ? `发布时间: ${citation.publishedAt}` : "",
+        ? `来源：用户上传文件（${sanitizeForPrompt(
+            citation.sourceLabel || citation.title,
+          )}）`
+        : `URL: ${sanitizeForPrompt(citation.url)}`,
+      citation.publishedAt
+        ? `发布时间: ${sanitizeForPrompt(citation.publishedAt)}`
+        : "",
       `证据片段：${sanitizeForPrompt(excerpt) || "（无可用文本）"}`,
       "</untrusted_evidence>",
     ]
@@ -254,9 +271,28 @@ export function buildVerificationEvidence(
     const cost = blocks.length > 0 ? block.length + 2 : block.length;
     if (used + cost > maxChars) continue;
     blocks.push(block);
+    includedCitationIndexes.add(index);
     used += cost;
   }
-  return blocks.join("\n\n");
+  return {
+    evidence: blocks.join("\n\n"),
+    includedCitationIndexes,
+  };
+}
+
+/** Backward-compatible text-only helper for callers that only render evidence. */
+export function buildVerificationEvidence(
+  claims: readonly ClaimUnit[],
+  citations: readonly Citation[],
+  maxChars = MAX_VERIFY_EVIDENCE_CHARS,
+  maxSourceChars = MAX_VERIFY_SOURCE_CHARS,
+): string {
+  return buildVerificationEvidenceBundle(
+    claims,
+    citations,
+    maxChars,
+    maxSourceChars,
+  ).evidence;
 }
 
 export function buildVerificationMessages(input: {
@@ -413,17 +449,34 @@ export async function verifyReportCitations(
   if (input.remainingMs <= MIN_VERIFY_REMAINING_MS) return unchanged;
   if (input.modelCallsRemaining <= 0) return unchanged;
 
-  const claims = selectClaimsForVerification(extractCitedClaims(input.markdown));
-  if (claims.length === 0) return unchanged;
+  const selectedClaims = selectClaimsForVerification(
+    extractCitedClaims(input.markdown),
+  );
+  if (selectedClaims.length === 0) return unchanged;
 
-  const evidence = buildVerificationEvidence(claims, input.citations);
+  const evidenceBundle = buildVerificationEvidenceBundle(
+    selectedClaims,
+    input.citations,
+  );
+  const claims = selectedClaims.filter((claim) =>
+    claim.citations.every((index) =>
+      evidenceBundle.includedCitationIndexes.has(index),
+    ),
+  );
+  // Running an audit without the cited evidence turns "not included in the
+  // prompt" into "unsupported" and can delete otherwise valid prose.
+  if (claims.length === 0) return unchanged;
   input.onVerifyStart?.();
 
   let raw: string;
   try {
     raw = await input.callJson({
       ...input.baseBody,
-      messages: buildVerificationMessages({ topic: input.topic, claims, evidence }),
+      messages: buildVerificationMessages({
+        topic: input.topic,
+        claims,
+        evidence: evidenceBundle.evidence,
+      }),
       temperature: 0,
       max_tokens: VERIFY_MAX_TOKENS,
     });
