@@ -21,9 +21,10 @@ import {
   Switch,
   toast,
 } from "@agenticx/ui";
-import { Globe2, KeyRound, Plus, RefreshCcw, Trash2 } from "lucide-react";
+import { ArrowRight, Globe2, KeyRound, Plus, RefreshCcw, Trash2 } from "lucide-react";
 
 import { adminFetch } from "../../../lib/admin-client-auth";
+import { orderSearchProvidersByRole } from "./provider-roles";
 
 const MAX_PROVIDER_POOL_SIZE = 2;
 const SEARCH_CALL_OPTIONS = [1, 2, 3, 4, 5] as const;
@@ -107,6 +108,13 @@ export default function WebSearchSettingsPage() {
     () => config?.availableAdapters.find((adapter) => adapter.id === newAdapter),
     [config?.availableAdapters, newAdapter],
   );
+  const orderedProviders = useMemo(
+    () =>
+      config
+        ? orderSearchProvidersByRole(config.providers, config.primaryProviderId)
+        : [],
+    [config],
+  );
 
   const load = async () => {
     setLoading(true);
@@ -161,12 +169,8 @@ export default function WebSearchSettingsPage() {
 
   const selectPrimary = (providerId: string) => {
     if (!config) return;
-    const selected = config.providers.find((provider) => provider.id === providerId);
-    if (!selected) return;
-    const ordered = [
-      selected,
-      ...config.providers.filter((provider) => provider.id !== providerId),
-    ];
+    const ordered = orderSearchProvidersByRole(config.providers, providerId);
+    if (ordered[0]?.id !== providerId) return;
     void save({ provider: providerId, providers: providerUpdates(ordered) });
   };
 
@@ -174,7 +178,7 @@ export default function WebSearchSettingsPage() {
     if (!config) return;
     const saved = await save({
       provider: config.primaryProviderId,
-      providers: providerUpdates(config.providers, { [providerId]: apiKey }),
+      providers: providerUpdates(orderedProviders, { [providerId]: apiKey }),
     });
     if (saved) {
       setKeyDrafts((current) => ({ ...current, [providerId]: "" }));
@@ -183,7 +187,7 @@ export default function WebSearchSettingsPage() {
 
   const removeProvider = (providerId: string) => {
     if (!config || config.providers.length <= 1) return;
-    const next = config.providers.filter((provider) => provider.id !== providerId);
+    const next = orderedProviders.filter((provider) => provider.id !== providerId);
     const nextPrimary =
       config.primaryProviderId === providerId
         ? next[0]?.id
@@ -210,9 +214,9 @@ export default function WebSearchSettingsPage() {
       hasApiKey: Boolean(newApiKey.trim()),
       ...(endpoint ? { endpoint } : {}),
     };
-    const next = [...config.providers, nextProvider];
+    const next = [...orderedProviders, nextProvider];
     const saved = await save({
-      provider: config.primaryProviderId || id,
+      provider: orderedProviders[0]?.id || id,
       providers: providerUpdates(next, { [id]: newApiKey.trim() }),
     });
     if (saved) {
@@ -301,65 +305,134 @@ export default function WebSearchSettingsPage() {
         <CardContent className="space-y-5">
           {loading ? (
             <div className="py-8 text-center text-sm text-muted-foreground">{t("loading")}</div>
-          ) : config?.providers.length ? (
-            <div className="space-y-3">
-              {config.providers.map((provider) => {
-                const isPrimary = provider.id === config.primaryProviderId;
-                const draft = keyDrafts[provider.id] ?? "";
-                return (
-                  <div key={provider.id} className="space-y-3 rounded-lg border p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{provider.displayName}</span>
-                          {isPrimary ? <Badge variant="success">{t("primary")}</Badge> : null}
+          ) : config ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm">
+                <Badge variant="success">{t("primary")}</Badge>
+                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                <span className="text-muted-foreground">{t("failoverCondition")}</span>
+                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                <Badge variant="outline">{t("fallback")}</Badge>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                {([0, 1] as const).map((slotIndex) => {
+                  const provider = orderedProviders[slotIndex];
+                  const isPrimary = slotIndex === 0;
+                  const draft = provider ? keyDrafts[provider.id] ?? "" : "";
+                  return (
+                    <div
+                      key={isPrimary ? "primary-provider" : "fallback-provider"}
+                      className={[
+                        "space-y-4 rounded-xl border p-4",
+                        isPrimary
+                          ? "border-primary/30 bg-primary/[0.035]"
+                          : "border-border bg-muted/20",
+                      ].join(" ")}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-background text-xs font-semibold shadow-sm ring-1 ring-border">
+                              {slotIndex + 1}
+                            </span>
+                            <span className="font-semibold">
+                              {isPrimary
+                                ? t("primaryProviderTitle")
+                                : t("fallbackProviderTitle")}
+                            </span>
+                            <Badge variant={isPrimary ? "success" : "outline"}>
+                              {isPrimary ? t("primary") : t("fallback")}
+                            </Badge>
+                          </div>
+                          <p className="mt-1.5 text-xs text-muted-foreground">
+                            {isPrimary
+                              ? t("primaryProviderHint")
+                              : t("fallbackProviderHint")}
+                          </p>
                         </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {provider.adapter}
-                          {provider.endpoint ? ` · ${provider.endpoint}` : ""}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        {!isPrimary ? (
-                          <Button variant="outline" size="sm" disabled={saving} onClick={() => selectPrimary(provider.id)}>
-                            {t("setPrimary")}
-                          </Button>
+                        {provider ? (
+                          <div className="flex gap-2">
+                            {!isPrimary ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={saving}
+                                onClick={() => selectPrimary(provider.id)}
+                              >
+                                {t("setPrimary")}
+                              </Button>
+                            ) : null}
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-destructive"
+                              disabled={saving || config.providers.length <= 1}
+                              aria-label={t("remove")}
+                              onClick={() => removeProvider(provider.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         ) : null}
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          className="text-destructive"
-                          disabled={saving || config.providers.length <= 1}
-                          aria-label={t("remove")}
-                          onClick={() => removeProvider(provider.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
                       </div>
+                      {provider ? (
+                        <>
+                          <div className="rounded-lg border bg-background/80 px-3 py-2.5">
+                            <div className="font-medium">{provider.displayName}</div>
+                            <p className="mt-1 break-all text-xs text-muted-foreground">
+                              {provider.adapter}
+                              {provider.endpoint ? ` · ${provider.endpoint}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            <Input
+                              type="password"
+                              value={draft}
+                              disabled={saving}
+                              placeholder={
+                                provider.hasApiKey
+                                  ? t("keyConfigured")
+                                  : t("keyPlaceholder")
+                              }
+                              onChange={(event) =>
+                                setKeyDrafts((current) => ({
+                                  ...current,
+                                  [provider.id]: event.target.value,
+                                }))
+                              }
+                            />
+                            <Button
+                              size="sm"
+                              disabled={saving || !draft.trim()}
+                              onClick={() =>
+                                void updateProviderKey(provider.id, draft.trim())
+                              }
+                            >
+                              {t("saveKey")}
+                            </Button>
+                            {provider.hasApiKey ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={saving}
+                                onClick={() => void updateProviderKey(provider.id, "")}
+                              >
+                                {t("clearKey")}
+                              </Button>
+                            ) : null}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="rounded-lg border border-dashed bg-background/50 px-4 py-8 text-center text-sm text-muted-foreground">
+                          {isPrimary ? t("primaryEmpty") : t("fallbackEmpty")}
+                        </div>
+                      )}
                     </div>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <Input
-                        type="password"
-                        value={draft}
-                        disabled={saving}
-                        placeholder={provider.hasApiKey ? t("keyConfigured") : t("keyPlaceholder")}
-                        onChange={(event) =>
-                          setKeyDrafts((current) => ({ ...current, [provider.id]: event.target.value }))
-                        }
-                      />
-                      <Button size="sm" disabled={saving || !draft.trim()} onClick={() => void updateProviderKey(provider.id, draft.trim())}>
-                        {t("saveKey")}
-                      </Button>
-                      {provider.hasApiKey ? (
-                        <Button variant="outline" size="sm" disabled={saving} onClick={() => void updateProviderKey(provider.id, "")}>
-                          {t("clearKey")}
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            </>
           ) : (
             <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
               {t("emptyServices")}
@@ -369,7 +442,7 @@ export default function WebSearchSettingsPage() {
           <div className="space-y-4 rounded-lg border border-dashed p-4">
             <div className="flex items-center gap-2 font-medium">
               <Plus className="h-4 w-4" />
-              {t("addService")}
+              {t(config?.providers.length ? "addFallbackService" : "addPrimaryService")}
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
@@ -414,7 +487,7 @@ export default function WebSearchSettingsPage() {
                 }
                 onClick={() => void addProvider()}
               >
-                {t("add")}
+                {t(config?.providers.length ? "addAsFallback" : "addAsPrimary")}
               </Button>
               {config && config.providers.length >= MAX_PROVIDER_POOL_SIZE ? (
                 <span className="text-xs text-muted-foreground">{t("poolFull")}</span>
