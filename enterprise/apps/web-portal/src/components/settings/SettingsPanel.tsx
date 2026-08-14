@@ -16,13 +16,22 @@ import {
   SelectValue,
   TooltipProvider,
   toast,
+  useLocale,
+  useUiTheme,
+  type UiLocale,
+  type UiTheme,
 } from "@agenticx/ui";
 import {
+  Check,
   FileSearch,
+  Languages,
   LockKeyhole,
   MessageSquare,
+  Monitor,
+  Moon,
   Settings as SettingsIcon,
   Shield,
+  Sun,
   KeyRound,
   Trash2,
 } from "lucide-react";
@@ -48,9 +57,16 @@ type PortalModelOption = {
   isDefault: boolean;
   capabilities?: string[];
 };
+type PreferenceChoiceOption<T extends string> = {
+  value: T;
+  label: React.ReactNode;
+  icon?: React.ReactNode;
+};
 
 export function SettingsPanel() {
   const t = useTranslations("settings");
+  const { locale, setLocale } = useLocale();
+  const { theme, setTheme } = useUiTheme();
   const [active, setActive] = useState<TabId>("general");
   const [availableModels, setAvailableModels] = useState<PortalModelOption[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -89,6 +105,43 @@ export function SettingsPanel() {
               ? t("general.chatStyleTerminal")
               : t("general.chatStyleClean"),
       })),
+    [t],
+  );
+
+  const themeOptions = useMemo<Array<PreferenceChoiceOption<UiTheme>>>(
+    () => [
+      {
+        value: "system",
+        label: t("general.themeSystem"),
+        icon: <Monitor className="h-4 w-4" />,
+      },
+      {
+        value: "light",
+        label: t("general.themeLight"),
+        icon: <Sun className="h-4 w-4" />,
+      },
+      {
+        value: "dark",
+        label: t("general.themeDark"),
+        icon: <Moon className="h-4 w-4" />,
+      },
+    ],
+    [t],
+  );
+
+  const languageOptions = useMemo<Array<PreferenceChoiceOption<UiLocale>>>(
+    () => [
+      {
+        value: "zh",
+        label: t("general.languageChinese"),
+        icon: <Languages className="h-4 w-4" />,
+      },
+      {
+        value: "en",
+        label: t("general.languageEnglish"),
+        icon: <Languages className="h-4 w-4" />,
+      },
+    ],
     [t],
   );
 
@@ -278,12 +331,28 @@ export function SettingsPanel() {
                 <SettingsRow
                   label={t("general.uiTheme")}
                   description={t("general.uiThemeDescription")}
-                  control={<Badge variant="soft">{t("general.syncedToSystem")}</Badge>}
+                  control={
+                    <PreferenceChoiceGroup
+                      ariaLabel={t("general.uiTheme")}
+                      value={theme}
+                      options={themeOptions}
+                      onChange={setTheme}
+                      className="grid-cols-3 sm:w-[390px]"
+                    />
+                  }
                 />
                 <SettingsRow
                   label={t("general.displayLanguage")}
                   description={t("general.displayLanguageDescription")}
-                  control={<Badge variant="soft">{t("general.synced")}</Badge>}
+                  control={
+                    <PreferenceChoiceGroup
+                      ariaLabel={t("general.displayLanguage")}
+                      value={locale}
+                      options={languageOptions}
+                      onChange={setLocale}
+                      className="grid-cols-2 sm:w-[300px]"
+                    />
+                  }
                 />
                 <SettingsRow
                   label={t("general.chatStyle")}
@@ -651,7 +720,56 @@ function SettingsRow({
         <div className="text-sm font-medium">{label}</div>
         {description ? <div className="mt-0.5 text-xs text-muted-foreground">{description}</div> : null}
       </div>
-      <div className={stack ? "" : "shrink-0"}>{control}</div>
+      <div className={stack ? "" : "w-full shrink-0 sm:w-auto"}>{control}</div>
+    </div>
+  );
+}
+
+function PreferenceChoiceGroup<T extends string>({
+  ariaLabel,
+  value,
+  options,
+  onChange,
+  className,
+}: {
+  ariaLabel: string;
+  value: T;
+  options: Array<PreferenceChoiceOption<T>>;
+  onChange: (next: T) => void;
+  className?: string;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className={[
+        "grid w-full gap-1 rounded-xl border border-border/70 bg-muted/40 p-1",
+        className ?? "",
+      ].join(" ")}
+    >
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(option.value)}
+            className={[
+              "relative flex min-h-10 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              selected
+                ? "border-primary/25 bg-background text-foreground shadow-sm"
+                : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground",
+            ].join(" ")}
+          >
+            <span className={selected ? "text-primary" : "text-muted-foreground"}>{option.icon}</span>
+            <span className="truncate">{option.label}</span>
+            {selected ? <Check className="h-3.5 w-3.5 shrink-0 text-primary" /> : null}
+          </button>
+        );
+      })}
     </div>
   );
 }
