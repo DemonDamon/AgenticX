@@ -15,6 +15,7 @@ function outlineWith(n: number): ReportOutline {
       brief: "b",
       citationIndexes: [],
       format: "prose" as const,
+      semanticRole: "custom" as const,
     })),
   };
 }
@@ -32,8 +33,8 @@ describe("buildMindmap", () => {
       outline: {
         title: "报告",
         sections: [
-          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose" },
-          { id: "s2", title: "技术路径", brief: "b", citationIndexes: [], format: "prose" },
+          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose", semanticRole: "core" },
+          { id: "s2", title: "技术路径", brief: "b", citationIndexes: [], format: "prose", semanticRole: "mechanism" },
         ],
       },
     });
@@ -56,6 +57,7 @@ describe("buildMindmap", () => {
             brief: "b",
             citationIndexes: [],
             format: "prose",
+            semanticRole: "core",
           },
         ],
       },

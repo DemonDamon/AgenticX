@@ -18,12 +18,35 @@ export type SectionFormat =
   | "mermaid"
   | "tradeoff";
 
+export type SectionSemanticRole =
+  | "core"
+  | "evidence"
+  | "mechanism"
+  | "outcome"
+  | "boundary"
+  | "decision"
+  | "limitations"
+  | "internal_meta"
+  | "custom";
+
 const FORMAT_SET = new Set<SectionFormat>([
   "prose",
   "comparison_table",
   "timeline",
   "mermaid",
   "tradeoff",
+]);
+
+const SEMANTIC_ROLE_SET = new Set<SectionSemanticRole>([
+  "core",
+  "evidence",
+  "mechanism",
+  "outcome",
+  "boundary",
+  "decision",
+  "limitations",
+  "internal_meta",
+  "custom",
 ]);
 
 export type ReportSection = {
@@ -36,6 +59,8 @@ export type ReportSection = {
   citationIndexes: number[];
   /** 本节主表达形态；缺省 prose */
   format: SectionFormat;
+  /** 供章节排序、策略过滤和缺口补位使用，不从标题关键词反推。 */
+  semanticRole: SectionSemanticRole;
 };
 
 export type ReportOutline = {
@@ -95,10 +120,12 @@ function reportContentPolicyBlock(policy: ReportContentPolicy): string {
 
 const OUTLINE_SYSTEM = [
   "你是深度研究报告大纲助手。只输出 JSON，不要 Markdown 围栏。",
-  '格式：{"title":"...","sections":[{"id":"s1","title":"...","brief":"...","citation_indexes":[1,4,7],"format":"prose"}]}',
+  '格式：{"title":"...","sections":[{"id":"s1","title":"...","brief":"...","citation_indexes":[1,4,7],"format":"prose","semantic_role":"core"}]}',
   `章节数 ${MIN_SECTIONS}-${MAX_SECTIONS}，按证据密度决定，宁少勿滥。`,
   "必须包含首节「核心结论」，其余章节直接回答用户问题，按结果、证据、机制和适用条件组织。",
   "format 取值：prose | comparison_table | timeline | mermaid | tradeoff",
+  "semantic_role 取值：core | evidence | mechanism | outcome | boundary | decision | limitations | custom；首节必须为 core，每节只选一个最主要角色。",
+  "禁止输出 internal_meta 角色；decision 与 limitations 仅在下方报告内容策略明确允许时使用。",
   "首节「核心结论」必须 format=prose。tradeoff 仅在下方报告内容策略明确允许决策章节时使用。",
   "默认禁止独立的「不确定性与信息缺口」「来源置信度」「检索过程」「研究方法自评」等内部元章节。",
   "证据限制若会改变答案，只在对应结论附近简洁说明适用边界，不得扩写成系统检索自评。",
@@ -157,6 +184,7 @@ function defaultOutline(
         brief: "基于前述证据说明选择条件、推荐与风险",
         citationIndexes: [],
         format: "tradeoff",
+        semanticRole: "decision",
       }
     : policy.allowLimitationsSections
       ? {
@@ -165,6 +193,7 @@ function defaultOutline(
           brief: "说明会实质影响结论的限制、风险与适用条件",
           citationIndexes: [],
           format: "prose",
+          semanticRole: "limitations",
         }
       : {
           id: "s5",
@@ -172,6 +201,7 @@ function defaultOutline(
           brief: "综合前述结果，说明结论成立的条件和实际适用范围",
           citationIndexes: [],
           format: "prose",
+          semanticRole: "boundary",
         };
   return {
     title: fallbackTitle || "调研报告",
@@ -182,6 +212,7 @@ function defaultOutline(
         brief: "概括主题核心发现与判断",
         citationIndexes: [],
         format: "prose",
+        semanticRole: "core",
       },
       {
         id: "s2",
@@ -189,6 +220,7 @@ function defaultOutline(
         brief: "围绕用户问题呈现关键表现与直接证据。请用 Markdown 对比表呈现关键维度",
         citationIndexes: [],
         format: "comparison_table",
+        semanticRole: "evidence",
       },
       {
         id: "s3",
@@ -196,6 +228,7 @@ function defaultOutline(
         brief: "解释关键结果由何种机制、条件或实现路径造成",
         citationIndexes: [],
         format: "prose",
+        semanticRole: "mechanism",
       },
       {
         id: "s4",
@@ -203,6 +236,7 @@ function defaultOutline(
         brief: "结合具体案例或数据说明实际结果，以及结论适用和不适用的条件",
         citationIndexes: [],
         format: "prose",
+        semanticRole: "outcome",
       },
       finalSection,
     ],
@@ -214,6 +248,20 @@ function normalizeFormat(raw: unknown): SectionFormat {
     return raw as SectionFormat;
   }
   return "prose";
+}
+
+function normalizeSemanticRole(
+  raw: unknown,
+  index: number,
+): SectionSemanticRole {
+  if (
+    typeof raw === "string" &&
+    SEMANTIC_ROLE_SET.has(raw as SectionSemanticRole)
+  ) {
+    return raw as SectionSemanticRole;
+  }
+  // Rolling compatibility with outlines generated before semantic_role existed.
+  return index === 0 ? "core" : "custom";
 }
 
 function normalizeSection(
@@ -235,28 +283,23 @@ function normalizeSection(
         .map((n) => (typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : NaN))
         .filter((n) => Number.isFinite(n) && n > 0)
     : [];
-  return { id, title, brief, citationIndexes, format: normalizeFormat(obj.format) };
+  return {
+    id,
+    title,
+    brief,
+    citationIndexes,
+    format: normalizeFormat(obj.format),
+    semanticRole: normalizeSemanticRole(
+      obj.semantic_role ?? obj.semanticRole,
+      index,
+    ),
+  };
 }
 
-const INTERNAL_META_SECTION_RE =
+const LEGACY_INTERNAL_META_GUARD_RE =
   /不确定性与信息缺口|信息缺口|证据缺口|来源置信度|证据置信度|资料完整性|检索过程|搜索过程|调研过程|研究方法自评|证据质量评估|information\s+gaps?|source\s+confidence|research\s+methodology|search\s+process/iu;
-const DECISION_SECTION_RE =
+const LEGACY_DECISION_GUARD_RE =
   /推荐|不推荐|决策建议|采用建议|选型建议|风险评估|recommend(?:ation)?|risk\s+assessment|decision/iu;
-const RISK_SECTION_RE = /风险|risk/iu;
-const SUBSTANTIVE_SECTION_RE =
-  /对比|比较|性能|成本|能力|方案|指标|数据|证据|机制|条件|适用|差异|benchmark|performance|cost|comparison|evidence/iu;
-
-function neutralizeDecisionLanguage(text: string): string {
-  return text
-    .replace(/推荐\s*[\/、与和]?\s*不推荐/giu, "适用条件")
-    .replace(/不推荐/gu, "不适用")
-    .replace(/推荐/gu, "比较结论")
-    .replace(/(?:决策|采用|选型)建议/gu, "比较结论")
-    .replace(/风险评估/gu, "适用条件")
-    .replace(/\brecommendations?\b/giu, "comparative findings")
-    .replace(/\brisk\s+assessment\b/giu, "applicable conditions")
-    .replace(/\bdecision\s+advice\b/giu, "comparative findings");
-}
 
 /**
  * Prompt 不是安全边界：模型返回元章节或未请求的决策体例时，
@@ -268,33 +311,30 @@ export function applyReportContentPolicy(
 ): ReportOutline {
   const sections = outline.sections.flatMap((section): ReportSection[] => {
     const combined = `${section.title} ${section.brief}`;
-    const internalMeta =
-      INTERNAL_META_SECTION_RE.test(section.title) ||
-      (INTERNAL_META_SECTION_RE.test(section.brief) &&
-        !SUBSTANTIVE_SECTION_RE.test(combined));
-    if (!policy.allowLimitationsSections && internalMeta) return [];
+    const legacyGuardText =
+      section.semanticRole === "custom" ? combined : section.title;
+    if (section.semanticRole === "internal_meta") return [];
+    if (
+      !policy.allowLimitationsSections &&
+      (section.semanticRole === "limitations" ||
+        LEGACY_INTERNAL_META_GUARD_RE.test(legacyGuardText))
+    ) {
+      return [];
+    }
+    if (
+      !policy.allowDecisionSections &&
+      (section.semanticRole === "decision" ||
+        (section.semanticRole !== "limitations" &&
+          LEGACY_DECISION_GUARD_RE.test(legacyGuardText)))
+    ) {
+      return [];
+    }
 
     let next = section;
     if (!policy.allowDecisionSections && next.format === "tradeoff") {
       next = { ...next, format: "comparison_table" };
     }
 
-    if (!policy.allowDecisionSections) {
-      const decisionInTitle = DECISION_SECTION_RE.test(next.title);
-      const decisionInBrief = DECISION_SECTION_RE.test(next.brief);
-      const explicitRiskAllowed =
-        policy.allowLimitationsSections && RISK_SECTION_RE.test(next.title);
-      if (decisionInTitle && !explicitRiskAllowed) {
-        if (!SUBSTANTIVE_SECTION_RE.test(combined)) return [];
-        next = {
-          ...next,
-          title: neutralizeDecisionLanguage(next.title),
-          brief: neutralizeDecisionLanguage(next.brief),
-        };
-      } else if (decisionInBrief && !explicitRiskAllowed) {
-        next = { ...next, brief: neutralizeDecisionLanguage(next.brief) };
-      }
-    }
     return [next];
   });
 
@@ -302,26 +342,10 @@ export function applyReportContentPolicy(
   return ensureMinimumOutlineSections({ ...outline, sections }, policy);
 }
 
-const CORE_SECTION_RE = /核心结论|执行摘要|主要结论|key findings?|executive summary/iu;
-const EVIDENCE_SECTION_RE = /表现|证据|数据|指标|对比|比较|benchmark|evidence|performance/iu;
-const MECHANISM_SECTION_RE = /机制|原理|因果|实现|路径|架构|mechanism|architecture|how it works/iu;
-const OUTCOME_SECTION_RE = /结果|案例|实践|场景|影响|outcome|case|practice|impact/iu;
-const BOUNDARY_SECTION_RE = /适用|条件|边界|局限|风险|结论|判断|decision|limitation|risk|scope/iu;
-
 function sectionPurpose(section: ReportSection): string {
-  const title = section.title;
-  if (CORE_SECTION_RE.test(title)) return "core";
-  if (EVIDENCE_SECTION_RE.test(title)) return "evidence";
-  if (MECHANISM_SECTION_RE.test(title)) return "mechanism";
-  if (OUTCOME_SECTION_RE.test(title)) return "outcome";
-  if (BOUNDARY_SECTION_RE.test(title)) return "boundary";
-  const text = `${section.title} ${section.brief}`;
-  if (CORE_SECTION_RE.test(text)) return "core";
-  if (EVIDENCE_SECTION_RE.test(text)) return "evidence";
-  if (MECHANISM_SECTION_RE.test(text)) return "mechanism";
-  if (OUTCOME_SECTION_RE.test(text)) return "outcome";
-  if (BOUNDARY_SECTION_RE.test(text)) return "boundary";
-  return `custom:${section.title.normalize("NFKC").toLocaleLowerCase("en-US")}`;
+  return section.semanticRole === "custom"
+    ? `custom:${section.title.normalize("NFKC").toLocaleLowerCase("en-US")}`
+    : section.semanticRole;
 }
 
 /**

@@ -33,7 +33,7 @@ describe("finalizeReportArtifacts", () => {
       outline: {
         title: "报告标题",
         sections: [
-          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [1], format: "prose" },
+          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [1], format: "prose", semanticRole: "core" },
         ],
       },
       markdown: "# 报告标题\n\n结论 [1]\n",
@@ -65,7 +65,7 @@ describe("finalizeReportArtifacts", () => {
       outline: {
         title: "报告标题",
         sections: [
-          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose" },
+          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose", semanticRole: "core" },
         ],
       },
       markdown: "# 报告\n\n结论\n",
@@ -92,7 +92,7 @@ describe("finalizeReportArtifacts", () => {
       outline: {
         title: "竞品调研",
         sections: [
-          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [1], format: "prose" },
+          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [1], format: "prose", semanticRole: "core" },
         ],
       },
       markdown: "# 竞品调研\n\n结论 [1]\n",
@@ -128,7 +128,7 @@ describe("finalizeReportArtifacts", () => {
       outline: {
         title: "报告标题",
         sections: [
-          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose" },
+          { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose", semanticRole: "core" },
         ],
       },
       markdown: "# 报告\n\n结论\n",

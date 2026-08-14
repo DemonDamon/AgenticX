@@ -22,13 +22,14 @@ import {
 
 describe("parseOutlineJson", () => {
   it("parses fenced json", () => {
-    const raw = "```json\n{\"title\":\"T\",\"sections\":[{\"id\":\"s1\",\"title\":\"核心结论\",\"brief\":\"b\",\"citation_indexes\":[1]}]}\n```";
+    const raw = "```json\n{\"title\":\"T\",\"sections\":[{\"id\":\"s1\",\"title\":\"核心结论\",\"brief\":\"b\",\"citation_indexes\":[1],\"semantic_role\":\"core\"}]}\n```";
     const outline = parseOutlineJson(raw, "fallback");
     expect(outline.title).toBe("T");
     expect(outline.sections).toHaveLength(MIN_SECTIONS);
     expect(outline.sections[0]?.title).toBe("核心结论");
     expect(outline.sections[0]?.citationIndexes).toEqual([1]);
     expect(outline.sections[0]?.format).toBe("prose");
+    expect(outline.sections[0]?.semanticRole).toBe("core");
   });
 
   it("parses section format timeline", () => {
@@ -61,9 +62,10 @@ describe("parseOutlineJson", () => {
     const raw = `<think>先想大纲，可能要 {5} 节</think>${JSON.stringify({ title: "T", sections })}`;
     const outline = parseOutlineJson(raw, "fallback");
     expect(outline.title).toBe("T");
-    expect(outline.sections).toHaveLength(7);
-    expect(outline.sections[0]?.title).toBe("核心结论");
-    expect(outline.sections[6]?.title).toBe("章节6");
+    expect(outline.sections).toHaveLength(6);
+    expect(outline.sections[0]?.title).toBe("章节1");
+    expect(outline.sections[0]?.semanticRole).toBe("core");
+    expect(outline.sections[5]?.title).toBe("章节6");
   });
 
   it("falls back to five distinct result-focused sections when sections are empty", () => {
@@ -108,6 +110,38 @@ describe("parseOutlineJson", () => {
     );
   });
 
+  it("uses semantic roles without inferring purpose from section titles", () => {
+    const sections = [
+      ["alpha", "core"],
+      ["beta", "evidence"],
+      ["gamma", "mechanism"],
+      ["delta", "outcome"],
+      ["epsilon", "boundary"],
+    ].map(([title, semanticRole], index) => ({
+      id: `s${index + 1}`,
+      title,
+      brief: "b",
+      semantic_role: semanticRole,
+      format: "prose",
+    }));
+    const outline = parseOutlineJson(JSON.stringify({ title: "T", sections }), "T");
+
+    expect(outline.sections.map((section) => section.title)).toEqual([
+      "alpha",
+      "beta",
+      "gamma",
+      "delta",
+      "epsilon",
+    ]);
+    expect(outline.sections.map((section) => section.semanticRole)).toEqual([
+      "core",
+      "evidence",
+      "mechanism",
+      "outcome",
+      "boundary",
+    ]);
+  });
+
   it("filters internal meta and unrequested decision sections deterministically", () => {
     const policy = deriveReportContentPolicy({
       originalUserQuery: "研究某模型的实际表现",
@@ -117,24 +151,33 @@ describe("parseOutlineJson", () => {
       JSON.stringify({
         title: "T",
         sections: [
-          { id: "s1", title: "核心结论", brief: "回答表现", format: "prose" },
+          {
+            id: "s1",
+            title: "核心结论",
+            brief: "回答表现",
+            format: "prose",
+            semantic_role: "core",
+          },
           {
             id: "s2",
             title: "性能与公开证据",
             brief: "比较关键指标与评测条件",
             format: "comparison_table",
+            semantic_role: "evidence",
           },
           {
             id: "s3",
-            title: "来源置信度与信息缺口",
-            brief: "介绍检索过程",
+            title: "内部审计附录",
+            brief: "仅供系统内部处理",
             format: "prose",
+            semantic_role: "internal_meta",
           },
           {
             id: "s4",
-            title: "推荐 / 不推荐 / 风险评估",
-            brief: "给出决策建议",
+            title: "下一步",
+            brief: "给出最终动作",
             format: "tradeoff",
+            semantic_role: "decision",
           },
         ],
       }),
@@ -143,6 +186,8 @@ describe("parseOutlineJson", () => {
     );
     expect(outline.sections).toHaveLength(MIN_SECTIONS);
     expect(outline.sections.map((section) => section.title)).toContain("性能与公开证据");
+    expect(outline.sections.map((section) => section.title)).not.toContain("内部审计附录");
+    expect(outline.sections.map((section) => section.title)).not.toContain("下一步");
     expect(outline.sections.map((section) => section.title)).toContain("机制与因果解释");
     expect(outline.sections.some((section) => section.format === "tradeoff")).toBe(
       false,
@@ -157,19 +202,26 @@ describe("parseOutlineJson", () => {
       JSON.stringify({
         title: "T",
         sections: [
-          { id: "s1", title: "核心结论", brief: "总结", format: "prose" },
+          {
+            id: "s1",
+            title: "核心结论",
+            brief: "总结",
+            format: "prose",
+            semantic_role: "core",
+          },
           {
             id: "s2",
-            title: "不确定性与信息缺口",
+            title: "风险评估与适用边界",
             brief: "回答用户明确询问的局限",
             format: "prose",
+            semantic_role: "limitations",
           },
         ],
       }),
       "T",
       limitations,
     );
-    expect(limitationOutline.sections[1]?.title).toBe("不确定性与信息缺口");
+    expect(limitationOutline.sections[1]?.title).toBe("风险评估与适用边界");
 
     const decision = deriveReportContentPolicy({
       originalUserQuery: "比较两个方案",
@@ -179,12 +231,19 @@ describe("parseOutlineJson", () => {
       JSON.stringify({
         title: "T",
         sections: [
-          { id: "s1", title: "核心结论", brief: "总结", format: "prose" },
+          {
+            id: "s1",
+            title: "核心结论",
+            brief: "总结",
+            format: "prose",
+            semantic_role: "core",
+          },
           {
             id: "s2",
             title: "方案对比与推荐",
             brief: "说明推荐、不推荐与风险",
             format: "tradeoff",
+            semantic_role: "decision",
           },
         ],
       }),
@@ -194,17 +253,25 @@ describe("parseOutlineJson", () => {
     expect(decisionOutline.sections[1]?.format).toBe("tradeoff");
   });
 
-  it("normalizes substantive comparisons instead of dropping them", () => {
+  it("drops an unrequested decision role instead of rewriting its wording", () => {
     const outline: ReportOutline = {
       title: "T",
       sections: [
-        { id: "s1", title: "核心结论", brief: "总结", citationIndexes: [], format: "prose" },
+        {
+          id: "s1",
+          title: "核心结论",
+          brief: "总结",
+          citationIndexes: [],
+          format: "prose",
+          semanticRole: "core",
+        },
         {
           id: "s2",
           title: "方案对比与推荐",
           brief: "比较性能数据并给出选型建议",
           citationIndexes: [],
           format: "tradeoff",
+          semanticRole: "decision",
         },
       ],
     };
@@ -212,9 +279,13 @@ describe("parseOutlineJson", () => {
       allowDecisionSections: false,
       allowLimitationsSections: false,
     });
-    expect(fixed.sections[1]?.title).toBe("方案对比与比较结论");
-    expect(fixed.sections[1]?.brief).not.toContain("选型建议");
-    expect(fixed.sections[1]?.format).toBe("comparison_table");
+    expect(fixed.sections.map((section) => section.title)).not.toContain(
+      "方案对比与推荐",
+    );
+    expect(fixed.sections).toHaveLength(MIN_SECTIONS);
+    expect(fixed.sections.some((section) => section.format === "tradeoff")).toBe(
+      false,
+    );
   });
 
   it("falls back to a result-focused outline when every model section is meta", () => {
@@ -272,6 +343,7 @@ describe("report content policy", () => {
     expect(prompt).toContain("【报告内容策略】");
     expect(prompt).toContain("禁止推荐、不推荐");
     expect(prompt).toContain("禁止独立的信息缺口");
+    expect(prompt).toContain("semantic_role");
   });
 });
 
@@ -402,6 +474,7 @@ describe("renderTableOfContents / buildSectionMessages", () => {
           brief: "总结",
           citationIndexes: [],
           format: "comparison_table",
+          semanticRole: "core",
         },
       ],
     };
@@ -425,6 +498,7 @@ describe("renderTableOfContents / buildSectionMessages", () => {
         brief: "比较",
         citationIndexes: [1, 2],
         format: "comparison_table",
+        semanticRole: "evidence",
       },
       body: "A 更快 [1]，B 成本更低 [2]。",
     });
@@ -441,10 +515,38 @@ describe("ensureRichOutlineFormats", () => {
     const outline: ReportOutline = {
       title: "T",
       sections: [
-        { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose" },
-        { id: "s2", title: "分析", brief: "展开", citationIndexes: [], format: "prose" },
-        { id: "s3", title: "更多", brief: "展开", citationIndexes: [], format: "prose" },
-        { id: "s4", title: "缺口", brief: "b", citationIndexes: [], format: "prose" },
+        {
+          id: "s1",
+          title: "核心结论",
+          brief: "b",
+          citationIndexes: [],
+          format: "prose",
+          semanticRole: "core",
+        },
+        {
+          id: "s2",
+          title: "分析",
+          brief: "展开",
+          citationIndexes: [],
+          format: "prose",
+          semanticRole: "evidence",
+        },
+        {
+          id: "s3",
+          title: "更多",
+          brief: "展开",
+          citationIndexes: [],
+          format: "prose",
+          semanticRole: "mechanism",
+        },
+        {
+          id: "s4",
+          title: "缺口",
+          brief: "b",
+          citationIndexes: [],
+          format: "prose",
+          semanticRole: "boundary",
+        },
       ],
     };
     const fixed = ensureRichOutlineFormats(outline);
@@ -460,6 +562,7 @@ describe("sectionMeetsFormat", () => {
     title: "节",
     brief: "b",
     citationIndexes: [] as number[],
+    semanticRole: "custom" as const,
   };
 
   it("accepts GFM table for comparison_table", () => {

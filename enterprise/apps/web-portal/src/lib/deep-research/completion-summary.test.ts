@@ -17,9 +17,9 @@ const baseInput: CompletionSummaryInput = {
   outline: {
     title: "DeepSeek V4 核心技术点",
     sections: [
-      { id: "s1", title: "核心结论", brief: "概括架构与训练创新", citationIndexes: [], format: "prose" },
-      { id: "s2", title: "分项分析", brief: "MoE / MLA / Dual-Chain", citationIndexes: [], format: "prose" },
-      { id: "s3", title: "不确定性", brief: "信息缺口", citationIndexes: [], format: "prose" },
+      { id: "s1", title: "核心结论", brief: "概括架构与训练创新", citationIndexes: [], format: "prose", semanticRole: "core" },
+      { id: "s2", title: "分项分析", brief: "MoE / MLA / Dual-Chain", citationIndexes: [], format: "prose", semanticRole: "evidence" },
+      { id: "s3", title: "不确定性", brief: "信息缺口", citationIndexes: [], format: "prose", semanticRole: "limitations" },
     ],
   },
   stats: {
@@ -330,6 +330,7 @@ describe("fallbackSummary", () => {
       brief: "b",
       citationIndexes: [] as number[],
       format: "prose" as const,
+      semanticRole: "custom" as const,
     }));
     const out = fallbackSummary({ ...baseInput, outline: { title: "t", sections } });
     expect(out).not.toContain("章节12");
