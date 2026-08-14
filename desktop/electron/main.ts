@@ -61,6 +61,10 @@ import { isRealpathUnder, safeRealpath } from "./path-guard";
 import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import { selectEnterpriseInferenceBase } from "./enterprise-routing";
 import {
+  normalizeEnterpriseModelCatalog,
+  type EnterpriseModelCatalogEntry,
+} from "./enterprise-model-catalog";
+import {
   computePollMaxTicks,
   DEFAULT_ENTERPRISE_PORTAL_ORIGIN,
   enterpriseFetchErrorMessage,
@@ -279,6 +283,8 @@ type EnterpriseConfig = {
   };
   policy?: { strict?: boolean };
   models?: string[];
+  /** Structured catalog from Portal; `models` remains for runtime compatibility. */
+  model_catalog?: EnterpriseModelCatalogEntry[];
   synced_at?: string;
 };
 
@@ -376,12 +382,13 @@ function applyEnterpriseProvider(
     transport: "gateway-direct-v1" | "portal-proxy-v1";
     reauthRequiredForDirect?: boolean;
     token: string;
-    models: string[];
+    modelCatalog: EnterpriseModelCatalogEntry[];
     user: NonNullable<EnterpriseConfig["user"]>;
     strict: boolean;
   },
 ): void {
-  const models = opts.models.filter(Boolean);
+  const modelCatalog = normalizeEnterpriseModelCatalog(opts.modelCatalog);
+  const models = modelCatalog.map((entry) => entry.id);
   const inferenceBase = opts.inferenceBaseUrl.replace(/\/+$/, "");
   cfg.enterprise = {
     enabled: true,
@@ -394,6 +401,7 @@ function applyEnterpriseProvider(
     user: opts.user,
     policy: { strict: opts.strict },
     models,
+    model_catalog: modelCatalog,
     synced_at: new Date().toISOString(),
   };
   cfg.providers = cfg.providers ?? {};
@@ -471,7 +479,7 @@ async function finishEnterpriseLogin(
     message?: string;
     data?: {
       user?: EnterpriseTokenUser;
-      models?: Array<{ id?: string }>;
+      models?: unknown[];
       policy?: { strict?: boolean };
       apiBaseUrl?: string;
       inferenceApiBaseUrl?: string;
@@ -502,9 +510,8 @@ async function finishEnterpriseLogin(
   if (!inference.ok) {
     return { ok: false, error: inference.error };
   }
-  const models = (bootJson.data?.models ?? [])
-    .map((m) => String(m.id ?? "").trim())
-    .filter(Boolean);
+  const modelCatalog = normalizeEnterpriseModelCatalog(bootJson.data?.models ?? []);
+  const models = modelCatalog.map((entry) => entry.id);
   const user = bootJson.data?.user ?? fallbackUser ?? {};
   const cfg = loadAgxConfig();
   delete cfg.agx_account;
@@ -514,7 +521,7 @@ async function finishEnterpriseLogin(
     transport: inference.transport,
     reauthRequiredForDirect: inference.reauthRequiredForDirect,
     token: pat,
-    models,
+    modelCatalog,
     user: {
       user_id: user.userId ?? "",
       email: user.email ?? "",
@@ -7171,6 +7178,11 @@ function registerEarlyIpc(): void {
         displayName: ent?.user?.display_name ?? "",
         strict: ent?.policy?.strict !== false,
         models: Array.isArray(ent?.models) ? ent.models : [],
+        modelCatalog: normalizeEnterpriseModelCatalog(
+          Array.isArray(ent?.model_catalog) && ent.model_catalog.length > 0
+            ? ent.model_catalog
+            : ent?.models ?? [],
+        ),
         syncedAt: ent?.synced_at ?? "",
       },
     };
@@ -7497,6 +7509,11 @@ function registerIpc(): void {
       reauthRequiredForDirect: Boolean(ent?.reauth_required_for_direct),
       strict: ent?.policy?.strict !== false,
       models: Array.isArray(ent?.models) ? ent.models : [],
+      modelCatalog: normalizeEnterpriseModelCatalog(
+        Array.isArray(ent?.model_catalog) && ent.model_catalog.length > 0
+          ? ent.model_catalog
+          : ent?.models ?? [],
+      ),
       syncedAt: ent?.synced_at ?? "",
     };
   });
@@ -7515,6 +7532,11 @@ function registerIpc(): void {
       displayName: ent?.user?.display_name ?? "",
       strict: ent?.policy?.strict !== false,
       models: Array.isArray(ent?.models) ? ent.models : [],
+      modelCatalog: normalizeEnterpriseModelCatalog(
+        Array.isArray(ent?.model_catalog) && ent.model_catalog.length > 0
+          ? ent.model_catalog
+          : ent?.models ?? [],
+      ),
       syncedAt: ent?.synced_at ?? "",
     };
   });
@@ -7624,7 +7646,7 @@ function registerIpc(): void {
             tenantId?: string;
             deptId?: string | null;
           };
-          models?: Array<{ id?: string }>;
+          models?: unknown[];
           policy?: { strict?: boolean };
           apiBaseUrl?: string;
           inferenceApiBaseUrl?: string;
@@ -7653,9 +7675,8 @@ function registerIpc(): void {
       if (!inference.ok) {
         return { ok: false, error: inference.error };
       }
-      const models = (bootJson.data?.models ?? [])
-        .map((m) => String(m.id ?? "").trim())
-        .filter(Boolean);
+      const modelCatalog = normalizeEnterpriseModelCatalog(bootJson.data?.models ?? []);
+      const models = modelCatalog.map((entry) => entry.id);
       const user = bootJson.data?.user ?? ent?.user ?? {};
       applyEnterpriseProvider(cfg, {
         portalOrigin: baseUrl,
@@ -7663,7 +7684,7 @@ function registerIpc(): void {
         transport: inference.transport,
         reauthRequiredForDirect: inference.reauthRequiredForDirect,
         token,
-        models,
+        modelCatalog,
         user: {
           user_id: (user as { userId?: string }).userId ?? ent?.user?.user_id ?? "",
           email: (user as { email?: string }).email ?? ent?.user?.email ?? "",

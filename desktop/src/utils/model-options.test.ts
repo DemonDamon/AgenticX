@@ -3,6 +3,7 @@ import type { ProviderEntry } from "../store";
 import {
   coerceSelectableModel,
   collectSelectableModelOptions,
+  groupManagedModelOptions,
   isModelInProviderCatalog,
   isModelSelectable,
   listProviderVisibleModelIds,
@@ -122,6 +123,87 @@ describe("model-options", () => {
     expect(
       resolveDirectModelPickerProvider({ enterprise, zhipu }),
     ).toBeNull();
+  });
+
+  it("reuses enterprise catalog providers while retaining physical request ids", () => {
+    const enterprise: ProviderEntry = {
+      apiKey: TEST_PROVIDER_KEY,
+      baseUrl: "https://portal.example.com/api/desktop/v1",
+      model: "chinamobile/kimi/kimi-k3",
+      models: [
+        "moma/Qwen/Qwen3.6-Plus",
+        "chinamobile/kimi/kimi-k3",
+        "chinamobile/deepseek/deepseek-v4",
+        "moonshot/Kimi/Kimi-K2.7-code",
+      ],
+      enabled: true,
+      dropParams: true,
+      managed: true,
+      modelCatalog: [
+        {
+          id: "moma/Qwen/Qwen3.6-Plus",
+          provider: "moma",
+          providerLabel: "MOMA",
+          model: "Qwen/Qwen3.6-Plus",
+          label: "Qwen 3.6 Plus",
+        },
+        {
+          id: "chinamobile/kimi/kimi-k3",
+          provider: "chinamobile",
+          providerLabel: "移动云",
+          model: "kimi/kimi-k3",
+          label: "Kimi K3",
+        },
+        {
+          id: "chinamobile/deepseek/deepseek-v4",
+          provider: "chinamobile",
+          providerLabel: "移动云",
+          model: "deepseek/deepseek-v4",
+          label: "DeepSeek V4",
+        },
+        {
+          id: "moonshot/Kimi/Kimi-K2.7-code",
+          provider: "moonshot",
+          providerLabel: "月之暗面",
+          model: "Kimi/Kimi-K2.7-code",
+          label: "Kimi K2.7 Code",
+        },
+      ],
+    };
+    const options = sortModelOptionsByPrefix(
+      collectSelectableModelOptions({ enterprise }),
+    );
+
+    const groups = groupManagedModelOptions(enterprise, options);
+
+    expect(groups.map((group) => [group.providerLabel, group.items.length])).toEqual([
+      ["MOMA", 1],
+      ["月之暗面", 1],
+      ["移动云", 2],
+    ]);
+    expect(groups.find((group) => group.providerLabel === "移动云")?.items.map((item) => ({
+      provider: item.provider,
+      model: item.model,
+    }))).toEqual([
+      { provider: "enterprise", model: "chinamobile/deepseek/deepseek-v4" },
+      { provider: "enterprise", model: "chinamobile/kimi/kimi-k3" },
+    ]);
+  });
+
+  it("derives internal providers from legacy managed ids", () => {
+    const enterprise: ProviderEntry = {
+      ...openaiGateway,
+      model: "chinamobile/kimi/kimi-k3",
+      models: ["chinamobile/kimi/kimi-k3", "moma/Qwen/Qwen3.6-Plus"],
+      managed: true,
+    };
+
+    expect(
+      groupManagedModelOptions(
+        enterprise,
+        collectSelectableModelOptions({ enterprise }),
+      ).map((group) => group.providerLabel),
+    ).toEqual(["MOMA", "移动云"]);
   });
 
   it("groups enterprise models by visible family prefix with natural model order", () => {

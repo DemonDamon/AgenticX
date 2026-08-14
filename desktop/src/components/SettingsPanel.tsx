@@ -116,7 +116,10 @@ import {
   type ProviderInterfaceKind,
 } from "../utils/provider-display";
 import { PROVIDER_ICON_MAP } from "../utils/provider-icons";
-import { normalizeProviderEntry } from "../utils/model-options";
+import {
+  normalizeProviderEntry,
+  type ManagedModelCatalogEntry,
+} from "../utils/model-options";
 import { isEnterpriseModelManagementLocked } from "../utils/enterprise-model-management";
 import { SHOW_DESKTOP_EXTERNAL_IM } from "../constants/desktop-feature-visibility";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
@@ -216,6 +219,8 @@ type ProviderEntry = {
   interface?: ProviderInterfaceKind;
   /** 企业托管 provider，设置页只读 */
   managed?: boolean;
+  /** 企业后台下发的内部 provider / model 目录。 */
+  modelCatalog?: ManagedModelCatalogEntry[];
 };
 
 /** 至少填写了密钥或自定义 API 地址之一，才视为已配置（与「留空使用默认」的隐式地址区分）。 */
@@ -270,13 +275,21 @@ function providerEntryFromSaved(saved: Partial<ProviderEntry> | undefined): Prov
     displayName: dn || undefined,
     interface: iface,
     managed: saved?.managed === true,
+    modelCatalog: Array.isArray(saved?.modelCatalog) ? saved.modelCatalog : undefined,
   };
 }
 
 function cloneProviderDraftMap(draft: Record<string, ProviderEntry>): Record<string, ProviderEntry> {
   const out: Record<string, ProviderEntry> = {};
   for (const [name, entry] of Object.entries(draft)) {
-    out[name] = { ...entry, models: [...entry.models] };
+    out[name] = {
+      ...entry,
+      models: [...entry.models],
+      modelCatalog: entry.modelCatalog?.map((item) => ({
+        ...item,
+        capabilities: item.capabilities ? [...item.capabilities] : undefined,
+      })),
+    };
   }
   return out;
 }
@@ -7306,6 +7319,8 @@ export function SettingsPanel({
           displayName: row.display_name,
           interface: row.interface,
           managed: row.managed === true,
+          modelCatalog:
+            name === "enterprise" ? cfg.enterprise?.modelCatalog ?? [] : undefined,
         });
       }
       const managedOnly = cfg.enterprise?.enabled === true && cfg.enterprise?.strict !== false;

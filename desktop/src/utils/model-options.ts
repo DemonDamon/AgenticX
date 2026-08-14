@@ -1,5 +1,16 @@
 import { formatModelOptionLabel, normalizeBareModelId } from "./model-display";
 
+export type ManagedModelCatalogEntry = {
+  id: string;
+  provider: string;
+  providerLabel: string;
+  model: string;
+  label: string;
+  route?: "local" | "private-cloud" | "third-party";
+  isDefault?: boolean;
+  capabilities?: string[];
+};
+
 export type ProviderCatalogEntry = {
   apiKey: string;
   baseUrl: string;
@@ -10,12 +21,27 @@ export type ProviderCatalogEntry = {
   displayName?: string;
   interface?: "openai" | "ollama";
   managed?: boolean;
+  modelCatalog?: ManagedModelCatalogEntry[];
 };
 
 export type SelectableModelOption = {
   provider: string;
   model: string;
   label: string;
+};
+
+export type ManagedModelProviderGroup = {
+  provider: string;
+  providerLabel: string;
+  items: SelectableModelOption[];
+};
+
+const MANAGED_PROVIDER_FALLBACK_LABELS: Record<string, string> = {
+  chinamobile: "移动云",
+  cmcc: "移动云",
+  kimi: "月之暗面",
+  moonshot: "月之暗面",
+  moma: "MOMA",
 };
 
 const MODEL_PREFIX_COLLATOR = new Intl.Collator("en-US", {
@@ -58,6 +84,56 @@ export function sortModelOptionsByPrefix<T extends Pick<SelectableModelOption, "
     if (modelOrder !== 0) return modelOrder;
     return MODEL_PREFIX_COLLATOR.compare(left.model, right.model);
   });
+}
+
+function managedProviderFromModelId(modelId: string): string {
+  const value = modelId.trim();
+  const slash = value.indexOf("/");
+  return slash > 0 ? value.slice(0, slash).trim() : "enterprise";
+}
+
+function managedProviderFallbackLabel(provider: string): string {
+  const normalized = provider.trim().toLowerCase();
+  if (!normalized || normalized === "enterprise") return "企业模型";
+  return MANAGED_PROVIDER_FALLBACK_LABELS[normalized] ?? provider.trim();
+}
+
+/**
+ * Split one physical Enterprise gateway into the internal providers configured
+ * by admins. Requests still use the physical provider and complete model id.
+ */
+export function groupManagedModelOptions(
+  entry: ProviderCatalogEntry,
+  options: readonly SelectableModelOption[],
+): ManagedModelProviderGroup[] {
+  const metadata = new Map(
+    (entry.modelCatalog ?? [])
+      .filter((item) => item && typeof item.id === "string")
+      .map((item) => [item.id.trim(), item] as const),
+  );
+  const groups = new Map<string, ManagedModelProviderGroup>();
+
+  for (const option of options) {
+    const catalogItem = metadata.get(option.model.trim());
+    const provider =
+      catalogItem?.provider?.trim() || managedProviderFromModelId(option.model);
+    const key = provider.toLowerCase();
+    const providerLabel =
+      catalogItem?.providerLabel?.trim() || managedProviderFallbackLabel(provider);
+    const group = groups.get(key);
+    if (group) {
+      group.items.push(option);
+    } else {
+      groups.set(key, { provider, providerLabel, items: [option] });
+    }
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      items: sortModelOptionsByPrefix(group.items),
+    }))
+    .sort((left, right) => MODEL_PREFIX_COLLATOR.compare(left.providerLabel, right.providerLabel));
 }
 
 /** Models the user can pick for a provider: visible list wins over legacy `model`. */

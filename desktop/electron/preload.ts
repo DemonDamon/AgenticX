@@ -928,6 +928,13 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       reauthRequiredForDirect?: boolean;
       strict?: boolean;
       models?: string[];
+      modelCatalog?: Array<{
+        id: string;
+        provider: string;
+        providerLabel: string;
+        model: string;
+        label: string;
+      }>;
       syncedAt?: string;
     }>,
   loadEnterprise: async () =>
@@ -939,6 +946,13 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       displayName?: string;
       strict?: boolean;
       models?: string[];
+      modelCatalog?: Array<{
+        id: string;
+        provider: string;
+        providerLabel: string;
+        model: string;
+        label: string;
+      }>;
       syncedAt?: string;
       inferenceBaseUrl?: string;
       transport?: string;

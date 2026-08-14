@@ -43,6 +43,17 @@ type ProviderConfig = {
   managed?: boolean;
 };
 
+type EnterpriseModelCatalogItem = {
+  id: string;
+  provider: string;
+  providerLabel: string;
+  model: string;
+  label: string;
+  route?: "local" | "private-cloud" | "third-party";
+  isDefault?: boolean;
+  capabilities?: string[];
+};
+
 type LoadConfigResult = {
   defaultProvider: string;
   providers: Record<string, ProviderConfig>;
@@ -64,6 +75,7 @@ type LoadConfigResult = {
     displayName: string;
     strict: boolean;
     models: string[];
+    modelCatalog: EnterpriseModelCatalogItem[];
     syncedAt: string;
   };
 };
@@ -861,6 +873,7 @@ declare global {
         reauthRequiredForDirect?: boolean;
         strict?: boolean;
         models?: string[];
+        modelCatalog?: EnterpriseModelCatalogItem[];
         syncedAt?: string;
       }>;
       loadEnterprise: () => Promise<{
@@ -874,6 +887,7 @@ declare global {
         displayName?: string;
         strict?: boolean;
         models?: string[];
+        modelCatalog?: EnterpriseModelCatalogItem[];
         syncedAt?: string;
       }>;
       enterpriseLogin: (payload: {

@@ -9,6 +9,7 @@ import {
   coerceSelectableModel,
   reconcilePaneModelsWithSettings as reconcilePaneModelsPure,
   resolveSessionBindingModel,
+  type ManagedModelCatalogEntry,
 } from "./utils/model-options";
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
@@ -431,6 +432,8 @@ export type ProviderEntry = {
   interface?: "openai" | "ollama";
   /** Enterprise managed provider (read-only in settings). */
   managed?: boolean;
+  /** Internal providers/models returned by the Enterprise bootstrap catalog. */
+  modelCatalog?: ManagedModelCatalogEntry[];
 };
 
 type SettingsState = {

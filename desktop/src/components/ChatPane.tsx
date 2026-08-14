@@ -263,6 +263,7 @@ import { getProviderDisplayName } from "../utils/provider-display";
 import {
   collectSelectableModelOptions,
   coerceSelectableModel,
+  groupManagedModelOptions,
   isModelSelectable,
   isProviderCredentialed,
   resolveDirectModelPickerProvider,
@@ -1146,7 +1147,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
    * Group by vendor. Seed every enabled+credentialed provider first so「已启动」渠道
    * (e.g. MOMA with only legacy `model` / empty visible `models`) still gets a section.
    */
-  const groups = useMemo(() => {
+  const physicalProviderGroups = useMemo(() => {
     const byProvider = new Map<string, typeof options>();
     for (const [provider, entry] of Object.entries(settings.providers)) {
       if (entry.enabled === false) continue;
@@ -1168,14 +1169,37 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     () => resolveDirectModelPickerProvider(settings.providers),
     [settings.providers],
   );
+  const groups = useMemo(() => {
+    if (directProviderId) {
+      const entry = settings.providers[directProviderId];
+      if (entry) {
+        const internalGroups = groupManagedModelOptions(
+          entry,
+          options.filter((option) => option.provider === directProviderId),
+        );
+        return internalGroups.map((group) => ({
+          key: `${directProviderId}:${group.provider.toLowerCase()}`,
+          requestProvider: directProviderId,
+          visualProvider: group.provider,
+          providerLabel: group.providerLabel,
+          items: group.items,
+        }));
+      }
+    }
+    return physicalProviderGroups.map((group) => ({
+      key: group.provider,
+      requestProvider: group.provider,
+      visualProvider: group.provider,
+      providerLabel: group.providerLabel,
+      items: group.items,
+    }));
+  }, [directProviderId, options, physicalProviderGroups, settings.providers]);
   const explicitlySelectedProviderGroup = selectedProviderId
-    ? groups.find((group) => group.provider === selectedProviderId) ?? null
+    ? groups.find((group) => group.key === selectedProviderId) ?? null
     : null;
-  const directProviderGroup = directProviderId
-    ? groups.find((group) => group.provider === directProviderId) ?? null
-    : null;
-  const selectedProviderGroup = explicitlySelectedProviderGroup ?? directProviderGroup;
-  const displayedProviderId = selectedProviderGroup?.provider ?? null;
+  const selectedProviderGroup =
+    explicitlySelectedProviderGroup ?? (directProviderId && groups.length === 1 ? groups[0] ?? null : null);
+  const displayedProviderId = selectedProviderGroup?.requestProvider ?? null;
 
   /** Same model id served by several vendors — only then does the row need its vendor spelled out. */
   const ambiguousModelNames = useMemo(() => {
@@ -1249,9 +1273,20 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
 
   const hoverBlurb = useMemo(() => {
     if (!hoverOpt) return null;
-    const providerLabel = getProviderDisplayName(hoverOpt.provider, settings.providers[hoverOpt.provider]);
-    return describeModelForPicker(hoverOpt.provider, hoverOpt.model, providerLabel);
-  }, [hoverOpt, settings.providers]);
+    const providerGroup = groups.find((group) =>
+      group.items.some(
+        (item) => item.provider === hoverOpt.provider && item.model === hoverOpt.model,
+      ),
+    );
+    const providerLabel =
+      providerGroup?.providerLabel
+      ?? getProviderDisplayName(hoverOpt.provider, settings.providers[hoverOpt.provider]);
+    return describeModelForPicker(
+      providerGroup?.visualProvider ?? hoverOpt.provider,
+      hoverOpt.model,
+      providerLabel,
+    );
+  }, [groups, hoverOpt, settings.providers]);
 
   const paneReasoningEffort = normalizeKimiReasoningEffort(paneModel?.reasoningEffort);
   const showEffortControls = Boolean(hoverBlurb?.supportsReasoningEffort);
@@ -1335,10 +1370,12 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                       先选择模型提供商
                     </div>
                     {groups.map((group) => {
-                      const isCurrentProvider = group.provider === currentProvider;
+                      const isCurrentProvider = group.items.some(
+                        (item) => item.provider === currentProvider && item.model === currentModel,
+                      );
                       return (
                         <button
-                          key={group.provider}
+                          key={group.key}
                           type="button"
                           className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition-colors ${
                             isCurrentProvider
@@ -1346,12 +1383,15 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                               : "hover:bg-surface-hover"
                           }`}
                           onClick={() => {
-                            setSelectedProviderId(group.provider);
+                            setSelectedProviderId(group.key);
                             setHoverKey(null);
                             setEffortMenuOpen(false);
                           }}
                         >
-                          <ProviderGlyph provider={group.provider} model={group.items[0]?.model ?? ""} />
+                          <ProviderGlyph
+                            provider={group.visualProvider}
+                            model={group.items[0]?.model ?? ""}
+                          />
                           <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-text-strong">
                             {group.providerLabel}
                           </span>
@@ -1419,7 +1459,10 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                             }}
                             onClick={() => handleSelect(opt.provider, opt.model)}
                           >
-                            <ProviderGlyph provider={opt.provider} model={opt.model} />
+                            <ProviderGlyph
+                              provider={selectedProviderGroup.visualProvider}
+                              model={opt.model}
+                            />
                             <span className="min-w-0 flex-1 truncate font-semibold text-text-strong">
                               {modelName}
                             </span>

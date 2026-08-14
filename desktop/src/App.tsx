@@ -92,7 +92,8 @@ function toProviderEntries(
       interface?: "openai" | "ollama";
       managed?: boolean;
     }
-  >
+  >,
+  enterpriseModelCatalog: NonNullable<ProviderEntry["modelCatalog"]> = [],
 ): Record<string, ProviderEntry> {
   const result: Record<string, ProviderEntry> = {};
   for (const [name, cfg] of Object.entries(raw)) {
@@ -111,6 +112,9 @@ function toProviderEntries(
     if (displayName) row.displayName = displayName;
     if (cfg.interface === "openai" || cfg.interface === "ollama") row.interface = cfg.interface;
     if (cfg.managed === true) row.managed = true;
+    if (name === "enterprise" && enterpriseModelCatalog.length > 0) {
+      row.modelCatalog = enterpriseModelCatalog;
+    }
     result[name] = normalizeProviderEntry(row);
   }
   return result;
@@ -544,7 +548,10 @@ export function App() {
         setOnboardingCompleted(true);
         const loadedConfirmStrategy = cfgEarly.confirmStrategy ?? "semi-auto";
         setConfirmStrategy(loadedConfirmStrategy);
-        const entries = toProviderEntries(cfgEarly.providers ?? {});
+        const entries = toProviderEntries(
+          cfgEarly.providers ?? {},
+          cfgEarly.enterprise?.modelCatalog ?? [],
+        );
         // Strict managed mode: after enterprise login, only expose managed providers in the store.
         const ent = cfgEarly.enterprise;
         const managedOnly = ent?.enabled === true && ent?.strict !== false;
