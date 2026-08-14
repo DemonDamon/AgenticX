@@ -13,13 +13,21 @@ describe("deepResearchWaitingLabel", () => {
     expect(deepResearchWaitingLabel([])).toBe("正在启动深度研究…");
   });
 
-  it("surfaces the latest phase message while clarify/plan render no segment", () => {
+  it("surfaces clarify progress as a visible process row instead of idle dots", () => {
     const events: DeepResearchEvent[] = [
       { type: "run_started", runId: "r1" },
       { type: "phase", phase: "clarify", message: "正在判断是否需要澄清…" },
     ];
     expect(deepResearchWaitingLabel(events)).toBe("正在判断是否需要澄清…");
-    expect(buildDeepResearchSegments(events, "running")).toHaveLength(0);
+    const segments = buildDeepResearchSegments(events, "running");
+    expect(segments).toEqual([
+      expect.objectContaining({
+        kind: "status",
+        title: "正在判断是否需要澄清…",
+        status: "running",
+        detailLines: ["正在判断现有信息是否足以开始研究。"],
+      }),
+    ]);
   });
 
   it("surfaces recon cold-start as a visible search tools card before clarify", () => {
@@ -55,13 +63,18 @@ describe("deepResearchWaitingLabel", () => {
 });
 
 describe("deepResearchNeedsTrailingActivity", () => {
-  it("is true after clarify resume narrative while waiting for lanes", () => {
+  it("uses a visible planning row after clarify instead of trailing dots", () => {
     const events: DeepResearchEvent[] = [
       { type: "narrative", text: "已明确调研方向，开始系统检索。" },
       { type: "phase", phase: "plan", message: "正在规划研究路径…" },
     ];
     const segments = buildDeepResearchSegments(events, "running");
-    expect(deepResearchNeedsTrailingActivity(segments, "running")).toBe(true);
+    expect(deepResearchNeedsTrailingActivity(segments, "running")).toBe(false);
+    expect(segments.at(-1)).toMatchObject({
+      kind: "status",
+      title: "正在规划研究路径…",
+      status: "running",
+    });
   });
 
   it("is false while a tools card still has a running lane", () => {
@@ -155,9 +168,11 @@ describe("buildDeepResearchSegments", () => {
 
     const segments = buildDeepResearchSegments(events, "completed");
     expect(segments.map((s) => s.kind)).toEqual([
+      "status",
       "narrative",
       "clarify",
       "narrative",
+      "status",
       "tools",
       "narrative",
       // Writing phases collapse into one card; plain "深度研究完成" is omitted.
@@ -171,10 +186,10 @@ describe("buildDeepResearchSegments", () => {
     expect(toolsTitle).toContain("已完成");
     expect(toolsTitle).not.toContain("正在并行检索");
 
-    // Planning phases must not appear as separate checklist spam.
+    // Preparation phases remain available as compact, auto-collapsing process rows.
     expect(
-      segments.some((s) => s.kind === "status" && s.title.includes("规划研究路径")),
-    ).toBe(false);
+      segments.some((s) => s.kind === "status" && s.title === "已规划研究路径"),
+    ).toBe(true);
 
     // Report artifacts are deferred to the delivery strip after the body.
     expect(collectDeepResearchDeliveryArtifacts(events)).toEqual([

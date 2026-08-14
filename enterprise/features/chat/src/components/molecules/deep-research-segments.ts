@@ -103,6 +103,17 @@ export function completedPhaseTitle(title: string): string {
   return raw;
 }
 
+function processPhaseDetail(phase: "clarify" | "plan" | "reflect"): string {
+  switch (phase) {
+    case "clarify":
+      return "正在判断现有信息是否足以开始研究。";
+    case "plan":
+      return "正在把问题拆解为可验证的研究路径。";
+    case "reflect":
+      return "正在交叉核对来源，并在预算内补充关键证据。";
+  }
+}
+
 /**
  * Final / non-memo artifacts for the delivery strip after the report body.
  * Lane memos stay attached to expandable search steps only.
@@ -139,18 +150,18 @@ export function buildDeepResearchSegments(
   let writeSteps: ResearchStep[] = [];
   let writeId = "synthesize-1";
   let wroteCard = false;
-  let reflectStatus: Extract<DeepResearchSegment, { kind: "status" }> | null = null;
+  let processStatus: Extract<DeepResearchSegment, { kind: "status" }> | null = null;
   const runTerminal =
     status === "completed" || status === "failed" || status === "cancelled";
 
-  /** Internal refinement lanes stay hidden, but their high-level status must settle visibly. */
-  const settleReflectStatus = (outcome: "done" | "failed") => {
-    if (!reflectStatus || reflectStatus.status !== "running") return;
-    reflectStatus.status = outcome;
+  /** Model preparation/refinement stays readable without exposing raw chain-of-thought. */
+  const settleProcessStatus = (outcome: "done" | "failed") => {
+    if (!processStatus || processStatus.status !== "running") return;
+    processStatus.status = outcome;
     if (outcome === "done") {
-      reflectStatus.title = completedPhaseTitle(reflectStatus.title);
+      processStatus.title = completedPhaseTitle(processStatus.title);
     }
-    reflectStatus = null;
+    processStatus = null;
   };
 
   /** A writing step is finished the moment the next one starts. */
@@ -209,7 +220,7 @@ export function buildDeepResearchSegments(
       case "run_started":
         break;
       case "narrative": {
-        settleReflectStatus("done");
+        settleProcessStatus("done");
         flushCards();
         const text = event.text.trim();
         if (text) {
@@ -219,6 +230,7 @@ export function buildDeepResearchSegments(
       }
       case "clarify": {
         if (!clarifyPushed) {
+          settleProcessStatus("done");
           flushCards();
           segments.push({ kind: "clarify", id: "clarify" });
           clarifyPushed = true;
@@ -228,34 +240,44 @@ export function buildDeepResearchSegments(
       case "clarify_timeout":
         break;
       case "phase": {
-        if (event.phase === "recon" || event.phase === "clarify" || event.phase === "plan") {
+        // Recon immediately emits a visible search lane, so another process row
+        // would duplicate the same activity.
+        if (event.phase === "recon") break;
+        if (
+          event.phase === "clarify" ||
+          event.phase === "plan" ||
+          event.phase === "reflect"
+        ) {
+          settleProcessStatus("done");
+          flushCards();
+          const fallbackTitle =
+            event.phase === "clarify"
+              ? "正在判断是否需要澄清…"
+              : event.phase === "plan"
+                ? "正在规划研究路径…"
+                : "正在复核并补充关键证据…";
+          const title = event.message?.trim() || fallbackTitle;
+          const processOutcome =
+            status === "completed" ? "done" : runTerminal ? "failed" : "running";
+          const row: Extract<DeepResearchSegment, { kind: "status" }> = {
+            kind: "status",
+            id: `phase-${event.phase}-${seq++}`,
+            title: processOutcome === "done" ? completedPhaseTitle(title) : title,
+            status: processOutcome,
+            detailLines: [processPhaseDetail(event.phase)],
+          };
+          segments.push(row);
+          processStatus = processOutcome === "running" ? row : null;
           break;
         }
         if (event.phase === "lanes") {
-          settleReflectStatus("done");
+          settleProcessStatus("done");
           flushCards();
           toolsTitle = event.message || "正在并行检索…";
           break;
         }
-        if (event.phase === "reflect") {
-          settleReflectStatus("done");
-          flushCards();
-          const title = event.message?.trim() || "正在复核并补充关键证据…";
-          const reflectOutcome =
-            status === "completed" ? "done" : runTerminal ? "failed" : "running";
-          const row: Extract<DeepResearchSegment, { kind: "status" }> = {
-            kind: "status",
-            id: `phase-reflect-${seq++}`,
-            title: reflectOutcome === "done" ? completedPhaseTitle(title) : title,
-            status: reflectOutcome,
-            detailLines: [],
-          };
-          segments.push(row);
-          reflectStatus = reflectOutcome === "running" ? row : null;
-          break;
-        }
         if (event.phase === "synthesize") {
-          settleReflectStatus("done");
+          settleProcessStatus("done");
           flushTools();
           settleWriteSteps("done");
           writeSteps.push({
@@ -268,7 +290,7 @@ export function buildDeepResearchSegments(
           break;
         }
         if (event.phase === "done") {
-          settleReflectStatus(
+          settleProcessStatus(
             status === "failed" || status === "cancelled" ? "failed" : "done",
           );
           flushTools();
@@ -293,7 +315,7 @@ export function buildDeepResearchSegments(
         break;
       }
       case "reflection": {
-        settleReflectStatus("done");
+        settleProcessStatus("done");
         flushCards();
         segments.push({
           kind: "reflection",
@@ -303,7 +325,7 @@ export function buildDeepResearchSegments(
         break;
       }
       case "research_stats": {
-        settleReflectStatus("done");
+        settleProcessStatus("done");
         flushCards();
         const stats = [
           `检索式 ${event.queriesPlanned} 条`,
@@ -321,6 +343,7 @@ export function buildDeepResearchSegments(
         break;
       }
       case "lane_started": {
+        settleProcessStatus("done");
         lanes.set(event.laneId, {
           laneId: event.laneId,
           title: event.title,

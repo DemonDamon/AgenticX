@@ -377,24 +377,70 @@ function ToolsCard({
 function StatusRow({
   title,
   status,
+  detailLines,
 }: {
   title: string;
   status: "running" | "done" | "failed";
+  detailLines: string[];
 }) {
-  // Match ToolsCard chrome so phase status rows share the same corner radius.
+  const running = status === "running";
+  const canExpand = detailLines.length > 0;
+  const [open, setOpen] = React.useState(running && canExpand);
+  const prevRunning = React.useRef(running);
+
+  React.useEffect(() => {
+    if (prevRunning.current && !running) {
+      setOpen(false);
+    } else if (!prevRunning.current && running && canExpand) {
+      setOpen(true);
+    }
+    prevRunning.current = running;
+  }, [canExpand, running]);
+
   return (
     <div
-      className="mb-3 flex items-center gap-2 rounded-xl border border-border/60 bg-card px-3 py-2.5 shadow-sm"
+      className="mb-3 overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm"
       data-testid="deep-research-status-row"
+      data-collapsed={open ? "false" : "true"}
     >
-      {status === "running" ? (
-        <IconSpinner className="h-4 w-4 shrink-0 animate-spin text-primary" />
-      ) : status === "failed" ? (
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
-      ) : (
-        <IconCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
-      )}
-      <span className="min-w-0 flex-1 text-sm font-medium text-foreground">{title}</span>
+      <button
+        type="button"
+        disabled={!canExpand}
+        onClick={() => {
+          if (canExpand) setOpen((value) => !value);
+        }}
+        className={[
+          "flex w-full items-center gap-2 px-3 py-2.5 text-left",
+          canExpand ? "" : "cursor-default",
+        ].join(" ")}
+        aria-expanded={canExpand ? open : undefined}
+      >
+        {status === "running" ? (
+          <IconSpinner className="h-4 w-4 shrink-0 animate-spin text-primary" />
+        ) : status === "failed" ? (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
+        ) : (
+          <IconCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
+        <span className="min-w-0 flex-1 text-sm font-medium text-foreground">{title}</span>
+        {canExpand ? (
+          <IconChevronRight
+            className={[
+              "ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+              open ? "rotate-90" : "",
+            ].join(" ")}
+          />
+        ) : null}
+      </button>
+      {open && canExpand ? (
+        <div className="space-y-1 border-t border-border/50 px-3 py-2 text-sm leading-5 text-muted-foreground">
+          {detailLines.map((line, index) => (
+            <p key={`${title}-detail-${index}`} className="whitespace-pre-wrap">
+              {line}
+            </p>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -527,7 +573,12 @@ export function DeepResearchWorkbench({
             );
           case "status":
             return (
-              <StatusRow key={segment.id} title={segment.title} status={segment.status} />
+              <StatusRow
+                key={segment.id}
+                title={segment.title}
+                status={segment.status}
+                detailLines={segment.detailLines}
+              />
             );
           case "reflection":
             return <ReflectionCard key={segment.id} gaps={segment.gaps} />;
