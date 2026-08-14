@@ -2,7 +2,7 @@
 
 Planned-with: GPT-5 (Codex)
 Suggested-Impl-Model: gpt5.6sol
-Status: pending-review
+Status: approved-for-implementation
 Plan-Id: 2026-08-14-deep-research-results-first-orchestration
 
 ## 目标
