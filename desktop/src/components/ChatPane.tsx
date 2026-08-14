@@ -164,6 +164,7 @@ import {
   shouldShowStopButton,
   type SessionExecutionState,
 } from "../utils/streaming-stop-policy";
+import { shouldApplyScrollPinFromEvent, shouldPinScrollOnUserSend } from "../utils/chat-scroll-pin";
 import {
   TURN_INTERRUPTED_TOAST,
   isTurnInterruptionNoticeMessage,
@@ -2954,6 +2955,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const streamRafRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = useRef(true);
+  /** >0 while we assign scrollTop; scroll events in that window must not unpin. */
+  const programmaticScrollRef = useRef(0);
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
   const sessionBootstrapInflightRef = useRef("");
@@ -3249,16 +3252,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     () => (useReActImLayout ? expandMessagesToTopLevelRows(visibleMessagesWithStream) : null),
     [useReActImLayout, visibleMessagesWithStream]
   );
+  const syncJumpToBottomFab = useCallback(() => {
+    const el = listRef.current;
+    if (!el) {
+      setShowJumpToBottomFab(false);
+      return;
+    }
+    const overflow = el.scrollHeight > el.clientHeight + 4;
+    setShowJumpToBottomFab(overflow && !isNearBottom(el));
+  }, []);
+
   const flushJumpToBottomFab = useCallback(() => {
     const el = listRef.current;
     if (!el) {
       setShowJumpToBottomFab(false);
       return;
     }
-    autoScrollPinnedRef.current = isNearBottom(el);
-    const overflow = el.scrollHeight > el.clientHeight + 4;
-    setShowJumpToBottomFab(overflow && !isNearBottom(el));
+    if (shouldApplyScrollPinFromEvent(programmaticScrollRef.current > 0)) {
+      autoScrollPinnedRef.current = isNearBottom(el);
+    }
+    syncJumpToBottomFab();
+  }, [syncJumpToBottomFab]);
+
+  const scrollListToBottom = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    programmaticScrollRef.current += 1;
+    el.scrollTop = el.scrollHeight;
+    programmaticScrollRef.current -= 1;
   }, []);
+
+  const pinChatListToLatestTurn = useCallback(() => {
+    autoScrollPinnedRef.current = true;
+    scrollListToBottom();
+    setShowJumpToBottomFab(false);
+  }, [scrollListToBottom]);
 
   /** 灵巧模式退出后主界面 ChatPane remount，`flushJumpToBottomFab` 会在 scrollTop=0 时误判 unpinned；此处强制滚底一次。 */
   const focusExitScrollTarget = useAppStore((s) =>
@@ -3640,25 +3668,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    const onScrollOrResize = () => flushJumpToBottomFab();
+    // User scroll may unpin. Content-height resize must not unpin; if still
+    // pinned, keep the latest turn in view as bubbles/stream grow.
+    const onScroll = () => flushJumpToBottomFab();
+    const onResize = () => {
+      if (autoScrollPinnedRef.current) {
+        scrollListToBottom();
+      }
+      syncJumpToBottomFab();
+    };
     flushJumpToBottomFab();
-    el.addEventListener("scroll", onScrollOrResize, { passive: true });
-    const ro = new ResizeObserver(onScrollOrResize);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    const ro = new ResizeObserver(onResize);
     ro.observe(el);
     return () => {
-      el.removeEventListener("scroll", onScrollOrResize);
+      el.removeEventListener("scroll", onScroll);
       ro.disconnect();
     };
-  }, [paneId, flushJumpToBottomFab]);
+  }, [paneId, flushJumpToBottomFab, syncJumpToBottomFab, scrollListToBottom]);
 
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      if (listRef.current && autoScrollPinnedRef.current) {
-        listRef.current.scrollTop = listRef.current.scrollHeight;
-      }
-      flushJumpToBottomFab();
-    });
-  }, [visibleMessages, streamedAssistantText, flushJumpToBottomFab]);
+  useLayoutEffect(() => {
+    if (autoScrollPinnedRef.current) {
+      scrollListToBottom();
+      // Second frame: markdown/images can grow after the first commit.
+      requestAnimationFrame(() => {
+        if (autoScrollPinnedRef.current) {
+          scrollListToBottom();
+        }
+        syncJumpToBottomFab();
+      });
+      return;
+    }
+    // FAB only — do not recompute pin here. Layout is often still short of the
+    // true bottom when a new user bubble mounts, and that used to unpin us.
+    syncJumpToBottomFab();
+  }, [visibleMessages, streamedAssistantText, scrollListToBottom, syncJumpToBottomFab]);
 
   const highlightJumpKeyRef = useRef<string>("");
   useEffect(() => {
@@ -8608,6 +8652,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (!isContinuation && !text && !hasReadyAttachments && !hasQuotePayload) return;
     if (!apiBase) return;
 
+    if (shouldPinScrollOnUserSend({ continuation, queueDrain: options?.queueDrain })) {
+      pinChatListToLatestTurn();
+    }
+
     // Exact 「确认/取消」 phrases resolve a unique pending action card without a new LLM turn.
     if (!isContinuation && text && !hasReadyAttachments) {
       const decision = matchActionConfirmationReply(text);
@@ -9046,6 +9094,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             })(),
           }
         );
+        pinChatListToLatestTurn();
       }
     } else {
       addSubAgentEvent(targetAgentId, { type: "user", content: messageText });
@@ -12228,11 +12277,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 aria-label="回到底部"
                 title="回到底部"
                 onClick={() => {
-                  const el = listRef.current;
-                  if (!el) return;
-                  autoScrollPinnedRef.current = true;
-                  el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-                  flushJumpToBottomFab();
+                  pinChatListToLatestTurn();
                 }}
               >
                 <ChevronDown className="h-5 w-5" strokeWidth={2.25} aria-hidden />
