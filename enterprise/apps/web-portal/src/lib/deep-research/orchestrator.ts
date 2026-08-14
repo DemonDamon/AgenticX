@@ -122,12 +122,12 @@ export const MAX_TRACE_QUERY_CHARS = 500;
  */
 export const LANE_ADOPT_CAP = 12;
 /**
- * 一个车道先跑几条检索式作为探针，再决定要不要跑完剩下的。
+ * 一个车道先跑一条检索式作为探针，再决定要不要跑完剩下的。
  *
  * 候选数已超过本车道采用额度时，后续检索式只会挤动候选名单顺序，却照样按
  * 请求次数计费——观测到 19 条检索式仅去重出 31 个唯一 URL，边际收益极低。
  */
-export const EARLY_STOP_PROBE_VARIANTS = 2;
+export const EARLY_STOP_PROBE_VARIANTS = 1;
 export const RECON_TIMEOUT_MS = 15_000;
 
 type LaneSourcesTrace = NonNullable<
@@ -1303,9 +1303,14 @@ export async function runDeepResearchTurn(
             // cost money per request and would only shuffle the shortlist.
             await runSearchWave(indexedVariants.slice(0, EARLY_STOP_PROBE_VARIANTS));
             const laneAdoptCap = resolveLaneAdoptCap(registry.size);
+            // A provider normally returns at most resultsPerLane (8-10), while
+            // the lane adopt cap is 12. Requiring pool.size >= laneAdoptCap
+            // would therefore force a second call even when the first query
+            // returned its full requested quota.
+            const enoughCandidates = Math.min(laneAdoptCap, resultsPerLane);
             const deferredVariants = indexedVariants.slice(EARLY_STOP_PROBE_VARIANTS);
             if (deferredVariants.length > 0) {
-              if (pool.size >= laneAdoptCap) {
+              if (pool.size >= enoughCandidates) {
                 enqueueEvent({
                   type: "lane_progress",
                   laneId,

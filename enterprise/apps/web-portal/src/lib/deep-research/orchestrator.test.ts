@@ -1694,8 +1694,9 @@ describe("P1 multi-variant + reflect", () => {
           ],
           executeSearch: async (query: string) => {
             calls.push(query);
-            // Each probe query alone already fills the lane's adopt budget.
-            return Array.from({ length: LANE_ADOPT_CAP }, (_, i) => ({
+            // One full provider page is enough even though it is smaller than
+            // the lane-wide adopt cap.
+            return Array.from({ length: MAX_RESULTS_PER_LANE }, (_, i) => ({
               title: `${query}-${i}`,
               url: `https://ex.com/${encodeURIComponent(query)}/${i}`,
               snippet: "s",
@@ -1716,7 +1717,7 @@ describe("P1 multi-variant + reflect", () => {
     expect(String(earlyStop?.message ?? "")).toContain(`实际检索 ${EARLY_STOP_PROBE_VARIANTS} 条`);
 
     const stats = events.find((e) => e.type === "research_stats");
-    // Reported spend must be what actually ran (2 lanes × probe), not the 4
+    // Reported spend must be what actually ran (2 lanes × one-query probe), not the 4
     // queries each lane expanded.
     expect(stats?.queriesPlanned).toBe(EARLY_STOP_PROBE_VARIANTS * 2);
     const laneSources = events.find(
@@ -1727,10 +1728,9 @@ describe("P1 multi-variant + reflect", () => {
       queries?: Array<{ status?: string }>;
     };
     expect(trace.topLevelQueriesRun).toBe(EARLY_STOP_PROBE_VARIANTS);
-    expect(trace.queries?.slice(EARLY_STOP_PROBE_VARIANTS)).toEqual([
-      expect.objectContaining({ status: "skipped" }),
-      expect.objectContaining({ status: "skipped" }),
-    ]);
+    const skipped = trace.queries?.slice(EARLY_STOP_PROBE_VARIANTS) ?? [];
+    expect(skipped).toHaveLength(4 - EARLY_STOP_PROBE_VARIANTS);
+    expect(skipped.every((query) => query.status === "skipped")).toBe(true);
   });
 
   it("runs every query when candidates stay below the adopt budget", async () => {
