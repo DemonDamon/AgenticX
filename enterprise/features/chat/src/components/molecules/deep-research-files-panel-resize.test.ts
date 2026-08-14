@@ -28,6 +28,12 @@ describe("clampFilesPanelWidth", () => {
     expect(container - clamped).toBeGreaterThanOrEqual(FILES_PANEL_CHAT_MIN_PX);
     expect(clamped).toBeLessThanOrEqual(Math.floor(container * FILES_PANEL_MAX_RATIO));
   });
+
+  it("uses the full container when two usable columns cannot fit", () => {
+    const container = FILES_PANEL_CHAT_MIN_PX + FILES_PANEL_MIN_PX - 1;
+    expect(clampFilesPanelWidth(180, container)).toBe(container);
+    expect(defaultFilesPanelWidth(497, { htmlPreview: true })).toBe(497);
+  });
 });
 
 describe("defaultFilesPanelWidth", () => {

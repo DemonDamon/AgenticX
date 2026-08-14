@@ -117,7 +117,9 @@ const PORTAL_TOC_NARROW_PATCH = `
       }
       if (!a) return;
       var href = a.getAttribute("href") || "";
-      if (/^https?:\/\//i.test(href)) {
+      // This code is embedded inside a template string. Keep both backslashes
+      // so the generated srcDoc contains escaped slashes in the URL regex.
+      if (/^https?:\\/\\//i.test(href)) {
         event.preventDefault();
         if (event.stopPropagation) event.stopPropagation();
         window.parent.postMessage({

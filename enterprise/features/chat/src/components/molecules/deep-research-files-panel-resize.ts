@@ -19,11 +19,17 @@ export function clampFilesPanelWidth(widthPx: number, containerPx: number): numb
   const container = Math.max(0, Math.floor(containerPx));
   if (container <= 0) return FILES_PANEL_MIN_PX;
 
+  // A split view cannot keep both columns usable below their combined minimum.
+  // Let the open files panel take the viewport instead of squeezing an HTML
+  // report into a ~170px strip beside the chat column.
+  if (container < FILES_PANEL_CHAT_MIN_PX + FILES_PANEL_MIN_PX) {
+    return container;
+  }
+
   const maxByRatio = Math.floor(container * FILES_PANEL_MAX_RATIO);
   const maxByChatMin = container - FILES_PANEL_CHAT_MIN_PX;
   const max = Math.max(0, Math.min(maxByRatio, maxByChatMin));
-  // Tiny viewports: prefer keeping chat usable; panel may dip below MIN.
-  const min = Math.min(FILES_PANEL_MIN_PX, max);
+  const min = FILES_PANEL_MIN_PX;
   const raw = Number.isFinite(widthPx) ? Math.round(widthPx) : min;
   return Math.min(max, Math.max(min, raw));
 }

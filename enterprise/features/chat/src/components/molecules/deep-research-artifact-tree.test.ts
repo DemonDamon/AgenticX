@@ -86,6 +86,11 @@ describe("prepareHtmlPreviewSrcDoc", () => {
     expect(out).toContain('type: "agx:external-link"');
     expect(out).toContain("window.parent.postMessage");
     expect(out).toContain("scrollToHash");
+    const injectedScript = out.match(
+      /<script id="agx-portal-toc-narrow-js">([\s\S]*?)<\/script>/,
+    )?.[1];
+    expect(injectedScript).toBeTruthy();
+    expect(() => new Function(injectedScript!)).not.toThrow();
     const clickHandler = out.slice(
       out.indexOf("__agxPortalHashNav"),
       out.indexOf("</script>", out.indexOf("__agxPortalHashNav")),
