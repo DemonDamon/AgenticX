@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computePollMaxTicks,
+  DEFAULT_ENTERPRISE_PORTAL_ORIGIN,
   enterpriseFetchErrorMessage,
   isVerificationUrlSameOrigin,
   normalizeVerificationUrlForPortalOrigin,
@@ -14,6 +15,14 @@ describe("enterprise-browser-login helpers", () => {
     expect(validatePortalOriginForBrowserLogin("http://127.0.0.1:3000").ok).toBe(true);
     expect(validatePortalOriginForBrowserLogin("https://portal.example.com").ok).toBe(true);
     expect(validatePortalOriginForBrowserLogin("http://portal.example.com").ok).toBe(false);
+  });
+
+  it("normalizes the customer portal host to its deployed TLS port", () => {
+    expect(DEFAULT_ENTERPRISE_PORTAL_ORIGIN).toBe("https://test-pal.cmccfund.com:3000");
+    expect(validatePortalOriginForBrowserLogin("https://test-pal.cmccfund.com")).toEqual({
+      ok: true,
+      origin: DEFAULT_ENTERPRISE_PORTAL_ORIGIN,
+    });
   });
 
   it("requires verification URL same origin under /auth/desktop", () => {

@@ -62,6 +62,7 @@ import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import { selectEnterpriseInferenceBase } from "./enterprise-routing";
 import {
   computePollMaxTicks,
+  DEFAULT_ENTERPRISE_PORTAL_ORIGIN,
   enterpriseFetchErrorMessage,
   isVerificationUrlSameOrigin,
   normalizeVerificationUrlForPortalOrigin,
@@ -286,8 +287,7 @@ function resolveEnterprisePortalDefault(cfg: AgxConfig): string {
   const fromEnv = String(process.env.AGX_ENTERPRISE_PORTAL_URL ?? "").trim();
   const fromDefault = String(cfg.enterprise?.default_portal_url ?? "").trim();
   const fromLast = String(cfg.enterprise?.base_url ?? "").trim();
-  const candidate = fromEnv || fromDefault || fromLast;
-  if (!candidate) return "";
+  const candidate = fromEnv || fromDefault || fromLast || DEFAULT_ENTERPRISE_PORTAL_ORIGIN;
   const validated = validatePortalOriginForBrowserLogin(candidate);
   return validated.ok ? validated.origin : "";
 }

@@ -3,8 +3,15 @@
  * Pure functions stay free of Electron so unit tests can cover security checks.
  */
 
+/** Customer delivery Portal; the test environment currently terminates TLS on 3000, not 443. */
+export const DEFAULT_ENTERPRISE_PORTAL_ORIGIN = "https://test-pal.cmccfund.com:3000";
+
 export function normalizePortalOrigin(raw: string): string {
-  return String(raw || "").trim().replace(/\/+$/, "");
+  const normalized = String(raw || "").trim().replace(/\/+$/, "");
+  if (/^https:\/\/test-pal\.cmccfund\.com$/i.test(normalized)) {
+    return DEFAULT_ENTERPRISE_PORTAL_ORIGIN;
+  }
+  return normalized;
 }
 
 export type PortalOriginValidation =
