@@ -6,16 +6,19 @@ import { extractJsonText } from "./llm-json";
 import {
   defaultFacetLanes,
   looksOpenEndedResearchQuery,
+  parseResearchComplexity,
+  RESEARCH_COMPLEXITY_GUIDANCE,
+  type ResearchComplexity,
 } from "./research-intent";
 import { DIRECT_DOCUMENT_RESEARCH_ANCHOR_POLICY } from "./direct-document-intent";
+
+export type { ResearchComplexity } from "./research-intent";
 
 export const MIN_SUB_QUESTIONS = 2;
 /** Must stay ≤ orchestrator MAX_LANES (cost + UI lane budget). */
 export const MAX_SUB_QUESTIONS = 5;
 /** Open-ended research asks should fan out at least this many lanes. */
 export const OPEN_ENDED_MIN_LANES = 4;
-
-export type ResearchComplexity = "simple" | "moderate" | "complex";
 
 export type ResearchPlan = {
   topic: string;
@@ -40,7 +43,7 @@ const PLANNER_SYSTEM = [
   "你是研究规划助手。根据用户问题拆解研究路径。",
   "只输出 JSON，不要 Markdown 围栏，不要其它解释。",
   '格式严格为：{"topic":"...","complexity":"simple|moderate|complex","sub_questions":["...","..."]}',
-  `先判断问题复杂度，再据此决定 sub_questions 条数：simple（单一事实或定义类）${MIN_SUB_QUESTIONS}-3 条；moderate（多维度对比或需要几个侧面）3-4 条；complex（跨领域、需时间线或多方观点或技术细节分层）4-${MAX_SUB_QUESTIONS} 条。总数不得超过 ${MAX_SUB_QUESTIONS}。`,
+  `先按统一口径判断问题复杂度：${RESEARCH_COMPLEXITY_GUIDANCE}。再据此决定 sub_questions 条数：simple ${MIN_SUB_QUESTIONS}-3 条；moderate 3-4 条；complex 4-${MAX_SUB_QUESTIONS} 条。总数不得超过 ${MAX_SUB_QUESTIONS}。`,
   "『核心技术点』『全面分析』『综述』『对比』『调研』等开放题一律至少 moderate，禁止只输出 1 条子问题，也禁止把用户原问原样当作唯一子问题。",
   "禁止为凑数拆出重复或空洞的子问题：宁少勿滥，每条必须能独立检索且彼此不重叠。",
   "若用户澄清中列出了多个彼此独立的技术方向/关注点，必须为每个方向各建一条 sub_question，禁止合并成一条综合检索，也禁止把整段『【用户澄清】』原文当作唯一子问题。",
@@ -78,10 +81,6 @@ export function enforcePlanBreadth(plan: ResearchPlan, userQuery: string): Resea
     complexity: plan.complexity === "simple" ? "moderate" : plan.complexity,
     subQuestions: facets,
   };
-}
-
-function normalizeComplexity(raw: unknown): ResearchComplexity {
-  return raw === "simple" || raw === "complex" ? raw : "moderate";
 }
 
 function normalizeSubQuestions(raw: unknown, fallbackQuery: string): string[] {
@@ -128,7 +127,11 @@ export function parseResearchPlanJson(text: string, fallbackQuery: string): Rese
         parsed.sub_questions ?? parsed.subQuestions,
         fallbackQuery,
       );
-      return { topic, complexity: normalizeComplexity(parsed.complexity), subQuestions };
+      return {
+        topic,
+        complexity: parseResearchComplexity(parsed.complexity) ?? "moderate",
+        subQuestions,
+      };
     } catch {
       return null;
     }

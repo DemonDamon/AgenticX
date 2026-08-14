@@ -54,6 +54,9 @@ describe("automatic turn routing", () => {
     expect(messages?.[0]?.content).toContain("不确定时不要选择 deep");
     expect(messages?.[0]?.content).toContain("1 到 3 条自包含检索词");
     expect(messages?.[0]?.content).toContain("不得只补出其中一个");
+    expect(messages?.[0]?.content).toContain(
+      "complexity 使用与研究规划相同的口径",
+    );
     expect(messages?.[1]?.content).toContain(
       '"temporal_context":{"current_date":"2026-08-12"',
     );
@@ -497,6 +500,65 @@ describe("automatic turn routing", () => {
           queryConfidence: 1,
         },
       },
+    });
+  });
+
+  it("reuses semantic research complexity to rescue a borderline comparison", async () => {
+    const currentQuery = "全面对比模型 A 和模型 B 的架构与推理能力";
+    const outcome = await planAutomaticTurn(
+      [{ role: "user", content: currentQuery }],
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: vi.fn(async () =>
+          gatewayJson(
+            JSON.stringify({
+              mode: "deep",
+              complexity: "moderate",
+              research_query: currentQuery,
+              route_confidence: 0.75,
+              query_confidence: 0.9,
+              reason: "需要比较多个独立侧面",
+            }),
+          )) as unknown as typeof fetch,
+      },
+      AUTO_OPTIONS,
+    );
+
+    expect(outcome).toMatchObject({
+      kind: "planned",
+      plan: {
+        mode: "deep",
+        researchQuery: currentQuery,
+        intentConfidence: { routeConfidence: 0.75 },
+      },
+    });
+  });
+
+  it("does not use semantic assistance for a single-fact comparison", async () => {
+    const outcome = await planAutomaticTurn(
+      [{ role: "user", content: "对比一下手机 A 和手机 B 的重量" }],
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: vi.fn(async () =>
+          gatewayJson(
+            JSON.stringify({
+              mode: "deep",
+              complexity: "simple",
+              research_query: "对比手机 A 和手机 B 的重量",
+              route_confidence: 0.75,
+              query_confidence: 0.9,
+              reason: "单一事实比较",
+            }),
+          )) as unknown as typeof fetch,
+      },
+      AUTO_OPTIONS,
+    );
+
+    expect(outcome).toEqual({
+      kind: "fallback",
+      reason: "low_deep_confidence",
     });
   });
 

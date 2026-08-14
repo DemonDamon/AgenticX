@@ -5,6 +5,21 @@
  * provide a deterministic floor so "核心技术点" style asks still clarify and fan out.
  */
 
+export type ResearchComplexity = "simple" | "moderate" | "complex";
+
+export const RESEARCH_COMPLEXITY_GUIDANCE =
+  "simple 表示单一事实、定义或仅比较一个事实面；" +
+  "moderate 表示多维度对比或需要几个独立侧面；" +
+  "complex 表示跨领域、时间线、多方观点或分层技术细节";
+
+export function parseResearchComplexity(
+  value: unknown,
+): ResearchComplexity | null {
+  return value === "simple" || value === "moderate" || value === "complex"
+    ? value
+    : null;
+}
+
 export function looksOpenEndedResearchQuery(query: string): boolean {
   const q = query.trim();
   if (!q) return false;
