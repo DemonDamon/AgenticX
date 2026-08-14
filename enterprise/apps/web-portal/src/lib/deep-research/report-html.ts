@@ -235,6 +235,10 @@ function renderSources(citations: Citation[]): string {
   }
   const items = citations
     .map((c) => {
+      if (c.sourceType === "attachment") {
+        const label = c.sourceLabel || "用户上传文件";
+        return `<li id="ref-${c.index}"><span class="ref-num">[${c.index}]</span> <span>${escapeHtml(c.title || label)}</span><span class="ref-url">${escapeHtml(label)} · 用户上传文件</span></li>`;
+      }
       const href = safeHref(c.url);
       return `<li id="ref-${c.index}"><span class="ref-num">[${c.index}]</span> <a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.title || c.url)}</a><span class="ref-url">${escapeHtml(c.url)}</span></li>`;
     })

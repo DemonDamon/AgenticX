@@ -284,6 +284,93 @@ describe("runDeepResearchTurn", () => {
     expect(runReconFn.mock.calls[0]?.[0]?.query).not.toContain("https://");
   });
 
+  it("reuses uploaded document identity for routing and its body only as lane evidence", async () => {
+    const sentinel = "UNIQUE_UPLOADED_DOCUMENT_EVIDENCE_SENTINEL";
+    const groundedQuery =
+      "深度解读《Reliable Agents Under Partial Observability》：核心创新、方法论、关键实验与结论";
+    const gatewayBodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      gatewayBodies.push(body);
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: "lane memo" } }] }),
+        } as Response;
+      }
+      return synthUpstream("report");
+    });
+    const runReconFn = vi.fn(async (_deps: ReconDeps) => ({ brief: "", hits: [] }));
+    const clarifyQueries: string[] = [];
+    const proposeClarify = vi.fn(async (deps: { userQuery: string }) => {
+      clarifyQueries.push(deps.userQuery);
+      return { needed: false as const };
+    });
+    const buildPlan = vi.fn(async (_deps: PlannerDeps) => ({
+      topic: "Reliable Agents",
+      complexity: "simple" as const,
+      subQuestions: ["这篇论文的方法和实验结论"],
+    }));
+    const fetchPagesFn = vi.fn(async (urls: string[]) => ({
+      pages: urls.map(() => null),
+      stats: emptyFetchStats(),
+    }));
+    const readPage = vi.fn(async () => null);
+
+    const response = await runDeepResearchTurn(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: [
+              "你能读懂这个文件吗？",
+              "",
+              "--- 附件: research.pdf ---",
+              "Reliable Agents Under Partial Observability",
+              "Abstract and methodology.",
+              "Project page: https://malicious.example/inside-upload",
+              `The evaluation reports ${sentinel} in Table 8.`,
+            ].join("\n"),
+          },
+        ],
+        agenticx_deep_research: true,
+      },
+      {
+        ...baseDeps({
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          runReconFn,
+          proposeClarify,
+          buildPlan,
+          readPage,
+          fetchPagesFn,
+          executeSearch: async () => [
+            {
+              title: "external verification",
+              url: "https://example.com/verification",
+              snippet: "external context",
+            },
+          ],
+        }),
+      },
+    );
+
+    const result = await readSsePayload(response);
+    expect(runReconFn.mock.calls[0]?.[0]?.query).toBe(groundedQuery);
+    expect(readPage).not.toHaveBeenCalled();
+    expect(clarifyQueries[0]).toBe(groundedQuery);
+    expect(buildPlan.mock.calls[0]?.[0]?.userQuery).toContain(groundedQuery);
+    expect(runReconFn.mock.calls[0]?.[0]?.query).not.toContain(sentinel);
+    expect(buildPlan.mock.calls[0]?.[0]?.userQuery).not.toContain(sentinel);
+    expect(JSON.stringify(gatewayBodies)).toContain(sentinel);
+    const fetchedUrls = fetchPagesFn.mock.calls.flatMap((call) => call[0]);
+    expect(fetchedUrls).toEqual(["https://example.com/verification"]);
+    expect(fetchedUrls.every((url) => !url.startsWith("attachment:"))).toBe(true);
+    expect(result.hasSourcesFrame).toBe(true);
+    expect(result.sourcesCount).toBe(1);
+    expect(result.raw).not.toContain("attachment:");
+  });
+
   it("emits structured events, streams report, and sources frame without gray progress", async () => {
     const plan: ResearchPlan = {
       topic: "主题",
@@ -1457,6 +1544,28 @@ describe("formatEvidencePack / formatSourcesAppendix", () => {
     expect(pack).toContain("摘要：sa");
     expect(pack).toContain("证据覆盖提醒：当前仅 1 个来源域名");
     expect(formatSourcesAppendix(citations)).toContain("**来源**");
+  });
+
+  it("labels uploaded document evidence without exposing its synthetic URL", () => {
+    const citations: Citation[] = [
+      {
+        index: 1,
+        title: "Paper",
+        url: "attachment:paper.pdf%3Aabc",
+        snippet: "parsed excerpt",
+        sourceType: "attachment",
+        sourceLabel: "paper.pdf",
+      },
+    ];
+    const pack = formatEvidencePack(
+      { topic: "Paper", complexity: "moderate", subQuestions: ["方法"] },
+      [{ question: "方法", citations }],
+    );
+
+    expect(pack).toContain("来源：用户上传文件（paper.pdf）");
+    expect(pack).not.toContain("attachment:");
+    expect(formatSourcesAppendix(citations)).toContain("用户上传文件（paper.pdf）");
+    expect(formatSourcesAppendix(citations)).not.toContain("attachment:");
   });
 
   it("keeps provider dates without declaring a trend from metadata", () => {

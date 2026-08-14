@@ -57,6 +57,26 @@ describe("renderHtmlReport", () => {
     expect(html).not.toMatch(/<a href="#">1<\/a>/);
   });
 
+  it("renders uploaded-document citations as plain sources, not external links", () => {
+    const html = renderHtmlReport({
+      ...base,
+      citations: [
+        {
+          index: 1,
+          title: "Uploaded paper",
+          url: "attachment:paper.pdf%3Aabc",
+          snippet: "evidence",
+          sourceType: "attachment" as const,
+          sourceLabel: "paper.pdf",
+        },
+      ],
+    });
+
+    expect(html).toContain("Uploaded paper");
+    expect(html).toContain("paper.pdf · 用户上传文件");
+    expect(html).not.toContain('href="attachment:');
+  });
+
   it("hides the full-text stat when its value is zero", () => {
     const html = renderHtmlReport({
       ...base,

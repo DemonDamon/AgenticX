@@ -58,4 +58,28 @@ describe("CitationRegistry", () => {
     expect(registry.list()[0]?.fullText).toBe("全文正文");
     expect(() => registry.attachFullText("https://missing.com", "x")).not.toThrow();
   });
+
+  it("registers an uploaded document without pretending it is a web URL", () => {
+    const registry = new CitationRegistry();
+    const first = registry.addAttachment({
+      identity: "paper.pdf:abc",
+      fileName: "paper.pdf",
+      title: "Paper title",
+      snippet: "evidence",
+    });
+    const duplicate = registry.addAttachment({
+      identity: "paper.pdf:abc",
+      fileName: "paper.pdf",
+      title: "Different title",
+      snippet: "different",
+    });
+
+    expect(duplicate.index).toBe(first.index);
+    expect(first).toMatchObject({
+      sourceType: "attachment",
+      sourceLabel: "paper.pdf",
+      title: "Paper title",
+    });
+    expect(first.url).toMatch(/^attachment:/u);
+  });
 });

@@ -9,6 +9,10 @@ export type Citation = {
   title: string;
   url: string;
   snippet: string;
+  /** Omitted for ordinary public-web citations for backward compatibility. */
+  sourceType?: "attachment";
+  /** User-visible filename for an uploaded document; never a local path. */
+  sourceLabel?: string;
   /** Provider publication timestamp, when available; never inferred from snippets. */
   publishedAt?: string;
   /** 抓取成功的网页正文；失败时 undefined，证据包降级用 snippet。 */
@@ -53,6 +57,29 @@ export class CitationRegistry {
       url: hit.url,
       snippet: hit.snippet,
       ...(hit.publishedAt ? { publishedAt: hit.publishedAt } : {}),
+    };
+    this.nextIndex += 1;
+    this.byKey.set(key, citation);
+    return citation;
+  }
+
+  addAttachment(input: {
+    identity: string;
+    fileName: string;
+    title: string;
+    snippet: string;
+  }): Citation {
+    const url = `attachment:${encodeURIComponent(input.identity)}`;
+    const key = normalizeCitationUrl(url);
+    const existing = this.byKey.get(key);
+    if (existing) return existing;
+    const citation: Citation = {
+      index: this.nextIndex,
+      title: input.title || input.fileName,
+      url,
+      snippet: input.snippet,
+      sourceType: "attachment",
+      sourceLabel: input.fileName,
     };
     this.nextIndex += 1;
     this.byKey.set(key, citation);
