@@ -152,7 +152,7 @@ function defaultOutline(
 ): ReportOutline {
   const finalSection: ReportSection = policy.allowDecisionSections
     ? {
-        id: "s3",
+        id: "s5",
         title: "比较结论与决策建议",
         brief: "基于前述证据说明选择条件、推荐与风险",
         citationIndexes: [],
@@ -160,16 +160,16 @@ function defaultOutline(
       }
     : policy.allowLimitationsSections
       ? {
-          id: "s3",
+          id: "s5",
           title: "局限、风险与适用边界",
           brief: "说明会实质影响结论的限制、风险与适用条件",
           citationIndexes: [],
           format: "prose",
         }
       : {
-          id: "s3",
-          title: "机制、条件与适用范围",
-          brief: "解释关键机制，并说明结论成立的条件和实际适用范围",
+          id: "s5",
+          title: "综合判断与适用范围",
+          brief: "综合前述结果，说明结论成立的条件和实际适用范围",
           citationIndexes: [],
           format: "prose",
         };
@@ -189,6 +189,20 @@ function defaultOutline(
         brief: "围绕用户问题呈现关键表现与直接证据。请用 Markdown 对比表呈现关键维度",
         citationIndexes: [],
         format: "comparison_table",
+      },
+      {
+        id: "s3",
+        title: "机制与因果解释",
+        brief: "解释关键结果由何种机制、条件或实现路径造成",
+        citationIndexes: [],
+        format: "prose",
+      },
+      {
+        id: "s4",
+        title: "实际结果与边界条件",
+        brief: "结合具体案例或数据说明实际结果，以及结论适用和不适用的条件",
+        citationIndexes: [],
+        format: "prose",
       },
       finalSection,
     ],
@@ -285,6 +299,87 @@ export function applyReportContentPolicy(
   });
 
   if (sections.length === 0) return defaultOutline(outline.title, policy);
+  return ensureMinimumOutlineSections({ ...outline, sections }, policy);
+}
+
+const CORE_SECTION_RE = /核心结论|执行摘要|主要结论|key findings?|executive summary/iu;
+const EVIDENCE_SECTION_RE = /表现|证据|数据|指标|对比|比较|benchmark|evidence|performance/iu;
+const MECHANISM_SECTION_RE = /机制|原理|因果|实现|路径|架构|mechanism|architecture|how it works/iu;
+const OUTCOME_SECTION_RE = /结果|案例|实践|场景|影响|outcome|case|practice|impact/iu;
+const BOUNDARY_SECTION_RE = /适用|条件|边界|局限|风险|结论|判断|decision|limitation|risk|scope/iu;
+
+function sectionPurpose(section: ReportSection): string {
+  const title = section.title;
+  if (CORE_SECTION_RE.test(title)) return "core";
+  if (EVIDENCE_SECTION_RE.test(title)) return "evidence";
+  if (MECHANISM_SECTION_RE.test(title)) return "mechanism";
+  if (OUTCOME_SECTION_RE.test(title)) return "outcome";
+  if (BOUNDARY_SECTION_RE.test(title)) return "boundary";
+  const text = `${section.title} ${section.brief}`;
+  if (CORE_SECTION_RE.test(text)) return "core";
+  if (EVIDENCE_SECTION_RE.test(text)) return "evidence";
+  if (MECHANISM_SECTION_RE.test(text)) return "mechanism";
+  if (OUTCOME_SECTION_RE.test(text)) return "outcome";
+  if (BOUNDARY_SECTION_RE.test(text)) return "boundary";
+  return `custom:${section.title.normalize("NFKC").toLocaleLowerCase("en-US")}`;
+}
+
+/**
+ * Enforce the 5–9 section delivery contract after policy filtering. Missing
+ * sections are filled with distinct result/evidence/mechanism/outcome/boundary
+ * duties instead of generic filler or internal research-process commentary.
+ */
+export function ensureMinimumOutlineSections(
+  outline: ReportOutline,
+  policy: ReportContentPolicy = DEFAULT_REPORT_CONTENT_POLICY,
+): ReportOutline {
+  const defaults = defaultOutline(outline.title, policy).sections;
+  const deduped: ReportSection[] = [];
+  const seenTitles = new Set<string>();
+  for (const section of outline.sections.slice(0, MAX_SECTIONS)) {
+    const key = section.title.normalize("NFKC").toLocaleLowerCase("en-US").trim();
+    if (!key || seenTitles.has(key)) continue;
+    seenTitles.add(key);
+    deduped.push(section);
+  }
+
+  const coreIndex = deduped.findIndex((section) => sectionPurpose(section) === "core");
+  if (coreIndex < 0) {
+    deduped.unshift(defaults[0]!);
+  } else if (coreIndex > 0) {
+    const [core] = deduped.splice(coreIndex, 1);
+    if (core) deduped.unshift(core);
+  }
+  if (deduped[0]) deduped[0] = { ...deduped[0], format: "prose" };
+
+  const purposes = new Set(deduped.map(sectionPurpose));
+  for (const fallback of defaults) {
+    if (deduped.length >= MIN_SECTIONS) break;
+    const purpose = sectionPurpose(fallback);
+    if (purposes.has(purpose)) continue;
+    deduped.push(fallback);
+    purposes.add(purpose);
+  }
+  // A highly unusual custom outline can occupy every semantic bucket while
+  // still containing fewer than five unique titles. Fill from unused defaults.
+  for (const fallback of defaults) {
+    if (deduped.length >= MIN_SECTIONS) break;
+    if (deduped.some((section) => section.title === fallback.title)) continue;
+    deduped.push(fallback);
+  }
+
+  const usedIds = new Set<string>();
+  const sections = deduped.slice(0, MAX_SECTIONS).map((section, index) => {
+    const requestedId = section.id.trim();
+    let id = requestedId && !usedIds.has(requestedId) ? requestedId : `s${index + 1}`;
+    let suffix = index + 1;
+    while (usedIds.has(id)) {
+      suffix += 1;
+      id = `s${suffix}`;
+    }
+    usedIds.add(id);
+    return { ...section, id };
+  });
   return ensureRichOutlineFormats({ ...outline, sections });
 }
 
@@ -393,18 +488,58 @@ export function buildSectionMessages(args: {
   ];
 }
 
-function hasGfmTable(body: string): boolean {
+export function buildSectionFormatRepairMessages(args: {
+  section: ReportSection;
+  body: string;
+  contentPolicy?: ReportContentPolicy;
+}): Array<{ role: string; content: string }> {
+  return [
+    {
+      role: "system",
+      content: [
+        "你是报告章节结构修复助手。只重排下方现有正文，使其满足指定 Markdown 形态。",
+        "不得添加正文中没有的新事实、数字、引用编号或结论；保留原有 [N] 引用；不要输出章节标题。",
+        "不要解释修复过程，只输出修复后的完整章节正文。",
+        UNTRUSTED_EVIDENCE_SYSTEM_HINT,
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: [
+        `章节：${args.section.title}`,
+        `目标形态：${args.section.format}`,
+        FORMAT_DIRECTIVES[args.section.format],
+        reportContentPolicyBlock(args.contentPolicy ?? DEFAULT_REPORT_CONTENT_POLICY),
+        "",
+        "【待结构修复的原正文】",
+        args.body,
+      ].join("\n"),
+    },
+  ];
+}
+
+function gfmTableDataRows(body: string): number {
   const lines = body.replace(/\r\n/g, "\n").split("\n");
   for (let i = 0; i < lines.length - 1; i += 1) {
     const row = (lines[i] ?? "").trim();
     const sep = (lines[i + 1] ?? "").trim();
-    if (/^\|.+\|$/.test(row) && /^\|[\s|:-]+\|$/.test(sep)) return true;
+    if (!/^\|.+\|$/.test(row) || !/^\|[\s|:-]+\|$/.test(sep)) continue;
+    let dataRows = 0;
+    for (let j = i + 2; j < lines.length; j += 1) {
+      if (!/^\|.+\|$/.test((lines[j] ?? "").trim())) break;
+      dataRows += 1;
+    }
+    return dataRows;
   }
-  return false;
+  return 0;
+}
+
+function hasGfmTable(body: string, minimumRows = 1): boolean {
+  return gfmTableDataRows(body) >= minimumRows;
 }
 
 function hasTimelineHeuristic(body: string): boolean {
-  if (hasGfmTable(body)) return true;
+  if (hasGfmTable(body, 4)) return true;
   const bullets = body
     .replace(/\r\n/g, "\n")
     .split("\n")
@@ -416,14 +551,14 @@ function hasMermaidFence(body: string): boolean {
   return /```mermaid[\s\S]*?```/i.test(body);
 }
 
-/** 轻量结构校验：不满足也不阻断落盘，供 orchestrator warn。 */
+/** Deterministic structure validation used by the orchestrator repair pass. */
 export function sectionMeetsFormat(section: ReportSection, body: string): boolean {
   switch (section.format) {
     case "prose":
-      return true;
+      return body.trim().length > 0;
     case "comparison_table":
     case "tradeoff":
-      return hasGfmTable(body);
+      return hasGfmTable(body, 3);
     case "timeline":
       return hasTimelineHeuristic(body);
     case "mermaid":

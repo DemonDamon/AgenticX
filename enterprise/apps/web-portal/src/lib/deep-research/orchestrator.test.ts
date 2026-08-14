@@ -2943,6 +2943,7 @@ describe("page fetch + sectioned report", () => {
 
   it("still warns section format miss for table sections when evidence exists", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let streamCalls = 0;
     const response = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "主题调研" }] },
       {
@@ -2955,6 +2956,7 @@ describe("page fetch + sectioned report", () => {
                 json: async () => ({ choices: [{ message: { content: "memo" } }] }),
               } as Response;
             }
+            streamCalls += 1;
             return synthUpstream("只有散文没有表格");
           }) as unknown as typeof fetch,
           buildPlan: async () => ({
@@ -2972,6 +2974,63 @@ describe("page fetch + sectioned report", () => {
     expect(
       warn.mock.calls.some((call) => String(call[0]).includes("section format miss")),
     ).toBe(true);
+    // Five section drafts + exactly one bounded repair pass for the table section.
+    expect(streamCalls).toBe(6);
+    warn.mockRestore();
+  });
+
+  it("replaces a malformed section with the one-pass format repair output", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const artifactStore = createMemoryArtifactStore();
+    const repairedTable = [
+      "| 维度 | 结果 |",
+      "| --- | --- |",
+      "| 性能 | 较高 [1] |",
+      "| 成本 | 可控 [1] |",
+      "| 场景 | 生产环境 [1] |",
+    ].join("\n");
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          runId: "format-repair-run",
+          artifactStore,
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const rawBody = String(init?.body ?? "{}");
+            const body = JSON.parse(rawBody) as { stream?: boolean };
+            if (body.stream === false) {
+              return new Response(
+                JSON.stringify({ choices: [{ message: { content: "memo" } }] }),
+                { status: 200 },
+              );
+            }
+            return synthUpstream(
+              rawBody.includes("【待结构修复的原正文】")
+                ? repairedTable
+                : "原始散文正文 [1]",
+            );
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A"],
+          }),
+          executeSearch: async () => [
+            { title: "Doc", url: "https://example.com/doc", snippet: "evidence" },
+          ],
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    const artifacts = await artifactStore.listByRun("t1", "u1", "format-repair-run");
+    const report = artifacts.find((artifact) => artifact.path.endsWith("final-report.md"));
+    expect(report?.content).toContain("| 维度 | 结果 |");
+    expect(report?.content).toContain("| 性能 | 较高 [1](#ref-1) |");
+    expect(report?.content).not.toContain("## 关键表现与证据\n\n原始散文正文");
+    expect(
+      warn.mock.calls.some((call) => String(call[0]).includes("section format miss")),
+    ).toBe(false);
     warn.mockRestore();
   });
 });

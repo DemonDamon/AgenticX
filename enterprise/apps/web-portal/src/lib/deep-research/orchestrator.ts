@@ -96,6 +96,7 @@ import {
 } from "./run-store";
 import {
   buildReportOutline,
+  buildSectionFormatRepairMessages,
   buildSectionMessages,
   deriveReportContentPolicy,
   linkifyCitations,
@@ -2142,7 +2143,7 @@ export async function runDeepResearchTurn(
               includeLaneMemos: false,
             }),
           ].join("\n");
-          const sectionBody = await streamSectionInto(
+          let sectionBody = await streamSectionInto(
             buildSectionMessages({
               outline,
               section,
@@ -2156,18 +2157,57 @@ export async function runDeepResearchTurn(
               title: section.title,
             },
           );
-          if (sectionBody) {
-            reportContentParts.push(sectionBody);
-          }
           const tableLike =
             section.format === "comparison_table" || section.format === "tradeoff";
           const noEvidence = registrySnapshot().length === 0;
-          if (!sectionMeetsFormat(section, sectionBody) && !(tableLike && noEvidence)) {
-            console.warn(
-              "[deep-research] section format miss",
-              section.id,
-              section.format,
-            );
+          const formatMiss =
+            sectionBody.trim().length > 0 &&
+            !sectionMeetsFormat(section, sectionBody) &&
+            !(tableLike && noEvidence);
+          if (formatMiss) {
+            enqueueEvent({
+              type: "phase",
+              phase: "synthesize",
+              message: `正在校正「${section.title}」的呈现结构…`,
+            });
+            let repairedBody = "";
+            if (
+              budgetLeft() > 30_000 &&
+              budgetLedger.remaining("modelCalls") > 0
+            ) {
+              try {
+                repairedBody = await streamSectionInto(
+                  buildSectionFormatRepairMessages({
+                    section,
+                    body: sectionBody,
+                    contentPolicy: reportContentPolicy,
+                  }),
+                  {
+                    id: `section-${section.id}-format-repair`,
+                    title: `${section.title} · 结构校正`,
+                  },
+                );
+              } catch (error) {
+                if (error instanceof DeepResearchPolicyError) throw error;
+                console.warn(
+                  "[deep-research] section format repair failed",
+                  section.id,
+                  error instanceof Error ? error.message : error,
+                );
+              }
+            }
+            if (repairedBody && sectionMeetsFormat(section, repairedBody)) {
+              sectionBody = repairedBody;
+            } else {
+              console.warn(
+                "[deep-research] section format miss",
+                section.id,
+                section.format,
+              );
+            }
+          }
+          if (sectionBody) {
+            reportContentParts.push(sectionBody);
           }
           if (sectionBody.trim()) {
             previousSummaries.push(sectionBody.trim().slice(0, 200));

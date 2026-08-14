@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  MIN_SECTIONS,
   MAX_SECTIONS,
   SECTION_TARGET_CHARS,
   applyReportContentPolicy,
   buildReportOutline,
+  buildSectionFormatRepairMessages,
   buildSectionMessages,
   deriveReportContentPolicy,
   ensureRichOutlineFormats,
@@ -19,7 +21,7 @@ describe("parseOutlineJson", () => {
     const raw = "```json\n{\"title\":\"T\",\"sections\":[{\"id\":\"s1\",\"title\":\"核心结论\",\"brief\":\"b\",\"citation_indexes\":[1]}]}\n```";
     const outline = parseOutlineJson(raw, "fallback");
     expect(outline.title).toBe("T");
-    expect(outline.sections).toHaveLength(1);
+    expect(outline.sections).toHaveLength(MIN_SECTIONS);
     expect(outline.sections[0]?.title).toBe("核心结论");
     expect(outline.sections[0]?.citationIndexes).toEqual([1]);
     expect(outline.sections[0]?.format).toBe("prose");
@@ -55,21 +57,23 @@ describe("parseOutlineJson", () => {
     const raw = `<think>先想大纲，可能要 {5} 节</think>${JSON.stringify({ title: "T", sections })}`;
     const outline = parseOutlineJson(raw, "fallback");
     expect(outline.title).toBe("T");
-    expect(outline.sections).toHaveLength(6);
-    expect(outline.sections[5]?.title).toBe("章节6");
+    expect(outline.sections).toHaveLength(7);
+    expect(outline.sections[0]?.title).toBe("核心结论");
+    expect(outline.sections[6]?.title).toBe("章节6");
   });
 
-  it("falls back to default three sections when sections empty", () => {
+  it("falls back to five distinct result-focused sections when sections are empty", () => {
     const outline = parseOutlineJson('{"title":"X","sections":[]}', "主题");
     expect(outline.title).toBe("X");
-    expect(outline.sections).toHaveLength(3);
+    expect(outline.sections).toHaveLength(MIN_SECTIONS);
     expect(outline.sections[0]?.title).toBe("核心结论");
-    expect(outline.sections[2]?.title).toBe("机制、条件与适用范围");
+    expect(outline.sections[2]?.title).toBe("机制与因果解释");
+    expect(outline.sections[4]?.title).toBe("综合判断与适用范围");
   });
 
   it("falls back on non-json without throwing", () => {
     const outline = parseOutlineJson("memo", "主题");
-    expect(outline.sections).toHaveLength(3);
+    expect(outline.sections).toHaveLength(MIN_SECTIONS);
     expect(outline.title).toBe("主题");
   });
 
@@ -82,6 +86,22 @@ describe("parseOutlineJson", () => {
     }));
     const outline = parseOutlineJson(JSON.stringify({ title: "T", sections }), "T");
     expect(outline.sections).toHaveLength(MAX_SECTIONS);
+  });
+
+  it("keeps section ids unique while backfilling a short outline", () => {
+    const outline = parseOutlineJson(
+      JSON.stringify({
+        title: "T",
+        sections: [
+          { id: "s5", title: "核心结论", brief: "总结" },
+          { id: "s5", title: "自定义分析", brief: "分析" },
+        ],
+      }),
+      "T",
+    );
+    expect(new Set(outline.sections.map((section) => section.id)).size).toBe(
+      outline.sections.length,
+    );
   });
 
   it("filters internal meta and unrequested decision sections deterministically", () => {
@@ -117,10 +137,9 @@ describe("parseOutlineJson", () => {
       "T",
       policy,
     );
-    expect(outline.sections.map((section) => section.title)).toEqual([
-      "核心结论",
-      "性能与公开证据",
-    ]);
+    expect(outline.sections).toHaveLength(MIN_SECTIONS);
+    expect(outline.sections.map((section) => section.title)).toContain("性能与公开证据");
+    expect(outline.sections.map((section) => section.title)).toContain("机制与因果解释");
     expect(outline.sections.some((section) => section.format === "tradeoff")).toBe(
       false,
     );
@@ -209,7 +228,7 @@ describe("parseOutlineJson", () => {
       }),
       "T",
     );
-    expect(outline.sections).toHaveLength(3);
+    expect(outline.sections).toHaveLength(MIN_SECTIONS);
     expect(outline.sections.map((section) => section.title)).not.toContain(
       "不确定性与信息缺口",
     );
@@ -266,8 +285,8 @@ describe("renderTableOfContents / buildSectionMessages", () => {
     );
     const toc = renderTableOfContents(outline);
     expect(toc).toContain("## 目录");
-    expect(toc).toContain("1. A");
-    expect(toc).toContain("2. B");
+    expect(toc).toMatch(/\d+\. A/);
+    expect(toc).toMatch(/\d+\. B/);
   });
 
   it("includes evidence and previous summaries in section messages", () => {
@@ -393,6 +412,24 @@ describe("renderTableOfContents / buildSectionMessages", () => {
     expect(joined).not.toContain("必须含 ≥1 张");
     expect(joined).not.toContain("必须含一个");
   });
+
+  it("builds a bounded repair prompt from the existing body without asking for new facts", () => {
+    const messages = buildSectionFormatRepairMessages({
+      section: {
+        id: "s2",
+        title: "关键对比",
+        brief: "比较",
+        citationIndexes: [1, 2],
+        format: "comparison_table",
+      },
+      body: "A 更快 [1]，B 成本更低 [2]。",
+    });
+    const joined = messages.map((message) => message.content).join("\n");
+    expect(joined).toContain("【待结构修复的原正文】");
+    expect(joined).toContain("A 更快 [1]");
+    expect(joined).toContain("≥3 数据行");
+    expect(joined).toContain("不得添加");
+  });
 });
 
 describe("ensureRichOutlineFormats", () => {
@@ -436,6 +473,16 @@ describe("sectionMeetsFormat", () => {
     expect(
       sectionMeetsFormat({ ...base, format: "comparison_table" }, "只有散文没有表 [1]"),
     ).toBe(false);
+  });
+
+  it("rejects a syntactic table with fewer than three data rows", () => {
+    const body = [
+      "| 维度 | A |",
+      "| --- | --- |",
+      "| 成本 | 1 [1] |",
+      "| 性能 | 2 [1] |",
+    ].join("\n");
+    expect(sectionMeetsFormat({ ...base, format: "comparison_table" }, body)).toBe(false);
   });
 
   it("accepts mermaid fence for mermaid format", () => {
