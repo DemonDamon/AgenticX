@@ -23,28 +23,39 @@ const MODEL_PREFIX_COLLATOR = new Intl.Collator("en-US", {
   sensitivity: "base",
 });
 
-function modelPrefixSortKey(modelId: string): string {
+function modelPrefixSortParts(modelId: string): { family: string; model: string } {
   const segments = modelId
     .trim()
     .toLowerCase()
     .split("/")
     .map((segment) => segment.trim())
     .filter(Boolean);
-  if (segments.length > 1) return segments.slice(0, -1).join("/");
-  const bare = segments[0] ?? "";
-  return bare.match(/^[a-z]+/)?.[0] ?? bare;
+  const model = segments.at(-1) ?? "";
+  if (segments.length > 1) {
+    // Enterprise model ids may contain an infrastructure route before the
+    // visible vendor, for example `chinamobile/kimi/kimi-k3`, while another
+    // model from the same family is simply `Kimi/Kimi-K2.6`.  The segment
+    // nearest the model is the semantic prefix users see; comparing the whole
+    // route would incorrectly split those Kimi rows into separate groups.
+    return { family: segments.at(-2) ?? model, model };
+  }
+  return { family: model.match(/^[a-z]+/)?.[0] ?? model, model };
 }
 
-/** Keep models with the same routing/family prefix adjacent, then sort naturally within it. */
+/** Keep models with the same visible family prefix adjacent, then sort naturally within it. */
 export function sortModelOptionsByPrefix<T extends Pick<SelectableModelOption, "model">>(
   options: readonly T[],
 ): T[] {
   return [...options].sort((left, right) => {
+    const leftParts = modelPrefixSortParts(left.model);
+    const rightParts = modelPrefixSortParts(right.model);
     const prefixOrder = MODEL_PREFIX_COLLATOR.compare(
-      modelPrefixSortKey(left.model),
-      modelPrefixSortKey(right.model),
+      leftParts.family,
+      rightParts.family,
     );
     if (prefixOrder !== 0) return prefixOrder;
+    const modelOrder = MODEL_PREFIX_COLLATOR.compare(leftParts.model, rightParts.model);
+    if (modelOrder !== 0) return modelOrder;
     return MODEL_PREFIX_COLLATOR.compare(left.model, right.model);
   });
 }

@@ -124,7 +124,7 @@ describe("model-options", () => {
     ).toBeNull();
   });
 
-  it("groups enterprise models by routing prefix with natural model order", () => {
+  it("groups enterprise models by visible family prefix with natural model order", () => {
     const options = [
       { model: "openai-main/gpt-5.2" },
       { model: "chinamobile/kimi/kimi-k3" },
@@ -141,6 +141,30 @@ describe("model-options", () => {
       { model: "openai-main/gpt-5.2" },
     ]);
     expect(options[0]?.model).toBe("openai-main/gpt-5.2");
+  });
+
+  it("keeps mixed-depth enterprise routes from the same family together", () => {
+    const options = [
+      { model: "Qwen/Qwen2.5-32B-Instruct" },
+      { model: "chinamobile/kimi/kimi-k3" },
+      { model: "DeepSeek/DeepSeek-V4-Flash" },
+      { model: "Kimi/Kimi-K2.6" },
+      { model: "Kimi/Kimi-K2.7-code" },
+      { model: "Minimax/Minimax-M2.7" },
+      { model: "Qwen/Qwen3.6-Plus" },
+      { model: "ZHIPU/GLM-5.2" },
+    ];
+
+    expect(sortModelOptionsByPrefix(options)).toEqual([
+      { model: "DeepSeek/DeepSeek-V4-Flash" },
+      { model: "Kimi/Kimi-K2.6" },
+      { model: "Kimi/Kimi-K2.7-code" },
+      { model: "chinamobile/kimi/kimi-k3" },
+      { model: "Minimax/Minimax-M2.7" },
+      { model: "Qwen/Qwen2.5-32B-Instruct" },
+      { model: "Qwen/Qwen3.6-Plus" },
+      { model: "ZHIPU/GLM-5.2" },
+    ]);
   });
 
   it("collects only selectable provider/model pairs", () => {
