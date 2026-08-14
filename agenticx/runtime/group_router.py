@@ -11,7 +11,7 @@ import inspect
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable, Dict, List, Sequence
 
 _log = logging.getLogger(__name__)
@@ -278,6 +278,8 @@ class GroupReply:
     tool_name: str = ""
     tool_phase: str = ""  # "calling" | "done" | ""
     tool_call_id: str = ""
+    clarify_options: List[str] = field(default_factory=list)
+    clarify_allow_free_text: bool = True
 
 
 @dataclass
@@ -494,6 +496,9 @@ class GroupChatRouter:
             if question:
                 return f"等待确认后继续执行：{question}"
             return "等待确认后继续执行"
+        if et == EventType.CLARIFICATION_REQUIRED.value:
+            prompt = str(data.get("prompt", "") or "").strip()
+            return prompt or "等待你的输入后继续"
         if et == EventType.SUBAGENT_STARTED.value:
             sub_name = str(data.get("name", "") or data.get("agent_name", "") or "子任务")
             return f"已启动子任务：{sub_name}"
@@ -504,6 +509,21 @@ class GroupChatRouter:
         if et == EventType.SUBAGENT_ERROR.value:
             return str(data.get("text", "") or "子任务执行失败，正在处理")
         return ""
+
+    @staticmethod
+    def _should_enqueue_runtime_event(event_type: str, progress_text: str) -> bool:
+        """HITL events must enqueue even when the progress line is empty."""
+        group_evt = GroupChatRouter._runtime_event_to_group_event_type(event_type)
+        if group_evt in {"group_blocked", "group_clarification"}:
+            return True
+        return bool(str(progress_text or "").strip())
+
+    @staticmethod
+    def _should_forward_progress(reply: "GroupReply") -> bool:
+        """Stream filter: keep HITL rows even if content was stripped."""
+        if str(getattr(reply, "event_type", "") or "") in {"group_blocked", "group_clarification"}:
+            return True
+        return bool(str(getattr(reply, "content", "") or "").strip())
 
     @staticmethod
     def _runtime_event_to_tool_step(event_type: str, data: Dict[str, Any]) -> Dict[str, str]:
@@ -1188,20 +1208,28 @@ class GroupChatRouter:
         ):
             if progress_queue is not None:
                 progress_text = self._runtime_event_to_progress_text(event.type, event.data)
-                if progress_text:
-                    group_evt_type = self._runtime_event_to_group_event_type(event.type)
+                group_evt_type = self._runtime_event_to_group_event_type(event.type)
+                if self._should_enqueue_runtime_event(event.type, progress_text):
                     confirm_request_id = (
                         str(event.data.get("id", "") or "")
                         if group_evt_type in ("group_blocked", "group_clarification")
                         else ""
                     )
                     tool_step = self._runtime_event_to_tool_step(event.type, event.data)
+                    raw_opts = event.data.get("options") if group_evt_type == "group_clarification" else None
+                    clarify_options = (
+                        [str(o).strip() for o in raw_opts if str(o).strip()]
+                        if isinstance(raw_opts, list)
+                        else []
+                    )
                     progress_queue.put_nowait(
                         GroupReply(
                             agent_id=avatar_id,
                             avatar_name=avatar_name,
                             avatar_url=avatar_url,
-                            content=progress_text,
+                            content=progress_text
+                            or str(event.data.get("prompt", "") or event.data.get("question", "") or "").strip()
+                            or "等待你的输入后继续",
                             skipped=True,
                             event_type=group_evt_type,
                             confirm_request_id=confirm_request_id,
@@ -1210,6 +1238,8 @@ class GroupChatRouter:
                             tool_name=tool_step.get("tool_name", ""),
                             tool_phase=tool_step.get("tool_phase", ""),
                             tool_call_id=tool_step.get("tool_call_id", ""),
+                            clarify_options=clarify_options,
+                            clarify_allow_free_text=event.data.get("allow_free_text") is not False,
                         )
                     )
             if event.type == EventType.FINAL.value:
@@ -1286,13 +1316,13 @@ class GroupChatRouter:
         while not task.done():
             try:
                 progress = await asyncio.wait_for(queue.get(), timeout=0.2)
-                if str(progress.content or "").strip():
+                if self._should_forward_progress(progress):
                     yield progress
             except asyncio.TimeoutError:
                 continue
         while not queue.empty():
             progress = queue.get_nowait()
-            if str(progress.content or "").strip():
+            if self._should_forward_progress(progress):
                 yield progress
         yield await task
 
@@ -2195,6 +2225,7 @@ class GroupChatRouter:
 
         force_reply_targets = {str(x).strip() for x in resolved_mentions if str(x).strip()}
         responded_this_turn: set[str] = set()
+        progress_q: asyncio.Queue[GroupReply] = asyncio.Queue()
         tasks = [
             asyncio.create_task(
                 self._run_one_target(
@@ -2208,33 +2239,56 @@ class GroupChatRouter:
                     should_stop=should_stop,
                     force_reply=(aid in force_reply_targets),
                     user_display_name=udn,
+                    progress_queue=progress_q,
                 )
             )
             for aid in targets
         ]
         parallel_replies: list[GroupReply] = []
-        for coro in asyncio.as_completed(tasks):
+        pending = set(tasks)
+
+        def _drain_progress() -> list[GroupReply]:
+            drained: list[GroupReply] = []
+            while True:
+                try:
+                    evt = progress_q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if self._should_forward_progress(evt):
+                    drained.append(evt)
+            return drained
+
+        while pending:
+            for evt in _drain_progress():
+                yield evt
             if await self._should_stop(should_stop):
-                for t in tasks:
+                for t in pending:
                     t.cancel()
                 break
-            try:
-                r = await coro
+            done, pending = await asyncio.wait(
+                pending, timeout=0.2, return_when=asyncio.FIRST_COMPLETED
+            )
+            for t in done:
+                try:
+                    r = t.result()
+                except Exception as exc:
+                    err_reply = GroupReply(
+                        agent_id="unknown",
+                        avatar_name="unknown",
+                        avatar_url="",
+                        content="",
+                        skipped=False,
+                        error=str(exc),
+                    )
+                    self._record_turn_response(responded_this_turn, err_reply)
+                    parallel_replies.append(err_reply)
+                    yield err_reply
+                    continue
                 self._record_turn_response(responded_this_turn, r)
                 parallel_replies.append(r)
                 yield r
-            except Exception as exc:
-                err_reply = GroupReply(
-                    agent_id="unknown",
-                    avatar_name="unknown",
-                    avatar_url="",
-                    content="",
-                    skipped=False,
-                    error=str(exc),
-                )
-                self._record_turn_response(responded_this_turn, err_reply)
-                parallel_replies.append(err_reply)
-                yield err_reply
+        for evt in _drain_progress():
+            yield evt
         for r in parallel_replies:
             if r.error:
                 continue
