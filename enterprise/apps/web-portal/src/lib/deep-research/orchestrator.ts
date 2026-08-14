@@ -116,7 +116,11 @@ import {
   refreshGatewayBearer,
   type RefreshAccessToken,
 } from "./gateway-auth-refresh";
-import { expandQueries, type QueryVariant } from "./query-expander";
+import {
+  allowsRecencyVariant,
+  expandQueries,
+  type QueryVariant,
+} from "./query-expander";
 import {
   SourcePool,
   adaptiveMaxPerDomain,
@@ -1575,11 +1579,13 @@ export async function runDeepResearchTurn(
               return { ...empty, queriesPlanned: variantsRun, queriesExecuted };
             }
 
-            // Only a lane that actually planned a recency probe gets time
-            // weighting; history and foundational-theory lanes keep the
-            // relevance/authority formula unchanged.
+            // Derive time sensitivity from the sub-question itself. A small
+            // expansion model may omit or mislabel the recency variant; that
+            // must not disable freshness weighting for an explicitly current
+            // question. Historical/foundational lanes still keep the original
+            // relevance/authority formula.
             const scored = scorePool(question, pool.list(), {
-              timeSensitive: variants.some((variant) => variant.kind === "recency"),
+              timeSensitive: allowsRecencyVariant(question, new Date(now())),
               now: now(),
             });
             const selected = selectTopSources(

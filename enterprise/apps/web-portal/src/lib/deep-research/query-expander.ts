@@ -43,17 +43,36 @@ const EXPAND_SYSTEM = [
  * ranking downstream.
  */
 const CURRENT_STATE_RE =
-  /最新|近期|目前|当前|现状|如今|今年|本月|截至|上线|发布|更新|新版|动态|趋势|价格|定价|行情|政策|法规|进展|排行|榜单|路线图|roadmap|latest|recent|current|now|today|upcoming|release[sd]?|chang(?:e|es|elog)|pricing|status|update[sd]?|state of|\b20\d{2}\b/iu;
+  /最新|近期|目前|当前|现状|如今|今年|本月|截至|上线|发布|更新|新版|动态|趋势|价格|定价|行情|政策|法规|进展|排行|榜单|路线图|roadmap|latest|recent|current|now|today|upcoming|release[sd]?|chang(?:e|es|elog)|pricing|status|update[sd]?|state of/iu;
 /** Explicitly retrospective or timeless sub-questions. */
 const HISTORICAL_RE =
   /历史|沿革|演进史|起源|由来|发展史|早期|最初|经典|奠基|原理|定义|概念|基础理论|数学证明|推导|history|historical|origin|classic|seminal|foundational|fundamental|theorem|proof|definition/iu;
+const EXPLICIT_YEAR_RE = /\b(20\d{2})\b/gu;
+const PAST_TO_PRESENT_RE =
+  /至今|到现在|截至目前|延续至今|一直到今天|since\s+20\d{2}|20\d{2}\s*(?:to|through|until)\s*(?:now|today|present)|to date/iu;
 
 /** Whether a `recency` variant is justified for this sub-question. */
-export function allowsRecencyVariant(subQuestion: string): boolean {
+export function allowsRecencyVariant(
+  subQuestion: string,
+  now: Date = new Date(),
+): boolean {
   const text = subQuestion.trim();
   if (!text) return false;
   if (HISTORICAL_RE.test(text)) return false;
-  return CURRENT_STATE_RE.test(text);
+  const years = [...text.matchAll(EXPLICIT_YEAR_RE)].map((match) => Number(match[1]));
+  if (
+    years.length > 0 &&
+    years.every((year) => year < now.getUTCFullYear()) &&
+    !PAST_TO_PRESENT_RE.test(text)
+  ) {
+    // “2020 年的表现 / 截至 2020 年” is a bounded historical snapshot, not a
+    // current-state lane. “2020 年至今” remains time-sensitive.
+    return false;
+  }
+  return (
+    CURRENT_STATE_RE.test(text) ||
+    years.some((year) => year >= now.getUTCFullYear())
+  );
 }
 
 const KIND_SET = new Set<QueryVariant["kind"]>([

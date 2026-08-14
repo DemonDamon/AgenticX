@@ -128,15 +128,18 @@ describe("querySimilarity / isNearDuplicateQuery", () => {
 });
 
 describe("recency variant gating", () => {
+  const now = new Date("2026-08-15T00:00:00.000Z");
+
   it("allows a recency probe only for current-state sub-questions", () => {
     for (const question of [
       "MiniMax M2 最新定价",
       "欧盟 AI 法案的近期进展",
       "该框架目前的默认配置是什么",
       "2026 年的模型发布节奏",
+      "2027 年的模型能力",
       "latest release notes for the runtime",
     ]) {
-      expect(allowsRecencyVariant(question)).toBe(true);
+      expect(allowsRecencyVariant(question, now)).toBe(true);
     }
   });
 
@@ -146,10 +149,17 @@ describe("recency variant gating", () => {
       "注意力机制的基础理论与数学推导",
       "什么是挂谷猜想的定义",
       "分布式共识的经典论文有哪些",
+      "2020 年的模型表现",
+      "截至 2020 年的模型价格",
       "the origin of the seminal backpropagation proof",
     ]) {
-      expect(allowsRecencyVariant(question)).toBe(false);
+      expect(allowsRecencyVariant(question, now)).toBe(false);
     }
+  });
+
+  it("keeps past-to-present ranges time-sensitive", () => {
+    expect(allowsRecencyVariant("2020 年至今的模型价格趋势", now)).toBe(true);
+    expect(allowsRecencyVariant("changes from 2020 to present", now)).toBe(true);
   });
 
   it("keeps a mislabelled recency query but demotes its kind", () => {
