@@ -284,6 +284,54 @@ describe("finalizeToolsCardTitle via completed segments", () => {
 });
 
 describe("reflection / research_stats segments", () => {
+  it("shows the hidden refinement stage as a visible running status", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "phase", phase: "lanes", message: "正在并行检索…" },
+      { type: "lane_started", laneId: "a", title: "核心表现", index: 1, total: 1 },
+      { type: "lane_done", laneId: "a", status: "ok" },
+      { type: "phase", phase: "reflect", message: "正在复核并补充关键证据…" },
+    ];
+
+    const segments = buildDeepResearchSegments(events, "running");
+    expect(segments.map((segment) => segment.kind)).toEqual(["tools", "status"]);
+    const refine = segments[1];
+    expect(refine && refine.kind === "status" ? refine : null).toMatchObject({
+      title: "正在复核并补充关键证据…",
+      status: "running",
+    });
+    expect(deepResearchNeedsTrailingActivity(segments, "running")).toBe(false);
+  });
+
+  it("settles refinement before report writing starts", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "phase", phase: "reflect", message: "正在复核并补充关键证据…" },
+      {
+        type: "research_stats",
+        queriesPlanned: 3,
+        urlsDiscovered: 12,
+        sourcesSelected: 6,
+        pagesFetched: 2,
+      },
+      { type: "narrative", text: "证据已就绪，开始撰写报告。" },
+      { type: "phase", phase: "synthesize", message: "正在拟定报告大纲…" },
+    ];
+
+    const segments = buildDeepResearchSegments(events, "running");
+    expect(segments.map((segment) => segment.kind)).toEqual([
+      "status",
+      "stats",
+      "narrative",
+      "tools",
+    ]);
+    const refine = segments[0];
+    expect(refine && refine.kind === "status" ? refine : null).toMatchObject({
+      title: "已复核并补充关键证据",
+      status: "done",
+    });
+    const writing = segments[3];
+    expect(writing && writing.kind === "tools" ? writing.title : "").toBe("正在撰写报告…");
+  });
+
   it("renders reflection gaps and stats label", () => {
     const events: DeepResearchEvent[] = [
       {

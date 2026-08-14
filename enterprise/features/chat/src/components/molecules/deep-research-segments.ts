@@ -139,8 +139,19 @@ export function buildDeepResearchSegments(
   let writeSteps: ResearchStep[] = [];
   let writeId = "synthesize-1";
   let wroteCard = false;
+  let reflectStatus: Extract<DeepResearchSegment, { kind: "status" }> | null = null;
   const runTerminal =
     status === "completed" || status === "failed" || status === "cancelled";
+
+  /** Internal refinement lanes stay hidden, but their high-level status must settle visibly. */
+  const settleReflectStatus = (outcome: "done" | "failed") => {
+    if (!reflectStatus || reflectStatus.status !== "running") return;
+    reflectStatus.status = outcome;
+    if (outcome === "done") {
+      reflectStatus.title = completedPhaseTitle(reflectStatus.title);
+    }
+    reflectStatus = null;
+  };
 
   /** A writing step is finished the moment the next one starts. */
   const settleWriteSteps = (outcome: "done" | "failed") => {
@@ -198,6 +209,7 @@ export function buildDeepResearchSegments(
       case "run_started":
         break;
       case "narrative": {
+        settleReflectStatus("done");
         flushCards();
         const text = event.text.trim();
         if (text) {
@@ -219,12 +231,31 @@ export function buildDeepResearchSegments(
         if (event.phase === "recon" || event.phase === "clarify" || event.phase === "plan") {
           break;
         }
-        if (event.phase === "lanes" || event.phase === "reflect") {
+        if (event.phase === "lanes") {
+          settleReflectStatus("done");
           flushCards();
-          toolsTitle = event.message || (event.phase === "reflect" ? "复盘信息缺口…" : "正在并行检索…");
+          toolsTitle = event.message || "正在并行检索…";
+          break;
+        }
+        if (event.phase === "reflect") {
+          settleReflectStatus("done");
+          flushCards();
+          const title = event.message?.trim() || "正在复核并补充关键证据…";
+          const reflectOutcome =
+            status === "completed" ? "done" : runTerminal ? "failed" : "running";
+          const row: Extract<DeepResearchSegment, { kind: "status" }> = {
+            kind: "status",
+            id: `phase-reflect-${seq++}`,
+            title: reflectOutcome === "done" ? completedPhaseTitle(title) : title,
+            status: reflectOutcome,
+            detailLines: [],
+          };
+          segments.push(row);
+          reflectStatus = reflectOutcome === "running" ? row : null;
           break;
         }
         if (event.phase === "synthesize") {
+          settleReflectStatus("done");
           flushTools();
           settleWriteSteps("done");
           writeSteps.push({
@@ -237,6 +268,9 @@ export function buildDeepResearchSegments(
           break;
         }
         if (event.phase === "done") {
+          settleReflectStatus(
+            status === "failed" || status === "cancelled" ? "failed" : "done",
+          );
           flushTools();
           settleWriteSteps(status === "failed" || status === "cancelled" ? "failed" : "done");
           flushWrite();
@@ -259,6 +293,7 @@ export function buildDeepResearchSegments(
         break;
       }
       case "reflection": {
+        settleReflectStatus("done");
         flushCards();
         segments.push({
           kind: "reflection",
@@ -268,6 +303,7 @@ export function buildDeepResearchSegments(
         break;
       }
       case "research_stats": {
+        settleReflectStatus("done");
         flushCards();
         const stats = [
           `检索式 ${event.queriesPlanned} 条`,
