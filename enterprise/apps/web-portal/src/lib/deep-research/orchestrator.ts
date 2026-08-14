@@ -2521,7 +2521,14 @@ export async function runDeepResearchTurn(
           // provider or fallback request goes out.
           enqueueDelta(`\n\n${error.userMessage}`);
           enqueueEvent(
-            { type: "phase", phase: "done", message: "今日联网搜索额度已用完" },
+            {
+              type: "phase",
+              phase: "done",
+              message:
+                error.reason === "exhausted"
+                  ? "今日联网搜索额度已用完"
+                  : "联网搜索额度校验暂时不可用",
+            },
             { status: "failed", phase: "done" },
           );
           await persistFinish("failed", error.userMessage);

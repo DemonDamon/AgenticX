@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DAILY_SEARCH_PROVIDER_QUOTA_EXHAUSTED_MESSAGE,
+  DAILY_SEARCH_PROVIDER_QUOTA_UNAVAILABLE_MESSAGE,
   MAX_DAILY_SEARCH_PROVIDER_CALLS,
   __createMemoryDailySearchProviderQuotaOps,
   __setDailySearchProviderQuotaOpsForTests,
@@ -23,6 +24,7 @@ beforeEach(() => {
 
 afterEach(() => {
   __setDailySearchProviderQuotaOpsForTests(null);
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -131,6 +133,30 @@ describe("daily search provider quota", () => {
 
     await expect(reserveTenantDailySearchProviderCall("t1")).rejects.toMatchObject({
       reason: "unavailable",
+    });
+  });
+
+  it("fails closed when production starts without a database", async () => {
+    __setDailySearchProviderQuotaOpsForTests(null);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DATABASE_URL", "");
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(reserveTenantDailySearchProviderCall("t1")).rejects.toMatchObject({
+      reason: "unavailable",
+      userMessage: DAILY_SEARCH_PROVIDER_QUOTA_UNAVAILABLE_MESSAGE,
+    });
+  });
+
+  it("keeps the no-database memory store limited to local development", async () => {
+    __setDailySearchProviderQuotaOpsForTests(null);
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("DATABASE_URL", "");
+
+    await reserveTenantDailySearchProviderCall("local-tenant");
+    await expect(getTenantDailySearchProviderQuota("local-tenant")).resolves.toMatchObject({
+      used: 1,
+      unlimited: true,
     });
   });
 

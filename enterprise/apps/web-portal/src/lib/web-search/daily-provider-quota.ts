@@ -102,10 +102,9 @@ function summarize(input: { usageDay: string; limit: number; used: number; today
 type QuotaRow = { limit: number; used: number; usageDay: string };
 
 /**
- * Storage seam. The in-memory implementation is used only when no database is
- * configured at all (local dev): with no persistence there is nothing to meter
- * and nowhere for an admin to set a cap. A *configured* database that errors is
- * always fail-closed.
+ * Storage seam. The in-memory implementation is allowed only in an explicit
+ * local/test process. Production must fail closed when persistence is missing:
+ * otherwise the portal and admin console each get a private unlimited counter.
  */
 type QuotaOps = {
   read(tenantId: string): Promise<QuotaRow | null>;
@@ -279,8 +278,31 @@ function mysqlOps(config: Extract<ReturnType<typeof resolveDatabaseConfig>, { di
   };
 }
 
+const IN_MEMORY_QUOTA_OPT_IN = "AGX_ALLOW_IN_MEMORY_SEARCH_QUOTA";
+
+function allowsInMemoryQuota(): boolean {
+  const nodeEnv = process.env.NODE_ENV;
+  if (nodeEnv === "test" || nodeEnv === "development") return true;
+  if (nodeEnv === "production") return false;
+  return /^(?:1|true)$/iu.test(process.env[IN_MEMORY_QUOTA_OPT_IN]?.trim() ?? "");
+}
+
+function unavailableOps(): QuotaOps {
+  const fail = async (): Promise<never> => {
+    throw new Error(DAILY_SEARCH_PROVIDER_QUOTA_UNAVAILABLE_MESSAGE);
+  };
+  return {
+    read: fail,
+    ensureRow: fail,
+    setLimit: fail,
+    reserve: fail,
+  };
+}
+
 function resolveOps(): QuotaOps {
-  if (!process.env.DATABASE_URL?.trim()) return sharedMemoryOps();
+  if (!process.env.DATABASE_URL?.trim()) {
+    return allowsInMemoryQuota() ? sharedMemoryOps() : unavailableOps();
+  }
   const config = resolveDatabaseConfig();
   return config.dialect === "mysql" ? mysqlOps(config) : pgOps();
 }
@@ -340,9 +362,12 @@ export async function reserveTenantDailySearchProviderCall(
   now: Date = new Date(),
 ): Promise<void> {
   const today = utcUsageDay(now);
-  const store = ops();
   let admitted: boolean;
   try {
+    // Resolve the backend inside the guarded block too: malformed production
+    // database configuration is a quota outage, not a provider failure that may
+    // continue into failover.
+    const store = ops();
     await store.ensureRow(tenantId, today, now);
     admitted = await store.reserve(tenantId, today, now);
   } catch (error) {
