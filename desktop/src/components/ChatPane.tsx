@@ -3079,6 +3079,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   useEffect(() => {
     ccBridgeLastSessionModeRef.current = "";
   }, [pane.sessionId]);
+  // ChatPane stays mounted across history jumps; mention UI is pane-local and
+  // must not ride into the next session.
+  useEffect(() => {
+    if (atSearchTimerRef.current != null) {
+      clearTimeout(atSearchTimerRef.current);
+      atSearchTimerRef.current = null;
+    }
+    setAtOpen(false);
+    setAtQuery("");
+    setAtCandidates([]);
+    setAtBrowse(null);
+  }, [pane.sessionId]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskspaceAutoRefreshKey, setTaskspaceAutoRefreshKey] = useState(0);
   const [taskspaceWidth, setTaskspaceWidth] = useState(() => {
