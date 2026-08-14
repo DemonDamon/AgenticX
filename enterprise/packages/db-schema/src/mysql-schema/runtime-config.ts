@@ -157,6 +157,9 @@ export const enterpriseRuntimeWebSearch = mysqlTable("enterprise_runtime_web_sea
     .$type<Array<Record<string, unknown>>>(),
   maxResults: int("max_results").default(50).notNull(),
   maxSearchCalls: int("max_search_calls").default(3).notNull(),
+  maxDeepResearchProviderCalls: int("max_deep_research_provider_calls")
+    .default(24)
+    .notNull(),
   deepResearchEnabled: boolean("deep_research_enabled").default(true).notNull(),
   updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });

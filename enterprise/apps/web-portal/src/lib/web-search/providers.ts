@@ -90,6 +90,8 @@ export type WebSearchProviderAttempt = {
 };
 
 export type WebSearchExecutionDiagnostics = {
+  /** Authoritative admission hook, invoked immediately before a real provider request. */
+  beforeProviderAttempt?: (providerId: string) => void;
   /** Best-effort observability only; observer failures never affect retrieval. */
   onProviderAttempt?: (attempt: WebSearchProviderAttempt) => void;
   /** Shared run cancellation/deadline; unlike diagnostics callbacks, this is authoritative. */
@@ -614,6 +616,9 @@ export async function executeWebSearch(
       observe("failed", 0);
       continue;
     }
+    // Deliberately outside the adapter try/catch: a hard run-budget rejection
+    // must stop failover instead of being mistaken for a provider failure.
+    diagnostics?.beforeProviderAttempt?.(provider.id);
     try {
       const hits = sanitizeProviderHits(await adapter.search({
         query: q,

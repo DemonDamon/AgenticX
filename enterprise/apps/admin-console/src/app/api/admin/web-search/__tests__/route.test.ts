@@ -72,6 +72,29 @@ describe("/api/admin/web-search", () => {
     },
   );
 
+  it("persists an independent deep-research provider-call limit", async () => {
+    upsertTenantWebSearchConfig.mockResolvedValue({
+      maxDeepResearchProviderCalls: 24,
+    });
+
+    const response = await put({ maxDeepResearchProviderCalls: 24 });
+
+    expect(response.status).toBe(200);
+    expect(upsertTenantWebSearchConfig).toHaveBeenCalledWith(
+      "tenant-1",
+      expect.objectContaining({ maxDeepResearchProviderCalls: 24 }),
+    );
+  });
+
+  it.each([5, 61, 12.5, "24", null])(
+    "rejects invalid deep-research provider limits: %s",
+    async (maxDeepResearchProviderCalls) => {
+      const response = await put({ maxDeepResearchProviderCalls });
+      expect(response.status).toBe(400);
+      expect(upsertTenantWebSearchConfig).not.toHaveBeenCalled();
+    },
+  );
+
   it("does not load configuration when the admin guard rejects access", async () => {
     requireAdminScope.mockResolvedValue({
       ok: false,

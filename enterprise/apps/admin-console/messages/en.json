@@ -391,6 +391,8 @@
         "deepResearchHint": "Allow multi-stage research workflows",
         "maxSearchCalls": "Search limit per turn",
         "maxSearchCallsHint": "Maximum provider calls for each message",
+        "maxDeepResearchProviderCalls": "Deep research search limit",
+        "maxDeepResearchProviderCallsHint": "Maximum provider requests per deep-research run; primary and fallback attempts count separately",
         "servicesTitle": "Primary / fallback search providers",
         "servicesDescription": "Assign explicit search roles. Requests use the primary provider first and switch to the fallback only after failure or insufficient results.",
         "loading": "Loading search configuration…",

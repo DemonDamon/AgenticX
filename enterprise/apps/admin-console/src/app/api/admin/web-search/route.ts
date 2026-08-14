@@ -16,6 +16,11 @@ import {
   MAX_MAX_SEARCH_CALLS,
   MIN_MAX_SEARCH_CALLS,
 } from "../../../../../../web-portal/src/lib/web-search/search-call-budget";
+import {
+  isValidMaxDeepResearchProviderCalls,
+  MAX_MAX_DEEP_RESEARCH_PROVIDER_CALLS,
+  MIN_MAX_DEEP_RESEARCH_PROVIDER_CALLS,
+} from "../../../../../../web-portal/src/lib/deep-research/budget-ledger";
 
 function badRequest(message: string): Response {
   return NextResponse.json(
@@ -107,6 +112,14 @@ export async function PUT(request: Request) {
     );
   }
   if (
+    body.maxDeepResearchProviderCalls !== undefined &&
+    !isValidMaxDeepResearchProviderCalls(body.maxDeepResearchProviderCalls)
+  ) {
+    return badRequest(
+      `单次深度研究搜索服务调用上限必须为 ${MIN_MAX_DEEP_RESEARCH_PROVIDER_CALLS} 到 ${MAX_MAX_DEEP_RESEARCH_PROVIDER_CALLS} 之间的整数`,
+    );
+  }
+  if (
     body.apiKey !== undefined &&
     (typeof body.apiKey !== "string" ||
       body.apiKey.length > 8_192 ||
@@ -128,6 +141,7 @@ export async function PUT(request: Request) {
       provider: typeof body.provider === "string" ? body.provider : undefined,
       maxResults: typeof body.maxResults === "number" ? body.maxResults : undefined,
       maxSearchCalls: body.maxSearchCalls,
+      maxDeepResearchProviderCalls: body.maxDeepResearchProviderCalls,
       apiKey: typeof body.apiKey === "string" ? body.apiKey : undefined,
       deepResearchEnabled:
         typeof body.deepResearchEnabled === "boolean"

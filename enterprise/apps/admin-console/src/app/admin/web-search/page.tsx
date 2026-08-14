@@ -28,6 +28,7 @@ import { orderSearchProvidersByRole } from "./provider-roles";
 
 const MAX_PROVIDER_POOL_SIZE = 2;
 const SEARCH_CALL_OPTIONS = [1, 2, 3, 4, 5] as const;
+const DEEP_RESEARCH_PROVIDER_CALL_OPTIONS = [6, 12, 18, 24, 32, 40, 48, 60] as const;
 
 type PublicSearchProvider = {
   id: string;
@@ -53,6 +54,7 @@ type WebSearchConfig = {
   primaryProviderId: string;
   deepResearchEnabled: boolean;
   maxSearchCalls: number;
+  maxDeepResearchProviderCalls: number;
   providers: PublicSearchProvider[];
   availableAdapters: PublicSearchAdapter[];
 };
@@ -248,7 +250,7 @@ export default function WebSearchSettingsPage() {
           </CardTitle>
           <CardDescription>{t("policyDescription")}</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div className="flex items-center justify-between rounded-lg border p-4">
             <div>
               <Label>{t("enabled")}</Label>
@@ -284,6 +286,30 @@ export default function WebSearchSettingsPage() {
               </SelectTrigger>
               <SelectContent>
                 {SEARCH_CALL_OPTIONS.map((value) => (
+                  <SelectItem key={value} value={String(value)}>
+                    {value}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2 rounded-lg border p-4">
+            <Label>{t("maxDeepResearchProviderCalls")}</Label>
+            <p className="text-sm text-muted-foreground">
+              {t("maxDeepResearchProviderCallsHint")}
+            </p>
+            <Select
+              value={String(config?.maxDeepResearchProviderCalls ?? 24)}
+              disabled={!config || loading || saving}
+              onValueChange={(value) =>
+                void save({ maxDeepResearchProviderCalls: Number(value) })
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DEEP_RESEARCH_PROVIDER_CALL_OPTIONS.map((value) => (
                   <SelectItem key={value} value={String(value)}>
                     {value}
                   </SelectItem>

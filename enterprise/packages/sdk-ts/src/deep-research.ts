@@ -84,6 +84,15 @@ export type DeepResearchEvent =
       sourcesSelected: number;
       pagesFetched: number;
     }
+  | {
+      type: "research_budget";
+      usage: {
+        searchQueries: { used: number; limit: number; remaining: number };
+        providerCalls: { used: number; limit: number; remaining: number };
+        pageFetches: { used: number; limit: number; remaining: number };
+        modelCalls: { used: number; limit: number; remaining: number };
+      };
+    }
   | { type: "narrative"; text: string };
 
 export type DeepResearchStatus =

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  isMissingDeepResearchProviderBudgetColumnError,
   isMissingMaxSearchCallsColumnError,
   isMissingProviderPoolColumnError,
   mapStoredWebSearchConfigRow,
@@ -33,6 +34,15 @@ describe("tenant web-search rolling schema compatibility", () => {
           code: "42703",
           message: 'column "max_search_calls" does not exist',
         },
+      }),
+    ).toBe(true);
+  });
+
+  it("recognizes the deep-research budget rolling schema error", () => {
+    expect(
+      isMissingDeepResearchProviderBudgetColumnError({
+        code: "42703",
+        message: 'column "max_deep_research_provider_calls" does not exist',
       }),
     ).toBe(true);
   });
@@ -123,6 +133,30 @@ describe("tenant web-search rolling schema compatibility", () => {
 
     expect(readLegacy).not.toHaveBeenCalled();
     expect(mapped.maxSearchCalls).toBe(5);
+  });
+
+  it("falls back one migration while preserving the ordinary-search budget", async () => {
+    const readBeforeDeepResearchBudget = vi.fn().mockResolvedValue([
+      { ...LEGACY_ROW, maxSearchCalls: 5 },
+    ]);
+    const result = await readWebSearchConfigWithLegacyColumnFallback(
+      vi.fn().mockRejectedValue({
+        code: "42703",
+        message: 'column "max_deep_research_provider_calls" does not exist',
+      }),
+      vi.fn(),
+      vi.fn(),
+      readBeforeDeepResearchBudget,
+    );
+    const mapped = mapStoredWebSearchConfigRow(
+      result.rows[0]!,
+      result.usedLegacySearchCallBudget,
+      result.usedLegacyDeepResearchBudget,
+    );
+
+    expect(readBeforeDeepResearchBudget).toHaveBeenCalledOnce();
+    expect(mapped.maxSearchCalls).toBe(5);
+    expect(mapped.maxDeepResearchProviderCalls).toBe(24);
   });
 
   it("preserves the legacy provider and key when the provider-pool column is absent", async () => {

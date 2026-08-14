@@ -127,6 +127,13 @@
       "when": 1786608000001,
       "tag": "0017_web_search_call_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1786694400001,
+      "tag": "0018_deep_research_provider_budget",
+      "breakpoints": true
     }
   ]
 }

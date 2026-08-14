@@ -391,6 +391,8 @@
         "deepResearchHint": "允许多阶段研究流程",
         "maxSearchCalls": "单轮搜索上限",
         "maxSearchCallsHint": "每条消息最多调用搜索服务的次数",
+        "maxDeepResearchProviderCalls": "深度研究搜索调用上限",
+        "maxDeepResearchProviderCallsHint": "单次深度研究最多发起的搜索服务请求数，主服务与备用服务分别计数",
         "servicesTitle": "主 / 备搜索 Provider",
         "servicesDescription": "明确配置主搜索与备用搜索。请求优先走主 Provider，失败或结果不足时才切换备用 Provider。",
         "loading": "正在加载搜索配置…",

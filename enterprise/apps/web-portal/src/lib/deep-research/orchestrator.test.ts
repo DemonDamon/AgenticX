@@ -29,6 +29,7 @@ import { directFetch } from "../web-search/direct-fetch";
 import type { executeWebSearch } from "../web-search/providers";
 import type { DirectPageView } from "../web-search/direct-page";
 import { MAX_FOLLOWUP_QUERIES, MAX_REFLECT_ROUNDS } from "./reflector";
+import { DeepResearchBudgetLedger } from "./budget-ledger";
 
 type ExecuteSearchArgs = Parameters<typeof executeWebSearch>;
 
@@ -2834,6 +2835,110 @@ describe("page fetch + sectioned report", () => {
       warn.mock.calls.some((call) => String(call[0]).includes("section format miss")),
     ).toBe(false);
     warn.mockRestore();
+  });
+
+  it("hard-caps provider attempts with the tenant deep-research budget", async () => {
+    const executeSearch = vi.fn(async (...args: ExecuteSearchArgs) => {
+      const query = args[0];
+      args[4]?.beforeProviderAttempt?.("tenant-primary");
+      return [
+        {
+          title: query,
+          url: `https://example.com/${encodeURIComponent(query)}`,
+          snippet: "evidence",
+        },
+      ];
+    });
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "预算测试" }] },
+      {
+        ...baseDeps({
+          loadTenantConfig: async () => ({
+            enabled: true,
+            provider: "duckduckgo" as const,
+            apiKey: "",
+            maxResults: 50,
+            maxDeepResearchProviderCalls: 6,
+            deepResearchEnabled: true,
+          }),
+          runReconFn: undefined,
+          executeSearch,
+          buildPlan: async () => ({
+            topic: "预算测试",
+            complexity: "complex" as const,
+            subQuestions: ["q1", "q2", "q3", "q4", "q5"],
+          }),
+          expandQueriesFn: async ({ subQuestion }: { subQuestion: string }) =>
+            ["a", "b", "c", "d"].map((suffix, index) => ({
+              query: `${subQuestion}-${suffix}`,
+              kind: index === 0 ? ("primary" as const) : ("term" as const),
+            })),
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return new Response(
+                JSON.stringify({ choices: [{ message: { content: "memo" } }] }),
+                { status: 200 },
+              );
+            }
+            return synthUpstream("report body");
+          }) as unknown as typeof fetch,
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    const budget = events.find((event) => event.type === "research_budget")?.usage as
+      | Record<string, { used: number; limit: number; remaining: number }>
+      | undefined;
+
+    expect(executeSearch).toHaveBeenCalledTimes(6);
+    expect(budget?.providerCalls).toEqual({ used: 6, limit: 6, remaining: 0 });
+    expect(budget?.searchQueries.used).toBe(6);
+    expect(budget?.modelCalls.used).toBeGreaterThan(0);
+  });
+
+  it("admits only the remaining page-fetch batch", async () => {
+    const fetchPagesFn = vi.fn(async (urls: string[]) => ({
+      pages: urls.map(() => null),
+      stats: emptyFetchStats(),
+    }));
+    const ledger = new DeepResearchBudgetLedger({ pageFetches: 2 });
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "页面预算测试" }] },
+      {
+        ...baseDeps({
+          budgetLedger: ledger,
+          fetchPagesFn,
+          buildPlan: async () => ({
+            topic: "页面预算测试",
+            complexity: "moderate" as const,
+            subQuestions: ["q1", "q2", "q3"],
+          }),
+          executeSearch: async (query: string) =>
+            Array.from({ length: 4 }, (_, index) => ({
+              title: `${query}-${index}`,
+              url: `https://example.com/${query}/${index}`,
+              snippet: "evidence",
+            })),
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return new Response(
+                JSON.stringify({ choices: [{ message: { content: "memo" } }] }),
+                { status: 200 },
+              );
+            }
+            return synthUpstream("report body");
+          }) as unknown as typeof fetch,
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    const fetchedUrls = fetchPagesFn.mock.calls.flatMap((call) => call[0]);
+    expect(fetchedUrls).toHaveLength(2);
+    expect(ledger.snapshot().pageFetches).toEqual({ used: 2, limit: 2, remaining: 0 });
   });
 
   it("still warns section format miss for table sections when evidence exists", async () => {

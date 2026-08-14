@@ -14,6 +14,10 @@ import {
   normalizeMaxSearchCalls,
 } from "./search-call-budget";
 import {
+  DEFAULT_MAX_DEEP_RESEARCH_PROVIDER_CALLS,
+  normalizeMaxDeepResearchProviderCalls,
+} from "../deep-research/budget-ledger";
+import {
   DEFAULT_MAX_RESULTS,
   getWebSearchAdapter,
   isConfiguredWebSearchProvider,
@@ -36,6 +40,7 @@ export type WebSearchPublicConfig = {
   provider: WebSearchProviderName;
   maxResults: number;
   maxSearchCalls: number;
+  maxDeepResearchProviderCalls: number;
   hasApiKey: boolean;
   deepResearchEnabled: boolean;
   primaryProviderId: string;
@@ -59,6 +64,7 @@ export type WebSearchUpdateInput = {
   provider?: string;
   maxResults?: number;
   maxSearchCalls?: number;
+  maxDeepResearchProviderCalls?: number;
   /** Empty string clears key; undefined leaves unchanged. */
   apiKey?: string;
   deepResearchEnabled?: boolean;
@@ -72,12 +78,14 @@ type StoredWebSearchConfigRow = {
   providers?: unknown;
   maxResults: unknown;
   maxSearchCalls?: unknown;
+  maxDeepResearchProviderCalls?: unknown;
   deepResearchEnabled: unknown;
 };
 
 type WebSearchConfigRead = {
   rows: StoredWebSearchConfigRow[];
   usedLegacySearchCallBudget: boolean;
+  usedLegacyDeepResearchBudget: boolean;
   usedLegacyProviderPool: boolean;
 };
 
@@ -95,7 +103,7 @@ export class WebSearchConfigValidationError extends Error {
 
 function isMissingWebSearchConfigColumnError(
   error: unknown,
-  columnName: "max_search_calls" | "providers",
+  columnName: "max_search_calls" | "max_deep_research_provider_calls" | "providers",
 ): boolean {
   const visited = new Set<object>();
   let current: unknown = error;
@@ -131,6 +139,14 @@ export function isMissingMaxSearchCallsColumnError(error: unknown): boolean {
   return isMissingWebSearchConfigColumnError(error, "max_search_calls");
 }
 
+/** Recognize only the expected rolling-deploy failure for the deep-research budget column. */
+export function isMissingDeepResearchProviderBudgetColumnError(error: unknown): boolean {
+  return isMissingWebSearchConfigColumnError(
+    error,
+    "max_deep_research_provider_calls",
+  );
+}
+
 /** Recognize only the expected rolling-deploy failure for the provider-pool column. */
 export function isMissingProviderPoolColumnError(error: unknown): boolean {
   return isMissingWebSearchConfigColumnError(error, "providers");
@@ -140,37 +156,69 @@ export async function readWebSearchConfigWithLegacyColumnFallback(
   readCurrent: () => Promise<StoredWebSearchConfigRow[]>,
   readBeforeSearchBudget: () => Promise<StoredWebSearchConfigRow[]>,
   readBeforeProviderPool?: () => Promise<StoredWebSearchConfigRow[]>,
+  readBeforeDeepResearchBudget?: () => Promise<StoredWebSearchConfigRow[]>,
 ): Promise<WebSearchConfigRead> {
-  try {
+  const readOldest = async (): Promise<WebSearchConfigRead> => {
+    if (!readBeforeProviderPool) throw new Error("provider-pool legacy reader unavailable");
     return {
-      rows: await readCurrent(),
-      usedLegacySearchCallBudget: false,
-      usedLegacyProviderPool: false,
+      rows: await readBeforeProviderPool(),
+      usedLegacySearchCallBudget: true,
+      usedLegacyDeepResearchBudget: true,
+      usedLegacyProviderPool: true,
     };
-  } catch (error) {
-    if (isMissingProviderPoolColumnError(error) && readBeforeProviderPool) {
-      return {
-        rows: await readBeforeProviderPool(),
-        usedLegacySearchCallBudget: true,
-        usedLegacyProviderPool: true,
-      };
-    }
-    if (!isMissingMaxSearchCallsColumnError(error)) throw error;
+  };
+
+  const readBeforeSearch = async (): Promise<WebSearchConfigRead> => {
     try {
       return {
         rows: await readBeforeSearchBudget(),
         usedLegacySearchCallBudget: true,
+        usedLegacyDeepResearchBudget: true,
         usedLegacyProviderPool: false,
       };
-    } catch (legacyError) {
-      if (!isMissingProviderPoolColumnError(legacyError) || !readBeforeProviderPool) {
-        throw legacyError;
+    } catch (error) {
+      if (isMissingProviderPoolColumnError(error) && readBeforeProviderPool) {
+        return readOldest();
       }
-      return {
-        rows: await readBeforeProviderPool(),
-        usedLegacySearchCallBudget: true,
-        usedLegacyProviderPool: true,
-      };
+      throw error;
+    }
+  };
+
+  const handlePreDeepSchemaError = async (error: unknown): Promise<WebSearchConfigRead> => {
+    if (isMissingProviderPoolColumnError(error) && readBeforeProviderPool) {
+      return readOldest();
+    }
+    if (!isMissingMaxSearchCallsColumnError(error)) throw error;
+    return readBeforeSearch();
+  };
+
+  try {
+    return {
+      rows: await readCurrent(),
+      usedLegacySearchCallBudget: false,
+      usedLegacyDeepResearchBudget: false,
+      usedLegacyProviderPool: false,
+    };
+  } catch (error) {
+    if (
+      isMissingDeepResearchProviderBudgetColumnError(error) &&
+      readBeforeDeepResearchBudget
+    ) {
+      try {
+        return {
+          rows: await readBeforeDeepResearchBudget(),
+          usedLegacySearchCallBudget: false,
+          usedLegacyDeepResearchBudget: true,
+          usedLegacyProviderPool: false,
+        };
+      } catch (preDeepError) {
+        return handlePreDeepSchemaError(preDeepError);
+      }
+    }
+    try {
+      return await handlePreDeepSchemaError(error);
+    } catch (fallbackError) {
+      throw fallbackError;
     }
   }
 }
@@ -231,6 +279,7 @@ function parseStoredProviders(raw: unknown): WebSearchProviderConfig[] {
 export function mapStoredWebSearchConfigRow(
   row: StoredWebSearchConfigRow,
   usedLegacySearchCallBudget = false,
+  usedLegacyDeepResearchBudget = false,
 ): Exclude<TenantWebSearchRow, null> {
   return {
     enabled: Boolean(row.enabled),
@@ -241,6 +290,9 @@ export function mapStoredWebSearchConfigRow(
     maxSearchCalls: usedLegacySearchCallBudget
       ? DEFAULT_MAX_SEARCH_CALLS
       : normalizeMaxSearchCalls(row.maxSearchCalls),
+    maxDeepResearchProviderCalls: usedLegacyDeepResearchBudget
+      ? DEFAULT_MAX_DEEP_RESEARCH_PROVIDER_CALLS
+      : normalizeMaxDeepResearchProviderCalls(row.maxDeepResearchProviderCalls),
     deepResearchEnabled: Boolean(row.deepResearchEnabled),
   };
 }
@@ -405,7 +457,12 @@ export async function loadTenantWebSearchConfigStrict(
   const config = resolveDatabaseConfig();
   if (config.dialect === "mysql") {
     const { raw: db } = await createMysqlDb(config);
-    const { rows, usedLegacySearchCallBudget, usedLegacyProviderPool } =
+    const {
+      rows,
+      usedLegacySearchCallBudget,
+      usedLegacyDeepResearchBudget,
+      usedLegacyProviderPool,
+    } =
       await readWebSearchConfigWithLegacyColumnFallback(
         () => db.select().from(mysqlTable).where(eq(mysqlTable.tenantId, tid)).limit(1),
         () =>
@@ -433,17 +490,37 @@ export async function loadTenantWebSearchConfigStrict(
             .from(mysqlTable)
             .where(eq(mysqlTable.tenantId, tid))
             .limit(1),
+        () =>
+          db
+            .select({
+              enabled: mysqlTable.enabled,
+              provider: mysqlTable.provider,
+              apiKeyCipher: mysqlTable.apiKeyCipher,
+              providers: mysqlTable.providers,
+              maxResults: mysqlTable.maxResults,
+              maxSearchCalls: mysqlTable.maxSearchCalls,
+              deepResearchEnabled: mysqlTable.deepResearchEnabled,
+            })
+            .from(mysqlTable)
+            .where(eq(mysqlTable.tenantId, tid))
+            .limit(1),
       );
     const row = rows[0];
     if (!row) return null;
     return mapStoredWebSearchConfigRow(
       row,
       usedLegacySearchCallBudget || usedLegacyProviderPool,
+      usedLegacyDeepResearchBudget || usedLegacyProviderPool,
     );
   }
 
   const db = getIamDb();
-  const { rows, usedLegacySearchCallBudget, usedLegacyProviderPool } =
+  const {
+    rows,
+    usedLegacySearchCallBudget,
+    usedLegacyDeepResearchBudget,
+    usedLegacyProviderPool,
+  } =
     await readWebSearchConfigWithLegacyColumnFallback(
       () => db.select().from(pgTable).where(eq(pgTable.tenantId, tid)).limit(1),
       () =>
@@ -471,12 +548,27 @@ export async function loadTenantWebSearchConfigStrict(
           .from(pgTable)
           .where(eq(pgTable.tenantId, tid))
           .limit(1),
+      () =>
+        db
+          .select({
+            enabled: pgTable.enabled,
+            provider: pgTable.provider,
+            apiKeyCipher: pgTable.apiKeyCipher,
+            providers: pgTable.providers,
+            maxResults: pgTable.maxResults,
+            maxSearchCalls: pgTable.maxSearchCalls,
+            deepResearchEnabled: pgTable.deepResearchEnabled,
+          })
+          .from(pgTable)
+          .where(eq(pgTable.tenantId, tid))
+          .limit(1),
     );
   const row = rows[0];
   if (!row) return null;
   return mapStoredWebSearchConfigRow(
     row,
     usedLegacySearchCallBudget || usedLegacyProviderPool,
+    usedLegacyDeepResearchBudget || usedLegacyProviderPool,
   );
 }
 
@@ -496,6 +588,7 @@ export async function loadTenantWebSearchConfig(tenantId: string): Promise<Tenan
       providers: [],
       maxResults: DEFAULT_MAX_RESULTS,
       maxSearchCalls: DEFAULT_MAX_SEARCH_CALLS,
+      maxDeepResearchProviderCalls: DEFAULT_MAX_DEEP_RESEARCH_PROVIDER_CALLS,
       deepResearchEnabled: false,
     };
   }
@@ -511,6 +604,7 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
       provider: "duckduckgo",
       maxResults: DEFAULT_MAX_RESULTS,
       maxSearchCalls: DEFAULT_MAX_SEARCH_CALLS,
+      maxDeepResearchProviderCalls: DEFAULT_MAX_DEEP_RESEARCH_PROVIDER_CALLS,
       hasApiKey: false,
       deepResearchEnabled: true,
       primaryProviderId: "duckduckgo",
@@ -523,6 +617,9 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
     provider: normalizeProvider(row.provider),
     maxResults: row.maxResults,
     maxSearchCalls: normalizeMaxSearchCalls(row.maxSearchCalls),
+    maxDeepResearchProviderCalls: normalizeMaxDeepResearchProviderCalls(
+      row.maxDeepResearchProviderCalls,
+    ),
     hasApiKey: Boolean(row.apiKey.trim()),
     deepResearchEnabled: Boolean(row.deepResearchEnabled),
     primaryProviderId: effectivePrimaryProviderId(
@@ -591,6 +688,9 @@ export async function upsertTenantWebSearchConfig(
   const nextMaxSearchCalls = normalizeMaxSearchCalls(
     input.maxSearchCalls ?? existing?.maxSearchCalls,
   );
+  const nextMaxDeepResearchProviderCalls = normalizeMaxDeepResearchProviderCalls(
+    input.maxDeepResearchProviderCalls ?? existing?.maxDeepResearchProviderCalls,
+  );
   const nextDeepResearch =
     input.deepResearchEnabled ?? existing?.deepResearchEnabled ?? true;
   const nextKey = primary.apiKey;
@@ -611,6 +711,7 @@ export async function upsertTenantWebSearchConfig(
         providers: providerRows,
         maxResults: nextMax,
         maxSearchCalls: nextMaxSearchCalls,
+        maxDeepResearchProviderCalls: nextMaxDeepResearchProviderCalls,
         deepResearchEnabled: nextDeepResearch,
         updatedAt,
       })
@@ -622,6 +723,7 @@ export async function upsertTenantWebSearchConfig(
           providers: providerRows,
           maxResults: nextMax,
           maxSearchCalls: nextMaxSearchCalls,
+          maxDeepResearchProviderCalls: nextMaxDeepResearchProviderCalls,
           deepResearchEnabled: nextDeepResearch,
           updatedAt,
         },
@@ -638,6 +740,7 @@ export async function upsertTenantWebSearchConfig(
         providers: providerRows,
         maxResults: nextMax,
         maxSearchCalls: nextMaxSearchCalls,
+        maxDeepResearchProviderCalls: nextMaxDeepResearchProviderCalls,
         deepResearchEnabled: nextDeepResearch,
         updatedAt,
       })
@@ -650,6 +753,7 @@ export async function upsertTenantWebSearchConfig(
           providers: providerRows,
           maxResults: nextMax,
           maxSearchCalls: nextMaxSearchCalls,
+          maxDeepResearchProviderCalls: nextMaxDeepResearchProviderCalls,
           deepResearchEnabled: nextDeepResearch,
           updatedAt,
         },
@@ -661,6 +765,7 @@ export async function upsertTenantWebSearchConfig(
     provider: nextProvider,
     maxResults: nextMax,
     maxSearchCalls: nextMaxSearchCalls,
+    maxDeepResearchProviderCalls: nextMaxDeepResearchProviderCalls,
     hasApiKey: Boolean(nextKey.trim()),
     deepResearchEnabled: nextDeepResearch,
     primaryProviderId: effectivePrimaryProviderId(nextProviders, primary.id),

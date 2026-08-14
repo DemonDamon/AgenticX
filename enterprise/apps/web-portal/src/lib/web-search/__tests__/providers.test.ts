@@ -520,6 +520,53 @@ describe("web search providers", () => {
     ]);
   });
 
+  it("lets an authoritative admission hook stop provider failover before network I/O", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("primary down");
+    });
+    const admitted: string[] = [];
+
+    await expect(
+      executeWebSearch(
+        "q",
+        5,
+        {
+          provider: "bocha",
+          apiKey: "k",
+          maxResults: 5,
+          providers: [
+            {
+              id: "primary",
+              adapter: "bocha",
+              displayName: "Primary",
+              apiKey: "k",
+              enabled: true,
+              priority: 0,
+            },
+            {
+              id: "secondary",
+              adapter: "duckduckgo",
+              displayName: "Secondary",
+              apiKey: "",
+              enabled: true,
+              priority: 1,
+            },
+          ],
+        },
+        fetchImpl as unknown as typeof fetch,
+        {
+          beforeProviderAttempt: (providerId) => {
+            admitted.push(providerId);
+            if (providerId === "secondary") throw new Error("provider budget exhausted");
+          },
+        },
+      ),
+    ).rejects.toThrow("provider budget exhausted");
+
+    expect(admitted).toEqual(["primary", "secondary"]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("does not invent an unconfigured fallback provider", async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error("primary down");

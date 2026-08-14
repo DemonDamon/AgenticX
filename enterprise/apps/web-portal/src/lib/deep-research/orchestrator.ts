@@ -12,6 +12,7 @@ import {
 } from "../web-search/providers";
 import {
   resolvePageFetchConfig,
+  resolveDeepResearchProviderCallLimit,
   resolveWebSearchConfig,
   type TenantWebSearchRow,
 } from "../web-search/config";
@@ -47,6 +48,10 @@ import { formatDeepResearchEventSse } from "./events";
 import { stripThinkBlocks } from "./content-clean";
 import { modelProgressSnapshot } from "./model-progress";
 import { formatEvidencePack } from "./evidence-pack";
+import {
+  DeepResearchBudgetLedger,
+  isDeepResearchBudgetExceeded,
+} from "./budget-ledger";
 import {
   GatewayStreamIdleTimeoutError,
   PausableDeadline,
@@ -283,6 +288,8 @@ export type DeepResearchDeps = {
   now?: () => number;
   /** Test/deployment override; clarification wait remains excluded from this active budget. */
   totalBudgetMs?: number;
+  /** Optional request-scoped hard call ledger (tests/custom runners). */
+  budgetLedger?: DeepResearchBudgetLedger;
   /**
    * Optional: mint a fresh access JWT before synthesize (outline + sections).
    * Long retrieve can outlive the 1h cookie captured at request start.
@@ -473,6 +480,7 @@ async function callGatewayStream(
   deps: DeepResearchDeps,
   body: Record<string, unknown>,
 ): Promise<Response> {
+  deps.budgetLedger?.consume("modelCalls");
   const fetchImpl = deps.fetchImpl ?? fetch;
   const requestController = new AbortController();
   const requestTimer = setTimeout(
@@ -501,6 +509,7 @@ async function callGatewayJson(
   deps: DeepResearchDeps,
   body: Record<string, unknown>,
 ): Promise<string> {
+  deps.budgetLedger?.consume("modelCalls");
   const fetchImpl = deps.fetchImpl ?? fetch;
   const requestController = new AbortController();
   const requestTimer = setTimeout(
@@ -743,7 +752,16 @@ export async function runDeepResearchTurn(
       const budgetLeft = () => deadline.remainingMs();
       /** Retrieval-side budget: keeps WRITE_RESERVE_MIN_MS untouched for section writing. */
       const searchBudgetLeft = () => budgetLeft() - WRITE_RESERVE_MIN_MS;
-      const toolDeps: DeepResearchDeps = { ...deps, signal: runSignal };
+      const budgetLedger =
+        deps.budgetLedger ??
+        new DeepResearchBudgetLedger({
+          providerCalls: resolveDeepResearchProviderCallLimit(tenant),
+        });
+      const toolDeps: DeepResearchDeps = {
+        ...deps,
+        signal: runSignal,
+        budgetLedger,
+      };
       let transportClosed = Boolean(transportSignal?.aborted);
       transportSignal?.addEventListener(
         "abort",
@@ -907,7 +925,11 @@ export async function runDeepResearchTurn(
         // Resolve one explicit public document for the whole run. All lanes use
         // the same request-local page view and only rerank its passages.
         let directPageView: DirectPageView | null = null;
-        if (directReference && egressOk) {
+        if (
+          directReference &&
+          egressOk &&
+          budgetLedger.tryConsume("pageFetches")
+        ) {
           enqueueEvent({
             type: "narrative",
             text: "正在直接读取用户指定的公开页面，后续研究车道会复用并按问题定位片段。",
@@ -961,7 +983,11 @@ export async function runDeepResearchTurn(
         enqueueFlush();
         const todayLine = formatTodayLine(now);
         let recon: ReconResult = { brief: "", hits: [] };
-        if (budgetLeft() > 0) {
+        if (
+          budgetLeft() > 0 &&
+          budgetLedger.remaining("providerCalls") > 0 &&
+          budgetLedger.tryConsume("searchQueries")
+        ) {
           try {
             recon = await (deps.runReconFn ?? runRecon)({
               query: userQuery,
@@ -970,6 +996,7 @@ export async function runDeepResearchTurn(
               fetchImpl: deps.fetchImpl,
               signal: runSignal,
               timeoutMs: RECON_TIMEOUT_MS,
+              beforeProviderAttempt: () => budgetLedger.consume("providerCalls"),
             });
           } catch {
             recon = { brief: "", hits: [] };
@@ -992,7 +1019,7 @@ export async function runDeepResearchTurn(
         enqueueFlush();
         let clarifyResult: ClarifierResult = { needed: false };
         let clarifierCompleted = false;
-        if (budgetLeft() > 0) {
+        if (budgetLeft() > 0 && budgetLedger.tryConsume("modelCalls")) {
           // Bound clarifier so a slow gateway cannot leave the UI silent for minutes.
           const clarifyAbort = new AbortController();
           const onRunAbort = () => clarifyAbort.abort();
@@ -1107,7 +1134,10 @@ export async function runDeepResearchTurn(
         enqueueEvent({ type: "phase", phase: "plan", message: "正在规划研究路径…" });
 
         let plan: ResearchPlan;
-        if (searchBudgetLeft() <= 0) {
+        if (
+          searchBudgetLeft() <= 0 ||
+          !budgetLedger.tryConsume("modelCalls")
+        ) {
           plan = {
             topic: sanitizeResearchTopic(userQuery || "研究主题"),
             complexity: "moderate",
@@ -1361,7 +1391,13 @@ export async function runDeepResearchTurn(
                 async ({ variant, variantIndex }) => {
                   const providerIds: string[] = [];
                   try {
-                    if (searchBudgetLeft() <= 0) return;
+                    if (
+                      searchBudgetLeft() <= 0 ||
+                      budgetLedger.remaining("providerCalls") <= 0 ||
+                      !budgetLedger.tryConsume("searchQueries")
+                    ) {
+                      return;
+                    }
                     variantsRun += 1;
                     queriesExecuted.push(variant.query);
                     const hits = await searchFn(
@@ -1371,6 +1407,8 @@ export async function runDeepResearchTurn(
                       deps.fetchImpl,
                       {
                         signal: runSignal,
+                        beforeProviderAttempt: () =>
+                          budgetLedger.consume("providerCalls"),
                         onProviderAttempt: ({ providerId }) => {
                           if (providerIds.length < 2 && !providerIds.includes(providerId)) {
                             providerIds.push(providerId);
@@ -1390,6 +1428,17 @@ export async function runDeepResearchTurn(
                       pool.add(hit, variant.query);
                     }
                   } catch (error) {
+                    if (isDeepResearchBudgetExceeded(error, "providerCalls")) {
+                      if (providerIds.length > 0) variantFailures += 1;
+                      queryTrace[variantIndex] = {
+                        query: variant.query.slice(0, MAX_TRACE_QUERY_CHARS),
+                        kind: variant.kind,
+                        status: providerIds.length > 0 ? "failed" : "skipped",
+                        hitCount: 0,
+                        ...(providerIds.length > 0 ? { providerIds } : {}),
+                      };
+                      return;
+                    }
                     variantFailures += 1;
                     queryTrace[variantIndex] = {
                       query: variant.query.slice(0, MAX_TRACE_QUERY_CHARS),
@@ -1518,10 +1567,22 @@ export async function runDeepResearchTurn(
                 !citation.fullText?.trim() &&
                 (!directReference || !matchesDirectPage(directReference, citation.url)),
             );
-            if (fetchableCitations.length > 0 && searchBudgetLeft() > 0 && egressOk) {
+            const admittedPageFetches =
+              searchBudgetLeft() > 0 && egressOk
+                ? budgetLedger.take("pageFetches", fetchableCitations.length)
+                : 0;
+            const budgetedFetchableCitations = fetchableCitations.slice(
+              0,
+              admittedPageFetches,
+            );
+            if (
+              budgetedFetchableCitations.length > 0 &&
+              searchBudgetLeft() > 0 &&
+              egressOk
+            ) {
               try {
                 const { pages, stats } = await fetchPages(
-                  fetchableCitations.map((c) => c.url),
+                  budgetedFetchableCitations.map((c) => c.url),
                   {
                     signal: runSignal,
                     timeoutMs: Math.min(
@@ -1534,7 +1595,7 @@ export async function runDeepResearchTurn(
                 );
                 for (const [i, page] of pages.entries()) {
                   if (!page) continue;
-                  const citation = fetchableCitations[i];
+                  const citation = budgetedFetchableCitations[i];
                   if (!citation) continue;
                   registry.attachFullText(citation.url, page.text);
                   citation.fullText = page.text;
@@ -2268,6 +2329,11 @@ export async function runDeepResearchTurn(
           enqueueDelta(fallbackSummary(summaryInput));
           summarySent = true;
         }
+
+        enqueueEvent({
+          type: "research_budget",
+          usage: budgetLedger.snapshot(),
+        });
 
         try {
           const sourcesFrame = formatWebSearchSourcesSse(citationsToHits(citations));

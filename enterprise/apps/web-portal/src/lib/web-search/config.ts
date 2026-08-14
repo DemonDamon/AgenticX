@@ -16,6 +16,10 @@ import {
   DEFAULT_BACKEND_CHAIN,
   type PageFetchBackendName,
 } from "./page-fetch-backends";
+import {
+  DEFAULT_MAX_DEEP_RESEARCH_PROVIDER_CALLS,
+  normalizeMaxDeepResearchProviderCalls,
+} from "../deep-research/budget-ledger";
 
 export type TenantWebSearchRow = {
   enabled: boolean;
@@ -24,6 +28,8 @@ export type TenantWebSearchRow = {
   maxResults: number;
   /** Shared ordinary-search provider-call cap; absent legacy rows use 3. */
   maxSearchCalls?: number;
+  /** Independent deep-research provider-attempt cap; includes failover attempts. */
+  maxDeepResearchProviderCalls?: number;
   /** Ordered, decrypted provider instances; absent rows retain legacy single-provider behavior. */
   providers?: WebSearchProviderConfig[];
   primaryProviderId?: string;
@@ -167,4 +173,10 @@ export function resolvePageFetchConfig(tenant: TenantWebSearchRow): PageFetchRun
     apiKeys,
     archivePages: parseArchiveFlag(process.env.PAGE_FETCH_ARCHIVE, tenant?.archivePages),
   };
+}
+
+export function resolveDeepResearchProviderCallLimit(tenant: TenantWebSearchRow): number {
+  return tenant
+    ? normalizeMaxDeepResearchProviderCalls(tenant.maxDeepResearchProviderCalls)
+    : DEFAULT_MAX_DEEP_RESEARCH_PROVIDER_CALLS;
 }

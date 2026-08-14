@@ -38,6 +38,7 @@ const STORED_ROW = {
   providers: [],
   maxResults: 50,
   maxSearchCalls: 3,
+  maxDeepResearchProviderCalls: 24,
   deepResearchEnabled: true,
   updatedAt: new Date(),
 };
@@ -72,6 +73,7 @@ describe("tenant web-search settings reads", () => {
     await expect(getPublicWebSearchConfig("tenant-1")).resolves.toMatchObject({
       enabled: true,
       maxSearchCalls: 3,
+      maxDeepResearchProviderCalls: 24,
       deepResearchEnabled: true,
     });
   });

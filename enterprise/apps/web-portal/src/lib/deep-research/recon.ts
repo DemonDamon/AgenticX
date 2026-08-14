@@ -6,7 +6,12 @@
  * A single cheap search plus today's date grounds both stages in reality.
  */
 
-import { executeWebSearch, type WebSearchHit, type WebSearchRuntimeConfig } from "../web-search/providers";
+import {
+  executeWebSearch,
+  type WebSearchExecutionDiagnostics,
+  type WebSearchHit,
+  type WebSearchRuntimeConfig,
+} from "../web-search/providers";
 
 export const RECON_RESULTS = 5;
 export const RECON_SNIPPET_CHARS = 220;
@@ -27,6 +32,7 @@ export type ReconDeps = {
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
   timeoutMs?: number;
+  beforeProviderAttempt?: WebSearchExecutionDiagnostics["beforeProviderAttempt"];
 };
 
 export function formatTodayLine(now: () => number = Date.now): string {
@@ -93,6 +99,7 @@ export async function runRecon(deps: ReconDeps): Promise<ReconResult> {
     const hits = await Promise.race([
       searchFn(query, RECON_RESULTS, deps.searchCfg, deps.fetchImpl, {
         signal: controller.signal,
+        beforeProviderAttempt: deps.beforeProviderAttempt,
       }),
       timeout,
     ]);
