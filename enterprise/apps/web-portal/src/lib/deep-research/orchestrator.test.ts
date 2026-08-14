@@ -1223,6 +1223,100 @@ describe("runDeepResearchTurn", () => {
     warn.mockRestore();
   });
 
+  it("audits the whole report once and ships only the corrected body", async () => {
+    const runOnce = async (budgetLedger: DeepResearchBudgetLedger, runId: string) => {
+      const store = createMemoryArtifactStore();
+      const auditBodies: Array<Record<string, unknown>> = [];
+      let modelCallsBeforeAudit = 0;
+      const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          stream?: boolean;
+          messages?: unknown;
+        };
+        const isAudit = JSON.stringify(body.messages ?? []).includes("事实核查员");
+        if (isAudit) {
+          // The audit already debited its own call by the time fetch runs.
+          modelCallsBeforeAudit = budgetLedger.snapshot().modelCalls.used - 1;
+          auditBodies.push(body);
+          return new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content:
+                      '{"findings":[{"claim_id":"c1","verdict":"partial","replacement":"营收有所增长 [1]。"}]}',
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (body.stream === false) {
+          return new Response(
+            JSON.stringify({ choices: [{ message: { content: "memo" } }] }),
+            { status: 200 },
+          );
+        }
+        return synthUpstream("营收增长 40% [1]。");
+      });
+
+      const response = await runDeepResearchTurn(
+        { model: "m", messages: [{ role: "user", content: "营收调研" }] },
+        {
+          ...baseDeps({
+            artifactStore: store,
+            runId,
+            budgetLedger,
+            fetchImpl: fetchImpl as unknown as typeof fetch,
+            buildPlan: async () => ({
+              topic: "营收调研",
+              complexity: "simple" as const,
+              subQuestions: ["q1"],
+            }),
+            executeSearch: async () => [
+              { title: "财报", url: "https://ex.com/ir", snippet: "营收数据" },
+            ],
+          }),
+        },
+      );
+      const payload = await readSsePayload(response);
+      const artifacts = await store.listByRun("t1", "u1", runId);
+      return { ...payload, auditBodies, artifacts, modelCallsBeforeAudit };
+    };
+
+    const rich = await runOnce(new DeepResearchBudgetLedger(), "run-verify-rich");
+
+    expect(rich.auditBodies).toHaveLength(1);
+    expect(rich.auditBodies[0]).toMatchObject({ temperature: 0, max_tokens: 4096 });
+    // Exactly one visible phase, and nothing about confidence or gaps.
+    const auditPhases = rich.events.filter(
+      (event) => event.type === "phase" && event.message === "正在复核引用与关键断言…",
+    );
+    expect(auditPhases).toHaveLength(1);
+
+    const report = rich.artifacts.find((a) => a.path.endsWith("final-report.md"));
+    expect(report?.content).toContain("营收有所增长");
+    expect(report?.content).not.toMatch(/置信度|信息缺口|claim_id|verdict/u);
+
+    const richBudget = rich.events.find((e) => e.type === "research_budget")?.usage as
+      | Record<string, { used: number }>
+      | undefined;
+    // The audit is charged to the same model-call ledger as every other stage.
+    expect(richBudget?.modelCalls?.used).toBeGreaterThan(rich.modelCallsBeforeAudit);
+
+    // Exactly one call short of the audit: the run must still deliver its report.
+    const poor = await runOnce(
+      new DeepResearchBudgetLedger({ modelCalls: rich.modelCallsBeforeAudit }),
+      "run-verify-poor",
+    );
+    expect(poor.auditBodies).toHaveLength(0);
+    expect(
+      poor.artifacts.find((a) => a.path.endsWith("final-report.md"))?.content,
+    ).toContain("营收增长 40%");
+    expect(poor.events.some((e) => e.type === "phase" && e.phase === "done")).toBe(true);
+  });
+
   it("writes one memo artifact per successful lane", async () => {
     const store = createMemoryArtifactStore();
     const runStore = createMemoryRunStore();

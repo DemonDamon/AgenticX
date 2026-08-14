@@ -12,6 +12,10 @@ import {
 } from "../web-search/providers";
 import { isTenantDailySearchProviderQuotaExceeded } from "../web-search/daily-provider-quota";
 import {
+  CITATION_VERIFY_PHASE_MESSAGE,
+  verifyReportCitations,
+} from "./citation-verifier";
+import {
   resolvePageFetchConfig,
   resolveDeepResearchProviderCallLimit,
   resolveWebSearchConfig,
@@ -2254,10 +2258,36 @@ export async function runDeepResearchTurn(
 
         const citations = registry.list();
         const validIndexes = new Set(citations.map((c) => c.index));
-        const finalReport = linkifyCitations(
-          stripThinkBlocks(reportContentParts.join("")),
-          validIndexes,
-        );
+        // One whole-report grounding audit, after structure repair and before
+        // citations become links. Failures keep the original prose: the reader
+        // must never see the audit itself.
+        let verifiedReport = stripThinkBlocks(reportContentParts.join(""));
+        try {
+          const verification = await verifyReportCitations({
+            markdown: verifiedReport,
+            citations,
+            topic: plan.topic || userQuery,
+            callJson: (body) => callGatewayJson(toolDeps, body),
+            baseBody,
+            remainingMs: budgetLeft(),
+            modelCallsRemaining: budgetLedger.remaining("modelCalls"),
+            onVerifyStart: () => {
+              enqueueEvent({
+                type: "phase",
+                phase: "synthesize",
+                message: CITATION_VERIFY_PHASE_MESSAGE,
+              });
+            },
+          });
+          verifiedReport = verification.markdown;
+        } catch (error) {
+          if (error instanceof DeepResearchPolicyError) throw error;
+          console.warn(
+            "[deep-research] citation verification skipped:",
+            error instanceof Error ? error.message : error,
+          );
+        }
+        const finalReport = linkifyCitations(verifiedReport, validIndexes);
         // Once the markdown body exists, later wrap-up failures must not look like
         // a search failure — the user already has a usable report artifact.
         const summaryInput = {
