@@ -138,6 +138,7 @@ import {
   domTextLooksNonEmpty,
   isComposerNonEmpty,
   nextComposerAtMentionState,
+  replaceAtMentionAtCaret,
 } from "../utils/composer-input-sync";
 import { Toast } from "./ds/Toast";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
@@ -4260,8 +4261,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [pane.id, pane.sessionId, pane.activeTaskspaceId, apiBase, apiToken, openSidePanel, addPaneTerminalTab, paneWidth]
   );
 
-  const updateAtStateFromText = useCallback((value: string) => {
-    const next = nextComposerAtMentionState(value);
+  const updateAtStateFromText = useCallback((value: string, caretOffset?: number) => {
+    const next = nextComposerAtMentionState(value, caretOffset);
     setAtOpen((prev) => (prev === next.open ? prev : next.open));
     setAtQuery((prev) => (prev === next.query ? prev : next.query));
     if (next.shouldSearch) {
@@ -4279,40 +4280,44 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, []);
 
   const syncComposerFromValue = useCallback(
-    (value: string) => {
+    (value: string, caretOffset?: number) => {
       setComposerHasText((prev) => {
         const next = isComposerNonEmpty(value);
         return prev === next ? prev : next;
       });
-      updateAtStateFromText(value);
+      updateAtStateFromText(value, caretOffset);
     },
     [updateAtStateFromText]
   );
 
-  const extractComposerText = useCallback((): string => {
-    const el = composerRef.current;
-    if (!el) return "";
+  const serializeComposerRoot = useCallback((root: HTMLElement): string => {
     // Keep visual token text clean (without "@"), but serialize it as "@name" for routing.
-    const clone = el.cloneNode(true) as HTMLDivElement;
-    const tokenNodes = clone.querySelectorAll<HTMLElement>("[data-ref-token='1']");
+    const tokenNodes = root.querySelectorAll<HTMLElement>("[data-ref-token='1']");
     for (const node of tokenNodes) {
       const name = String(node.dataset.refName || node.textContent || "").trim();
       node.textContent = name ? `@${name}` : "";
     }
     // Serialize skill tokens as "@skill://name"
-    const skillNodes = clone.querySelectorAll<HTMLElement>("[data-skill-token='1']");
+    const skillNodes = root.querySelectorAll<HTMLElement>("[data-skill-token='1']");
     for (const node of skillNodes) {
       const name = String(node.dataset.skillName || "").trim();
       node.textContent = name ? `@skill://${name}` : "";
     }
     // Keep quote chips as positional placeholders so setComposerText / @file round-trips
     // do not yank them back to the start of the composer.
-    clone.querySelectorAll<HTMLElement>("[data-quote-token='1']").forEach((node) => {
+    root.querySelectorAll<HTMLElement>("[data-quote-token='1']").forEach((node) => {
       const id = String(node.getAttribute("data-quote-id") || "").trim();
       node.textContent = id ? composerQuotePlaceholder(id) : "";
     });
-    return (clone.innerText || "").replace(/\u00a0/g, " ");
+    return (root.innerText || "").replace(/\u00a0/g, " ");
   }, []);
+
+  const extractComposerText = useCallback((): string => {
+    const el = composerRef.current;
+    if (!el) return "";
+    const clone = el.cloneNode(true) as HTMLDivElement;
+    return serializeComposerRoot(clone);
+  }, [serializeComposerRoot]);
 
   const extractComposerSendText = useCallback((): string => {
     return stripComposerQuotePlaceholders(extractComposerText());
@@ -4370,6 +4375,48 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (!el.contains(range.commonAncestorContainer)) return;
     composerSavedRangeRef.current = range.cloneRange();
   }, []);
+
+  const readLiveComposerCaretOffset = useCallback((fullText: string): number => {
+    const el = composerRef.current;
+    if (!el) return fullText.length;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return fullText.length;
+    const range = selection.getRangeAt(0);
+    if (!el.contains(range.commonAncestorContainer)) return fullText.length;
+    const prefixRange = document.createRange();
+    prefixRange.selectNodeContents(el);
+    prefixRange.setEnd(range.startContainer, range.startOffset);
+    const before = prefixRange.toString().replace(/\u00a0/g, " ");
+    if (fullText.startsWith(before)) return before.length;
+    const idx = fullText.indexOf(before);
+    if (idx >= 0) return idx + before.length;
+    return fullText.length;
+  }, []);
+
+  const readSerializedComposerAroundCaret = useCallback((): { before: string; after: string } => {
+    const el = composerRef.current;
+    if (!el) return { before: "", after: "" };
+    const selection = window.getSelection();
+    const range =
+      selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : composerSavedRangeRef.current;
+    if (!range || !el.contains(range.commonAncestorContainer)) {
+      return { before: extractComposerText(), after: "" };
+    }
+    const beforeRange = document.createRange();
+    beforeRange.selectNodeContents(el);
+    beforeRange.setEnd(range.startContainer, range.startOffset);
+    const afterRange = document.createRange();
+    afterRange.selectNodeContents(el);
+    afterRange.setStart(range.endContainer, range.endOffset);
+    const beforeWrap = document.createElement("div");
+    beforeWrap.appendChild(beforeRange.cloneContents());
+    const afterWrap = document.createElement("div");
+    afterWrap.appendChild(afterRange.cloneContents());
+    return {
+      before: serializeComposerRoot(beforeWrap),
+      after: serializeComposerRoot(afterWrap),
+    };
+  }, [extractComposerText, serializeComposerRoot]);
 
   useEffect(() => {
     const onSelectionChange = () => saveComposerCaret();
@@ -4835,6 +4882,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     ]
   );
 
+  const applyAtMentionReplacement = useCallback(
+    (mention: string, options?: Parameters<typeof setComposerText>[1]) => {
+      const { before, after } = readSerializedComposerAroundCaret();
+      setComposerText(replaceAtMentionAtCaret(before, after, mention), options);
+    },
+    [readSerializedComposerAroundCaret, setComposerText]
+  );
+
   const addContextFile = async (
     taskspaceId: string,
     relPath: string,
@@ -4938,17 +4993,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         composerRefLabel: cleanLabel,
       });
       const mention = `@${cleanLabel} `;
-      const base = extractComposerText();
-      const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) =>
-        `${text.startsWith(" ") ? " " : ""}${mention}`
-      );
-      setComposerText(next, {
+      applyAtMentionReplacement(mention, {
         tokenNames: [cleanLabel],
         ...(absKey ? { refSourcePaths: { [cleanLabel]: absKey } } : {}),
       });
       focusComposerEnd();
     },
-    [addContextFile, extractComposerText, focusComposerEnd, setComposerText]
+    [addContextFile, applyAtMentionReplacement, focusComposerEnd]
   );
 
   const insertWorkspaceFileReference = useCallback(
@@ -12392,17 +12443,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   return;
                 }
                 const live = (composerRef.current?.innerText || "").replace(/\u00a0/g, " ");
-                syncComposerFromValue(live);
+                syncComposerFromValue(live, readLiveComposerCaretOffset(live));
                 saveComposerCaret();
               }}
-              onKeyUp={() => saveComposerCaret()}
-              onMouseUp={() => saveComposerCaret()}
+              onKeyUp={() => {
+                saveComposerCaret();
+                const live = (composerRef.current?.innerText || "").replace(/\u00a0/g, " ");
+                updateAtStateFromText(live, readLiveComposerCaretOffset(live));
+              }}
+              onMouseUp={() => {
+                saveComposerCaret();
+                const live = (composerRef.current?.innerText || "").replace(/\u00a0/g, " ");
+                updateAtStateFromText(live, readLiveComposerCaretOffset(live));
+              }}
               onCompositionStart={() => {
                 imeComposingRef.current = true;
               }}
               onCompositionEnd={() => {
                 const live = (composerRef.current?.innerText || "").replace(/\u00a0/g, " ");
-                syncComposerFromValue(live);
+                syncComposerFromValue(live, readLiveComposerCaretOffset(live));
                 saveComposerCaret();
                 window.setTimeout(() => {
                   imeComposingRef.current = false;
@@ -12504,17 +12563,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     setAtOpen(false);
                     setAtQuery("");
                     if (first.kind === "avatar") {
-                      const mention = `@${first.label} `;
-                      const base = extractComposerText();
-                      const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
-                      setComposerText(next);
+                      applyAtMentionReplacement(`@${first.label} `);
                       return;
                     }
                     if (first.kind === "taskspace") {
-                      const mention = `@${first.label} `;
-                      const base = extractComposerText();
-                      const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
-                      setComposerText(next, { tokenNames: [first.alias || first.label] });
+                      applyAtMentionReplacement(`@${first.label} `, {
+                        tokenNames: [first.alias || first.label],
+                      });
                       void addTaskspaceAliasReference(first.taskspaceId, first.alias, first.path);
                     } else {
                       void insertAtAutocompleteFileReference(first.taskspaceId, first.path, first.label);
@@ -12751,17 +12806,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       setAtOpen(false);
                       setAtQuery("");
                       if (item.kind === "avatar") {
-                        const mention = `@${item.label} `;
-                        const base = extractComposerText();
-                        const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
-                        setComposerText(next);
+                        applyAtMentionReplacement(`@${item.label} `);
                         return;
                       }
                       if (item.kind === "taskspace") {
-                        const mention = `@${item.label} `;
-                        const base = extractComposerText();
-                        const next = base.replace(/(?:^|\s)@[^\s@]*$/, (text) => `${text.startsWith(" ") ? " " : ""}${mention}`);
-                        setComposerText(next, { tokenNames: [item.alias || item.label] });
+                        applyAtMentionReplacement(`@${item.label} `, {
+                          tokenNames: [item.alias || item.label],
+                        });
                         void addTaskspaceAliasReference(item.taskspaceId, item.alias, item.path);
                       } else {
                         void insertAtAutocompleteFileReference(item.taskspaceId, item.path, item.label);
