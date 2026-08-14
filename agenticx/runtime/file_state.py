@@ -7,7 +7,6 @@ Author: Damon Li
 from __future__ import annotations
 
 import hashlib
-import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,28 +24,45 @@ class FileReadState:
 
 
 class FileStateTracker:
-    """Per-session tracker: file_read records state; file_edit checks staleness."""
+    """Per-session tracker: reads/writes refresh snapshots; file_edit checks staleness."""
 
     def __init__(self) -> None:
         self._states: dict[str, FileReadState] = {}
 
+    def refresh_from_disk(self, path: str) -> bool:
+        """Refresh snapshot from on-disk bytes. Return True if a file was recorded."""
+        key = self._normalize_path(path)
+        if not key:
+            return False
+        try:
+            p = Path(key)
+            if not p.is_file():
+                return False
+            st = p.stat()
+            digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        except OSError:
+            return False
+        self._states[key] = FileReadState(
+            path=key,
+            content_hash=digest,
+            mtime=float(st.st_mtime),
+            read_at=time.time(),
+        )
+        return True
+
     def record_read(self, path: str, content: str) -> None:
-        """Record logical content returned to the model (after line slicing, etc.)."""
+        """Record a snapshot after a read. Prefer on-disk bytes when the file exists."""
+        if self.refresh_from_disk(path):
+            return
         key = self._normalize_path(path)
         if not key:
             return
         raw = content.encode("utf-8", errors="replace")
         digest = hashlib.sha256(raw).hexdigest()
-        mtime = 0.0
-        try:
-            st = os.stat(key)
-            mtime = float(st.st_mtime)
-        except OSError:
-            pass
         self._states[key] = FileReadState(
             path=key,
             content_hash=digest,
-            mtime=mtime,
+            mtime=0.0,
             read_at=time.time(),
         )
 
