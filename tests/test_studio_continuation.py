@@ -25,6 +25,7 @@ from agenticx.studio.continuation import (
     resolve_continuation_prompt,
     should_dedupe_continue,
 )
+from agenticx.studio.protocols import ContinueRequest
 
 
 class _FakeSession:
@@ -38,6 +39,17 @@ class _FakeManaged:
         self.session_id = "test-session"
         self.execution_state = "interrupted"
         self.studio_session = _FakeSession()
+
+
+def test_continue_request_accepts_explicit_model_override() -> None:
+    request = ContinueRequest(
+        reason="interrupted",
+        source="desktop_manual",
+        provider="zhipu",
+        model="glm-5",
+    )
+    assert request.provider == "zhipu"
+    assert request.model == "glm-5"
 
 
 def test_resolve_continuation_prompt_interrupted() -> None:
@@ -340,4 +352,3 @@ def test_supervisor_uses_recent_continue_as_interrupted_silence_anchor() -> None
 
     assert _last_continue_attempt_ts(managed.studio_session) == recent_continue
     assert _supervisor_silence_anchor(managed, messages) == recent_continue
-

@@ -55,6 +55,8 @@ class ChatRequest(BaseModel):
     # Idempotency key from desktop: a duplicate POST with the same id within a
     # short window is short-circuited so no second user row is persisted.
     client_turn_id: Optional[str] = None
+    # Kimi K3 top-level reasoning_effort: "low" | "high" | "max" (ignored for other models).
+    reasoning_effort: Optional[str] = None
 
 
 class ContinueRequest(BaseModel):
@@ -63,6 +65,11 @@ class ContinueRequest(BaseModel):
     reason: str = "manual"
     suppress_user_echo: bool = True
     source: str = "desktop_manual"
+    # Optional model override for a user-triggered recovery.  Keeping this on
+    # the continuation request avoids a race between the desktop's persistence
+    # call and the runtime reading the session's current model.
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
 class ConfirmResponse(BaseModel):

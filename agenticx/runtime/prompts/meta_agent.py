@@ -408,6 +408,21 @@ def _build_memory_recall_context(session: StudioSession) -> str:
         return ""
 
 
+def _session_has_explicit_context_inheritance(session: StudioSession) -> bool:
+    """True when create_session wrote an explicit [context_inherited] marker.
+
+    Fresh "new chat" sessions must stay clean; only user-opted inherit-from
+    prior topic may receive automatic cross-session summary injection.
+    """
+    for msg in getattr(session, "agent_messages", None) or []:
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and "[context_inherited]" in content:
+            return True
+    return False
+
+
 def _build_session_summary_context(session: StudioSession, max_age_days: int = 7) -> str:
     from agenticx.runtime.session_summary_store import (
         chat_history_ends_with_pending_user,
@@ -417,6 +432,11 @@ def _build_session_summary_context(session: StudioSession, max_age_days: int = 7
     )
 
     if not is_session_summary_enabled():
+        return ""
+    # Brand-new chats must not silently continue the previous topic via
+    # workspace session summaries. Carry-over only happens when the user
+    # explicitly inherited context (see POST /api/sessions inherit path).
+    if not _session_has_explicit_context_inheritance(session):
         return ""
     if chat_history_ends_with_pending_user(session):
         return ""
@@ -951,6 +971,8 @@ def build_meta_agent_system_prompt(
         "- 连续 2 次工具失败后，先做一次失败归因并调整方案；禁止在同一错误模式下重复试错超过 2 次。\n"
         "- 对 MCP 连接问题，优先走最短闭环：`file_read(mcp.json)` -> `mcp_import` -> `mcp_connect` -> 若失败仅补充 1 次最小验证（命令可执行性）；随后给出明确结论与下一步，不要无限深挖。\n\n"
         "- 若涉及文件产出，必须要求子智能体给出可验证路径与工具成功证据；不要接受“口头已生成”。\n"
+        "- 产出文件的正文引用纪律：文件必须先通过 `file_write` 真实落盘到会话工作区，正文与链接中只允许引用真实存在的绝对路径；"
+        "**禁止输出 `sandbox:` 协议链接**（Desktop 无法打开，属伪造产物链接）。\n"
         "- 用户未明确指定落盘目录时，直接写入「当前会话工作区」中的默认（或侧栏选中）路径，无需再征求路径；"
         "禁止在 `$HOME` 下自造新目录名（应使用会话默认工作区下的子目录）。\n\n"
         "- 当用户询问“你有什么能力 / skills / mcp / 工具”时：直接基于“已注册能力”章节作答，禁止调用 `check_resources` 或启动子智能体。\n"
@@ -1007,6 +1029,8 @@ def build_meta_agent_system_prompt(
         "- 真委派执行期间，分身真实 session 会记录完整对话过程；完成后结果会写入 scratchpad（`delegation_result::<id>`），可在后续轮次读取并向用户汇报。\n"
         "- 询问委派进度时优先调用 `query_subagent_status`，并可使用 avatar 名称/avatar_id/delegation_id 进行查询。\n"
         "- 调用前先查看 Avatars 列表确认目标分身存在。\n"
+        "- 需要列出/核对当前已注册分身（尤其本轮刚创建过分身、上文 Avatars 列表可能滞后）时，使用 `list_avatars` 获取实时名单。\n"
+        "- 用户要求把分身拉群、新建项目群/团队群时，使用 `create_group_chat(name, members, routing?)`；members 可传分身名或 id。创建成功后向用户汇报群名与成员，并提示可在「项目群」列表进入群聊。\n"
         "- **严禁对已注册分身使用 `spawn_subagent`**。若用户指令中提到的人名/角色在 Avatars 列表中存在，必须用 `delegate_to_avatar(avatar_id=..., task=...)`。用 `spawn_subagent` 创建同名临时智能体是严重错误。\n\n"
         "## 向用户提问（human-in-the-loop）\n"
         "- 当你需要用户做开放式决策（方案确认、二选一、风格/配色偏好、缺失参数、是否锁定某约束）时，**必须调用 `request_clarification` 工具**发起阻塞提问，**禁止把开放式问题写进正文然后结束回合**。\n"

@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 TOOL_SEARCH_STATE_KEY = "__tool_search_state_v1__"
 TOOL_SEARCH_TOOL_NAME = "tool_search"
@@ -19,6 +19,10 @@ DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD = 6000
 TOOL_NOT_YET_LOADED_TEMPLATE = (
     "Tool '{name}' schema is not loaded yet. "
     "Call tool_search and retry on the next round."
+)
+TOOL_AUTO_LOADED_TEMPLATE = (
+    "Tool '{name}' schema was not loaded and has been auto-loaded. "
+    "Retry the same call directly on the next round; do NOT call tool_search first."
 )
 DEFAULT_CONTEXT_BUDGET_RATIO = 0.05
 CONTEXT_BUDGET_RATIO_MIN = 0.01
@@ -104,7 +108,6 @@ BUILTIN_DEFER_ALLOWLIST: frozenset[str] = frozenset(
         "scratchpad_write",
         "send_bug_report_email",
         "session_search",
-        "show_widget",
         "skill_import_repo",
         "skill_list",
         "skill_manage",
@@ -688,6 +691,38 @@ def apply_search(
 
 def is_deferred_builtin(name: str) -> bool:
     return name in BUILTIN_DEFER_ALLOWLIST and name not in CORE_ALWAYS_LOAD_TOOLS
+
+
+def auto_load_deferred_tool(session: Any, ts_ctx: ToolSearchRuntimeContext, tool_name: str) -> str:
+    """Mark a pending deferred/MCP tool loaded so next round's projection includes it.
+
+    Returns the tool-result message telling the model to retry directly.
+    Falls back to TOOL_NOT_YET_LOADED_TEMPLATE when the name is not in catalog.
+    """
+    name = str(tool_name or "").strip()
+    descriptor = next((d for d in ts_ctx.catalog.descriptors if d.name == name), None)
+    if descriptor is None:
+        return TOOL_NOT_YET_LOADED_TEMPLATE.format(name=name or tool_name)
+    thr = (
+        int(ts_ctx.effective_threshold)
+        if ts_ctx.effective_threshold is not None
+        else int(ts_ctx.config.normalized().auto_schema_token_threshold)
+    )
+    max_loaded = resolve_max_loaded(
+        effective_threshold=thr,
+        core_schema_tokens=_estimate_core_schema_tokens(ts_ctx),
+    )
+    ts_ctx.state = mark_loaded(ts_ctx.state, [descriptor.stable_id], max_loaded=max_loaded)
+    scratchpad = getattr(session, "scratchpad", None)
+    if not isinstance(scratchpad, dict):
+        scratchpad = {}
+        try:
+            setattr(session, "scratchpad", scratchpad)
+        except Exception:
+            pass
+    if isinstance(scratchpad, dict):
+        dump_state_to_scratchpad(scratchpad, ts_ctx.state)
+    return TOOL_AUTO_LOADED_TEMPLATE.format(name=name)
 
 
 def known_unloaded_names(ctx: ToolSearchRuntimeContext) -> set[str]:

@@ -140,6 +140,36 @@ GroupChatRouter._run_team_turn()
 
 ---
 
+## 修订（2026-07-30）：执行层升级为 Graph Scheduler（仍 Hybrid）
+
+### 触发原因
+
+Workforce 规划后，群聊路径曾用 `for subtask in subtasks` **顺序**执行，无法表达 `dependencies` 并行，也无法为上帝视角 Run Graph 提供一等 `GraphRun` 状态。
+
+### 修订决策
+
+**保持 ADR 0002 Hybrid 不变**：规划层仍是 `WorkforcePattern.decompose_task` + `assign_tasks`；执行层仍是 `_run_one_target_stream` / `AgentRuntime`。
+
+新增 `agenticx/runtime/graph/`：
+
+- `compile_workforce_run` 将 subtasks + assignment 编译为 `GraphRun`
+- `execute_group_run` 按 `depends` 边调度 ready 集，`max_parallel` 内 `asyncio` 并行
+- 快照落盘 `~/.agenticx/graph_runs/<run_id>/run.json`
+- 仍 **禁止** 调用 `WorkforcePattern.execute()` / AgentExecutor 执行栈
+
+### 兼容性
+
+- 既有 `workforce.*` SSE 事件继续在节点 runner 内发布
+- 额外发出 `graph.*` 事件（Desktop 聊天区忽略，供后续运行图面板消费）
+- `GET /api/graph/runs` / `GET /api/graph/runs/{run_id}` 供快照查询
+
+### 关联 Plan
+
+- Plan-Id: `2026-07-30-graph-runtime-core`
+- Plan-File: `.cursor/plans/2026-07-30-graph-runtime-core.plan.md`
+
+---
+
 ## 关联
 
 - Plan-Id: `group-chat-workforce-bridge`

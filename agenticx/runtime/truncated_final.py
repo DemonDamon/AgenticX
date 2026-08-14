@@ -15,12 +15,37 @@ ACTION_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 
-SUSPECT_BODY_MAX_CHARS = 80
+# Explicit vendor "hit max tokens" reasons — always continue once.
+_LENGTH_FINISH_REASONS = frozenset(
+    {
+        "length",
+        "max_tokens",
+        "max_output_tokens",
+        "max_completion_tokens",
+    }
+)
 
+SUSPECT_BODY_MAX_CHARS = 80
 
 def reasoning_has_action_intent(reasoning_text: str) -> bool:
     """Return whether reasoning declares an unfinished external action."""
     return bool(ACTION_INTENT_RE.search(str(reasoning_text or "")))
+
+
+# Ends mid-token after a path separator, e.g. "补 T4/T" cut before "T5".
+_MID_PATH_CUT_RE = re.compile(r"[A-Za-z0-9_\u4e00-\u9fff]/[A-Za-z0-9_\u4e00-\u9fff]{0,3}$")
+
+
+def _has_unbalanced_markdown(body: str) -> bool:
+    """True when common markdown delimiters are left open (strong cut signal)."""
+    text = str(body or "")
+    if text.count("```") % 2 == 1:
+        return True
+    # Bold/italic markers: odd ** count means an unclosed span (this session's
+    # architect reply ended mid-`**一句话…`).
+    if text.count("**") % 2 == 1:
+        return True
+    return False
 
 
 def detect_suspected_truncated_final(
@@ -31,18 +56,40 @@ def detect_suspected_truncated_final(
     executed_tool_names: Sequence[str],
     finish_reason: str,
 ) -> str:
-    """Return a signal when a short terminal reply is likely truncated.
+    """Return a signal when a terminal reply is likely truncated.
 
-    ``finish_reason`` is deliberately accepted for telemetry compatibility but
-    not used as a standalone signal: some providers omit it on ordinary,
-    complete replies, so treating an absent value as corruption causes false
-    continuation requests.
+    Priority:
+    1. Explicit length / max_tokens finish reasons (any body length).
+    2. Unbalanced markdown fences / bold markers (any body length, no tools).
+    3. Legacy short-body + action-intent heuristic (≤80 chars).
     """
+    normalized_finish = str(finish_reason or "").strip().lower()
+    if normalized_finish in _LENGTH_FINISH_REASONS:
+        return "finish_reason_length"
+
     if had_tool_calls_this_round or executed_tool_names:
         return ""
 
     body = str(visible_body or "").strip()
-    if not body or len(body) > SUSPECT_BODY_MAX_CHARS:
+    if not body:
+        return ""
+
+    if _has_unbalanced_markdown(body):
+        return "unbalanced_markdown"
+
+    last_line = next(
+        (ln.strip() for ln in reversed(body.splitlines()) if ln.strip()),
+        "",
+    )
+    if (
+        last_line
+        and not _TERMINATOR_RE.search(last_line)
+        and _MID_PATH_CUT_RE.search(last_line)
+        and len(body) > SUSPECT_BODY_MAX_CHARS
+    ):
+        return "mid_path_cut"
+
+    if len(body) > SUSPECT_BODY_MAX_CHARS:
         return ""
     if _TERMINATOR_RE.search(body):
         return ""

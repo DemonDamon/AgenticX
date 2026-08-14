@@ -83,6 +83,7 @@ from agenticx.llms.provider_fault import (
     human_hint_for_fault,
     record_session_provider_hard_failure,
 )
+from agenticx.llms.sampling_params import resolve_chat_temperature
 from agenticx.runtime.provider_fallback import (
     maybe_apply_provider_fallback,
     record_provider_timeout,
@@ -429,6 +430,9 @@ DEFAULT_LLM_HEARTBEAT_TIMEOUT_SECONDS = 60.0
 DEFAULT_LLM_HARD_TIMEOUT_SECONDS = 300.0
 DEFAULT_LLM_ROUND_TIMEOUT_SECONDS = 180.0
 LLM_ROUND_TIMEOUT_RETRY_LIMIT = 1
+DEFAULT_LLM_STALL_PATIENCE_MAX_ATTEMPTS = 3
+DEFAULT_LLM_STALL_PATIENCE_BUDGET_SECONDS = 900.0
+DEFAULT_LLM_STALL_PATIENCE_BASE_SECONDS = 15.0
 logger = logging.getLogger(__name__)
 
 
@@ -737,6 +741,99 @@ def _reset_llm_timeout_retry_count(session: StudioSession) -> None:
         sp.pop("_llm_round_timeout_count", None)
 
 
+def _resolve_stall_patience_config(session: StudioSession) -> Dict[str, Any]:
+    """Resolve patience-mode config: env first, runtime config, then defaults."""
+
+    def _cfg(key: str) -> Any:
+        try:
+            from agenticx.cli.config_manager import ConfigManager
+
+            return ConfigManager.get_value(f"runtime.llm_stall_patience_{key}")
+        except Exception:
+            return None
+
+    def _bool(env_key: str, cfg_key: str, default: bool) -> bool:
+        raw = os.getenv(env_key, "").strip().lower()
+        if raw in {"0", "false", "no", "off"}:
+            return False
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+        cfg_value = _cfg(cfg_key)
+        return bool(cfg_value) if cfg_value is not None else default
+
+    def _int(env_key: str, cfg_key: str, default: int) -> int:
+        raw = os.getenv(env_key, "").strip()
+        if raw:
+            try:
+                value = int(raw)
+                if value > 0:
+                    return value
+            except ValueError:
+                pass
+        cfg_value = _cfg(cfg_key)
+        if cfg_value is not None:
+            try:
+                value = int(cfg_value)
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        return default
+
+    def _float(env_key: str, cfg_key: str, default: float) -> float:
+        raw = os.getenv(env_key, "").strip()
+        if raw:
+            try:
+                value = float(raw)
+                if value > 0:
+                    return value
+            except ValueError:
+                pass
+        cfg_value = _cfg(cfg_key)
+        if cfg_value is not None:
+            try:
+                value = float(cfg_value)
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        return default
+
+    return {
+        "enabled": _bool("AGX_LLM_STALL_PATIENCE_ENABLED", "enabled", True),
+        "max_attempts": _int(
+            "AGX_LLM_STALL_PATIENCE_MAX_ATTEMPTS",
+            "max_attempts",
+            DEFAULT_LLM_STALL_PATIENCE_MAX_ATTEMPTS,
+        ),
+        "budget_seconds": _float(
+            "AGX_LLM_STALL_PATIENCE_BUDGET_SECONDS",
+            "budget_seconds",
+            DEFAULT_LLM_STALL_PATIENCE_BUDGET_SECONDS,
+        ),
+        "base_seconds": _float(
+            "AGX_LLM_STALL_PATIENCE_BASE_SECONDS",
+            "base_seconds",
+            DEFAULT_LLM_STALL_PATIENCE_BASE_SECONDS,
+        ),
+    }
+
+
+def _stall_patience_state(session: StudioSession) -> Dict[str, Any]:
+    """Return per-session patience retry state."""
+    state = getattr(session, "_stall_patience", None)
+    if not isinstance(state, dict):
+        state = {"attempts": 0, "started_at": 0.0}
+        setattr(session, "_stall_patience", state)
+    state.setdefault("attempts", 0)
+    state.setdefault("started_at", 0.0)
+    return state
+
+
+def _reset_stall_patience(session: StudioSession) -> None:
+    setattr(session, "_stall_patience", {"attempts": 0, "started_at": 0.0})
+
+
 def _should_emit_show_widget_delta(
     emit_state: Dict[int, Dict[str, float]],
     idx: int,
@@ -794,6 +891,14 @@ def _streamed_tool_call_truncated(name: str, args_obj: Dict[str, Any]) -> bool:
     return False
 
 
+def _chat_temperature_kwargs(model_name: str, provider_name: str) -> Dict[str, float]:
+    """Build optional temperature kwarg for invoke/stream (omit when None)."""
+    value = resolve_chat_temperature(model_name, provider=provider_name)
+    if value is None:
+        return {}
+    return {"temperature": float(value)}
+
+
 def _resolve_round_max_tokens(
     base: int,
     recent_tools: Sequence[str],
@@ -817,6 +922,20 @@ def _resolve_round_max_tokens(
     if str(provider or "").strip().lower() == "minimax":
         return min(4096, int(resolved))
     return int(resolved)
+
+
+def _kimi_k3_reasoning_effort_kwargs(session: Any, model_name: str) -> Dict[str, Any]:
+    """Pass Moonshot Kimi K3 top-level ``reasoning_effort`` when set on the session.
+
+    Values: ``low`` / ``high`` / ``max``. Other models ignore this attribute.
+    """
+    bare = str(model_name or "").strip().lower().split("/")[-1]
+    if not (bare == "kimi-k3" or bare.startswith("kimi-k3-") or bare.startswith("kimi-k3.")):
+        return {}
+    raw = str(getattr(session, "_reasoning_effort", "") or "").strip().lower()
+    if raw not in {"low", "high", "max"}:
+        return {}
+    return {"reasoning_effort": raw}
 
 
 def _build_streamed_tool_truncation_hint(names: Sequence[str]) -> str:
@@ -889,6 +1008,36 @@ def _serialize_context_files(session: StudioSession) -> str:
     if not session.context_files:
         return "(empty)"
     return serialize_context_files(session.context_files)
+
+
+def _build_attached_files_hint(session: StudioSession) -> str:
+    """List attached text/document files at the user-turn level for the model."""
+    cf = getattr(session, "context_files", None)
+    if not isinstance(cf, dict) or not cf:
+        return ""
+    lines: list[str] = []
+    for key, value in cf.items():
+        k = str(key or "").strip()
+        v = str(value or "").strip()
+        if not k or k.startswith("skill:") or k.startswith("@dir:"):
+            continue
+        if (
+            v.startswith("[图片")
+            or v.startswith("[视频]")
+            or v.startswith("[附件解析失败]")
+            or v.startswith("[附件] ")
+            or v.startswith("[文件引用] ")
+        ):
+            continue
+        name = os.path.basename(k.replace("\\", "/")) or k
+        lines.append(f"- {name}（{k}）")
+    if not lines:
+        return ""
+    return (
+        "\n\n[已附文件]\n"
+        + "\n".join(lines)
+        + "\n上述文件内容已在 system prompt 的 context_files 节中给出，请直接阅读并基于其回答。"
+    )
 
 
 def _turn_has_external_context(session: StudioSession, user_input: Any) -> bool:
@@ -2095,6 +2244,57 @@ def _build_progress_signature(session: StudioSession) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _tool_result_ok_flag(result: Any) -> Optional[bool]:
+    """Return the boolean ``ok`` flag from a JSON tool result, if present.
+
+    Meta tools (create_avatar / delegate_to_avatar / config writers, etc.)
+    return ``{"ok": true|false, ...}``; use it as an authoritative progress
+    signal. Returns None when the result is not a JSON object with a boolean
+    ``ok`` field, so callers fall back to existing heuristics.
+    """
+    if not isinstance(result, str):
+        return None
+    head = result.lstrip()[:4000]
+    if not head.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(head)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    flag = parsed.get("ok")
+    return flag if isinstance(flag, bool) else None
+
+
+def _build_loop_halt_success_digest(session: StudioSession, *, max_items: int = 20) -> str:
+    """Summarize confirmed successful tool outcomes from this session for the
+    loop-halt prompt, so the final user-facing summary cannot claim "no
+    progress" when concrete results were already produced."""
+    lines: List[str] = []
+    seen: set[str] = set()
+    for msg in getattr(session, "agent_messages", []) or []:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if _tool_result_ok_flag(content) is not True:
+            continue
+        try:
+            payload = json.loads(str(content).lstrip()[:4000])
+        except Exception:
+            continue
+        tool_name = str(msg.get("name") or "tool")
+        label = payload.get("name") or payload.get("message") or ""
+        line = f"{tool_name} 成功：{label}" if label else f"{tool_name} 成功"
+        if line in seen:
+            continue
+        seen.add(line)
+        lines.append(f"- {line}")
+    if len(lines) > max_items:
+        lines = lines[-max_items:]
+    return "\n".join(lines)
+
+
 _CONFIRMATION_SPAM_KEYWORDS = frozenset(
     {"TODO", "FINAL", "COMPLETED", "ULTIMATE", "ABSOLUTE", "REPORT", "SUMMARY"}
 )
@@ -2632,7 +2832,7 @@ class AgentRuntime:
         )
         from agenticx.runtime.context_budget import maybe_compact_meta_turn_context
         from agenticx.runtime.tool_search import (
-            TOOL_NOT_YET_LOADED_TEMPLATE,
+            auto_load_deferred_tool,
             is_tool_pending_next_round,
             project_tools_for_round,
         )
@@ -2815,6 +3015,12 @@ class AgentRuntime:
             if not _is_system_trigger:
                 pending_compaction_notice_count = int(compacted_count)
         user_content: Any = user_message_content if user_message_content is not None else user_input
+        attached_hint = _build_attached_files_hint(session)
+        if attached_hint:
+            if isinstance(user_content, str):
+                user_content = f"{user_content}{attached_hint}"
+            elif isinstance(user_content, list):
+                user_content = list(user_content) + [{"type": "text", "text": attached_hint}]
         messages.append({"role": "user", "content": user_content})
         if persist_user_message:
             # Store rich content (list with image_url blocks for vision uploads) + attachments
@@ -3220,6 +3426,12 @@ class AgentRuntime:
                 except Exception:
                     llm_call_kwargs = {}
                 try:
+                    llm_call_kwargs.update(
+                        _kimi_k3_reasoning_effort_kwargs(session, model_name)
+                    )
+                except Exception:
+                    pass
+                try:
                     from agenticx.runtime.tool_search import (
                         estimate_schema_tokens,
                         should_apply_tool_search,
@@ -3338,9 +3550,9 @@ class AgentRuntime:
                                 stream_kwargs: Dict[str, Any] = {
                                     "tools": list(active_tools),
                                     "tool_choice": _round_tool_choice,
-                                    "temperature": 0.2,
                                     "max_tokens": int(_max_tokens),
                                     "timeout": request_timeout_seconds,
+                                    **_chat_temperature_kwargs(model_name, provider_name),
                                 }
                                 if _zhipu_tool_stream_supported(provider_name, model_name):
                                     # BigModel exposes incremental tool-call deltas as
@@ -3349,7 +3561,6 @@ class AgentRuntime:
                                     stream_kwargs["tool_stream"] = True
                                 if provider_name.strip().lower() == "minimax":
                                     stream_kwargs.pop("tool_choice", None)
-                                    stream_kwargs.pop("temperature", None)
                                     # _resolve_round_max_tokens already clamps MiniMax.
                                     stream_kwargs["max_tokens"] = int(_max_tokens)
                                 stream_kwargs.update(llm_call_kwargs)
@@ -3656,7 +3867,6 @@ class AgentRuntime:
                                 messages_for_llm,
                                 tools=active_tools,
                                 tool_choice=_fallback_tool_choice,
-                                temperature=0.2,
                                 max_tokens=_resolve_round_max_tokens(
                                     int(
                                         getattr(session, "_max_tokens_override", None)
@@ -3666,6 +3876,7 @@ class AgentRuntime:
                                     provider=provider_name,
                                 ),
                                 timeout=request_timeout_seconds,
+                                **_chat_temperature_kwargs(model_name, provider_name),
                                 **llm_call_kwargs,
                             )
                         except Exception as invoke_exc:
@@ -3989,6 +4200,50 @@ class AgentRuntime:
                     )
                     messages.append({"role": "user", "content": f"[系统通知] {notice}"})
                     continue
+                patience = _resolve_stall_patience_config(session)
+                if patience["enabled"]:
+                    patience_state = _stall_patience_state(session)
+                    now_mono = asyncio.get_running_loop().time()
+                    if not patience_state.get("started_at"):
+                        patience_state["started_at"] = now_mono
+                    waited_seconds = now_mono - float(patience_state["started_at"])
+                    if (
+                        patience_state["attempts"] < patience["max_attempts"]
+                        and waited_seconds < patience["budget_seconds"]
+                    ):
+                        patience_state["attempts"] += 1
+                        wait_seconds = min(
+                            patience["base_seconds"] * (2 ** (patience_state["attempts"] - 1)),
+                            60.0,
+                            max(1.0, patience["budget_seconds"] - waited_seconds),
+                        )
+                        yield RuntimeEvent(
+                            type=EventType.TOOL_PROGRESS.value,
+                            data={
+                                "name": "模型响应",
+                                "phase": "stall_patient_wait",
+                                "tool_call_id": "",
+                                "attempt": patience_state["attempts"],
+                                "max_attempts": patience["max_attempts"],
+                                "waited_seconds": int(waited_seconds),
+                                "next_retry_in_seconds": int(wait_seconds),
+                                "provider": provider_hint,
+                                "model": model_hint,
+                            },
+                            agent_id=agent_id,
+                        )
+                        if patience_state["attempts"] == 1:
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        "[系统通知] 模型响应持续超时，系统正在自动等待并重试；"
+                                        "恢复后将继续本轮，无需用户操作。"
+                                    ),
+                                }
+                            )
+                        await asyncio.sleep(wait_seconds)
+                        continue
                 yield RuntimeEvent(
                     type=EventType.STALL.value,
                     data={
@@ -4114,11 +4369,12 @@ class AgentRuntime:
                         )
                         continue
 
-                err_text = (
-                    human_hint_for_fault(fault)
-                    if fault in {"billing", "auth", "rate_limit", "context_window", "transient"}
-                    else f"模型调用失败: {exc}"
-                )
+                if fault in {"billing", "auth", "rate_limit", "context_window", "transient"}:
+                    err_text = human_hint_for_fault(fault)
+                else:
+                    _prov = str(provider_name or "").strip() or "?"
+                    _model = str(model_name or "").strip() or "?"
+                    err_text = f"模型调用失败 ({_prov}/{_model}): {exc}"
                 # Recover once from broken tool-call pairing after compaction/split.
                 if (
                     fault in {"context_window", "transient"}
@@ -4151,6 +4407,17 @@ class AgentRuntime:
                     agent_id=agent_id,
                 )
                 return
+            if _stall_patience_state(session)["attempts"] > 0:
+                yield RuntimeEvent(
+                    type=EventType.TOOL_PROGRESS.value,
+                    data={
+                        "name": "模型响应",
+                        "phase": "stall_patient_recovered",
+                        "tool_call_id": "",
+                    },
+                    agent_id=agent_id,
+                )
+            _reset_stall_patience(session)
             _reset_llm_timeout_retry_count(session)
             reset_provider_timeout_streak(session)
             # Preserve streamed raw before response.content overwrites the
@@ -4452,7 +4719,6 @@ class AgentRuntime:
                             try:
                                 for chunk in self.llm.stream(
                                     messages,
-                                    temperature=0.2,
                                     max_tokens=_resolve_round_max_tokens(
                                         int(
                                             getattr(session, "_max_tokens_override", None)
@@ -4462,6 +4728,7 @@ class AgentRuntime:
                                         provider=provider_name,
                                     ),
                                     timeout=request_timeout_seconds,
+                                    **_chat_temperature_kwargs(model_name, provider_name),
                                     **llm_call_kwargs,
                                 ):
                                     if stop_event.is_set():
@@ -4759,6 +5026,13 @@ class AgentRuntime:
                 if not tool_name:
                     invalid_message = "模型返回了无效工具调用（缺少 tool name），已忽略本次调用。"
                     tool_name = "unknown_tool"
+                    # Emit TOOL_CALL first so the desktop client has a pending card to merge
+                    # the denied result into, rather than falling back to a bare bubble.
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
                     messages.append(
                         {
                             "role": "tool",
@@ -4789,12 +5063,21 @@ class AgentRuntime:
                         )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
-                        data={"text": invalid_message, "tool_call_id": tool_call_id},
+                        data={
+                            "text": invalid_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     yield RuntimeEvent(
                         type=EventType.TOOL_RESULT.value,
-                        data={"name": tool_name, "result": invalid_message, "tool_call_id": tool_call_id},
+                        data={
+                            "name": tool_name,
+                            "result": invalid_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     _record_tool_turn_outcome("failed")
@@ -4803,6 +5086,13 @@ class AgentRuntime:
                 perm_deny = tool_denied_by_session_permissions(tool_name)
                 if perm_deny:
                     denied_message = perm_deny
+                    # Emit TOOL_CALL first so the desktop client has a pending card to merge
+                    # the denied result into, rather than falling back to a bare bubble.
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
                     messages.append(
                         {
                             "role": "tool",
@@ -4833,12 +5123,21 @@ class AgentRuntime:
                         )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
-                        data={"text": denied_message, "tool_call_id": tool_call_id},
+                        data={
+                            "text": denied_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     yield RuntimeEvent(
                         type=EventType.TOOL_RESULT.value,
-                        data={"name": tool_name, "result": denied_message, "tool_call_id": tool_call_id},
+                        data={
+                            "name": tool_name,
+                            "result": denied_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     _record_tool_turn_outcome("failed")
@@ -4850,9 +5149,16 @@ class AgentRuntime:
                         allowed_tool_names=allowed_tool_names,
                         full_openai_tools=full_tool_pool,
                     ):
-                        denied_message = TOOL_NOT_YET_LOADED_TEMPLATE.format(name=tool_name)
+                        denied_message = auto_load_deferred_tool(session, ts_ctx, tool_name)
                     else:
                         denied_message = f"工具 '{tool_name}' 不在当前允许列表中，已拒绝执行。"
+                    # Emit TOOL_CALL first so the desktop client has a pending card to merge
+                    # the denied/auto-loaded result into, rather than falling back to a bare bubble.
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
                     messages.append(
                         {
                             "role": "tool",
@@ -4883,12 +5189,21 @@ class AgentRuntime:
                         )
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
-                        data={"text": denied_message, "tool_call_id": tool_call_id},
+                        data={
+                            "text": denied_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     yield RuntimeEvent(
                         type=EventType.TOOL_RESULT.value,
-                        data={"name": tool_name, "result": denied_message, "tool_call_id": tool_call_id},
+                        data={
+                            "name": tool_name,
+                            "result": denied_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     _record_tool_turn_outcome("failed")
@@ -5343,6 +5658,11 @@ class AgentRuntime:
                     and not is_error_result
                     and len(result.strip()) > 10
                 )
+                ok_flag = _tool_result_ok_flag(result)
+                if ok_flag is True:
+                    # Meta tools (create_avatar, delegate_to_avatar, ...) return
+                    # {"ok": true}; a confirmed success must count as progress.
+                    logical_progress = True
                 if tool_name in EXPLORATORY_TOOLS and isinstance(result, str) and result.strip():
                     if not is_error_result:
                         # Successful exploratory call resets the discovery budget
@@ -5478,14 +5798,17 @@ class AgentRuntime:
                     synced_session_message_count = len(session.agent_messages)
 
                     _original_task_snippet = (user_input or "").strip().replace("\n", " ")[:500]
+                    _success_digest = _build_loop_halt_success_digest(session)
                     halt_prompt = (
                         "[system-halt] 运行时检测到连续工具调用无进展，已自动停止重试。\n"
                         f"触发原因：{loop_issue.message}\n"
                         f"【用户原始请求】{_original_task_snippet}\n"
+                        "【本轮已确认完成的事实】（以下工具调用已成功返回，属于已完成事项，不得描述为失败或无进展）：\n"
+                        f"{_success_digest or '（无）'}\n"
                         "⚠️ 严格要求：回答必须紧扣上面的【用户原始请求】，不得切换、发明或扩展到任何其它话题（例如不要自行转为配置教程、产品对比等与原始请求无关的主题）。\n"
-                        "请用中文 3-5 句直接对用户说明：\n"
-                        "1) 围绕【用户原始请求】你尝试过哪些工具/参数；\n"
-                        "2) 失败或无进展的主要原因（参数不对 / 站点不可达 / 工具能力不足 / 需鉴权 等）；\n"
+                        "请用中文 3-6 句直接对用户说明：\n"
+                        "1) 若【本轮已确认完成的事实】非空，必须先明确告知这些事项已经成功完成；\n"
+                        "2) 再说明本轮为何被自动停止（如后续重复调用已存在的对象等）以及尚未完成的部分；\n"
                         "3) 围绕同一个原始请求的下一步建议（换工具、补充信息、手动执行等）。\n"
                         "请直接给出正文，不要再调用任何工具，也不要讨论与原始请求无关的内容。"
                     )
@@ -5502,9 +5825,9 @@ class AgentRuntime:
                             try:
                                 for chunk in self.llm.stream(
                                     messages,
-                                    temperature=0.2,
                                     max_tokens=800,
                                     timeout=request_timeout_seconds,
+                                    **_chat_temperature_kwargs(model_name, provider_name),
                                 ):
                                     if stop_event.is_set():
                                         break

@@ -9,9 +9,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Callable, Dict, List, Sequence
+
+_log = logging.getLogger(__name__)
 
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.agent_tools import STUDIO_TOOLS
@@ -50,6 +53,20 @@ def _get_mention_hops() -> int:
 
 # Keep the module-level name for backward-compat callers that import it directly.
 GROUP_MENTION_FOLLOWUP_HOPS = _DEFAULT_MENTION_HOPS
+
+
+def resolve_studio_session_id(base_session: Any) -> str:
+    """Resolve the studio chat UUID from a StudioSession-like object.
+
+    ``StudioSession`` has no ``session_id`` field; the chat handler attaches
+    ``_session_id`` / ``_usage_owner_session_id``. Prefer those over a bare
+    ``session_id`` attribute (tests / mocks may set the latter).
+    """
+    for key in ("_session_id", "_usage_owner_session_id", "session_id"):
+        val = str(getattr(base_session, key, "") or "").strip()
+        if val:
+            return val
+    return ""
 
 
 # Heuristic markers that hint a complex multi-step task suitable for Workforce
@@ -255,6 +272,12 @@ class GroupReply:
     error: str = ""
     event_type: str = "group_reply"
     confirm_request_id: str = ""
+    # Structured fields for graph projection / member activity side panel.
+    graph_run_id: str = ""
+    graph_node_id: str = ""
+    tool_name: str = ""
+    tool_phase: str = ""  # "calling" | "done" | ""
+    tool_call_id: str = ""
 
 
 @dataclass
@@ -295,6 +318,19 @@ class GroupChatRouter:
             skipped=True,
             event_type="group_typing",
         )
+
+    def _graph_member_labels(self, group_avatar_ids: Sequence[str]) -> Dict[str, str]:
+        """avatar_id → display name for Run Graph node labels (not hex ids)."""
+        labels: Dict[str, str] = {META_LEADER_AGENT_ID: self._meta_leader_label}
+        for aid in group_avatar_ids:
+            sid = str(aid or "").strip()
+            if not sid:
+                continue
+            avatar = self.avatar_registry.get_avatar(sid)
+            name = str(getattr(avatar, "name", "") or "").strip() if avatar else ""
+            if name:
+                labels[sid] = name
+        return labels
 
     def _group_user_addressing_rules(self, user_display_name: str) -> str:
         u = str(user_display_name or "").strip() or "用户"
@@ -421,6 +457,8 @@ class GroupChatRouter:
         avatar_name: str,
         avatar_url: str,
         text: str,
+        graph_run_id: str = "",
+        graph_node_id: str = "",
     ) -> GroupReply:
         """Build one progress event row for group chat streaming."""
         return GroupReply(
@@ -430,6 +468,8 @@ class GroupChatRouter:
             content=str(text or "").strip(),
             skipped=True,
             event_type="group_progress",
+            graph_run_id=str(graph_run_id or "").strip(),
+            graph_node_id=str(graph_node_id or "").strip(),
         )
 
     @staticmethod
@@ -437,36 +477,17 @@ class GroupChatRouter:
         """Map runtime event to user-visible progress text."""
         et = str(event_type or "")
         if et == EventType.ROUND_START.value:
-            return "开始处理任务..."
+            # No chat-line for round start — frontend shows the expert label +
+            # stream placeholder instead of a noisy "开始处理任务..." row.
+            return ""
         if et == EventType.TOOL_CALL.value:
             tool_name = str(data.get("name", "") or data.get("tool_name", "") or "tool")
-            raw_args = data.get("arguments", data.get("args", {}))
-            if isinstance(raw_args, str):
-                args_preview = raw_args.strip()
-            else:
-                try:
-                    args_preview = json.dumps(raw_args, ensure_ascii=False)
-                except Exception:
-                    args_preview = str(raw_args)
-            if len(args_preview) > 180:
-                args_preview = args_preview[:177] + "..."
-            if args_preview and args_preview not in {"{}", "null", "None"}:
-                return f"正在调用工具：{tool_name} {args_preview}"
+            # Keep status scannable; args belong in side-panel detail, not the line.
             return f"正在调用工具：{tool_name}"
         if et == EventType.TOOL_RESULT.value:
             tool_name = str(data.get("name", "") or data.get("tool_name", "") or "tool")
-            raw_result = data.get("result", "")
-            if isinstance(raw_result, str):
-                result_preview = raw_result.strip()
-            else:
-                try:
-                    result_preview = json.dumps(raw_result, ensure_ascii=False)
-                except Exception:
-                    result_preview = str(raw_result)
-            if len(result_preview) > 220:
-                result_preview = result_preview[:217] + "..."
-            if result_preview and result_preview not in {"{}", "null", "None"}:
-                return f"工具已完成：{tool_name} · {result_preview}"
+            # Result body belongs to the assistant reply / side panel detail, not the
+            # one-line status. Keep the status row scannable.
             return f"工具已完成：{tool_name}"
         if et == EventType.CONFIRM_REQUIRED.value:
             question = str(data.get("question", "") or "").strip()
@@ -485,6 +506,36 @@ class GroupChatRouter:
         return ""
 
     @staticmethod
+    def _runtime_event_to_tool_step(event_type: str, data: Dict[str, Any]) -> Dict[str, str]:
+        """Structured tool step for graph projection (no long previews)."""
+        et = str(event_type or "")
+        if et == EventType.TOOL_CALL.value:
+            phase = "calling"
+        elif et == EventType.TOOL_RESULT.value:
+            phase = "done"
+        else:
+            return {}
+        tool_name = str(data.get("name", "") or data.get("tool_name", "") or "tool")
+        call_id = str(data.get("id", "") or data.get("tool_call_id", "") or "")
+        return {"tool_name": tool_name, "tool_phase": phase, "tool_call_id": call_id}
+
+    @staticmethod
+    def _graph_run_id_of(base_session: StudioSession) -> str:
+        pad = getattr(base_session, "scratchpad", None)
+        if not isinstance(pad, dict):
+            return ""
+        return str(pad.get("graph_run_id") or "").strip()
+
+    @staticmethod
+    def _graph_node_id_for_agent(agent_id: str) -> str:
+        aid = str(agent_id or "").strip()
+        if not aid:
+            return ""
+        if aid.startswith("agent:"):
+            return aid
+        return f"agent:{aid}"
+
+    @staticmethod
     def _runtime_event_to_group_event_type(event_type: str) -> str:
         """Map runtime event type to group progress event type."""
         et = str(event_type or "")
@@ -493,6 +544,146 @@ class GroupChatRouter:
         if et == EventType.CLARIFICATION_REQUIRED.value:
             return "group_clarification"
         return "group_progress"
+
+    def _graph_sse_reply(self, etype: str, data: Dict[str, Any]) -> GroupReply:
+        """Wrap a graph.* payload as a skipped GroupReply for chat SSE passthrough."""
+        return GroupReply(
+            agent_id=META_LEADER_AGENT_ID,
+            avatar_name="Graph",
+            avatar_url="",
+            content=json.dumps(data, ensure_ascii=False),
+            skipped=True,
+            event_type=str(etype),
+        )
+
+    def _project_a2a_message_edge(
+        self,
+        *,
+        base_session: StudioSession,
+        group_id: str,
+        group_avatar_ids: Sequence[str],
+        source_agent_id: str,
+        target_agent_id: str,
+        summary: str = "",
+    ) -> List[GroupReply]:
+        """Persist MESSAGE edge on presence/workforce run and return SSE replies."""
+        try:
+            from agenticx.runtime.graph.social import (
+                ensure_presence_run,
+                message_edge_events,
+                note_debate_edge,
+                upsert_message_edge,
+            )
+            from agenticx.runtime.graph.store import get_default_store
+
+            pad = getattr(base_session, "scratchpad", None)
+            if not isinstance(pad, dict):
+                pad = {}
+                try:
+                    setattr(base_session, "scratchpad", pad)
+                except Exception:
+                    return []
+            existing = str(pad.get("graph_run_id") or "").strip() or None
+            member_labels = self._graph_member_labels(group_avatar_ids)
+            run = ensure_presence_run(
+                session_id=resolve_studio_session_id(base_session),
+                group_id=group_id,
+                member_ids=list(group_avatar_ids) + [META_LEADER_AGENT_ID],
+                store=get_default_store(),
+                existing_run_id=existing,
+                member_labels=member_labels,
+            )
+            pad["graph_run_id"] = run.run_id
+            src = (
+                f"agent:{source_agent_id}"
+                if not str(source_agent_id).startswith("agent:")
+                else str(source_agent_id)
+            )
+            tgt = (
+                f"agent:{target_agent_id}"
+                if not str(target_agent_id).startswith("agent:")
+                else str(target_agent_id)
+            )
+            edge = upsert_message_edge(run, source=src, target=tgt, label="mention")
+            get_default_store().save(run, bump_version=True)
+            note_debate_edge(pad, source=src, target=tgt)
+            out: List[GroupReply] = []
+            for ev in message_edge_events(run, edge, summary=summary):
+                et = str(ev.get("type") or "graph.edge_flow")
+                out.append(self._graph_sse_reply(et, ev))
+            return out
+        except Exception:
+            return []
+
+    def _project_h2a_fanout(
+        self,
+        *,
+        base_session: StudioSession,
+        group_id: str,
+        group_avatar_ids: Sequence[str],
+        target_agent_ids: Sequence[str],
+    ) -> List[GroupReply]:
+        try:
+            from agenticx.runtime.graph.social import (
+                ensure_presence_run,
+                note_debate_edge,
+                project_h2a_fanout,
+            )
+            from agenticx.runtime.graph.store import get_default_store
+
+            pad = getattr(base_session, "scratchpad", None)
+            if not isinstance(pad, dict):
+                pad = {}
+                try:
+                    setattr(base_session, "scratchpad", pad)
+                except Exception:
+                    return []
+            existing = str(pad.get("graph_run_id") or "").strip() or None
+            member_labels = self._graph_member_labels(group_avatar_ids)
+            run = ensure_presence_run(
+                session_id=resolve_studio_session_id(base_session),
+                group_id=group_id,
+                member_ids=list(group_avatar_ids) + [META_LEADER_AGENT_ID],
+                store=get_default_store(),
+                existing_run_id=existing,
+                member_labels=member_labels,
+            )
+            pad["graph_run_id"] = run.run_id
+            edges, events = project_h2a_fanout(
+                run, target_agent_ids, member_labels=member_labels
+            )
+            for edge in edges:
+                note_debate_edge(pad, source=edge.source, target=edge.target)
+            get_default_store().save(run, bump_version=True)
+            return [
+                self._graph_sse_reply(str(ev.get("type") or "graph.edge_updated"), ev)
+                for ev in events
+            ]
+        except Exception:
+            return []
+
+    def _maybe_yield_debate_nudge(self, base_session: StudioSession) -> List[GroupReply]:
+        try:
+            from agenticx.runtime.graph.social import maybe_debate_nudge
+
+            pad = getattr(base_session, "scratchpad", None)
+            if not isinstance(pad, dict):
+                return []
+            text = maybe_debate_nudge(pad)
+            if not text:
+                return []
+            return [
+                GroupReply(
+                    agent_id=META_LEADER_AGENT_ID,
+                    avatar_name=self._meta_leader_label,
+                    avatar_url="",
+                    content=text,
+                    skipped=True,
+                    event_type="graph.debate_nudge",
+                )
+            ]
+        except Exception:
+            return []
 
     async def _emit_mention_follow_ups(
         self,
@@ -508,6 +699,15 @@ class GroupChatRouter:
         hops: int,
         responded_this_turn: set[str],
     ) -> AsyncGenerator[GroupReply, None]:
+        # Selection-rule converge policy can suppress A2A mention hops.
+        try:
+            from agenticx.runtime.graph.intervene import effective_mention_hops
+
+            pad = getattr(base_session, "scratchpad", None)
+            if isinstance(pad, dict):
+                hops = effective_mention_hops(pad, hops)
+        except Exception:
+            pass
         if hops <= 0:
             return
         if reply.skipped or not str(reply.content or "").strip():
@@ -521,6 +721,17 @@ class GroupChatRouter:
                 continue
             if await self._should_stop(should_stop):
                 return
+            for ge in self._project_a2a_message_edge(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                source_agent_id=str(reply.agent_id),
+                target_agent_id=str(tid),
+                summary=(reply.content or "")[:80],
+            ):
+                yield ge
+            for nudge in self._maybe_yield_debate_nudge(base_session):
+                yield nudge
             if tid == META_LEADER_AGENT_ID:
                 ty_name = self._meta_leader_label
             else:
@@ -790,9 +1001,14 @@ class GroupChatRouter:
         u = str(user_display_name or "").strip() or "用户"
         prompt = (
             f"你是群聊「{group_name}」的项目经理兼组长。\n"
-            "你需要像项目经理向团长汇报一样回答：简洁、清晰、可执行。\n"
+            "默认像微信群聊里的组长发言：短、清晰、可执行，先给结论再补关键点。\n"
             "你可以综合所有成员最近发言给出全局判断。\n"
-            "禁止输出工具调用细节。\n\n"
+            "禁止输出工具调用细节。\n"
+            "## 回复长度（必须遵守）\n"
+            "- 默认短聊：通常 2–6 句或少量要点，不要主动写长报告、完整验收表、大段 Markdown 表格。\n"
+            "- 仅当用户明确要求报告/验收清单/完整方案/详细对照表，或问题本身必须交付长文材料时，"
+            "才展开长篇；展开前可先一句说明「下面按验收项展开」。\n"
+            "- 未明确要求长文时：用要点概括关键结论 + 下一步，把细表留给用户追问。\n\n"
             f"人类提问者显示名：{u}。请直接对该用户作答（可用「你」或其显示名），不要无故把主答对象换成 @ 某位分身，除非在明确指派后续跟进。\n\n"
             f"群成员:\n{members_summary}\n\n"
             f"最近群聊上下文:\n{context.render_recent_dialogue()}\n\n"
@@ -804,7 +1020,7 @@ class GroupChatRouter:
             model=model,
             prompt=prompt,
             temperature=0.2,
-            max_tokens=900,
+            max_tokens=500,
         )
         final_text = text.strip()
         if not final_text:
@@ -844,8 +1060,9 @@ class GroupChatRouter:
             avatar_name = self._meta_leader_label
             avatar_role = "Group Leader"
             avatar_prompt = (
-                "你是群聊组长兼项目经理。优先用工具（搜索、查文档）研究问题后给出有信号量的答复；"
-                "仅在真正需要专业成员动手执行时才 @ 委派。保持简洁可执行，不要输出工具调用细节。"
+                "你是群聊组长兼项目经理。优先用工具（搜索、查文档）研究问题后给出有信号量的短答复；"
+                "仅在真正需要专业成员动手执行时才 @ 委派。"
+                "默认微信群短聊风格；仅用户明确要报告/清单/长文时才展开。不要输出工具调用细节。"
             )
             avatar_url = ""
             provider = getattr(base_session, "provider_name", None)
@@ -895,7 +1112,11 @@ class GroupChatRouter:
             "- 你是微信群聊中的一个成员，遵循自然对话风格。\n"
             f"{force_rule}"
             "- 若需要回答，请直接给完整答案，不要流式、不分段。\n"
-            "- 回答简洁、有执行性，贴合你的角色职责。\n"
+            "- 默认短聊：像真人在微信群里说话——先结论，再补 2–5 个关键点；"
+            "不要主动输出长报告、完整验收清单、大段对照表或说明书式长文。\n"
+            "- 仅当用户明确要「报告 / 验收清单 / 完整方案 / 详细表格 / 长文」，"
+            "或当前问题显然是在交付文档材料时，才仔细展开长篇；否则保持短回复，细项留给追问。\n"
+            "- 回答有执行性，贴合你的角色职责；能一句话说清就不要写成章节。\n"
             "- 你能看到其他成员最近发言，可基于上下文补充或纠正。\n"
             "- 查看「最近群聊上下文」，若已有成员提出了相同的澄清问题，不要重复；"
             "给出你独特的专业判断、不同视角，或主动用工具查找答案。\n"
@@ -903,6 +1124,22 @@ class GroupChatRouter:
             f"## 你的长期指令\n{avatar_prompt or '(无)'}\n\n"
             f"## 最近群聊上下文\n{dialogue_context}\n"
         )
+        # Graph Runtime interventions queued on the owner session scratchpad.
+        try:
+            from agenticx.runtime.graph.intervene import consume_graph_directives
+
+            owner_pad = getattr(base_session, "scratchpad", None)
+            if isinstance(owner_pad, dict):
+                gdirs = consume_graph_directives(owner_pad, str(avatar_id))
+                if gdirs:
+                    joined = "\n".join(f"- {d}" for d in gdirs)
+                    system_prompt = (
+                        f"{system_prompt}\n"
+                        "## Graph intervention (authoritative)\n"
+                        f"{joined}\n"
+                    )
+        except Exception:
+            pass
         if quoted_content.strip():
             local_user_input = f"{user_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
         else:
@@ -924,6 +1161,8 @@ class GroupChatRouter:
             max_tool_rounds=self.max_tool_rounds,
             clarify_gate=clarify_gate,
         )
+        graph_run_id = self._graph_run_id_of(base_session)
+        graph_node_id = self._graph_node_id_for_agent(avatar_id)
         if progress_queue is not None:
             progress_queue.put_nowait(
                 self._progress_reply(
@@ -931,6 +1170,8 @@ class GroupChatRouter:
                     avatar_name=avatar_name,
                     avatar_url=avatar_url,
                     text="已接收任务，正在分析...",
+                    graph_run_id=graph_run_id,
+                    graph_node_id=graph_node_id,
                 )
             )
         final_text = ""
@@ -954,6 +1195,7 @@ class GroupChatRouter:
                         if group_evt_type in ("group_blocked", "group_clarification")
                         else ""
                     )
+                    tool_step = self._runtime_event_to_tool_step(event.type, event.data)
                     progress_queue.put_nowait(
                         GroupReply(
                             agent_id=avatar_id,
@@ -963,6 +1205,11 @@ class GroupChatRouter:
                             skipped=True,
                             event_type=group_evt_type,
                             confirm_request_id=confirm_request_id,
+                            graph_run_id=graph_run_id,
+                            graph_node_id=graph_node_id,
+                            tool_name=tool_step.get("tool_name", ""),
+                            tool_phase=tool_step.get("tool_phase", ""),
+                            tool_call_id=tool_step.get("tool_call_id", ""),
                         )
                     )
             if event.type == EventType.FINAL.value:
@@ -1104,6 +1351,13 @@ class GroupChatRouter:
             and _is_open_call_question(user_input)
         ):
             context.clear_active_thread()
+            for ge in self._project_h2a_fanout(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                target_agent_ids=[META_LEADER_AGENT_ID],
+            ):
+                yield ge
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
             if await self._should_stop(should_stop):
                 return
@@ -1138,6 +1392,13 @@ class GroupChatRouter:
             return
         if META_LEADER_AGENT_ID in mention_set:
             context.clear_active_thread()
+            for ge in self._project_h2a_fanout(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                target_agent_ids=[META_LEADER_AGENT_ID],
+            ):
+                yield ge
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
             if await self._should_stop(should_stop):
                 return
@@ -1194,6 +1455,13 @@ class GroupChatRouter:
             )
         if decision.action == "meta_direct":
             context.clear_active_thread()
+            for ge in self._project_h2a_fanout(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                target_agent_ids=[META_LEADER_AGENT_ID],
+            ):
+                yield ge
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
             if await self._should_stop(should_stop):
                 return
@@ -1232,6 +1500,15 @@ class GroupChatRouter:
             primary_targets = [x for x in primary_targets if x in explicit]
         else:
             primary_targets = primary_targets[:2]
+        # H2A fan-out: project human→agent MESSAGE edges for God-View.
+        if primary_targets:
+            for ge in self._project_h2a_fanout(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                target_agent_ids=primary_targets,
+            ):
+                yield ge
         any_success = False
         for target in primary_targets:
             if await self._should_stop(should_stop):
@@ -1492,8 +1769,9 @@ class GroupChatRouter:
         llm = self.llm_factory(provider or None, model or None)
 
         # ── 1. TaskLock (session-scoped project state) ─────────────────────
+        _sid_for_lock = resolve_studio_session_id(base_session) or str(group_id or "")
         task_lock = get_or_create_task_lock(
-            project_id=f"group::{group_id}::{getattr(base_session, 'session_id', group_id)}"
+            project_id=f"group::{group_id}::{_sid_for_lock}"
         )
         task_lock.add_conversation("user", user_input)
 
@@ -1669,30 +1947,75 @@ class GroupChatRouter:
         async for r in _drain_relay():
             yield r
 
-        # ── 8. Execution: per-subtask via AgentRuntime (_run_one_target) ───
+        # ── 8. Execution: Graph DAG scheduler + AgentRuntime per node ───────
+        # Hybrid stack preserved (ADR 0002): Workforce plans; AgentRuntime executes.
+        from agenticx.runtime.graph.compiler import compile_workforce_run
+        from agenticx.runtime.graph.models import GraphNode
+        from agenticx.runtime.graph.scheduler import execute_group_run
+        from agenticx.runtime.graph.store import get_default_store
+
         responded_this_turn: set[str] = set()
+        subtask_by_id = {str(st.id): st for st in subtasks}
+        session_id = resolve_studio_session_id(base_session)
+        if not session_id:
+            _log.warning(
+                "workforce graph compile missing studio session_id group_id=%s; "
+                "refusing to bind GraphRun.session_id to group_id",
+                group_id,
+            )
+        graph_run = compile_workforce_run(
+            session_id=session_id,
+            group_id=group_id,
+            subtasks=subtasks,
+            assignment_map={str(k): str(v) for k, v in assignment_map.items()},
+        )
+        try:
+            scratch = getattr(base_session, "scratchpad", None)
+            if isinstance(scratch, dict):
+                scratch["graph_run_id"] = graph_run.run_id
+        except Exception:
+            pass
 
-        for subtask in subtasks:
-            if await self._should_stop(should_stop):
-                break
+        graph_event_queue: asyncio.Queue[GroupReply] = asyncio.Queue()
 
-            worker_id = assignment_map.get(subtask.id, "")
-            avatar_id = worker_id_to_avatar_id.get(worker_id, worker_id)
+        def _on_graph_event(etype: str, data: dict) -> None:
+            import json as _json
+            node = data.get("node") if isinstance(data, dict) else None
+            agent_id = META_LEADER_AGENT_ID
+            if isinstance(node, dict) and node.get("agent_id"):
+                agent_id = str(node.get("agent_id"))
+            graph_event_queue.put_nowait(
+                GroupReply(
+                    agent_id=agent_id,
+                    avatar_name="Graph",
+                    avatar_url="",
+                    content=_json.dumps(data, ensure_ascii=False),
+                    skipped=True,
+                    event_type=str(etype),
+                )
+            )
 
-            # Emit TASK_STARTED
+        async def _drain_graph_events() -> None:
+            while not graph_event_queue.empty():
+                yield graph_event_queue.get_nowait()
+
+        async def _node_runner(node: GraphNode):
+            st = subtask_by_id.get(node.id)
+            desc = (st.description if st is not None else node.task_text) or node.task_text
+            worker_id = str(node.agent_id or assignment_map.get(node.id, "") or "")
+            avatar_id = worker_id_to_avatar_id.get(worker_id, worker_id) or META_LEADER_AGENT_ID
+
             event_bus.publish(WorkforceEvent(
                 action=WorkforceAction.TASK_STARTED,
-                task_id=subtask.id,
-                agent_id=avatar_id or META_LEADER_AGENT_ID,
-                data={"task_description": subtask.description},
+                task_id=node.id,
+                agent_id=avatar_id,
+                data={"task_description": desc},
             ))
             async for r in _drain_relay():
                 yield r
+            async for r in _drain_graph_events():
+                yield r
 
-            if not avatar_id:
-                avatar_id = META_LEADER_AGENT_ID
-
-            # Show typing indicator.
             if avatar_id == META_LEADER_AGENT_ID:
                 ty_name = self._meta_leader_label
             else:
@@ -1700,10 +2023,14 @@ class GroupChatRouter:
                 ty_name = str(getattr(av, "name", "") or avatar_id) if av else avatar_id
             yield self._typing_event(avatar_id, ty_name)
 
-            # Execute via AgentRuntime (full Studio capabilities).
-            subtask_input = subtask.description
+            subtask_input = desc
             if quoted_content.strip():
                 subtask_input = f"{subtask_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
+            if node.directives:
+                joined = "\n".join(f"- {d}" for d in node.directives)
+                subtask_input = (
+                    f"{subtask_input}\n\n## Graph intervention (authoritative)\n{joined}"
+                )
 
             reply: GroupReply | None = None
             async for target_evt in self._run_one_target_stream(
@@ -1725,7 +2052,7 @@ class GroupChatRouter:
             if reply is None or reply.skipped:
                 event_bus.publish(WorkforceEvent(
                     action=WorkforceAction.TASK_FAILED,
-                    task_id=subtask.id,
+                    task_id=node.id,
                     agent_id=avatar_id,
                     data={"error": reply.error if reply else "no response"},
                 ))
@@ -1734,13 +2061,28 @@ class GroupChatRouter:
                 task_lock.add_conversation("assistant", reply.content or "")
                 event_bus.publish(WorkforceEvent(
                     action=WorkforceAction.TASK_COMPLETED,
-                    task_id=subtask.id,
+                    task_id=node.id,
                     agent_id=avatar_id,
                     data={"result": (reply.content or "")[:500]},
                 ))
-
             async for r in _drain_relay():
                 yield r
+
+        max_parallel = min(4, max(1, len(worker_instances)))
+        async for item in execute_group_run(
+            graph_run,
+            runner=_node_runner,
+            on_event=_on_graph_event,
+            store=get_default_store(),
+            max_parallel=max_parallel,
+            should_stop=should_stop,
+        ):
+            yield item
+            async for r in _drain_graph_events():
+                yield r
+
+        async for r in _drain_graph_events():
+            yield r
 
         # ── 9. Leader summary ───────────────────────────────────────────────
         if not await self._should_stop(should_stop):
@@ -1748,7 +2090,7 @@ class GroupChatRouter:
             summary_prompt = (
                 f"{user_input}\n\n"
                 "[系统] 所有子任务已执行完毕，请以项目经理身份综合以上成员的工作成果，"
-                "给出简洁的最终答复和下一步建议。"
+                "用微信群短聊风格给出最终答复和下一步建议（默认短，勿主动写长报告）。"
             )
             pm = await self._run_meta_project_manager_reply(
                 base_session=base_session,
@@ -1756,7 +2098,10 @@ class GroupChatRouter:
                 group_name=group_name,
                 user_input=summary_prompt,
                 quoted_content="",
-                extra_instruction="请综合所有成员成果，给出最终答复。",
+                extra_instruction=(
+                    "请综合所有成员成果，给出最终答复。"
+                    "默认短聊：结论 + 关键点 + 下一步；仅用户本轮明确要求报告/清单时才展开长文。"
+                ),
                 user_display_name=user_display_name,
             )
             yield pm

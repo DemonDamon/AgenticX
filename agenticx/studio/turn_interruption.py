@@ -37,16 +37,25 @@ def _last_failure_summary(session: Any) -> str:
     if not text:
         return ""
     # Strip noisy SDK prefixes so the user sees the vendor message.
+    # Preserve "(provider/model): ..." so the card shows which model actually failed.
+    if text.startswith("模型调用失败 ("):
+        text = text[len("模型调用失败 ") :].lstrip()
+    elif text.startswith("模型调用失败: "):
+        text = text[len("模型调用失败: ") :].lstrip()
     for prefix in (
-        "模型调用失败: ",
         "litellm.BadRequestError: ",
+        "litellm.UnsupportedParamsError: ",
         "OpenAIException - ",
     ):
         if text.startswith(prefix):
             text = text[len(prefix) :].lstrip()
     # Some messages are "A: B: <real>"; collapse repeated prefixes once more.
-    text = text.replace("litellm.BadRequestError: ", "").replace("OpenAIException - ", "")
-    return text[:120].strip()
+    text = (
+        text.replace("litellm.BadRequestError: ", "")
+        .replace("litellm.UnsupportedParamsError: ", "")
+        .replace("OpenAIException - ", "")
+    )
+    return text[:160].strip()
 
 
 def _last_history_row(session: Any) -> dict[str, Any] | None:

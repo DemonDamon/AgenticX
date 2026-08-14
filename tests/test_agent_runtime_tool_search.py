@@ -11,7 +11,7 @@ from agenticx.runtime import AgentRuntime, ConfirmGate, EventType
 from agenticx.runtime.tool_search import (
     BUILTIN_DEFER_ALLOWLIST,
     CORE_ALWAYS_LOAD_TOOLS,
-    TOOL_NOT_YET_LOADED_TEMPLATE,
+    TOOL_AUTO_LOADED_TEMPLATE,
     TOOL_SEARCH_STATE_KEY,
     TOOL_SEARCH_TOOL_NAME,
     ToolSearchConfig,
@@ -189,7 +189,7 @@ def test_load_builtin_next_round(monkeypatch):
     assert TOOL_SEARCH_STATE_KEY in (session.scratchpad or {})
 
 
-def test_same_batch_not_yet_loaded(monkeypatch):
+def test_same_batch_auto_loads_deferred_tool(monkeypatch):
     monkeypatch.setattr(
         "agenticx.runtime.tool_search_runtime.read_tool_search_config",
         lambda: ToolSearchConfig(mode="always"),
@@ -230,10 +230,16 @@ def test_same_batch_not_yet_loaded(monkeypatch):
         and e["data"].get("name") == "web_fetch"
     ]
     assert results
-    assert "not loaded yet" in results[0]
-    assert TOOL_NOT_YET_LOADED_TEMPLATE.format(name="web_fetch") == results[0] or (
-        "tool_search" in results[0].lower()
-    )
+    assert results[0] == TOOL_AUTO_LOADED_TEMPLATE.format(name="web_fetch")
+    assert "web_fetch" in llm.tools_seen[1]
+    err_events = [
+        e
+        for e in events
+        if e["type"] == EventType.ERROR.value
+        and "web_fetch" in str(e["data"].get("text", ""))
+    ]
+    assert err_events
+    assert err_events[0]["data"].get("is_error") is True
 
 
 def test_scratchpad_restore(monkeypatch):
@@ -304,3 +310,79 @@ def test_meta_prompt_mentions_tool_search():
     session = StudioSession()
     prompt = build_meta_agent_system_prompt(session)
     assert "tool_search" in prompt
+
+
+def test_show_widget_always_projected_when_in_pool(monkeypatch):
+    """AC-1: show_widget is not deferred; projection includes it without load."""
+    monkeypatch.setattr(
+        "agenticx.runtime.tool_search_runtime.read_tool_search_config",
+        lambda: ToolSearchConfig(mode="always"),
+    )
+    assert "show_widget" not in BUILTIN_DEFER_ALLOWLIST
+    pool = _make_pool()
+    pool.append(
+        {
+            "type": "function",
+            "function": {
+                "name": "show_widget",
+                "description": "inline widget",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    )
+    session = StudioSession()
+    ctx = build_runtime_context(session=session, full_openai_tools=pool)
+    out = project_tools_for_round(ctx, full_openai_tools=pool)
+    names = _tool_names(out)
+    assert "show_widget" in names
+    assert "web_fetch" not in names
+
+
+def test_direct_deferred_call_auto_loads_for_next_round(monkeypatch):
+    """AC-2: direct call of unloaded deferred tool self-heals via auto-load."""
+    monkeypatch.setattr(
+        "agenticx.runtime.tool_search_runtime.read_tool_search_config",
+        lambda: ToolSearchConfig(mode="always"),
+    )
+    pool = _make_pool()
+    script = [
+        {
+            "content": "fetch",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {
+                        "name": "web_fetch",
+                        "arguments": {"url": "https://example.com"},
+                    },
+                }
+            ],
+        },
+        {"content": "done", "tool_calls": []},
+    ]
+    llm = _CaptureToolsLLM(script)
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    events = asyncio.run(_collect(runtime, session, "fetch page", tools=pool))
+    results = [
+        str(e["data"].get("result", ""))
+        for e in events
+        if e["type"] == EventType.TOOL_RESULT.value
+        and e["data"].get("name") == "web_fetch"
+    ]
+    assert results
+    assert results[0] == TOOL_AUTO_LOADED_TEMPLATE.format(name="web_fetch")
+    assert TOOL_SEARCH_STATE_KEY in (session.scratchpad or {})
+    loaded = (session.scratchpad or {}).get(TOOL_SEARCH_STATE_KEY, {}).get("loaded_ids") or []
+    assert "builtin:web_fetch" in loaded
+    assert len(llm.tools_seen) >= 2
+    assert "web_fetch" not in llm.tools_seen[0]
+    assert "web_fetch" in llm.tools_seen[1]
+    tool_result_event = next(
+        e
+        for e in events
+        if e["type"] == EventType.TOOL_RESULT.value
+        and e["data"].get("name") == "web_fetch"
+    )
+    assert tool_result_event["data"].get("is_error") is True

@@ -65,6 +65,7 @@ from agenticx.cli.studio_mcp import (
     set_mcp_skip_default_names_config,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
+from agenticx.llms.sampling_params import provider_raw_enabled_for_fallback
 from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AutoSuspendClarifyGate
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
@@ -2657,6 +2658,16 @@ def create_studio_app() -> FastAPI:
             session.provider_name = payload.provider
         if payload.model:
             session.model_name = payload.model
+        # Kimi K3 reasoning_effort (low/high/max); cleared when absent so stale values
+        # from a previous K3 turn do not leak onto other models.
+        _effort = str(getattr(payload, "reasoning_effort", None) or "").strip().lower()
+        if _effort in {"low", "high", "max"}:
+            setattr(session, "_reasoning_effort", _effort)
+        elif hasattr(session, "_reasoning_effort"):
+            try:
+                delattr(session, "_reasoning_effort")
+            except Exception:
+                setattr(session, "_reasoning_effort", None)
 
         from agenticx.llms.vision import is_vision_capable
 
@@ -2702,6 +2713,12 @@ def create_studio_app() -> FastAPI:
                     if not key or key in seen:
                         continue
                     seen.add(key)
+                    # Do not silently pick catalog entries the user disabled in Settings.
+                    raw_provider = cfg.providers.get(key) if isinstance(cfg.providers, dict) else None
+                    if not provider_raw_enabled_for_fallback(
+                        raw_provider if isinstance(raw_provider, dict) else None
+                    ):
+                        continue
                     provider_cfg = cfg.get_provider(key)
                     fallback_model = str(provider_cfg.model or "").strip()
                     if not fallback_model:
@@ -2814,15 +2831,40 @@ def create_studio_app() -> FastAPI:
                 )
             manager.clear_interrupt(payload.session_id)
             manager.set_execution_state(payload.session_id, "running")
+            setattr(session, "_session_id", payload.session_id)
             setattr(session, "_usage_owner_session_id", payload.session_id)
-            async def _group_chat_stream() -> AsyncGenerator[str, None]:
+
+            # Local import: later in this handler there is another `import asyncio`
+            # which makes the name function-local for the whole body.
+            import asyncio as _asyncio_group
+
+            group_use_event_hub = live_reattach_enabled()
+            group_event_hub = (
+                manager.ensure_event_hub(payload.session_id) if group_use_event_hub else None
+            )
+            group_fallback_queue: "_asyncio_group.Queue[SseEvent | None]" = _asyncio_group.Queue()
+
+            async def _emit_group_event(evt: SseEvent) -> None:
+                """Publish to hub when enabled, else queue for the local generator."""
+                if group_event_hub is not None:
+                    await group_event_hub.publish(
+                        RuntimeEvent(
+                            type=evt.type,
+                            data=dict(evt.data or {}),
+                            agent_id=str((evt.data or {}).get("agent_id") or "meta"),
+                        )
+                    )
+                else:
+                    await group_fallback_queue.put(evt)
+
+            async def _produce_group_events() -> None:
                 try:
                     if turn_context_files:
                         progress_evt = SseEvent(
                             type=EventType.TOOL_PROGRESS.value,
                             data={"name": "document_parse", "elapsed_seconds": 0},
                         )
-                        yield f"data: {json.dumps(progress_evt.model_dump(), ensure_ascii=False)}\n\n"
+                        await _emit_group_event(progress_evt)
                         try:
                             await hydrate_turn_context_files(turn_context_files, session.context_files)
                         except Exception:
@@ -2879,7 +2921,7 @@ def create_studio_app() -> FastAPI:
                                 "avatar_name": meta_leader_label,
                             },
                         )
-                        yield f"data: {json.dumps(typing_evt.model_dump(), ensure_ascii=False)}\n\n"
+                        await _emit_group_event(typing_evt)
                     for aid in mentioned_set:
                         avatar_cfg = avatar_registry.get_avatar(aid)
                         typing_evt = SseEvent(
@@ -2889,7 +2931,7 @@ def create_studio_app() -> FastAPI:
                                 "avatar_name": (avatar_cfg.name if avatar_cfg else aid),
                             },
                         )
-                        yield f"data: {json.dumps(typing_evt.model_dump(), ensure_ascii=False)}\n\n"
+                        await _emit_group_event(typing_evt)
 
                     u_display = str(getattr(payload, "user_display_name", None) or "").strip() or None
                     async for reply in router.run_group_turn(
@@ -2902,11 +2944,9 @@ def create_studio_app() -> FastAPI:
                         user_input=payload.user_input,
                         quoted_content=quoted_content,
                         quoted_message_id=quoted_message_id,
-                        should_stop=request.is_disconnected,
+                        should_stop=lambda: manager.should_interrupt(payload.session_id),
                         user_display_name=u_display,
                     ):
-                        if await request.is_disconnected():
-                            break
                         evt_type = str(getattr(reply, "event_type", "") or "")
                         if not evt_type:
                             evt_type = "group_skipped" if reply.skipped else "group_reply"
@@ -2920,19 +2960,104 @@ def create_studio_app() -> FastAPI:
                                 "skipped": reply.skipped,
                                 "error": reply.error,
                                 "confirm_request_id": str(getattr(reply, "confirm_request_id", "") or ""),
+                                "graph_run_id": str(getattr(reply, "graph_run_id", "") or ""),
+                                "graph_node_id": str(getattr(reply, "graph_node_id", "") or ""),
+                                "tool_name": str(getattr(reply, "tool_name", "") or ""),
+                                "tool_phase": str(getattr(reply, "tool_phase", "") or ""),
+                                "tool_call_id": str(getattr(reply, "tool_call_id", "") or ""),
                             },
                         )
-                        yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                        await _emit_group_event(evt)
+                        if evt_type in {"group_reply", "group_skipped"}:
+                            try:
+                                manager.incremental_persist(payload.session_id)
+                            except Exception:
+                                pass
                 except Exception as exc:
                     err = SseEvent(type="error", data={"text": f"Group runtime error: {exc}"})
-                    yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                    with contextlib.suppress(Exception):
+                        await _emit_group_event(err)
                 finally:
+                    # publish_done must precede set_execution_state("idle"):
+                    # idle clears/closes the hub (see SessionManager.set_execution_state).
                     manager.clear_interrupt(payload.session_id)
-                    manager.set_execution_state(payload.session_id, "idle")
                     await manager.persist_async(payload.session_id)
-                yield 'data: {"type":"done","data":{}}\n\n'
+                    if group_event_hub is not None:
+                        await group_event_hub.publish_done()
+                    else:
+                        await group_fallback_queue.put(None)
+                    manager.set_execution_state(payload.session_id, "idle")
 
-            return StreamingResponse(_group_chat_stream(), media_type="text/event-stream")
+            async def _group_chat_stream() -> AsyncGenerator[str, None]:
+                group_runtime_task: _asyncio_group.Task[None] | None = None
+                client_disconnected = False
+                hub_sub_id: int | None = None
+                try:
+                    group_runtime_task = _asyncio_group.create_task(_produce_group_events())
+                    if group_event_hub is not None:
+                        hub_sub_id, hub_sub_q, _ = group_event_hub.subscribe()
+                        while True:
+                            if await request.is_disconnected():
+                                client_disconnected = True
+                                break
+                            try:
+                                buffered = await _asyncio_group.wait_for(
+                                    hub_sub_q.get(), timeout=0.1
+                                )
+                            except _asyncio_group.TimeoutError:
+                                if group_event_hub.is_runtime_done and hub_sub_q.empty():
+                                    yield 'data: {"type":"done","data":{}}\n\n'
+                                    break
+                                continue
+                            if buffered.event is None:
+                                yield 'data: {"type":"done","data":{}}\n\n'
+                                break
+                            for line in _buffered_event_to_sse_lines(buffered):
+                                yield line
+                    else:
+                        while True:
+                            if await request.is_disconnected():
+                                client_disconnected = True
+                                break
+                            try:
+                                evt = await _asyncio_group.wait_for(
+                                    group_fallback_queue.get(), timeout=0.1
+                                )
+                            except _asyncio_group.TimeoutError:
+                                if (
+                                    group_runtime_task is not None
+                                    and group_runtime_task.done()
+                                    and group_fallback_queue.empty()
+                                ):
+                                    yield 'data: {"type":"done","data":{}}\n\n'
+                                    break
+                                continue
+                            if evt is None:
+                                yield 'data: {"type":"done","data":{}}\n\n'
+                                break
+                            yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+                finally:
+                    if hub_sub_id is not None and group_event_hub is not None:
+                        group_event_hub.unsubscribe(hub_sub_id)
+                    if group_runtime_task is not None and not group_runtime_task.done():
+                        if group_event_hub is not None and client_disconnected:
+                            logger.info(
+                                "[group] client disconnected, runtime continues (hub) session=%s",
+                                payload.session_id,
+                            )
+                        else:
+                            group_runtime_task.cancel()
+                            with contextlib.suppress(Exception):
+                                await group_runtime_task
+                    elif group_runtime_task is not None:
+                        with contextlib.suppress(Exception):
+                            await group_runtime_task
+
+            return StreamingResponse(
+                _group_chat_stream(),
+                media_type="text/event-stream",
+                headers=_STREAMING_SSE_HEADERS,
+            )
 
         try:
             llm = _resolve_llm()
@@ -3663,6 +3788,22 @@ def create_studio_app() -> FastAPI:
         await continuation_lock.acquire()
 
         try:
+            # A user may choose a different model from the stall/recovery card.
+            # Apply that override before prepare_continue() and before the
+            # nested /api/chat call reads the session model.  The desktop also
+            # persists the pick, but relying on that separate request creates a
+            # race where recovery starts with the previous model.
+            override_provider = str(payload.provider or "").strip()
+            override_model = str(payload.model or "").strip()
+            if override_provider or override_model:
+                current_provider = str(getattr(managed.studio_session, "provider_name", "") or "").strip()
+                current_model = str(getattr(managed.studio_session, "model_name", "") or "").strip()
+                manager.set_session_model(
+                    sid,
+                    provider=override_provider or current_provider,
+                    model=override_model or current_model,
+                )
+
             exec_state = str(getattr(managed, "execution_state", "idle") or "idle")
             if source in {"desktop_manual", "supervisor"} and exec_state == "running":
                 from agenticx.studio.continuation import interrupt_running_for_continue
@@ -5746,6 +5887,149 @@ def create_studio_app() -> FastAPI:
                     break
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    @app.get("/api/graph/runs")
+    async def list_graph_runs(
+        session_id: str = Query(default=""),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """List WorkGraph runs for a studio session (Graph Runtime SP1)."""
+        from agenticx.runtime.graph.store import get_default_store
+
+        _check_token(x_agx_desktop_token)
+        sid = str(session_id or "").strip()
+        if not sid:
+            raise HTTPException(status_code=400, detail="session_id required")
+        store = get_default_store()
+        runs = store.list_by_session(sid)
+        if not runs:
+            # Legacy: workforce/presence runs were bound to group_id (or empty
+            # session_id) because StudioSession had no session_id field.
+            managed = manager.get(sid, touch=False)
+            avatar_id = str(getattr(managed, "avatar_id", "") or "").strip() if managed else ""
+            if avatar_id.startswith("group:"):
+                gid = avatar_id[len("group:") :].strip()
+                if gid:
+                    seen = {r.run_id for r in runs}
+                    for r in store.list_by_group_id(gid):
+                        if r.run_id not in seen:
+                            runs.append(r)
+                            seen.add(r.run_id)
+        return {
+            "ok": True,
+            "session_id": sid,
+            "runs": [
+                {
+                    "run_id": r.run_id,
+                    "session_id": r.session_id,
+                    "group_id": r.group_id,
+                    "status": r.status,
+                    "version": r.version,
+                    "node_count": len(r.nodes),
+                    "edge_count": len(r.edges),
+                }
+                for r in runs
+            ],
+        }
+
+    @app.get("/api/graph/runs/{run_id}")
+    async def get_graph_run(
+        run_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return a full GraphRun snapshot + agent projection for God-View UI."""
+        from agenticx.runtime.graph.intervene import build_agent_projection
+        from agenticx.runtime.graph.store import get_default_store
+
+        _check_token(x_agx_desktop_token)
+        rid = str(run_id or "").strip()
+        if not rid:
+            raise HTTPException(status_code=400, detail="run_id required")
+        run = get_default_store().load(rid)
+        if run is None:
+            raise HTTPException(status_code=404, detail="graph run not found")
+        return {
+            "ok": True,
+            "run": run.to_dict(),
+            "projection": build_agent_projection(run),
+        }
+
+    @app.post("/api/graph/runs/{run_id}/intervene")
+    async def post_graph_intervene(
+        run_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Apply I1–I6 graph interventions (optimistic version lock)."""
+        from agenticx.runtime.graph.intervene import (
+            CONVERGE_SCRATCH_KEY,
+            InterveneError,
+            apply_intervention,
+            scratchpad_key_for_agent,
+        )
+        from agenticx.runtime.graph.store import get_default_store
+
+        _check_token(x_agx_desktop_token)
+        rid = str(run_id or "").strip()
+        if not rid:
+            raise HTTPException(status_code=400, detail="run_id required")
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="JSON object required")
+        store = get_default_store()
+        run = store.load(rid)
+        if run is None:
+            raise HTTPException(status_code=404, detail="graph run not found")
+        try:
+            result = apply_intervention(
+                run,
+                op=str(payload.get("op") or ""),
+                version=payload.get("version"),
+                node_ids=payload.get("node_ids") or [],
+                edge_ids=payload.get("edge_ids") or [],
+                payload=payload.get("payload") if isinstance(payload.get("payload"), dict) else payload,
+            )
+        except InterveneError as exc:
+            detail = {"detail": str(exc), **(exc.extra or {})}
+            raise HTTPException(status_code=int(exc.status_code), detail=detail) from exc
+
+        store.save(result.run, bump_version=True)
+
+        # Push live directives / converge policy onto the owning session scratchpad.
+        sid = str(result.run.session_id or "").strip()
+        if sid:
+            managed = manager.get(sid, touch=False)
+            if managed is not None:
+                sess = getattr(managed, "session", managed)
+                pad = getattr(sess, "scratchpad", None)
+                if not isinstance(pad, dict):
+                    pad = {}
+                    try:
+                        setattr(sess, "scratchpad", pad)
+                    except Exception:
+                        pass
+                if isinstance(pad, dict):
+                    for agent_id, items in result.scratchpad_directives.items():
+                        key = scratchpad_key_for_agent(agent_id)
+                        existing = pad.get(key)
+                        if not isinstance(existing, list):
+                            existing = []
+                        existing.extend(items)
+                        pad[key] = existing
+                    if result.converge_policy:
+                        pad[CONVERGE_SCRATCH_KEY] = dict(result.converge_policy)
+                    try:
+                        manager.persist(sid)
+                    except Exception:
+                        pass
+
+        return {
+            "ok": True,
+            "run_id": result.run.run_id,
+            "version": result.run.version,
+            "applied": result.applied,
+            "warnings": result.warnings,
+            "events": result.events,
+        }
 
     @app.post("/api/groups/{group_id}/action")
     async def post_group_action(
