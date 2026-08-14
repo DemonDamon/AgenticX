@@ -27,6 +27,7 @@ export * from "./components/molecules/deep-research-segments";
 export * from "./utils/deep-research-active-run";
 export * from "./utils/deep-research-hydrate";
 export * from "./utils/deep-research-reconnect";
+export * from "./utils/deep-research-events";
 export * from "./components/molecules/InputArea";
 export * from "./components/molecules/MessageQueuePanel";
 export * from "./components/molecules/QueuedMessageBubble";

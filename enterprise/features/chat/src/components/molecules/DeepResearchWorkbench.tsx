@@ -158,7 +158,6 @@ function ExpandableStepRow({
   onOpenLaneSources?: (lane: DeepResearchLaneSelection) => void;
   onOpenLaneSource?: (source: LaneSource) => void;
 }) {
-  const [open, setOpen] = React.useState(false);
   const sources = step.sources ?? [];
   const metrics = React.useMemo(
     () => parseLaneMetrics(step.detailLines),
@@ -169,6 +168,25 @@ function ExpandableStepRow({
     sources.length > 0 ||
     Boolean(step.artifactId) ||
     (metrics.length === 0 && step.detailLines.length > 0);
+  const autoOpen = step.kind === "phase" && step.status === "running" && canExpand;
+  const [open, setOpen] = React.useState(autoOpen);
+  const previousStatus = React.useRef(step.status);
+  const previousCanExpand = React.useRef(canExpand);
+
+  React.useEffect(() => {
+    if (
+      step.kind === "phase" &&
+      step.status === "running" &&
+      canExpand &&
+      (previousStatus.current !== "running" || !previousCanExpand.current)
+    ) {
+      setOpen(true);
+    } else if (previousStatus.current === "running" && step.status !== "running") {
+      setOpen(false);
+    }
+    previousStatus.current = step.status;
+    previousCanExpand.current = canExpand;
+  }, [canExpand, step.kind, step.status]);
 
   return (
     <li className="relative">

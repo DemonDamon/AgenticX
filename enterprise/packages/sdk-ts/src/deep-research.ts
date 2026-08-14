@@ -66,6 +66,16 @@ export type DeepResearchEvent =
       bytes: number;
     }
   | { type: "clarify_timeout"; runId: string }
+  /** Bounded model reasoning/draft attached only to a collapsible process step. */
+  | {
+      type: "reasoning";
+      id: string;
+      phase: "clarify" | "plan" | "lanes" | "reflect" | "synthesize";
+      title: string;
+      text: string;
+      kind: "reasoning" | "draft";
+      done?: boolean;
+    }
   | { type: "reflection"; gaps: string[] }
   | {
       type: "research_stats";

@@ -15,6 +15,30 @@ function progress(i: number): DeepResearchEvent {
 }
 
 describe("trimEvents", () => {
+  it("drops transient reasoning before durable research events", () => {
+    const reasoning: DeepResearchEvent = {
+      type: "reasoning",
+      id: "section-core",
+      phase: "synthesize",
+      title: "核心结论",
+      text: "过程文本",
+      kind: "reasoning",
+    };
+    const events: DeepResearchEvent[] = [
+      { type: "run_started", runId: "r1" },
+      reasoning,
+      ...Array.from({ length: MAX_EVENTS_PER_RUN - 1 }, (): DeepResearchEvent => ({
+        type: "lane_done",
+        laneId: "l1",
+        status: "ok",
+      })),
+      { type: "artifact", id: "a1", path: "report.md", title: "报告", kind: "report", bytes: 1 },
+    ];
+    const trimmed = trimEvents(events);
+    expect(trimmed.some((event) => event.type === "reasoning")).toBe(false);
+    expect(trimmed.some((event) => event.type === "artifact")).toBe(true);
+  });
+
   it("prefers dropping lane_progress while keeping run_started and clarify", () => {
     const events: DeepResearchEvent[] = [
       { type: "run_started", runId: "r1" },
@@ -352,5 +376,40 @@ describe("createRunWriter", () => {
     const row = await store.get("t1", "u1", "r1");
     expect(row!.events).toHaveLength(3);
     expect(row!.phase).toBe("lanes");
+  });
+
+  it("coalesces reasoning snapshots from the same stage across flushes", async () => {
+    const store = createMemoryRunStore();
+    await store.create({
+      runId: "r1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "主题",
+    });
+    const writer = createRunWriter(store, "r1");
+    writer.push({
+      type: "reasoning",
+      id: "section-core",
+      phase: "synthesize",
+      title: "核心结论",
+      text: "第一版",
+      kind: "draft",
+    });
+    await writer.flush();
+    writer.push({
+      type: "reasoning",
+      id: "section-core",
+      phase: "synthesize",
+      title: "核心结论",
+      text: "第二版",
+      kind: "draft",
+      done: true,
+    });
+    await writer.flush();
+    const row = await store.get("t1", "u1", "r1");
+    expect(row?.events).toEqual([
+      expect.objectContaining({ type: "reasoning", text: "第二版", done: true }),
+    ]);
   });
 });

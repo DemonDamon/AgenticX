@@ -1045,6 +1045,14 @@ describe("runDeepResearchTurn", () => {
     const { events } = await readSsePayload(response);
     const artifactEvents = events.filter((e) => e.type === "artifact");
     expect(artifactEvents.length).toBeGreaterThanOrEqual(2);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "reasoning" &&
+          event.kind === "reasoning" &&
+          String(event.text).includes("internal section reasoning"),
+      ),
+    ).toBe(true);
 
     const list = await store.listBySession("t1", "u1", "s1");
     const memos = list.filter((a) => a.kind === "memo");
@@ -1067,6 +1075,7 @@ describe("runDeepResearchTurn", () => {
     const run = await runStore.get("t1", "u1", "run-art-1");
     expect(run?.reportMarkdown).not.toContain("final");
     expect(run?.reportMarkdown).not.toContain("internal");
+    expect(JSON.stringify(run?.events ?? [])).toContain("internal section reasoning");
   });
 
   it("honors clarify html format: report.html is written and summary links to it", async () => {
@@ -1794,7 +1803,7 @@ describe("P1 multi-variant + reflect", () => {
     expect(calls.filter((q) => q.startsWith("q1"))).toHaveLength(3);
   });
 
-  it("deduplicates repeated gap queries while keeping refinement events internal", async () => {
+  it("deduplicates repeated gap queries while exposing bounded refinement progress", async () => {
     let reflectCalls = 0;
     const searchCalls: string[] = [];
     const artifactStore = createMemoryArtifactStore();
@@ -1858,9 +1867,16 @@ describe("P1 multi-variant + reflect", () => {
         (event) =>
           typeof event.laneId === "string" && event.laneId.startsWith("gap-"),
       ),
-    ).toBe(false);
-    expect(JSON.stringify(events)).not.toContain("缺官方论文");
-    expect(JSON.stringify(events)).not.toContain("official paper");
+    ).toBe(true);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "phase",
+        phase: "lanes",
+        message: "正在补充验证第 1 轮 · 1 项关键证据…",
+      }),
+    );
+    expect(JSON.stringify(events)).toContain("缺官方论文");
+    expect(JSON.stringify(events)).toContain("official paper");
 
     const artifacts = await artifactStore.listByRun("t1", "u1", runId);
     expect(artifacts.some((artifact) => artifact.path.includes("/lanes/gap-"))).toBe(false);

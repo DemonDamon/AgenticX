@@ -114,6 +114,11 @@ function processPhaseDetail(phase: "clarify" | "plan" | "reflect"): string {
   }
 }
 
+function modelProgressDetail(kind: "reasoning" | "draft", text: string): string {
+  const label = kind === "reasoning" ? "思考过程" : "生成中的内容";
+  return `${label}\n${text}`;
+}
+
 /**
  * Final / non-memo artifacts for the delivery strip after the report body.
  * Lane memos stay attached to expandable search steps only.
@@ -151,6 +156,10 @@ export function buildDeepResearchSegments(
   let writeId = "synthesize-1";
   let wroteCard = false;
   let processStatus: Extract<DeepResearchSegment, { kind: "status" }> | null = null;
+  const processRowsByPhase = new Map<
+    "clarify" | "plan" | "reflect",
+    Extract<DeepResearchSegment, { kind: "status" }>
+  >();
   const runTerminal =
     status === "completed" || status === "failed" || status === "cancelled";
 
@@ -267,6 +276,7 @@ export function buildDeepResearchSegments(
             detailLines: [processPhaseDetail(event.phase)],
           };
           segments.push(row);
+          processRowsByPhase.set(event.phase, row);
           processStatus = processOutcome === "running" ? row : null;
           break;
         }
@@ -310,6 +320,34 @@ export function buildDeepResearchSegments(
               status: status === "failed" ? "failed" : "done",
               detailLines: message ? [message] : [],
             });
+          }
+        }
+        break;
+      }
+      case "reasoning": {
+        const detail = modelProgressDetail(event.kind, event.text);
+        if (event.phase === "synthesize") {
+          const step = [...writeSteps].reverse().find((candidate) => candidate.status === "running");
+          if (!step) break;
+          step.detailLines = [detail];
+          if (event.done) {
+            step.status = "done";
+            step.title = completedPhaseTitle(step.title);
+          }
+          break;
+        }
+        if (
+          event.phase === "clarify" ||
+          event.phase === "plan" ||
+          event.phase === "reflect"
+        ) {
+          const row = processRowsByPhase.get(event.phase);
+          if (!row) break;
+          row.detailLines = [detail];
+          if (event.done) {
+            row.status = "done";
+            row.title = completedPhaseTitle(row.title);
+            if (processStatus === row) processStatus = null;
           }
         }
         break;

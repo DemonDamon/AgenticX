@@ -45,6 +45,7 @@ import { formatTodayLine, runRecon, type ReconResult } from "./recon";
 import { CitationRegistry, type Citation } from "./registry";
 import { formatDeepResearchEventSse } from "./events";
 import { stripThinkBlocks } from "./content-clean";
+import { modelProgressSnapshot } from "./model-progress";
 import {
   proposeClarification,
   type ClarifierResult,
@@ -281,7 +282,7 @@ type LaneResult = {
   queriesExecuted: string[];
 };
 
-type LaneVisibility = "public" | "internal";
+type LaneVisibility = "public" | "progress" | "internal";
 
 function sseDataFrame(payload: unknown): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
@@ -797,6 +798,43 @@ export async function runDeepResearchTurn(
         writer?.push(event, patch);
         safeControllerEnqueue(encoder.encode(formatDeepResearchEventSse(event)));
       };
+      const progressEventState = new Map<
+        string,
+        { text: string; kind: "reasoning" | "draft"; emittedAt: number }
+      >();
+      const enqueueModelProgress = (input: {
+        id: string;
+        phase: "clarify" | "plan" | "lanes" | "reflect" | "synthesize";
+        title: string;
+        text: string;
+        kind: "reasoning" | "draft";
+        done?: boolean;
+      }) => {
+        const text = input.text.trim();
+        if (!text) return;
+        const previous = progressEventState.get(input.id);
+        const changedKind = previous?.kind !== input.kind;
+        const elapsed = now() - (previous?.emittedAt ?? 0);
+        if (
+          !input.done &&
+          !changedKind &&
+          previous &&
+          (text === previous.text || elapsed < 400)
+        ) {
+          return;
+        }
+        if (!input.done && !previous && text.length < 16) return;
+        progressEventState.set(input.id, { text, kind: input.kind, emittedAt: now() });
+        enqueueEvent({
+          type: "reasoning",
+          id: input.id,
+          phase: input.phase,
+          title: input.title,
+          text,
+          kind: input.kind,
+          ...(input.done ? { done: true } : {}),
+        });
+      };
 
       const persistFinish = async (
         status: "completed" | "failed" | "cancelled",
@@ -1170,7 +1208,7 @@ export async function runDeepResearchTurn(
           const { question, laneId, index, total } = args;
           const visibility = args.visibility ?? "public";
           const enqueueLaneEvent = (event: DeepResearchEvent) => {
-            if (visibility === "public") enqueueEvent(event);
+            if (visibility !== "internal") enqueueEvent(event);
           };
           const laneDocumentCitations: Citation[] = [];
           if (directPageView && directPageCitation) {
@@ -1755,6 +1793,12 @@ export async function runDeepResearchTurn(
             });
             if (novelGaps.length === 0) break;
 
+            enqueueEvent({
+              type: "phase",
+              phase: "lanes",
+              message: `正在补充验证第 ${round} 轮 · ${novelGaps.length} 项关键证据…`,
+            });
+
             const gapResults = await mapPool(
               novelGaps,
               SEARCH_CONCURRENCY,
@@ -1769,7 +1813,9 @@ export async function runDeepResearchTurn(
                   ),
                   skipExpand: true,
                   variantExecution: "sequential_early_stop",
-                  visibility: "internal",
+                  // Show the verification work and source metrics, but keep
+                  // internal gap memos out of the user-facing artifact list.
+                  visibility: "progress",
                 }),
               runSignal,
             );
@@ -1855,6 +1901,7 @@ export async function runDeepResearchTurn(
 
         const streamSectionInto = async (
           messages: Array<{ role: string; content: string }>,
+          progress: { id: string; title: string },
         ): Promise<string> => {
           const upstream = await callGatewayStream(toolDeps, {
             ...baseBody,
@@ -1875,6 +1922,7 @@ export async function runDeepResearchTurn(
           const decoder = new TextDecoder();
           let buffer = "";
           const sectionParts: string[] = [];
+          const reasoningParts: string[] = [];
           while (true) {
             if (runSignal?.aborted) {
               try {
@@ -1905,7 +1953,9 @@ export async function runDeepResearchTurn(
               if (data === "[DONE]") continue;
               let isContentDelta = false;
               type GatewayStreamFrame = {
-                choices?: Array<{ delta?: { content?: string } }>;
+                choices?: Array<{
+                  delta?: { content?: string; reasoning_content?: string };
+                }>;
                 error?: { code?: unknown; message?: unknown };
               };
               let parsed: GatewayStreamFrame | null = null;
@@ -1929,10 +1979,30 @@ export async function runDeepResearchTurn(
                     : "响应触发合规策略，网关已阻断返回。",
                 );
               }
+              const reasoningPiece = parsed?.choices?.[0]?.delta?.reasoning_content;
+              if (typeof reasoningPiece === "string") {
+                reasoningParts.push(reasoningPiece);
+                isContentDelta = true;
+              }
               const piece = parsed?.choices?.[0]?.delta?.content;
               if (typeof piece === "string") {
                 sectionParts.push(piece);
                 isContentDelta = true;
+              }
+              if (isContentDelta) {
+                const snapshot = modelProgressSnapshot(
+                  sectionParts.join(""),
+                  reasoningParts.join(""),
+                );
+                if (snapshot) {
+                  enqueueModelProgress({
+                    id: progress.id,
+                    phase: "synthesize",
+                    title: progress.title,
+                    text: snapshot.text,
+                    kind: snapshot.kind,
+                  });
+                }
               }
               // Report content deltas are NOT forwarded to the chat transport —
               // the chat area shows only a completion summary, not the full report.
@@ -1940,6 +2010,20 @@ export async function runDeepResearchTurn(
                 safeControllerEnqueue(encoder.encode(`${frame}\n\n`));
               }
             }
+          }
+          const finalProgress = modelProgressSnapshot(
+            sectionParts.join(""),
+            reasoningParts.join(""),
+          );
+          if (finalProgress) {
+            enqueueModelProgress({
+              id: progress.id,
+              phase: "synthesize",
+              title: progress.title,
+              text: finalProgress.text,
+              kind: finalProgress.kind,
+              done: true,
+            });
           }
           return stripThinkBlocks(sectionParts.join(""));
         };
@@ -1981,6 +2065,10 @@ export async function runDeepResearchTurn(
               previousSummaries,
               contentPolicy: reportContentPolicy,
             }),
+            {
+              id: `section-${section.id}`,
+              title: section.title,
+            },
           );
           if (sectionBody) {
             reportContentParts.push(sectionBody);

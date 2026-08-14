@@ -347,6 +347,49 @@ describe("reflection / research_stats segments", () => {
     expect(writing && writing.kind === "tools" ? writing.title : "").toBe("正在撰写报告…");
   });
 
+  it("renders each follow-up verification round as its own collapsible search card", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "phase", phase: "reflect", message: "正在复核并补充关键证据…" },
+      {
+        type: "phase",
+        phase: "lanes",
+        message: "正在补充验证第 1 轮 · 1 项关键证据…",
+      },
+      {
+        type: "lane_started",
+        laneId: "gap-r1-g1",
+        title: "缺少官方性能数据",
+        index: 1,
+        total: 1,
+      },
+      {
+        type: "lane_progress",
+        laneId: "gap-r1-g1",
+        message: "已收集 6 个来源，正在读取正文…",
+        sourcesCollected: 6,
+      },
+      { type: "lane_done", laneId: "gap-r1-g1", status: "ok" },
+    ];
+
+    const segments = buildDeepResearchSegments(events, "completed");
+    expect(segments.map((segment) => segment.kind)).toEqual(["status", "tools"]);
+    expect(segments[0]).toMatchObject({
+      kind: "status",
+      title: "已复核并补充关键证据",
+      status: "done",
+    });
+    const verification = segments[1];
+    if (!verification || verification.kind !== "tools") {
+      throw new Error("expected follow-up tools card");
+    }
+    expect(verification.title).toBe("已补充验证第 1 轮 · 1 项关键证据");
+    expect(verification.steps[0]).toMatchObject({
+      kind: "lane",
+      subtitle: "缺少官方性能数据",
+      status: "done",
+    });
+  });
+
   it("renders reflection gaps and stats label", () => {
     const events: DeepResearchEvent[] = [
       {
@@ -432,6 +475,52 @@ describe("writing phases", () => {
       ["已撰写第 2/2 节：分项分析", "done"],
       ["正在综合分析…", "running"],
     ]);
+  });
+
+  it("attaches live model progress to the active step and settles it when done", () => {
+    const active = buildDeepResearchSegments(
+      [
+        { type: "phase", phase: "synthesize", message: "正在撰写第 1/1 节：核心结论" },
+        {
+          type: "reasoning",
+          id: "section-core",
+          phase: "synthesize",
+          title: "核心结论",
+          text: "先比较多组证据，再收敛到可验证结论。",
+          kind: "reasoning",
+        },
+      ],
+      "running",
+    );
+    const activeCard = active[0];
+    if (!activeCard || activeCard.kind !== "tools") throw new Error("expected tools card");
+    expect(activeCard.steps[0]).toMatchObject({
+      status: "running",
+      detailLines: ["思考过程\n先比较多组证据，再收敛到可验证结论。"],
+    });
+
+    const settled = buildDeepResearchSegments(
+      [
+        { type: "phase", phase: "synthesize", message: "正在撰写第 1/1 节：核心结论" },
+        {
+          type: "reasoning",
+          id: "section-core",
+          phase: "synthesize",
+          title: "核心结论",
+          text: "先比较多组证据，再收敛到可验证结论。",
+          kind: "reasoning",
+          done: true,
+        },
+      ],
+      "running",
+    );
+    const settledCard = settled[0];
+    if (!settledCard || settledCard.kind !== "tools") throw new Error("expected tools card");
+    expect(settledCard.title).toBe("已完成报告撰写 · 1 步");
+    expect(settledCard.steps[0]).toMatchObject({
+      status: "done",
+      title: "已撰写第 1/1 节：核心结论",
+    });
   });
 
   it("rewrites every step to past tense once the run finishes", () => {

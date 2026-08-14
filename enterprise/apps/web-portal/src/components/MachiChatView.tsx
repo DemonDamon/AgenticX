@@ -20,6 +20,7 @@ import {
   withClipboardImageNames,
   modelSupportsVision,
   consumeDeepResearchReconnectStream,
+  appendDeepResearchEvent,
   shouldShowHistorySyncAlert,
   type ActiveDeepResearchRun,
 } from "@agenticx/feature-chat";
@@ -247,7 +248,7 @@ export function MachiChatView({
             if (event.type === "clarify") status = "awaiting_clarify";
             else if (event.type === "phase" && event.phase === "done") status = "completed";
             else if (status === "awaiting_clarify") status = "running";
-            const events = [...(prevDr?.events ?? []), event].slice(-400);
+            const events = appendDeepResearchEvent(prevDr?.events ?? [], event, 400);
             const artifactIds = [...(prevDr?.artifactIds ?? [])];
             if (event.type === "artifact" && !artifactIds.includes(event.id)) {
               artifactIds.push(event.id);

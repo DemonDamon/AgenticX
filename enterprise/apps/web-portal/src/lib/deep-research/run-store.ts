@@ -168,7 +168,7 @@ export function runLooksFinished(row: Pick<RunRecord, "phase" | "events" | "repo
 
 /**
  * Trim events when over MAX_EVENTS_PER_RUN.
- * Prefer dropping oldest lane_progress, then narrative, then lane_sources;
+ * Prefer dropping transient reasoning, then lane_progress, narrative, and lane_sources;
  * never drop run_started/clarify.
  */
 export function trimEvents(events: DeepResearchEvent[]): DeepResearchEvent[] {
@@ -181,6 +181,7 @@ export function trimEvents(events: DeepResearchEvent[]): DeepResearchEvent[] {
     return true;
   };
   while (next.length > MAX_EVENTS_PER_RUN) {
+    if (dropOldestOfType("reasoning")) continue;
     if (dropOldestOfType("lane_progress")) continue;
     if (dropOldestOfType("narrative")) continue;
     if (dropOldestOfType("lane_sources")) continue;
@@ -190,6 +191,27 @@ export function trimEvents(events: DeepResearchEvent[]): DeepResearchEvent[] {
     next.splice(idx, 1);
   }
   return next;
+}
+
+/** Keep one full-text reasoning snapshot per stage while preserving event order. */
+export function mergeRunEvents(
+  current: DeepResearchEvent[],
+  incoming: DeepResearchEvent[],
+): DeepResearchEvent[] {
+  const next = [...current];
+  for (const event of incoming) {
+    if (event.type === "reasoning") {
+      const existing = next.findIndex(
+        (candidate) => candidate.type === "reasoning" && candidate.id === event.id,
+      );
+      if (existing >= 0) {
+        next[existing] = event;
+        continue;
+      }
+    }
+    next.push(event);
+  }
+  return trimEvents(next);
 }
 
 function createMemoryStore(): RunStore {
@@ -222,7 +244,7 @@ function createMemoryStore(): RunStore {
       if (!row) return;
       if (TERMINAL_STATUSES.has(row.status)) return;
       if (events.length > 0) {
-        row.events = trimEvents([...row.events, ...events]);
+        row.events = mergeRunEvents(row.events, events);
         row.eventSeq += events.length;
       }
       if (patch?.status) row.status = patch.status;
@@ -382,7 +404,7 @@ function createSqlStore(): RunStore {
         if (TERMINAL_STATUSES.has(current.status as DeepResearchRunStatus)) return;
         const merged =
           events.length > 0
-            ? trimEvents([...asEvents(current.events), ...events])
+            ? mergeRunEvents(asEvents(current.events), events)
             : asEvents(current.events);
         await db
           .update(mysqlTable)
@@ -404,7 +426,7 @@ function createSqlStore(): RunStore {
       if (TERMINAL_STATUSES.has(current.status as DeepResearchRunStatus)) return;
       const merged =
         events.length > 0
-          ? trimEvents([...asEvents(current.events), ...events])
+          ? mergeRunEvents(asEvents(current.events), events)
           : asEvents(current.events);
       await db
         .update(pgTable)
@@ -698,7 +720,17 @@ export function createRunWriter(store: RunStore, runId: string): RunWriter {
 
   return {
     push(event, patch) {
-      pendingEvents.push(event);
+      if (event.type === "reasoning") {
+        // Reasoning snapshots carry the full bounded text. Keep only the latest
+        // snapshot per stage inside each flush window instead of persisting every token.
+        const existing = pendingEvents.findIndex(
+          (candidate) => candidate.type === "reasoning" && candidate.id === event.id,
+        );
+        if (existing >= 0) pendingEvents[existing] = event;
+        else pendingEvents.push(event);
+      } else {
+        pendingEvents.push(event);
+      }
       const nextPatch = { ...pendingPatch };
       if (patch?.status) nextPatch.status = patch.status;
       if (patch?.phase) nextPatch.phase = patch.phase;

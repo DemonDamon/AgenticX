@@ -27,6 +27,19 @@ describe("deep research timeline labels", () => {
     ).toBe("车道失败");
   });
 
+  it("labels transient reasoning without echoing its private text", () => {
+    expect(
+      labelForDeepResearchEvent({
+        type: "reasoning",
+        id: "section-core",
+        phase: "synthesize",
+        title: "核心结论",
+        text: "过程文本",
+        kind: "reasoning",
+      }),
+    ).toBe("思考：核心结论");
+  });
+
   it("empty events list is a no-op for callers (component contract)", () => {
     const events: DeepResearchEvent[] = [];
     expect(events.map(labelForDeepResearchEvent)).toEqual([]);

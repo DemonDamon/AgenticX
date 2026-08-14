@@ -32,6 +32,7 @@ import { shouldEnqueueOnResend } from "./utils/message-queue";
 import { getSessionRequestId, isSessionStreaming } from "./utils/session-stream-state";
 import { probeNote } from "./debug/update-depth-probe";
 import { hydrateMessagesDeepResearch } from "./utils/deep-research-hydrate";
+import { appendDeepResearchEvent } from "./utils/deep-research-events";
 
 const UPDATE_DEPTH_ERROR_RE = /Maximum update depth exceeded/i;
 
@@ -410,7 +411,7 @@ function applyDeepResearchEventToAssistant(
       // Post-resume / timeout narratives also leave the clarify gate.
       status = "running";
     }
-    const events = [...(prev?.events ?? []), event].slice(-200);
+    const events = appendDeepResearchEvent(prev?.events ?? [], event, 200);
     const artifactIds = [...(prev?.artifactIds ?? [])];
     if (event.type === "artifact" && !artifactIds.includes(event.id)) {
       artifactIds.push(event.id);
