@@ -1,4 +1,4 @@
-import type { AtMentionCandidate, AtMentionIconTone } from "../utils/at-mention-display";
+import type { AtMentionCandidate } from "../utils/at-mention-display";
 import {
   atMentionIconTone,
   atMentionPrimaryText,
@@ -6,6 +6,7 @@ import {
   browseTrailLabel,
   groupAtMentionCandidates,
 } from "../utils/at-mention-display";
+import { ComposerRefIcon, type ComposerRefIconKind } from "./icons/ComposerRefIcon";
 
 export type AtMentionBrowseState = {
   taskspaceId: string;
@@ -26,13 +27,11 @@ type Props = {
   onLeaveBrowse: () => void;
 };
 
-const TONE_CLASS: Record<Exclude<AtMentionIconTone, "avatar">, string> = {
-  folder: "text-amber-400 [html[data-theme=light]_&]:text-amber-600",
-  document: "text-sky-400 [html[data-theme=light]_&]:text-sky-600",
-  code: "text-violet-400 [html[data-theme=light]_&]:text-violet-600",
-  image: "text-fuchsia-400 [html[data-theme=light]_&]:text-fuchsia-600",
-  generic: "text-text-faint",
-};
+function pickerIconKind(item: AtMentionCandidate): ComposerRefIconKind {
+  const tone = atMentionIconTone(item);
+  if (tone === "avatar" || tone === "generic") return "file";
+  return tone;
+}
 
 function isFolderCandidate(item: AtMentionCandidate): item is FolderCandidate {
   return item.kind === "taskspace" || item.kind === "dir";
@@ -42,45 +41,6 @@ function candidateKey(item: AtMentionCandidate): string {
   return item.kind === "avatar"
     ? `avatar:${item.avatarId}`
     : `${item.kind}:${item.taskspaceId}:${item.path}`;
-}
-
-/** Softly filled glyphs: hairline outlines lose presence at 14px. */
-function FolderGlyph() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden className="h-[14px] w-[14px]">
-      <path
-        d="M2 4.6A1.6 1.6 0 013.6 3h2.2l1.3 1.3h5.3A1.6 1.6 0 0114 5.9v5.5a1.6 1.6 0 01-1.6 1.6H3.6A1.6 1.6 0 012 11.4V4.6z"
-        fill="currentColor"
-        fillOpacity="0.16"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function FileGlyph() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden className="h-[14px] w-[14px]">
-      <path
-        d="M4.6 2.6h4.6l3.2 3.2v7.6a.9.9 0 01-.9.9H4.6a.9.9 0 01-.9-.9V3.5a.9.9 0 01.9-.9z"
-        fill="currentColor"
-        fillOpacity="0.14"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9.2 2.6v3.2h3.2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 function Chevron({ dir = "right" }: { dir?: "right" | "left" }) {
@@ -110,11 +70,9 @@ function AtMentionIcon({ item }: { item: AtMentionCandidate }) {
       </span>
     );
   }
-  const tone = atMentionIconTone(item);
-  const toneClass = tone === "avatar" ? TONE_CLASS.generic : TONE_CLASS[tone];
   return (
-    <span className={`flex h-[15px] w-[15px] shrink-0 items-center justify-center ${toneClass}`}>
-      {isFolderCandidate(item) ? <FolderGlyph /> : <FileGlyph />}
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+      <ComposerRefIcon kind={pickerIconKind(item)} className="agx-composer-inline-chip-icon h-4 w-4" />
     </span>
   );
 }

@@ -72,6 +72,9 @@ describe("atMentionIconTone", () => {
       atMentionIconTone({ kind: "file", taskspaceId: "t", path: "a.svg", label: "a.svg" })
     ).toBe("image");
     expect(
+      atMentionIconTone({ kind: "file", taskspaceId: "t", path: "a.pdf", label: "a.pdf" })
+    ).toBe("pdf");
+    expect(
       atMentionIconTone({
         kind: "taskspace",
         taskspaceId: "t",

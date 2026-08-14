@@ -29,7 +29,7 @@ export type AtMentionCandidate =
       label: string;
     };
 
-export type AtMentionIconTone = "folder" | "document" | "code" | "image" | "generic" | "avatar";
+export type AtMentionIconTone = "folder" | "document" | "code" | "image" | "pdf" | "generic" | "avatar";
 
 export function atMentionPrimaryText(item: AtMentionCandidate): string {
   if (item.kind === "file") {
@@ -67,11 +67,12 @@ export function atMentionIconTone(item: AtMentionCandidate): AtMentionIconTone {
   if (item.kind === "avatar") return "avatar";
   if (item.kind === "taskspace" || item.kind === "dir") return "folder";
   const name = atMentionPrimaryText(item).toLowerCase();
+  if (/\.pdf$/.test(name)) return "pdf";
   if (/\.(png|jpe?g|gif|webp|bmp|svg|heic|avif|ico)$/.test(name)) return "image";
   if (/\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|swift|c|cpp|h|hpp|cs|rb|php|sh|json|yaml|yml|toml|xml|html|css|sql)$/.test(name)) {
     return "code";
   }
-  if (/\.(md|mdx|txt|pdf|doc|docx|ppt|pptx|rtf|odt)$/.test(name)) return "document";
+  if (/\.(md|mdx|txt|doc|docx|ppt|pptx|rtf|odt)$/.test(name)) return "document";
   return "generic";
 }
 

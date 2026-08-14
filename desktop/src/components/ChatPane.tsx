@@ -4595,6 +4595,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       token.setAttribute("contenteditable", "false");
       token.setAttribute("data-ref-token", "1");
       token.setAttribute("data-ref-name", name);
+      token.setAttribute("data-ref-kind", kind);
       token.className = COMPOSER_INLINE_CHIP_CLASS;
       if (resolvedPath) {
         token.setAttribute("data-source-path", resolvedPath);
