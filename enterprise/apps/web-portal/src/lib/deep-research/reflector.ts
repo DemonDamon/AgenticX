@@ -3,11 +3,19 @@
  */
 
 import { parseLlmJson } from "./llm-json";
+import {
+  normalizeSelfContainedSearchQueries,
+  selfContainedSearchPlanInstruction,
+} from "../web-search/follow-up";
 
-/** At most one information-gap follow-up lane (cost control). */
-export const MAX_GAPS = 1;
-/** Query budget for the single follow-up gap. */
-export const MAX_FOLLOWUP_QUERIES = 3;
+/** Longitudinal refinement: one highest-value gap per round. */
+export const MAX_GAPS_PER_ROUND = 1;
+/** Backward-compatible alias for callers/tests that imported the old cap. */
+export const MAX_GAPS = MAX_GAPS_PER_ROUND;
+export const MAX_QUERIES_PER_GAP = 3;
+export const MAX_REFLECT_ROUNDS = 3;
+/** Total top-level follow-up queries across every reflection round. */
+export const MAX_FOLLOWUP_QUERIES = 6;
 
 export type ResearchGap = {
   id: string;
@@ -23,10 +31,13 @@ export type ReflectDeps = {
 };
 
 const REFLECT_SYSTEM = [
-  "你是调研复盘助手。根据已收集的车道备忘识别仍可用再检索解决的信息缺口。",
+  "你是调研内部证据复盘助手。根据已收集的全部车道备忘，只识别最值得继续检索的一个证据缺口。",
   '只输出 JSON：{"gaps":[{"id":"g1","description":"...","queries":["..."]}]}；无缺口输出 {"gaps":[]}。',
-  "重点判据：单一来源缺乏交叉验证；缺少官方一手文献；互相矛盾未澄清；时间线/数字未获权威确认。",
-  `gaps 最多 ${MAX_GAPS} 条，每条 1–3 个 queries。只报能靠再搜一次解决的缺口。`,
+  "缺口必须同时满足：会实质改变对原始主题的答案；当前备忘尚未回答；能由具体公开检索补齐。",
+  "优先定位第一方资料、原始评测、可复现实验、直接数据或能澄清冲突的权威来源。",
+  "禁止输出‘资料可能不全’‘仍需更多研究’‘通用方法论’‘来源置信度’等不可操作的泛化缺口。",
+  `gaps 最多 ${MAX_GAPS_PER_ROUND} 条。`,
+  selfContainedSearchPlanInstruction(MAX_QUERIES_PER_GAP, "queries"),
 ].join("\n");
 
 export function parseGapsJson(raw: string): ResearchGap[] {
@@ -35,22 +46,27 @@ export function parseGapsJson(raw: string): ResearchGap[] {
 
   const gapsRaw = Array.isArray(parsed.gaps) ? parsed.gaps : [];
   const gaps: ResearchGap[] = [];
-  let queryBudget = MAX_FOLLOWUP_QUERIES;
+  const seenDescriptions = new Set<string>();
   for (const item of gapsRaw) {
-    if (gaps.length >= MAX_GAPS || queryBudget <= 0) break;
+    if (gaps.length >= MAX_GAPS_PER_ROUND) break;
     if (!item || typeof item !== "object") continue;
     const obj = item as Record<string, unknown>;
     const description =
       typeof obj.description === "string" ? obj.description.trim() : "";
     if (!description) continue;
-    const queries = Array.isArray(obj.queries)
-      ? obj.queries
-          .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
-          .map((q) => q.trim())
-          .slice(0, Math.min(3, queryBudget))
-      : [];
-    if (queries.length === 0) continue;
-    queryBudget -= queries.length;
+    const descriptionKey = description
+      .normalize("NFKC")
+      .toLocaleLowerCase("en-US")
+      .replace(/\s+/gu, " ");
+    if (seenDescriptions.has(descriptionKey)) continue;
+    if (!Array.isArray(obj.queries)) continue;
+    const queries = normalizeSelfContainedSearchQueries({
+      resolvedQuery: description,
+      candidates: obj.queries,
+      maxSearchCalls: MAX_QUERIES_PER_GAP,
+    });
+    if (!queries) continue;
+    seenDescriptions.add(descriptionKey);
     const id =
       typeof obj.id === "string" && obj.id.trim()
         ? obj.id.trim()

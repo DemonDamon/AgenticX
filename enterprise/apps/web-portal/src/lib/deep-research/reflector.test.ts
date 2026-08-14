@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { MAX_GAPS, parseGapsJson } from "./reflector";
+import {
+  MAX_GAPS,
+  MAX_QUERIES_PER_GAP,
+  parseGapsJson,
+  reflectOnGaps,
+} from "./reflector";
 
 describe("parseGapsJson", () => {
   it("parses fenced gaps", () => {
@@ -32,5 +37,50 @@ describe("parseGapsJson", () => {
     const parsed = parseGapsJson(JSON.stringify({ gaps }));
     expect(parsed.length).toBeLessThanOrEqual(MAX_GAPS);
     expect(parsed.every((g) => g.queries.length > 0)).toBe(true);
+  });
+
+  it("deduplicates crowded facets and caps one gap to the shared query budget", () => {
+    const parsed = parseGapsJson(
+      JSON.stringify({
+        gaps: [
+          {
+            id: "g1",
+            description: "补齐不同评测条件下的实际表现",
+            queries: [
+              "模型 A 版本 V 基准 X 成绩",
+              "  模型 A 版本 V 基准 X 成绩  ",
+              "模型 A 版本 V 基准 Y 成绩",
+              "模型 A 版本 V 硬件 H 推理性能",
+              "模型 A 版本 V 额外查询",
+            ],
+          },
+        ],
+      }),
+    );
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.queries).toEqual([
+      "模型 A 版本 V 基准 X 成绩",
+      "模型 A 版本 V 基准 Y 成绩",
+      "模型 A 版本 V 硬件 H 推理性能",
+    ]);
+    expect(parsed[0]?.queries).toHaveLength(MAX_QUERIES_PER_GAP);
+  });
+
+  it("asks only for answer-changing, self-contained searchable gaps", async () => {
+    let prompt = "";
+    await reflectOnGaps({
+      topic: "某模型的实际表现",
+      todayLine: "当前日期：2026-08-14",
+      laneMemos: [{ question: "公开评测", memo: "已有初步成绩" }],
+      callJson: async (messages) => {
+        prompt = messages.map((message) => message.content).join("\n");
+        return '{"gaps":[]}';
+      },
+    });
+    expect(prompt).toContain("会实质改变");
+    expect(prompt).toContain("当前备忘尚未回答");
+    expect(prompt).toContain("每条 queries 都必须自包含");
+    expect(prompt).toContain("默认只给 1 条");
+    expect(prompt).toContain("禁止输出");
   });
 });

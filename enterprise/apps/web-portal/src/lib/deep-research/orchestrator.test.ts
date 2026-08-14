@@ -27,6 +27,7 @@ import { emptyFetchStats } from "../web-search/page-fetch";
 import { directFetch } from "../web-search/direct-fetch";
 import type { executeWebSearch } from "../web-search/providers";
 import type { DirectPageView } from "../web-search/direct-page";
+import { MAX_FOLLOWUP_QUERIES, MAX_REFLECT_ROUNDS } from "./reflector";
 
 type ExecuteSearchArgs = Parameters<typeof executeWebSearch>;
 
@@ -1773,8 +1774,9 @@ describe("P1 multi-variant + reflect", () => {
     expect(calls.filter((q) => q.startsWith("q1"))).toHaveLength(3);
   });
 
-  it("runs gap lanes once when reflect returns gaps", async () => {
+  it("deduplicates a repeated gap query across reflection rounds", async () => {
     let reflectCalls = 0;
+    const searchCalls: string[] = [];
     const response = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "主题调研" }] },
       {
@@ -1794,9 +1796,12 @@ describe("P1 multi-variant + reflect", () => {
             complexity: "moderate" as const,
             subQuestions: ["侧面A", "侧面B"],
           }),
-          executeSearch: async (query: string) => [
-            { title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" },
-          ],
+          executeSearch: async (query: string) => {
+            searchCalls.push(query);
+            return [
+              { title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" },
+            ];
+          },
           reflectFn: async () => {
             reflectCalls += 1;
             return [
@@ -1811,9 +1816,12 @@ describe("P1 multi-variant + reflect", () => {
       },
     );
     const { events } = await readSsePayload(response);
-    expect(reflectCalls).toBe(1);
+    expect(reflectCalls).toBe(2);
+    expect(searchCalls.filter((query) => query === "official paper")).toHaveLength(1);
     expect(events.some((e) => e.type === "reflection")).toBe(true);
-    expect(events.some((e) => e.type === "lane_started" && e.laneId === "gap-g1")).toBe(true);
+    expect(
+      events.some((e) => e.type === "lane_started" && e.laneId === "gap-r1-g1"),
+    ).toBe(true);
     expect(events.some((e) => e.type === "research_stats")).toBe(true);
     // Gap card first, then the follow-up search card — no narrative saying both.
     const reflectionIdx = events.findIndex((e) => e.type === "reflection");
@@ -1825,7 +1833,7 @@ describe("P1 multi-variant + reflect", () => {
         e.message.includes("补充检索"),
     );
     const gapLaneIdx = events.findIndex(
-      (e) => e.type === "lane_started" && e.laneId === "gap-g1",
+      (e) => e.type === "lane_started" && e.laneId === "gap-r1-g1",
     );
     expect(reflectionIdx).toBeGreaterThanOrEqual(0);
     expect(followUpIdx).toBeGreaterThan(reflectionIdx);
@@ -1838,6 +1846,264 @@ describe("P1 multi-variant + reflect", () => {
           e.text.includes("信息缺口，正在补充检索"),
       ),
     ).toBe(false);
+  });
+
+  it("feeds each follow-up memo into the next longitudinal reflection", async () => {
+    let reflectCalls = 0;
+    const memoSnapshots: string[][] = [];
+    const searchCalls: string[] = [];
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("ok");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A", "侧面B"],
+          }),
+          executeSearch: async (query: string) => {
+            searchCalls.push(query);
+            return [
+              { title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" },
+            ];
+          },
+          reflectFn: async ({ laneMemos }: { laneMemos: Array<{ question: string }> }) => {
+            reflectCalls += 1;
+            memoSnapshots.push(laneMemos.map((row) => row.question));
+            if (reflectCalls === 1) {
+              return [{ id: "g1", description: "第一缺口", queries: ["first evidence"] }];
+            }
+            if (reflectCalls === 2) {
+              return [{ id: "g2", description: "第二缺口", queries: ["second evidence"] }];
+            }
+            return [];
+          },
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    expect(reflectCalls).toBe(3);
+    expect(memoSnapshots.map((snapshot) => snapshot.length)).toEqual([2, 3, 4]);
+    expect(memoSnapshots[1]).toContain("第一缺口");
+    expect(memoSnapshots[2]).toEqual(expect.arrayContaining(["第一缺口", "第二缺口"]));
+    expect(searchCalls).toEqual(expect.arrayContaining(["first evidence", "second evidence"]));
+  });
+
+  it("stops longitudinal refinement when a follow-up adds no new evidence URL", async () => {
+    let reflectCalls = 0;
+    const searchCalls: string[] = [];
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("ok");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A", "侧面B"],
+          }),
+          executeSearch: async (query: string) => {
+            searchCalls.push(query);
+            return [{ title: query, url: "https://ex.com/shared#fragment", snippet: "s" }];
+          },
+          reflectFn: async () => {
+            reflectCalls += 1;
+            return [
+              {
+                id: `g${reflectCalls}`,
+                description: "重复来源缺口",
+                queries: [`duplicate evidence ${reflectCalls}`],
+              },
+            ];
+          },
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    expect(reflectCalls).toBe(1);
+    expect(searchCalls.filter((query) => query.startsWith("duplicate evidence"))).toEqual([
+      "duplicate evidence 1",
+    ]);
+  });
+
+  it.each([
+    { firstFacetHits: MAX_RESULTS_PER_LANE, expectedFacets: ["facet-1"] },
+    { firstFacetHits: 1, expectedFacets: ["facet-1", "facet-2"] },
+  ])(
+    "runs crowded gap facets sequentially and stops after enough evidence ($firstFacetHits first hits)",
+    async ({ firstFacetHits, expectedFacets }) => {
+      let reflectCalls = 0;
+      const gapCalls: string[] = [];
+      const response = await runDeepResearchTurn(
+        { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+        {
+          ...baseDeps({
+            fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+              const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+              if (body.stream === false) {
+                return {
+                  ok: true,
+                  json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+                } as Response;
+              }
+              return synthUpstream("ok");
+            }) as unknown as typeof fetch,
+            buildPlan: async () => ({
+              topic: "主题调研",
+              complexity: "moderate" as const,
+              subQuestions: ["侧面A", "侧面B"],
+            }),
+            executeSearch: async (query: string) => {
+              if (!query.startsWith("facet-")) {
+                return [
+                  { title: query, url: `https://initial.test/${query}`, snippet: "s" },
+                ];
+              }
+              gapCalls.push(query);
+              const hitCount = query === "facet-1" ? firstFacetHits : MAX_RESULTS_PER_LANE;
+              return Array.from({ length: hitCount }, (_, index) => ({
+                title: `${query}-${index}`,
+                url: `https://gap.test/${query}/${index}`,
+                snippet: "s",
+              }));
+            },
+            reflectFn: async () => {
+              reflectCalls += 1;
+              return reflectCalls === 1
+                ? [
+                    {
+                      id: "g1",
+                      description: "拥挤缺口",
+                      queries: ["facet-1", "facet-2", "facet-3"],
+                    },
+                  ]
+                : [];
+            },
+          }),
+        },
+      );
+
+      await readSsePayload(response);
+      expect(gapCalls).toEqual(expectedFacets);
+      expect(gapCalls).not.toContain("facet-3");
+    },
+  );
+
+  it("enforces the total six-query follow-up budget across rounds", async () => {
+    let reflectCalls = 0;
+    const gapCalls: string[] = [];
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("ok");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A", "侧面B"],
+          }),
+          executeSearch: async (query: string) => {
+            if (query.startsWith("round-")) gapCalls.push(query);
+            return [
+              { title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" },
+            ];
+          },
+          reflectFn: async () => {
+            reflectCalls += 1;
+            return [
+              {
+                id: `g${reflectCalls}`,
+                description: `第 ${reflectCalls} 轮缺口`,
+                queries: [1, 2, 3].map((index) => `round-${reflectCalls}-facet-${index}`),
+              },
+            ];
+          },
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(reflectCalls).toBe(2);
+    expect(gapCalls).toHaveLength(MAX_FOLLOWUP_QUERIES);
+    const stats = events.find((event) => event.type === "research_stats");
+    expect(stats?.queriesPlanned).toBe(2 + MAX_FOLLOWUP_QUERIES);
+  });
+
+  it("stops after the bounded number of reflection rounds", async () => {
+    let reflectCalls = 0;
+    const gapCalls: string[] = [];
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "主题调研" }] },
+      {
+        ...baseDeps({
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("ok");
+          }) as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "主题调研",
+            complexity: "moderate" as const,
+            subQuestions: ["侧面A", "侧面B"],
+          }),
+          executeSearch: async (query: string) => {
+            if (query.startsWith("bounded-")) gapCalls.push(query);
+            return [
+              { title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" },
+            ];
+          },
+          reflectFn: async () => {
+            reflectCalls += 1;
+            return [
+              {
+                id: `g${reflectCalls}`,
+                description: `持续缺口 ${reflectCalls}`,
+                queries: [`bounded-${reflectCalls}`],
+              },
+            ];
+          },
+        }),
+      },
+    );
+
+    await readSsePayload(response);
+    expect(reflectCalls).toBe(MAX_REFLECT_ROUNDS);
+    expect(gapCalls).toHaveLength(MAX_REFLECT_ROUNDS);
   });
 });
 

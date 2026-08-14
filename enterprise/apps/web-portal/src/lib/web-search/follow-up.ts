@@ -60,6 +60,27 @@ export type SearchQueryRewriteOptions = {
   };
 };
 
+/**
+ * Shared contract for turning one crowded retrieval target into the smallest
+ * useful set of standalone facets. It is prompt text only and adds no model call.
+ */
+export function selfContainedSearchPlanInstruction(
+  maxSearchCallsValue: unknown,
+  queryField = "search_queries",
+): string {
+  const maxSearchCalls = normalizeMaxSearchCalls(maxSearchCallsValue);
+  return (
+    `${queryField} 必须包含最少且足够的 1 到 ${maxSearchCalls} 条可直接检索查询。默认只给 1 条；` +
+    (maxSearchCalls === 1
+      ? "本轮上限为 1，必须把全部实体、事件和时间范围合并进唯一一条自包含查询，不得遗漏任何检索目标。"
+      : "") +
+    (maxSearchCalls > 1
+      ? "仅当当前问题包含多个需要分别取证的实体、事件、实验条件、指标或时间范围，单条查询容易遗漏其中一部分时才拆分。"
+      : "") +
+    `每条 ${queryField} 都必须自包含，不得使用代词；不得把同一意图改写成多个近义版本来凑数量。`
+  );
+}
+
 function buildQueryRewriteSystemPrompt(
   maxSearchCallsValue: unknown,
   options: SearchQueryRewriteOptions = {},
@@ -70,14 +91,8 @@ function buildQueryRewriteSystemPrompt(
     "不要输出思考过程、解释或 Markdown，立即返回要求的 JSON。" +
     "阅读最近几条对话，把当前用户问题整理成脱离上下文也能理解的 resolved_query，并判断本轮是否真的需要公开网页事实。" +
     "只有明确无需外部事实即可回答的算术、逻辑、写作、翻译、寒暄或基于现有上下文的请求，need_search 才为 false；不确定时为 true。" +
-    `need_search 为 true 时，search_queries 必须包含最少且足够的 1 到 ${maxSearchCalls} 条可直接检索查询。默认只给 1 条；` +
-    (maxSearchCalls === 1
-      ? "本轮上限为 1，必须把全部实体、事件和时间范围合并进唯一一条自包含查询，不得遗漏任何检索目标。"
-      : "") +
-    (maxSearchCalls > 1
-      ? "仅当当前问题包含多个需要分别取证的实体、事件或时间范围，单条查询容易遗漏其中一部分时才拆分。"
-      : "") +
-    "每条 search_queries 都必须自包含，不得使用代词；不得把同一意图改写成多个近义版本来凑数量。" +
+    "need_search 为 true 时，" +
+    selfContainedSearchPlanInstruction(maxSearchCalls) +
     "need_search 为 false 时，search_queries 必须为空数组。" +
     "当前问题已经完整时，保持其原意并返回精简的等价查询；存在省略主语、代词、地点、对象或限定条件时，" +
     "从历史中补齐缺失部分，必要时加入身份或领域锚点来消除重名。" +
@@ -305,6 +320,40 @@ export function parseSearchQueryRewrite(
 }
 
 /**
+ * Sanitize, deduplicate and cap self-contained retrieval facets. Ordinary
+ * search and deep-research refinement share this exact paid-call boundary.
+ */
+export function normalizeSelfContainedSearchQueries(args: {
+  resolvedQuery: string;
+  candidates: unknown;
+  maxSearchCalls: unknown;
+}): string[] | null {
+  const resolvedQuery = sanitizeWebSearchQuery(args.resolvedQuery);
+  if (!resolvedQuery) return null;
+  if (args.candidates !== undefined && !Array.isArray(args.candidates)) return null;
+  const candidates = Array.isArray(args.candidates) ? args.candidates : [resolvedQuery];
+  if (candidates.some((candidate) => typeof candidate !== "string")) return null;
+
+  const maxSearchCalls = normalizeMaxSearchCalls(args.maxSearchCalls);
+  // A one-call budget cannot represent separate facets. Preserve the complete
+  // standalone target rather than selecting one partial facet.
+  if (maxSearchCalls === 1) return [resolvedQuery];
+
+  const searchQueries: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const sanitized = sanitizeWebSearchQuery(String(candidate));
+    if (!sanitized) continue;
+    const key = sanitized.normalize("NFKC").toLocaleLowerCase("en-US");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    searchQueries.push(sanitized);
+    if (searchQueries.length >= maxSearchCalls) break;
+  }
+  return searchQueries.length > 0 ? searchQueries : null;
+}
+
+/**
  * Validate an already-parsed search plan. Automatic turn routing reuses this
  * exact contract instead of maintaining a second query sanitizer and budget.
  */
@@ -341,32 +390,12 @@ export function parseSearchQueryRewriteValue(
   if (!needSearch) {
     return { query, needSearch: false, searchQueries: [], confidence };
   }
-  if (row.search_queries !== undefined && !Array.isArray(row.search_queries)) {
-    return null;
-  }
-  const candidates = Array.isArray(row.search_queries) ? row.search_queries : [query];
-  if (candidates.some((candidate) => typeof candidate !== "string")) return null;
-
-  const maxSearchCalls = normalizeMaxSearchCalls(maxSearchCallsValue);
-  // A one-call budget cannot represent separate facets. Use the complete
-  // standalone request as the sole query even if the planner ignored the
-  // merge instruction and returned one facet per entity.
-  if (maxSearchCalls === 1) {
-    return { query, needSearch: true, searchQueries: [query], confidence };
-  }
-
-  const searchQueries: string[] = [];
-  const seen = new Set<string>();
-  for (const candidate of candidates) {
-    const sanitized = sanitizeWebSearchQuery(String(candidate));
-    if (!sanitized) continue;
-    const key = sanitized.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    searchQueries.push(sanitized);
-    if (searchQueries.length >= maxSearchCalls) break;
-  }
-  if (searchQueries.length === 0) return null;
+  const searchQueries = normalizeSelfContainedSearchQueries({
+    resolvedQuery: query,
+    candidates: row.search_queries,
+    maxSearchCalls: maxSearchCallsValue,
+  });
+  if (!searchQueries) return null;
   return { query, needSearch: true, searchQueries, confidence };
 }
 

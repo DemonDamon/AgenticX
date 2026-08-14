@@ -101,7 +101,13 @@ import {
   scorePool,
   selectTopSources,
 } from "./source-pool";
-import { MAX_GAPS, reflectOnGaps, type ResearchGap } from "./reflector";
+import {
+  MAX_FOLLOWUP_QUERIES,
+  MAX_GAPS_PER_ROUND,
+  MAX_REFLECT_ROUNDS,
+  reflectOnGaps,
+  type ResearchGap,
+} from "./reflector";
 import type { DeepResearchEvent } from "@agenticx/sdk-ts";
 import { isPolicyErrorCode, toComplianceMessage } from "@agenticx/core-api";
 
@@ -271,6 +277,8 @@ type LaneResult = {
   urlsDiscovered: number;
   sourcesSelected: number;
   pagesFetched: number;
+  /** Queries that reached executeSearch; deferred early-stop facets are excluded. */
+  queriesExecuted: string[];
 };
 
 function sseDataFrame(payload: unknown): string {
@@ -350,6 +358,51 @@ export function resolveResultsPerLane(laneCount: number): number {
  */
 export function resolveLaneAdoptCap(sourcesUsed: number): number {
   return Math.max(0, Math.min(LANE_ADOPT_CAP, MAX_SOURCES - sourcesUsed));
+}
+
+export function normalizeRefinementKey(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+export function normalizeEvidenceUrlKey(value: string): string {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return normalizeRefinementKey(value);
+  }
+}
+
+/** Keep one highest-value gap and only queries not executed in earlier rounds. */
+export function selectNovelResearchGaps(
+  gaps: ResearchGap[],
+  state: {
+    seenGapKeys: Set<string>;
+    seenQueryKeys: Set<string>;
+    remainingQueries: number;
+  },
+): ResearchGap[] {
+  if (state.remainingQueries <= 0) return [];
+  for (const gap of gaps.slice(0, MAX_GAPS_PER_ROUND)) {
+    const gapKey = normalizeRefinementKey(gap.description);
+    if (!gapKey) continue;
+    const roundQueryKeys = new Set<string>();
+    const queries = gap.queries.filter((query) => {
+      const key = normalizeRefinementKey(query);
+      if (!key || state.seenQueryKeys.has(key) || roundQueryKeys.has(key)) return false;
+      roundQueryKeys.add(key);
+      return true;
+    }).slice(0, state.remainingQueries);
+    if (queries.length === 0) continue;
+    state.seenGapKeys.add(gapKey);
+    return [{ ...gap, queries }];
+  }
+  return [];
 }
 
 export function formatEvidencePack(
@@ -1109,6 +1162,7 @@ export async function runDeepResearchTurn(
           total: number;
           variants?: QueryVariant[];
           skipExpand?: boolean;
+          variantExecution?: "wave" | "sequential_early_stop";
         }): Promise<LaneResult> => {
           const { question, laneId, index, total } = args;
           const laneDocumentCitations: Citation[] = [];
@@ -1169,6 +1223,7 @@ export async function runDeepResearchTurn(
             urlsDiscovered: 0,
             sourcesSelected: laneDocumentCitations.length,
             pagesFetched: 0,
+            queriesExecuted: [],
           };
 
           try {
@@ -1232,6 +1287,7 @@ export async function runDeepResearchTurn(
             const pool = new SourcePool();
             let variantFailures = 0;
             let variantsRun = 0;
+            const queriesExecuted: string[] = [];
             const queryTrace: LaneSourcesTrace["queries"] = variants.map((variant) => ({
               query: variant.query.slice(0, MAX_TRACE_QUERY_CHARS),
               kind: variant.kind,
@@ -1256,6 +1312,7 @@ export async function runDeepResearchTurn(
                   try {
                     if (searchBudgetLeft() <= 0) return;
                     variantsRun += 1;
+                    queriesExecuted.push(variant.query);
                     const hits = await searchFn(
                       variant.query,
                       resultsPerLane,
@@ -1302,14 +1359,18 @@ export async function runDeepResearchTurn(
             // Probe with the first couple of queries, then stop if the pool
             // already exceeds what this lane is allowed to adopt — extra queries
             // cost money per request and would only shuffle the shortlist.
-            await runSearchWave(indexedVariants.slice(0, EARLY_STOP_PROBE_VARIANTS));
+            const probeVariantCount =
+              args.variantExecution === "sequential_early_stop"
+                ? 1
+                : EARLY_STOP_PROBE_VARIANTS;
+            await runSearchWave(indexedVariants.slice(0, probeVariantCount));
             const laneAdoptCap = resolveLaneAdoptCap(registry.size);
             // A provider normally returns at most resultsPerLane (8-10), while
             // the lane adopt cap is 12. Requiring pool.size >= laneAdoptCap
             // would therefore force a second call even when the first query
             // returned its full requested quota.
             const enoughCandidates = Math.min(laneAdoptCap, resultsPerLane);
-            const deferredVariants = indexedVariants.slice(EARLY_STOP_PROBE_VARIANTS);
+            const deferredVariants = indexedVariants.slice(probeVariantCount);
             if (deferredVariants.length > 0) {
               if (pool.size >= enoughCandidates) {
                 enqueueEvent({
@@ -1317,6 +1378,19 @@ export async function runDeepResearchTurn(
                   laneId,
                   message: `候选已够用，实际检索 ${variantsRun} 条，省去 ${deferredVariants.length} 条检索式`,
                 });
+              } else if (args.variantExecution === "sequential_early_stop") {
+                for (const deferred of deferredVariants) {
+                  if (searchBudgetLeft() <= 0 || pool.size >= enoughCandidates) break;
+                  await runSearchWave([deferred]);
+                }
+                const skipped = indexedVariants.length - variantsRun;
+                if (skipped > 0) {
+                  enqueueEvent({
+                    type: "lane_progress",
+                    laneId,
+                    message: `候选已够用，实际检索 ${variantsRun} 条，省去 ${skipped} 条检索式`,
+                  });
+                }
               } else {
                 await runSearchWave(deferredVariants);
               }
@@ -1353,7 +1427,7 @@ export async function runDeepResearchTurn(
                 laneId,
                 status: laneDocumentCitations.length > 0 ? "ok" : "failed",
               });
-              return { ...empty, queriesPlanned: variantsRun };
+              return { ...empty, queriesPlanned: variantsRun, queriesExecuted };
             }
 
             const scored = scorePool(question, pool.list());
@@ -1552,6 +1626,7 @@ export async function runDeepResearchTurn(
               urlsDiscovered: pool.size,
               sourcesSelected: questionCitations.length,
               pagesFetched,
+              queriesExecuted,
             };
           } catch (error) {
             if (error instanceof DOMException && error.name === "AbortError") throw error;
@@ -1605,86 +1680,126 @@ export async function runDeepResearchTurn(
 
         if (runSignal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-        // --- Reflect + one-shot follow-up search ---
+        // --- Reflect + bounded longitudinal follow-up search ---
         if (searchBudgetLeft() > REFLECT_MIN_BUDGET_MS) {
           enqueueEvent({
             type: "phase",
             phase: "reflect",
             message: "正在复盘已收集证据，识别信息缺口…",
           });
-          let gaps: ResearchGap[] = [];
-          let reflectPolicyError: DeepResearchPolicyError | null = null;
-          try {
-            gaps = await reflectFn({
-              topic: plan.topic || userQuery,
-              todayLine,
-              laneMemos: citationsByQuestion.map((r) => ({
-                question: r.question,
-                memo: r.memo,
-              })),
-              callJson: async (messages) => {
-                try {
-                  return await callGatewayJson(toolDeps, { ...baseBody, messages });
-                } catch (error) {
-                  if (error instanceof DeepResearchPolicyError) {
-                    reflectPolicyError = error;
-                    return "";
-                  }
-                  throw error;
-                }
-              },
-            });
-          } catch (error) {
-            if (error instanceof DeepResearchPolicyError) reflectPolicyError = error;
-            gaps = [];
-          }
-          if (reflectPolicyError) throw reflectPolicyError;
-          // Hard cap: at most one gap → one follow-up lane (search cost control).
-          gaps = gaps.slice(0, MAX_GAPS);
+          const seenGapKeys = new Set<string>();
+          const seenQueryKeys = new Set<string>();
+          const seenEvidenceUrls = new Set(
+            [...reconCitations, ...citationsByQuestion.flatMap((row) => row.citations)]
+              .map((citation) => normalizeEvidenceUrlKey(citation.url))
+              .filter(Boolean),
+          );
+          let followupQueriesUsed = 0;
 
-          if (gaps.length > 0) {
-            // The gap card is itself the "发现 N 处信息缺口" announcement, and the
-            // follow-up lanes card carries the "补充检索" step — a narrative saying
-            // both would just duplicate the two cards around it.
+          for (let round = 1; round <= MAX_REFLECT_ROUNDS; round += 1) {
+            if (
+              runSignal?.aborted ||
+              searchBudgetLeft() <= REFLECT_MIN_BUDGET_MS ||
+              followupQueriesUsed >= MAX_FOLLOWUP_QUERIES
+            ) {
+              break;
+            }
+
+            let gaps: ResearchGap[] = [];
+            let reflectPolicyError: DeepResearchPolicyError | null = null;
+            try {
+              gaps = await reflectFn({
+                topic: plan.topic || userQuery,
+                todayLine,
+                // Include every prior gap memo so each pass reasons over the
+                // evidence added by the preceding pass, not a frozen snapshot.
+                laneMemos: citationsByQuestion.map((row) => ({
+                  question: row.question,
+                  memo: row.memo,
+                })),
+                callJson: async (messages) => {
+                  try {
+                    return await callGatewayJson(toolDeps, { ...baseBody, messages });
+                  } catch (error) {
+                    if (error instanceof DeepResearchPolicyError) {
+                      reflectPolicyError = error;
+                      return "";
+                    }
+                    throw error;
+                  }
+                },
+              });
+            } catch (error) {
+              if (error instanceof DeepResearchPolicyError) reflectPolicyError = error;
+              gaps = [];
+            }
+            if (reflectPolicyError) throw reflectPolicyError;
+
+            const novelGaps = selectNovelResearchGaps(gaps, {
+              seenGapKeys,
+              seenQueryKeys,
+              remainingQueries: MAX_FOLLOWUP_QUERIES - followupQueriesUsed,
+            });
+            if (novelGaps.length === 0) {
+              if (round === 1) {
+                enqueueEvent({
+                  type: "narrative",
+                  text: "证据交叉验证充分，未发现需要补搜的缺口。",
+                });
+              }
+              break;
+            }
+
             enqueueEvent({
               type: "reflection",
-              gaps: gaps.map((g) => g.description),
+              gaps: novelGaps.map((gap) => gap.description),
             });
             enqueueEvent({
               type: "phase",
               phase: "lanes",
-              message: `正在针对 ${gaps.length} 处缺口补充检索…`,
+              message: `正在针对 ${novelGaps.length} 处缺口补充检索…`,
             });
+
             const gapResults = await mapPool(
-              gaps,
+              novelGaps,
               SEARCH_CONCURRENCY,
-              async (gap, gapIndex) => {
-                const queries = gap.queries.map(
-                  (q): QueryVariant => ({ query: q, kind: "term" }),
-                );
-                return runOneLane({
+              async (gap, gapIndex) =>
+                runOneLane({
                   question: gap.description,
-                  laneId: `gap-${gap.id}`,
+                  laneId: `gap-r${round}-${gap.id}`,
                   index: gapIndex + 1,
-                  total: gaps.length,
-                  variants: queries,
+                  total: novelGaps.length,
+                  variants: gap.queries.map(
+                    (query): QueryVariant => ({ query, kind: "term" }),
+                  ),
                   skipExpand: true,
-                });
-              },
+                  variantExecution: "sequential_early_stop",
+                }),
               runSignal,
             );
+
+            let newEvidenceCount = 0;
             for (const row of gapResults) {
               citationsByQuestion.push(row);
               totalQueries += row.queriesPlanned;
               totalDiscovered += row.urlsDiscovered;
               totalSelected += row.sourcesSelected;
               totalPagesFetched += row.pagesFetched;
+              followupQueriesUsed += row.queriesPlanned;
+              for (const query of row.queriesExecuted) {
+                seenQueryKeys.add(normalizeRefinementKey(query));
+              }
+              for (const citation of row.citations) {
+                const urlKey = normalizeEvidenceUrlKey(citation.url);
+                if (!urlKey || seenEvidenceUrls.has(urlKey)) continue;
+                seenEvidenceUrls.add(urlKey);
+                newEvidenceCount += 1;
+              }
             }
-          } else {
-            enqueueEvent({
-              type: "narrative",
-              text: "证据交叉验证充分，未发现需要补搜的缺口。",
-            });
+
+            // Repeating the same evidence cannot improve the answer. Stop here
+            // instead of spending another reflection/search round on an empty loop.
+            if (newEvidenceCount === 0) break;
           }
         }
 

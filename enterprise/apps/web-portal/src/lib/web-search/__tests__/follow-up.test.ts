@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildSearchQueryRewriteMessages,
   hasPriorSearchQueryLeakage,
+  normalizeSelfContainedSearchQueries,
   parseSearchQueryRewrite,
+  selfContainedSearchPlanInstruction,
 } from "../follow-up";
 
 const THINK_OPEN = "<" + "think" + ">";
@@ -74,6 +76,36 @@ describe("contextual search-query rewrite", () => {
     expect(single?.[0]?.content).toContain("不得遗漏任何检索目标");
     expect(single?.[0]?.content).toContain("王虹 邓煜 分别离开北京大学 原因");
     expect(single?.[0]?.content).not.toContain("search_queries 应分别查询");
+  });
+
+  it("shares one self-contained facet contract with refinement callers", () => {
+    expect(selfContainedSearchPlanInstruction(3, "queries")).toContain(
+      "每条 queries 都必须自包含",
+    );
+    expect(
+      normalizeSelfContainedSearchQueries({
+        resolvedQuery: "模型 A 在两项评测中的表现",
+        candidates: [
+          "模型 A 基准 X 成绩",
+          " 模型 A 基准 X 成绩 ",
+          "模型 A 基准 Y 成绩",
+          "模型 A 推理条件",
+          "超出上限",
+        ],
+        maxSearchCalls: 3,
+      }),
+    ).toEqual([
+      "模型 A 基准 X 成绩",
+      "模型 A 基准 Y 成绩",
+      "模型 A 推理条件",
+    ]);
+    expect(
+      normalizeSelfContainedSearchQueries({
+        resolvedQuery: "模型 A 在两项评测中的表现",
+        candidates: ["模型 A 基准 X 成绩", "模型 A 基准 Y 成绩"],
+        maxSearchCalls: 1,
+      }),
+    ).toEqual(["模型 A 在两项评测中的表现"]);
   });
 
   it("reuses the query planner for document-language lexical facets", () => {
