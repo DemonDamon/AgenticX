@@ -2364,6 +2364,11 @@ def _kb_retrieval_always_mode(session: Any) -> bool:
     config, mirroring ``_build_kb_retrieval_policy_block``. Returns False when
     the KB subsystem is unavailable or disabled.
     """
+    from agenticx.features import local_knowledge_enabled
+
+    if not local_knowledge_enabled():
+        return False
+
     mode = str(getattr(session, "kb_retrieval_mode", "") or "").strip().lower()
     if mode in {"auto", "always"}:
         return mode == "always"

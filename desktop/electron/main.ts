@@ -2975,6 +2975,7 @@ async function startStudioServe(): Promise<void> {
     AGX_DEV_PORT: devPort,
     AGX_DESKTOP_TOKEN: apiToken,
     AGX_WORKSPACE_ROOT: desktopHome,
+    AGX_LOCAL_KNOWLEDGE_ENABLED: "0",
     // Intentionally NOT setting AGX_DESKTOP_UNRESTRICTED_FS — path access is
     // gated by session workspace roots + mount modes (see agent_tools.py).
     AGX_SKILL_PROTOCOL: trinity.skill_protocol ? "true" : "false",

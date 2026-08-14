@@ -37,6 +37,7 @@ import {
   type SidePanelTab,
 } from "../store";
 import { VOICE_UI_ENABLED } from "../constants/feature-flags";
+import { LOCAL_KNOWLEDGE_ENABLED } from "../constants/desktop-feature-visibility";
 import { useGraphRunStore } from "./graph/useGraphRun";
 import { graphHasTaskNodes } from "./graph/graph-types";
 import {
@@ -613,7 +614,7 @@ function ComposerMoreActionsButton({
 }: {
   onPickFile: () => void;
   renderSkillPicker: () => ReactNode;
-  renderKbRetrieval: () => ReactNode;
+  renderKbRetrieval?: () => ReactNode;
   renderConnectors: () => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -687,7 +688,7 @@ function ComposerMoreActionsButton({
             <span className="flex-1">添加文件</span>
           </button>
           {renderSkillPicker()}
-          {renderKbRetrieval()}
+          {renderKbRetrieval?.()}
           {renderConnectors()}
         </div>,
         document.body,
@@ -2610,6 +2611,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, []);
 
   useEffect(() => {
+    if (!LOCAL_KNOWLEDGE_ENABLED) return;
     if (!apiToken) return;
     const resolveBase = async () => {
       const base = String(apiBase ?? "").trim();
@@ -12477,17 +12479,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   renderSkillPicker={() => (
                     <SkillPickerButton apiBase={apiBase} apiToken={apiToken} onSelect={handleSkillSelect} embedded />
                   )}
-                  renderKbRetrieval={() => (
-                    <PaneKnowledgeRetrievalModeSwitch
-                      apiToken={apiToken}
-                      apiBase={apiBase}
-                      sessionId={pane.sessionId}
-                      paneId={paneId}
-                      globalDefaultMode={kbGlobalDefaultMode}
-                      onNewSessionDefaultChange={onKbNewSessionDefaultChange}
-                      embedded
-                    />
-                  )}
+                  renderKbRetrieval={
+                    LOCAL_KNOWLEDGE_ENABLED
+                      ? () => (
+                          <PaneKnowledgeRetrievalModeSwitch
+                            apiToken={apiToken}
+                            apiBase={apiBase}
+                            sessionId={pane.sessionId}
+                            paneId={paneId}
+                            globalDefaultMode={kbGlobalDefaultMode}
+                            onNewSessionDefaultChange={onKbNewSessionDefaultChange}
+                            embedded
+                          />
+                        )
+                      : undefined
+                  }
                   renderConnectors={() => (
                     <ConnectorsMenuButton sessionId={pane.sessionId} embedded />
                   )}

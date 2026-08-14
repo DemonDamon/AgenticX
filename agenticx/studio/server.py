@@ -116,10 +116,9 @@ from agenticx.studio.session_manager import (
     managed_session_binding_matches_avatar_query,
 )
 from agenticx.tools.mcp_hub import MCPHub
-from agenticx.studio.kb.routes import register_kb_routes
 from agenticx.studio.code_index.routes import register_code_index_routes
-from agenticx.brain.routes import register_brain_routes
 from agenticx.studio.voice_endpoints import register_voice_endpoints
+from agenticx.features import local_knowledge_enabled
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.workspace.loader import (
     append_long_term_memory,
@@ -1584,6 +1583,8 @@ def create_studio_app() -> FastAPI:
         avatar_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Inject code_search when the session has mounted code brains (avatar/Meta)."""
+        if not local_knowledge_enabled():
+            return tools
         try:
             from agenticx.brain.mount import session_has_mounted_code_brains
 
@@ -7713,9 +7714,15 @@ def create_studio_app() -> FastAPI:
             logger.warning("registry_install error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    # Machi knowledge base — Stage-1 MVP (Plan-Id: machi-kb-stage1-local-mvp)
-    register_kb_routes(app)
-    register_brain_routes(app)
+    # Local document brains are optional in customer Desktop builds. Keep the
+    # generic server default unchanged and avoid importing the subsystem at all
+    # when the process-level feature is disabled.
+    if local_knowledge_enabled():
+        from agenticx.studio.kb.routes import register_kb_routes
+        from agenticx.brain.routes import register_brain_routes
+
+        register_kb_routes(app)
+        register_brain_routes(app)
     register_code_index_routes(app)
     from agenticx.studio.web_search.routes import register_web_search_routes
 

@@ -551,6 +551,11 @@ def _build_kb_retrieval_policy_block(mode_override: Optional[str] = None) -> str
             valid value is provided it supersedes the global ``retrieval.mode``
             config, enabling per-session binding of the KB retrieval policy.
     """
+    from agenticx.features import local_knowledge_enabled
+
+    if not local_knowledge_enabled():
+        return ""
+
     override = str(mode_override or "").strip().lower()
     # Per-session override wins over the global config value and survives a
     # config-read failure below.

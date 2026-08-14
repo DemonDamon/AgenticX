@@ -42,6 +42,7 @@ from agenticx.cli.studio_skill import (
     skill_use as studio_skill_use,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
+from agenticx.features import local_knowledge_enabled
 from agenticx.memory.session_store import SessionStore
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.skills.guard import scan_skill, should_allow
@@ -7523,6 +7524,24 @@ except Exception as _exc:  # pragma: no cover - defensive import isolation
     logging.getLogger(__name__).warning(
         "project_state tool registration skipped: %s", _exc,
     )
+
+
+LOCAL_KNOWLEDGE_TOOL_NAMES = frozenset({"knowledge_search", "knowledge_synthesize"})
+
+
+def without_local_knowledge_tools(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove local document-brain tools while preserving the remaining order."""
+
+    return [
+        tool
+        for tool in tools
+        if str((tool.get("function") or {}).get("name", "")).strip()
+        not in LOCAL_KNOWLEDGE_TOOL_NAMES
+    ]
+
+
+if not local_knowledge_enabled():
+    STUDIO_TOOLS[:] = without_local_knowledge_tools(STUDIO_TOOLS)
 
 
 _TOOL_REQUIRED_PARAMS: Dict[str, List[str]] = {}

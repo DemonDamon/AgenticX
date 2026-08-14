@@ -13,6 +13,11 @@ import os
 import sys
 
 
+# The customer Desktop ships document attachment parsing but delegates durable
+# knowledge storage to the Enterprise service. Set this before importing Studio.
+os.environ.setdefault("AGX_LOCAL_KNOWLEDGE_ENABLED", "0")
+
+
 def _suppress_macos_dock_icon() -> None:
     """Prevent headless server process from showing a dock icon on macOS."""
     if sys.platform != "darwin":

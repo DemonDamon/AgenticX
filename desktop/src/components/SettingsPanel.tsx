@@ -121,7 +121,10 @@ import {
   type ManagedModelCatalogEntry,
 } from "../utils/model-options";
 import { isEnterpriseModelManagementLocked } from "../utils/enterprise-model-management";
-import { SHOW_DESKTOP_EXTERNAL_IM } from "../constants/desktop-feature-visibility";
+import {
+  LOCAL_KNOWLEDGE_ENABLED,
+  SHOW_DESKTOP_EXTERNAL_IM,
+} from "../constants/desktop-feature-visibility";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import type { SettingsTab } from "../settings-tab";
 import type { MCPDiscoveryHit } from "./settings/mcp/MCPDiscoveryPanel";
@@ -1062,8 +1065,9 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "connectors", label: "连接器", icon: Link2 },
   { id: "tools", label: "内置工具", icon: Wrench },
   { id: "skills", label: "技能配置", icon: SkillPuzzleIcon },
-  // Plan-Id: machi-kb-stage1-local-mvp
-  { id: "knowledge", label: "知识库", icon: Library },
+  ...(LOCAL_KNOWLEDGE_ENABLED
+    ? [{ id: "knowledge" as const, label: "知识库", icon: Library }]
+    : []),
   { id: "data_sources", label: "数据源", icon: Database },
   { id: "memory", label: "记忆管理", icon: Network },
   { id: "hooks", label: "钩子管理", icon: Anchor },
@@ -6335,7 +6339,11 @@ export function SettingsPanel({
   );
   useEffect(() => {
     if (!open || !settingsOpenToTab) return;
-    setTab(settingsOpenToTab);
+    setTab(
+      settingsOpenToTab === "knowledge" && !LOCAL_KNOWLEDGE_ENABLED
+        ? "general"
+        : settingsOpenToTab,
+    );
     updateSettingsSlice({ openToTab: undefined });
   }, [open, settingsOpenToTab, updateSettingsSlice]);
   useEffect(() => {
@@ -7883,7 +7891,9 @@ export function SettingsPanel({
         return;
       }
     }
-    const kbRes = await knowledgeRef.current?.flushIfDirty();
+    const kbRes = LOCAL_KNOWLEDGE_ENABLED
+      ? await knowledgeRef.current?.flushIfDirty()
+      : undefined;
     if (kbRes && !kbRes.ok) {
       const cont = window.confirm(
         `知识库配置保存失败：\n${kbRes.error ?? "未知错误"}\n\n是否仍继续保存其它设置？`,
@@ -8591,7 +8601,7 @@ export function SettingsPanel({
             className={`min-h-0 flex-1 pl-5 pr-4 ${
               tab === "provider"
                 ? "flex flex-col overflow-hidden pt-4 pb-3"
-                : tab === "knowledge"
+                : tab === "knowledge" && LOCAL_KNOWLEDGE_ENABLED
                   ? "flex flex-col overflow-hidden py-3"
                   : "overflow-y-auto py-3"
             }`}
@@ -10395,7 +10405,9 @@ export function SettingsPanel({
             )}
 
             {/* === KNOWLEDGE TAB === Plan-Id: machi-kb-stage1-local-mvp */}
-            {tab === "knowledge" && <KnowledgeSettings ref={knowledgeRef} />}
+            {LOCAL_KNOWLEDGE_ENABLED && tab === "knowledge" && (
+              <KnowledgeSettings ref={knowledgeRef} />
+            )}
 
             {tab === "data_sources" && <DataSourcesSettings />}
 

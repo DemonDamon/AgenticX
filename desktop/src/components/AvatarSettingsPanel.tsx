@@ -11,6 +11,7 @@ import {
 } from "../utils/avatar-color";
 import type { AvatarPaletteKey } from "../utils/avatar-color";
 import { DefaultModelSelect } from "./DefaultModelSelect";
+import { LOCAL_KNOWLEDGE_ENABLED } from "../constants/desktop-feature-visibility";
 
 function avatarInitials(name: string): string {
   const t = name.trim();
@@ -185,7 +186,7 @@ export function AvatarSettingsPanel(props: Props) {
     }
     void loadTools();
     void loadSoul();
-    if (mode === "avatar") {
+    if (mode === "avatar" && LOCAL_KNOWLEDGE_ENABLED) {
       void (async () => {
         try {
           const base = String((await window.agenticxDesktop.getApiBase()) || "").replace(/\/+$/, "");
@@ -284,7 +285,7 @@ export function AvatarSettingsPanel(props: Props) {
         default_provider: defaultProvider.trim(),
         default_model: defaultModel.trim(),
         color: colorDraft,
-        brains_enabled: brainsPayload,
+        ...(LOCAL_KNOWLEDGE_ENABLED ? { brains_enabled: brainsPayload } : {}),
       });
       if (!res?.ok) {
         setMessage(`保存失败: ${res?.error ?? "未知错误"}`);
@@ -565,6 +566,7 @@ export function AvatarSettingsPanel(props: Props) {
                   }}
                 />
               </label>
+              {LOCAL_KNOWLEDGE_ENABLED ? (
               <div className="rounded-md border border-border bg-surface-card p-3">
                 <div className="text-sm font-medium text-text-primary">挂载知识脑</div>
                 <p className="mt-1 text-xs text-text-faint">
@@ -617,6 +619,7 @@ export function AvatarSettingsPanel(props: Props) {
                   </div>
                 ) : null}
               </div>
+              ) : null}
               <div className="border-t border-border pt-4">
                 <label className="block text-sm text-text-muted">
                   灵魂
