@@ -1048,10 +1048,18 @@ class SessionManager:
         # Guarantee provider-legal context before re-entry.
         try:
             from agenticx.runtime.agent_runtime import _sanitize_context_messages
+            from agenticx.runtime.harden_flags import interrupted_closers_enabled
+            from agenticx.runtime.interrupted_closers import close_interrupted_tool_calls
 
-            session.agent_messages = _sanitize_context_messages(
-                getattr(session, "agent_messages", None) or []
-            )
+            raw = getattr(session, "agent_messages", None) or []
+            if interrupted_closers_enabled():
+                dispatched = [
+                    str(c.get("id", "")).strip()
+                    for c in (getattr(checkpoint, "pending_tool_calls", None) or [])
+                    if isinstance(c, dict) and str(c.get("id", "")).strip()
+                ]
+                raw = close_interrupted_tool_calls(raw, dispatched_call_ids=dispatched)
+            session.agent_messages = _sanitize_context_messages(raw)
         except Exception:
             _log.debug("resume sanitize failed session=%s", session_id, exc_info=True)
         managed.execution_state = "running"
@@ -1110,10 +1118,7 @@ class SessionManager:
         )
 
         def _persist_cb() -> None:
-            try:
-                self.incremental_persist(session_id)
-            except Exception:
-                pass
+            self.incremental_persist(session_id)
 
         runtime = AgentRuntime(
             llm,

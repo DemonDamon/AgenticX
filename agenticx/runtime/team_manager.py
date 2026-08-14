@@ -145,6 +145,7 @@ class SubAgentContext:
     workspace_dir: str = ""
     persona_prompt: str = ""
     avatar_id: str = ""
+    inherit_parent_context: bool = True
     failure_count: int = 0
     escalation_level: int = 0
     result_file: str = ""
@@ -357,7 +358,11 @@ class AgentTeamManager:
             if context_file_keys
             else "(empty)"
         )
-        parent_summary = self._build_parent_context_summary()
+        parent_summary = (
+            self._build_parent_context_summary()
+            if getattr(context, "inherit_parent_context", True)
+            else ""
+        )
         parent_section = (
             f"## 父智能体对话上下文（最近摘要）\n{parent_summary}\n\n"
             if parent_summary
@@ -484,6 +489,7 @@ class AgentTeamManager:
         workspace_dir: Optional[str] = None,
         system_prompt: Optional[str] = None,
         avatar_id: Optional[str] = None,
+        inherit_parent_context: bool = True,
     ) -> Dict[str, Any]:
         async with self._lock:
             active = self._active_running_count()
@@ -573,6 +579,7 @@ class AgentTeamManager:
                 workspace_dir=str(workspace_dir or "").strip(),
                 persona_prompt=str(system_prompt or "").strip(),
                 avatar_id=str(avatar_id or "").strip(),
+                inherit_parent_context=bool(inherit_parent_context),
             )
             self._agents[agent_id] = context
             context.status = SubAgentStatus.RUNNING

@@ -2574,6 +2574,7 @@ class AgentRuntime:
         # re-emit the same UI warning.
         self._forced_budget_compact_this_turn = False
         self._proactive_compact_this_turn = False
+        self._overflow_retries_this_turn = 0
         self._budget_compress_notice_sent_this_turn = False
         self._mid_turn_persist = mid_turn_persist
         self._persist_interval_sec = _resolve_mid_turn_persist_interval()
@@ -2654,9 +2655,26 @@ class AgentRuntime:
             try:
                 self._mid_turn_persist()
             except Exception:
-                pass
+                return
             self._last_persist_time = now
             self._tools_since_persist = 0
+
+    def _persist_or_abort(self, reason: str) -> tuple[bool, str]:
+        """Flush the turn prefix before a side effect. Returns (ok, detail)."""
+        if self._mid_turn_persist is None:
+            return True, ""
+        try:
+            self._mid_turn_persist()
+        except Exception as exc:
+            logger.exception("persist before %s failed", reason)
+            from agenticx.runtime.harden_flags import persist_fail_closed_enabled
+
+            if persist_fail_closed_enabled():
+                return False, f"{type(exc).__name__}: {exc}"
+            return True, ""
+        self._last_persist_time = time.time()
+        self._tools_since_persist = 0
+        return True, ""
 
     def _persist_final_checkpoint(self) -> None:
         """Persist the completed turn before exposing its FINAL event."""
@@ -2976,6 +2994,7 @@ class AgentRuntime:
         self.loop_detector.reset()
         self._forced_budget_compact_this_turn = False
         self._proactive_compact_this_turn = False
+        self._overflow_retries_this_turn = 0
         self._budget_compress_notice_sent_this_turn = False
         self._pending_loop_nudge = None
         setattr(session, "_context_chain_repair_attempted", False)
@@ -3640,6 +3659,23 @@ class AgentRuntime:
                 messages_for_llm = _strip_non_llm_message_fields(messages_for_llm)
                 if provider_name.strip().lower() == "minimax":
                     messages_for_llm = _merge_consecutive_simple_roles_for_minimax(messages_for_llm)
+                ok, detail = self._persist_or_abort("llm_request")
+                if not ok:
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={
+                            "text": (
+                                "会话状态未能持久化，为避免崩溃后上下文与实际执行不一致，"
+                                "已中止本轮模型调用。请检查存储后端后重试。"
+                            ),
+                            "detail": detail,
+                            "detector": "persist_fail_closed",
+                            "severity": "error",
+                            "retryable": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    return
                 response_text = ""
                 tool_calls: List[Dict[str, Any]] = []
                 response: Any
@@ -4069,6 +4105,7 @@ class AgentRuntime:
                             raise asyncio.TimeoutError()
                         await asyncio.sleep(0.1)
                 await self.hooks.run_after_model(response, session)
+                self._overflow_retries_this_turn = 0
 
                 _round_usage = usage_metadata_from_llm_response(response)
                 self.token_budget.record(_round_usage)
@@ -4473,6 +4510,60 @@ class AgentRuntime:
                             agent_id=agent_id,
                         )
                         continue
+
+                if fault == "context_window":
+                    from agenticx.runtime.harden_flags import (
+                        max_overflow_retries,
+                        overflow_retry_enabled,
+                    )
+
+                    if (
+                        overflow_retry_enabled()
+                        and self._overflow_retries_this_turn < max_overflow_retries()
+                    ):
+                        hist_before = _sanitize_context_messages(session.agent_messages)
+                        new_hist, did, summary, count, _pending_q = await self.compactor.maybe_compact(
+                            hist_before,
+                            force=True,
+                            model=model_name,
+                        )
+                        new_hist = _sanitize_context_messages(new_hist) if did else new_hist
+                        made_progress = (
+                            bool(did) and len(new_hist) > 1 and len(new_hist) < len(hist_before)
+                        )
+                        if made_progress:
+                            self._overflow_retries_this_turn += 1
+                            session.agent_messages = new_hist
+                            messages[:] = [
+                                {"role": "system", "content": current_system_prompt},
+                                *list(new_hist),
+                            ]
+                            try:
+                                messages = _promote_user_image_attachments(
+                                    messages,
+                                    str(getattr(session, "provider_name", "") or ""),
+                                    str(getattr(session, "model_name", "") or ""),
+                                )
+                            except Exception:
+                                pass
+                            try:
+                                await self.hooks.run_on_compaction(count, summary, session)
+                            except Exception:
+                                pass
+                            yield RuntimeEvent(
+                                type=EventType.ERROR.value,
+                                data={
+                                    "text": (
+                                        "上下文超出模型窗口，已压缩历史并重试本轮"
+                                        f"（{self._overflow_retries_this_turn}/{max_overflow_retries()}）…"
+                                    ),
+                                    "severity": "warning",
+                                    "detector": "context_overflow_compact_retry",
+                                    "retryable": True,
+                                },
+                                agent_id=agent_id,
+                            )
+                            continue
 
                 if fault in {"billing", "auth", "rate_limit", "context_window", "transient"}:
                     err_text = human_hint_for_fault(fault)
@@ -5541,6 +5632,46 @@ class AgentRuntime:
 
                 before_progress = _build_progress_signature(session)
                 before_disk_write_count = len(disk_write_paths)
+                ok, detail = self._persist_or_abort(f"tool:{tool_name}")
+                if not ok:
+                    skip_text = (
+                        f"未执行：调用 {tool_name} 之前会话状态落盘失败（{detail}），"
+                        "为避免崩溃后重复副作用已跳过本次调用。请检查存储后端后重试。"
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": skip_text,
+                        }
+                    )
+                    session.agent_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": skip_text,
+                        }
+                    )
+                    synced_session_message_count = len(session.agent_messages)
+                    if not _is_system_trigger:
+                        session.chat_history.append(
+                            {
+                                "role": "tool",
+                                "content": skip_text,
+                                "tool_call_id": tool_call_id,
+                                "tool_name": tool_name,
+                                "tool_args": arguments,
+                                "tool_status": "error",
+                            }
+                        )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={"name": tool_name, "result": skip_text, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
+                    continue
                 effective_tm = self.team_manager or getattr(session, "_team_manager", None)
                 meta_only_names, meta_dispatch = _resolve_meta_tool_dispatchers()
                 if tool_name in meta_only_names:

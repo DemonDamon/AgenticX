@@ -76,7 +76,7 @@ from agenticx.cli.agent_tools import (
     _code_search_tool_defs,
     merge_computer_use_tools_into,
 )
-from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
+from agenticx.runtime.meta_tools import META_LEADER_LABEL_SCRATCH_KEY, visible_meta_agent_tools
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
 from agenticx.runtime.group_router import (
@@ -3270,10 +3270,7 @@ def create_studio_app() -> FastAPI:
         clear_stale_unattended_failure(session)
 
         def _mid_turn_persist_cb() -> None:
-            try:
-                manager.incremental_persist(payload.session_id)
-            except Exception:
-                pass
+            manager.incremental_persist(payload.session_id)
 
         try:
             runtime = AgentRuntime(
@@ -3376,15 +3373,15 @@ def create_studio_app() -> FastAPI:
             _blocked = {"schedule_task", "list_scheduled_tasks", "cancel_scheduled_task", "delegate_to_avatar"}
             effective_tools_source: list = [
                 t
-                for t in META_AGENT_TOOLS
+                for t in visible_meta_agent_tools()
                 if t.get("function", {}).get("name") not in _blocked
             ]
         elif is_avatar_session:
             effective_tools_source = [
-                t for t in META_AGENT_TOOLS if t.get("function", {}).get("name") != "delegate_to_avatar"
+                t for t in visible_meta_agent_tools() if t.get("function", {}).get("name") != "delegate_to_avatar"
             ]
         else:
-            effective_tools_source = list(META_AGENT_TOOLS)
+            effective_tools_source = list(visible_meta_agent_tools())
         effective_tools_source = merge_computer_use_tools_into(effective_tools_source)
         effective_tools_source = _strip_disabled_web_search_tools(effective_tools_source)
         effective_tools_source = _maybe_inject_code_search_tools(
@@ -4256,7 +4253,7 @@ def create_studio_app() -> FastAPI:
             loop_avatar_cfg = avatar_registry.get_avatar(loop_avatar_id)
             if loop_avatar_cfg is not None:
                 loop_avatar_tools_enabled = _sanitize_tools_enabled(loop_avatar_cfg.tools_enabled)
-        loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(META_AGENT_TOOLS)
+        loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(visible_meta_agent_tools())
         loop_tools_source = merge_computer_use_tools_into(loop_tools_source)
         loop_tools_source = _strip_disabled_web_search_tools(loop_tools_source)
         loop_tools_source = _maybe_inject_code_search_tools(
@@ -5268,7 +5265,7 @@ def create_studio_app() -> FastAPI:
             "liteparse": "document",
             "list_data_sources": "data_source", "query_data_source": "data_source",
             "schedule_task": "scheduling", "list_scheduled_tasks": "scheduling", "cancel_scheduled_task": "scheduling",
-            "spawn_subagent": "meta", "cancel_subagent": "meta", "retry_subagent": "meta",
+            "spawn_subagent": "meta", "fresh_round_loop": "meta", "cancel_subagent": "meta", "retry_subagent": "meta",
             "query_subagent_status": "meta", "check_resources": "meta", "recommend_subagent_model": "meta",
             "list_skills": "meta", "list_mcps": "meta",
             "send_bug_report_email": "meta", "update_email_config": "meta",
@@ -5289,8 +5286,8 @@ def create_studio_app() -> FastAPI:
                 "is_meta": name in META_TOOL_NAMES,
             })
         from agenticx.cli.agent_tools import COMPUTER_USE_TOOLS, computer_use_config_enabled
-        from agenticx.runtime.meta_tools import META_AGENT_TOOLS
-        for tool in META_AGENT_TOOLS:
+        from agenticx.runtime.meta_tools import visible_meta_agent_tools
+        for tool in visible_meta_agent_tools():
             fn = tool.get("function", {})
             name = fn.get("name", "")
             if not name or name in seen:

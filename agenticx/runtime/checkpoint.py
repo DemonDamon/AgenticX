@@ -7,14 +7,14 @@ but not yet answered, and the confirm-gate state. Checkpoints persist through
 the session storage backend's agent-state channel (Plan A), so they are
 shareable across replicas when the redis backend is configured.
 
-Resume semantics: the restored context is passed through
-``_sanitize_context_messages`` (dangling assistant tool_calls are stripped by
-the sanitizer, keeping provider-required tool-call pairing intact), a
-``[系统通知]`` resume hint is fed as the turn input (not persisted to
-chat_history per the established system-trigger convention), and the round
-loop continues at ``checkpoint.round_idx + 1``. Pending tools are NOT
-re-executed: re-running side-effecting tools after a crash could duplicate
-effects, and the sanitizer already guarantees a legal context.
+Resume semantics: interrupted closer rows are synthesized first (unpaired
+tool_calls become explicit 「未开始」or 「结果未知」tool results), then the
+restored context is passed through ``_sanitize_context_messages`` so
+provider-required pairing stays intact. A ``[系统通知]`` resume hint is fed
+as the turn input (not persisted to chat_history per the established
+system-trigger convention), and the round loop continues at
+``checkpoint.round_idx + 1``. Pending tools are NOT re-executed: re-running
+side-effecting tools after a crash could duplicate effects.
 
 Author: Damon Li
 """
@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 
 RESUME_SYSTEM_HINT = (
     "[系统通知] 本会话从运行时崩溃/中断中恢复。此前已完成的工具调用轮次与结果"
-    "已保留在上下文中；被中断轮次的未完成工具调用已从上下文中移除。"
+    "已保留在上下文中；被中断轮次的工具调用已在上下文中标注为「未开始」或「结果未知」。"
+    "对标注为结果未知的写入类操作，先核验外部状态再决定是否重做。"
     "请基于现有上下文继续未完成的任务，不要重复已完成的步骤。"
 )
 

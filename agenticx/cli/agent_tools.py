@@ -2423,6 +2423,7 @@ async def _tool_desktop_keyboard_type(
 
 META_TOOL_NAMES = {
     "spawn_subagent",
+    "fresh_round_loop",
     "cancel_subagent",
     "retry_subagent",
     "query_subagent_status",
