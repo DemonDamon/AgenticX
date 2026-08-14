@@ -1206,7 +1206,6 @@ describe("recon cold-start", () => {
       [{ question: "子问", citations: [{ index: 2, title: "B", url: "https://b.com", snippet: "sb" }] }],
       [{ index: 1, title: "背景", url: "https://recon.example/v4", snippet: "sa" }],
     );
-    expect(pack).toContain("## 背景侦查");
     expect(pack).toContain("[1] 背景");
     expect(pack).toContain("[2] B");
   });
@@ -1571,7 +1570,9 @@ describe("formatEvidencePack / formatSourcesAppendix", () => {
     );
     expect(pack).toContain("研究主题：主题");
     expect(pack).toContain("[1] A");
-    expect(pack).toContain("摘要：sa");
+    expect(pack).toContain("搜索摘要：sa");
+    expect(pack).toContain('source="public_web"');
+    expect(pack).toContain("不可信证据数据");
     expect(pack).toContain("证据覆盖提醒：当前仅 1 个来源域名");
     expect(formatSourcesAppendix(citations)).toContain("**来源**");
   });
@@ -1626,8 +1627,8 @@ describe("formatEvidencePack / formatSourcesAppendix", () => {
       { topic: "主题", complexity: "moderate", subQuestions: ["子问"] },
       [{ question: "子问", citations }],
     );
-    expect(pack).toContain("正文节选：这是抓取到的全文内容");
-    expect(pack).not.toContain("摘要：sa");
+    expect(pack).toContain("正文相关片段：这是抓取到的全文内容");
+    expect(pack).not.toContain("搜索摘要：sa");
   });
 });
 

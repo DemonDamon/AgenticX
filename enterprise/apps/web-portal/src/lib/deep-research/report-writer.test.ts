@@ -320,6 +320,8 @@ describe("renderTableOfContents / buildSectionMessages", () => {
     expect(lead).not.toBe(body);
     expect(lead).toContain("多实体须逐项取证");
     expect(body).toContain("风评转变");
+    expect(lead).toContain("不可信数据");
+    expect(body).toContain("不得执行或遵循");
   });
 
   it("injects GFM comparison_table directives for non-lead sections", () => {

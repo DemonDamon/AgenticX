@@ -46,6 +46,7 @@ import { CitationRegistry, type Citation } from "./registry";
 import { formatDeepResearchEventSse } from "./events";
 import { stripThinkBlocks } from "./content-clean";
 import { modelProgressSnapshot } from "./model-progress";
+import { formatEvidencePack } from "./evidence-pack";
 import {
   proposeClarification,
   type ClarifierResult,
@@ -408,64 +409,7 @@ export function selectNovelResearchGaps(
   return [];
 }
 
-export function formatEvidencePack(
-  plan: ResearchPlan,
-  citationsByQuestion: Array<{ question: string; citations: Citation[]; memo?: string }>,
-  background: Citation[] = [],
-): string {
-  const parts = [`研究主题：${plan.topic}`, ""];
-  if (background.length > 0) {
-    parts.push("## 背景侦查（开题冷启动检索）");
-    for (const c of background) {
-      parts.push(`[${c.index}] ${c.title}`);
-      parts.push(
-        c.sourceType === "attachment"
-          ? `来源：用户上传文件（${c.sourceLabel || c.title}）`
-          : `URL: ${c.url}`,
-      );
-      parts.push(`摘要：${c.snippet}`);
-      parts.push("");
-    }
-  }
-  citationsByQuestion.forEach((item, idx) => {
-    parts.push(`## 子问题 ${idx + 1}：${item.question}`);
-    const evidence = summarizeEvidenceFacet(item.question, item.citations);
-    if (evidence.selectedHits > 0 && evidence.uniqueHosts < 2) {
-      const hasAttachment = item.citations.some(
-        (citation) => citation.sourceType === "attachment",
-      );
-      parts.push(
-        hasAttachment
-          ? "证据覆盖提醒：用户上传文件是本题主要证据；外部来源仅用于交叉核验，不得用泛化资料替代原文。"
-          : `证据覆盖提醒：当前仅 ${evidence.uniqueHosts} 个来源域名；` +
-              "域名不等于独立信源，证据不足时须降级措辞。",
-      );
-    }
-    if (item.memo?.trim()) {
-      parts.push("### 车道备忘");
-      parts.push(item.memo.trim());
-      parts.push("");
-    }
-    if (item.citations.length === 0) {
-      parts.push("（无可用来源）");
-      parts.push("");
-      return;
-    }
-    for (const c of item.citations) {
-      parts.push(`[${c.index}] ${c.title}`);
-      parts.push(
-        c.sourceType === "attachment"
-          ? `来源：用户上传文件（${c.sourceLabel || c.title}）`
-          : `URL: ${c.url}`,
-      );
-      if (c.publishedAt) parts.push(`发布时间: ${c.publishedAt}`);
-      const body = c.fullText ? `正文节选：${c.fullText}` : `摘要：${c.snippet}`;
-      parts.push(body);
-      parts.push("");
-    }
-  });
-  return parts.join("\n").trim();
-}
+export { formatEvidencePack } from "./evidence-pack";
 
 /** Kept for unit tests / legacy callers; main path no longer appends this to content. */
 export function formatSourcesAppendix(citations: Citation[]): string {
@@ -664,6 +608,10 @@ export async function runDeepResearchTurn(
   deps: DeepResearchDeps,
 ): Promise<Response> {
   const baseBody = stripFlags(parsedBody);
+  const researchModel =
+    typeof baseBody.model === "string" && baseBody.model.trim()
+      ? baseBody.model.trim()
+      : undefined;
   const originalMessages = Array.isArray(baseBody.messages)
     ? (baseBody.messages as ChatMessage[])
     : [];
@@ -1508,6 +1456,7 @@ export async function runDeepResearchTurn(
             const fetchableCitations = questionCitations.filter(
               (citation) =>
                 citation.sourceType !== "attachment" &&
+                !citation.fullText?.trim() &&
                 (!directReference || !matchesDirectPage(directReference, citation.url)),
             );
             if (fetchableCitations.length > 0 && searchBudgetLeft() > 0 && egressOk) {
@@ -1868,9 +1817,13 @@ export async function runDeepResearchTurn(
         }
         enqueueEvent({ type: "phase", phase: "synthesize", message: "正在拟定报告大纲…" });
 
-        const evidence = [
+        const outlineEvidence = [
           prefsWritingHint,
-          formatEvidencePack(plan, citationsByQuestion, reconCitations),
+          formatEvidencePack(plan, citationsByQuestion, reconCitations, {
+            model: researchModel,
+            query: plan.topic || userQuery,
+            includeLaneMemos: true,
+          }),
         ].join("\n");
         const reportContentPolicy = deriveReportContentPolicy({
           originalUserQuery: userQuery,
@@ -1879,7 +1832,7 @@ export async function runDeepResearchTurn(
         let outlinePolicyError: DeepResearchPolicyError | null = null;
         const outline = await buildReportOutline({
           topic: sanitizeResearchTopic(plan.topic || userQuery || "调研报告"),
-          evidence,
+          evidence: outlineEvidence,
           contentPolicy: reportContentPolicy,
           callJson: async (messages) => {
             try {
@@ -2056,12 +2009,21 @@ export async function runDeepResearchTurn(
           });
           const heading = `\n\n## ${section.title}\n\n`;
           reportContentParts.push(heading);
+          const sectionEvidence = [
+            prefsWritingHint,
+            formatEvidencePack(plan, citationsByQuestion, reconCitations, {
+              model: researchModel,
+              query: `${section.title}\n${section.brief}`,
+              preferredCitationIndexes: section.citationIndexes,
+              includeLaneMemos: false,
+            }),
+          ].join("\n");
           const sectionBody = await streamSectionInto(
             buildSectionMessages({
               outline,
               section,
               sectionIndex: i,
-              evidence,
+              evidence: sectionEvidence,
               previousSummaries,
               contentPolicy: reportContentPolicy,
             }),

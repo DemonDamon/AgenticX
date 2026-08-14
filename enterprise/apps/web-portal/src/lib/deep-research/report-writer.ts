@@ -4,6 +4,7 @@
  */
 
 import { EVIDENCE_DISCIPLINE_HINT } from "../retrieval/evidence-discipline";
+import { UNTRUSTED_EVIDENCE_SYSTEM_HINT } from "./evidence-pack";
 import { parseLlmJson } from "./llm-json";
 
 export const MIN_SECTIONS = 5;
@@ -104,6 +105,7 @@ const OUTLINE_SYSTEM = [
   "中间章节按证据选择形态：对比/选型/竞品至少 1 节 comparison_table；演进/版本/时间节点至少 1 节 timeline；架构/关系/流程可用 1 节 mermaid。",
   "全篇中间节不得全部为 prose（至少 1 节为 comparison_table / timeline / mermaid / tradeoff 之一）。",
   "citation_indexes 只能引用证据包中真实存在的编号。",
+  UNTRUSTED_EVIDENCE_SYSTEM_HINT,
   "使用与用户提问相同的语言。",
 ].join("\n");
 
@@ -111,6 +113,7 @@ const SECTION_SYSTEM = [
   "你是深度研究报告分节写作助手。只写当前这一节的正文，不要重复输出标题，不要写其它章节内容。",
   `目标篇幅 ≥ ${SECTION_TARGET_CHARS} 字：展开论证、给出具体数字与机制细节，禁止空话凑字。`,
   "每条事实必须以 [N] 标注，N 必须在证据包中存在，禁止编造编号。",
+  UNTRUSTED_EVIDENCE_SYSTEM_HINT,
   EVIDENCE_DISCIPLINE_HINT,
   "禁止介绍内部搜索次数、来源置信度、信息缺口清单、检索过程或第一条资料是否可信。",
   "证据不足时缩小断言范围；真正影响结论的限定条件须放在对应结论旁，不得另写检索自评。",
@@ -125,6 +128,7 @@ const LEAD_SECTION_SYSTEM = [
   "本节是全文结论摘要，不是综述：用 4–8 条要点式结论呈现最关键判断，每条 1–3 句。",
   "目标篇幅 400–800 字，禁止展开机制细节与背景铺陈——那些属于后续分项分析章节。",
   "每条结论必须以 [N] 标注支撑证据，N 必须在证据包中存在，禁止编造编号。",
+  UNTRUSTED_EVIDENCE_SYSTEM_HINT,
   EVIDENCE_DISCIPLINE_HINT,
   "禁止把内部来源置信度、信息缺口清单或检索过程当作结论；必要限定条件只在其影响的结论中就近说明。",
   "只输出本节 Markdown 正文，不要重复输出标题。",
