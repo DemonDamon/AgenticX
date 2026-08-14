@@ -48,9 +48,11 @@ import {
   formatHits,
   primaryWebSearchProvider,
   WEB_SEARCH_MAX_RESULTS_CAP,
+  type WebSearchExecutionDiagnostics,
   type WebSearchHit,
   type WebSearchRuntimeConfig,
 } from "./providers";
+import { isTenantDailySearchProviderQuotaExceeded } from "./daily-provider-quota";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
 import { rerankHits } from "./rerank";
 import {
@@ -170,6 +172,11 @@ export type GatewayFetchDeps = {
   signal?: AbortSignal;
   loadTenantConfig?: () => Promise<TenantWebSearchRow>;
   executeSearch?: typeof executeWebSearch;
+  /**
+   * Tenant daily provider-call gate, awaited immediately before every real
+   * outbound search (primary and failover alike). Rejecting aborts the turn.
+   */
+  reserveProviderCall?: () => Promise<void>;
   /** Test seam; production reuses page-fetch through readDirectPage. */
   readPage?: typeof readDirectPage;
 };
@@ -905,7 +912,10 @@ async function executeOrdinarySearchPlan(
   queries: string[],
   cfg: WebSearchRuntimeConfig,
   searchFn: typeof executeWebSearch,
-  options: { acceptHit?: (hit: WebSearchHit) => boolean } = {},
+  options: {
+    acceptHit?: (hit: WebSearchHit) => boolean;
+    reserveProviderCall?: () => Promise<void>;
+  } = {},
 ): Promise<{
   groups: WebSearchHit[][];
   providerCalls: number;
@@ -923,6 +933,9 @@ async function executeOrdinarySearchPlan(
   let callsUsed = 0;
   let retryTrace: NonNullable<WebSearchTracePayload["retry"]> | undefined;
   const providerIdsByQuery = boundedQueries.map(() => [primary.id]);
+  const admission: WebSearchExecutionDiagnostics | undefined = options.reserveProviderCall
+    ? { beforeProviderAttempt: () => options.reserveProviderCall!() }
+    : undefined;
 
   const groups = await Promise.all(
     boundedQueries.map(async (query) => {
@@ -932,9 +945,14 @@ async function executeOrdinarySearchPlan(
           query,
           maxResults,
           configForWebSearchProvider(cfg, primary),
+          undefined,
+          admission,
         );
         return options.acceptHit ? hits.filter(options.acceptHit) : hits;
       } catch (error) {
+        // A tenant quota block is not a provider fault: stop, do not degrade to
+        // an unsearched answer and do not spend the failover call.
+        if (isTenantDailySearchProviderQuotaExceeded(error)) throw error;
         console.warn(
           `[web-search] provider=${primary.id} query_chars=${query.length} failed:`,
           error instanceof Error ? error.message : error,
@@ -972,12 +990,15 @@ async function executeOrdinarySearchPlan(
           boundedQueries[retryIndex]!,
           maxResults,
           configForWebSearchProvider(cfg, alternative),
+          undefined,
+          admission,
         );
         const complement = options.acceptHit ? fetched.filter(options.acceptHit) : fetched;
         groups[retryIndex] = current.length === 0
           ? complement
           : mergeSearchHits(current, complement);
       } catch (error) {
+        if (isTenantDailySearchProviderQuotaExceeded(error)) throw error;
         console.warn(
           `[web-search] retry provider=${alternative.id} failed:`,
           error instanceof Error ? error.message : error,
@@ -1280,6 +1301,7 @@ export async function runWebSearchTurn(
           : undefined;
       const planResult = await executeOrdinarySearchPlan(searchQueries, cfg, searchFn, {
         ...(exactDocumentFallback ? { acceptHit: exactDocumentFallback } : {}),
+        ...(deps.reserveProviderCall ? { reserveProviderCall: deps.reserveProviderCall } : {}),
       });
       providerCalls = planResult.providerCalls;
       providerIdsByQuery = planResult.providerIdsByQuery;
@@ -1300,6 +1322,9 @@ export async function runWebSearchTurn(
         console.warn("[web-search] search failed, degrading: no usable hits");
       }
     } catch (error) {
+      // Never degrade a quota block into a search-free answer — the caller turns
+      // this into a 429 so the user knows why the web was not consulted.
+      if (isTenantDailySearchProviderQuotaExceeded(error)) throw error;
       searchFailed = true;
       console.warn(
         "[web-search] search failed, degrading:",

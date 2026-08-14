@@ -17,6 +17,8 @@ export * from "./chat-attachments";
 export * from "./chat-share-snapshots";
 export * from "./deep-research-runs";
 
+export * from "./web-search-quota";
+
 export * from "./runtime-config";
 export * from "./gateway-channels";
 export * from "./api-tokens";

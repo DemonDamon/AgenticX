@@ -21,6 +21,13 @@ import {
   MAX_MAX_DEEP_RESEARCH_PROVIDER_CALLS,
   MIN_MAX_DEEP_RESEARCH_PROVIDER_CALLS,
 } from "../../../../../../web-portal/src/lib/deep-research/budget-ledger";
+import {
+  getTenantDailySearchProviderQuota,
+  isValidMaxDailySearchProviderCalls,
+  MAX_DAILY_SEARCH_PROVIDER_CALLS,
+  MIN_DAILY_SEARCH_PROVIDER_CALLS,
+  setTenantDailySearchProviderLimit,
+} from "../../../../../../web-portal/src/lib/web-search/daily-provider-quota";
 
 function badRequest(message: string): Response {
   return NextResponse.json(
@@ -69,8 +76,15 @@ export async function GET() {
   if (!auth.ok) return auth.response;
 
   try {
-    const data = await getPublicWebSearchConfig(auth.session.tenantId);
-    return NextResponse.json({ code: "00000", message: "ok", data });
+    const [data, dailyProviderQuota] = await Promise.all([
+      getPublicWebSearchConfig(auth.session.tenantId),
+      getTenantDailySearchProviderQuota(auth.session.tenantId),
+    ]);
+    return NextResponse.json({
+      code: "00000",
+      message: "ok",
+      data: { ...data, dailyProviderQuota },
+    });
   } catch (error) {
     return NextResponse.json(
       {
@@ -120,6 +134,14 @@ export async function PUT(request: Request) {
     );
   }
   if (
+    body.maxDailySearchProviderCalls !== undefined &&
+    !isValidMaxDailySearchProviderCalls(body.maxDailySearchProviderCalls)
+  ) {
+    return badRequest(
+      `每日搜索调用上限必须为 ${MIN_DAILY_SEARCH_PROVIDER_CALLS} 到 ${MAX_DAILY_SEARCH_PROVIDER_CALLS} 之间的整数`,
+    );
+  }
+  if (
     body.apiKey !== undefined &&
     (typeof body.apiKey !== "string" ||
       body.apiKey.length > 8_192 ||
@@ -149,7 +171,19 @@ export async function PUT(request: Request) {
           : undefined,
       providers,
     });
-    return NextResponse.json({ code: "00000", message: "ok", data });
+    // The limit lives in its own row; setting it never clears today's counter.
+    if (body.maxDailySearchProviderCalls !== undefined) {
+      await setTenantDailySearchProviderLimit(
+        auth.session.tenantId,
+        body.maxDailySearchProviderCalls as number,
+      );
+    }
+    const dailyProviderQuota = await getTenantDailySearchProviderQuota(auth.session.tenantId);
+    return NextResponse.json({
+      code: "00000",
+      message: "ok",
+      data: { ...data, dailyProviderQuota },
+    });
   } catch (error) {
     if (error instanceof WebSearchConfigValidationError) {
       return badRequest(error.message);

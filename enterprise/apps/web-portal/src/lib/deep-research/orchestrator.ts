@@ -10,6 +10,7 @@ import {
   type WebSearchHit,
   type WebSearchRuntimeConfig,
 } from "../web-search/providers";
+import { isTenantDailySearchProviderQuotaExceeded } from "../web-search/daily-provider-quota";
 import {
   resolvePageFetchConfig,
   resolveDeepResearchProviderCallLimit,
@@ -289,6 +290,11 @@ export type DeepResearchDeps = {
   totalBudgetMs?: number;
   /** Optional request-scoped hard call ledger (tests/custom runners). */
   budgetLedger?: DeepResearchBudgetLedger;
+  /**
+   * Tenant daily provider-call gate, awaited after the per-run ledger reserved
+   * its own slot and immediately before every real outbound search.
+   */
+  reserveProviderCall?: () => Promise<void>;
   /**
    * Optional: mint a fresh access JWT before synthesize (outline + sections).
    * Long retrieve can outlive the 1h cookie captured at request start.
@@ -761,6 +767,16 @@ export async function runDeepResearchTurn(
         signal: runSignal,
         budgetLedger,
       };
+      /**
+       * Single admission point for every outbound provider call in this run:
+       * the per-run ledger first (cheap, local), then the tenant daily gate.
+       * Both throw, and both sit outside the provider try/catch so a rejection
+       * stops failover instead of looking like a provider fault.
+       */
+      const admitProviderCall = async (): Promise<void> => {
+        budgetLedger.consume("providerCalls");
+        await deps.reserveProviderCall?.();
+      };
       let transportClosed = Boolean(transportSignal?.aborted);
       transportSignal?.addEventListener(
         "abort",
@@ -995,9 +1011,10 @@ export async function runDeepResearchTurn(
               fetchImpl: deps.fetchImpl,
               signal: runSignal,
               timeoutMs: RECON_TIMEOUT_MS,
-              beforeProviderAttempt: () => budgetLedger.consume("providerCalls"),
+              beforeProviderAttempt: admitProviderCall,
             });
-          } catch {
+          } catch (error) {
+            if (isTenantDailySearchProviderQuotaExceeded(error)) throw error;
             recon = { brief: "", hits: [] };
           }
         }
@@ -1424,8 +1441,7 @@ export async function runDeepResearchTurn(
                       deps.fetchImpl,
                       {
                         signal: runSignal,
-                        beforeProviderAttempt: () =>
-                          budgetLedger.consume("providerCalls"),
+                        beforeProviderAttempt: admitProviderCall,
                         onProviderAttempt: ({ providerId }) => {
                           if (providerIds.length < 2 && !providerIds.includes(providerId)) {
                             providerIds.push(providerId);
@@ -1445,6 +1461,8 @@ export async function runDeepResearchTurn(
                       pool.add(hit, variant.query);
                     }
                   } catch (error) {
+                    // Tenant-wide gate: nothing later in this run can succeed.
+                    if (isTenantDailySearchProviderQuotaExceeded(error)) throw error;
                     if (isDeepResearchBudgetExceeded(error, "providerCalls")) {
                       if (providerIds.length > 0) variantFailures += 1;
                       queryTrace[variantIndex] = {
@@ -1768,6 +1786,7 @@ export async function runDeepResearchTurn(
           } catch (error) {
             if (error instanceof DOMException && error.name === "AbortError") throw error;
             if (error instanceof DeepResearchPolicyError) throw error;
+            if (isTenantDailySearchProviderQuotaExceeded(error)) throw error;
             searchFailures += 1;
             console.warn(
               "[deep-research] lane failed:",
@@ -2451,6 +2470,19 @@ export async function runDeepResearchTurn(
             { status: "cancelled", phase: "done" },
           );
           await persistFinish("cancelled");
+          safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
+          safeClose();
+          return;
+        }
+        if (isTenantDailySearchProviderQuotaExceeded(error)) {
+          // Same terminal wording as ordinary search; stop before any further
+          // provider or fallback request goes out.
+          enqueueDelta(`\n\n${error.userMessage}`);
+          enqueueEvent(
+            { type: "phase", phase: "done", message: "今日联网搜索额度已用完" },
+            { status: "failed", phase: "done" },
+          );
+          await persistFinish("failed", error.userMessage);
           safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
           safeClose();
           return;

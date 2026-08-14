@@ -27,6 +27,7 @@ import type { Citation } from "./registry";
 import { emptyFetchStats } from "../web-search/page-fetch";
 import { directFetch } from "../web-search/direct-fetch";
 import type { executeWebSearch } from "../web-search/providers";
+import { TenantDailySearchProviderQuotaError } from "../web-search/daily-provider-quota";
 import type { DirectPageView } from "../web-search/direct-page";
 import { MAX_FOLLOWUP_QUERIES, MAX_REFLECT_ROUNDS } from "./reflector";
 import { DeepResearchBudgetLedger } from "./budget-ledger";
@@ -683,6 +684,59 @@ describe("runDeepResearchTurn", () => {
     const { text, events } = await readSsePayload(response);
     expect(text).toContain(DEEP_RESEARCH_SEARCH_FAILED);
     expect(events.some((e) => e.type === "phase" && e.phase === "done")).toBe(true);
+  });
+
+  it("stops the whole run when the tenant daily search quota is exhausted", async () => {
+    const runStore = createMemoryRunStore();
+    const plan: ResearchPlan = { topic: "T", complexity: "simple", subQuestions: ["a", "b"] };
+    const adapterCalls = vi.fn();
+    let allowed = 1;
+    const reserveProviderCall = vi.fn(async () => {
+      if (allowed <= 0) throw new TenantDailySearchProviderQuotaError("exhausted");
+      allowed -= 1;
+    });
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+        } as Response;
+      }
+      return synthUpstream("报告正文");
+    });
+
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "q" }] },
+      {
+        ...baseDeps({
+          runId: "run-daily-quota",
+          runStore,
+          reserveProviderCall,
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          buildPlan: async () => plan,
+          executeSearch: async (
+            ..._args: ExecuteSearchArgs
+          ): Promise<Awaited<ReturnType<typeof executeWebSearch>>> => {
+            const diagnostics = _args[4];
+            await diagnostics?.beforeProviderAttempt?.("primary");
+            adapterCalls();
+            return [{ title: "t", url: "https://ex.com/1", snippet: "s" }];
+          },
+        }),
+      },
+    );
+
+    const { text, events } = await readSsePayload(response);
+    expect(text).toContain("今日联网搜索额度已用完");
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "phase", phase: "done", message: "今日联网搜索额度已用完" }),
+    );
+    // Provider work stops at the gate; nothing runs after it closed.
+    expect(adapterCalls).toHaveBeenCalledTimes(1);
+    const run = await runStore.get("t1", "u1", "run-daily-quota");
+    expect(run?.status).toBe("failed");
+    expect(run?.errorMessage).toContain("今日联网搜索额度已用完");
   });
 
   it.each([

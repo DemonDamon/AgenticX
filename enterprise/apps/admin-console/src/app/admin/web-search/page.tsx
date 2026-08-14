@@ -29,6 +29,17 @@ import { orderSearchProvidersByRole } from "./provider-roles";
 const MAX_PROVIDER_POOL_SIZE = 2;
 const SEARCH_CALL_OPTIONS = [1, 2, 3, 4, 5] as const;
 const DEEP_RESEARCH_PROVIDER_CALL_OPTIONS = [6, 12, 18, 24, 32, 40, 48, 60] as const;
+const MAX_DAILY_SEARCH_PROVIDER_CALLS = 1_000_000;
+
+function isValidDailyLimit(draft: string): boolean {
+  const value = Number(draft.trim());
+  return (
+    draft.trim() !== "" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= MAX_DAILY_SEARCH_PROVIDER_CALLS
+  );
+}
 
 type PublicSearchProvider = {
   id: string;
@@ -48,6 +59,14 @@ type PublicSearchAdapter = {
   defaultEndpoint?: string;
 };
 
+type DailyProviderQuota = {
+  usageDay: string;
+  limit: number;
+  used: number;
+  remaining: number | null;
+  unlimited: boolean;
+};
+
 type WebSearchConfig = {
   enabled: boolean;
   provider: string;
@@ -55,6 +74,7 @@ type WebSearchConfig = {
   deepResearchEnabled: boolean;
   maxSearchCalls: number;
   maxDeepResearchProviderCalls: number;
+  dailyProviderQuota: DailyProviderQuota;
   providers: PublicSearchProvider[];
   availableAdapters: PublicSearchAdapter[];
 };
@@ -105,6 +125,7 @@ export default function WebSearchSettingsPage() {
   const [newName, setNewName] = useState("");
   const [newEndpoint, setNewEndpoint] = useState("");
   const [newApiKey, setNewApiKey] = useState("");
+  const [dailyLimitDraft, setDailyLimitDraft] = useState("");
 
   const selectedAdapter = useMemo(
     () => config?.availableAdapters.find((adapter) => adapter.id === newAdapter),
@@ -131,6 +152,7 @@ export default function WebSearchSettingsPage() {
       }
       setConfig(payload.data);
       setKeyDrafts({});
+      setDailyLimitDraft(String(payload.data.dailyProviderQuota?.limit ?? 0));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("toast.loadFailed"));
     } finally {
@@ -159,6 +181,7 @@ export default function WebSearchSettingsPage() {
         throw new Error(payload.message ?? t("toast.saveFailed"));
       }
       setConfig(payload.data);
+      setDailyLimitDraft(String(payload.data.dailyProviderQuota?.limit ?? 0));
       toast.success(t("toast.saved"));
       return true;
     } catch (error) {
@@ -250,7 +273,7 @@ export default function WebSearchSettingsPage() {
           </CardTitle>
           <CardDescription>{t("policyDescription")}</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <div className="flex items-center justify-between rounded-lg border p-4">
             <div>
               <Label>{t("enabled")}</Label>
@@ -316,6 +339,46 @@ export default function WebSearchSettingsPage() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-2 rounded-lg border p-4">
+            <Label htmlFor="daily-search-provider-limit">
+              {t("maxDailySearchProviderCalls")}
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              {t("maxDailySearchProviderCallsHint")}
+            </p>
+            <div className="flex items-center gap-2">
+              <Input
+                id="daily-search-provider-limit"
+                type="number"
+                min={0}
+                max={MAX_DAILY_SEARCH_PROVIDER_CALLS}
+                step={1}
+                className="w-full"
+                value={dailyLimitDraft}
+                disabled={!config || loading || saving}
+                onChange={(event) => setDailyLimitDraft(event.target.value)}
+              />
+              <Button
+                variant="outline"
+                disabled={!config || loading || saving || !isValidDailyLimit(dailyLimitDraft)}
+                onClick={() =>
+                  void save({ maxDailySearchProviderCalls: Number(dailyLimitDraft) })
+                }
+              >
+                {t("saveDailySearchProviderLimit")}
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {config?.dailyProviderQuota?.unlimited ?? true
+                ? t("dailySearchProviderUsageUnlimited", {
+                    used: config?.dailyProviderQuota?.used ?? 0,
+                  })
+                : t("dailySearchProviderUsage", {
+                    used: config?.dailyProviderQuota?.used ?? 0,
+                    limit: config?.dailyProviderQuota?.limit ?? 0,
+                  })}
+            </p>
           </div>
         </CardContent>
       </Card>

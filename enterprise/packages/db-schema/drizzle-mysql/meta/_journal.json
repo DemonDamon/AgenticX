@@ -141,6 +141,13 @@
       "when": 1786780800001,
       "tag": "0019_deep_research_run_coordination",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1786867200001,
+      "tag": "0020_web_search_daily_provider_quota",
+      "breakpoints": true
     }
   ]
 }

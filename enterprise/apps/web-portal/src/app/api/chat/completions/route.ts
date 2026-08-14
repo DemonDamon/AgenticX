@@ -29,6 +29,10 @@ import {
   loadTenantWebSearchConfig,
   loadTenantWebSearchConfigStrict,
 } from "../../../../lib/web-search/tenant-config";
+import {
+  isTenantDailySearchProviderQuotaExceeded,
+  reserveTenantDailySearchProviderCall,
+} from "../../../../lib/web-search/daily-provider-quota";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
 import {
@@ -372,6 +376,7 @@ export async function POST(request: Request) {
       sessionId: chatSessionId,
       resolvedUserQuery: turnPlan.researchQuery,
       intentConfidence: turnPlan.intentConfidence,
+      reserveProviderCall: () => reserveTenantDailySearchProviderCall(session.tenantId),
       refreshAccessToken: async () => {
         if (!refreshToken) return null;
         try {
@@ -415,12 +420,21 @@ export async function POST(request: Request) {
           headers: gatewayHeaders,
           signal: request.signal,
           loadTenantConfig: loadTenantSearchConfigForWeb,
+          reserveProviderCall: () => reserveTenantDailySearchProviderCall(session.tenantId),
         },
         turnPlan.searchPlan
           ? { preparedSearchPlan: turnPlan.searchPlan }
           : {},
       );
     } catch (error) {
+      if (isTenantDailySearchProviderQuotaExceeded(error)) {
+        // Never fall through to a search-free model answer: the user asked for
+        // the web, and the tenant gate is the reason they did not get it.
+        return NextResponse.json(
+          { error: { code: error.reason === "exhausted" ? "42903" : "50302", message: error.userMessage } },
+          { status: error.reason === "exhausted" ? 429 : 503 },
+        );
+      }
       const detail = error instanceof Error ? error.message : "web search turn failed";
       return NextResponse.json(
         {

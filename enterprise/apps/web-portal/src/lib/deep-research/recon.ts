@@ -12,6 +12,7 @@ import {
   type WebSearchHit,
   type WebSearchRuntimeConfig,
 } from "../web-search/providers";
+import { isTenantDailySearchProviderQuotaExceeded } from "../web-search/daily-provider-quota";
 
 export const RECON_RESULTS = 5;
 export const RECON_SNIPPET_CHARS = 220;
@@ -106,7 +107,10 @@ export async function runRecon(deps: ReconDeps): Promise<ReconResult> {
     if (!Array.isArray(hits)) return empty;
     const capped = hits.slice(0, RECON_RESULTS);
     return { brief: buildReconBrief(capped), hits: capped };
-  } catch {
+  } catch (error) {
+    // The tenant daily gate is the one failure recon must not swallow: every
+    // later lane would hit the same wall, so the run has to stop now.
+    if (isTenantDailySearchProviderQuotaExceeded(error)) throw error;
     // Recon is an enhancement: never fail the run because cold-start search broke.
     return empty;
   } finally {

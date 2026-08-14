@@ -12,6 +12,10 @@ import {
   withSearchContext,
 } from "../tool-loop";
 import { executeWebSearch, type WebSearchHit } from "../providers";
+import {
+  isTenantDailySearchProviderQuotaExceeded,
+  TenantDailySearchProviderQuotaError,
+} from "../daily-provider-quota";
 import { readDirectPage, type DirectPageView } from "../direct-page";
 
 type ExecuteSearchConfig = Parameters<typeof executeWebSearch>[2];
@@ -1652,6 +1656,147 @@ describe("web search tool loop", () => {
     expect(text).toContain('"providerIds":["primary","secondary"]');
   });
 
+  it("gates the primary and the failover call through the tenant daily quota", async () => {
+    const executeSearch = vi.fn(
+      async (
+        query: string,
+        _max: number | undefined,
+        cfg: ExecuteSearchConfig,
+        _fetchImpl?: typeof fetch,
+        diagnostics?: { beforeProviderAttempt?: (providerId: string) => void | Promise<void> },
+      ) => {
+        await diagnostics?.beforeProviderAttempt?.(cfg.primaryProviderId ?? "primary");
+        if (cfg.primaryProviderId === "secondary") {
+          return [{ title: "补充证据", url: "https://fallback.example/a", snippet: query }];
+        }
+        return [];
+      },
+    );
+    const reserveProviderCall = vi.fn(async () => undefined);
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [{ message: { content: JSON.stringify({ need_search: false }) } }],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "2026 年 8 月 AI 监管新规有哪些" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "bocha",
+          apiKey: "primary-key",
+          maxResults: 50,
+          providers: [
+            {
+              id: "primary",
+              adapter: "bocha",
+              displayName: "Primary",
+              apiKey: "primary-key",
+              enabled: true,
+              priority: 0,
+            },
+            {
+              id: "secondary",
+              adapter: "tavily",
+              displayName: "Secondary",
+              apiKey: "secondary-key",
+              enabled: true,
+              priority: 1,
+            },
+          ],
+        }),
+        executeSearch: executeSearch as unknown as typeof executeWebSearch,
+        reserveProviderCall,
+      },
+    );
+
+    // Primary attempt plus the failover attempt each reserve one call.
+    expect(reserveProviderCall).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops the turn instead of answering unsearched once the daily quota is gone", async () => {
+    const executeSearch = vi.fn(
+      async (
+        _query: string,
+        _max: number | undefined,
+        cfg: ExecuteSearchConfig,
+        _fetchImpl?: typeof fetch,
+        diagnostics?: { beforeProviderAttempt?: (providerId: string) => void | Promise<void> },
+      ) => {
+        await diagnostics?.beforeProviderAttempt?.(cfg.primaryProviderId ?? "primary");
+        return [];
+      },
+    );
+    const reserveProviderCall = vi.fn(async () => {
+      throw new TenantDailySearchProviderQuotaError("exhausted");
+    });
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [{ message: { content: JSON.stringify({ need_search: false }) } }],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    await expect(
+      runWebSearchTurn(
+        {
+          model: "m",
+          messages: [{ role: "user", content: "2026 年 8 月 AI 监管新规有哪些" }],
+          agenticx_web_search: true,
+        },
+        {
+          url: "http://gateway.test/v1/chat/completions",
+          headers: {},
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          loadTenantConfig: async () => ({
+            enabled: true,
+            provider: "bocha",
+            apiKey: "primary-key",
+            maxResults: 50,
+            providers: [
+              {
+                id: "primary",
+                adapter: "bocha",
+                displayName: "Primary",
+                apiKey: "primary-key",
+                enabled: true,
+                priority: 0,
+              },
+              {
+                id: "secondary",
+                adapter: "tavily",
+                displayName: "Secondary",
+                apiKey: "secondary-key",
+                enabled: true,
+                priority: 1,
+              },
+            ],
+          }),
+          executeSearch: executeSearch as unknown as typeof executeWebSearch,
+          reserveProviderCall,
+        },
+      ),
+    ).rejects.toSatisfy(isTenantDailySearchProviderQuotaExceeded);
+
+    // The failover attempt is never made once the gate is closed.
+    expect(reserveProviderCall).toHaveBeenCalledTimes(1);
+  });
+
   it("uses one- and two-call budgets without adding a fallback retry", async () => {
     const runWithBudget = async (maxSearchCalls: number) => {
       const attempted: Array<{ query: string; providerId?: string }> = [];
@@ -1893,6 +2038,8 @@ describe("web search tool loop", () => {
       "数学家 王虹 近期新闻",
       undefined,
       expect.anything(),
+      undefined,
+      undefined,
     );
     const text = await response.text();
     expect(text).toContain('"reason":"auto_route_search"');
@@ -1942,7 +2089,13 @@ describe("web search tool loop", () => {
       },
     );
 
-    expect(executeSearch).toHaveBeenCalledWith("王虹 最近怎么样", undefined, expect.anything());
+    expect(executeSearch).toHaveBeenCalledWith(
+      "王虹 最近怎么样",
+      undefined,
+      expect.anything(),
+      undefined,
+      undefined,
+    );
     expect(executeSearch.mock.calls[0]?.[0]).not.toContain("王虹是谁");
     const rewriteBody = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body ?? "{}")) as {
       stream?: boolean;
@@ -2006,6 +2159,8 @@ describe("web search tool loop", () => {
       "数学家 王虹 最近几天 新闻",
       undefined,
       expect.anything(),
+      undefined,
+      undefined,
     );
   });
 

@@ -567,6 +567,156 @@ describe("web search providers", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("awaits an async admission hook and counts primary plus failover attempts", async () => {
+    const search = vi.fn(async () => {
+      throw new Error("provider down");
+    });
+    registerWebSearchAdapter({
+      id: "test-admission-primary",
+      displayName: "Admission primary",
+      requiresApiKey: false,
+      search,
+    });
+    registerWebSearchAdapter({
+      id: "test-admission-secondary",
+      displayName: "Admission secondary",
+      requiresApiKey: false,
+      search,
+    });
+    let reserved = 0;
+    const reserve = vi.fn(async () => {
+      // Async gate: the provider request must not start before it settles.
+      await Promise.resolve();
+      reserved += 1;
+    });
+
+    await expect(
+      executeWebSearch(
+        "q",
+        5,
+        {
+          provider: "test-admission-primary",
+          apiKey: "",
+          maxResults: 5,
+          providers: [
+            {
+              id: "primary",
+              adapter: "test-admission-primary",
+              displayName: "Primary",
+              apiKey: "",
+              enabled: true,
+              priority: 0,
+            },
+            {
+              id: "secondary",
+              adapter: "test-admission-secondary",
+              displayName: "Secondary",
+              apiKey: "",
+              enabled: true,
+              priority: 1,
+            },
+          ],
+        },
+        undefined,
+        { beforeProviderAttempt: reserve },
+      ),
+    ).rejects.toThrow("provider down");
+
+    // Both the failed primary attempt and the failover attempt are metered.
+    expect(reserved).toBe(2);
+    expect(search).toHaveBeenCalledTimes(2);
+  });
+
+  it("never reaches the adapter once the admission hook rejects", async () => {
+    const search = vi.fn(async () => []);
+    registerWebSearchAdapter({
+      id: "test-admission-blocked",
+      displayName: "Admission blocked",
+      requiresApiKey: false,
+      search,
+    });
+
+    await expect(
+      executeWebSearch(
+        "q",
+        5,
+        {
+          provider: "test-admission-blocked",
+          apiKey: "",
+          maxResults: 5,
+          providers: [
+            {
+              id: "primary",
+              adapter: "test-admission-blocked",
+              displayName: "Primary",
+              apiKey: "",
+              enabled: true,
+              priority: 0,
+            },
+            {
+              id: "secondary",
+              adapter: "test-admission-blocked",
+              displayName: "Secondary",
+              apiKey: "",
+              enabled: true,
+              priority: 1,
+            },
+          ],
+        },
+        undefined,
+        { beforeProviderAttempt: async () => Promise.reject(new Error("daily quota exhausted")) },
+      ),
+    ).rejects.toThrow("daily quota exhausted");
+
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it("does not charge admission for unknown adapters or missing credentials", async () => {
+    const search = vi.fn(async () => []);
+    const reserve = vi.fn(async () => undefined);
+    registerWebSearchAdapter({
+      id: "test-admission-keyed",
+      displayName: "Admission keyed",
+      requiresApiKey: true,
+      search,
+    });
+
+    await expect(
+      executeWebSearch(
+        "q",
+        5,
+        {
+          provider: "test-admission-keyed",
+          apiKey: "",
+          maxResults: 5,
+          providers: [
+            {
+              id: "ghost",
+              adapter: "adapter-that-was-never-registered",
+              displayName: "Ghost",
+              apiKey: "",
+              enabled: true,
+              priority: 0,
+            },
+            {
+              id: "keyless",
+              adapter: "test-admission-keyed",
+              displayName: "Keyless",
+              apiKey: "",
+              enabled: true,
+              priority: 1,
+            },
+          ],
+        },
+        undefined,
+        { beforeProviderAttempt: reserve },
+      ),
+    ).rejects.toThrow(/no configured web search provider/);
+
+    expect(reserve).not.toHaveBeenCalled();
+    expect(search).not.toHaveBeenCalled();
+  });
+
   it("does not invent an unconfigured fallback provider", async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error("primary down");
