@@ -586,7 +586,7 @@ export async function runDeepResearchTurn(
     ? (baseBody.messages as ChatMessage[])
     : [];
   const directReference = resolveDirectPageReference(originalMessages);
-  const userQuery =
+  let userQuery =
     (directReference ? resolveDirectDocumentResearchQuery(directReference) : "") ||
     deps.resolvedUserQuery?.trim() ||
     extractLastUserQuery(originalMessages);
@@ -788,6 +788,12 @@ export async function runDeepResearchTurn(
             );
             return null;
           });
+          if (directPageView) {
+            userQuery = resolveDirectDocumentResearchQuery(
+              directReference,
+              directPageView.title,
+            );
+          }
         }
 
         // --- Recon (knowledge cold-start) ---

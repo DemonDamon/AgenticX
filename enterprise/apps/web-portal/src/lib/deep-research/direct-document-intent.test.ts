@@ -16,7 +16,7 @@ describe("direct document research intent", () => {
 
     expect(reference).not.toBeNull();
     expect(resolveDirectDocumentResearchQuery(reference!)).toBe(
-      "解读用户指定的论文（arXiv 2606.19348）：研究问题、核心方法、关键实验结果、主要结论与局限",
+      "深度解读论文（arXiv 2606.19348）：核心创新、方法论、关键实验与结论",
     );
   });
 
@@ -38,8 +38,8 @@ describe("direct document research intent", () => {
     ]);
 
     expect(reference).not.toBeNull();
-    expect(resolveDirectDocumentResearchQuery(reference!)).toBe(
-      "围绕用户指定的论文（arXiv 2606.19348）回答：Table 8 的通过率是多少？",
+    expect(resolveDirectDocumentResearchQuery(reference!, "A Benchmark Paper")).toBe(
+      "围绕《A Benchmark Paper》研究：Table 8 的通过率是多少？",
     );
   });
 
@@ -59,9 +59,21 @@ describe("direct document research intent", () => {
       explicitInCurrentTurn: false,
     });
     expect(isGenericDirectDocumentPrompt(reference!.question)).toBe(false);
-    expect(resolveDirectDocumentResearchQuery(reference!)).toBe(
-      "围绕用户指定的论文（arXiv 2606.19348）回答：那这篇文章的局限性是什么？",
+    expect(resolveDirectDocumentResearchQuery(reference!, "A Benchmark Paper")).toBe(
+      "围绕《A Benchmark Paper》研究：那这篇文章的局限性是什么？",
     );
+  });
+
+  it("falls back to the page domain without forwarding the full URL", () => {
+    const reference = resolveDirectPageReference([
+      { role: "user", content: "https://docs.example.com/reports/2026/result.html 总结主要风险" },
+    ]);
+
+    expect(reference).not.toBeNull();
+    expect(resolveDirectDocumentResearchQuery(reference!)).toBe(
+      "围绕指定页面（docs.example.com）研究：总结主要风险",
+    );
+    expect(resolveDirectDocumentResearchQuery(reference!)).not.toContain("/reports/2026");
   });
 
   it("does not classify a scoped analysis request as generic", () => {

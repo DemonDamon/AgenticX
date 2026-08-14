@@ -23,12 +23,32 @@ export function isGenericDirectDocumentPrompt(question: string): boolean {
   return GENERIC_DIRECT_DOCUMENT_PROMPTS.some((pattern) => pattern.test(normalized));
 }
 
-function directDocumentLabel(reference: DirectPageReference): string {
+function normalizedDocumentTitle(title: string | undefined): string {
+  const normalized = String(title ?? "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return "";
+  return normalized.length > 180 ? `${normalized.slice(0, 180)}…` : normalized;
+}
+
+function directDocumentEntity(
+  reference: DirectPageReference,
+  documentTitle?: string,
+): string {
+  const title = normalizedDocumentTitle(documentTitle);
+  if (title) return `《${title}》`;
   if (reference.adapterId === "arxiv") {
     const paperId = reference.arxivId?.trim();
-    return paperId ? `用户指定的论文（arXiv ${paperId}）` : "用户指定的论文";
+    if (paperId) return `论文（arXiv ${paperId}）`;
   }
-  return `用户指定的公开页面（${reference.displayUrl}）`;
+  try {
+    const hostname = new URL(reference.displayUrl).hostname.replace(/^www\./, "");
+    if (hostname) return `指定页面（${hostname}）`;
+  } catch {
+    // Fall through to a neutral entity when the normalized URL is unavailable.
+  }
+  return "指定页面";
 }
 
 /**
@@ -39,17 +59,14 @@ function directDocumentLabel(reference: DirectPageReference): string {
  * Search engines and the LLM then generalise it into “how to read a paper”,
  * losing the user-supplied document even though its URL was parsed correctly.
  */
-export function resolveDirectDocumentResearchQuery(reference: DirectPageReference): string {
-  const question = reference.question.trim();
-  const documentLabel = directDocumentLabel(reference);
-  if (!isGenericDirectDocumentPrompt(question)) {
-    // Keep the user's scoped follow-up verbatim, but restore the document identity
-    // that was carried by an earlier turn (or removed while parsing the current URL).
-    return `围绕${documentLabel}回答：${question}`;
+export function resolveDirectDocumentResearchQuery(
+  reference: DirectPageReference,
+  documentTitle?: string,
+): string {
+  const originalQuestion = reference.question.trim();
+  const documentEntity = directDocumentEntity(reference, documentTitle);
+  if (isGenericDirectDocumentPrompt(originalQuestion)) {
+    return `深度解读${documentEntity}：核心创新、方法论、关键实验与结论`;
   }
-
-  if (reference.adapterId === "arxiv") {
-    return `解读${documentLabel}：研究问题、核心方法、关键实验结果、主要结论与局限`;
-  }
-  return `解读${documentLabel}：核心主题、关键论据、主要结论与局限`;
+  return `围绕${documentEntity}研究：${originalQuestion}`;
 }

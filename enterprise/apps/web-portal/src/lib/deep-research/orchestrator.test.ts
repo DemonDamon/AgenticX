@@ -210,12 +210,11 @@ describe("runDeepResearchTurn", () => {
       readUrl: "https://arxiv.org/html/2606.19348",
       question: "你能读懂这篇文章嘛?",
     });
-    expect(runReconFn.mock.calls[0]?.[0]).toMatchObject({
-      query: "解读用户指定的论文（arXiv 2606.19348）：研究问题、核心方法、关键实验结果、主要结论与局限",
-    });
-    expect(buildPlan.mock.calls[0]?.[0]?.userQuery).toContain(
-      "解读用户指定的论文（arXiv 2606.19348）",
+    expect(runReconFn.mock.calls[0]?.[0]?.query).toBe(
+      "深度解读《Paper title》：核心创新、方法论、关键实验与结论",
     );
+    expect(runReconFn.mock.calls[0]?.[0]?.query).not.toContain("https://");
+    expect(buildPlan.mock.calls[0]?.[0]?.userQuery).toContain("《Paper title》");
     expect(buildPlan.mock.calls[0]?.[0]?.userQuery).not.toContain("如何读懂");
     expect(fetchPagesFn).toHaveBeenCalled();
     const pageFetchUrls = fetchPagesFn.mock.calls.flatMap((call) => call[0]);
@@ -227,6 +226,11 @@ describe("runDeepResearchTurn", () => {
 
   it("keeps a unique historical paper identity in recon and planning for a follow-up", async () => {
     const runReconFn = vi.fn(async (_deps: ReconDeps) => ({ brief: "", hits: [] }));
+    const clarifyDeps: Array<Record<string, unknown>> = [];
+    const proposeClarify = async (deps: Record<string, unknown>) => {
+      clarifyDeps.push(deps);
+      return { needed: false as const };
+    };
     const buildPlan = vi.fn(async (_deps: PlannerDeps) => ({
       topic: "论文局限",
       complexity: "simple" as const,
@@ -257,6 +261,7 @@ describe("runDeepResearchTurn", () => {
         ...baseDeps({
           fetchImpl: fetchImpl as unknown as typeof fetch,
           runReconFn,
+          proposeClarify,
           buildPlan,
           readPage: async (reference: DirectPageView["reference"]): Promise<DirectPageView> => ({
             reference,
@@ -272,11 +277,11 @@ describe("runDeepResearchTurn", () => {
     );
 
     await readSsePayload(response);
-    const groundedQuery =
-      "围绕用户指定的论文（arXiv 2606.19348）回答：那这篇文章的局限性是什么？";
+    const groundedQuery = "围绕《Paper》研究：那这篇文章的局限性是什么？";
     expect(runReconFn.mock.calls[0]?.[0]?.query).toBe(groundedQuery);
+    expect(clarifyDeps[0]?.userQuery).toBe(groundedQuery);
     expect(buildPlan.mock.calls[0]?.[0]?.userQuery).toContain(groundedQuery);
-    expect(buildPlan.mock.calls[0]?.[0]?.userQuery).not.toContain("通用阅读");
+    expect(runReconFn.mock.calls[0]?.[0]?.query).not.toContain("https://");
   });
 
   it("emits structured events, streams report, and sources frame without gray progress", async () => {
