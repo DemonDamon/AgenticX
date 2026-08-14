@@ -8,7 +8,9 @@ import {
   listProviderVisibleModelIds,
   normalizeProviderEntry,
   reconcilePaneModelsWithSettings,
+  resolveDirectModelPickerProvider,
   resolveSessionBindingModel,
+  sortModelOptionsByPrefix,
 } from "./model-options";
 
 const TEST_PROVIDER_KEY = ["place", "holder"].join("");
@@ -93,6 +95,52 @@ describe("model-options", () => {
       provider: "enterprise",
       model: "chinamobile/kimi/kimi-k3",
     });
+  });
+
+  it("opens the model level directly for a sole managed provider", () => {
+    const enterprise: ProviderEntry = {
+      ...openaiGateway,
+      managed: true,
+    };
+
+    expect(resolveDirectModelPickerProvider({ enterprise })).toBe("enterprise");
+    expect(
+      resolveDirectModelPickerProvider({
+        enterprise,
+        disabledLocal: { ...zhipu, enabled: false },
+      }),
+    ).toBe("enterprise");
+  });
+
+  it("keeps provider selection for ordinary or multi-provider catalogs", () => {
+    const enterprise: ProviderEntry = {
+      ...openaiGateway,
+      managed: true,
+    };
+
+    expect(resolveDirectModelPickerProvider({ openai: openaiGateway })).toBeNull();
+    expect(
+      resolveDirectModelPickerProvider({ enterprise, zhipu }),
+    ).toBeNull();
+  });
+
+  it("groups enterprise models by routing prefix with natural model order", () => {
+    const options = [
+      { model: "openai-main/gpt-5.2" },
+      { model: "chinamobile/kimi/kimi-k3" },
+      { model: "chinamobile/deepseek/deepseek-v3" },
+      { model: "chinamobile/kimi/kimi-k2.6" },
+      { model: "openai-main/gpt-5.1" },
+    ];
+
+    expect(sortModelOptionsByPrefix(options)).toEqual([
+      { model: "chinamobile/deepseek/deepseek-v3" },
+      { model: "chinamobile/kimi/kimi-k2.6" },
+      { model: "chinamobile/kimi/kimi-k3" },
+      { model: "openai-main/gpt-5.1" },
+      { model: "openai-main/gpt-5.2" },
+    ]);
+    expect(options[0]?.model).toBe("openai-main/gpt-5.2");
   });
 
   it("collects only selectable provider/model pairs", () => {

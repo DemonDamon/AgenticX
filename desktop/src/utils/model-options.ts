@@ -18,6 +18,37 @@ export type SelectableModelOption = {
   label: string;
 };
 
+const MODEL_PREFIX_COLLATOR = new Intl.Collator("en-US", {
+  numeric: true,
+  sensitivity: "base",
+});
+
+function modelPrefixSortKey(modelId: string): string {
+  const segments = modelId
+    .trim()
+    .toLowerCase()
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length > 1) return segments.slice(0, -1).join("/");
+  const bare = segments[0] ?? "";
+  return bare.match(/^[a-z]+/)?.[0] ?? bare;
+}
+
+/** Keep models with the same routing/family prefix adjacent, then sort naturally within it. */
+export function sortModelOptionsByPrefix<T extends Pick<SelectableModelOption, "model">>(
+  options: readonly T[],
+): T[] {
+  return [...options].sort((left, right) => {
+    const prefixOrder = MODEL_PREFIX_COLLATOR.compare(
+      modelPrefixSortKey(left.model),
+      modelPrefixSortKey(right.model),
+    );
+    if (prefixOrder !== 0) return prefixOrder;
+    return MODEL_PREFIX_COLLATOR.compare(left.model, right.model);
+  });
+}
+
 /** Models the user can pick for a provider: visible list wins over legacy `model`. */
 export function listProviderVisibleModelIds(entry: ProviderCatalogEntry): string[] {
   const models = (entry.models ?? []).map((m) => m.trim()).filter(Boolean);
@@ -121,6 +152,22 @@ export function collectSelectableModelOptions(
     }
   }
   return result;
+}
+
+/**
+ * Skip the provider level only when the complete visible picker catalog is a
+ * single managed provider. A normal single-provider setup keeps the hierarchy
+ * so adding more providers later does not change the interaction model.
+ */
+export function resolveDirectModelPickerProvider(
+  providers: Record<string, ProviderCatalogEntry>,
+): string | null {
+  const selectableProviders = Object.entries(providers).filter(([, entry]) =>
+    providerPassesPickerGate(entry),
+  );
+  if (selectableProviders.length !== 1) return null;
+  const [providerId, entry] = selectableProviders[0] ?? [];
+  return providerId && entry?.managed === true ? providerId : null;
 }
 
 export function resolveFallbackModel(
