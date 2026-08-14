@@ -48,6 +48,9 @@ win:
       to: backend
       filter:
         - "**/*"
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
 linux:
   target:
     - AppImage
