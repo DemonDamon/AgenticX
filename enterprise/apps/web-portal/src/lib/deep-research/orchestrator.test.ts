@@ -20,7 +20,8 @@ import {
 import { createMemoryArtifactStore } from "./artifact-store";
 import { createMemoryRunStore } from "./run-store";
 import { clearClarifyWaiters, resolveClarifyResume } from "./run-wait";
-import type { ResearchPlan } from "./planner";
+import type { PlannerDeps, ResearchPlan } from "./planner";
+import type { ReconDeps } from "./recon";
 import type { Citation } from "./registry";
 import { emptyFetchStats } from "../web-search/page-fetch";
 import { directFetch } from "../web-search/direct-fetch";
@@ -166,6 +167,12 @@ describe("runDeepResearchTurn", () => {
       pages: urls.map(() => null),
       stats: emptyFetchStats(),
     }));
+    const runReconFn = vi.fn(async (_deps: ReconDeps) => ({ brief: "", hits: [] }));
+    const buildPlan = vi.fn(async (_deps: PlannerDeps) => ({
+      topic: "Paper",
+      complexity: "simple" as const,
+      subQuestions: ["Table 8 Pass Rate"],
+    }));
 
     const response = await runDeepResearchTurn(
       {
@@ -173,7 +180,7 @@ describe("runDeepResearchTurn", () => {
         messages: [
           {
             role: "user",
-            content: "https://arxiv.org/pdf/2606.19348请研究这篇文章",
+            content: "https://arxiv.org/pdf/2606.19348你能读懂这篇文章嘛?",
           },
         ],
         agenticx_deep_research: true,
@@ -183,11 +190,8 @@ describe("runDeepResearchTurn", () => {
           fetchImpl: fetchImpl as unknown as typeof fetch,
           readPage,
           fetchPagesFn,
-          buildPlan: async () => ({
-            topic: "Paper",
-            complexity: "simple" as const,
-            subQuestions: ["Table 8 Pass Rate"],
-          }),
+          runReconFn,
+          buildPlan,
           executeSearch: async () => [
             {
               title: "duplicate paper",
@@ -204,8 +208,15 @@ describe("runDeepResearchTurn", () => {
     expect(readPage).toHaveBeenCalledTimes(1);
     expect(readPage.mock.calls[0]?.[0]).toMatchObject({
       readUrl: "https://arxiv.org/html/2606.19348",
-      question: "请研究这篇文章",
+      question: "你能读懂这篇文章嘛?",
     });
+    expect(runReconFn.mock.calls[0]?.[0]).toMatchObject({
+      query: "解读用户指定的论文（arXiv 2606.19348）：研究问题、核心方法、关键实验结果、主要结论与局限",
+    });
+    expect(buildPlan.mock.calls[0]?.[0]?.userQuery).toContain(
+      "解读用户指定的论文（arXiv 2606.19348）",
+    );
+    expect(buildPlan.mock.calls[0]?.[0]?.userQuery).not.toContain("如何读懂");
     expect(fetchPagesFn).toHaveBeenCalled();
     const pageFetchUrls = fetchPagesFn.mock.calls.flatMap((call) => call[0]);
     expect(pageFetchUrls.length).toBeGreaterThan(0);

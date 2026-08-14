@@ -33,6 +33,7 @@ import {
 } from "../web-search/direct-page";
 import { archivePage, pageArchivePath } from "./page-archive";
 import { buildCompletionSummary, fallbackSummary } from "./completion-summary";
+import { resolveDirectDocumentResearchQuery } from "./direct-document-intent";
 import { buildResearchPlan, enforcePlanBreadth, type ResearchPlan } from "./planner";
 import { formatTodayLine, runRecon, type ReconResult } from "./recon";
 import { CitationRegistry, type Citation } from "./registry";
@@ -586,7 +587,7 @@ export async function runDeepResearchTurn(
     : [];
   const directReference = resolveDirectPageReference(originalMessages);
   const userQuery =
-    directReference?.question.trim() ||
+    (directReference ? resolveDirectDocumentResearchQuery(directReference) : "") ||
     deps.resolvedUserQuery?.trim() ||
     extractLastUserQuery(originalMessages);
   const now = deps.now ?? Date.now;
