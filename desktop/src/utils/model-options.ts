@@ -66,11 +66,7 @@ export function isModelInProviderCatalog(
 ): boolean {
   const entry = providers[providerId];
   if (!entry || entry.enabled === false) return false;
-  const bare = normalizeBareModelId(modelId);
-  if (!bare) return false;
-  return listProviderVisibleModelIds(entry).some(
-    (candidate) => normalizeBareModelId(candidate) === bare,
-  );
+  return canonicalizeCatalogModel(providerId, modelId, providers) !== null;
 }
 
 /** Same rules as chat/automation model pickers. */
@@ -92,11 +88,20 @@ export function canonicalizeCatalogModel(
 ): string | null {
   const entry = providers[providerId];
   if (!entry) return null;
-  const bare = normalizeBareModelId(modelId);
-  if (!bare) return null;
-  const hit = listProviderVisibleModelIds(entry).find(
-    (candidate) => normalizeBareModelId(candidate) === bare,
-  );
+  const raw = modelId.trim();
+  if (!raw) return null;
+  const candidates = listProviderVisibleModelIds(entry);
+  // Managed Enterprise ids can contain several routing segments, for example
+  // `chinamobile/kimi/kimi-k3`. Prefer the exact catalog id before comparing a
+  // single optional routing prefix; repeatedly stripping prefixes silently
+  // turns a valid choice into a different model and falls back to row one.
+  const exact = candidates.find((candidate) => candidate.trim() === raw);
+  if (exact) return exact;
+  const bare = normalizeBareModelId(raw);
+  const hit = candidates.find((candidate) => {
+    const candidateBare = normalizeBareModelId(candidate);
+    return candidateBare === raw || candidateBare === bare;
+  });
   return hit ?? null;
 }
 
@@ -143,10 +148,10 @@ export function coerceSelectableModel(
   preferredProvider?: string,
 ): { provider: string; model: string } | null {
   const providerId = provider.trim();
-  const bare = normalizeBareModelId(model);
-  if (providerId && bare && isModelSelectable(providerId, bare, providers)) {
+  const requestedModel = model.trim();
+  if (providerId && requestedModel && isModelSelectable(providerId, requestedModel, providers)) {
     const canonical =
-      canonicalizeCatalogModel(providerId, bare, providers) ?? bare;
+      canonicalizeCatalogModel(providerId, requestedModel, providers) ?? requestedModel;
     return { provider: providerId, model: canonical };
   }
   return resolveFallbackModel(providers, preferredProvider || providerId);

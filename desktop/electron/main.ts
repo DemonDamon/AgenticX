@@ -11053,23 +11053,32 @@ function registerIpc(): void {
     if (isRemoteMode()) {
       const name = (payload.provider || "").trim();
       if (name && (payload.apiKey || payload.model)) {
-        await studioFetchJson(`/api/config/providers/${encodeURIComponent(name)}`, {
+        const providerResult = await studioFetchJson(`/api/config/providers/${encodeURIComponent(name)}`, {
           method: "PUT",
           body: {
             apiKey: payload.apiKey,
             model: payload.model,
           },
         });
-        await studioFetchJson("/api/config/default-provider", {
+        if (!providerResult.ok) {
+          return { ok: false, path: "remote", error: providerResult.error ?? `HTTP ${providerResult.status}` };
+        }
+        const defaultProviderResult = await studioFetchJson("/api/config/default-provider", {
           method: "PUT",
           body: { name },
         });
+        if (!defaultProviderResult.ok) {
+          return { ok: false, path: "remote", error: defaultProviderResult.error ?? `HTTP ${defaultProviderResult.status}` };
+        }
       }
       if (payload.activeProvider || payload.activeModel) {
-        await studioFetchJson("/api/config/active-model", {
+        const activeModelResult = await studioFetchJson("/api/config/active-model", {
           method: "PUT",
           body: { provider: payload.activeProvider, model: payload.activeModel },
         });
+        if (!activeModelResult.ok) {
+          return { ok: false, path: "remote", error: activeModelResult.error ?? `HTTP ${activeModelResult.status}` };
+        }
       }
       return { ok: true, path: "remote" };
     }

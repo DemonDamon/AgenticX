@@ -66,6 +66,35 @@ describe("model-options", () => {
     expect(options[0]?.model).toBe("some-model");
   });
 
+  it("keeps complete enterprise managed model ids when switching", () => {
+    const enterprise: ProviderEntry = {
+      apiKey: TEST_PROVIDER_KEY,
+      baseUrl: "https://portal.example.com/api/desktop/v1",
+      model: "openai-main/gpt-4o",
+      models: ["openai-main/gpt-4o", "chinamobile/kimi/kimi-k3"],
+      enabled: true,
+      dropParams: true,
+      interface: "openai",
+      managed: true,
+    };
+    const providers = { enterprise };
+
+    expect(
+      collectSelectableModelOptions(providers).map((row) => row.model),
+    ).toEqual(["openai-main/gpt-4o", "chinamobile/kimi/kimi-k3"]);
+    expect(
+      coerceSelectableModel(
+        providers,
+        "enterprise",
+        "chinamobile/kimi/kimi-k3",
+        "enterprise",
+      ),
+    ).toEqual({
+      provider: "enterprise",
+      model: "chinamobile/kimi/kimi-k3",
+    });
+  });
+
   it("collects only selectable provider/model pairs", () => {
     const options = collectSelectableModelOptions({
       openai: openaiGateway,
