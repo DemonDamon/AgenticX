@@ -1,17 +1,24 @@
 /**
  * Deep-research run persistence (PG / MySQL / in-memory fallback).
+ *
+ * Every mutation is multi-instance safe: event appends use `run_id + revision`
+ * CAS, report chunks are concatenated inside SQL, and terminal status is decided
+ * by a single conditional UPDATE. Clarify coordination lives in the same row so
+ * an instance that waits and an instance that answers never need shared disk.
  */
 
 import { enterpriseDeepResearchRuns as pgTable } from "@agenticx/db-schema";
 import { enterpriseDeepResearchRuns as mysqlTable } from "@agenticx/db-schema/mysql";
 import { createMysqlDb, getIamDb, resolveDatabaseConfig } from "@agenticx/iam-core";
 import type { DeepResearchEvent } from "@agenticx/sdk-ts";
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Citation } from "./registry";
 
 export const MAX_EVENTS_PER_RUN = 400;
 /** 事件批量落库间隔，避免每条事件一次 UPDATE。 */
 export const RUN_FLUSH_INTERVAL_MS = 1_500;
+/** CAS 重试上限；耗尽后抛错，绝不静默丢事件。 */
+export const MAX_RUN_CAS_ATTEMPTS = 8;
 
 export type DeepResearchRunStatus =
   | "running"
@@ -19,6 +26,8 @@ export type DeepResearchRunStatus =
   | "completed"
   | "failed"
   | "cancelled";
+
+export type DeepResearchTerminalStatus = "completed" | "failed" | "cancelled";
 
 const TERMINAL_STATUSES: ReadonlySet<DeepResearchRunStatus> = new Set([
   "completed",
@@ -29,6 +38,19 @@ const TERMINAL_STATUSES: ReadonlySet<DeepResearchRunStatus> = new Set([
 const ACTIVE_STATUSES: DeepResearchRunStatus[] = ["running", "awaiting_clarify"];
 
 const NEVER_DROP_TYPES = new Set<DeepResearchEvent["type"]>(["run_started", "clarify"]);
+
+export type ClarifyResumePayload = {
+  answers: Record<string, string>;
+  skip: boolean;
+  timedOut?: boolean;
+};
+
+/** Written by `expireClarification()` when nobody answered before the deadline. */
+export function clarifyTimeoutPayload(): ClarifyResumePayload {
+  return { answers: {}, skip: true, timedOut: true };
+}
+
+export type ClarificationOutcome = "resumed" | "already_continued" | "not_found";
 
 export type RunRecord = {
   runId: string;
@@ -44,6 +66,8 @@ export type RunRecord = {
   citations: Citation[];
   errorMessage?: string;
   eventSeq: number;
+  /** Optimistic-lock counter bumped by every mutation. */
+  revision: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -66,9 +90,30 @@ export type RunStore = {
   setCitations(runId: string, citations: Citation[]): Promise<void>;
   finish(
     runId: string,
-    status: "completed" | "failed" | "cancelled",
+    status: DeepResearchTerminalStatus,
     errorMessage?: string,
   ): Promise<void>;
+  /**
+   * Atomically persist the clarify events, flip to `awaiting_clarify`, arm the
+   * deadline and drop any stale answer. False when the run vanished or already
+   * reached a terminal status — the caller must then not emit clarify SSE.
+   */
+  beginClarification(
+    runId: string,
+    events: DeepResearchEvent[],
+    expiresAt: Date | null,
+  ): Promise<boolean>;
+  /** First valid answer wins; repeat submissions never overwrite it. */
+  resolveClarification(input: {
+    tenantId: string;
+    userId: string;
+    runId: string;
+    payload: ClarifyResumePayload;
+    now?: Date;
+  }): Promise<ClarificationOutcome>;
+  getClarificationResume(runId: string): Promise<ClarifyResumePayload | null>;
+  /** Race the pending resume; returns whichever payload won. */
+  expireClarification(runId: string, now?: Date): Promise<ClarifyResumePayload>;
   get(tenantId: string, userId: string, runId: string): Promise<RunRecord | null>;
   listActive(tenantId: string, userId: string, sessionId?: string): Promise<RunRecord[]>;
   /** Most recently updated run for a session (any status) — used to rehydrate workbench after refresh. */
@@ -86,10 +131,12 @@ export type RunWriter = {
   pushReport(chunk: string): void;
   flush(): Promise<void>;
   finish(
-    status: "completed" | "failed" | "cancelled",
+    status: DeepResearchTerminalStatus,
     errorMessage?: string,
   ): Promise<void>;
 };
+
+export const STALE_RUN_ERROR_MESSAGE = "stale run reaped after process restart";
 
 function isRunStatus(value: string): value is DeepResearchRunStatus {
   return (
@@ -115,6 +162,21 @@ function toIso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : String(value);
 }
 
+/** Coerce a persisted clarify answer blob back into a trusted payload shape. */
+export function normalizeClarifyResume(value: unknown): ClarifyResumePayload | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as { answers?: unknown; skip?: unknown; timedOut?: unknown };
+  const answers: Record<string, string> = {};
+  if (raw.answers && typeof raw.answers === "object" && !Array.isArray(raw.answers)) {
+    for (const [key, entry] of Object.entries(raw.answers as Record<string, unknown>)) {
+      if (typeof entry === "string") answers[key] = entry;
+    }
+  }
+  const payload: ClarifyResumePayload = { answers, skip: raw.skip === true };
+  if (raw.timedOut === true) payload.timedOut = true;
+  return payload;
+}
+
 function mapRow(row: {
   runId: string;
   tenantId: string;
@@ -128,6 +190,7 @@ function mapRow(row: {
   citations: unknown;
   errorMessage: string | null;
   eventSeq: number;
+  revision: number;
   createdAt: Date | string;
   updatedAt: Date | string;
 }): RunRecord {
@@ -144,6 +207,7 @@ function mapRow(row: {
     citations: asCitations(row.citations),
     errorMessage: row.errorMessage ?? undefined,
     eventSeq: Number(row.eventSeq) || 0,
+    revision: Number(row.revision) || 0,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
   };
@@ -214,13 +278,27 @@ export function mergeRunEvents(
   return trimEvents(next);
 }
 
+type MemoryRow = RunRecord & {
+  clarifyResume: ClarifyResumePayload | null;
+  clarifyExpiresAt: Date | null;
+};
+
+function snapshot(row: MemoryRow): RunRecord {
+  const {
+    clarifyResume: _clarifyResume,
+    clarifyExpiresAt: _clarifyExpiresAt,
+    ...record
+  } = row;
+  return { ...record, events: [...row.events], citations: [...row.citations] };
+}
+
 function createMemoryStore(): RunStore {
-  const bucket = new Map<string, RunRecord>();
+  const bucket = new Map<string, MemoryRow>();
 
   return {
     async create(input) {
       const now = new Date().toISOString();
-      const row: RunRecord = {
+      const row: MemoryRow = {
         runId: input.runId,
         tenantId: input.tenantId,
         userId: input.userId,
@@ -232,11 +310,14 @@ function createMemoryStore(): RunStore {
         reportMarkdown: "",
         citations: [],
         eventSeq: 0,
+        revision: 0,
+        clarifyResume: null,
+        clarifyExpiresAt: null,
         createdAt: now,
         updatedAt: now,
       };
       bucket.set(input.runId, row);
-      return { ...row, events: [], citations: [] };
+      return snapshot(row);
     },
 
     async appendEvents(runId, events, patch) {
@@ -249,6 +330,7 @@ function createMemoryStore(): RunStore {
       }
       if (patch?.status) row.status = patch.status;
       if (patch?.phase) row.phase = patch.phase;
+      row.revision += 1;
       row.updatedAt = new Date().toISOString();
     },
 
@@ -258,6 +340,7 @@ function createMemoryStore(): RunStore {
       if (!row) return;
       if (TERMINAL_STATUSES.has(row.status)) return;
       row.reportMarkdown = `${row.reportMarkdown}${chunk}`;
+      row.revision += 1;
       row.updatedAt = new Date().toISOString();
     },
 
@@ -265,6 +348,7 @@ function createMemoryStore(): RunStore {
       const row = bucket.get(runId);
       if (!row) return;
       row.citations = citations;
+      row.revision += 1;
       row.updatedAt = new Date().toISOString();
     },
 
@@ -276,18 +360,65 @@ function createMemoryStore(): RunStore {
       row.status = status;
       if (errorMessage !== undefined) row.errorMessage = errorMessage;
       row.phase = "done";
+      row.revision += 1;
       row.updatedAt = new Date().toISOString();
+    },
+
+    async beginClarification(runId, events, expiresAt) {
+      const row = bucket.get(runId);
+      if (!row) return false;
+      if (TERMINAL_STATUSES.has(row.status)) return false;
+      if (events.length > 0) {
+        row.events = mergeRunEvents(row.events, events);
+        row.eventSeq += events.length;
+      }
+      row.status = "awaiting_clarify";
+      row.phase = "clarify";
+      row.clarifyResume = null;
+      row.clarifyExpiresAt = expiresAt;
+      row.revision += 1;
+      row.updatedAt = new Date().toISOString();
+      return true;
+    },
+
+    async resolveClarification({ tenantId, userId, runId, payload, now }) {
+      const row = bucket.get(runId);
+      if (!row || row.tenantId !== tenantId || row.userId !== userId) return "not_found";
+      const at = now ?? new Date();
+      const expired =
+        row.clarifyExpiresAt !== null && row.clarifyExpiresAt.getTime() <= at.getTime();
+      if (row.status !== "awaiting_clarify" || row.clarifyResume !== null || expired) {
+        return "already_continued";
+      }
+      row.clarifyResume = normalizeClarifyResume(payload) ?? { answers: {}, skip: true };
+      row.status = "running";
+      row.revision += 1;
+      row.updatedAt = at.toISOString();
+      return "resumed";
+    },
+
+    async getClarificationResume(runId) {
+      const row = bucket.get(runId);
+      return row?.clarifyResume ? { ...row.clarifyResume } : null;
+    },
+
+    async expireClarification(runId, now) {
+      const row = bucket.get(runId);
+      if (!row) return clarifyTimeoutPayload();
+      if (row.status === "awaiting_clarify" && row.clarifyResume === null) {
+        row.clarifyResume = clarifyTimeoutPayload();
+        row.status = "running";
+        row.revision += 1;
+        row.updatedAt = (now ?? new Date()).toISOString();
+      }
+      return row.clarifyResume ? { ...row.clarifyResume } : clarifyTimeoutPayload();
     },
 
     async get(tenantId, userId, runId) {
       const row = bucket.get(runId);
       if (!row) return null;
       if (row.tenantId !== tenantId || row.userId !== userId) return null;
-      return {
-        ...row,
-        events: [...row.events],
-        citations: [...row.citations],
-      };
+      return snapshot(row);
     },
 
     async listActive(tenantId, userId, sessionId) {
@@ -300,11 +431,7 @@ function createMemoryStore(): RunStore {
             (sessionId === undefined || row.sessionId === sessionId),
         )
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .map((row) => ({
-          ...row,
-          events: [...row.events],
-          citations: [...row.citations],
-        }));
+        .map(snapshot);
     },
 
     async getLatestBySession(tenantId, userId, sessionId) {
@@ -317,12 +444,7 @@ function createMemoryStore(): RunStore {
         )
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       const row = rows[0];
-      if (!row) return null;
-      return {
-        ...row,
-        events: [...row.events],
-        citations: [...row.citations],
-      };
+      return row ? snapshot(row) : null;
     },
 
     async reapStaleRuns(olderThanMs) {
@@ -332,8 +454,9 @@ function createMemoryStore(): RunStore {
         if (!ACTIVE_STATUSES.includes(row.status)) continue;
         if (Date.parse(row.updatedAt) >= cutoff) continue;
         row.status = "failed";
-        row.errorMessage = "stale run reaped after process restart";
+        row.errorMessage = STALE_RUN_ERROR_MESSAGE;
         row.phase = "done";
+        row.revision += 1;
         row.updatedAt = new Date().toISOString();
         count += 1;
       }
@@ -342,222 +465,280 @@ function createMemoryStore(): RunStore {
   };
 }
 
-function createSqlStore(): RunStore {
+/** Snapshot needed to compute the next CAS write. */
+export type RunAppendState = {
+  status: DeepResearchRunStatus;
+  events: DeepResearchEvent[];
+  eventSeq: number;
+  revision: number;
+};
+
+/**
+ * Dialect primitives behind the SQL store. Each mutation returns the number of
+ * rows it actually changed so the caller can distinguish "lost the race" from
+ * "row is gone / already terminal" without a second read.
+ */
+export type RunSqlOps = {
+  create(record: {
+    runId: string;
+    tenantId: string;
+    userId: string;
+    sessionId: string;
+    topic: string;
+    now: Date;
+  }): Promise<void>;
+  loadAppendState(runId: string): Promise<RunAppendState | null>;
+  casAppendEvents(input: {
+    runId: string;
+    revision: number;
+    events: DeepResearchEvent[];
+    eventSeq: number;
+    status?: DeepResearchRunStatus;
+    phase?: string;
+    now: Date;
+  }): Promise<number>;
+  casBeginClarification(input: {
+    runId: string;
+    revision: number;
+    events: DeepResearchEvent[];
+    eventSeq: number;
+    expiresAt: Date | null;
+    now: Date;
+  }): Promise<number>;
+  appendReportChunk(runId: string, chunk: string, now: Date): Promise<number>;
+  setCitations(runId: string, citations: Citation[], now: Date): Promise<number>;
+  finishRun(input: {
+    runId: string;
+    status: DeepResearchTerminalStatus;
+    errorMessage?: string;
+    now: Date;
+  }): Promise<number>;
+  reapStale(cutoff: Date, now: Date): Promise<number>;
+  resolveClarification(input: {
+    runId: string;
+    tenantId: string;
+    userId: string;
+    payload: ClarifyResumePayload;
+    now: Date;
+  }): Promise<number>;
+  expireClarification(input: {
+    runId: string;
+    payload: ClarifyResumePayload;
+    now: Date;
+  }): Promise<number>;
+  readClarifyResume(runId: string): Promise<unknown>;
+  get(tenantId: string, userId: string, runId: string): Promise<RunRecord | null>;
+  listActive(tenantId: string, userId: string, sessionId?: string): Promise<RunRecord[]>;
+  getLatestBySession(
+    tenantId: string,
+    userId: string,
+    sessionId: string,
+  ): Promise<RunRecord | null>;
+};
+
+type PgDb = ReturnType<typeof getIamDb>;
+type MysqlDb = Awaited<ReturnType<typeof createMysqlDb>>["raw"];
+
+function createPgOps(db: PgDb): RunSqlOps {
   return {
-    async create(input) {
-      const now = new Date();
-      const config = resolveDatabaseConfig();
-      const values = {
-        runId: input.runId,
-        tenantId: input.tenantId,
-        userId: input.userId,
-        sessionId: input.sessionId,
-        status: "running" as const,
-        phase: "recon",
-        topic: input.topic,
-        events: [] as unknown[],
-        reportMarkdown: "",
-        citations: [] as unknown[],
-        errorMessage: null as string | null,
-        eventSeq: 0,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      if (config.dialect === "mysql") {
-        const { raw: db } = await createMysqlDb(config);
-        await db.insert(mysqlTable).values(values);
-      } else {
-        const db = getIamDb();
-        await db.insert(pgTable).values(values);
-      }
-
-      return {
-        runId: input.runId,
-        tenantId: input.tenantId,
-        userId: input.userId,
-        sessionId: input.sessionId,
+    async create({ runId, tenantId, userId, sessionId, topic, now }) {
+      await db.insert(pgTable).values({
+        runId,
+        tenantId,
+        userId,
+        sessionId,
         status: "running",
         phase: "recon",
-        topic: input.topic,
+        topic,
         events: [],
         reportMarkdown: "",
         citations: [],
+        errorMessage: null,
         eventSeq: 0,
-        createdAt: now.toISOString(),
-        updatedAt: now.toISOString(),
-      };
+        revision: 0,
+        clarifyResume: null,
+        clarifyExpiresAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
     },
 
-    async appendEvents(runId, events, patch) {
-      const config = resolveDatabaseConfig();
-      const now = new Date();
-
-      if (config.dialect === "mysql") {
-        const { raw: db } = await createMysqlDb(config);
-        const rows = await db
-          .select()
-          .from(mysqlTable)
-          .where(eq(mysqlTable.runId, runId))
-          .limit(1);
-        const current = rows[0];
-        if (!current) return;
-        if (TERMINAL_STATUSES.has(current.status as DeepResearchRunStatus)) return;
-        const merged =
-          events.length > 0
-            ? mergeRunEvents(asEvents(current.events), events)
-            : asEvents(current.events);
-        await db
-          .update(mysqlTable)
-          .set({
-            events: merged,
-            eventSeq: Number(current.eventSeq) + events.length,
-            ...(patch?.status ? { status: patch.status } : {}),
-            ...(patch?.phase ? { phase: patch.phase } : {}),
-            updatedAt: now,
-          })
-          .where(eq(mysqlTable.runId, runId));
-        return;
-      }
-
-      const db = getIamDb();
-      const rows = await db.select().from(pgTable).where(eq(pgTable.runId, runId)).limit(1);
-      const current = rows[0];
-      if (!current) return;
-      if (TERMINAL_STATUSES.has(current.status as DeepResearchRunStatus)) return;
-      const merged =
-        events.length > 0
-          ? mergeRunEvents(asEvents(current.events), events)
-          : asEvents(current.events);
-      await db
-        .update(pgTable)
-        .set({
-          events: merged,
-          eventSeq: Number(current.eventSeq) + events.length,
-          ...(patch?.status ? { status: patch.status } : {}),
-          ...(patch?.phase ? { phase: patch.phase } : {}),
-          updatedAt: now,
-        })
-        .where(eq(pgTable.runId, runId));
-    },
-
-    async appendReport(runId, chunk) {
-      if (!chunk) return;
-      const config = resolveDatabaseConfig();
-      const now = new Date();
-
-      if (config.dialect === "mysql") {
-        const { raw: db } = await createMysqlDb(config);
-        const rows = await db
-          .select({ status: mysqlTable.status, reportMarkdown: mysqlTable.reportMarkdown })
-          .from(mysqlTable)
-          .where(eq(mysqlTable.runId, runId))
-          .limit(1);
-        const current = rows[0];
-        if (!current) return;
-        if (TERMINAL_STATUSES.has(current.status as DeepResearchRunStatus)) return;
-        await db
-          .update(mysqlTable)
-          .set({
-            reportMarkdown: `${current.reportMarkdown ?? ""}${chunk}`,
-            updatedAt: now,
-          })
-          .where(eq(mysqlTable.runId, runId));
-        return;
-      }
-
-      const db = getIamDb();
+    async loadAppendState(runId) {
       const rows = await db
-        .select({ status: pgTable.status, reportMarkdown: pgTable.reportMarkdown })
+        .select({
+          status: pgTable.status,
+          events: pgTable.events,
+          eventSeq: pgTable.eventSeq,
+          revision: pgTable.revision,
+        })
         .from(pgTable)
         .where(eq(pgTable.runId, runId))
         .limit(1);
-      const current = rows[0];
-      if (!current) return;
-      if (TERMINAL_STATUSES.has(current.status as DeepResearchRunStatus)) return;
-      await db
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        status: isRunStatus(row.status) ? row.status : "running",
+        events: asEvents(row.events),
+        eventSeq: Number(row.eventSeq) || 0,
+        revision: Number(row.revision) || 0,
+      };
+    },
+
+    async casAppendEvents({ runId, revision, events, eventSeq, status, phase, now }) {
+      const rows = await db
+        .update(pgTable)
+        .set({
+          events: events as unknown[],
+          eventSeq,
+          revision: revision + 1,
+          ...(status ? { status } : {}),
+          ...(phase ? { phase } : {}),
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(pgTable.runId, runId),
+            eq(pgTable.revision, revision),
+            inArray(pgTable.status, ACTIVE_STATUSES),
+          ),
+        )
+        .returning({ runId: pgTable.runId });
+      return rows.length;
+    },
+
+    async casBeginClarification({ runId, revision, events, eventSeq, expiresAt, now }) {
+      const rows = await db
+        .update(pgTable)
+        .set({
+          events: events as unknown[],
+          eventSeq,
+          revision: revision + 1,
+          status: "awaiting_clarify",
+          phase: "clarify",
+          clarifyResume: null,
+          clarifyExpiresAt: expiresAt,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(pgTable.runId, runId),
+            eq(pgTable.revision, revision),
+            inArray(pgTable.status, ACTIVE_STATUSES),
+          ),
+        )
+        .returning({ runId: pgTable.runId });
+      return rows.length;
+    },
+
+    async appendReportChunk(runId, chunk, now) {
+      const rows = await db
         .update(pgTable)
         .set({
           reportMarkdown: sql`${pgTable.reportMarkdown} || ${chunk}`,
+          revision: sql`${pgTable.revision} + 1`,
           updatedAt: now,
         })
-        .where(eq(pgTable.runId, runId));
+        .where(and(eq(pgTable.runId, runId), inArray(pgTable.status, ACTIVE_STATUSES)))
+        .returning({ runId: pgTable.runId });
+      return rows.length;
     },
 
-    async setCitations(runId, citations) {
-      const config = resolveDatabaseConfig();
-      const now = new Date();
-      if (config.dialect === "mysql") {
-        const { raw: db } = await createMysqlDb(config);
-        await db
-          .update(mysqlTable)
-          .set({ citations, updatedAt: now })
-          .where(eq(mysqlTable.runId, runId));
-        return;
-      }
-      const db = getIamDb();
-      await db
-        .update(pgTable)
-        .set({ citations, updatedAt: now })
-        .where(eq(pgTable.runId, runId));
-    },
-
-    async finish(runId, status, errorMessage) {
-      const config = resolveDatabaseConfig();
-      const now = new Date();
-      const set = {
-        status,
-        phase: "done",
-        updatedAt: now,
-        ...(errorMessage !== undefined ? { errorMessage } : {}),
-      };
-
-      if (config.dialect === "mysql") {
-        const { raw: db } = await createMysqlDb(config);
-        const rows = await db
-          .select({ status: mysqlTable.status })
-          .from(mysqlTable)
-          .where(eq(mysqlTable.runId, runId))
-          .limit(1);
-        if (!rows[0]) return;
-        const existingStatus = rows[0].status as DeepResearchRunStatus;
-        if (TERMINAL_STATUSES.has(existingStatus) && existingStatus !== status) return;
-        if (TERMINAL_STATUSES.has(existingStatus) && errorMessage === undefined) return;
-        await db.update(mysqlTable).set(set).where(eq(mysqlTable.runId, runId));
-        return;
-      }
-
-      const db = getIamDb();
+    async setCitations(runId, citations, now) {
       const rows = await db
-        .select({ status: pgTable.status })
+        .update(pgTable)
+        .set({
+          citations: citations as unknown[],
+          revision: sql`${pgTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(eq(pgTable.runId, runId))
+        .returning({ runId: pgTable.runId });
+      return rows.length;
+    },
+
+    async finishRun({ runId, status, errorMessage, now }) {
+      const rows = await db
+        .update(pgTable)
+        .set({
+          status,
+          phase: "done",
+          revision: sql`${pgTable.revision} + 1`,
+          updatedAt: now,
+          ...(errorMessage !== undefined ? { errorMessage } : {}),
+        })
+        .where(and(eq(pgTable.runId, runId), finishGuardPg(status, errorMessage)))
+        .returning({ runId: pgTable.runId });
+      return rows.length;
+    },
+
+    async reapStale(cutoff, now) {
+      const rows = await db
+        .update(pgTable)
+        .set({
+          status: "failed",
+          phase: "done",
+          errorMessage: STALE_RUN_ERROR_MESSAGE,
+          revision: sql`${pgTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(and(inArray(pgTable.status, ACTIVE_STATUSES), lt(pgTable.updatedAt, cutoff)))
+        .returning({ runId: pgTable.runId });
+      return rows.length;
+    },
+
+    async resolveClarification({ runId, tenantId, userId, payload, now }) {
+      const rows = await db
+        .update(pgTable)
+        .set({
+          clarifyResume: payload,
+          status: "running",
+          revision: sql`${pgTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(pgTable.runId, runId),
+            eq(pgTable.tenantId, tenantId),
+            eq(pgTable.userId, userId),
+            eq(pgTable.status, "awaiting_clarify"),
+            isNull(pgTable.clarifyResume),
+            or(isNull(pgTable.clarifyExpiresAt), gt(pgTable.clarifyExpiresAt, now)),
+          ),
+        )
+        .returning({ runId: pgTable.runId });
+      return rows.length;
+    },
+
+    async expireClarification({ runId, payload, now }) {
+      const rows = await db
+        .update(pgTable)
+        .set({
+          clarifyResume: payload,
+          status: "running",
+          revision: sql`${pgTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(pgTable.runId, runId),
+            eq(pgTable.status, "awaiting_clarify"),
+            isNull(pgTable.clarifyResume),
+          ),
+        )
+        .returning({ runId: pgTable.runId });
+      return rows.length;
+    },
+
+    async readClarifyResume(runId) {
+      const rows = await db
+        .select({ clarifyResume: pgTable.clarifyResume })
         .from(pgTable)
         .where(eq(pgTable.runId, runId))
         .limit(1);
-      if (!rows[0]) return;
-      const existingStatus = rows[0].status as DeepResearchRunStatus;
-      if (TERMINAL_STATUSES.has(existingStatus) && existingStatus !== status) return;
-      if (TERMINAL_STATUSES.has(existingStatus) && errorMessage === undefined) return;
-      await db.update(pgTable).set(set).where(eq(pgTable.runId, runId));
+      return rows[0]?.clarifyResume ?? null;
     },
 
     async get(tenantId, userId, runId) {
-      const config = resolveDatabaseConfig();
-      if (config.dialect === "mysql") {
-        const { raw: db } = await createMysqlDb(config);
-        const rows = await db
-          .select()
-          .from(mysqlTable)
-          .where(
-            and(
-              eq(mysqlTable.runId, runId),
-              eq(mysqlTable.tenantId, tenantId),
-              eq(mysqlTable.userId, userId),
-            ),
-          )
-          .limit(1);
-        return rows[0] ? mapRow(rows[0]) : null;
-      }
-      const db = getIamDb();
       const rows = await db
         .select()
         .from(pgTable)
@@ -573,25 +754,6 @@ function createSqlStore(): RunStore {
     },
 
     async listActive(tenantId, userId, sessionId) {
-      const config = resolveDatabaseConfig();
-      if (config.dialect === "mysql") {
-        const { raw: db } = await createMysqlDb(config);
-        const rows = await db
-          .select()
-          .from(mysqlTable)
-          .where(
-            and(
-              eq(mysqlTable.tenantId, tenantId),
-              eq(mysqlTable.userId, userId),
-              inArray(mysqlTable.status, ACTIVE_STATUSES),
-              ...(sessionId ? [eq(mysqlTable.sessionId, sessionId)] : []),
-            ),
-          );
-        return rows
-          .map(mapRow)
-          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-      }
-      const db = getIamDb();
       const rows = await db
         .select()
         .from(pgTable)
@@ -607,24 +769,6 @@ function createSqlStore(): RunStore {
     },
 
     async getLatestBySession(tenantId, userId, sessionId) {
-      const config = resolveDatabaseConfig();
-      if (config.dialect === "mysql") {
-        const { raw: db } = await createMysqlDb(config);
-        const rows = await db
-          .select()
-          .from(mysqlTable)
-          .where(
-            and(
-              eq(mysqlTable.tenantId, tenantId),
-              eq(mysqlTable.userId, userId),
-              eq(mysqlTable.sessionId, sessionId),
-            ),
-          )
-          .orderBy(desc(mysqlTable.updatedAt))
-          .limit(1);
-        return rows[0] ? mapRow(rows[0]) : null;
-      }
-      const db = getIamDb();
       const rows = await db
         .select()
         .from(pgTable)
@@ -639,40 +783,445 @@ function createSqlStore(): RunStore {
         .limit(1);
       return rows[0] ? mapRow(rows[0]) : null;
     },
+  };
+}
+
+/**
+ * First terminal status wins. A later call carrying `errorMessage` may still
+ * enrich the *same* terminal status (persistFinish saves citations first, then
+ * the message), but completed/failed/cancelled never overwrite each other.
+ */
+function finishGuardPg(status: DeepResearchTerminalStatus, errorMessage?: string) {
+  const active = inArray(pgTable.status, ACTIVE_STATUSES);
+  if (errorMessage === undefined) return active;
+  return or(active, eq(pgTable.status, status));
+}
+
+function finishGuardMysql(status: DeepResearchTerminalStatus, errorMessage?: string) {
+  const active = inArray(mysqlTable.status, ACTIVE_STATUSES);
+  if (errorMessage === undefined) return active;
+  return or(active, eq(mysqlTable.status, status));
+}
+
+/** mysql2 returns `[ResultSetHeader, FieldPacket[]]`; PG counts `returning()` rows instead. */
+export function mysqlAffectedRows(result: unknown): number {
+  const header = Array.isArray(result) ? result[0] : result;
+  const rows = (header as { affectedRows?: unknown } | undefined)?.affectedRows;
+  return typeof rows === "number" ? rows : 0;
+}
+
+function createMysqlOps(db: MysqlDb): RunSqlOps {
+  return {
+    async create({ runId, tenantId, userId, sessionId, topic, now }) {
+      await db.insert(mysqlTable).values({
+        runId,
+        tenantId,
+        userId,
+        sessionId,
+        status: "running",
+        phase: "recon",
+        topic,
+        events: [],
+        reportMarkdown: "",
+        citations: [],
+        errorMessage: null,
+        eventSeq: 0,
+        revision: 0,
+        clarifyResume: null,
+        clarifyExpiresAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    },
+
+    async loadAppendState(runId) {
+      const rows = await db
+        .select({
+          status: mysqlTable.status,
+          events: mysqlTable.events,
+          eventSeq: mysqlTable.eventSeq,
+          revision: mysqlTable.revision,
+        })
+        .from(mysqlTable)
+        .where(eq(mysqlTable.runId, runId))
+        .limit(1);
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        status: isRunStatus(row.status) ? row.status : "running",
+        events: asEvents(row.events),
+        eventSeq: Number(row.eventSeq) || 0,
+        revision: Number(row.revision) || 0,
+      };
+    },
+
+    async casAppendEvents({ runId, revision, events, eventSeq, status, phase, now }) {
+      const result = await db
+        .update(mysqlTable)
+        .set({
+          events: events as unknown[],
+          eventSeq,
+          revision: revision + 1,
+          ...(status ? { status } : {}),
+          ...(phase ? { phase } : {}),
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(mysqlTable.runId, runId),
+            eq(mysqlTable.revision, revision),
+            inArray(mysqlTable.status, ACTIVE_STATUSES),
+          ),
+        );
+      return mysqlAffectedRows(result);
+    },
+
+    async casBeginClarification({ runId, revision, events, eventSeq, expiresAt, now }) {
+      const result = await db
+        .update(mysqlTable)
+        .set({
+          events: events as unknown[],
+          eventSeq,
+          revision: revision + 1,
+          status: "awaiting_clarify",
+          phase: "clarify",
+          clarifyResume: null,
+          clarifyExpiresAt: expiresAt,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(mysqlTable.runId, runId),
+            eq(mysqlTable.revision, revision),
+            inArray(mysqlTable.status, ACTIVE_STATUSES),
+          ),
+        );
+      return mysqlAffectedRows(result);
+    },
+
+    async appendReportChunk(runId, chunk, now) {
+      const result = await db
+        .update(mysqlTable)
+        .set({
+          reportMarkdown: sql`concat(${mysqlTable.reportMarkdown}, ${chunk})`,
+          revision: sql`${mysqlTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(and(eq(mysqlTable.runId, runId), inArray(mysqlTable.status, ACTIVE_STATUSES)));
+      return mysqlAffectedRows(result);
+    },
+
+    async setCitations(runId, citations, now) {
+      const result = await db
+        .update(mysqlTable)
+        .set({
+          citations: citations as unknown[],
+          revision: sql`${mysqlTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(eq(mysqlTable.runId, runId));
+      return mysqlAffectedRows(result);
+    },
+
+    async finishRun({ runId, status, errorMessage, now }) {
+      const result = await db
+        .update(mysqlTable)
+        .set({
+          status,
+          phase: "done",
+          revision: sql`${mysqlTable.revision} + 1`,
+          updatedAt: now,
+          ...(errorMessage !== undefined ? { errorMessage } : {}),
+        })
+        .where(and(eq(mysqlTable.runId, runId), finishGuardMysql(status, errorMessage)));
+      return mysqlAffectedRows(result);
+    },
+
+    async reapStale(cutoff, now) {
+      const result = await db
+        .update(mysqlTable)
+        .set({
+          status: "failed",
+          phase: "done",
+          errorMessage: STALE_RUN_ERROR_MESSAGE,
+          revision: sql`${mysqlTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(inArray(mysqlTable.status, ACTIVE_STATUSES), lt(mysqlTable.updatedAt, cutoff)),
+        );
+      return mysqlAffectedRows(result);
+    },
+
+    async resolveClarification({ runId, tenantId, userId, payload, now }) {
+      const result = await db
+        .update(mysqlTable)
+        .set({
+          clarifyResume: payload,
+          status: "running",
+          revision: sql`${mysqlTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(mysqlTable.runId, runId),
+            eq(mysqlTable.tenantId, tenantId),
+            eq(mysqlTable.userId, userId),
+            eq(mysqlTable.status, "awaiting_clarify"),
+            isNull(mysqlTable.clarifyResume),
+            or(isNull(mysqlTable.clarifyExpiresAt), gt(mysqlTable.clarifyExpiresAt, now)),
+          ),
+        );
+      return mysqlAffectedRows(result);
+    },
+
+    async expireClarification({ runId, payload, now }) {
+      const result = await db
+        .update(mysqlTable)
+        .set({
+          clarifyResume: payload,
+          status: "running",
+          revision: sql`${mysqlTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(mysqlTable.runId, runId),
+            eq(mysqlTable.status, "awaiting_clarify"),
+            isNull(mysqlTable.clarifyResume),
+          ),
+        );
+      return mysqlAffectedRows(result);
+    },
+
+    async readClarifyResume(runId) {
+      const rows = await db
+        .select({ clarifyResume: mysqlTable.clarifyResume })
+        .from(mysqlTable)
+        .where(eq(mysqlTable.runId, runId))
+        .limit(1);
+      return rows[0]?.clarifyResume ?? null;
+    },
+
+    async get(tenantId, userId, runId) {
+      const rows = await db
+        .select()
+        .from(mysqlTable)
+        .where(
+          and(
+            eq(mysqlTable.runId, runId),
+            eq(mysqlTable.tenantId, tenantId),
+            eq(mysqlTable.userId, userId),
+          ),
+        )
+        .limit(1);
+      return rows[0] ? mapRow(rows[0]) : null;
+    },
+
+    async listActive(tenantId, userId, sessionId) {
+      const rows = await db
+        .select()
+        .from(mysqlTable)
+        .where(
+          and(
+            eq(mysqlTable.tenantId, tenantId),
+            eq(mysqlTable.userId, userId),
+            inArray(mysqlTable.status, ACTIVE_STATUSES),
+            ...(sessionId ? [eq(mysqlTable.sessionId, sessionId)] : []),
+          ),
+        );
+      return rows.map(mapRow).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    },
+
+    async getLatestBySession(tenantId, userId, sessionId) {
+      const rows = await db
+        .select()
+        .from(mysqlTable)
+        .where(
+          and(
+            eq(mysqlTable.tenantId, tenantId),
+            eq(mysqlTable.userId, userId),
+            eq(mysqlTable.sessionId, sessionId),
+          ),
+        )
+        .orderBy(desc(mysqlTable.updatedAt))
+        .limit(1);
+      return rows[0] ? mapRow(rows[0]) : null;
+    },
+  };
+}
+
+async function resolveDialectOps(): Promise<RunSqlOps> {
+  const config = resolveDatabaseConfig();
+  if (config.dialect === "mysql") {
+    const { raw } = await createMysqlDb(config);
+    return createMysqlOps(raw);
+  }
+  return createPgOps(getIamDb());
+}
+
+export class RunCasExhaustedError extends Error {
+  constructor(runId: string, operation: string) {
+    super(`deep-research run ${runId}: ${operation} lost ${MAX_RUN_CAS_ATTEMPTS} CAS attempts`);
+    this.name = "RunCasExhaustedError";
+  }
+}
+
+/** Exported for tests: the dialect seam can be replaced with a fake driver. */
+export function createSqlRunStore(loadOps: () => Promise<RunSqlOps> = resolveDialectOps): RunStore {
+  /**
+   * Read → merge → conditional UPDATE. A lost race means another instance
+   * already bumped `revision`, so we re-read and rebuild the merge instead of
+   * clobbering their events.
+   */
+  const casMerge = async (
+    runId: string,
+    events: DeepResearchEvent[],
+    apply: (
+      ops: RunSqlOps,
+      state: RunAppendState,
+      merged: DeepResearchEvent[],
+      eventSeq: number,
+    ) => Promise<number>,
+    operation: string,
+  ): Promise<"applied" | "unavailable"> => {
+    const ops = await loadOps();
+    for (let attempt = 0; attempt < MAX_RUN_CAS_ATTEMPTS; attempt += 1) {
+      const state = await ops.loadAppendState(runId);
+      if (!state) return "unavailable";
+      if (TERMINAL_STATUSES.has(state.status)) return "unavailable";
+      const merged =
+        events.length > 0 ? mergeRunEvents(state.events, events) : state.events;
+      const changed = await apply(ops, state, merged, state.eventSeq + events.length);
+      if (changed > 0) return "applied";
+    }
+    throw new RunCasExhaustedError(runId, operation);
+  };
+
+  return {
+    async create(input) {
+      const now = new Date();
+      const ops = await loadOps();
+      await ops.create({ ...input, now });
+      return {
+        runId: input.runId,
+        tenantId: input.tenantId,
+        userId: input.userId,
+        sessionId: input.sessionId,
+        status: "running",
+        phase: "recon",
+        topic: input.topic,
+        events: [],
+        reportMarkdown: "",
+        citations: [],
+        eventSeq: 0,
+        revision: 0,
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+    },
+
+    async appendEvents(runId, events, patch) {
+      await casMerge(
+        runId,
+        events,
+        (ops, state, merged, eventSeq) =>
+          ops.casAppendEvents({
+            runId,
+            revision: state.revision,
+            events: merged,
+            eventSeq,
+            status: patch?.status,
+            phase: patch?.phase,
+            now: new Date(),
+          }),
+        "appendEvents",
+      );
+    },
+
+    async appendReport(runId, chunk) {
+      if (!chunk) return;
+      const ops = await loadOps();
+      await ops.appendReportChunk(runId, chunk, new Date());
+    },
+
+    async setCitations(runId, citations) {
+      const ops = await loadOps();
+      await ops.setCitations(runId, citations, new Date());
+    },
+
+    async finish(runId, status, errorMessage) {
+      const ops = await loadOps();
+      await ops.finishRun({ runId, status, errorMessage, now: new Date() });
+    },
+
+    async beginClarification(runId, events, expiresAt) {
+      const outcome = await casMerge(
+        runId,
+        events,
+        (ops, state, merged, eventSeq) =>
+          ops.casBeginClarification({
+            runId,
+            revision: state.revision,
+            events: merged,
+            eventSeq,
+            expiresAt,
+            now: new Date(),
+          }),
+        "beginClarification",
+      );
+      return outcome === "applied";
+    },
+
+    async resolveClarification({ tenantId, userId, runId, payload, now }) {
+      const ops = await loadOps();
+      const at = now ?? new Date();
+      const changed = await ops.resolveClarification({
+        runId,
+        tenantId,
+        userId,
+        payload: normalizeClarifyResume(payload) ?? { answers: {}, skip: true },
+        now: at,
+      });
+      if (changed > 0) return "resumed";
+      // Ownership is checked in the same statement, so a miss is either a
+      // foreign/absent run (404) or a run that already moved on (idempotent 200).
+      const existing = await ops.get(tenantId, userId, runId);
+      return existing ? "already_continued" : "not_found";
+    },
+
+    async getClarificationResume(runId) {
+      const ops = await loadOps();
+      return normalizeClarifyResume(await ops.readClarifyResume(runId));
+    },
+
+    async expireClarification(runId, now) {
+      const ops = await loadOps();
+      const at = now ?? new Date();
+      await ops.expireClarification({ runId, payload: clarifyTimeoutPayload(), now: at });
+      // Re-read: a concurrent resume may have won the race.
+      return normalizeClarifyResume(await ops.readClarifyResume(runId)) ?? clarifyTimeoutPayload();
+    },
+
+    async get(tenantId, userId, runId) {
+      const ops = await loadOps();
+      return ops.get(tenantId, userId, runId);
+    },
+
+    async listActive(tenantId, userId, sessionId) {
+      const ops = await loadOps();
+      return ops.listActive(tenantId, userId, sessionId);
+    },
+
+    async getLatestBySession(tenantId, userId, sessionId) {
+      const ops = await loadOps();
+      return ops.getLatestBySession(tenantId, userId, sessionId);
+    },
 
     async reapStaleRuns(olderThanMs) {
-      const cutoff = new Date(Date.now() - olderThanMs);
-      const config = resolveDatabaseConfig();
-      const set = {
-        status: "failed" as const,
-        phase: "done",
-        errorMessage: "stale run reaped after process restart",
-        updatedAt: new Date(),
-      };
-
-      if (config.dialect === "mysql") {
-        const { raw: db } = await createMysqlDb(config);
-        const rows = await db
-          .select({ runId: mysqlTable.runId })
-          .from(mysqlTable)
-          .where(
-            and(inArray(mysqlTable.status, ACTIVE_STATUSES), lt(mysqlTable.updatedAt, cutoff)),
-          );
-        for (const row of rows) {
-          await db.update(mysqlTable).set(set).where(eq(mysqlTable.runId, row.runId));
-        }
-        return rows.length;
-      }
-
-      const db = getIamDb();
-      const rows = await db
-        .select({ runId: pgTable.runId })
-        .from(pgTable)
-        .where(and(inArray(pgTable.status, ACTIVE_STATUSES), lt(pgTable.updatedAt, cutoff)));
-      for (const row of rows) {
-        await db.update(pgTable).set(set).where(eq(pgTable.runId, row.runId));
-      }
-      return rows.length;
+      const ops = await loadOps();
+      const now = new Date();
+      return ops.reapStale(new Date(now.getTime() - olderThanMs), now);
     },
   };
 }
@@ -712,16 +1261,21 @@ export function createRunWriter(store: RunStore, runId: string): RunWriter {
     pendingReport = "";
     if (events.length === 0 && !patch && !report) return;
 
-    flushChain = flushChain.then(async () => {
-      // Report chunks first: a terminal status patch in the same flush must not
-      // block appendReport (finish / phase=done often lands with the last summary).
-      if (report) {
-        await store.appendReport(runId, report);
-      }
-      if (events.length > 0 || patch) {
-        await store.appendEvents(runId, events, patch);
-      }
-    });
+    flushChain = flushChain
+      .then(async () => {
+        // Report chunks first: a terminal status patch in the same flush must not
+        // block appendReport (finish / phase=done often lands with the last summary).
+        if (report) {
+          await store.appendReport(runId, report);
+        }
+        if (events.length > 0 || patch) {
+          await store.appendEvents(runId, events, patch);
+        }
+      })
+      // A poisoned chain would silently stall every later flush; log and continue.
+      .catch((error) => {
+        console.warn("[deep-research] run-store flush failed:", error);
+      });
     await flushChain;
   };
 
@@ -764,7 +1318,7 @@ export function createRunStore(): RunStore {
   if (!process.env.DATABASE_URL?.trim()) return createMemoryStore();
   try {
     resolveDatabaseConfig();
-    return createSqlStore();
+    return createSqlRunStore();
   } catch {
     return createMemoryStore();
   }

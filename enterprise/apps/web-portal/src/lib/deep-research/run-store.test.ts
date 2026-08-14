@@ -342,6 +342,209 @@ describe("memory run store", () => {
     expect(await store.get("t2", "u1", "r1")).toBeNull();
     expect(await store.get("t1", "u2", "r1")).toBeNull();
   });
+
+  it("keeps the first terminal status; a later different outcome cannot overwrite it", async () => {
+    const store = createMemoryRunStore();
+    await store.create({
+      runId: "r1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "主题",
+    });
+    await store.finish("r1", "completed");
+    await store.finish("r1", "failed", "late failure");
+    await store.finish("r1", "cancelled");
+    const row = await store.get("t1", "u1", "r1");
+    expect(row?.status).toBe("completed");
+    expect(row?.errorMessage).toBeUndefined();
+  });
+
+  it("does not resurrect a finished run through a late report append", async () => {
+    const store = createMemoryRunStore();
+    await store.create({
+      runId: "r1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "主题",
+    });
+    await store.appendReport("r1", "# 正文\n");
+    await store.finish("r1", "completed");
+    await store.appendReport("r1", "迟到的尾巴");
+    const row = await store.get("t1", "u1", "r1");
+    expect(row?.status).toBe("completed");
+    expect(row?.reportMarkdown).toBe("# 正文\n");
+  });
+
+  it("reapStaleRuns skips runs that were touched inside the window", async () => {
+    const store = createMemoryRunStore();
+    await store.create({
+      runId: "fresh",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "A",
+    });
+    await store.create({
+      runId: "done",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "B",
+    });
+    await store.finish("done", "completed");
+    // Window is 1h; both rows were just written, so nothing is stale.
+    expect(await store.reapStaleRuns(3_600_000)).toBe(0);
+    expect((await store.get("t1", "u1", "fresh"))?.status).toBe("running");
+    expect((await store.get("t1", "u1", "done"))?.status).toBe("completed");
+    // Everything older than "now" is stale — only the active run is reaped.
+    expect(await store.reapStaleRuns(-1)).toBe(1);
+    expect((await store.get("t1", "u1", "fresh"))?.status).toBe("failed");
+    expect((await store.get("t1", "u1", "done"))?.status).toBe("completed");
+  });
+
+  it("bumps revision on every mutation", async () => {
+    const store = createMemoryRunStore();
+    const created = await store.create({
+      runId: "r1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "主题",
+    });
+    expect(created.revision).toBe(0);
+    await store.appendEvents("r1", [{ type: "narrative", text: "一" }]);
+    await store.appendReport("r1", "chunk");
+    await store.setCitations("r1", []);
+    expect((await store.get("t1", "u1", "r1"))?.revision).toBe(3);
+  });
+});
+
+describe("clarify coordination", () => {
+  const OWNER = { tenantId: "t1", userId: "u1" };
+
+  async function armed(runId = "r1", ttlMs: number | null = 60_000) {
+    const store = createMemoryRunStore();
+    await store.create({ ...OWNER, runId, sessionId: "s1", topic: "主题" });
+    const armedOk = await store.beginClarification(
+      runId,
+      [{ type: "narrative", text: "请确认方向" }],
+      ttlMs === null ? null : new Date(Date.now() + ttlMs),
+    );
+    return { store, armedOk };
+  }
+
+  it("beginClarification persists the events and flips to awaiting_clarify", async () => {
+    const { store, armedOk } = await armed();
+    expect(armedOk).toBe(true);
+    const row = await store.get(OWNER.tenantId, OWNER.userId, "r1");
+    expect(row?.status).toBe("awaiting_clarify");
+    expect(row?.phase).toBe("clarify");
+    expect(row?.events).toHaveLength(1);
+    expect(row?.eventSeq).toBe(1);
+    expect(await store.getClarificationResume("r1")).toBeNull();
+  });
+
+  it("refuses to arm a run that already finished", async () => {
+    const store = createMemoryRunStore();
+    await store.create({ ...OWNER, runId: "r1", sessionId: "s1", topic: "主题" });
+    await store.finish("r1", "cancelled");
+    expect(await store.beginClarification("r1", [], null)).toBe(false);
+  });
+
+  it("accepts only the first answer and reports repeats as already continued", async () => {
+    const { store } = await armed();
+    await expect(
+      store.resolveClarification({
+        ...OWNER,
+        runId: "r1",
+        payload: { answers: { q1: "first" }, skip: false },
+      }),
+    ).resolves.toBe("resumed");
+    await expect(
+      store.resolveClarification({
+        ...OWNER,
+        runId: "r1",
+        payload: { answers: { q1: "second" }, skip: false },
+      }),
+    ).resolves.toBe("already_continued");
+    expect(await store.getClarificationResume("r1")).toEqual({
+      answers: { q1: "first" },
+      skip: false,
+    });
+    expect((await store.get(OWNER.tenantId, OWNER.userId, "r1"))?.status).toBe("running");
+  });
+
+  it("returns not_found for cross-tenant and cross-user resume attempts", async () => {
+    const { store } = await armed();
+    await expect(
+      store.resolveClarification({
+        tenantId: "t2",
+        userId: "u1",
+        runId: "r1",
+        payload: { answers: {}, skip: true },
+      }),
+    ).resolves.toBe("not_found");
+    await expect(
+      store.resolveClarification({
+        tenantId: "t1",
+        userId: "u2",
+        runId: "r1",
+        payload: { answers: {}, skip: true },
+      }),
+    ).resolves.toBe("not_found");
+    await expect(
+      store.resolveClarification({
+        ...OWNER,
+        runId: "missing",
+        payload: { answers: {}, skip: true },
+      }),
+    ).resolves.toBe("not_found");
+    // The run is still waiting for its rightful owner.
+    expect(await store.getClarificationResume("r1")).toBeNull();
+  });
+
+  it("rejects a resume that arrives after the clarify deadline", async () => {
+    const { store } = await armed("r1", 1_000);
+    await expect(
+      store.resolveClarification({
+        ...OWNER,
+        runId: "r1",
+        payload: { answers: { q1: "late" }, skip: false },
+        now: new Date(Date.now() + 5_000),
+      }),
+    ).resolves.toBe("already_continued");
+    expect(await store.getClarificationResume("r1")).toBeNull();
+  });
+
+  it("expireClarification yields the resume payload when the answer won the race", async () => {
+    const { store } = await armed();
+    await store.resolveClarification({
+      ...OWNER,
+      runId: "r1",
+      payload: { answers: { q1: "winner" }, skip: false },
+    });
+    await expect(store.expireClarification("r1")).resolves.toEqual({
+      answers: { q1: "winner" },
+      skip: false,
+    });
+  });
+
+  it("expireClarification writes the skip payload exactly once", async () => {
+    const { store } = await armed();
+    await expect(store.expireClarification("r1")).resolves.toEqual({
+      answers: {},
+      skip: true,
+      timedOut: true,
+    });
+    await expect(store.expireClarification("r1")).resolves.toEqual({
+      answers: {},
+      skip: true,
+      timedOut: true,
+    });
+    expect((await store.get(OWNER.tenantId, OWNER.userId, "r1"))?.status).toBe("running");
+  });
 });
 
 describe("newEventsSince", () => {

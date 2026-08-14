@@ -1,225 +1,113 @@
 /**
  * Clarify resume coordination for deep-research.
  *
- * Uses both an in-memory waiter (fast path) and a small JSON file under
- * enterprise/.runtime so resume still works across Next.js HMR / isolate
- * boundaries. A pure in-memory Map was cleared on hot reload while the SSE
- * request kept waiting — the clarify card then got "alreadyContinued" and
- * showed a false timeout within the real deadline.
+ * The run row is the single source of truth: the instance running the SSE turn
+ * polls `getClarificationResume()`, while the instance serving `/resume` writes
+ * the answer with a conditional UPDATE. The in-memory notifier below is a pure
+ * latency optimisation for the common single-instance case — dropping it (HMR,
+ * a different isolate, a different pod) only costs one poll interval.
  */
 
-import fs from "node:fs";
-import path from "node:path";
+import {
+  clarifyTimeoutPayload,
+  type ClarifyResumePayload,
+  type RunStore,
+} from "./run-store";
 
-export type ClarifyResumePayload = {
-  answers: Record<string, string>;
-  skip: boolean;
-  timedOut?: boolean;
-};
+export type { ClarifyResumePayload };
 
-type Waiter = {
-  resolve: (value: ClarifyResumePayload) => void;
-  reject: (reason?: unknown) => void;
-  timer: ReturnType<typeof setTimeout>;
-  poll: ReturnType<typeof setInterval>;
-  settled: boolean;
-};
-
-type PendingFile = {
-  status: "waiting" | "resolved";
-  updatedAt: number;
-  payload?: ClarifyResumePayload;
-};
+/** DB poll cadence while a clarify card is on screen. */
+export const CLARIFY_POLL_INTERVAL_MS = 1_000;
 
 type ClarifyGlobal = typeof globalThis & {
-  __agxClarifyWaiters?: Map<string, Waiter>;
-  __agxClarifyWaitDir?: string;
+  __agxClarifyNotifiers?: Map<string, Set<() => void>>;
 };
 
-function clarifyGlobal(): ClarifyGlobal {
-  return globalThis as ClarifyGlobal;
+function notifiers(): Map<string, Set<() => void>> {
+  const g = globalThis as ClarifyGlobal;
+  if (!g.__agxClarifyNotifiers) g.__agxClarifyNotifiers = new Map();
+  return g.__agxClarifyNotifiers;
 }
 
-function waiters(): Map<string, Waiter> {
-  const g = clarifyGlobal();
-  if (!g.__agxClarifyWaiters) g.__agxClarifyWaiters = new Map();
-  return g.__agxClarifyWaiters;
-}
-
-export function resolveClarifyWaitDir(cwd = process.cwd()): string {
-  const override = process.env.AGX_CLARIFY_WAIT_DIR?.trim();
-  if (override) return path.resolve(override);
-  const g = clarifyGlobal();
-  if (g.__agxClarifyWaitDir) return g.__agxClarifyWaitDir;
-  const candidates = [
-    path.resolve(cwd, ".runtime/deep-research-clarify"),
-    path.resolve(cwd, "../../.runtime/deep-research-clarify"),
-  ];
-  for (const candidate of candidates) {
-    const enterpriseRuntime = path.dirname(candidate);
-    if (fs.existsSync(enterpriseRuntime) || candidate.includes(`${path.sep}.runtime${path.sep}`)) {
-      return candidate;
+/** Wake local waiters immediately after a resume landed in the database. */
+export function notifyClarifyResume(runId: string): void {
+  const listeners = notifiers().get(runId);
+  if (!listeners) return;
+  for (const listener of [...listeners]) {
+    try {
+      listener();
+    } catch {
+      // A dead waiter must not block the others.
     }
   }
-  return candidates[0]!;
 }
 
-/** Test helper: pin wait dir (also sets AGX_CLARIFY_WAIT_DIR). */
-export function setClarifyWaitDirForTests(dir: string | null): void {
-  const g = clarifyGlobal();
-  if (dir) {
-    g.__agxClarifyWaitDir = path.resolve(dir);
-    process.env.AGX_CLARIFY_WAIT_DIR = g.__agxClarifyWaitDir;
-  } else {
-    delete g.__agxClarifyWaitDir;
-    delete process.env.AGX_CLARIFY_WAIT_DIR;
-  }
+function subscribe(runId: string, listener: () => void): () => void {
+  const map = notifiers();
+  const listeners = map.get(runId) ?? new Set<() => void>();
+  listeners.add(listener);
+  map.set(runId, listeners);
+  return () => {
+    const current = map.get(runId);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) map.delete(runId);
+  };
 }
 
-function pendingPath(runId: string): string {
-  const safe = runId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 128);
-  return path.join(resolveClarifyWaitDir(), `${safe}.json`);
-}
-
-function ensureWaitDir(): void {
-  fs.mkdirSync(resolveClarifyWaitDir(), { recursive: true });
-}
-
-function writePending(runId: string, doc: PendingFile): void {
-  ensureWaitDir();
-  const file = pendingPath(runId);
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(doc), "utf8");
-  fs.renameSync(tmp, file);
-}
-
-function readPending(runId: string): PendingFile | null {
-  try {
-    const raw = fs.readFileSync(pendingPath(runId), "utf8");
-    const parsed = JSON.parse(raw) as PendingFile;
-    if (parsed?.status !== "waiting" && parsed?.status !== "resolved") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function removePending(runId: string): void {
-  try {
-    fs.unlinkSync(pendingPath(runId));
-  } catch {
-    // ignore
-  }
-}
-
-function settleWaiter(runId: string, payload: ClarifyResumePayload): void {
-  const waiter = waiters().get(runId);
-  if (!waiter || waiter.settled) {
-    if (payload.timedOut) removePending(runId);
-    return;
-  }
-  waiter.settled = true;
-  clearTimeout(waiter.timer);
-  clearInterval(waiter.poll);
-  waiters().delete(runId);
-  removePending(runId);
-  waiter.resolve(payload);
-}
-
+/**
+ * Resolve once the run row carries a clarify answer, or once `timeoutMs` elapses
+ * and `expireClarification()` wrote the skip payload. Never rejects: a database
+ * hiccup degrades to "keep polling", and an unreachable database at the deadline
+ * degrades to the timeout payload so the run still continues.
+ */
 export function waitForClarifyResume(
+  runStore: RunStore,
   runId: string,
   timeoutMs: number,
 ): Promise<ClarifyResumePayload> {
-  const existing = waiters().get(runId);
-  if (existing && !existing.settled) {
-    existing.settled = true;
-    clearTimeout(existing.timer);
-    clearInterval(existing.poll);
-    waiters().delete(runId);
-    existing.reject(new Error("clarify waiter replaced"));
-  }
+  return new Promise<ClarifyResumePayload>((resolve) => {
+    let settled = false;
+    let unsubscribe: (() => void) | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-  writePending(runId, { status: "waiting", updatedAt: Date.now() });
+    const settle = (payload: ClarifyResumePayload) => {
+      if (settled) return;
+      settled = true;
+      if (poll !== null) clearInterval(poll);
+      if (timer !== null) clearTimeout(timer);
+      unsubscribe?.();
+      resolve(payload);
+    };
 
-  return new Promise<ClarifyResumePayload>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      settleWaiter(runId, { answers: {}, skip: true, timedOut: true });
+    const check = async () => {
+      if (settled) return;
+      try {
+        const payload = await runStore.getClarificationResume(runId);
+        if (payload) settle(payload);
+      } catch {
+        // Transient read failure — the next tick retries.
+      }
+    };
+
+    poll = setInterval(() => {
+      void check();
+    }, CLARIFY_POLL_INTERVAL_MS);
+
+    timer = setTimeout(() => {
+      void (async () => {
+        if (settled) return;
+        try {
+          settle(await runStore.expireClarification(runId, new Date()));
+        } catch {
+          settle(clarifyTimeoutPayload());
+        }
+      })();
     }, timeoutMs);
 
-    const poll = setInterval(() => {
-      const doc = readPending(runId);
-      if (doc?.status === "resolved" && doc.payload) {
-        const next: ClarifyResumePayload = {
-          answers: doc.payload.answers ?? {},
-          skip: Boolean(doc.payload.skip),
-        };
-        if (doc.payload.timedOut) next.timedOut = true;
-        settleWaiter(runId, next);
-      }
-    }, 200);
-
-    waiters().set(runId, {
-      resolve,
-      reject,
-      timer,
-      poll,
-      settled: false,
+    unsubscribe = subscribe(runId, () => {
+      void check();
     });
   });
-}
-
-export function resolveClarifyResume(runId: string, payload: ClarifyResumePayload): boolean {
-  const doc = readPending(runId);
-  const memoryWaiter = waiters().get(runId);
-  const wasWaiting =
-    doc?.status === "waiting" || Boolean(memoryWaiter && !memoryWaiter.settled);
-
-  if (!wasWaiting) {
-    return false;
-  }
-
-  writePending(runId, {
-    status: "resolved",
-    updatedAt: Date.now(),
-    payload: {
-      answers: payload.answers ?? {},
-      skip: Boolean(payload.skip),
-      timedOut: Boolean(payload.timedOut),
-    },
-  });
-
-  if (memoryWaiter && !memoryWaiter.settled) {
-    const next: ClarifyResumePayload = {
-      answers: payload.answers ?? {},
-      skip: Boolean(payload.skip),
-    };
-    if (payload.timedOut) next.timedOut = true;
-    settleWaiter(runId, next);
-  }
-  return true;
-}
-
-export function hasClarifyWaiter(runId: string): boolean {
-  const memory = waiters().get(runId);
-  if (memory && !memory.settled) return true;
-  return readPending(runId)?.status === "waiting";
-}
-
-/** Test helper */
-export function clearClarifyWaiters(): void {
-  for (const [runId, waiter] of waiters()) {
-    waiter.settled = true;
-    clearTimeout(waiter.timer);
-    clearInterval(waiter.poll);
-    removePending(runId);
-  }
-  waiters().clear();
-  const dir = resolveClarifyWaitDir();
-  try {
-    for (const name of fs.readdirSync(dir)) {
-      if (name.endsWith(".json")) fs.unlinkSync(path.join(dir, name));
-    }
-  } catch {
-    // ignore
-  }
 }

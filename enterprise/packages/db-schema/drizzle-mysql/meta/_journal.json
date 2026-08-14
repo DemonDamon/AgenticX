@@ -134,6 +134,13 @@
       "when": 1786694400001,
       "tag": "0018_deep_research_provider_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1786780800001,
+      "tag": "0019_deep_research_run_coordination",
+      "breakpoints": true
     }
   ]
 }

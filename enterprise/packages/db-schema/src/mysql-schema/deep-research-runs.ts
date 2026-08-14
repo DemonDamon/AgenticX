@@ -34,6 +34,12 @@ export const enterpriseDeepResearchRuns = mysqlTable(
     citations: json("citations").$type<unknown[]>().default([]).notNull(),
     errorMessage: text("error_message"),
     eventSeq: int("event_seq").default(0).notNull(),
+    /** 乐观锁版本号：跨实例写入用 run_id + revision 做 CAS。 */
+    revision: int("revision").default(0).notNull(),
+    /** 澄清应答（ClarifyResumePayload），DB 是跨实例澄清协调的唯一事实源。 */
+    clarifyResume: json("clarify_resume").$type<unknown>(),
+    /** 澄清等待到期时间；超时后由 expireClarification 原子写入跳过应答。 */
+    clarifyExpiresAt: datetime("clarify_expires_at", { fsp: 6 }),
     createdAt: datetime("created_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
     updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
   },

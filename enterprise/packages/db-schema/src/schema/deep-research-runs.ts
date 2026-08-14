@@ -21,6 +21,12 @@ export const enterpriseDeepResearchRuns = pgTable(
     citations: jsonb("citations").$type<unknown[]>().default([]).notNull(),
     errorMessage: text("error_message"),
     eventSeq: integer("event_seq").default(0).notNull(),
+    /** 乐观锁版本号：跨实例写入用 run_id + revision 做 CAS。 */
+    revision: integer("revision").default(0).notNull(),
+    /** 澄清应答（ClarifyResumePayload），DB 是跨实例澄清协调的唯一事实源。 */
+    clarifyResume: jsonb("clarify_resume").$type<unknown>(),
+    /** 澄清等待到期时间；超时后由 expireClarification 原子写入跳过应答。 */
+    clarifyExpiresAt: timestamp("clarify_expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

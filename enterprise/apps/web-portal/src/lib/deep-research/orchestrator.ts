@@ -78,10 +78,7 @@ import {
   type DeliveryPrefs,
 } from "./delivery-prefs";
 import { looksOpenEndedResearchQuery } from "./research-intent";
-import {
-  waitForClarifyResume,
-  type ClarifyResumePayload,
-} from "./run-wait";
+import { waitForClarifyResume } from "./run-wait";
 import {
   createArtifactStore,
   type ArtifactStore,
@@ -90,6 +87,7 @@ import {
 import {
   defaultRunStore,
   createRunWriter,
+  type ClarifyResumePayload,
   type DeepResearchRunStatus,
   type RunStore,
   type RunWriter,
@@ -1061,60 +1059,78 @@ export async function runDeepResearchTurn(
           : [];
 
         if (clarifyQuestions.length > 0) {
-          enqueueEvent({
-            type: "narrative",
-            text: "现状已校准，再确认一下调研方向与交付偏好。",
-          });
-          for (let i = 0; i < clarifyQuestions.length; i += 1) {
-            const q = clarifyQuestions[i]!;
-            enqueueEvent(
-              {
-                type: "clarify",
-                runId,
-                step: i + 1,
-                total: clarifyQuestions.length,
-                questionId: q.id,
-                question: q.question,
-                options: q.options,
-                allowCustom: q.allowCustom,
-                multiSelect: q.multiSelect,
-              },
-              i === 0 ? { status: "awaiting_clarify", phase: "clarify" } : undefined,
+          const clarifyGateEvents: DeepResearchEvent[] = [
+            { type: "narrative", text: "现状已校准，再确认一下调研方向与交付偏好。" },
+            ...clarifyQuestions.map((q, i) => ({
+              type: "clarify" as const,
+              runId,
+              step: i + 1,
+              total: clarifyQuestions.length,
+              questionId: q.id,
+              question: q.question,
+              options: q.options,
+              allowCustom: q.allowCustom,
+              multiSelect: q.multiSelect,
+            })),
+          ];
+          // The clarify card is only safe to show once the database says the run
+          // is awaiting an answer — otherwise a resume could land before the row
+          // can accept it and the user would see a false timeout.
+          await writer?.flush();
+          let clarifyArmed = false;
+          try {
+            clarifyArmed = await runStore.beginClarification(
+              runId,
+              clarifyGateEvents,
+              // Wall clock, not the run budget clock: other instances compare this
+              // deadline against their own `now` when accepting an answer.
+              awaitClarify ? new Date(Date.now() + clarifyTimeoutMs) : null,
+            );
+          } catch (error) {
+            console.warn("[deep-research] clarify gate persist failed:", error);
+          }
+
+          if (clarifyArmed) {
+            // Already persisted above — emit straight to SSE so the writer cannot
+            // append these events a second time.
+            for (const event of clarifyGateEvents) {
+              safeControllerEnqueue(encoder.encode(formatDeepResearchEventSse(event)));
+            }
+            enqueueFlush();
+
+            if (awaitClarify) {
+              // User think-time is explicitly outside the active research budget.
+              deadline.pause();
+              try {
+                clarifyResume = await waitForClarifyResume(runStore, runId, clarifyTimeoutMs);
+              } finally {
+                deadline.resume();
+              }
+              // resolveClarification / expireClarification already flipped the row
+              // back to `running`; no extra status patch here.
+              if (clarifyResume.timedOut) {
+                enqueueEvent({ type: "clarify_timeout", runId });
+                enqueueEvent({ type: "narrative", text: "澄清超时，按默认假设继续。" });
+              } else if (!clarifyResume.skip) {
+                enqueueEvent({ type: "narrative", text: "已明确调研方向，开始系统检索。" });
+              } else {
+                enqueueEvent({ type: "narrative", text: "已跳过确认，按默认假设继续检索。" });
+              }
+            }
+            if (clarifyResume.skip || clarifyResume.timedOut) {
+              deliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
+            } else {
+              deliveryPrefs = parseDeliveryPrefs(clarifyResume.answers, clarifyQuestions);
+            }
+            const laneQuestions = clarifyQuestions.filter(
+              (q) => !isDeliveryClarifyQuestionId(q.id),
+            );
+            clarifyExpandedLanes = expandLanesFromClarifyAnswers(
+              userQuery,
+              laneQuestions,
+              clarifyResume,
             );
           }
-          enqueueFlush();
-
-          if (awaitClarify) {
-            // User think-time is explicitly outside the active research budget.
-            deadline.pause();
-            try {
-              clarifyResume = await waitForClarifyResume(runId, clarifyTimeoutMs);
-            } finally {
-              deadline.resume();
-            }
-            await runStore.appendEvents(runId, [], { status: "running" });
-            if (clarifyResume.timedOut) {
-              enqueueEvent({ type: "clarify_timeout", runId });
-              enqueueEvent({ type: "narrative", text: "澄清超时，按默认假设继续。" });
-            } else if (!clarifyResume.skip) {
-              enqueueEvent({ type: "narrative", text: "已明确调研方向，开始系统检索。" });
-            } else {
-              enqueueEvent({ type: "narrative", text: "已跳过确认，按默认假设继续检索。" });
-            }
-          }
-          if (clarifyResume.skip || clarifyResume.timedOut) {
-            deliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
-          } else {
-            deliveryPrefs = parseDeliveryPrefs(clarifyResume.answers, clarifyQuestions);
-          }
-          const laneQuestions = clarifyQuestions.filter(
-            (q) => !isDeliveryClarifyQuestionId(q.id),
-          );
-          clarifyExpandedLanes = expandLanesFromClarifyAnswers(
-            userQuery,
-            laneQuestions,
-            clarifyResume,
-          );
         }
 
         // Clarify + delivery prefs are planner/writer hints only — never mutate the

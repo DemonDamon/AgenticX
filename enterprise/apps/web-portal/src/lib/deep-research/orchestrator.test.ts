@@ -19,8 +19,8 @@ import {
   runDeepResearchTurn,
 } from "./orchestrator";
 import { createMemoryArtifactStore } from "./artifact-store";
-import { createMemoryRunStore } from "./run-store";
-import { clearClarifyWaiters, resolveClarifyResume } from "./run-wait";
+import { createMemoryRunStore, type RunStore } from "./run-store";
+import { notifyClarifyResume } from "./run-wait";
 import type { PlannerDeps, ResearchPlan } from "./planner";
 import type { ReconDeps } from "./recon";
 import type { Citation } from "./registry";
@@ -85,6 +85,27 @@ function synthUpstream(content: string): Response {
     },
   });
   return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+/**
+ * Answer a clarify card the way `/api/chat/deep-research/resume` does: write to
+ * the run row, then nudge any local waiter. No shared file, no shared waiter map.
+ */
+async function answerClarify(
+  runStore: RunStore,
+  runId: string,
+  payload: { answers: Record<string, string>; skip: boolean },
+  now?: Date,
+): Promise<string> {
+  const outcome = await runStore.resolveClarification({
+    tenantId: "t1",
+    userId: "u1",
+    runId,
+    payload,
+    now,
+  });
+  notifyClarifyResume(runId);
+  return outcome;
 }
 
 function baseDeps(overrides: Record<string, unknown> = {}) {
@@ -1027,7 +1048,7 @@ describe("runDeepResearchTurn", () => {
   });
 
   it("waits for clarify resume before starting lanes", async () => {
-    clearClarifyWaiters();
+    const runStore = createMemoryRunStore();
     const plan: ResearchPlan = { topic: "T", complexity: "simple", subQuestions: ["q1"] };
     let lanesStarted = false;
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -1048,6 +1069,7 @@ describe("runDeepResearchTurn", () => {
           awaitClarify: true,
           clarifyTimeoutMs: 5_000,
           runId: "run-clarify-1",
+          runStore,
           fetchImpl: fetchImpl as unknown as typeof fetch,
           proposeClarify: async () => ({
             needed: true as const,
@@ -1073,7 +1095,11 @@ describe("runDeepResearchTurn", () => {
 
     await new Promise((r) => setTimeout(r, 30));
     expect(lanesStarted).toBe(false);
-    expect(resolveClarifyResume("run-clarify-1", { answers: { q1: "A" }, skip: false })).toBe(true);
+    // The row must already be awaiting before the client can answer.
+    expect((await runStore.get("t1", "u1", "run-clarify-1"))?.status).toBe("awaiting_clarify");
+    await expect(
+      answerClarify(runStore, "run-clarify-1", { answers: { q1: "A" }, skip: false }),
+    ).resolves.toBe("resumed");
     const response = await responsePromise;
     const { text, events } = await readSsePayload(response);
     expect(lanesStarted).toBe(true);
@@ -1081,7 +1107,66 @@ describe("runDeepResearchTurn", () => {
     // After clarify resumes, a final report artifact is produced; chat shows summary only.
     expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(true);
     expect(text).not.toContain("after-clarify");
-    clearClarifyWaiters();
+    // The gate persisted the cards itself, so the writer must not duplicate them.
+    const stored = await runStore.get("t1", "u1", "run-clarify-1");
+    expect(stored?.events.filter((e) => e.type === "clarify")).toHaveLength(
+      events.filter((e) => e.type === "clarify").length,
+    );
+  });
+
+  it("never emits a clarify card when the run row could not be armed", async () => {
+    const runStore = createMemoryRunStore();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(runStore, "beginClarification").mockRejectedValue(new Error("db down"));
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+        } as Response;
+      }
+      return synthUpstream("# 报告\n\n结论 [1]\n");
+    });
+
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "模糊问题" }] },
+      {
+        ...baseDeps({
+          awaitClarify: true,
+          clarifyTimeoutMs: 5_000,
+          runId: "run-clarify-unarmed",
+          runStore,
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          proposeClarify: async () => ({
+            needed: true as const,
+            questions: [
+              {
+                id: "q1",
+                question: "场景？",
+                options: [
+                  { id: "a", label: "A" },
+                  { id: "b", label: "B" },
+                ],
+              },
+            ],
+          }),
+          buildPlan: async () => ({
+            topic: "T",
+            complexity: "simple" as const,
+            subQuestions: ["q1"],
+          }),
+          executeSearch: async () => [{ title: "t", url: "https://ex.com/1", snippet: "s" }],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(events.some((e) => e.type === "clarify")).toBe(false);
+    expect((await runStore.get("t1", "u1", "run-clarify-unarmed"))?.status).not.toBe(
+      "awaiting_clarify",
+    );
+    warn.mockRestore();
   });
 
   it("writes one memo artifact per successful lane", async () => {
@@ -1158,7 +1243,7 @@ describe("runDeepResearchTurn", () => {
   });
 
   it("honors clarify html format: report.html is written and summary links to it", async () => {
-    clearClarifyWaiters();
+    const runStore = createMemoryRunStore();
     const store = createMemoryArtifactStore();
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
@@ -1181,6 +1266,7 @@ describe("runDeepResearchTurn", () => {
           clarifyTimeoutMs: 5_000,
           artifactStore: store,
           runId: "run-html-prefs",
+          runStore,
           fetchImpl: fetchImpl as unknown as typeof fetch,
           proposeClarify: async () => ({ needed: false as const }),
           buildPlan: async () => ({
@@ -1196,15 +1282,15 @@ describe("runDeepResearchTurn", () => {
     );
 
     await new Promise((r) => setTimeout(r, 30));
-    expect(
-      resolveClarifyResume("run-html-prefs", {
+    await expect(
+      answerClarify(runStore, "run-html-prefs", {
         answers: {
           q_delivery_shape: "结构化报告——完整论证链",
           q_delivery_format: "可视化网页（.html）",
         },
         skip: false,
       }),
-    ).toBe(true);
+    ).resolves.toBe("resumed");
 
     const response = await responsePromise;
     const { text, events } = await readSsePayload(response);
@@ -1474,7 +1560,7 @@ describe("clarify multi-select → lanes", () => {
   });
 
   it("does not let a slow clarify wait collapse multi-select into one lane", async () => {
-    clearClarifyWaiters();
+    const runStore = createMemoryRunStore();
     let clock = 1_000;
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
@@ -1494,6 +1580,7 @@ describe("clarify multi-select → lanes", () => {
           awaitClarify: true,
           clarifyTimeoutMs: 5_000,
           runId: "run-clarify-multiselect",
+          runStore,
           now: () => clock,
           fetchImpl: fetchImpl as unknown as typeof fetch,
           proposeClarify: async () => ({
@@ -1522,12 +1609,12 @@ describe("clarify multi-select → lanes", () => {
     await new Promise((r) => setTimeout(r, 20));
     // Simulate the user thinking for longer than TOTAL_BUDGET_MS while the waiter blocks.
     clock += 200_000;
-    expect(
-      resolveClarifyResume("run-clarify-multiselect", {
+    await expect(
+      answerClarify(runStore, "run-clarify-multiselect", {
         answers: { q2: focusOptions.map((o) => o.label).join("、") },
         skip: false,
       }),
-    ).toBe(true);
+    ).resolves.toBe("resumed");
 
     const response = await responsePromise;
     const { events } = await readSsePayload(response);
@@ -1535,7 +1622,6 @@ describe("clarify multi-select → lanes", () => {
       (e) => e.type === "lane_started" && e.laneId !== "recon-cold-start",
     );
     expect(researchLanes).toHaveLength(4);
-    clearClarifyWaiters();
   });
 });
 
