@@ -119,7 +119,7 @@ func (s *Server) reportUsageDetailed(identity requestIdentity, decision routing.
 	cost := float64(n.TotalTokens) * 0.000001
 	pricingVersion := ""
 	if table := s.activePricingTable(); table != nil {
-		result := table.ComputeCost(decision.Model, usage, metering.CostContext{At: time.Now().UTC()})
+		result := table.ComputeCostForProvider(decision.Provider, decision.Model, usage, metering.CostContext{At: time.Now().UTC()})
 		cost = result.CostUSD
 		pricingVersion = result.PricingVersion
 	}
@@ -193,7 +193,6 @@ func inboundProtocolLabel(label string) string {
 	}
 	return label
 }
-
 
 func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeContext, session protocolSession) bool {
 	if s.cacheService == nil {

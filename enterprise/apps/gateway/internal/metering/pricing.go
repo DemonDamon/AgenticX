@@ -198,11 +198,28 @@ func (t *PricingTable) ForModel(model string) ModelPricing {
 }
 
 func (t *PricingTable) ForModelAt(model string, at time.Time) ModelPricing {
+	return t.ForProviderModelAt("", model, at)
+}
+
+// ForProviderModel resolves provider/model first, then falls back to the legacy
+// model-only key so existing pricing snapshots remain valid during migration.
+func (t *PricingTable) ForProviderModel(provider, model string) ModelPricing {
+	return t.ForProviderModelAt(provider, model, time.Now().UTC())
+}
+
+func (t *PricingTable) ForProviderModelAt(provider, model string, at time.Time) ModelPricing {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	if entries, ok := t.models[model]; ok {
-		if picked, ok := pickEffectivePricing(entries, at); ok {
-			return normalizePricing(picked, t.defaultP)
+	keys := make([]string, 0, 2)
+	if provider = strings.TrimSpace(provider); provider != "" {
+		keys = append(keys, provider+"/"+model)
+	}
+	keys = append(keys, model)
+	for _, key := range keys {
+		if entries, ok := t.models[key]; ok {
+			if picked, ok := pickEffectivePricing(entries, at); ok {
+				return normalizePricing(picked, t.defaultP)
+			}
 		}
 	}
 	return normalizePricing(t.defaultP, t.defaultP)
@@ -314,12 +331,22 @@ func (t *PricingTable) ComputeCostUSD(model string, usage openai.Usage) float64 
 	return t.ComputeCost(model, usage, CostContext{At: time.Now().UTC()}).CostUSD
 }
 
+func (t *PricingTable) ComputeCostUSDForProvider(provider, model string, usage openai.Usage) float64 {
+	return t.ComputeCostForProvider(provider, model, usage, CostContext{At: time.Now().UTC()}).CostUSD
+}
+
 // ComputeCost calculates cost with optional complexity context.
 func (t *PricingTable) ComputeCost(model string, usage openai.Usage, ctx CostContext) CostResult {
+	return t.ComputeCostForProvider("", model, usage, ctx)
+}
+
+// ComputeCostForProvider keeps pricing aligned with the provider selected by
+// routing. This prevents same-named models from sharing the wrong unit price.
+func (t *PricingTable) ComputeCostForProvider(provider, model string, usage openai.Usage, ctx CostContext) CostResult {
 	if ctx.At.IsZero() {
 		ctx.At = time.Now().UTC()
 	}
-	p := t.ForModelAt(model, ctx.At)
+	p := t.ForProviderModelAt(provider, model, ctx.At)
 	n := NormalizeUsage(usage)
 	regularInput := n.PromptTokens - n.CachedTokens - n.CacheReadInputTokens
 	if regularInput < 0 {

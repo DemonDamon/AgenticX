@@ -49,19 +49,7 @@ const DEFAULT_CONFIG: PricingConfig = {
     cacheRead: 0.0000001,
     reasoningOutput: 0.000003,
   },
-  models: {
-    "gpt-4o": [{ input: 0.0000025, output: 0.00001, cachedInput: 0.00000125 }],
-    "gpt-4o-mini": [{ input: 0.00000015, output: 0.0000006, cachedInput: 0.000000075 }],
-    "claude-3-5-sonnet-latest": [
-      {
-        input: 0.000003,
-        output: 0.000015,
-        cacheCreation: 0.00000375,
-        cacheRead: 0.0000003,
-      },
-    ],
-    "deepseek-chat": [{ input: 0.00000014, output: 0.00000028, cachedInput: 0.000000014 }],
-  },
+  models: {},
   updatedAt: new Date().toISOString(),
 };
 
@@ -114,11 +102,6 @@ function normalizePricing(input: Partial<PricingConfig> | undefined): PricingCon
     if (!key) continue;
     const list = Array.isArray(entries) ? entries : [entries as ModelPricingEntry];
     models[key] = list.map((entry) => normalizeEntry(entry, seedDefault));
-  }
-  if (Object.keys(models).length === 0) {
-    for (const [model, entries] of Object.entries(DEFAULT_CONFIG.models)) {
-      models[model] = entries.map((entry) => normalizeEntry(entry, seedDefault));
-    }
   }
   const updatedAt = new Date().toISOString();
   const versionBase = input?.version?.trim() || `pricing-${updatedAt.slice(0, 10)}`;

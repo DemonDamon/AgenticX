@@ -27,6 +27,29 @@ func TestPricingCacheCost(t *testing.T) {
 	}
 }
 
+func TestProviderSpecificPricingPrecedesLegacyModelPrice(t *testing.T) {
+	table := &PricingTable{
+		version: "provider-v1",
+		models: map[string][]ModelPricing{
+			"shared-model":            {{InputPerM: 1, OutputPerM: 2}},
+			"provider-a/shared-model": {{InputPerM: 3, OutputPerM: 6}},
+			"provider-b/shared-model": {{InputPerM: 5, OutputPerM: 10}},
+		},
+		defaultP: defaultModelPricing(),
+	}
+	usage := openai.Usage{PromptTokens: 1_000_000, CompletionTokens: 1_000_000, TotalTokens: 2_000_000}
+
+	if got := table.ComputeCostUSDForProvider("provider-a", "shared-model", usage); got != 9 {
+		t.Fatalf("provider-a cost=%v want 9", got)
+	}
+	if got := table.ComputeCostUSDForProvider("provider-b", "shared-model", usage); got != 15 {
+		t.Fatalf("provider-b cost=%v want 15", got)
+	}
+	if got := table.ComputeCostUSDForProvider("provider-c", "shared-model", usage); got != 3 {
+		t.Fatalf("legacy fallback cost=%v want 3", got)
+	}
+}
+
 func TestDynamicPricingReasoningAndLongContextSurcharge(t *testing.T) {
 	hasReasoning := true
 	table := &PricingTable{

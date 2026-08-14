@@ -42,6 +42,7 @@ import {
   Check,
   CircleDot,
   CircleMinus,
+  CircleDollarSign,
   Eye,
   EyeOff,
   Loader2,
@@ -52,6 +53,13 @@ import {
   Server,
 } from "lucide-react";
 import { inferModelCapabilities, isEmbeddingModelId } from "../../../lib/infer-model-capabilities";
+import {
+  pricePerMillion,
+  resolveProviderModelPricing,
+  syncPricingToProviderCatalog,
+  updateProviderModelPrice,
+  type PricingConfig,
+} from "../../../lib/model-pricing";
 
 type ProviderRoute = "local" | "private-cloud" | "third-party";
 
@@ -110,6 +118,12 @@ type FetchModelsResp = {
   data?: { models?: string[]; warning?: string };
 };
 
+type PricingResp = {
+  code: string;
+  message: string;
+  data?: { pricing?: PricingConfig };
+};
+
 interface ProviderFormBaseline {
   displayName: string;
   baseUrl: string;
@@ -154,9 +168,20 @@ export default function ModelProvidersPage() {
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
   const [fetchModelsWarning, setFetchModelsWarning] = useState<string | null>(null);
+  const [pricing, setPricing] = useState<PricingConfig | null>(null);
+  const [pricingBaseline, setPricingBaseline] = useState("");
+  const [pricingSaving, setPricingSaving] = useState(false);
   const formInitializedForId = useRef<string | null>(null);
 
   const active = useMemo(() => providers.find((p) => p.id === activeId) ?? null, [providers, activeId]);
+  const catalogPricing = useMemo(
+    () => (pricing ? syncPricingToProviderCatalog(pricing, providers) : null),
+    [pricing, providers],
+  );
+  const pricingDirty = useMemo(
+    () => Boolean(catalogPricing && JSON.stringify(catalogPricing) !== pricingBaseline),
+    [catalogPricing, pricingBaseline],
+  );
 
   const formDirty = useMemo(() => {
     if (!baseline) return false;
@@ -191,7 +216,10 @@ export default function ModelProvidersPage() {
   const load = useCallback(async (preferId?: string) => {
     setLoading(true);
     try {
-      const res = await adminFetch("/api/admin/providers", { cache: "no-store" });
+      const [res, pricingRes] = await Promise.all([
+        adminFetch("/api/admin/providers", { cache: "no-store" }),
+        adminFetch("/api/metering/pricing", { cache: "no-store" }),
+      ]);
       const json = (await res.json()) as ListResp;
       if (!res.ok || !json.data) {
         toast.error(json.message ?? t("toast.loadFailed"));
@@ -200,12 +228,58 @@ export default function ModelProvidersPage() {
       setProviders(json.data.providers);
       setTemplates(json.data.templates);
       setActiveId((prev) => preferId ?? prev ?? json.data!.providers[0]?.id ?? null);
+      const pricingJson = (await pricingRes.json()) as PricingResp;
+      if (pricingRes.ok && pricingJson.data?.pricing) {
+        setPricing(pricingJson.data.pricing);
+        setPricingBaseline(JSON.stringify(pricingJson.data.pricing));
+      } else {
+        setPricing(null);
+        setPricingBaseline("");
+        toast.error(pricingJson.message ?? t("toast.pricingLoadFailed"));
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("toast.networkError"));
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const handleSavePricing = async () => {
+    if (!catalogPricing || pricingSaving) return;
+    setPricingSaving(true);
+    try {
+      const response = await adminFetch("/api/metering/pricing", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(catalogPricing),
+      });
+      const json = (await response.json()) as PricingResp;
+      if (!response.ok || !json.data?.pricing) {
+        throw new Error(json.message || t("toast.pricingSaveFailed"));
+      }
+      const synced = syncPricingToProviderCatalog(json.data.pricing, providers);
+      setPricing(synced);
+      setPricingBaseline(JSON.stringify(synced));
+      toast.success(t("toast.pricingSaved"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("toast.pricingSaveFailed"));
+    } finally {
+      setPricingSaving(false);
+    }
+  };
+
+  const handlePriceChange = (
+    providerId: string,
+    modelName: string,
+    kind: "input" | "output",
+    value: number,
+  ) => {
+    setPricing((current) => {
+      if (!current) return current;
+      const synced = syncPricingToProviderCatalog(current, providers);
+      return updateProviderModelPrice(synced, providerId, modelName, kind, value);
+    });
+  };
 
   useEffect(() => {
     void load();
@@ -722,6 +796,15 @@ export default function ModelProvidersPage() {
                       <p className="text-xs text-muted-foreground">{t("modelListHint")}</p>
                     </div>
                     <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant={pricingDirty ? "default" : "outline"}
+                        disabled={!pricingDirty || pricingSaving}
+                        onClick={() => void handleSavePricing()}
+                      >
+                        <CircleDollarSign />
+                        {pricingSaving ? t("pricingSaving") : t("savePricing")}
+                      </Button>
                       <TooltipProvider delayDuration={280}>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -761,29 +844,67 @@ export default function ModelProvidersPage() {
                     />
                   ) : (
                     <ul className="divide-y divide-border">
-                      {active.models.map((m) => (
-                        <li key={m.name} className="flex items-center gap-3 py-2.5">
-                          <Checkbox
-                            checked={m.enabled}
-                            onCheckedChange={(value) => void handleToggleModel(m.name, value === true)}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium">{m.label}</div>
-                            <div className="truncate text-xs text-muted-foreground font-mono">{m.name}</div>
-                          </div>
-                          {m.capabilities?.map((cap) => (
-                            <Badge key={cap} variant="soft" className="text-[10px]">{cap}</Badge>
-                          ))}
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => void handleDeleteModel(m.name)}
-                            aria-label={t("removeModel")}
+                      {active.models.map((m) => {
+                        const entry = catalogPricing
+                          ? resolveProviderModelPricing(catalogPricing, active.id, m.name)
+                          : null;
+                        return (
+                          <li
+                            key={m.name}
+                            className="grid gap-3 py-3 md:grid-cols-[auto_minmax(0,1fr)_130px_130px_auto] md:items-center"
                           >
-                            <Trash2 />
-                          </Button>
-                        </li>
-                      ))}
+                            <Checkbox
+                              checked={m.enabled}
+                              onCheckedChange={(value) => void handleToggleModel(m.name, value === true)}
+                            />
+                            <div className="min-w-0">
+                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                <span className="truncate text-sm font-medium">{m.label}</span>
+                                {m.capabilities?.map((cap) => (
+                                  <Badge key={cap} variant="soft" className="text-[10px]">{cap}</Badge>
+                                ))}
+                              </div>
+                              <div className="truncate text-xs text-muted-foreground font-mono">{m.name}</div>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[11px] text-muted-foreground">{t("inputPricePerM")}</Label>
+                              <Input
+                                className="h-8 text-right font-mono text-xs"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={entry ? pricePerMillion(entry, "input") : ""}
+                                disabled={!entry || pricingSaving}
+                                onChange={(event) =>
+                                  handlePriceChange(active.id, m.name, "input", Number(event.target.value || 0))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[11px] text-muted-foreground">{t("outputPricePerM")}</Label>
+                              <Input
+                                className="h-8 text-right font-mono text-xs"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={entry ? pricePerMillion(entry, "output") : ""}
+                                disabled={!entry || pricingSaving}
+                                onChange={(event) =>
+                                  handlePriceChange(active.id, m.name, "output", Number(event.target.value || 0))
+                                }
+                              />
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => void handleDeleteModel(m.name)}
+                              aria-label={t("removeModel")}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>

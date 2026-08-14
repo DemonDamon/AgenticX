@@ -56,27 +56,6 @@ type QuotaConfig = {
   updatedAt: string;
 };
 
-type ModelPricingEntry = {
-  input: number;
-  output: number;
-  reasoningOutput?: number;
-  cachedInput?: number;
-  surcharges?: Array<{
-    name?: string;
-    when: { contextTokensGte?: number; hasReasoning?: boolean };
-    addPerM?: number;
-    multiplierPct?: number;
-    applyTo?: string;
-  }>;
-};
-
-type PricingConfig = {
-  version: string;
-  default: ModelPricingEntry;
-  models: Record<string, ModelPricingEntry[]>;
-  updatedAt: string;
-};
-
 type BudgetAction = "block" | "warn" | "fallback";
 type BudgetRule = {
   unit: "cost_usd" | "tokens";
@@ -123,13 +102,6 @@ const EMPTY_BUDGET_RULE: BudgetRule = {
   limit: 0,
   warnThresholdPct: 80,
   action: "warn",
-};
-
-const EMPTY_PRICING: PricingConfig = {
-  version: "",
-  default: { input: 0, output: 0 },
-  models: {},
-  updatedAt: "",
 };
 
 const EMPTY: QuotaConfig = {
@@ -378,7 +350,6 @@ export default function MeteringQuotaPage() {
   const t = useTranslations("pages.ops.quota");
   const tc = useTranslations("common");
   const [quota, setQuota] = useState<QuotaConfig>(EMPTY);
-  const [pricing, setPricing] = useState<PricingConfig>(EMPTY_PRICING);
   const [budget, setBudget] = useState<BudgetConfig>(EMPTY_BUDGET);
   const [budgetAlerts, setBudgetAlerts] = useState<BudgetAlert[]>([]);
   const [usageByKey, setUsageByKey] = useState<Record<string, UsageSnapshot>>({});
@@ -393,19 +364,16 @@ export default function MeteringQuotaPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [quotaRes, pricingRes, budgetRes, alertsRes] = await Promise.all([
+      const [quotaRes, budgetRes, alertsRes] = await Promise.all([
         adminFetch("/api/metering/quota", { cache: "no-store" }),
-        adminFetch("/api/metering/pricing", { cache: "no-store" }),
         adminFetch("/api/metering/budget", { cache: "no-store" }),
         adminFetch("/api/metering/budget?view=alerts&limit=50", { cache: "no-store" }),
       ]);
       const quotaJson = (await quotaRes.json()) as { data?: { quota?: QuotaConfig } };
-      const pricingJson = (await pricingRes.json()) as { data?: { pricing?: PricingConfig } };
       const budgetJson = (await budgetRes.json()) as { data?: { budget?: BudgetConfig } };
       const alertsJson = (await alertsRes.json()) as { data?: { alerts?: BudgetAlert[] } };
       const nextQuota = { ...EMPTY, ...(quotaJson.data?.quota ?? EMPTY), apiTokens: quotaJson.data?.quota?.apiTokens ?? {} };
       setQuota(nextQuota);
-      setPricing({ ...EMPTY_PRICING, ...(pricingJson.data?.pricing ?? EMPTY_PRICING) });
       setBudget({ ...EMPTY_BUDGET, ...(budgetJson.data?.budget ?? EMPTY_BUDGET) });
       setBudgetAlerts(alertsJson.data?.alerts ?? []);
       setUsageLoading(true);
@@ -424,16 +392,11 @@ export default function MeteringQuotaPage() {
   }, []);
 
   const save = async () => {
-    const [quotaRes, pricingRes, budgetRes] = await Promise.all([
+    const [quotaRes, budgetRes] = await Promise.all([
       adminFetch("/api/metering/quota", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(quota),
-      }),
-      adminFetch("/api/metering/pricing", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(pricing),
       }),
       adminFetch("/api/metering/budget", {
         method: "PUT",
@@ -441,7 +404,7 @@ export default function MeteringQuotaPage() {
         body: JSON.stringify(budget),
       }),
     ]);
-    if (!quotaRes.ok || !pricingRes.ok || !budgetRes.ok) {
+    if (!quotaRes.ok || !budgetRes.ok) {
       toast.error(tc("toast.saveFailed"));
       return;
     }
@@ -543,7 +506,6 @@ export default function MeteringQuotaPage() {
           <TabsTrigger value="departments">{t("tabs.departments")}</TabsTrigger>
           <TabsTrigger value="users">{t("tabs.users")}</TabsTrigger>
           <TabsTrigger value="pats">{t("tabs.pats")}</TabsTrigger>
-          <TabsTrigger value="pricing">计价</TabsTrigger>
           <TabsTrigger value="budget">预算</TabsTrigger>
           <TabsTrigger value="budget-alerts">预算告警</TabsTrigger>
         </TabsList>
@@ -641,112 +603,6 @@ export default function MeteringQuotaPage() {
               onRemove={() => removeMapKey("apiTokens", id)}
             />
           ))}
-        </TabsContent>
-
-        <TabsContent value="pricing" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>默认词元单价（USD / token）</CardTitle>
-              <CardDescription>
-                保存后发布快照，网关经 GATEWAY_REMOTE_PRICING_CONFIG_URL 拉取；当前版本 {pricing.version || "—"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-3">
-              <div className="space-y-1">
-                <Label className="text-xs">输入</Label>
-                <Input
-                  type="number"
-                  step="any"
-                  value={pricing.default.input}
-                  onChange={(e) =>
-                    setPricing((prev) => ({
-                      ...prev,
-                      default: { ...prev.default, input: Number(e.target.value || 0) },
-                    }))
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">输出</Label>
-                <Input
-                  type="number"
-                  step="any"
-                  value={pricing.default.output}
-                  onChange={(e) =>
-                    setPricing((prev) => ({
-                      ...prev,
-                      default: { ...prev.default, output: Number(e.target.value || 0) },
-                    }))
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">推理输出</Label>
-                <Input
-                  type="number"
-                  step="any"
-                  value={pricing.default.reasoningOutput ?? 0}
-                  onChange={(e) =>
-                    setPricing((prev) => ({
-                      ...prev,
-                      default: { ...prev.default, reasoningOutput: Number(e.target.value || 0) },
-                    }))
-                  }
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>模型单价</CardTitle>
-              <CardDescription>按模型覆盖默认价；复杂场景可在配置 JSON 中扩展 surcharges。</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {Object.entries(pricing.models).map(([model, entries]) => {
-                const entry = entries[0] ?? { input: 0, output: 0 };
-                return (
-                  <div key={model} className="grid grid-cols-[160px_repeat(2,minmax(0,1fr))] items-end gap-2 rounded-md border border-border px-3 py-3">
-                    <div className="font-medium text-sm pb-2">{model}</div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">输入</Label>
-                      <Input
-                        type="number"
-                        step="any"
-                        value={entry.input}
-                        onChange={(e) =>
-                          setPricing((prev) => ({
-                            ...prev,
-                            models: {
-                              ...prev.models,
-                              [model]: [{ ...entry, input: Number(e.target.value || 0) }],
-                            },
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">输出</Label>
-                      <Input
-                        type="number"
-                        step="any"
-                        value={entry.output}
-                        onChange={(e) =>
-                          setPricing((prev) => ({
-                            ...prev,
-                            models: {
-                              ...prev.models,
-                              [model]: [{ ...entry, output: Number(e.target.value || 0) }],
-                            },
-                          }))
-                        }
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
         </TabsContent>
 
         <TabsContent value="budget" className="mt-4 space-y-4">

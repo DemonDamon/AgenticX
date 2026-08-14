@@ -11,7 +11,7 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 )
 
-func (s *Server) estimateRequestCostUSD(model string, inputTokens int) float64 {
+func (s *Server) estimateRequestCostUSD(provider, model string, inputTokens int) float64 {
 	if inputTokens <= 0 {
 		return 0
 	}
@@ -28,7 +28,7 @@ func (s *Server) estimateRequestCostUSD(model string, inputTokens int) float64 {
 	if table == nil {
 		return float64(usage.TotalTokens) * 0.000001
 	}
-	return table.ComputeCostUSD(model, usage)
+	return table.ComputeCostUSDForProvider(provider, model, usage)
 }
 
 func (s *Server) applyBudgetFallback(req *openai.ChatCompletionRequest, decision *routing.Decision, check quota.CheckResult) {
@@ -89,7 +89,7 @@ func (s *Server) runChatQuotaGate(
 	estimatedInputTokens int,
 	reserveTokens int64,
 ) (quota.CheckResult, billing.Reservation, bool) {
-	estimatedCost := s.estimateRequestCostUSD(req.Model, estimatedInputTokens)
+	estimatedCost := s.estimateRequestCostUSD(decision.Provider, decision.Model, estimatedInputTokens)
 	if s.useChannelRelay() {
 		reservation := s.billingService.ReserveContext(qctx, reserveTokens, estimatedCost)
 		if !reservation.Allowed {
