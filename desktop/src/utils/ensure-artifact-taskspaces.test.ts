@@ -3,6 +3,7 @@ import {
   SESSION_TASK_ARTIFACTS_DIRNAME,
   SESSION_TASK_ARTIFACTS_LABEL,
   ensureArtifactTaskspacesForSession,
+  loadPersistedSessionArtifactPaths,
   sessionTaskArtifactsDir,
   shouldPruneAutoArtifactRoot,
 } from "./ensure-artifact-taskspaces";
@@ -131,5 +132,53 @@ describe("ensureArtifactTaskspacesForSession", () => {
     const result = await ensureArtifactTaskspacesForSession("sess-1", []);
     expect(result.ok).toBe(true);
     expect(linkIntoSessionWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+describe("loadPersistedSessionArtifactPaths", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("uses loadSessionMessages so a >512KB messages.json still yields older writes", async () => {
+    const svg = "/Users/damon/myWork/oag-deep-research/assets/fig2-open-source-landscape.svg";
+    const pdf = "/Users/damon/myWork/oag-deep-research/Palantir本体论产品与开源平替调研报告.pdf";
+    const readLocalTextFile = vi.fn(async (rel: string) => {
+      if (/\/messages\.json$/.test(String(rel))) {
+        return { ok: false, error: "file too large to read (994304 bytes)" };
+      }
+      return {
+        ok: true,
+        content: JSON.stringify([
+          { role: "user", content: "飞书文档也同步改了吗" },
+          { role: "assistant", content: `路径：\n\`${pdf}\`` },
+        ]),
+      };
+    });
+    const loadSessionMessages = vi.fn(async () => ({
+      ok: true,
+      messages: [
+        {
+          role: "tool",
+          tool_name: "file_write",
+          tool_args: { path: svg, content: "<svg/>" },
+          content: `OK: wrote ${svg}`,
+        },
+      ],
+    }));
+    vi.stubGlobal("window", {
+      agenticxDesktop: {
+        loadSessionMessages,
+        readLocalTextFile,
+      },
+    });
+
+    const paths = await loadPersistedSessionArtifactPaths("aacf581b-eab0-4add-9196-5099945a690b");
+    expect(loadSessionMessages).toHaveBeenCalledWith("aacf581b-eab0-4add-9196-5099945a690b");
+    expect(readLocalTextFile.mock.calls.map((c) => c[0])).toEqual([
+      "~/.agenticx/sessions/aacf581b-eab0-4add-9196-5099945a690b/agent_messages.json",
+    ]);
+    expect(paths).toEqual([svg, pdf]);
   });
 });

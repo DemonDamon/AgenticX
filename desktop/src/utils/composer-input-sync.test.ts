@@ -5,6 +5,7 @@ import {
   isComposerNonEmpty,
   matchTrailingAtMention,
   nextComposerAtMentionState,
+  replaceAtMentionAtCaret,
   shouldCommitComposerHasText,
 } from "./composer-input-sync";
 
@@ -62,6 +63,47 @@ describe("nextComposerAtMentionState", () => {
       query: "src/",
       shouldSearch: true,
     });
+  });
+
+  it("opens the picker for a mid-sentence @ when caretOffset is after that token", () => {
+    const value = "最后就是帮我提交 @ 变更代码";
+    const caretOffset = value.indexOf("@") + 1;
+    expect(nextComposerAtMentionState(value, caretOffset)).toEqual({
+      open: true,
+      query: "",
+      shouldSearch: true,
+    });
+  });
+
+  it("keeps the picker closed when caret sits after later words", () => {
+    const value = "最后就是帮我提交 @ 变更代码";
+    expect(nextComposerAtMentionState(value)).toEqual({
+      open: false,
+      query: "",
+      shouldSearch: false,
+    });
+  });
+
+  it("uses the in-progress query at a mid-sentence caret", () => {
+    const value = "请看 @fi 然后继续";
+    const caretOffset = value.indexOf("@fi") + 3;
+    expect(nextComposerAtMentionState(value, caretOffset)).toEqual({
+      open: true,
+      query: "fi",
+      shouldSearch: true,
+    });
+  });
+});
+
+describe("replaceAtMentionAtCaret", () => {
+  it("replaces a trailing @ token", () => {
+    expect(replaceAtMentionAtCaret("请看 @fi", "", "@readme.md ")).toBe("请看 @readme.md ");
+  });
+
+  it("replaces a mid-sentence @ and keeps the following words", () => {
+    expect(replaceAtMentionAtCaret("最后就是帮我提交 @", " 变更代码", "@main.ts ")).toBe(
+      "最后就是帮我提交 @main.ts  变更代码"
+    );
   });
 });
 

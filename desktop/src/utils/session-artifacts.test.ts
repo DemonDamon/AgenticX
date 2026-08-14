@@ -5,7 +5,10 @@ import {
   artifactBaseName,
   artifactHomeRelativeKey,
   collectArtifactPathsFromAgentMessages,
+  collectArtifactPathsFromChatMessages,
+  collectArtifactPathsFromPersistedSessionFiles,
   collectSessionArtifactPaths,
+  parseSessionMessageFilePayload,
   collectTurnPreviewImagePaths,
   expandArtifactHomePath,
   isInAppArtifactPreviewPath,
@@ -402,6 +405,98 @@ describe("collectSessionArtifactPaths — successful write only", () => {
       }),
     ];
     expect(collectSessionArtifactPaths(messages)).toEqual([p]);
+  });
+});
+
+describe("collectArtifactPathsFromChatMessages (messages.json)", () => {
+  it("collects file_write from snake_case chat history rows", () => {
+    const svg = "/Users/damon/myWork/oag-deep-research/assets/fig2-open-source-landscape.svg";
+    const rows = [
+      {
+        role: "tool",
+        tool_name: "file_write",
+        tool_status: "done",
+        tool_args: { path: svg, content: "<svg xmlns='huge-payload'/>" },
+        content: `OK: wrote ${svg}`,
+      },
+    ];
+    expect(collectArtifactPathsFromChatMessages(rows)).toEqual([svg]);
+  });
+
+  it("collects bash_exec absolute path from stdout and labeled assistant save", () => {
+    const pdf = "/Users/damon/myWork/oag-deep-research/Palantir本体论产品与开源平替调研报告.pdf";
+    const rows = [
+      {
+        role: "tool",
+        tool_name: "bash_exec",
+        tool_args: { command: `ls -la "${pdf}"` },
+        content: `exit_code=0\nstdout:\n-rw-r--r-- 1 damon staff 2686051 ${pdf}\n`,
+      },
+      {
+        role: "assistant",
+        content: `路径：\n\`${pdf}\``,
+      },
+    ];
+    expect(collectArtifactPathsFromChatMessages(rows)).toEqual([pdf]);
+  });
+
+  it("does not collect denied file_edit from chat history", () => {
+    const p = "/Users/damon/myWork/research-agent/requirements.txt";
+    const rows = [
+      {
+        role: "tool",
+        tool_name: "file_edit",
+        tool_status: "done",
+        tool_args: { path: p },
+        content: `ERROR: path escapes workspace: ${p}`,
+      },
+    ];
+    expect(collectArtifactPathsFromChatMessages(rows)).toEqual([]);
+  });
+
+  it("accepts { messages: [...] } wrapper payload", () => {
+    const md = "/Users/damon/report.md";
+    const payload = {
+      messages: [
+        {
+          role: "tool",
+          tool_name: "file_write",
+          tool_args: { path: md },
+          content: `OK: wrote ${md}`,
+        },
+      ],
+    };
+    expect(collectArtifactPathsFromChatMessages(parseSessionMessageFilePayload(payload))).toEqual([
+      md,
+    ]);
+  });
+});
+
+describe("collectArtifactPathsFromPersistedSessionFiles — tail vs full history", () => {
+  it("keeps older writes when agent_messages tail has no file_write", () => {
+    const svg = "/Users/damon/myWork/oag-deep-research/assets/fig1-palantir-product-shape.svg";
+    const pdf = "/Users/damon/myWork/oag-deep-research/Palantir本体论产品与开源平替调研报告.pdf";
+    const chatHistoryRows = [
+      {
+        role: "tool",
+        tool_name: "file_write",
+        tool_args: { path: svg },
+        content: `OK: wrote ${svg}`,
+      },
+    ];
+    const agentMessageRows = [
+      { role: "user", content: "飞书文档也同步改了吗" },
+      {
+        role: "assistant",
+        content: `路径：\n\`${pdf}\``,
+      },
+    ];
+    expect(
+      collectArtifactPathsFromPersistedSessionFiles({
+        chatHistoryRows,
+        agentMessageRows,
+      }),
+    ).toEqual([svg, pdf]);
   });
 });
 

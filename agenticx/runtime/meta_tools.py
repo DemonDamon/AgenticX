@@ -278,6 +278,40 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "fresh_round_loop",
+            "description": (
+                "为一个明确目标启动『上下文复位循环』：每轮用一个全新的子智能体执行，"
+                "不继承本会话对话历史，只传目标、工作目录与上一轮的结构化交接报告。"
+                "适用于会把单个会话窗口撑爆的超长任务（大规模重构、批量审计）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objective": {
+                        "type": "string",
+                        "description": "稳定不变的最终目标，必须自包含、可独立理解。",
+                    },
+                    "workspace_dir": {
+                        "type": "string",
+                        "description": "作为唯一事实来源的工作目录绝对路径。",
+                    },
+                    "max_rounds": {
+                        "type": "integer",
+                        "description": "轮次上限，默认 16，硬上限 32。",
+                    },
+                    "round_timeout_seconds": {
+                        "type": "integer",
+                        "description": "单轮子智能体墙钟上限，默认 1200。",
+                    },
+                },
+                "required": ["objective", "workspace_dir"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "cancel_subagent",
             "description": "Cancel a running sub-agent by ID or avatar name.",
             "parameters": {
@@ -719,6 +753,19 @@ META_AGENT_TOOLS: List[Dict[str, Any]] = list(STUDIO_TOOLS) + [
     t for t in _META_ONLY_TOOLS
     if t.get("function", {}).get("name") not in _studio_tool_names
 ]
+
+
+def visible_meta_agent_tools() -> List[Dict[str, Any]]:
+    """Session-facing meta tool table with gated opt-in tools filtered out."""
+    from agenticx.runtime.harden_flags import fresh_round_loop_enabled
+
+    if fresh_round_loop_enabled():
+        return list(META_AGENT_TOOLS)
+    return [
+        tool
+        for tool in META_AGENT_TOOLS
+        if str((tool.get("function") or {}).get("name", "")) != "fresh_round_loop"
+    ]
 
 _DEFAULT_AVATAR_WS_FILES: List[str] = ["IDENTITY.md", "MEMORY.md", "memory/today"]
 
@@ -2659,6 +2706,22 @@ async def dispatch_meta_tool_async(
             model=requested_model or None,
             workspace_dir=str(arguments.get("workspace_dir", "")).strip() or None,
             system_prompt=str(arguments.get("system_prompt", "")).strip() or None,
+        )
+        return json.dumps(result, ensure_ascii=False)
+
+    if name == "fresh_round_loop":
+        from agenticx.runtime.fresh_round_loop import run_fresh_round_loop
+        from agenticx.runtime.harden_flags import fresh_round_loop_enabled
+
+        if not fresh_round_loop_enabled():
+            return json.dumps({"ok": False, "error": "disabled"}, ensure_ascii=False)
+        result = await run_fresh_round_loop(
+            team_manager=team_manager,
+            session=session,
+            objective=str(arguments.get("objective", "") or ""),
+            workspace_dir=str(arguments.get("workspace_dir", "") or ""),
+            max_rounds=arguments.get("max_rounds"),
+            round_timeout_seconds=arguments.get("round_timeout_seconds"),
         )
         return json.dumps(result, ensure_ascii=False)
 
