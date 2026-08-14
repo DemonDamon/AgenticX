@@ -141,6 +141,10 @@ import {
   replaceAtMentionAtCaret,
 } from "../utils/composer-input-sync";
 import { Toast } from "./ds/Toast";
+import { AtMentionPicker } from "./AtMentionPicker";
+import type { AtMentionBrowseState } from "./AtMentionPicker";
+import type { AtMentionCandidate } from "../utils/at-mention-display";
+import { parentBrowsePath } from "../utils/at-mention-display";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
 import { isKnownNonVisionChatModel } from "../utils/model-vision";
@@ -2651,27 +2655,7 @@ function resolveReadyAttachment(
   return undefined;
 }
 
-type AtCandidate =
-  | {
-      kind: "avatar";
-      avatarId: string;
-      label: string;
-      role: string;
-      avatarUrl?: string;
-    }
-  | {
-      kind: "file";
-      taskspaceId: string;
-      path: string;
-      label: string;
-    }
-  | {
-      kind: "taskspace";
-      taskspaceId: string;
-      path: string;
-      label: string;
-      alias: string;
-    };
+type AtCandidate = AtMentionCandidate;
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
@@ -2980,10 +2964,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [showJumpToBottomFab, setShowJumpToBottomFab] = useState(false);
   const imeComposingRef = useRef(false);
   const atSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const searchAtCandidatesRef = useRef<(queryText: string) => void | Promise<void>>(() => {});
+  const searchAtCandidatesRef = useRef<
+    (queryText: string, browseArg?: AtMentionBrowseState | null) => void | Promise<void>
+  >(() => {});
   const [atOpen, setAtOpen] = useState(false);
   const [atQuery, setAtQuery] = useState("");
   const [atCandidates, setAtCandidates] = useState<AtCandidate[]>([]);
+  /** Non-null while the `@` picker is drilled into a directory. */
+  const [atBrowse, setAtBrowse] = useState<AtMentionBrowseState | null>(null);
   const [groupTyping, setGroupTyping] = useState<Record<string, string>>({});
   /** One-line activity hint per group member (tool progress); not a chat message. */
   const [groupActivityHint, setGroupActivityHint] = useState<Record<string, string>>({});
@@ -3994,7 +3982,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return "";
   };
 
-  const searchAtCandidates = async (queryText: string) => {
+  const searchAtCandidates = async (
+    queryText: string,
+    browseArg?: AtMentionBrowseState | null
+  ) => {
+    // Callers that just changed directory pass the next state explicitly; the
+    // debounced path relies on this render's closure.
+    const browse = browseArg === undefined ? atBrowse : browseArg;
     const lowered = queryText.trim().toLowerCase();
     const metaLabel = metaLeaderDisplayName.trim() || META_AGENT_DISPLAY_NAME;
     const metaAtAliases = [metaLabel, META_AGENT_DISPLAY_NAME, "组长", "Machi", "machi", "meta", "meta-agent"];
@@ -4025,9 +4019,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           }))
       : [];
     // Near (meta leader) first — always @-able in group chat, matching members panel.
-    const avatarCandidates: AtCandidate[] = metaCandidate
-      ? [metaCandidate, ...memberCandidates]
-      : memberCandidates;
+    // Inside a directory the list is purely filesystem, so members drop out.
+    const avatarCandidates: AtCandidate[] = browse
+      ? []
+      : metaCandidate
+        ? [metaCandidate, ...memberCandidates]
+        : memberCandidates;
 
     const apiSessionId = resolveTaskspaceApiSessionId();
     if (!apiSessionId) {
@@ -4039,35 +4036,66 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       setAtCandidates(avatarCandidates.slice(0, 24));
       return;
     }
-    const activeId = pane.activeTaskspaceId && wsResp.workspaces.some((item) => item.id === pane.activeTaskspaceId)
-      ? pane.activeTaskspaceId
-      : wsResp.workspaces[0].id;
-    if (!pane.activeTaskspaceId) setActiveTaskspace(pane.id, activeId);
+    const activeId = browse
+      ? browse.taskspaceId
+      : pane.activeTaskspaceId && wsResp.workspaces.some((item) => item.id === pane.activeTaskspaceId)
+        ? pane.activeTaskspaceId
+        : wsResp.workspaces[0].id;
+    if (!browse && !pane.activeTaskspaceId) setActiveTaskspace(pane.id, activeId);
+    const browseRoot = browse?.path || ".";
     const rootResp = await window.agenticxDesktop.listTaskspaceFiles({
       sessionId: apiSessionId,
       taskspaceId: activeId,
-      path: ".",
+      path: browseRoot,
     });
     if (!rootResp.ok || !Array.isArray(rootResp.files)) {
       setAtCandidates(avatarCandidates.slice(0, 24));
       return;
     }
+    // Mounted taskspace roots stay at the top level; inside a directory the
+    // breadcrumb owns the location instead.
+    const mountRows: Extract<AtCandidate, { kind: "taskspace" }>[] = browse
+      ? []
+      : wsResp.workspaces.map((item) => ({
+          kind: "taskspace",
+          taskspaceId: item.id,
+          path: item.path,
+          label: item.label || item.path.split("/").filter(Boolean).pop() || "taskspace",
+          alias: item.label || item.path.split("/").filter(Boolean).pop() || "taskspace",
+        }));
+
+    if (!lowered) {
+      // No query: list exactly one level so deep trees stay browsable instead of
+      // being flattened into a dump the user has to scroll.
+      const dirRows: Extract<AtCandidate, { kind: "dir" }>[] = [];
+      const fileRows: Extract<AtCandidate, { kind: "file" }>[] = [];
+      for (const row of rootResp.files) {
+        if (row.type === "dir") {
+          dirRows.push({ kind: "dir", taskspaceId: activeId, path: row.path, label: row.name });
+        } else if (row.type === "file") {
+          fileRows.push({ kind: "file", taskspaceId: activeId, path: row.path, label: row.name });
+        }
+      }
+      setAtCandidates(
+        [...avatarCandidates, ...mountRows, ...dirRows.slice(0, 40), ...fileRows.slice(0, 40)].slice(
+          0,
+          80
+        )
+      );
+      return;
+    }
+
+    // With a query, scan recursively under the current location.
     const flatRows: Extract<AtCandidate, { kind: "file" }>[] = [];
-    const folderRows: Extract<AtCandidate, { kind: "taskspace" }>[] = wsResp.workspaces.map((item) => ({
-      kind: "taskspace",
-      taskspaceId: item.id,
-      path: item.path,
-      label: item.label || item.path.split("/").filter(Boolean).pop() || "taskspace",
-      alias: item.label || item.path.split("/").filter(Boolean).pop() || "taskspace",
-    }));
-    const queue: string[] = ["."];
+    const nestedDirRows: Extract<AtCandidate, { kind: "dir" }>[] = [];
+    const queue: string[] = [browseRoot];
     const visited = new Set<string>();
     while (queue.length > 0 && flatRows.length < 200) {
-      const current = queue.shift() || ".";
+      const current = queue.shift() || browseRoot;
       if (visited.has(current)) continue;
       visited.add(current);
       const listResp =
-        current === "."
+        current === browseRoot
           ? rootResp
           : await window.agenticxDesktop.listTaskspaceFiles({
               sessionId: apiSessionId,
@@ -4080,24 +4108,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           flatRows.push({ kind: "file", taskspaceId: activeId, path: row.path, label: row.name });
           continue;
         }
-        if (row.type === "dir" && !visited.has(row.path) && queue.length < 200) {
-          queue.push(row.path);
+        if (row.type === "dir") {
+          nestedDirRows.push({ kind: "dir", taskspaceId: activeId, path: row.path, label: row.name });
+          if (!visited.has(row.path) && queue.length < 200) queue.push(row.path);
         }
       }
     }
-    const filteredFiles = !lowered
-      ? flatRows.slice(0, 20)
-      : flatRows.filter((item) => item.path.toLowerCase().includes(lowered)).slice(0, 20);
-    const filteredFolders = !lowered
-      ? folderRows.slice(0, 8)
-      : folderRows
-          .filter(
-            (item) =>
-              item.alias.toLowerCase().includes(lowered) ||
-              item.path.toLowerCase().includes(lowered)
-          )
-          .slice(0, 8);
-    setAtCandidates([...avatarCandidates, ...filteredFolders, ...filteredFiles].slice(0, 24));
+    const filteredFiles = flatRows
+      .filter((item) => item.path.toLowerCase().includes(lowered))
+      .slice(0, 20);
+    const filteredFolders = [
+      ...mountRows.filter(
+        (item) =>
+          item.alias.toLowerCase().includes(lowered) || item.path.toLowerCase().includes(lowered)
+      ),
+      ...nestedDirRows.filter((item) => item.path.toLowerCase().includes(lowered)),
+    ].slice(0, 8);
+    setAtCandidates([...avatarCandidates, ...filteredFolders, ...filteredFiles].slice(0, 28));
   };
   searchAtCandidatesRef.current = searchAtCandidates;
 
@@ -4265,6 +4292,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const next = nextComposerAtMentionState(value, caretOffset);
     setAtOpen((prev) => (prev === next.open ? prev : next.open));
     setAtQuery((prev) => (prev === next.query ? prev : next.query));
+    // Losing the `@` token ends the browse session, so the next `@` starts at the top.
+    if (!next.open) setAtBrowse((prev) => (prev === null ? prev : null));
     if (next.shouldSearch) {
       if (atSearchTimerRef.current != null) clearTimeout(atSearchTimerRef.current);
       atSearchTimerRef.current = setTimeout(() => {
@@ -5000,6 +5029,88 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       focusComposerEnd();
     },
     [addContextFile, applyAtMentionReplacement, focusComposerEnd]
+  );
+
+  /** Same as insertWorkspaceDirectoryReference, but replaces the `@` token at the
+   * caret instead of appending, and accepts an already-known absolute path. */
+  const insertAtAutocompleteDirectoryReference = useCallback(
+    async (taskspaceId: string, relPath: string, label: string, absolutePathHint?: string) => {
+      const cleanLabel = String(label || relPath.split(/[\\/]/).pop() || "folder").trim();
+      if (!taskspaceId || !cleanLabel) return;
+      const start = relPath || ".";
+      let abs = String(absolutePathHint || "").trim();
+      if (!abs) {
+        const apiSessionId = resolveTaskspaceApiSessionId();
+        if (!apiSessionId) return;
+        const wsResp = await window.agenticxDesktop.listTaskspaces(apiSessionId);
+        const ts = wsResp.workspaces?.find((item) => item.id === taskspaceId);
+        if (!ts?.path) return;
+        abs = start === "." ? ts.path : absoluteTaskspacePath(ts.path, start);
+      }
+      await addTaskspaceAliasReference(taskspaceId, cleanLabel, abs, start);
+      applyAtMentionReplacement(`@${cleanLabel} `, { tokenNames: [cleanLabel] });
+      focusComposerEnd();
+    },
+    [addTaskspaceAliasReference, applyAtMentionReplacement, focusComposerEnd]
+  );
+
+  /** Drill into a folder row; the typed query (if any) now scopes to that subtree. */
+  const enterAtMentionDir = useCallback(
+    (item: Extract<AtCandidate, { kind: "taskspace" | "dir" }>) => {
+      const next: AtMentionBrowseState =
+        item.kind === "taskspace"
+          ? { taskspaceId: item.taskspaceId, taskspaceLabel: item.label, path: "." }
+          : {
+              taskspaceId: item.taskspaceId,
+              taskspaceLabel: atBrowse?.taskspaceLabel || item.label,
+              path: item.path,
+            };
+      setAtBrowse(next);
+      void searchAtCandidatesRef.current(atQuery, next);
+    },
+    [atBrowse, atQuery]
+  );
+
+  const leaveAtMentionBrowse = useCallback(() => {
+    if (!atBrowse) return;
+    // Stepping above the taskspace root returns to the top-level list.
+    const next: AtMentionBrowseState | null =
+      atBrowse.path === "." ? null : { ...atBrowse, path: parentBrowsePath(atBrowse.path) };
+    setAtBrowse(next);
+    void searchAtCandidatesRef.current(atQuery, next);
+  }, [atBrowse, atQuery]);
+
+  const insertAtMentionDir = useCallback(
+    (item: Extract<AtCandidate, { kind: "taskspace" | "dir" }>) => {
+      setAtOpen(false);
+      setAtQuery("");
+      setAtBrowse(null);
+      void insertAtAutocompleteDirectoryReference(
+        item.taskspaceId,
+        item.kind === "taskspace" ? "." : item.path,
+        item.label,
+        item.kind === "taskspace" ? item.path : undefined
+      );
+    },
+    [insertAtAutocompleteDirectoryReference]
+  );
+
+  const pickAtMentionCandidate = useCallback(
+    (item: AtCandidate) => {
+      if (item.kind === "taskspace" || item.kind === "dir") {
+        enterAtMentionDir(item);
+        return;
+      }
+      setAtOpen(false);
+      setAtQuery("");
+      setAtBrowse(null);
+      if (item.kind === "avatar") {
+        applyAtMentionReplacement(`@${item.label} `);
+        return;
+      }
+      void insertAtAutocompleteFileReference(item.taskspaceId, item.path, item.label);
+    },
+    [applyAtMentionReplacement, enterAtMentionDir, insertAtAutocompleteFileReference]
   );
 
   const insertWorkspaceFileReference = useCallback(
@@ -12559,21 +12670,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if (e.key === "Enter" && !e.shiftKey) {
                   if (atOpen && atCandidates.length > 0) {
                     e.preventDefault();
-                    const first = atCandidates[0];
-                    setAtOpen(false);
-                    setAtQuery("");
-                    if (first.kind === "avatar") {
-                      applyAtMentionReplacement(`@${first.label} `);
-                      return;
-                    }
-                    if (first.kind === "taskspace") {
-                      applyAtMentionReplacement(`@${first.label} `, {
-                        tokenNames: [first.alias || first.label],
-                      });
-                      void addTaskspaceAliasReference(first.taskspaceId, first.alias, first.path);
-                    } else {
-                      void insertAtAutocompleteFileReference(first.taskspaceId, first.path, first.label);
-                    }
+                    // Same semantics as clicking the row: folders drill in, others insert.
+                    pickAtMentionCandidate(atCandidates[0]);
                     return;
                   }
                   if (composerExpanded) {
@@ -12760,6 +12858,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 />
               </div>
             </div>
+            {atOpen ? (
+              <AtMentionPicker
+                query={atQuery}
+                candidates={atCandidates}
+                browse={atBrowse}
+                onPick={pickAtMentionCandidate}
+                onEnterDir={enterAtMentionDir}
+                onInsertDir={insertAtMentionDir}
+                onLeaveBrowse={leaveAtMentionBrowse}
+              />
+            ) : null}
           </div>
           {/* AI 免责声明：仅非空会话显示（对齐 Work Buddy，空新建会话不打扰） */}
           {(pane.messages ?? []).some(
@@ -12787,48 +12896,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 document.body
               )
             : null}
-          {atOpen ? (
-            <div className="mt-1 max-h-28 overflow-y-auto rounded border border-border bg-surface-panel p-1 backdrop-blur-xl">
-              {atCandidates.length === 0 ? (
-                <div className="px-2 py-1 text-[11px] text-text-faint">
-                  未找到匹配对象{atQuery ? `: ${atQuery}` : ""}
-                </div>
-              ) : (
-                atCandidates.map((item) => (
-                  <button
-                    key={
-                      item.kind === "avatar"
-                        ? `avatar:${item.avatarId}`
-                        : `${item.kind}:${item.taskspaceId}:${item.path}`
-                    }
-                    className="block w-full rounded px-2 py-1 text-left text-[11px] text-text-muted hover:bg-surface-hover"
-                    onClick={() => {
-                      setAtOpen(false);
-                      setAtQuery("");
-                      if (item.kind === "avatar") {
-                        applyAtMentionReplacement(`@${item.label} `);
-                        return;
-                      }
-                      if (item.kind === "taskspace") {
-                        applyAtMentionReplacement(`@${item.label} `, {
-                          tokenNames: [item.alias || item.label],
-                        });
-                        void addTaskspaceAliasReference(item.taskspaceId, item.alias, item.path);
-                      } else {
-                        void insertAtAutocompleteFileReference(item.taskspaceId, item.path, item.label);
-                      }
-                    }}
-                  >
-                    {item.kind === "avatar"
-                      ? `👤 ${item.label}${item.role ? ` · ${item.role}` : ""}`
-                      : item.kind === "taskspace"
-                      ? `📁 ${item.label} → ${item.path}`
-                      : item.path}
-                  </button>
-                ))
-              )}
-            </div>
-          ) : null}
           </div>
         </div>
         </div>
