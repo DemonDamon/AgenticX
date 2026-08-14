@@ -7,17 +7,13 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
-import logging
 import platform
 import shutil
 from pathlib import Path
-from typing import Any, Iterable, List, Optional
+from typing import Callable
 
-from agenticx.knowledge.readers import get_reader
 from agenticx.tools.adapters.liteparse import LiteParseAdapter
 
-
-logger = logging.getLogger(__name__)
 
 NATIVE_READER_EXTS = {".pdf", ".docx", ".pptx"}
 LITEPARSE_REQUIRED_EXTS = {
@@ -32,7 +28,24 @@ LITEPARSE_REQUIRED_EXTS = {
     ".bmp",
 }
 LIBREOFFICE_REQUIRED_EXTS = {".doc", ".ppt", ".xls", ".xlsx"}
-PLAIN_TEXT_EXTS = {".md", ".txt", ".markdown", ".rst", ".log"}
+PLAIN_TEXT_EXTS = {
+    ".csv",
+    ".htm",
+    ".html",
+    ".js",
+    ".json",
+    ".log",
+    ".markdown",
+    ".md",
+    ".py",
+    ".rst",
+    ".ts",
+    ".tsv",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
 LITEPARSE_INSTALL_HINT = "npm i -g @llamaindex/liteparse"
 
 
@@ -67,52 +80,116 @@ def libreoffice_available() -> bool:
     return bool(shutil.which("soffice") or shutil.which("libreoffice"))
 
 
-def _extract_contents(docs: Any) -> List[str]:
-    texts: List[str] = []
-    if docs is None:
-        return texts
-    iterable: Iterable[Any]
-    if isinstance(docs, (list, tuple)):
-        iterable = docs
-    else:
-        iterable = [docs]
-    for item in iterable:
-        content = getattr(item, "content", None)
-        if content is None and isinstance(item, dict):
-            content = item.get("content")
-        if isinstance(content, str) and content.strip():
-            texts.append(content)
-    return texts
+def _read_pdf_text(path: Path) -> str:
+    """Read a PDF without importing the local knowledge subsystem."""
+
+    try:
+        import fitz  # type: ignore
+    except ImportError:
+        fitz = None
+
+    if fitz is not None:
+        document = fitz.open(str(path))
+        try:
+            if document.needs_pass:
+                raise ValueError("PDF requires password")
+            pages = []
+            for page_number, page in enumerate(document, 1):
+                text = page.get_text()
+                if isinstance(text, str) and text.strip():
+                    pages.append(f"--- Page {page_number} ---\n{text}")
+            return "\n\n".join(pages)
+        finally:
+            document.close()
+
+    try:
+        import pypdf  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "No PDF library available. Install PyMuPDF or pypdf."
+        ) from exc
+
+    with path.open("rb") as handle:
+        reader = pypdf.PdfReader(handle)
+        if reader.is_encrypted:
+            raise ValueError("PDF requires password")
+        pages = []
+        for page_number, page in enumerate(reader.pages, 1):
+            text = page.extract_text()
+            if isinstance(text, str) and text.strip():
+                pages.append(f"--- Page {page_number} ---\n{text}")
+        return "\n\n".join(pages)
+
+
+def _read_docx_text(path: Path) -> str:
+    """Read paragraphs and tables from a DOCX attachment."""
+
+    from docx import Document as DocxDocument  # type: ignore
+
+    document = DocxDocument(str(path))
+    parts = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
+    for table in document.tables:
+        rows = []
+        for row in table.rows:
+            rows.append(" | ".join(cell.text.strip() for cell in row.cells))
+        if any(row.strip(" |") for row in rows):
+            parts.append("\n".join(rows))
+    return "\n\n".join(parts)
+
+
+def _read_pptx_text(path: Path) -> str:
+    """Read slide text and speaker notes from a PPTX attachment."""
+
+    from pptx import Presentation  # type: ignore
+
+    presentation = Presentation(str(path))
+    slides = []
+    for slide_number, slide in enumerate(presentation.slides, 1):
+        parts = [f"=== 幻灯片 {slide_number} ==="]
+        for shape in slide.shapes:
+            text = getattr(shape, "text", None)
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+        try:
+            notes_text = slide.notes_slide.notes_text_frame.text.strip()
+        except Exception:
+            notes_text = ""
+        if notes_text:
+            parts.append(f"备注: {notes_text}")
+        if len(parts) > 1:
+            slides.append("\n".join(parts))
+    return "\n\n".join(slides)
+
+
+_NATIVE_TEXT_READERS: dict[str, Callable[[Path], str]] = {
+    ".pdf": _read_pdf_text,
+    ".docx": _read_docx_text,
+    ".pptx": _read_pptx_text,
+}
+
+
+async def _read_native_document(path: Path) -> str:
+    reader = _NATIVE_TEXT_READERS.get(path.suffix.lower())
+    if reader is None:
+        return path.read_text(encoding="utf-8", errors="replace")
+    return await asyncio.to_thread(reader, path)
 
 
 async def _read_with_native_reader(path: Path) -> str:
     try:
-        reader = get_reader(path)
-    except Exception as exc:
-        raise DocumentTextError(
-            "parse_failed",
-            f"无法初始化文档读取器以解析 {path.suffix or path.name}：{exc}",
-        ) from exc
-
-    try:
-        raw = reader.read(path)
-        if asyncio.iscoroutine(raw):
-            docs = await raw
-        else:
-            docs = raw
+        text = await _read_native_document(path)
     except Exception as exc:
         raise DocumentTextError(
             "parse_failed",
             f"解析 {path.name} 失败：{exc}",
         ) from exc
 
-    texts = _extract_contents(docs)
-    if not texts:
+    if not isinstance(text, str) or not text.strip():
         raise DocumentTextError(
             "empty_content",
             f"未能从 {path.name} 提取到可用文本内容。",
         )
-    return "\n\n".join(texts)
+    return text
 
 
 async def _read_with_liteparse(path: Path, *, require_libreoffice: bool) -> str:
@@ -199,7 +276,7 @@ async def read_document_text(path: Path) -> str:
                     raise native_exc from None
             raise
 
-    # Remaining formats (html/json/csv/...) also go through native readers.
+    # Unknown text-like formats retain the previous permissive fallback.
     return await _read_with_native_reader(resolved)
 
 

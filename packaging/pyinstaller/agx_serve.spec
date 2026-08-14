@@ -24,23 +24,13 @@ uvicorn_hiddenimports = [
     "uvicorn.logging",
 ]
 
-# `desktop-runtime` extras 里声明的第三方依赖在源码里几乎都是
-# **方法体内 + try/except 包裹**的延迟导入（典型例子：
-# `agenticx.studio.kb.runtime._ChromaBackend._ensure()` 里的
-# `import chromadb`，以及 `pdf_reader.py` 里轮询 `fitz` / `pypdf` /
-# `PyPDF2`）。PyInstaller 的 modulegraph 扫这种写法常常漏，必须显式
-# `collect_all` 才能把 **数据 / 二进制 / 全部子模块** 一锅端进去；
-# 否则即便 venv 里装好，运行时仍抛
-# "chromadb is required for the knowledge base. Install with `pip install chromadb`."
+# `desktop-runtime` extras 里声明的附件解析和代码索引依赖大多是方法体内
+# 延迟导入。PyInstaller 的 modulegraph 常会漏掉，需显式 collect_all。
 _DESKTOP_RUNTIME_PACKAGES = (
-    "chromadb",
-    "onnxruntime",  # chromadb 默认 embedding 等路径动态依赖；否则运行时
-                    # "The onnxruntime python package is not installed"
     "fitz",         # PyMuPDF 顶层模块名
     "pypdf",
     "docx",         # python-docx
     "pptx",         # python-pptx
-    "docx2txt",
     "numpy",
     # code_index / Semble（方法体内 import，须 collect_all）
     "semble",
@@ -52,8 +42,6 @@ _DESKTOP_RUNTIME_PACKAGES = (
 )
 
 _CRITICAL_DESKTOP_RUNTIME_PACKAGES = (
-    "chromadb",
-    "onnxruntime",
     "numpy",
 )
 
@@ -64,8 +52,8 @@ for _pkg in _DESKTOP_RUNTIME_PACKAGES:
     try:
         _d, _b, _h = collect_all(_pkg)
     except Exception as exc:
-        # Critical runtime dependencies must never be skipped; otherwise
-        # the shipped desktop bundle can boot but fail when KB is used.
+        # Critical runtime dependencies must never be skipped; otherwise the
+        # shipped desktop bundle can boot but fail when code indexing is used.
         if _pkg in _CRITICAL_DESKTOP_RUNTIME_PACKAGES:
             raise RuntimeError(
                 f"Missing critical desktop runtime dependency during PyInstaller collect_all: {_pkg}"
@@ -112,9 +100,10 @@ a = Analysis(
         "pandas",
         "plotly",
         "seaborn",
-        # NOTE: chromadb **不**排除——它是知识库默认向量后端，被
-        # `agenticx.studio.kb.runtime._ChromaBackend` 直接 `import chromadb`，
-        # 排除后桌面端打开「资料」页就抛 "chromadb is required..."。
+        # Customer Desktop delegates durable knowledge storage to Enterprise.
+        # Never pull its local vector runtime into the bundled server.
+        "chromadb",
+        "onnxruntime",
         "qdrant_client",
         "pymilvus",
         "neo4j",

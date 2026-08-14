@@ -48,7 +48,7 @@ def _suppress_macos_dock_icon() -> None:
 
 def _check_desktop_runtime() -> int:
     """Verify that bundled desktop runtime modules can be imported."""
-    required = ("chromadb", "onnxruntime", "numpy")
+    required = ("numpy",)
     missing: list[str] = []
     for name in required:
         try:

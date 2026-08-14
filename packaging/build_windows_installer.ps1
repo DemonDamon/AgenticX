@@ -127,7 +127,7 @@ function Test-DesktopRuntimeImports {
 import importlib
 import sys
 
-required = ("chromadb", "onnxruntime", "numpy")
+required = ("numpy",)
 missing = []
 for name in required:
     try:
@@ -167,9 +167,7 @@ if (-not $SkipPyInstaller) {
     # Install with `desktop-runtime` extras so the bundled exe ships with PDF /
     # Office readers and numpy (GitHub issue #10: "Document ingestion fails for
     # PDF files (missing PDF reader libs / missing numpy)" on Windows).
-    # --prefer-binary: pull wheels whenever available (chroma-hnswlib ships
-    # cp312 win_amd64 wheels; falling back to source build collides with our
-    # pre-loaded MSVC env). Defensive even though pip already prefers wheels.
+    # --prefer-binary avoids source builds for native document dependencies.
     & $VenvPip install --prefer-binary "$ProjectRoot[desktop-runtime]"
     Test-DesktopRuntimeImports -PythonExe $VenvPython
 

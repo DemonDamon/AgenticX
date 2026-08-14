@@ -22,13 +22,13 @@ const PHASE_LABEL: Record<RepairPhase, string> = {
   idle: "",
   "creating-venv": "创建虚拟环境…",
   "upgrading-pip": "升级 pip…",
-  installing: "安装知识库与文档解析依赖（可能耗时数分钟）…",
+  installing: "安装文档解析与桌面运行依赖（可能耗时数分钟）…",
   done: "修复完成",
   error: "修复失败",
 };
 
 /**
- * Diagnoses backend Python deps (chromadb, onnxruntime, numpy, PDF libs) and
+ * Diagnoses backend Python deps (document readers, code-index numpy, network proxy) and
  * offers a one-click repair that installs agenticx[desktop-runtime] into
  * ~/.agenticx/.venv. Only renders a banner when there is a problem.
  */
@@ -50,7 +50,7 @@ export function BackendDepsPanel() {
       setDiag({
         ok: false,
         error: String(err),
-        missing: ["chromadb", "pdf (PyMuPDF or pypdf)"],
+        missing: ["numpy", "pdf (PyMuPDF or pypdf)"],
       });
     } finally {
       setBusy(false);
@@ -139,7 +139,7 @@ export function BackendDepsPanel() {
                 </p>
               ) : (
                 <p className="mt-0.5 text-[11px] text-text-subtle">
-                  点击修复将创建 ~/.agenticx/.venv 并安装 agenticx[desktop-runtime]（含 chromadb、PDF 解析、SOCKS 代理 socksio 等）。
+                  点击修复将创建 ~/.agenticx/.venv 并安装 agenticx[desktop-runtime]（含文档解析、代码索引与 SOCKS 代理等）。
                 </p>
               )}
             </>

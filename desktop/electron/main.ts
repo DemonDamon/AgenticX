@@ -8312,12 +8312,12 @@ function registerIpc(): void {
 
   // ── Backend Python dependency diagnose + one-click repair ──────────
   // For end-users running Near without a bundled backend: detect missing
-  // desktop-runtime pieces (chromadb, onnxruntime, numpy, PDF libs, …) and
+  // desktop-runtime pieces (document readers, code-index numpy, MCP, …) and
   // install agenticx[desktop-runtime] into ~/.agenticx/.venv on user action.
   const DESKTOP_RUNTIME_DIAGNOSE_PY = [
     "import importlib, json, os, sys",
     "missing = []",
-    'for n in ("chromadb", "onnxruntime", "numpy"):',
+    'for n in ("numpy",):',
     "    try:",
     "        importlib.import_module(n)",
     "    except Exception:",
@@ -8339,7 +8339,7 @@ function registerIpc(): void {
     "    try:",
     "        importlib.import_module('socksio')",
     "    except Exception:",
-    '        missing.append("socksio (SOCKS 代理需要，向量化/Embedding 会用到)")',
+    '        missing.append("socksio (SOCKS 网络代理需要)")',
     'print(json.dumps({"executable": sys.executable, "missing": missing}))',
   ].join("\n");
 
@@ -8372,7 +8372,7 @@ function registerIpc(): void {
       return {
         ok: false,
         error: "未找到可用的 Python 解释器（检测后端依赖需要）",
-        missing: ["chromadb", "onnxruntime", "numpy", "pdf (PyMuPDF or pypdf)", "socksio (SOCKS 代理)"],
+        missing: ["numpy", "pdf (PyMuPDF or pypdf)", "socksio (SOCKS 代理)"],
       };
     }
     return new Promise((resolve) => {
@@ -8395,7 +8395,7 @@ function registerIpc(): void {
             usingBundled: false,
             pythonPath: py,
             error: (err || out).slice(-2000),
-            missing: ["chromadb", "onnxruntime", "numpy", "pdf (PyMuPDF or pypdf)", "socksio (SOCKS 代理)"],
+            missing: ["numpy", "pdf (PyMuPDF or pypdf)", "socksio (SOCKS 代理)"],
           });
         }
       });
@@ -8404,7 +8404,7 @@ function registerIpc(): void {
           ok: false,
           pythonPath: py,
           error: String(e),
-          missing: ["chromadb", "onnxruntime", "numpy", "pdf (PyMuPDF or pypdf)", "socksio (SOCKS 代理)"],
+          missing: ["numpy", "pdf (PyMuPDF or pypdf)", "socksio (SOCKS 代理)"],
         }),
       );
     });
@@ -8448,7 +8448,7 @@ function registerIpc(): void {
       const srcRoot = findAgenticxSourceRoot();
       const installLabel = srcRoot
         ? `从本地源码安装 agenticx[desktop-runtime]（${srcRoot}）…`
-        : "从 PyPI 安装 agenticx[desktop-runtime]（chromadb、PDF 等）…";
+        : "从 PyPI 安装 agenticx[desktop-runtime]（文档解析、MCP 等）…";
       send("installing", installLabel, 35);
       const installArgs = srcRoot
         ? ["-m", "pip", "install", "-e", `${srcRoot}[desktop-runtime]`]
@@ -8458,8 +8458,8 @@ function registerIpc(): void {
         send("error", "依赖安装失败，请查看上方日志");
         return { ok: false, error: "pip install failed" };
       }
-      // PyPI 0.4.x desktop-runtime 可能尚未包含 socksio；SOCKS 代理下向量化必装。
-      send("installing", "安装 SOCKS 代理依赖 socksio（向量化/Embedding）…", 72);
+      // Older published desktop-runtime builds may not include socksio.
+      send("installing", "安装 SOCKS 网络代理依赖 socksio…", 72);
       const socksCode = await runStep(venvPy, ["-m", "pip", "install", "socksio>=1.0.0,<2"], "installing");
       if (socksCode !== 0) {
         send("error", "socksio 安装失败");

@@ -76,11 +76,10 @@ dependencies = [
 [project.optional-dependencies]
 # ── 桌面打包最小运行时 ──
 # PyInstaller 打出来的 agx-server 需要这些包在 venv 里，才能：
-#   - 解析 PDF（PyMuPDF 优先，pypdf 兜底；若都缺，PDFReader 会抛
+#   - 解析 PDF（PyMuPDF 优先，pypdf 兜底；若都缺，附件解析会抛
 #     "No PDF library available"）
-#   - 解析 Word/PowerPoint（python-docx / python-pptx / docx2txt）
-#   - 满足 agenticx.knowledge 下游模块对 numpy 的隐式要求，避免
-#     "agenticx.knowledge.readers unavailable: No module named 'numpy'"
+#   - 解析 Word/PowerPoint（python-docx / python-pptx）
+#   - 支持本地代码索引等仍依赖 numpy 的桌面能力
 # packaging/build_backend.sh 与 build_windows_installer.ps1 都必须用
 # `pip install "$PROJECT_ROOT[desktop-runtime]"` 安装本组。
 desktop-runtime = [
@@ -88,24 +87,15 @@ desktop-runtime = [
     "pypdf>=3.15.0,<5",
     "python-docx>=0.8.11,<2",
     "python-pptx>=0.6.21,<1",
-    "docx2txt>=0.8,<1",
     "numpy>=1.24.0,<2",
-    # 知识库默认向量后端：agenticx.studio.kb.runtime._ChromaBackend 直接
-    # `import chromadb`，缺失时 UI 上抛 "chromadb is required..." 而打包
-    # 后的桌面端用户没法 pip install 进 bundle。
-    "chromadb>=0.5.0,<1",
-    # chromadb 默认 embedding / 部分 segment 实现会动态 import onnxruntime；
-    # 未显式安装时运行时报 "The onnxruntime python package is not installed"。
-    # PyInstaller 同样需要 collect_all("onnxruntime") 才能打入 native 库。
-    "onnxruntime>=1.17.0,<2",
     # Studio 的 MCP 面板 / auto-connect 强依赖官方 mcp SDK；
     # 缺失时 MCPClientV2._create_session 里 stdio_client=None，所有连接
     # 会以 "TypeError: 'NoneType' object is not callable" 静默失败。
     "mcp>=1.0.0,<2",
     "semble>=0.1.10,<0.2.0",
     "pathspec>=1.0.0",
-    # 本机 shell / agx serve 继承 ALL_PROXY=socks5://… 时，httpx / OpenAI SDK / LiteLLM
-    # 向量化会走 SOCKS；缺 socksio 则入库阶段才抛 ImportError。
+    # 本机 shell / agx serve 继承 ALL_PROXY=socks5://… 时，httpx / OpenAI SDK /
+    # LiteLLM 会走 SOCKS；缺 socksio 会在首次网络请求时抛 ImportError。
     "socksio>=1.0.0,<2",
 ]
 # ── 统一数据源网关（AkShare 等免费行情插件）──

@@ -2,8 +2,10 @@
 
 Author: Damon Li
 """
-from typing import cast
-from agenticx.knowledge.graphers.config import LLMConfig
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from .base import BaseLLMProvider
 from .litellm_provider import LiteLLMProvider
 from .kimi_provider import KimiProvider
@@ -12,6 +14,10 @@ from .ark_provider import ArkLLMProvider
 from .zhipu_provider import ZhipuProvider
 from .qianfan_provider import QianfanProvider
 from .minimax_provider import MiniMaxProvider
+
+
+if TYPE_CHECKING:
+    from agenticx.knowledge.graphers.config import LLMConfig
 
 
 class LlmFactory:

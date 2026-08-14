@@ -7,16 +7,9 @@ Author: Damon Li
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 
 from agenticx.tools import document_text as dt
-
-
-class _FakeDoc:
-    def __init__(self, content: str) -> None:
-        self.content = content
 
 
 class _FakeReader:
@@ -25,11 +18,11 @@ class _FakeReader:
         self.fail = fail
         self.calls: list[Path] = []
 
-    async def read(self, path: Path):
+    async def read(self, path: Path) -> str:
         self.calls.append(path)
         if self.fail:
             raise RuntimeError("native reader failed")
-        return [_FakeDoc(self.content)]
+        return self.content
 
 
 class _FakeLiteParseAdapter:
@@ -69,7 +62,7 @@ async def test_pdf_uses_native_reader_without_liteparse(
     reader = _FakeReader("pdf body")
     _FakeLiteParseAdapter.available = False
 
-    monkeypatch.setattr(dt, "get_reader", lambda path: reader)
+    monkeypatch.setattr(dt, "_read_native_document", reader.read)
     monkeypatch.setattr(dt, "LiteParseAdapter", _FakeLiteParseAdapter)
     monkeypatch.setattr(dt, "libreoffice_available", lambda: False)
 
@@ -88,7 +81,7 @@ async def test_docx_uses_native_reader_without_libreoffice(
     reader = _FakeReader("docx body")
     _FakeLiteParseAdapter.available = False
 
-    monkeypatch.setattr(dt, "get_reader", lambda path: reader)
+    monkeypatch.setattr(dt, "_read_native_document", reader.read)
     monkeypatch.setattr(dt, "LiteParseAdapter", _FakeLiteParseAdapter)
     monkeypatch.setattr(dt, "libreoffice_available", lambda: False)
 
@@ -106,7 +99,7 @@ async def test_pptx_uses_native_reader_without_libreoffice(
     reader = _FakeReader("pptx body")
     _FakeLiteParseAdapter.available = False
 
-    monkeypatch.setattr(dt, "get_reader", lambda path: reader)
+    monkeypatch.setattr(dt, "_read_native_document", reader.read)
     monkeypatch.setattr(dt, "LiteParseAdapter", _FakeLiteParseAdapter)
     monkeypatch.setattr(dt, "libreoffice_available", lambda: False)
 
@@ -179,7 +172,7 @@ async def test_native_reader_can_fallback_to_liteparse(
     _FakeLiteParseAdapter.available = True
     _FakeLiteParseAdapter.text = "fallback body"
 
-    monkeypatch.setattr(dt, "get_reader", lambda path: reader)
+    monkeypatch.setattr(dt, "_read_native_document", reader.read)
     monkeypatch.setattr(dt, "LiteParseAdapter", _FakeLiteParseAdapter)
     monkeypatch.setattr(dt, "libreoffice_available", lambda: False)
 
@@ -197,7 +190,7 @@ async def test_parser_returns_empty_content_error(
     reader = _FakeReader("   ")
     _FakeLiteParseAdapter.available = False
 
-    monkeypatch.setattr(dt, "get_reader", lambda path: reader)
+    monkeypatch.setattr(dt, "_read_native_document", reader.read)
     monkeypatch.setattr(dt, "LiteParseAdapter", _FakeLiteParseAdapter)
 
     with pytest.raises(dt.DocumentTextError) as excinfo:

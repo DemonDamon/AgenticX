@@ -54,7 +54,7 @@ VPIP="$VENV/bin/pip"
 import importlib
 import sys
 
-required = ("chromadb", "onnxruntime", "numpy")
+required = ("numpy",)
 missing = []
 for name in required:
     try:
