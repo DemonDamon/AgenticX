@@ -30,7 +30,31 @@ const EXPAND_SYSTEM = [
   "每条变体必须换检索角度：改换关键词、语言或限定源。仅增删助词、标点、语序的变体一律不要——它们会命中同一批网页，等于白花检索配额。",
   DIRECT_DOCUMENT_RESEARCH_ANCHOR_POLICY,
   "kind 取值：primary|term|english|authority|recency|contrarian。",
+  // kind=recency also switches the lane onto time-weighted ranking, so a
+  // historical or foundational lane must not carry one.
+  "kind=recency 只用于子问题本身求当前态或最新变化（现状、最新版本、近期政策、当前价格等）。" +
+    "历史沿革、基础理论、经典论文、定义解释类子问题禁止使用 recency——" +
+    "误标会让旧的权威资料被新博客机械压过。",
 ].join("\n");
+
+/**
+ * Sub-questions whose answer is a *current* state. Only these may keep a
+ * `recency` variant, because that kind switches the lane to time-weighted
+ * ranking downstream.
+ */
+const CURRENT_STATE_RE =
+  /最新|近期|目前|当前|现状|如今|今年|本月|截至|上线|发布|更新|新版|动态|趋势|价格|定价|行情|政策|法规|进展|排行|榜单|路线图|roadmap|latest|recent|current|now|today|upcoming|release[sd]?|chang(?:e|es|elog)|pricing|status|update[sd]?|state of|\b20\d{2}\b/iu;
+/** Explicitly retrospective or timeless sub-questions. */
+const HISTORICAL_RE =
+  /历史|沿革|演进史|起源|由来|发展史|早期|最初|经典|奠基|原理|定义|概念|基础理论|数学证明|推导|history|historical|origin|classic|seminal|foundational|fundamental|theorem|proof|definition/iu;
+
+/** Whether a `recency` variant is justified for this sub-question. */
+export function allowsRecencyVariant(subQuestion: string): boolean {
+  const text = subQuestion.trim();
+  if (!text) return false;
+  if (HISTORICAL_RE.test(text)) return false;
+  return CURRENT_STATE_RE.test(text);
+}
 
 const KIND_SET = new Set<QueryVariant["kind"]>([
   "primary",
@@ -134,6 +158,7 @@ export function parseVariantsJson(raw: string, subQuestion: string): QueryVarian
   const parsed = parseLlmJson<unknown>(raw);
   if (!Array.isArray(parsed)) return fallback;
 
+  const recencyAllowed = allowsRecencyVariant(subQuestion);
   const variants: QueryVariant[] = [];
   for (const item of parsed) {
     if (!item || typeof item !== "object") continue;
@@ -141,9 +166,12 @@ export function parseVariantsJson(raw: string, subQuestion: string): QueryVarian
     const query = typeof obj.query === "string" ? obj.query.trim() : "";
     if (!query) continue;
     const kindRaw = typeof obj.kind === "string" ? obj.kind : "term";
-    const kind = KIND_SET.has(kindRaw as QueryVariant["kind"])
+    let kind = KIND_SET.has(kindRaw as QueryVariant["kind"])
       ? (kindRaw as QueryVariant["kind"])
       : "term";
+    // Keep the query, drop the label: the variant is still a useful angle, but
+    // it must not switch a historical lane onto time-weighted ranking.
+    if (kind === "recency" && !recencyAllowed) kind = "term";
     variants.push({ query, kind });
   }
   const deduped = dedupeVariants(variants);

@@ -1575,7 +1575,13 @@ export async function runDeepResearchTurn(
               return { ...empty, queriesPlanned: variantsRun, queriesExecuted };
             }
 
-            const scored = scorePool(question, pool.list());
+            // Only a lane that actually planned a recency probe gets time
+            // weighting; history and foundational-theory lanes keep the
+            // relevance/authority formula unchanged.
+            const scored = scorePool(question, pool.list(), {
+              timeSensitive: variants.some((variant) => variant.kind === "recency"),
+              now: now(),
+            });
             const selected = selectTopSources(
               scored,
               resolveLaneAdoptCap(registry.size),

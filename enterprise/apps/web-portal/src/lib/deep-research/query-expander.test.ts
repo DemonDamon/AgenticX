@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_VARIANTS_PER_LANE,
+  allowsRecencyVariant,
   expandQueries,
   heuristicVariants,
   isNearDuplicateQuery,
@@ -123,5 +124,56 @@ describe("querySimilarity / isNearDuplicateQuery", () => {
     const queries = variants.map((v) => v.query);
     expect(new Set(queries).size).toBe(queries.length);
     expect(variants.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("recency variant gating", () => {
+  it("allows a recency probe only for current-state sub-questions", () => {
+    for (const question of [
+      "MiniMax M2 最新定价",
+      "欧盟 AI 法案的近期进展",
+      "该框架目前的默认配置是什么",
+      "2026 年的模型发布节奏",
+      "latest release notes for the runtime",
+    ]) {
+      expect(allowsRecencyVariant(question)).toBe(true);
+    }
+  });
+
+  it("refuses one for historical, foundational and definitional sub-questions", () => {
+    for (const question of [
+      "Transformer 架构的历史沿革",
+      "注意力机制的基础理论与数学推导",
+      "什么是挂谷猜想的定义",
+      "分布式共识的经典论文有哪些",
+      "the origin of the seminal backpropagation proof",
+    ]) {
+      expect(allowsRecencyVariant(question)).toBe(false);
+    }
+  });
+
+  it("keeps a mislabelled recency query but demotes its kind", () => {
+    const variants = parseVariantsJson(
+      JSON.stringify([
+        { query: "Transformer 架构的历史沿革", kind: "primary" },
+        { query: "Transformer 架构 演进 综述", kind: "recency" },
+      ]),
+      "Transformer 架构的历史沿革",
+    );
+
+    expect(variants.map((v) => v.query)).toContain("Transformer 架构 演进 综述");
+    expect(variants.some((v) => v.kind === "recency")).toBe(false);
+  });
+
+  it("preserves the recency kind when the sub-question really asks for now", () => {
+    const variants = parseVariantsJson(
+      JSON.stringify([
+        { query: "MiniMax M2 最新定价", kind: "primary" },
+        { query: "MiniMax M2 pricing 2026", kind: "recency" },
+      ]),
+      "MiniMax M2 最新定价",
+    );
+
+    expect(variants.some((v) => v.kind === "recency")).toBe(true);
   });
 });
