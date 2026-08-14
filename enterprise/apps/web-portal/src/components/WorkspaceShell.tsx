@@ -59,6 +59,7 @@ import {
   EnterpriseBrandMark,
 } from "./EnterpriseBrandMark";
 import { SettingsPanel } from "./settings/SettingsPanel";
+import { readDefaultModelPreference } from "../lib/default-model-preference";
 import { SessionGeneratingDots } from "./SessionGeneratingDots";
 import { HistorySessionsPanel } from "./HistorySessionsPanel";
 import {
@@ -256,7 +257,10 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   }, []);
 
   const onNewChat = React.useCallback(() => {
-    void createSession({ defaultModel: activeModel || "deepseek-chat", title: t("newChat") });
+    void createSession({
+      defaultModel: readDefaultModelPreference() || activeModel || undefined,
+      title: t("newChat"),
+    });
     manualDeepResearchSessionIdRef.current = null;
     setDeepResearchMode("off");
     // Starting a different conversation must not erase the old conversation's
@@ -266,7 +270,10 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   }, [createSession, activeModel, t]);
 
   const onDeepResearchNav = React.useCallback(() => {
-    void createSession({ defaultModel: activeModel || "deepseek-chat", title: t("newChat") });
+    void createSession({
+      defaultModel: readDefaultModelPreference() || activeModel || undefined,
+      title: t("newChat"),
+    });
     const draftId = useChatStore.getState().activeSessionId;
     manualDeepResearchSessionIdRef.current = draftId;
     setDeepResearchMode("manual");

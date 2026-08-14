@@ -110,6 +110,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "platform",
     items: [
       { href: "/admin/models", labelKey: "models", icon: Package },
+      { href: "/admin/web-search", labelKey: "webSearch", icon: Search },
       { href: "/admin/routing", labelKey: "autoRouting", icon: Route },
       { href: "/admin/mcp-servers", labelKey: "mcpServers", icon: PlugZap },
       { href: "/admin/api-tokens", labelKey: "apiTokens", icon: KeyRound },

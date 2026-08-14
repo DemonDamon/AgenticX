@@ -2,51 +2,37 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getSessionFromCookies = vi.fn();
 const getPublicWebSearchConfig = vi.fn();
-const upsertTenantWebSearchConfig = vi.fn();
-const WebSearchConfigValidationError = vi.hoisted(
-  () => class WebSearchConfigValidationError extends Error {},
-);
 
 vi.mock("../../../../../lib/session", () => ({
   getSessionFromCookies: (...args: unknown[]) => getSessionFromCookies(...args),
-  passwordChangeRequiredResponse: () => Response.json(
-    { code: "40302", message: "password_change_required" },
-    { status: 403 },
-  ),
+  passwordChangeRequiredResponse: () =>
+    Response.json(
+      { code: "40302", message: "password_change_required" },
+      { status: 403 },
+    ),
 }));
 
 vi.mock("../../../../../lib/web-search/tenant-config", () => ({
   getPublicWebSearchConfig: (...args: unknown[]) => getPublicWebSearchConfig(...args),
-  upsertTenantWebSearchConfig: (...args: unknown[]) => upsertTenantWebSearchConfig(...args),
-  WebSearchConfigValidationError,
 }));
 
-import { GET, PUT } from "../route";
+import { GET } from "../route";
 
 const SESSION = {
   tenantId: "tenant-1",
   userId: "user-1",
   mustChangePassword: false,
-  scopes: ["provider:update"],
+  scopes: ["workspace:chat"],
 };
 
-function put(body: unknown): Promise<Response> {
-  return PUT(new Request("http://localhost/api/me/web-search", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  }));
-}
-
-describe("/api/me/web-search search-call budget", () => {
+describe("/api/me/web-search", () => {
   beforeEach(() => {
     getSessionFromCookies.mockReset();
     getPublicWebSearchConfig.mockReset();
-    upsertTenantWebSearchConfig.mockReset();
     getSessionFromCookies.mockResolvedValue(SESSION);
   });
 
-  it("returns the persisted per-turn search limit", async () => {
+  it("returns the tenant policy needed by the chat composer", async () => {
     getPublicWebSearchConfig.mockResolvedValue({
       enabled: true,
       provider: "duckduckgo",
@@ -62,148 +48,47 @@ describe("/api/me/web-search search-call budget", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      data: { maxSearchCalls: 4 },
+      data: {
+        enabled: true,
+        deepResearchEnabled: true,
+        maxSearchCalls: 4,
+        canManage: false,
+      },
     });
     expect(getPublicWebSearchConfig).toHaveBeenCalledWith("tenant-1");
   });
 
-  it.each([1, 5])("accepts a valid search limit of %i", async (maxSearchCalls) => {
-    upsertTenantWebSearchConfig.mockResolvedValue({ maxSearchCalls });
-
-    const response = await put({ maxSearchCalls });
-
-    expect(response.status).toBe(200);
-    expect(upsertTenantWebSearchConfig).toHaveBeenCalledWith(
-      "tenant-1",
-      expect.objectContaining({ maxSearchCalls }),
-    );
-  });
-
-  it("allows members to read but rejects tenant-wide configuration writes", async () => {
-    getSessionFromCookies.mockResolvedValue({ ...SESSION, scopes: ["workspace:chat"] });
+  it("never exposes provider endpoints or management capability on the portal", async () => {
+    getSessionFromCookies.mockResolvedValue({
+      ...SESSION,
+      scopes: ["provider:update", "*"],
+    });
     getPublicWebSearchConfig.mockResolvedValue({
       enabled: true,
       providers: [
         {
           id: "custom-1",
-          adapter: "doubao",
+          adapter: "custom",
           endpoint: "https://private-search.example/api",
         },
       ],
+      availableAdapters: [],
     });
 
-    const getResponse = await GET();
-    const putResponse = await put({ maxSearchCalls: 4 });
-
-    expect(getResponse.status).toBe(200);
-    const getJson = await getResponse.json();
-    expect(getJson).toMatchObject({ data: { canManage: false } });
-    expect(JSON.stringify(getJson)).not.toContain("private-search.example");
-    expect(putResponse.status).toBe(403);
-    expect(upsertTenantWebSearchConfig).not.toHaveBeenCalled();
-  });
-
-  it("does not treat generic admin-console access as search-provider write access", async () => {
-    getSessionFromCookies.mockResolvedValue({ ...SESSION, scopes: ["admin:enter"] });
-    getPublicWebSearchConfig.mockResolvedValue({ enabled: true, providers: [] });
-
-    const getResponse = await GET();
-    const putResponse = await put({ maxSearchCalls: 4 });
-
-    expect(getResponse.status).toBe(200);
-    await expect(getResponse.json()).resolves.toMatchObject({
-      data: { canManage: false },
-    });
-    expect(putResponse.status).toBe(403);
-  });
-
-  it("allows wildcard administrators to manage search providers", async () => {
-    getSessionFromCookies.mockResolvedValue({ ...SESSION, scopes: ["*"] });
-    upsertTenantWebSearchConfig.mockResolvedValue({ maxSearchCalls: 4 });
-
-    const response = await put({ maxSearchCalls: 4 });
+    const response = await GET();
+    const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ data: { canManage: false } });
+    expect(JSON.stringify(payload)).not.toContain("private-search.example");
   });
 
-  it("returns tenant provider validation failures as a client error", async () => {
-    upsertTenantWebSearchConfig.mockRejectedValue(
-      new WebSearchConfigValidationError("搜索服务 API 地址无效"),
-    );
+  it("requires an authenticated portal session", async () => {
+    getSessionFromCookies.mockResolvedValue(null);
 
-    const response = await put({
-      providers: [{ id: "custom-1", adapter: "doubao" }],
-    });
+    const response = await GET();
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { message: "搜索服务 API 地址无效" },
-    });
-  });
-
-  it.each([0, 6, 1.5, "3", null])(
-    "rejects an invalid search limit of %s",
-    async (maxSearchCalls) => {
-      const response = await put({ maxSearchCalls });
-
-      expect(response.status).toBe(400);
-      expect(upsertTenantWebSearchConfig).not.toHaveBeenCalled();
-    },
-  );
-
-  it("rejects an oversized top-level provider key", async () => {
-    const response = await put({ apiKey: "k".repeat(8_193) });
-
-    expect(response.status).toBe(400);
-    expect(upsertTenantWebSearchConfig).not.toHaveBeenCalled();
-  });
-
-  it("passes a bounded custom endpoint provider pool to the tenant config layer", async () => {
-    upsertTenantWebSearchConfig.mockResolvedValue({ primaryProviderId: "custom-1" });
-
-    const response = await put({
-      providers: [
-        {
-          id: "custom-1",
-          adapter: "doubao",
-          displayName: "内部搜索",
-          apiKey: "secret-key",
-          enabled: true,
-          priority: 0,
-          options: { endpoint: "https://search.example/api" },
-        },
-      ],
-    });
-
-    expect(response.status).toBe(200);
-    expect(upsertTenantWebSearchConfig).toHaveBeenCalledWith(
-      "tenant-1",
-      expect.objectContaining({
-        providers: [
-          expect.objectContaining({
-            id: "custom-1",
-            adapter: "doubao",
-            options: { endpoint: "https://search.example/api" },
-          }),
-        ],
-      }),
-    );
-  });
-
-  it.each([
-    { providers: [] },
-    {
-      providers: [
-        { id: "a", adapter: "bocha" },
-        { id: "b", adapter: "tavily" },
-        { id: "c", adapter: "doubao" },
-      ],
-    },
-    { providers: [{ id: "a", adapter: "bocha", options: "bad" }] },
-  ])("rejects an invalid provider pool %#", async (body) => {
-    const response = await put(body);
-
-    expect(response.status).toBe(400);
-    expect(upsertTenantWebSearchConfig).not.toHaveBeenCalled();
+    expect(response.status).toBe(401);
+    expect(getPublicWebSearchConfig).not.toHaveBeenCalled();
   });
 });

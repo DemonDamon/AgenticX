@@ -177,19 +177,13 @@
     "title": "设置",
     "tabs": {
       "general": "常规设置",
-      "modelService": "模型服务",
-      "defaults": "默认模型",
-      "webSearch": "网络搜索",
-      "parser": "文档解析",
-      "chat": "聊天设置"
+      "chat": "聊天设置",
+      "parser": "文档解析"
     },
     "tabDescriptions": {
       "general": "语言 / 主题 / 数据导出",
-      "modelService": "API Key、Provider 配置",
-      "defaults": "默认模型与命名模型",
-      "webSearch": "联网搜索开关与密钥",
-      "parser": "文档解析器选择",
-      "chat": "流式输出 / 自动命名"
+      "chat": "默认模型 / 流式输出 / 自动命名",
+      "parser": "文档解析器选择"
     },
     "general": {
       "sectionDescription": "跨应用的通用偏好设置",
@@ -255,9 +249,11 @@
     "defaults": {
       "sectionDescription": "为新会话挑选默认模型",
       "defaultChatModel": "默认对话模型",
-      "defaultChatModelDescription": "新建会话时会自动选中",
-      "sessionNamingModel": "会话命名模型",
-      "sessionNamingModelDescription": "系统自动为会话起名时使用"
+      "defaultChatModelDescription": "仅展示管理员已分配给你的模型，新建会话时会自动选中",
+      "loadingModels": "正在加载模型…",
+      "noModels": "暂无可用模型",
+      "noModelsHint": "管理员尚未为当前账号分配可用模型",
+      "loadFailed": "无法读取可用模型，请稍后重试"
     },
     "webSearch": {
       "sectionDescription": "联网搜索为模型补充实时信息",
@@ -317,9 +313,7 @@
       "streaming": "流式输出",
       "streamingDescription": "SSE 实时渲染，首 token 延迟更低",
       "autoTitle": "自动命名会话",
-      "autoTitleDescription": "首条消息后自动为会话生成标题",
-      "defaultTemperature": "默认温度",
-      "defaultTemperatureDescription": "数值越低越确定，越高越多样"
+      "autoTitleDescription": "首条消息后自动为会话生成标题"
     }
   }
 }

@@ -65,6 +65,11 @@ import {
 } from "./ComposerPlusMenu";
 import { ENTERPRISE_PRODUCT_NAME } from "./EnterpriseBrandMark";
 import {
+  readDefaultModelPreference,
+  resolveAvailableDefaultModel,
+  writeDefaultModelPreference,
+} from "../lib/default-model-preference";
+import {
   expandChatShareTurnSelection,
   toChatShareMessage,
   type ChatShareMessage,
@@ -376,8 +381,13 @@ export function MachiChatView({
     if (!availableModelIdsKey) return;
     const exists = availableModels.some((m) => m.id === activeModel);
     if (exists) return;
-    const next = availableModels.find((m) => m.isDefault) ?? availableModels[0];
+    const next = resolveAvailableDefaultModel(
+      availableModels,
+      readDefaultModelPreference(),
+      activeModel,
+    );
     if (!next) return;
+    writeDefaultModelPreference(next.id);
     if (useChatStore.getState().activeModel === next.id) return;
     probeNote("MachiChatView.switchModelFallback", { from: activeModel, to: next.id });
     switchModel(next.id);

@@ -177,19 +177,13 @@
     "title": "Settings",
     "tabs": {
       "general": "General",
-      "modelService": "Model service",
-      "defaults": "Default models",
-      "webSearch": "Web search",
-      "parser": "Document parser",
-      "chat": "Chat settings"
+      "chat": "Chat settings",
+      "parser": "Document parser"
     },
     "tabDescriptions": {
       "general": "Language / theme / data export",
-      "modelService": "API keys and provider setup",
-      "defaults": "Default and naming models",
-      "webSearch": "Web search toggle and keys",
-      "parser": "Document parser selection",
-      "chat": "Streaming / auto title"
+      "chat": "Default model / streaming / auto title",
+      "parser": "Document parser selection"
     },
     "general": {
       "sectionDescription": "Cross-app preferences",
@@ -255,9 +249,11 @@
     "defaults": {
       "sectionDescription": "Pick default models for new sessions",
       "defaultChatModel": "Default chat model",
-      "defaultChatModelDescription": "Selected automatically for new sessions",
-      "sessionNamingModel": "Session naming model",
-      "sessionNamingModelDescription": "Used when auto-generating session titles"
+      "defaultChatModelDescription": "Only models assigned by an administrator are shown and used for new sessions",
+      "loadingModels": "Loading models…",
+      "noModels": "No available models",
+      "noModelsHint": "No models have been assigned to this account",
+      "loadFailed": "Unable to load available models. Try again later."
     },
     "webSearch": {
       "sectionDescription": "Add real-time information to model responses",
@@ -317,9 +313,7 @@
       "streaming": "Streaming output",
       "streamingDescription": "SSE rendering for lower time-to-first-token",
       "autoTitle": "Auto title sessions",
-      "autoTitleDescription": "Generate a title after the first message",
-      "defaultTemperature": "Default temperature",
-      "defaultTemperatureDescription": "Lower is more deterministic, higher is more varied"
+      "autoTitleDescription": "Generate a title after the first message"
     }
   }
 }
