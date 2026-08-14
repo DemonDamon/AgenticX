@@ -271,7 +271,8 @@ function createMemoryStore(): RunStore {
     async finish(runId, status, errorMessage) {
       const row = bucket.get(runId);
       if (!row) return;
-      if (TERMINAL_STATUSES.has(row.status)) return;
+      if (TERMINAL_STATUSES.has(row.status) && row.status !== status) return;
+      if (TERMINAL_STATUSES.has(row.status) && errorMessage === undefined) return;
       row.status = status;
       if (errorMessage !== undefined) row.errorMessage = errorMessage;
       row.phase = "done";
@@ -518,7 +519,10 @@ function createSqlStore(): RunStore {
           .from(mysqlTable)
           .where(eq(mysqlTable.runId, runId))
           .limit(1);
-        if (!rows[0] || TERMINAL_STATUSES.has(rows[0].status as DeepResearchRunStatus)) return;
+        if (!rows[0]) return;
+        const existingStatus = rows[0].status as DeepResearchRunStatus;
+        if (TERMINAL_STATUSES.has(existingStatus) && existingStatus !== status) return;
+        if (TERMINAL_STATUSES.has(existingStatus) && errorMessage === undefined) return;
         await db.update(mysqlTable).set(set).where(eq(mysqlTable.runId, runId));
         return;
       }
@@ -529,7 +533,10 @@ function createSqlStore(): RunStore {
         .from(pgTable)
         .where(eq(pgTable.runId, runId))
         .limit(1);
-      if (!rows[0] || TERMINAL_STATUSES.has(rows[0].status as DeepResearchRunStatus)) return;
+      if (!rows[0]) return;
+      const existingStatus = rows[0].status as DeepResearchRunStatus;
+      if (TERMINAL_STATUSES.has(existingStatus) && existingStatus !== status) return;
+      if (TERMINAL_STATUSES.has(existingStatus) && errorMessage === undefined) return;
       await db.update(pgTable).set(set).where(eq(pgTable.runId, runId));
     },
 

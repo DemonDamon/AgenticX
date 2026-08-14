@@ -67,7 +67,13 @@ describe("runRecon", () => {
     });
     expect(result.hits).toHaveLength(RECON_RESULTS);
     expect(result.brief).toContain("检索到的现状");
-    expect(searchFn).toHaveBeenCalledWith("deepseek v4 核心技术点", RECON_RESULTS, cfg, undefined);
+    expect(searchFn).toHaveBeenCalledWith(
+      "deepseek v4 核心技术点",
+      RECON_RESULTS,
+      cfg,
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("swallows search failures so the run continues", async () => {
@@ -78,7 +84,19 @@ describe("runRecon", () => {
   });
 
   it("returns empty when the search outlives the timeout", async () => {
-    const searchFn = vi.fn().mockImplementation(() => new Promise(() => {}));
+    let searchSignal: AbortSignal | undefined;
+    const searchFn = vi.fn().mockImplementation(
+      (
+        _query: string,
+        _results: number,
+        _cfg: unknown,
+        _fetch: unknown,
+        diagnostics?: { signal?: AbortSignal },
+      ) => {
+        searchSignal = diagnostics?.signal;
+        return new Promise(() => {});
+      },
+    );
     const result = await runRecon({
       query: "q",
       searchCfg: cfg,
@@ -86,6 +104,7 @@ describe("runRecon", () => {
       timeoutMs: 5,
     });
     expect(result).toEqual({ brief: "", hits: [] });
+    expect(searchSignal?.aborted).toBe(true);
   });
 
   it("skips work for an empty query or an already-aborted signal", async () => {

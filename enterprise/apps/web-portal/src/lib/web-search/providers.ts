@@ -67,6 +67,7 @@ type WebSearchAdapterContext = {
   apiKey: string;
   options: Record<string, unknown>;
   fetchImpl: FetchLike;
+  signal?: AbortSignal;
 };
 
 export type WebSearchAdapterDefinition = {
@@ -91,6 +92,8 @@ export type WebSearchProviderAttempt = {
 export type WebSearchExecutionDiagnostics = {
   /** Best-effort observability only; observer failures never affect retrieval. */
   onProviderAttempt?: (attempt: WebSearchProviderAttempt) => void;
+  /** Shared run cancellation/deadline; unlike diagnostics callbacks, this is authoritative. */
+  signal?: AbortSignal;
 };
 
 const ADAPTERS = new Map<string, WebSearchAdapterDefinition>();
@@ -100,6 +103,12 @@ export const MAX_CONFIGURED_WEB_SEARCH_PROVIDERS = 2;
 const BOCHA_ENDPOINT = "https://api.bochaai.com/v1/web-search";
 const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const DOUBAO_CUSTOM_ENDPOINT = "https://open.feedcoopapi.com/search_api/web_search";
+const SEARCH_REQUEST_TIMEOUT_MS = 20_000;
+
+function searchRequestSignal(parent?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(SEARCH_REQUEST_TIMEOUT_MS);
+  return parent ? AbortSignal.any([parent, timeout]) : timeout;
+}
 
 /** Adapter registration is the only protocol-specific extension point. */
 export function registerWebSearchAdapter(definition: WebSearchAdapterDefinition): void {
@@ -343,12 +352,13 @@ async function searchDuckDuckGoLite(
   query: string,
   maxResults: number,
   fetchImpl: FetchLike,
+  signal?: AbortSignal,
 ): Promise<WebSearchHit[]> {
   const url = `https://lite.duckduckgo.com/lite/?${new URLSearchParams({ q: query }).toString()}`;
   const response = await fetchImpl(url, {
     method: "GET",
     headers: { "user-agent": DDG_UA },
-    signal: AbortSignal.timeout(20_000),
+    signal: searchRequestSignal(signal),
   });
   const html = await response.text();
   // 202 / anomaly pages are still HTTP "ok" for fetch — must detect explicitly.
@@ -370,6 +380,7 @@ async function searchDuckDuckGo(
   query: string,
   maxResults: number,
   fetchImpl: FetchLike,
+  signal?: AbortSignal,
 ): Promise<WebSearchHit[]> {
   const body = new URLSearchParams({ q: query });
   let htmlError: Error | null = null;
@@ -381,7 +392,7 @@ async function searchDuckDuckGo(
         "user-agent": DDG_UA,
       },
       body,
-      signal: AbortSignal.timeout(20_000),
+      signal: searchRequestSignal(signal),
     });
     const html = await response.text();
     if (response.ok && !looksLikeDdgChallenge(response.status, html)) {
@@ -393,7 +404,7 @@ async function searchDuckDuckGo(
   }
 
   try {
-    return await searchDuckDuckGoLite(query, maxResults, fetchImpl);
+    return await searchDuckDuckGoLite(query, maxResults, fetchImpl, signal);
   } catch (liteError) {
     throw (
       htmlError ??
@@ -409,6 +420,7 @@ async function searchBocha(
   fetchImpl: FetchLike,
   options: Record<string, unknown>,
   freshness?: BochaFreshness,
+  signal?: AbortSignal,
 ): Promise<WebSearchHit[]> {
   const payload: Record<string, unknown> = { query, count: maxResults, summary: true };
   if (freshness) payload.freshness = freshness;
@@ -421,7 +433,7 @@ async function searchBocha(
       authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(20_000),
+    signal: searchRequestSignal(signal),
   });
   if (!response.ok) {
     throw new Error(`bocha http ${response.status}`);
@@ -457,6 +469,7 @@ async function searchTavily(
   apiKey: string,
   fetchImpl: FetchLike,
   options: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<WebSearchHit[]> {
   const endpoint = await resolveAdapterEndpoint(options, TAVILY_ENDPOINT);
   const response = await fetchImpl(endpoint.url, {
@@ -468,7 +481,7 @@ async function searchTavily(
       query,
       max_results: maxResults,
     }),
-    signal: AbortSignal.timeout(20_000),
+    signal: searchRequestSignal(signal),
   });
   if (!response.ok) {
     throw new Error(`tavily http ${response.status}`);
@@ -489,6 +502,7 @@ async function searchDoubaoCustom(
   apiKey: string,
   fetchImpl: FetchLike,
   options: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<WebSearchHit[]> {
   const endpoint = await resolveAdapterEndpoint(options, DOUBAO_CUSTOM_ENDPOINT);
   const response = await fetchImpl(endpoint.url, {
@@ -505,7 +519,7 @@ async function searchDoubaoCustom(
       Count: maxResults,
       NeedSummary: true,
     }),
-    signal: AbortSignal.timeout(20_000),
+    signal: searchRequestSignal(signal),
   });
   if (!response.ok) {
     throw new Error(`doubao search http ${response.status}`);
@@ -563,12 +577,18 @@ export async function executeWebSearch(
 ): Promise<WebSearchHit[]> {
   const q = query.trim();
   if (!q) return [];
+  if (diagnostics?.signal?.aborted) {
+    throw diagnostics.signal.reason ?? new DOMException("Aborted", "AbortError");
+  }
   const n = clampMaxResults(maxResults ?? cfg.maxResults ?? DEFAULT_MAX_RESULTS);
   const providers = configuredWebSearchProviders(cfg).slice(0, MAX_CONFIGURED_WEB_SEARCH_PROVIDERS);
   if (providers.length === 0) throw new Error("no configured web search provider");
 
   let lastError: unknown = new Error("search returned no hits");
   for (const provider of providers) {
+    if (diagnostics?.signal?.aborted) {
+      throw diagnostics.signal.reason ?? new DOMException("Aborted", "AbortError");
+    }
     const attemptStartedAt = Date.now();
     const observe = (outcome: WebSearchProviderAttempt["outcome"], hitCount: number) => {
       try {
@@ -601,12 +621,16 @@ export async function executeWebSearch(
         apiKey: provider.apiKey,
         options: provider.options ?? {},
         fetchImpl,
+        signal: diagnostics?.signal,
       }));
       observe(hits.length > 0 ? "ok" : "empty", hits.length);
       if (hits.length > 0) return hits;
       lastError = new Error(`web search provider returned no hits: ${provider.id}`);
     } catch (error) {
       observe("failed", 0);
+      if (diagnostics?.signal?.aborted) {
+        throw diagnostics.signal.reason ?? error;
+      }
       lastError = error;
     }
   }
@@ -617,8 +641,8 @@ registerWebSearchAdapter({
   id: "duckduckgo",
   displayName: "DuckDuckGo",
   requiresApiKey: false,
-  search: ({ query, maxResults, fetchImpl }) =>
-    searchDuckDuckGo(query, maxResults, fetchImpl),
+  search: ({ query, maxResults, fetchImpl, signal }) =>
+    searchDuckDuckGo(query, maxResults, fetchImpl, signal),
 });
 
 registerWebSearchAdapter({
@@ -627,8 +651,16 @@ registerWebSearchAdapter({
   requiresApiKey: true,
   supportsCustomEndpoint: true,
   defaultEndpoint: BOCHA_ENDPOINT,
-  search: ({ query, maxResults, apiKey, options, fetchImpl }) =>
-    searchBocha(query, maxResults, apiKey, fetchImpl, options, resolveFreshness(query)),
+  search: ({ query, maxResults, apiKey, options, fetchImpl, signal }) =>
+    searchBocha(
+      query,
+      maxResults,
+      apiKey,
+      fetchImpl,
+      options,
+      resolveFreshness(query),
+      signal,
+    ),
 });
 
 registerWebSearchAdapter({
@@ -637,8 +669,8 @@ registerWebSearchAdapter({
   requiresApiKey: true,
   supportsCustomEndpoint: true,
   defaultEndpoint: TAVILY_ENDPOINT,
-  search: ({ query, maxResults, apiKey, options, fetchImpl }) =>
-    searchTavily(query, maxResults, apiKey, fetchImpl, options),
+  search: ({ query, maxResults, apiKey, options, fetchImpl, signal }) =>
+    searchTavily(query, maxResults, apiKey, fetchImpl, options, signal),
 });
 
 registerWebSearchAdapter({
@@ -647,6 +679,6 @@ registerWebSearchAdapter({
   requiresApiKey: true,
   supportsCustomEndpoint: true,
   defaultEndpoint: DOUBAO_CUSTOM_ENDPOINT,
-  search: ({ query, maxResults, apiKey, options, fetchImpl }) =>
-    searchDoubaoCustom(query, maxResults, apiKey, fetchImpl, options),
+  search: ({ query, maxResults, apiKey, options, fetchImpl, signal }) =>
+    searchDoubaoCustom(query, maxResults, apiKey, fetchImpl, options, signal),
 });

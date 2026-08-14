@@ -74,14 +74,26 @@ export async function runRecon(deps: ReconDeps): Promise<ReconResult> {
 
   const searchFn = deps.searchFn ?? executeWebSearch;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort(deps.signal?.reason);
+  if (deps.signal) {
+    if (deps.signal.aborted) controller.abort(deps.signal.reason);
+    else deps.signal.addEventListener("abort", onParentAbort, { once: true });
+  }
 
   try {
-    // executeWebSearch takes no AbortSignal, so bound it by racing a timer.
+    // Keep the race for injected search functions, while production providers
+    // also receive the signal and stop their actual network request.
     const timeout = new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), deps.timeoutMs ?? RECON_DEFAULT_TIMEOUT_MS);
+      timer = setTimeout(() => {
+        controller.abort(new DOMException("recon search timed out", "TimeoutError"));
+        resolve(null);
+      }, deps.timeoutMs ?? RECON_DEFAULT_TIMEOUT_MS);
     });
     const hits = await Promise.race([
-      searchFn(query, RECON_RESULTS, deps.searchCfg, deps.fetchImpl),
+      searchFn(query, RECON_RESULTS, deps.searchCfg, deps.fetchImpl, {
+        signal: controller.signal,
+      }),
       timeout,
     ]);
     if (!Array.isArray(hits)) return empty;
@@ -92,5 +104,6 @@ export async function runRecon(deps: ReconDeps): Promise<ReconResult> {
     return empty;
   } finally {
     if (timer) clearTimeout(timer);
+    deps.signal?.removeEventListener("abort", onParentAbort);
   }
 }

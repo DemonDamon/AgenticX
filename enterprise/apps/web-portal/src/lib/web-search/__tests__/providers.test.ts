@@ -535,6 +535,36 @@ describe("web search providers", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("propagates a shared run deadline into the active provider request", async () => {
+    const controller = new AbortController();
+    let providerSignal: AbortSignal | undefined;
+    const fetchImpl = vi.fn(
+      async (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          providerSignal = init?.signal;
+          if (init?.signal?.aborted) {
+            reject(init.signal.reason);
+            return;
+          }
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    const pending = executeWebSearch(
+      "q",
+      5,
+      { provider: "bocha", apiKey: "k", maxResults: 5 },
+      fetchImpl as unknown as typeof fetch,
+      { signal: controller.signal },
+    );
+    const reason = new DOMException("run deadline", "TimeoutError");
+    controller.abort(reason);
+
+    await expect(pending).rejects.toBe(reason);
+    expect(providerSignal?.aborted).toBe(true);
+  });
+
   it("clamps max_results above cap to 50", async () => {
     const fetchImpl = vi.fn(async () => new Response(DDG_HTML, { status: 200 }));
     await executeWebSearch("q", 999, { provider: "duckduckgo", apiKey: "", maxResults: 5 }, fetchImpl as unknown as typeof fetch);

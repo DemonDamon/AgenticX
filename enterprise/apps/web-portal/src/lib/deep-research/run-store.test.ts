@@ -220,6 +220,27 @@ describe("memory run store", () => {
     expect(row!.events).toHaveLength(0);
   });
 
+  it("persists the final error after a terminal phase event set the same status", async () => {
+    const store = createMemoryRunStore();
+    await store.create({
+      runId: "r1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "主题",
+    });
+    await store.appendEvents(
+      "r1",
+      [{ type: "phase", phase: "done", message: "已达到时间预算" }],
+      { status: "failed", phase: "done" },
+    );
+    await store.finish("r1", "failed", "active-time deadline exceeded");
+
+    const row = await store.get("t1", "u1", "r1");
+    expect(row?.status).toBe("failed");
+    expect(row?.errorMessage).toBe("active-time deadline exceeded");
+  });
+
   it("runLooksFinished detects delivered final report while status still running", () => {
     expect(
       runLooksFinished({

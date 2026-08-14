@@ -912,7 +912,7 @@ describe("runDeepResearchTurn", () => {
     }
   });
 
-  it("still produces a report when total budget is exhausted after planning", async () => {
+  it("hard-stops when the injected active clock exhausts the total budget", async () => {
     let clock = 0;
     const plan: ResearchPlan = { topic: "T", complexity: "moderate", subQuestions: ["q1", "q2"] };
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -940,10 +940,87 @@ describe("runDeepResearchTurn", () => {
     );
 
     const { text, events, raw } = await readSsePayload(response);
-    expect(events.some((e) => e.type === "phase" && e.phase === "synthesize")).toBe(true);
-    // Budget-exhausted runs still persist a final report artifact; chat shows summary only.
-    expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(true);
+    expect(events.some((e) => e.type === "phase" && e.phase === "synthesize")).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "phase", phase: "done", message: "已达到时间预算" }),
+    );
+    expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(false);
+    expect(text).toContain("时间上限");
     expect(text).not.toContain("budget-report");
+    expect(raw).toContain("[DONE]");
+  });
+
+  it("hard-aborts a hung section when the active-time deadline expires", async () => {
+    const runStore = createMemoryRunStore();
+    const runId = "run-hard-deadline-01";
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    title: "超时测试",
+                    sections: [
+                      {
+                        id: "s1",
+                        title: "核心结论",
+                        brief: "总结",
+                        citation_indexes: [1],
+                        format: "prose",
+                      },
+                    ],
+                  }),
+                },
+              },
+            ],
+          }),
+        } as Response;
+      }
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull() {
+            // Never produce a section chunk; the shared deadline must cancel this read.
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    });
+
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "超时测试" }] },
+      {
+        ...baseDeps({
+          runId,
+          runStore,
+          totalBudgetMs: 80,
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "超时测试",
+            complexity: "simple" as const,
+            subQuestions: ["指标"],
+          }),
+          executeSearch: async () => [
+            { title: "来源", url: "https://example.com/source", snippet: "证据" },
+          ],
+        }),
+      },
+    );
+
+    const { text, events, raw } = await readSsePayload(response);
+    const row = await runStore.get("t1", "u1", runId);
+    expect(row?.status).toBe("failed");
+    expect(row?.errorMessage).toContain("时间上限");
+    expect(text).toContain("时间上限");
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "phase", phase: "done", message: "已达到时间预算" }),
+    );
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: "phase", phase: "done", message: "已取消" }),
+    );
     expect(raw).toContain("[DONE]");
   });
 

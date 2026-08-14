@@ -48,6 +48,12 @@ import { stripThinkBlocks } from "./content-clean";
 import { modelProgressSnapshot } from "./model-progress";
 import { formatEvidencePack } from "./evidence-pack";
 import {
+  GatewayStreamIdleTimeoutError,
+  PausableDeadline,
+  isAbortLike,
+  readStreamWithIdleTimeout,
+} from "./deadline";
+import {
   proposeClarification,
   type ClarifierResult,
   type ClarifyQuestion,
@@ -147,6 +153,17 @@ function envMs(key: string, fallback: number): number {
   const raw = Number(process.env[key]);
   return Number.isFinite(raw) && raw > 0 ? raw : fallback;
 }
+
+/** Max wait for gateway response headers / non-streaming completions. */
+export const GATEWAY_REQUEST_TIMEOUT_MS = envMs(
+  "DEEP_RESEARCH_GATEWAY_REQUEST_TIMEOUT_MS",
+  90_000,
+);
+/** Max silence between two gateway stream frames. */
+export const GATEWAY_STREAM_IDLE_TIMEOUT_MS = envMs(
+  "DEEP_RESEARCH_GATEWAY_STREAM_IDLE_TIMEOUT_MS",
+  90_000,
+);
 
 /** route.ts maxDuration = 1500s；留 300s 给收尾与网络抖动。 */
 export const TOTAL_BUDGET_MS = envMs("DEEP_RESEARCH_TOTAL_BUDGET_MS", 1_200_000);
@@ -264,6 +281,8 @@ export type DeepResearchDeps = {
   awaitClarify?: boolean;
   signal?: AbortSignal;
   now?: () => number;
+  /** Test/deployment override; clarification wait remains excluded from this active budget. */
+  totalBudgetMs?: number;
   /**
    * Optional: mint a fresh access JWT before synthesize (outline + sections).
    * Long retrieve can outlive the 1h cookie captured at request start.
@@ -454,12 +473,27 @@ async function callGatewayStream(
   body: Record<string, unknown>,
 ): Promise<Response> {
   const fetchImpl = deps.fetchImpl ?? fetch;
-  return fetchImpl(deps.url, {
-    method: "POST",
-    headers: deps.headers,
-    body: JSON.stringify(body),
-    signal: deps.signal,
-  });
+  const requestController = new AbortController();
+  const requestTimer = setTimeout(
+    () =>
+      requestController.abort(
+        new DOMException("gateway response headers timed out", "TimeoutError"),
+      ),
+    GATEWAY_REQUEST_TIMEOUT_MS,
+  );
+  const signal = deps.signal
+    ? AbortSignal.any([deps.signal, requestController.signal])
+    : requestController.signal;
+  try {
+    return await fetchImpl(deps.url, {
+      method: "POST",
+      headers: deps.headers,
+      body: JSON.stringify(body),
+      signal,
+    });
+  } finally {
+    clearTimeout(requestTimer);
+  }
 }
 
 async function callGatewayJson(
@@ -467,26 +501,45 @@ async function callGatewayJson(
   body: Record<string, unknown>,
 ): Promise<string> {
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const response = await fetchImpl(deps.url, {
-    method: "POST",
-    headers: deps.headers,
-    body: JSON.stringify({ ...body, stream: false }),
-    signal: deps.signal,
-  });
-  if (!response.ok) {
-    const failure = await readGatewayFailure(response);
-    const policyError = policyErrorFromFailure(failure);
-    if (policyError) throw policyError;
-    return "";
+  const requestController = new AbortController();
+  const requestTimer = setTimeout(
+    () =>
+      requestController.abort(
+        new DOMException("gateway non-streaming request timed out", "TimeoutError"),
+      ),
+    GATEWAY_REQUEST_TIMEOUT_MS,
+  );
+  const signal = deps.signal
+    ? AbortSignal.any([deps.signal, requestController.signal])
+    : requestController.signal;
+  try {
+    const response = await fetchImpl(deps.url, {
+      method: "POST",
+      headers: deps.headers,
+      body: JSON.stringify({ ...body, stream: false }),
+      signal,
+    });
+    if (!response.ok) {
+      const failure = await readGatewayFailure(response);
+      const policyError = policyErrorFromFailure(failure);
+      if (policyError) throw policyError;
+      return "";
+    }
+    const payload = (await response.json()) as {
+      choices?: Array<{ message?: { content?: unknown } }>;
+    };
+    const content = payload.choices?.[0]?.message?.content;
+    return typeof content === "string" ? content : "";
+  } finally {
+    clearTimeout(requestTimer);
   }
-  const payload = (await response.json()) as {
-    choices?: Array<{ message?: { content?: unknown } }>;
-  };
-  const content = payload.choices?.[0]?.message?.content;
-  return typeof content === "string" ? content : "";
 }
 
-async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<Response> {
+async function pipeWithPrefix(
+  upstream: Response,
+  prefixText: string,
+  signal?: AbortSignal,
+): Promise<Response> {
   if (!upstream.ok || !upstream.body) {
     const errText = await upstream.text().catch(() => "gateway error");
     return new Response(errText, {
@@ -500,7 +553,11 @@ async function pipeWithPrefix(upstream: Response, prefixText: string): Promise<R
       controller.enqueue(encoder.encode(sseDelta(prefixText)));
       const reader = upstream.body!.getReader();
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readStreamWithIdleTimeout(
+          reader,
+          GATEWAY_STREAM_IDLE_TIMEOUT_MS,
+          signal,
+        );
         if (done) break;
         if (value) controller.enqueue(value);
       }
@@ -634,13 +691,6 @@ export async function runDeepResearchTurn(
     deps.resolvedUserQuery?.trim() ||
     extractLastUserQuery(originalMessages);
   const now = deps.now ?? Date.now;
-  const startedAt = now();
-  // Clarify wait can last up to CLARIFY_TIMEOUT_MS (5m) and must NOT burn the
-  // research budget — otherwise a slow answer collapses planning to 1 lane.
-  let budgetPausedMs = 0;
-  const budgetLeft = () => TOTAL_BUDGET_MS - (now() - startedAt - budgetPausedMs);
-  /** Retrieval-side budget: keeps WRITE_RESERVE_MIN_MS untouched for section writing. */
-  const searchBudgetLeft = () => budgetLeft() - WRITE_RESERVE_MIN_MS;
   const runId = deps.runId ?? ulid().toLowerCase();
   const tenantId = deps.tenantId ?? "tenant";
   const userId = deps.userId ?? "user";
@@ -662,7 +712,7 @@ export async function runDeepResearchTurn(
       stream: true,
       messages: originalMessages,
     });
-    return pipeWithPrefix(upstream, DEEP_RESEARCH_DISABLED_HINT);
+    return pipeWithPrefix(upstream, DEEP_RESEARCH_DISABLED_HINT, deps.signal);
   }
 
   if (!searchCfg.enabled) {
@@ -671,7 +721,7 @@ export async function runDeepResearchTurn(
       stream: true,
       messages: originalMessages,
     });
-    return pipeWithPrefix(upstream, DEEP_RESEARCH_SEARCH_DISABLED_HINT);
+    return pipeWithPrefix(upstream, DEEP_RESEARCH_SEARCH_DISABLED_HINT, deps.signal);
   }
 
   const encoder = new TextEncoder();
@@ -687,8 +737,11 @@ export async function runDeepResearchTurn(
     async start(controller) {
       // Transport signal only stops SSE writes; run signal drives search/fetch/gateway.
       const transportSignal = deps.signal;
-      const runController = new AbortController();
-      const runSignal = runController.signal;
+      const deadline = new PausableDeadline(deps.totalBudgetMs ?? TOTAL_BUDGET_MS, now);
+      const runSignal = deadline.signal;
+      const budgetLeft = () => deadline.remainingMs();
+      /** Retrieval-side budget: keeps WRITE_RESERVE_MIN_MS untouched for section writing. */
+      const searchBudgetLeft = () => budgetLeft() - WRITE_RESERVE_MIN_MS;
       const toolDeps: DeepResearchDeps = { ...deps, signal: runSignal };
       let transportClosed = Boolean(transportSignal?.aborted);
       transportSignal?.addEventListener(
@@ -1003,9 +1056,13 @@ export async function runDeepResearchTurn(
           enqueueFlush();
 
           if (awaitClarify) {
-            const waitStarted = now();
-            clarifyResume = await waitForClarifyResume(runId, clarifyTimeoutMs);
-            budgetPausedMs += Math.max(0, now() - waitStarted);
+            // User think-time is explicitly outside the active research budget.
+            deadline.pause();
+            try {
+              clarifyResume = await waitForClarifyResume(runId, clarifyTimeoutMs);
+            } finally {
+              deadline.resume();
+            }
             await runStore.appendEvents(runId, [], { status: "running" });
             if (clarifyResume.timedOut) {
               enqueueEvent({ type: "clarify_timeout", runId });
@@ -1312,6 +1369,7 @@ export async function runDeepResearchTurn(
                       searchCfg,
                       deps.fetchImpl,
                       {
+                        signal: runSignal,
                         onProviderAttempt: ({ providerId }) => {
                           if (providerIds.length < 2 && !providerIds.includes(providerId)) {
                             providerIds.push(providerId);
@@ -1885,7 +1943,11 @@ export async function runDeepResearchTurn(
               }
               throw new DOMException("Aborted", "AbortError");
             }
-            const { done, value } = await reader.read();
+            const { done, value } = await readStreamWithIdleTimeout(
+              reader,
+              GATEWAY_STREAM_IDLE_TIMEOUT_MS,
+              runSignal,
+            );
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
             let idx = buffer.indexOf("\n\n");
@@ -2224,7 +2286,43 @@ export async function runDeepResearchTurn(
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
         safeClose();
       } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
+        if (deadline.expired) {
+          const timeoutMessage = "深度研究已达到本次运行的时间上限，任务已自动停止。";
+          enqueueDelta(`\n\n> ${timeoutMessage}`);
+          enqueueEvent(
+            { type: "phase", phase: "done", message: "已达到时间预算" },
+            { status: "failed", phase: "done" },
+          );
+          await persistFinish("failed", timeoutMessage);
+          safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
+          safeClose();
+          return;
+        }
+        if (error instanceof GatewayStreamIdleTimeoutError) {
+          const timeoutMessage = "模型流式响应长时间没有新内容，深度研究已自动停止。";
+          enqueueDelta(`\n\n> ${timeoutMessage}`);
+          enqueueEvent(
+            { type: "phase", phase: "done", message: "模型响应超时" },
+            { status: "failed", phase: "done" },
+          );
+          await persistFinish("failed", timeoutMessage);
+          safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
+          safeClose();
+          return;
+        }
+        if (error instanceof DOMException && error.name === "TimeoutError") {
+          const timeoutMessage = "模型请求超过单次等待上限，深度研究已自动停止。";
+          enqueueDelta(`\n\n> ${timeoutMessage}`);
+          enqueueEvent(
+            { type: "phase", phase: "done", message: "模型请求超时" },
+            { status: "failed", phase: "done" },
+          );
+          await persistFinish("failed", timeoutMessage);
+          safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
+          safeClose();
+          return;
+        }
+        if (isAbortLike(error)) {
           enqueueEvent(
             { type: "phase", phase: "done", message: "已取消" },
             { status: "cancelled", phase: "done" },
@@ -2279,6 +2377,7 @@ export async function runDeepResearchTurn(
         safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
         safeClose();
       } finally {
+        deadline.dispose();
         clearInterval(heartbeat);
       }
     },
