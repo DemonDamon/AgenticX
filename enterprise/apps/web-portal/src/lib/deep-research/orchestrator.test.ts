@@ -245,8 +245,10 @@ describe("runDeepResearchTurn", () => {
     const pageFetchUrls = fetchPagesFn.mock.calls.flatMap((call) => call[0]);
     expect(pageFetchUrls.length).toBeGreaterThan(0);
     expect(new Set(pageFetchUrls)).toEqual(new Set(["https://example.com/context"]));
-    expect(JSON.stringify(gatewayBodies)).toContain("Table 8: R&D coding benchmark");
-    expect(JSON.stringify(gatewayBodies)).toContain("Pass Rate Internal Engineers 80 percent");
+    // The single direct read is reused by every lane, but each lane prompt now
+    // carries only the passages its own question ranks highest.
+    expect(JSON.stringify(gatewayBodies)).toContain("Paper title and abstract");
+    expect(JSON.stringify(gatewayBodies)).toContain("Method section");
   });
 
   it("keeps a unique historical paper identity in recon and planning for a follow-up", async () => {

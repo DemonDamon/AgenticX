@@ -443,6 +443,124 @@ export async function buildReportOutline(deps: OutlineDeps): Promise<ReportOutli
   }
 }
 
+/** Per-section continuity memory; nine of these must still fit one prompt. */
+export const MAX_SECTION_CONTINUITY_CHARS = 420;
+export const MAX_REPORT_CONTINUITY_CHARS = 4_000;
+const MAX_CONTINUITY_CLAIMS = 3;
+
+const CONTINUITY_FENCE_RE = /^\s*(?:```|~~~)/u;
+const CONTINUITY_HEADING_RE = /^\s{0,3}#{1,6}\s/u;
+const CONTINUITY_TABLE_DIVIDER_RE = /^\s*\|?[\s:|-]*-{3,}[\s:|-]*\|?\s*$/u;
+/** Fresh instance per scan: a shared global regex carries lastIndex across calls. */
+const continuityCitationRe = () => /\[(\d{1,3})\]/gu;
+const HAS_CONTINUITY_CITATION_RE = /\[\d{1,3}\]/u;
+const CONTINUITY_SENTENCE_RE = /(?<=[。！？；!?;])\s*/u;
+
+/** Drop code, headings and table rules; keep readable statements in order. */
+function continuityStatements(body: string): string[] {
+  const statements: string[] = [];
+  let inFence = false;
+  for (const line of body.split("\n")) {
+    if (CONTINUITY_FENCE_RE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (CONTINUITY_HEADING_RE.test(line)) continue;
+    if (CONTINUITY_TABLE_DIVIDER_RE.test(line)) continue;
+    const text = line.replace(/^\s*(?:[-*+]|\d{1,3}[.)]|>)\s*/u, "").trim();
+    if (!text) continue;
+    for (const piece of text.split(CONTINUITY_SENTENCE_RE)) {
+      const statement = piece.trim();
+      // Short enough to be a fragment ("是的。", "见下表") carries no conclusion.
+      if (statement.length >= 4) statements.push(statement);
+    }
+  }
+  return statements;
+}
+
+/** Evenly spaced picks so the end of a long section is never dropped. */
+function spreadPick<T>(items: readonly T[], count: number): T[] {
+  if (items.length <= count) return [...items];
+  const picked: T[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const at = Math.round((i * (items.length - 1)) / (count - 1));
+    const item = items[at];
+    if (item !== undefined && !picked.includes(item)) picked.push(item);
+  }
+  return picked;
+}
+
+/**
+ * Deterministic cross-section memory.
+ *
+ * A flat `slice(0, 200)` of the section body kept only its opening paragraph, so
+ * the conclusion of a 2,000-character chapter never reached the next section and
+ * later chapters happily re-derived or contradicted it. This keeps the cited
+ * conclusions instead, and never costs a model call.
+ */
+export function buildSectionContinuitySummary(title: string, body: string): string {
+  const statements = continuityStatements(body);
+  if (statements.length === 0) return "";
+
+  const cited = statements.filter((statement) =>
+    HAS_CONTINUITY_CITATION_RE.test(statement),
+  );
+  const chosen =
+    cited.length > 0
+      ? spreadPick(cited, MAX_CONTINUITY_CLAIMS)
+      : spreadPick(
+          statements.length > 1 ? [statements[0]!, statements[statements.length - 1]!] : statements,
+          2,
+        );
+
+  const usedCitations: string[] = [];
+  for (const statement of chosen) {
+    for (const match of statement.matchAll(continuityCitationRe())) {
+      const marker = `[${match[1]}]`;
+      if (!usedCitations.includes(marker)) usedCitations.push(marker);
+    }
+  }
+
+  const header = `【${title.trim() || "本节"}】`;
+  const lines = [header, "关键结论："];
+  let used = lines.join("\n").length;
+  for (const statement of chosen) {
+    const line = `- ${statement}`;
+    if (used + line.length + 1 > MAX_SECTION_CONTINUITY_CHARS) break;
+    lines.push(line);
+    used += line.length + 1;
+  }
+  if (lines.length === 2) {
+    // Nothing fit under the cap: keep a truncated first statement over nothing.
+    lines.push(`- ${chosen[0]!.slice(0, Math.max(0, MAX_SECTION_CONTINUITY_CHARS - used - 3))}`);
+    used = lines.join("\n").length;
+  }
+  if (usedCitations.length > 0) {
+    const sourcesLine = `已用来源：${usedCitations.join("")}`;
+    if (used + sourcesLine.length + 1 <= MAX_SECTION_CONTINUITY_CHARS) {
+      lines.push(sourcesLine);
+    }
+  }
+  return lines.join("\n").slice(0, MAX_SECTION_CONTINUITY_CHARS);
+}
+
+/** Newest-first trim so the immediately preceding section always survives. */
+export function boundReportContinuity(
+  summaries: readonly string[],
+  maxChars = MAX_REPORT_CONTINUITY_CHARS,
+): string[] {
+  const kept: string[] = [];
+  let used = 0;
+  for (let i = summaries.length - 1; i >= 0; i -= 1) {
+    const summary = summaries[i]!;
+    if (used + summary.length + 1 > maxChars) break;
+    kept.unshift(summary);
+    used += summary.length + 1;
+  }
+  return kept;
+}
+
 export function buildSectionMessages(args: {
   outline: ReportOutline;
   section: ReportSection;
@@ -451,9 +569,10 @@ export function buildSectionMessages(args: {
   previousSummaries: string[];
   contentPolicy?: ReportContentPolicy;
 }): Array<{ role: string; content: string }> {
+  const bounded = boundReportContinuity(args.previousSummaries);
   const prev =
-    args.previousSummaries.length > 0
-      ? `前文已写内容摘要：\n${args.previousSummaries.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
+    bounded.length > 0
+      ? `前文已写内容摘要：\n${bounded.map((s, i) => `${i + 1}. ${s}`).join("\n")}`
       : "前文已写内容摘要：（无）";
   const citeHint =
     args.section.citationIndexes.length > 0

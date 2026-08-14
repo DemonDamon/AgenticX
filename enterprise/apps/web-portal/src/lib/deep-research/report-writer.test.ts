@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_REPORT_CONTINUITY_CHARS,
+  MAX_SECTION_CONTINUITY_CHARS,
   MIN_SECTIONS,
   MAX_SECTIONS,
   SECTION_TARGET_CHARS,
   applyReportContentPolicy,
+  boundReportContinuity,
+  buildSectionContinuitySummary,
   buildReportOutline,
   buildSectionFormatRepairMessages,
   buildSectionMessages,
@@ -517,5 +521,102 @@ describe("linkifyCitations", () => {
     expect(linkifyCitations(md, new Set([1, 2]))).toBe(
       "正文 [1](#ref-1)\n\n```\ncode [1]\n```\n\n后 [2](#ref-2)",
     );
+  });
+});
+
+describe("buildSectionContinuitySummary", () => {
+  it("carries the conclusion at the end of a long section into the next prompt", () => {
+    const body = [
+      "## 背景",
+      "本节先铺垫行业背景。".repeat(60),
+      "",
+      "中段展开了三条论证路径。".repeat(60),
+      "",
+      "最终结论：迁移成本在 12 个月内可以收回 [7]。",
+    ].join("\n");
+
+    const summary = buildSectionContinuitySummary("成本回收", body);
+
+    expect(summary).toContain("【成本回收】");
+    expect(summary).toContain("12 个月内可以收回");
+    expect(summary).toContain("[7]");
+    expect(summary.length).toBeLessThanOrEqual(MAX_SECTION_CONTINUITY_CHARS);
+  });
+
+  it("prefers cited statements and lists the citations it used", () => {
+    const body = [
+      "这是一句没有引用的过渡句。",
+      "训练成本下降 40% [1]。",
+      "推理延迟下降 25% [4]。",
+    ].join("\n");
+
+    const summary = buildSectionContinuitySummary("关键数据", body);
+
+    expect(summary).toContain("关键结论：");
+    expect(summary).toContain("训练成本下降 40% [1]。");
+    expect(summary).toContain("推理延迟下降 25% [4]。");
+    expect(summary).toContain("已用来源：[1][4]");
+    expect(summary).not.toContain("过渡句");
+  });
+
+  it("strips code fences, headings and table rules", () => {
+    const body = [
+      "### 小标题",
+      "```bash",
+      "npm run build [1]",
+      "```",
+      "| A | B |",
+      "| --- | --- |",
+      "| 吞吐 | 提升 30% [2] |",
+    ].join("\n");
+
+    const summary = buildSectionContinuitySummary("结构", body);
+
+    expect(summary).not.toContain("小标题");
+    expect(summary).not.toContain("npm run build");
+    expect(summary).not.toContain("---");
+    expect(summary).toContain("提升 30% [2]");
+  });
+
+  it("falls back to the first and last statements when nothing is cited", () => {
+    const body = ["开篇陈述内容。", "中间陈述内容。", "收尾陈述内容。"].join("\n");
+    const summary = buildSectionContinuitySummary("无引用", body);
+
+    expect(summary).toContain("开篇陈述内容。");
+    expect(summary).toContain("收尾陈述内容。");
+  });
+
+  it("returns nothing for an empty section", () => {
+    expect(buildSectionContinuitySummary("空", "")).toBe("");
+    expect(buildSectionContinuitySummary("空", "\n\n   \n")).toBe("");
+  });
+});
+
+describe("boundReportContinuity", () => {
+  it("keeps nine sections of memory under the whole-report cap", () => {
+    const summaries = Array.from({ length: 9 }, (_, i) =>
+      buildSectionContinuitySummary(
+        `第 ${i + 1} 节`,
+        Array.from({ length: 20 }, (_, j) => `第 ${i}-${j} 条关键结论数据 [${j + 1}]。`).join("\n"),
+      ),
+    );
+
+    const bounded = boundReportContinuity(summaries);
+    const total = bounded.reduce((sum, entry) => sum + entry.length + 1, 0);
+
+    expect(total).toBeLessThanOrEqual(MAX_REPORT_CONTINUITY_CHARS);
+    // The section immediately before the current one must always survive.
+    expect(bounded[bounded.length - 1]).toBe(summaries[summaries.length - 1]);
+  });
+
+  it("drops the oldest sections first when the cap is tight", () => {
+    const summaries = ["A".repeat(400), "B".repeat(400), "C".repeat(400)];
+    expect(boundReportContinuity(summaries, 900)).toEqual([summaries[1], summaries[2]]);
+  });
+
+  it("never re-injects a whole section body", () => {
+    const body = "这是一段很长的章节正文。".repeat(200);
+    const summary = buildSectionContinuitySummary("长节", body);
+    expect(summary.length).toBeLessThan(body.length / 10);
   });
 });

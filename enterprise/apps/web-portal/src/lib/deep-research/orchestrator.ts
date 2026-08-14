@@ -52,7 +52,11 @@ import { CitationRegistry, type Citation } from "./registry";
 import { formatDeepResearchEventSse } from "./events";
 import { stripThinkBlocks } from "./content-clean";
 import { modelProgressSnapshot } from "./model-progress";
-import { formatEvidencePack } from "./evidence-pack";
+import {
+  formatEvidencePack,
+  formatLaneEvidencePack,
+  UNTRUSTED_EVIDENCE_SYSTEM_HINT,
+} from "./evidence-pack";
 import {
   DeepResearchBudgetLedger,
   isDeepResearchBudgetExceeded,
@@ -99,6 +103,7 @@ import {
 } from "./run-store";
 import {
   buildReportOutline,
+  buildSectionContinuitySummary,
   buildSectionFormatRepairMessages,
   buildSectionMessages,
   deriveReportContentPolicy,
@@ -1709,20 +1714,20 @@ export async function runDeepResearchTurn(
 
             let memo = "";
             if (questionCitations.length > 0 && searchBudgetLeft() > 0) {
-              const evidenceBits = questionCitations
-                .map((c) => {
-                  const body = c.fullText ? c.fullText.slice(0, 2_000) : c.snippet;
-                  return `[${c.index}] ${c.title}\n${body}`;
-                })
-                .join("\n\n");
+              // Bounded, deduplicated and question-relevant: a lane holding a
+              // dozen long pages must not push the memo call past its context.
+              const laneMemoEvidence = formatLaneEvidencePack(question, questionCitations, {
+                ...(typeof baseBody.model === "string" ? { model: baseBody.model } : {}),
+              });
               memo = stripThinkBlocks(
                 await callGatewayJson(toolDeps, {
                   ...baseBody,
                   messages: [
                     { role: "system", content: LANE_SUMMARY_SYSTEM },
+                    { role: "system", content: UNTRUSTED_EVIDENCE_SYSTEM_HINT },
                     {
                       role: "user",
-                      content: `子问题：${question}\n\n摘录：\n${evidenceBits}`,
+                      content: `子问题：${question}\n\n${laneMemoEvidence}`,
                     },
                   ],
                 }),
@@ -2249,7 +2254,8 @@ export async function runDeepResearchTurn(
             reportContentParts.push(sectionBody);
           }
           if (sectionBody.trim()) {
-            previousSummaries.push(sectionBody.trim().slice(0, 200));
+            const continuity = buildSectionContinuitySummary(section.title, sectionBody);
+            if (continuity) previousSummaries.push(continuity);
           }
         }
         if (!truncated) {
