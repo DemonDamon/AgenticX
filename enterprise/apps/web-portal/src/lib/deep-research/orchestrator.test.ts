@@ -15,6 +15,7 @@ import {
   matchSelectedOptions,
   resolveLaneAdoptCap,
   resolveResultsPerLane,
+  selectNovelResearchGaps,
   runDeepResearchTurn,
 } from "./orchestrator";
 import { createMemoryArtifactStore } from "./artifact-store";
@@ -1710,6 +1711,26 @@ describe("formatEvidencePack / formatSourcesAppendix", () => {
 });
 
 describe("P1 multi-variant + reflect", () => {
+  it("does not revisit the same normalized evidence gap with different queries", () => {
+    const state = {
+      seenGapKeys: new Set<string>(),
+      seenQueryKeys: new Set<string>(),
+      remainingQueries: 6,
+    };
+    const first = selectNovelResearchGaps(
+      [{ id: "g1", description: "缺少 原始评测", queries: ["query-a"] }],
+      state,
+    );
+    const repeated = selectNovelResearchGaps(
+      [{ id: "g2", description: "缺少   原始评测", queries: ["query-b"] }],
+      state,
+    );
+
+    expect(first).toHaveLength(1);
+    expect(repeated).toEqual([]);
+    expect(state.seenGapKeys.size).toBe(1);
+  });
+
   it("runs one search call per expanded variant", async () => {
     const calls: string[] = [];
     const response = await runDeepResearchTurn(

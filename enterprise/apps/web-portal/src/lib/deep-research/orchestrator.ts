@@ -414,6 +414,7 @@ export function selectNovelResearchGaps(
   for (const gap of gaps.slice(0, MAX_GAPS_PER_ROUND)) {
     const gapKey = normalizeRefinementKey(gap.description);
     if (!gapKey) continue;
+    if (state.seenGapKeys.has(gapKey)) continue;
     const roundQueryKeys = new Set<string>();
     const queries = gap.queries.filter((query) => {
       const key = normalizeRefinementKey(query);
