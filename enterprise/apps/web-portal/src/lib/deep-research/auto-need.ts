@@ -22,6 +22,7 @@ import { parseLlmJson } from "./llm-json";
 import {
   parseResearchComplexity,
   RESEARCH_COMPLEXITY_GUIDANCE,
+  type ResearchComplexity,
 } from "./research-intent";
 
 export type ResearchMessage = WebSearchChatMessage;
@@ -76,8 +77,6 @@ export type DeepResearchAutoPromptMessage = {
 
 const CLASSIFIER_TIMEOUT_MS = 8000;
 export const MIN_AUTO_DEEP_RESEARCH_CONFIDENCE = 0.8;
-/** Strong request structure may rescue only a borderline route score above this floor. */
-export const MIN_RULE_ASSISTED_ROUTE_CONFIDENCE = 0.5;
 const MIN_SEMANTIC_ASSISTED_ROUTE_CONFIDENCE = 0.7;
 export const MIN_AUTO_PLAIN_CONFIDENCE = 0.7;
 export const MIN_DEEP_RESEARCH_QUERY_CONFIDENCE = 0.7;
@@ -90,18 +89,7 @@ const DEEP_RESEARCH_CONTEXT_BUDGET = {
   preserveTail: true,
 } as const;
 
-export type DeepResearchShapeVerdict = "strong" | "neutral" | "reject";
-
-const EXPLICIT_RESEARCH_RE =
-  /深度研究|深入调研|系统调研|全面调研|专项调研|研究报告|尽职调查|deep research|in-depth research|due diligence/iu;
-const MULTI_SOURCE_RE =
-  /多(?:个|方|源)?来源|交叉核验|相互印证|证据链|引用来源|参考文献|文献综述|原始资料|multi[- ]source|cross[- ]check|triangulat|citation|bibliograph/iu;
-const COMPARATIVE_RE =
-  /比较|对比|差异|优劣|利弊|取舍|竞争格局|横向评测|基准测试|失败模式|风险评估|成本分析|方案评估|versus|\bvs\.?\b|compar(?:e|ison|ative)|benchmark|trade[- ]?off|failure mode|risk assessment/iu;
-const MULTI_DIMENSION_RE =
-  /(?:现状|趋势|原因|影响|风险|成本|方法|证据|结论|建议|局限|案例).{0,20}(?:现状|趋势|原因|影响|风险|成本|方法|证据|结论|建议|局限|案例)|多个维度|系统性|全景|产业链|时间线|multi[- ]dimensional|landscape|timeline/iu;
-const RESEARCH_DELIVERABLE_RE =
-  /(?:输出|形成|撰写|给出|生成).{0,16}(?:研究报告|评估报告|调研报告|证据报告|分析报告|章节|表格|路线图)|不少于\s*\d+\s*字|附(?:上)?引用|标注来源|executive summary|research report|assessment report|with citations/iu;
+export type DeepResearchShapeVerdict = "neutral" | "reject";
 
 const SIMPLE_LOOKUP_RE =
   /^(?:请|麻烦|帮我|能否|可以|你能)?\s*(?:告诉我|查一下|搜一下|解释一下)?\s*(?:什么是|谁是|哪一年|何时|什么时候|几点|多少度|今天天气|明天天气|汇率是多少|价格是多少|现在多少钱|what is|who is|when is|what time|weather|how much)/iu;
@@ -180,58 +168,31 @@ function collapseWhitespace(text: string): string {
 }
 
 /**
- * Calibrate an uncalibrated model score with request structure, not keywords.
- * A single word such as “研究” or “报告” is never sufficient: strong requires
- * at least two independent signals. Obvious lightweight tasks veto an expensive
- * lane even when a small model reports an overconfident score.
+ * Deterministic fallback for obvious lightweight tasks. Positive deep-routing
+ * recall belongs to the model's shared ResearchComplexity contract; these
+ * patterns never promote a request into an expensive lane.
  */
-export function assessDeepResearchShape(query: string): DeepResearchShapeVerdict {
+export function assessDeepResearchShape(
+  query: string,
+  complexity: ResearchComplexity | null = null,
+): DeepResearchShapeVerdict {
   const text = collapseWhitespace(query);
   if (!text) return "reject";
 
-  const hasMultiSource = MULTI_SOURCE_RE.test(text);
-  const hasComparison = COMPARATIVE_RE.test(text);
-  const hasDimensions = MULTI_DIMENSION_RE.test(text);
-  const hasExplicitResearch = EXPLICIT_RESEARCH_RE.test(text);
-  const hasDeliverable = RESEARCH_DELIVERABLE_RE.test(text);
-  const substantiveSignals = [
-    hasMultiSource,
-    hasComparison,
-    hasDimensions,
-    hasExplicitResearch,
-    hasDeliverable,
-  ].filter(Boolean).length;
+  // The semantic classifier may override lexical ambiguity such as “translation
+  // research” or a multi-dimensional weather study. Missing/legacy complexity
+  // stays conservative and uses the lightweight fallback below.
+  if (complexity === "moderate" || complexity === "complex") return "neutral";
 
-  // “什么是深度研究报告” contains research nouns but is still a simple
-  // concept lookup. Only actual evidence/comparison/dimensional structure may
-  // override this lightweight shape.
-  if (
-    SIMPLE_LOOKUP_RE.test(text) &&
-    !hasMultiSource &&
-    !hasComparison &&
-    !hasDimensions
-  ) {
-    return "reject";
-  }
-  if (UTILITY_TASK_RE.test(text) && substantiveSignals < 2) return "reject";
-  if (
-    SIMPLE_FACT_TOPIC_RE.test(text) &&
-    !hasMultiSource &&
-    !hasComparison &&
-    !hasDimensions
-  ) {
-    return "reject";
-  }
+  if (SIMPLE_LOOKUP_RE.test(text)) return "reject";
+  if (UTILITY_TASK_RE.test(text)) return "reject";
+  if (SIMPLE_FACT_TOPIC_RE.test(text)) return "reject";
   if (
     DIRECT_PAGE_RE.test(text) &&
-    SINGLE_PAGE_TASK_RE.test(text) &&
-    !hasMultiSource &&
-    !hasComparison &&
-    !hasDimensions
+    SINGLE_PAGE_TASK_RE.test(text)
   ) {
     return "reject";
   }
-  if (substantiveSignals >= 2) return "strong";
   return "neutral";
 }
 
@@ -339,7 +300,7 @@ export function parseAutoTurnPlan(
   );
 
   const shapeVerdict = calibrationPayload
-    ? assessDeepResearchShape(calibrationPayload.current_query)
+    ? assessDeepResearchShape(calibrationPayload.current_query, complexity)
     : "neutral";
   if (shapeVerdict === "reject") {
     console.info("[deep-research] automatic deep route vetoed by request shape");
@@ -354,15 +315,11 @@ export function parseAutoTurnPlan(
   let effectiveQueryConfidence = queryConfidence;
 
   if (!modelAccepted) {
-    const deterministicAssist =
-      calibrationPayload !== undefined &&
-      shapeVerdict === "strong" &&
-      routeConfidence >= MIN_RULE_ASSISTED_ROUTE_CONFIDENCE;
     const semanticAssist =
       calibrationPayload !== undefined &&
       (complexity === "moderate" || complexity === "complex") &&
       routeConfidence >= MIN_SEMANTIC_ASSISTED_ROUTE_CONFIDENCE;
-    if (!deterministicAssist && !semanticAssist) {
+    if (!semanticAssist) {
       return { kind: "fallback", reason: "low_deep_confidence" };
     }
 

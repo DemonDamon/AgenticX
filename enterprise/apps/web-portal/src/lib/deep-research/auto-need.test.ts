@@ -4,7 +4,6 @@ import {
   buildAutoTurnPlanMessages,
   MAX_DEEP_RESEARCH_QUERY_CHARS,
   MIN_AUTO_DEEP_RESEARCH_CONFIDENCE,
-  MIN_RULE_ASSISTED_ROUTE_CONFIDENCE,
   parseAutoTurnPlan,
   parseDeepResearchQueryResolution,
   planAutomaticTurn,
@@ -21,18 +20,21 @@ function gatewayJson(content: string, status = 200): Response {
 }
 
 describe("automatic turn routing", () => {
-  it("uses independent structural signals for deterministic calibration", () => {
+  it("uses deterministic request shape only as a lightweight fallback", () => {
     expect(
       assessDeepResearchShape(
         "系统比较 A 与 B，交叉核验多个来源，并输出带引用的证据报告",
       ),
-    ).toBe("strong");
+    ).toBe("neutral");
     expect(assessDeepResearchShape("研究一下天气")).toBe("reject");
     expect(assessDeepResearchShape("什么是深度研究报告？")).toBe("reject");
     expect(
       assessDeepResearchShape("请总结 https://example.com/paper 这篇文章"),
     ).toBe("reject");
     expect(assessDeepResearchShape("把这段话翻译成英文")).toBe("reject");
+    expect(
+      assessDeepResearchShape("深入研究机器翻译的架构与成本", "complex"),
+    ).toBe("neutral");
   });
 
   it("sends recent conversation context and current query to the routing agent", () => {
@@ -468,7 +470,7 @@ describe("automatic turn routing", () => {
     );
   });
 
-  it("rescues a strong first-turn request at the route-confidence floor", async () => {
+  it("does not promote a legacy low-confidence response from keywords alone", async () => {
     const currentQuery =
       "系统比较 A 与 B，交叉核验多个来源，并输出带引用的证据报告";
     const outcome = await planAutomaticTurn(
@@ -481,8 +483,8 @@ describe("automatic turn routing", () => {
             JSON.stringify({
               mode: "deep",
               research_query: "",
-              route_confidence: MIN_RULE_ASSISTED_ROUTE_CONFIDENCE,
-              query_confidence: 0.5,
+              route_confidence: 0.79,
+              query_confidence: 0.9,
               reason: "可能需要多源核验",
             }),
           )) as unknown as typeof fetch,
@@ -490,16 +492,9 @@ describe("automatic turn routing", () => {
       AUTO_OPTIONS,
     );
 
-    expect(outcome).toMatchObject({
-      kind: "planned",
-      plan: {
-        mode: "deep",
-        researchQuery: currentQuery,
-        intentConfidence: {
-          routeConfidence: MIN_RULE_ASSISTED_ROUTE_CONFIDENCE,
-          queryConfidence: 1,
-        },
-      },
+    expect(outcome).toEqual({
+      kind: "fallback",
+      reason: "low_deep_confidence",
     });
   });
 
