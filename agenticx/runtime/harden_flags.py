@@ -98,3 +98,8 @@ def persist_fail_closed_enabled() -> bool:
 def fresh_round_loop_enabled() -> bool:
     """``AGX_FRESH_ROUND_LOOP`` / ``runtime.fresh_round_loop``. Default False."""
     return _resolve_bool("AGX_FRESH_ROUND_LOOP", "runtime.fresh_round_loop", False)
+
+
+def group_meta_direct_tools_enabled() -> bool:
+    """``AGX_GROUP_META_DIRECT_TOOLS`` / ``group.meta_direct_tools``. Default False."""
+    return _resolve_bool("AGX_GROUP_META_DIRECT_TOOLS", "group.meta_direct_tools", False)

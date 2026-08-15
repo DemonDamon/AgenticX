@@ -560,6 +560,8 @@ type Props = {
   groupId?: string | null;
   avatarList?: Avatar[];
   metaLeaderLabel?: string;
+  /** Agent ids currently typing or showing a live activity hint. */
+  groupActiveAgentIds?: string[];
 };
 
 function uid(): string {
@@ -685,6 +687,7 @@ export function WorkPanel({
   groupId = null,
   avatarList = [],
   metaLeaderLabel = "Machi",
+  groupActiveAgentIds = [],
 }: Props) {
   const isGroupPane = Boolean(groupId);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
@@ -1949,6 +1952,8 @@ export function WorkPanel({
                   groupId={groupId}
                   avatarList={avatarList}
                   metaLeaderLabel={metaLeaderLabel}
+                  messages={paneMessages}
+                  activeAgentIds={groupActiveAgentIds}
                 />
               </Section>
             ) : null}

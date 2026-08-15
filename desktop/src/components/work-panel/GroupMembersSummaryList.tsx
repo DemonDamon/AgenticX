@@ -1,5 +1,10 @@
 import { useMemo, useState } from "react";
-import { useAppStore, type Avatar } from "../../store";
+import { useAppStore, type Avatar, type Message } from "../../store";
+import {
+  groupMemberActivityTitle,
+  resolveGroupMemberActivity,
+  type GroupMemberActivity,
+} from "../../utils/group-member-activity";
 
 const MEMBER_PALETTE = [
   "bg-cyan-600",
@@ -30,14 +35,24 @@ const NAME_CLASS = "text-[10px]";
  * Inline group members strip for task-summary Section「成员」.
  * Add / remove stay in-panel (no separate WorkPanel tab).
  */
+function activityDotClass(state: GroupMemberActivity["state"]): string {
+  if (state === "running") return "bg-[var(--status-warning)]";
+  if (state === "replied") return "bg-[var(--status-success)]";
+  return "border border-current bg-transparent text-text-faint";
+}
+
 export function GroupMembersSummaryList({
   groupId,
   avatarList,
   metaLeaderLabel,
+  messages = [],
+  activeAgentIds = [],
 }: {
   groupId: string;
   avatarList: Avatar[];
   metaLeaderLabel: string;
+  messages?: Array<Pick<Message, "role" | "agentId" | "toolName" | "timestamp">>;
+  activeAgentIds?: string[];
 }) {
   const groups = useAppStore((s) => s.groups);
   const setGroups = useAppStore((s) => s.setGroups);
@@ -65,6 +80,18 @@ export function GroupMembersSummaryList({
       return a.name.toLowerCase().includes(q) || a.role.toLowerCase().includes(q);
     });
   }, [mode, group, avatarList, dialogSearch]);
+
+  const activityById = useMemo(
+    () => resolveGroupMemberActivity(messages, group?.avatarIds ?? [], activeAgentIds),
+    [messages, group?.avatarIds, activeAgentIds],
+  );
+  const executedCount = useMemo(() => {
+    let n = 0;
+    for (const item of activityById.values()) {
+      if (item.state !== "idle") n += 1;
+    }
+    return n;
+  }, [activityById]);
 
   if (!group) {
     return <p className="text-xs text-text-faint">未找到该群配置，可在侧栏刷新群列表后重试。</p>;
@@ -115,6 +142,9 @@ export function GroupMembersSummaryList({
 
   return (
     <div className="space-y-2">
+      <p className="text-[11px] text-text-faint">
+        本会话已执行 {executedCount}/{group.avatarIds.length}
+      </p>
       {errorText ? <p className="text-[10px] text-rose-300">{errorText}</p> : null}
       {mode === "remove" ? (
         <div className="flex items-center justify-between">
@@ -148,6 +178,8 @@ export function GroupMembersSummaryList({
         {group.avatarIds.map((id) => {
           const a = avatarById.get(id);
           const label = a?.name ?? id.slice(0, 6);
+          const activity = activityById.get(id);
+          const statusTitle = activity ? groupMemberActivityTitle(activity) : "未执行";
           return (
             <button
               key={id}
@@ -160,24 +192,31 @@ export function GroupMembersSummaryList({
                 mode === "remove" ? "cursor-pointer hover:opacity-90" : "cursor-default"
               } disabled:opacity-60`}
             >
-              {a?.avatarUrl ? (
-                <img
-                  src={a.avatarUrl}
-                  alt=""
-                  className="shrink-0 rounded-xl object-cover"
-                  style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
+              <div
+                className="relative shrink-0"
+                style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
+              >
+                {a?.avatarUrl ? (
+                  <img
+                    src={a.avatarUrl}
+                    alt=""
+                    className="h-full w-full rounded-xl object-cover"
+                  />
+                ) : (
+                  <div
+                    className={`flex h-full w-full items-center justify-center rounded-xl text-[10px] font-bold text-white ${memberColorClass(id)}`}
+                  >
+                    {memberInitials(label)}
+                  </div>
+                )}
+                <span
+                  className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ${activityDotClass(activity?.state ?? "idle")}`}
+                  title={statusTitle}
                 />
-              ) : (
-                <div
-                  className={`flex shrink-0 items-center justify-center rounded-xl text-[10px] font-bold text-white ${memberColorClass(id)}`}
-                  style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-                >
-                  {memberInitials(label)}
-                </div>
-              )}
+              </div>
               <span
                 className={`w-full truncate text-text-muted ${NAME_CLASS}`}
-                title={`${label}${a?.role ? ` · ${a.role}` : ""}`}
+                title={`${label}${a?.role ? ` · ${a.role}` : ""} · ${statusTitle}`}
               >
                 {label}
               </span>
