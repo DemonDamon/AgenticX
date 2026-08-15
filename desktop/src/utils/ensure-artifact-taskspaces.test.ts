@@ -181,4 +181,90 @@ describe("loadPersistedSessionArtifactPaths", () => {
     ]);
     expect(paths).toEqual([svg, pdf]);
   });
+
+  it("merges default-workspace files when group chat history has no file_write rows", async () => {
+    const sid = "33a3bc2a-d494-493f-a62a-e29a3b4f027d";
+    const root = `/Users/damon/.agenticx/taskspaces/${sid}/default`;
+    const html = `${root}/parent-kid-games.html`;
+    const loadSessionMessages = vi.fn(async () => ({
+      ok: true,
+      messages: [
+        { role: "user", content: "做个亲子小游戏" },
+        { role: "assistant", content: "原型已交付：`parent-kid-games.html`" },
+      ],
+    }));
+    const readLocalTextFile = vi.fn(async () => ({ ok: true, content: "[]" }));
+    const listTaskspaces = vi.fn(async () => ({
+      ok: true,
+      workspaces: [{ id: "default", path: root, label: "default" }],
+    }));
+    const listTaskspaceFiles = vi.fn(async () => ({
+      ok: true,
+      files: [
+        { name: "memory", type: "dir", path: "memory", size: 0, modified: 0 },
+        {
+          name: "parent-kid-games.html",
+          type: "file",
+          path: "parent-kid-games.html",
+          size: 12,
+          modified: 0,
+        },
+      ],
+    }));
+    vi.stubGlobal("window", {
+      agenticxDesktop: {
+        loadSessionMessages,
+        readLocalTextFile,
+        listTaskspaces,
+        listTaskspaceFiles,
+      },
+    });
+
+    const paths = await loadPersistedSessionArtifactPaths(sid);
+    expect(paths).toEqual([html]);
+    expect(listTaskspaceFiles).toHaveBeenCalledTimes(1);
+    expect(listTaskspaceFiles).toHaveBeenCalledWith({
+      sessionId: sid,
+      taskspaceId: "default",
+      path: ".",
+    });
+  });
+
+  it("walks a regular subdir but not memory/", async () => {
+    const sid = "group-walk";
+    const root = `/Users/damon/.agenticx/taskspaces/${sid}/default`;
+    const nested = `${root}/games/board.html`;
+    const listTaskspaceFiles = vi.fn(async (payload: { path?: string }) => {
+      if (payload.path === "games") {
+        return {
+          ok: true,
+          files: [
+            { name: "board.html", type: "file", path: "games/board.html", size: 1, modified: 0 },
+          ],
+        };
+      }
+      return {
+        ok: true,
+        files: [
+          { name: "memory", type: "dir", path: "memory", size: 0, modified: 0 },
+          { name: "games", type: "dir", path: "games", size: 0, modified: 0 },
+        ],
+      };
+    });
+    vi.stubGlobal("window", {
+      agenticxDesktop: {
+        loadSessionMessages: vi.fn(async () => ({ ok: true, messages: [] })),
+        readLocalTextFile: vi.fn(async () => ({ ok: true, content: "[]" })),
+        listTaskspaces: vi.fn(async () => ({
+          ok: true,
+          workspaces: [{ id: "default", path: root, label: "default" }],
+        })),
+        listTaskspaceFiles,
+      },
+    });
+
+    const paths = await loadPersistedSessionArtifactPaths(sid);
+    expect(paths).toEqual([nested]);
+    expect(listTaskspaceFiles.mock.calls.map((c) => c[0]?.path)).toEqual([".", "games"]);
+  });
 });

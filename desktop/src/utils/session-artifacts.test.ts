@@ -10,9 +10,11 @@ import {
   collectSessionArtifactPaths,
   parseSessionMessageFilePayload,
   collectTurnPreviewImagePaths,
+  collectWorkspaceListingArtifactPaths,
   expandArtifactHomePath,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
+  isWalkableWorkspaceArtifactDir,
   looksLikeDirectoryPath,
   pathToFileUrl,
   preferAnimatedPreviewImages,
@@ -694,5 +696,48 @@ describe("turn preview images", () => {
     ];
     expect(collectTurnPreviewImagePaths(messages, "mid")).toEqual([]);
     expect(collectTurnPreviewImagePaths(messages, "final")).toEqual([gif]);
+  });
+});
+
+describe("default workspace listing → 任务产物", () => {
+  const root =
+    "/Users/damon/.agenticx/taskspaces/33a3bc2a-d494-493f-a62a-e29a3b4f027d/default";
+
+  it("keeps root files like parent-kid-games.html and skips memory/", () => {
+    expect(
+      collectWorkspaceListingArtifactPaths({
+        workspaceRoot: root,
+        entries: [
+          { name: "memory", type: "dir", path: "memory" },
+          { name: "parent-kid-games.html", type: "file", path: "parent-kid-games.html" },
+        ],
+      }),
+    ).toEqual([`${root}/parent-kid-games.html`]);
+  });
+
+  it("skips hidden files and extensionless names", () => {
+    expect(
+      collectWorkspaceListingArtifactPaths({
+        workspaceRoot: root,
+        entries: [
+          { name: ".DS_Store", type: "file", path: ".DS_Store" },
+          { name: "README", type: "file", path: "README" },
+          { name: "notes.md", type: "file", path: "notes.md" },
+        ],
+      }),
+    ).toEqual([`${root}/notes.md`]);
+  });
+
+  it("does not walk memory, hidden, or mounted dirs", () => {
+    expect(isWalkableWorkspaceArtifactDir({ name: "memory", type: "dir" })).toBe(false);
+    expect(isWalkableWorkspaceArtifactDir({ name: ".git", type: "dir" })).toBe(false);
+    expect(
+      isWalkableWorkspaceArtifactDir({
+        name: "external-repo",
+        type: "dir",
+        mount_mode: "reference",
+      }),
+    ).toBe(false);
+    expect(isWalkableWorkspaceArtifactDir({ name: "output", type: "dir" })).toBe(true);
   });
 });
