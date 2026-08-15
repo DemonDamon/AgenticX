@@ -29,12 +29,23 @@ from agenticx.runtime.group_facts import (
     format_zero_exec_fallback,
     render_facts_block,
 )
-from agenticx.runtime.harden_flags import group_meta_direct_tools_enabled
+from agenticx.runtime.harden_flags import (
+    group_intent_max_tokens,
+    group_meta_direct_tools_enabled,
+    group_meta_reply_max_tokens,
+)
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
 
 META_LEADER_AGENT_ID = "__meta__"
 META_LEADER_NAME = "组长"
+# Shown when the meta PM completion comes back with no visible content.
+# Must NOT read like a progress report: an empty completion is a model/runtime
+# condition, not a statement about project status.
+_META_EMPTY_REPLY_NOTICE = (
+    "这轮我没有产出内容（模型回复长度上限可能被推理占满）。"
+    "请再发一次，或直接 @ 对应成员派活，例如「@程基岩 先搭一个能飞能撞的原型」。"
+)
 # Max @-mention follow-up hops per user turn.
 # Can be overridden in ~/.agenticx/config.yaml under group_chat.mention_hops.
 _DEFAULT_MENTION_HOPS = 2
@@ -914,15 +925,34 @@ class GroupChatRouter:
     ) -> str:
         llm = self.llm_factory(provider or None, model or None)
         messages = [{"role": "user", "content": prompt}]
-        try:
-            response = llm.invoke(
-                messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
+
+        def _once(budget: int) -> tuple[str, str]:
+            try:
+                response = llm.invoke(
+                    messages,
+                    temperature=temperature,
+                    max_tokens=budget,
+                )
+            except TypeError:
+                response = llm.invoke(messages)
+            text = self._extract_text(response)
+            reason = ""
+            choices = getattr(response, "choices", None) or []
+            if choices:
+                reason = str(getattr(choices[0], "finish_reason", "") or "")
+            return text, reason
+
+        text, finish_reason = _once(max_tokens)
+        if not text.strip() and finish_reason.lower() == "length":
+            retry_budget = min(int(max_tokens) * 2, 8000)
+            _log.warning(
+                "group_router: empty completion truncated by budget "
+                "(finish_reason=length, max_tokens=%s); retrying with %s",
+                max_tokens,
+                retry_budget,
             )
-        except TypeError:
-            response = llm.invoke(messages)
-        return self._extract_text(response)
+            text, finish_reason = _once(retry_budget)
+        return text
 
     async def _should_stop(self, should_stop: Callable[[], Any]) -> bool:
         try:
@@ -1016,7 +1046,7 @@ class GroupChatRouter:
                 model=model,
                 prompt=prompt,
                 temperature=0.1,
-                max_tokens=280,
+                max_tokens=group_intent_max_tokens(),
             )
         except Exception:
             if active_thread is not None and active_thread.partner_id in member_ids:
@@ -1037,12 +1067,20 @@ class GroupChatRouter:
                 reason="intent_fallback_meta_direct",
             )
         payload = self._extract_json_object(text)
+        if not payload:
+            _log.warning(
+                "group_router: intent JSON unparsable (text_len=%s); "
+                "falling back to meta_direct",
+                len(str(text or "")),
+            )
         action = str(payload.get("action", "") or "").strip().lower()
         raw_targets = payload.get("target_ids", [])
         if not isinstance(raw_targets, list):
             raw_targets = []
         target_ids = [str(x).strip() for x in raw_targets if str(x).strip() in member_ids]
-        reason = str(payload.get("reason", "") or "").strip() or "llm_decision"
+        reason = str(payload.get("reason", "") or "").strip() or (
+            "intent_parse_failed" if not payload else "llm_decision"
+        )
         if action not in {"route_to", "meta_direct", "continue_thread"}:
             action = "route_to" if target_ids else "meta_direct"
         if action == "continue_thread":
@@ -1106,11 +1144,14 @@ class GroupChatRouter:
             model=model,
             prompt=prompt,
             temperature=0.2,
-            max_tokens=500,
+            max_tokens=group_meta_reply_max_tokens(),
         )
         final_text = text.strip()
         if not final_text:
-            final_text = "我先给出当前可确认的进展：暂无足够信息，请指明想看的模块或成员。"
+            _log.warning(
+                "group_router: meta PM reply empty after retry; emitting no-output notice"
+            )
+            final_text = _META_EMPTY_REPLY_NOTICE
         context.append_agent(
             agent_id=META_LEADER_AGENT_ID,
             agent_name=self._meta_leader_label,
