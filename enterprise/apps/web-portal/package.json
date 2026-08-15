@@ -26,6 +26,7 @@
     "@agenticx/iam-core": "workspace:*",
     "@agenticx/sdk-ts": "workspace:^",
     "@agenticx/ui": "workspace:*",
+    "decimal.js": "^10.6.0",
     "drizzle-orm": "^0.45.2",
     "jszip": "^3.10.1",
     "lucide-react": "^0.542.0",

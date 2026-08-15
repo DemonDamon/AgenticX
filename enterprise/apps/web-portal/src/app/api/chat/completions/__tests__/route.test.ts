@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   resolveManualDeepResearchQuery: vi.fn(),
   runDeepResearchTurn: vi.fn(),
   runWebSearchTurn: vi.fn(),
+  withCalculatorContext: vi.fn(),
 }));
 
 vi.mock("../../../../../lib/session", () => ({
@@ -50,6 +51,9 @@ vi.mock("../../../../../lib/deep-research/artifact-store", () => ({
 vi.mock("../../../../../lib/deep-research/auto-need", () => ({
   planAutomaticTurn: mocks.planAutomaticTurn,
   resolveManualDeepResearchQuery: mocks.resolveManualDeepResearchQuery,
+}));
+vi.mock("../../../../../lib/calculator/chat-context", () => ({
+  withCalculatorContext: mocks.withCalculatorContext,
 }));
 
 import { POST } from "../route";
@@ -114,6 +118,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       kind: "fallback",
       reason: "classifier_unavailable",
     });
+    mocks.withCalculatorContext.mockResolvedValue(null);
   });
 
   it("gives manual activation priority and skips the automatic gate", async () => {
@@ -129,6 +134,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
 
     expect(await response.text()).toBe("deep");
     expect(mocks.planAutomaticTurn).not.toHaveBeenCalled();
+    expect(mocks.withCalculatorContext).not.toHaveBeenCalled();
     expect(mocks.resolveManualDeepResearchQuery).toHaveBeenCalledTimes(1);
     expect(mocks.runDeepResearchTurn).toHaveBeenCalledWith(
       expect.any(Object),
@@ -231,6 +237,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     );
     expect(mocks.resolveManualDeepResearchQuery).not.toHaveBeenCalled();
     expect(mocks.runDeepResearchTurn).not.toHaveBeenCalled();
+    expect(mocks.withCalculatorContext).not.toHaveBeenCalled();
     expect(mocks.runWebSearchTurn).toHaveBeenCalledWith(
       expect.any(Object),
       expect.any(Object),
@@ -243,7 +250,9 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       kind: "planned",
       plan: { mode: "plain", reason: "现有上下文足够" },
     });
-    const fetchMock = vi.fn(async () => new Response("plain"));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response("plain"),
+    );
     vi.stubGlobal("fetch", fetchMock);
     try {
       const response = await POST(request({
@@ -255,7 +264,45 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       expect(mocks.planAutomaticTurn).toHaveBeenCalledTimes(1);
       expect(mocks.runWebSearchTurn).not.toHaveBeenCalled();
       expect(mocks.runDeepResearchTurn).not.toHaveBeenCalled();
+      expect(mocks.withCalculatorContext).toHaveBeenCalledTimes(1);
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("forwards calculator-enriched context only on the ordinary chat path", async () => {
+    mocks.withCalculatorContext.mockImplementation(async (body: Record<string, unknown>) => ({
+      ...body,
+      messages: [
+        { role: "system", content: "deterministic-result: 0.3" },
+        ...(body.messages as unknown[]),
+      ],
+    }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response("plain"),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const response = await POST(request({
+        messages: [{ role: "user", content: "请计算 0.1 + 0.2" }],
+      }));
+
+      expect(await response.text()).toBe("plain");
+      expect(mocks.withCalculatorContext).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "model-a" }),
+        expect.objectContaining({
+          url: expect.stringContaining("/v1/chat/completions"),
+          headers: expect.objectContaining({ "x-agenticx-provider": "provider-a" }),
+        }),
+      );
+      const forwarded = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+      expect(forwarded.messages[0]).toEqual({
+        role: "system",
+        content: "deterministic-result: 0.3",
+      });
+      expect(mocks.runWebSearchTurn).not.toHaveBeenCalled();
+      expect(mocks.runDeepResearchTurn).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }

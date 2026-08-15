@@ -192,6 +192,9 @@ importers:
       '@agenticx/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      decimal.js:
+        specifier: ^10.6.0
+        version: 10.6.0
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/pg@8.20.0)(mysql2@3.23.1(@types/node@20.19.43))(pg@8.22.0)

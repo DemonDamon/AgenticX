@@ -40,6 +40,7 @@ import {
   resolveManualDeepResearchQuery,
 } from "../../../../lib/deep-research/auto-need";
 import type { DeepResearchIntentConfidence } from "../../../../lib/deep-research/clarification-policy";
+import { withCalculatorContext } from "../../../../lib/calculator/chat-context";
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.messages)) return body;
@@ -449,7 +450,13 @@ export async function POST(request: Request) {
   }
 
   if (parsedBody) {
-    forwardBody = JSON.stringify(withSanitizedMessages(parsedBody));
+    const directBody = withSanitizedMessages(parsedBody);
+    const calculatedBody = await withCalculatorContext(directBody, {
+      url: GATEWAY_COMPLETIONS_URL,
+      headers: gatewayHeaders,
+      signal: request.signal,
+    });
+    forwardBody = JSON.stringify(calculatedBody ?? directBody);
   }
 
   let upstream: Response;
