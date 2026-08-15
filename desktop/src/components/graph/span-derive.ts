@@ -21,6 +21,31 @@ export function agentIdFromNode(nodeId: string): string {
   return nodeId.startsWith("agent:") ? nodeId.slice("agent:".length) : nodeId;
 }
 
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0s";
+  const totalSec = Math.floor(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const minutes = Math.floor(totalSec / 60);
+  const seconds = totalSec % 60;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+export function deriveRunningToolByAgent(
+  toolStepsByNode: Record<string, ToolStep[]>,
+): Record<string, { toolName: string; startMs: number }> {
+  const out: Record<string, { toolName: string; startMs: number }> = {};
+  for (const [nodeId, steps] of Object.entries(toolStepsByNode)) {
+    const running = deriveToolSpans(steps).filter((span) => span.running);
+    if (running.length === 0) continue;
+    let latest = running[0]!;
+    for (const span of running) {
+      if (span.startMs >= latest.startMs) latest = span;
+    }
+    out[agentIdFromNode(nodeId)] = { toolName: latest.toolName, startMs: latest.startMs };
+  }
+  return out;
+}
+
 export function deriveToolSpans(steps: ToolStep[]): ToolSpan[] {
   const indexed: Array<{ span: ToolSpan; order: number }> = [];
   for (let i = 0; i < steps.length; i++) {
