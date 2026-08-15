@@ -37,6 +37,18 @@ const ASSISTANT_META =
 const ARITHMETIC = /^[\d\s+\-*/×÷().=%]+$/;
 const ARITHMETIC_OP = /[+\-*/×÷=%]/;
 
+/**
+ * The whole utterance is an arithmetic expression — "1+2", "10/4", "(3+4)*2=".
+ * Shared with the chat calculator so the two cannot disagree about what counts
+ * as a sum the user typed out.
+ */
+export function isPureArithmetic(text: string): boolean {
+  const normalized = normalize(text);
+  return (
+    normalized.length > 0 && ARITHMETIC.test(normalized) && ARITHMETIC_OP.test(normalized)
+  );
+}
+
 const ATTACHMENT_MARKER = /(^|\n)---\s*(?:附件|attachment)\s*[:：]/i;
 const SHORT_QUERY_MAX = 24;
 const ATTACHMENT_USER_TEXT_MAX = 40;
@@ -112,7 +124,7 @@ export function classifyWebSearchFastPath(
   }
 
   // 6) Pure arithmetic
-  if (ARITHMETIC.test(normalized) && ARITHMETIC_OP.test(normalized)) {
+  if (isPureArithmetic(normalized)) {
     return { action: "skip", reason: "arithmetic" };
   }
 

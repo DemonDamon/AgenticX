@@ -75,6 +75,17 @@ function parseDecimal(value: unknown): InstanceType<typeof Decimal> | null {
   }
 }
 
+/**
+ * The canonical value of a numeric literal, or null if it is not one.
+ *
+ * Comparing by value rather than by spelling is what lets "1,234.56", "1234.56"
+ * and "1234.560" anchor to each other while "1234.65" does not.
+ */
+export function canonicalDecimal(value: unknown): string | null {
+  const parsed = parseDecimal(value);
+  return parsed ? plain(parsed) : null;
+}
+
 function trimDecimal(text: string): string {
   if (!text.includes(".")) return text === "-0" ? "0" : text;
   const trimmed = text.replace(/\.?0+$/u, "");
