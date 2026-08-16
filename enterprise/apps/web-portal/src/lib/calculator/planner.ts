@@ -16,6 +16,15 @@
 import { parseLlmJson } from "../deep-research/llm-json";
 import { canonicalDecimal, executeCalculatorBatch, type CalculatorResult } from "./core";
 
+/**
+ * A planner is deliberately bounded so a stalled provider cannot hold the
+ * user's answer open forever. This is a network safety ceiling, not a limit on
+ * how long the answering model may reason. Both chat and grounded search use
+ * the same value so one path cannot silently become less reliable than the
+ * other.
+ */
+export const CALCULATOR_PLANNER_TIMEOUT_MS = 15_000;
+
 export type CalculatorGatewayDeps = {
   url: string;
   headers: Record<string, string>;
@@ -144,24 +153,29 @@ export type PlanCalculationsInput = {
    */
   anchors: ReadonlySet<string>;
   traceStage: string;
-  timeoutMs: number;
 };
 
 /**
  * Plan, execute and anchor. Returns an empty array for every failure mode —
  * unreachable gateway, non-JSON reply, rejected arithmetic, unanchored operand
  * — so a caller never has to distinguish "nothing to compute" from "could not
- * compute", and an ordinary answer is produced either way.
+ * compute", and an ordinary answer is produced either way. Infrastructure
+ * failures remain invisible to the end user, but are logged with the trace
+ * stage so they are no longer indistinguishable from a legitimate empty plan.
  */
 export async function planCalculations(
   input: PlanCalculationsInput,
 ): Promise<CalculatorResult[]> {
   const { deps } = input;
   const controller = new AbortController();
-  const abort = () => controller.abort();
-  const timeout = setTimeout(abort, input.timeoutMs);
+  let timedOut = false;
+  const onParentAbort = () => controller.abort();
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, CALCULATOR_PLANNER_TIMEOUT_MS);
   if (deps.signal?.aborted) controller.abort();
-  else deps.signal?.addEventListener("abort", abort, { once: true });
+  else deps.signal?.addEventListener("abort", onParentAbort, { once: true });
 
   try {
     const response = await (deps.fetchImpl ?? fetch)(deps.url, {
@@ -170,7 +184,12 @@ export async function planCalculations(
       body: JSON.stringify(plannerBody(input.body, input.system, input.user)),
       signal: controller.signal,
     });
-    if (!response.ok) return [];
+    if (!response.ok) {
+      console.warn(
+        `[calculator] planner request failed stage=${input.traceStage} status=${response.status}`,
+      );
+      return [];
+    }
     const planned = parseLlmJson<unknown>(completionText(await response.json()));
     const executed = executeCalculatorBatch(planned).filter(
       (result): result is CalculatorResult & { value: string; displayValue: string } =>
@@ -179,11 +198,20 @@ export async function planCalculations(
         typeof result.displayValue === "string",
     );
     return anchoredResults(executed, input.anchors);
-  } catch {
+  } catch (error) {
+    if (timedOut) {
+      console.warn(
+        `[calculator] planner timed out stage=${input.traceStage} timeout_ms=${CALCULATOR_PLANNER_TIMEOUT_MS}`,
+      );
+    } else if (!deps.signal?.aborted) {
+      console.warn(
+        `[calculator] planner failed stage=${input.traceStage} reason=${error instanceof Error ? error.name : "unknown"}`,
+      );
+    }
     return [];
   } finally {
     clearTimeout(timeout);
-    deps.signal?.removeEventListener("abort", abort);
+    deps.signal?.removeEventListener("abort", onParentAbort);
   }
 }
 

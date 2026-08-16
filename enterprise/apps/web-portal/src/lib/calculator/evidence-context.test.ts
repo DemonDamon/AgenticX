@@ -137,6 +137,7 @@ describe("evidence calculations", () => {
   });
 
   it("degrades to no calculations when the planner is unusable", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     for (const impl of [
       vi.fn(async () => gatewayJson("not json")),
       vi.fn(async () => new Response("nope", { status: 500 })),
@@ -152,6 +153,98 @@ describe("evidence calculations", () => {
         anchorTexts: SOURCES,
       });
       expect(results).toEqual([]);
+    }
+    warn.mockRestore();
+  });
+
+  it("does not cut off a valid evidence plan at the old six-second boundary", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(
+        (_url: string | URL | Request, init?: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            const timer = setTimeout(
+              () =>
+                resolve(
+                  gatewayJson(
+                    JSON.stringify({
+                      calculations: [
+                        {
+                          id: "c1",
+                          operation: "quotient",
+                          operands: ["445.17", "907.03"],
+                        },
+                      ],
+                    }),
+                  ),
+                ),
+              6_500,
+            );
+            init?.signal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer);
+                const error = new Error("aborted");
+                error.name = "AbortError";
+                reject(error);
+              },
+              { once: true },
+            );
+          }),
+      );
+
+      const pending = planEvidenceCalculations({
+        deps: { url: "https://gw.example", headers: {}, fetchImpl },
+        body: {},
+        task: "用户当前请求：净利率",
+        evidenceText: EVIDENCE,
+        anchorTexts: SOURCES,
+      });
+      await vi.advanceTimersByTimeAsync(6_500);
+
+      await expect(pending).resolves.toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still aborts a stalled planner and records why it degraded", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const fetchImpl = vi.fn(
+        (_url: string | URL | Request, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              "abort",
+              () => {
+                const error = new Error("aborted");
+                error.name = "AbortError";
+                reject(error);
+              },
+              { once: true },
+            );
+          }),
+      );
+
+      const pending = planEvidenceCalculations({
+        deps: { url: "https://gw.example", headers: {}, fetchImpl },
+        body: {},
+        task: "用户当前请求：净利率",
+        evidenceText: EVIDENCE,
+        anchorTexts: SOURCES,
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await expect(pending).resolves.toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "planner timed out stage=chat.search-calculator timeout_ms=15000",
+        ),
+      );
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
     }
   });
 

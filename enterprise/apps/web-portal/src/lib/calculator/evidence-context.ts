@@ -42,12 +42,6 @@ import {
 export { calculationContextBlock };
 
 const EVIDENCE_CALCULATOR_TRACE_STAGE = "chat.search-calculator";
-/**
- * Shorter than the chat path's budget: this call sits between retrieval and the
- * first answer token, on a turn that has already spent a rewrite and a search.
- * Timing out costs the calculations, never the answer.
- */
-const EVIDENCE_CALCULATOR_TIMEOUT_MS = 6_000;
 const MAX_EVIDENCE_CHARS = 12_000;
 /** Generous: the request, the resolved query and the recent turns share it. */
 const MAX_TASK_CHARS = 3_000;
@@ -116,6 +110,5 @@ export async function planEvidenceCalculations(
       `检索到的材料：\n${evidenceText}`,
     anchors: collectAnchors(input.anchorTexts),
     traceStage: EVIDENCE_CALCULATOR_TRACE_STAGE,
-    timeoutMs: EVIDENCE_CALCULATOR_TIMEOUT_MS,
   });
 }
