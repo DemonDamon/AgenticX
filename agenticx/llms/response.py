@@ -36,3 +36,7 @@ class LLMResponse(BaseModel):
         default=None,
         description="Tool calls requested by the model (OpenAI function calling format)."
     )
+    reasoning_content: Optional[str] = Field(
+        default=None,
+        description="Provider thinking-mode text that must be echoed on later tool rounds.",
+    )

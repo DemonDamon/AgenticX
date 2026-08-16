@@ -787,6 +787,103 @@ def test_runtime_preserves_reasoning_content_for_tool_round(monkeypatch) -> None
     assert tool_assistant["reasoning_content"] == "完整的工具前思考"
 
 
+def test_runtime_tool_round_always_sets_reasoning_content_key(monkeypatch) -> None:
+    import asyncio
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "tool-ok"
+
+    class _ToolNoThinkLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def invoke(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(
+                    "need tool",
+                    [
+                        {
+                            "id": "call-empty-rc",
+                            "type": "function",
+                            "function": {"name": "list_files", "arguments": {"path": "."}},
+                        }
+                    ],
+                )
+            return _FakeResponse("完成", [])
+
+        def stream(self, *_args, **_kwargs):
+            yield ""
+
+    async def _collect(runtime: AgentRuntime, session: StudioSession, text: str):
+        items = []
+        async for event in runtime.run_turn(text, session):
+            items.append(event)
+        return items
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    session = StudioSession()
+    runtime = AgentRuntime(_ToolNoThinkLLM(), _ApproveGate())
+    asyncio.run(_collect(runtime, session, "列出文件"))
+
+    tool_assistant = next(
+        row for row in session.agent_messages
+        if row.get("role") == "assistant" and row.get("tool_calls")
+    )
+    assert "reasoning_content" in tool_assistant
+    assert tool_assistant["reasoning_content"] == ""
+
+
+def test_runtime_persists_invoke_reasoning_content_for_tool_round(monkeypatch) -> None:
+    import asyncio
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return "tool-ok"
+
+    class _InvokeReasoningLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def invoke(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                resp = _FakeResponse(
+                    "need tool",
+                    [
+                        {
+                            "id": "call-rc-field",
+                            "type": "function",
+                            "function": {"name": "list_files", "arguments": {"path": "."}},
+                        }
+                    ],
+                )
+                resp.reasoning_content = "invoke-path thought"
+                return resp
+            return _FakeResponse("完成", [])
+
+        def stream(self, *_args, **_kwargs):
+            yield ""
+
+    async def _collect(runtime: AgentRuntime, session: StudioSession, text: str):
+        items = []
+        async for event in runtime.run_turn(text, session):
+            items.append(event)
+        return items
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    session = StudioSession()
+    runtime = AgentRuntime(_InvokeReasoningLLM(), _ApproveGate())
+    asyncio.run(_collect(runtime, session, "列出文件"))
+
+    tool_assistant = next(
+        row for row in session.agent_messages
+        if row.get("role") == "assistant" and row.get("tool_calls")
+    )
+    assert tool_assistant["reasoning_content"] == "invoke-path thought"
+
+
 def test_runtime_tool_round_appends_single_assistant(monkeypatch) -> None:
     import asyncio
     from agenticx.runtime import agent_runtime as runtime_module

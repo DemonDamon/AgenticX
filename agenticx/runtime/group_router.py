@@ -314,6 +314,20 @@ def _group_chat_tools() -> Sequence[Dict[str, Any]]:
     ]
 
 
+_GROUP_MEMBER_RUNTIME_FLAG_ATTRS = (
+    "_thinking_enabled",
+    "_reasoning_effort",
+    "kb_retrieval_mode",
+)
+
+
+def _copy_group_member_runtime_flags(base_session: Any, local_session: Any) -> None:
+    """Copy pane thinking / KB flags onto the per-member turn session."""
+    for attr in _GROUP_MEMBER_RUNTIME_FLAG_ATTRS:
+        if hasattr(base_session, attr):
+            setattr(local_session, attr, getattr(base_session, attr))
+
+
 @dataclass
 class GroupReply:
     agent_id: str
@@ -1221,6 +1235,7 @@ class GroupChatRouter:
         setattr(local_session, "_team_manager", getattr(base_session, "_team_manager", None))
         setattr(local_session, "_session_manager", getattr(base_session, "_session_manager", None))
         setattr(local_session, "__group_chat_mode", True)
+        _copy_group_member_runtime_flags(base_session, local_session)
 
         dialogue_context = context.render_recent_dialogue()
         force_rule = (
