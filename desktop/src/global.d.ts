@@ -640,6 +640,8 @@ declare global {
             score: number; evidence: string; rationale: string;
           }>;
           findings: Array<{ key: string; impact: string; repair: string; verification: string }>;
+          observations_available?: boolean;
+          messages_available?: boolean;
         };
         error?: string;
       }>;

@@ -209,10 +209,14 @@ export function SidebarSessionHistory() {
           }
         }
         // Best-effort batch fetch of loop-review scores; failures stay silent.
+        // Sessions without tool observations carry no real signal — their score
+        // is a floor imposed by missing evidence, so we show no badge at all.
         void Promise.allSettled(
           rows.map(async (row) => {
             const r = await window.agenticxDesktop.getSessionLoopReview(row.session_id);
-            return r.ok && r.review ? { id: row.session_id, score: r.review.overall } : null;
+            return r.ok && r.review && r.review.observations_available !== false
+              ? { id: row.session_id, score: r.review.overall }
+              : null;
           }),
         ).then((results) => {
           const next: Record<string, number> = {};
@@ -1490,7 +1494,7 @@ export function SidebarSessionHistory() {
       {loopReviewFor
         ? createPortal(
             <div
-              className="fixed inset-0 z-[240] flex items-start justify-center bg-black/40 pt-[12vh]"
+              className="fixed inset-0 z-[240] flex items-start justify-center bg-black/70 pt-[12vh] backdrop-blur-none"
               onClick={() => setLoopReviewFor(null)}
             >
               <div onClick={(e) => e.stopPropagation()}>

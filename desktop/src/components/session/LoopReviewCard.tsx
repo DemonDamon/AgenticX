@@ -30,6 +30,21 @@ type Props = {
   onClose: () => void;
 };
 
+/** 证据状态展示文案（内部枚举仍为英文，后续可接 i18n） */
+const EVIDENCE_LABELS: Record<string, string> = {
+  missing: "缺失",
+  unobserved: "未观测",
+  present: "已存在",
+  wired: "已接入",
+  exercised: "已执行",
+  outcome_supported: "结果可证",
+  not_applicable: "不适用",
+};
+
+function evidenceLabel(evidence: string): string {
+  return EVIDENCE_LABELS[evidence] ?? evidence;
+}
+
 function isPositiveEvidence(evidence: string): boolean {
   return evidence === "outcome_supported" || evidence === "exercised";
 }
@@ -75,7 +90,10 @@ export function LoopReviewCard({ sessionId, onClose }: Props) {
   }, [sessionId]);
 
   return (
-    <div className="flex w-[340px] flex-col overflow-hidden rounded-xl border border-border bg-surface-panel shadow-2xl">
+    <div
+      className="flex w-[340px] flex-col overflow-hidden rounded-xl border border-border shadow-2xl"
+      style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
+    >
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <div className="text-[13px] font-semibold text-text-strong">会话体检</div>
         <button
@@ -122,11 +140,11 @@ export function LoopReviewCard({ sessionId, onClose }: Props) {
                         <span
                           className={`rounded px-1 py-px text-[10px] ${
                             isPositiveEvidence(d.evidence)
-                              ? "bg-[rgba(var(--theme-color-rgb,59,130,246),0.12)] text-text-strong"
+                              ? "bg-surface-card-strong text-text-strong"
                               : "bg-surface-card text-text-muted"
                           }`}
                         >
-                          {d.evidence}
+                          {evidenceLabel(d.evidence)}
                         </span>
                         <span className={`text-[12px] font-medium ${TONE_TEXT[scoreTone(d.score)]}`}>
                           {d.score}
@@ -151,7 +169,7 @@ export function LoopReviewCard({ sessionId, onClose }: Props) {
 
             <div className="mt-4 border-t border-border pt-3">
               <div className="mb-2 text-[11px] font-medium text-text-muted">
-                Findings ({data.findings.length})
+                体检发现（{data.findings.length}）
               </div>
               {data.findings.length === 0 ? (
                 <div className="text-[12px] text-text-muted">未发现需要修复的问题</div>
