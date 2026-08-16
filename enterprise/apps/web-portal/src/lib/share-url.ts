@@ -28,3 +28,9 @@ export function buildShareUrl(path: string, requestUrl: string, env: ShareUrlEnv
   const baseUrl = normalizeBaseUrl(configured ?? new URL(requestUrl).origin);
   return new URL(path, `${baseUrl}/`).toString();
 }
+
+/** Browser copy target: always the origin the employee is currently visiting. */
+export function buildBrowserShareUrl(path: string, origin: string): string {
+  if (!path.startsWith("/")) throw new Error("share path must be absolute");
+  return new URL(path, `${normalizeBaseUrl(origin)}/`).toString();
+}
