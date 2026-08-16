@@ -180,7 +180,13 @@ describe("history-outbox", () => {
       ...msg(),
       role: "assistant" as const,
       web_search_sources: [
-        { title: "used", url: "https://used.example", snippet: "s", usedByModel: true },
+        {
+          title: "used",
+          url: "https://used.example",
+          snippet: "s",
+          usedByModel: true,
+          publishedAt: "2026-08-14",
+        },
         { title: "extra", url: "https://extra.example", snippet: "s", usedByModel: false },
       ],
       web_search_trace: {
@@ -206,6 +212,15 @@ describe("history-outbox", () => {
     const overlay = (await listPendingOverlayMessages(sessionId))[0];
     expect(overlay?.web_search_trace).toEqual(assistant.web_search_trace);
     expect(overlay?.web_search_sources?.map((source) => source.usedByModel)).toEqual([true, false]);
+    // The whole outbound chain, not one hop of it: a field added at the frame
+    // has to survive this rebuild too, and did not.
+    expect(
+      stripToAppendPayload(assistant).web_search_sources?.map((source) => source.publishedAt),
+    ).toEqual(["2026-08-14", undefined]);
+    expect(overlay?.web_search_sources?.map((source) => source.publishedAt)).toEqual([
+      "2026-08-14",
+      undefined,
+    ]);
   });
 
   it("stripToAppendPayload keeps truncated parsed_text and drops image data_url", () => {

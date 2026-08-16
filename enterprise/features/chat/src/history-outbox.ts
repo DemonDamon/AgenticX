@@ -223,6 +223,12 @@ export function stripToAppendPayload(message: ChatMessage): HistoryAppendPayload
   };
   if (message.model) payload.model = message.model;
   if (message.web_search_sources?.length) {
+    // Rebuilt field by field so nothing unexpected is written back, which also
+    // means every new field has to be added here explicitly. `publishedAt` was
+    // added to the frame, the client mapper and the write validator and missed
+    // here, so it reached the browser and was dropped on the way back — the
+    // stored record showed no dates at all while the model was plainly being
+    // shown them.
     payload.web_search_sources = message.web_search_sources.map((source) => ({
       title: source.title,
       url: source.url,
@@ -230,6 +236,7 @@ export function stripToAppendPayload(message: ChatMessage): HistoryAppendPayload
       ...(typeof source.usedByModel === "boolean"
         ? { usedByModel: source.usedByModel }
         : {}),
+      ...(source.publishedAt ? { publishedAt: source.publishedAt } : {}),
     }));
   }
   const webSearchTrace = sanitizeWebSearchTrace(message.web_search_trace);
