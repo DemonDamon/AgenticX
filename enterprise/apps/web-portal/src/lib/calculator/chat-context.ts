@@ -153,6 +153,20 @@ function plannerTranscript(messages: readonly ChatMessage[]): string {
   return JSON.stringify(selected).slice(0, MAX_TRANSCRIPT_CHARS);
 }
 
+/**
+ * Append, never prepend.
+ *
+ * This was first written as a prompt-caching fix, and that justification does
+ * not hold. The premise was that the system message begins with a prompt
+ * stable across a conversation; it does not. `withCurrentTimeContext` prepends
+ * a block carrying a second-resolution timestamp at offset zero, so the prefix
+ * changes every second no matter where this block goes. Making the prompt
+ * cacheable means moving that block, which is a separate decision.
+ *
+ * The ordering is kept on its own merits. Per-turn figures belong next to the
+ * question rather than in front of instructions written for another purpose,
+ * and this block is the one part of the prompt the answer must not paraphrase.
+ */
 function attachCalculationContext(
   messages: readonly ChatMessage[],
   results: readonly CalculatorResult[],
@@ -160,7 +174,7 @@ function attachCalculationContext(
   const block = calculationContextBlock(results);
   const first = messages[0];
   if (first?.role === "system" && typeof first.content === "string") {
-    return [{ ...first, content: `${block}\n\n${first.content}` }, ...messages.slice(1)];
+    return [{ ...first, content: `${first.content}\n\n${block}` }, ...messages.slice(1)];
   }
   return [{ role: "system", content: block }, ...messages];
 }

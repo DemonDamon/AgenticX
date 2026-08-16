@@ -2668,8 +2668,32 @@ describe("web search calculator", () => {
     expect(system).toContain("本轮确定性计算结果");
     expect(system).toContain("0.49079");
     expect(system).toContain("1.46884");
-    // The instruction to use them must precede the evidence they came from.
-    expect(system.indexOf("本轮确定性计算结果")).toBeLessThan(system.indexOf("联网搜索结果"));
+    // Appended last, like the search results block itself. An earlier version
+    // put the calculations in front of everything, which changed the system
+    // prompt from its first byte and made every computing turn miss the
+    // provider's prefix cache — the one thing `withSearchContext` avoids by
+    // appending. The figures also read better next to the question.
+    expect(system.indexOf("本轮确定性计算结果")).toBeGreaterThan(
+      system.indexOf("联网搜索结果"),
+    );
+  });
+
+  it("changes nothing ahead of the material it was computed from", async () => {
+    // Deliberately not asserting a byte-identical prefix: the current-time
+    // block sits at offset zero and carries a second-resolution timestamp, so
+    // two runs differ whenever they straddle a second. What this change owns is
+    // narrower — calculating adds text after the evidence and touches nothing
+    // before it.
+    const withCalc = await turn([
+      { id: "c1", operation: "quotient", operands: ["445.17", "907.03"] },
+    ]);
+    const withoutCalc = await turn([]);
+    const head = (system: string) => system.slice(0, system.indexOf("联网搜索结果"));
+    expect(head(withCalc.system)).not.toContain("本轮确定性计算结果");
+    expect(head(withCalc.system).length).toBe(head(withoutCalc.system).length);
+    expect(withCalc.system.indexOf("本轮确定性计算结果")).toBeGreaterThan(
+      withCalc.system.indexOf("联网搜索结果"),
+    );
   });
 
   it("still forwards no tools upstream and does not disturb the sources frame", async () => {

@@ -458,11 +458,14 @@ export function recentTurnTexts(messages: ChatMessage[]): string[] {
 }
 
 /**
- * Prepend locally computed figures to the grounded system message.
+ * Append locally computed figures to the grounded system message.
  *
- * Placed before the search results rather than after: the model must reach the
- * instruction not to recompute them before it reaches the numbers they came
- * from. An empty batch — nothing to compute, or planning failed — returns the
+ * Last, after the retrieved material rather than before it: the figures are
+ * what the answer should use, and placing them after the untrusted retrieved
+ * text puts the instruction to use them where that text is least able to talk
+ * over it.
+ *
+ * An empty batch — nothing to compute, or planning failed — returns the
  * messages untouched, which is why the answer path needs no branch of its own.
  */
 export function withEvidenceCalculations(
@@ -476,7 +479,7 @@ export function withEvidenceCalculations(
     const existing = typeof next[0].content === "string" ? next[0].content : "";
     next[0] = {
       ...next[0],
-      content: existing ? `${block}\n\n${existing}` : block,
+      content: existing ? `${existing}\n\n${block}` : block,
     };
     return next;
   }
