@@ -46,6 +46,8 @@ DEFAULTS: dict[str, Any] = {
     "freeze_during_session": True,
     "gepa_enabled": False,
     "gepa_num_candidates": 3,
+    "evidence_gate_strict": False,
+    "loop_review_enabled": True,
 }
 
 

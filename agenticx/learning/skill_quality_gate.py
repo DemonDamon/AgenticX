@@ -25,6 +25,14 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
+from agenticx.learning.config import get_learning_config
+from agenticx.learning.evidence import (
+    EVIDENCE_RANK,
+    EvidenceState,
+    classify_validation_evidence,
+    collect_session_evidence,
+)
+
 logger = logging.getLogger("agenticx.learning")
 
 MIN_TOOL_CALLS_DEFAULT = 5
@@ -65,11 +73,35 @@ def _check_min_steps(
 
 
 def _check_success_evidence(observations: list[dict[str, Any]]) -> QualityCheck:
-    """At least one successful tool call should be present."""
-    successes = sum(1 for o in observations if o.get("success", False))
-    if successes > 0:
-        return QualityCheck("success_evidence", True, f"{successes} successes", 1.0)
-    return QualityCheck("success_evidence", False, "no successful tool calls", 0.0)
+    """Grade by *evidence level* of validation, not by a bare success flag.
+
+    A session that only wrote files without running any verifier passes but is
+    scored below par (when ``learning.evidence_gate_strict`` is on), nudging the
+    aggregate gate score toward the minimum threshold instead of acing it.
+    """
+    strict = bool(get_learning_config().get("evidence_gate_strict", False))
+    ev = collect_session_evidence(observations)
+    state = classify_validation_evidence(ev)
+    rank = EVIDENCE_RANK[state]
+    if state is EvidenceState.NOT_APPLICABLE:
+        # Pure read-only sessions have nothing to validate. Legacy behavior only
+        # failed when *every* call errored — keep that floor so an all-failed
+        # session can't qualify as skill-worthy just because it wrote nothing.
+        if observations and not any(o.get("success", False) for o in observations):
+            return QualityCheck("success_evidence", False, "no successful tool calls", 0.0)
+        return QualityCheck("success_evidence", True, "read-only session", 0.6)
+    if rank >= EVIDENCE_RANK[EvidenceState.EXERCISED]:
+        return QualityCheck("success_evidence", True, f"evidence={state.value}", 1.0)
+    if rank >= EVIDENCE_RANK[EvidenceState.PRESENT]:
+        if not strict:
+            return QualityCheck(
+                "success_evidence", True, f"evidence={state.value} (legacy)", 1.0
+            )
+        # Writes observed but never verified: pass, but below full score.
+        return QualityCheck(
+            "success_evidence", True, f"evidence={state.value}, unverified", 0.5
+        )
+    return QualityCheck("success_evidence", False, f"evidence={state.value}", 0.0)
 
 
 def _check_dedup(
