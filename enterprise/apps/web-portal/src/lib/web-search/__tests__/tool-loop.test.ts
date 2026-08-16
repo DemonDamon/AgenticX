@@ -2848,6 +2848,76 @@ describe("web search calculator", () => {
     expect(text).toContain("ok");
   });
 
+  it("does not search or attach sources for an expression with a value-question tail", async () => {
+    const stages: string[] = [];
+    const bodies: Array<{
+      stream?: boolean;
+      messages?: Array<{ role?: string; content?: string }>;
+    }> = [];
+    const executeSearch = vi.fn(async () => {
+      throw new Error("search must not run for a self-contained arithmetic question");
+    });
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      bodies.push(body);
+      const stage = (init?.headers as Record<string, string> | undefined)?.[
+        "x-agenticx-trace-stage"
+      ];
+      if (stage) stages.push(stage);
+      if (stage === "chat.calculator") {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  calculations: [
+                    {
+                      id: "c1",
+                      operation: "quotient",
+                      operands: ["312.67", "13.01"],
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "312.67 ÷ 13.01 等于多少" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+          calculatorEnabled: true,
+        }),
+        executeSearch,
+      },
+    );
+    const text = await readText(response);
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    expect(stages).toContain("chat.calculator");
+    expect(String(answerBody(bodies)?.messages?.[0]?.content)).toContain(
+      '"value":"24.033051498847"',
+    );
+    expect(text).toContain('"reason":"arithmetic"');
+    expect(text).toContain('"providerCalls":0');
+    expect(text).not.toContain("agenticx_web_search_sources");
+  });
+
   it("shows the planner the request, not only the compressed retrieval term", async () => {
     // The resolved query is built to be short — the instruction to compute is
     // exactly what gets compressed out of it.

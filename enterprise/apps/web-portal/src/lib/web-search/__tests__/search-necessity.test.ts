@@ -44,10 +44,28 @@ describe("classifyWebSearchFastPath", () => {
   });
 
   it("skips pure arithmetic (AC-1)", () => {
-    for (const query of ["1+1=?", "(3+4)*2"]) {
+    for (const query of [
+      "1+1=?",
+      "(3+4)*2",
+      "312.67 ÷ 13.01 等于多少",
+      "0.1 + 0.2 是多少？",
+      "1-2 等于几",
+    ]) {
       expect(classifyWebSearchFastPath({ query }), query).toEqual({
         action: "skip",
         reason: "arithmetic",
+      });
+    }
+  });
+
+  it("does not let the arithmetic fast path suppress factual numeric prose", () => {
+    for (const query of [
+      "2024 和 2025 的平均工资是多少",
+      "iPhone 17 Pro 和 iPhone 16 有什么区别",
+      "错误码 500 和 502 分别是什么意思",
+    ]) {
+      expect(classifyWebSearchFastPath({ query }), query).toEqual({
+        action: "continue",
       });
     }
   });

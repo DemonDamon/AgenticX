@@ -1,4 +1,4 @@
-import { isPureArithmetic } from "../web-search/search-necessity";
+import { isArithmeticQuestion } from "../web-search/search-necessity";
 import type { CalculatorResult } from "./core";
 import type { CalculationIntent } from "./intent";
 import {
@@ -35,13 +35,6 @@ const INFIX_OPERATOR = /\d\s*(?:[+*×÷]|[加减乘除])\s*\d|\d\s+[-/]\s+\d/u;
 
 /** "N 的 M%" — the shape of a percent_of request, no vocabulary involved. */
 const PERCENT_OF_SHAPE = /\d\s*的\s*\d+(?:\.\d+)?\s*%/u;
-
-/**
- * A question asking for the value of the expression before it. Stripping it
- * turns "1-2 等于多少？" back into the expression it is. This is not domain
- * vocabulary — it is how Chinese writes "= ?".
- */
-const VALUE_QUESTION_TAIL = /\s*(?:等于|=|是)?\s*(?:多少|几)\s*[?？.。!！]*$/u;
 
 /** Words naming one of the seven operations. Closed: tied to the operation set. */
 const OPERATION_WORD =
@@ -116,7 +109,7 @@ function latestUserText(messages: readonly ChatMessage[]): string {
 export function shouldPlanCalculator(messages: readonly ChatMessage[]): boolean {
   const current = latestUserText(messages);
   if (!current) return false;
-  if (isPureArithmetic(current.replace(VALUE_QUESTION_TAIL, ""))) return true;
+  if (isArithmeticQuestion(current)) return true;
   if (INFIX_OPERATOR.test(current)) return true;
   if (PERCENT_OF_SHAPE.test(current)) return true;
   return countNumbers(current) >= 2 && OPERATION_WORD.test(current);

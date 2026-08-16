@@ -38,6 +38,14 @@ const ARITHMETIC = /^[\d\s+\-*/×÷().=%]+$/;
 const ARITHMETIC_OP = /[+\-*/×÷=%]/;
 
 /**
+ * A natural-language tail asking for the value of an otherwise complete
+ * expression. Keeping this next to the expression grammar lets the search
+ * fast path and the calculator agree on turns such as "1-2 等于多少".
+ */
+const ARITHMETIC_VALUE_QUESTION_TAIL =
+  /\s*(?:等于|=|是)?\s*(?:多少|几)\s*[?？.。!！]*$/u;
+
+/**
  * The whole utterance is an arithmetic expression — "1+2", "10/4", "(3+4)*2=".
  * Shared with the chat calculator so the two cannot disagree about what counts
  * as a sum the user typed out.
@@ -46,6 +54,21 @@ export function isPureArithmetic(text: string): boolean {
   const normalized = normalize(text);
   return (
     normalized.length > 0 && ARITHMETIC.test(normalized) && ARITHMETIC_OP.test(normalized)
+  );
+}
+
+/**
+ * A self-contained expression, optionally followed by "等于多少 / 是几".
+ *
+ * Deliberately narrower than the calculator's high-recall planning gate: this
+ * function is allowed to suppress web search, so prose such as "2024 和 2025
+ * 的平均工资是多少" must continue to semantic routing.
+ */
+export function isArithmeticQuestion(text: string): boolean {
+  const normalized = normalize(text);
+  return (
+    isPureArithmetic(normalized) ||
+    isPureArithmetic(normalized.replace(ARITHMETIC_VALUE_QUESTION_TAIL, ""))
   );
 }
 
@@ -123,8 +146,8 @@ export function classifyWebSearchFastPath(
     return { action: "skip", reason: "assistant_meta" };
   }
 
-  // 6) Pure arithmetic
-  if (isPureArithmetic(normalized)) {
+  // 6) A self-contained arithmetic expression, with an optional value question.
+  if (isArithmeticQuestion(normalized)) {
     return { action: "skip", reason: "arithmetic" };
   }
 
