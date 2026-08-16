@@ -216,9 +216,24 @@ export async function planCalculations(
 }
 
 /**
- * The block handed to the answering model. Deliberately says the numbers are
- * already computed and must be used verbatim: the failure this feature exists
- * to prevent is a model re-deriving a figure it was given and getting it wrong.
+ * The block handed to the answering model.
+ *
+ * Two authorities, kept apart on purpose. The arithmetic is settled here and
+ * the model must not redo it — a model re-deriving a division it was handed is
+ * the failure this feature exists to prevent. Which figures to divide is not
+ * settled here, and saying so matters: an earlier wording told the model it
+ * "must use the result and may not rewrite the values", and it read that as
+ * covering the operands too.
+ *
+ * In a real turn that cost the answer. The model found three prices newer than
+ * the one the planner had chosen, worked out for itself that a third source's
+ * per-share figure was quarterly rather than trailing, and then talked itself
+ * back into the stale pair because it believed it was not allowed to disagree.
+ * It was better placed than the planner to make that call — it reads the prose
+ * the figures are embedded in — and had been forbidden from making it.
+ *
+ * The same wording produced the display noise. Told not to rewrite the value,
+ * a ratio was quoted to twelve decimal places.
  */
 export function calculationContextBlock(results: readonly CalculatorResult[]): string {
   const payload = results.map((result) => ({
@@ -231,8 +246,12 @@ export function calculationContextBlock(results: readonly CalculatorResult[]): s
   }));
   return (
     "## 本轮确定性计算结果\n" +
-    "以下数值由本地十进制计算器生成。回答涉及这些运算时必须采用结果，不得重新心算或改写数值；" +
-    "只在与用户问题相关时使用，不要向用户描述内部规划器或调用流程。\n" +
+    "以下数值由本地十进制计算器按给定 operands 精确算出。\n" +
+    "- 算术以此为准：不要重算，也不要换成别的数字。" +
+    "展示时可以按语境四舍五入（例如比率保留两位小数），不必照搬全部位数。\n" +
+    "- 操作数选得对不对由你判断：如果材料里有时点更贴近问题、或口径更一致的数，" +
+    "直接用材料里的数回答并说明依据，不必迁就下面的结果。\n" +
+    "- 只在与用户问题相关时使用，不要向用户描述内部规划器或调用流程。\n" +
     JSON.stringify(payload)
   );
 }

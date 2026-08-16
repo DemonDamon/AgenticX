@@ -3,6 +3,7 @@ import {
   buildWebSearchQuery,
   compactHitsForModel,
   extractLastUserQuery,
+  formatWebSearchSourcesSse,
   pipeUpstreamSse,
   runWebSearchTurn,
   summarizeSelectedEvidence,
@@ -2668,8 +2669,32 @@ describe("web search calculator", () => {
     expect(system).toContain("本轮确定性计算结果");
     expect(system).toContain("0.49079");
     expect(system).toContain("1.46884");
-    // The instruction to use them must precede the evidence they came from.
-    expect(system.indexOf("本轮确定性计算结果")).toBeLessThan(system.indexOf("联网搜索结果"));
+    // Appended last, like the search results block itself. An earlier version
+    // put the calculations in front of everything, which changed the system
+    // prompt from its first byte and made every computing turn miss the
+    // provider's prefix cache — the one thing `withSearchContext` avoids by
+    // appending. The figures also read better next to the question.
+    expect(system.indexOf("本轮确定性计算结果")).toBeGreaterThan(
+      system.indexOf("联网搜索结果"),
+    );
+  });
+
+  it("changes nothing ahead of the material it was computed from", async () => {
+    // Deliberately not asserting a byte-identical prefix: the current-time
+    // block sits at offset zero and carries a second-resolution timestamp, so
+    // two runs differ whenever they straddle a second. What this change owns is
+    // narrower — calculating adds text after the evidence and touches nothing
+    // before it.
+    const withCalc = await turn([
+      { id: "c1", operation: "quotient", operands: ["445.17", "907.03"] },
+    ]);
+    const withoutCalc = await turn([]);
+    const head = (system: string) => system.slice(0, system.indexOf("联网搜索结果"));
+    expect(head(withCalc.system)).not.toContain("本轮确定性计算结果");
+    expect(head(withCalc.system).length).toBe(head(withoutCalc.system).length);
+    expect(withCalc.system.indexOf("本轮确定性计算结果")).toBeGreaterThan(
+      withCalc.system.indexOf("联网搜索结果"),
+    );
   });
 
   it("still forwards no tools upstream and does not disturb the sources frame", async () => {
@@ -3130,5 +3155,33 @@ describe("web search calculator", () => {
       { id: "c1", operation: "quotient", operands: ["445.71", "907.03"] },
     ]);
     expect(system).not.toContain("本轮确定性计算结果");
+  });
+});
+
+describe("formatWebSearchSourcesSse", () => {
+  it("carries the provider timestamp so ranking can be audited afterwards", () => {
+    // Dropping it made the persisted record look as though the providers
+    // returned no dates, which is the opposite of what actually happened.
+    const frame = formatWebSearchSourcesSse(
+      [
+        {
+          title: "行情页",
+          url: "https://ex.com/a",
+          snippet: "价格 348.580",
+          publishedAt: "2026-08-07",
+        },
+      ],
+      [{ title: "无日期来源", url: "https://ex.com/b", snippet: "x" }],
+    );
+    const payload = JSON.parse(frame.replace(/^data: /, "").trim()) as {
+      agenticx_web_search_sources: Array<Record<string, unknown>>;
+    };
+    expect(payload.agenticx_web_search_sources[0]).toMatchObject({
+      url: "https://ex.com/a",
+      usedByModel: true,
+      publishedAt: "2026-08-07",
+    });
+    // Absent stays absent rather than becoming an empty string.
+    expect(payload.agenticx_web_search_sources[1]).not.toHaveProperty("publishedAt");
   });
 });

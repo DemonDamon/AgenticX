@@ -17,6 +17,8 @@ export const MAX_ATTACHMENT_DATA_URL_CHARS = 8_000_000;
 export const MAX_ATTACHMENT_PARSED_TEXT_CHARS = 120_000;
 export const MAX_WEB_SEARCH_SOURCES = 50;
 export const MAX_SOURCE_FIELD_CHARS = 4_000;
+/** Provider timestamps are short strings; anything longer is not one. */
+export const MAX_PUBLISHED_AT_CHARS = 64;
 export const MAX_DEEP_RESEARCH_EVENTS = 200;
 
 function sanitizeAttachments(raw: unknown): ChatMessageAttachment[] | undefined {
@@ -105,11 +107,18 @@ function sanitizeWebSearchSources(raw: unknown): WebSearchSource[] | undefined {
     if (title.length > MAX_SOURCE_FIELD_CHARS || snippet.length > MAX_SOURCE_FIELD_CHARS) {
       throw new Error("web_search_sources field too large");
     }
+    // Provider text, so bounded rather than parsed: the value is only ever
+    // shown back and compared, and an unparseable one must not fail the write.
+    const publishedAt =
+      typeof row.publishedAt === "string"
+        ? row.publishedAt.trim().slice(0, MAX_PUBLISHED_AT_CHARS)
+        : "";
     out.push({
       title: title || url,
       url,
       snippet: snippet.slice(0, MAX_SOURCE_FIELD_CHARS),
       ...(row.usedByModel === true ? { usedByModel: true } : row.usedByModel === false ? { usedByModel: false } : {}),
+      ...(publishedAt ? { publishedAt } : {}),
     });
   }
   return out.length > 0 ? out : undefined;

@@ -83,6 +83,43 @@ describe("HttpChatClient stream cancel", () => {
     expect(sourcesChunk?.delta).toBeUndefined();
   });
 
+  it("carries a provider publication date through, and omits it when absent", async () => {
+    const payload =
+      'data: {"agenticx_web_search_sources":[' +
+      '{"title":"A","url":"https://a.example","snippet":"S","publishedAt":"2026-08-07"},' +
+      '{"title":"B","url":"https://b.example","snippet":"S"},' +
+      '{"title":"C","url":"https://c.example","snippet":"S","publishedAt":"   "}' +
+      "]}\n\n" +
+      "data: [DONE]\n\n";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(payload, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+        ),
+      ),
+    );
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [
+        { id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" },
+      ],
+    });
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+
+    const sources = chunks.find((c) => c.webSearchSources?.length)?.webSearchSources ?? [];
+    expect(sources[0]?.publishedAt).toBe("2026-08-07");
+    expect(sources[1]).not.toHaveProperty("publishedAt");
+    // Blank is not a date; it must not become an empty-string field.
+    expect(sources[2]).not.toHaveProperty("publishedAt");
+  });
+
   it("parses bounded web-search trace frames and ignores unknown versions", async () => {
     const payload =
       `data: ${JSON.stringify({

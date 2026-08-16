@@ -45,6 +45,8 @@ export type WebSearchSource = {
   snippet: string;
   /** True when this hit was injected into the model prompt for the turn. */
   usedByModel?: boolean;
+  /** Provider publication timestamp; absent for providers that do not report one. */
+  publishedAt?: string;
 };
 
 export type WebSearchTrace = {

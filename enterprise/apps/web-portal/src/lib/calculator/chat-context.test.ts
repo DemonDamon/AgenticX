@@ -307,6 +307,24 @@ describe("operand anchoring", () => {
     expect(injected).toContain("100");
   });
 
+  it("keeps the arithmetic authoritative while leaving the operands open", async () => {
+    // These pull in opposite directions and both are needed. Merging them into
+    // one instruction is what made a model quote a ratio to twelve decimals and
+    // then use figures it had itself identified as stale.
+    const body = await run("1200 加 300 等于多少", [
+      { id: "c1", operation: "sum", operands: ["1200", "300"] },
+    ]);
+    const system = String(
+      (body as { messages: Array<{ role: string; content: string }> }).messages.find(
+        (message) => message.role === "system",
+      )?.content ?? "",
+    );
+    expect(system).toContain("不要重算");
+    expect(system).toContain("可以按语境四舍五入");
+    expect(system).toContain("操作数选得对不对由你判断");
+    expect(system).toContain("不必迁就下面的结果");
+  });
+
   it("does not let an injected system message anchor the next turn", async () => {
     const fetchImpl = planner([{ id: "c1", operation: "sum", operands: ["4242", "1"] }]);
     const body = await withCalculatorContext(

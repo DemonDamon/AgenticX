@@ -320,19 +320,21 @@ export function formatWebSearchSourcesSse(
   selected: WebSearchHit[],
   remainder: WebSearchHit[] = [],
 ): string {
+  // `publishedAt` travels with the hit so a finished turn can be audited. It
+  // was dropped here, which made the persisted record look as though the
+  // providers returned no dates at all — the ranking could not be checked
+  // afterwards, and an investigation into a stale figure reached the opposite
+  // conclusion from the truth because of it.
+  const row = (hit: WebSearchHit, usedByModel: boolean) => ({
+    title: hit.title,
+    url: hit.url,
+    snippet: hit.snippet,
+    usedByModel,
+    ...(hit.publishedAt ? { publishedAt: hit.publishedAt } : {}),
+  });
   const payload = [
-    ...selected.map((hit) => ({
-      title: hit.title,
-      url: hit.url,
-      snippet: hit.snippet,
-      usedByModel: true,
-    })),
-    ...remainder.map((hit) => ({
-      title: hit.title,
-      url: hit.url,
-      snippet: hit.snippet,
-      usedByModel: false,
-    })),
+    ...selected.map((hit) => row(hit, true)),
+    ...remainder.map((hit) => row(hit, false)),
   ];
   return sseDataFrame({ agenticx_web_search_sources: payload });
 }
@@ -414,11 +416,14 @@ export function recentTurnTexts(messages: ChatMessage[]): string[] {
 }
 
 /**
- * Prepend locally computed figures to the grounded system message.
+ * Append locally computed figures to the grounded system message.
  *
- * Placed before the search results rather than after: the model must reach the
- * instruction not to recompute them before it reaches the numbers they came
- * from. An empty batch — nothing to compute, or planning failed — returns the
+ * Last, after the retrieved material rather than before it: the figures are
+ * what the answer should use, and placing them after the untrusted retrieved
+ * text puts the instruction to use them where that text is least able to talk
+ * over it.
+ *
+ * An empty batch — nothing to compute, or planning failed — returns the
  * messages untouched, which is why the answer path needs no branch of its own.
  */
 export function withEvidenceCalculations(
@@ -432,7 +437,7 @@ export function withEvidenceCalculations(
     const existing = typeof next[0].content === "string" ? next[0].content : "";
     next[0] = {
       ...next[0],
-      content: existing ? `${block}\n\n${existing}` : block,
+      content: existing ? `${existing}\n\n${block}` : block,
     };
     return next;
   }
