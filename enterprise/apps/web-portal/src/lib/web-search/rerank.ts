@@ -141,12 +141,74 @@ export function rankTextPassages(query: string, passages: string[]): RankedTextP
     .sort((a, b) => b.score - a.score || a.index - b.index);
 }
 
+/** Weight on the recency list. Deliberately below BM25's — see `rerankHits`. */
+const RECENCY_WEIGHT = 1;
+/** One date ranks nothing. Below this the list carries no usable signal. */
+const MIN_DATED_HITS = 2;
+/** Metadata claiming to be from the future is not a date we can trust. */
+const MAX_FUTURE_SKEW_MS = 24 * 60 * 60 * 1000;
+
+function publishedAtMs(hit: WebSearchHit, now: number): number | null {
+  const raw = hit.publishedAt?.trim();
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  // Provider text: anything unparseable, or dated ahead of now, is treated as
+  // having no date rather than guessed at. Untrusted metadata must not be able
+  // to claim the freshest slot by claiming to be from next year.
+  if (!Number.isFinite(parsed) || parsed > now + MAX_FUTURE_SKEW_MS) return null;
+  return parsed;
+}
+
 /**
- * BM25(k1=1.5, b=0.75) 打分后与 provider 原始排序做加权 RRF 融合：
- *   score = 2/(60 + bm25Rank) + 1/(60 + providerRank)
- * BM25 权重更高，才能把靠后但真正相关的命中捞到前面；provider 序仍作稳定信号。
+ * Positions in a newest-first list, or null when too few hits carry a date.
+ *
+ * Hits without a usable date take the median position of the ones that have
+ * them, so the term neither rewards nor penalises them. Ranking them last
+ * would have quietly demoted every result from the providers that report no
+ * dates at all — two of the four in use — which is a retrieval regression
+ * disguised as a freshness improvement.
  */
-export function rerankHits(query: string, hits: WebSearchHit[]): WebSearchHit[] {
+function recencyRanks(hits: readonly WebSearchHit[], now: number): number[] | null {
+  const dated: Array<{ index: number; ms: number }> = [];
+  hits.forEach((hit, index) => {
+    const ms = publishedAtMs(hit, now);
+    if (ms !== null) dated.push({ index, ms });
+  });
+  if (dated.length < MIN_DATED_HITS) return null;
+
+  dated.sort((a, b) => b.ms - a.ms || a.index - b.index);
+  const ranks = new Array<number>(hits.length).fill((dated.length - 1) / 2);
+  dated.forEach((row, rank) => {
+    ranks[row.index] = rank;
+  });
+  return ranks;
+}
+
+/**
+ * BM25(k1=1.5, b=0.75) 打分后与 provider 原始排序、发布时间做加权 RRF 融合：
+ *   score = 2/(60 + bm25Rank) + 1/(60 + providerRank) + 1/(60 + recencyRank)
+ * BM25 权重更高，才能把靠后但真正相关的命中捞到前面；provider 序仍作稳定信号。
+ *
+ * The recency list is worth at most half of BM25 by construction: at K=60 the
+ * BM25 term spans 0.0133 between first and last while a weight-1 term spans
+ * 0.0067. So it reorders near-ties — which is where a stale quote outranking a
+ * current one actually happens — and cannot pull a loosely related recent page
+ * over a clearly relevant older one. A question about a major past event keeps
+ * its authoritative sources.
+ *
+ * It applies to every query rather than to ones guessed to be time-sensitive.
+ * Deciding that from the query text means a keyword list, which grows once per
+ * phrasing and is wrong on everything it has not seen yet; a bounded weight on
+ * all queries is the cheaper mistake.
+ *
+ * The weight is an untuned starting point. It was chosen for the bound above,
+ * not measured against labelled results.
+ */
+export function rerankHits(
+  query: string,
+  hits: WebSearchHit[],
+  now: number = Date.now(),
+): WebSearchHit[] {
   if (!query.trim() || hits.length <= 1) return hits.slice();
 
   const queryTokens = tokenize(query);
@@ -167,10 +229,15 @@ export function rerankHits(query: string, hits: WebSearchHit[]): WebSearchHit[] 
     bm25Rank[row.index] = rank;
   });
 
+  const recencyRank = recencyRanks(hits, now);
+
   const fused = hits.map((hit, index) => ({
     hit,
     index,
-    score: 2 / (RRF_K + (bm25Rank[index] ?? index)) + 1 / (RRF_K + index),
+    score:
+      2 / (RRF_K + (bm25Rank[index] ?? index)) +
+      1 / (RRF_K + index) +
+      (recencyRank ? RECENCY_WEIGHT / (RRF_K + (recencyRank[index] ?? 0)) : 0),
   }));
 
   fused.sort((a, b) => {
