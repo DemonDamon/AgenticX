@@ -177,6 +177,7 @@ export async function planCalculations(
   if (deps.signal?.aborted) controller.abort();
   else deps.signal?.addEventListener("abort", onParentAbort, { once: true });
 
+  const startedAt = Date.now();
   try {
     const response = await (deps.fetchImpl ?? fetch)(deps.url, {
       method: "POST",
@@ -204,8 +205,11 @@ export async function planCalculations(
     // for nothing, the arithmetic was rejected, or the operands were not found
     // in the evidence. Without this the only way to tell them apart is to
     // guess from the wording of an answer.
+    // Elapsed too: this call is the whole runtime cost of the feature, and an
+    // empty plan is the case where that cost bought nothing.
     console.info(
-      `[calculator] stage=${input.traceStage} planned=${batch.length} executed=${executed.length} kept=${kept.length}` +
+      `[calculator] stage=${input.traceStage} ms=${Date.now() - startedAt}` +
+        ` planned=${batch.length} executed=${executed.length} kept=${kept.length}` +
         (kept.length
           ? ` ops=${kept.map((r) => `${r.operation}(${r.operands.join(",")})=${r.displayValue}`).join(" ")}`
           : ""),

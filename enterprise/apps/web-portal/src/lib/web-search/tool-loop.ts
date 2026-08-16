@@ -1523,7 +1523,16 @@ export async function runWebSearchTurn(
   const planCalculationsForTurn =
     calculatorEnabled && !searchFailed && allowsEvidencePlanning(calculationIntent);
   if (!planCalculationsForTurn) {
-    console.info(`[web-search] evidence calculation skipped intent=${calculationIntent}`);
+    // Name the condition that actually stopped it. Printing the intent for
+    // every skip read as though the intent were the cause, so a turn skipped
+    // by the tenant switch looked like one skipped by an `uncertain` hint —
+    // which is the opposite of what `uncertain` does.
+    const reason = !calculatorEnabled
+      ? "tenant_disabled"
+      : searchFailed
+        ? "retrieval_failed"
+        : `intent_${calculationIntent}`;
+    console.info(`[web-search] evidence calculation skipped reason=${reason}`);
   }
 
   const groundedMessages = searchFailed
