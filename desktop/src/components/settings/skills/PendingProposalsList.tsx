@@ -223,7 +223,7 @@ export function PendingProposalsList({
                   <button
                     type="button"
                     disabled={isBusy}
-                    className="flex h-7 items-center rounded-md bg-[var(--ui-btn-primary-bg)] px-3 text-[11px] font-medium text-white transition hover:bg-[var(--ui-btn-primary-bg-hover)] disabled:opacity-40"
+                    className="flex h-7 items-center rounded-md bg-[var(--ui-btn-primary-bg)] px-3 text-[11px] font-medium text-[var(--ui-btn-primary-text)] transition hover:bg-[var(--ui-btn-primary-bg-hover)] disabled:opacity-40"
                     onClick={() => void act(p.proposal_id, "approve")}
                   >
                     {isBusy ? "处理中…" : "批准"}
