@@ -263,6 +263,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
 
   listSessions: async (avatarId?: string) => ipcRenderer.invoke("list-sessions", avatarId),
+  getSessionLoopReview: async (sessionId: string, refresh?: boolean) =>
+    ipcRenderer.invoke("get-session-loop-review", sessionId, refresh),
   interruptSession: async (sessionId: string) => ipcRenderer.invoke("interrupt-session", sessionId),
   loadRuntimeConfig: async () => ipcRenderer.invoke("load-runtime-config"),
   saveRuntimeConfig: async (payload: {
