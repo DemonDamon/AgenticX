@@ -135,6 +135,16 @@ def _get_generate_app():
         console.print("[bold red]错误:[/bold red] 无法导入 generate 模块")
         raise typer.Exit(1)
 
+
+def _get_harness_app():
+    """Lazy import harness sub-application."""
+    try:
+        from agenticx.cli.harness_app import harness_app
+        return harness_app
+    except ImportError:
+        console.print("[bold red]错误:[/bold red] 无法导入 harness 模块")
+        raise typer.Exit(1)
+
 class AgenticXGroup(TyperGroup):
     """Custom group to provide typo suggestions for unknown commands."""
 
@@ -451,6 +461,13 @@ except Exception:
 try:
     generate_app = _get_generate_app()
     app.add_typer(generate_app)
+except Exception:
+    pass
+
+# 注册 harness 子命令 (延迟加载)
+try:
+    harness_app = _get_harness_app()
+    app.add_typer(harness_app)
 except Exception:
     pass
 
