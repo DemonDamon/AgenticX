@@ -39,6 +39,38 @@ const run = async (calculations: unknown, anchorTexts: readonly string[] = SOURC
 };
 
 describe("evidence calculations", () => {
+  it("gives the planner a reference point and a rule for choosing between time points", async () => {
+    // Ranking gets the fresher page nearer the top; it cannot say which figure
+    // ON a page belongs to which moment. Both prices sat in the same result
+    // set, each with its own inline timestamp, and only something reading the
+    // text can tell them apart. This is written as a general principle — most
+    // material worth computing over has more than one time point in it.
+    const fetchImpl = planner([]);
+    await planEvidenceCalculations({
+      deps: { url: "https://gw.example", headers: {}, fetchImpl },
+      body: {},
+      task: "用户当前请求：查最新价格并算出比率",
+      evidenceText: EVIDENCE,
+      anchorTexts: SOURCES,
+      now: new Date("2026-08-16T10:00:00+08:00"),
+    });
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const system = body.messages[0]!.content;
+    const user = body.messages[1]!.content;
+
+    // "最新" is meaningless to the planner without knowing when now is.
+    expect(user).toContain("今天是 2026-08-16");
+    // The ordering of trust, and that position in the list is not recency.
+    expect(system).toContain("数值自己标注的时间");
+    expect(system).toContain("材料里排在前面不代表更新");
+    // Recency must never win by breaking the basis, which is the way this
+    // makes an answer worse rather than better.
+    expect(system).toContain("口径优先");
+  });
+
   it("computes a derived ratio the model composed from primitives", async () => {
     // 净利率 is not a concept this module knows; the model expressed it as a
     // quotient of two figures that are on the page.
