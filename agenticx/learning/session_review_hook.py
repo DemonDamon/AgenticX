@@ -418,7 +418,7 @@ class SessionReviewHook(AgentHook):
                     })
                     continue
 
-                result = await _tool_skill_manage(args, session=None)
+                result = await _tool_skill_manage(args, session=session)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,

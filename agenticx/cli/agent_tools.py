@@ -6409,7 +6409,16 @@ def _queue_skill_proposal(
 ) -> str:
     from agenticx.learning.gepa_proposer import write_proposal
 
-    session_id = str(getattr(session, "session_id", "") or "") if session else ""
+    session_id = ""
+    if session is not None:
+        session_id = str(
+            getattr(session, "_session_id", "")
+            or getattr(session, "_usage_owner_session_id", "")
+            or getattr(session, "session_id", "")
+            or ""
+        ).strip()
+        if not review_model:
+            review_model = str(getattr(session, "model_name", "") or "").strip()
     pdir = write_proposal(
         base_skill=name,
         action=action,

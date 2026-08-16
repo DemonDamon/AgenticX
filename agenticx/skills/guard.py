@@ -61,6 +61,8 @@ __all__ = [
     "merge_verdicts",
     "resolve_trust_level",
     "finding_to_dict",
+    "format_guard_rejection_message",
+    "format_guard_block_for_user",
     "render_html_report",
     "write_html_report",
     "load_guard_config",
@@ -196,6 +198,14 @@ _CATEGORY_LABELS: dict[str, str] = {
     "credential": "凭据泄露",
     "injection": "命令/提示注入",
     "destructive": "破坏性操作",
+    "code_execution": "代码执行",
+}
+
+_TRUST_LABELS: dict[str, str] = {
+    "agent-created": "智能体新建",
+    "community": "社区",
+    "builtin": "内置",
+    "trusted": "可信来源",
 }
 
 
@@ -227,5 +237,27 @@ def format_guard_rejection_message(
         "建议：移除或改写上述片段后使用 skill_manage patch；"
         "勿反复 delete/create 或 file_write 绕路。"
     )
+    return "\n".join(lines)
+
+
+def format_guard_block_for_user(result: ScanResult, *, source: str | None = None) -> str:
+    """Desktop-facing guard rejection: Chinese, no internal tool jargon."""
+    trust = resolve_trust_level(source or result.source or "agent-created")
+    trust_label = _TRUST_LABELS.get(trust, trust)
+    n = len(result.findings)
+    lines = [
+        "这条技能没能写入：安全扫描判定内容有风险。",
+        f"按「{trust_label}」处理，高危项会直接拦截（命中 {n} 处）。",
+    ]
+    seen: set[str] = set()
+    for finding in result.findings[:4]:
+        cat = (finding.category or finding.pattern_name or "unknown").strip()
+        if cat in seen:
+            continue
+        seen.add(cat)
+        label = _CATEGORY_LABELS.get(cat, cat)
+        snippet = (finding.matched_text or finding.pattern_name or "").strip()[:60]
+        lines.append(f"· {label}：{snippet}")
+    lines.append("可以改写命中片段后再批准，或点拒绝丢弃这条提案。")
     return "\n".join(lines)
 

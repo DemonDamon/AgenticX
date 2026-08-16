@@ -488,8 +488,8 @@ patterns:
   pattern_name: shell_eval
   category: code_execution
   severity: dangerous
-  regex: eval\s+
-  description: Shell eval 执行动态命令
+  regex: eval\s+(?:["'`]|\$)
+  description: Shell eval 执行动态命令（不含 eval set / 评测用语）
   source: cls-certify-threat
 - pattern_id: TH-CE-010
   pattern_name: child_process

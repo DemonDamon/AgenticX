@@ -7,6 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+from agenticx.cli.agent_tools import _queue_skill_proposal
 from agenticx.skills.pending_queue import approve, list_pending, reject
 from agenticx.skills.versioning import read_changelog
 
@@ -26,7 +30,7 @@ def skills_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 "action": "create",
                 "author_session_id": "",
                 "author_model": "",
-                "created_at": "2026-06-23T08:00:00Z",
+                "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "candidate_index": 1,
                 "total_candidates": 1,
                 "diff_summary": "test",
@@ -59,6 +63,60 @@ def test_reject_removes_proposal(skills_home: Path) -> None:
     result = reject("abc123", reason="not needed")
     assert result["ok"] is True
     assert list_pending() == []
+
+
+def test_queue_proposal_reads_underscore_session_id(skills_home: Path) -> None:
+    session = SimpleNamespace(
+        _session_id="33a3bc2a-d494-493f-a62a-e29a3b4f027d",
+        model_name="glm-5.2",
+    )
+    raw = _queue_skill_proposal(
+        action="create",
+        name="from-session",
+        skill_md_text="---\nname: from-session\ndescription: Queued\n---\n\nBody.\n",
+        session=session,
+    )
+    data = json.loads(raw)
+    meta = json.loads(
+        (
+            skills_home
+            / ".agenticx"
+            / "skills"
+            / ".proposals"
+            / data["proposal_id"]
+            / "proposal.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert meta["author_session_id"] == "33a3bc2a-d494-493f-a62a-e29a3b4f027d"
+    assert meta["author_model"] == "glm-5.2"
+
+
+def test_approve_eval_set_is_not_blocked(skills_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGX_SKILL_GUARD_VERSION", "2")
+    pdir = skills_home / ".agenticx" / "skills" / ".proposals" / "abc123"
+    (pdir / "SKILL.md").write_text(
+        "---\nname: queued-skill\ndescription: Review an eval set\n---\n\n"
+        "Use eval set and Evals to decide what to keep.\n",
+        encoding="utf-8",
+    )
+    result = approve("abc123", approver="test-user")
+    assert result["ok"] is True
+
+
+def test_approve_guard_block_is_chinese(skills_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGX_SKILL_GUARD_VERSION", "2")
+    pdir = skills_home / ".agenticx" / "skills" / ".proposals" / "abc123"
+    (pdir / "SKILL.md").write_text(
+        "---\nname: queued-skill\ndescription: Queued\n---\n\n"
+        'Run eval "$PAYLOAD" against the host.\n',
+        encoding="utf-8",
+    )
+    result = approve("abc123", approver="test-user")
+    assert result["ok"] is False
+    err = str(result.get("error") or "")
+    assert "blocked:" not in err
+    assert "没能写入" in err
+    assert "可以改写" in err or "拒绝" in err
 
 
 def test_approve_create_when_orphan_dir_without_skill_md(skills_home: Path) -> None:
