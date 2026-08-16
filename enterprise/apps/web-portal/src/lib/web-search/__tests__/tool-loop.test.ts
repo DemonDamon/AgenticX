@@ -3,6 +3,7 @@ import {
   buildWebSearchQuery,
   compactHitsForModel,
   extractLastUserQuery,
+  formatWebSearchSourcesSse,
   pipeUpstreamSse,
   runWebSearchTurn,
   summarizeSelectedEvidence,
@@ -3084,5 +3085,33 @@ describe("web search calculator", () => {
       { id: "c1", operation: "quotient", operands: ["445.71", "907.03"] },
     ]);
     expect(system).not.toContain("本轮确定性计算结果");
+  });
+});
+
+describe("formatWebSearchSourcesSse", () => {
+  it("carries the provider timestamp so ranking can be audited afterwards", () => {
+    // Dropping it made the persisted record look as though the providers
+    // returned no dates, which is the opposite of what actually happened.
+    const frame = formatWebSearchSourcesSse(
+      [
+        {
+          title: "行情页",
+          url: "https://ex.com/a",
+          snippet: "价格 348.580",
+          publishedAt: "2026-08-07",
+        },
+      ],
+      [{ title: "无日期来源", url: "https://ex.com/b", snippet: "x" }],
+    );
+    const payload = JSON.parse(frame.replace(/^data: /, "").trim()) as {
+      agenticx_web_search_sources: Array<Record<string, unknown>>;
+    };
+    expect(payload.agenticx_web_search_sources[0]).toMatchObject({
+      url: "https://ex.com/a",
+      usedByModel: true,
+      publishedAt: "2026-08-07",
+    });
+    // Absent stays absent rather than becoming an empty string.
+    expect(payload.agenticx_web_search_sources[1]).not.toHaveProperty("publishedAt");
   });
 });

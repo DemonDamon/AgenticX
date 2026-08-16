@@ -364,19 +364,21 @@ export function formatWebSearchSourcesSse(
   selected: WebSearchHit[],
   remainder: WebSearchHit[] = [],
 ): string {
+  // `publishedAt` travels with the hit so a finished turn can be audited. It
+  // was dropped here, which made the persisted record look as though the
+  // providers returned no dates at all — the ranking could not be checked
+  // afterwards, and an investigation into a stale figure reached the opposite
+  // conclusion from the truth because of it.
+  const row = (hit: WebSearchHit, usedByModel: boolean) => ({
+    title: hit.title,
+    url: hit.url,
+    snippet: hit.snippet,
+    usedByModel,
+    ...(hit.publishedAt ? { publishedAt: hit.publishedAt } : {}),
+  });
   const payload = [
-    ...selected.map((hit) => ({
-      title: hit.title,
-      url: hit.url,
-      snippet: hit.snippet,
-      usedByModel: true,
-    })),
-    ...remainder.map((hit) => ({
-      title: hit.title,
-      url: hit.url,
-      snippet: hit.snippet,
-      usedByModel: false,
-    })),
+    ...selected.map((hit) => row(hit, true)),
+    ...remainder.map((hit) => row(hit, false)),
   ];
   return sseDataFrame({ agenticx_web_search_sources: payload });
 }

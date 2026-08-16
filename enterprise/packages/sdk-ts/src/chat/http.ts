@@ -353,6 +353,7 @@ export class HttpChatClient implements ChatClient {
               url?: string;
               snippet?: string;
               usedByModel?: boolean;
+              publishedAt?: string;
             }>;
             agenticx_web_search_trace?: unknown;
             agenticx_deep_research_event?: DeepResearchEvent;
@@ -409,11 +410,13 @@ export class HttpChatClient implements ChatClient {
                   const snippet = String(item.snippet ?? "").trim();
                   const usedByModel =
                     item.usedByModel === true ? true : item.usedByModel === false ? false : undefined;
+                  const publishedAt = String(item.publishedAt ?? "").trim();
                   return {
                     title,
                     url,
                     snippet,
                     ...(usedByModel === undefined ? {} : { usedByModel }),
+                    ...(publishedAt ? { publishedAt } : {}),
                   };
                 })
                 .filter((item) => item.url),

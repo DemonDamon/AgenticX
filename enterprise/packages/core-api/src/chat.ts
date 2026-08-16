@@ -36,6 +36,12 @@ export type WebSearchSource = {
   snippet: string;
   /** True when this hit was injected into the model prompt for the turn. */
   usedByModel?: boolean;
+  /**
+   * Provider publication timestamp as reported, unparsed. Absent for providers
+   * that do not report one, which is most of them; persisted so retrieval
+   * ordering can be checked after the fact.
+   */
+  publishedAt?: string;
 };
 
 /**

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeInboundMessages } from "./chat-message-sanitize";
+import {
+  MAX_PUBLISHED_AT_CHARS,
+  sanitizeInboundMessages,
+} from "./chat-message-sanitize";
 
 const SESSION = "01HYAAAAAAAAAAAAAAAAAAAAA1";
 const TENANT = "01HYAAAAAAAAAAAAAAAAAAAAA2";
@@ -142,6 +145,30 @@ describe("sanitizeInboundMessages", () => {
       },
     ]);
     expect(messages[0]?.web_search_sources).toHaveLength(1);
+  });
+
+  it("preserves and bounds publishedAt on web_search_sources", () => {
+    // Provider text, so it must survive the round trip without being parsed:
+    // this is the only field that lets anyone check retrieval ordering after
+    // the fact.
+    const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01HYAAAAAAAAAAAAAAAAAAAAB1",
+        role: "assistant",
+        content: "答案 [1][2][3]",
+        created_at: "2026-08-16T12:00:00.000Z",
+        web_search_sources: [
+          { title: "有日期", url: "https://a.example", snippet: "s", publishedAt: "2026-08-07" },
+          { title: "无日期", url: "https://b.example", snippet: "s" },
+          { title: "垃圾日期", url: "https://c.example", snippet: "s", publishedAt: "x".repeat(500) },
+        ],
+      },
+    ]);
+    const sources = messages[0]?.web_search_sources ?? [];
+    expect(sources[0]?.publishedAt).toBe("2026-08-07");
+    expect(sources[1]).not.toHaveProperty("publishedAt");
+    // Kept, but bounded — an unparseable value must not fail the write.
+    expect(sources[2]?.publishedAt?.length).toBe(MAX_PUBLISHED_AT_CHARS);
   });
 
   it("preserves usedByModel on web_search_sources", () => {
