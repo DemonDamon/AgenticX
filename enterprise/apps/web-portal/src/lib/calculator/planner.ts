@@ -191,13 +191,26 @@ export async function planCalculations(
       return [];
     }
     const planned = parseLlmJson<unknown>(completionText(await response.json()));
-    const executed = executeCalculatorBatch(planned).filter(
+    const batch = executeCalculatorBatch(planned);
+    const executed = batch.filter(
       (result): result is CalculatorResult & { value: string; displayValue: string } =>
         result.status === "ok" &&
         typeof result.value === "string" &&
         typeof result.displayValue === "string",
     );
-    return anchoredResults(executed, input.anchors);
+    const kept = anchoredResults(executed, input.anchors);
+    // Three counts, because "no calculation reached the answer" has three very
+    // different causes and none of them is visible downstream: the model asked
+    // for nothing, the arithmetic was rejected, or the operands were not found
+    // in the evidence. Without this the only way to tell them apart is to
+    // guess from the wording of an answer.
+    console.info(
+      `[calculator] stage=${input.traceStage} planned=${batch.length} executed=${executed.length} kept=${kept.length}` +
+        (kept.length
+          ? ` ops=${kept.map((r) => `${r.operation}(${r.operands.join(",")})=${r.displayValue}`).join(" ")}`
+          : ""),
+    );
+    return kept;
   } catch (error) {
     if (timedOut) {
       console.warn(
