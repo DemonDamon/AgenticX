@@ -1,3 +1,4 @@
+import type { CalculationIntent } from "../calculator/intent";
 import type { DeepResearchIntentConfidence } from "../deep-research/clarification-policy";
 
 /** Immutable feature requests parsed from the client body. */
@@ -19,12 +20,15 @@ export type PreparedSearchPlan = {
   readonly searchQueries: readonly string[];
   readonly confidence: number;
   readonly source: "auto-route";
+  /** Advisory hint for the evidence calculator; `uncertain` when unstated. */
+  readonly calculationIntent: CalculationIntent;
 };
 
 export type AutomaticTurnPlan =
   | {
       readonly mode: "plain";
       readonly reason: string;
+      readonly calculationIntent: CalculationIntent;
     }
   | {
       readonly mode: "web";
@@ -65,6 +69,7 @@ export type TurnPlan =
       readonly mode: "plain";
       readonly source: "default" | "auto-route";
       readonly reason?: string;
+      readonly calculationIntent?: CalculationIntent;
     };
 
 export function selectTurnPlan(
@@ -80,6 +85,7 @@ export function selectTurnPlan(
         mode: "plain",
         source: "auto-route",
         reason: automaticPlan.reason,
+        calculationIntent: automaticPlan.calculationIntent,
       };
     }
     if (automaticPlan.mode === "deep") {

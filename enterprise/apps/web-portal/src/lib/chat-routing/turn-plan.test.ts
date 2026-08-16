@@ -58,6 +58,7 @@ describe("selectTurnPlan", () => {
         query: "王虹 近期新闻",
         needSearch: true,
         searchQueries: ["数学家 王虹 近期新闻"],
+        calculationIntent: "uncertain" as const,
         confidence: 0.96,
         source: "auto-route",
       },
@@ -85,6 +86,7 @@ describe("selectTurnPlan", () => {
         query: "近期新闻",
         needSearch: true,
         searchQueries: ["近期新闻"],
+        calculationIntent: "uncertain" as const,
         confidence: 0.96,
         source: "auto-route",
       },
@@ -104,12 +106,13 @@ describe("selectTurnPlan", () => {
           webSearchRequested: true,
           automaticDeepResearchRequested: true,
         }),
-        { mode: "plain", reason: "基于现有上下文即可回答" },
+        { mode: "plain", reason: "基于现有上下文即可回答", calculationIntent: "uncertain" },
       ),
     ).toEqual({
       mode: "plain",
       source: "auto-route",
       reason: "基于现有上下文即可回答",
+      calculationIntent: "uncertain",
     });
   });
 

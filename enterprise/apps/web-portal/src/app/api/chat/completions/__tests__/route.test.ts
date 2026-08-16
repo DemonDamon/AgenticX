@@ -295,6 +295,9 @@ describe("POST /api/chat/completions deep-research preflight", () => {
           url: expect.stringContaining("/v1/chat/completions"),
           headers: expect.objectContaining({ "x-agenticx-provider": "provider-a" }),
         }),
+        // No automatic routing ran for this turn, so no hint is passed and the
+        // module's own gate decides.
+        {},
       );
       const forwarded = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
       expect(forwarded.messages[0]).toEqual({

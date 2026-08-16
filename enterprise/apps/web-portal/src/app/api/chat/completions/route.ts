@@ -451,11 +451,17 @@ export async function POST(request: Request) {
 
   if (parsedBody) {
     const directBody = withSanitizedMessages(parsedBody);
-    const calculatedBody = await withCalculatorContext(directBody, {
-      url: GATEWAY_COMPLETIONS_URL,
-      headers: gatewayHeaders,
-      signal: request.signal,
-    });
+    const calculatedBody = await withCalculatorContext(
+      directBody,
+      {
+        url: GATEWAY_COMPLETIONS_URL,
+        headers: gatewayHeaders,
+        signal: request.signal,
+      },
+      // Automatic routing already read this turn on its way to choosing plain
+      // chat; if it said the answer needs arithmetic, that outranks the pattern.
+      turnPlan.mode === "plain" ? { intent: turnPlan.calculationIntent } : {},
+    );
     forwardBody = JSON.stringify(calculatedBody ?? directBody);
   }
 

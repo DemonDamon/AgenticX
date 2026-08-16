@@ -17,8 +17,30 @@ import {
   TenantDailySearchProviderQuotaError,
 } from "../daily-provider-quota";
 import { readDirectPage, type DirectPageView } from "../direct-page";
+import type { PreparedSearchPlan } from "../../chat-routing/turn-plan";
+import type { CalculationIntent } from "../../calculator/intent";
 
 type ExecuteSearchConfig = Parameters<typeof executeWebSearch>[2];
+
+/**
+ * The body of the streaming answer call.
+ *
+ * A turn now makes several gateway calls — query rewrite and calculation
+ * planning are both non-streaming — so the answer is selected by `stream`
+ * rather than by position.
+ */
+function answerBody<T extends { stream?: unknown }>(bodies: readonly T[]): T | undefined {
+  return bodies.find((body) => body.stream === true);
+}
+
+/** Non-streaming calls: query rewrite, and calculation planning when it runs. */
+function preflightBodies<T extends { stream?: unknown }>(bodies: readonly T[]): T[] {
+  return bodies.filter((body) => body.stream === false);
+}
+
+function answerBodies<T extends { stream?: unknown }>(bodies: readonly T[]): T[] {
+  return bodies.filter((body) => body.stream === true);
+}
 
 function sseResponse(text: string): Response {
   return new Response(text, {
@@ -223,6 +245,7 @@ describe("web search tool loop", () => {
           query: "read arXiv 2606.19348",
           needSearch: true,
           searchQueries: ["arXiv 2606.19348"],
+          calculationIntent: "uncertain" as const,
           confidence: 0.98,
           source: "auto-route",
         },
@@ -235,8 +258,8 @@ describe("web search tool loop", () => {
       readUrl: "https://arxiv.org/html/2606.19348",
       question: "你能读懂这篇文章嘛?",
     });
-    expect(bodies).toHaveLength(1);
-    expect(JSON.stringify(bodies[0])).toContain("网页直读状态");
+    expect(answerBodies(bodies)).toHaveLength(1);
+    expect(JSON.stringify(answerBody(bodies))).toContain("网页直读状态");
     expect(JSON.stringify(bodies[0])).toContain("Abstract evidence");
     const text = await response.text();
     expect(text).toContain('"reason":"direct_page_html"');
@@ -309,8 +332,10 @@ describe("web search tool loop", () => {
 
     expect(executeSearch).not.toHaveBeenCalled();
     expect(readPage).toHaveBeenCalledTimes(1);
-    expect(bodies).toHaveLength(2);
-    expect(JSON.stringify(bodies[1])).toContain("Table 8 Pass Rate Internal Engineers 80 percent");
+    expect(answerBodies(bodies)).toHaveLength(1);
+    expect(JSON.stringify(answerBody(bodies))).toContain(
+      "Table 8 Pass Rate Internal Engineers 80 percent",
+    );
   });
 
   it("expands a weak cross-language document hit before answering", async () => {
@@ -385,8 +410,8 @@ describe("web search tool loop", () => {
 
     expect(readPage).toHaveBeenCalledTimes(1);
     expect(executeSearch).not.toHaveBeenCalled();
-    expect(bodies).toHaveLength(2);
-    expect(JSON.stringify(bodies[0])).toContain("target_document");
+    expect(answerBodies(bodies)).toHaveLength(1);
+    expect(JSON.stringify(preflightBodies(bodies)[0])).toContain("target_document");
     expect(JSON.stringify(bodies[1])).toContain("hybrid attention mechanism");
     expect(JSON.stringify(bodies[1])).toContain("Evaluation results compare model quality");
     const text = await response.text();
@@ -441,8 +466,8 @@ describe("web search tool loop", () => {
 
     expect(readPage).toHaveBeenCalledTimes(1);
     expect(executeSearch).not.toHaveBeenCalled();
-    expect(bodies).toHaveLength(1);
-    expect(JSON.stringify(bodies[0])).toContain("Figure 11: Win-rate comparison");
+    expect(answerBodies(bodies)).toHaveLength(1);
+    expect(JSON.stringify(answerBody(bodies))).toContain("Figure 11: Win-rate comparison");
     const text = await response.text();
     expect(text).toContain('"reason":"direct_page_html"');
     expect(text).toContain('"queryResolutionMs":0');
@@ -557,8 +582,8 @@ describe("web search tool loop", () => {
 
     expect(readPage).toHaveBeenCalledTimes(1);
     expect(executeSearch).toHaveBeenCalledTimes(1);
-    expect(bodies).toHaveLength(1);
-    const gatewayBody = JSON.stringify(bodies[0]);
+    expect(answerBodies(bodies)).toHaveLength(1);
+    const gatewayBody = JSON.stringify(answerBody(bodies));
     expect(gatewayBody).toContain("正文未能完整提取");
     expect(gatewayBody).toContain("不得声称已打开、通读或直接读取该页面");
 
@@ -569,7 +594,7 @@ describe("web search tool loop", () => {
   });
 
   it("runs server-side search first and strips agenticx_web_search / tools on final stream", async () => {
-    const bodies: unknown[] = [];
+    const bodies: Array<{ stream?: unknown }> = [];
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body ?? "{}")));
       return sseResponse('data: {"choices":[{"delta":{"content":"基于检索的回答 [1]"}}]}\n\ndata: [DONE]\n\n');
@@ -603,8 +628,8 @@ describe("web search tool loop", () => {
     );
 
     expect(executeSearch).toHaveBeenCalledTimes(1);
-    expect(bodies).toHaveLength(1);
-    const finalBody = bodies[0] as {
+    expect(answerBodies(bodies)).toHaveLength(1);
+    const finalBody = answerBody(bodies) as {
       agenticx_web_search?: unknown;
       tools?: unknown;
       tool_choice?: unknown;
@@ -1031,7 +1056,10 @@ describe("web search tool loop", () => {
 
     expect(executeSearch).toHaveBeenCalledTimes(1);
     expect(executeSearch.mock.calls[0]?.[0]).toBe("广州南沙 今天天气");
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    // Query rewrite, calculation planning, answer. The middle one is the cost
+    // of the calculator: this snippet states 24 and 30, so a calculation is
+    // possible and the model is asked. It declines, and nothing is injected.
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
   it("skips web search for greetings", async () => {
@@ -1271,7 +1299,7 @@ describe("web search tool loop", () => {
   });
 
   it("injects more than 10 hits for large-context models (AC-5)", async () => {
-    const bodies: Array<{ messages?: Array<{ role?: string; content?: string | null }> }> = [];
+    const bodies: Array<{ stream?: boolean; messages?: Array<{ role?: string; content?: string | null }> }> = [];
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body ?? "{}")));
       return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
@@ -1303,13 +1331,13 @@ describe("web search tool loop", () => {
       },
     );
 
-    const system = String(bodies[0]?.messages?.[0]?.content ?? "");
+    const system = String(answerBody(bodies)?.messages?.[0]?.content ?? "");
     const injectedCount = (system.match(/^\[\d+\] /gm) ?? []).length;
     expect(injectedCount).toBeGreaterThan(10);
   });
 
   it("keeps SSE source order aligned with model injection indices (AC-6)", async () => {
-    const bodies: Array<{ messages?: Array<{ role?: string; content?: string | null }> }> = [];
+    const bodies: Array<{ stream?: boolean; messages?: Array<{ role?: string; content?: string | null }> }> = [];
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body ?? "{}")));
       return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
@@ -1352,7 +1380,7 @@ describe("web search tool loop", () => {
       },
     );
 
-    const system = String(bodies[0]?.messages?.[0]?.content ?? "");
+    const system = String(answerBody(bodies)?.messages?.[0]?.content ?? "");
     const injectedUrls = [...system.matchAll(/^URL: (https:\/\/\S+)/gm)].map((m) => m[1]!);
     expect(injectedUrls.length).toBeGreaterThan(0);
 
@@ -1478,8 +1506,8 @@ describe("web search tool loop", () => {
     );
 
     expect(executeSearch).not.toHaveBeenCalled();
-    expect(bodies.map((body) => body.stream)).toEqual([false, true]);
-    expect(String(bodies[1]?.messages?.[0]?.content)).toContain("本轮说明");
+    expect(answerBodies(bodies)).toHaveLength(1);
+    expect(String(answerBody(bodies)?.messages?.[0]?.content)).toContain("本轮说明");
     const text = await response.text();
     expect(text).toContain("1+1=2");
     expect(text).not.toContain("agenticx_web_search_sources");
@@ -2026,13 +2054,16 @@ describe("web search tool loop", () => {
           query: "数学家 王虹 近期新闻",
           needSearch: true,
           searchQueries: ["数学家 王虹 近期新闻", "王虹 最新动态"],
+          calculationIntent: "uncertain" as const,
           confidence: 0.97,
           source: "auto-route",
         },
       },
     );
 
-    expect(gatewayBodies).toEqual([{ stream: true }]);
+    expect(gatewayBodies.filter((body) => body.stream === true)).toEqual([
+      { stream: true },
+    ]);
     expect(executeSearch).toHaveBeenCalledTimes(1);
     expect(executeSearch).toHaveBeenCalledWith(
       "数学家 王虹 近期新闻",
@@ -2153,7 +2184,8 @@ describe("web search tool loop", () => {
       },
     );
 
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    // Query rewrite, calculation planning, answer.
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(executeSearch).toHaveBeenCalledTimes(1);
     expect(executeSearch).toHaveBeenCalledWith(
       "数学家 王虹 最近几天 新闻",
@@ -2502,5 +2534,487 @@ describe("web search tool loop", () => {
     expect(content).not.toContain(THINK_OPEN);
     expect(content).not.toContain("[8]");
     expect(content).toContain("蔡徐坤");
+  });
+});
+
+describe("web search calculator", () => {
+  const HITS: WebSearchHit[] = [
+    {
+      title: "公司半年报",
+      url: "https://ex.com/hy",
+      snippet: "上半年营业收入 907.03 亿元，归属于母公司股东的净利润 445.17 亿元。",
+    },
+    {
+      title: "上年同期",
+      url: "https://ex.com/last",
+      snippet: "上年同期营业收入 893.90 亿元。",
+    },
+  ];
+
+  /** Gateway that answers the rewrite, the calculation planner and the answer. */
+  const gateway = (calculations: unknown) => {
+    const bodies: Array<{
+      stream?: boolean;
+      messages?: Array<{ role?: string; content?: string }>;
+    }> = [];
+    const stages: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      bodies.push(body as (typeof bodies)[number]);
+      const stage = (init?.headers as Record<string, string> | undefined)?.[
+        "x-agenticx-trace-stage"
+      ];
+      if (stage) stages.push(stage);
+      if (stage === "chat.search-calculator") {
+        return jsonResponse({
+          choices: [{ message: { content: JSON.stringify({ calculations }) } }],
+        });
+      }
+      if (body.stream === false) {
+        return jsonResponse({
+          choices: [{ message: { content: '{"resolved_query":"公司 半年报","confidence":0.9}' } }],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+    return { fetchImpl, bodies, stages };
+  };
+
+  const turn = async (
+    calculations: unknown,
+    preparedSearchPlan?: PreparedSearchPlan,
+  ) => {
+    const { fetchImpl, bodies, stages } = gateway(calculations);
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "这家公司上半年净利率和营收同比是多少" }],
+        agenticx_web_search: true,
+        tools: [{ type: "function", function: { name: "web_search" } }],
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: { authorization: "Bearer t" },
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch: async () => HITS,
+      },
+      preparedSearchPlan ? { preparedSearchPlan } : {},
+    );
+    await readText(res);
+    return { bodies, stages, system: String(answerBody(bodies)?.messages?.[0]?.content ?? "") };
+  };
+
+  const routedPlan = (calculationIntent: CalculationIntent): PreparedSearchPlan => ({
+    query: "某公司 上半年 营收 净利润",
+    needSearch: true,
+    searchQueries: ["某公司 上半年 营收 净利润"],
+    confidence: 0.95,
+    source: "auto-route",
+    calculationIntent,
+  });
+
+  it("computes what the model asked for and hands the answer the exact value", async () => {
+    // 净利率 and 同比 are the model's reading of the question; this module
+    // knows neither, only quotient and percentage_change over stated figures.
+    const { system, stages } = await turn([
+      { id: "c1", operation: "quotient", operands: ["445.17", "907.03"] },
+      { id: "c2", operation: "percentage_change", operands: ["893.90", "907.03"] },
+    ]);
+    expect(stages).toContain("chat.search-calculator");
+    expect(system).toContain("本轮确定性计算结果");
+    expect(system).toContain("0.49079");
+    expect(system).toContain("1.46884");
+    // The instruction to use them must precede the evidence they came from.
+    expect(system.indexOf("本轮确定性计算结果")).toBeLessThan(system.indexOf("联网搜索结果"));
+  });
+
+  it("still forwards no tools upstream and does not disturb the sources frame", async () => {
+    const { bodies } = await turn([
+      { id: "c1", operation: "quotient", operands: ["445.17", "907.03"] },
+    ]);
+    const answer = answerBody(bodies) as Record<string, unknown> | undefined;
+    expect(answer?.tools).toBeUndefined();
+    expect(answer?.tool_choice).toBeUndefined();
+    expect(answer?.stream).toBe(true);
+  });
+
+  it("leaves the grounded answer untouched when nothing is computable", async () => {
+    const { system } = await turn([]);
+    expect(system).not.toContain("本轮确定性计算结果");
+    expect(system).toContain("联网搜索结果");
+  });
+
+  it("skips the planning call only when a routing agent said it is not needed", async () => {
+    const { stages, system } = await turn(
+      [{ id: "c1", operation: "quotient", operands: ["445.17", "907.03"] }],
+      routedPlan("not_needed"),
+    );
+    expect(stages).not.toContain("chat.search-calculator");
+    expect(system).not.toContain("本轮确定性计算结果");
+    expect(system).toContain("联网搜索结果");
+  });
+
+  it("plans on needed, on uncertain, and when no agent judged the turn", async () => {
+    // uncertain is the honest answer before retrieval — "上半年表现如何" cannot
+    // be settled until the pages are in hand — so it must not skip. Absent is
+    // uncertain too: the rewrite agent does not run on every search turn.
+    for (const plan of [routedPlan("needed"), routedPlan("uncertain"), undefined]) {
+      const { stages, system } = await turn(
+        [{ id: "c1", operation: "quotient", operands: ["445.17", "907.03"] }],
+        plan,
+      );
+      expect(stages).toContain("chat.search-calculator");
+      expect(system).toContain("0.49079");
+    }
+  });
+
+
+  it("computes over a page the user named, not only over search results", async () => {
+    // This path returns before the ordinary search flow. It was reported as
+    // covered while it was not: "打开这个财报页，算一下净利率" reached the
+    // answering model with the figures and no arithmetic.
+    const stages: string[] = [];
+    const bodies: Array<{
+      stream?: boolean;
+      messages?: Array<{ role?: string; content?: string }>;
+    }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      const stage = (init?.headers as Record<string, string> | undefined)?.[
+        "x-agenticx-trace-stage"
+      ];
+      if (stage) stages.push(stage);
+      if (stage === "chat.search-calculator") {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  calculations: [
+                    { id: "c1", operation: "quotient", operands: ["445.17", "907.03"] },
+                  ],
+                }),
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const readPage = vi.fn(async (reference): Promise<DirectPageView> => ({
+      reference,
+      title: "某公司半年报",
+      text: "某公司半年报\n\n上半年实现营业收入 907.03 亿元。\n\n归属于母公司股东的净利润 445.17 亿元。",
+      rawChars: 120,
+      coverage: "full_html",
+      backend: "native",
+    }));
+
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: "https://ex.com/hy 打开这个财报页，帮我算一下净利率",
+          },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch: async () => [],
+        readPage,
+      },
+    );
+    await readText(res);
+
+    expect(stages).toContain("chat.search-calculator");
+    const system = String(answerBody(bodies)?.messages?.[0]?.content ?? "");
+    expect(system).toContain("本轮确定性计算结果");
+    expect(system).toContain("0.49079");
+  });
+
+  it("still calculates when the turn skips search entirely", async () => {
+    // "1+2" takes the arithmetic fast path and never searches. Answering it
+    // from the model's own head was worse with the toggle on than off.
+    const stages: string[] = [];
+    const bodies: Array<{
+      stream?: boolean;
+      messages?: Array<{ role?: string; content?: string }>;
+    }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      const stage = (init?.headers as Record<string, string> | undefined)?.[
+        "x-agenticx-trace-stage"
+      ];
+      if (stage) stages.push(stage);
+      if (stage === "chat.calculator") {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  calculations: [{ id: "c1", operation: "sum", operands: ["0.1", "0.2"] }],
+                }),
+              },
+            },
+          ],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "0.1+0.2" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch: async () => {
+          throw new Error("search must not run for a pure expression");
+        },
+      },
+    );
+    const text = await readText(res);
+
+    expect(stages).toContain("chat.calculator");
+    const system = String(answerBody(bodies)?.messages?.[0]?.content ?? "");
+    expect(system).toContain('"value":"0.3"');
+    expect(text).toContain("ok");
+  });
+
+  it("shows the planner the request, not only the compressed retrieval term", async () => {
+    // The resolved query is built to be short — the instruction to compute is
+    // exactly what gets compressed out of it.
+    let plannerPrompt = "";
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const stage = (init?.headers as Record<string, string> | undefined)?.[
+        "x-agenticx-trace-stage"
+      ];
+      if (stage === "chat.search-calculator") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          messages?: Array<{ content?: string }>;
+        };
+        plannerPrompt = String(body.messages?.[1]?.content ?? "");
+        return jsonResponse({
+          choices: [{ message: { content: '{"calculations":[]}' } }],
+        });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "查一下某公司最新股价和 EPS，并帮我算出 PE" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch: async () => [
+          { title: "某公司行情", url: "https://ex.com/q", snippet: "最新股价 42.50 元，EPS 3.40 元。" },
+        ],
+      },
+      {
+        preparedSearchPlan: {
+          query: "某公司 最新股价 EPS",
+          needSearch: true,
+          searchQueries: ["某公司 最新股价 EPS"],
+          confidence: 0.95,
+          source: "auto-route",
+          calculationIntent: "uncertain" as const,
+        },
+      },
+    );
+    await readText(res);
+
+    expect(plannerPrompt).toContain("并帮我算出 PE");
+    expect(plannerPrompt).toContain("某公司 最新股价 EPS");
+  });
+
+
+  /** Answers the calculation planner, the query rewriter, then the stream. */
+  const noEvidenceGateway = (rewrite?: string) => {
+    const stages: string[] = [];
+    const bodies: Array<{
+      stream?: unknown;
+      messages?: Array<{ role?: string; content?: string }>;
+    }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      bodies.push(body as (typeof bodies)[number]);
+      const stage = (init?.headers as Record<string, string> | undefined)?.[
+        "x-agenticx-trace-stage"
+      ];
+      if (stage) stages.push(stage);
+      if (stage === "chat.calculator") {
+        return jsonResponse({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  calculations: [
+                    { id: "c1", operation: "difference", operands: ["31.2", "28.5"] },
+                  ],
+                }),
+              },
+            },
+          ],
+        });
+      }
+      if (rewrite && body.stream === false) {
+        return jsonResponse({ choices: [{ message: { content: rewrite } }] });
+      }
+      return sseResponse('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n');
+    });
+    return { fetchImpl, bodies, stages };
+  };
+
+  const MARGIN_QUESTION = "去年毛利率 28.5，今年 31.2，高了多少";
+
+  it("lets a no-search decision still open a calculation the pattern missed", async () => {
+    // The rewriter says this needs no public web facts and, in the same reply,
+    // that the answer needs arithmetic. Nothing in the pattern gate recognises
+    // the question, so without the hint the answer is whatever the model works
+    // out in its head.
+    const { fetchImpl, bodies, stages } = noEvidenceGateway(
+      JSON.stringify({
+        need_search: false,
+        resolved_query: MARGIN_QUESTION,
+        search_queries: [],
+        confidence: 0.95,
+        calculation_intent: "needed",
+      }),
+    );
+    const executeSearch = vi.fn(async () => []);
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "上次那家公司的毛利率是多少" },
+          { role: "assistant", content: "去年 28.5%。" },
+          { role: "user", content: MARGIN_QUESTION },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch,
+      },
+    );
+    await readText(res);
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    expect(stages).toContain("chat.calculator");
+    expect(String(answerBody(bodies)?.messages?.[0]?.content)).toContain('"value":"2.7"');
+  });
+
+  it("keeps computing when an administrator disabled search, hint and all", async () => {
+    const { fetchImpl, bodies, stages } = noEvidenceGateway();
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "31.2 - 28.5" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: false,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch: async () => [],
+      },
+    );
+    const text = await readText(res);
+
+    expect(stages).toContain("chat.calculator");
+    expect(String(answerBody(bodies)?.messages?.[0]?.content)).toContain('"value":"2.7"');
+    // The administrator notice is still the first thing the reader sees.
+    expect(text).toContain("管理员已关闭联网搜索");
+  });
+
+  it("keeps computing when retrieval fails, and still says retrieval failed", async () => {
+    const { fetchImpl, bodies, stages } = noEvidenceGateway();
+    const res = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "查一下今年行情。另外 31.2 - 28.5 是多少" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 5,
+        }),
+        executeSearch: async () => [],
+      },
+    );
+    const text = await readText(res);
+
+    expect(stages).toContain("chat.calculator");
+    expect(String(answerBody(bodies)?.messages?.[0]?.content)).toContain('"value":"2.7"');
+    expect(text).toContain("联网搜索暂不可用");
+  });
+
+  it("drops a figure the sources never stated rather than computing it exactly", async () => {
+    // 445.17 misread as 445.71: the arithmetic would be perfect and the answer
+    // wrong, and it travels in a system message nobody sees.
+    const { system } = await turn([
+      { id: "c1", operation: "quotient", operands: ["445.71", "907.03"] },
+    ]);
+    expect(system).not.toContain("本轮确定性计算结果");
   });
 });

@@ -71,14 +71,6 @@ describe("calculator turn routing", () => {
     expect(fires("预算 100 万和 200 万怎么分")).toBe(true);
   });
 
-  it("still needs more than digits, so ordinary numeric prose is free", () => {
-    // The gate's whole job: no operation named, no call. This is what keeps
-    // dates, versions and error codes off the blocking path.
-    expect(fires("2026年8月14日那次会议讲了什么")).toBe(false);
-    expect(fires("iPhone 17 Pro 和 iPhone 16 有什么区别")).toBe(false);
-    expect(fires("错误码 500 和 502 分别什么意思")).toBe(false);
-  });
-
   it("does not spend a blocking planner call on ordinary numeric prose", () => {
     // Every one of these fired before: the gate only counted digits, and the
     // call sits in front of the answer.
@@ -170,6 +162,38 @@ describe("calculator turn routing", () => {
         },
       ),
     ).resolves.toBeNull();
+  });
+
+  it("lets automatic routing open a turn the pattern would have closed", async () => {
+    // "这家公司的毛利率比去年高多少" names no operation word the gate knows and
+    // its numbers are in the answer, not the question. The router already read
+    // the turn on its way to choosing plain chat; that judgement outranks a
+    // pattern that cannot read.
+    const question = "去年毛利率 28.5，今年 31.2，高了多少";
+    expect(shouldPlanCalculator([{ role: "user", content: question }])).toBe(false);
+
+    const fetchImpl = vi.fn(async () =>
+      gatewayJson('{"calculations":[{"id":"c1","operation":"difference","operands":["31.2","28.5"]}]}'),
+    );
+    const body = await withCalculatorContext(
+      { messages: [{ role: "user", content: question }] },
+      { url: "https://gw.example", headers: {}, fetchImpl: fetchImpl as typeof fetch },
+      { intent: "needed" },
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(body)).toContain("2.7");
+  });
+
+  it("never lets the hint veto a turn the gate recognised", async () => {
+    // The reverse direction is deliberately not wired: one missed field must
+    // not silently send an arithmetic question back to mental math.
+    const fetchImpl = vi.fn(async () => gatewayJson('{"calculations":[]}'));
+    await withCalculatorContext(
+      { messages: [{ role: "user", content: "0.1 + 0.2 等于多少" }] },
+      { url: "https://gw.example", headers: {}, fetchImpl: fetchImpl as typeof fetch },
+      { intent: "not_needed" },
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("does not call the planner for ordinary non-numeric chat", async () => {

@@ -154,6 +154,51 @@ describe("automatic turn routing", () => {
     expect(payload.current_query?.length).toBeLessThanOrEqual(1_600);
   });
 
+  it("reads the calculation hint where the prompt asks for it", () => {
+    // The prompt puts calculation_intent beside `mode`, not inside search_plan.
+    // Parsing it from the nested plan demoted every honest top-level answer to
+    // `uncertain`, so `not_needed` never saved the call it exists to save.
+    const webPlan = (raw: string) => {
+      const outcome = parseAutoTurnPlan(raw, AUTO_OPTIONS);
+      return outcome?.kind === "planned" && outcome.plan.mode === "web"
+        ? outcome.plan.searchPlan.calculationIntent
+        : undefined;
+    };
+    const searchPlan = {
+      need_search: true,
+      resolved_query: "某公司 最新股价",
+      search_queries: ["某公司 最新股价"],
+      confidence: 0.96,
+    };
+    expect(
+      webPlan(
+        JSON.stringify({
+          mode: "web",
+          search_plan: searchPlan,
+          reason: "取证",
+          calculation_intent: "not_needed",
+        }),
+      ),
+    ).toBe("not_needed");
+    expect(
+      webPlan(
+        JSON.stringify({
+          mode: "web",
+          search_plan: searchPlan,
+          reason: "取证",
+          calculation_intent: "needed",
+        }),
+      ),
+    ).toBe("needed");
+    // Plain and deep read the same field from the same place.
+    expect(
+      parseAutoTurnPlan(
+        '{"mode":"plain","confidence":0.94,"reason":"够了","calculation_intent":"needed"}',
+        AUTO_OPTIONS,
+      ),
+    ).toMatchObject({ plan: { calculationIntent: "needed" } });
+  });
+
   it("parses distinct plain, web, and deep contracts", () => {
     expect(
       parseAutoTurnPlan(
@@ -162,7 +207,7 @@ describe("automatic turn routing", () => {
       ),
     ).toEqual({
       kind: "planned",
-      plan: { mode: "plain", reason: "已有上下文足够" },
+      plan: { mode: "plain", reason: "已有上下文足够", calculationIntent: "uncertain" },
     });
     expect(
       parseAutoTurnPlan(
@@ -189,6 +234,7 @@ describe("automatic turn routing", () => {
           searchQueries: ["甲 动态", "乙 动态", "丙 动态"],
           confidence: 0.96,
           source: "auto-route",
+          calculationIntent: "uncertain",
         },
       },
     });
@@ -615,6 +661,7 @@ describe("automatic turn routing", () => {
       plan: {
         mode: "plain",
         reason: "只是在询问功能概念",
+        calculationIntent: "uncertain",
       },
     });
   });

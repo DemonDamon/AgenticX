@@ -5,6 +5,7 @@ import {
   hasPriorSearchQueryLeakage,
   normalizeSelfContainedSearchQueries,
   parseSearchQueryRewrite,
+  parseSearchQueryRewriteValue,
   selfContainedSearchPlanInstruction,
 } from "../follow-up";
 
@@ -12,6 +13,33 @@ const THINK_OPEN = "<" + "think" + ">";
 const THINK_CLOSE = "<" + "/" + "think" + ">";
 
 describe("contextual search-query rewrite", () => {
+  it("carries the calculation hint without letting it affect the rewrite", () => {
+    // The field is advisory. A value the schema does not recognise must not
+    // cost the rewrite — losing that would turn a cosmetic model slip into a
+    // failed search.
+    expect(
+      parseSearchQueryRewriteValue({
+        need_search: true,
+        resolved_query: "某公司 2026 上半年 营收 净利润",
+        search_queries: ["某公司 2026 上半年 营收 净利润"],
+        confidence: 0.95,
+        calculation_intent: "needed",
+      })?.calculationIntent,
+    ).toBe("needed");
+
+    for (const calculation_intent of ["NEEDED", true, 1, null, undefined]) {
+      const parsed = parseSearchQueryRewriteValue({
+        need_search: true,
+        resolved_query: "某公司 2026 上半年 营收",
+        search_queries: ["某公司 2026 上半年 营收"],
+        confidence: 0.95,
+        calculation_intent,
+      });
+      expect(parsed?.query).toBe("某公司 2026 上半年 营收");
+      expect(parsed?.calculationIntent).toBe("uncertain");
+    }
+  });
+
   it("sends bounded recent context and the current query to the rewrite agent", () => {
     const messages = buildSearchQueryRewriteMessages(
       [
@@ -190,6 +218,7 @@ describe("contextual search-query rewrite", () => {
       needSearch: true,
       searchQueries: ["数学家 王虹 最近几天 新闻"],
       confidence: 0.96,
+      calculationIntent: "uncertain",
     });
     expect(
       parseSearchQueryRewrite(
@@ -200,6 +229,7 @@ describe("contextual search-query rewrite", () => {
       needSearch: true,
       searchQueries: ["广州南沙 天气"],
       confidence: 0.91,
+      calculationIntent: "uncertain",
     });
     expect(
       parseSearchQueryRewrite(
@@ -210,6 +240,7 @@ describe("contextual search-query rewrite", () => {
       needSearch: true,
       searchQueries: ["她最近怎么样"],
       confidence: 0.96,
+      calculationIntent: "uncertain",
     });
   });
 
@@ -238,6 +269,7 @@ describe("contextual search-query rewrite", () => {
         "第三个独立检索面",
       ],
       confidence: 0.98,
+      calculationIntent: "uncertain",
     });
   });
 
@@ -247,6 +279,7 @@ describe("contextual search-query rewrite", () => {
       resolved_query: "甲乙丙丁分别发生了什么",
       search_queries: ["甲 近况", "甲 近况", "乙 近况", "丙 近况", "丁 近况"],
       confidence: 0.98,
+      calculationIntent: "uncertain",
     });
 
     expect(parseSearchQueryRewrite(raw, 2)?.searchQueries).toEqual([
@@ -280,6 +313,7 @@ describe("contextual search-query rewrite", () => {
       needSearch: false,
       searchQueries: [],
       confidence: 0.99,
+      calculationIntent: "uncertain",
     });
   });
 
@@ -299,7 +333,13 @@ describe("contextual search-query rewrite", () => {
   it("accepts an explicit unresolved decision and rejects malformed confidence", () => {
     expect(
       parseSearchQueryRewrite('{"resolved_query":"","confidence":0}'),
-    ).toEqual({ query: "", needSearch: false, searchQueries: [], confidence: 0 });
+    ).toEqual({
+      query: "",
+      needSearch: false,
+      searchQueries: [],
+      confidence: 0,
+      calculationIntent: "uncertain",
+    });
     expect(
       parseSearchQueryRewrite('{"resolved_query":"","confidence":0.9}'),
     ).toBeNull();

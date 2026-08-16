@@ -13,6 +13,17 @@
  *   outages as "联网搜索暂不可用").
  */
 
+import {
+  calculationContextBlock,
+  planEvidenceCalculations,
+} from "../calculator/evidence-context";
+import type { CalculatorResult } from "../calculator/core";
+import {
+  DEFAULT_CALCULATION_INTENT,
+  allowsEvidencePlanning,
+  type CalculationIntent,
+} from "../calculator/intent";
+import { withCalculatorContext } from "../calculator/chat-context";
 import { stripEmptyAssistantMessages } from "../chat-completion-sanitize";
 import type { PreparedSearchPlan } from "../chat-routing/turn-plan";
 import { withCurrentTimeContext } from "../current-time";
@@ -407,6 +418,70 @@ export function withSearchContext(
   return [{ role: "system", content: resultsBlock }, ...next];
 }
 
+/** How far back an operand may be anchored to something the user typed. */
+const MAX_CALCULATION_ANCHOR_MESSAGES = 8;
+const MAX_CALCULATION_TASK_TURN_CHARS = 600;
+
+/**
+ * What the calculation planner is told the turn is about.
+ *
+ * The resolved query alone is not enough and cannot be: it is built to be a
+ * short retrieval term, so "查一下最新股价和 EPS，帮我算出 PE" reaches search
+ * as "公司 最新股价 EPS" and the instruction to compute is exactly the part
+ * that was compressed away. The verbatim request and the recent turns carry it.
+ */
+function calculationTask(messages: ChatMessage[], resolvedQuery: string): string {
+  const request = extractLastUserRawText(messages).slice(
+    0,
+    MAX_CALCULATION_TASK_TURN_CHARS,
+  );
+  const history = recentTurnTexts(messages)
+    .slice(0, -1)
+    .map((text) => text.slice(0, MAX_CALCULATION_TASK_TURN_CHARS))
+    .filter((text) => text.trim());
+  return [
+    `用户当前请求：${request}`,
+    resolvedQuery ? `本轮检索词：${resolvedQuery}` : "",
+    history.length ? `最近对话：\n${history.join("\n---\n")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** Recent human/assistant text, so an operand the user supplied also anchors. */
+export function recentTurnTexts(messages: ChatMessage[]): string[] {
+  return messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .slice(-MAX_CALCULATION_ANCHOR_MESSAGES)
+    .map((message) => messageContentToText(message.content));
+}
+
+/**
+ * Prepend locally computed figures to the grounded system message.
+ *
+ * Placed before the search results rather than after: the model must reach the
+ * instruction not to recompute them before it reaches the numbers they came
+ * from. An empty batch — nothing to compute, or planning failed — returns the
+ * messages untouched, which is why the answer path needs no branch of its own.
+ */
+export function withEvidenceCalculations(
+  messages: ChatMessage[],
+  results: readonly CalculatorResult[],
+): ChatMessage[] {
+  if (results.length === 0) return messages;
+  const block = calculationContextBlock(results);
+  const next = messages.map((message) => ({ ...message }));
+  if (next[0]?.role === "system") {
+    const existing = typeof next[0].content === "string" ? next[0].content : "";
+    next[0] = {
+      ...next[0],
+      content: existing ? `${block}\n\n${existing}` : block,
+    };
+    return next;
+  }
+  return [{ role: "system", content: block }, ...next];
+}
+
 function withIncompleteDirectPageContext(messages: ChatMessage[]): ChatMessage[] {
   const next = messages.map((message) => ({ ...message }));
   if (next[0]?.role === "system") {
@@ -675,6 +750,8 @@ async function rewriteSearchQueryWithAi(
           searchQueries: [current],
           confidence: 0.5,
           source: "current-fallback",
+          // The rewriter was unreachable, so its hint is unavailable too.
+          calculationIntent: DEFAULT_CALCULATION_INTENT,
         },
       };
     }
@@ -728,6 +805,8 @@ export async function resolveStandaloneSearchQuery(
       searchQueries: [query],
       confidence: 1,
       source: "current",
+      // The rewrite agent was skipped, so nothing judged this turn.
+      calculationIntent: DEFAULT_CALCULATION_INTENT,
     },
   };
 }
@@ -1064,9 +1143,40 @@ export async function runWebSearchTurn(
   const cfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);
   const { tools: _tools, tool_choice: _toolChoice, ...rest } = baseBody;
 
+  /**
+   * The body for an answer this turn will produce with no evidence attached.
+   *
+   * Four branches reach that state — the fast skip, an agent deciding no search
+   * is needed, search disabled by an administrator, and retrieval failing — and
+   * each used to stream straight to the model. So "1+2" with the web search
+   * toggle ON was answered from the model's head, while the same question with
+   * the toggle OFF was computed. Wiring these one at a time is how that gap
+   * happened twice, so they now share this.
+   *
+   * `intent` is passed where a routing agent already judged the turn. It can
+   * only open a calculation the pattern missed; it can never veto one. When no
+   * calculation is planned this adds no call at all.
+   */
+  const prepareNoEvidenceAnswerBody = async (
+    messages: ChatMessage[],
+    intent?: CalculationIntent,
+  ): Promise<Record<string, unknown>> => {
+    const body: Record<string, unknown> = { ...rest, stream: true, messages };
+    const calculated = await withCalculatorContext(
+      body,
+      deps,
+      intent ? { intent } : {},
+    );
+    return calculated ?? body;
+  };
+
   const respondWithoutSearch = async (
     reason: string,
-    details: { resolvedQuery?: string; queryResolutionMs?: number } = {},
+    details: {
+      resolvedQuery?: string;
+      queryResolutionMs?: number;
+      calculationIntent?: CalculationIntent;
+    } = {},
   ): Promise<Response> => {
     console.info(`[web-search] skipped search-first (reason=${reason})`);
     const trace: WebSearchTracePayload = {
@@ -1087,11 +1197,10 @@ export async function runWebSearchTurn(
           : reason.startsWith("context_query_")
             ? withCurrentTimeContext(originalMessages)
           : withTrivialTurnContext(withCurrentTimeContext(originalMessages));
-      const upstream = await callGatewayStream(deps, {
-        ...rest,
-        stream: true,
-        messages: directMessages,
-      });
+      const upstream = await callGatewayStream(
+        deps,
+        await prepareNoEvidenceAnswerBody(directMessages, details.calculationIntent),
+      );
       return pipeUpstreamSse(upstream, {
         traceFrame: formatWebSearchTraceSse(trace),
       });
@@ -1102,11 +1211,10 @@ export async function runWebSearchTurn(
 
   if (!cfg.enabled) {
     try {
-      const upstream = await callGatewayStream(deps, {
-        ...rest,
-        stream: true,
-        messages: withCurrentTimeContext(originalMessages),
-      });
+      const upstream = await callGatewayStream(
+        deps,
+        await prepareNoEvidenceAnswerBody(withCurrentTimeContext(originalMessages)),
+      );
       return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT, {
         version: 1,
         decision: "skip",
@@ -1169,6 +1277,7 @@ export async function runWebSearchTurn(
     evidenceQueries: string[],
     resolvedQuery: string,
     queryResolutionMs: number,
+    calculationIntent: CalculationIntent,
   ): Promise<Response | null> => {
     if (!directReference || !directView) return null;
     const evidence = selectDirectPageEvidence(
@@ -1207,11 +1316,29 @@ export async function runWebSearchTurn(
       },
     };
     try {
+      // A page the user named is evidence like any other. Reporting this path
+      // as covered while it returned before reaching the planner was wrong:
+      // "打开这个财报页，算一下净利率" got the same mental arithmetic as before.
+      const calculations = allowsEvidencePlanning(calculationIntent)
+        ? await planEvidenceCalculations({
+            deps,
+            body: rest,
+            task: calculationTask(originalMessages, resolvedQuery),
+            evidenceText: evidence.text,
+            anchorTexts: [
+              `${evidence.title}\n${evidence.text}`,
+              ...recentTurnTexts(originalMessages),
+            ],
+          })
+        : [];
       const upstream = await callGatewayStream(deps, {
         ...rest,
         stream: true,
         messages: withCurrentTimeContext(
-          withDirectPageContext(originalMessages, evidence),
+          withEvidenceCalculations(
+            withDirectPageContext(originalMessages, evidence),
+            calculations,
+          ),
         ),
       });
       return pipeWithSourcesAppendix(upstream, [source], [], trace);
@@ -1224,7 +1351,12 @@ export async function runWebSearchTurn(
 
   if (directReference) {
     const directQuery = directReference.question || directReference.displayUrl;
-    const directResponse = await respondFromDirectPage([directQuery], directQuery, 0);
+    const directResponse = await respondFromDirectPage(
+      [directQuery],
+      directQuery,
+      0,
+      options.preparedSearchPlan?.calculationIntent ?? DEFAULT_CALCULATION_INTENT,
+    );
     if (directResponse) return directResponse;
   }
 
@@ -1242,6 +1374,8 @@ export async function runWebSearchTurn(
         searchQueries: [explicitQuery],
         confidence: 1,
         source: "current",
+        // No routing agent spoke for this turn; the page may still hold figures.
+        calculationIntent: DEFAULT_CALCULATION_INTENT,
       },
     };
   } else if (options.preparedSearchPlan) {
@@ -1253,6 +1387,7 @@ export async function runWebSearchTurn(
         searchQueries: [...options.preparedSearchPlan.searchQueries],
         confidence: options.preparedSearchPlan.confidence,
         source: options.preparedSearchPlan.source,
+        calculationIntent: options.preparedSearchPlan.calculationIntent,
       },
     };
   } else {
@@ -1282,6 +1417,7 @@ export async function runWebSearchTurn(
     return respondWithoutSearch("semantic_no_search", {
       resolvedQuery: queryResolution.value.query,
       queryResolutionMs,
+      calculationIntent: queryResolution.value.calculationIntent,
     });
   }
   let query = queryResolution.value.query;
@@ -1298,6 +1434,7 @@ export async function runWebSearchTurn(
       [directReference.question, query, ...searchQueries],
       query,
       queryResolutionMs,
+      queryResolution.value.calculationIntent,
     );
     if (directResponse) return directResponse;
   }
@@ -1407,9 +1544,39 @@ export async function runWebSearchTurn(
     },
   };
 
+  // Only an explicit `not_needed` from a routing agent that already read this
+  // turn skips the planning call. Silence, an older gateway, an unparseable
+  // value or an honest `uncertain` all plan: the agents run before retrieval,
+  // so "does this need arithmetic" is often not answerable until the pages are
+  // in hand. A missed hint costs one call; a wrongly trusted one costs the
+  // grounding this whole path exists for.
+  const calculationIntent = queryResolution.value.calculationIntent;
+  const planCalculationsForTurn =
+    !searchFailed && allowsEvidencePlanning(calculationIntent);
+  if (!planCalculationsForTurn) {
+    console.info(`[web-search] evidence calculation skipped intent=${calculationIntent}`);
+  }
+
   const groundedMessages = searchFailed
     ? originalMessages
-    : withSearchContext(originalMessages, selected, evidence);
+    : withEvidenceCalculations(
+        withSearchContext(originalMessages, selected, evidence),
+        !planCalculationsForTurn
+          ? []
+          : await planEvidenceCalculations({
+          deps,
+          body: rest,
+          task: calculationTask(originalMessages, query),
+          // The planner reads the hits exactly as the answering model will.
+          evidenceText: formatHits(selected),
+          // Operands may only come from what a source actually said, plus what
+          // the user typed — not from the indices and URLs printed around them.
+              anchorTexts: [
+                ...selected.map((hit) => `${hit.title}\n${hit.snippet}`),
+                ...recentTurnTexts(originalMessages),
+              ],
+            }),
+      );
   const messages = withCurrentTimeContext(
     incompleteDirectPage
       ? withIncompleteDirectPageContext(groundedMessages)
@@ -1418,11 +1585,15 @@ export async function runWebSearchTurn(
 
   let upstream: Response;
   try {
-    upstream = await callGatewayStream(deps, {
-      ...rest,
-      stream: true,
-      messages,
-    });
+    upstream = await callGatewayStream(
+      deps,
+      searchFailed
+        ? // No evidence to compute over, but the user may have supplied the
+          // numbers themselves; that answer should not degrade to mental math
+          // just because retrieval broke.
+          await prepareNoEvidenceAnswerBody(messages, calculationIntent)
+        : { ...rest, stream: true, messages },
+    );
   } catch (error) {
     return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");
   }
