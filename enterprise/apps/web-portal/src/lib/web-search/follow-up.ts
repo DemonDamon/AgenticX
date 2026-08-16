@@ -11,7 +11,7 @@ import {
   messageContentToText,
   sanitizeResearchRequest,
   sanitizeWebSearchQuery,
-} from "./tool-loop";
+} from "./query-text";
 import {
   DEFAULT_MAX_SEARCH_CALLS,
   normalizeMaxSearchCalls,
