@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  isCalculatorEnabled,
+  isMissingCalculatorColumnError,
   isMissingDeepResearchProviderBudgetColumnError,
   isMissingMaxSearchCallsColumnError,
   isMissingProviderPoolColumnError,
@@ -245,5 +247,121 @@ describe("tenant web-search rolling schema compatibility", () => {
         vi.fn().mockRejectedValue(connectionError),
       ),
     ).rejects.toBe(connectionError);
+  });
+});
+
+describe("calculation switch rolling schema compatibility", () => {
+  const CURRENT_ROW = {
+    enabled: true,
+    provider: "bocha",
+    apiKeyCipher: "key",
+    providers: [],
+    maxResults: 50,
+    maxSearchCalls: 3,
+    maxDeepResearchProviderCalls: 24,
+    deepResearchEnabled: true,
+  };
+
+  it.each([
+    { code: "42703", message: 'column "calculator_enabled" does not exist' },
+    {
+      message: "Failed query",
+      cause: { code: "42703", message: 'column "calculator_enabled" does not exist' },
+    },
+    {
+      code: "ER_BAD_FIELD_ERROR",
+      errno: 1054,
+      sqlMessage: "Unknown column 'calculator_enabled' in 'field list'",
+    },
+  ])("recognizes the rolling-deploy error for the calculation column: %#", (error) => {
+    expect(isMissingCalculatorColumnError(error)).toBe(true);
+  });
+
+  it("does not confuse it with another column's error", () => {
+    expect(
+      isMissingCalculatorColumnError({
+        code: "42703",
+        message: 'column "max_search_calls" does not exist',
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps serving the row when only the calculation column is missing", async () => {
+    // The window between deploying this code and running its migration. Before
+    // the fallback existed the whole read rejected, which took the admin
+    // console and deep research down with it rather than just turning
+    // calculation off.
+    const missing = async () => {
+      throw { code: "42703", message: 'column "calculator_enabled" does not exist' };
+    };
+    const read = await readWebSearchConfigWithLegacyColumnFallback(
+      missing,
+      async () => {
+        throw new Error("must not fall through to a legacy budget read");
+      },
+      async () => {
+        throw new Error("must not fall through to a pre-provider-pool read");
+      },
+      async () => {
+        throw new Error("must not fall through to a pre-deep-research read");
+      },
+      async () => [CURRENT_ROW],
+    );
+
+    // Nothing else about this schema is legacy, so no budget default is forced.
+    expect(read.usedLegacySearchCallBudget).toBe(false);
+    expect(read.usedLegacyDeepResearchBudget).toBe(false);
+    expect(read.usedLegacyProviderPool).toBe(false);
+    const row = mapStoredWebSearchConfigRow(read.rows[0]!, false, false);
+    expect(row?.maxSearchCalls).toBe(3);
+    expect(row?.deepResearchEnabled).toBe(true);
+    // The column is unreadable, so calculation is off until the migration runs.
+    expect(isCalculatorEnabled(row)).toBe(false);
+  });
+
+  it("still rejects an error that is not a missing calculation column", async () => {
+    await expect(
+      readWebSearchConfigWithLegacyColumnFallback(
+        async () => {
+          throw new Error("connection refused");
+        },
+        async () => [CURRENT_ROW],
+        undefined,
+        undefined,
+        async () => [CURRENT_ROW],
+      ),
+    ).rejects.toThrow("connection refused");
+  });
+});
+
+describe("calculation rollback switch", () => {
+  const row = (extra: Record<string, unknown>) =>
+    ({
+      enabled: true,
+      provider: "duckduckgo",
+      apiKey: "",
+      maxResults: 12,
+      ...extra,
+    }) as Parameters<typeof isCalculatorEnabled>[0];
+
+  it("resolves the four states an operator can actually be in", () => {
+    // No row: the tenant has never opened the settings page, so the column
+    // default applies. Defaulting to off here would leave every existing
+    // tenant silently without calculation and no error to explain it.
+    expect(isCalculatorEnabled(null)).toBe(true);
+    expect(isCalculatorEnabled(row({ calculatorEnabled: true }))).toBe(true);
+    // An administrator turned it off.
+    expect(isCalculatorEnabled(row({ calculatorEnabled: false }))).toBe(false);
+    // A legacy-column fallback read produced no field at all: a schema we
+    // cannot confirm restores the pre-calculator path.
+    expect(isCalculatorEnabled(row({}))).toBe(false);
+  });
+
+  it("keeps a legacy row off after the compatibility mapper runs", () => {
+    // The mapper is what a pre-migration database goes through, so the two
+    // must agree; reading `?? true` at any call site would undo this.
+    expect(isCalculatorEnabled(mapStoredWebSearchConfigRow(LEGACY_ROW, true, true))).toBe(
+      false,
+    );
   });
 });

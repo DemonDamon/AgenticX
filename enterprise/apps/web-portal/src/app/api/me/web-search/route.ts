@@ -23,9 +23,13 @@ export async function GET() {
   try {
     const data = await getPublicWebSearchConfig(session.tenantId);
     const providers = data.providers.map(({ endpoint: _endpoint, ...provider }) => provider);
+    // The calculation switch is an operator rollback control, not a user
+    // capability: the composer has nothing to show for it and nothing to do
+    // with it, so it never leaves the server for an ordinary session.
+    const { calculatorEnabled: _calculatorEnabled, ...visible } = data;
     return NextResponse.json({
       data: {
-        ...data,
+        ...visible,
         providers,
         canManage: false,
       },

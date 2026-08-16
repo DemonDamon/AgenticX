@@ -43,6 +43,8 @@ export type WebSearchPublicConfig = {
   maxDeepResearchProviderCalls: number;
   hasApiKey: boolean;
   deepResearchEnabled: boolean;
+  /** Admin-only; the portal strips this before it reaches an ordinary user. */
+  calculatorEnabled: boolean;
   primaryProviderId: string;
   providers: PublicWebSearchProvider[];
   availableAdapters: WebSearchAdapterPublicDefinition[];
@@ -68,6 +70,7 @@ export type WebSearchUpdateInput = {
   /** Empty string clears key; undefined leaves unchanged. */
   apiKey?: string;
   deepResearchEnabled?: boolean;
+  calculatorEnabled?: boolean;
   providers?: WebSearchProviderUpdate[];
 };
 
@@ -80,6 +83,8 @@ type StoredWebSearchConfigRow = {
   maxSearchCalls?: unknown;
   maxDeepResearchProviderCalls?: unknown;
   deepResearchEnabled: unknown;
+  /** Absent on a pre-migration database; that reads as off. */
+  calculatorEnabled?: unknown;
 };
 
 type WebSearchConfigRead = {
@@ -103,7 +108,11 @@ export class WebSearchConfigValidationError extends Error {
 
 function isMissingWebSearchConfigColumnError(
   error: unknown,
-  columnName: "max_search_calls" | "max_deep_research_provider_calls" | "providers",
+  columnName:
+    | "max_search_calls"
+    | "max_deep_research_provider_calls"
+    | "providers"
+    | "calculator_enabled",
 ): boolean {
   const visited = new Set<object>();
   let current: unknown = error;
@@ -152,11 +161,24 @@ export function isMissingProviderPoolColumnError(error: unknown): boolean {
   return isMissingWebSearchConfigColumnError(error, "providers");
 }
 
+/**
+ * Recognize the rolling-deploy window for the calculation switch.
+ *
+ * New code reaches a database whose migration has not run yet on every rolling
+ * deploy. Without this the whole config read rejects, which does not merely
+ * disable the calculator: the admin console and deep research read this row
+ * strictly and would fail outright, and ordinary search would go fail-closed.
+ */
+export function isMissingCalculatorColumnError(error: unknown): boolean {
+  return isMissingWebSearchConfigColumnError(error, "calculator_enabled");
+}
+
 export async function readWebSearchConfigWithLegacyColumnFallback(
   readCurrent: () => Promise<StoredWebSearchConfigRow[]>,
   readBeforeSearchBudget: () => Promise<StoredWebSearchConfigRow[]>,
   readBeforeProviderPool?: () => Promise<StoredWebSearchConfigRow[]>,
   readBeforeDeepResearchBudget?: () => Promise<StoredWebSearchConfigRow[]>,
+  readBeforeCalculator?: () => Promise<StoredWebSearchConfigRow[]>,
 ): Promise<WebSearchConfigRead> {
   const readOldest = async (): Promise<WebSearchConfigRead> => {
     if (!readBeforeProviderPool) throw new Error("provider-pool legacy reader unavailable");
@@ -200,6 +222,17 @@ export async function readWebSearchConfigWithLegacyColumnFallback(
       usedLegacyProviderPool: false,
     };
   } catch (error) {
+    // Only the calculation column is missing: every other value is current, so
+    // this is not a legacy schema in any other respect. The retried read omits
+    // the column, which leaves it undefined and therefore off.
+    if (isMissingCalculatorColumnError(error) && readBeforeCalculator) {
+      return {
+        rows: await readBeforeCalculator(),
+        usedLegacySearchCallBudget: false,
+        usedLegacyDeepResearchBudget: false,
+        usedLegacyProviderPool: false,
+      };
+    }
     if (
       isMissingDeepResearchProviderBudgetColumnError(error) &&
       readBeforeDeepResearchBudget
@@ -294,6 +327,8 @@ export function mapStoredWebSearchConfigRow(
       ? DEFAULT_MAX_DEEP_RESEARCH_PROVIDER_CALLS
       : normalizeMaxDeepResearchProviderCalls(row.maxDeepResearchProviderCalls),
     deepResearchEnabled: Boolean(row.deepResearchEnabled),
+    // undefined on a legacy-column fallback read, which Boolean() makes false.
+    calculatorEnabled: Boolean(row.calculatorEnabled),
   };
 }
 
@@ -504,6 +539,23 @@ export async function loadTenantWebSearchConfigStrict(
             .from(mysqlTable)
             .where(eq(mysqlTable.tenantId, tid))
             .limit(1),
+        // Everything current except the calculation switch, for the window
+        // between deploying this code and running its migration.
+        () =>
+          db
+            .select({
+              enabled: mysqlTable.enabled,
+              provider: mysqlTable.provider,
+              apiKeyCipher: mysqlTable.apiKeyCipher,
+              providers: mysqlTable.providers,
+              maxResults: mysqlTable.maxResults,
+              maxSearchCalls: mysqlTable.maxSearchCalls,
+              maxDeepResearchProviderCalls: mysqlTable.maxDeepResearchProviderCalls,
+              deepResearchEnabled: mysqlTable.deepResearchEnabled,
+            })
+            .from(mysqlTable)
+            .where(eq(mysqlTable.tenantId, tid))
+            .limit(1),
       );
     const row = rows[0];
     if (!row) return null;
@@ -562,6 +614,23 @@ export async function loadTenantWebSearchConfigStrict(
           .from(pgTable)
           .where(eq(pgTable.tenantId, tid))
           .limit(1),
+      // Everything current except the calculation switch, for the window
+      // between deploying this code and running its migration.
+      () =>
+        db
+          .select({
+            enabled: pgTable.enabled,
+            provider: pgTable.provider,
+            apiKeyCipher: pgTable.apiKeyCipher,
+            providers: pgTable.providers,
+            maxResults: pgTable.maxResults,
+            maxSearchCalls: pgTable.maxSearchCalls,
+            maxDeepResearchProviderCalls: pgTable.maxDeepResearchProviderCalls,
+            deepResearchEnabled: pgTable.deepResearchEnabled,
+          })
+          .from(pgTable)
+          .where(eq(pgTable.tenantId, tid))
+          .limit(1),
     );
   const row = rows[0];
   if (!row) return null;
@@ -590,8 +659,30 @@ export async function loadTenantWebSearchConfig(tenantId: string): Promise<Tenan
       maxSearchCalls: DEFAULT_MAX_SEARCH_CALLS,
       maxDeepResearchProviderCalls: DEFAULT_MAX_DEEP_RESEARCH_PROVIDER_CALLS,
       deepResearchEnabled: false,
+      calculatorEnabled: false,
     };
   }
+}
+
+/**
+ * The tenant's calculation switch, resolved for a row that may not exist.
+ *
+ * Four inputs, one rule each:
+ * - no row at all — no tenant policy is on record, whether because the tenant
+ *   has never opened the settings page or because this deployment has no
+ *   database configured. Both keep the column default, so calculation is ON;
+ * - the column is present and false — an administrator turned it off;
+ * - the column is missing, so a legacy-column fallback read produced undefined
+ *   — a schema we cannot confirm reads as OFF;
+ * - the config load failed, so the caller holds the fail-closed row, which
+ *   carries false for the same reason.
+ *
+ * Read through this everywhere. Repeating `?? true` at call sites is how the
+ * missing-column case quietly becomes on again.
+ */
+export function isCalculatorEnabled(row: TenantWebSearchRow): boolean {
+  if (!row) return true;
+  return Boolean(row.calculatorEnabled);
 }
 
 export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSearchPublicConfig> {
@@ -607,6 +698,7 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
       maxDeepResearchProviderCalls: DEFAULT_MAX_DEEP_RESEARCH_PROVIDER_CALLS,
       hasApiKey: false,
       deepResearchEnabled: true,
+      calculatorEnabled: true,
       primaryProviderId: "duckduckgo",
       providers: [],
       availableAdapters: listWebSearchAdapters(),
@@ -622,6 +714,7 @@ export async function getPublicWebSearchConfig(tenantId: string): Promise<WebSea
     ),
     hasApiKey: Boolean(row.apiKey.trim()),
     deepResearchEnabled: Boolean(row.deepResearchEnabled),
+    calculatorEnabled: isCalculatorEnabled(row),
     primaryProviderId: effectivePrimaryProviderId(
       row.providers ?? [],
       row.provider,
@@ -693,6 +786,10 @@ export async function upsertTenantWebSearchConfig(
   );
   const nextDeepResearch =
     input.deepResearchEnabled ?? existing?.deepResearchEnabled ?? true;
+  // A tenant that has never opened this page keeps calculation on, matching the
+  // column default. Only an administrator turning it off writes false.
+  const nextCalculator =
+    input.calculatorEnabled ?? existing?.calculatorEnabled ?? true;
   const nextKey = primary.apiKey;
   const cipher = encryptProviderApiKey(nextKey);
   const providerRows = storedProviders(nextProviders);
@@ -713,6 +810,7 @@ export async function upsertTenantWebSearchConfig(
         maxSearchCalls: nextMaxSearchCalls,
         maxDeepResearchProviderCalls: nextMaxDeepResearchProviderCalls,
         deepResearchEnabled: nextDeepResearch,
+        calculatorEnabled: nextCalculator,
         updatedAt,
       })
       .onDuplicateKeyUpdate({
@@ -725,6 +823,7 @@ export async function upsertTenantWebSearchConfig(
           maxSearchCalls: nextMaxSearchCalls,
           maxDeepResearchProviderCalls: nextMaxDeepResearchProviderCalls,
           deepResearchEnabled: nextDeepResearch,
+          calculatorEnabled: nextCalculator,
           updatedAt,
         },
       });
@@ -742,6 +841,7 @@ export async function upsertTenantWebSearchConfig(
         maxSearchCalls: nextMaxSearchCalls,
         maxDeepResearchProviderCalls: nextMaxDeepResearchProviderCalls,
         deepResearchEnabled: nextDeepResearch,
+        calculatorEnabled: nextCalculator,
         updatedAt,
       })
       .onConflictDoUpdate({
@@ -755,6 +855,7 @@ export async function upsertTenantWebSearchConfig(
           maxSearchCalls: nextMaxSearchCalls,
           maxDeepResearchProviderCalls: nextMaxDeepResearchProviderCalls,
           deepResearchEnabled: nextDeepResearch,
+          calculatorEnabled: nextCalculator,
           updatedAt,
         },
       });
@@ -768,6 +869,7 @@ export async function upsertTenantWebSearchConfig(
     maxDeepResearchProviderCalls: nextMaxDeepResearchProviderCalls,
     hasApiKey: Boolean(nextKey.trim()),
     deepResearchEnabled: nextDeepResearch,
+    calculatorEnabled: nextCalculator,
     primaryProviderId: effectivePrimaryProviderId(nextProviders, primary.id),
     providers: publicProviders(nextProviders),
     availableAdapters: listWebSearchAdapters(),

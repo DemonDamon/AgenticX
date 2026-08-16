@@ -26,6 +26,7 @@ import {
   type WebSearchChatMessage,
 } from "../../../../lib/web-search/tool-loop";
 import {
+  isCalculatorEnabled,
   loadTenantWebSearchConfig,
   loadTenantWebSearchConfigStrict,
 } from "../../../../lib/web-search/tenant-config";
@@ -294,6 +295,9 @@ export async function POST(request: Request) {
       {
         allowWebSearch: turnRequests.webSearchRequested,
         maxSearchCalls: tenantSearchConfigSnapshot?.maxSearchCalls,
+        // Policy is already loaded here; with calculation off the prompt does
+        // not ask for the hint at all.
+        calculatorEnabled: isCalculatorEnabled(tenantSearchConfigSnapshot),
       },
     );
     if (outcome.kind === "planned") {
@@ -458,9 +462,15 @@ export async function POST(request: Request) {
         headers: gatewayHeaders,
         signal: request.signal,
       },
-      // Automatic routing already read this turn on its way to choosing plain
-      // chat; if it said the answer needs arithmetic, that outranks the pattern.
-      turnPlan.mode === "plain" ? { intent: turnPlan.calculationIntent } : {},
+      {
+        // Automatic routing already read this turn on its way to choosing plain
+        // chat; if it said the answer needs arithmetic, that outranks the
+        // pattern.
+        ...(turnPlan.mode === "plain" ? { intent: turnPlan.calculationIntent } : {}),
+        // Read only if something is actually going to be planned, and through
+        // the promise the search and research paths already share.
+        isEnabled: async () => isCalculatorEnabled(await loadTenantSearchConfigForWeb()),
+      },
     );
     forwardBody = JSON.stringify(calculatedBody ?? directBody);
   }

@@ -170,6 +170,8 @@ export const enterpriseRuntimeWebSearch = pgTable("enterprise_runtime_web_search
     .default(24)
     .notNull(),
   deepResearchEnabled: boolean("deep_research_enabled").default(true).notNull(),
+  /** Tenant rollback switch for deterministic calculation; off restores the pre-calculator answer path. */
+  calculatorEnabled: boolean("calculator_enabled").default(true).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

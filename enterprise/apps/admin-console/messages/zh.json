@@ -396,6 +396,8 @@
         "enabledHint": "允许对话检索实时信息",
         "deepResearch": "启用深度研究",
         "deepResearchHint": "允许多阶段研究流程",
+        "calculator": "精确数值核算",
+        "calculatorHint": "在普通聊天和联网搜索中，对必要的基础数值运算进行本地核算。关闭后由模型直接回答。",
         "maxSearchCalls": "单轮搜索上限",
         "maxSearchCallsHint": "每条消息最多调用搜索服务的次数",
         "maxDeepResearchProviderCalls": "深度研究搜索调用上限",

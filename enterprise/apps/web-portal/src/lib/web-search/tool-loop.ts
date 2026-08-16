@@ -66,6 +66,7 @@ import {
 } from "./providers";
 import { isTenantDailySearchProviderQuotaExceeded } from "./daily-provider-quota";
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
+import { isCalculatorEnabled } from "./tenant-config";
 import { rerankHits } from "./rerank";
 import {
   assessSearchEvidence,
@@ -1141,6 +1142,11 @@ export async function runWebSearchTurn(
 
   const tenant = deps.loadTenantConfig ? await deps.loadTenantConfig() : null;
   const cfg: WebSearchRuntimeConfig = resolveWebSearchConfig(tenant);
+  // One read, already done for search policy. Off means this turn never enters
+  // the calculation path at all — no planning call, no hint in any prompt, and
+  // an upstream request identical to the one sent before the calculator
+  // existed.
+  const calculatorEnabled = isCalculatorEnabled(tenant);
   const { tools: _tools, tool_choice: _toolChoice, ...rest } = baseBody;
 
   /**
@@ -1162,6 +1168,7 @@ export async function runWebSearchTurn(
     intent?: CalculationIntent,
   ): Promise<Record<string, unknown>> => {
     const body: Record<string, unknown> = { ...rest, stream: true, messages };
+    if (!calculatorEnabled) return body;
     const calculated = await withCalculatorContext(
       body,
       deps,
@@ -1319,7 +1326,7 @@ export async function runWebSearchTurn(
       // A page the user named is evidence like any other. Reporting this path
       // as covered while it returned before reaching the planner was wrong:
       // "打开这个财报页，算一下净利率" got the same mental arithmetic as before.
-      const calculations = allowsEvidencePlanning(calculationIntent)
+      const calculations = calculatorEnabled && allowsEvidencePlanning(calculationIntent)
         ? await planEvidenceCalculations({
             deps,
             body: rest,
@@ -1398,13 +1405,14 @@ export async function runWebSearchTurn(
       cfg.maxSearchCalls,
       directReference && directView
         ? {
+            calculatorEnabled,
             targetDocument: {
               title: directView.title,
               url: directReference.displayUrl,
               sample: directView.text.slice(0, 2_000),
             },
           }
-        : {},
+        : { calculatorEnabled },
     );
   }
   const queryResolutionMs = Date.now() - queryResolutionStartedAt;
@@ -1552,7 +1560,7 @@ export async function runWebSearchTurn(
   // grounding this whole path exists for.
   const calculationIntent = queryResolution.value.calculationIntent;
   const planCalculationsForTurn =
-    !searchFailed && allowsEvidencePlanning(calculationIntent);
+    calculatorEnabled && !searchFailed && allowsEvidencePlanning(calculationIntent);
   if (!planCalculationsForTurn) {
     console.info(`[web-search] evidence calculation skipped intent=${calculationIntent}`);
   }

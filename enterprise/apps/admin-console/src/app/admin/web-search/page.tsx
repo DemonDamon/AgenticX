@@ -72,6 +72,7 @@ type WebSearchConfig = {
   provider: string;
   primaryProviderId: string;
   deepResearchEnabled: boolean;
+  calculatorEnabled: boolean;
   maxSearchCalls: number;
   maxDeepResearchProviderCalls: number;
   dailyProviderQuota: DailyProviderQuota;
@@ -294,6 +295,17 @@ export default function WebSearchSettingsPage() {
               checked={config?.deepResearchEnabled ?? false}
               disabled={!config || loading || saving}
               onCheckedChange={(deepResearchEnabled) => void save({ deepResearchEnabled })}
+            />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div>
+              <Label>{t("calculator")}</Label>
+              <p className="text-sm text-muted-foreground">{t("calculatorHint")}</p>
+            </div>
+            <Switch
+              checked={config?.calculatorEnabled ?? false}
+              disabled={!config || loading || saving}
+              onCheckedChange={(calculatorEnabled) => void save({ calculatorEnabled })}
             />
           </div>
           <div className="space-y-2 rounded-lg border p-4">

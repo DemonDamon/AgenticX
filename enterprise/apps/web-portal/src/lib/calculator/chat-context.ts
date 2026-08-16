@@ -171,10 +171,24 @@ function attachCalculationContext(
  * Returns null when the turn has no numeric shape, planning fails, or no valid
  * calculation was requested. Callers then forward the original body unchanged.
  */
+export type CalculatorContextOptions = {
+  intent?: CalculationIntent;
+  /**
+   * The tenant rollback switch, consulted only once this turn is going to plan.
+   *
+   * Order matters for cost, not for semantics: ordinary chat reads no tenant
+   * configuration at all today, so asking the database first would put a round
+   * trip in front of every message including the ones with no arithmetic in
+   * them. Asking after the gate keeps that path untouched, and a turn the gate
+   * rejected would not have computed anything either way.
+   */
+  isEnabled?: () => boolean | Promise<boolean>;
+};
+
 export async function withCalculatorContext(
   body: Record<string, unknown>,
   deps: CalculatorGatewayDeps,
-  options: { intent?: CalculationIntent } = {},
+  options: CalculatorContextOptions = {},
 ): Promise<Record<string, unknown> | null> {
   const messages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : [];
   // The routing agent, when one ran, may open this turn that the pattern would
@@ -182,6 +196,7 @@ export async function withCalculatorContext(
   // a turn the gate recognised, so no single missed field silently sends an
   // arithmetic question back to mental math.
   if (options.intent !== "needed" && !shouldPlanCalculator(messages)) return null;
+  if (options.isEnabled && !(await options.isEnabled())) return null;
 
   const results = await planCalculations({
     deps,

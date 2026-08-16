@@ -169,6 +169,10 @@ export async function PUT(request: Request) {
         typeof body.deepResearchEnabled === "boolean"
           ? body.deepResearchEnabled
           : undefined,
+      calculatorEnabled:
+        typeof body.calculatorEnabled === "boolean"
+          ? body.calculatorEnabled
+          : undefined,
       providers,
     });
     // The limit lives in its own row; setting it never clears today's counter.

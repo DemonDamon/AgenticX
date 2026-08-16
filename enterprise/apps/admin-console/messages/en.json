@@ -396,6 +396,8 @@
         "enabledHint": "Allow chats to retrieve current information",
         "deepResearch": "Enable deep research",
         "deepResearchHint": "Allow multi-stage research workflows",
+        "calculator": "Verified arithmetic",
+        "calculatorHint": "Compute the basic figures an answer needs locally in ordinary chat and web search. When off, the model answers directly.",
         "maxSearchCalls": "Search limit per turn",
         "maxSearchCallsHint": "Maximum provider calls for each message",
         "maxDeepResearchProviderCalls": "Deep research search limit",

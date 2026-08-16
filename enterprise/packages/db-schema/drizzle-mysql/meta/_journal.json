@@ -148,6 +148,13 @@
       "when": 1786867200001,
       "tag": "0020_web_search_daily_provider_quota",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1786953600000,
+      "tag": "0021_calculator_enabled",
+      "breakpoints": true
     }
   ]
 }

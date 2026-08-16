@@ -35,6 +35,13 @@ export type TenantWebSearchRow = {
   primaryProviderId?: string;
   /** Tenant deep-research switch; missing legacy config currently defaults to enabled. */
   deepResearchEnabled?: boolean;
+  /**
+   * Tenant rollback switch for deterministic calculation. Absent on a database
+   * that predates the column, which is read as OFF: a schema we cannot confirm
+   * should restore the answer path that existed before the calculator, not
+   * assume a feature the operator never enabled.
+   */
+  calculatorEnabled?: boolean;
   /** 逗号分隔的后端链，如 "native,jina"。 */
   pageFetchBackends?: string;
   pageFetchJinaApiKey?: string;

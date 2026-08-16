@@ -41,6 +41,9 @@ vi.mock("../../../../../lib/web-search/tool-loop", () => ({
 vi.mock("../../../../../lib/web-search/tenant-config", () => ({
   loadTenantWebSearchConfig: mocks.loadTenantWebSearchConfig,
   loadTenantWebSearchConfigStrict: mocks.loadTenantWebSearchConfigStrict,
+  // Not mocked away: the rollback switch is one of the things under test.
+  isCalculatorEnabled: (row: { calculatorEnabled?: boolean } | null) =>
+    row ? Boolean(row.calculatorEnabled) : true,
 }));
 vi.mock("../../../../../lib/deep-research/orchestrator", () => ({
   runDeepResearchTurn: mocks.runDeepResearchTurn,
@@ -103,6 +106,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       maxResults: 5,
       maxSearchCalls: 3,
       deepResearchEnabled: true,
+      calculatorEnabled: true,
     });
     mocks.loadTenantWebSearchConfigStrict.mockResolvedValue({
       enabled: true,
@@ -111,6 +115,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       maxResults: 5,
       maxSearchCalls: 3,
       deepResearchEnabled: true,
+      calculatorEnabled: true,
     });
     mocks.runDeepResearchTurn.mockResolvedValue(new Response("deep"));
     mocks.runWebSearchTurn.mockResolvedValue(new Response("web"));
@@ -176,7 +181,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     expect(mocks.planAutomaticTurn).toHaveBeenCalledWith(
       expect.any(Array),
       expect.any(Object),
-      { allowWebSearch: false, maxSearchCalls: 3 },
+      { allowWebSearch: false, maxSearchCalls: 3, calculatorEnabled: true },
     );
     expect(mocks.resolveManualDeepResearchQuery).not.toHaveBeenCalled();
     expect(mocks.runDeepResearchTurn).toHaveBeenCalledWith(
@@ -233,7 +238,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
     expect(mocks.planAutomaticTurn).toHaveBeenCalledWith(
       expect.any(Array),
       expect.any(Object),
-      { allowWebSearch: true, maxSearchCalls: 3 },
+      { allowWebSearch: true, maxSearchCalls: 3, calculatorEnabled: true },
     );
     expect(mocks.resolveManualDeepResearchQuery).not.toHaveBeenCalled();
     expect(mocks.runDeepResearchTurn).not.toHaveBeenCalled();
@@ -296,8 +301,9 @@ describe("POST /api/chat/completions deep-research preflight", () => {
           headers: expect.objectContaining({ "x-agenticx-provider": "provider-a" }),
         }),
         // No automatic routing ran for this turn, so no hint is passed and the
-        // module's own gate decides.
-        {},
+        // module's own gate decides. The tenant switch is read lazily, only if
+        // the gate is going to plan.
+        expect.objectContaining({ isEnabled: expect.any(Function) }),
       );
       const forwarded = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
       expect(forwarded.messages[0]).toEqual({
@@ -338,6 +344,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       apiKey: "",
       maxResults: 5,
       deepResearchEnabled: false,
+      calculatorEnabled: true,
     });
 
     const response = await POST(request({
@@ -357,6 +364,7 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       apiKey: "",
       maxResults: 5,
       deepResearchEnabled: false,
+      calculatorEnabled: true,
     });
 
     const response = await POST(request({ agenticx_deep_research: true }));
