@@ -176,6 +176,20 @@
       "when": 1787212800001,
       "tag": "0024_deep_research_runs_trace_id",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1787299200001,
+      "tag": "0025_portal_request_logs_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1787385600001,
+      "tag": "0026_portal_request_logs_session_idx",
+      "breakpoints": true
     }
   ]
 }

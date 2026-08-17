@@ -20,6 +20,7 @@ export async function POST(request: Request) {
     userId: session.userId,
     tenantId: session.tenantId,
   });
+  logCtx.setMode("deep_research");
 
   let body: { runId?: unknown; answers?: unknown; skip?: unknown };
   try {
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
       skip?: unknown;
     };
   } catch {
+    logCtx.markNoop();
     return NextResponse.json(
       { error: { code: "40001", message: "invalid json body" } },
       { status: 400 },
@@ -37,11 +39,13 @@ export async function POST(request: Request) {
 
   const runId = typeof body.runId === "string" ? body.runId.trim() : "";
   if (!runId) {
+    logCtx.markNoop();
     return NextResponse.json(
       { error: { code: "40001", message: "runId required" } },
       { status: 400 },
     );
   }
+  logCtx.setRun(runId);
 
   const answers: Record<string, string> = {};
   if (body.answers && typeof body.answers === "object" && !Array.isArray(body.answers)) {
@@ -81,6 +85,7 @@ export async function POST(request: Request) {
   if (outcome === "already_continued") {
     // Idempotent: a timeout or an earlier submission already continued the run.
     // Returning 404 here made the clarify card dump raw JSON while research ran.
+    logCtx.markNoop();
     return NextResponse.json({
       code: "00000",
       message: "ok",

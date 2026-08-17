@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireAdminSomeScope } from "../../../../lib/admin-auth";
 import { parseOptionalPortalLogString } from "../../../../lib/portal-logs-query-filters";
-import { normalizePortalLogLimit, queryPortalLogs } from "../../../../lib/portal-logs-query";
+import { normalizePortalLogLimit } from "../../../../lib/portal-logs-query";
+import { queryPortalLogSessions } from "../../../../lib/portal-logs-session-query";
 
 export async function POST(request: Request) {
   const guard = await requireAdminSomeScope(["audit:read:all", "audit:manage"]);
@@ -17,7 +18,6 @@ export async function POST(request: Request) {
   }
 
   const fields = [
-    "trace_id",
     "user_id",
     "session_id",
     "level",
@@ -29,7 +29,6 @@ export async function POST(request: Request) {
     "end",
   ] as const;
   const parsed: Record<(typeof fields)[number], string | undefined> = {
-    trace_id: undefined,
     user_id: undefined,
     session_id: undefined,
     level: undefined,
@@ -55,9 +54,8 @@ export async function POST(request: Request) {
       : 0;
 
   try {
-    const data = await queryPortalLogs({
+    const data = await queryPortalLogSessions({
       tenant_id: guard.session.tenantId,
-      trace_id: parsed.trace_id,
       user_id: parsed.user_id,
       session_id: parsed.session_id,
       level: parsed.level,

@@ -69,7 +69,7 @@ describe("withRequestLog", () => {
     expect(isTraceId(response.headers.get("x-agenticx-trace-id"))).toBe(true);
   });
 
-  it("logs deep_research.runs finish at debug and chat.completions at info", async () => {
+  it("skips deep_research.runs success finish but still logs chat.completions", async () => {
     vi.stubEnv("PORTAL_LOG_LEVEL", "debug");
     const lines: string[] = [];
     vi.spyOn(console, "log").mockImplementation((line: unknown) => {
@@ -90,9 +90,8 @@ describe("withRequestLog", () => {
       })
       .filter((row): row is { event?: string; level?: string } => Boolean(row));
 
-    const runsFinish = parsed.find((row) => row.event === "deep_research.runs.finish");
+    expect(parsed.some((row) => row.event === "deep_research.runs.finish")).toBe(false);
     const chatFinish = parsed.find((row) => row.event === "chat.completions.finish");
-    expect(runsFinish?.level).toBe("debug");
     expect(chatFinish?.level).toBe("info");
   });
 
@@ -111,6 +110,77 @@ describe("withRequestLog", () => {
 
     const parsed = errors.map((line) => JSON.parse(line) as { event: string; level: string });
     const errRow = parsed.find((row) => row.event === "deep_research.runs.error");
+    expect(errRow?.level).toBe("error");
+  });
+
+  it("defaults mode to chat and honors setMode(deep_research)", async () => {
+    vi.stubEnv("PORTAL_LOG_LEVEL", "debug");
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      lines.push(String(line));
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await withRequestLog("chat.completions", async () => new Response("ok", { status: 200 }));
+    await withRequestLog("chat.completions", async (ctx) => {
+      ctx.setMode("deep_research");
+      ctx.setRun("01JTESTMODE000000000000001");
+      return new Response("ok", { status: 200 });
+    });
+
+    const parsed = lines
+      .map((line) => {
+        try {
+          return JSON.parse(line) as { event?: string; mode?: string; run_id?: string };
+        } catch {
+          return null;
+        }
+      })
+      .filter((row): row is { event?: string; mode?: string; run_id?: string } => Boolean(row));
+
+    const finishes = parsed.filter((row) => row.event === "chat.completions.finish");
+    expect(finishes).toHaveLength(2);
+    expect(finishes[0]?.mode).toBe("chat");
+    expect(finishes[1]?.mode).toBe("deep_research");
+    expect(finishes[1]?.run_id).toBe("01JTESTMODE000000000000001");
+  });
+
+  it("skips success finish after markNoop but still logs errors", async () => {
+    vi.stubEnv("PORTAL_LOG_LEVEL", "debug");
+    const lines: string[] = [];
+    const errors: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      lines.push(String(line));
+    });
+    vi.spyOn(console, "error").mockImplementation((line: unknown) => {
+      errors.push(String(line));
+    });
+
+    await withRequestLog("deep_research.resume", async (ctx) => {
+      ctx.markNoop();
+      return new Response("ok", { status: 200 });
+    });
+
+    await expect(
+      withRequestLog("deep_research.resume", async (ctx) => {
+        ctx.markNoop();
+        throw new Error("resume boom");
+      }),
+    ).rejects.toThrow("resume boom");
+
+    const parsed = lines
+      .map((line) => {
+        try {
+          return JSON.parse(line) as { event?: string };
+        } catch {
+          return null;
+        }
+      })
+      .filter((row): row is { event?: string } => Boolean(row));
+    expect(parsed.some((row) => row.event === "deep_research.resume.finish")).toBe(false);
+
+    const errParsed = errors.map((line) => JSON.parse(line) as { event: string; level: string });
+    const errRow = errParsed.find((row) => row.event === "deep_research.resume.error");
     expect(errRow?.level).toBe("error");
   });
 });

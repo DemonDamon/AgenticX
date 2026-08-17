@@ -1,4 +1,4 @@
-import { and, desc, eq, lte, sql } from "drizzle-orm";
+import { and, desc, eq, lt, lte, sql } from "drizzle-orm";
 import { chatMessages as pgMessages } from "@agenticx/db-schema";
 import { chatMessages as mysqlMessages } from "@agenticx/db-schema/mysql";
 import { getIamDb, resolveDatabaseConfig } from "@agenticx/iam-core";
@@ -8,6 +8,8 @@ import { getAdminMysqlDb } from "./db-stores/mysql/database";
 export const TRACE_IO_PREVIEW_CHARS = 4_000;
 /** Max chars returned to browser even when user expands (hard ceiling). */
 export const TRACE_IO_EXPAND_CHARS = 32_000;
+/** Page size for session-wide conversation reads (fetch PAGE_SIZE+1 to detect has_more). */
+export const SESSION_CONVERSATION_PAGE_SIZE = 40;
 
 export type TraceIoText = {
   text: string;
@@ -239,4 +241,99 @@ export function pickTurnMessages<T extends { role: string }>(rows: T[]): T[] {
     if (row.role === "user") break;
   }
   return collected.reverse();
+}
+
+export type SessionConversation = {
+  session_id: string;
+  messages: TraceConversationMessage[];
+  has_more: boolean;
+  next_before?: string;
+  empty: boolean;
+};
+
+/**
+ * Load a page of chat_messages for a session (newest page first, returned oldest→newest).
+ * Pass `before` (ISO created_at of the earliest message already loaded) to page further back.
+ */
+export async function getSessionConversation(
+  tenantId: string,
+  sessionId: string,
+  options?: { expand?: boolean; before?: string },
+): Promise<SessionConversation> {
+  const tid = tenantId.trim();
+  const sid = sessionId.trim();
+  const expand = Boolean(options?.expand);
+  const beforeRaw = options?.before?.trim();
+  const beforeDate = beforeRaw ? new Date(beforeRaw) : undefined;
+  const beforeValid = beforeDate && !Number.isNaN(beforeDate.getTime()) ? beforeDate : undefined;
+
+  if (!tid || !sid) {
+    return { session_id: sid, messages: [], has_more: false, empty: true };
+  }
+
+  const pageLimit = SESSION_CONVERSATION_PAGE_SIZE + 1;
+  const config = resolveDatabaseConfig();
+
+  switch (config.dialect) {
+    case "postgresql": {
+      const db = getIamDb();
+      const conditions = [eq(pgMessages.tenantId, tid), eq(pgMessages.sessionId, sid)];
+      if (beforeValid) conditions.push(lt(pgMessages.createdAt, beforeValid));
+      const window = await db
+        .select()
+        .from(pgMessages)
+        .where(and(...conditions))
+        .orderBy(desc(pgMessages.createdAt))
+        .limit(pageLimit);
+      const hasMore = window.length > SESSION_CONVERSATION_PAGE_SIZE;
+      const page = hasMore ? window.slice(0, SESSION_CONVERSATION_PAGE_SIZE) : window;
+      const chronological = [...page].reverse();
+      const messages = chronological.map((row) => mapRow(row, expand));
+      const nextBefore =
+        chronological.length > 0
+          ? chronological[0]!.createdAt instanceof Date
+            ? chronological[0]!.createdAt.toISOString()
+            : String(chronological[0]!.createdAt)
+          : undefined;
+      return {
+        session_id: sid,
+        messages,
+        has_more: hasMore,
+        next_before: hasMore ? nextBefore : undefined,
+        empty: messages.length === 0,
+      };
+    }
+    case "mysql": {
+      const db = getAdminMysqlDb();
+      const conditions = [eq(mysqlMessages.tenantId, tid), eq(mysqlMessages.sessionId, sid)];
+      if (beforeValid) conditions.push(lt(mysqlMessages.createdAt, beforeValid));
+      const window = await db
+        .select()
+        .from(mysqlMessages)
+        .where(and(...conditions))
+        .orderBy(desc(mysqlMessages.createdAt))
+        .limit(pageLimit);
+      const hasMore = window.length > SESSION_CONVERSATION_PAGE_SIZE;
+      const page = hasMore ? window.slice(0, SESSION_CONVERSATION_PAGE_SIZE) : window;
+      const chronological = [...page].reverse();
+      const messages = chronological.map((row) => mapRow(row, expand));
+      const nextBefore =
+        chronological.length > 0
+          ? chronological[0]!.createdAt instanceof Date
+            ? chronological[0]!.createdAt.toISOString()
+            : String(chronological[0]!.createdAt)
+          : undefined;
+      return {
+        session_id: sid,
+        messages,
+        has_more: hasMore,
+        next_before: hasMore ? nextBefore : undefined,
+        empty: messages.length === 0,
+      };
+    }
+    default: {
+      const exhaustive: never = config;
+      throw new Error(`Unsupported database config: ${JSON.stringify(exhaustive)}`);
+    }
+  }
 }

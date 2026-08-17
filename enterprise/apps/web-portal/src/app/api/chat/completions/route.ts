@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { ulid } from "ulid";
 import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
@@ -382,7 +383,17 @@ export async function POST(request: Request) {
     `[chat-routing] selected mode=${turnPlan.mode} source=${turnPlan.source}`,
   );
 
+  logCtx.setMode(
+    turnPlan.mode === "deep"
+      ? "deep_research"
+      : turnPlan.mode === "web"
+        ? "web_search"
+        : "chat",
+  );
+
   if (turnPlan.mode === "deep" && parsedBody) {
+    const deepResearchRunId = ulid().toLowerCase();
+    logCtx.setRun(deepResearchRunId);
     return runDeepResearchTurn(withSanitizedMessages(parsedBody), {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
@@ -392,6 +403,7 @@ export async function POST(request: Request) {
       tenantId: session.tenantId,
       userId: session.userId,
       sessionId: chatSessionId,
+      runId: deepResearchRunId,
       traceId,
       resolvedUserQuery: turnPlan.researchQuery,
       intentConfidence: turnPlan.intentConfidence,

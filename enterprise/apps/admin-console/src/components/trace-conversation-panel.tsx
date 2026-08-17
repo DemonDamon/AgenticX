@@ -1,51 +1,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Button } from "@agenticx/ui";
+import { Button } from "@agenticx/ui";
 import { adminFetch } from "../lib/admin-client-auth";
 import type { TraceConversationTurn } from "../lib/trace-conversation-io";
+import {
+  ConversationMessageList,
+  type ConversationMessageListLabels,
+} from "./conversation-message-list";
 
-export type TraceConversationPanelLabels = {
+export type TraceConversationPanelLabels = ConversationMessageListLabels & {
   title: string;
+  titleSession?: string;
   loading: string;
   empty: string;
   loadFailed: string;
   expand: string;
   collapse: string;
   truncatedHint: string;
-  roleUser: string;
-  roleAssistant: string;
-  roleTool: string;
-  roleSystem: string;
-  reasoning: string;
-  attachments: string;
-  chars: string;
+  scopeTurn?: string;
+  scopeSession?: string;
+  loadEarlier?: string;
+  noSession?: string;
 };
-
-function roleLabel(
-  role: string,
-  labels: TraceConversationPanelLabels,
-): string {
-  switch (role) {
-    case "user":
-      return labels.roleUser;
-    case "assistant":
-      return labels.roleAssistant;
-    case "tool":
-      return labels.roleTool;
-    case "system":
-      return labels.roleSystem;
-    default:
-      return role;
-  }
-}
 
 export function TraceConversationPanel({
   traceId,
   labels,
+  onSessionId,
 }: {
   traceId: string;
   labels: TraceConversationPanelLabels;
+  onSessionId?: (sessionId: string | null) => void;
 }) {
   const [data, setData] = useState<TraceConversationTurn | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +44,7 @@ export function TraceConversationPanel({
     if (!id) {
       setData(null);
       setLoading(false);
+      onSessionId?.(null);
       return;
     }
     setLoading(true);
@@ -76,13 +63,17 @@ export function TraceConversationPanel({
         if (!response.ok) {
           setError(payload.message ?? labels.loadFailed);
           setData(null);
+          onSessionId?.(null);
           return;
         }
-        setData(payload.data ?? null);
+        const turn = payload.data ?? null;
+        setData(turn);
+        onSessionId?.(turn?.session_id ?? null);
       } catch {
         if (!cancelled) {
           setError(labels.loadFailed);
           setData(null);
+          onSessionId?.(null);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -91,7 +82,7 @@ export function TraceConversationPanel({
     return () => {
       cancelled = true;
     };
-  }, [traceId, expanded, labels.loadFailed]);
+  }, [traceId, expanded, labels.loadFailed, onSessionId]);
 
   if (loading) {
     return <div className="text-xs text-muted-foreground">{labels.loading}</div>;
@@ -126,50 +117,7 @@ export function TraceConversationPanel({
       {anyTruncated && !expanded ? (
         <p className="text-[11px] text-muted-foreground">{labels.truncatedHint}</p>
       ) : null}
-      <div className="max-h-[360px] space-y-2 overflow-auto">
-        {data.messages.map((msg) => (
-          <div
-            key={msg.id}
-            className="rounded-md border border-border bg-muted/30 p-2"
-          >
-            <div className="mb-1 flex flex-wrap items-center gap-1.5">
-              <Badge variant={msg.role === "user" ? "secondary" : "outline"} className="h-5 text-[10px]">
-                {roleLabel(msg.role, labels)}
-              </Badge>
-              {msg.model ? (
-                <span className="font-mono text-[10px] text-muted-foreground">{msg.model}</span>
-              ) : null}
-              <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-                {msg.content.length.toLocaleString()} {labels.chars}
-                {msg.content.truncated ? " · …" : ""}
-              </span>
-            </div>
-            {msg.attachments && msg.attachments.length > 0 ? (
-              <div className="mb-1.5 flex flex-wrap gap-1">
-                <span className="text-[10px] text-muted-foreground">{labels.attachments}:</span>
-                {msg.attachments.map((att, idx) => (
-                  <Badge key={`${att.name ?? idx}`} variant="outline" className="h-5 max-w-[160px] truncate text-[10px]">
-                    {att.name || att.mime || "file"}
-                    {att.mime ? ` (${att.mime})` : ""}
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
-            {msg.reasoning?.text ? (
-              <div className="mb-1.5 rounded border border-dashed border-border/80 bg-background/60 p-1.5">
-                <div className="mb-0.5 text-[10px] font-medium text-muted-foreground">
-                  {labels.reasoning}
-                  {msg.reasoning.truncated ? " · …" : ""}
-                </div>
-                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">
-                  {msg.reasoning.text}
-                </pre>
-              </div>
-            ) : null}
-            <pre className="whitespace-pre-wrap break-words font-mono text-[11px]">{msg.content.text || "—"}</pre>
-          </div>
-        ))}
-      </div>
+      <ConversationMessageList messages={data.messages} labels={labels} />
     </div>
   );
 }

@@ -14,6 +14,8 @@ export type PortalLogRow = {
   user_id?: string;
   session_id?: string;
   route?: string;
+  mode?: string;
+  run_id?: string;
   status?: number;
   duration_ms?: number;
   error_name?: string;
@@ -85,6 +87,8 @@ async function defaultInsertBatch(rows: PortalLogRow[]): Promise<void> {
     userId: row.user_id ?? null,
     sessionId: row.session_id ?? null,
     route: row.route ?? null,
+    mode: row.mode ?? null,
+    runId: row.run_id ?? null,
     status: row.status ?? null,
     durationMs: row.duration_ms ?? null,
     errorName: row.error_name ?? null,

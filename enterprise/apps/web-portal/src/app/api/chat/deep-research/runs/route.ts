@@ -123,6 +123,7 @@ export async function GET(request: Request) {
     tenantId: session.tenantId,
     sessionId,
   });
+  logCtx.setMode("deep_research");
   const store = defaultRunStore;
   const activeRaw = await store.listActive(session.tenantId, session.userId, sessionId);
   const active = await healFinishedActiveRuns(activeRaw);

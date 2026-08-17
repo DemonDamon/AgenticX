@@ -125,6 +125,8 @@ describe("mysql baseline migration inventory", () => {
       "0022_gateway_audit_trace_id.sql",
       "0023_portal_request_logs.sql",
       "0024_deep_research_runs_trace_id.sql",
+      "0025_portal_request_logs_mode.sql",
+      "0026_portal_request_logs_session_idx.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -167,6 +169,8 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 22, tag: "0022_gateway_audit_trace_id" }),
       expect.objectContaining({ idx: 23, tag: "0023_portal_request_logs" }),
       expect.objectContaining({ idx: 24, tag: "0024_deep_research_runs_trace_id" }),
+      expect.objectContaining({ idx: 25, tag: "0025_portal_request_logs_mode" }),
+      expect.objectContaining({ idx: 26, tag: "0026_portal_request_logs_session_idx" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

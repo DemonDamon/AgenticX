@@ -9,6 +9,8 @@ export type LogFields = {
   tenant_id?: string;
   session_id?: string;
   route?: string;
+  mode?: string;
+  run_id?: string;
   status?: number;
   duration_ms?: number;
   error_name?: string;
@@ -24,6 +26,8 @@ const STRUCTURED_KEYS = new Set([
   "tenant_id",
   "session_id",
   "route",
+  "mode",
+  "run_id",
   "status",
   "duration_ms",
   "error_name",
@@ -131,6 +135,8 @@ export function log(level: LogLevel, fields: LogFields): void {
     user_id: typeof safe.user_id === "string" ? safe.user_id : undefined,
     session_id: typeof safe.session_id === "string" ? safe.session_id : undefined,
     route: typeof safe.route === "string" ? safe.route : undefined,
+    mode: typeof safe.mode === "string" ? safe.mode : undefined,
+    run_id: typeof safe.run_id === "string" ? safe.run_id : undefined,
     status: typeof safe.status === "number" ? safe.status : undefined,
     duration_ms: typeof safe.duration_ms === "number" ? safe.duration_ms : undefined,
     error_name: typeof safe.error_name === "string" ? safe.error_name : undefined,
