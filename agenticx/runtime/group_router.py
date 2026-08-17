@@ -23,6 +23,13 @@ from agenticx.runtime import AgentRuntime
 from agenticx.runtime import AsyncClarifyGate, AsyncConfirmGate
 from agenticx.runtime.events import EventType
 from agenticx.runtime.group_context import GroupChatContext
+from agenticx.runtime.group_facts import (
+    GroupExecutionFacts,
+    build_group_execution_facts,
+    format_zero_exec_fallback,
+    render_facts_block,
+)
+from agenticx.runtime.harden_flags import group_meta_direct_tools_enabled
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
 
@@ -153,6 +160,40 @@ def _is_open_call_question(user_input: str) -> bool:
         if marker in text:
             return True
     return False
+
+
+_PROGRESS_QUERY_MARKERS_CN = (
+    "干活了吗",
+    "干了吗",
+    "怎么样了",
+    "进展",
+    "进度",
+    "做完了吗",
+    "完成了吗",
+    "到哪了",
+    "什么情况",
+    "有结果了吗",
+)
+
+
+def _is_progress_query(user_input: str) -> bool:
+    """True when the user is asking for execution progress rather than new work."""
+    text = (user_input or "").strip()
+    if not text:
+        return False
+    for marker in _PROGRESS_QUERY_MARKERS_CN:
+        if marker in text:
+            return True
+    return False
+
+
+def _append_zero_exec_fallback(reply: GroupReply, facts: GroupExecutionFacts) -> GroupReply:
+    line = format_zero_exec_fallback(facts)
+    body = str(reply.content or "").rstrip()
+    if line in body:
+        return reply
+    reply.content = f"{body}\n{line}" if body else line
+    return reply
 
 
 def _is_complex_multistep_task(user_input: str) -> bool:
@@ -907,6 +948,21 @@ class GroupChatRouter:
             )
         return members
 
+    def _collect_group_execution_facts(self, base_session: StudioSession) -> GroupExecutionFacts:
+        history = getattr(base_session, "chat_history", None)
+        if not isinstance(history, list):
+            history = []
+        taskspaces = getattr(base_session, "taskspaces", None)
+        if not isinstance(taskspaces, list):
+            taskspaces = []
+        avatar_ids = getattr(base_session, "__group_avatar_ids", None) or []
+        return build_group_execution_facts(
+            chat_history=history,
+            members=self._avatar_member_summary(avatar_ids),
+            taskspaces=taskspaces,
+            session_id=resolve_studio_session_id(base_session),
+        )
+
     async def _analyze_intent(
         self,
         *,
@@ -1009,10 +1065,14 @@ class GroupChatRouter:
         extra_instruction: str = "",
         quoted_content: str = "",
         user_display_name: str = "我",
+        facts: GroupExecutionFacts | None = None,
     ) -> GroupReply:
         members_summary = GroupChatContext.render_members_summary(
             self._avatar_member_summary(getattr(base_session, "__group_avatar_ids", []) or [])
         )
+        if facts is None:
+            facts = self._collect_group_execution_facts(base_session)
+        facts_block = render_facts_block(facts)
         provider = getattr(base_session, "provider_name", None)
         model = getattr(base_session, "model_name", None)
         local_user_input = user_input
@@ -1031,6 +1091,12 @@ class GroupChatRouter:
             "- 未明确要求长文时：用要点概括关键结论 + 下一步，把细表留给用户追问。\n\n"
             f"人类提问者显示名：{u}。请直接对该用户作答（可用「你」或其显示名），不要无故把主答对象换成 @ 某位分身，除非在明确指派后续跟进。\n\n"
             f"群成员:\n{members_summary}\n\n"
+            f"{facts_block}\n\n"
+            "## 进展陈述规则（必须遵守）\n"
+            "- 只能依据上方「群工作台事实」陈述执行进展；事实块之外的进展一律不得声称。\n"
+            "- 若某成员列在「从未执行过」，必须明说该成员还没开始，禁止描述其产出、完成度或草稿状态。\n"
+            "- 无产出文件时，禁止给出「已跑通」「写了一半」「出了第一版」这类具体完成度描述。\n"
+            "- 你自己或他人在历史消息里的「计划 / 安排 / 将要」不等于已执行，不得当作进展复述。\n\n"
             f"最近群聊上下文:\n{context.render_recent_dialogue()}\n\n"
             f"用户问题:\n{local_user_input}\n\n"
             f"{extra_instruction.strip()}\n"
@@ -1495,16 +1561,53 @@ class GroupChatRouter:
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
             if await self._should_stop(should_stop):
                 return
-            pm = await self._run_meta_project_manager_reply(
-                base_session=base_session,
-                context=context,
-                group_name=group_name,
-                user_input=user_input,
-                quoted_content=quoted_content,
-                extra_instruction="请从项目经理视角直接回答。",
-                user_display_name=user_display_name,
-            )
-            yield pm
+            facts = self._collect_group_execution_facts(base_session)
+            extra_instruction = "请从项目经理视角直接回答。"
+            zero_exec_progress = _is_progress_query(user_input) and not facts.has_any_execution
+            if zero_exec_progress:
+                extra_instruction = (
+                    "本会话尚无任何成员实际执行记录，请如实说明还没开始，"
+                    "不要描述任何产出或完成度。\n"
+                    + extra_instruction
+                )
+            if group_meta_direct_tools_enabled():
+                pm = None
+                async for pm_evt in self._run_one_target_stream(
+                    base_session=base_session,
+                    context=context,
+                    group_id=group_id,
+                    group_name=group_name,
+                    avatar_id=META_LEADER_AGENT_ID,
+                    user_input=user_input,
+                    quoted_content=quoted_content,
+                    should_stop=should_stop,
+                    force_reply=True,
+                    user_display_name=user_display_name,
+                ):
+                    if (
+                        zero_exec_progress
+                        and pm_evt.event_type in {"group_reply", "group_skipped"}
+                    ):
+                        pm_evt = _append_zero_exec_fallback(pm_evt, facts)
+                    yield pm_evt
+                    if pm_evt.event_type in {"group_reply", "group_skipped"}:
+                        pm = pm_evt
+                if pm is None:
+                    return
+            else:
+                pm = await self._run_meta_project_manager_reply(
+                    base_session=base_session,
+                    context=context,
+                    group_name=group_name,
+                    user_input=user_input,
+                    quoted_content=quoted_content,
+                    extra_instruction=extra_instruction,
+                    user_display_name=user_display_name,
+                    facts=facts,
+                )
+                if zero_exec_progress:
+                    pm = _append_zero_exec_fallback(pm, facts)
+                yield pm
             self._record_turn_response(responded_this_turn, pm)
             async for fu in self._emit_mention_follow_ups(
                 reply=pm,

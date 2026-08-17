@@ -3006,6 +3006,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [groupTyping, setGroupTyping] = useState<Record<string, string>>({});
   /** One-line activity hint per group member (tool progress); not a chat message. */
   const [groupActivityHint, setGroupActivityHint] = useState<Record<string, string>>({});
+  const groupActiveAgentIds = useMemo(
+    () => Array.from(new Set([...Object.keys(groupTyping), ...Object.keys(groupActivityHint)])),
+    [groupTyping, groupActivityHint],
+  );
   const lastGroupProgressRef = useRef<Record<string, string>>({});
   type QuoteTarget = { id: string; message: Message; body: string };
   const [quoteTargets, setQuoteTargets] = useState<QuoteTarget[]>([]);
@@ -13185,6 +13189,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             groupId={isGroupPane ? groupChatId : null}
             avatarList={avatars}
             metaLeaderLabel={metaLeaderDisplayName}
+            groupActiveAgentIds={groupActiveAgentIds}
           />
         </div>
       ) : null}
@@ -13322,6 +13327,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 groupId={isGroupPane ? groupChatId : null}
                 avatarList={avatars}
                 metaLeaderLabel={metaLeaderDisplayName}
+                groupActiveAgentIds={groupActiveAgentIds}
               />
             </div>
           ) : null}
