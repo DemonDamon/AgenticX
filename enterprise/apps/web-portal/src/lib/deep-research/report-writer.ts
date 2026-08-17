@@ -6,6 +6,7 @@
 import { EVIDENCE_DISCIPLINE_HINT } from "../retrieval/evidence-discipline";
 import { UNTRUSTED_EVIDENCE_SYSTEM_HINT } from "./evidence-pack";
 import { parseLlmJson } from "./llm-json";
+import { parseChartSpec } from "./report-chart";
 import {
   isMarkdownFenceLine,
   isMarkdownHeadingLine,
@@ -22,6 +23,7 @@ export type SectionFormat =
   | "comparison_table"
   | "timeline"
   | "mermaid"
+  | "chart"
   | "tradeoff";
 
 export type SectionSemanticRole =
@@ -40,6 +42,7 @@ const FORMAT_SET = new Set<SectionFormat>([
   "comparison_table",
   "timeline",
   "mermaid",
+  "chart",
   "tradeoff",
 ]);
 
@@ -129,14 +132,14 @@ const OUTLINE_SYSTEM = [
   '格式：{"title":"...","sections":[{"id":"s1","title":"...","brief":"...","citation_indexes":[1,4,7],"format":"prose","semantic_role":"core"}]}',
   `章节数 ${MIN_SECTIONS}-${MAX_SECTIONS}，按证据密度决定，宁少勿滥。`,
   "必须包含首节「核心结论」，其余章节直接回答用户问题，按结果、证据、机制和适用条件组织。",
-  "format 取值：prose | comparison_table | timeline | mermaid | tradeoff",
+  "format 取值：prose | comparison_table | timeline | mermaid | chart | tradeoff",
   "semantic_role 取值：core | evidence | mechanism | outcome | boundary | decision | limitations | custom；首节必须为 core，每节只选一个最主要角色。",
   "禁止输出 internal_meta 角色；decision 与 limitations 仅在下方报告内容策略明确允许时使用。",
   "首节「核心结论」必须 format=prose。tradeoff 仅在下方报告内容策略明确允许决策章节时使用。",
   "默认禁止独立的「不确定性与信息缺口」「来源置信度」「检索过程」「研究方法自评」等内部元章节。",
   "证据限制若会改变答案，只在对应结论附近简洁说明适用边界，不得扩写成系统检索自评。",
-  "中间章节按证据选择形态：对比/选型/竞品至少 1 节 comparison_table；演进/版本/时间节点至少 1 节 timeline；架构/关系/流程可用 1 节 mermaid。",
-  "全篇中间节不得全部为 prose（至少 1 节为 comparison_table / timeline / mermaid / tradeoff 之一）。",
+  "中间章节按证据选择形态：对比/选型至少 1 节 comparison_table；演进/版本/时间节点至少 1 节 timeline；架构/关系/流程可用 1 节 mermaid；含有来源支撑的明显数值对比（市场规模/性能指标/份额/价格）时至少 1 节 chart。",
+  "全篇中间节不得全部为 prose（至少 1 节为 comparison_table / timeline / mermaid / chart / tradeoff 之一）。",
   "citation_indexes 只能引用证据包中真实存在的编号。",
   UNTRUSTED_EVIDENCE_SYSTEM_HINT,
   "使用与用户提问相同的语言。",
@@ -175,6 +178,10 @@ const FORMAT_DIRECTIVES: Record<SectionFormat, string> = {
     "表达形态 timeline：必须用 GFM 表或有序时间线列出 ≥4 个带时间/版本节点的事件，每行带 [N]。",
   mermaid:
     "表达形态 mermaid：必须含一个 ```mermaid 代码块（flowchart 或 mindmap）；节点标签短；图后 3–6 句解读；禁止只写「如下图所示」而无代码块。",
+  chart:
+    "表达形态 chart：必须含一个 ```chart 代码块，内容为合法 JSON：" +
+    '{"type":"bar|line|pie|scatter","title":"...","x":["类目A","类目B"],"series":[{"name":"系列名","data":[1,2]}]}；' +
+    "x 与每条 series.data 必须等长；数值必须来自正文已引用的来源并就近标注 [N]，禁止编造；图后 2–4 句解读。",
   tradeoff:
     "表达形态 tradeoff：必须含「方案 × 维度」GFM 对比表，并另起一段写清推荐/不推荐/风险。",
 };
@@ -413,7 +420,30 @@ export function ensureMinimumOutlineSections(
   return ensureRichOutlineFormats({ ...outline, sections });
 }
 
-/** 中间节不得全是 prose：否则把第二节强制改为 comparison_table。 */
+const RICH_FORMAT_HINTS: Array<{
+  pattern: RegExp;
+  format: SectionFormat;
+  briefHint: string;
+}> = [
+  {
+    pattern:
+      /(规模|份额|占比|价格|成本|营收|销量|性能指标|数值|数据对比|market\s+share|revenue|price|cost|benchmark|latency|throughput)/iu,
+    format: "chart",
+    briefHint: "请用 ```chart 数据图呈现有引用来源支撑的关键数值对比",
+  },
+  {
+    pattern: /(演进|发展|历程|时间线|版本|历史|evolution|timeline|history|version)/iu,
+    format: "timeline",
+    briefHint: "请用时间线呈现关键节点",
+  },
+  {
+    pattern: /(架构|流程|机制|原理|关系|链路|architecture|workflow|mechanism|pipeline)/iu,
+    format: "mermaid",
+    briefHint: "请用 Mermaid 图呈现结构或流程关系",
+  },
+];
+
+/** 中间节不得全是 prose：按主题选择最匹配的结构化表达。 */
 export function ensureRichOutlineFormats(outline: ReportOutline): ReportOutline {
   if (outline.sections.length < 3) return outline;
   const middle = outline.sections.slice(1, -1);
@@ -421,12 +451,18 @@ export function ensureRichOutlineFormats(outline: ReportOutline): ReportOutline 
   if (middle.some((s) => s.format !== "prose")) return outline;
 
   const targetIndex = 1;
+  const topicText = `${outline.title} ${middle
+    .map((section) => `${section.title} ${section.brief}`)
+    .join(" ")}`;
+  const matched = RICH_FORMAT_HINTS.find((hint) => hint.pattern.test(topicText));
+  const format: SectionFormat = matched?.format ?? "comparison_table";
+  const briefHint = matched?.briefHint ?? "请用 Markdown 对比表呈现关键维度";
   const sections = outline.sections.map((section, i) => {
     if (i !== targetIndex) return section;
-    const brief = section.brief.includes("请用 Markdown 对比表")
+    const brief = section.brief.includes(briefHint)
       ? section.brief
-      : `${section.brief.replace(/。$/, "")}。请用 Markdown 对比表呈现关键维度`;
-    return { ...section, format: "comparison_table" as const, brief };
+      : `${section.brief.replace(/。$/, "")}。${briefHint}`;
+    return { ...section, format, brief };
   });
   return { ...outline, sections };
 }
@@ -696,6 +732,12 @@ function hasMermaidFence(body: string): boolean {
   return /```mermaid[\s\S]*?```/i.test(body);
 }
 
+function hasValidChartFence(body: string): boolean {
+  const match = body.match(/```chart([\s\S]*?)```/i);
+  if (!match?.[1]) return false;
+  return parseChartSpec(match[1].trim()) !== null;
+}
+
 /** Deterministic structure validation used by the orchestrator repair pass. */
 export function sectionMeetsFormat(section: ReportSection, body: string): boolean {
   switch (section.format) {
@@ -708,6 +750,8 @@ export function sectionMeetsFormat(section: ReportSection, body: string): boolea
       return hasTimelineHeuristic(body);
     case "mermaid":
       return hasMermaidFence(body);
+    case "chart":
+      return hasValidChartFence(body);
     default: {
       const _exhaustive: never = section.format;
       void _exhaustive;

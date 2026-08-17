@@ -4,6 +4,12 @@
  */
 
 import type { Citation } from "./registry";
+import {
+  chartSpecToGfmTable,
+  chartSpecToSvg,
+  chartSpecToXyChart,
+  parseChartSpec,
+} from "./report-chart";
 
 export type HtmlReportInput = {
   title: string;
@@ -107,11 +113,30 @@ export function markdownToHtml(markdown: string): { html: string; toc: TocEntry[
       }
       if (i < lines.length) i += 1;
       const source = codeLines.join("\n");
-      if (lang.toLowerCase() === "mermaid") {
+      const langLower = lang.toLowerCase();
+      if (langLower === "mermaid") {
         const escaped = escapeHtml(source);
         blocks.push(
           `<div class="mermaid-wrap"><pre class="mermaid">${escaped}</pre><pre class="mermaid-fallback" hidden>${escaped}</pre></div>`,
         );
+      } else if (langLower === "chart") {
+        const spec = parseChartSpec(source);
+        const xyChart = spec ? chartSpecToXyChart(spec) : null;
+        if (xyChart) {
+          const escaped = escapeHtml(xyChart);
+          blocks.push(
+            `<div class="mermaid-wrap"><pre class="mermaid">${escaped}</pre><pre class="mermaid-fallback" hidden>${escaped}</pre></div>`,
+          );
+        } else if (spec) {
+          const svg = chartSpecToSvg(spec);
+          if (svg) {
+            blocks.push(`<div class="chart-wrap">${svg}</div>`);
+          } else {
+            blocks.push(markdownToHtml(chartSpecToGfmTable(spec)).html);
+          }
+        } else {
+          blocks.push(`<pre><code class="language-chart">${escapeHtml(source)}</code></pre>`);
+        }
       } else {
         const langAttr = lang ? ` class="language-${escapeHtml(lang)}"` : "";
         blocks.push(
@@ -191,6 +216,7 @@ export function markdownToHtml(markdown: string): { html: string; toc: TocEntry[
     }
 
     const para: string[] = [];
+    const paraStart = i;
     while (i < lines.length && (lines[i] ?? "").trim()) {
       const next = lines[i] ?? "";
       if (
@@ -203,6 +229,12 @@ export function markdownToHtml(markdown: string): { html: string; toc: TocEntry[
         break;
       }
       para.push(next);
+      i += 1;
+    }
+    // A lone pipe row is not a table, but it also terminates the paragraph
+    // scanner. Consume it explicitly so malformed model output cannot loop.
+    if (i === paraStart) {
+      para.push(line);
       i += 1;
     }
     flushParagraph(para);
@@ -355,6 +387,12 @@ h1 { font-size: 1.85rem; line-height: 1.3; margin: 0 0 0.35rem; }
 .ref-url { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; word-break: break-all; }
 .mindmap { margin-top: 2.5rem; }
 .mermaid-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; overflow: auto; }
+.chart-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; overflow: auto; }
+.chart-figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+.chart-title { font-weight: 600; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; font-size: 0.85rem; color: var(--muted); justify-content: center; }
+.chart-legend-item { display: inline-flex; align-items: center; gap: 0.35rem; }
+.chart-dot { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 9999px; }
 .muted { color: var(--muted); }
 @media print {
   .sidebar, .theme-toggle { display: none !important; }
@@ -515,7 +553,7 @@ export function renderHtmlReport(input: HtmlReportInput): string {
           .join("\n");
 
   const mindmapBlock = renderMindmap(input.mindmapMermaid);
-  const bodyHasMermaid = /```mermaid\b/i.test(input.markdown);
+  const bodyHasMermaid = bodyHtml.includes('class="mermaid"');
   const needMermaid = Boolean(input.mindmapMermaid.trim()) || bodyHasMermaid;
   const mermaidScript = needMermaid
     ? `<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js" onerror="document.querySelectorAll('.mermaid').forEach(function(e){e.hidden=true});document.querySelectorAll('.mermaid-fallback').forEach(function(e){e.hidden=false})"></script>`

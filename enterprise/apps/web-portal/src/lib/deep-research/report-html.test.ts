@@ -135,6 +135,92 @@ describe("renderHtmlReport", () => {
     expect(html).not.toContain('class="mermaid"');
   });
 
+  it("consumes lone pipe rows that are not a valid table", () => {
+    const markdown = [
+      "## 架构分析",
+      "",
+      "本节正文 | 维度 | A |",
+      "| --- | --- |",
+      "| x | 1 [1] |",
+      "",
+    ].join("\n");
+    const { html } = markdownToHtml(markdown);
+    expect(html).toContain("架构分析");
+    expect(html).toContain("| --- | --- |");
+  });
+
+  it("renders a bar chart fence through the xychart path", () => {
+    const spec = JSON.stringify({
+      type: "bar",
+      title: "市场份额",
+      x: ["A", "B", "C"],
+      series: [{ name: "2026", data: [30, 45, 25] }],
+    });
+    const { html } = markdownToHtml(`## 份额\n\n\`\`\`chart\n${spec}\n\`\`\`\n`);
+    expect(html).toContain('class="mermaid"');
+    expect(html).toContain("xychart-beta");
+    expect(html).toContain("bar [30, 45, 25]");
+    expect(html).not.toContain('class="language-chart"');
+  });
+
+  it("renders a pie chart fence as an inline SVG figure", () => {
+    const spec = JSON.stringify({
+      type: "pie",
+      title: "占比",
+      x: ["甲", "乙"],
+      series: [{ name: "s", data: [60, 40] }],
+    });
+    const { html } = markdownToHtml(`\`\`\`chart\n${spec}\n\`\`\`\n`);
+    expect(html).toContain("chart-wrap");
+    expect(html).toContain("<svg");
+    expect(html).toContain("60.0%");
+  });
+
+  it("falls back to a data table when a valid chart cannot be drawn", () => {
+    const spec = JSON.stringify({
+      type: "pie",
+      x: ["甲", "乙"],
+      series: [{ name: "s", data: [0, 0] }],
+    });
+    const { html } = markdownToHtml(`\`\`\`chart\n${spec}\n\`\`\`\n`);
+    expect(html).toContain("<table>");
+    expect(html).toContain("<th>甲</th>");
+    expect(html).not.toContain('class="language-chart"');
+  });
+
+  it("keeps an invalid chart fence as escaped code", () => {
+    const { html } = markdownToHtml("```chart\n{invalid json\n```");
+    expect(html).toContain('class="language-chart"');
+    expect(html).not.toContain('class="mermaid"');
+  });
+
+  it("loads the diagram renderer only when a chart uses xychart", () => {
+    const bar = JSON.stringify({
+      type: "bar",
+      x: ["A", "B"],
+      series: [{ name: "s", data: [1, 2] }],
+    });
+    const barHtml = renderHtmlReport({
+      ...base,
+      mindmapMermaid: "",
+      markdown: `## 数值\n\n\`\`\`chart\n${bar}\n\`\`\`\n`,
+    });
+    expect(barHtml).toContain("mermaid.min.js");
+    expect(barHtml).toContain("xychart-beta");
+
+    const pie = JSON.stringify({
+      type: "pie",
+      x: ["A", "B"],
+      series: [{ name: "s", data: [1, 2] }],
+    });
+    const pieHtml = renderHtmlReport({
+      ...base,
+      mindmapMermaid: "",
+      markdown: `## 数值\n\n\`\`\`chart\n${pie}\n\`\`\`\n`,
+    });
+    expect(pieHtml).not.toContain("mermaid.min.js");
+  });
+
   it("keeps left toc at mid width and collapses toc under 520px", () => {
     const html = renderHtmlReport(base);
     expect(html).toContain("max-width: 860px) and (min-width: 521px)");

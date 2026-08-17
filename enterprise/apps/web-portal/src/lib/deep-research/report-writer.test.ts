@@ -554,6 +554,39 @@ describe("ensureRichOutlineFormats", () => {
     expect(fixed.sections[1]?.format).toBe("comparison_table");
     expect(fixed.sections[1]?.brief).toContain("请用 Markdown 对比表");
   });
+
+  it("routes a numeric comparison topic to chart", () => {
+    const outline: ReportOutline = {
+      title: "向量数据库市场份额与性能指标对比",
+      sections: [
+        { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose", semanticRole: "core" },
+        { id: "s2", title: "数据分析", brief: "展开", citationIndexes: [], format: "prose", semanticRole: "evidence" },
+        { id: "s3", title: "更多", brief: "展开", citationIndexes: [], format: "prose", semanticRole: "mechanism" },
+        { id: "s4", title: "边界", brief: "b", citationIndexes: [], format: "prose", semanticRole: "boundary" },
+      ],
+    };
+    const fixed = ensureRichOutlineFormats(outline);
+    expect(fixed.sections[1]?.format).toBe("chart");
+    expect(fixed.sections[1]?.brief).toContain("```chart");
+  });
+
+  it("routes evolution topics to timeline and architecture topics to diagrams", () => {
+    const makeOutline = (title: string): ReportOutline => ({
+      title,
+      sections: [
+        { id: "s1", title: "核心结论", brief: "b", citationIndexes: [], format: "prose", semanticRole: "core" },
+        { id: "s2", title: "分析", brief: "展开", citationIndexes: [], format: "prose", semanticRole: "evidence" },
+        { id: "s3", title: "更多", brief: "展开", citationIndexes: [], format: "prose", semanticRole: "mechanism" },
+        { id: "s4", title: "边界", brief: "b", citationIndexes: [], format: "prose", semanticRole: "boundary" },
+      ],
+    });
+    expect(ensureRichOutlineFormats(makeOutline("模型架构演进历程")).sections[1]?.format).toBe(
+      "timeline",
+    );
+    expect(ensureRichOutlineFormats(makeOutline("检索系统架构与处理链路")).sections[1]?.format).toBe(
+      "mermaid",
+    );
+  });
 });
 
 describe("sectionMeetsFormat", () => {
@@ -599,6 +632,26 @@ describe("sectionMeetsFormat", () => {
 
   it("rejects missing mermaid fence", () => {
     expect(sectionMeetsFormat({ ...base, format: "mermaid" }, "如下图所示")).toBe(false);
+  });
+
+  it("accepts only a valid chart fence for chart format", () => {
+    const spec = JSON.stringify({
+      type: "bar",
+      x: ["A", "B"],
+      series: [{ name: "s", data: [1, 2] }],
+    });
+    expect(
+      sectionMeetsFormat(
+        { ...base, format: "chart" },
+        `解读\n\n\`\`\`chart\n${spec}\n\`\`\`\n\n数据说明 [1]`,
+      ),
+    ).toBe(true);
+    expect(
+      sectionMeetsFormat(
+        { ...base, format: "chart" },
+        '```chart\n{"type":"bar"}\n```',
+      ),
+    ).toBe(false);
   });
 });
 
