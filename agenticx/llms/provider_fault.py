@@ -37,6 +37,24 @@ def _norm_provider(name: str) -> str:
     return str(name or "").strip().lower()
 
 
+def is_model_param_compat_error(exc: BaseException) -> bool:
+    """True when the vendor rejected sampling/tool params for this SKU.
+
+    Typical case: gpt-5 reasoning models reject temperature!=1
+    (LiteLLM UnsupportedParamsError). Safe to retry on a different model.
+    """
+    text = f"{type(exc).__name__} {exc}".lower()
+    return (
+        "unsupportedparamserror" in text
+        or "unsupported params" in text
+        or "don't support temperature" in text
+        or "does not support temperature" in text
+        or "only temperature=1" in text
+        or "invalid chat setting" in text
+        or "invalid params" in text
+    )
+
+
 def classify_provider_fault(exc: BaseException) -> FaultKind:
     """Best-effort classification from exception message and common SDK patterns."""
     text = f"{type(exc).__name__} {exc}".lower()

@@ -45,6 +45,11 @@ describe("model-options", () => {
     expect(normalizeProviderEntry(openaiGateway).model).toBe("gpt-5-chat");
   });
 
+  it("keeps an explicit default model when it is in models[]", () => {
+    const entry = { ...zhipu, model: "GLM-5.1", models: ["GLM-5", "GLM-5.1"] };
+    expect(normalizeProviderEntry(entry).model).toBe("GLM-5.1");
+  });
+
   it("coerces stale pane selections to a visible fallback", () => {
     const providers = { openai: openaiGateway, zhipu };
     expect(coerceSelectableModel(providers, "openai", "deepseek-r1", "openai")).toEqual({

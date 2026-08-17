@@ -34,6 +34,7 @@ import {
   Activity,
   RefreshCw,
   SquarePen,
+  Star,
   CircleMinus,
   CheckCircle2,
   Compass,
@@ -9492,6 +9493,7 @@ export function SettingsPanel({
                       <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
                         <div className="flex min-w-0 items-center gap-2">
                           <span className="text-sm font-medium text-text-primary">模型列表</span>
+                          <span className="truncate text-[10px] text-text-faint">星标设为该渠道默认模型</span>
                           <span className="rounded-full bg-surface-hover px-2 py-0.5 text-[10px] font-medium tabular-nums text-text-subtle">
                             {current.models.length}
                           </span>
@@ -9569,14 +9571,43 @@ export function SettingsPanel({
                           const entry = modelHealthMap[hk];
                           const checking = entry?.phase === "checking";
                           const unauthorized = entry?.phase === "unauthorized";
+                          const defaultModelId = (current.model || current.models[0] || "").trim();
+                          const isDefaultModel = model === defaultModelId;
                           return (
                             <div
                               key={model}
-                              className={`grid grid-cols-[minmax(0,1fr)_minmax(6.5rem,auto)_2rem_2rem] items-center gap-2 rounded-lg border border-border bg-surface-panel px-3 py-2.5 transition hover:border-[var(--settings-accent-border-muted)]${unauthorized ? " opacity-80" : ""}`}
+                              className={`grid grid-cols-[2rem_minmax(0,1fr)_minmax(6.5rem,auto)_2rem_2rem] items-center gap-2 rounded-lg border border-border bg-surface-panel px-3 py-2.5 transition hover:border-[var(--settings-accent-border-muted)]${unauthorized ? " opacity-80" : ""}`}
                             >
+                              <HoverTip label={isDefaultModel ? "当前默认模型" : "设为默认模型"}>
+                                <button
+                                  type="button"
+                                  aria-label={isDefaultModel ? "当前默认模型" : `设为默认 ${model}`}
+                                  aria-pressed={isDefaultModel}
+                                  className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${
+                                    isDefaultModel
+                                      ? "text-amber-400"
+                                      : "text-text-faint hover:bg-surface-hover hover:text-text-primary"
+                                  }`}
+                                  onClick={() => {
+                                    if (!isDefaultModel) updateField("model", model);
+                                  }}
+                                >
+                                  <Star
+                                    className={`h-4 w-4 ${isDefaultModel ? "fill-current" : ""}`}
+                                    aria-hidden
+                                  />
+                                </button>
+                              </HoverTip>
                               <div className="min-w-0">
-                                <div className="truncate text-sm text-text-primary">
-                                  {formatModelOptionLabel(active, model, current)}
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <span className="truncate text-sm text-text-primary">
+                                    {formatModelOptionLabel(active, model, current)}
+                                  </span>
+                                  {isDefaultModel ? (
+                                    <span className="shrink-0 rounded bg-amber-400/10 px-1.5 py-0.5 text-[10px] text-amber-400/90">
+                                      默认
+                                    </span>
+                                  ) : null}
                                 </div>
                               </div>
                               <div className="flex min-w-0 items-center justify-end gap-2">

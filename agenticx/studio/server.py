@@ -64,7 +64,7 @@ from agenticx.cli.studio_mcp import (
     set_mcp_extra_search_paths_config,
     set_mcp_skip_default_names_config,
 )
-from agenticx.llms.provider_resolver import ProviderResolver
+from agenticx.llms.provider_resolver import ProviderResolver, effective_session_llm_names
 from agenticx.llms.sampling_params import provider_raw_enabled_for_fallback
 from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AutoSuspendClarifyGate
 from agenticx.runtime.auto_solve import AutoSolveMode
@@ -2703,6 +2703,15 @@ def create_studio_app() -> FastAPI:
             image_inputs = []
 
         def _resolve_llm():
+            filled_provider, filled_model = effective_session_llm_names(
+                session.provider_name,
+                session.model_name,
+                session_id=str(payload.session_id or ""),
+            )
+            if filled_provider and not str(session.provider_name or "").strip():
+                session.provider_name = filled_provider
+            if filled_model and not str(session.model_name or "").strip():
+                session.model_name = filled_model
             try:
                 return ProviderResolver.resolve(
                     provider_name=session.provider_name,

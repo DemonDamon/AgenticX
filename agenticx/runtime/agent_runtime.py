@@ -81,7 +81,12 @@ from agenticx.runtime.followup_stream import (
 from agenticx.llms.provider_fault import (
     classify_provider_fault,
     human_hint_for_fault,
+    is_model_param_compat_error,
     record_session_provider_hard_failure,
+)
+from agenticx.llms.provider_resolver import (
+    config_default_llm_names,
+    should_fallback_to_default_model,
 )
 from agenticx.llms.sampling_params import resolve_chat_temperature
 from agenticx.runtime.provider_fallback import (
@@ -891,9 +896,18 @@ def _streamed_tool_call_truncated(name: str, args_obj: Dict[str, Any]) -> bool:
     return False
 
 
-def _chat_temperature_kwargs(model_name: str, provider_name: str) -> Dict[str, float]:
+def _chat_temperature_kwargs(
+    model_name: str,
+    provider_name: str,
+    *,
+    fallback_model: str = "",
+) -> Dict[str, float]:
     """Build optional temperature kwarg for invoke/stream (omit when None)."""
-    value = resolve_chat_temperature(model_name, provider=provider_name)
+    value = resolve_chat_temperature(
+        model_name,
+        provider=provider_name,
+        fallback_model=fallback_model,
+    )
     if value is None:
         return {}
     return {"temperature": float(value)}
@@ -3256,6 +3270,12 @@ class AgentRuntime:
         first_feedback_seconds = _resolve_llm_first_feedback_seconds(session)
         provider_name = str(getattr(session, "provider_name", "") or "").strip()
         model_name = str(getattr(session, "model_name", "") or "").strip()
+        if not model_name:
+            model_name = str(getattr(self.llm, "model", "") or "").strip()
+        if not provider_name:
+            llm_cls = type(self.llm).__name__
+            if llm_cls == "MiniMaxProvider" or "minimax" in model_name.lower():
+                provider_name = "minimax"
         prompt_cache_cfg = load_prompt_cache_config()
         latest_cache_telemetry: Dict[str, Any] = {
             "cache_mode": "disabled",
@@ -4246,6 +4266,8 @@ class AgentRuntime:
                         )
                     provider_name = str(getattr(session, "provider_name", "") or provider_name)
                     model_name = str(getattr(session, "model_name", "") or model_name)
+                    if not model_name:
+                        model_name = str(getattr(self.llm, "model", "") or "").strip()
                     invoke_timeout_seconds = _resolve_llm_invoke_timeout_seconds(session)
                     heartbeat_timeout_seconds = _resolve_llm_heartbeat_timeout_seconds(session)
                     hard_timeout_seconds = _resolve_llm_hard_timeout_seconds(session)
@@ -4453,6 +4475,102 @@ class AgentRuntime:
                         )
                         continue
 
+                if fault == "context_window":
+                    from agenticx.runtime.harden_flags import (
+                        max_overflow_retries,
+                        overflow_retry_enabled,
+                    )
+
+                    if (
+                        overflow_retry_enabled()
+                        and self._overflow_retries_this_turn < max_overflow_retries()
+                    ):
+                        hist_before = _sanitize_context_messages(session.agent_messages)
+                        new_hist, did, summary, count, _pending_q = await self.compactor.maybe_compact(
+                            hist_before,
+                            force=True,
+                            model=model_name,
+                        )
+                        new_hist = _sanitize_context_messages(new_hist) if did else new_hist
+                        made_progress = (
+                            bool(did) and len(new_hist) > 1 and len(new_hist) < len(hist_before)
+                        )
+                        if made_progress:
+                            self._overflow_retries_this_turn += 1
+                            session.agent_messages = new_hist
+                            messages[:] = [
+                                {"role": "system", "content": current_system_prompt},
+                                *list(new_hist),
+                            ]
+                            try:
+                                messages = _promote_user_image_attachments(
+                                    messages,
+                                    str(getattr(session, "provider_name", "") or ""),
+                                    str(getattr(session, "model_name", "") or ""),
+                                )
+                            except Exception:
+                                pass
+                            try:
+                                await self.hooks.run_on_compaction(count, summary, session)
+                            except Exception:
+                                pass
+                            yield RuntimeEvent(
+                                type=EventType.ERROR.value,
+                                data={
+                                    "text": (
+                                        "上下文超出模型窗口，已压缩历史并重试本轮"
+                                        f"（{self._overflow_retries_this_turn}/{max_overflow_retries()}）…"
+                                    ),
+                                    "severity": "warning",
+                                    "detector": "context_overflow_compact_retry",
+                                    "retryable": True,
+                                },
+                                agent_id=agent_id,
+                            )
+                            continue
+
+                default_provider, default_model = config_default_llm_names()
+                if (
+                    is_model_param_compat_error(exc)
+                    and should_fallback_to_default_model(
+                        already_attempted=bool(
+                            getattr(session, "_default_model_compat_fallback_attempted", False)
+                        ),
+                        current_provider=provider_name,
+                        current_model=model_name,
+                        default_provider=default_provider,
+                        default_model=default_model,
+                    )
+                ):
+                    setattr(session, "_default_model_compat_fallback_attempted", True)
+                    session.provider_name = default_provider
+                    session.model_name = default_model
+                    reloaded = False
+                    try:
+                        reloaded = self._reload_llm_for_session(session)
+                    except Exception:
+                        logger.warning(
+                            "failed to rebuild LLM after default-model fallback session=%s",
+                            getattr(session, "session_id", ""),
+                            exc_info=True,
+                        )
+                    if reloaded:
+                        provider_name = default_provider
+                        model_name = default_model
+                        yield RuntimeEvent(
+                            type=EventType.ERROR.value,
+                            data={
+                                "text": (
+                                    "当前模型参数不兼容，已自动降级到默认模型 "
+                                    f"{default_provider}/{default_model} 并重试…"
+                                ),
+                                "severity": "warning",
+                                "detector": "default_model_compat_fallback",
+                                "retryable": True,
+                            },
+                            agent_id=agent_id,
+                        )
+                        continue
                 if fault in {"billing", "auth", "rate_limit", "context_window", "transient"}:
                     err_text = human_hint_for_fault(fault)
                 else:
