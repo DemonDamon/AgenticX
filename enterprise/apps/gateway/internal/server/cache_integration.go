@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/agenticx/enterprise/gateway/internal/audit"
 	"github.com/agenticx/enterprise/gateway/internal/cache"
@@ -14,6 +15,16 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/quota"
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 )
+
+// spanMeta carries per-call observability fields for agent_token_traces.
+type spanMeta struct {
+	DurationMS     int
+	Status         string // "" → "ok"
+	ErrorMessage   string
+	Stage          string
+	PromptText     string // Phase B optional I/O
+	CompletionText string
+}
 
 type cacheServeContext struct {
 	w                    http.ResponseWriter
@@ -54,7 +65,9 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 	if hit.Layer == cache.LayerL1 || hit.Layer == cache.LayerL2 {
 		usage = s.cacheService.GatewayCacheUsage(hit.Entry, s.cacheService.Config().CacheDiscountRatio)
 	}
-	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck)
+	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck, spanMeta{
+		DurationMS: durationMSSince(ctx.startedAt),
+	})
 	if s.useChannelRelay() {
 		actual := int64(usage.PromptTokens + usage.CompletionTokens)
 		s.billingService.SettleContext(
@@ -115,7 +128,13 @@ func (s *Server) writeChatCache(tenantID, userID string, req openai.ChatCompleti
 	s.cacheService.Write(tenantID, userID, req, entry)
 }
 
-func (s *Server) reportUsageDetailed(identity requestIdentity, decision routing.Decision, usage openai.Usage, budgetCheck *quota.CheckResult) {
+func (s *Server) reportUsageDetailed(
+	identity requestIdentity,
+	decision routing.Decision,
+	usage openai.Usage,
+	budgetCheck *quota.CheckResult,
+	span spanMeta,
+) {
 	n := metering.NormalizeUsage(usage)
 	cost := float64(n.TotalTokens) * 0.000001
 	pricingVersion := ""
@@ -158,13 +177,24 @@ func (s *Server) reportUsageDetailed(identity requestIdentity, decision routing.
 		TraceStep:                identity.TraceStep,
 	})
 	if s.traceReporter != nil && strings.TrimSpace(identity.TraceID) != "" && identity.TraceStep > 0 {
+		meta := map[string]any{}
+		if stage := strings.TrimSpace(firstNonEmpty(span.Stage, identity.TraceStage)); stage != "" {
+			meta["stage"] = stage
+		}
+		if decision.Route != "" {
+			meta["route"] = decision.Route
+		}
+		if io := metering.BuildTraceIOMetadata(span.PromptText, span.CompletionText); io != nil {
+			meta["io"] = io
+		}
+		meta = metering.CapTraceMetadata(meta)
 		s.traceReporter.ReportAsync(metering.TraceSpanRecord{
 			ID:              makeID("trace"),
 			TenantID:        identity.TenantID,
 			TraceID:         identity.TraceID,
 			StepNo:          identity.TraceStep,
 			StepKind:        "model",
-			Status:          "ok",
+			Status:          defaultIfEmpty(span.Status, "ok"),
 			Model:           decision.Model,
 			Provider:        decision.Provider,
 			InputTokens:     n.PromptTokens,
@@ -172,8 +202,59 @@ func (s *Server) reportUsageDetailed(identity requestIdentity, decision routing.
 			ReasoningTokens: n.ReasoningTokens,
 			TotalTokens:     n.TotalTokens,
 			CostUSD:         cost,
+			DurationMS:      span.DurationMS,
+			ErrorMessage:    span.ErrorMessage,
+			Metadata:        meta,
 		})
 	}
+}
+
+func durationMSSince(startedAt time.Time) int {
+	if startedAt.IsZero() {
+		return 0
+	}
+	ms := time.Since(startedAt).Milliseconds()
+	if ms < 0 {
+		return 0
+	}
+	if ms > int64(^uint(0)>>1) {
+		return int(^uint(0) >> 1)
+	}
+	return int(ms)
+}
+
+func defaultIfEmpty(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// sanitizeTraceError truncates and strips credential-looking tokens from error text.
+func sanitizeTraceError(msg string) string {
+	msg = strings.TrimSpace(metering.RedactTraceText(msg))
+	if msg == "" {
+		return ""
+	}
+	// Drop leftover credential header names so ops screens never show them.
+	for _, needle := range []string{"Authorization", "authorization", "api_key", "apiKey", "API_KEY", "Bearer", "bearer"} {
+		msg = strings.ReplaceAll(msg, needle, "[REDACTED]")
+	}
+	const maxLen = 500
+	if utf8.RuneCountInString(msg) <= maxLen {
+		return msg
+	}
+	runes := []rune(msg)
+	return string(runes[:maxLen])
 }
 
 func (s *Server) auditChatCall(ev audit.Event, cacheLayer cache.Layer, keyHash string, sim float64, upstreamMS int64) audit.Event {
@@ -221,7 +302,9 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 	if hit.Layer == cache.LayerL1 || hit.Layer == cache.LayerL2 {
 		usage = s.cacheService.GatewayCacheUsage(hit.Entry, s.cacheService.Config().CacheDiscountRatio)
 	}
-	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck)
+	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck, spanMeta{
+		DurationMS: durationMSSince(ctx.startedAt),
+	})
 	if s.useChannelRelay() {
 		actual := int64(usage.PromptTokens + usage.CompletionTokens)
 		s.billingService.SettleContext(

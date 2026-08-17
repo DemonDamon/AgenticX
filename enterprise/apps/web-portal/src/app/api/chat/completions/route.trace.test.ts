@@ -105,6 +105,7 @@ describe("POST /api/chat/completions trace propagation", () => {
     const headers = new Headers(captured);
     expect(headers.get("x-agenticx-trace-id")).toBe(tid);
     expect(headers.get("x-agenticx-trace-step")).toBe("1");
+    expect(headers.get("x-agenticx-trace-stage")).toBe("chat.answer");
   });
 
   it("generates a valid ULID when incoming trace id is missing or invalid", async () => {

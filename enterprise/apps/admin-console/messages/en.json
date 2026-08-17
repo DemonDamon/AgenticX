@@ -1243,6 +1243,11 @@
           "tokens": "Tokens",
           "cost": "Cost (USD)",
           "startedAt": "Started at",
+          "stage": "Stage",
+          "errorMessage": "Error",
+          "ioTitle": "Step I/O preview",
+          "ioPrompt": "Prompt preview",
+          "ioCompletion": "Completion preview",
           "attributes": "Attributes",
           "sources": "Sources",
           "emptyAttrs": "No attributes"

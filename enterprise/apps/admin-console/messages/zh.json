@@ -1243,6 +1243,11 @@
           "tokens": "Token",
           "cost": "成本 (USD)",
           "startedAt": "开始时间",
+          "stage": "阶段",
+          "errorMessage": "错误信息",
+          "ioTitle": "步骤 I/O 预览",
+          "ioPrompt": "Prompt 预览",
+          "ioCompletion": "Completion 预览",
           "attributes": "属性",
           "sources": "来源",
           "emptyAttrs": "无附加属性"

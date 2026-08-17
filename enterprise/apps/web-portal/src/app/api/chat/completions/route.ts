@@ -232,6 +232,7 @@ export async function POST(request: Request) {
     "x-session-id": session.sessionId,
     "x-agenticx-trace-id": traceId,
     "x-agenticx-trace-step": "1",
+    "x-agenticx-trace-stage": "chat.answer",
     ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
   };
 

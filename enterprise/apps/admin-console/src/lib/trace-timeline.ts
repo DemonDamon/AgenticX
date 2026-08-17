@@ -209,28 +209,40 @@ export function assembleTraceTimeline(input: TraceTimelineInput): TraceTimeline 
     requestNodes[0] ??
     null;
 
-  const modelChildren: TraceNode[] = spans.map((span) => ({
-    id: `model-${span.id}`,
-    kind: "model_step",
-    label: `#${span.step_no} ${span.provider ?? "?"}/${span.model ?? "?"}`,
-    status: span.status,
-    durationMs: span.duration_ms,
-    tokens: {
-      input: span.input_tokens,
-      output: span.output_tokens,
-      reasoning: span.reasoning_tokens,
-      total: span.total_tokens,
-    },
-    costUsd: Number(span.cost_usd) || 0,
-    attrs: {
-      provider: span.provider,
-      model: span.model,
-      step_kind: span.step_kind,
-      error_message: span.error_message,
-      metadata: span.metadata,
-    },
-    children: [],
-  }));
+  const modelChildren: TraceNode[] = spans.map((span) => {
+    const stage =
+      isRecord(span.metadata) && typeof span.metadata.stage === "string"
+        ? span.metadata.stage.trim()
+        : "";
+    const modelPart = `${span.provider ?? "?"}/${span.model ?? "?"}`;
+    const label = stage
+      ? `step ${span.step_no} · ${stage} · ${modelPart}`
+      : `step ${span.step_no} · ${modelPart}`;
+    return {
+      id: `model-${span.id}`,
+      kind: "model_step" as const,
+      label,
+      status: span.status,
+      durationMs: span.duration_ms,
+      tokens: {
+        input: span.input_tokens,
+        output: span.output_tokens,
+        reasoning: span.reasoning_tokens,
+        total: span.total_tokens,
+      },
+      costUsd: Number(span.cost_usd) || 0,
+      attrs: {
+        provider: span.provider,
+        model: span.model,
+        step_kind: span.step_kind,
+        stage: stage || undefined,
+        error_message: span.error_message,
+        metadata: span.metadata,
+        ...(isRecord(span.metadata) && span.metadata.io ? { io: span.metadata.io } : {}),
+      },
+      children: [],
+    };
+  });
 
   if (primary) {
     primary.children.push(...modelChildren);

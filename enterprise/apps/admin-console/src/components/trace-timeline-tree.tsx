@@ -248,6 +248,11 @@ export type TraceExplorerLabels = {
   tokens: string;
   cost: string;
   startedAt: string;
+  stage: string;
+  errorMessage: string;
+  ioTitle: string;
+  ioPrompt: string;
+  ioCompletion: string;
   attributes: string;
   sources: string;
   emptyAttrs: string;
@@ -290,6 +295,22 @@ export function TraceExplorer({
     selected?.attrs && Array.isArray((selected.attrs as { sources?: unknown }).sources)
       ? ((selected.attrs as { sources: Array<{ title?: string; url?: string }> }).sources ?? [])
       : [];
+  const stage =
+    selected?.attrs && typeof (selected.attrs as { stage?: unknown }).stage === "string"
+      ? String((selected.attrs as { stage: string }).stage)
+      : "";
+  const errorMessage =
+    selected?.attrs && typeof (selected.attrs as { error_message?: unknown }).error_message === "string"
+      ? String((selected.attrs as { error_message: string }).error_message)
+      : "";
+  const io =
+    selected?.attrs &&
+    typeof (selected.attrs as { io?: unknown }).io === "object" &&
+    (selected.attrs as { io?: unknown }).io !== null
+      ? ((selected.attrs as {
+          io: { prompt_preview?: string; completion_preview?: string; truncated?: boolean };
+        }).io ?? null)
+      : null;
 
   return (
     <div
@@ -335,6 +356,7 @@ export function TraceExplorer({
               </div>
               <dl>
                 <DetailField label={labels.status} value={selected.status ?? "—"} />
+                <DetailField label={labels.stage} value={stage || "—"} />
                 <DetailField
                   label={labels.duration}
                   value={selected.durationMs != null ? `${selected.durationMs}ms` : "—"}
@@ -354,7 +376,23 @@ export function TraceExplorer({
                   }
                 />
                 <DetailField label={labels.startedAt} value={selected.startedAt ?? "—"} />
+                <DetailField label={labels.errorMessage} value={errorMessage || "—"} />
               </dl>
+              {io ? (
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-muted-foreground">{labels.ioTitle}</div>
+                  <div className="rounded-md border border-border bg-muted/30 p-2">
+                    <div className="mb-1 text-[10px] text-muted-foreground">{labels.ioPrompt}</div>
+                    <pre className="mb-2 max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">
+                      {io.prompt_preview || "—"}
+                    </pre>
+                    <div className="mb-1 text-[10px] text-muted-foreground">{labels.ioCompletion}</div>
+                    <pre className="max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">
+                      {io.completion_preview || "—"}
+                    </pre>
+                  </div>
+                </div>
+              ) : null}
               {sources.length > 0 ? (
                 <div className="space-y-1">
                   <div className="text-xs font-medium text-muted-foreground">{labels.sources}</div>
@@ -396,6 +434,11 @@ export type TraceTimelineTreeLabels = {
   tokens: string;
   cost: string;
   startedAt: string;
+  stage: string;
+  errorMessage: string;
+  ioTitle: string;
+  ioPrompt: string;
+  ioCompletion: string;
   attributes: string;
   sources: string;
   emptyAttrs: string;
@@ -502,6 +545,11 @@ export function TraceTimelineInline({
           tokens: labels.tokens,
           cost: labels.cost,
           startedAt: labels.startedAt,
+          stage: labels.stage,
+          errorMessage: labels.errorMessage,
+          ioTitle: labels.ioTitle,
+          ioPrompt: labels.ioPrompt,
+          ioCompletion: labels.ioCompletion,
           attributes: labels.attributes,
           sources: labels.sources,
           emptyAttrs: labels.emptyAttrs,

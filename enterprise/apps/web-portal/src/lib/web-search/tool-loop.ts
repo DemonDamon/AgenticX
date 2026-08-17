@@ -551,11 +551,14 @@ async function callGatewayStream(
   deps: GatewayFetchDeps,
   body: Record<string, unknown>,
   nextTraceStep?: () => string,
+  stage?: string,
 ): Promise<Response> {
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const headers = nextTraceStep
-    ? { ...deps.headers, "x-agenticx-trace-step": nextTraceStep() }
-    : deps.headers;
+  const headers: Record<string, string> = {
+    ...deps.headers,
+    ...(nextTraceStep ? { "x-agenticx-trace-step": nextTraceStep() } : {}),
+    ...(stage ? { "x-agenticx-trace-stage": stage } : {}),
+  };
   try {
     return await fetchImpl(deps.url, {
       method: "POST",
@@ -1176,6 +1179,7 @@ export async function runWebSearchTurn(
         deps,
         await prepareNoEvidenceAnswerBody(directMessages, details.calculationIntent),
         nextTraceStep,
+        "websearch.answer",
       );
       return pipeUpstreamSse(upstream, {
         traceFrame: formatWebSearchTraceSse(trace),
@@ -1191,6 +1195,7 @@ export async function runWebSearchTurn(
         deps,
         await prepareNoEvidenceAnswerBody(withCurrentTimeContext(originalMessages)),
         nextTraceStep,
+        "websearch.answer",
       );
       return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT, {
         version: 1,
@@ -1321,6 +1326,7 @@ export async function runWebSearchTurn(
           ),
         },
         nextTraceStep,
+        "websearch.answer",
       );
       return pipeWithSourcesAppendix(upstream, [source], [], trace);
     } catch (error) {
@@ -1585,6 +1591,7 @@ export async function runWebSearchTurn(
           await prepareNoEvidenceAnswerBody(messages, calculationIntent)
         : { ...rest, stream: true, messages },
       nextTraceStep,
+      "websearch.answer",
     );
   } catch (error) {
     return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");

@@ -880,6 +880,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.provider.Complete(r.Context(), req, decision)
 	if err != nil {
 		s.rollbackChatQuotaAndBudget(identity, req.Model, estimatedInputTokens, budgetCheck)
+		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
+			DurationMS:   durationMSSince(startedAt),
+			Status:       "error",
+			ErrorMessage: sanitizeTraceError(err.Error()),
+			PromptText:   joinMessages(req.Messages),
+		})
 		writeAPIError(w, openai.Internal(err.Error()))
 		return
 	}
@@ -898,7 +904,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
-	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck)
+	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
+		DurationMS:     durationMSSince(startedAt),
+		PromptText:     joinMessages(req.Messages),
+		CompletionText: responseContent,
+	})
 	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
 
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
@@ -1253,6 +1263,13 @@ func (s *Server) handleStream(
 				reservedTokens,
 				budgetCheck,
 				qctx,
+				spanMeta{
+					DurationMS:     durationMSSince(startedAt),
+					Status:         "error",
+					ErrorMessage:   "policy blocked stream chunk",
+					PromptText:     inputText,
+					CompletionText: responseBuilder.String(),
+				},
 			)
 			return
 		}
@@ -1265,6 +1282,13 @@ func (s *Server) handleStream(
 			reservedTokens,
 			budgetCheck,
 			qctx,
+			spanMeta{
+				DurationMS:     durationMSSince(startedAt),
+				Status:         "error",
+				ErrorMessage:   sanitizeTraceError(formatStreamError(streamErr)),
+				PromptText:     inputText,
+				CompletionText: responseBuilder.String(),
+			},
 		)
 		if code := streamErrorCode(streamErr); code != "" {
 			writeStreamPolicyError(w, flusher, code, formatStreamError(streamErr), nil)
@@ -1292,7 +1316,11 @@ func (s *Server) handleStream(
 		CompletionTokens: outputTokens,
 		TotalTokens:      inputTokens + outputTokens,
 	}
-	s.reportUsageDetailed(identity, decision, streamUsage, &budgetCheck)
+	s.reportUsageDetailed(identity, decision, streamUsage, &budgetCheck, spanMeta{
+		DurationMS:     durationMSSince(startedAt),
+		PromptText:     inputText,
+		CompletionText: responseText,
+	})
 	if s.metrics != nil && !firstTokenAt.IsZero() {
 		s.metrics.ObserveTPS(req.Model, decision.ChannelID, outputTokens, time.Since(firstTokenAt))
 	}
@@ -1475,6 +1503,7 @@ type requestIdentity struct {
 	AuthViaPAT    bool
 	TraceID       string
 	TraceStep     int
+	TraceStage    string
 }
 
 func (s *Server) quotaContext(identity requestIdentity, model string) quota.RequestContext {
@@ -1686,7 +1715,7 @@ func (s *Server) reportUsage(identity requestIdentity, decision routing.Decision
 		PromptTokens:     inputTokens,
 		CompletionTokens: outputTokens,
 		TotalTokens:      inputTokens + outputTokens,
-	}, nil)
+	}, nil, spanMeta{})
 }
 
 // settleInterruptedStreamUsage converts a successful reservation into actual
@@ -1700,13 +1729,18 @@ func (s *Server) settleInterruptedStreamUsage(
 	reservedTokens int64,
 	budgetCheck quota.CheckResult,
 	qctx quota.RequestContext,
+	spans ...spanMeta,
 ) {
 	usage := openai.Usage{
 		PromptTokens:     estimatedInputTokens,
 		CompletionTokens: partialOutputTokens,
 		TotalTokens:      estimatedInputTokens + partialOutputTokens,
 	}
-	s.reportUsageDetailed(identity, decision, usage, &budgetCheck)
+	span := spanMeta{}
+	if len(spans) > 0 {
+		span = spans[0]
+	}
+	s.reportUsageDetailed(identity, decision, usage, &budgetCheck, span)
 	if s.useChannelRelay() {
 		s.billingService.SettleContext(qctx, reservedTokens, int64(usage.TotalTokens))
 		return
