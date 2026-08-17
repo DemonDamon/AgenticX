@@ -30,6 +30,7 @@ import {
   useAppStore,
   type Avatar,
   type ChatPane as ChatPaneState,
+  type ConfirmStrategy,
   type Message,
   type MessageAttachment,
   type PendingConfirm,
@@ -2787,6 +2788,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       ),
     [pane.messages],
   );
+  const showNewTopicContext = !hasStartedChat && !pane.loadingMessages;
   const toolRoundBudget = 60;
   const queuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
   const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
@@ -4201,7 +4203,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   };
 
   const changeComposerConfirmStrategy = async (
-    strategy: "manual" | "auto",
+    strategy: ConfirmStrategy,
   ): Promise<boolean> => {
     const previous = useAppStore.getState().confirmStrategy;
     if (previous === strategy) {
@@ -13159,21 +13161,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
             ) : null}
             </div>
-            <ComposerContextControls
-              workspaces={composerTaskspaces}
-              activeTaskspaceId={pane.activeTaskspaceId}
-              workspacePanelOpen={workspacePanelOpen}
-              workspaceLoading={composerWorkspaceLoading}
-              workspaceError={composerWorkspaceError}
-              onWorkspaceMenuOpen={refreshComposerTaskspaces}
-              onWorkspaceSelect={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
-              onOpenWorkspacePanel={openComposerWorkspacePanel}
-              confirmStrategy={confirmStrategy}
-              permissionSaving={composerPermissionSaving}
-              permissionError={composerPermissionError}
-              onConfirmStrategyChange={changeComposerConfirmStrategy}
-            />
-            <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
+            <div
+              className={`agx-pane-composer-actions flex min-w-0 items-center justify-between gap-2 px-2.5 pt-1 ${
+                showNewTopicContext ? "pb-0" : "pb-2.5"
+              }`}
+            >
               <div className="flex min-w-0 shrink items-center gap-0.5 overflow-hidden">
                 <input
                   ref={fileInputRef}
@@ -13222,6 +13214,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     <ConnectorsMenuButton sessionId={pane.sessionId} embedded />
                   )}
                 />
+                {hasStartedChat ? (
+                  <ComposerContextControls
+                    active={focused}
+                    mode="conversation"
+                    workspaces={composerTaskspaces}
+                    activeTaskspaceId={pane.activeTaskspaceId}
+                    workspacePanelOpen={workspacePanelOpen}
+                    workspaceLoading={composerWorkspaceLoading}
+                    workspaceError={composerWorkspaceError}
+                    onWorkspaceMenuOpen={refreshComposerTaskspaces}
+                    onWorkspaceSelect={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
+                    onOpenWorkspacePanel={openComposerWorkspacePanel}
+                    confirmStrategy={confirmStrategy}
+                    permissionSaving={composerPermissionSaving}
+                    permissionError={composerPermissionError}
+                    onConfirmStrategyChange={changeComposerConfirmStrategy}
+                  />
+                ) : null}
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
               <div className="flex min-w-0 shrink-0 items-center gap-1.5">
@@ -13288,6 +13298,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 />
               </div>
             </div>
+            {showNewTopicContext ? (
+              <ComposerContextControls
+                active={focused}
+                mode="new-topic"
+                workspaces={composerTaskspaces}
+                activeTaskspaceId={pane.activeTaskspaceId}
+                workspacePanelOpen={workspacePanelOpen}
+                workspaceLoading={composerWorkspaceLoading}
+                workspaceError={composerWorkspaceError}
+                onWorkspaceMenuOpen={refreshComposerTaskspaces}
+                onWorkspaceSelect={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
+                onOpenWorkspacePanel={openComposerWorkspacePanel}
+                confirmStrategy={confirmStrategy}
+                permissionSaving={composerPermissionSaving}
+                permissionError={composerPermissionError}
+                onConfirmStrategyChange={changeComposerConfirmStrategy}
+              />
+            ) : null}
             {atOpen ? (
               <AtMentionPicker
                 query={atQuery}

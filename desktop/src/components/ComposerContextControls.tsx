@@ -15,6 +15,10 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import type { ConfirmStrategy, Taskspace } from "../store";
+import {
+  CONFIRM_STRATEGY_OPTIONS,
+  confirmStrategyLabel,
+} from "../constants/confirm-strategy-options";
 
 const MENU_WIDTH = 288;
 
@@ -37,10 +41,12 @@ export function composerWorkspaceLabel(
 }
 
 export function composerPermissionLabel(strategy: ConfirmStrategy): string {
-  return strategy === "auto" ? "自动批准" : "逐项确认";
+  return confirmStrategyLabel(strategy);
 }
 
 type Props = {
+  active?: boolean;
+  mode: "new-topic" | "conversation";
   workspaces: Taskspace[];
   activeTaskspaceId: string | null;
   workspacePanelOpen: boolean;
@@ -52,12 +58,14 @@ type Props = {
   confirmStrategy: ConfirmStrategy;
   permissionSaving?: boolean;
   permissionError?: string;
-  onConfirmStrategyChange: (strategy: "manual" | "auto") => Promise<boolean>;
+  onConfirmStrategyChange: (strategy: ConfirmStrategy) => Promise<boolean>;
 };
 
 type OpenMenu = "workspace" | "permission" | null;
 
 export function ComposerContextControls({
+  active = true,
+  mode,
   workspaces,
   activeTaskspaceId,
   workspacePanelOpen,
@@ -86,6 +94,13 @@ export function ComposerContextControls({
     setMenuPos(null);
     if (restoreFocus) window.requestAnimationFrame(() => trigger?.focus());
   }, [openMenu]);
+
+  useEffect(() => {
+    if (active) return;
+    focusedMenuRef.current = null;
+    setOpenMenu(null);
+    setMenuPos(null);
+  }, [active]);
 
   const syncPosition = useCallback(() => {
     const anchor =
@@ -264,48 +279,43 @@ export function ComposerContextControls({
               <div className="px-2.5 pb-1.5 pt-1 text-[11px] font-medium text-text-faint">
                 默认执行权限 · 对所有会话生效
               </div>
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={!permissionIsAuto}
-                disabled={permissionSaving}
-                className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition-colors disabled:opacity-60 ${
-                  !permissionIsAuto ? "bg-surface-card-strong" : "hover:bg-surface-hover"
-                }`}
-                onClick={async () => {
-                  if (await onConfirmStrategyChange("manual")) closeMenu(true);
-                }}
-              >
-                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-medium text-text-strong">逐项确认</span>
-                  <span className="mt-0.5 block text-[11px] leading-4 text-text-faint">
-                    工具执行前由你确认，适合处理不熟悉的工作区
-                  </span>
-                </span>
-                {!permissionIsAuto ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-theme" strokeWidth={2} /> : null}
-              </button>
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={permissionIsAuto}
-                disabled={permissionSaving}
-                className={`mt-0.5 flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition-colors disabled:opacity-60 ${
-                  permissionIsAuto ? "bg-surface-card-strong" : "hover:bg-surface-hover"
-                }`}
-                onClick={async () => {
-                  if (await onConfirmStrategyChange("auto")) closeMenu(true);
-                }}
-              >
-                <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" strokeWidth={1.8} />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-medium text-text-strong">自动批准</span>
-                  <span className="mt-0.5 block text-[11px] leading-4 text-text-faint">
-                    所有工具直接执行，不再逐项询问；工作区边界仍然有效
-                  </span>
-                </span>
-                {permissionIsAuto ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-theme" strokeWidth={2} /> : null}
-              </button>
+              {CONFIRM_STRATEGY_OPTIONS.map((option, index) => {
+                const selected = confirmStrategy === option.value;
+                const StrategyIcon = option.value === "auto" ? TriangleAlert : ShieldCheck;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    disabled={permissionSaving}
+                    className={`${index > 0 ? "mt-0.5" : ""} flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition-colors disabled:opacity-60 ${
+                      selected ? "bg-surface-card-strong" : "hover:bg-surface-hover"
+                    }`}
+                    onClick={async () => {
+                      if (await onConfirmStrategyChange(option.value)) closeMenu(true);
+                    }}
+                  >
+                    <StrategyIcon
+                      className={`mt-0.5 h-4 w-4 shrink-0 ${
+                        option.value === "auto" ? "text-status-warning" : "text-text-muted"
+                      }`}
+                      strokeWidth={1.8}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] font-medium text-text-strong">
+                        {option.label}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] leading-4 text-text-faint">
+                        {option.description}
+                      </span>
+                    </span>
+                    {selected ? (
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-theme" strokeWidth={2} />
+                    ) : null}
+                  </button>
+                );
+              })}
               {permissionSaving ? (
                 <div className="px-2.5 py-1.5 text-[11px] text-text-faint">正在保存…</div>
               ) : permissionError ? (
@@ -318,52 +328,64 @@ export function ComposerContextControls({
       )
     : null;
 
+  const workspaceTrigger = (
+    <button
+      ref={workspaceButtonRef}
+      type="button"
+      className={`flex h-7 min-w-0 max-w-[220px] items-center gap-1.5 rounded-lg px-2 text-[11px] transition-colors ${
+        openMenu === "workspace" || workspacePanelOpen
+          ? "bg-surface-hover text-text-strong"
+          : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+      }`}
+      onClick={toggleWorkspaceMenu}
+      title={`工作区：${activeWorkspaceLabel}`}
+      aria-haspopup="menu"
+      aria-expanded={openMenu === "workspace"}
+    >
+      <FolderOpen className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+      <span className="min-w-0 truncate">{activeWorkspaceLabel}</span>
+      <ChevronDown
+        className={`h-3 w-3 shrink-0 transition-transform ${openMenu === "workspace" ? "rotate-180" : ""}`}
+        strokeWidth={2}
+        aria-hidden
+      />
+    </button>
+  );
+
+  const permissionTrigger = (
+    <button
+      ref={permissionButtonRef}
+      type="button"
+      className={`flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] transition-colors ${
+        openMenu === "permission" || permissionIsAuto
+          ? "bg-surface-hover text-text-strong"
+          : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+      }`}
+      onClick={togglePermissionMenu}
+      title={`默认执行权限：${permissionLabel}`}
+      aria-haspopup="menu"
+      aria-expanded={openMenu === "permission"}
+    >
+      <ShieldCheck className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+      <span>{permissionLabel}</span>
+      <ChevronDown
+        className={`h-3 w-3 shrink-0 transition-transform ${openMenu === "permission" ? "rotate-180" : ""}`}
+        strokeWidth={2}
+        aria-hidden
+      />
+    </button>
+  );
+
   return (
     <>
-      <div className="flex min-w-0 items-center gap-1.5 px-2.5 pt-1">
-        <button
-          ref={workspaceButtonRef}
-          type="button"
-          className={`flex h-7 min-w-0 max-w-[220px] items-center gap-1.5 rounded-lg px-2 text-[11px] transition-colors ${
-            openMenu === "workspace" || workspacePanelOpen
-              ? "bg-surface-hover text-text-strong"
-              : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
-          }`}
-          onClick={toggleWorkspaceMenu}
-          title={`工作区：${activeWorkspaceLabel}`}
-          aria-haspopup="menu"
-          aria-expanded={openMenu === "workspace"}
-        >
-          <FolderOpen className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
-          <span className="min-w-0 truncate">{activeWorkspaceLabel}</span>
-          <ChevronDown
-            className={`h-3 w-3 shrink-0 transition-transform ${openMenu === "workspace" ? "rotate-180" : ""}`}
-            strokeWidth={2}
-            aria-hidden
-          />
-        </button>
-        <button
-          ref={permissionButtonRef}
-          type="button"
-          className={`flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] transition-colors ${
-            openMenu === "permission" || permissionIsAuto
-              ? "bg-surface-hover text-text-strong"
-              : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
-          }`}
-          onClick={togglePermissionMenu}
-          title={`默认执行权限：${permissionLabel}`}
-          aria-haspopup="menu"
-          aria-expanded={openMenu === "permission"}
-        >
-          <ShieldCheck className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
-          <span>{permissionLabel}</span>
-          <ChevronDown
-            className={`h-3 w-3 shrink-0 transition-transform ${openMenu === "permission" ? "rotate-180" : ""}`}
-            strokeWidth={2}
-            aria-hidden
-          />
-        </button>
-      </div>
+      {mode === "new-topic" ? (
+        <div className="flex min-w-0 items-center gap-1.5 px-2.5 pb-2.5 pt-1">
+          {workspaceTrigger}
+          {permissionTrigger}
+        </div>
+      ) : (
+        permissionTrigger
+      )}
       {menu}
     </>
   );

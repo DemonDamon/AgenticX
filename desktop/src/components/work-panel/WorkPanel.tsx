@@ -1495,14 +1495,6 @@ export function WorkPanel({
               <TerminalIcon className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
               终端
             </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
-              onClick={openWorkspaceTab}
-            >
-              <FolderOpen className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              工作区
-            </button>
           </div>,
           document.body
         )
@@ -1824,8 +1816,8 @@ export function WorkPanel({
           className="agx-topbar-btn !px-[5px]"
           title={
             SHOW_DESKTOP_RUN_GRAPH
-              ? "打开任务摘要 / 浏览器 / 运行图 / 执行时间线 / 终端 / 工作区"
-              : "打开任务摘要 / 浏览器 / 执行时间线 / 终端 / 工作区"
+              ? "打开任务摘要 / 浏览器 / 运行图 / 执行时间线 / 终端"
+              : "打开任务摘要 / 浏览器 / 执行时间线 / 终端"
           }
           aria-label="新建工作台标签"
           onClick={openPlusMenu}
