@@ -59,6 +59,11 @@ import { fetchFaviconDataUrl } from "./fetch-favicon";
 import { classifyModelHealthFailure } from "./model-health";
 import { isRealpathUnder, safeRealpath } from "./path-guard";
 import {
+  getServeStartupTimeoutMs,
+  LOCAL_BACKEND_STARTUP_ENV,
+  SERVE_READY_PROBE_TIMEOUT_MS,
+} from "./local-backend-startup";
+import {
   readSessionMessagesFromDisk,
   readSessionMessagesTailFromDisk,
 } from "./session-messages-disk";
@@ -2981,6 +2986,7 @@ async function startStudioServe(): Promise<void> {
   const devPort = process.env.AGX_DEV_PORT || "5713";
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    ...LOCAL_BACKEND_STARTUP_ENV,
     PATH: augmentedPath,
     AGX_DEV_PORT: devPort,
     AGX_DESKTOP_TOKEN: apiToken,
@@ -3025,7 +3031,7 @@ async function startStudioServe(): Promise<void> {
   }
 }
 
-async function waitServeReady(timeoutMs = 45000): Promise<void> {
+async function waitServeReady(timeoutMs = getServeStartupTimeoutMs()): Promise<void> {
   if (!serveProcess || !serveProcess.stdout || !serveProcess.stderr) {
     throw new Error("agx serve process not started");
   }
@@ -3033,17 +3039,26 @@ async function waitServeReady(timeoutMs = 45000): Promise<void> {
   const currentStdout = currentProcess.stdout!;
   const currentStderr = currentProcess.stderr!;
   const pingReady = async (): Promise<boolean> => {
+    const controller = new AbortController();
+    const probeTimeout = setTimeout(
+      () => controller.abort(),
+      SERVE_READY_PROBE_TIMEOUT_MS,
+    );
     try {
       const resp = await fetch(`${getStudioUrl()}/api/session`, {
         headers: { "x-agx-desktop-token": getStudioToken() },
+        signal: controller.signal,
       });
       return resp.ok;
     } catch {
       return false;
+    } finally {
+      clearTimeout(probeTimeout);
     }
   };
   await new Promise<void>((resolve, reject) => {
     let settled = false;
+    let probeInFlight = false;
     const fail = (message: string) => {
       if (settled) return;
       settled = true;
@@ -3068,17 +3083,21 @@ async function waitServeReady(timeoutMs = 45000): Promise<void> {
           markReady();
           return;
         }
-        fail("agx serve startup timeout");
+        fail(`agx serve startup timeout after ${Math.ceil(timeoutMs / 1000)}s`);
       })();
     }, timeoutMs);
-    const probeTimer = setInterval(() => {
-      void (async () => {
-        if (settled) return;
+    const probeOnce = async () => {
+      if (settled || probeInFlight) return;
+      probeInFlight = true;
+      try {
         if (await pingReady()) {
           markReady();
         }
-      })();
-    }, 500);
+      } finally {
+        probeInFlight = false;
+      }
+    };
+    const probeTimer = setInterval(() => void probeOnce(), 500);
     const onData = (chunk: Buffer) => {
       const text = chunk.toString("utf-8");
       if (text.includes("Uvicorn running") || text.includes("AgenticX Studio Server")) {
@@ -3109,6 +3128,7 @@ async function waitServeReady(timeoutMs = 45000): Promise<void> {
     currentStderr.on("data", onErrData);
     currentProcess.on("exit", onExit);
     currentProcess.on("error", onError);
+    void probeOnce();
   });
 }
 

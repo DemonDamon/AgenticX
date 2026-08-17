@@ -17,6 +17,11 @@ import sys
 # knowledge storage to the Enterprise service. Set this before importing Studio.
 os.environ.setdefault("AGX_LOCAL_KNOWLEDGE_ENABLED", "0")
 
+# LiteLLM otherwise tries to refresh optional model-pricing metadata from
+# GitHub during import. The bundled Desktop must boot from the packaged backup
+# even when public-network access is slow, filtered, or completely unavailable.
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
+
 
 def _suppress_macos_dock_icon() -> None:
     """Prevent headless server process from showing a dock icon on macOS."""
