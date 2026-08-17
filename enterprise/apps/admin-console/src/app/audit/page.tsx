@@ -659,6 +659,11 @@ function AuditPageContent() {
                                   {t("detail.viewPortalLogs")}
                                 </Link>
                               </Button>
+                              <Button type="button" variant="outline" size="sm" className="h-7" asChild>
+                                <Link href={`/traces/${encodeURIComponent(selected.trace_id)}`}>
+                                  {t("detail.viewRuntime")}
+                                </Link>
+                              </Button>
                             </div>
                             {tracePanel.status === "loading" ? (
                               <p className="text-xs text-muted-foreground">{t("detail.traceLoading")}</p>

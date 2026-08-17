@@ -850,6 +850,7 @@ export async function runDeepResearchTurn(
           userId,
           sessionId,
           topic: userQuery || "深度调研",
+          traceId: deps.traceId,
         });
         writer = createRunWriter(runStore, runId);
       } catch (error) {

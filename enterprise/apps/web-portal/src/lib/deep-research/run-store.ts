@@ -57,6 +57,7 @@ export type RunRecord = {
   tenantId: string;
   userId: string;
   sessionId: string;
+  traceId?: string;
   status: DeepResearchRunStatus;
   phase: string;
   topic: string;
@@ -79,6 +80,7 @@ export type RunStore = {
     userId: string;
     sessionId: string;
     topic: string;
+    traceId?: string;
   }): Promise<RunRecord>;
   /** 追加事件并可选更新 status/phase；超过 MAX_EVENTS_PER_RUN 时丢弃最旧的 lane_progress。 */
   appendEvents(
@@ -182,6 +184,7 @@ function mapRow(row: {
   tenantId: string;
   userId: string;
   sessionId: string;
+  traceId?: string | null;
   status: string;
   phase: string;
   topic: string;
@@ -199,6 +202,7 @@ function mapRow(row: {
     tenantId: row.tenantId,
     userId: row.userId,
     sessionId: row.sessionId,
+    traceId: row.traceId ?? undefined,
     status: isRunStatus(row.status) ? row.status : "running",
     phase: row.phase,
     topic: row.topic,
@@ -303,6 +307,7 @@ function createMemoryStore(): RunStore {
         tenantId: input.tenantId,
         userId: input.userId,
         sessionId: input.sessionId,
+        traceId: input.traceId,
         status: "running",
         phase: "recon",
         topic: input.topic,
@@ -485,6 +490,7 @@ export type RunSqlOps = {
     userId: string;
     sessionId: string;
     topic: string;
+    traceId?: string;
     now: Date;
   }): Promise<void>;
   loadAppendState(runId: string): Promise<RunAppendState | null>;
@@ -541,12 +547,13 @@ type MysqlDb = Awaited<ReturnType<typeof createMysqlDb>>["raw"];
 
 function createPgOps(db: PgDb): RunSqlOps {
   return {
-    async create({ runId, tenantId, userId, sessionId, topic, now }) {
+    async create({ runId, tenantId, userId, sessionId, topic, traceId, now }) {
       await db.insert(pgTable).values({
         runId,
         tenantId,
         userId,
         sessionId,
+        traceId: traceId ?? null,
         status: "running",
         phase: "recon",
         topic,
@@ -812,12 +819,13 @@ export function mysqlAffectedRows(result: unknown): number {
 
 function createMysqlOps(db: MysqlDb): RunSqlOps {
   return {
-    async create({ runId, tenantId, userId, sessionId, topic, now }) {
+    async create({ runId, tenantId, userId, sessionId, topic, traceId, now }) {
       await db.insert(mysqlTable).values({
         runId,
         tenantId,
         userId,
         sessionId,
+        traceId: traceId ?? null,
         status: "running",
         phase: "recon",
         topic,
@@ -1108,6 +1116,7 @@ export function createSqlRunStore(loadOps: () => Promise<RunSqlOps> = resolveDia
         tenantId: input.tenantId,
         userId: input.userId,
         sessionId: input.sessionId,
+        traceId: input.traceId,
         status: "running",
         phase: "recon",
         topic: input.topic,

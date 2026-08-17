@@ -1106,6 +1106,7 @@
           "requestId": "Request ID",
           "viewTrace": "View Trace",
           "viewPortalLogs": "View Portal logs",
+          "viewRuntime": "View runtime process",
           "copyRequestId": "Copy request ID",
           "traceLoading": "Loading Trace steps…",
           "traceEmpty": "No Trace steps for this request",
@@ -1152,12 +1153,16 @@
         "refresh": "Refresh",
         "filterTraceId": "Request ID",
         "filterTraceIdPlaceholder": "Paste request ID (trace_id)",
+        "filterSessionId": "Session ID",
+        "filterSessionIdPlaceholder": "Paste session_id",
         "filterLevel": "Level",
+        "filterRoute": "Route",
         "filterStart": "Start",
         "filterEnd": "End",
         "levelAll": "All",
         "levelWarnPlus": "warn+",
         "levelError": "error only",
+        "routeAll": "All",
         "applyFilters": "Search",
         "emptyLoadingTitle": "Loading...",
         "emptyLoadingDescription": "Querying portal request logs",
@@ -1177,6 +1182,7 @@
         "detail": {
           "copyRequestId": "Copy request ID",
           "viewAudit": "View gateway audit",
+          "viewRuntime": "View runtime process",
           "route": "Route",
           "status": "Status",
           "duration": "Duration",
@@ -1191,6 +1197,45 @@
           "loadFailed": "Failed to load",
           "copied": "Request ID copied",
           "copiedFields": "Fields JSON copied"
+        }
+      },
+      "traceRuntime": {
+        "breadcrumb": "Runtime process",
+        "title": "Runtime process",
+        "description": "Aggregate portal logs, model steps, and deep-research events by request ID",
+        "copyTraceId": "Copy request ID",
+        "backPortalLogs": "Back to Portal logs",
+        "backAudit": "Back to audit",
+        "loading": "Loading...",
+        "emptyTitle": "No process data",
+        "emptyDescription": "No portal logs, model steps, or deep-research events for this request ID",
+        "forbiddenTitle": "No permission",
+        "forbiddenDescription": "Requires audit:read:all or audit:read:dept",
+        "invalidTitle": "Invalid request ID",
+        "invalidDescription": "Provide a valid ULID request ID",
+        "totals": {
+          "steps": "Model steps",
+          "tokens": "Total tokens",
+          "cost": "Total cost",
+          "duration": "Duration"
+        },
+        "sources": {
+          "portal": "Portal logs",
+          "model": "Model steps",
+          "deepResearch": "Deep research"
+        },
+        "kind": {
+          "request": "Request",
+          "model_step": "Model",
+          "dr_phase": "Phase",
+          "dr_lane": "Lane",
+          "dr_event": "Event"
+        },
+        "expand": "Expand",
+        "collapse": "Collapse",
+        "toast": {
+          "loadFailed": "Load failed",
+          "copied": "Request ID copied"
         }
       },
       "metering": {

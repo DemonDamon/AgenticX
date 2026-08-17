@@ -18,6 +18,8 @@ export const enterpriseDeepResearchRuns = mysqlTable(
     tenantId: varchar("tenant_id", { length: 26 }).notNull(),
     userId: varchar("user_id", { length: 26 }).notNull(),
     sessionId: varchar("session_id", { length: 26 }).notNull(),
+    /** 关联的请求 trace_id（ULID，长度 26；列宽按主规划统一 128）。可为空：老数据与非 trace 链路。 */
+    traceId: varchar("trace_id", { length: 128 }),
     /** running | awaiting_clarify | completed | failed | cancelled */
     status: varchar("status", { length: 32 }).default("running").notNull(),
     /** recon | clarify | plan | lanes | reflect | synthesize | done */
@@ -54,5 +56,6 @@ export const enterpriseDeepResearchRuns = mysqlTable(
       table.status,
       table.updatedAt,
     ),
+    traceIdx: index("enterprise_deep_research_runs_trace_idx").on(table.tenantId, table.traceId),
   }),
 );

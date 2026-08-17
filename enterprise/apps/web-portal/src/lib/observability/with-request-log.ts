@@ -7,6 +7,16 @@ export type RequestLogUser = {
   sessionId?: string;
 };
 
+/**
+ * 高频轮询路由：成功日志降为 debug，避免把 portal_request_logs 刷成访问日志。
+ * 失败仍走 error 级，不受此影响。
+ */
+const POLLING_ROUTES: ReadonlySet<string> = new Set(["deep_research.runs"]);
+
+function finishLevel(route: string): "info" | "debug" {
+  return POLLING_ROUTES.has(route) ? "debug" : "info";
+}
+
 export type RequestLogCtx = {
   traceId: string;
   setUser(user: RequestLogUser): void;
@@ -40,7 +50,7 @@ export async function withRequestLog(
     if (!headers.get("x-agenticx-trace-id")) {
       headers.set("x-agenticx-trace-id", traceId);
     }
-    log("info", {
+    log(finishLevel(route), {
       event: `${route}.finish`,
       route,
       trace_id: traceId,
