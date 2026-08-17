@@ -9,10 +9,11 @@ import { createPortal } from "react-dom";
 import {
   Check,
   ChevronDown,
+  CircleQuestionMark,
   FolderOpen,
   PanelRightOpen,
   ShieldCheck,
-  TriangleAlert,
+  Zap,
 } from "lucide-react";
 import type { ConfirmStrategy, Taskspace } from "../store";
 import {
@@ -62,6 +63,16 @@ type Props = {
 };
 
 type OpenMenu = "workspace" | "permission" | null;
+
+function permissionStrategyVisual(strategy: ConfirmStrategy) {
+  if (strategy === "manual") {
+    return { Icon: CircleQuestionMark, iconClassName: "text-text-muted" };
+  }
+  if (strategy === "semi-auto") {
+    return { Icon: ShieldCheck, iconClassName: "text-[var(--settings-accent-fg)]" };
+  }
+  return { Icon: Zap, iconClassName: "text-status-warning" };
+}
 
 export function ComposerContextControls({
   active = true,
@@ -281,7 +292,9 @@ export function ComposerContextControls({
               </div>
               {CONFIRM_STRATEGY_OPTIONS.map((option, index) => {
                 const selected = confirmStrategy === option.value;
-                const StrategyIcon = option.value === "auto" ? TriangleAlert : ShieldCheck;
+                const { Icon: StrategyIcon, iconClassName } = permissionStrategyVisual(
+                  option.value,
+                );
                 return (
                   <button
                     key={option.value}
@@ -297,9 +310,7 @@ export function ComposerContextControls({
                     }}
                   >
                     <StrategyIcon
-                      className={`mt-0.5 h-4 w-4 shrink-0 ${
-                        option.value === "auto" ? "text-status-warning" : "text-text-muted"
-                      }`}
+                      className={`mt-0.5 h-4 w-4 shrink-0 ${iconClassName}`}
                       strokeWidth={1.8}
                     />
                     <span className="min-w-0 flex-1">
@@ -352,6 +363,9 @@ export function ComposerContextControls({
     </button>
   );
 
+  const { Icon: ActivePermissionIcon, iconClassName: activePermissionIconClassName } =
+    permissionStrategyVisual(confirmStrategy);
+
   const permissionTrigger = (
     <button
       ref={permissionButtonRef}
@@ -366,7 +380,11 @@ export function ComposerContextControls({
       aria-haspopup="menu"
       aria-expanded={openMenu === "permission"}
     >
-      <ShieldCheck className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
+      <ActivePermissionIcon
+        className={`h-3.5 w-3.5 shrink-0 ${activePermissionIconClassName}`}
+        strokeWidth={1.8}
+        aria-hidden
+      />
       <span>{permissionLabel}</span>
       <ChevronDown
         className={`h-3 w-3 shrink-0 transition-transform ${openMenu === "permission" ? "rotate-180" : ""}`}
@@ -379,7 +397,7 @@ export function ComposerContextControls({
   return (
     <>
       {mode === "new-topic" ? (
-        <div className="flex min-w-0 items-center gap-1.5 px-2.5 pb-2.5 pt-1">
+        <div className="flex min-w-0 items-center gap-1.5">
           {workspaceTrigger}
           {permissionTrigger}
         </div>

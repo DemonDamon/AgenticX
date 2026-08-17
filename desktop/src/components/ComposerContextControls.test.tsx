@@ -71,4 +71,43 @@ describe("ComposerContextControls", () => {
     expect(html).toContain("白名单放行");
     expect(html).toContain('aria-haspopup="menu"');
   });
+
+  it("uses a distinct icon for every permission strategy", () => {
+    const renderStrategy = (confirmStrategy: "manual" | "semi-auto" | "auto") =>
+      renderToStaticMarkup(
+        <ComposerContextControls
+          mode="conversation"
+          workspaces={[]}
+          activeTaskspaceId={null}
+          workspacePanelOpen={false}
+          onWorkspaceMenuOpen={vi.fn()}
+          onWorkspaceSelect={vi.fn()}
+          onOpenWorkspacePanel={vi.fn()}
+          confirmStrategy={confirmStrategy}
+          onConfirmStrategyChange={vi.fn(async () => true)}
+        />,
+      );
+
+    expect(renderStrategy("manual")).toContain("lucide-circle-question-mark");
+    expect(renderStrategy("semi-auto")).toContain("lucide-shield-check");
+    expect(renderStrategy("auto")).toContain("lucide-zap");
+  });
+
+  it("keeps new-topic controls inline without a second-row padding wrapper", () => {
+    const html = renderToStaticMarkup(
+      <ComposerContextControls
+        mode="new-topic"
+        workspaces={[{ id: "default", label: "default", path: "/tmp/workspace" }]}
+        activeTaskspaceId="default"
+        workspacePanelOpen={false}
+        onWorkspaceMenuOpen={vi.fn()}
+        onWorkspaceSelect={vi.fn()}
+        onOpenWorkspacePanel={vi.fn()}
+        confirmStrategy="manual"
+        onConfirmStrategyChange={vi.fn(async () => true)}
+      />,
+    );
+
+    expect(html).not.toContain("px-2.5 pb-2.5 pt-1");
+  });
 });
