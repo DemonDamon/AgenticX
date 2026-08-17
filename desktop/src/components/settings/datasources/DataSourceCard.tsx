@@ -118,7 +118,7 @@ export function DataSourceCard({ item, onToggle, onTest, onOpenMcp }: Props) {
               className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition ${
                 item.enabled
                   ? "border border-border bg-surface-hover text-text-primary"
-                  : "bg-[var(--ui-btn-primary-bg)] text-[var(--ui-btn-primary-fg)]"
+                  : "bg-[var(--ui-btn-primary-bg)] text-[var(--ui-btn-primary-text)]"
               }`}
               onClick={() => void handleToggle()}
             >
