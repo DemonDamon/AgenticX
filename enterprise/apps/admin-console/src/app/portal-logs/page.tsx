@@ -422,8 +422,8 @@ function PortalLogsPageContent() {
       />
 
       <Card>
-        <CardContent className="flex flex-wrap items-end gap-3 pt-4">
-          <div className="min-w-[280px] flex-1 space-y-1.5">
+        <CardContent className="grid gap-3 pt-4 sm:grid-cols-2 xl:grid-cols-12 xl:items-end">
+          <div className="min-w-0 space-y-1.5 xl:col-span-4">
             <Label htmlFor="portal-log-trace">{t("filterTraceId")}</Label>
             <Input
               id="portal-log-trace"
@@ -434,7 +434,7 @@ function PortalLogsPageContent() {
               disabled={groupBy === "session"}
             />
           </div>
-          <div className="min-w-[280px] flex-1 space-y-1.5">
+          <div className="min-w-0 space-y-1.5 xl:col-span-4">
             <Label htmlFor="portal-log-session">{t("filterSessionId")}</Label>
             <Input
               id="portal-log-session"
@@ -444,7 +444,7 @@ function PortalLogsPageContent() {
               className="font-mono"
             />
           </div>
-          <div className="w-[160px] space-y-1.5">
+          <div className="min-w-0 space-y-1.5 xl:col-span-2">
             <Label>{t("filterLevel")}</Label>
             <Select value={level} onValueChange={(v) => setLevel(v as LevelFilter)}>
               <SelectTrigger>
@@ -457,7 +457,7 @@ function PortalLogsPageContent() {
               </SelectContent>
             </Select>
           </div>
-          <div className="w-[160px] space-y-1.5">
+          <div className="min-w-0 space-y-1.5 xl:col-span-2">
             <Label>{t("groupByLabel")}</Label>
             <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupBy)}>
               <SelectTrigger>
@@ -469,7 +469,7 @@ function PortalLogsPageContent() {
               </SelectContent>
             </Select>
           </div>
-          <div className="w-[180px] space-y-1.5">
+          <div className="min-w-0 space-y-1.5 xl:col-span-2">
             <Label>{t("filterMode")}</Label>
             <Select
               value={mode === "" ? "__all__" : mode}
@@ -486,7 +486,7 @@ function PortalLogsPageContent() {
               </SelectContent>
             </Select>
           </div>
-          <div className="w-[220px] space-y-1.5">
+          <div className="min-w-0 space-y-1.5 xl:col-span-3">
             <Label>{t("filterRoute")}</Label>
             <Select
               value={route === "" ? "__all__" : route}
@@ -504,25 +504,33 @@ function PortalLogsPageContent() {
               </SelectContent>
             </Select>
           </div>
-          <div className="w-[180px] space-y-1.5">
+          <div className="min-w-0 space-y-1.5 xl:col-span-3">
             <Label htmlFor="portal-log-start">{t("filterStart")}</Label>
             <Input
               id="portal-log-start"
               type="datetime-local"
               value={start}
               onChange={(e) => setStart(e.target.value)}
+              className="min-w-0"
             />
           </div>
-          <div className="w-[180px] space-y-1.5">
+          <div className="min-w-0 space-y-1.5 xl:col-span-3">
             <Label htmlFor="portal-log-end">{t("filterEnd")}</Label>
             <Input
               id="portal-log-end"
               type="datetime-local"
               value={end}
               onChange={(e) => setEnd(e.target.value)}
+              className="min-w-0"
             />
           </div>
-          <Button type="button" size="sm" onClick={() => void load()} disabled={loading}>
+          <Button
+            type="button"
+            size="sm"
+            className="h-9 w-full sm:w-auto xl:col-span-1 xl:w-full"
+            onClick={() => void load()}
+            disabled={loading}
+          >
             <Search className="mr-1.5 h-3.5 w-3.5" />
             {t("applyFilters")}
           </Button>
