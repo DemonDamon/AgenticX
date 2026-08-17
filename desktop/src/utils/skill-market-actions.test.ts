@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildSkillTryPrompt,
+  buildSkillTryDraft,
   findInstalledMarketplaceSkill,
   hasAlternateSkillVariant,
   skillMarkdownPath,
@@ -98,10 +98,11 @@ describe("skill marketplace actions", () => {
     ).toBe(false);
   });
 
-  it("builds a real skill reference and its editable markdown path", () => {
-    expect(buildSkillTryPrompt("financial-review")).toContain(
-      "@skill://financial-review",
+  it("builds an editable skill-only draft and its markdown path", () => {
+    expect(buildSkillTryDraft("  financial-review  ")).toBe(
+      "@skill://financial-review ",
     );
+    expect(buildSkillTryDraft("  ")).toBe("");
     expect(skillMarkdownPath("/tmp/financial-review/")).toBe(
       "/tmp/financial-review/SKILL.md",
     );

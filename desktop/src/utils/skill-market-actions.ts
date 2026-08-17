@@ -60,11 +60,9 @@ export function hasAlternateSkillVariant(skill: InstalledSkillCandidate): boolea
   );
 }
 
-export function buildSkillTryPrompt(skillName: string): string {
+export function buildSkillTryDraft(skillName: string): string {
   const normalizedName = String(skillName || "").trim();
-  return normalizedName
-    ? `@skill://${normalizedName} 请使用这个技能开始，并简要告诉我可以提供什么输入。`
-    : "";
+  return normalizedName ? `@skill://${normalizedName} ` : "";
 }
 
 export function skillMarkdownPath(baseDir: string): string {

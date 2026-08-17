@@ -11618,17 +11618,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const detail = (e as CustomEvent).detail as { paneId?: string; draftText?: string } | undefined;
       if (detail?.paneId && detail.paneId !== pane.id) return;
       createNewTopicRef.current(false, pane.sessionMode ?? "daily_office");
-      const draftText = detail?.draftText;
-      if (draftText) {
-        // syncComposerFromValue alone only flips React emptiness/@ state; the contenteditable composer
-        // renders from direct DOM writes, so we must go through
-        // setComposerText to actually show the draft text in the box.
-        window.setTimeout(() => setComposerText(draftText), 0);
-      }
+      clearQuoteTargets();
+      setContextFiles({});
+      composerRefPathsRef.current = {};
+      composerRefMetaOverrideRef.current = {};
+      const draftText = detail?.draftText ?? "";
+      // syncComposerFromValue alone only flips React emptiness/@ state; the contenteditable composer
+      // renders from direct DOM writes, so we must go through setComposerText. Always write the
+      // value, including an empty draft, so a new task cannot inherit unsent text or references.
+      window.setTimeout(() => setComposerText(draftText), 0);
     };
     window.addEventListener("agenticx:pane:new-topic", onNewTopic);
     return () => window.removeEventListener("agenticx:pane:new-topic", onNewTopic);
-  }, [pane.id, pane.sessionMode]);
+  }, [clearQuoteTargets, pane.id, pane.sessionMode, setComposerText]);
 
   const insertGlobalSearchFileReference = useCallback(
     async (filePath: string, mode: "current" | "new") => {

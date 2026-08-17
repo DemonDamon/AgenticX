@@ -67,11 +67,12 @@ import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import type { SkillHubMarketItem } from "../utils/skillhub-market";
 import {
-  buildSkillTryPrompt,
+  buildSkillTryDraft,
   findInstalledMarketplaceSkill,
   hasAlternateSkillVariant,
   skillMarkdownPath,
 } from "../utils/skill-market-actions";
+import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { decideSkillInstallRequest } from "../utils/skill-install-queue";
 import { filterAndRankSkills } from "../utils/skill-search";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
@@ -3042,6 +3043,7 @@ function SkillsTab() {
 
   const addPane = useAppStore((s) => s.addPane);
   const setForwardAutoReply = useAppStore((s) => s.setForwardAutoReply);
+  const { newMetaTask } = usePaneNavigation();
   const closeSettings = useAppStore((s) => s.closeSettings);
 
   const [installPromptBusy, setInstallPromptBusy] = useState(false);
@@ -3822,7 +3824,8 @@ function SkillsTab() {
       setMarketInstallMessage(skillHubInstallItem(item), "请先启用这个技能再试用。");
       return;
     }
-    void runPromptInNewMetaSession(buildSkillTryPrompt(installed.name));
+    newMetaTask(buildSkillTryDraft(installed.name));
+    closeSettings();
   };
   const toggleSkillHubSkill = (item: SkillHubMarketItem, enabled: boolean) => {
     const installed = getInstalledMarketSkill(item.slug);
