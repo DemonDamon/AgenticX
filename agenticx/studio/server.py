@@ -5368,7 +5368,9 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
-        sessions = manager.list_sessions(avatar_id=avatar_id)
+        from agenticx.studio.blocking_io import run_in_persist_pool
+
+        sessions = await run_in_persist_pool(manager.list_sessions, avatar_id)
         return {"ok": True, "sessions": sessions}
 
     @app.get("/api/sessions/search")

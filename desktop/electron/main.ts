@@ -58,6 +58,10 @@ import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
 import { fetchFaviconDataUrl } from "./fetch-favicon";
 import { classifyModelHealthFailure } from "./model-health";
 import { isRealpathUnder, safeRealpath } from "./path-guard";
+import {
+  readSessionMessagesFromDisk,
+  readSessionMessagesTailFromDisk,
+} from "./session-messages-disk";
 import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import { selectEnterpriseInferenceBase } from "./enterprise-routing";
 import {
@@ -581,6 +585,7 @@ type SkillInstallPolicyConfig = {
 };
 
 const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
+const SESSIONS_DIR = path.join(CONFIG_DIR, "sessions");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
 const DEFAULT_META_WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
 
@@ -9061,6 +9066,8 @@ function registerIpc(): void {
   ipcMain.handle("load-session-messages", async (_event, sessionId: string) => {
     const sid = String(sessionId || "").trim();
     if (!sid) return { ok: false, messages: [], error: "sessionId is required" };
+    const diskFull = readSessionMessagesFromDisk(SESSIONS_DIR, sid);
+    if (diskFull) return diskFull;
     await waitForStudio(PRELOAD_READY_BUDGET_MS);
     return withFetchTimeout(
       (async () => {
@@ -9094,6 +9101,12 @@ function registerIpc(): void {
     ) => {
       const sid = String(sessionId || "").trim();
       if (!sid) return { ok: false, messages: [], error: "sessionId is required" };
+      const wantTail =
+        typeof options.tailRounds === "number" && Number.isFinite(options.tailRounds);
+      if (wantTail) {
+        const diskTail = readSessionMessagesTailFromDisk(SESSIONS_DIR, sid);
+        if (diskTail) return diskTail;
+      }
       await waitForStudio(PRELOAD_READY_BUDGET_MS);
       return withFetchTimeout(
         fetchSessionMessagesPageCore(sid, options),

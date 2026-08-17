@@ -2,6 +2,17 @@ import { useCallback, useRef } from "react";
 import { useAppStore } from "../store";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
+import {
+  existingGroupPaneNeedsBind,
+  isSessionAvatarMatch,
+  pickConfirmedGroupSessionId,
+  pickMostRecentSessionId,
+  pickOptimisticGroupSessionId,
+  shouldCreateGroupSession,
+  shouldSkipGroupSessionListOnOpen,
+  type GroupOpenSessionRow,
+} from "../utils/group-pane-open";
+import { schedulePrefetchSessionTail } from "../utils/session-tail-cache";
 
 /**
  * Shared pane-navigation logic used by the nav sidebar, the avatar gallery
@@ -9,45 +20,13 @@ import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
  * helpers so session-restore behaviour stays identical.
  */
 
-type SessionListItem = {
+type SessionListItem = GroupOpenSessionRow & {
   session_id: string;
   avatar_id: string | null;
   updated_at: number;
-  created_at?: number;
-  archived?: boolean;
   provider?: string;
   model?: string;
 };
-
-function isSessionAvatarMatch(item: SessionListItem, avatarId?: string | null): boolean {
-  const targetAvatarId = (avatarId ?? "").trim();
-  const itemAvatarId = String(item.avatar_id ?? "").trim();
-  if (!targetAvatarId) return itemAvatarId.length === 0;
-  return itemAvatarId === targetAvatarId;
-}
-
-function pickMostRecentSessionId(
-  sessions: SessionListItem[],
-  avatarId?: string | null
-): string | undefined {
-  const sorted = [...sessions]
-    .filter((item) => {
-      const sid = String(item.session_id ?? "").trim();
-      if (!sid) return false;
-      if (item.archived === true) return false;
-      return isSessionAvatarMatch(item, avatarId);
-    })
-    .sort((a, b) => {
-      const ua = Number.isFinite(a.updated_at) ? a.updated_at : 0;
-      const ub = Number.isFinite(b.updated_at) ? b.updated_at : 0;
-      if (ub !== ua) return ub - ua;
-      const ca = Number.isFinite(a.created_at ?? NaN) ? (a.created_at as number) : 0;
-      const cb = Number.isFinite(b.created_at ?? NaN) ? (b.created_at as number) : 0;
-      return cb - ca;
-    });
-  const sid = sorted[0]?.session_id;
-  return sid ? String(sid).trim() : undefined;
-}
 
 export function usePaneNavigation() {
   const panes = useAppStore((s) => s.panes);
@@ -177,43 +156,78 @@ export function usePaneNavigation() {
       setMainView("chat");
       const groupAvatarId = `group:${group.id}`;
       const existing = panes.find((item) => item.avatarId === groupAvatarId);
+
+      const bindGroupPaneSession = async (paneId: string) => {
+        const rememberedSid = getRememberedSessionForAvatar(groupAvatarId);
+        const readCurrentSid = () =>
+          String(
+            useAppStore.getState().panes.find((item) => item.id === paneId)?.sessionId ?? ""
+          ).trim();
+        const optimisticSid = pickOptimisticGroupSessionId(rememberedSid);
+        if (optimisticSid && !readCurrentSid()) {
+          setPaneSessionId(paneId, optimisticSid);
+          schedulePrefetchSessionTail(optimisticSid);
+        }
+        if (
+          shouldSkipGroupSessionListOnOpen({
+            optimisticSid,
+            currentSid: readCurrentSid(),
+          })
+        ) {
+          return;
+        }
+
+        const listed = await window.agenticxDesktop
+          .listSessions(groupAvatarId)
+          .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
+        const listedRows =
+          listed.ok && Array.isArray(listed.sessions) ? listed.sessions : [];
+        const confirmedSid = pickConfirmedGroupSessionId({
+          rememberedSid,
+          listed: listedRows,
+          groupAvatarId,
+        });
+        if (confirmedSid) {
+          if (readCurrentSid() !== confirmedSid) {
+            setPaneSessionId(paneId, confirmedSid);
+          }
+          return;
+        }
+        if (!shouldCreateGroupSession({ confirmedSid, currentSid: readCurrentSid() })) {
+          return;
+        }
+        const created = await window.agenticxDesktop.createSession({
+          avatar_id: groupAvatarId,
+          name: group.name,
+        });
+        if (created.ok && created.session_id) {
+          setPaneSessionId(paneId, created.session_id);
+        }
+      };
+
       if (existing) {
         setActivePaneId(existing.id);
         setActiveAvatarId(null);
+        if (!existingGroupPaneNeedsBind(existing.sessionId)) return;
+        void bindGroupPaneSession(existing.id);
         return;
       }
 
       if (openingRef.current) return;
       openingRef.current = true;
 
-      const paneId = addPane(groupAvatarId, `群聊 · ${group.name}`, "");
+      const rememberedSid = getRememberedSessionForAvatar(groupAvatarId);
+      const optimisticSid = pickOptimisticGroupSessionId(rememberedSid) ?? "";
+      const paneId = addPane(groupAvatarId, `群聊 · ${group.name}`, optimisticSid);
       setActivePaneId(paneId);
       setActiveAvatarId(null);
+      if (optimisticSid) {
+        schedulePrefetchSessionTail(optimisticSid);
+      }
 
-      void (async () => {
-        try {
-          const listed = await window.agenticxDesktop
-            .listSessions(groupAvatarId)
-            .catch(() => ({ ok: false, sessions: [] as SessionListItem[] }));
-          const recentSid =
-            listed.ok && Array.isArray(listed.sessions)
-              ? pickMostRecentSessionId(listed.sessions, groupAvatarId)
-              : undefined;
-          if (recentSid) {
-            setPaneSessionId(paneId, recentSid);
-            return;
-          }
-          const created = await window.agenticxDesktop.createSession({
-            avatar_id: groupAvatarId,
-            name: group.name,
-          });
-          if (created.ok && created.session_id) {
-            setPaneSessionId(paneId, created.session_id);
-          }
-        } finally {
-          openingRef.current = false;
-        }
-      })();
+      void bindGroupPaneSession(paneId).finally(() => {
+        openingRef.current = false;
+      });
     },
     [panes, addPane, setActivePaneId, setActiveAvatarId, setPaneSessionId, setMainView]
   );

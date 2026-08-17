@@ -949,7 +949,7 @@ class SessionManager:
                 ),
                 **_harness_list_fields(managed.studio_session),
             })
-        for row in self._list_persisted_sessions():
+        for row in self._list_persisted_sessions(avatar_id=avatar_id):
             sid = str(row.get("session_id", "")).strip()
             if not sid or sid in seen_session_ids:
                 continue
@@ -2685,12 +2685,26 @@ class SessionManager:
             return None
         return s
 
-    def _list_persisted_sessions(self) -> list[dict]:
+    def _list_persisted_sessions(self, avatar_id: str | None = None) -> list[dict]:
+        """Load persisted session rows, optionally scoped to one avatar_id.
+
+        When ``avatar_id`` is set, skip unrelated rows before any ``messages.json``
+        reads so filtered listings (group-pane open) stay cheap.
+        """
         rows: list[dict] = []
+        wanted = normalize_session_avatar_binding(avatar_id)
         try:
-            latest = self._session_store._list_latest_sessions_sync(limit=0)
+            latest = self._session_store._list_latest_sessions_sync(
+                limit=0, avatar_id=wanted
+            )
         except Exception:
             latest = []
+        sqlite_skip: set[str] = set()
+        if wanted is not None:
+            try:
+                sqlite_skip = self._session_store._list_all_session_ids_sync()
+            except Exception:
+                sqlite_skip = set()
         for item in latest:
             sid = str(item.get("session_id", "")).strip()
             if not sid:
@@ -2698,6 +2712,14 @@ class SessionManager:
             metadata = item.get("metadata", {})
             if not isinstance(metadata, dict):
                 metadata = {}
+            raw_av = metadata.get("avatar_id")
+            row_av = (
+                None
+                if raw_av is None
+                else normalize_session_avatar_binding(str(raw_av))
+            )
+            if wanted is not None and row_av != wanted:
+                continue
             chat_count = 0
             try:
                 chat_count = int(metadata.get("chat_messages", 0))
@@ -2739,24 +2761,16 @@ class SessionManager:
                 }
             )
         known = {str(row.get("session_id", "")) for row in rows}
+        skip_dirs = known | sqlite_skip
         root = Path(self._sessions_root)
         if root.exists():
             for child in root.iterdir():
                 if not child.is_dir():
                     continue
                 sid = child.name
-                if sid in known:
+                if sid in skip_dirs:
                     continue
                 messages_path = child / "messages.json"
-                if not messages_path.exists():
-                    continue
-                try:
-                    content = messages_path.read_text(encoding="utf-8").strip()
-                    if not content or content == "[]":
-                        continue
-                except Exception:
-                    continue
-                mtime = float(messages_path.stat().st_mtime)
                 fs_meta: dict[str, Any] = {}
                 try:
                     loaded = self._session_store._load_latest_session_metadata_sync(sid)
@@ -2770,6 +2784,17 @@ class SessionManager:
                     if raw_av is None
                     else normalize_session_avatar_binding(str(raw_av))
                 )
+                if wanted is not None and av_norm != wanted:
+                    continue
+                if not messages_path.exists():
+                    continue
+                try:
+                    content = messages_path.read_text(encoding="utf-8").strip()
+                    if not content or content == "[]":
+                        continue
+                except Exception:
+                    continue
+                mtime = float(messages_path.stat().st_mtime)
                 raw_nm = fs_meta.get("avatar_name")
                 av_name = None if raw_nm is None else (str(raw_nm).strip() or None)
                 sess_nm = self._sanitize_session_name(fs_meta.get("session_name"))

@@ -855,42 +855,35 @@ class SessionStore:
                 return candidate
         return None
 
-    def _list_latest_sessions_sync(self, limit: int = 500) -> List[Dict[str, Any]]:
+    def _list_latest_sessions_sync(
+        self,
+        limit: int = 500,
+        avatar_id: str | None = None,
+    ) -> List[Dict[str, Any]]:
         safe_limit = int(limit)
         use_limit = safe_limit > 0
+        wanted = str(avatar_id or "").strip() or None
+        sql = """
+                    SELECT s.session_id, s.created_at, s.metadata
+                    FROM session_summaries AS s
+                    INNER JOIN (
+                        SELECT session_id, MAX(created_at) AS max_created_at
+                        FROM session_summaries
+                        GROUP BY session_id
+                    ) AS latest
+                      ON s.session_id = latest.session_id
+                     AND s.created_at = latest.max_created_at
+        """
+        params: list[Any] = []
+        if wanted is not None:
+            sql += " WHERE json_extract(s.metadata, '$.avatar_id') = ?"
+            params.append(wanted)
+        sql += " ORDER BY s.created_at DESC"
+        if use_limit:
+            sql += " LIMIT ?"
+            params.append(safe_limit)
         with self._connect() as conn:
-            if use_limit:
-                rows = conn.execute(
-                    """
-                    SELECT s.session_id, s.created_at, s.metadata
-                    FROM session_summaries AS s
-                    INNER JOIN (
-                        SELECT session_id, MAX(created_at) AS max_created_at
-                        FROM session_summaries
-                        GROUP BY session_id
-                    ) AS latest
-                      ON s.session_id = latest.session_id
-                     AND s.created_at = latest.max_created_at
-                    ORDER BY s.created_at DESC
-                    LIMIT ?
-                    """,
-                    (safe_limit,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT s.session_id, s.created_at, s.metadata
-                    FROM session_summaries AS s
-                    INNER JOIN (
-                        SELECT session_id, MAX(created_at) AS max_created_at
-                        FROM session_summaries
-                        GROUP BY session_id
-                    ) AS latest
-                      ON s.session_id = latest.session_id
-                     AND s.created_at = latest.max_created_at
-                    ORDER BY s.created_at DESC
-                    """
-                ).fetchall()
+            rows = conn.execute(sql, tuple(params)).fetchall()
             result: List[Dict[str, Any]] = []
             needs_name_repair: List[int] = []  # indices in result that need fallback lookup
             for row in rows:
@@ -923,6 +916,18 @@ class SessionStore:
                     except Exception:
                         pass
             return result
+
+    def _list_all_session_ids_sync(self) -> set[str]:
+        """Cheap DISTINCT session_id set so filtered listings skip sqlite-backed dirs."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT session_id FROM session_summaries"
+            ).fetchall()
+            return {
+                str(row["session_id"]).strip()
+                for row in rows
+                if str(row["session_id"] or "").strip()
+            }
 
     def _purge_session_sync(self, session_id: str) -> bool:
         sid = str(session_id or "").strip()
