@@ -7,6 +7,7 @@ import io
 import json
 import os
 import stat
+import time
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,10 @@ from agenticx.extensions.registry_hub import (
     _skill_package_from_zip,
 )
 from agenticx.extensions.skill_market_install import (
+    PreviewCacheEntry,
+    _cleanup_preview_cache,
+    _package_sha256,
+    discard_market_skill_preview,
     install_market_skill,
     normalize_market_skill_name,
     parse_market_skill_reference,
@@ -198,6 +203,8 @@ def test_preview_then_install_reuses_download_and_marks_skillhub_source() -> Non
     assert preview["package"]["file_count"] == 2
     assert "安全检查" in preview["message"]
     assert "已安装" not in preview["message"]
+    assert len(preview["preview_token"]) >= 32
+    assert preview["archive_sha256"] == _package_sha256(hub.package)
 
     result = install_market_skill(
         "alphapai-research",
@@ -206,6 +213,7 @@ def test_preview_then_install_reuses_download_and_marks_skillhub_source() -> Non
         preview_cache=cache,
         auto_non_high=True,
         provenance_source="skillhub",
+        preview_token=str(preview["preview_token"]),
     )
     assert result["ok"] is True
     assert hub.fetch_calls == 1
@@ -254,12 +262,11 @@ def test_skillhub_preview_preserves_namespace_for_native_download(
     }
 
 
-def test_skillhub_preview_falls_back_to_clawhub_package(
+def test_skillhub_preview_never_substitutes_bare_mirror_package_for_namespace(
     monkeypatch: Any,
 ) -> None:
     hub = RegistryHub(registries=[])
     calls: list[str] = []
-    package = RegistrySkillPackage(files={"SKILL.md": SAFE_SKILL.encode("utf-8")})
 
     def _native_failure(
         _url: str,
@@ -275,7 +282,9 @@ def test_skillhub_preview_falls_back_to_clawhub_package(
         _skill_name: str,
     ) -> tuple[RegistrySkillPackage, str]:
         calls.append("clawhub")
-        return package, ""
+        return RegistrySkillPackage(
+            files={"SKILL.md": SAFE_SKILL.encode("utf-8")}
+        ), ""
 
     monkeypatch.setattr(hub, "_fetch_skillhub_package", _native_failure)
     monkeypatch.setattr(hub, "_fetch_clawhub_package", _mirror_success)
@@ -287,10 +296,162 @@ def test_skillhub_preview_falls_back_to_clawhub_package(
         preview_cache={},
     )
 
-    assert preview["ok"] is True
+    assert preview["ok"] is False
     assert preview["source"] == "skillhub"
-    assert package.namespace == "clawhub_boteeenchan-ship-it"
-    assert calls == ["skillhub:clawhub_boteeenchan-ship-it", "clawhub"]
+    assert "native unavailable" in preview["error"]
+    assert calls == ["skillhub:clawhub_boteeenchan-ship-it"]
+
+
+def test_origin_source_must_match_install_registry() -> None:
+    hub = _FakeHub()
+    preview = preview_market_skill(
+        "alphapai-research",
+        source_name="company-clawhub",
+        origin_source="skillhub",
+        hub=hub,  # type: ignore[arg-type]
+        preview_cache={},
+    )
+
+    assert preview["ok"] is False
+    assert "does not match registry source" in preview["error"]
+    assert hub.fetch_calls == 0
+
+
+def test_confirmation_is_bound_to_exact_preview_archive() -> None:
+    hub = _FakeHub(DANGEROUS_SKILL)
+    cache: dict[str, Any] = {}
+    preview = preview_market_skill(
+        "risky-skill",
+        source_name="company-clawhub",
+        hub=hub,  # type: ignore[arg-type]
+        preview_cache=cache,
+    )
+    assert preview["scan"]["overall"] == "dangerous"
+
+    # A package mutation after preview invalidates the token's archive binding.
+    entry = next(iter(cache.values()))
+    assert isinstance(entry, PreviewCacheEntry)
+    entry.package.files["SKILL.md"] = SAFE_SKILL.encode("utf-8")
+    result = install_market_skill(
+        "risky-skill",
+        source_name="company-clawhub",
+        acknowledge_high_risk=True,
+        preview_token=str(preview["preview_token"]),
+        hub=hub,  # type: ignore[arg-type]
+        preview_cache=cache,
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "preview_refresh_required"
+    assert hub.writes == []
+
+
+def test_confirmation_rejects_expired_or_wrong_preview_token() -> None:
+    hub = _FakeHub(DANGEROUS_SKILL)
+    cache: dict[str, Any] = {}
+    preview = preview_market_skill(
+        "risky-skill",
+        source_name="company-clawhub",
+        hub=hub,  # type: ignore[arg-type]
+        preview_cache=cache,
+        cache_ttl_seconds=1,
+    )
+    entry = next(iter(cache.values()))
+    assert isinstance(entry, PreviewCacheEntry)
+    entry.expires_at = 0
+
+    expired = install_market_skill(
+        "risky-skill",
+        source_name="company-clawhub",
+        acknowledge_high_risk=True,
+        preview_token=str(preview["preview_token"]),
+        hub=hub,  # type: ignore[arg-type]
+        preview_cache=cache,
+    )
+    assert expired["error_code"] == "preview_refresh_required"
+
+    fresh = preview_market_skill(
+        "risky-skill",
+        source_name="company-clawhub",
+        hub=hub,  # type: ignore[arg-type]
+        preview_cache=cache,
+    )
+    wrong = install_market_skill(
+        "risky-skill",
+        source_name="company-clawhub",
+        acknowledge_high_risk=True,
+        preview_token=f"wrong-{fresh['preview_token']}",
+        hub=hub,  # type: ignore[arg-type]
+        preview_cache=cache,
+    )
+    assert wrong["error_code"] == "preview_refresh_required"
+    assert hub.writes == []
+
+
+def test_matching_preview_token_allows_confirmation_and_consumes_cache() -> None:
+    hub = _FakeHub(DANGEROUS_SKILL)
+    cache: dict[str, Any] = {}
+    preview = preview_market_skill(
+        "risky-skill",
+        source_name="company-clawhub",
+        hub=hub,  # type: ignore[arg-type]
+        preview_cache=cache,
+    )
+    result = install_market_skill(
+        "risky-skill",
+        source_name="company-clawhub",
+        acknowledge_high_risk=True,
+        preview_token=str(preview["preview_token"]),
+        hub=hub,  # type: ignore[arg-type]
+        preview_cache=cache,
+        provenance_source="skillhub",
+    )
+
+    assert result["ok"] is True
+    assert cache == {}
+    assert len(hub.writes) == 1
+
+
+def test_preview_cache_cleanup_is_global_bounded_and_cancellable() -> None:
+    package = RegistrySkillPackage(
+        files={"SKILL.md": SAFE_SKILL.encode("utf-8")}
+    )
+    now = 10_000.0
+    cache: dict[str, Any] = {}
+    for index in range(4):
+        cache[f"source::skill-{index}"] = PreviewCacheEntry(
+            package=package,
+            expires_at=now + index + 1,
+            preview_token=f"token-{index}",
+            archive_sha256=_package_sha256(package),
+            size_bytes=len(SAFE_SKILL.encode("utf-8")),
+            origin_source="clawhub",
+        )
+
+    # Use a future-proof monotonic base for entries, then evict oldest entries
+    # until both count and byte limits are satisfied.
+    for entry in cache.values():
+        entry.expires_at = time.monotonic() + entry.expires_at - now
+    _cleanup_preview_cache(
+        cache,
+        max_entries=2,
+        max_bytes=2 * len(SAFE_SKILL.encode("utf-8")),
+    )
+    assert list(cache) == ["source::skill-2", "source::skill-3"]
+
+    assert discard_market_skill_preview(
+        "skill-3",
+        source_name="source",
+        preview_token="wrong",
+        preview_cache=cache,
+    ) is False
+    assert discard_market_skill_preview(
+        "skill-3",
+        source_name="source",
+        preview_token="token-3",
+        preview_cache=cache,
+    ) is True
+    assert "source::skill-3" not in cache
 
 
 def test_preview_scans_supporting_scripts_not_only_skill_markdown() -> None:
@@ -368,6 +529,8 @@ def test_unscannable_extensionless_executable_is_high_risk(
     )
     assert result["ok"] is False
     assert result["error_code"] == "high_risk_confirm_required"
+    assert len(result["preview_token"]) >= 32
+    assert len(result["archive_sha256"]) == 64
     assert hub.writes == []
 
 
@@ -560,6 +723,7 @@ def test_skillhub_cli_results_include_direct_install_source(monkeypatch: Any) ->
     assert rows[0]["slug"] == "alphapai-research"
     assert rows[0]["source"] == "skillhub"
     assert rows[0]["source_type"] == "skillhub"
+    assert rows[0]["origin_source"] == "skillhub_cli"
     assert rows[0]["namespace"] == "clawhub_boteeenchan-ship-it"
 
 
@@ -628,6 +792,8 @@ def test_skillhub_search_prefers_native_api_and_skips_broken_local_cli(
                     source_type="skillhub",
                     extra={
                         "display_name": "AlphaPai Research",
+                        "icon_url": "https://example.test/icon.png",
+                        "downloads": 0,
                         "namespace": {
                             "handle": "clawhub_boteeenchan-ship-it",
                             "canonicalName": "@clawhub_boteeenchan-ship-it/alphapai-research",
@@ -653,7 +819,44 @@ def test_skillhub_search_prefers_native_api_and_skips_broken_local_cli(
     assert result["source"] == "skillhub_api"
     assert result["items"][0]["slug"] == "alphapai-research"
     assert result["items"][0]["source"] == "skillhub"
+    assert result["items"][0]["origin_source"] == "skillhub_api"
     assert result["items"][0]["namespace"] == "clawhub_boteeenchan-ship-it"
+    assert result["items"][0]["icon_url"] == "https://example.test/icon.png"
+    assert result["items"][0]["downloads"] == 0
+
+
+def test_skillhub_search_marks_mirror_results_with_their_real_origin(
+    monkeypatch: Any,
+) -> None:
+    from agenticx.extensions import skillhub_adapter
+
+    class _MirrorSearchHub:
+        def source_name_for_type(self, source_type: str) -> str:
+            return source_type
+
+        def search_source(self, source_name: str, query: str) -> list[SearchResult]:
+            if source_name == "skillhub":
+                raise RuntimeError("native unavailable")
+            return [
+                SearchResult(
+                    name=query,
+                    description="fixture",
+                    source="clawhub",
+                    source_type="clawhub",
+                )
+            ]
+
+    monkeypatch.setattr(
+        RegistryHub,
+        "from_config",
+        classmethod(lambda _cls: _MirrorSearchHub()),
+    )
+    result = skillhub_adapter.search_skillhub_market("alphapai-research")
+
+    assert result["ok"] is True
+    assert result["source"] == "clawhub_registry"
+    assert result["items"][0]["source"] == "clawhub"
+    assert result["items"][0]["origin_source"] == "clawhub_registry"
 
 
 def test_market_install_tool_uses_plain_language_confirmation(
@@ -669,6 +872,8 @@ def test_market_install_tool_uses_plain_language_confirmation(
             "name": "risky-skill",
             "source": "company-clawhub",
             "namespace": "clawhub_fixture",
+            "origin_source": "clawhub_registry",
+            "preview_token": "preview-token",
             "scan": {
                 "overall": "dangerous",
                 "skills": [{"findings": [{"pattern_name": "danger"}]}],
@@ -703,6 +908,8 @@ def test_market_install_tool_uses_plain_language_confirmation(
     assert all(token not in question for token in ("curl", "npm", "~/.agenticx"))
     assert captured["install_kwargs"]["acknowledge_high_risk"] is True
     assert captured["install_kwargs"]["namespace"] == "clawhub_fixture"
+    assert captured["install_kwargs"]["origin_source"] == "clawhub_registry"
+    assert captured["install_kwargs"]["preview_token"] == "preview-token"
     assert captured["install_kwargs"]["provenance_source"] == "skillhub"
 
 
@@ -727,9 +934,14 @@ def test_registry_http_endpoints_use_shared_installer(monkeypatch: Any) -> None:
         captured["install"] = {"name": skill_name, **kwargs}
         return {"ok": True, "name": skill_name, "installed_path": "/tmp/SKILL.md"}
 
+    def _discard(skill_name: str, **kwargs: Any) -> bool:
+        captured["discard"] = {"name": skill_name, **kwargs}
+        return True
+
     monkeypatch.delenv("AGX_DESKTOP_TOKEN", raising=False)
     monkeypatch.setattr(market, "preview_market_skill", _preview)
     monkeypatch.setattr(market, "install_market_skill", _install)
+    monkeypatch.setattr(market, "discard_market_skill_preview", _discard)
     client = TestClient(create_studio_app())
 
     preview_response = client.post(
@@ -738,12 +950,14 @@ def test_registry_http_endpoints_use_shared_installer(monkeypatch: Any) -> None:
             "source": "skillhub",
             "name": "alphapai-research",
             "namespace": "clawhub_boteeenchan-ship-it",
+            "origin_source": "skillhub_api",
         },
     )
     assert preview_response.status_code == 200
     assert preview_response.json()["ok"] is True
     assert captured["preview"]["source_name"] == "skillhub"
     assert captured["preview"]["namespace"] == "clawhub_boteeenchan-ship-it"
+    assert captured["preview"]["origin_source"] == "skillhub_api"
 
     install_response = client.post(
         "/api/registry/install",
@@ -751,6 +965,8 @@ def test_registry_http_endpoints_use_shared_installer(monkeypatch: Any) -> None:
             "source": "skillhub",
             "name": "alphapai-research",
             "namespace": "clawhub_boteeenchan-ship-it",
+            "origin_source": "skillhub_api",
+            "preview_token": "preview-token",
             "provenance_source": "skillhub",
         },
     )
@@ -758,4 +974,20 @@ def test_registry_http_endpoints_use_shared_installer(monkeypatch: Any) -> None:
     assert install_response.json()["ok"] is True
     assert captured["install"]["provenance_source"] == "skillhub"
     assert captured["install"]["namespace"] == "clawhub_boteeenchan-ship-it"
+    assert captured["install"]["origin_source"] == "skillhub_api"
+    assert captured["install"]["preview_token"] == "preview-token"
     assert captured["install"]["preview_cache"] is captured["preview"]["preview_cache"]
+
+    discard_response = client.post(
+        "/api/registry/install-preview/discard",
+        json={
+            "source": "skillhub",
+            "name": "alphapai-research",
+            "namespace": "clawhub_boteeenchan-ship-it",
+            "preview_token": "preview-token",
+        },
+    )
+    assert discard_response.status_code == 200
+    assert discard_response.json() == {"ok": True, "discarded": True}
+    assert captured["discard"]["preview_token"] == "preview-token"
+    assert captured["discard"]["preview_cache"] is captured["preview"]["preview_cache"]

@@ -14,6 +14,9 @@ describe("normalizeSkillHubMarketItems", () => {
           namespace: "clawhub_boteeenchan-ship-it",
           canonical_name: "@clawhub_boteeenchan-ship-it/alphapai-research",
           downloads: 12,
+          icon_url: "https://example.test/icon.png",
+          origin_source: "skillhub_api",
+          origin_hint: "原生市场结果",
         },
       ]),
     ).toEqual([
@@ -24,10 +27,13 @@ describe("normalizeSkillHubMarketItems", () => {
         version: "latest",
         author: "unknown",
         downloads: 12,
+        icon_url: "https://example.test/icon.png",
         source: "company-clawhub",
         source_type: "clawhub",
         namespace: "clawhub_boteeenchan-ship-it",
         canonical_name: "@clawhub_boteeenchan-ship-it/alphapai-research",
+        origin_source: "skillhub_api",
+        origin_hint: "原生市场结果",
         provenance_source: "skillhub",
       },
     ]);

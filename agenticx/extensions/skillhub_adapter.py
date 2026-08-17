@@ -43,7 +43,7 @@ def _search_via_skillhub_cli(
                 argv,
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=15,
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -98,9 +98,15 @@ def _search_via_skillhub_cli(
                     "description": str(row.get("summary") or row.get("description") or "").strip(),
                     "version": str(row.get("version") or "latest"),
                     "author": str(row.get("author") or row.get("publisher") or "unknown"),
-                    "downloads": row.get("downloads") or row.get("downloadCount"),
+                    "downloads": (
+                        row.get("downloads")
+                        if "downloads" in row
+                        else row.get("downloadCount")
+                    ),
+                    "icon_url": str(row.get("icon_url") or row.get("iconUrl") or "").strip(),
                     "source": install_source,
                     "source_type": "skillhub",
+                    "origin_source": "skillhub_cli",
                     "namespace": namespace,
                     "canonical_name": canonical_name,
                 }
@@ -147,7 +153,12 @@ def search_skillhub_market(query: str) -> Dict[str, Any]:
                 or extra.get("canonicalName")
                 or (f"@{namespace}/{r.name}" if namespace else r.name)
             ).strip()
-            downloads = extra.get("downloads") or extra.get("downloadCount")
+            downloads = (
+                extra.get("downloads")
+                if "downloads" in extra
+                else extra.get("downloadCount")
+            )
+            icon_url = str(extra.get("icon_url") or extra.get("iconUrl") or "").strip()
             display_name = str(extra.get("display_name") or r.name).strip()
             items.append(
                 {
@@ -157,8 +168,16 @@ def search_skillhub_market(query: str) -> Dict[str, Any]:
                     "version": r.version,
                     "author": r.author,
                     "downloads": downloads,
+                    "icon_url": icon_url,
                     "source": r.source,
                     "source_type": r.source_type,
+                    "origin_source": (
+                        "skillhub_api"
+                        if r.source_type == "skillhub"
+                        else "clawhub_registry"
+                        if r.source_type == "clawhub"
+                        else r.source_type
+                    ),
                     "namespace": namespace,
                     "canonical_name": canonical_name,
                 }

@@ -7719,6 +7719,7 @@ def create_studio_app() -> FastAPI:
                 skill_name,
                 source_name=str(payload.get("source", "")).strip(),
                 namespace=str(payload.get("namespace", "")).strip(),
+                origin_source=str(payload.get("origin_source", "")).strip(),
                 preview_cache=_registry_preview_cache,
             )
         except Exception as exc:
@@ -7747,6 +7748,8 @@ def create_studio_app() -> FastAPI:
                 skill_name,
                 source_name=str(payload.get("source", "")).strip(),
                 namespace=str(payload.get("namespace", "")).strip(),
+                origin_source=str(payload.get("origin_source", "")).strip(),
+                preview_token=str(payload.get("preview_token", "")).strip(),
                 acknowledge_high_risk=bool(payload.get("acknowledge_high_risk")),
                 confirm_non_high_risk=bool(payload.get("confirm_non_high_risk")),
                 auto_non_high=_load_non_high_risk_auto_install(),
@@ -7756,6 +7759,28 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("registry_install error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/registry/install-preview/discard")
+    async def registry_install_preview_discard(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Discard a cached marketplace preview after the user cancels."""
+        _check_token(x_agx_desktop_token)
+        skill_name = str(payload.get("name", "")).strip()
+        if not skill_name:
+            raise HTTPException(status_code=400, detail="name is required")
+        from agenticx.extensions.skill_market_install import discard_market_skill_preview
+
+        discarded = await asyncio.to_thread(
+            discard_market_skill_preview,
+            skill_name,
+            source_name=str(payload.get("source", "")).strip(),
+            namespace=str(payload.get("namespace", "")).strip(),
+            preview_token=str(payload.get("preview_token", "")).strip(),
+            preview_cache=_registry_preview_cache,
+        )
+        return {"ok": True, "discarded": discarded}
 
     # Local document brains are optional in customer Desktop builds. Keep the
     # generic server default unchanged and avoid importing the subsystem at all

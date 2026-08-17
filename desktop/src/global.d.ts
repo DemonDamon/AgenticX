@@ -462,6 +462,7 @@ type RegistrySearchItem = {
   install_hint: string;
   namespace?: string;
   canonical_name?: string;
+  origin_source?: string;
   provenance_source?: "registry" | "skillhub";
 };
 type RegistrySearchResult = {
@@ -480,10 +481,12 @@ type SkillHubSearchItem = {
   version: string;
   author: string;
   downloads?: string | number;
+  icon_url?: string;
   source: string;
   source_type: string;
   namespace?: string;
   canonical_name?: string;
+  origin_source?: string;
 };
 type SkillHubSearchResult = {
   ok: boolean;
@@ -500,6 +503,7 @@ type RegistryInstallResult = {
   installed_path?: string;
   error?: string;
   error_code?: string;
+  preview_token?: string;
   scan_summary?: SkillScanPayload;
 };
 type BundleInstallPreviewResult = {
@@ -510,6 +514,8 @@ type BundleInstallPreviewResult = {
 type RegistryInstallPreviewResult = {
   ok: boolean;
   scan?: SkillScanPayload;
+  preview_token?: string;
+  archive_sha256?: string;
   error?: string;
 };
 
@@ -1535,11 +1541,24 @@ declare global {
         source: string;
         name: string;
         namespace?: string;
+        originSource?: string;
+        previewToken?: string;
         acknowledgeHighRisk?: boolean;
         confirmNonHighRisk?: boolean;
         provenanceSource?: "registry" | "skillhub";
       }) => Promise<RegistryInstallResult>;
-      installFromRegistryPreview: (args: { source: string; name: string; namespace?: string }) => Promise<RegistryInstallPreviewResult>;
+      installFromRegistryPreview: (args: {
+        source: string;
+        name: string;
+        namespace?: string;
+        originSource?: string;
+      }) => Promise<RegistryInstallPreviewResult>;
+      discardRegistryInstallPreview: (args: {
+        source: string;
+        name: string;
+        namespace?: string;
+        previewToken?: string;
+      }) => Promise<{ ok: boolean; discarded?: boolean; error?: string }>;
 
       terminalSpawn: (payload: {
         id: string;

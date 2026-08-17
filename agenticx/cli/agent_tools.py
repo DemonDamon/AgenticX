@@ -6196,6 +6196,7 @@ async def _tool_skill_market_install(
         )
 
     from agenticx.extensions.skill_market_install import (
+        discard_market_skill_preview,
         install_market_skill,
         load_non_high_risk_auto_install,
         preview_market_skill,
@@ -6243,6 +6244,12 @@ async def _tool_skill_market_install(
             emit_event=emit_event,
         )
     if not approved:
+        discard_market_skill_preview(
+            str(preview.get("name") or raw_name),
+            source_name=str(preview.get("source") or source_name),
+            namespace=str(preview.get("namespace") or ""),
+            preview_token=str(preview.get("preview_token") or ""),
+        )
         return json.dumps(
             {
                 "ok": False,
@@ -6258,6 +6265,8 @@ async def _tool_skill_market_install(
         str(preview.get("name") or raw_name),
         source_name=str(preview.get("source") or source_name),
         namespace=str(preview.get("namespace") or ""),
+        origin_source=str(preview.get("origin_source") or ""),
+        preview_token=str(preview.get("preview_token") or ""),
         acknowledge_high_risk=needs_high_confirmation,
         confirm_non_high_risk=needs_policy_confirmation,
         auto_non_high=auto_non_high,

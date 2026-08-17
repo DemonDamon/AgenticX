@@ -10,19 +10,37 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 import tempfile
+import threading
 import time
 from collections.abc import MutableMapping
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 from urllib.parse import urlparse
 
 from agenticx.extensions.registry_hub import RegistryHub, RegistrySkillPackage
 
-PreviewCache = MutableMapping[str, tuple[RegistrySkillPackage, float]]
+
+@dataclass
+class PreviewCacheEntry:
+    package: RegistrySkillPackage
+    expires_at: float
+    preview_token: str
+    archive_sha256: str
+    size_bytes: int
+    origin_source: str
+
+
+PreviewCache = MutableMapping[str, Any]
 
 DEFAULT_PREVIEW_CACHE_TTL_SECONDS = 120.0
-_PROCESS_PREVIEW_CACHE: dict[str, tuple[RegistrySkillPackage, float]] = {}
+DEFAULT_PREVIEW_CACHE_MAX_ENTRIES = 32
+DEFAULT_PREVIEW_CACHE_MAX_BYTES = 64 * 1024 * 1024
+_PROCESS_PREVIEW_CACHE: dict[str, Any] = {}
+_PREVIEW_CACHE_LOCK = threading.RLock()
 
 # Native binaries and scripts can be executable without a filename extension.
 # Keep this deliberately structural: ZIP mode bits and stable file signatures
@@ -166,22 +184,156 @@ def _cache_key(source_name: str, skill_name: str, namespace: str = "") -> str:
     return f"{source_name}:{namespace}:{skill_name}"
 
 
+def _package_sha256(package: RegistrySkillPackage) -> str:
+    """Return a stable digest for the exact validated package contents."""
+    digest = hashlib.sha256()
+    for file_path in sorted(package.files):
+        path_bytes = file_path.encode("utf-8")
+        body = package.files[file_path]
+        digest.update(len(path_bytes).to_bytes(4, "big"))
+        digest.update(path_bytes)
+        digest.update(len(body).to_bytes(8, "big"))
+        digest.update(body)
+        digest.update(b"\x01" if file_path in package.executable_paths else b"\x00")
+    return digest.hexdigest()
+
+
+def _package_size(package: RegistrySkillPackage) -> int:
+    return sum(len(body) for body in package.files.values())
+
+
+def _cleanup_preview_cache(
+    cache: PreviewCache,
+    *,
+    max_entries: int = DEFAULT_PREVIEW_CACHE_MAX_ENTRIES,
+    max_bytes: int = DEFAULT_PREVIEW_CACHE_MAX_BYTES,
+) -> None:
+    """Drop expired/legacy entries, then enforce process memory bounds."""
+    now = time.monotonic()
+    with _PREVIEW_CACHE_LOCK:
+        for key, value in list(cache.items()):
+            if not isinstance(value, PreviewCacheEntry) or value.expires_at <= now:
+                cache.pop(key, None)
+
+        entries = sorted(
+            (
+                (key, value)
+                for key, value in cache.items()
+                if isinstance(value, PreviewCacheEntry)
+            ),
+            key=lambda item: item[1].expires_at,
+        )
+        total_bytes = sum(entry.size_bytes for _, entry in entries)
+        while entries and (
+            len(entries) > max(1, int(max_entries))
+            or total_bytes > max(1, int(max_bytes))
+        ):
+            key, entry = entries.pop(0)
+            if cache.pop(key, None) is not None:
+                total_bytes -= entry.size_bytes
+
+
+def _store_preview_entry(
+    cache: PreviewCache,
+    cache_key: str,
+    package: RegistrySkillPackage,
+    *,
+    origin_source: str,
+    ttl_seconds: float = DEFAULT_PREVIEW_CACHE_TTL_SECONDS,
+) -> Optional[PreviewCacheEntry]:
+    archive_sha256 = _package_sha256(package)
+    package.archive_sha256 = package.archive_sha256 or archive_sha256
+    entry = PreviewCacheEntry(
+        package=package,
+        expires_at=time.monotonic() + max(1.0, float(ttl_seconds)),
+        preview_token=secrets.token_urlsafe(32),
+        archive_sha256=archive_sha256,
+        size_bytes=_package_size(package),
+        origin_source=origin_source,
+    )
+    with _PREVIEW_CACHE_LOCK:
+        cache[cache_key] = entry
+    _cleanup_preview_cache(cache)
+    with _PREVIEW_CACHE_LOCK:
+        stored = cache.get(cache_key)
+    return stored if isinstance(stored, PreviewCacheEntry) else None
+
+
+def discard_market_skill_preview(
+    skill_name: str,
+    *,
+    source_name: str,
+    namespace: str = "",
+    preview_token: str = "",
+    preview_cache: Optional[PreviewCache] = None,
+) -> bool:
+    """Discard one pending preview after cancellation or explicit cleanup."""
+    cache = preview_cache if preview_cache is not None else _PROCESS_PREVIEW_CACHE
+    key = _cache_key(
+        str(source_name or "").strip(),
+        normalize_market_skill_name(skill_name),
+        str(namespace or "").strip().lstrip("@"),
+    )
+    with _PREVIEW_CACHE_LOCK:
+        entry = cache.get(key)
+        if not isinstance(entry, PreviewCacheEntry):
+            cache.pop(key, None)
+            return False
+        if preview_token and not secrets.compare_digest(entry.preview_token, preview_token):
+            return False
+        cache.pop(key, None)
+        return True
+
+
+def _normalized_origin_source(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    aliases = {
+        "skillhub_api": "skillhub",
+        "skillhub_cli": "skillhub",
+        "clawhub_registry": "clawhub",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _default_origin_source(source_type: str, source_name: str) -> str:
+    normalized = _normalized_origin_source(source_type)
+    if normalized == "skillhub":
+        return "skillhub_api"
+    if normalized == "clawhub":
+        return "clawhub_registry"
+    return str(source_name or normalized).strip()
+
+
 def _fetch_package(
     hub: RegistryHub,
     source_name: str,
     skill_name: str,
     *,
     namespace: str,
+    origin_source: str,
     preview_cache: Optional[PreviewCache],
-) -> tuple[Optional[RegistrySkillPackage], str]:
+) -> tuple[Optional[RegistrySkillPackage], str, str]:
     cache = preview_cache if preview_cache is not None else _PROCESS_PREVIEW_CACHE
     cache_key = _cache_key(source_name, skill_name, namespace)
-    cached = cache.get(cache_key)
-    if cached:
-        package, expires_at = cached
-        if time.monotonic() < expires_at:
-            return package, ""
-        cache.pop(cache_key, None)
+    raw_source_type = hub.source_type_for_name(source_name)
+    source_type = _normalized_origin_source(raw_source_type)
+    requested_origin = _normalized_origin_source(origin_source)
+    if requested_origin and source_type and requested_origin != source_type:
+        return (
+            None,
+            f"Package origin '{requested_origin}' does not match registry source '{source_type}'",
+            source_type,
+        )
+    _cleanup_preview_cache(cache)
+    with _PREVIEW_CACHE_LOCK:
+        cached = cache.get(cache_key)
+        if isinstance(cached, PreviewCacheEntry):
+            return cached.package, "", cached.origin_source
+
+    actual_origin = (
+        str(origin_source or "").strip().lower()
+        or _default_origin_source(raw_source_type, source_name)
+    )
 
     fetch_package = getattr(hub, "fetch_skill_package", None)
     if callable(fetch_package):
@@ -198,29 +350,11 @@ def _fetch_package(
         if package is not None or not error:
             if package is not None and namespace and not package.namespace:
                 package.namespace = namespace
-            return package, error
-        if hub.source_type_for_name(source_name) == "skillhub":
-            clawhub_source = hub.source_name_for_type("clawhub")
-            if clawhub_source and clawhub_source != source_name:
-                try:
-                    fallback_package, fallback_error = fetch_package(
-                        clawhub_source,
-                        skill_name,
-                        namespace="",
-                    )
-                except TypeError as exc:
-                    if "namespace" not in str(exc):
-                        raise
-                    fallback_package, fallback_error = fetch_package(
-                        clawhub_source,
-                        skill_name,
-                    )
-                if fallback_package is not None and not fallback_error:
-                    if namespace and not fallback_package.namespace:
-                        fallback_package.namespace = namespace
-                    return fallback_package, ""
-                return None, f"{error} | ClawHub fallback: {fallback_error}"
-        return package, error
+            return package, error, actual_origin
+        # A publisher-scoped package must never silently degrade to a bare-slug
+        # package from another registry.  Callers may retry an explicitly
+        # surfaced mirror result whose source and coordinate they can verify.
+        return package, error, actual_origin
 
     # Compatibility for test doubles and older custom RegistryHub adapters.
     try:
@@ -234,8 +368,12 @@ def _fetch_package(
             raise
         content, error = hub.fetch_skill_markdown(source_name, skill_name)
     if error or content is None:
-        return None, error or "fetch failed"
-    return RegistrySkillPackage(files={"SKILL.md": content.encode("utf-8")}), ""
+        return None, error or "fetch failed", actual_origin
+    return (
+        RegistrySkillPackage(files={"SKILL.md": content.encode("utf-8")}),
+        "",
+        actual_origin,
+    )
 
 
 def _scan_package(package: RegistrySkillPackage):
@@ -315,6 +453,7 @@ def preview_market_skill(
     *,
     source_name: str = "",
     namespace: str = "",
+    origin_source: str = "",
     hub: Optional[RegistryHub] = None,
     preview_cache: Optional[PreviewCache] = None,
     cache_ttl_seconds: float = DEFAULT_PREVIEW_CACHE_TTL_SECONDS,
@@ -331,11 +470,12 @@ def preview_market_skill(
     if resolve_error:
         return {"ok": False, "error": resolve_error, "name": normalized_name}
 
-    package, fetch_error = _fetch_package(
+    package, fetch_error, actual_origin = _fetch_package(
         active_hub,
         source,
         normalized_name,
         namespace=effective_namespace,
+        origin_source=origin_source,
         preview_cache=preview_cache,
     )
     if fetch_error or package is None:
@@ -345,24 +485,47 @@ def preview_market_skill(
             "source": source,
             "name": normalized_name,
             "namespace": effective_namespace,
+            "origin_source": actual_origin,
         }
 
     cache = preview_cache if preview_cache is not None else _PROCESS_PREVIEW_CACHE
-    cache[_cache_key(source, normalized_name, effective_namespace)] = (
-        package,
-        time.monotonic() + max(1.0, float(cache_ttl_seconds)),
-    )
-
+    cache_key = _cache_key(source, normalized_name, effective_namespace)
     from agenticx.skills.guard import scan_result_to_payload
 
     scan_result = _scan_package(package)
     one = scan_result_to_payload(scan_result, normalized_name)
+    # Start the confirmation TTL only after the potentially expensive scan so
+    # the user receives the full window to review and approve the result.
+    cached = _store_preview_entry(
+        cache,
+        cache_key,
+        package,
+        origin_source=actual_origin,
+        ttl_seconds=cache_ttl_seconds,
+    )
+
+    # A single package is bounded by the registry validator and therefore
+    # should survive cleanup.  Fail closed if custom limits removed it.
+    if not isinstance(cached, PreviewCacheEntry):
+        return {
+            "ok": False,
+            "error": "preview_cache_capacity_exceeded",
+            "error_code": "preview_cache_capacity_exceeded",
+            "source": source,
+            "name": normalized_name,
+            "namespace": effective_namespace,
+            "origin_source": actual_origin,
+        }
+
     return {
         "ok": True,
         "message": f"已完成「{normalized_name}」的安全检查，可以继续安装。",
         "source": source,
         "name": normalized_name,
         "namespace": effective_namespace,
+        "origin_source": actual_origin,
+        "preview_token": cached.preview_token,
+        "archive_sha256": cached.archive_sha256,
         "package": {
             "file_count": len(package.files),
             "version": package.version,
@@ -376,6 +539,8 @@ def install_market_skill(
     *,
     source_name: str = "",
     namespace: str = "",
+    origin_source: str = "",
+    preview_token: str = "",
     acknowledge_high_risk: bool = False,
     confirm_non_high_risk: bool = False,
     auto_non_high: Optional[bool] = None,
@@ -395,13 +560,52 @@ def install_market_skill(
     if resolve_error:
         return {"ok": False, "error": resolve_error, "name": normalized_name}
 
-    package, fetch_error = _fetch_package(
-        active_hub,
-        source,
-        normalized_name,
-        namespace=effective_namespace,
-        preview_cache=preview_cache,
+    cache = preview_cache if preview_cache is not None else _PROCESS_PREVIEW_CACHE
+    cache_key = _cache_key(source, normalized_name, effective_namespace)
+    _cleanup_preview_cache(cache)
+    requires_preview_binding = bool(
+        acknowledge_high_risk or confirm_non_high_risk or preview_token
     )
+    package: Optional[RegistrySkillPackage]
+    actual_origin = _normalized_origin_source(origin_source)
+    if requires_preview_binding:
+        with _PREVIEW_CACHE_LOCK:
+            cached = cache.get(cache_key)
+        valid_token = (
+            isinstance(cached, PreviewCacheEntry)
+            and bool(preview_token)
+            and secrets.compare_digest(cached.preview_token, preview_token)
+        )
+        valid_archive = (
+            valid_token
+            and isinstance(cached, PreviewCacheEntry)
+            and secrets.compare_digest(
+                cached.archive_sha256,
+                _package_sha256(cached.package),
+            )
+        )
+        if not valid_archive:
+            return {
+                "ok": False,
+                "error": "preview_refresh_required",
+                "error_code": "preview_refresh_required",
+                "message": "技能包预览已过期或发生变化，请重新检查后确认。",
+                "source": source,
+                "name": normalized_name,
+                "namespace": effective_namespace,
+            }
+        package = cached.package
+        actual_origin = cached.origin_source
+        fetch_error = ""
+    else:
+        package, fetch_error, actual_origin = _fetch_package(
+            active_hub,
+            source,
+            normalized_name,
+            namespace=effective_namespace,
+            origin_source=origin_source,
+            preview_cache=preview_cache,
+        )
     if fetch_error or package is None:
         return {
             "ok": False,
@@ -409,6 +613,7 @@ def install_market_skill(
             "source": source,
             "name": normalized_name,
             "namespace": effective_namespace,
+            "origin_source": actual_origin,
         }
 
     from agenticx.skills.guard import scan_result_to_payload
@@ -424,7 +629,40 @@ def install_market_skill(
         else bool(auto_non_high)
     )
 
-    if scan_result.verdict == "dangerous" and not acknowledge_high_risk:
+    needs_high_confirmation = (
+        scan_result.verdict == "dangerous" and not acknowledge_high_risk
+    )
+    needs_non_high_confirmation = (
+        scan_result.verdict in ("safe", "caution")
+        and not allow_non_high
+        and not confirm_non_high_risk
+    )
+    confirmation_entry: Optional[PreviewCacheEntry] = None
+    if needs_high_confirmation or needs_non_high_confirmation:
+        with _PREVIEW_CACHE_LOCK:
+            existing = cache.get(cache_key)
+        confirmation_entry = (
+            existing
+            if isinstance(existing, PreviewCacheEntry)
+            else _store_preview_entry(
+                cache,
+                cache_key,
+                package,
+                origin_source=actual_origin,
+            )
+        )
+        if confirmation_entry is None:
+            return {
+                "ok": False,
+                "error": "preview_cache_capacity_exceeded",
+                "error_code": "preview_cache_capacity_exceeded",
+                "source": source,
+                "name": normalized_name,
+                "namespace": effective_namespace,
+                "origin_source": actual_origin,
+            }
+
+    if needs_high_confirmation:
         return {
             "ok": False,
             "error": "high_risk_confirm_required",
@@ -432,13 +670,12 @@ def install_market_skill(
             "source": source,
             "name": normalized_name,
             "namespace": effective_namespace,
+            "origin_source": actual_origin,
+            "preview_token": confirmation_entry.preview_token,
+            "archive_sha256": confirmation_entry.archive_sha256,
             "scan_summary": summary,
         }
-    if (
-        scan_result.verdict in ("safe", "caution")
-        and not allow_non_high
-        and not confirm_non_high_risk
-    ):
+    if needs_non_high_confirmation:
         return {
             "ok": False,
             "error": "non_high_risk_confirm_required",
@@ -446,6 +683,9 @@ def install_market_skill(
             "source": source,
             "name": normalized_name,
             "namespace": effective_namespace,
+            "origin_source": actual_origin,
+            "preview_token": confirmation_entry.preview_token,
+            "archive_sha256": confirmation_entry.archive_sha256,
             "scan_summary": summary,
         }
 
@@ -472,13 +712,14 @@ def install_market_skill(
         # the list if the Studio cache module is unavailable in a CLI context.
         pass
 
-    cache = preview_cache if preview_cache is not None else _PROCESS_PREVIEW_CACHE
-    cache.pop(_cache_key(source, normalized_name, effective_namespace), None)
+    with _PREVIEW_CACHE_LOCK:
+        cache.pop(cache_key, None)
     return {
         "ok": True,
         "source": source,
         "name": normalized_name,
         "namespace": effective_namespace,
+        "origin_source": actual_origin,
         "installed_path": str(markdown_path),
         "package": {
             "file_count": len(package.files),

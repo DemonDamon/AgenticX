@@ -11582,6 +11582,7 @@ function registerIpc(): void {
       const params = new URLSearchParams({ q: args.q || "" });
       const resp = await fetch(`${studioUrl}/api/registry/skillhub/search?${params.toString()}`, {
         headers: { "x-agx-desktop-token": getStudioToken() },
+        signal: AbortSignal.timeout(35_000),
       });
       return await resp.json();
     } catch (err) {
@@ -12207,6 +12208,8 @@ function registerIpc(): void {
         source: string;
         name: string;
         namespace?: string;
+        originSource?: string;
+        previewToken?: string;
         acknowledgeHighRisk?: boolean;
         confirmNonHighRisk?: boolean;
         provenanceSource?: "registry" | "skillhub";
@@ -12221,6 +12224,8 @@ function registerIpc(): void {
             source: args.source,
             name: args.name,
             namespace: args.namespace ?? "",
+            origin_source: args.originSource ?? "",
+            preview_token: args.previewToken ?? "",
             acknowledge_high_risk: Boolean(args.acknowledgeHighRisk),
             confirm_non_high_risk: Boolean(args.confirmNonHighRisk),
             provenance_source: args.provenanceSource ?? "registry",
@@ -12233,13 +12238,47 @@ function registerIpc(): void {
     }
   );
 
-  ipcMain.handle("install-from-registry-preview", async (_event, args: { source: string; name: string; namespace?: string }) => {
+  ipcMain.handle("install-from-registry-preview", async (_event, args: {
+    source: string;
+    name: string;
+    namespace?: string;
+    originSource?: string;
+  }) => {
     const studioUrl = getStudioUrl();
     try {
       const resp = await fetch(`${studioUrl}/api/registry/install-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
-        body: JSON.stringify({ source: args.source, name: args.name, namespace: args.namespace ?? "" }),
+        body: JSON.stringify({
+          source: args.source,
+          name: args.name,
+          namespace: args.namespace ?? "",
+          origin_source: args.originSource ?? "",
+        }),
+      });
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("discard-registry-install-preview", async (_event, args: {
+    source: string;
+    name: string;
+    namespace?: string;
+    previewToken?: string;
+  }) => {
+    const studioUrl = getStudioUrl();
+    try {
+      const resp = await fetch(`${studioUrl}/api/registry/install-preview/discard`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({
+          source: args.source,
+          name: args.name,
+          namespace: args.namespace ?? "",
+          preview_token: args.previewToken ?? "",
+        }),
       });
       return await resp.json();
     } catch (err) {
