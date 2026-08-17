@@ -1183,6 +1183,8 @@
           "copyRequestId": "Copy request ID",
           "viewAudit": "View gateway audit",
           "viewRuntime": "View runtime process",
+          "openRuntimePage": "Open full process page",
+          "runtimeProcess": "Runtime process",
           "route": "Route",
           "status": "Status",
           "duration": "Duration",
@@ -1233,6 +1235,34 @@
         },
         "expand": "Expand",
         "collapse": "Collapse",
+        "detail": {
+          "title": "Node detail",
+          "selectHint": "Select a node on the left to inspect",
+          "status": "Status",
+          "duration": "Duration",
+          "tokens": "Tokens",
+          "cost": "Cost (USD)",
+          "startedAt": "Started at",
+          "attributes": "Attributes",
+          "sources": "Sources",
+          "emptyAttrs": "No attributes"
+        },
+        "conversation": {
+          "title": "Conversation turn",
+          "loading": "Loading conversation…",
+          "empty": "No chat messages for this request (may predate trace_id persistence)",
+          "loadFailed": "Failed to load conversation",
+          "expand": "Show more",
+          "collapse": "Collapse preview",
+          "truncatedHint": "Preview truncated (default 4000 chars). Images show attachment names only, not binary payloads.",
+          "roleUser": "User",
+          "roleAssistant": "Assistant",
+          "roleTool": "Tool",
+          "roleSystem": "System",
+          "reasoning": "Reasoning",
+          "attachments": "Attachments",
+          "chars": "chars"
+        },
         "toast": {
           "loadFailed": "Load failed",
           "copied": "Request ID copied"

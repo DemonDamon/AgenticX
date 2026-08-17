@@ -1,6 +1,7 @@
 "use client";
 
 import { adminFetch } from "../../lib/admin-client-auth";
+import { TraceTimelineInline } from "../../components/trace-timeline-tree";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -33,7 +34,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Copy, FileText, Inbox, RefreshCcw, Search } from "lucide-react";
+import { Copy, ExternalLink, FileText, Inbox, RefreshCcw, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { PortalLogItem } from "../../lib/portal-logs-query";
 
@@ -62,6 +63,7 @@ function levelBadgeVariant(level: string): "destructive" | "warning" | "secondar
 
 function PortalLogsPageContent() {
   const t = useTranslations("pages.ops.portalLogs");
+  const tRuntime = useTranslations("pages.ops.traceRuntime");
   const ts = useTranslations("shell");
   const searchParams = useSearchParams();
   const initialTrace = searchParams.get("trace_id")?.trim() ?? "";
@@ -316,7 +318,7 @@ function PortalLogsPageContent() {
       )}
 
       <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
+        <SheetContent className="w-full sm:max-w-4xl overflow-y-auto">
           {selected ? (
             <>
               <SheetHeader>
@@ -350,7 +352,8 @@ function PortalLogsPageContent() {
                       </Button>
                       <Button type="button" variant="outline" size="sm" className="h-7" asChild>
                         <Link href={`/traces/${encodeURIComponent(selected.trace_id)}`}>
-                          {t("detail.viewRuntime")}
+                          <ExternalLink className="mr-1 h-3.5 w-3.5" />
+                          {t("detail.openRuntimePage")}
                         </Link>
                       </Button>
                     </>
@@ -367,6 +370,54 @@ function PortalLogsPageContent() {
                   <DetailRow label={t("detail.user")} value={selected.user_id ?? "—"} />
                   <DetailRow label={t("detail.session")} value={selected.session_id ?? "—"} />
                 </dl>
+
+                {selected.trace_id ? (
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground">
+                      {t("detail.runtimeProcess")}
+                    </div>
+                    <TraceTimelineInline
+                      traceId={selected.trace_id}
+                      labels={{
+                        loading: tRuntime("loading"),
+                        empty: tRuntime("emptyDescription"),
+                        loadFailed: tRuntime("toast.loadFailed"),
+                        expand: tRuntime("expand"),
+                        collapse: tRuntime("collapse"),
+                        kind: (kind) => tRuntime(`kind.${kind}`),
+                        totalsSteps: tRuntime("totals.steps"),
+                        totalsTokens: tRuntime("totals.tokens"),
+                        totalsDuration: tRuntime("totals.duration"),
+                        detailTitle: tRuntime("detail.title"),
+                        selectHint: tRuntime("detail.selectHint"),
+                        status: tRuntime("detail.status"),
+                        duration: tRuntime("detail.duration"),
+                        tokens: tRuntime("detail.tokens"),
+                        cost: tRuntime("detail.cost"),
+                        startedAt: tRuntime("detail.startedAt"),
+                        attributes: tRuntime("detail.attributes"),
+                        sources: tRuntime("detail.sources"),
+                        emptyAttrs: tRuntime("detail.emptyAttrs"),
+                        conversation: {
+                          title: tRuntime("conversation.title"),
+                          loading: tRuntime("conversation.loading"),
+                          empty: tRuntime("conversation.empty"),
+                          loadFailed: tRuntime("conversation.loadFailed"),
+                          expand: tRuntime("conversation.expand"),
+                          collapse: tRuntime("conversation.collapse"),
+                          truncatedHint: tRuntime("conversation.truncatedHint"),
+                          roleUser: tRuntime("conversation.roleUser"),
+                          roleAssistant: tRuntime("conversation.roleAssistant"),
+                          roleTool: tRuntime("conversation.roleTool"),
+                          roleSystem: tRuntime("conversation.roleSystem"),
+                          reasoning: tRuntime("conversation.reasoning"),
+                          attachments: tRuntime("conversation.attachments"),
+                          chars: tRuntime("conversation.chars"),
+                        },
+                      }}
+                    />
+                  </div>
+                ) : null}
 
                 {selected.error_message ? (
                   <div className="space-y-1">

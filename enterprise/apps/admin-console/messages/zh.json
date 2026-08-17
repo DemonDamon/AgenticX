@@ -1183,6 +1183,8 @@
           "copyRequestId": "复制请求 ID",
           "viewAudit": "查看网关审计",
           "viewRuntime": "查看运行时过程",
+          "openRuntimePage": "全屏打开过程页",
+          "runtimeProcess": "运行时过程",
           "route": "路由",
           "status": "状态码",
           "duration": "耗时",
@@ -1233,6 +1235,34 @@
         },
         "expand": "展开",
         "collapse": "收起",
+        "detail": {
+          "title": "节点详情",
+          "selectHint": "点击左侧节点查看详情",
+          "status": "状态",
+          "duration": "耗时",
+          "tokens": "Token",
+          "cost": "成本 (USD)",
+          "startedAt": "开始时间",
+          "attributes": "属性",
+          "sources": "来源",
+          "emptyAttrs": "无附加属性"
+        },
+        "conversation": {
+          "title": "本轮对话",
+          "loading": "加载对话内容…",
+          "empty": "未找到关联的聊天消息（该请求可能未落库或早于 trace_id 落盘）",
+          "loadFailed": "加载对话失败",
+          "expand": "展开更多",
+          "collapse": "收起预览",
+          "truncatedHint": "内容已截断预览（默认最多 4000 字）；图片仅显示附件名，不内联二进制。",
+          "roleUser": "用户",
+          "roleAssistant": "助手",
+          "roleTool": "工具",
+          "roleSystem": "系统",
+          "reasoning": "思考过程",
+          "attachments": "附件",
+          "chars": "字"
+        },
         "toast": {
           "loadFailed": "加载失败",
           "copied": "已复制请求 ID"

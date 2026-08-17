@@ -1,12 +1,12 @@
 "use client";
 
 import { adminFetch } from "../../../lib/admin-client-auth";
+import { TraceExplorer } from "../../../components/trace-timeline-tree";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import type { TraceNode, TraceNodeKind, TraceTimeline } from "@agenticx/core-api";
+import type { TraceTimeline } from "@agenticx/core-api";
 import {
-  Badge,
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
@@ -20,138 +20,8 @@ import {
   PageHeader,
   toast,
 } from "@agenticx/ui";
-import { ChevronDown, ChevronRight, Copy, GitBranch, Inbox } from "lucide-react";
+import { Copy, GitBranch, Inbox } from "lucide-react";
 import { useTranslations } from "next-intl";
-
-function kindBadgeVariant(
-  kind: TraceNodeKind,
-  status?: string,
-): "destructive" | "secondary" | "outline" {
-  if (status === "failed" || status === "error" || status === "500") return "destructive";
-  if (kind === "model_step") return "outline";
-  if (kind === "dr_lane") return "outline";
-  return "secondary";
-}
-
-function TraceNodeRow({
-  node,
-  depth,
-  tKind,
-  tExpand,
-  tCollapse,
-}: {
-  node: TraceNode;
-  depth: number;
-  tKind: (key: TraceNodeKind) => string;
-  tExpand: string;
-  tCollapse: string;
-}) {
-  const [open, setOpen] = useState(depth < 2);
-  const hasChildren = node.children.length > 0;
-  const failed =
-    node.status === "failed" ||
-    node.status === "error" ||
-    (typeof node.status === "string" && node.status.startsWith("5"));
-
-  return (
-    <div className="border-b border-border last:border-b-0">
-      <div
-        className="flex items-start gap-2 px-3 py-2 hover:bg-muted/40"
-        style={{ paddingLeft: 12 + depth * 16 }}
-      >
-        <button
-          type="button"
-          className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground disabled:opacity-30"
-          disabled={!hasChildren}
-          aria-label={open ? tCollapse : tExpand}
-          onClick={() => setOpen((v) => !v)}
-        >
-          {hasChildren ? (
-            open ? (
-              <ChevronDown className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" />
-            )
-          ) : (
-            <span className="h-3.5 w-3.5" />
-          )}
-        </button>
-        <Badge variant={kindBadgeVariant(node.kind, node.status)} className="shrink-0">
-          {tKind(node.kind)}
-        </Badge>
-        <div className="min-w-0 flex-1">
-          <div className={`truncate text-sm ${failed ? "text-destructive" : ""}`}>{node.label}</div>
-          {open && node.attrs ? (
-            <div className="mt-1 space-y-1 text-xs text-muted-foreground">
-              {node.kind === "model_step" ? (
-                <div className="font-mono">
-                  {String(node.attrs.provider ?? "—")}/{String(node.attrs.model ?? "—")}
-                  {node.tokens
-                    ? ` · in ${node.tokens.input} / out ${node.tokens.output} / total ${node.tokens.total}`
-                    : ""}
-                  {node.attrs.error_message ? (
-                    <div className="mt-1 text-destructive">{String(node.attrs.error_message)}</div>
-                  ) : null}
-                </div>
-              ) : null}
-              {node.kind === "dr_lane" && Array.isArray((node.attrs as { sources?: unknown }).sources) ? (
-                <ul className="list-disc pl-4">
-                  {(
-                    (node.attrs as { sources?: Array<{ title?: string; url?: string }> }).sources ?? []
-                  ).map((src, idx) => (
-                    <li key={`${src.url ?? src.title ?? idx}`}>
-                      {src.url ? (
-                        <a href={src.url} target="_blank" rel="noreferrer" className="underline">
-                          {src.title || src.url}
-                        </a>
-                      ) : (
-                        src.title || "—"
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-              {node.kind === "dr_event" &&
-              Array.isArray((node.attrs as { sources?: unknown }).sources) ? (
-                <ul className="list-disc pl-4">
-                  {(
-                    (node.attrs as { sources?: Array<{ title?: string; url?: string }> }).sources ?? []
-                  ).map((src, idx) => (
-                    <li key={`${src.url ?? src.title ?? idx}`}>
-                      {src.url ? (
-                        <a href={src.url} target="_blank" rel="noreferrer" className="underline">
-                          {src.title || src.url}
-                        </a>
-                      ) : (
-                        src.title || "—"
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-        <div className="shrink-0 text-right font-mono text-xs text-muted-foreground">
-          {node.durationMs != null ? <div>{node.durationMs}ms</div> : null}
-          {node.tokens ? <div>{node.tokens.total} tok</div> : null}
-        </div>
-      </div>
-      {open && hasChildren
-        ? node.children.map((child) => (
-            <TraceNodeRow
-              key={child.id}
-              node={child}
-              depth={depth + 1}
-              tKind={tKind}
-              tExpand={tExpand}
-              tCollapse={tCollapse}
-            />
-          ))
-        : null}
-    </div>
-  );
-}
 
 export default function TraceRuntimePage() {
   const t = useTranslations("pages.ops.traceRuntime");
@@ -313,20 +183,41 @@ export default function TraceRuntimePage() {
           description={t("emptyDescription")}
         />
       ) : (
-        <Card>
-          <CardContent className="p-0">
-            {data.nodes.map((node) => (
-              <TraceNodeRow
-                key={node.id}
-                node={node}
-                depth={0}
-                tKind={(kind) => t(`kind.${kind}`)}
-                tExpand={t("expand")}
-                tCollapse={t("collapse")}
-              />
-            ))}
-          </CardContent>
-        </Card>
+        <TraceExplorer
+          data={data}
+          labels={{
+            expand: t("expand"),
+            collapse: t("collapse"),
+            kind: (kind) => t(`kind.${kind}`),
+            detailTitle: t("detail.title"),
+            selectHint: t("detail.selectHint"),
+            status: t("detail.status"),
+            duration: t("detail.duration"),
+            tokens: t("detail.tokens"),
+            cost: t("detail.cost"),
+            startedAt: t("detail.startedAt"),
+            attributes: t("detail.attributes"),
+            sources: t("detail.sources"),
+            emptyAttrs: t("detail.emptyAttrs"),
+            conversation: {
+              title: t("conversation.title"),
+              loading: t("conversation.loading"),
+              empty: t("conversation.empty"),
+              loadFailed: t("conversation.loadFailed"),
+              expand: t("conversation.expand"),
+              collapse: t("conversation.collapse"),
+              truncatedHint: t("conversation.truncatedHint"),
+              roleUser: t("conversation.roleUser"),
+              roleAssistant: t("conversation.roleAssistant"),
+              roleTool: t("conversation.roleTool"),
+              roleSystem: t("conversation.roleSystem"),
+              reasoning: t("conversation.reasoning"),
+              attachments: t("conversation.attachments"),
+              chars: t("conversation.chars"),
+            },
+          }}
+          className="min-h-[480px] bg-card"
+        />
       )}
     </div>
   );
