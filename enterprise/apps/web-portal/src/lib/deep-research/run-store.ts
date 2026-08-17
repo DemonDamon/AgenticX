@@ -37,7 +37,13 @@ const TERMINAL_STATUSES: ReadonlySet<DeepResearchRunStatus> = new Set([
 
 const ACTIVE_STATUSES: DeepResearchRunStatus[] = ["running", "awaiting_clarify"];
 
-const NEVER_DROP_TYPES = new Set<DeepResearchEvent["type"]>(["run_started", "clarify"]);
+const NEVER_DROP_TYPES = new Set<DeepResearchEvent["type"]>([
+  "run_started",
+  "clarify",
+  "clarify_chat",
+  "research_profile",
+  "research_plan",
+]);
 
 export type ClarifyResumePayload = {
   answers: Record<string, string>;
@@ -116,6 +122,11 @@ export type RunStore = {
   getClarificationResume(runId: string): Promise<ClarifyResumePayload | null>;
   /** Race the pending resume; returns whichever payload won. */
   expireClarification(runId: string, now?: Date): Promise<ClarifyResumePayload>;
+  /** Re-open a non-completed orphaned plan gate after its original waiter died. */
+  reopenForContinue(
+    runId: string,
+    patch?: { status?: DeepResearchRunStatus; phase?: string },
+  ): Promise<boolean>;
   get(tenantId: string, userId: string, runId: string): Promise<RunRecord | null>;
   listActive(tenantId: string, userId: string, sessionId?: string): Promise<RunRecord[]>;
   /** Most recently updated run for a session (any status) — used to rehydrate workbench after refresh. */
@@ -419,6 +430,19 @@ function createMemoryStore(): RunStore {
       return row.clarifyResume ? { ...row.clarifyResume } : clarifyTimeoutPayload();
     },
 
+    async reopenForContinue(runId, patch) {
+      const row = bucket.get(runId);
+      if (!row || row.status === "completed") return false;
+      row.status = patch?.status ?? "running";
+      row.phase = patch?.phase ?? "lanes";
+      row.errorMessage = undefined;
+      row.clarifyResume = null;
+      row.clarifyExpiresAt = null;
+      row.revision += 1;
+      row.updatedAt = new Date().toISOString();
+      return true;
+    },
+
     async get(tenantId, userId, runId) {
       const row = bucket.get(runId);
       if (!row) return null;
@@ -517,6 +541,12 @@ export type RunSqlOps = {
     runId: string;
     status: DeepResearchTerminalStatus;
     errorMessage?: string;
+    now: Date;
+  }): Promise<number>;
+  reopenForContinue(input: {
+    runId: string;
+    status: DeepResearchRunStatus;
+    phase: string;
     now: Date;
   }): Promise<number>;
   reapStale(cutoff: Date, now: Date): Promise<number>;
@@ -674,6 +704,28 @@ function createPgOps(db: PgDb): RunSqlOps {
           ...(errorMessage !== undefined ? { errorMessage } : {}),
         })
         .where(and(eq(pgTable.runId, runId), finishGuardPg(status, errorMessage)))
+        .returning({ runId: pgTable.runId });
+      return rows.length;
+    },
+
+    async reopenForContinue({ runId, status, phase, now }) {
+      const rows = await db
+        .update(pgTable)
+        .set({
+          status,
+          phase,
+          errorMessage: null,
+          clarifyResume: null,
+          clarifyExpiresAt: null,
+          revision: sql`${pgTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(pgTable.runId, runId),
+            inArray(pgTable.status, ["running", "awaiting_clarify", "failed", "cancelled"]),
+          ),
+        )
         .returning({ runId: pgTable.runId });
       return rows.length;
     },
@@ -945,6 +997,27 @@ function createMysqlOps(db: MysqlDb): RunSqlOps {
       return mysqlAffectedRows(result);
     },
 
+    async reopenForContinue({ runId, status, phase, now }) {
+      const result = await db
+        .update(mysqlTable)
+        .set({
+          status,
+          phase,
+          errorMessage: null,
+          clarifyResume: null,
+          clarifyExpiresAt: null,
+          revision: sql`${mysqlTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(mysqlTable.runId, runId),
+            inArray(mysqlTable.status, ["running", "awaiting_clarify", "failed", "cancelled"]),
+          ),
+        );
+      return mysqlAffectedRows(result);
+    },
+
     async reapStale(cutoff, now) {
       const result = await db
         .update(mysqlTable)
@@ -1212,6 +1285,17 @@ export function createSqlRunStore(loadOps: () => Promise<RunSqlOps> = resolveDia
       return normalizeClarifyResume(await ops.readClarifyResume(runId)) ?? clarifyTimeoutPayload();
     },
 
+    async reopenForContinue(runId, patch) {
+      const ops = await loadOps();
+      const changed = await ops.reopenForContinue({
+        runId,
+        status: patch?.status ?? "running",
+        phase: patch?.phase ?? "lanes",
+        now: new Date(),
+      });
+      return changed > 0;
+    },
+
     async get(tenantId, userId, runId) {
       const ops = await loadOps();
       return ops.get(tenantId, userId, runId);
@@ -1241,6 +1325,20 @@ export function newEventsSince(record: RunRecord, lastEventSeq: number): DeepRes
   if (delta <= 0) return [];
   return record.events.slice(-Math.min(delta, record.events.length));
 }
+
+/** Refresh hydrate depends on these state transitions; do not leave them in the batch window. */
+const IMMEDIATE_FLUSH_EVENT_TYPES = new Set<DeepResearchEvent["type"]>([
+  "run_started",
+  "phase",
+  "clarify",
+  "clarify_chat",
+  "research_profile",
+  "research_plan",
+  "lane_started",
+  "lane_done",
+  "artifact",
+  "reflection",
+]);
 
 export function createRunWriter(store: RunStore, runId: string): RunWriter {
   let pendingEvents: DeepResearchEvent[] = [];
@@ -1312,7 +1410,11 @@ export function createRunWriter(store: RunStore, runId: string): RunWriter {
         nextPatch.phase = stamped.phase;
       }
       if (Object.keys(nextPatch).length > 0) pendingPatch = nextPatch;
-      schedule();
+      if (IMMEDIATE_FLUSH_EVENT_TYPES.has(stamped.type)) {
+        void flush();
+      } else {
+        schedule();
+      }
     },
     pushReport(chunk) {
       if (!chunk) return;

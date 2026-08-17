@@ -29,6 +29,11 @@ function notifiers(): Map<string, Set<() => void>> {
   return g.__agxClarifyNotifiers;
 }
 
+/** Best-effort local ownership signal used before taking over an orphaned plan gate. */
+export function hasLiveClarifyWaiter(runId: string): boolean {
+  return (notifiers().get(runId)?.size ?? 0) > 0;
+}
+
 /** Wake local waiters immediately after a resume landed in the database. */
 export function notifyClarifyResume(runId: string): void {
   const listeners = notifiers().get(runId);
@@ -95,19 +100,23 @@ export function waitForClarifyResume(
       void check();
     }, CLARIFY_POLL_INTERVAL_MS);
 
-    timer = setTimeout(() => {
-      void (async () => {
-        if (settled) return;
-        try {
-          settle(await runStore.expireClarification(runId, new Date()));
-        } catch {
-          settle(clarifyTimeoutPayload());
-        }
-      })();
-    }, timeoutMs);
+    // timeoutMs <= 0 is an explicit indefinite plan-alignment gate.
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        void (async () => {
+          if (settled) return;
+          try {
+            settle(await runStore.expireClarification(runId, new Date()));
+          } catch {
+            settle(clarifyTimeoutPayload());
+          }
+        })();
+      }, timeoutMs);
+    }
 
     unsubscribe = subscribe(runId, () => {
       void check();
     });
+    void check();
   });
 }

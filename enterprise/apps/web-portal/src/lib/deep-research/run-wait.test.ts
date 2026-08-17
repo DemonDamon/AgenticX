@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRunStore, type RunStore } from "./run-store";
 import {
   CLARIFY_POLL_INTERVAL_MS,
+  hasLiveClarifyWaiter,
   notifyClarifyResume,
   waitForClarifyResume,
 } from "./run-wait";
@@ -70,6 +71,28 @@ describe("clarify resume coordination", () => {
     await expect(pending).resolves.toEqual({ answers: { q1: "B" }, skip: false });
   });
 
+  it("supports an indefinite plan gate and exposes only its local waiter", async () => {
+    vi.useFakeTimers();
+    const store = await armedRun("run-indefinite", 24 * 60 * 60_000);
+    const pending = waitForClarifyResume(store, "run-indefinite", 0);
+    expect(hasLiveClarifyWaiter("run-indefinite")).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(hasLiveClarifyWaiter("run-indefinite")).toBe(true);
+    await store.resolveClarification({
+      ...OWNER,
+      runId: "run-indefinite",
+      payload: { answers: { __plan_action__: "approve" }, skip: false },
+    });
+    notifyClarifyResume("run-indefinite");
+
+    await expect(pending).resolves.toEqual({
+      answers: { __plan_action__: "approve" },
+      skip: false,
+    });
+    expect(hasLiveClarifyWaiter("run-indefinite")).toBe(false);
+  });
+
   it("times out into a persisted skip payload that later resumes cannot undo", async () => {
     vi.useFakeTimers();
     const store = await armedRun("run-timeout", 1_000);
@@ -118,7 +141,7 @@ describe("clarify resume coordination", () => {
 
     const pending = waitForClarifyResume(store, "run-flaky", 60_000);
     await vi.advanceTimersByTimeAsync(CLARIFY_POLL_INTERVAL_MS);
-    expect(readSpy).toHaveBeenCalledTimes(1);
+    expect(readSpy).toHaveBeenCalledTimes(2);
 
     await store.resolveClarification({
       ...OWNER,

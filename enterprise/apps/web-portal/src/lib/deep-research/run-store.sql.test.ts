@@ -176,6 +176,22 @@ function createDriver(): Driver {
       );
     },
 
+    async reopenForContinue({ runId, status, phase, now }) {
+      return update(
+        runId,
+        (row) => row.status !== "completed",
+        (row) => {
+          row.status = status;
+          row.phase = phase;
+          row.errorMessage = null;
+          row.clarifyResume = null;
+          row.clarifyExpiresAt = null;
+          row.revision += 1;
+          row.updatedAt = now;
+        },
+      );
+    },
+
     async reapStale(cutoff, now) {
       let changed = 0;
       for (const row of rows.values()) {

@@ -579,7 +579,7 @@ describe("createRunWriter", () => {
     vi.useRealTimers();
   });
 
-  it("batches multiple push calls into one appendEvents within flush interval", async () => {
+  it("flushes critical events immediately so refresh hydrate is not empty", async () => {
     const store = createMemoryRunStore();
     await store.create({
       runId: "r1",
@@ -591,15 +591,53 @@ describe("createRunWriter", () => {
     const appendSpy = vi.spyOn(store, "appendEvents");
     const writer = createRunWriter(store, "r1");
     writer.push({ type: "run_started", runId: "r1" });
-    writer.push({ type: "phase", phase: "lanes", message: "检索中" });
+    await writer.flush();
+    expect(appendSpy).toHaveBeenCalled();
+    const row = await store.get("t1", "u1", "r1");
+    expect(row!.events.some((e) => e.type === "run_started")).toBe(true);
+  });
+
+  it("reopenForContinue allows append after failed reap", async () => {
+    const store = createMemoryRunStore();
+    await store.create({
+      runId: "r-reopen",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "主题",
+    });
+    await store.finish("r-reopen", "failed", "stale run reaped");
+    await store.appendEvents("r-reopen", [{ type: "narrative", text: "should no-op" }]);
+    let row = await store.get("t1", "u1", "r-reopen");
+    expect(row?.events.some((e) => e.type === "narrative")).toBe(false);
+    expect(await store.reopenForContinue("r-reopen")).toBe(true);
+    await store.appendEvents(
+      "r-reopen",
+      [{ type: "narrative", text: "continued" }],
+      { status: "running", phase: "lanes" },
+    );
+    row = await store.get("t1", "u1", "r-reopen");
+    expect(row?.status).toBe("running");
+    expect(row?.events.some((e) => e.type === "narrative" && e.text === "continued")).toBe(true);
+  });
+
+  it("still batches non-critical events within flush interval", async () => {
+    const store = createMemoryRunStore();
+    await store.create({
+      runId: "r2",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "主题",
+    });
+    const appendSpy = vi.spyOn(store, "appendEvents");
+    const writer = createRunWriter(store, "r2");
     writer.push({ type: "narrative", text: "开始" });
+    writer.push({ type: "lane_progress", laneId: "q1", message: "搜…" });
     expect(appendSpy).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(RUN_FLUSH_INTERVAL_MS);
     expect(appendSpy).toHaveBeenCalledTimes(1);
-    expect(appendSpy.mock.calls[0]![1]).toHaveLength(3);
-    const row = await store.get("t1", "u1", "r1");
-    expect(row!.events).toHaveLength(3);
-    expect(row!.phase).toBe("lanes");
+    expect(appendSpy.mock.calls[0]![1]).toHaveLength(2);
   });
 
   it("coalesces reasoning snapshots from the same stage across flushes", async () => {

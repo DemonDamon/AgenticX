@@ -19,6 +19,9 @@ const TERMINAL: ReadonlySet<DeepResearchRunStatus> = new Set([
 
 const POLL_MS = 1_000;
 
+/** 重连回放灌入聊天区的报告尾部上限（live 路径聊天区只有摘要）。 */
+const CHAT_REPLAY_MAX_CHARS = 3_000;
+
 type Params = Promise<{ runId: string }>;
 
 function sseDelta(content: string): string {
@@ -88,7 +91,10 @@ export async function GET(request: Request, segmentData: { params: Params }) {
       let lastEventSeq = initial.eventSeq;
       let reportLen = 0;
       if (initial.reportMarkdown) {
-        safeEnqueue(sseDelta(initial.reportMarkdown));
+        // 聊天区只应看到摘要尾部：live 路径从不把分节正文灌进气泡，
+        // 全量回放曾把整篇报告 dump 进消息内容（页面输出极长的根因）。
+        const tail = initial.reportMarkdown.slice(-CHAT_REPLAY_MAX_CHARS);
+        safeEnqueue(sseDelta(tail));
         reportLen = initial.reportMarkdown.length;
       }
 
@@ -117,8 +123,11 @@ export async function GET(request: Request, segmentData: { params: Params }) {
         }
         lastEventSeq = latest.eventSeq;
 
-        if (latest.reportMarkdown.length > reportLen) {
-          const suffix = latest.reportMarkdown.slice(reportLen);
+        if (latest.reportMarkdown.length > reportLen && TERMINAL.has(latest.status)) {
+          // 只在终态补发摘要尾部；写作中途的分节正文增量不灌入聊天区
+          // （live 路径本来就不显示正文，重连也不该显示）。
+          const from = Math.max(reportLen, latest.reportMarkdown.length - CHAT_REPLAY_MAX_CHARS);
+          const suffix = latest.reportMarkdown.slice(from);
           reportLen = latest.reportMarkdown.length;
           if (suffix) safeEnqueue(sseDelta(suffix));
         }

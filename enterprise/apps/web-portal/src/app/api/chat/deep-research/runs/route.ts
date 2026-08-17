@@ -13,6 +13,29 @@ export const runtime = "nodejs";
 
 const MAX_HYDRATE_EVENTS = 200;
 
+/** 活跃 run 超过该时长无事件落库 → 判定为死亡（handler 被杀/用户关页），服务端收割。 */
+const STALE_ACTIVE_RUN_MS = 30 * 60_000;
+/** 收割是全局扫描，按进程节流，避免横幅轮询放大成全表 UPDATE。 */
+const REAP_INTERVAL_MS = 60_000;
+let lastReapAt = 0;
+
+async function reapStaleRunsThrottled(): Promise<void> {
+  const now = Date.now();
+  if (now - lastReapAt < REAP_INTERVAL_MS) return;
+  lastReapAt = now;
+  try {
+    const reaped = await defaultRunStore.reapStaleRuns(STALE_ACTIVE_RUN_MS);
+    if (reaped > 0) {
+      console.info("[deep-research] reaped stale active runs:", reaped);
+    }
+  } catch (error) {
+    console.warn(
+      "[deep-research] reap stale runs failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
 function isReportArtifact(path: string, kind: string): boolean {
   if (kind === "report") return true;
   const lower = path.toLowerCase();
@@ -125,6 +148,7 @@ export async function GET(request: Request) {
   });
   logCtx.setMode("deep_research");
   const store = defaultRunStore;
+  await reapStaleRunsThrottled();
   const activeRaw = await store.listActive(session.tenantId, session.userId, sessionId);
   const active = await healFinishedActiveRuns(activeRaw);
 
