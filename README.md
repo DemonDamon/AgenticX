@@ -695,6 +695,7 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **AgentRun SDK** | [Serverless-Devs/agentrun-sdk-python](https://github.com/Serverless-Devs/agentrun-sdk-python) | Serverless agent runtime patterns |
 | **AgentScope** | [agentscope-ai/agentscope](https://github.com/agentscope-ai/agentscope) | Multi-agent communication & pipeline |
 | **Agno** | [agno-agi/agno](https://github.com/agno-agi/agno) | Lightweight agent framework design |
+| **Better Harness** | [QoderAI/better-harness](https://github.com/QoderAI/better-harness) | Evidence-graded session loop review (Present / Wired / Exercised / Outcome-supported) |
 | **Camel** | [camel-ai/camel](https://github.com/camel-ai/camel) | Role-playing agents & society simulation |
 | **Cherry Studio** | [CherryHQ/cherry-studio](https://github.com/CherryHQ/cherry-studio) | Desktop UX, MCP integration, skill system |
 | **Claude Code** | [anthropics/claude-code](https://github.com/anthropics/claude-code) | Agentic CLI UX & plugin architecture |
@@ -702,6 +703,7 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **ClawTeam** | [HKUDS/ClawTeam](https://github.com/HKUDS/ClawTeam) | Multi-agent team coordination |
 | **CodexMonitor** | [Dimillian/CodexMonitor](https://github.com/Dimillian/CodexMonitor) | Desktop monitoring & Tauri app patterns |
 | **CrewAI** | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | Crew orchestration, flow & memory system |
+| **DeepSeek Harness** | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | Long-run turn hardening: overflow retry, interrupted closers, fail-closed persist |
 | **DeepWiki Open** | [AsyncFuncAI/deepwiki-open](https://github.com/AsyncFuncAI/deepwiki-open) | Repository-level knowledge indexing |
 | **Deer Flow** | [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | Deep research workflow & skill harness |
 | **Eigent** | [eigent-ai/eigent](https://github.com/eigent-ai/eigent) | Multi-agent workforce & SSE event spec |
