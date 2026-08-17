@@ -1263,6 +1263,96 @@ describe("runDeepResearchTurn", () => {
     ).toBe(true);
   });
 
+  it("continues an orphaned approved plan on the same run without repeating preflight", async () => {
+    const runStore = createMemoryRunStore();
+    await runStore.create({
+      runId: "run-orphan-continue-1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "s1",
+      topic: "研究主题",
+    });
+    await runStore.appendEvents(
+      "run-orphan-continue-1",
+      [
+        { type: "run_started", runId: "run-orphan-continue-1" },
+        {
+          type: "research_plan",
+          runId: "run-orphan-continue-1",
+          action: "approved",
+          version: 2,
+          plan: {
+            version: 2,
+            objective: "研究主题",
+            scope: [],
+            subQuestions: [
+              { id: "sq1", title: "现状" },
+              { id: "sq2", title: "风险" },
+            ],
+            sourceStrategy: [],
+            deliverables: [],
+            assumptions: [],
+          },
+        },
+      ],
+      { status: "running", phase: "plan_resuming" },
+    );
+    const buildPlan = vi.fn();
+    const proposeClarify = vi.fn();
+    const runReconFn = vi.fn();
+
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "研究主题" }] },
+      {
+        ...baseDeps({
+          runId: "run-orphan-continue-1",
+          runStore,
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("orphan-report");
+          }) as unknown as typeof fetch,
+          buildPlan,
+          proposeClarify,
+          runReconFn,
+          executeSearch: async (query: string) => [
+            { title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" },
+          ],
+          continueFromPlanGate: {
+            plan: {
+              topic: "研究主题",
+              complexity: "moderate" as const,
+              subQuestions: ["现状", "风险"],
+            },
+            planVersion: 2,
+            topic: "研究主题",
+            planEventEmitted: true,
+          },
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(buildPlan).not.toHaveBeenCalled();
+    expect(proposeClarify).not.toHaveBeenCalled();
+    expect(runReconFn).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type === "clarify")).toBe(false);
+    expect(events.some((event) => event.type === "clarify_chat")).toBe(false);
+    expect(
+      events.filter(
+        (event) => event.type === "lane_started" && event.laneId !== "recon-cold-start",
+      ),
+    ).toHaveLength(2);
+    const stored = await runStore.get("t1", "u1", "run-orphan-continue-1");
+    expect(stored?.status).toBe("completed");
+    expect(stored?.events.filter((event) => event.type === "run_started")).toHaveLength(1);
+  });
+
   it("never emits a clarify card when the run row could not be armed", async () => {
     const runStore = createMemoryRunStore();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);

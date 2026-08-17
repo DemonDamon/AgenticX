@@ -11,7 +11,7 @@ import { enterpriseDeepResearchRuns as pgTable } from "@agenticx/db-schema";
 import { enterpriseDeepResearchRuns as mysqlTable } from "@agenticx/db-schema/mysql";
 import { createMysqlDb, getIamDb, resolveDatabaseConfig } from "@agenticx/iam-core";
 import type { DeepResearchEvent } from "@agenticx/sdk-ts";
-import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { Citation } from "./registry";
 
 export const MAX_EVENTS_PER_RUN = 400;
@@ -123,6 +123,8 @@ export type RunStore = {
   getClarificationResume(runId: string): Promise<ClarifyResumePayload | null>;
   /** Race the pending resume; returns whichever payload won. */
   expireClarification(runId: string, now?: Date): Promise<ClarifyResumePayload>;
+  /** Exactly one live waiter or orphan takeover may consume a resumed plan gate. */
+  claimPlanGateResume(runId: string): Promise<boolean>;
   /** Re-open a non-completed orphaned plan gate after its original waiter died. */
   reopenForContinue(
     runId: string,
@@ -431,6 +433,22 @@ function createMemoryStore(): RunStore {
       return row.clarifyResume ? { ...row.clarifyResume } : clarifyTimeoutPayload();
     },
 
+    async claimPlanGateResume(runId) {
+      const row = bucket.get(runId);
+      if (
+        !row ||
+        row.status !== "running" ||
+        row.phase !== "plan" ||
+        row.clarifyResume === null
+      ) {
+        return false;
+      }
+      row.phase = "plan_resuming";
+      row.revision += 1;
+      row.updatedAt = new Date().toISOString();
+      return true;
+    },
+
     async reopenForContinue(runId, patch) {
       const row = bucket.get(runId);
       if (!row || row.status === "completed") return false;
@@ -545,6 +563,7 @@ export type RunSqlOps = {
     errorMessage?: string;
     now: Date;
   }): Promise<number>;
+  claimPlanGateResume(input: { runId: string; now: Date }): Promise<number>;
   reopenForContinue(input: {
     runId: string;
     status: DeepResearchRunStatus;
@@ -706,6 +725,26 @@ function createPgOps(db: PgDb): RunSqlOps {
           ...(errorMessage !== undefined ? { errorMessage } : {}),
         })
         .where(and(eq(pgTable.runId, runId), finishGuardPg(status, errorMessage)))
+        .returning({ runId: pgTable.runId });
+      return rows.length;
+    },
+
+    async claimPlanGateResume({ runId, now }) {
+      const rows = await db
+        .update(pgTable)
+        .set({
+          phase: "plan_resuming",
+          revision: sql`${pgTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(pgTable.runId, runId),
+            eq(pgTable.status, "running"),
+            eq(pgTable.phase, "plan"),
+            isNotNull(pgTable.clarifyResume),
+          ),
+        )
         .returning({ runId: pgTable.runId });
       return rows.length;
     },
@@ -999,6 +1038,25 @@ function createMysqlOps(db: MysqlDb): RunSqlOps {
       return mysqlAffectedRows(result);
     },
 
+    async claimPlanGateResume({ runId, now }) {
+      const result = await db
+        .update(mysqlTable)
+        .set({
+          phase: "plan_resuming",
+          revision: sql`${mysqlTable.revision} + 1`,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(mysqlTable.runId, runId),
+            eq(mysqlTable.status, "running"),
+            eq(mysqlTable.phase, "plan"),
+            isNotNull(mysqlTable.clarifyResume),
+          ),
+        );
+      return mysqlAffectedRows(result);
+    },
+
     async reopenForContinue({ runId, status, phase, now }) {
       const result = await db
         .update(mysqlTable)
@@ -1286,6 +1344,11 @@ export function createSqlRunStore(loadOps: () => Promise<RunSqlOps> = resolveDia
       await ops.expireClarification({ runId, payload: clarifyTimeoutPayload(), now: at });
       // Re-read: a concurrent resume may have won the race.
       return normalizeClarifyResume(await ops.readClarifyResume(runId)) ?? clarifyTimeoutPayload();
+    },
+
+    async claimPlanGateResume(runId) {
+      const ops = await loadOps();
+      return (await ops.claimPlanGateResume({ runId, now: new Date() })) > 0;
     },
 
     async reopenForContinue(runId, patch) {

@@ -457,6 +457,31 @@ describe("clarify coordination", () => {
     expect(row?.phase).toBe("plan");
   });
 
+  it("lets exactly one continuation claim a resumed plan gate", async () => {
+    const store = createMemoryRunStore();
+    await store.create({ ...OWNER, runId: "r1", sessionId: "s1", topic: "主题" });
+    await store.beginClarification(
+      "r1",
+      [{ type: "narrative", text: "确认计划" }],
+      null,
+      "plan",
+    );
+    await store.resolveClarification({
+      ...OWNER,
+      runId: "r1",
+      payload: { answers: { __plan_action__: "approve" }, skip: false },
+    });
+
+    const claims = await Promise.all([
+      store.claimPlanGateResume("r1"),
+      store.claimPlanGateResume("r1"),
+    ]);
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    expect((await store.get(OWNER.tenantId, OWNER.userId, "r1"))?.phase).toBe(
+      "plan_resuming",
+    );
+  });
+
   it("refuses to arm a run that already finished", async () => {
     const store = createMemoryRunStore();
     await store.create({ ...OWNER, runId: "r1", sessionId: "s1", topic: "主题" });

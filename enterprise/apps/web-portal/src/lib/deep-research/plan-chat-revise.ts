@@ -168,6 +168,7 @@ export async function syncRevisePlanChat(input: {
       },
     ],
     null,
+    "plan",
   );
   if (!armed) {
     throw new Error("plan gate could not be re-armed");

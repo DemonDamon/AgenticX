@@ -176,6 +176,21 @@ function createDriver(): Driver {
       );
     },
 
+    async claimPlanGateResume({ runId, now }) {
+      return update(
+        runId,
+        (row) =>
+          row.status === "running" &&
+          row.phase === "plan" &&
+          row.clarifyResume !== null,
+        (row) => {
+          row.phase = "plan_resuming";
+          row.revision += 1;
+          row.updatedAt = now;
+        },
+      );
+    },
+
     async reopenForContinue({ runId, status, phase, now }) {
       return update(
         runId,
@@ -455,6 +470,23 @@ describe("sql run store — clarify coordination", () => {
     ).resolves.toBe(true);
     expect(driver.rows.get("r1")!.status).toBe("awaiting_clarify");
     expect(driver.rows.get("r1")!.phase).toBe("plan");
+  });
+
+  it("allows only one SQL-backed consumer to claim a resumed plan gate", async () => {
+    const { driver, store } = await seeded();
+    await store.beginClarification("r1", [narrative("确认计划")], null, "plan");
+    await store.resolveClarification({
+      ...OWNER,
+      runId: "r1",
+      payload: { answers: { __plan_action__: "approve" }, skip: false },
+    });
+
+    const claims = await Promise.all([
+      store.claimPlanGateResume("r1"),
+      store.claimPlanGateResume("r1"),
+    ]);
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    expect(driver.rows.get("r1")!.phase).toBe("plan_resuming");
   });
 
   it("reports false when the run finished before the gate", async () => {

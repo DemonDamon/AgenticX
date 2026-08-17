@@ -285,6 +285,16 @@ type ChatMessage = {
   name?: string;
 };
 
+/** Resume a plan-gated run after its original request process disappeared. */
+export type ContinueFromPlanGate = {
+  plan: ResearchPlan;
+  planVersion: number;
+  topic: string;
+  /** The resume route already persisted the approved/updated plan event. */
+  planEventEmitted?: boolean;
+  deliveryPrefs?: DeliveryPrefs;
+};
+
 export type DeepResearchDeps = {
   url: string;
   headers: Record<string, string>;
@@ -337,6 +347,8 @@ export type DeepResearchDeps = {
    * Long retrieve can outlive the 1h cookie captured at request start.
    */
   refreshAccessToken?: RefreshAccessToken;
+  /** Orphan plan-gate continuation: reuse the existing run and jump to lanes. */
+  continueFromPlanGate?: ContinueFromPlanGate;
 };
 
 type LaneResult = {
@@ -799,6 +811,8 @@ export async function runDeepResearchTurn(
     (attachedReference ? resolveAttachedDocumentResearchQuery(attachedReference) : "") ||
     deps.resolvedUserQuery?.trim() ||
     extractLastUserQuery(originalMessages);
+  const continueFrom = deps.continueFromPlanGate;
+  if (continueFrom?.topic.trim()) userQuery = continueFrom.topic.trim();
   const now = deps.now ?? Date.now;
   const runId = deps.runId ?? ulid().toLowerCase();
   const tenantId = deps.tenantId ?? "tenant";
@@ -899,18 +913,30 @@ export async function runDeepResearchTurn(
       );
 
       let writer: RunWriter | null = null;
-      try {
-        await runStore.create({
-          runId,
-          tenantId,
-          userId,
-          sessionId,
-          topic: userQuery || "深度调研",
-          traceId: deps.traceId,
-        });
-        writer = createRunWriter(runStore, runId);
-      } catch (error) {
-        console.warn("[deep-research] run-store create failed:", error);
+      if (continueFrom) {
+        try {
+          const existing = await runStore.get(tenantId, userId, runId);
+          if (!existing) throw new Error("orphan continuation run not found");
+          writer = createRunWriter(runStore, runId);
+        } catch (error) {
+          console.warn("[deep-research] orphan run-store attach failed:", error);
+          controller.error(error);
+          return;
+        }
+      } else {
+        try {
+          await runStore.create({
+            runId,
+            tenantId,
+            userId,
+            sessionId,
+            topic: userQuery || "深度调研",
+            traceId: deps.traceId,
+          });
+          writer = createRunWriter(runStore, runId);
+        } catch (error) {
+          console.warn("[deep-research] run-store create failed:", error);
+        }
       }
 
       const safeControllerEnqueue = (chunk: Uint8Array) => {
@@ -1040,7 +1066,11 @@ export async function runDeepResearchTurn(
       try {
         if (runSignal.aborted) throw new DOMException("Aborted", "AbortError");
 
-        enqueueEvent({ type: "run_started", runId });
+        if (continueFrom) {
+          enqueueEvent({ type: "narrative", text: "已恢复中断的计划确认，继续执行研究。" });
+        } else {
+          enqueueEvent({ type: "run_started", runId });
+        }
         enqueueFlush();
 
         // deps.fetchImpl 是「调 gateway」的实现，不能用来探外站；出网探测固定走
@@ -1094,59 +1124,103 @@ export async function runDeepResearchTurn(
           enqueueFlush();
         }
 
-        // --- Recon (knowledge cold-start) ---
-        // Without this, clarify/plan reason from stale parametric knowledge and can
-        // invent premises like "X has not been released yet". Emit a visible
-        // lane so the timeline shows the cold-start search before clarify.
-        enqueueEvent({
-          type: "narrative",
-          text: "我先快速检索最新公开资料，校准调研前提。",
-        });
-        enqueueEvent({ type: "phase", phase: "recon", message: "正在快速侦查最新现状…" });
-        enqueueEvent({ type: "phase", phase: "lanes", message: "开题冷启动检索…" });
-        const reconLaneId = "recon-cold-start";
-        enqueueEvent({
-          type: "lane_started",
-          laneId: reconLaneId,
-          title: userQuery || "开题冷启动",
-          index: 1,
-          total: 1,
-        });
-        enqueueFlush();
         const todayLine = formatTodayLine(now);
         let recon: ReconResult = { brief: "", hits: [] };
-        if (
-          budgetLeft() > 0 &&
-          budgetLedger.remaining("providerCalls") > 0 &&
-          budgetLedger.tryConsume("searchQueries")
-        ) {
-          try {
-            recon = await (deps.runReconFn ?? runRecon)({
-              query: userQuery,
-              searchCfg,
-              searchFn,
-              fetchImpl: deps.fetchImpl,
-              signal: runSignal,
-              timeoutMs: RECON_TIMEOUT_MS,
-              beforeProviderAttempt: admitProviderCall,
-            });
-          } catch (error) {
-            if (isTenantDailySearchProviderQuotaExceeded(error)) throw error;
-            recon = { brief: "", hits: [] };
+        if (!continueFrom) {
+          // --- Recon (knowledge cold-start) ---
+          // Without this, clarify/plan reason from stale parametric knowledge and can
+          // invent premises like "X has not been released yet". Emit a visible
+          // lane so the timeline shows the cold-start search before clarify.
+          enqueueEvent({
+            type: "narrative",
+            text: "我先快速检索最新公开资料，校准调研前提。",
+          });
+          enqueueEvent({ type: "phase", phase: "recon", message: "正在快速侦查最新现状…" });
+          enqueueEvent({ type: "phase", phase: "lanes", message: "开题冷启动检索…" });
+          const reconLaneId = "recon-cold-start";
+          enqueueEvent({
+            type: "lane_started",
+            laneId: reconLaneId,
+            title: userQuery || "开题冷启动",
+            index: 1,
+            total: 1,
+          });
+          enqueueFlush();
+          if (
+            budgetLeft() > 0 &&
+            budgetLedger.remaining("providerCalls") > 0 &&
+            budgetLedger.tryConsume("searchQueries")
+          ) {
+            try {
+              recon = await (deps.runReconFn ?? runRecon)({
+                query: userQuery,
+                searchCfg,
+                searchFn,
+                fetchImpl: deps.fetchImpl,
+                signal: runSignal,
+                timeoutMs: RECON_TIMEOUT_MS,
+                beforeProviderAttempt: admitProviderCall,
+              });
+            } catch (error) {
+              if (isTenantDailySearchProviderQuotaExceeded(error)) throw error;
+              recon = { brief: "", hits: [] };
+            }
           }
+          enqueueEvent({
+            type: "lane_progress",
+            laneId: reconLaneId,
+            message: `已收集 ${recon.hits.length} 个来源`,
+            sourcesCollected: recon.hits.length,
+          });
+          enqueueEvent({
+            type: "lane_done",
+            laneId: reconLaneId,
+            status: recon.hits.length > 0 ? "ok" : "failed",
+          });
         }
-        enqueueEvent({
-          type: "lane_progress",
-          laneId: reconLaneId,
-          message: `已收集 ${recon.hits.length} 个来源`,
-          sourcesCollected: recon.hits.length,
-        });
-        enqueueEvent({
-          type: "lane_done",
-          laneId: reconLaneId,
-          status: recon.hits.length > 0 ? "ok" : "failed",
-        });
 
+        let clarifyExpandedLanes: string[] | null = null;
+        let deliveryPrefs: DeliveryPrefs = continueFrom?.deliveryPrefs
+          ? { ...continueFrom.deliveryPrefs }
+          : { ...DEFAULT_DELIVERY_PREFS };
+        let prefsWritingHint = [
+          deliveryPrefsPromptBlock(deliveryPrefs),
+          "",
+          "（以上交付偏好仅供写作约束，禁止原样写入报告正文或标题。）",
+        ].join("\n");
+        let plan: ResearchPlan;
+
+        if (continueFrom) {
+          plan = enforcePlanBreadth(
+            {
+              ...continueFrom.plan,
+              topic: sanitizeResearchTopic(
+                continueFrom.plan.topic || continueFrom.topic || userQuery || "研究主题",
+              ),
+            },
+            userQuery,
+          );
+          if (!continueFrom.planEventEmitted) {
+            enqueueEvent({
+              type: "research_plan",
+              runId,
+              action: "approved",
+              version: continueFrom.planVersion,
+              plan: {
+                version: continueFrom.planVersion,
+                objective: plan.topic,
+                scope: [],
+                subQuestions: plan.subQuestions.map((question, index) => ({
+                  id: `sq${index + 1}`,
+                  title: question,
+                })),
+                sourceStrategy: [],
+                deliverables: [],
+                assumptions: [],
+              },
+            });
+          }
+        } else {
         // --- Adaptive interaction policy: one unresolved gap uses chat, multiple use a card. ---
         enqueueEvent({ type: "phase", phase: "clarify", message: "正在判断是否需要澄清…" });
         enqueueFlush();
@@ -1247,8 +1321,6 @@ export async function runDeepResearchTurn(
           }
         };
 
-        let clarifyExpandedLanes: string[] | null = null;
-        let deliveryPrefs: DeliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
         let clarifyResume: ClarifyResumePayload = { answers: {}, skip: true };
         let clarifyQuestions: ClarifyQuestion[] = [];
         let chatClarifyNote = "";
@@ -1321,7 +1393,7 @@ export async function runDeepResearchTurn(
           planningContext = `${planningContext}\n\n【用户澄清】\n- ${chatClarifyNote}`;
         }
         planningContext = `${planningContext}\n\n${deliveryPrefsPromptBlock(deliveryPrefs)}`;
-        const prefsWritingHint = [
+        prefsWritingHint = [
           deliveryPrefsPromptBlock(deliveryPrefs),
           "",
           "（以上交付偏好仅供写作约束，禁止原样写入报告正文或标题。）",
@@ -1330,7 +1402,6 @@ export async function runDeepResearchTurn(
         // --- Plan ---
         enqueueEvent({ type: "phase", phase: "plan", message: "正在规划研究路径…" });
 
-        let plan: ResearchPlan;
         if (
           searchBudgetLeft() <= 0 ||
           !budgetLedger.tryConsume("modelCalls")
@@ -1441,6 +1512,13 @@ export async function runDeepResearchTurn(
             }
 
             const gateResume = await waitGate(0);
+            if (!(await runStore.claimPlanGateResume(runId))) {
+              // Another instance won the same database-backed plan resume. End
+              // this transport quietly; the winner owns all subsequent events.
+              safeControllerEnqueue(encoder.encode("data: [DONE]\n\n"));
+              safeClose();
+              return;
+            }
             const action = parsePlanChatGateAction({
               answers: gateResume.answers,
               skip: gateResume.skip,
@@ -1535,6 +1613,7 @@ export async function runDeepResearchTurn(
               break;
             }
           }
+        }
         }
 
         if (runSignal?.aborted) throw new DOMException("Aborted", "AbortError");
