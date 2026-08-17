@@ -176,6 +176,7 @@ import {
   isFutileResume,
   lastTurnHasCompletedAssistantReply,
   lastTurnHasToolActivity,
+  paneHasPendingHumanGate,
   resolveSessionHealth,
   resolveSilenceTier,
   resolveSilenceTierLabel,
@@ -6439,9 +6440,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [stallTick, stallState, sessionExecutionState, pane.sessionId]);
 
   const stallThresholdSeconds = stallRuntimeConfig.stall_detect_silence_seconds;
+  const awaitingHuman = useMemo(
+    () => paneHasPendingHumanGate(pane.messages),
+    [pane.messages],
+  );
   const silenceTier = useMemo(
-    () => resolveSilenceTier(silentSeconds, stallThresholdSeconds),
-    [silentSeconds, stallThresholdSeconds],
+    () =>
+      awaitingHuman
+        ? "thinking"
+        : resolveSilenceTier(silentSeconds, stallThresholdSeconds),
+    [awaitingHuman, silentSeconds, stallThresholdSeconds],
   );
   const sessionHealth = useMemo(
     () =>
@@ -6450,8 +6458,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         stallThresholdSeconds,
         sessionExecutionState,
         stallState,
+        awaitingHuman,
       ),
-    [silentSeconds, stallThresholdSeconds, sessionExecutionState, stallState],
+    [awaitingHuman, silentSeconds, stallThresholdSeconds, sessionExecutionState, stallState],
   );
 
   const taskLiveness = useMemo((): "active" | "stalled" | "idle" => {
@@ -7323,6 +7332,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (isFutileResume(msgs)) {
         setStallState("none");
         setStallRejectReason("");
+        return;
+      }
+
+      // Parked on an unanswered HITL card: silence is expected, not a stall.
+      if (paneHasPendingHumanGate(msgs)) {
+        setStallState("none");
         return;
       }
 
@@ -9730,7 +9745,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             if (payload.type === "group_blocked") {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
               const avatarUrl = String(payload.data?.avatar_url ?? "");
-              const blockedText = String(payload.data?.content ?? "").trim();
+              const blockedText =
+                String(payload.data?.content ?? "").trim() || "等待确认后继续执行";
               const requestId = String(payload.data?.confirm_request_id ?? "").trim();
               setGroupTyping((prev) => {
                 const next = { ...prev };
@@ -9791,6 +9807,68 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       }
                     : undefined,
                 }
+              );
+              continue;
+            }
+            if (payload.type === "group_clarification") {
+              const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
+              const avatarUrl = String(payload.data?.avatar_url ?? "");
+              const prompt =
+                String(payload.data?.content ?? "").trim() || "等待你的输入后继续";
+              const requestId = String(payload.data?.confirm_request_id ?? "").trim();
+              const rawOptions = payload.data?.clarify_options;
+              const options = Array.isArray(rawOptions)
+                ? rawOptions.map((o) => String(o)).filter(Boolean)
+                : [];
+              const allowFreeText = payload.data?.clarify_allow_free_text !== false;
+              setGroupTyping((prev) => {
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
+              setGroupActivityHint((prev) => {
+                if (!(eventAgentId in prev)) return prev;
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
+              if (!prompt || !requestId) continue;
+              const pan = useAppStore.getState().panes.find((p) => p.id === pane.id);
+              const dup = (pan?.messages ?? []).some(
+                (m) => m.clarificationPrompt?.requestId === requestId,
+              );
+              if (dup) continue;
+              lastGroupProgressRef.current[eventAgentId] = prompt;
+              const promptPayload = {
+                requestId,
+                prompt,
+                options,
+                allowFreeText,
+                agentId: eventAgentId,
+                sessionId: requestSessionId,
+              };
+              addPaneMessageIfSessionActive(
+                pane.id,
+                "tool",
+                prompt,
+                eventAgentId,
+                chatProvider,
+                chatModel,
+                undefined,
+                {
+                  avatarName,
+                  avatarUrl: avatarUrl || undefined,
+                  toolName: "request_clarification",
+                  toolStatus: "running",
+                  clarificationPrompt: promptPayload,
+                  metadata: {
+                    kind: "clarification",
+                    request_id: requestId,
+                    prompt,
+                    options,
+                    allow_free_text: allowFreeText,
+                  },
+                },
               );
               continue;
             }

@@ -373,7 +373,14 @@ def _buffered_event_to_sse_lines(buffered: BufferedEvent) -> list[str]:
     return lines
 
 
-def _persist_clarification_prompt(session: Any, data: Dict[str, Any], *, suspended: bool = False) -> None:
+def _persist_clarification_prompt(
+    session: Any,
+    data: Dict[str, Any],
+    *,
+    suspended: bool = False,
+    agent_id: str | None = None,
+    avatar_name: str | None = None,
+) -> None:
     """Append a UI-visible clarification prompt row to chat_history (NFR-2).
 
     Idempotent: skip if the last row already records the same request_id.
@@ -419,6 +426,14 @@ def _persist_clarification_prompt(session: Any, data: Dict[str, Any], *, suspend
         ctx = data.get("context")
         if isinstance(ctx, dict) and ctx:
             row["metadata"]["context"] = ctx
+        aid = str(agent_id or "").strip()
+        if aid:
+            row["agent_id"] = aid
+            row["sender_id"] = aid
+        aname = str(avatar_name or "").strip()
+        if aname:
+            row["avatar_name"] = aname
+            row["sender_name"] = aname
         history.append(row)
     except Exception:
         logger.exception("[clarify] failed to persist clarification prompt")
@@ -2976,10 +2991,28 @@ def create_studio_app() -> FastAPI:
                                 "tool_name": str(getattr(reply, "tool_name", "") or ""),
                                 "tool_phase": str(getattr(reply, "tool_phase", "") or ""),
                                 "tool_call_id": str(getattr(reply, "tool_call_id", "") or ""),
+                                "clarify_options": list(getattr(reply, "clarify_options", None) or []),
+                                "clarify_allow_free_text": bool(
+                                    getattr(reply, "clarify_allow_free_text", True)
+                                ),
                             },
                         )
                         await _emit_group_event(evt)
-                        if evt_type in {"group_reply", "group_skipped"}:
+                        if evt_type == "group_clarification":
+                            _persist_clarification_prompt(
+                                session,
+                                {
+                                    "id": str(getattr(reply, "confirm_request_id", "") or ""),
+                                    "prompt": str(reply.content or ""),
+                                    "options": list(getattr(reply, "clarify_options", None) or []),
+                                    "allow_free_text": bool(
+                                        getattr(reply, "clarify_allow_free_text", True)
+                                    ),
+                                },
+                                agent_id=str(reply.agent_id or ""),
+                                avatar_name=str(reply.avatar_name or ""),
+                            )
+                        if evt_type in {"group_reply", "group_skipped", "group_clarification"}:
                             try:
                                 manager.incremental_persist(payload.session_id)
                             except Exception:

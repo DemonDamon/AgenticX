@@ -12,7 +12,9 @@ import {
   lastTurnHasToolActivity,
   lastTurnPromisedActionWithoutFollowThrough,
   messageLooksLikeAssistantFinal,
+  paneHasPendingHumanGate,
   resolveDisplayedTodoFromMessages,
+  resolveSessionHealth,
   resolveStickyTodoDisplay,
   resolveWorkPanelTodoFromMessages,
   sessionMessagesHydrated,
@@ -807,5 +809,70 @@ describe("detectModelForgotFinalTodoUpdate", () => {
       }),
     ];
     expect(detectModelForgotFinalTodoUpdate(messages, 0)).toBe(true);
+  });
+});
+
+describe("paneHasPendingHumanGate", () => {
+  it("detects unanswered clarification cards", () => {
+    expect(
+      paneHasPendingHumanGate([
+        msg({
+          id: "c1",
+          role: "tool",
+          clarificationPrompt: { requestId: "clr_1", prompt: "飞机叫什么？" },
+        }),
+      ]),
+    ).toBe(true);
+  });
+
+  it("ignores answered or suspended clarification cards", () => {
+    expect(
+      paneHasPendingHumanGate([
+        msg({
+          id: "c2",
+          role: "tool",
+          clarificationPrompt: { requestId: "clr_2", prompt: "done" },
+          metadata: { clarification_answered: true },
+        }),
+        msg({
+          id: "c3",
+          role: "tool",
+          clarificationPrompt: { requestId: "clr_3", prompt: "later" },
+          clarificationSuspended: true,
+        }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("detects inline confirm and pending action confirmation", () => {
+    expect(
+      paneHasPendingHumanGate([
+        msg({
+          id: "b1",
+          role: "tool",
+          inlineConfirm: { requestId: "cfm_1", question: "继续？" },
+        }),
+      ]),
+    ).toBe(true);
+    expect(
+      paneHasPendingHumanGate([
+        msg({
+          id: "a1",
+          role: "assistant",
+          actionConfirmation: { status: "pending" },
+        }),
+      ]),
+    ).toBe(true);
+  });
+});
+
+describe("resolveSessionHealth awaiting human", () => {
+  it("stays normal while a HITL card is unanswered even after long silence", () => {
+    expect(resolveSessionHealth(400, 90, "running", "none", true)).toBe("normal");
+    expect(resolveSessionHealth(400, 90, "running", "stall", true)).toBe("normal");
+  });
+
+  it("still marks stuck when running is silent and nobody is waiting", () => {
+    expect(resolveSessionHealth(400, 90, "running", "none", false)).toBe("stuck");
   });
 });

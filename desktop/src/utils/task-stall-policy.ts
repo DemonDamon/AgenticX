@@ -506,7 +506,9 @@ export function resolveSessionHealth(
   thresholdSeconds: number,
   executionState?: string,
   stallState?: StallPhase,
+  awaitingHuman?: boolean,
 ): SessionHealth {
+  if (awaitingHuman) return "normal";
   const state = (executionState || "").trim();
   if (stallState === "stall" || stallState === "exhausted") return "stuck";
   if (state !== "running") return "normal";
@@ -514,6 +516,26 @@ export function resolveSessionHealth(
   if (tier === "stuck") return "stuck";
   if (tier === "slow") return "slow";
   return "normal";
+}
+
+/** True when the transcript is parked on an unanswered HITL card. */
+export function paneHasPendingHumanGate(messages: Array<{
+  inlineConfirm?: unknown;
+  actionConfirmation?: { status?: string };
+  clarificationPrompt?: unknown;
+  clarificationSuspended?: boolean;
+  metadata?: unknown;
+}> | undefined): boolean {
+  return (messages ?? []).some((m) => {
+    if (m.inlineConfirm) return true;
+    if (m.actionConfirmation?.status === "pending") return true;
+    if (!m.clarificationPrompt || m.clarificationSuspended) return false;
+    const meta =
+      m.metadata && typeof m.metadata === "object"
+        ? (m.metadata as Record<string, unknown>)
+        : null;
+    return meta?.clarification_answered !== true;
+  });
 }
 
 const DISK_WRITE_PATH_RE =
