@@ -9,6 +9,8 @@ type Props = {
   inline?: boolean;
   /** Tooltip horizontal anchor; `end` keeps the bubble inside narrow right-aligned rows. */
   tooltipAlign?: "center" | "end";
+  /** Extra classes on the hover target wrapper (e.g. `w-full min-w-0` for block text). */
+  className?: string;
   children: ReactNode;
 };
 
@@ -17,6 +19,7 @@ export function HoverTip({
   delayMs = 280,
   inline = false,
   tooltipAlign = "center",
+  className,
   children,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -84,7 +87,11 @@ export function HoverTip({
     <>
       <div
         ref={anchorRef}
-        className={inline ? "relative inline align-baseline" : "relative flex shrink-0"}
+        className={
+          inline
+            ? `relative inline align-baseline${className ? ` ${className}` : ""}`
+            : `relative flex shrink-0${className ? ` ${className}` : ""}`
+        }
         onPointerEnter={() => {
           clearTimer();
           timerRef.current = setTimeout(() => {

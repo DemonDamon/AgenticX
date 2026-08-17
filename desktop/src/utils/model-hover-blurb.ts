@@ -86,6 +86,14 @@ const CURATED_BLURBS: CuratedRule[] = [
     description: "综合对话与工具调用均衡，适合工程辅助与知识问答",
   },
   {
+    test: (m) => m.includes("deepseek-v4-pro") || m === "deepseek-v4-pro",
+    description: "官网旗舰对话，适合复杂推理、代码与工具调用",
+  },
+  {
+    test: (m) => m.includes("deepseek-v4-flash") || m === "deepseek-v4-flash",
+    description: "官网快速档，适合日常对话与低延迟任务",
+  },
+  {
     test: (m) => m.includes("deepseek-r1") || m.includes("deepseek-reasoner"),
     description: "强推理模型，擅长数学、逻辑与分步推导",
   },

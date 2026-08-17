@@ -52,6 +52,7 @@ import { Panel } from "./ds/Panel";
 import { SettingsDropdown } from "./ds/SettingsDropdown";
 import { Modal } from "./ds/Modal";
 import { HoverTip } from "./ds/HoverTip";
+import { ClampToFitText } from "./ds/ClampToFitText";
 import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
 import { useAppStore } from "../store";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
@@ -64,6 +65,7 @@ import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt
 import { buildAlphapaiScraperInstallPrompt } from "../utils/alphapai-scraper-install-prompt";
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
+import { filterAndRankSkills } from "../utils/skill-search";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { VOICE_UI_ENABLED } from "../constants/feature-flags";
@@ -204,7 +206,7 @@ export type FavoriteForwardContext = {
 
 const ALL_PROVIDERS = [
   "openai", "anthropic", "volcengine", "bailian",
-  "zhipu", "qianfan", "minimax", "kimi", "ollama",
+  "zhipu", "qianfan", "minimax", "kimi", "deepseek", "ollama",
 ] as const;
 
 /** LiteLLM routes: show optional drop_params toggle for strict OpenAI-compatible gateways. */
@@ -993,7 +995,7 @@ function ProviderAvatar({
       style={{ width: size, height: size, backgroundColor: bg, color }}
     >
       {IconComp ? (
-        <IconComp size={Math.round(size * 0.55)} className="shrink-0" />
+        <IconComp size={Math.round(size * 0.64)} className="shrink-0" />
       ) : (
         <span style={{ fontSize: Math.round(size * 0.4), fontWeight: 700, lineHeight: 1 }}>
           {getProviderInitials(providerId, entry)}
@@ -3662,13 +3664,7 @@ function SkillsTab() {
   );
   const globalSkillPool = items.filter((s) => effectiveSkillLocation(s) !== "project");
   const globalSkills = pinSkillFirst(
-    search.trim()
-      ? globalSkillPool.filter(
-          (s) =>
-            s.name.toLowerCase().includes(search.toLowerCase()) ||
-            s.description.toLowerCase().includes(search.toLowerCase()),
-        )
-      : globalSkillPool,
+    filterAndRankSkills(globalSkillPool, search),
     recentMarketSkillName,
   );
   const hasGlobalSkills = globalSkillPool.length > 0;
@@ -4093,9 +4089,16 @@ function SkillsTab() {
                         </span>
                       </button>
                     </div>
-                    <p className="mt-2.5 line-clamp-2 flex-1 text-[12px] leading-relaxed text-text-muted">
-                      {skill.description}
-                    </p>
+                    <HoverTip
+                      label={skill.description}
+                      delayMs={280}
+                      className="mt-2.5 min-h-0 w-full flex-1 flex-col"
+                    >
+                      <ClampToFitText
+                        text={skill.description}
+                        className="min-h-0 w-full min-w-0 flex-1 break-words text-[12px] leading-4 text-text-muted"
+                      />
+                    </HoverTip>
                     {!canInstall ? (
                       <button
                         type="button"

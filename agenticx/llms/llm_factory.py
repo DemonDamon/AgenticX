@@ -14,6 +14,7 @@ from .ark_provider import ArkLLMProvider
 from .zhipu_provider import ZhipuProvider
 from .qianfan_provider import QianfanProvider
 from .minimax_provider import MiniMaxProvider
+from .deepseek_provider import DeepSeekProvider
 
 
 if TYPE_CHECKING:
@@ -89,6 +90,14 @@ class LlmFactory:
             )
         elif llm_type == "minimax":
             return MiniMaxProvider(
+                model=config.model,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                timeout=config.timeout,
+                max_retries=config.max_retries,
+            )
+        elif llm_type == "deepseek":
+            return DeepSeekProvider(
                 model=config.model,
                 api_key=config.api_key,
                 base_url=config.base_url,

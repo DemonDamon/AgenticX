@@ -118,6 +118,7 @@ import { resolveForwardTarget as resolveForwardTargetPayload } from "../utils/re
 import { HoverTip } from "./ds/HoverTip";
 import { ConnectorsMenuButton } from "./connectors/ConnectorsMenuButton";
 import { SkillPuzzleIcon, skillPuzzleIconInnerHtml } from "./icons/SkillPuzzleIcon";
+import { filterAndRankSkills } from "../utils/skill-search";
 import {
   COMPOSER_INLINE_CHIP_CLASS,
   composerRefIconInnerHtml,
@@ -798,13 +799,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  const filtered = query.trim()
-    ? skills.filter(
-        (s) =>
-          s.name.toLowerCase().includes(query.toLowerCase()) ||
-          s.description?.toLowerCase().includes(query.toLowerCase())
-      )
-    : skills;
+  const filtered = filterAndRankSkills(skills, query);
 
   const dropdown =
     open && dropdownPos

@@ -18,6 +18,7 @@ describe("provider-display", () => {
     expect(isProviderDisplayNameEditable("openai", { baseUrl: "http://47.2.1.1/v1" })).toBe(true);
     expect(isProviderDisplayNameEditable("openai", { baseUrl: "https://api.openai.com/v1" })).toBe(false);
     expect(isProviderDisplayNameEditable("anthropic", {})).toBe(false);
+    expect(isProviderDisplayNameEditable("deepseek", {})).toBe(false);
   });
 
   it("allows deleting user-added vendors but not built-in slots", () => {
@@ -26,6 +27,7 @@ describe("provider-display", () => {
     expect(isProviderDeletable("openai")).toBe(false);
     expect(isProviderDeletable("anthropic")).toBe(false);
     expect(isProviderDeletable("ollama")).toBe(false);
+    expect(isProviderDeletable("deepseek")).toBe(false);
   });
 
   it("labels built-in openai with custom base as compatible gateway", () => {
@@ -33,6 +35,7 @@ describe("provider-display", () => {
       getProviderDisplayName("openai", { baseUrl: "http://47.2.1.1/v1" }),
     ).toBe("OpenAI 兼容");
     expect(getProviderDisplayName("openai", { baseUrl: "https://api.openai.com/v1" })).toBe("OpenAI");
+    expect(getProviderDisplayName("deepseek", {})).toBe("DeepSeek");
     expect(isOfficialOpenAIBase("https://api.openai.com/v1/")).toBe(true);
   });
 });

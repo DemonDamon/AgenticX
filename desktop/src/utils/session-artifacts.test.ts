@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { Message, SubAgent } from "../store";
 import {
+  appendMissingImageMarkdown,
   artifactBaseName,
   artifactHomeRelativeKey,
   collectArtifactPathsFromAgentMessages,
   collectSessionArtifactPaths,
+  collectTurnPreviewImagePaths,
   expandArtifactHomePath,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
   looksLikeDirectoryPath,
   pathToFileUrl,
+  preferAnimatedPreviewImages,
 } from "./session-artifacts";
 
 function toolMsg(partial: Partial<Message> & Pick<Message, "id" | "content">): Message {
@@ -485,5 +488,116 @@ describe("artifact helpers", () => {
   it("pathToFileUrl", () => {
     expect(pathToFileUrl("/Users/damon/a.html")).toBe("file:///Users/damon/a.html");
     expect(pathToFileUrl("C:/Users/damon/a.html")).toBe("file:///C:/Users/damon/a.html");
+  });
+});
+
+describe("collectSessionArtifactPaths — bash stdout + table cells", () => {
+  const gif =
+    "/Users/damon/.agenticx/taskspaces/35ca2867-f843-4013-bfc2-d328c35d2427/default/archscribe-login/login-swimlane.gif";
+  const png =
+    "/Users/damon/.agenticx/taskspaces/35ca2867-f843-4013-bfc2-d328c35d2427/default/archscribe-login/login-swimlane.png";
+  const svg =
+    "/Users/damon/.agenticx/taskspaces/35ca2867-f843-4013-bfc2-d328c35d2427/default/archscribe-login/login-swimlane.svg";
+
+  it("collects absolute image paths echoed in bash_exec stdout (no redirect / no JSON output)", () => {
+    const messages: Message[] = [
+      toolMsg({
+        id: "t-ls",
+        toolName: "bash_exec",
+        toolArgs: {
+          command:
+            'OUTPUT_DIR="/Users/damon/.agenticx/taskspaces/35ca2867-f843-4013-bfc2-d328c35d2427/default/archscribe-login"\necho "GIF: $OUTPUT_DIR/login-swimlane.gif"',
+        },
+        content: [
+          "exit_code=0",
+          "stdout:",
+          "=== 文件路径 ===",
+          `PNG: ${png}`,
+          `GIF: ${gif}`,
+          `SVG: ${svg}`,
+          "stderr:",
+          "(empty)",
+        ].join("\n"),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([png, gif, svg]);
+  });
+
+  it("does not collect skill source files listed by find/ls in bash stdout", () => {
+    const messages: Message[] = [
+      toolMsg({
+        id: "t-find",
+        toolName: "bash_exec",
+        toolArgs: { command: "find ~/.agenticx/skills/registry/archscribe -type f" },
+        content: [
+          "exit_code=0",
+          "stdout:",
+          "/Users/damon/.agenticx/skills/registry/archscribe/SKILL.md",
+          "/Users/damon/.agenticx/skills/registry/archscribe/scripts/render_animated_diagram.py",
+        ].join("\n"),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([]);
+  });
+
+  it("joins table filenames in any column under 路径： directory", () => {
+    const messages: Message[] = [
+      assistantMsg({
+        id: "a-final",
+        content: [
+          "### 产出文件",
+          "",
+          "| 格式 | 文件名 | 大小 |",
+          "|---|---|---|",
+          "| PNG（静态） | `login-swimlane.png` | 274 KB |",
+          "| GIF（动画） | `login-swimlane.gif` | 702 KB |",
+          "| SVG（矢量） | `login-swimlane.svg` | 2.8 MB |",
+          "",
+          "路径：`/Users/damon/.agenticx/taskspaces/35ca2867-f843-4013-bfc2-d328c35d2427/default/archscribe-login/`",
+        ].join("\n"),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([png, gif, svg]);
+  });
+});
+
+describe("turn preview images", () => {
+  it("prefers animated gif over png/svg with the same stem", () => {
+    const dir =
+      "/Users/damon/.agenticx/taskspaces/s/default/archscribe-login";
+    expect(
+      preferAnimatedPreviewImages([
+        `${dir}/login-swimlane.png`,
+        `${dir}/login-swimlane.gif`,
+        `${dir}/login-swimlane.svg`,
+        `${dir}/login-swimlane-spec.json`,
+      ]),
+    ).toEqual([`${dir}/login-swimlane.gif`]);
+  });
+
+  it("appends markdown images only for paths not already in the body", () => {
+    const gif = "/Users/damon/out/login-swimlane.gif";
+    const png = "/Users/damon/out/other.png";
+    const body = `已生成\n\n![已有](${gif})`;
+    expect(appendMissingImageMarkdown(body, [gif, png])).toBe(
+      `${body}\n\n![other.png](${png})`,
+    );
+  });
+
+  it("collectTurnPreviewImagePaths only embeds on the last assistant of the turn", () => {
+    const gif =
+      "/Users/damon/.agenticx/taskspaces/s/default/archscribe-login/login-swimlane.gif";
+    const messages: Message[] = [
+      assistantMsg({ id: "mid", content: "渲染中" }),
+      toolMsg({
+        id: "t-out",
+        toolName: "bash_exec",
+        toolArgs: { command: "ls" },
+        content: `GIF: ${gif}`,
+      }),
+      assistantMsg({ id: "final", content: "完成" }),
+    ];
+    expect(collectTurnPreviewImagePaths(messages, "mid")).toEqual([]);
+    expect(collectTurnPreviewImagePaths(messages, "final")).toEqual([gif]);
   });
 });

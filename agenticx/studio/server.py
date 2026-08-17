@@ -2705,6 +2705,7 @@ def create_studio_app() -> FastAPI:
                         "qianfan",
                         "kimi",
                         "minimax",
+                        "deepseek",
                         "ollama",
                     ]
                 )

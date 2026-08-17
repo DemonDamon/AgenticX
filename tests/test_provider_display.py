@@ -42,6 +42,7 @@ def test_format_model_option_label_uses_display_name() -> None:
 def test_get_provider_display_name_hides_raw_custom_ids() -> None:
     assert get_provider_display_name("custom_openai_legacy") == "历史厂商"
     assert get_provider_display_name("custom_openai_moma", {"display_name": "MOMA"}) == "MOMA"
+    assert get_provider_display_name("deepseek") == "DeepSeek"
 
 
 def test_provider_breakdown_label_reads_config(monkeypatch) -> None:
