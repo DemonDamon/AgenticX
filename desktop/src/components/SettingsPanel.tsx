@@ -61,6 +61,7 @@ import {
   type RecommendedSkillTier,
 } from "../data/recommended-skills";
 import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt";
+import { buildAlphapaiScraperInstallPrompt } from "../utils/alphapai-scraper-install-prompt";
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
@@ -3414,6 +3415,8 @@ function SkillsTab() {
         ? buildOfficeCliInstallPrompt()
         : skillId === "archscribe"
           ? buildArchscribeInstallPrompt()
+          : skillId === "alphapai-scraper"
+            ? buildAlphapaiScraperInstallPrompt()
           : "";
     if (!prompt.trim()) return;
     void runInstallPromptInMetaAgent(prompt);

@@ -59,6 +59,19 @@ export const RECOMMENDED_SKILLS: RecommendedSkill[] = [
     cta: "install",
   },
   {
+    id: "alphapai-scraper",
+    name: "alphapai-scraper",
+    provider: "Alpha派",
+    description:
+      "按 Alpha派官方安装文档抓取与研究网页内容；点击安装后由 Meta-Agent 自动下载、解压并落盘技能。",
+    icon_src: "",
+    official_url:
+      "https://open-api.rabyte.cn/alpha/open-api/v1/file/api-docs/alphapai-research/install.md",
+    category: "网页抓取",
+    tier: "third_party",
+    cta: "install",
+  },
+  {
     id: "tencent-docs",
     name: "腾讯文档",
     provider: "腾讯",
