@@ -6,6 +6,7 @@ import type {
   WebSearchSource,
 } from "@agenticx/core-api";
 import { sanitizeWebSearchTrace } from "@agenticx/core-api";
+import { isTraceId } from "@agenticx/sdk-ts";
 
 const ALLOWED_ROLES = new Set(["system", "user", "assistant", "tool"]);
 const ULID_RE = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
@@ -196,6 +197,10 @@ export function sanitizeInboundMessages(
     const createdAt = typeof row.created_at === "string" ? row.created_at : new Date().toISOString();
     if (Number.isNaN(Date.parse(createdAt))) throw new Error("invalid created_at");
     const model = typeof row.model === "string" ? row.model : undefined;
+    // 只接受合法 26 位 ULID，拒绝伪造/超长输入；非法值静默丢弃而非抛错，
+    // 避免旧客户端或脏数据把整批消息的落库打挂。
+    const traceIdRaw = typeof row.trace_id === "string" ? row.trace_id.trim() : "";
+    const traceId = isTraceId(traceIdRaw) ? traceIdRaw : undefined;
     out.push({
       id,
       session_id: sessionId,
@@ -208,6 +213,7 @@ export function sanitizeInboundMessages(
       web_search_trace: webSearchTrace,
       deep_research: deepResearch,
       model,
+      trace_id: traceId,
       created_at: createdAt,
     });
   }

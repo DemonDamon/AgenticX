@@ -109,6 +109,7 @@ export type AssistantResponseVersion = {
   web_search_sources?: ChatMessage["web_search_sources"];
   web_search_trace?: ChatMessage["web_search_trace"];
   deep_research?: ChatMessage["deep_research"];
+  trace_id?: ChatMessage["trace_id"];
 };
 
 export type UserResponseVersionState = {
@@ -379,6 +380,7 @@ function toAssistantVersion(
     web_search_sources: message.web_search_sources,
     web_search_trace: message.web_search_trace,
     deep_research: message.deep_research,
+    trace_id: message.trace_id,
   };
 }
 
@@ -526,6 +528,34 @@ function preserveStreamedWebSearchTrace(
 ): ChatMessage {
   if (message.id !== assistantId || !trace) return message;
   return { ...message, web_search_trace: trace };
+}
+
+function applyTraceIdToAssistant(
+  set: ChatStoreSet,
+  assistantId: string,
+  userMessageId: string | undefined,
+  traceId: string,
+) {
+  set((prev) => {
+    const nextMessages = prev.messages.map((message) =>
+      message.id === assistantId ? { ...message, trace_id: traceId } : message,
+    );
+    if (!userMessageId) return { messages: nextMessages };
+    const current = prev.responseVersionsByUserMessageId[userMessageId];
+    if (!current) return { messages: nextMessages };
+    return {
+      messages: nextMessages,
+      responseVersionsByUserMessageId: {
+        ...prev.responseVersionsByUserMessageId,
+        [userMessageId]: {
+          ...current,
+          versions: current.versions.map((version, index) =>
+            index === current.activeIndex ? { ...version, trace_id: traceId } : version,
+          ),
+        },
+      },
+    };
+  });
 }
 
 function findVersionIndexByAssistantId(versions: AssistantResponseVersion[], assistantId: string): number {
@@ -1452,8 +1482,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         deepResearchEnabled,
         deepResearchAuto,
       );
-      const { requestId } = await client.sendMessage(request);
+      const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
+      // trace_id 是跨服务关联键（requestId 只是前端内存句柄，不出浏览器）。
+      // 挂到助手消息上，供气泡「复制请求 ID」与落库后的排障检索。
+      if (traceId) {
+        applyTraceIdToAssistant(set, assistantMessage.id, userMessage.id, traceId);
+      }
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
@@ -1757,8 +1792,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         deepResearchEnabled,
         deepResearchAuto,
       );
-      const { requestId } = await client.sendMessage(request);
+      const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
+      // trace_id 是跨服务关联键（requestId 只是前端内存句柄，不出浏览器）。
+      // 挂到助手消息上，供气泡「复制请求 ID」与落库后的排障检索。
+      if (traceId) {
+        applyTraceIdToAssistant(set, replacementAssistant.id, input.messageId, traceId);
+      }
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
@@ -2035,8 +2075,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         deepResearchEnabled,
         deepResearchAuto,
       );
-      const { requestId } = await client.sendMessage(request);
+      const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
+      // trace_id 是跨服务关联键（requestId 只是前端内存句柄，不出浏览器）。
+      // 挂到助手消息上，供气泡「复制请求 ID」与落库后的排障检索。
+      if (traceId) {
+        applyTraceIdToAssistant(set, replacementAssistant.id, targetUserMessageId, traceId);
+      }
 
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
@@ -2244,6 +2289,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 web_search_sources: targetVersion.web_search_sources,
                 web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
+                trace_id: targetVersion.trace_id,
               }
             : index === userIndex
               ? { ...message, content: targetVersion.queryText || message.content }
@@ -2300,6 +2346,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 web_search_sources: targetVersion.web_search_sources,
                 web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
+                trace_id: targetVersion.trace_id,
               }
             : index === userIndex
               ? { ...message, content: targetVersion.queryText || message.content }
@@ -2348,6 +2395,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 web_search_sources: targetVersion.web_search_sources,
                 web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
+                trace_id: targetVersion.trace_id,
               }
             : message
         ),
@@ -2394,6 +2442,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 web_search_sources: targetVersion.web_search_sources,
                 web_search_trace: targetVersion.web_search_trace,
                 deep_research: targetVersion.deep_research,
+                trace_id: targetVersion.trace_id,
               }
             : message
         ),

@@ -305,4 +305,31 @@ describe("sanitizeInboundMessages", () => {
       ]),
     ).toThrow(/valid ULID/);
   });
+
+  it("preserves valid trace_id and silently drops illegal values", () => {
+    const valid = "01J0000000000000000000000A";
+    const kept = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01HYAAAAAAAAAAAAAAAAAAAAC1",
+        role: "assistant",
+        content: "ok",
+        created_at: "2026-08-10T00:00:00.000Z",
+        trace_id: valid,
+      },
+    ]);
+    expect(kept[0]?.trace_id).toBe(valid);
+
+    for (const bad of ["not-a-ulid", "; DROP", "x".repeat(200)]) {
+      const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
+        {
+          id: "01HYAAAAAAAAAAAAAAAAAAAAC2",
+          role: "assistant",
+          content: "ok",
+          created_at: "2026-08-10T00:00:00.000Z",
+          trace_id: bad,
+        },
+      ]);
+      expect(messages[0]?.trace_id).toBeUndefined();
+    }
+  });
 });

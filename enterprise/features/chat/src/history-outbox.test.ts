@@ -137,6 +137,31 @@ describe("history-outbox", () => {
     expect(append).toHaveBeenCalled();
   });
 
+  it("stripToAppendPayload keeps trace_id when present and omits when absent", () => {
+    const withTrace = stripToAppendPayload({
+      id: ulid(),
+      session_id: "01SESSIONAAAAAAAAAAAAAAAAA",
+      tenant_id: "01TENANTAAAAAAAAAAAAAAAAAA",
+      user_id: "01USERAAAAAAAAAAAAAAAAAAAA",
+      role: "assistant",
+      content: "ok",
+      created_at: "2026-08-10T00:00:00.000Z",
+      trace_id: "01J0000000000000000000000A",
+    });
+    expect(withTrace.trace_id).toBe("01J0000000000000000000000A");
+
+    const withoutTrace = stripToAppendPayload({
+      id: ulid(),
+      session_id: "01SESSIONAAAAAAAAAAAAAAAAA",
+      tenant_id: "01TENANTAAAAAAAAAAAAAAAAAA",
+      user_id: "01USERAAAAAAAAAAAAAAAAAAAA",
+      role: "assistant",
+      content: "ok",
+      created_at: "2026-08-10T00:00:00.000Z",
+    });
+    expect(Object.prototype.hasOwnProperty.call(withoutTrace, "trace_id")).toBe(false);
+  });
+
   it("stripToAppendPayload keeps deep_research workbench events", () => {
     const payload = stripToAppendPayload({
       id: ulid(),
