@@ -33,8 +33,51 @@ import { getSessionRequestId, isSessionStreaming } from "./utils/session-stream-
 import { probeNote } from "./debug/update-depth-probe";
 import { hydrateMessagesDeepResearch } from "./utils/deep-research-hydrate";
 import { appendDeepResearchEvent } from "./utils/deep-research-events";
+import { getDeepResearchInteractionPref } from "./utils/deep-research-interaction-pref";
+import { fetchActiveDeepResearchRuns } from "./utils/deep-research-active-run";
+import {
+  buildPlanChatRevisionAssistantMessage,
+  fetchPlanChatRunDetail,
+  findActivePlanChatGate,
+  freezePlanChatSourceDeepResearch,
+  latestResearchPlanFromEvents,
+  postPlanChatComposerReply,
+  resolveDeepResearchEventTargetAssistantId,
+  sessionHasPlanChatVersion,
+} from "./utils/deep-research-plan-chat-composer";
 
 const UPDATE_DEPTH_ERROR_RE = /Maximum update depth exceeded/i;
+
+/** Remember last open chat so refresh restores the deep-research session, not only newest-by-created. */
+const LAST_ACTIVE_SESSION_KEY = "agx-portal-last-active-session-v1";
+
+function readLastActiveSessionId(): string | null {
+  try {
+    if (typeof sessionStorage === "undefined") return null;
+    const id = sessionStorage.getItem(LAST_ACTIVE_SESSION_KEY)?.trim();
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLastActiveSessionId(sessionId: string | null | undefined): void {
+  try {
+    if (typeof sessionStorage === "undefined") return;
+    const id = String(sessionId ?? "").trim();
+    if (!id) {
+      sessionStorage.removeItem(LAST_ACTIVE_SESSION_KEY);
+      return;
+    }
+    sessionStorage.setItem(LAST_ACTIVE_SESSION_KEY, id);
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+/** Throttle mid-run history checkpoints per assistant message. */
+const deepResearchCheckpointAtByAssistantId = new Map<string, number>();
+const DEEP_RESEARCH_CHECKPOINT_MS = 8_000;
 
 /** Stable code mapped to i18n in web-portal; keep messages intact on catch. */
 export const STREAM_UPDATE_DEPTH_ERROR = "STREAM_UPDATE_DEPTH";
@@ -152,6 +195,8 @@ export type ChatStoreState = {
   lastDeepResearchBySessionId: Record<string, boolean>;
   /** Last automatic deep-research toggle per session (retry / regenerate / queue). */
   lastDeepResearchAutoBySessionId: Record<string, boolean>;
+  /** 主输入正在改计划（resume HTTP 进行中）——输入区显示发送中，而非假 idle。 */
+  planChatRevising: boolean;
 };
 
 const EMPTY_USAGE: SessionTokenUsage = {
@@ -174,6 +219,11 @@ export type ChatStoreActions = {
   deleteSessions(sessionIds: string[]): Promise<void>;
   switchModel(model: string): void;
   sendMessage(client: ChatClient, input: SendMessageInput, options?: SendMessageOptions): Promise<void>;
+  /**
+   * 计划对齐 gate：用主输入内容改计划（resume），不新开一轮对话。
+   * @returns true 已处理；false 当前无 plan_chat gate。
+   */
+  resumePlanChatFromComposer(content: string): Promise<boolean>;
   sendQueuedMessageNow(client: ChatClient, messageId: string): Promise<void>;
   removePendingMessage(messageId: string): void;
   editPendingMessage(messageId: string, content: string): void;
@@ -299,6 +349,7 @@ function toSdkRequest(
   webSearch?: boolean,
   deepResearch?: boolean,
   deepResearchAuto?: boolean,
+  interactionPref: string = "auto",
 ): SdkChatRequest {
   return {
     sessionId,
@@ -330,6 +381,9 @@ function toSdkRequest(
     ...(webSearch ? { webSearch: true } : {}),
     ...(deepResearch ? { deepResearch: true } : {}),
     ...(deepResearchAuto ? { deepResearchAuto: true } : {}),
+    ...((deepResearch || deepResearchAuto) && interactionPref !== "auto"
+      ? { deepResearchInteraction: interactionPref }
+      : {}),
   };
 }
 
@@ -390,47 +444,189 @@ function applyDeepResearchEventToAssistant(
   userMessageId: string | undefined,
   event: DeepResearchEvent,
 ) {
-  const patchMessage = (message: ChatMessage): ChatMessage => {
-    if (message.id !== assistantId) return message;
-    const prev = message.deep_research;
-    const runId =
-      ("runId" in event && typeof event.runId === "string" && event.runId) ||
-      prev?.runId ||
-      "unknown";
-    let status: NonNullable<ChatMessage["deep_research"]>["status"] = prev?.status ?? "running";
-    if (event.type === "clarify") {
-      status = "awaiting_clarify";
-    } else if (event.type === "phase" && event.phase === "done") {
-      status = "completed";
-    } else if (
-      status === "awaiting_clarify" &&
-      (event.type === "clarify_timeout" ||
-        event.type === "lane_started" ||
-        event.type === "phase" ||
-        event.type === "run_started" ||
-        event.type === "narrative")
-    ) {
-      // Post-resume / timeout narratives also leave the clarify gate.
-      status = "running";
-    }
-    const events = appendDeepResearchEvent(prev?.events ?? [], event, 200);
-    const artifactIds = [...(prev?.artifactIds ?? [])];
-    if (event.type === "artifact" && !artifactIds.includes(event.id)) {
-      artifactIds.push(event.id);
-    }
-    return {
-      ...message,
-      deep_research: {
-        runId,
-        status,
-        events,
-        artifactIds,
-        clarifyAnswers: prev?.clarifyAnswers,
-      },
-    };
-  };
+  // 计划对齐：updated 方案拆成对话流里的新助手气泡，避免同一张卡原地改版本。
+  if (event.type === "research_plan" && event.action === "updated") {
+    let forkedPlanChat = false;
+    set((prev) => {
+      const source = prev.messages.find((m) => m.id === assistantId);
+      if (!source?.deep_research) return prev;
+      const visibility =
+        source.deep_research.profile?.planVisibility ??
+        [...(source.deep_research.events ?? [])]
+          .reverse()
+          .find((e) => e.type === "research_profile")?.planVisibility;
+      if (visibility !== "chat_editable") return prev;
+      forkedPlanChat = true;
+      const sessionId = source.session_id;
+      if (
+        sessionHasPlanChatVersion(prev.messages, sessionId, event.runId, event.version)
+      ) {
+        const keepMax = Math.max(1, event.version - 1);
+        return {
+          messages: prev.messages.map((message) => {
+            if (message.id !== assistantId || !message.deep_research) return message;
+            return {
+              ...message,
+              deep_research: freezePlanChatSourceDeepResearch(
+                message.deep_research,
+                keepMax,
+              ),
+            };
+          }),
+        };
+      }
+      const keepMax =
+        source.deep_research.planVersion ??
+        source.deep_research.plan?.version ??
+        Math.max(1, event.version - 1);
+      const revision = buildPlanChatRevisionAssistantMessage({
+        id: makeId(),
+        sessionId,
+        tenantId: source.tenant_id,
+        userId: source.user_id,
+        runId: event.runId,
+        plan: event.plan,
+        version: event.version,
+        profile: source.deep_research.profile,
+      });
+      return {
+        messages: [
+          ...prev.messages.map((message) => {
+            if (message.id !== assistantId || !message.deep_research) return message;
+            return {
+              ...message,
+              deep_research: freezePlanChatSourceDeepResearch(
+                message.deep_research,
+                keepMax,
+              ),
+            };
+          }),
+          revision,
+        ],
+        sessions: prev.sessions.map((session) =>
+          session.id === sessionId
+            ? {
+                ...session,
+                message_count: session.message_count + 1,
+                last_message_at: now(),
+                updated_at: now(),
+              }
+            : session,
+        ),
+      };
+    });
+    if (forkedPlanChat) return;
+  }
 
   set((prev) => {
+    const targetId = resolveDeepResearchEventTargetAssistantId(
+      prev.messages,
+      assistantId,
+      event,
+    );
+    const patchMessage = (message: ChatMessage): ChatMessage => {
+      if (message.id !== targetId) return message;
+      const prevDr = message.deep_research;
+      const runId =
+        ("runId" in event && typeof event.runId === "string" && event.runId) ||
+        prevDr?.runId ||
+        "unknown";
+      let status: NonNullable<ChatMessage["deep_research"]>["status"] = prevDr?.status ?? "running";
+      if (event.type === "clarify" || event.type === "clarify_chat") {
+        status = "awaiting_clarify";
+      } else if (event.type === "research_plan" && event.action === "proposed") {
+        // 计划对齐 / 先看计划：草案提出后阻塞等待用户确认/修改。
+        status = "awaiting_clarify";
+      } else if (event.type === "research_plan" && event.action === "approved") {
+        status = "running";
+      } else if (event.type === "research_plan" && event.action === "updated") {
+        // chat_editable：更新后仍在多轮对话 gate；legacy editable 编辑后立刻开跑。
+        status =
+          prevDr?.profile?.planVisibility === "chat_editable"
+            ? "awaiting_clarify"
+            : "running";
+      } else if (event.type === "phase" && event.phase === "done") {
+        status = "completed";
+      } else if (
+        status === "awaiting_clarify" &&
+        (event.type === "clarify_timeout" ||
+          event.type === "lane_started" ||
+          event.type === "phase" ||
+          event.type === "run_started" ||
+          event.type === "narrative")
+      ) {
+        // Post-resume / timeout 离开澄清 gate。
+        // 计划对齐 gate 未结束时，phase/narrative/run_started 不得把 status 打成 running，
+        // 否则主输入会误判为「流式中」而排队。
+        // recon-cold-start 的 lane_started 出现在 plan 之前/并行，不得结束 gate。
+        const laneId =
+          event.type === "lane_started" && typeof event.laneId === "string"
+            ? event.laneId
+            : "";
+        const isReconLane =
+          event.type === "lane_started" &&
+          (laneId === "recon-cold-start" || laneId.startsWith("recon-"));
+        if (isReconLane) {
+          status = "awaiting_clarify";
+        } else {
+          const eventsSoFar = [...(prevDr?.events ?? []), event];
+          const latestPlan = [...eventsSoFar]
+            .reverse()
+            .find((e) => e.type === "research_plan");
+          const profileVisibility =
+            prevDr?.profile?.planVisibility ??
+            [...(prevDr?.events ?? [])]
+              .reverse()
+              .find((e) => e.type === "research_profile")?.planVisibility;
+          const chatEditable = profileVisibility === "chat_editable";
+          const planGateOpen =
+            latestPlan?.type === "research_plan" &&
+            (latestPlan.action === "proposed" ||
+              (chatEditable && latestPlan.action === "updated"));
+          if (planGateOpen && event.type !== "lane_started" && event.type !== "clarify_timeout") {
+            status = "awaiting_clarify";
+          } else {
+            status = "running";
+          }
+        }
+      }
+      const events = appendDeepResearchEvent(prevDr?.events ?? [], event, 200);
+      const artifactIds = [...(prevDr?.artifactIds ?? [])];
+      if (event.type === "artifact" && !artifactIds.includes(event.id)) {
+        artifactIds.push(event.id);
+      }
+      // research_profile / research_plan 快照：从事件流派生最新状态，供工作台与重连恢复。
+      let profile = prevDr?.profile;
+      let plan = prevDr?.plan;
+      let planVersion = prevDr?.planVersion;
+      if (event.type === "research_profile") {
+        profile = {
+          researchDepth: event.researchDepth,
+          clarifyMode: event.clarifyMode,
+          clarifyBudget: event.clarifyBudget,
+          planVisibility: event.planVisibility,
+          assumptions: event.assumptions,
+        };
+      } else if (event.type === "research_plan") {
+        plan = event.plan;
+        planVersion = event.version;
+      }
+      return {
+        ...message,
+        deep_research: {
+          runId,
+          status,
+          events,
+          artifactIds,
+          clarifyAnswers: prevDr?.clarifyAnswers,
+          ...(profile ? { profile } : {}),
+          ...(plan ? { plan } : {}),
+          ...(planVersion ? { planVersion } : {}),
+          ...(profile?.assumptions?.length ? { assumptions: profile.assumptions } : {}),
+        },
+      };
+    };
+
     const nextMessages = prev.messages.map(patchMessage);
     if (!userMessageId) return { messages: nextMessages };
     const current = prev.responseVersionsByUserMessageId[userMessageId];
@@ -443,7 +639,10 @@ function applyDeepResearchEventToAssistant(
           ...current,
           versions: current.versions.map((version, index) =>
             index === current.activeIndex
-              ? { ...version, deep_research: nextMessages.find((m) => m.id === assistantId)?.deep_research }
+              ? {
+                  ...version,
+                  deep_research: nextMessages.find((m) => m.id === targetId)?.deep_research,
+                }
               : version,
           ),
         },
@@ -688,19 +887,21 @@ async function persistAppendMessagesNow(
 }
 
 /**
- * Durably stage the user half of a turn before opening the long-running model
- * stream. The outbox write is local/fast and survives refresh; its coordinator
+ * Durably stage a turn prefix before opening the long-running model stream.
+ * Normal chat stages the user message; deep research stages user + assistant
+ * shell so later same-id checkpoints never create a partial-overlap write.
+ * The outbox write is local/fast and survives refresh; its coordinator
  * flushes to the portal without adding a history round-trip to TTFT. Tests and
  * non-portal consumers that have no outbox coordinator retain the direct append
  * path, chained ahead of the eventual assistant append.
  */
-async function persistUserMessageBeforeStream(
+async function persistMessagesBeforeStream(
   set: (partial: Partial<ChatStoreState> | ((state: ChatStoreState) => Partial<ChatStoreState>)) => void,
   sessionId: string,
-  message: ChatMessage,
+  messages: ChatMessage[],
 ): Promise<void> {
   try {
-    const queued = await enqueueAppend(sessionId, [message]);
+    const queued = await enqueueAppend(sessionId, messages);
     if (queued.enqueued) {
       void flushHistoryOutbox();
       return;
@@ -709,7 +910,7 @@ async function persistUserMessageBeforeStream(
     // IndexedDB can be unavailable in private/restricted browser contexts.
     // Fall through to the existing server-first persistence path.
   }
-  void persistAppendMessages(set, sessionId, [message]);
+  void persistAppendMessages(set, sessionId, messages);
 }
 
 function assistantHasPersistableTurnState(message: ChatMessage): boolean {
@@ -875,6 +1076,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   lastWebSearchBySessionId: {},
   lastDeepResearchBySessionId: {},
   lastDeepResearchAutoBySessionId: {},
+  planChatRevising: false,
 
   setHistoryPrincipal(principal) {
     set({ historyPrincipal: principal });
@@ -940,12 +1142,311 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }));
   },
 
+  async resumePlanChatFromComposer(content) {
+    const text = content.trim();
+    if (!text) return false;
+    const state = get();
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return false;
+    const planChatGate = findActivePlanChatGate(state.messages, sessionId);
+    if (!planChatGate) return false;
+
+    const tenantId =
+      state.sessions.find((session) => session.id === sessionId)?.tenant_id ?? DEFAULT_TENANT;
+    const userId =
+      state.sessions.find((session) => session.id === sessionId)?.user_id ?? DEFAULT_USER;
+    const userMessage: ChatMessage = {
+      id: makeId(),
+      session_id: sessionId,
+      tenant_id: tenantId,
+      user_id: userId,
+      role: "user",
+      content: text,
+      created_at: new Date().toISOString(),
+    };
+    set((prev) => ({
+      messages: prev.messages
+        .map((message) => {
+          if (message.id !== planChatGate.assistantMessageId || !message.deep_research) {
+            return message;
+          }
+          return {
+            ...message,
+            deep_research: {
+              ...message.deep_research,
+              status: "awaiting_clarify",
+              events: [
+                ...(message.deep_research.events ?? []),
+                {
+                  type: "narrative" as const,
+                  text: "正在根据你的反馈更新计划…",
+                },
+              ].slice(-200),
+            },
+          };
+        })
+        .concat(userMessage),
+      errorMessage: null,
+      planChatRevising: true,
+      // 清掉本会话排队，避免随后「立即发送」取消流并开新一轮。
+      pendingMessages: prev.pendingMessages.filter((m) => m.sessionId !== sessionId),
+      sessions: prev.sessions.map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              message_count: session.message_count + 1,
+              last_message_at: now(),
+              updated_at: now(),
+            }
+          : session,
+      ),
+    }));
+    if (get().hydrated) {
+      void persistAppendMessages(set, sessionId, [userMessage]);
+    }
+    const clearPlanChatUpdating = () => {
+      set((prev) => ({
+        messages: prev.messages.map((message) => {
+          if (message.id !== planChatGate.assistantMessageId || !message.deep_research) {
+            return message;
+          }
+          const events = (message.deep_research.events ?? []).filter(
+            (event) =>
+              !(
+                event.type === "narrative" &&
+                /正在根据你的反馈更新计划/.test(event.text)
+              ),
+          );
+          return {
+            ...message,
+            deep_research: { ...message.deep_research, events },
+          };
+        }),
+      }));
+    };
+    try {
+      const result = await postPlanChatComposerReply({
+        runId: planChatGate.runId,
+        chatReply: text,
+        plan: planChatGate.plan,
+        sessionId,
+        topic: planChatGate.topic || text,
+        model: get().activeModel?.trim() || undefined,
+      });
+      if (result.kind === "error") {
+        clearPlanChatUpdating();
+        set({ errorMessage: result.message, planChatRevising: false });
+        return true;
+      }
+      if (result.kind === "already_continued") {
+        clearPlanChatUpdating();
+        set({ errorMessage: result.message, planChatRevising: false });
+        return true;
+      }
+      // resumed：旧卡冻结，用户反馈下方追加「新一版方案卡」（不要在同一张卡上改 v2）。
+      if (result.plan && result.plan.subQuestions.length > 0) {
+        const nextVersion = result.version ?? result.plan.version;
+        const keepVersionMax = planChatGate.plan.version ?? 1;
+        let appended: ChatMessage | null = null;
+        set((prev) => {
+          if (
+            sessionHasPlanChatVersion(
+              prev.messages,
+              sessionId,
+              planChatGate.runId,
+              nextVersion,
+            )
+          ) {
+            return {
+              messages: prev.messages.map((message) => {
+                if (message.id !== planChatGate.assistantMessageId || !message.deep_research) {
+                  return message;
+                }
+                return {
+                  ...message,
+                  deep_research: freezePlanChatSourceDeepResearch(
+                    message.deep_research,
+                    keepVersionMax,
+                  ),
+                };
+              }),
+              errorMessage: null,
+              planChatRevising: false,
+            };
+          }
+          const source = prev.messages.find(
+            (m) => m.id === planChatGate.assistantMessageId,
+          );
+          const userCreatedMs = Date.parse(userMessage.created_at) || Date.now();
+          appended = buildPlanChatRevisionAssistantMessage({
+            id: makeId(),
+            sessionId,
+            tenantId,
+            userId,
+            runId: planChatGate.runId,
+            plan: result.plan!,
+            version: nextVersion,
+            profile: source?.deep_research?.profile,
+            // 保证刷新后 ORDER BY created_at 仍是：改计划用户话 → 新方案卡
+            createdAt: new Date(userCreatedMs + 1).toISOString(),
+          });
+          return {
+            messages: [
+              ...prev.messages.map((message) => {
+                if (message.id !== planChatGate.assistantMessageId || !message.deep_research) {
+                  return message;
+                }
+                return {
+                  ...message,
+                  deep_research: freezePlanChatSourceDeepResearch(
+                    message.deep_research,
+                    keepVersionMax,
+                  ),
+                };
+              }),
+              appended,
+            ],
+            errorMessage: null,
+            planChatRevising: false,
+            sessions: prev.sessions.map((session) =>
+              session.id === sessionId
+                ? {
+                    ...session,
+                    message_count: session.message_count + 1,
+                    last_message_at: now(),
+                    updated_at: now(),
+                  }
+                : session,
+            ),
+          };
+        });
+        if (appended && get().hydrated) {
+          void persistAppendMessages(set, sessionId, [appended]);
+        }
+        return true;
+      }
+      // 兼容旧响应：无 plan 体时再 hydrate 回填。
+      const baselineVersion = planChatGate.plan.version ?? 1;
+      void (async () => {
+        try {
+          for (let attempt = 0; attempt < 40; attempt += 1) {
+            const detail = await fetchPlanChatRunDetail(planChatGate.runId, sessionId);
+            const events = detail?.events;
+            if (!events?.length) {
+              await new Promise((resolve) => setTimeout(resolve, 500));
+              continue;
+            }
+            const latestPlan = latestResearchPlanFromEvents(events);
+            const versionAdvanced =
+              !!latestPlan &&
+              (latestPlan.version > baselineVersion || latestPlan.action === "approved");
+            if (!versionAdvanced || !latestPlan) {
+              await new Promise((resolve) => setTimeout(resolve, 500));
+              continue;
+            }
+            let appended: ChatMessage | null = null;
+            set((prev) => {
+              if (
+                sessionHasPlanChatVersion(
+                  prev.messages,
+                  sessionId,
+                  planChatGate.runId,
+                  latestPlan.version,
+                )
+              ) {
+                return {
+                  messages: prev.messages.map((message) => {
+                    if (message.id !== planChatGate.assistantMessageId || !message.deep_research) {
+                      return message;
+                    }
+                    return {
+                      ...message,
+                      deep_research: freezePlanChatSourceDeepResearch(
+                        message.deep_research,
+                        baselineVersion,
+                      ),
+                    };
+                  }),
+                  errorMessage: null,
+                  planChatRevising: false,
+                };
+              }
+              const source = prev.messages.find(
+                (m) => m.id === planChatGate.assistantMessageId,
+              );
+              appended = buildPlanChatRevisionAssistantMessage({
+                id: makeId(),
+                sessionId,
+                tenantId,
+                userId,
+                runId: planChatGate.runId,
+                plan: latestPlan.plan,
+                version: latestPlan.version,
+                profile: source?.deep_research?.profile,
+              });
+              return {
+                messages: [
+                  ...prev.messages.map((message) => {
+                    if (message.id !== planChatGate.assistantMessageId || !message.deep_research) {
+                      return message;
+                    }
+                    return {
+                      ...message,
+                      deep_research: freezePlanChatSourceDeepResearch(
+                        message.deep_research,
+                        baselineVersion,
+                      ),
+                    };
+                  }),
+                  appended,
+                ],
+                errorMessage: null,
+                planChatRevising: false,
+                sessions: prev.sessions.map((session) =>
+                  session.id === sessionId
+                    ? {
+                        ...session,
+                        message_count: session.message_count + 1,
+                        last_message_at: now(),
+                        updated_at: now(),
+                      }
+                    : session,
+                ),
+              };
+            });
+            if (appended && get().hydrated) {
+              void persistAppendMessages(set, sessionId, [appended]);
+            }
+            return;
+          }
+          clearPlanChatUpdating();
+          set({
+            errorMessage: "计划仍在更新或未同步成功，请稍后重试，或直接点「开始调研」。",
+            planChatRevising: false,
+          });
+        } catch {
+          clearPlanChatUpdating();
+          set({ errorMessage: "计划更新同步失败，请重试。", planChatRevising: false });
+        }
+      })();
+    } catch {
+      clearPlanChatUpdating();
+      set({ errorMessage: "网络异常，计划更新失败，请重试。", planChatRevising: false });
+    }
+    return true;
+  },
+
   async sendQueuedMessageNow(client, messageId) {
     const item = get().pendingMessages.find((message) => message.id === messageId);
     if (!item) return;
     set((state) => ({
       pendingMessages: state.pendingMessages.filter((message) => message.id !== messageId),
     }));
+    // 计划对齐中：排队消息也只改计划，禁止 forceSend 打断原 run。
+    if (findActivePlanChatGate(get().messages, item.sessionId)) {
+      await get().resumePlanChatFromComposer(item.content);
+      return;
+    }
     await get().sendMessage(
       client,
       {
@@ -982,8 +1483,24 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           void flushHistoryOutbox();
           return;
         }
-        const activeSession = sessions[0]!;
+        // Prefer: active deep-research run session → last open session → newest created.
+        const rememberedId = readLastActiveSessionId();
+        let preferredId = rememberedId && sessions.some((s) => s.id === rememberedId)
+          ? rememberedId
+          : sessions[0]!.id;
+        try {
+          const activeRuns = await fetchActiveDeepResearchRuns(null);
+          const runSessionId = activeRuns[0]?.sessionId?.trim();
+          if (runSessionId && sessions.some((s) => s.id === runSessionId)) {
+            preferredId = runSessionId;
+          }
+        } catch {
+          // banner/hydrate must not fail closed on runs probe
+        }
+        const activeSession =
+          sessions.find((session) => session.id === preferredId) ?? sessions[0]!;
         const activeSessionId = activeSession.id;
+        writeLastActiveSessionId(activeSessionId);
         const remoteMessages = await portalHistory.getMessages(activeSessionId);
         const overlay = await listPendingOverlayMessages(activeSessionId);
         const merged = await hydrateMessagesDeepResearch(
@@ -1073,6 +1590,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
     const targetIsStreaming = isSessionStreaming(get(), sessionId);
     const loadSeq = ++sessionMessageLoadSeq;
+    writeLastActiveSessionId(sessionId);
     set((prev) => ({
       ...discardDraftSessionPatch(prev),
       activeSessionId: sessionId,
@@ -1303,6 +1821,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     // Best-effort outbox flush before a new turn; do not block typing/send.
     void flushHistoryOutbox({ timeoutMs: 800 });
 
+    // 计划对齐 gate：主输入只改计划；含 forceSend 也绝不能 cancel + 新开一轮。
+    if (content && (await get().resumePlanChatFromComposer(content))) {
+      return;
+    }
+
     if (shouldEnqueueOnResend({ isStreamActive: isSessionStreaming(state, sessionId), forceSend: options?.forceSend })) {
       const enqueueSessionId = sessionId;
       set((prev) => ({
@@ -1462,17 +1985,36 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       }),
     }));
     options?.onAccepted?.(sessionId);
+    writeLastActiveSessionId(sessionId);
     setSessionStream(set, sessionId, { status: "sending", activeRequestId: "" });
 
-    // A browser refresh may destroy the streaming JS context before the final
-    // history POST. Stage the user's message first so the conversation never
-    // degrades into an empty persisted session.
+    // A refresh can destroy the streaming context before the final append.
+    // Deep research stages both ids up front; ordinary chat stages only user.
     if (get().hydrated) {
-      await persistUserMessageBeforeStream(set, sessionId, userMessage);
+      await persistMessagesBeforeStream(
+        set,
+        sessionId,
+        deepResearchEnabled
+          ? [userMessage, assistantMessage]
+          : [userMessage],
+      );
     }
 
     let streamedWebSearchSources: ChatMessage["web_search_sources"];
     let streamedWebSearchTrace: ChatMessage["web_search_trace"];
+    const checkpointDeepResearchTurn = (force = false) => {
+      if (!deepResearchEnabled || !get().hydrated) return;
+      const nowTs = Date.now();
+      const last = deepResearchCheckpointAtByAssistantId.get(assistantMessage.id) ?? 0;
+      if (!force && nowTs - last < DEEP_RESEARCH_CHECKPOINT_MS) return;
+      deepResearchCheckpointAtByAssistantId.set(assistantMessage.id, nowTs);
+      const snap = get();
+      const u = snap.messages.find((m) => m.id === userMessage.id);
+      const a = snap.messages.find((m) => m.id === assistantMessage.id);
+      if (u?.role === "user" && a?.role === "assistant") {
+        void persistAppendMessages(set, sessionId, [u, a]);
+      }
+    };
     try {
       const request = toSdkRequest(
         sessionId,
@@ -1481,6 +2023,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         webSearchEnabled,
         deepResearchEnabled,
         deepResearchAuto,
+        getDeepResearchInteractionPref(),
       );
       const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
@@ -1577,6 +2120,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             userMessage.id,
             chunk.deepResearchEvent,
           );
+          const evType = chunk.deepResearchEvent.type;
+          const forceCheckpoint =
+            evType === "run_started" ||
+            evType === "clarify" ||
+            evType === "clarify_chat" ||
+            evType === "phase" ||
+            evType === "lane_started";
+          checkpointDeepResearchTurn(forceCheckpoint);
         }
 
         if (chunk.done) {
@@ -1625,14 +2176,21 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             streamedWebSearchTrace,
           );
           if (assistantHasPersistableTurnState(assistantToPersist)) {
-            // Yield one tick after SSE teardown so the portal can accept the
-            // follow-up append. The user half is already durable and ordered
-            // ahead of this operation by the outbox/append chain.
             await new Promise<void>((resolve) => setTimeout(resolve, 0));
-            await persistAppendMessages(set, sessionId, [assistantToPersist]);
+            if (deepResearchEnabled) {
+              const persistedUser = afterStream.messages.find(
+                (message) => message.id === userMessage.id && message.role === "user",
+              );
+              if (persistedUser) {
+                await persistAppendMessages(set, sessionId, [persistedUser, assistantToPersist]);
+              }
+            } else {
+              await persistAppendMessages(set, sessionId, [assistantToPersist]);
+            }
           }
         }
       }
+      deepResearchCheckpointAtByAssistantId.delete(assistantMessage.id);
 
       const after = get();
       const sid = String(queueSessionId ?? "").trim();
@@ -1791,6 +2349,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         webSearchEnabled,
         deepResearchEnabled,
         deepResearchAuto,
+        getDeepResearchInteractionPref(),
       );
       const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });
@@ -2074,6 +2633,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         webSearchEnabled,
         deepResearchEnabled,
         deepResearchAuto,
+        getDeepResearchInteractionPref(),
       );
       const { requestId, traceId } = await client.sendMessage(request);
       setSessionStream(set, sessionId, { status: "streaming", activeRequestId: requestId });

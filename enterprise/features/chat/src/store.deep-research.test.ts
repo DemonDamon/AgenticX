@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatChunk, ChatClient, ChatRequest, SendMessageResult } from "@agenticx/sdk-ts";
 import type { ChatSession } from "@agenticx/core-api";
 
-const { createSession } = vi.hoisted(() => ({
+const { createSession, appendMessages } = vi.hoisted(() => ({
   createSession: vi.fn(),
+  appendMessages: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("./history-client", () => ({
@@ -11,7 +12,7 @@ vi.mock("./history-client", () => ({
     listSessions: vi.fn().mockResolvedValue([]),
     createSession,
     getMessages: vi.fn().mockResolvedValue([]),
-    appendMessages: vi.fn().mockResolvedValue(undefined),
+    appendMessages,
     replaceMessages: vi.fn().mockResolvedValue(undefined),
     renameSession: vi.fn(),
     patchSession: vi.fn(),
@@ -22,6 +23,10 @@ vi.mock("./history-client", () => ({
   ChatHistoryHttpError: class ChatHistoryHttpError extends Error {
     status = 500;
   },
+}));
+
+vi.mock("./utils/deep-research-active-run", () => ({
+  fetchActiveDeepResearchRuns: vi.fn().mockResolvedValue([]),
 }));
 
 import { useChatStore } from "./store";
@@ -69,6 +74,10 @@ class CapturingClient implements ChatClient {
 }
 
 describe("chat store deepResearch request wiring", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     useChatStore.setState({
@@ -100,6 +109,7 @@ describe("chat store deepResearch request wiring", () => {
       lastWebSearchBySessionId: {},
       lastDeepResearchBySessionId: {},
       lastDeepResearchAutoBySessionId: {},
+      planChatRevising: false,
     });
   });
 
@@ -108,6 +118,44 @@ describe("chat store deepResearch request wiring", () => {
     await useChatStore.getState().sendMessage(client, { content: "research please", deepResearch: true });
     expect(client.requests[0]?.deepResearch).toBe(true);
     expect(useChatStore.getState().lastDeepResearchBySessionId.A).toBe(true);
+  });
+
+  it("persists deep-research user+assistant shell before stream ends (refresh survival)", async () => {
+    appendMessages.mockClear();
+
+    const client = new CapturingClient();
+    let releaseStream!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    client.streamChunks = null;
+    client.stream = async function* stream(requestId: string) {
+      yield {
+        requestId,
+        done: false,
+        deepResearchEvent: { type: "run_started", runId: "run-early" },
+      };
+      await gate;
+      yield { requestId, done: true };
+    };
+
+    const sendPromise = useChatStore.getState().sendMessage(client, {
+      content: "long research",
+      deepResearch: true,
+    });
+    // Early shell persist is fire-and-forget right after optimistic UI.
+    await vi.waitFor(() => {
+      expect(appendMessages.mock.calls.length).toBeGreaterThanOrEqual(1);
+    });
+    const firstBatch = appendMessages.mock.calls[0]![1] as Array<{
+      role: string;
+      deep_research?: { runId?: string };
+    }>;
+    expect(firstBatch.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(firstBatch[1]?.deep_research?.runId).toBe("pending");
+
+    releaseStream();
+    await sendPromise;
   });
 
   it("omits deepResearch when toggle is off", async () => {
@@ -133,6 +181,22 @@ describe("chat store deepResearch request wiring", () => {
     expect(assistantId).toBeTruthy();
     await useChatStore.getState().regenerateAssistantResponse(client, assistantId!);
     expect(client.requests.at(-1)?.deepResearchAuto).toBe(true);
+  });
+
+  it("forwards the selected interaction policy in automatic deep research mode", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn(() => "card_first"),
+      setItem: vi.fn(),
+    });
+    const client = new CapturingClient();
+
+    await useChatStore.getState().sendMessage(client, {
+      content: "research when needed",
+      deepResearch: false,
+      deepResearchAuto: true,
+    });
+
+    expect(client.requests[0]?.deepResearchInteraction).toBe("card_first");
   });
 
   it("keeps a queued manual activation forced after the composer switches to auto", async () => {
@@ -324,5 +388,130 @@ describe("chat store deepResearch request wiring", () => {
     expect(assistant?.content).not.toContain("正在规划");
     expect(assistant?.deep_research?.runId).toBe("run-1");
     expect(assistant?.deep_research?.events.some((e) => e.type === "phase")).toBe(true);
+  });
+
+  it("research_plan proposed → awaiting_clarify so plan_first UI can edit", async () => {
+    const client = new CapturingClient();
+    client.streamChunks = [
+      {
+        requestId: "req-1",
+        done: false,
+        deepResearchEvent: { type: "run_started", runId: "run-plan" },
+      },
+      {
+        requestId: "req-1",
+        done: false,
+        deepResearchEvent: {
+          type: "research_plan",
+          runId: "run-plan",
+          action: "proposed",
+          version: 1,
+          plan: {
+            version: 1,
+            objective: "主题",
+            scope: [],
+            subQuestions: [{ id: "sq1", title: "子问题" }],
+            sourceStrategy: [],
+            deliverables: [],
+            assumptions: [],
+          },
+        },
+      },
+      // Stream stays open while backend waits on the plan gate — no done yet.
+    ];
+
+    // Hang the generator after emitting plan so we can assert mid-gate status.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const chunks = client.streamChunks;
+    client.streamChunks = null;
+    client.stream = async function* stream(requestId: string) {
+      for (const chunk of chunks!) {
+        yield { ...chunk, requestId };
+      }
+      await gate;
+      yield { requestId, done: true };
+    };
+
+    const sendPromise = useChatStore.getState().sendMessage(client, {
+      content: "research",
+      deepResearch: true,
+    });
+    await vi.waitFor(() => {
+      const assistant = useChatStore.getState().messages.find((m) => m.role === "assistant");
+      expect(assistant?.deep_research?.status).toBe("awaiting_clarify");
+    });
+    release();
+    await sendPromise;
+  });
+
+  it("narrative while plan still proposed keeps awaiting_clarify", async () => {
+    const client = new CapturingClient();
+    client.streamChunks = [
+      {
+        requestId: "req-1",
+        done: false,
+        deepResearchEvent: { type: "run_started", runId: "run-plan-2" },
+      },
+      {
+        requestId: "req-1",
+        done: false,
+        deepResearchEvent: {
+          type: "research_plan",
+          runId: "run-plan-2",
+          action: "proposed",
+          version: 1,
+          plan: {
+            version: 1,
+            objective: "主题",
+            scope: [],
+            subQuestions: [{ id: "sq1", title: "子问题" }],
+            sourceStrategy: [],
+            deliverables: [],
+            assumptions: [],
+          },
+        },
+      },
+      {
+        requestId: "req-1",
+        done: false,
+        deepResearchEvent: {
+          type: "narrative",
+          text: "确认或修改前不会自动开始检索。",
+        },
+      },
+    ];
+
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const chunks = client.streamChunks;
+    client.streamChunks = null;
+    client.stream = async function* stream(requestId: string) {
+      for (const chunk of chunks!) {
+        yield { ...chunk, requestId };
+      }
+      await gate;
+      yield { requestId, done: true };
+    };
+
+    const sendPromise = useChatStore.getState().sendMessage(client, {
+      content: "research",
+      deepResearch: true,
+    });
+    await vi.waitFor(() => {
+      const assistant = useChatStore.getState().messages.find((m) => m.role === "assistant");
+      expect(assistant?.deep_research?.status).toBe("awaiting_clarify");
+      expect(
+        assistant?.deep_research?.events.some(
+          (e) => e.type === "research_plan" && e.action === "proposed",
+        ),
+      ).toBe(true);
+    });
+    release();
+    await sendPromise;
   });
 });

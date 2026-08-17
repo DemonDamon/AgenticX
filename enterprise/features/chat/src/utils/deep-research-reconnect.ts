@@ -65,3 +65,54 @@ export async function consumeDeepResearchReconnectStream(
   }
   handlers.onDone?.();
 }
+
+/**
+ * Reconnect manager: 同一 runId 同时只允许一条活跃重连流。
+ * 重复点击「继续查看」/ 切换会话必须先 abort 旧流——否则多条轮询流会把同一批
+ * live 事件重复追加到同一条消息上（撰写报告卡片翻倍的生产事故根因）。
+ */
+const activeReconnects = new Map<string, AbortController>();
+
+export function abortDeepResearchReconnect(runId: string): void {
+  const controller = activeReconnects.get(runId);
+  if (!controller) return;
+  activeReconnects.delete(runId);
+  controller.abort();
+}
+
+export function abortAllDeepResearchReconnects(): void {
+  for (const controller of activeReconnects.values()) {
+    controller.abort();
+  }
+  activeReconnects.clear();
+}
+
+/** Test helper: how many reconnect streams are currently alive. */
+export function countActiveDeepResearchReconnects(): number {
+  return activeReconnects.size;
+}
+
+export async function startDeepResearchReconnect(
+  runId: string,
+  handlers: ReconnectStreamHandlers,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  abortDeepResearchReconnect(runId);
+  const controller = new AbortController();
+  activeReconnects.set(runId, controller);
+  try {
+    await consumeDeepResearchReconnectStream(
+      runId,
+      { ...handlers, signal: controller.signal },
+      fetchImpl,
+    );
+  } catch (error) {
+    // 主动 abort 是正常退出（新流顶替 / 切换会话），不向上抛。
+    if (controller.signal.aborted) return;
+    throw error;
+  } finally {
+    if (activeReconnects.get(runId) === controller) {
+      activeReconnects.delete(runId);
+    }
+  }
+}

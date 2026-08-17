@@ -24,15 +24,16 @@ export function phaseLabelZh(phase: string): string {
 }
 
 export async function fetchActiveDeepResearchRuns(
-  sessionId: string,
+  sessionId?: string | null,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ActiveDeepResearchRun[]> {
-  if (!sessionId.trim()) return [];
   try {
-    const res = await fetchImpl(
-      `/api/chat/deep-research/runs?sessionId=${encodeURIComponent(sessionId)}`,
-      { cache: "no-store" },
-    );
+    const qs = sessionId?.trim()
+      ? `?sessionId=${encodeURIComponent(sessionId.trim())}`
+      : "";
+    const res = await fetchImpl(`/api/chat/deep-research/runs${qs}`, {
+      cache: "no-store",
+    });
     if (!res.ok) return [];
     const json = (await res.json()) as {
       data?: { runs?: ActiveDeepResearchRun[] };
