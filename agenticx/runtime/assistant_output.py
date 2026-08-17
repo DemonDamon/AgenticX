@@ -23,8 +23,19 @@ _MINIMAX_ARTIFACT_RE = re.compile(
 _ZERO_WIDTH_RE = re.compile(
     r"[\u200b\u200c\u200d\u2060\ufeff\u00ad]",
 )
+# MiniMax (and similar) models sometimes emit follow-up aliases such as
+# ``<followflows>`` instead of the canonical ``<followups>`` block.
+_FOLLOWUP_TAG_NAMES = frozenset(
+    {
+        "followups",
+        "followflows",
+        "follow-ups",
+        "follow_ups",
+        "followup",
+    }
+)
 _RESERVED_TAG_TOKEN_RE = re.compile(
-    r"</?\s*think\b|</?\s*followups\b",
+    r"</?\s*think\b|</?\s*follow(?:flows|-ups|_ups|ups|up)\b",
     re.IGNORECASE,
 )
 _CONTROL_CHAR_RE = re.compile(
@@ -33,7 +44,7 @@ _CONTROL_CHAR_RE = re.compile(
 
 _TAG_NAME_RE = re.compile(
     r"^(?P<closing>/?)\s*"
-    r"(?P<name>think|followups)\b"
+    r"(?P<name>think|followflows|follow-ups|follow_ups|followups|followup)\b"
     r"(?P<rest>.*)$",
     re.IGNORECASE | re.DOTALL,
 )
@@ -187,15 +198,16 @@ def _classify_tag(inner: str) -> Optional[Tuple[str, bool, bool]]:
     match = _TAG_NAME_RE.match(normalized)
     if not match:
         return None
-    name = match.group("name").lower()
+    raw_name = match.group("name").lower()
+    name = "followups" if raw_name in _FOLLOWUP_TAG_NAMES else raw_name
     closing = bool(match.group("closing"))
     rest = match.group("rest") or ""
-    # Canonical form is exactly ``think`` / ``followups`` with optional trailing
-    # spaces only (no attributes). Any extra spacing inside the original ``<>``
-    # or attributes marks the tag noncanonical.
-    compact_canonical = f"{'/' if closing else ''}{name}"
+    # Canonical form is exactly ``think`` / a known follow-up alias with
+    # optional trailing spaces only (no attributes). Known aliases such as
+    # ``followflows`` are accepted spellings, not noncanonical tags.
+    compact_accepted = f"{'/' if closing else ''}{raw_name}"
     original_compact = re.sub(r"\s+", "", _ZERO_WIDTH_RE.sub("", inner)).lower()
-    noncanonical = original_compact != compact_canonical or bool(rest.strip())
+    noncanonical = original_compact != compact_accepted or bool(rest.strip())
     # Also treat leading/trailing spaces inside <> as noncanonical.
     if inner != inner.strip() or "\n" in inner or "\r" in inner:
         noncanonical = True
