@@ -17,10 +17,10 @@ export type SessionConversationPanelLabels = ConversationMessageListLabels & {
   loading: string;
   empty: string;
   loadFailed: string;
-  expand: string;
-  collapse: string;
   truncatedHint: string;
   loadEarlier: string;
+  reasoningExpand?: string;
+  reasoningCollapse?: string;
 };
 
 export function SessionConversationPanel({
@@ -149,7 +149,14 @@ export function SessionConversationPanel({
         </Button>
       ) : null}
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
-      <ConversationMessageList messages={messages} labels={labels} />
+      <ConversationMessageList
+        messages={messages}
+        labels={{
+          ...labels,
+          expand: labels.reasoningExpand ?? labels.expand,
+          collapse: labels.reasoningCollapse ?? labels.collapse,
+        }}
+      />
     </div>
   );
 }

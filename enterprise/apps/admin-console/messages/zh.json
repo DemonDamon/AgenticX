@@ -1288,6 +1288,8 @@
           "roleTool": "工具",
           "roleSystem": "系统",
           "reasoning": "思考过程",
+          "reasoningExpand": "展开",
+          "reasoningCollapse": "收起",
           "attachments": "附件",
           "chars": "字",
           "scopeTurn": "本轮",

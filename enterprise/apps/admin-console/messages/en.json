@@ -1288,6 +1288,8 @@
           "roleTool": "Tool",
           "roleSystem": "System",
           "reasoning": "Reasoning",
+          "reasoningExpand": "Expand",
+          "reasoningCollapse": "Collapse",
           "attachments": "Attachments",
           "chars": "chars",
           "scopeTurn": "This turn",

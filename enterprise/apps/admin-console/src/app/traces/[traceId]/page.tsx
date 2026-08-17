@@ -219,6 +219,8 @@ export default function TraceRuntimePage() {
               roleTool: t("conversation.roleTool"),
               roleSystem: t("conversation.roleSystem"),
               reasoning: t("conversation.reasoning"),
+              reasoningExpand: t("conversation.reasoningExpand"),
+              reasoningCollapse: t("conversation.reasoningCollapse"),
               attachments: t("conversation.attachments"),
               chars: t("conversation.chars"),
               scopeTurn: t("conversation.scopeTurn"),
