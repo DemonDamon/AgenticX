@@ -182,13 +182,15 @@ func handleReconnect(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	setCredentials(creds)
-	stopMonitor()
-	// Reset error streak before attempting fresh monitor so a previous failure streak
-	// doesn't immediately re-mark as stale.
-	monitorMu.Lock()
-	consecutiveMonitorErrors = 0
-	monitorMu.Unlock()
+	// startMonitor serializes against the previous generation (wait + epoch).
 	go startMonitor(creds)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if isMonitorRunning() {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bot_id": creds.BotID})
 }

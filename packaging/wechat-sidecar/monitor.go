@@ -37,18 +37,27 @@ type MessageItem struct {
 	AESKey string `json:"aes_key,omitempty"`
 }
 
+type monitorLoopFunc func(ctx context.Context, creds *Credentials) error
+
 var (
-	monitorMu              sync.Mutex
-	monitorCancel          context.CancelFunc
-	monitorRunning         bool
-	monitorClient          *ilink.Client
-	lastMessageTime        time.Time
-	keepaliveCancel        context.CancelFunc
+	monitorLifeMu            sync.Mutex
+	monitorMu                sync.Mutex
+	monitorCancel            context.CancelFunc
+	monitorDone              chan struct{}
+	monitorEpoch             uint64
+	monitorRunning           bool
+	monitorClient            *ilink.Client
+	lastMessageTime          time.Time
+	keepaliveCancel          context.CancelFunc
 	consecutiveMonitorErrors int
 
 	sseMu      sync.Mutex
 	sseClients []chan SSEEvent
+
+	runMonitorLoop monitorLoopFunc = runIlinkMonitorLoop
 )
+
+const stopMonitorWaitTimeout = 8 * time.Second
 
 func isMonitorRunning() bool {
 	monitorMu.Lock()
@@ -57,26 +66,60 @@ func isMonitorRunning() bool {
 }
 
 func startMonitor(creds *Credentials) {
-	monitorMu.Lock()
-	if monitorRunning && monitorCancel != nil {
-		monitorCancel()
-	}
+	monitorLifeMu.Lock()
+	stopMonitorWait()
+
 	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	monitorMu.Lock()
 	monitorCancel = cancel
+	monitorDone = done
+	monitorEpoch++
+	epoch := monitorEpoch
 	monitorRunning = true
+	lastMessageTime = time.Now()
+	consecutiveMonitorErrors = 0
 	monitorMu.Unlock()
+	monitorLifeMu.Unlock()
 
-	slog.Info("starting monitor", "bot_id", creds.BotID)
+	slog.Info("starting monitor", "bot_id", creds.BotID, "epoch", epoch)
 
+	defer func() {
+		close(done)
+		finishMonitorGeneration(epoch, done)
+		slog.Info("monitor stopped", "epoch", epoch)
+	}()
+
+	err := runMonitorLoop(ctx, creds)
+	if err != nil && ctx.Err() == nil {
+		slog.Error("monitor exited with error", "error", err, "epoch", epoch)
+		broadcastSSE(SSEEvent{Type: "error", Status: fmt.Sprintf("monitor stopped: %v", err)})
+	}
+}
+
+func finishMonitorGeneration(epoch uint64, done chan struct{}) {
+	monitorMu.Lock()
+	defer monitorMu.Unlock()
+	if epoch != monitorEpoch {
+		return
+	}
+	monitorRunning = false
+	monitorClient = nil
+	consecutiveMonitorErrors = 0
+	if monitorCancel != nil {
+		monitorCancel = nil
+	}
+	if done != nil && monitorDone == done {
+		monitorDone = nil
+	}
+}
+
+func runIlinkMonitorLoop(ctx context.Context, creds *Credentials) error {
 	client := ilink.NewClient(creds.BotToken, ilink.WithBaseURL(creds.BaseURL))
 
 	monitorMu.Lock()
 	monitorClient = client
-	monitorMu.Unlock()
-
-	monitorMu.Lock()
-	lastMessageTime = time.Now()
-	consecutiveMonitorErrors = 0
 	monitorMu.Unlock()
 
 	kaCtx, kaCancel := context.WithCancel(ctx)
@@ -94,11 +137,19 @@ func startMonitor(creds *Credentials) {
 		broadcastSSE(evt)
 	}
 
+	monitorMu.Lock()
+	epoch := monitorEpoch
+	monitorMu.Unlock()
+
 	opts := &ilink.MonitorOptions{
 		OnError: func(err error) {
 			slog.Error("monitor error", "error", err)
 			broadcastSSE(SSEEvent{Type: "error", Status: err.Error()})
 			monitorMu.Lock()
+			if epoch != monitorEpoch {
+				monitorMu.Unlock()
+				return
+			}
 			consecutiveMonitorErrors++
 			if consecutiveMonitorErrors >= 3 {
 				monitorRunning = false
@@ -112,41 +163,54 @@ func startMonitor(creds *Credentials) {
 			slog.Warn("iLink session expired")
 			broadcastSSE(SSEEvent{Type: "status", Status: "session_expired"})
 			monitorMu.Lock()
+			if epoch != monitorEpoch {
+				monitorMu.Unlock()
+				return
+			}
 			monitorRunning = false
 			consecutiveMonitorErrors = 0
 			monitorMu.Unlock()
 		},
 	}
 
-	err := client.Monitor(ctx, handler, opts)
-	if err != nil && ctx.Err() == nil {
-		slog.Error("monitor exited with error", "error", err)
-		broadcastSSE(SSEEvent{Type: "error", Status: fmt.Sprintf("monitor stopped: %v", err)})
-	}
-
-	monitorMu.Lock()
-	monitorRunning = false
-	monitorClient = nil
-	consecutiveMonitorErrors = 0
-	monitorMu.Unlock()
-
-	slog.Info("monitor stopped")
+	return client.Monitor(ctx, handler, opts)
 }
 
-func stopMonitor() {
+func stopMonitorWait() {
 	monitorMu.Lock()
-	defer monitorMu.Unlock()
 	if keepaliveCancel != nil {
 		keepaliveCancel()
 		keepaliveCancel = nil
 	}
-	if monitorCancel != nil {
-		monitorCancel()
-		monitorCancel = nil
+	cancel := monitorCancel
+	done := monitorDone
+	monitorCancel = nil
+	monitorMu.Unlock()
+
+	if cancel != nil {
+		cancel()
 	}
-	monitorRunning = false
-	monitorClient = nil
-	consecutiveMonitorErrors = 0
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(stopMonitorWaitTimeout):
+		slog.Warn("stopMonitor wait timed out")
+	}
+}
+
+func stopMonitor() {
+	monitorLifeMu.Lock()
+	defer monitorLifeMu.Unlock()
+	stopMonitorWait()
+	monitorMu.Lock()
+	if monitorCancel == nil {
+		monitorRunning = false
+		monitorClient = nil
+		consecutiveMonitorErrors = 0
+	}
+	monitorMu.Unlock()
 }
 
 func keepaliveLoop(ctx context.Context, creds *Credentials) {
