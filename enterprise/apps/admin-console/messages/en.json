@@ -44,6 +44,7 @@
         "bulkImport": "Bulk Provisioning",
         "organization": "Organization & provisioning",
         "audit": "Audit Logs",
+        "portalLogs": "Portal Logs",
         "compliance": "Compliance",
         "metering": "Usage & Quotas",
         "quota": "Quota Control",
@@ -1104,6 +1105,7 @@
           "session": "Session",
           "requestId": "Request ID",
           "viewTrace": "View Trace",
+          "viewPortalLogs": "View Portal logs",
           "copyRequestId": "Copy request ID",
           "traceLoading": "Loading Trace steps…",
           "traceEmpty": "No Trace steps for this request",
@@ -1141,6 +1143,54 @@
         "toast": {
           "loadFailed": "Failed to load",
           "copied": "Request ID copied"
+        }
+      },
+      "portalLogs": {
+        "breadcrumb": "Portal logs",
+        "title": "Portal logs",
+        "description": "{count} rows · portal BFF structured request logs",
+        "refresh": "Refresh",
+        "filterTraceId": "Request ID",
+        "filterTraceIdPlaceholder": "Paste request ID (trace_id)",
+        "filterLevel": "Level",
+        "filterStart": "Start",
+        "filterEnd": "End",
+        "levelAll": "All",
+        "levelWarnPlus": "warn+",
+        "levelError": "error only",
+        "applyFilters": "Search",
+        "emptyLoadingTitle": "Loading...",
+        "emptyLoadingDescription": "Querying portal request logs",
+        "emptyTitle": "No logs",
+        "emptyDescription": "No records match filters",
+        "forbiddenTitle": "No permission",
+        "forbiddenDescription": "Requires audit:read:all permission",
+        "columns": {
+          "time": "Time",
+          "level": "Level",
+          "event": "Event",
+          "route": "Route",
+          "status": "Status",
+          "duration": "Duration",
+          "user": "User"
+        },
+        "detail": {
+          "copyRequestId": "Copy request ID",
+          "viewAudit": "View gateway audit",
+          "route": "Route",
+          "status": "Status",
+          "duration": "Duration",
+          "user": "User",
+          "session": "Session",
+          "errorMessage": "Error message",
+          "errorStack": "Stack",
+          "fields": "Custom fields",
+          "copyFields": "Copy JSON"
+        },
+        "toast": {
+          "loadFailed": "Failed to load",
+          "copied": "Request ID copied",
+          "copiedFields": "Fields JSON copied"
         }
       },
       "metering": {

@@ -1,8 +1,9 @@
 "use client";
 import { adminFetch } from "../../lib/admin-client-auth";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { AuditEvent } from "@agenticx/core-api";
 import {
   Badge,
@@ -92,17 +93,18 @@ type TracePanelState =
   | { status: "error"; message: string }
   | { status: "ok"; spans: TraceSpanRow[] };
 
-export default function AuditPage() {
+function AuditPageContent() {
   const t = useTranslations("pages.ops.audit");
   const ts = useTranslations("shell");
   const tc = useTranslations("common");
+  const searchParams = useSearchParams();
   const [items, setItems] = useState<AuditEvent[]>([]);
   const [selected, setSelected] = useState<AuditEvent | null>(null);
   const [total, setTotal] = useState(0);
   const [chainValid, setChainValid] = useState(true);
   const [chainError, setChainError] = useState<{ at?: string; reason?: string } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [traceId, setTraceId] = useState("");
+  const [traceId, setTraceId] = useState(() => searchParams.get("trace_id")?.trim() ?? "");
   const [sessionId, setSessionId] = useState("");
   const [userId, setUserId] = useState("");
   const [model, setModel] = useState("");
@@ -199,6 +201,11 @@ export default function AuditPage() {
   const loadUserDirectory = useCallback(async () => {
     setUserDirectory(await loadAdminUserDirectory());
   }, []);
+
+  useEffect(() => {
+    const fromQuery = searchParams.get("trace_id")?.trim() ?? "";
+    if (fromQuery) setTraceId(fromQuery);
+  }, [searchParams]);
 
   useEffect(() => {
     void load();
@@ -647,6 +654,11 @@ export default function AuditPage() {
                               >
                                 {t("detail.viewTrace")}
                               </Button>
+                              <Button type="button" variant="outline" size="sm" className="h-7" asChild>
+                                <Link href={`/portal-logs?trace_id=${encodeURIComponent(selected.trace_id)}`}>
+                                  {t("detail.viewPortalLogs")}
+                                </Link>
+                              </Button>
                             </div>
                             {tracePanel.status === "loading" ? (
                               <p className="text-xs text-muted-foreground">{t("detail.traceLoading")}</p>
@@ -787,5 +799,18 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0 text-foreground">{value}</dd>
     </div>
+  );
+}
+
+export default function AuditPage() {
+  const t = useTranslations("pages.ops.audit");
+  return (
+    <Suspense
+      fallback={
+        <div className="p-8 text-center text-muted-foreground">{t("emptyLoadingTitle")}</div>
+      }
+    >
+      <AuditPageContent />
+    </Suspense>
   );
 }

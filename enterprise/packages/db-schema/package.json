@@ -16,6 +16,7 @@
     "db:migrate:pg": "drizzle-kit migrate --config drizzle.pg.config.ts",
     "db:migrate:mysql": "drizzle-kit migrate --config drizzle.mysql.config.ts",
     "db:check:parity": "vitest run src/__tests__/schema-parity.test.ts",
+    "db:purge:portal-logs": "node ./scripts/purge-portal-logs.mjs",
     "db:seed": "node ./scripts/db-seed-dispatch.mjs",
     "db:seed:iam": "node ./scripts/iam-demo-seed.mjs",
     "db:seed:pg": "node ./scripts/db-seed.mjs",

@@ -1,3 +1,5 @@
+import { enqueueLog } from "./db-sink";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export type LogFields = {
@@ -14,6 +16,20 @@ export type LogFields = {
   error_stack?: string;
   [key: string]: unknown;
 };
+
+const STRUCTURED_KEYS = new Set([
+  "event",
+  "trace_id",
+  "user_id",
+  "tenant_id",
+  "session_id",
+  "route",
+  "status",
+  "duration_ms",
+  "error_name",
+  "error_message",
+  "error_stack",
+]);
 
 const LEVEL_ORDER: Record<LogLevel, number> = {
   debug: 10,
@@ -89,14 +105,37 @@ export function log(level: LogLevel, fields: LogFields): void {
   if (LEVEL_ORDER[level] < LEVEL_ORDER[minLevel()]) {
     return;
   }
+  const safe = redact(fields);
   const line = JSON.stringify({
     ts: new Date().toISOString(),
     level,
-    ...redact(fields),
+    ...safe,
   });
+  // stdout first — DB sink is best-effort and must not block or break logging.
   if (level === "error") {
     console.error(line);
   } else {
     console.log(line);
   }
+
+  const extras: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(safe)) {
+    if (!STRUCTURED_KEYS.has(key)) extras[key] = value;
+  }
+  enqueueLog({
+    tenant_id: typeof safe.tenant_id === "string" && safe.tenant_id.trim() ? safe.tenant_id : "unknown",
+    log_time: new Date(),
+    level,
+    event: String(safe.event ?? "unknown"),
+    trace_id: typeof safe.trace_id === "string" ? safe.trace_id : undefined,
+    user_id: typeof safe.user_id === "string" ? safe.user_id : undefined,
+    session_id: typeof safe.session_id === "string" ? safe.session_id : undefined,
+    route: typeof safe.route === "string" ? safe.route : undefined,
+    status: typeof safe.status === "number" ? safe.status : undefined,
+    duration_ms: typeof safe.duration_ms === "number" ? safe.duration_ms : undefined,
+    error_name: typeof safe.error_name === "string" ? safe.error_name : undefined,
+    error_message: typeof safe.error_message === "string" ? safe.error_message : undefined,
+    error_stack: typeof safe.error_stack === "string" ? safe.error_stack : undefined,
+    fields: Object.keys(extras).length > 0 ? extras : undefined,
+  });
 }

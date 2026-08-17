@@ -44,6 +44,7 @@
         "bulkImport": "批量开通",
         "organization": "组织与批量开通",
         "audit": "审计日志",
+        "portalLogs": "Portal 日志",
         "compliance": "合规留存",
         "metering": "用量与额度",
         "quota": "额度控制",
@@ -1104,6 +1105,7 @@
           "session": "Session",
           "requestId": "请求 ID",
           "viewTrace": "查看 Trace",
+          "viewPortalLogs": "查看 Portal 日志",
           "copyRequestId": "复制请求 ID",
           "traceLoading": "正在加载 Trace 明细…",
           "traceEmpty": "该请求暂无 Trace step",
@@ -1141,6 +1143,54 @@
         "toast": {
           "loadFailed": "加载失败",
           "copied": "已复制请求 ID"
+        }
+      },
+      "portalLogs": {
+        "breadcrumb": "Portal 日志",
+        "title": "Portal 日志",
+        "description": "共 {count} 条 · 前台 BFF 结构化请求日志",
+        "refresh": "刷新",
+        "filterTraceId": "请求 ID",
+        "filterTraceIdPlaceholder": "粘贴请求 ID（trace_id）",
+        "filterLevel": "级别",
+        "filterStart": "开始时间",
+        "filterEnd": "结束时间",
+        "levelAll": "全部",
+        "levelWarnPlus": "warn+",
+        "levelError": "仅 error",
+        "applyFilters": "查询",
+        "emptyLoadingTitle": "加载中...",
+        "emptyLoadingDescription": "正在查询 Portal 请求日志",
+        "emptyTitle": "暂无日志",
+        "emptyDescription": "无符合条件的记录",
+        "forbiddenTitle": "无权限",
+        "forbiddenDescription": "需要 audit:read:all 权限",
+        "columns": {
+          "time": "时间",
+          "level": "级别",
+          "event": "事件",
+          "route": "路由",
+          "status": "状态码",
+          "duration": "耗时",
+          "user": "用户"
+        },
+        "detail": {
+          "copyRequestId": "复制请求 ID",
+          "viewAudit": "查看网关审计",
+          "route": "路由",
+          "status": "状态码",
+          "duration": "耗时",
+          "user": "用户",
+          "session": "会话",
+          "errorMessage": "错误信息",
+          "errorStack": "堆栈",
+          "fields": "自定义字段",
+          "copyFields": "复制 JSON"
+        },
+        "toast": {
+          "loadFailed": "加载失败",
+          "copied": "已复制请求 ID",
+          "copiedFields": "已复制字段 JSON"
         }
       },
       "metering": {
