@@ -148,6 +148,7 @@ import { parentBrowsePath } from "../utils/at-mention-display";
 import { extractClipboardImageFiles, withClipboardImageNames } from "../utils/clipboard-images";
 import { clipboardPlainTextForPaste } from "../utils/clipboard-plain-text";
 import { isKnownNonVisionChatModel } from "../utils/model-vision";
+import { getVisionFallbackInfo, type VisionFallbackInfo } from "../utils/vision-fallback";
 import {
   applySessionFindHighlights,
   clearSessionFindHighlights,
@@ -3032,6 +3033,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [pendingForwardMessages, setPendingForwardMessages] = useState<ForwardPendingMessage[]>([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
+  const [attachToastMessage, setAttachToastMessage] = useState(VISION_UNSUPPORTED_TOAST);
+  const [visionFallback, setVisionFallback] = useState<VisionFallbackInfo>({ available: false });
+  const fallbackHintedRef = useRef<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void getVisionFallbackInfo({ apiToken })
+      .then((info) => {
+        if (!cancelled) setVisionFallback(info);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [apiToken, chatProvider, chatModel]);
   const [debateNudgeText, setDebateNudgeText] = useState("");
   const [favoriteToastOpen, setFavoriteToastOpen] = useState(false);
   const [favoriteToastMsg, setFavoriteToastMsg] = useState("");
@@ -8345,10 +8361,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     });
   }, []);
 
-  const parseLocalFile = useCallback((file: File, key: string) => {
-    if (isImageFile(file) && isKnownNonVisionChatModel(chatProvider, chatModel)) {
+  const visionAttachBlocked =
+    isKnownNonVisionChatModel(chatProvider, chatModel) && !visionFallback.available;
+  const notifyImageAttach = () => {
+    if (visionAttachBlocked) {
+      setAttachToastMessage(VISION_UNSUPPORTED_TOAST);
       setAttachToastOpen(true);
       return;
+    }
+    if (isKnownNonVisionChatModel(chatProvider, chatModel) && visionFallback.available) {
+      const key = `${paneId}:${chatProvider}/${chatModel}`;
+      if (fallbackHintedRef.current !== key) {
+        fallbackHintedRef.current = key;
+        setAttachToastMessage(`当前模型不支持看图，将由 ${visionFallback.label || "视觉模型"} 解读图片`);
+        setAttachToastOpen(true);
+      }
+    }
+  };
+
+  const parseLocalFile = useCallback((file: File, key: string) => {
+    if (isImageFile(file) && isKnownNonVisionChatModel(chatProvider, chatModel)) {
+      notifyImageAttach();
+      if (visionAttachBlocked) return;
     }
     if (isVideoFile(file) && isKnownNonVisionChatModel(chatProvider, chatModel)) {
       setAttachToastOpen(true);
@@ -8480,7 +8514,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         errorText: "不支持的文件格式",
       },
     }));
-  }, [chatProvider, chatModel]);
+  }, [chatProvider, chatModel, notifyImageAttach, visionAttachBlocked]);
 
   useEffect(() => {
     if (!voiceInputHint) return;
@@ -12395,7 +12429,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             placement="inline-bottom-center"
             variant="warning"
             open={attachToastOpen}
-            message={VISION_UNSUPPORTED_TOAST}
+            message={attachToastMessage}
             onClose={() => setAttachToastOpen(false)}
             timeoutMs={3200}
           />
@@ -12807,10 +12841,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 for (const file of files) {
                   if (isImageFile(file) && isKnownNonVisionChatModel(chatProvider, chatModel)) {
                     if (!showedVisionToast) {
-                      setAttachToastOpen(true);
+                      notifyImageAttach();
                       showedVisionToast = true;
                     }
-                    continue;
+                    if (visionAttachBlocked) continue;
                   }
                   const key = `${file.name}:${file.size}:${file.lastModified}`;
                   parseLocalFile(file, key);
@@ -12824,8 +12858,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if (raw.length > 0) {
                   if (isKnownNonVisionChatModel(chatProvider, chatModel)) {
                     e.preventDefault();
-                    setAttachToastOpen(true);
-                    return;
+                    notifyImageAttach();
+                    if (visionAttachBlocked) return;
                   }
                   e.preventDefault();
                   const files = withClipboardImageNames(raw);
@@ -12949,10 +12983,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     for (const file of Array.from(files)) {
                       if (isImageFile(file) && isKnownNonVisionChatModel(chatProvider, chatModel)) {
                         if (!showedVisionToast) {
-                          setAttachToastOpen(true);
+                          notifyImageAttach();
                           showedVisionToast = true;
                         }
-                        continue;
+                        if (visionAttachBlocked) continue;
                       }
                       const key = `${file.name}:${file.size}:${file.lastModified}`;
                       parseLocalFile(file, key);

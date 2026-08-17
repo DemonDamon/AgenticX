@@ -45,8 +45,10 @@ export function isKnownNonVisionChatModel(provider: string, model: string): bool
   const slug = modelLower.includes("/") ? (modelLower.split("/").pop() ?? modelLower) : modelLower;
 
   if (KNOWN_TEXT_ONLY_RE.test(combined) || KNOWN_TEXT_ONLY_RE.test(modelLower)) return true;
-  if (p === "minimax" && minimaxM2TextOnlySlug(slug)) return true;
-  if (p === "zhipu" && zhipuTextOnlySlug(slug)) return true;
-  if ((p === "bailian" || p === "dashscope") && bailianQwenTextOnlySlug(slug)) return true;
+  // Known text-only families are matched by model slug regardless of provider,
+  // so custom OpenAI-compatible gateways serving these SKUs are also blocked.
+  if (minimaxM2TextOnlySlug(slug)) return true;
+  if (zhipuTextOnlySlug(slug)) return true;
+  if (bailianQwenTextOnlySlug(slug)) return true;
   return false;
 }

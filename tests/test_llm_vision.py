@@ -30,6 +30,13 @@ def test_zhipu_text_only_glm_skus_are_not_vision_capable() -> None:
     assert is_vision_capable("zhipu", "glm-5") is False
 
 
+def test_known_text_only_skus_are_not_vision_capable_across_providers() -> None:
+    assert is_vision_capable("custom_openai_caiyun", "glm-5.2") is False
+    assert is_vision_capable("custom_openai_x", "qwen3.7-max") is False
+    assert is_vision_capable("custom_openai_x", "glm-4.6v") is True
+    assert is_vision_capable("openai", "gpt-4o") is True
+
+
 def test_zhipu_vision_glm_skus_are_vision_capable() -> None:
     assert is_vision_capable("zhipu", "glm-4v") is True
     assert is_vision_capable("zhipu", "glm-4v-flash") is True
