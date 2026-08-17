@@ -42,7 +42,7 @@ describe("portal log db sink", () => {
   });
 
   it("flushes once when 50 rows are enqueued", async () => {
-    const insertBatch = vi.fn(async () => undefined);
+    const insertBatch = vi.fn(async (_rows: PortalLogRow[]) => undefined);
     __resetDbSinkForTests({ insertBatch });
 
     for (let i = 0; i < 50; i += 1) {
@@ -51,12 +51,12 @@ describe("portal log db sink", () => {
     await vi.waitFor(() => {
       expect(insertBatch).toHaveBeenCalledTimes(1);
     });
-    const firstBatch = insertBatch.mock.calls[0]?.[0] as PortalLogRow[] | undefined;
+    const firstBatch = insertBatch.mock.calls[0]?.[0];
     expect(firstBatch).toHaveLength(50);
   });
 
   it("flushes after FLUSH_INTERVAL_MS with fewer than batch size", async () => {
-    const insertBatch = vi.fn(async () => undefined);
+    const insertBatch = vi.fn(async (_rows: PortalLogRow[]) => undefined);
     __resetDbSinkForTests({ insertBatch });
 
     for (let i = 0; i < 10; i += 1) {
@@ -65,7 +65,7 @@ describe("portal log db sink", () => {
     expect(insertBatch).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(2000);
     expect(insertBatch).toHaveBeenCalledTimes(1);
-    const timedBatch = insertBatch.mock.calls[0]?.[0] as PortalLogRow[] | undefined;
+    const timedBatch = insertBatch.mock.calls[0]?.[0];
     expect(timedBatch).toHaveLength(10);
   });
 
