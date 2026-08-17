@@ -18,6 +18,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agenticx.learning.evidence import (
+    EvidenceState,
+    classify_validation_evidence,
+    collect_session_evidence,
+)
 from agenticx.learning.instinct import Instinct
 
 logger = logging.getLogger("agenticx.learning")
@@ -34,6 +39,10 @@ class SessionSignals:
     error_recovery_count: int = 0
     retry_pattern_count: int = 0
     total_elapsed_ms: int = 0
+    verification_calls: int = 0
+    verification_success: int = 0
+    write_calls: int = 0
+    validation_evidence: str = EvidenceState.UNOBSERVED.value
 
     @property
     def success_rate(self) -> float:
@@ -134,6 +143,12 @@ def extract_signals(observations: list[dict[str, Any]]) -> SessionSignals:
         prev_success = success
 
     signals.unique_tools = len(tools_seen)
+
+    ev = collect_session_evidence(observations)
+    signals.verification_calls = ev.verification_calls
+    signals.verification_success = ev.verification_success
+    signals.write_calls = ev.write_calls
+    signals.validation_evidence = classify_validation_evidence(ev).value
     return signals
 
 

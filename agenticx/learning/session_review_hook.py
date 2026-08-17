@@ -25,6 +25,8 @@ from agenticx.learning.analyzer import (
     extract_signals,
     load_session_observations,
 )
+from agenticx.learning.config import get_learning_config
+from agenticx.learning.loop_review import review_session, write_review
 from agenticx.runtime.hooks import AgentHook
 
 logger = logging.getLogger("agenticx.learning")
@@ -158,12 +160,41 @@ class SessionReviewHook(AgentHook):
     session_summary_hook.
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Strong refs to in-flight fire-and-forget tasks so they are not GC'd.
+        self._loop_review_tasks: set[asyncio.Task] = set()
+
     async def on_agent_end(self, final_text: str, session: Any) -> None:
+        await self._spawn_loop_review(session)  # independent of the skill-review gate
         if not _review_enabled():
             return
         if not self._should_review(session):
             return
         asyncio.create_task(self._run_review(session))
+
+    async def _spawn_loop_review(self, session: Any) -> None:
+        """Fire-and-forget deterministic loop review. Never raises."""
+        if not get_learning_config().get("loop_review_enabled", True):
+            return
+        session_id = str(
+            getattr(session, "session_id", "") or getattr(session, "id", "") or ""
+        ).strip()
+        if not session_id:
+            return
+        session_dir = Path.home() / ".agenticx" / "sessions" / session_id
+        if not session_dir.is_dir():
+            return
+        task = asyncio.ensure_future(self._run_loop_review(session_dir))
+        self._loop_review_tasks.add(task)
+        task.add_done_callback(self._loop_review_tasks.discard)
+
+    async def _run_loop_review(self, session_dir: Path) -> None:
+        try:
+            review = await asyncio.to_thread(review_session, session_dir)
+            await asyncio.to_thread(write_review, review, session_dir)
+        except Exception:
+            logger.debug("loop review failed for %s", session_dir, exc_info=True)
 
     def _should_review(self, session: Any) -> bool:
         """Check nudge interval and min tool calls thresholds."""
