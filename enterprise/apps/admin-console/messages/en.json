@@ -1272,6 +1272,7 @@
           "ioTitle": "Step I/O preview",
           "ioPrompt": "Prompt preview",
           "ioCompletion": "Completion preview",
+          "noStepIo": "No input/output captured for this step",
           "attributes": "Attributes",
           "sources": "Sources",
           "emptyAttrs": "No attributes"

@@ -204,6 +204,7 @@ export default function TraceRuntimePage() {
             ioTitle: t("detail.ioTitle"),
             ioPrompt: t("detail.ioPrompt"),
             ioCompletion: t("detail.ioCompletion"),
+            noStepIo: t("detail.noStepIo"),
             attributes: t("detail.attributes"),
             sources: t("detail.sources"),
             emptyAttrs: t("detail.emptyAttrs"),

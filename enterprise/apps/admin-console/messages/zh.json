@@ -1272,6 +1272,7 @@
           "ioTitle": "步骤 I/O 预览",
           "ioPrompt": "Prompt 预览",
           "ioCompletion": "Completion 预览",
+          "noStepIo": "该步骤未捕获输入输出",
           "attributes": "属性",
           "sources": "来源",
           "emptyAttrs": "无附加属性"
