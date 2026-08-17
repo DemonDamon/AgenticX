@@ -583,7 +583,7 @@ function PortalLogsPageContent() {
           }
         }}
       >
-        <SheetContent className="w-full sm:max-w-4xl overflow-y-auto">
+        <SheetContent className="w-full overflow-y-auto sm:max-w-[90vw]">
           {selectedSession ? (
             <>
               <SheetHeader>
@@ -693,6 +693,8 @@ function PortalLogsPageContent() {
                         totalsTokens: tRuntime("totals.tokens"),
                         totalsDuration: tRuntime("totals.duration"),
                         detailTitle: tRuntime("detail.title"),
+                        contentTitle: tRuntime("detail.contentTitle"),
+                        metadataTitle: tRuntime("detail.metadataTitle"),
                         selectHint: tRuntime("detail.selectHint"),
                         close: tRuntime("detail.close"),
                         status: tRuntime("detail.status"),
@@ -742,7 +744,7 @@ function PortalLogsPageContent() {
       </Sheet>
 
       <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full sm:max-w-4xl overflow-y-auto">
+        <SheetContent className="w-full overflow-y-auto sm:max-w-[90vw]">
           {selected ? (
             <>
               <SheetHeader>
@@ -817,6 +819,8 @@ function PortalLogsPageContent() {
                         totalsTokens: tRuntime("totals.tokens"),
                         totalsDuration: tRuntime("totals.duration"),
                         detailTitle: tRuntime("detail.title"),
+                        contentTitle: tRuntime("detail.contentTitle"),
+                        metadataTitle: tRuntime("detail.metadataTitle"),
                         selectHint: tRuntime("detail.selectHint"),
                         close: tRuntime("detail.close"),
                         status: tRuntime("detail.status"),

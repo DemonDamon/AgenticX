@@ -190,6 +190,8 @@ export default function TraceRuntimePage() {
             collapse: t("collapse"),
             kind: (kind) => t(`kind.${kind}`),
             detailTitle: t("detail.title"),
+            contentTitle: t("detail.contentTitle"),
+            metadataTitle: t("detail.metadataTitle"),
             selectHint: t("detail.selectHint"),
             close: t("detail.close"),
             status: t("detail.status"),
