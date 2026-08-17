@@ -580,10 +580,10 @@ body.agx-settings-nav-resizing {
   --chat-im-avatar-fg: var(--theme-color-text);
   --settings-accent-focus: rgba(var(--theme-color-rgb), 0.5);
   --ui-btn-primary-border: rgba(var(--theme-color-rgb), 0.5);
-  /* 输入框内 @file / skill 占位胶囊：与「主题色」同系，避免蓝/紫与焦点环割裂 */
-  --chat-composer-chip-border: rgba(var(--theme-color-rgb), 0.48);
-  --chat-composer-chip-bg: rgba(var(--theme-color-rgb), 0.2);
-  --chat-composer-chip-fg: color-mix(in srgb, rgb(var(--theme-color-rgb)) 34%, var(--text-primary) 66%);
+  /* Soft fill, no theme-color stroke — white accent used to read as a wireframe. */
+  --chat-composer-chip-border: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --chat-composer-chip-bg: color-mix(in srgb, var(--text-primary) 8%, var(--surface-card));
+  --chat-composer-chip-fg: var(--text-strong);
 }
 
 .agx-composer-inline-chip[data-source-path] {
@@ -605,6 +605,21 @@ body.agx-settings-nav-resizing {
   vertical-align: -0.12em;
   margin-right: 0.22em;
 }
+
+.agx-composer-inline-chip-icon[data-tone="folder"] { color: #fbbf24; }
+.agx-composer-inline-chip-icon[data-tone="document"] { color: #38bdf8; }
+.agx-composer-inline-chip-icon[data-tone="code"] { color: #3b82f6; }
+.agx-composer-inline-chip-icon[data-tone="image"] { color: #e879f9; }
+.agx-composer-inline-chip-icon[data-tone="pdf"] { color: #f87171; }
+.agx-composer-inline-chip-icon[data-tone="file"] { color: var(--text-muted); }
+.agx-composer-inline-chip-icon[data-tone="element"] { color: #10b981; }
+
+:root[data-theme="light"] .agx-composer-inline-chip-icon[data-tone="folder"] { color: #d97706; }
+:root[data-theme="light"] .agx-composer-inline-chip-icon[data-tone="document"] { color: #0284c7; }
+:root[data-theme="light"] .agx-composer-inline-chip-icon[data-tone="code"] { color: #2563eb; }
+:root[data-theme="light"] .agx-composer-inline-chip-icon[data-tone="image"] { color: #c026d3; }
+:root[data-theme="light"] .agx-composer-inline-chip-icon[data-tone="pdf"] { color: #dc2626; }
+:root[data-theme="light"] .agx-composer-inline-chip-icon[data-tone="element"] { color: #059669; }
 
 /* Cursor-style quote chip: compact pill, short truncated preview */
 .agx-composer-quote-chip,
@@ -768,8 +783,8 @@ input[type="radio"] {
 :root[data-theme="light"][data-theme-color] {
   --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.22);
   --chat-im-user-border: rgba(var(--theme-color-rgb), 0.14);
-  --chat-composer-chip-bg: rgba(var(--theme-color-rgb), 0.14);
-  --chat-composer-chip-border: rgba(var(--theme-color-rgb), 0.4);
+  --chat-composer-chip-bg: color-mix(in srgb, var(--text-primary) 6%, var(--surface-card));
+  --chat-composer-chip-border: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 :root[data-theme="dim"][data-theme-color] {
   --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.4);

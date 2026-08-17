@@ -15,6 +15,9 @@ def test_resolve_context_window_known_models():
         ("gemini-2.5-pro", 1_048_576),
         ("gemini-1.5", 1_000_000),
         ("qwen-plus", 128_000),
+        ("glm-5.2", 1_000_000),
+        ("glm-5.1", 200_000),
+        ("glm-4.7", 128_000),
         ("unknown-model", 128_000),
     ]
     for name, expected in cases:

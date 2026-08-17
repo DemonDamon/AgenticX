@@ -22,6 +22,27 @@ export function matchTrailingAtMention(value: string): string | null {
   return match[1] ?? "";
 }
 
+export function composerTextBeforeCaret(value: string, caretOffset = value.length): string {
+  const offset = Math.max(0, Math.min(value.length, caretOffset));
+  return value.slice(0, offset);
+}
+
+/** Replace the @ token ending `textBeforeCaret`; keep `textAfterCaret` intact. */
+export function replaceAtMentionAtCaret(
+  textBeforeCaret: string,
+  textAfterCaret: string,
+  mention: string
+): string {
+  if (matchTrailingAtMention(textBeforeCaret) === null) {
+    const sep = !textBeforeCaret || /\s$/.test(textBeforeCaret) ? "" : " ";
+    return `${textBeforeCaret}${sep}${mention}${textAfterCaret}`;
+  }
+  const prefix = textBeforeCaret.replace(TRAILING_AT_RE, (text) =>
+    `${text.startsWith(" ") ? " " : ""}${mention}`
+  );
+  return `${prefix}${textAfterCaret}`;
+}
+
 export function shouldCommitComposerHasText(prevHasText: boolean, nextValue: string): boolean {
   return prevHasText !== isComposerNonEmpty(nextValue);
 }
@@ -32,8 +53,11 @@ export type ComposerAtMentionState = {
   shouldSearch: boolean;
 };
 
-export function nextComposerAtMentionState(value: string): ComposerAtMentionState {
-  const query = matchTrailingAtMention(value);
+export function nextComposerAtMentionState(
+  value: string,
+  caretOffset = value.length
+): ComposerAtMentionState {
+  const query = matchTrailingAtMention(composerTextBeforeCaret(value, caretOffset));
   if (query === null) {
     return { open: false, query: "", shouldSearch: false };
   }
