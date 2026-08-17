@@ -186,6 +186,12 @@ class LiteLLMProvider(BaseLLMProvider):
             existing.setdefault(k, v)
         kwargs["extra_body"] = existing
 
+    def _apply_sampling_constraints(self, kwargs: Dict[str, Any]) -> None:
+        """Force gpt-5 temperature=1 even when callers pass the Studio default 0.2."""
+        from agenticx.llms.sampling_params import sanitize_chat_call_kwargs
+
+        sanitize_chat_call_kwargs(kwargs, str(self.model or ""))
+
     def invoke(
         self, prompt: Union[str, List[Dict]], tools: Optional[List[Dict]] = None, **kwargs
     ) -> LLMResponse:
@@ -206,6 +212,7 @@ class LiteLLMProvider(BaseLLMProvider):
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
+        self._apply_sampling_constraints(kwargs)
         _no_proxy_client = _build_no_proxy_openai_client(self.api_key, self.base_url)
         if _no_proxy_client is not None:
             kwargs.setdefault("client", _no_proxy_client)
@@ -246,6 +253,7 @@ class LiteLLMProvider(BaseLLMProvider):
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
+        self._apply_sampling_constraints(kwargs)
         _no_proxy_async_client = _build_no_proxy_async_openai_client(self.api_key, self.base_url)
         if _no_proxy_async_client is not None:
             kwargs.setdefault("client", _no_proxy_async_client)
@@ -285,6 +293,7 @@ class LiteLLMProvider(BaseLLMProvider):
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
+        self._apply_sampling_constraints(kwargs)
         response_stream = litellm.completion(
             model=self.model,
             messages=messages,
@@ -356,6 +365,7 @@ class LiteLLMProvider(BaseLLMProvider):
         stream_options["include_usage"] = True
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
+        self._apply_sampling_constraints(kwargs)
         model_lower = str(self.model or "").lower()
         if "minimax" in model_lower:
             extra = kwargs.get("extra_body")
@@ -481,6 +491,7 @@ class LiteLLMProvider(BaseLLMProvider):
         fallbacks = kwargs.pop("fallbacks", self.fallbacks)
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
+        self._apply_sampling_constraints(kwargs)
         _no_proxy_async_client = _build_no_proxy_async_openai_client(self.api_key, self.base_url)
         if _no_proxy_async_client is not None:
             kwargs.setdefault("client", _no_proxy_async_client)
