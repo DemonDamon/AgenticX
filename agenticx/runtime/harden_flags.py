@@ -103,3 +103,39 @@ def fresh_round_loop_enabled() -> bool:
 def group_meta_direct_tools_enabled() -> bool:
     """``AGX_GROUP_META_DIRECT_TOOLS`` / ``group.meta_direct_tools``. Default False."""
     return _resolve_bool("AGX_GROUP_META_DIRECT_TOOLS", "group.meta_direct_tools", False)
+
+
+def group_intent_max_tokens() -> int:
+    """``AGX_GROUP_INTENT_MAX_TOKENS`` / ``group.intent_max_tokens``. Default 1500, clamp 280..8000.
+
+    Reasoning models spend the completion budget on the thinking chain before
+    emitting the routing JSON; 280 tokens truncates them mid-thought.
+    """
+    raw: Optional[int] = None
+    env = os.environ.get("AGX_GROUP_INTENT_MAX_TOKENS", "").strip()
+    if env:
+        try:
+            raw = int(env)
+        except Exception:
+            raw = None
+    if raw is None:
+        raw = _config_int("group.intent_max_tokens")
+    if raw is None:
+        raw = 1500
+    return max(280, min(8000, int(raw)))
+
+
+def group_meta_reply_max_tokens() -> int:
+    """``AGX_GROUP_META_REPLY_MAX_TOKENS`` / ``group.meta_reply_max_tokens``. Default 2000, clamp 500..8000."""
+    raw: Optional[int] = None
+    env = os.environ.get("AGX_GROUP_META_REPLY_MAX_TOKENS", "").strip()
+    if env:
+        try:
+            raw = int(env)
+        except Exception:
+            raw = None
+    if raw is None:
+        raw = _config_int("group.meta_reply_max_tokens")
+    if raw is None:
+        raw = 2000
+    return max(500, min(8000, int(raw)))

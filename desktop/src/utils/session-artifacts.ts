@@ -13,7 +13,7 @@
  */
 
 import type { Message, SubAgent } from "../store";
-import { isAbsoluteFilePath } from "./workspace-file-path";
+import { absoluteTaskspacePath, isAbsoluteFilePath } from "./workspace-file-path";
 
 const OK_WRITE_RE = /OK:\s*(?:wrote|edited)\s+(.+?)(?:\s+\(\d+\s+chars\))?/gi;
 
@@ -67,6 +67,63 @@ function looksLikeArtifactFile(path: string): boolean {
   // Hidden config dirs (`.codewiki`, `.git`) look like "name.ext" to a naive regex — reject.
   if (/^\.[A-Za-z0-9_-]+$/.test(base)) return false;
   return /\.[a-zA-Z0-9]{1,12}$/.test(base);
+}
+
+/** Dirs that live in the session default workspace but are not task outputs. */
+const WORKSPACE_ARTIFACT_SKIP_DIRS = new Set([
+  "memory",
+  ".git",
+  "node_modules",
+  "site-packages",
+  "__pycache__",
+  "task_artifacts",
+]);
+
+export type WorkspaceArtifactListingEntry = {
+  name: string;
+  type: string;
+  path?: string;
+  mount_mode?: string;
+};
+
+/** True when a default-workspace directory should be scanned for artifacts. */
+export function isWalkableWorkspaceArtifactDir(
+  entry: WorkspaceArtifactListingEntry,
+): boolean {
+  if (String(entry.type || "").trim() !== "dir") return false;
+  const name = String(entry.name || "").trim();
+  if (!name || name.startsWith(".")) return false;
+  if (WORKSPACE_ARTIFACT_SKIP_DIRS.has(name.toLowerCase())) return false;
+  if (String(entry.mount_mode || "").trim()) return false;
+  return true;
+}
+
+/**
+ * Map one default-workspace directory listing to artifact file paths.
+ * Group chat often writes files here without persisting file_write rows.
+ */
+export function collectWorkspaceListingArtifactPaths(opts: {
+  workspaceRoot: string;
+  entries: WorkspaceArtifactListingEntry[] | undefined | null;
+}): string[] {
+  const root = String(opts.workspaceRoot || "").trim();
+  if (!root) return [];
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of opts.entries ?? []) {
+    if (String(entry.type || "").trim() !== "file") continue;
+    const name = String(entry.name || "").trim();
+    if (!name || name.startsWith(".")) continue;
+    if (!looksLikeArtifactFile(name)) continue;
+    const rel = String(entry.path || name).trim().replace(/\\/g, "/");
+    if (!rel) continue;
+    const parts = rel.split("/").filter(Boolean);
+    if (parts.some((part) => WORKSPACE_ARTIFACT_SKIP_DIRS.has(part.toLowerCase()))) {
+      continue;
+    }
+    addPath(paths, seen, absoluteTaskspacePath(root, rel));
+  }
+  return paths;
 }
 
 /** Best-effort $HOME for expanding `~/…` during normalize (Node/Electron/Vitest). */

@@ -10,6 +10,8 @@ import { useAppStore } from "../store";
 import {
   collectArtifactPathsFromPersistedSessionFiles,
   collectSessionArtifactPaths,
+  collectWorkspaceListingArtifactPaths,
+  isWalkableWorkspaceArtifactDir,
   parseSessionMessageFilePayload,
 } from "./session-artifacts";
 import { NEAR_ARTIFACT_TASKSPACES_SYNCED } from "./workspace-sidebar-events";
@@ -109,10 +111,84 @@ export async function loadPersistedSessionArtifactPaths(sessionId: string): Prom
     agentMessageRows = [];
   }
 
-  return collectArtifactPathsFromPersistedSessionFiles({
+  const fromMessages = collectArtifactPathsFromPersistedSessionFiles({
     chatHistoryRows,
     agentMessageRows,
   });
+  const fromWorkspace = await loadDefaultWorkspaceArtifactPaths(sid);
+  return collectSessionArtifactPaths([], [], [...fromMessages, ...fromWorkspace]);
+}
+
+const WORKSPACE_ARTIFACT_MAX_DEPTH = 2;
+const WORKSPACE_ARTIFACT_MAX_FILES = 80;
+
+/**
+ * Group chat (and some 1:1 turns) write into the session default workspace
+ * without persisting file_write rows. Scan that tree so「任务产物」matches
+ * what the 工作区 tab already shows.
+ */
+async function loadDefaultWorkspaceArtifactPaths(sessionId: string): Promise<string[]> {
+  const sid = String(sessionId || "").trim();
+  const desktop = window.agenticxDesktop;
+  if (!sid || !desktop?.listTaskspaces || !desktop.listTaskspaceFiles) return [];
+
+  let root = "";
+  try {
+    const listed = await desktop.listTaskspaces(sid);
+    const defaultTs = (listed?.ok ? listed.workspaces : []).find(
+      (item) => String(item?.id || "").trim() === "default",
+    );
+    root = String(defaultTs?.path || "").trim();
+  } catch {
+    return [];
+  }
+  if (!root) return [];
+
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  const queue: Array<{ rel: string; depth: number }> = [{ rel: ".", depth: 0 }];
+
+  while (queue.length > 0 && paths.length < WORKSPACE_ARTIFACT_MAX_FILES) {
+    const item = queue.shift();
+    if (!item) break;
+    let files: Array<{
+      name: string;
+      type: string;
+      path?: string;
+      mount_mode?: string;
+    }> = [];
+    try {
+      const res = await desktop.listTaskspaceFiles({
+        sessionId: sid,
+        taskspaceId: "default",
+        path: item.rel,
+      });
+      if (!res?.ok || !Array.isArray(res.files)) continue;
+      files = res.files;
+    } catch {
+      continue;
+    }
+
+    for (const found of collectWorkspaceListingArtifactPaths({
+      workspaceRoot: root,
+      entries: files,
+    })) {
+      if (seen.has(found)) continue;
+      seen.add(found);
+      paths.push(found);
+      if (paths.length >= WORKSPACE_ARTIFACT_MAX_FILES) break;
+    }
+
+    if (item.depth >= WORKSPACE_ARTIFACT_MAX_DEPTH) continue;
+    for (const entry of files) {
+      if (!isWalkableWorkspaceArtifactDir(entry)) continue;
+      const nextRel = String(entry.path || entry.name || "").trim();
+      if (!nextRel || nextRel === ".") continue;
+      queue.push({ rel: nextRel, depth: item.depth + 1 });
+    }
+  }
+
+  return paths;
 }
 
 export type EnsureArtifactTaskspacesResult = {
