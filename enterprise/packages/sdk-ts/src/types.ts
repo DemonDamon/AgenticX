@@ -79,6 +79,8 @@ export type WebSearchTrace = {
 
 export type ChatChunk = {
   requestId: string;
+  /** Correlates browser → portal → gateway audit / token traces. */
+  traceId?: string;
   delta?: string;
   done: boolean;
   usage?: ChatUsage;
@@ -98,4 +100,5 @@ export type ChatChunk = {
 
 export type SendMessageResult = {
   requestId: string;
+  traceId: string;
 };

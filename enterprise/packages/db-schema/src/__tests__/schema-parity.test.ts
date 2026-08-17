@@ -122,6 +122,7 @@ describe("mysql baseline migration inventory", () => {
       "0019_deep_research_run_coordination.sql",
       "0020_web_search_daily_provider_quota.sql",
       "0021_calculator_enabled.sql",
+      "0022_gateway_audit_trace_id.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -161,6 +162,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 19, tag: "0019_deep_research_run_coordination" }),
       expect.objectContaining({ idx: 20, tag: "0020_web_search_daily_provider_quota" }),
       expect.objectContaining({ idx: 21, tag: "0021_calculator_enabled" }),
+      expect.objectContaining({ idx: 22, tag: "0022_gateway_audit_trace_id" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

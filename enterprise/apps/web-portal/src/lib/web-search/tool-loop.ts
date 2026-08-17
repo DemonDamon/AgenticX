@@ -550,12 +550,16 @@ function extractUpstreamErrorMessage(errText: string, status: number): string {
 async function callGatewayStream(
   deps: GatewayFetchDeps,
   body: Record<string, unknown>,
+  nextTraceStep?: () => string,
 ): Promise<Response> {
   const fetchImpl = deps.fetchImpl ?? fetch;
+  const headers = nextTraceStep
+    ? { ...deps.headers, "x-agenticx-trace-step": nextTraceStep() }
+    : deps.headers;
   try {
     return await fetchImpl(deps.url, {
       method: "POST",
-      headers: deps.headers,
+      headers,
       body: JSON.stringify(body),
       signal: deps.signal,
     });
@@ -1090,6 +1094,9 @@ export async function runWebSearchTurn(
   deps: GatewayFetchDeps,
   options: { preparedSearchPlan?: PreparedSearchPlan } = {},
 ): Promise<Response> {
+  let traceStep = 0;
+  const nextTraceStep = () => String(++traceStep);
+
   const baseBody = stripWebSearchFlag(parsedBody);
   // Sanitize assistant history before search/skip paths so prior <think> chains and
   // stale [N] citation indices never reach the upstream model.
@@ -1168,6 +1175,7 @@ export async function runWebSearchTurn(
       const upstream = await callGatewayStream(
         deps,
         await prepareNoEvidenceAnswerBody(directMessages, details.calculationIntent),
+        nextTraceStep,
       );
       return pipeUpstreamSse(upstream, {
         traceFrame: formatWebSearchTraceSse(trace),
@@ -1182,6 +1190,7 @@ export async function runWebSearchTurn(
       const upstream = await callGatewayStream(
         deps,
         await prepareNoEvidenceAnswerBody(withCurrentTimeContext(originalMessages)),
+        nextTraceStep,
       );
       return pipeWithPrefix(upstream, ADMIN_DISABLED_HINT, {
         version: 1,
@@ -1299,16 +1308,20 @@ export async function runWebSearchTurn(
             ],
           })
         : [];
-      const upstream = await callGatewayStream(deps, {
-        ...rest,
-        stream: true,
-        messages: withCurrentTimeContext(
-          withEvidenceCalculations(
-            withDirectPageContext(originalMessages, evidence),
-            calculations,
+      const upstream = await callGatewayStream(
+        deps,
+        {
+          ...rest,
+          stream: true,
+          messages: withCurrentTimeContext(
+            withEvidenceCalculations(
+              withDirectPageContext(originalMessages, evidence),
+              calculations,
+            ),
           ),
-        ),
-      });
+        },
+        nextTraceStep,
+      );
       return pipeWithSourcesAppendix(upstream, [source], [], trace);
     } catch (error) {
       return gatewayUnavailableResponse(
@@ -1571,6 +1584,7 @@ export async function runWebSearchTurn(
           // just because retrieval broke.
           await prepareNoEvidenceAnswerBody(messages, calculationIntent)
         : { ...rest, stream: true, messages },
+      nextTraceStep,
     );
   } catch (error) {
     return gatewayUnavailableResponse(error instanceof Error ? error.message : "gateway unreachable");

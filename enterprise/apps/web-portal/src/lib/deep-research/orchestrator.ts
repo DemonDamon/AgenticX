@@ -290,6 +290,10 @@ export type DeepResearchDeps = {
   userId?: string;
   sessionId?: string;
   runId?: string;
+  /** Correlates portal, gateway audit, and token traces for this research turn. */
+  traceId?: string;
+  /** Request-local sequence for gateway model calls. */
+  nextTraceStep?: () => string;
   /** Standalone research request resolved from the current conversation. */
   resolvedUserQuery?: string;
   /** Existing route/query confidence; used only to trust a valid clarifier skip. */
@@ -337,7 +341,10 @@ function sseDelta(content: string): string {
   return sseDataFrame({ choices: [{ delta: { content } }] });
 }
 
-function eventStreamResponse(stream: ReadableStream<Uint8Array>): Response {
+function eventStreamResponse(
+  stream: ReadableStream<Uint8Array>,
+  traceId?: string,
+): Response {
   return new Response(stream, {
     status: 200,
     headers: {
@@ -345,6 +352,7 @@ function eventStreamResponse(stream: ReadableStream<Uint8Array>): Response {
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
       "x-accel-buffering": "no",
+      ...(traceId ? { "x-agenticx-trace-id": traceId } : {}),
     },
   });
 }
@@ -494,6 +502,15 @@ export async function mapPool<T, R>(
   return results;
 }
 
+function gatewayCallHeaders(deps: DeepResearchDeps): Record<string, string> {
+  const step = deps.nextTraceStep?.() ?? "1";
+  return {
+    ...deps.headers,
+    ...(deps.traceId ? { "x-agenticx-trace-id": deps.traceId } : {}),
+    "x-agenticx-trace-step": step,
+  };
+}
+
 async function callGatewayStream(
   deps: DeepResearchDeps,
   body: Record<string, unknown>,
@@ -514,7 +531,7 @@ async function callGatewayStream(
   try {
     return await fetchImpl(deps.url, {
       method: "POST",
-      headers: deps.headers,
+      headers: gatewayCallHeaders(deps),
       body: JSON.stringify(body),
       signal,
     });
@@ -543,7 +560,7 @@ async function callGatewayJson(
   try {
     const response = await fetchImpl(deps.url, {
       method: "POST",
-      headers: deps.headers,
+      headers: gatewayCallHeaders(deps),
       body: JSON.stringify({ ...body, stream: false }),
       signal,
     });
@@ -567,12 +584,16 @@ async function pipeWithPrefix(
   upstream: Response,
   prefixText: string,
   signal?: AbortSignal,
+  traceId?: string,
 ): Promise<Response> {
   if (!upstream.ok || !upstream.body) {
     const errText = await upstream.text().catch(() => "gateway error");
     return new Response(errText, {
       status: upstream.status || 502,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(traceId ? { "x-agenticx-trace-id": traceId } : {}),
+      },
     });
   }
   const stream = new ReadableStream<Uint8Array>({
@@ -596,10 +617,10 @@ async function pipeWithPrefix(
       }
     },
   });
-  return eventStreamResponse(stream);
+  return eventStreamResponse(stream, traceId);
 }
 
-function textOnlyDoneStream(content: string): Response {
+function textOnlyDoneStream(content: string, traceId?: string): Response {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const encoder = new TextEncoder();
@@ -612,7 +633,7 @@ function textOnlyDoneStream(content: string): Response {
       }
     },
   });
-  return eventStreamResponse(stream);
+  return eventStreamResponse(stream, traceId);
 }
 
 function citationsToHits(citations: Citation[]): WebSearchHit[] {
@@ -692,6 +713,18 @@ export async function runDeepResearchTurn(
   parsedBody: Record<string, unknown>,
   deps: DeepResearchDeps,
 ): Promise<Response> {
+  let traceStep = 0;
+  const nextTraceStep = () => String(++traceStep);
+  const traceId = deps.traceId;
+  deps = {
+    ...deps,
+    nextTraceStep,
+    headers: {
+      ...deps.headers,
+      ...(traceId ? { "x-agenticx-trace-id": traceId } : {}),
+    },
+  };
+
   const baseBody = stripFlags(parsedBody);
   const researchModel =
     typeof baseBody.model === "string" && baseBody.model.trim()
@@ -740,7 +773,12 @@ export async function runDeepResearchTurn(
       stream: true,
       messages: originalMessages,
     });
-    return pipeWithPrefix(upstream, DEEP_RESEARCH_DISABLED_HINT, deps.signal);
+    return pipeWithPrefix(
+      upstream,
+      DEEP_RESEARCH_DISABLED_HINT,
+      deps.signal,
+      traceId,
+    );
   }
 
   if (!searchCfg.enabled) {
@@ -749,7 +787,12 @@ export async function runDeepResearchTurn(
       stream: true,
       messages: originalMessages,
     });
-    return pipeWithPrefix(upstream, DEEP_RESEARCH_SEARCH_DISABLED_HINT, deps.signal);
+    return pipeWithPrefix(
+      upstream,
+      DEEP_RESEARCH_SEARCH_DISABLED_HINT,
+      deps.signal,
+      traceId,
+    );
   }
 
   const encoder = new TextEncoder();
@@ -1057,7 +1100,7 @@ export async function runDeepResearchTurn(
           try {
             clarifyResult = await clarifyFn({
               url: deps.url,
-              headers: deps.headers,
+              headers: gatewayCallHeaders(deps),
               body: baseBody,
               userQuery,
               todayLine,
@@ -1195,7 +1238,7 @@ export async function runDeepResearchTurn(
         } else {
           plan = await planFn({
             url: deps.url,
-            headers: deps.headers,
+            headers: gatewayCallHeaders(deps),
             body: baseBody,
             userQuery: planningContext,
             todayLine,
@@ -2593,7 +2636,7 @@ export async function runDeepResearchTurn(
     },
   });
 
-  return eventStreamResponse(stream);
+  return eventStreamResponse(stream, traceId);
 }
 
 /** Test helper: plain failure stream when all searches fail (exported for AC). */

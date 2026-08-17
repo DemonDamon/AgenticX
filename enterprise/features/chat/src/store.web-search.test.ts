@@ -52,7 +52,7 @@ class CapturingClient implements ChatClient {
   async sendMessage(req: ChatRequest): Promise<SendMessageResult> {
     this.requests.push(req);
     this.seq += 1;
-    return { requestId: `req-${this.seq}` };
+    return { requestId: `req-${this.seq}`, traceId: `01TESTTRACEID0000000000${String(this.seq).padStart(2, "0")}` };
   }
 
   async *stream(requestId: string): AsyncIterable<ChatChunk> {

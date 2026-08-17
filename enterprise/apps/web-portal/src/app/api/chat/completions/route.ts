@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { isTraceId, newTraceId } from "@agenticx/sdk-ts";
 import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
@@ -97,6 +98,9 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  const incomingTraceId = request.headers.get("x-agenticx-trace-id")?.trim() ?? "";
+  const traceId = isTraceId(incomingTraceId) ? incomingTraceId : newTraceId();
 
   const ctx = toChatHistoryContext(session);
   const owned = await isChatSessionOwned(ctx, chatSessionId);
@@ -220,6 +224,8 @@ export async function POST(request: Request) {
     "x-dept-id": session.deptId ?? "",
     "x-user-email": session.email,
     "x-session-id": session.sessionId,
+    "x-agenticx-trace-id": traceId,
+    "x-agenticx-trace-step": "1",
     ...(providerHint ? { "x-agenticx-provider": providerHint } : {}),
   };
 
@@ -379,6 +385,7 @@ export async function POST(request: Request) {
       tenantId: session.tenantId,
       userId: session.userId,
       sessionId: chatSessionId,
+      traceId,
       resolvedUserQuery: turnPlan.researchQuery,
       intentConfidence: turnPlan.intentConfidence,
       reserveProviderCall: () => reserveTenantDailySearchProviderCall(session.tenantId),
@@ -490,9 +497,13 @@ export async function POST(request: Request) {
         error: {
           code: "50301",
           message: `Gateway 不可用（${GATEWAY_COMPLETIONS_URL}）：${detail}。请确认已执行 bash scripts/start-dev.sh 且 :8088 网关进程正常。`,
+          trace_id: traceId,
         },
       },
-      { status: 503 },
+      {
+        status: 503,
+        headers: { "x-agenticx-trace-id": traceId },
+      },
     );
   }
 
@@ -502,6 +513,7 @@ export async function POST(request: Request) {
       status: upstream.status,
       headers: {
         "content-type": "application/json",
+        "x-agenticx-trace-id": traceId,
       },
     });
   }
@@ -512,6 +524,7 @@ export async function POST(request: Request) {
       "content-type": upstream.headers.get("content-type") ?? "text/event-stream",
       "cache-control": "no-cache",
       connection: "keep-alive",
+      "x-agenticx-trace-id": traceId,
     },
   });
 }

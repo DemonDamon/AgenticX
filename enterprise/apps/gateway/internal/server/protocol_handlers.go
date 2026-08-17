@@ -164,7 +164,7 @@ func (s *Server) dispatchProtocol(
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
 		estimatedInputTokens: estimatedInputTokens, reservedTokens: reserveTokens,
 		inboundProtocol: inboundProtocolLabel(session.inbound),
-		budgetCheck: &budgetCheck,
+		budgetCheck:     &budgetCheck,
 	}, session) {
 		return
 	}
@@ -459,6 +459,7 @@ func (s *Server) protocolAuditEvent(
 		UserEmail:        identity.UserEmail,
 		DepartmentID:     identity.DepartmentID,
 		SessionID:        identity.SessionID,
+		TraceID:          identity.TraceID,
 		ClientType:       "multi-protocol",
 		ClientIP:         r.RemoteAddr,
 		Provider:         decision.Provider,

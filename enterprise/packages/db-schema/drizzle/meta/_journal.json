@@ -330,6 +330,13 @@
       "when": 1786953600000,
       "tag": "0047_calculator_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1787040000000,
+      "tag": "0048_gateway_audit_trace_id",
+      "breakpoints": true
     }
   ]
 }

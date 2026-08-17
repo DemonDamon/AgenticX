@@ -1,5 +1,6 @@
 import type { ChatClient } from "./client";
 import type { DeepResearchEvent } from "../deep-research";
+import { newTraceId } from "../trace/trace-id";
 import type {
   ChatChunk,
   ChatMessage,
@@ -12,6 +13,7 @@ import { toGatewayMessage } from "./multimodal";
 type PendingRequest = {
   request: ChatRequest;
   cancelled: boolean;
+  traceId: string;
 };
 
 type HttpChatClientOptions = {
@@ -238,11 +240,13 @@ export class HttpChatClient implements ChatClient {
 
   public async sendMessage(req: ChatRequest): Promise<SendMessageResult> {
     const requestId = makeRequestId();
+    const traceId = newTraceId();
     this.pending.set(requestId, {
       request: req,
       cancelled: false,
+      traceId,
     });
-    return { requestId };
+    return { requestId, traceId };
   }
 
   public async *stream(requestId: string): AsyncIterable<ChatChunk> {
@@ -266,6 +270,7 @@ export class HttpChatClient implements ChatClient {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          "x-agenticx-trace-id": pending.traceId,
           ...(pending.request.sessionId?.trim()
             ? { "x-chat-session-id": pending.request.sessionId.trim() }
             : {}),
@@ -287,6 +292,7 @@ export class HttpChatClient implements ChatClient {
         yield {
           requestId,
           done: true,
+          traceId: pending.traceId,
           error: parsed,
         };
         return;
@@ -297,6 +303,7 @@ export class HttpChatClient implements ChatClient {
         yield {
           requestId,
           done: true,
+          traceId: pending.traceId,
           error: {
             code: "50000",
             message: "empty gateway stream",
@@ -371,6 +378,7 @@ export class HttpChatClient implements ChatClient {
             yield {
               requestId,
               done: true,
+              traceId: pending.traceId,
               error: {
                 code: chunk.error.code ?? "50000",
                 // Preserve structured Gateway/upstream errors. Only exceptions thrown
@@ -489,6 +497,7 @@ export class HttpChatClient implements ChatClient {
         yield {
           requestId,
           done: true,
+          traceId: pending.traceId,
           error: {
             code: "50000",
             message: normalizeTransportErrorMessage(

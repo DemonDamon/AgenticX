@@ -111,7 +111,7 @@ func (p *PgWriter) Insert(ctx context.Context, e Event) error {
 	query := `
 INSERT INTO gateway_audit_events (
   id, tenant_id, event_time, event_type,
-  user_id, user_email, department_id, session_id,
+  user_id, user_email, department_id, session_id, trace_id,
   client_type, client_ip, provider, model, route,
   channel_id, channel_key_ref, api_token_id,
   input_tokens, output_tokens, total_tokens, latency_ms,
@@ -122,7 +122,7 @@ INSERT INTO gateway_audit_events (
   created_at, updated_at
 ) VALUES (
   ?,?,?,?,
-  ?,?,?,?,
+  ?,?,?,?,?,
   ?,?,?,?,?,
   ?,?,?,
   ?,?,?,?,
@@ -142,6 +142,7 @@ INSERT INTO gateway_audit_events (
 		nullStr(e.UserEmail),
 		nullStr(e.DepartmentID),
 		nullStr(e.SessionID),
+		nullStr(e.TraceID),
 		ct,
 		nullStr(e.ClientIP),
 		nullStr(e.Provider),

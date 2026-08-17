@@ -71,6 +71,7 @@ func (s *Server) emitBudgetAuditIfNeeded(identity requestIdentity, check quota.C
 		UserEmail:    identity.UserEmail,
 		DepartmentID: identity.DepartmentID,
 		SessionID:    identity.SessionID,
+		TraceID:      identity.TraceID,
 		ClientType:   "web-portal",
 		ClientIP:     r.RemoteAddr,
 		Route:        check.Description,
