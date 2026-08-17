@@ -31,6 +31,7 @@ function toCsv(items: AuditEvent[]): string {
     "event_time",
     "event_type",
     "user_id",
+    "trace_id",
     "department_id",
     "provider",
     "model",
@@ -46,6 +47,7 @@ function toCsv(items: AuditEvent[]): string {
       item.event_time,
       item.event_type,
       item.user_id ?? "",
+      item.trace_id ?? "",
       item.department_id ?? "",
       item.provider ?? "",
       item.model ?? "",
@@ -141,6 +143,8 @@ export class LocalAuditStore implements AuditStore {
     const filtered = events.filter((event) => {
       if (!this.canReadEvent(actor, event)) return false;
       if (input.user_id && event.user_id !== input.user_id) return false;
+      if (input.trace_id && event.trace_id !== input.trace_id) return false;
+      if (input.session_id && event.session_id !== input.session_id) return false;
       if (input.department_id && event.department_id !== input.department_id) return false;
       if (input.provider && event.provider !== input.provider) return false;
       if (input.model && event.model !== input.model) return false;

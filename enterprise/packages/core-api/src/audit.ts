@@ -36,6 +36,7 @@ export interface AuditEvent {
   user_email?: string;
   department_id?: string;
   session_id?: string;
+  trace_id?: string;
   client_type: AuditClientType;
   client_ip?: string;
 
@@ -76,6 +77,8 @@ export interface AuditEvent {
 export type AuditQueryInput = {
   tenant_id: string;
   user_id?: string;
+  trace_id?: string;
+  session_id?: string;
   department_id?: string;
   provider?: string;
   model?: string;

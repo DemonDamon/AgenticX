@@ -1067,6 +1067,8 @@
         "refresh": "Refresh",
         "searchPlaceholder": "Search event type / user / model...",
         "advancedFilter": "Advanced filter",
+        "filterTraceId": "Request ID",
+        "filterSessionId": "Session ID",
         "filterUserId": "User ID",
         "filterModel": "Model",
         "filterPolicy": "Policy hit",
@@ -1100,6 +1102,23 @@
           "provider": "Provider",
           "tenant": "Tenant",
           "session": "Session",
+          "requestId": "Request ID",
+          "viewTrace": "View Trace",
+          "copyRequestId": "Copy request ID",
+          "traceLoading": "Loading Trace steps…",
+          "traceEmpty": "No Trace steps for this request",
+          "traceNoPermission": "Missing metering:read permission; Trace details unavailable",
+          "traceNotFound": "No Trace details for this request (may not have been metered)",
+          "traceLoadFailed": "Failed to load Trace",
+          "traceColumns": {
+            "stepNo": "step",
+            "stepKind": "kind",
+            "status": "status",
+            "model": "model",
+            "totalTokens": "tokens",
+            "durationMs": "duration(ms)",
+            "error": "error"
+          },
           "inputTokens": "Input tokens",
           "outputTokens": "Output tokens",
           "totalTokens": "Total tokens",
@@ -1113,12 +1132,15 @@
           "noPolicyDescription": "This event is compliant"
         },
         "filterLabels": {
+          "trace": "Request ID: ",
+          "session": "Session: ",
           "user": "User: ",
           "model": "Model: ",
           "policy": "Policy: "
         },
         "toast": {
-          "loadFailed": "Failed to load"
+          "loadFailed": "Failed to load",
+          "copied": "Request ID copied"
         }
       },
       "metering": {

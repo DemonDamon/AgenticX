@@ -1067,6 +1067,8 @@
         "refresh": "刷新",
         "searchPlaceholder": "按事件类型 / 用户 / 模型搜索...",
         "advancedFilter": "高级筛选",
+        "filterTraceId": "请求 ID",
+        "filterSessionId": "会话 ID",
         "filterUserId": "用户 ID",
         "filterModel": "模型",
         "filterPolicy": "策略命中",
@@ -1100,6 +1102,23 @@
           "provider": "Provider",
           "tenant": "租户",
           "session": "Session",
+          "requestId": "请求 ID",
+          "viewTrace": "查看 Trace",
+          "copyRequestId": "复制请求 ID",
+          "traceLoading": "正在加载 Trace 明细…",
+          "traceEmpty": "该请求暂无 Trace step",
+          "traceNoPermission": "无 metering:read 权限，无法查看 Trace 明细",
+          "traceNotFound": "该请求未产生 Trace 明细（可能未经过计费上报）",
+          "traceLoadFailed": "加载 Trace 失败",
+          "traceColumns": {
+            "stepNo": "step",
+            "stepKind": "类型",
+            "status": "状态",
+            "model": "模型",
+            "totalTokens": "tokens",
+            "durationMs": "耗时(ms)",
+            "error": "错误"
+          },
           "inputTokens": "Input tokens",
           "outputTokens": "Output tokens",
           "totalTokens": "Total tokens",
@@ -1113,12 +1132,15 @@
           "noPolicyDescription": "本次事件合规"
         },
         "filterLabels": {
+          "trace": "请求 ID：",
+          "session": "会话：",
           "user": "用户：",
           "model": "模型：",
           "policy": "策略："
         },
         "toast": {
-          "loadFailed": "加载失败"
+          "loadFailed": "加载失败",
+          "copied": "已复制请求 ID"
         }
       },
       "metering": {

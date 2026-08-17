@@ -5,6 +5,7 @@ import {
   insertGatewayAuditExportEvent,
 } from "../../../../lib/audit-service";
 import { requireAdminScope } from "../../../../lib/admin-auth";
+import { parseOptionalAuditId } from "../../../../lib/audit-query-filters";
 import { takeToken } from "../../../../lib/rate-limit";
 
 export async function POST(request: Request) {
@@ -19,6 +20,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ code: "40001", message: "invalid json" }, { status: 400 });
   }
 
+  const traceId = parseOptionalAuditId(body.trace_id, "trace_id");
+  if (!traceId.ok) {
+    return NextResponse.json({ code: "40001", message: traceId.message }, { status: 400 });
+  }
+  const sessionId = parseOptionalAuditId(body.session_id, "session_id");
+  if (!sessionId.ok) {
+    return NextResponse.json({ code: "40001", message: sessionId.message }, { status: 400 });
+  }
+
   const actor = await buildAuditActor(guard.session, guard.scopes);
   const rateKey = `audit-export:${actor.tenantId}:${actor.userId}`;
   if (!takeToken(rateKey, 3, 60_000)) {
@@ -28,6 +38,8 @@ export async function POST(request: Request) {
   const input = {
     tenant_id: guard.session.tenantId,
     user_id: typeof body.user_id === "string" ? body.user_id : undefined,
+    trace_id: traceId.value,
+    session_id: sessionId.value,
     department_id: typeof body.department_id === "string" ? body.department_id : undefined,
     provider: typeof body.provider === "string" ? body.provider : undefined,
     model: typeof body.model === "string" ? body.model : undefined,

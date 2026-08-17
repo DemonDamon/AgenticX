@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildAuditActor, queryAudit } from "../../../../lib/audit-service";
 import { requireAdminSomeScope } from "../../../../lib/admin-auth";
+import { parseOptionalAuditId } from "../../../../lib/audit-query-filters";
 
 export async function POST(request: Request) {
   const guard = await requireAdminSomeScope(["audit:read", "audit:read:all", "audit:read:dept", "audit:manage"]);
@@ -13,11 +14,23 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ code: "40001", message: "invalid json" }, { status: 400 });
   }
+
+  const traceId = parseOptionalAuditId(body.trace_id, "trace_id");
+  if (!traceId.ok) {
+    return NextResponse.json({ code: "40001", message: traceId.message }, { status: 400 });
+  }
+  const sessionId = parseOptionalAuditId(body.session_id, "session_id");
+  if (!sessionId.ok) {
+    return NextResponse.json({ code: "40001", message: sessionId.message }, { status: 400 });
+  }
+
   try {
     const actor = await buildAuditActor(guard.session, guard.scopes);
     const result = await queryAudit(actor, {
       tenant_id: guard.session.tenantId,
       user_id: typeof body.user_id === "string" ? body.user_id : undefined,
+      trace_id: traceId.value,
+      session_id: sessionId.value,
       department_id: typeof body.department_id === "string" ? body.department_id : undefined,
       provider: typeof body.provider === "string" ? body.provider : undefined,
       model: typeof body.model === "string" ? body.model : undefined,
