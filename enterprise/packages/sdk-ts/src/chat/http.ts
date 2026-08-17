@@ -290,6 +290,9 @@ export class HttpChatClient implements ChatClient {
           ...(pending.request.webSearch ? { agenticx_web_search: true } : {}),
           ...(pending.request.deepResearch ? { agenticx_deep_research: true } : {}),
           ...(pending.request.deepResearchAuto ? { agenticx_deep_research_auto: true } : {}),
+          ...(pending.request.deepResearchInteraction?.trim()
+            ? { agenticx_deep_research_interaction: pending.request.deepResearchInteraction.trim() }
+            : {}),
         }),
         signal: controller.signal,
       });

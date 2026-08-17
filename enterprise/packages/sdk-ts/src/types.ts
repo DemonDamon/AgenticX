@@ -31,6 +31,8 @@ export type ChatRequest = {
   /** User toggled deep research in the composer; BFF runs the multi-stage research pipeline. */
   deepResearch?: boolean;
   deepResearchAuto?: boolean;
+  /** Deep-research interaction preference: auto / direct / card_first / plan_chat. */
+  deepResearchInteraction?: string;
 };
 
 export type ChatUsage = {

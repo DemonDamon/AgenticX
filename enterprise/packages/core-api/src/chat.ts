@@ -195,6 +195,30 @@ export function sanitizeWebSearchTrace(raw: unknown): WebSearchTrace | undefined
   };
 }
 
+/** User-facing research plan snapshot (no model chain-of-thought). */
+export type ResearchPlanSnapshot = {
+  version: number;
+  objective: string;
+  scope: string[];
+  subQuestions: Array<{
+    id: string;
+    title: string;
+    purpose?: string;
+  }>;
+  sourceStrategy: string[];
+  deliverables: string[];
+  assumptions: string[];
+};
+
+/** Run-level interaction profile: depth, clarify mode, and plan visibility are independent. */
+export type ResearchInteractionProfile = {
+  researchDepth: "light" | "standard" | "deep";
+  clarifyMode: "card" | "chat" | "none";
+  clarifyBudget: { maxRounds: number; allowMidRun: boolean };
+  planVisibility: "hidden" | "preview" | "editable" | "chat_editable";
+  assumptions: string[];
+};
+
 /** Deep-research workbench state attached to an assistant message. */
 export type DeepResearchEventPayload =
   | { type: "run_started"; runId: string }
@@ -214,6 +238,35 @@ export type DeepResearchEventPayload =
       allowCustom?: boolean;
       /** default true；false = single-select chips */
       multiSelect?: boolean;
+      /** 0 = preflight, 1..n = midrun; absent means preflight for legacy events. */
+      roundIndex?: number;
+      phase?: "preflight" | "midrun";
+      /** High-impact ambiguity that cannot be silently skipped. */
+      blocking?: boolean;
+    }
+  | {
+      type: "clarify_chat";
+      runId: string;
+      roundIndex: number;
+      phase: "preflight" | "midrun" | "plan";
+      promptText: string;
+      resolvedSlots?: Record<string, string>;
+    }
+  | {
+      type: "research_profile";
+      runId: string;
+      researchDepth: "light" | "standard" | "deep";
+      clarifyMode: "card" | "chat" | "none";
+      clarifyBudget: { maxRounds: number; allowMidRun: boolean };
+      planVisibility: "hidden" | "preview" | "editable" | "chat_editable";
+      assumptions: string[];
+    }
+  | {
+      type: "research_plan";
+      runId: string;
+      action: "proposed" | "updated" | "approved";
+      version: number;
+      plan: ResearchPlanSnapshot;
     }
   | { type: "lane_started"; laneId: string; title: string; index: number; total: number }
   | { type: "lane_progress"; laneId: string; message: string; sourcesCollected?: number }
@@ -302,6 +355,12 @@ export type ChatMessageDeepResearch = {
   artifactIds?: string[];
   /** User answers from clarify panel (client + persist). */
   clarifyAnswers?: Record<string, string>;
+  /** Latest interaction profile (from research_profile event). */
+  profile?: ResearchInteractionProfile;
+  /** Latest plan snapshot and version (from research_plan event). */
+  plan?: ResearchPlanSnapshot;
+  planVersion?: number;
+  assumptions?: string[];
 };
 
 export type ChatMessage = {
