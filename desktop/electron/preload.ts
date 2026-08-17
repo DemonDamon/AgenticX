@@ -521,6 +521,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("native-connector-status", { id }),
   nativeConnectorTmeetLogin: async () =>
     ipcRenderer.invoke("native-connector-tmeet-login"),
+  nativeConnectorTmeetCancel: async () =>
+    ipcRenderer.invoke("native-connector-tmeet-cancel"),
   nativeConnectorTmeetLogout: async () =>
     ipcRenderer.invoke("native-connector-tmeet-logout"),
   nativeConnectorGithubLogin: async () =>

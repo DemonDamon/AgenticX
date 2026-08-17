@@ -1160,6 +1160,13 @@ declare global {
         label: string;
         error?: string;
       }>;
+      nativeConnectorTmeetCancel: () => Promise<{
+        ok: boolean;
+        available: boolean;
+        connected: boolean;
+        label: string;
+        error?: string;
+      }>;
       nativeConnectorTmeetLogout: () => Promise<{
         ok: boolean;
         available: boolean;

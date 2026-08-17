@@ -395,8 +395,12 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
         available: result.available,
         connected: result.connected,
         label: result.label,
-        error: result.error,
+        error: result.error === "已取消" ? undefined : result.error,
       });
+      if (result.error === "已取消") {
+        setTmeetPhase("");
+        return;
+      }
       if (!result.ok || !result.connected) {
         setDialogError(result.error || "腾讯会议授权未完成");
         return;
@@ -406,6 +410,23 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     } finally {
       setTmeetBusy(false);
     }
+  };
+
+  const handleTmeetCancel = async () => {
+    const shouldCancelLogin = tmeetBusy && !tmeetStatus.connected;
+    // Close immediately so a broken system browser can never trap the user in
+    // Settings while the main process tears down the CLI in the background.
+    setTmeetPhase("");
+    setDialogError("");
+    setSelectedId(null);
+    if (shouldCancelLogin) {
+      try {
+        await window.agenticxDesktop.nativeConnectorTmeetCancel();
+      } catch {
+        // Best-effort cancellation: the dialog must remain dismissible.
+      }
+    }
+    setTmeetBusy(false);
   };
 
   const handleTmeetLogout = async () => {
@@ -834,15 +855,14 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       <Modal
         open={selected?.id === "tencent-meeting"}
         title="腾讯会议连接器"
-        onClose={tmeetBusy ? undefined : () => setSelectedId(null)}
+        onClose={() => void handleTmeetCancel()}
         panelClassName="w-[min(560px,94vw)] bg-surface-panel"
         footer={
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              className="rounded-md border border-border px-3 py-2 text-xs text-text-muted hover:bg-surface-hover"
-              disabled={tmeetBusy}
-              onClick={() => setSelectedId(null)}
+              className="rounded-md border border-border px-3 py-2 text-xs text-text-primary transition hover:bg-surface-hover"
+              onClick={() => void handleTmeetCancel()}
             >
               取消
             </button>

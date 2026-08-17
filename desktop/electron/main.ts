@@ -2051,6 +2051,8 @@ let wechatSidecarPort = 0;
 let tmeetAuthProcess: ChildProcess | null = null;
 let tmeetAuthBusy = false;
 let tmeetInstallPromise: Promise<string> | null = null;
+/** Active Tencent Meeting Device Flow canceller — resolves login and kills the CLI process. */
+let cancelActiveTmeetLogin: ((reason?: string) => Promise<void>) | null = null;
 let tmeetBinaryValidationCache: {
   path: string;
   size: number;
@@ -3557,6 +3559,7 @@ function startTmeetLogin(): Promise<NativeConnectorStatusResult> {
     const finish = async (result?: NativeConnectorStatusResult, terminate = false) => {
       if (settled) return;
       settled = true;
+      cancelActiveTmeetLogin = null;
       if (timeout) clearTimeout(timeout);
       const currentProc = proc;
       if (terminate && currentProc && currentProc.exitCode === null) {
@@ -3572,8 +3575,24 @@ function startTmeetLogin(): Promise<NativeConnectorStatusResult> {
       if (proc && tmeetAuthProcess === proc) tmeetAuthProcess = null;
       tmeetAuthBusy = false;
       const status = result ?? (await getTmeetStatus());
-      sendTmeetProgress(status.connected ? "success" : "error");
+      if (status.error === "已取消") {
+        sendTmeetProgress("disconnected");
+      } else {
+        sendTmeetProgress(status.connected ? "success" : "error");
+      }
       resolve(status);
+    };
+    cancelActiveTmeetLogin = async (reason) => {
+      await finish(
+        {
+          ok: false,
+          available: true,
+          connected: false,
+          label: "可用",
+          error: reason || "已取消",
+        },
+        true,
+      );
     };
     const consume = (chunk: Buffer) => {
       output = `${output}${chunk.toString("utf8")}`.slice(-32768);
@@ -3596,6 +3615,9 @@ function startTmeetLogin(): Promise<NativeConnectorStatusResult> {
       }
     };
     void ensureTmeetBinaryInstalled().then((binaryPath) => {
+      // Cancellation may happen while the first-use CLI download is pending.
+      // Never spawn an authorization process after that login attempt settled.
+      if (settled) return;
       proc = spawn(binaryPath, ["auth", "login", "--no-browser"], {
         stdio: ["ignore", "pipe", "pipe"],
         env: {
@@ -7915,6 +7937,24 @@ function registerIpc(): void {
         error: error instanceof Error ? error.message : String(error),
       };
     }
+  });
+
+  ipcMain.handle("native-connector-tmeet-cancel", async () => {
+    if (cancelActiveTmeetLogin) {
+      await cancelActiveTmeetLogin("已取消");
+      return { ok: true, available: true, connected: false, label: "可用" };
+    }
+    if (tmeetAuthProcess && tmeetAuthProcess.exitCode === null) {
+      try {
+        tmeetAuthProcess.kill("SIGTERM");
+      } catch {
+        // ignore
+      }
+      tmeetAuthProcess = null;
+      tmeetAuthBusy = false;
+    }
+    sendTmeetProgress("disconnected");
+    return { ok: true, available: true, connected: false, label: "可用" };
   });
 
   ipcMain.handle("native-connector-tmeet-logout", async () => {
