@@ -662,7 +662,13 @@ def _build_url_vision_capability_block() -> str:
         "follow up with `view_image(target=...)` using either an image URL from "
         "`[discovered_images]`, a local file path produced by other tools, or a `data:image/*` URL.\n"
         "- Only call `view_image` when visual content is necessary to answer; do not "
-        "preemptively view every image. Each turn caps total visual attachments at 4.\n\n"
+        "preemptively view every image. Each turn caps total visual attachments at 4.\n"
+        "- If the current model is text-only (view_image reports the model does not support "
+        "vision, or a [系统提示] notice says attached images were omitted), call "
+        "`analyze_image(target=..., question=...)` instead — `target` may be omitted to read "
+        "the most recently attached image. Use the returned textual description to continue "
+        "the task (e.g. web_search). Never tell the user you cannot see an image before "
+        "trying analyze_image.\n\n"
     )
 
 

@@ -3111,6 +3111,31 @@ class AgentRuntime:
                 user_content = f"{user_content}{attached_hint}"
             elif isinstance(user_content, list):
                 user_content = list(user_content) + [{"type": "text", "text": attached_hint}]
+        if history_user_attachments and not is_vision_capable(
+            str(getattr(session, "provider_name", "") or ""),
+            str(getattr(session, "model_name", "") or ""),
+        ):
+            _img_rows = [
+                a
+                for a in history_user_attachments
+                if isinstance(a, dict)
+                and (
+                    str(a.get("mime_type", "") or "").startswith("image/")
+                    or str(a.get("data_url", "") or "").startswith("data:image/")
+                )
+            ]
+            if _img_rows:
+                _names = ", ".join(str(a.get("name", "") or "image") for a in _img_rows[:4])
+                _omit_notice = (
+                    f"\n[系统提示] 用户本轮附带了 {len(_img_rows)} 张图片（{_names}），"
+                    "但当前模型不支持视觉输入，图片未包含在你的输入中。"
+                    "请调用 analyze_image（target 可省略，默认读取最近附图；可用 question 指定关注点）"
+                    "获取图片内容解读后继续任务；不要回复用户「我看不到图片」。"
+                )
+                if isinstance(user_content, str):
+                    user_content = f"{user_content}{_omit_notice}"
+                elif isinstance(user_content, list):
+                    user_content = list(user_content) + [{"type": "text", "text": _omit_notice}]
         messages.append({"role": "user", "content": user_content})
         if persist_user_message:
             # Store rich content (list with image_url blocks for vision uploads) + attachments

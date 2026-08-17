@@ -10,6 +10,11 @@ describe("isKnownNonVisionChatModel — zhipu GLM text vs vision", () => {
     expect(isKnownNonVisionChatModel("zhipu", "glm-5")).toBe(true);
   });
 
+  it("treats known text-only SKUs as non-vision on custom OpenAI gateways", () => {
+    expect(isKnownNonVisionChatModel("custom_openai_caiyun", "glm-5.2")).toBe(true);
+    expect(isKnownNonVisionChatModel("custom_openai_x", "glm-4.6v")).toBe(false);
+  });
+
   it("allows GLM vision SKUs (digit+v / vision / vl)", () => {
     expect(isKnownNonVisionChatModel("zhipu", "glm-4v")).toBe(false);
     expect(isKnownNonVisionChatModel("zhipu", "glm-4v-flash")).toBe(false);

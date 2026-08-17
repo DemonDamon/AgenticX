@@ -61,14 +61,19 @@ def _bailian_qwen_text_no_vision(model_name: str) -> bool:
 
 
 def is_vision_capable(provider_name: str, model_name: str) -> bool:
-    """Return True when the provider/model pair should accept image_url inputs."""
-    provider = str(provider_name or "").strip().lower()
+    """Return True when the provider/model pair should accept image_url inputs.
+
+    Known text-only families are detected by model slug regardless of provider,
+    so OpenAI-compatible gateways (custom_openai_*) serving glm-5.x / qwen text
+    SKUs are also treated as text-only. Unknown slugs stay vision-permissive.
+    ``provider_name`` is kept for API compatibility and logging only.
+    """
     model = str(model_name or "").strip()
-    if provider == "minimax" and _minimax_m2_family_no_vision(model):
+    if _minimax_m2_family_no_vision(model):
         return False
-    if provider == "zhipu" and _zhipu_text_only_family(model):
+    if _zhipu_text_only_family(model):
         return False
-    if provider in {"bailian", "dashscope"} and _bailian_qwen_text_no_vision(model):
+    if _bailian_qwen_text_no_vision(model):
         return False
     return True
 

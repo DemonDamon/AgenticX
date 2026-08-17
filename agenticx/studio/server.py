@@ -7227,6 +7227,21 @@ def create_studio_app() -> FastAPI:
             logger.warning("get_config_providers error: %s", exc)
             return {"ok": False, "providers": {}, "error": str(exc)}
 
+    @app.get("/api/vision/fallback")
+    async def get_vision_fallback(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Report the configured vision fallback model for text-only chat sessions."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.llms.vision_fallback import resolve_vision_fallback
+
+            info = resolve_vision_fallback()
+            return {"ok": True, **info}
+        except Exception as exc:
+            logger.warning("get_vision_fallback error: %s", exc)
+            return {"ok": False, "available": False, "error": str(exc)}
+
     @app.put("/api/config/providers/{name}")
     async def put_config_provider(
         name: str,

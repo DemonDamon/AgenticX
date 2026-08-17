@@ -1903,6 +1903,36 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_image",
+            "description": (
+                "Analyze an image with the configured vision-capable fallback model and return "
+                "a textual understanding. Use ONLY when the current session model is text-only "
+                "(view_image reports the model does not support vision, or a system notice says "
+                "attached images were omitted). Accepts a local file path, http(s) URL, or "
+                "data:image/* URL; when target is omitted, the most recently attached image in "
+                "this session is used. The returned text description is your only window into "
+                "the image — quote specifics from it when continuing the task."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Optional. File path, http(s) URL, or data:image/* URL. Omit to use the latest session image.",
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "Optional focus for the vision pass, e.g. '识别图中的组织名称与 Logo 文字'.",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
     # ── task_experience tools (group team session cross-task memory) ──────────
     {
         "type": "function",
@@ -5847,32 +5877,23 @@ async def _tool_web_fetch(arguments: Dict[str, Any], session: Optional[StudioSes
     return "\n".join(lines).strip()
 
 
-async def _tool_view_image(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
-    target = str(arguments.get("target", "") or "").strip()
-    note = str(arguments.get("note", "") or "").strip()
-    if not target:
-        return "ERROR: missing required parameter 'target'"
-    if not _session_vision_capable(session):
-        model = str(getattr(session, "model_name", "") or "unknown")
-        return (
-            f"ERROR: current model '{model}' does not support vision; "
-            "switch to a vision-capable model first."
-        )
-    pending = _pending_visual_attachments(session)
-    if len(pending) >= _VIEW_IMAGE_MAX_PENDING:
-        return "ERROR: too many pending visual attachments (max 4 per turn)"
-    data: bytes
-    mime: str
-    name: str
-    source = target
+async def _load_image_target(
+    target: str,
+    session: Optional[StudioSession],
+) -> Tuple[bytes, str, str, str]:
+    """Resolve an image target to (data, mime, name, source).
+
+    Shared by view_image and analyze_image. Raises ValueError with a
+    user-facing message (without the "ERROR: " prefix) on failure.
+    """
     parsed = urlparse(target)
     if target.startswith("data:image/"):
         parsed_data = _parse_data_image_url(target)
         if parsed_data is None:
-            return "ERROR: unsupported image type"
+            raise ValueError("unsupported image type")
         data, mime = parsed_data
-        name = "clipboard-image"
-    elif parsed.scheme in {"http", "https"}:
+        return data, mime, "clipboard-image", target
+    if parsed.scheme in {"http", "https"}:
         try:
             data, content_type, final_url = await _fetch_http_bytes(
                 target,
@@ -5882,21 +5903,19 @@ async def _tool_view_image(arguments: Dict[str, Any], session: Optional[StudioSe
         except ValueError as exc:
             reason = str(exc)
             if reason == "too-large":
-                return "ERROR: image exceeds 8MB limit"
+                raise ValueError("image exceeds 8MB limit") from exc
             if reason.startswith("http "):
-                return f"ERROR: {reason}"
-            return "ERROR: network"
-        except Exception:
-            return "ERROR: network"
+                raise ValueError(reason) from exc
+            raise ValueError("network") from exc
+        except Exception as exc:
+            raise ValueError("network") from exc
         mime = _detect_image_mime(data) or (
             content_type if content_type.startswith("image/") else None
         )
         if not mime:
-            return "ERROR: unsupported image type"
-        source = final_url
-        name = _filename_from_url(final_url, mime)
-    elif parsed.scheme in {"file", ""} or target.startswith("/") or (len(target) > 2 and target[1] == ":"):
-        session_hit = None
+            raise ValueError("unsupported image type")
+        return data, mime, _filename_from_url(final_url, mime), final_url
+    if parsed.scheme in {"file", ""} or target.startswith("/") or (len(target) > 2 and target[1] == ":"):
         if session is not None:
             try:
                 from agenticx.studio.chat_attachments import resolve_session_chat_image
@@ -5904,25 +5923,43 @@ async def _tool_view_image(arguments: Dict[str, Any], session: Optional[StudioSe
                 session_hit = resolve_session_chat_image(session, target)
             except Exception:
                 session_hit = None
-        if session_hit is not None:
-            data, mime, name, source = session_hit
-        else:
-            try:
-                path = _resolve_workspace_path(target, session, pick_existing=True)
-            except ValueError as exc:
-                return f"ERROR: {exc}"
-            if not path.exists() or not path.is_file():
-                return f"ERROR: file not found: {path}"
-            data = path.read_bytes()
-            if len(data) > _VIEW_IMAGE_MAX_BYTES:
-                return "ERROR: image exceeds 8MB limit"
-            mime = _detect_image_mime(data)
-            if not mime:
-                return "ERROR: unsupported image type"
-            name = path.name
-            source = str(path)
-    else:
-        return "ERROR: only http(s) URLs, data:image/* URLs, and local file paths are supported"
+            if session_hit is not None:
+                return session_hit
+        try:
+            path = _resolve_workspace_path(target, session, pick_existing=True)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        if not path.exists() or not path.is_file():
+            raise ValueError(f"file not found: {path}")
+        data = path.read_bytes()
+        if len(data) > _VIEW_IMAGE_MAX_BYTES:
+            raise ValueError("image exceeds 8MB limit")
+        mime = _detect_image_mime(data)
+        if not mime:
+            raise ValueError("unsupported image type")
+        return data, mime, path.name, str(path)
+    raise ValueError("only http(s) URLs, data:image/* URLs, and local file paths are supported")
+
+
+async def _tool_view_image(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    target = str(arguments.get("target", "") or "").strip()
+    note = str(arguments.get("note", "") or "").strip()
+    if not target:
+        return "ERROR: missing required parameter 'target'"
+    if not _session_vision_capable(session):
+        model = str(getattr(session, "model_name", "") or "unknown")
+        return (
+            f"ERROR: current model '{model}' does not support vision; "
+            "use analyze_image(target=...) to read it via the vision fallback model, "
+            "or switch to a vision-capable model."
+        )
+    pending = _pending_visual_attachments(session)
+    if len(pending) >= _VIEW_IMAGE_MAX_PENDING:
+        return "ERROR: too many pending visual attachments (max 4 per turn)"
+    try:
+        data, mime, name, source = await _load_image_target(target, session)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
     if len(data) > _VIEW_IMAGE_MAX_BYTES:
         return "ERROR: image exceeds 8MB limit"
     data_url = _data_url_from_bytes(data, mime)
@@ -5941,6 +5978,87 @@ async def _tool_view_image(arguments: Dict[str, Any], session: Optional[StudioSe
     return (
         f"[image loaded: {name} ({size_kb} KB, {mime}); "
         f"will be visually attached in next turn{note_clause}]"
+    )
+
+
+async def _tool_analyze_image(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
+    target = str(arguments.get("target", "") or "").strip()
+    question = str(arguments.get("question", "") or "").strip()
+    if _session_vision_capable(session):
+        return (
+            "ERROR: current model already supports vision; use view_image(target=...) instead "
+            "so the image is attached to your own next turn."
+        )
+    from agenticx.llms.vision_fallback import resolve_vision_fallback
+
+    info = resolve_vision_fallback(session=session)
+    if not info.get("available"):
+        return (
+            "ERROR: no vision-capable fallback model is configured. Tell the user to add a "
+            "vision model (a SKU whose name carries a v/vision/vl marker, e.g. glm-4.6v) in "
+            "Settings → 模型服务, or set vision_fallback.provider/model in ~/.agenticx/config.yaml."
+        )
+    if target:
+        try:
+            data, mime, name, source = await _load_image_target(target, session)
+        except ValueError as exc:
+            return f"ERROR: {exc}"
+        if len(data) > _VIEW_IMAGE_MAX_BYTES:
+            return "ERROR: image exceeds 8MB limit"
+        data_url = _data_url_from_bytes(data, mime)
+    else:
+        from agenticx.studio.chat_attachments import (
+            image_data_url_from_attachment,
+            iter_session_image_attachments,
+        )
+
+        atts = iter_session_image_attachments(session) if session is not None else []
+        if not atts:
+            return (
+                "ERROR: no image found in this session; "
+                "pass target explicitly (path, http(s) URL, or data:image/* URL)"
+            )
+        att = atts[-1]
+        data_url = image_data_url_from_attachment(att)
+        if not data_url:
+            return "ERROR: latest image attachment has no readable bytes"
+        name = str(att.get("name", "") or "image")
+        source = str(att.get("storage_path", "") or "session-upload")
+
+    prompt_text = question or (
+        "请详细描述这张图片的关键内容（其中的文字、标识/Logo、界面元素、图表数据等），"
+        "以便后续据此检索与推理。"
+    )
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt_text},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ],
+        }
+    ]
+    try:
+        from agenticx.llms.provider_resolver import ProviderResolver
+
+        llm = ProviderResolver.resolve(
+            provider_name=str(info["provider"]),
+            model=str(info["model"]),
+        )
+        resp = await llm.ainvoke(messages)
+    except Exception as exc:
+        return (
+            f"ERROR: vision fallback call failed "
+            f"({info.get('label') or info.get('model')}): {exc}"
+        )
+    desc = str(getattr(resp, "content", "") or "").strip()
+    if not desc:
+        return "ERROR: vision fallback returned empty content"
+    label = str(info.get("label") or f"{info.get('provider')}/{info.get('model')}")
+    return (
+        f"[analyze_image: 视觉解读由 {label} 提供；图片 {name}，来源 {source}]\n"
+        f"{desc}\n"
+        "[/analyze_image] 请基于以上文字解读继续完成用户请求（如需检索请调用 web_search）。"
     )
 
 
@@ -7932,6 +8050,8 @@ async def dispatch_tool_async(
             return await _tool_web_fetch(arguments, session)
         if name == "view_image":
             return await _tool_view_image(arguments, session)
+        if name == "analyze_image":
+            return await _tool_analyze_image(arguments, session)
         if name == "session_search":
             return _tool_session_search(arguments, session)
         if name == "code_search":
