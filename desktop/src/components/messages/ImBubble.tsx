@@ -37,6 +37,7 @@ import { resolveMetaDisplayName } from "../../utils/display-name";
 import { avatarBgClass, avatarFgClass, expertLabelChipStyle } from "../../utils/avatar-color";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 import { MessageTimestamp } from "./MessageTimestamp";
+import { Shimmer } from "../ds/Shimmer";
 
 type Props = {
   message: Message;
@@ -871,8 +872,12 @@ export function ImBubble({
                   )
                 ) : isGroupTyping ? (
                   bodyText?.trim() ? (
-                    <div className="flex min-w-0 items-center gap-2 text-[13px] text-text-muted">
-                      <span className="min-w-0 break-words leading-[1.65]">{bodyText.trim()}</span>
+                    <div className="flex min-w-0 items-center gap-2 text-[13px]">
+                      <Shimmer
+                        variant="status"
+                        text={bodyText.trim()}
+                        className="min-w-0 break-words leading-[1.65]"
+                      />
                       <StreamingDots compact />
                     </div>
                   ) : (

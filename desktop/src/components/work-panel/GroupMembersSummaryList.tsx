@@ -1,17 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppStore, type Avatar, type Message } from "../../store";
 import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
-import {
-  groupMemberActivityTitle,
-  resolveGroupMemberActivity,
-  type GroupMemberActivity,
-} from "../../utils/group-member-activity";
-
-function memberInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
-  return name.slice(0, 2).toUpperCase() || "?";
-}
+import { resolveCrewSlots } from "../../utils/group-member-activity";
+import { EMPTY_PANE_GRAPH_STATE } from "../graph/graph-types";
+import { deriveRunningToolByAgent } from "../graph/span-derive";
+import { useGraphRunStore } from "../graph/useGraphRun";
+import { CrewWorkstationWall } from "./CrewWorkstationWall";
+import { memberInitials } from "./member-avatar";
 
 const AVATAR_SIZE = 36;
 const NAME_CLASS = "text-[10px]";
@@ -20,24 +15,37 @@ const NAME_CLASS = "text-[10px]";
  * Inline group members strip for task-summary Section「成员」.
  * Add / remove stay in-panel (no separate WorkPanel tab).
  */
-function activityDotClass(state: GroupMemberActivity["state"]): string {
-  if (state === "running") return "bg-[var(--status-warning)]";
-  if (state === "replied") return "bg-[var(--status-success)]";
+function activityDotClass(phase: "idle" | "running" | "waiting" | "replied" | "failed"): string {
+  if (phase === "running" || phase === "waiting") return "bg-[var(--status-warning)]";
+  if (phase === "failed") return "bg-[var(--status-danger)]";
+  if (phase === "replied") return "bg-[var(--status-success)]";
   return "border border-current bg-transparent text-text-faint";
 }
 
 export function GroupMembersSummaryList({
   groupId,
+  paneId,
   avatarList,
   metaLeaderLabel,
   messages = [],
   activeAgentIds = [],
+  activityHintById = {},
+  phaseOverrideById = {},
+  onAppendDirective,
+  onSwitchModel,
+  onInterrupt,
 }: {
   groupId: string;
+  paneId: string;
   avatarList: Avatar[];
   metaLeaderLabel: string;
   messages?: Array<Pick<Message, "role" | "agentId" | "toolName" | "timestamp">>;
   activeAgentIds?: string[];
+  activityHintById?: Record<string, string>;
+  phaseOverrideById?: Record<string, "waiting" | "failed">;
+  onAppendDirective?: (agentId: string) => void;
+  onSwitchModel?: (agentId: string) => void;
+  onInterrupt?: (agentId: string) => void;
 }) {
   const groups = useAppStore((s) => s.groups);
   const setGroups = useAppStore((s) => s.setGroups);
@@ -66,17 +74,58 @@ export function GroupMembersSummaryList({
     });
   }, [mode, group, avatarList, dialogSearch]);
 
-  const activityById = useMemo(
-    () => resolveGroupMemberActivity(messages, group?.avatarIds ?? [], activeAgentIds),
-    [messages, group?.avatarIds, activeAgentIds],
+  const toolStepsByNode = useGraphRunStore(
+    (s) => s.byPane[paneId]?.toolStepsByNode ?? EMPTY_PANE_GRAPH_STATE.toolStepsByNode,
+  );
+  const runningToolByAgent = useMemo(
+    () => deriveRunningToolByAgent(toolStepsByNode),
+    [toolStepsByNode],
+  );
+  const hasLiveWork = useMemo(
+    () =>
+      activeAgentIds.length > 0 ||
+      Object.keys(runningToolByAgent).length > 0 ||
+      Object.keys(phaseOverrideById).length > 0,
+    [activeAgentIds, runningToolByAgent, phaseOverrideById],
+  );
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hasLiveWork) return;
+    setNowMs(Date.now());
+    const t = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [hasLiveWork]);
+
+  const wallIds = useMemo(
+    () => ["__meta__", ...(group?.avatarIds ?? [])],
+    [group?.avatarIds],
+  );
+  const slots = useMemo(
+    () =>
+      resolveCrewSlots({
+        avatarIds: wallIds,
+        messages,
+        activeAgentIds,
+        activityHintById,
+        runningToolByAgent,
+        phaseOverrideById,
+        nowMs,
+      }),
+    [wallIds, messages, activeAgentIds, activityHintById, runningToolByAgent, phaseOverrideById, nowMs],
   );
   const executedCount = useMemo(() => {
     let n = 0;
-    for (const item of activityById.values()) {
-      if (item.state !== "idle") n += 1;
+    for (const item of slots) {
+      if (item.agentId === "__meta__") continue;
+      if (item.phase !== "idle") n += 1;
     }
     return n;
-  }, [activityById]);
+  }, [slots]);
+  const phaseById = useMemo(() => {
+    const map = new Map<string, (typeof slots)[number]>();
+    for (const item of slots) map.set(item.agentId, item);
+    return map;
+  }, [slots]);
 
   if (!group) {
     return <p className="text-xs text-text-faint">未找到该群配置，可在侧栏刷新群列表后重试。</p>;
@@ -144,6 +193,46 @@ export function GroupMembersSummaryList({
         </div>
       ) : null}
 
+      {mode === "browse" ? (
+        <>
+          <CrewWorkstationWall
+            slots={slots}
+            avatarById={avatarById}
+            metaLeaderLabel={metaLeaderLabel}
+            onAppendDirective={onAppendDirective}
+            onSwitchModel={onSwitchModel}
+            onInterrupt={onInterrupt}
+          />
+          <div className="flex flex-wrap gap-x-3 gap-y-2.5">
+            <div className="flex w-[52px] flex-col items-center gap-1 text-center">
+              <button
+                type="button"
+                onClick={openAddDialog}
+                disabled={saving}
+                className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
+                style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
+                title="添加成员"
+              >
+                +
+              </button>
+              <span className={`text-text-muted ${NAME_CLASS}`}>添加</span>
+            </div>
+            <div className="flex w-[52px] flex-col items-center gap-1 text-center">
+              <button
+                type="button"
+                onClick={() => setMode("remove")}
+                disabled={saving || group.avatarIds.length === 0}
+                className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
+                style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
+                title="移出成员"
+              >
+                −
+              </button>
+              <span className={`text-text-muted ${NAME_CLASS}`}>移出</span>
+            </div>
+          </div>
+        </>
+      ) : (
       <div className="flex flex-wrap gap-x-3 gap-y-2.5">
         <div className="flex w-[52px] flex-col items-center gap-1 text-center">
           <div
@@ -168,8 +257,18 @@ export function GroupMembersSummaryList({
         {group.avatarIds.map((id) => {
           const a = avatarById.get(id);
           const label = a?.name ?? id.slice(0, 6);
-          const activity = activityById.get(id);
-          const statusTitle = activity ? groupMemberActivityTitle(activity) : "未执行";
+          const activity = phaseById.get(id);
+          const statusTitle = activity
+            ? activity.phase === "replied"
+              ? `已回复 ${activity.replies} 次`
+              : activity.phase === "running"
+                ? "执行中"
+                : activity.phase === "waiting"
+                  ? "等待确认"
+                  : activity.phase === "failed"
+                    ? "执行失败"
+                    : "未执行"
+            : "未执行";
           return (
             <button
               key={id}
@@ -200,7 +299,7 @@ export function GroupMembersSummaryList({
                   </div>
                 )}
                 <span
-                  className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ${activityDotClass(activity?.state ?? "idle")}`}
+                  className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ${activityDotClass(activity?.phase ?? "idle")}`}
                   title={statusTitle}
                 />
               </div>
@@ -246,6 +345,7 @@ export function GroupMembersSummaryList({
           <span className={`text-text-muted ${NAME_CLASS}`}>移出</span>
         </div>
       </div>
+      )}
 
       {mode === "add" ? (
         <div

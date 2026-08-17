@@ -2,14 +2,23 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { Share2, X, RefreshCw } from "lucide-react";
 import type { ChatPane } from "../../store";
 import { useAppStore } from "../../store";
+import { isMetaLeaderAgentId } from "../../utils/display-name";
+import {
+  crewPhaseToGraphStatus,
+  resolveCrewSlots,
+  type CrewPhase,
+} from "../../utils/group-member-activity";
 import { GraphInterveneDock } from "./GraphInterveneDock";
 import {
   buildInterveneBody,
   EMPTY_PANE_GRAPH_STATE,
   graphHasTaskNodes,
   type GraphNodeSnapshot,
+  type GraphProjection,
   type InterveneRequest,
+  type PaneGraphState,
 } from "./graph-types";
+import { agentIdFromNode, deriveRunningToolByAgent } from "./span-derive";
 import {
   fetchGraphRun,
   listGraphRunsForSession,
@@ -27,9 +36,55 @@ type Props = {
   tintColor?: string | null;
   /** WorkPanel tab: hide duplicate title/close; tab bar owns chrome. */
   embedded?: boolean;
+  groupAvatarIds?: string[];
+  groupActiveAgentIds?: string[];
+  groupActivityHint?: Record<string, string>;
+  groupMemberPhase?: Record<string, "waiting" | "failed">;
 };
 
-export function RunGraphPanel({ pane, onClose, tintColor, embedded = false }: Props) {
+function overlayNodeStatus(
+  node: GraphNodeSnapshot,
+  phaseByAgent: Map<string, CrewPhase>,
+): GraphNodeSnapshot {
+  const aid = String(node.agent_id || agentIdFromNode(node.id) || "").trim();
+  if (!aid) return node;
+  const phase =
+    phaseByAgent.get(aid) ??
+    (isMetaLeaderAgentId(aid) ? phaseByAgent.get("__meta__") : undefined);
+  const mapped = crewPhaseToGraphStatus(phase ?? "idle");
+  if (!mapped) return node;
+  return { ...node, status: mapped };
+}
+
+function overlayCrewPhaseOnState(
+  state: PaneGraphState,
+  phaseByAgent: Map<string, CrewPhase>,
+): PaneGraphState {
+  if (phaseByAgent.size === 0) return state;
+  const nodes: Record<string, GraphNodeSnapshot> = {};
+  for (const [id, node] of Object.entries(state.nodes)) {
+    nodes[id] = overlayNodeStatus(node, phaseByAgent);
+  }
+  let projection: GraphProjection | null = state.projection;
+  if (projection) {
+    projection = {
+      ...projection,
+      agent_nodes: projection.agent_nodes.map((n) => overlayNodeStatus(n, phaseByAgent)),
+    };
+  }
+  return { ...state, nodes, projection };
+}
+
+export function RunGraphPanel({
+  pane,
+  onClose,
+  tintColor,
+  embedded = false,
+  groupAvatarIds = [],
+  groupActiveAgentIds = [],
+  groupActivityHint = {},
+  groupMemberPhase = {},
+}: Props) {
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
   // Must use a stable empty object — `?? emptyPaneGraphState()` allocates every
@@ -112,6 +167,36 @@ export function RunGraphPanel({ pane, onClose, tintColor, embedded = false }: Pr
       }
     },
     [apiBase, apiToken, refresh, runId],
+  );
+
+  const runningToolByAgent = useMemo(
+    () => deriveRunningToolByAgent(graphState.toolStepsByNode),
+    [graphState.toolStepsByNode],
+  );
+  const crewPhaseByAgent = useMemo(() => {
+    const ids = ["__meta__", ...groupAvatarIds];
+    const slots = resolveCrewSlots({
+      avatarIds: ids,
+      messages: pane.messages ?? [],
+      activeAgentIds: groupActiveAgentIds,
+      activityHintById: groupActivityHint,
+      runningToolByAgent,
+      phaseOverrideById: groupMemberPhase,
+    });
+    const map = new Map<string, CrewPhase>();
+    for (const slot of slots) map.set(slot.agentId, slot.phase);
+    return map;
+  }, [
+    groupAvatarIds,
+    groupActiveAgentIds,
+    groupActivityHint,
+    groupMemberPhase,
+    pane.messages,
+    runningToolByAgent,
+  ]);
+  const displayState = useMemo(
+    () => overlayCrewPhaseOnState(graphState, crewPhaseByAgent),
+    [graphState, crewPhaseByAgent],
   );
 
   const hasRun = Boolean(runId && (Object.keys(graphState.nodes).length > 0 || graphState.projection));
@@ -225,7 +310,7 @@ export function RunGraphPanel({ pane, onClose, tintColor, embedded = false }: Pr
               }
             >
               <RunGraphCanvas
-                state={graphState}
+                state={displayState}
                 preferAgentView={effectivePreferAgentView}
                 onSelectIds={(ids) => setSelected(pane.id, ids)}
                 onIntervene={intervene}

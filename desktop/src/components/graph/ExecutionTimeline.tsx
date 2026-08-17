@@ -9,6 +9,7 @@ import {
   agentIdFromNode,
   deriveTimelineWindow,
   deriveToolSpans,
+  formatDuration,
   nodeIdForAgent,
   type ToolSpan,
 } from "./span-derive";
@@ -37,15 +38,6 @@ const ZOOM_MAX = 24;
 const MIN_WIN = 1 / ZOOM_MAX;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-
-function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "0s";
-  const totalSec = Math.floor(ms / 1000);
-  if (totalSec < 60) return `${totalSec}s`;
-  const minutes = Math.floor(totalSec / 60);
-  const seconds = totalSec % 60;
-  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
-}
 
 function useNowMs(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());

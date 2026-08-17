@@ -3010,6 +3010,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     () => Array.from(new Set([...Object.keys(groupTyping), ...Object.keys(groupActivityHint)])),
     [groupTyping, groupActivityHint],
   );
+  /** 显式相位覆盖：group_blocked → "waiting"，group_error → "failed"。 */
+  const [groupMemberPhase, setGroupMemberPhase] = useState<Record<string, "waiting" | "failed">>({});
+  const [crewSettingsAvatarId, setCrewSettingsAvatarId] = useState<string | null>(null);
   const lastGroupProgressRef = useRef<Record<string, string>>({});
   type QuoteTarget = { id: string; message: Message; body: string };
   const [quoteTargets, setQuoteTargets] = useState<QuoteTarget[]>([]);
@@ -3185,9 +3188,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   /** 数字分身窗格顶栏：直接打开分身设置，无需再切到左侧「数字分身」画廊。 */
   const [avatarSettingsOpen, setAvatarSettingsOpen] = useState(false);
   const paneSettingsAvatar = useMemo(() => {
+    if (crewSettingsAvatarId) return avatars.find((a) => a.id === crewSettingsAvatarId);
     if (!isDedicatedAvatarPane || !pane?.avatarId) return undefined;
     return avatars.find((a) => a.id === pane.avatarId);
-  }, [isDedicatedAvatarPane, pane?.avatarId, avatars]);
+  }, [crewSettingsAvatarId, isDedicatedAvatarPane, pane?.avatarId, avatars]);
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
 
@@ -5015,6 +5019,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     },
     [readSerializedComposerAroundCaret, setComposerText]
   );
+
+  const handleCrewAppendDirective = useCallback(
+    (agentId: string) => {
+      const avatar = avatars.find((a) => a.id === agentId);
+      const name = String(avatar?.name || agentId).trim();
+      if (!name) return;
+      applyAtMentionReplacement(`@${name} `);
+      focusComposerEnd();
+    },
+    [applyAtMentionReplacement, avatars, focusComposerEnd],
+  );
+
+  const handleCrewSwitchModel = useCallback((agentId: string) => {
+    setCrewSettingsAvatarId(agentId);
+    setAvatarSettingsOpen(true);
+  }, []);
+
+  const handleCrewInterrupt = useCallback(() => {
+    const sid = pane.sessionId;
+    if (!sid) return;
+    void window.agenticxDesktop.interruptSession?.(sid);
+  }, [pane.sessionId]);
 
   const addContextFile = async (
     taskspaceId: string,
@@ -9712,6 +9738,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             if (payload.type === "group_typing") {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
               setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
+              setGroupMemberPhase((prev) => {
+                if (!(eventAgentId in prev)) return prev;
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
               continue;
             }
             if (payload.type === "group_progress") {
@@ -9744,6 +9776,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   updatedAt: now,
                 });
               }
+              setGroupMemberPhase((prev) => {
+                if (!(eventAgentId in prev)) return prev;
+                const next = { ...prev };
+                delete next[eventAgentId];
+                return next;
+              });
               continue;
             }
             if (payload.type === "group_blocked") {
@@ -9763,6 +9801,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 delete next[eventAgentId];
                 return next;
               });
+              setGroupMemberPhase((prev) => ({ ...prev, [eventAgentId]: "waiting" }));
               if (!blockedText) continue;
               const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
               if (prevText === blockedText) continue;
@@ -9895,6 +9934,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 delete next[eventAgentId];
                 return next;
               });
+              if (errorText.trim()) {
+                setGroupMemberPhase((prev) => ({ ...prev, [eventAgentId]: "failed" }));
+              } else {
+                setGroupMemberPhase((prev) => {
+                  if (!(eventAgentId in prev)) return prev;
+                  const next = { ...prev };
+                  delete next[eventAgentId];
+                  return next;
+                });
+              }
               if (content.trim()) {
                 addPaneMessageIfSessionActive(
                   pane.id,
@@ -11273,6 +11322,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         }
         setGroupTyping({});
         setGroupActivityHint({});
+        setGroupMemberPhase({});
         setContextFiles({});
         if (!abortController.signal.aborted) {
           useAppStore.getState().clearSessionHistoryHint(requestSessionId);
@@ -13190,6 +13240,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             avatarList={avatars}
             metaLeaderLabel={metaLeaderDisplayName}
             groupActiveAgentIds={groupActiveAgentIds}
+            groupActivityHint={groupActivityHint}
+            groupMemberPhase={groupMemberPhase}
+            onCrewAppendDirective={handleCrewAppendDirective}
+            onCrewSwitchModel={handleCrewSwitchModel}
+            onCrewInterrupt={handleCrewInterrupt}
           />
         </div>
       ) : null}
@@ -13328,6 +13383,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 avatarList={avatars}
                 metaLeaderLabel={metaLeaderDisplayName}
                 groupActiveAgentIds={groupActiveAgentIds}
+                groupActivityHint={groupActivityHint}
+                groupMemberPhase={groupMemberPhase}
+                onCrewAppendDirective={handleCrewAppendDirective}
+                onCrewSwitchModel={handleCrewSwitchModel}
+                onCrewInterrupt={handleCrewInterrupt}
               />
             </div>
           ) : null}
@@ -13414,7 +13474,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         <AvatarSettingsPanel
           mode="avatar"
           avatar={paneSettingsAvatar}
-          onClose={() => setAvatarSettingsOpen(false)}
+          onClose={() => {
+            setAvatarSettingsOpen(false);
+            setCrewSettingsAvatarId(null);
+          }}
           onSaved={() => {
             window.dispatchEvent(
               new CustomEvent("agenticx:avatars:changed", { detail: { openPane: false } })

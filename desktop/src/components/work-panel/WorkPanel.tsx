@@ -564,6 +564,11 @@ type Props = {
   metaLeaderLabel?: string;
   /** Agent ids currently typing or showing a live activity hint. */
   groupActiveAgentIds?: string[];
+  groupActivityHint?: Record<string, string>;
+  groupMemberPhase?: Record<string, "waiting" | "failed">;
+  onCrewAppendDirective?: (agentId: string) => void;
+  onCrewSwitchModel?: (agentId: string) => void;
+  onCrewInterrupt?: (agentId: string) => void;
 };
 
 function uid(): string {
@@ -690,6 +695,11 @@ export function WorkPanel({
   avatarList = [],
   metaLeaderLabel = META_AGENT_DISPLAY_NAME,
   groupActiveAgentIds = [],
+  groupActivityHint = {},
+  groupMemberPhase = {},
+  onCrewAppendDirective,
+  onCrewSwitchModel,
+  onCrewInterrupt,
 }: Props) {
   const isGroupPane = Boolean(groupId);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
@@ -1978,10 +1988,16 @@ export function WorkPanel({
               >
                 <GroupMembersSummaryList
                   groupId={groupId}
+                  paneId={paneId}
                   avatarList={avatarList}
                   metaLeaderLabel={metaLeaderLabel}
                   messages={paneMessages}
                   activeAgentIds={groupActiveAgentIds}
+                  activityHintById={groupActivityHint}
+                  phaseOverrideById={groupMemberPhase}
+                  onAppendDirective={onCrewAppendDirective}
+                  onSwitchModel={onCrewSwitchModel}
+                  onInterrupt={onCrewInterrupt}
                 />
               </Section>
             ) : null}
@@ -2109,6 +2125,10 @@ export function WorkPanel({
             onClose={closeGraphTab}
             tintColor={tintColor}
             embedded
+            groupAvatarIds={groupAvatarIds}
+            groupActiveAgentIds={groupActiveAgentIds}
+            groupActivityHint={groupActivityHint}
+            groupMemberPhase={groupMemberPhase}
           />
         ) : null}
 
