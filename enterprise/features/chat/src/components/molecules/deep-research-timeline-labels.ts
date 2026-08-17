@@ -8,6 +8,19 @@ export function labelForDeepResearchEvent(event: DeepResearchEvent): string {
       return event.message || event.phase;
     case "clarify":
       return `澄清 ${event.step}/${event.total}：${event.question}`;
+    case "clarify_chat":
+      return event.promptText;
+    case "research_profile":
+      return `研究策略：${event.researchDepth} · ${event.clarifyMode}`;
+    case "research_plan": {
+      const action =
+        event.action === "proposed"
+          ? "已生成"
+          : event.action === "updated"
+            ? "已更新"
+            : "已确认";
+      return `${action}研究计划 v${event.version}`;
+    }
     case "clarify_timeout":
       return "澄清超时，按默认假设继续";
     case "reasoning":
@@ -30,6 +43,8 @@ export function labelForDeepResearchEvent(event: DeepResearchEvent): string {
       return `复核信息缺口 ${event.gaps.length} 处`;
     case "research_stats":
       return `检索 ${event.queriesPlanned} 次 · 采用 ${event.sourcesSelected} 个来源`;
+    case "research_budget":
+      return `预算：检索 ${event.usage.searchQueries.used}/${event.usage.searchQueries.limit} · 模型 ${event.usage.modelCalls.used}/${event.usage.modelCalls.limit}`;
     default: {
       const _exhaustive: never = event;
       return String(_exhaustive);

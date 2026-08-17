@@ -40,6 +40,35 @@ describe("deep research timeline labels", () => {
     ).toBe("思考：核心结论");
   });
 
+  it("labels interaction and plan events without falling through", () => {
+    expect(
+      labelForDeepResearchEvent({
+        type: "clarify_chat",
+        runId: "r1",
+        roundIndex: 0,
+        phase: "preflight",
+        promptText: "请确认研究范围",
+      }),
+    ).toBe("请确认研究范围");
+    expect(
+      labelForDeepResearchEvent({
+        type: "research_plan",
+        runId: "r1",
+        action: "updated",
+        version: 2,
+        plan: {
+          version: 2,
+          objective: "范围",
+          scope: [],
+          subQuestions: [],
+          sourceStrategy: [],
+          deliverables: [],
+          assumptions: [],
+        },
+      }),
+    ).toBe("已更新研究计划 v2");
+  });
+
   it("empty events list is a no-op for callers (component contract)", () => {
     const events: DeepResearchEvent[] = [];
     expect(events.map(labelForDeepResearchEvent)).toEqual([]);

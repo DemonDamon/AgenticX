@@ -33,6 +33,7 @@ import {
 import { AttachmentContentPanel } from "./AttachmentContentPanel";
 import { UserMessageAttachmentCard } from "../atoms/UserMessageAttachmentCard";
 import { stripDeepResearchProgressFromContent } from "./deep-research-segments";
+import { findActivePlanChatGate } from "../../utils/deep-research-plan-chat-composer";
 import { useChatStore } from "../../store";
 import "../../markdown/chat-prism-themes.css";
 
@@ -500,6 +501,10 @@ export function MessageList({
   }, [userAttachmentsFingerprint]);
 
   const listSessionId = messages[0]?.session_id ?? "";
+  const activePlanChatAssistantId = React.useMemo(() => {
+    if (!listSessionId) return null;
+    return findActivePlanChatGate(messages, listSessionId)?.assistantMessageId ?? null;
+  }, [listSessionId, messages]);
   const prevListSessionIdRef = React.useRef(listSessionId);
   React.useEffect(() => {
     if (listSessionId !== prevListSessionIdRef.current) {
@@ -921,6 +926,9 @@ export function MessageList({
                         {isAssistant && message.deep_research ? (
                           <DeepResearchWorkbench
                             deepResearch={message.deep_research}
+                            planChatInteractive={
+                              activePlanChatAssistantId === message.id
+                            }
                             onClarifySubmitted={(answers) => {
                               useChatStore
                                 .getState()

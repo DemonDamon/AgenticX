@@ -197,6 +197,24 @@ describe("buildDeepResearchSegments", () => {
     ]);
   });
 
+  it("settles mid-search lanes as failed when run failed (no fake spinner)", () => {
+    const events: DeepResearchEvent[] = [
+      { type: "phase", phase: "lanes", message: "已拆解 2 条调研车道，正在并行检索…" },
+      { type: "lane_started", laneId: "a", title: "定价", index: 1, total: 2 },
+      { type: "lane_started", laneId: "b", title: "基准", index: 2, total: 2 },
+      { type: "lane_done", laneId: "a", status: "ok" },
+      // lane "b" never got lane_done — process died mid-search.
+    ];
+    const segments = buildDeepResearchSegments(events, "failed");
+    const tools = segments.find((s) => s.kind === "tools");
+    expect(tools?.kind).toBe("tools");
+    const steps = tools?.kind === "tools" ? tools.steps : [];
+    const laneB = steps.find((s) => s.id === "lane-b");
+    expect(laneB?.status).toBe("failed");
+    const laneA = steps.find((s) => s.id === "lane-a");
+    expect(laneA?.status).toBe("done");
+  });
+
   it("keeps lane memos off the delivery strip", () => {
     const events: DeepResearchEvent[] = [
       {

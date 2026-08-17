@@ -3,6 +3,10 @@
 import * as React from "react";
 import type { ChatMessageDeepResearch, DeepResearchEvent } from "@agenticx/core-api";
 import { DeepResearchClarifyCard } from "./DeepResearchClarifyCard";
+import { DeepResearchClarifyChat } from "./DeepResearchClarifyChat";
+import { DeepResearchPlanChatCard } from "./DeepResearchPlanChatCard";
+import { DeepResearchPreflightCard, isPlanGatePending } from "./DeepResearchPreflightCard";
+import { isPlanChatGatePending } from "../../utils/deep-research-plan-chat-composer";
 import {
   buildDeepResearchSegments,
   deepResearchNeedsTrailingActivity,
@@ -28,6 +32,8 @@ export type DeepResearchWorkbenchProps = {
   onOpenLaneSources?: (lane: DeepResearchLaneSelection) => void;
   /** Open a single searched page. */
   onOpenLaneSource?: (source: LaneSource) => void;
+  /** 计划对齐：是否为当前最新方案卡（历史卡只读）。默认 true。 */
+  planChatInteractive?: boolean;
   className?: string;
 };
 
@@ -521,6 +527,7 @@ export function DeepResearchWorkbench({
   onOpenArtifact,
   onOpenLaneSources,
   onOpenLaneSource,
+  planChatInteractive = true,
   className,
 }: DeepResearchWorkbenchProps) {
   const segments = React.useMemo(
@@ -538,7 +545,13 @@ export function DeepResearchWorkbench({
   const hasClarify = deepResearch.events.some((e): e is Extract<DeepResearchEvent, { type: "clarify" }> =>
     e.type === "clarify",
   );
-  const showTrailingDots = deepResearchNeedsTrailingActivity(segments, deepResearch.status);
+  const planGatePending = isPlanGatePending(deepResearch.events);
+  const planChatGatePending = isPlanChatGatePending(deepResearch.events);
+  const anyPlanGatePending = planGatePending || planChatGatePending;
+  // 计划草案等待用户操作时禁止三点动画，避免「像在跑、却改不了」的错觉。
+  const showTrailingDots =
+    !anyPlanGatePending &&
+    deepResearchNeedsTrailingActivity(segments, deepResearch.status);
 
   if (waitingShell) {
     return (
@@ -572,10 +585,52 @@ export function DeepResearchWorkbench({
               <DeepResearchClarifyCard
                 key={segment.id}
                 events={deepResearch.events}
-                awaiting={deepResearch.status === "awaiting_clarify"}
+                awaiting={
+                  deepResearch.status === "awaiting_clarify" && !anyPlanGatePending
+                }
                 clarifyAnswers={deepResearch.clarifyAnswers}
                 timedOut={timedOut}
                 onSubmitted={onClarifySubmitted}
+              />
+            );
+          case "clarify_chat":
+            return (
+              <DeepResearchClarifyChat
+                key={segment.id}
+                events={deepResearch.events}
+                awaiting={
+                  deepResearch.status === "awaiting_clarify" && !anyPlanGatePending
+                }
+                clarifyAnswers={deepResearch.clarifyAnswers}
+                timedOut={timedOut}
+                onSubmitted={onClarifySubmitted}
+              />
+            );
+          case "plan":
+            return (
+              <DeepResearchPreflightCard
+                key={segment.id}
+                events={deepResearch.events}
+                // 只恢复数据库里仍处于等待态的活动 gate；终态 run 保持只读。
+                awaiting={
+                  planGatePending && deepResearch.status === "awaiting_clarify"
+                }
+              />
+            );
+          case "plan_chat":
+            return (
+              <DeepResearchPlanChatCard
+                key={segment.id}
+                events={deepResearch.events}
+                interactive={planChatInteractive}
+                awaiting={
+                  planChatInteractive &&
+                  (deepResearch.status === "running" ||
+                    deepResearch.status === "awaiting_clarify") &&
+                  (planChatGatePending ||
+                    (deepResearch.status === "awaiting_clarify" &&
+                      deepResearch.profile?.planVisibility === "chat_editable"))
+                }
               />
             );
           case "tools":

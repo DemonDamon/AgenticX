@@ -5,6 +5,9 @@ import type { LaneSource } from "./deep-research-lane-sources";
 export type DeepResearchSegment =
   | { kind: "narrative"; id: string; text: string }
   | { kind: "clarify"; id: string }
+  | { kind: "clarify_chat"; id: string; roundIndex: number }
+  | { kind: "plan"; id: string }
+  | { kind: "plan_chat"; id: string }
   | {
       kind: "tools";
       id: string;
@@ -147,6 +150,9 @@ export function buildDeepResearchSegments(
 ): DeepResearchSegment[] {
   const segments: DeepResearchSegment[] = [];
   let clarifyPushed = false;
+  const clarifyChatRounds = new Set<number>();
+  let planPushed = false;
+  let planVisibility: "hidden" | "preview" | "editable" | "chat_editable" = "hidden";
   let toolsTitle = "正在并行检索…";
   let toolsId = "tools-1";
   let lanes = new Map<string, LaneDraft>();
@@ -204,6 +210,16 @@ export function buildDeepResearchSegments(
 
   const flushTools = () => {
     if (lanes.size === 0) return;
+    // A settled run can leave lanes with only `lane_started` (no `lane_done`)
+    // when the process died mid-search. Without this, the UI keeps a fake
+    // "搜索网页" spinner forever on a failed/cancelled run.
+    if (runTerminal) {
+      for (const lane of lanes.values()) {
+        if (lane.status === "running") {
+          lane.status = status === "completed" ? "done" : "failed";
+        }
+      }
+    }
     const steps = [...lanes.values()]
       .sort((a, b) => a.index - b.index)
       .map(laneToStep);
@@ -229,9 +245,17 @@ export function buildDeepResearchSegments(
       case "run_started":
         break;
       case "narrative": {
+        const text = event.text.trim();
+        // 计划对齐多轮内部旁白由 PlanChatCard 自己渲染，避免气泡重复刷屏。
+        if (
+          /^你：/.test(text) ||
+          /正在根据你的反馈更新计划/.test(text) ||
+          /^已更新计划 v\d+/.test(text)
+        ) {
+          break;
+        }
         settleProcessStatus("done");
         flushCards();
-        const text = event.text.trim();
         if (text) {
           segments.push({ kind: "narrative", id: `narrative-${seq++}`, text });
         }
@@ -243,6 +267,37 @@ export function buildDeepResearchSegments(
           flushCards();
           segments.push({ kind: "clarify", id: "clarify" });
           clarifyPushed = true;
+        }
+        break;
+      }
+      case "clarify_chat": {
+        // 计划对齐引导折入 plan_chat 卡，不单独成段。
+        if (event.phase === "plan") break;
+        // 每轮对话澄清独立成段（roundIndex 去重，防事件重放重复渲染）。
+        const round = typeof event.roundIndex === "number" ? event.roundIndex : 0;
+        if (!clarifyChatRounds.has(round)) {
+          settleProcessStatus("done");
+          flushCards();
+          clarifyChatRounds.add(round);
+          segments.push({ kind: "clarify_chat", id: `clarify-chat-${round}`, roundIndex: round });
+        }
+        break;
+      }
+      case "research_profile": {
+        planVisibility = event.planVisibility;
+        break;
+      }
+      case "research_plan": {
+        // hidden 计划不渲染；可见计划只渲染一张卡（最新版本由卡片自取）。
+        if (planVisibility !== "hidden" && !planPushed) {
+          settleProcessStatus("done");
+          flushCards();
+          if (planVisibility === "chat_editable") {
+            segments.push({ kind: "plan_chat", id: "plan-chat" });
+          } else {
+            segments.push({ kind: "plan", id: "plan" });
+          }
+          planPushed = true;
         }
         break;
       }
