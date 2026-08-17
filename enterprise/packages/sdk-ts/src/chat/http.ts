@@ -47,10 +47,17 @@ function parseErrorPayload(raw: unknown): { code: string; message: string } {
   return { code: "50000", message: "Gateway request failed" };
 }
 
+function appendRequestId(message: string, traceId?: string): string {
+  const tid = traceId?.trim();
+  if (!tid) return message;
+  if (message.includes("\n请求 ID: ")) return message;
+  return `${message}\n请求 ID: ${tid}`;
+}
+
 /** Map browser/undici opaque fetch failures to actionable copy for acceptance UX. */
-export function normalizeTransportErrorMessage(raw: string): string {
+export function normalizeTransportErrorMessage(raw: string, traceId?: string): string {
   const message = raw.trim();
-  if (!message) return "request failed";
+  if (!message) return appendRequestId("request failed", traceId);
   const lower = message.toLowerCase();
   if (
     lower === "failed to fetch" ||
@@ -60,12 +67,13 @@ export function normalizeTransportErrorMessage(raw: string): string {
     lower === "load failed" ||
     lower.includes("fetch failed")
   ) {
-    return (
+    return appendRequestId(
       "无法连接门户服务（网络中断或开发服务未响应）。" +
-      "对话若已显示完整回答，多半是历史同步失败；请确认门户仍在运行后刷新页面，或再发一条消息触发重试。"
+        "对话若已显示完整回答，多半是历史同步失败；请确认门户仍在运行后刷新页面，或再发一条消息触发重试。",
+      traceId,
     );
   }
-  return message;
+  return appendRequestId(message, traceId);
 }
 
 /**
@@ -293,7 +301,10 @@ export class HttpChatClient implements ChatClient {
           requestId,
           done: true,
           traceId: pending.traceId,
-          error: parsed,
+          error: {
+            code: parsed.code,
+            message: appendRequestId(parsed.message, pending.traceId),
+          },
         };
         return;
       }
@@ -306,7 +317,7 @@ export class HttpChatClient implements ChatClient {
           traceId: pending.traceId,
           error: {
             code: "50000",
-            message: "empty gateway stream",
+            message: appendRequestId("empty gateway stream", pending.traceId),
           },
         };
         return;
@@ -383,7 +394,10 @@ export class HttpChatClient implements ChatClient {
                 code: chunk.error.code ?? "50000",
                 // Preserve structured Gateway/upstream errors. Only exceptions thrown
                 // by browser fetch/read are normalized in the outer catch below.
-                message: chunk.error.message ?? "Gateway request failed",
+                message: appendRequestId(
+                  chunk.error.message ?? "Gateway request failed",
+                  pending.traceId,
+                ),
               },
             };
             this.pending.delete(requestId);
@@ -502,6 +516,7 @@ export class HttpChatClient implements ChatClient {
             code: "50000",
             message: normalizeTransportErrorMessage(
               error instanceof Error ? error.message : "request failed",
+              pending.traceId,
             ),
           },
         };

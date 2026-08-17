@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../../lib/session";
 import { defaultRunStore } from "../../../../../lib/deep-research/run-store";
 import { notifyClarifyResume } from "../../../../../lib/deep-research/run-wait";
+import { withRequestLog } from "../../../../../lib/observability/with-request-log";
 
 export async function POST(request: Request) {
+  return withRequestLog("deep_research.resume", async (logCtx) => {
   const session = await getSessionFromCookies();
   if (session?.mustChangePassword) {
     return passwordChangeRequiredResponse();
@@ -14,6 +16,10 @@ export async function POST(request: Request) {
       { status: 401 },
     );
   }
+  logCtx.setUser({
+    userId: session.userId,
+    tenantId: session.tenantId,
+  });
 
   let body: { runId?: unknown; answers?: unknown; skip?: unknown };
   try {
@@ -84,4 +90,5 @@ export async function POST(request: Request) {
 
   notifyClarifyResume(runId);
   return NextResponse.json({ code: "00000", message: "ok", data: { runId, resumed: true } });
+  }, request);
 }

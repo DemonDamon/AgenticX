@@ -438,7 +438,7 @@ describe("HttpChatClient stream cancel", () => {
     );
 
     const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
-    const { requestId } = await client.sendMessage({
+    const { requestId, traceId } = await client.sendMessage({
       sessionId: "session-1",
       model: "test-model",
       messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
@@ -449,7 +449,7 @@ describe("HttpChatClient stream cancel", () => {
       chunks.push(chunk);
     }
 
-    expect(chunks.at(-1)?.error?.message).toBe("boom");
+    expect(chunks.at(-1)?.error?.message).toBe(`boom\n请求 ID: ${traceId}`);
     expect(cancelSpy).toHaveBeenCalled();
   });
 

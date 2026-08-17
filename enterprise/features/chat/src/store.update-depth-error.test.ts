@@ -82,4 +82,29 @@ describe("stream update-depth error mapping", () => {
     const assistant = state.messages.find((m) => m.role === "assistant");
     expect(assistant?.content).toContain("partial");
   });
+
+  it("appends 请求 ID from chunk.traceId onto compliance errorMessage", async () => {
+    const traceId = "01JABCDEFGHJKMNPQRSTVWXYZB";
+    class TraceErrorClient implements ChatClient {
+      async sendMessage(_req: ChatRequest): Promise<SendMessageResult> {
+        return { requestId: "req-trace", traceId };
+      }
+      async *stream(_requestId: string): AsyncIterable<ChatChunk> {
+        yield {
+          requestId: "req-trace",
+          done: true,
+          traceId,
+          error: { code: "50000", message: "Gateway request failed" },
+        };
+      }
+      async cancel(_requestId: string): Promise<void> {
+        // no-op
+      }
+    }
+
+    await useChatStore.getState().sendMessage(new TraceErrorClient(), { content: "hello" });
+    const state = useChatStore.getState();
+    expect(state.errorMessage).toBe(`Gateway request failed\n请求 ID: ${traceId}`);
+    expect(state.errorMessage?.endsWith(`请求 ID: ${traceId}`)).toBe(true);
+  });
 });

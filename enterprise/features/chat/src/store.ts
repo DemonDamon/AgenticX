@@ -1463,7 +1463,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.error) {
-          const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
+          const complianceMessage = toComplianceMessage(
+            chunk.error.code,
+            chunk.error.message,
+            chunk.traceId,
+          );
           setSessionStream(set, sessionId, null);
           set({ errorMessage: complianceMessage });
           set((prev) => ({
@@ -1764,7 +1768,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.error) {
-          const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
+          const complianceMessage = toComplianceMessage(
+            chunk.error.code,
+            chunk.error.message,
+            chunk.traceId,
+          );
           setSessionStream(set, sessionId, null);
           set({ errorMessage: complianceMessage });
           set((prev) => ({
@@ -2038,7 +2046,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }
 
         if (chunk.error) {
-          const complianceMessage = toComplianceMessage(chunk.error.code, chunk.error.message);
+          const complianceMessage = toComplianceMessage(
+            chunk.error.code,
+            chunk.error.message,
+            chunk.traceId,
+          );
           setSessionStream(set, sessionId, null);
           set({ errorMessage: complianceMessage });
           set((prev) => ({

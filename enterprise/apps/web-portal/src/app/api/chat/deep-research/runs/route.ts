@@ -7,6 +7,7 @@ import {
   runLooksFinished,
   type RunRecord,
 } from "../../../../../lib/deep-research/run-store";
+import { withRequestLog } from "../../../../../lib/observability/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -105,6 +106,7 @@ async function healFinishedActiveRuns(rows: RunRecord[]): Promise<RunRecord[]> {
 }
 
 export async function GET(request: Request) {
+  return withRequestLog("deep_research.runs", async (logCtx) => {
   const session = await getSessionFromCookies();
   if (!session) {
     return NextResponse.json(
@@ -116,6 +118,11 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("sessionId")?.trim() || undefined;
   const hydrate = url.searchParams.get("hydrate") === "1";
+  logCtx.setUser({
+    userId: session.userId,
+    tenantId: session.tenantId,
+    sessionId,
+  });
   const store = defaultRunStore;
   const activeRaw = await store.listActive(session.tenantId, session.userId, sessionId);
   const active = await healFinishedActiveRuns(activeRaw);
@@ -156,4 +163,5 @@ export async function GET(request: Request) {
       ...(hydrate ? { latest } : {}),
     },
   });
+  }, request);
 }
