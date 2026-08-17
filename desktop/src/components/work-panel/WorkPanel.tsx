@@ -51,7 +51,6 @@ import { HoverTip } from "../ds/HoverTip";
 import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
 import {
   artifactBaseName,
-  collectArtifactPathsFromAgentMessages,
   collectSessionArtifactPaths,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
@@ -69,7 +68,10 @@ import { SessionReferenceList } from "./SessionReferenceList";
 import { SessionTodoList } from "./SessionTodoList";
 import { collectSessionReferences } from "../../utils/session-references";
 import { resolveWorkPanelTodoFromMessages } from "../../utils/task-stall-policy";
-import { ensureArtifactTaskspacesForSession } from "../../utils/ensure-artifact-taskspaces";
+import {
+  ensureArtifactTaskspacesForSession,
+  loadPersistedSessionArtifactPaths,
+} from "../../utils/ensure-artifact-taskspaces";
 import { RUNTIME_DEFAULT_TASKSPACES } from "../automation/RuntimeConfigSection";
 import {
   BROWSER_SELECTION_HOOK_JS,
@@ -746,54 +748,45 @@ export function WorkPanel({
     members: false,
   });
   const [extraArtifactPaths, setExtraArtifactPaths] = useState<string[]>([]);
-  /** Paths only present in agent_messages.json (ahead of chat messages.json). */
-  const [agentArtifactPaths, setAgentArtifactPaths] = useState<string[]>([]);
+  /**
+   * Paths from on-disk session files. `messages.json` is the full chat history;
+   * `agent_messages.json` is only the last 40 model-context rows (SSE gap).
+   */
+  const [diskArtifactPaths, setDiskArtifactPaths] = useState<string[]>([]);
   const [artifactHighlightPath, setArtifactHighlightPath] = useState<string | null>(null);
 
-  // Cold-start / SSE gap: chat `messages.json` can lag `agent_messages.json`
-  // (e.g. HTML file_write after UI disconnect). Merge agent-side writes into「任务产物」.
+  // Tail-loaded panes only hold the last 3 rounds / 40 messages. Re-scan the
+  // full `messages.json` so older file_write / bash artifacts stay listed.
   useEffect(() => {
     const sid = String(sessionId || "").trim();
     if (!sid) {
-      setAgentArtifactPaths([]);
+      setDiskArtifactPaths([]);
       return;
     }
     let cancelled = false;
-    const diskPath = `~/.agenticx/sessions/${sid}/agent_messages.json`;
     void (async () => {
-      const read = window.agenticxDesktop?.readLocalTextFile;
-      if (!read) return;
       try {
-        const res = await read(diskPath);
-        if (cancelled || !res?.ok || typeof res.content !== "string") {
-          if (!cancelled && res && !res.ok) {
-            console.warn("[WorkPanel] agent_messages read failed:", res.error || diskPath);
-          }
-          return;
-        }
-        const parsed = JSON.parse(res.content) as unknown;
-        const paths = collectArtifactPathsFromAgentMessages(
-          Array.isArray(parsed) ? parsed : [],
-        );
-        if (!cancelled) setAgentArtifactPaths(paths);
-      } catch {
-        if (!cancelled) setAgentArtifactPaths([]);
+        const paths = await loadPersistedSessionArtifactPaths(sid);
+        if (!cancelled) setDiskArtifactPaths(paths);
+      } catch (err) {
+        console.warn("[WorkPanel] persisted artifacts load failed:", err);
+        if (!cancelled) setDiskArtifactPaths([]);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [sessionId, paneMessages.length, summaryTabOpen]);
+  }, [sessionId, summaryTabOpen]);
 
   const artifactPaths = useMemo(
     () =>
       collectSessionArtifactPaths(
         paneMessages,
         subAgents,
-        [...extraArtifactPaths, ...agentArtifactPaths],
+        [...extraArtifactPaths, ...diskArtifactPaths],
         sessionId,
       ),
-    [paneMessages, subAgents, extraArtifactPaths, agentArtifactPaths, sessionId],
+    [paneMessages, subAgents, extraArtifactPaths, diskArtifactPaths, sessionId],
   );
 
   /** Content-stable key so effect does not re-fire on new array identity. */

@@ -120,7 +120,7 @@ export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
   }
 
   const title = formatReasoningTitle({ streaming, elapsedSeconds, hasReliableDuration });
-  // Same meta typography as TurnToolGroupCard "运行中 · 1s".
+  // Same rail title typography as completed "思考了 N 秒" / tool-group rows.
   const streamingMeta =
     hasReliableDuration && elapsedSeconds >= 1
       ? `思考中 · ${formatToolElapsedSeconds(elapsedSeconds)}`
@@ -141,7 +141,7 @@ export function ReasoningBlock({ text, streaming = false, seconds }: Props) {
           <Shimmer
             variant="status"
             text={streamingMeta}
-            className="min-w-0 truncate whitespace-nowrap text-[12px] font-normal tabular-nums"
+            className={`min-w-0 truncate whitespace-nowrap tabular-nums ${REACT_RAIL_TITLE_CLASS}`}
           />
         ) : (
           <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>{title}</span>

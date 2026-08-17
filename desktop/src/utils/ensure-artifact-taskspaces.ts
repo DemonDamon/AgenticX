@@ -8,8 +8,9 @@
 import type { Taskspace } from "../store";
 import { useAppStore } from "../store";
 import {
-  collectArtifactPathsFromAgentMessages,
+  collectArtifactPathsFromPersistedSessionFiles,
   collectSessionArtifactPaths,
+  parseSessionMessageFilePayload,
 } from "./session-artifacts";
 import { NEAR_ARTIFACT_TASKSPACES_SYNCED } from "./workspace-sidebar-events";
 
@@ -70,6 +71,48 @@ export function shouldPruneAutoArtifactRoot(
     }
   }
   return false;
+}
+
+/**
+ * Full chat history + model-context tail, for artifact collection.
+ *
+ * Do NOT use `readLocalTextFile` for `messages.json`: that IPC caps at 512KB
+ * and long sessions (file_write bodies) fail closed →「任务产物」collapses
+ * to the tail-only PDF. `loadSessionMessages` reads the same file without
+ * that cap.
+ */
+export async function loadPersistedSessionArtifactPaths(sessionId: string): Promise<string[]> {
+  const sid = String(sessionId || "").trim();
+  const desktop = window.agenticxDesktop;
+  if (!sid || !desktop) return [];
+
+  let chatHistoryRows: unknown[] = [];
+  try {
+    const full = await desktop.loadSessionMessages?.(sid);
+    if (full?.ok && Array.isArray(full.messages)) {
+      chatHistoryRows = full.messages;
+    }
+  } catch {
+    chatHistoryRows = [];
+  }
+
+  let agentMessageRows: unknown[] = [];
+  try {
+    const read = desktop.readLocalTextFile;
+    if (read) {
+      const res = await read(`~/.agenticx/sessions/${sid}/agent_messages.json`);
+      if (res?.ok && typeof res.content === "string") {
+        agentMessageRows = parseSessionMessageFilePayload(JSON.parse(res.content) as unknown);
+      }
+    }
+  } catch {
+    agentMessageRows = [];
+  }
+
+  return collectArtifactPathsFromPersistedSessionFiles({
+    chatHistoryRows,
+    agentMessageRows,
+  });
 }
 
 export type EnsureArtifactTaskspacesResult = {
@@ -231,22 +274,7 @@ export async function ensureSessionArtifactsFromAvailableSources(
     (item) => String(item.sessionId || "").trim() === sid,
   );
 
-  let agentPaths: string[] = [];
-  try {
-    const read = window.agenticxDesktop?.readLocalTextFile;
-    if (read) {
-      const res = await read(`~/.agenticx/sessions/${sid}/agent_messages.json`);
-      if (res?.ok && typeof res.content === "string") {
-        const parsed = JSON.parse(res.content) as unknown;
-        agentPaths = collectArtifactPathsFromAgentMessages(
-          Array.isArray(parsed) ? parsed : [],
-        );
-      }
-    }
-  } catch {
-    agentPaths = [];
-  }
-
-  const paths = collectSessionArtifactPaths(messages, subAgents, agentPaths, sid);
+  const diskPaths = await loadPersistedSessionArtifactPaths(sid);
+  const paths = collectSessionArtifactPaths(messages, subAgents, diskPaths, sid);
   return ensureArtifactTaskspacesForSession(sid, paths, opts);
 }

@@ -6470,8 +6470,37 @@ type TerminalSession = PtyTerminalSession | BridgeTerminalSession;
 
 const terminalSessions = new Map<string, TerminalSession>();
 
+/**
+ * node-pty's Unix spawn path execs `prebuilds/<plat>-<arch>/spawn-helper`.
+ * Some npm/mirror extracts drop the execute bit (mode 644), which surfaces as
+ * `Error: posix_spawnp failed` even though `/bin/zsh` itself is fine.
+ */
+function ensureNodePtySpawnHelperExecutable(): void {
+  if (process.platform === "win32") return;
+  const platArch = `${process.platform}-${process.arch}`;
+  const candidates = [
+    path.join(__dirname, "..", "node_modules", "node-pty", "prebuilds", platArch, "spawn-helper"),
+    path.join(process.cwd(), "node_modules", "node-pty", "prebuilds", platArch, "spawn-helper"),
+    path.join(__dirname, "..", "node_modules", "node-pty", "build", "Release", "spawn-helper"),
+    path.join(process.cwd(), "node_modules", "node-pty", "build", "Release", "spawn-helper"),
+  ];
+  for (const helper of candidates) {
+    try {
+      if (!fs.existsSync(helper)) continue;
+      const st = fs.statSync(helper);
+      if ((st.mode & 0o111) !== 0) return;
+      fs.chmodSync(helper, st.mode | 0o755);
+      console.warn("[terminal] restored execute bit on node-pty spawn-helper:", helper);
+      return;
+    } catch (err) {
+      console.warn("[terminal] failed to chmod node-pty spawn-helper:", helper, err);
+    }
+  }
+}
+
 function requireNodePty(): typeof import("node-pty") | null {
   try {
+    ensureNodePtySpawnHelperExecutable();
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require("node-pty") as typeof import("node-pty");
   } catch (err) {

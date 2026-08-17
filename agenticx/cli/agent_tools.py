@@ -4166,6 +4166,9 @@ def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] 
             from agenticx.runtime.code_read_cache import record_file_read
 
             record_file_read(session, path, start_line=start, end_line=end, total_lines=len(lines))
+            tracker = getattr(session, "file_state_tracker", None)
+            if tracker is not None:
+                tracker.refresh_from_disk(str(path))
         return out
 
     if session is not None:
@@ -4342,7 +4345,11 @@ async def _tool_file_write(
     scratchpad = getattr(session, "scratchpad", None)
     if isinstance(scratchpad, dict):
         scratchpad["__taskspace_hint__"] = str(path)
-    return _autoheal_skill_md_after_write(path, f"OK: wrote {path}")
+    result = _autoheal_skill_md_after_write(path, f"OK: wrote {path}")
+    tracker = getattr(session, "file_state_tracker", None)
+    if tracker is not None:
+        tracker.refresh_from_disk(str(path))
+    return result
 
 
 async def _tool_file_edit(
@@ -4415,7 +4422,10 @@ async def _tool_file_edit(
         path.write_text(updated_text, encoding="utf-8")
     except OSError as exc:
         return f"ERROR: write failed: {exc}"
-    return _autoheal_skill_md_after_write(path, f"OK: edited {path}")
+    result = _autoheal_skill_md_after_write(path, f"OK: edited {path}")
+    if tracker is not None:
+        tracker.refresh_from_disk(str(path))
+    return result
 
 
 async def _tool_codegen(

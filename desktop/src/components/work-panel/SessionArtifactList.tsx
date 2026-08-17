@@ -13,6 +13,9 @@ import {
 } from "../../utils/session-artifacts";
 import { formatPreviewBytes } from "../workspace/workspace-preview-types";
 
+/** Collapsed preview; full list stays behind「显示更多」. */
+export const ARTIFACT_LIST_COLLAPSED_LIMIT = 5;
+
 type Props = {
   paths: string[];
   highlightPath?: string | null;
@@ -29,13 +32,33 @@ export function SessionArtifactList({
 }: Props) {
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [sizeByPath, setSizeByPath] = useState<Record<string, number | null>>({});
+  const [expanded, setExpanded] = useState(false);
+  const pathsKey = paths.join("\0");
 
   useEffect(() => {
-    const target = String(highlightPath || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    setExpanded(false);
+  }, [pathsKey]);
+
+  const highlightTarget = String(highlightPath || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const highlightIndex = highlightTarget
+    ? paths.findIndex((p) => p === highlightTarget || p.startsWith(`${highlightTarget}/`))
+    : -1;
+
+  useEffect(() => {
+    if (highlightIndex >= ARTIFACT_LIST_COLLAPSED_LIMIT) setExpanded(true);
+  }, [highlightIndex]);
+
+  const hiddenCount = Math.max(0, paths.length - ARTIFACT_LIST_COLLAPSED_LIMIT);
+  const visiblePaths = expanded || hiddenCount === 0
+    ? paths
+    : paths.slice(0, ARTIFACT_LIST_COLLAPSED_LIMIT);
+
+  useEffect(() => {
+    const target = highlightTarget;
     if (!target) return;
     const exact = rowRefs.current[target];
     const prefixMatch = !exact
-      ? paths.find((p) => p === target || p.startsWith(`${target}/`))
+      ? visiblePaths.find((p) => p === target || p.startsWith(`${target}/`))
       : null;
     const el = exact ?? (prefixMatch ? rowRefs.current[prefixMatch] : null);
     if (el) {
@@ -49,7 +72,7 @@ export function SessionArtifactList({
     }
     onHighlightHandled?.();
     return undefined;
-  }, [highlightPath, paths, onHighlightHandled]);
+  }, [highlightPath, highlightTarget, visiblePaths, onHighlightHandled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +123,7 @@ export function SessionArtifactList({
 
   return (
     <div className="space-y-1.5">
-      {paths.map((path) => {
+      {visiblePaths.map((path) => {
         const inAppPreview =
           isInAppHtmlPreviewPath(path) || isInAppArtifactPreviewPath(path);
         const size = sizeByPath[path];
@@ -150,6 +173,15 @@ export function SessionArtifactList({
           </div>
         );
       })}
+      {hiddenCount > 0 ? (
+        <button
+          type="button"
+          className="w-full rounded-md px-1.5 py-1 text-left text-[12px] text-text-muted transition hover:bg-surface-hover hover:text-text-primary"
+          onClick={() => setExpanded((prev) => !prev)}
+        >
+          {expanded ? "收起" : `显示更多（+${hiddenCount}）`}
+        </button>
+      ) : null}
     </div>
   );
 }

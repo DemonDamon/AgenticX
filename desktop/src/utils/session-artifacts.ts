@@ -396,6 +396,95 @@ export function collectArtifactPathsFromAgentMessages(
   return collectSessionArtifactPaths(agentMessageRowsToCollectorMessages(rows));
 }
 
+/**
+ * Accept a raw `messages.json` / `agent_messages.json` payload (list or
+ * `{ messages | chat_history: [...] }` wrapper).
+ */
+export function parseSessionMessageFilePayload(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === "object") {
+    const obj = parsed as Record<string, unknown>;
+    const inner = obj.messages ?? obj.chat_history;
+    if (Array.isArray(inner)) return inner;
+  }
+  return [];
+}
+
+function slimToolArgs(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const src = raw as Record<string, unknown>;
+  const next: Record<string, unknown> = {};
+  const path = String(src.path ?? "").trim();
+  if (path) next.path = path;
+  const command = String(src.command ?? "").trim();
+  if (command) next.command = command;
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/**
+ * Map persisted `messages.json` chat-history rows into collector-friendly
+ * Message shapes. Chat rows use snake_case `tool_name` / `tool_args` (not
+ * OpenAI `tool_calls`). Only `path` / `command` are copied from tool_args so
+ * huge `file_write` bodies stay out of the collector.
+ */
+export function chatHistoryRowsToCollectorMessages(rows: unknown[] | undefined | null): Message[] {
+  const out: Message[] = [];
+  if (!Array.isArray(rows)) return out;
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const role = String(r.role || "").trim();
+
+    if (role === "tool") {
+      const statusRaw = String(r.tool_status ?? r.toolStatus ?? "").trim();
+      out.push({
+        id: String(r.tool_call_id || r.id || `ch-tool-${i}`),
+        role: "tool",
+        content: String(r.content ?? ""),
+        toolName: String(r.tool_name || r.toolName || r.name || "").trim() || undefined,
+        toolArgs: slimToolArgs(r.tool_args ?? r.toolArgs),
+        toolStatus: statusRaw === "error" ? "error" : undefined,
+        toolResultPreview: String(r.tool_result_preview ?? r.toolResultPreview ?? ""),
+        timestamp: 0,
+      });
+      continue;
+    }
+
+    if (role === "assistant") {
+      out.push({
+        id: String(r.id || `ch-asst-${i}`),
+        role: "assistant",
+        content: String(r.content ?? ""),
+        timestamp: 0,
+      });
+    }
+  }
+  return out;
+}
+
+/** Collect artifact paths from raw `messages.json` chat-history rows. */
+export function collectArtifactPathsFromChatMessages(
+  rows: unknown[] | undefined | null,
+): string[] {
+  return collectSessionArtifactPaths(chatHistoryRowsToCollectorMessages(rows));
+}
+
+/**
+ * Union artifacts from full chat history + model-context tail.
+ * Needed because `agent_messages.json` is persisted as last 40 rows only.
+ */
+export function collectArtifactPathsFromPersistedSessionFiles(opts: {
+  chatHistoryRows?: unknown[] | null;
+  agentMessageRows?: unknown[] | null;
+}): string[] {
+  return collectSessionArtifactPaths([
+    ...chatHistoryRowsToCollectorMessages(opts.chatHistoryRows),
+    ...agentMessageRowsToCollectorMessages(opts.agentMessageRows),
+  ]);
+}
+
 /** Extract artifact absolute paths from pane messages + sub-agent outputs. */
 export function collectSessionArtifactPaths(
   messages: Message[] | undefined | null,
