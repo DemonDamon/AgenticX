@@ -2659,8 +2659,8 @@ def create_studio_app() -> FastAPI:
             session.provider_name = payload.provider
         if payload.model:
             session.model_name = payload.model
-        # Kimi K3 reasoning_effort (low/high/max); cleared when absent so stale values
-        # from a previous K3 turn do not leak onto other models.
+        # Kimi K3 / DeepSeek V4 reasoning_effort; cleared when absent so stale
+        # values from a previous turn do not leak onto other models.
         _effort = str(getattr(payload, "reasoning_effort", None) or "").strip().lower()
         if _effort in {"low", "high", "max"}:
             setattr(session, "_reasoning_effort", _effort)
@@ -2669,6 +2669,15 @@ def create_studio_app() -> FastAPI:
                 delattr(session, "_reasoning_effort")
             except Exception:
                 setattr(session, "_reasoning_effort", None)
+
+        _thinking = getattr(payload, "thinking_enabled", None)
+        if _thinking is True or _thinking is False:
+            setattr(session, "_thinking_enabled", bool(_thinking))
+        elif hasattr(session, "_thinking_enabled"):
+            try:
+                delattr(session, "_thinking_enabled")
+            except Exception:
+                setattr(session, "_thinking_enabled", None)
 
         from agenticx.llms.vision import is_vision_capable
 

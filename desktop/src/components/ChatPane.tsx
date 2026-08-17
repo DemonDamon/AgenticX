@@ -252,13 +252,19 @@ import { favoriteStorageMessageId } from "../utils/favorite-selection";
 import { createResizeRafScheduler } from "../utils/resize-raf";
 import { avatarTintBg } from "../utils/avatar-color";
 import { formatModelDisplayParts, formatModelOptionLabel } from "../utils/model-display";
+import { SettingsSwitch } from "./settings/SettingsSwitch";
 import {
   DEFAULT_KIMI_REASONING_EFFORT,
+  DEEPSEEK_REASONING_EFFORT_OPTIONS,
   describeModelForPicker,
   KIMI_REASONING_EFFORT_OPTIONS,
+  labelForDeepSeekReasoningEffort,
   labelForKimiReasoningEffort,
+  normalizeDeepSeekReasoningEffort,
   normalizeKimiReasoningEffort,
+  supportsDeepSeekV4Thinking,
   supportsKimiK3ReasoningEffort,
+  type DeepSeekReasoningEffort,
   type KimiReasoningEffort,
 } from "../utils/model-hover-blurb";
 import { getProviderDisplayName } from "../utils/provider-display";
@@ -1070,11 +1076,60 @@ function ProviderGlyph({ provider, model }: { provider: string; model?: string }
 
 const MODEL_HOVER_TIP_WIDTH = 220;
 const MODEL_HOVER_TIP_GAP = 8;
+const MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT = 30;
+
+/** Rough height budget for the model hover card (used for first paint before measure). */
+function estimateModelHoverTipHeight(args: {
+  showDeepSeekThinking: boolean;
+  paneThinkingEnabled: boolean;
+  effortMenuOpen: boolean;
+  showEffortControls: boolean;
+  deepSeekEffortCount: number;
+  kimiEffortCount: number;
+}): number {
+  const {
+    showDeepSeekThinking,
+    paneThinkingEnabled,
+    effortMenuOpen,
+    showEffortControls,
+    deepSeekEffortCount,
+    kimiEffortCount,
+  } = args;
+  if (showDeepSeekThinking) {
+    let h = 140;
+    if (paneThinkingEnabled) {
+      h = 172;
+      if (effortMenuOpen) {
+        h += 12 + deepSeekEffortCount * MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT + 8;
+      }
+    }
+    return h;
+  }
+  if (showEffortControls) {
+    let h = 148;
+    if (effortMenuOpen) {
+      h += 12 + kimiEffortCount * MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT + 8;
+    }
+    return h;
+  }
+  return 108;
+}
+
+function clampFixedPopoverTop(top: number, height: number, margin = PANE_MODEL_PICKER_MARGIN): number {
+  const vh = window.innerHeight;
+  let nextTop = top;
+  if (nextTop + height > vh - margin) {
+    nextTop = Math.max(margin, vh - margin - height);
+  }
+  if (nextTop < margin) nextTop = margin;
+  return nextTop;
+}
 
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const settings = useAppStore((s) => s.settings);
   const setPaneModel = useAppStore((s) => s.setPaneModel);
   const setPaneReasoningEffort = useAppStore((s) => s.setPaneReasoningEffort);
+  const setPaneThinkingEnabled = useAppStore((s) => s.setPaneThinkingEnabled);
   const paneModel = useAppStore((s) => s.panes.find((pane) => pane.id === paneId));
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -1086,6 +1141,10 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const [hoverRowTop, setHoverRowTop] = useState(0);
   const [effortMenuOpen, setEffortMenuOpen] = useState(false);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const hoverTipRef = useRef<HTMLDivElement>(null);
+  const [hoverTipLayout, setHoverTipLayout] = useState<{ top: number; maxHeight: number } | null>(
+    null,
+  );
 
   /** Keep tip visible while moving between list row and tip card. */
   const cancelClearHover = useCallback(() => {
@@ -1285,31 +1344,62 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   }, [groups, hoverOpt, settings.providers]);
 
   const paneReasoningEffort = normalizeKimiReasoningEffort(paneModel?.reasoningEffort);
+  const paneDeepSeekEffort = normalizeDeepSeekReasoningEffort(paneModel?.reasoningEffort);
+  const paneThinkingEnabled = paneModel?.thinkingEnabled !== false;
   const showEffortControls = Boolean(hoverBlurb?.supportsReasoningEffort);
+  const showDeepSeekThinking = Boolean(hoverBlurb?.supportsDeepSeekThinking);
 
   const hoverTipStyle = useMemo((): CSSProperties | null => {
     if (!hoverBlurb || !panelRef.current) return null;
     const panel = panelRef.current.getBoundingClientRect();
     const vw = window.innerWidth;
-    const vh = window.innerHeight;
     const tipW = MODEL_HOVER_TIP_WIDTH;
     const spaceRight = vw - panel.right - PANE_MODEL_PICKER_MARGIN;
     const placeRight = spaceRight >= tipW + MODEL_HOVER_TIP_GAP;
     const left = placeRight
       ? panel.right + MODEL_HOVER_TIP_GAP
       : Math.max(PANE_MODEL_PICKER_MARGIN, panel.left - MODEL_HOVER_TIP_GAP - tipW);
-    const tipH = showEffortControls ? (effortMenuOpen ? 196 : 148) : 108;
-    let top = hoverRowTop;
-    if (top + tipH > vh - PANE_MODEL_PICKER_MARGIN) {
-      top = Math.max(PANE_MODEL_PICKER_MARGIN, vh - PANE_MODEL_PICKER_MARGIN - tipH);
-    }
-    if (top < PANE_MODEL_PICKER_MARGIN) top = PANE_MODEL_PICKER_MARGIN;
+    const tipH = estimateModelHoverTipHeight({
+      showDeepSeekThinking,
+      paneThinkingEnabled,
+      effortMenuOpen,
+      showEffortControls,
+      deepSeekEffortCount: DEEPSEEK_REASONING_EFFORT_OPTIONS.length,
+      kimiEffortCount: KIMI_REASONING_EFFORT_OPTIONS.length,
+    });
+    const top = clampFixedPopoverTop(hoverRowTop, tipH);
     return {
       left,
       top,
       width: tipW,
     };
-  }, [hoverBlurb, hoverRowTop, showEffortControls, effortMenuOpen]);
+  }, [hoverBlurb, hoverRowTop, showEffortControls, showDeepSeekThinking, paneThinkingEnabled, effortMenuOpen]);
+
+  useLayoutEffect(() => {
+    const el = hoverTipRef.current;
+    if (!hoverBlurb || !hoverTipStyle || !el) {
+      setHoverTipLayout(null);
+      return;
+    }
+    const height = el.getBoundingClientRect().height;
+    const baseTop = typeof hoverTipStyle.top === "number" ? hoverTipStyle.top : PANE_MODEL_PICKER_MARGIN;
+    const top = clampFixedPopoverTop(baseTop, height);
+    const maxHeight = Math.max(
+      MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT,
+      window.innerHeight - top - PANE_MODEL_PICKER_MARGIN,
+    );
+    setHoverTipLayout((prev) =>
+      prev && prev.top === top && prev.maxHeight === maxHeight ? prev : { top, maxHeight },
+    );
+  }, [
+    hoverBlurb,
+    hoverTipStyle,
+    effortMenuOpen,
+    paneThinkingEnabled,
+    hoverKey,
+    showEffortControls,
+    showDeepSeekThinking,
+  ]);
 
   return (
     <div className="relative min-w-0 max-w-full" ref={anchorRef}>
@@ -1494,10 +1584,18 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
             </div>
             {hoverBlurb && hoverTipStyle ? (
               <div
-                className={`agx-menu-pop fixed z-50 rounded-xl border border-border bg-surface-panel px-3.5 py-3 shadow-2xl backdrop-blur-xl ${
-                  showEffortControls ? "pointer-events-auto" : "pointer-events-none"
+                ref={hoverTipRef}
+                className={`agx-menu-pop fixed z-[9999] overflow-x-hidden overflow-y-auto rounded-xl border border-border bg-surface-panel px-3.5 py-3 shadow-2xl backdrop-blur-xl ${
+                  showEffortControls || showDeepSeekThinking
+                    ? "pointer-events-auto"
+                    : "pointer-events-none"
                 }`}
-                style={hoverTipStyle}
+                style={{
+                  ...hoverTipStyle,
+                  ...(hoverTipLayout
+                    ? { top: hoverTipLayout.top, maxHeight: hoverTipLayout.maxHeight }
+                    : null),
+                }}
                 role="tooltip"
                 onMouseEnter={cancelClearHover}
                 onMouseLeave={scheduleClearHover}
@@ -1512,7 +1610,75 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                   <span className="text-text-muted">{hoverBlurb.metaLabel}</span>
                   <span className="truncate font-medium text-text-strong">{hoverBlurb.metaValue}</span>
                 </div>
-                {showEffortControls ? (
+                {showDeepSeekThinking ? (
+                  <div className="relative mt-2 border-t border-border pt-2">
+                    <div className="flex w-full items-center justify-between gap-3 text-[11px]">
+                      <span className="text-text-muted">思考模式</span>
+                      <SettingsSwitch
+                        checked={paneThinkingEnabled}
+                        size="sm"
+                        aria-label="思考模式"
+                        onChange={(next) => {
+                          setPaneThinkingEnabled(paneId, next);
+                          if (!next) setEffortMenuOpen(false);
+                        }}
+                      />
+                    </div>
+                    {paneThinkingEnabled ? (
+                      <>
+                        <button
+                          type="button"
+                          className="mt-2 flex w-full items-center justify-between gap-3 text-[11px] transition-colors hover:text-text-strong"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEffortMenuOpen((v) => !v);
+                          }}
+                        >
+                          <span className="text-text-muted">思考强度</span>
+                          <span className="inline-flex items-center gap-0.5 font-medium text-text-strong">
+                            {labelForDeepSeekReasoningEffort(paneDeepSeekEffort)}
+                            <ChevronRight
+                              className={`h-3 w-3 text-text-muted transition-transform ${
+                                effortMenuOpen ? "rotate-90" : ""
+                              }`}
+                              strokeWidth={2}
+                              aria-hidden
+                            />
+                          </span>
+                        </button>
+                        {effortMenuOpen ? (
+                          <div className="mt-1.5 overflow-hidden rounded-lg border border-border bg-surface-cardStrong p-0.5">
+                            {DEEPSEEK_REASONING_EFFORT_OPTIONS.map((opt) => {
+                              const active = paneDeepSeekEffort === opt.value;
+                              return (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                                    active
+                                      ? "bg-surface-hover font-medium text-text-strong"
+                                      : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                                  }`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const next = opt.value as DeepSeekReasoningEffort;
+                                    setPaneReasoningEffort(paneId, next);
+                                    setEffortMenuOpen(false);
+                                  }}
+                                >
+                                  <span>{opt.label}</span>
+                                  {active ? (
+                                    <Check className="h-3 w-3 text-status-success" strokeWidth={2.5} />
+                                  ) : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                ) : showEffortControls ? (
                   <div className="relative mt-2 border-t border-border pt-2">
                     <button
                       type="button"
@@ -9032,6 +9198,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         body.reasoning_effort = normalizeKimiReasoningEffort(
           pane.reasoningEffort ?? DEFAULT_KIMI_REASONING_EFFORT,
         );
+      } else if (chatModel && supportsDeepSeekV4Thinking(chatModel)) {
+        const thinkingOn = pane.thinkingEnabled !== false;
+        body.thinking_enabled = thinkingOn;
+        if (thinkingOn) {
+          body.reasoning_effort = normalizeDeepSeekReasoningEffort(pane.reasoningEffort);
+        }
       }
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
       // Per-session KB retrieval mode: carry the session's explicit choice so the

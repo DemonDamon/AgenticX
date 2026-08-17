@@ -55,8 +55,10 @@ class ChatRequest(BaseModel):
     # Idempotency key from desktop: a duplicate POST with the same id within a
     # short window is short-circuited so no second user row is persisted.
     client_turn_id: Optional[str] = None
-    # Kimi K3 top-level reasoning_effort: "low" | "high" | "max" (ignored for other models).
+    # Kimi K3: "low" | "high" | "max". DeepSeek V4 thinking: "high" | "max".
     reasoning_effort: Optional[str] = None
+    # DeepSeek V4 thinking switch; None leaves session unset (runtime defaults on).
+    thinking_enabled: Optional[bool] = None
 
 
 class ContinueRequest(BaseModel):

@@ -9,6 +9,8 @@ export type ModelHoverBlurb = {
   metaValue: string;
   /** True when this SKU accepts Moonshot K3 `reasoning_effort` (low/high/max). */
   supportsReasoningEffort: boolean;
+  /** True when this SKU accepts DeepSeek V4 thinking switch + high/max effort. */
+  supportsDeepSeekThinking: boolean;
 };
 
 /** Kimi K3 top-level `reasoning_effort` values (Moonshot API). */
@@ -39,6 +41,33 @@ export function normalizeKimiReasoningEffort(raw: unknown): KimiReasoningEffort 
 
 export function labelForKimiReasoningEffort(effort: KimiReasoningEffort): string {
   return KIMI_REASONING_EFFORT_OPTIONS.find((o) => o.value === effort)?.label ?? "最大";
+}
+
+/** DeepSeek V4 Chat Completions `reasoning_effort` when thinking is on (high/max). */
+export type DeepSeekReasoningEffort = "high" | "max";
+
+export const DEEPSEEK_REASONING_EFFORT_OPTIONS: ReadonlyArray<{
+  value: DeepSeekReasoningEffort;
+  label: string;
+}> = [
+  { value: "high", label: "高" },
+  { value: "max", label: "超高" },
+];
+
+export const DEFAULT_DEEPSEEK_REASONING_EFFORT: DeepSeekReasoningEffort = "high";
+
+export function supportsDeepSeekV4Thinking(model: string): boolean {
+  return normalizeBareModelId(model).toLowerCase().startsWith("deepseek-v4");
+}
+
+export function normalizeDeepSeekReasoningEffort(raw: unknown): DeepSeekReasoningEffort {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "high" || v === "max") return v;
+  return DEFAULT_DEEPSEEK_REASONING_EFFORT;
+}
+
+export function labelForDeepSeekReasoningEffort(effort: DeepSeekReasoningEffort): string {
+  return DEEPSEEK_REASONING_EFFORT_OPTIONS.find((o) => o.value === effort)?.label ?? "高";
 }
 
 type CuratedRule = {
@@ -86,12 +115,8 @@ const CURATED_BLURBS: CuratedRule[] = [
     description: "综合对话与工具调用均衡，适合工程辅助与知识问答",
   },
   {
-    test: (m) => m.includes("deepseek-v4-pro") || m === "deepseek-v4-pro",
-    description: "官网旗舰对话，适合复杂推理、代码与工具调用",
-  },
-  {
-    test: (m) => m.includes("deepseek-v4-flash") || m === "deepseek-v4-flash",
-    description: "官网快速档，适合日常对话与低延迟任务",
+    test: (m) => m.startsWith("deepseek-v4") || m.includes("deepseek-v4"),
+    description: "DeepSeek 旗舰模型，支持 1M 上下文窗口",
   },
   {
     test: (m) => m.includes("deepseek-r1") || m.includes("deepseek-reasoner"),
@@ -177,5 +202,6 @@ export function describeModelForPicker(
     metaLabel: "服务渠道",
     metaValue: (providerLabel || "").trim() || provider,
     supportsReasoningEffort: supportsKimiK3ReasoningEffort(model),
+    supportsDeepSeekThinking: supportsDeepSeekV4Thinking(model),
   };
 }

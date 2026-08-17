@@ -145,9 +145,15 @@ export type ChatPane = {
   modelName: string;
   /**
    * Kimi K3 `reasoning_effort` for this pane (`low` | `high` | `max`).
-   * Only sent when the active model is Kimi K3; ignored otherwise.
+   * DeepSeek V4 uses `high` | `max` when thinking is on.
+   * Only sent when the active model accepts the corresponding API.
    */
   reasoningEffort?: "low" | "high" | "max";
+  /**
+   * DeepSeek V4 thinking switch. `undefined` means default on.
+   * Ignored for models that do not support the V4 thinking API.
+   */
+  thinkingEnabled?: boolean;
   messages: Message[];
   historyOpen: boolean;
   memoryGraphOpen: boolean;
@@ -582,8 +588,10 @@ type AppState = {
   setStatus: (status: UiStatus) => void;
   setActiveModel: (provider: string, model: string) => void;
   setPaneModel: (paneId: string, provider: string, model: string) => void;
-  /** Persist Kimi K3 reasoning_effort for a pane (low/high/max). */
+  /** Persist Kimi K3 / DeepSeek V4 reasoning_effort for a pane. */
   setPaneReasoningEffort: (paneId: string, effort: "low" | "high" | "max") => void;
+  /** Persist DeepSeek V4 thinking switch for a pane. */
+  setPaneThinkingEnabled: (paneId: string, enabled: boolean) => void;
   /** Migrate pane/global picks that are no longer in the visible model catalog. */
   reconcilePaneModels: () => { changedPaneIds: string[]; activeChanged: boolean };
   setUserMode: (mode: "pro" | "lite") => void;
@@ -1177,6 +1185,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       };
     }),
+  setPaneThinkingEnabled: (paneId, enabled) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, thinkingEnabled: enabled } : pane,
+      ),
+    })),
   reconcilePaneModels: () => {
     let changedPaneIds: string[] = [];
     let activeChanged = false;

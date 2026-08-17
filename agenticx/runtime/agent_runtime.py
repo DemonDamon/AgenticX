@@ -938,6 +938,46 @@ def _kimi_k3_reasoning_effort_kwargs(session: Any, model_name: str) -> Dict[str,
     return {"reasoning_effort": raw}
 
 
+def _is_deepseek_v4_model(model_name: str) -> bool:
+    bare = str(model_name or "").strip().lower().split("/")[-1]
+    return bare.startswith("deepseek-v4")
+
+
+def _deepseek_v4_thinking_kwargs(session: Any, model_name: str) -> Dict[str, Any]:
+    """OpenAI-compat DeepSeek V4 thinking via extra_body only.
+
+    LiteLLM's OpenAI adapter rejects top-level ``reasoning_effort`` for
+    ``openai/deepseek-v4-*`` (UnsupportedParamsError). Official Chat Completions
+    still accepts ``reasoning_effort`` in the JSON body, so nest it next to
+    ``thinking`` in extra_body.
+    """
+    if not _is_deepseek_v4_model(model_name):
+        return {}
+    enabled = getattr(session, "_thinking_enabled", None)
+    if enabled is False:
+        return {"extra_body": {"thinking": {"type": "disabled"}}}
+    raw = str(getattr(session, "_reasoning_effort", "") or "").strip().lower()
+    effort = raw if raw in {"high", "max"} else "high"
+    return {
+        "extra_body": {
+            "thinking": {"type": "enabled"},
+            "reasoning_effort": effort,
+        },
+    }
+
+
+def _merge_llm_call_kwargs(base: Dict[str, Any], extra: Dict[str, Any]) -> None:
+    """Update call kwargs; merge extra_body instead of replacing prompt-cache extra_body."""
+    payload = dict(extra or {})
+    extra_body = payload.pop("extra_body", None)
+    base.update(payload)
+    if isinstance(extra_body, dict):
+        existing = base.get("extra_body")
+        merged = dict(existing) if isinstance(existing, dict) else {}
+        merged.update(extra_body)
+        base["extra_body"] = merged
+
+
 def _build_streamed_tool_truncation_hint(names: Sequence[str]) -> str:
     """FR-C: human-readable retry hint appended to assistant text when streamed
     tool calls were dropped due to truncation.
@@ -3431,8 +3471,13 @@ class AgentRuntime:
                 except Exception:
                     llm_call_kwargs = {}
                 try:
-                    llm_call_kwargs.update(
-                        _kimi_k3_reasoning_effort_kwargs(session, model_name)
+                    _merge_llm_call_kwargs(
+                        llm_call_kwargs,
+                        _kimi_k3_reasoning_effort_kwargs(session, model_name),
+                    )
+                    _merge_llm_call_kwargs(
+                        llm_call_kwargs,
+                        _deepseek_v4_thinking_kwargs(session, model_name),
                     )
                 except Exception:
                     pass
