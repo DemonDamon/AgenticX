@@ -97,5 +97,23 @@
     "suggested_questions": [],
     "protocol_errors": ["missing_visible_body"],
     "malformed": true
+  },
+  {
+    "name": "followflows_alias_well_formed",
+    "raw": "正文<followflows>问题1\n问题2\n问题3</followflows>",
+    "reasoning": "",
+    "visible_body": "正文",
+    "suggested_questions": ["问题1", "问题2", "问题3"],
+    "protocol_errors": [],
+    "malformed": false
+  },
+  {
+    "name": "followflows_single_line_stripped",
+    "raw": "总结正文\n<followflows>客户追问 Qoder Work 和 Cursor 怎么选 客户想看 Qoder Work 的具体功能演示 客户问 Qoder Work 价格和订阅方案</followflows>",
+    "reasoning": "",
+    "visible_body": "总结正文\n",
+    "suggested_questions": [],
+    "protocol_errors": ["invalid_followup_count"],
+    "malformed": true
   }
 ]

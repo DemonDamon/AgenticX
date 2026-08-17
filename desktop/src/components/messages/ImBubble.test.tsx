@@ -137,6 +137,18 @@ describe("ImBubble assistant protocol boundary", () => {
     expect(html).not.toContain("粒子动画太卡了怎么优化");
   });
 
+  it("does not render a MiniMax followflows alias block as markdown body", () => {
+    const raw =
+      "总结正文\n<followflows>客户追问 Qoder Work 和 Cursor 怎么选 客户想看 Qoder Work 的具体功能演示 客户问 Qoder Work 价格和订阅方案</followflows>";
+    const html = renderToStaticMarkup(
+      <ImBubble message={{ id: "minimax-followflows", role: "assistant", content: raw }} />,
+    );
+
+    expect(html).toContain("总结正文");
+    expect(html).not.toContain("followflows");
+    expect(html).not.toContain("客户追问 Qoder Work 和 Cursor 怎么选");
+  });
+
   it("does not render a ReasoningBlock when reasoning only echoes the body", () => {
     const body =
       "## 总结\n\n当前目录有两个 .py 文件：\n- `analyze_cursor_cost.py`\n- `simple.py`";

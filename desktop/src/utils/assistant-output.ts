@@ -9,9 +9,18 @@
 const MINIMAX_ARTIFACT_RE =
   /[\]\[<>~!|]+\s*\/?\s*minimax[a-z_:]*\s*[\]\[<>~!|]*/gi;
 const ZERO_WIDTH_RE = /[\u200b\u200c\u200d\u2060\ufeff\u00ad]/g;
-const RESERVED_TAG_TOKEN_RE = /<\/?\s*think\b|<\/?\s*followups\b/i;
+const FOLLOWUP_TAG_NAMES = new Set([
+  "followups",
+  "followflows",
+  "follow-ups",
+  "follow_ups",
+  "followup",
+]);
+const RESERVED_TAG_TOKEN_RE =
+  /<\/?\s*think\b|<\/?\s*follow(?:flows|-ups|_ups|ups|up)\b/i;
 const CONTROL_CHAR_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
-const TAG_NAME_RE = /^(?<closing>\/?)\s*(?<name>think|followups)\b(?<rest>.*)$/is;
+const TAG_NAME_RE =
+  /^(?<closing>\/?)\s*(?<name>think|followflows|follow-ups|follow_ups|followups|followup)\b(?<rest>.*)$/is;
 
 export type ParsedAssistantOutputForUi = {
   reasoning: string;
@@ -74,12 +83,13 @@ function classifyTag(
   if (!normalized) return null;
   const match = TAG_NAME_RE.exec(normalized);
   if (!match || !match.groups) return null;
-  const name = match.groups.name.toLowerCase();
+  const rawName = match.groups.name.toLowerCase();
+  const name = FOLLOWUP_TAG_NAMES.has(rawName) ? "followups" : rawName;
   const isClosing = Boolean(match.groups.closing);
   const rest = match.groups.rest ?? "";
-  const compactCanonical = `${isClosing ? "/" : ""}${name}`;
+  const compactAccepted = `${isClosing ? "/" : ""}${rawName}`;
   const originalCompact = inner.replace(ZERO_WIDTH_RE, "").replace(/\s+/g, "").toLowerCase();
-  let noncanonical = originalCompact !== compactCanonical || Boolean(rest.trim());
+  let noncanonical = originalCompact !== compactAccepted || Boolean(rest.trim());
   if (inner !== inner.trim() || inner.includes("\n") || inner.includes("\r")) {
     noncanonical = true;
   }
