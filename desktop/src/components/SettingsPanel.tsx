@@ -3678,7 +3678,7 @@ function SkillsTab() {
   }
 
   return (
-    <div ref={skillsListAnchorRef} className="space-y-3">
+    <div ref={skillsListAnchorRef} className="flex flex-col gap-3">
 
       {pendingProposalCount > 0 ? (
         <Panel title={`待审 (${pendingProposalCount})`}>
@@ -3689,7 +3689,13 @@ function SkillsTab() {
       )}
 
       {/* Skill scan roots (presets + custom paths) */}
-      <Panel title="扫描路径" collapsible titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}>
+      <Panel
+        title="技能来源与扫描路径"
+        collapsible
+        defaultCollapsed
+        className="order-last"
+        titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
+      >
         <p className="mb-3 text-xs leading-relaxed text-text-subtle">
           项目内 <code className="text-text-muted">.agents/skills</code>、<code className="text-text-muted">.claude/skills</code>、<code className="text-text-muted">~/.agenticx/skills</code>（含 ClawHub 安装、智能体创建）以及内置包始终参与扫描。以下第三方根目录可按开关启用；也可添加自定义文件夹。
         </p>
@@ -3881,7 +3887,7 @@ function SkillsTab() {
         <div className="py-6 text-center text-sm text-text-faint">
           未发现任何技能。<br />
           <span className="text-xs text-text-subtle">
-            可将 SKILL.md 放置在项目 .agents/skills/、开启上方的第三方扫描路径，或使用「自定义路径」。
+            可将 SKILL.md 放置在项目 .agents/skills/，或展开下方的「技能来源与扫描路径」。
           </span>
         </div>
       )}
@@ -3984,7 +3990,7 @@ function SkillsTab() {
         title="技能市场"
         collapsible
         defaultCollapsed={false}
-        className="mt-4"
+        className="order-first"
         titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
       >
         <div className="space-y-4 pt-1 pb-1">
@@ -5591,7 +5597,7 @@ function SkillAdvancedPanel() {
       <Panel
         title="技能高级设置"
         collapsible
-        defaultCollapsed={false}
+        defaultCollapsed
         titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
       >
         <div className="py-2 text-sm text-text-faint">加载中…</div>
@@ -5603,7 +5609,7 @@ function SkillAdvancedPanel() {
     <Panel
       title="技能高级设置"
       collapsible
-      defaultCollapsed={false}
+      defaultCollapsed
       titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
     >
       <p className="mb-3 text-xs text-text-faint">
