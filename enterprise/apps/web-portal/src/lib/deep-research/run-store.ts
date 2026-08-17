@@ -1290,22 +1290,26 @@ export function createRunWriter(store: RunStore, runId: string): RunWriter {
 
   return {
     push(event, patch) {
-      if (event.type === "reasoning") {
+      const stamped: DeepResearchEvent = {
+        ...event,
+        ts: event.ts ?? new Date().toISOString(),
+      };
+      if (stamped.type === "reasoning") {
         // Reasoning snapshots carry the full bounded text. Keep only the latest
         // snapshot per stage inside each flush window instead of persisting every token.
         const existing = pendingEvents.findIndex(
-          (candidate) => candidate.type === "reasoning" && candidate.id === event.id,
+          (candidate) => candidate.type === "reasoning" && candidate.id === stamped.id,
         );
-        if (existing >= 0) pendingEvents[existing] = event;
-        else pendingEvents.push(event);
+        if (existing >= 0) pendingEvents[existing] = stamped;
+        else pendingEvents.push(stamped);
       } else {
-        pendingEvents.push(event);
+        pendingEvents.push(stamped);
       }
       const nextPatch = { ...pendingPatch };
       if (patch?.status) nextPatch.status = patch.status;
       if (patch?.phase) nextPatch.phase = patch.phase;
-      if (event.type === "phase" && typeof event.phase === "string") {
-        nextPatch.phase = event.phase;
+      if (stamped.type === "phase" && typeof stamped.phase === "string") {
+        nextPatch.phase = stamped.phase;
       }
       if (Object.keys(nextPatch).length > 0) pendingPatch = nextPatch;
       schedule();

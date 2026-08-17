@@ -196,7 +196,7 @@ export function sanitizeWebSearchTrace(raw: unknown): WebSearchTrace | undefined
 }
 
 /** Deep-research workbench state attached to an assistant message. */
-export type DeepResearchEvent =
+export type DeepResearchEventPayload =
   | { type: "run_started"; runId: string }
   | {
       type: "phase";
@@ -292,6 +292,9 @@ export type DeepResearchEvent =
   /** Short assistant prose between workbench steps (not part of final report content). */
   | { type: "narrative"; text: string };
 
+/** Optional wall-clock ISO timestamp stamped at emit time for trace duration. */
+export type DeepResearchEvent = DeepResearchEventPayload & { ts?: string };
+
 export type ChatMessageDeepResearch = {
   runId: string;
   status: "running" | "awaiting_clarify" | "completed" | "failed" | "cancelled";
@@ -313,6 +316,12 @@ export type ChatMessage = {
   web_search_trace?: WebSearchTrace;
   deep_research?: ChatMessageDeepResearch;
   model?: string;
+  /**
+   * 本轮请求的 x-agenticx-trace-id（26 位 ULID）。
+   * 用于把这条助手回复关联到 admin-console 的 Portal 日志 / 网关审计。
+   * 仅助手消息有值；历史消息在该字段引入前写入的为 undefined。
+   */
+  trace_id?: string;
   provider?: string;
   reasoning?: string;
   tool_calls?: ToolCallSummary[];

@@ -478,11 +478,14 @@ describe("runDeepResearchTurn", () => {
     };
     const headers: Record<string, string> = { authorization: "Bearer stale-at-start" };
     const authSeen: string[] = [];
+    const traceSeen: string[] = [];
+    const traceId = "01JZTRACEID000000000000001";
     const refreshAccessToken = vi.fn(async () => ({ accessToken: "fresh-after-search" }));
 
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
       const hdrs = (init?.headers ?? {}) as Record<string, string>;
       authSeen.push(String(hdrs.authorization ?? ""));
+      traceSeen.push(String(hdrs["x-agenticx-trace-id"] ?? ""));
       const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
       if (body.stream === false) {
         return {
@@ -507,6 +510,7 @@ describe("runDeepResearchTurn", () => {
           ],
           refreshAccessToken,
         }),
+        traceId,
       },
     );
 
@@ -516,6 +520,7 @@ describe("runDeepResearchTurn", () => {
     // At least one Gateway call after refresh must carry the new Bearer
     // (outline JSON and/or section stream).
     expect(authSeen.some((a) => a === "Bearer fresh-after-search")).toBe(true);
+    expect(traceSeen.every((value) => value === traceId)).toBe(true);
   });
 
   it("clamps total sources to MAX_SOURCES", async () => {

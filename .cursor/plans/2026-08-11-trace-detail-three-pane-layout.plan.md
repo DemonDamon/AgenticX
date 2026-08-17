@@ -48,6 +48,7 @@ Suggested-Impl-Model: 见「Suggested-Impl 子任务表」
 | FR-4 绝对时间轴条（CSS）+ kind 着色 | GPT-5.6 Terra 或 Composer 2.5 | 坐标计算要防 NaN/缺字段；视觉密度需对齐现有 token |
 | FR-5 i18n | Composer 2.5 | 键值增补 |
 | 全页/Drawer 接线与 tsc | Composer 2.5 | 改 labels 透传即可 |
+| FR-7 DR 事件 `ts` + assembler 支线/阶段耗时 | Composer 2.5 | 类型交叉 + 纯函数回填，落点明确 |
 
 最终 `Impl-Model` trailer 以实际使用为准。
 
@@ -61,6 +62,7 @@ Suggested-Impl-Model: 见「Suggested-Impl 子任务表」
 - FR-4：左侧每行绝对时间轴条：相对整条 trace 的 `[tMin, tMax]` 计算 `offsetPct` / `widthPct`
 - FR-5：zh/en i18n 增补（layout 提示、时间轴空态等，若需要）
 - FR-6：既有入口共用：`/traces/[traceId]` 与 portal-logs 详情 Sheet 内 `TraceTimelineInline` / `TraceExplorer`
+- FR-7：深度调研支线 / 阶段 / 事件补齐 `startedAt` + `durationMs`（事件写入 `ts`，assembler 回填），使时间轴与元数据「耗时」可见
 
 ## Out of scope / no-scope-creep
 
@@ -69,9 +71,11 @@ Suggested-Impl-Model: 见「Suggested-Impl 子任务表」
 - **不改** 网关 `GATEWAY_TRACE_IO_CAPTURE` 默认策略与截断长度
 - **不引入** 第三方观测 SDK / iframe / 新图表库（禁止 recharts 仅为 Gantt 而加；用 CSS）
 - **不改** Desktop 群聊运行图（`.cursor/plans/pending/2026-08-11-group-chat-process-observability.plan.md` 是另一条线）
-- **不改** `agenticx/studio/server.py`、web-portal 聊天写路径
+- **不改** `agenticx/studio/server.py`
 - **不改** Trace 列表页 Dashboard / Playground（图中其它屏）
 - **不** 默认自动选中第一个节点（保持现状：点击才开右侧/三栏；若产品后续要默认选中可另开 plan）
+- **不做** 存量无 `ts` 的历史 DR 事件回填（仅新产生的 run 有墙钟耗时；旧 run 支线仍可为 —）
+- **不** 把顶栏 totals.duration_ms 改成全树时间窗（另议；本 FR 只修节点级耗时）
 
 ---
 
@@ -309,6 +313,50 @@ const place =
 
 ---
 
+### FR-7：深度调研支线 / 阶段 / 事件耗时
+
+**根因：** `buildDeepResearchChildren`（`trace-timeline.ts`）对 `dr_lane` / `dr_phase` / `dr_event` 不写 `startedAt`/`durationMs`；编排侧 `lane_started` / `lane_done` 等事件载荷也无墙钟字段，故元数据「耗时」与时间轴条均为空。模型 step 来自 `agent_token_traces`，与 DR 事件树无关。
+
+**写路径落点（stamp `ts`）：**
+
+1. 类型（两处保持一致）：
+   - `enterprise/packages/core-api/src/chat.ts` 的 `DeepResearchEvent`
+   - `enterprise/packages/sdk-ts/src/deep-research.ts` 的 `DeepResearchEvent`
+
+   Before：纯 discriminated union。
+   After：先定义 payload union，再：
+
+   ```ts
+   export type DeepResearchEvent = DeepResearchEventPayload & { ts?: string };
+   ```
+
+   `ts` 为可选 ISO-8601，旧事件兼容。
+
+2. Stamp（已有则不覆盖）：
+   - `enterprise/apps/web-portal/src/lib/deep-research/orchestrator.ts` 的 `enqueueEvent`（约 L792）：
+     `const stamped = { ...event, ts: event.ts ?? new Date().toISOString() };` 再 `writer?.push` / SSE。
+   - `enterprise/apps/web-portal/src/lib/deep-research/run-store.ts` 的 `createRunWriter().push`（约 L797）：同样补 `ts`，覆盖非 orchestrator 入口。
+
+**读路径落点（assembler）：** `buildDeepResearchChildren`
+
+- 辅助：`eventTs(raw) → string | undefined`（合法 `Date.parse`）。
+- **lane：** `lane_started` → 节点 `startedAt = eventTs`；`lane_done` → 若同 `laneId` 节点已有 `startedAt` 且 done 有 `ts`，则 `durationMs = done - start`（≥0），并写 `status`。
+- **phase：** `phase` 事件设 `startedAt`；下一 `phase` 到来时给上一 phase 填 `durationMs`；循环结束若仍无 duration，用该 phase 子树中最大 `startedAt+duration` 或最后一个带 `ts` 的子孙回填（有则写，无则保持空）。
+- **其它 dr_event：** 有 `ts` 则 `startedAt = ts`；点事件可不设 `durationMs`（时间轴无条，仅开始时间可显；若希望可见短条，可选 `durationMs: 0`——**本 FR 选定：点事件不设 durationMs**）。
+- `sanitizeDrEventAttrs`：**保留** `ts`（随 rest 进入 attrs 可接受）。
+
+**测试：** `enterprise/apps/admin-console/src/lib/__tests__/trace-timeline.test.ts`
+
+- Fixture：`lane_started`/`lane_done` 带相隔 5s 的 `ts`，断言对应 `dr_lane.durationMs === 5000` 且 `startedAt` 正确。
+- 无 `ts` 的旧事件：lane 仍无 `durationMs`（不回归、不瞎填）。
+
+- **AC-7.1:** 带 `ts` 的 lane_started→lane_done 组装后元数据耗时与时间轴条可见。
+- **AC-7.2:** 新 run 经 `enqueueEvent`/`writer.push` 落库的事件 JSON 含 `ts`。
+- **AC-7.3:** 无 `ts` 历史事件不抛错、耗时仍为 —。
+- **AC-7.4:** `pnpm -C enterprise/apps/admin-console exec vitest run src/lib/__tests__/trace-timeline.test.ts` 绿。
+
+---
+
 ## 实施任务顺序（给 Composer）
 
 ### Task 1: 时间窗 helper + assembler startedAt + 测试
@@ -335,6 +383,13 @@ const place =
 1. 补 zh/en 与两处 page labels。
 2. 最终 `tsc` + vitest `trace-timeline.test.ts`。
 
+### Task 5: FR-7 DR 事件耗时（续作）
+
+1. 两处 `DeepResearchEvent` 增加可选 `ts`。
+2. `enqueueEvent` + `createRunWriter().push` stamp。
+3. `buildDeepResearchChildren` 回填 lane/phase/event 时间字段 + 单测。
+4. vitest 绿；新跑一条 deep research 后看支线耗时。
+
 ---
 
 ## 验证清单（实施者自测）
@@ -354,6 +409,7 @@ pnpm -C enterprise/apps/admin-console exec tsc --noEmit
 3. 比较两个 step 的时间条左右位置与 `startedAt` 一致。
 4. 再点同一节点：关闭中右栏。
 5. Portal 日志详情抽屉同样走查一遍。
+6. **（FR-7）** 新跑一轮 deep research 后打开同 trace：支线节点有耗时数字与时间轴条；选中后元数据「耗时」非 —。
 
 ---
 
@@ -365,15 +421,15 @@ pnpm -C enterprise/apps/admin-console exec tsc --noEmit
 | 多 request 节点时间窗被无关 log 拉宽 | `computeTraceTimeWindow` 用全树；若噪声过大，后续可改为「仅 primary.children + primary」——**本 plan 不做** |
 | Sheet 过窄三栏挤压 | 加宽 Sheet 或窄屏单列（FR-2） |
 | 无 IO 捕获 | 中栏只靠 conversation，不视为 bug |
+| 存量 DR 事件无 `ts` | 支线耗时仍为 —；须新 run 才有数据（不做历史回填） |
 
 ---
 
 ## Commit 提示（实施阶段）
 
-Plan 移回 `.cursor/plans/` 后再实施。建议拆 2 个 commit：
+Plan 已在 `.cursor/plans/`。FR-1 / FR-2–6 已落地。续作建议：
 
-1. `fix(enterprise): map model step startedAt for trace timeline`（FR-1）
-2. `feat(enterprise): three-pane trace detail with absolute gantt bars`（FR-2–6）
+3. `feat(enterprise): stamp deep-research event timestamps for lane duration`（FR-7）
 
 Trailers：`Plan-Id: 2026-08-11-trace-detail-three-pane-layout`，`Plan-File: .cursor/plans/2026-08-11-trace-detail-three-pane-layout.plan.md`，`Plan-Model` / `Impl-Model` / `Made-with: Damon Li`。
 Subject/body **勿**写第三方观测产品名。

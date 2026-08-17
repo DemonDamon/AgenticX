@@ -719,13 +719,16 @@ export async function runDeepResearchTurn(
   let traceStep = 0;
   const nextTraceStep = () => String(++traceStep);
   const traceId = deps.traceId;
+  const gatewayHeaders = deps.headers;
+  if (traceId) {
+    gatewayHeaders["x-agenticx-trace-id"] = traceId;
+  }
   deps = {
     ...deps,
     nextTraceStep,
-    headers: {
-      ...deps.headers,
-      ...(traceId ? { "x-agenticx-trace-id": traceId } : {}),
-    },
+    // Keep the shared mutable header bag: long research turns rotate the
+    // Bearer token in place before synthesis, and every later stage must see it.
+    headers: gatewayHeaders,
   };
 
   const baseBody = stripFlags(parsedBody);
@@ -898,8 +901,12 @@ export async function runDeepResearchTurn(
         event: DeepResearchEvent,
         patch?: { status?: DeepResearchRunStatus; phase?: string },
       ) => {
-        writer?.push(event, patch);
-        safeControllerEnqueue(encoder.encode(formatDeepResearchEventSse(event)));
+        const stamped: DeepResearchEvent = {
+          ...event,
+          ts: event.ts ?? new Date().toISOString(),
+        };
+        writer?.push(stamped, patch);
+        safeControllerEnqueue(encoder.encode(formatDeepResearchEventSse(stamped)));
       };
       const progressEventState = new Map<
         string,
