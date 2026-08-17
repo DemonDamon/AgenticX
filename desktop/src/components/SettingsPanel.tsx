@@ -60,12 +60,16 @@ import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import {
   RECOMMENDED_SKILLS,
   RECOMMENDED_TIER_LABEL,
+  type RecommendedSkill,
   type RecommendedSkillTier,
 } from "../data/recommended-skills";
 import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt";
-import { buildAlphapaiScraperInstallPrompt } from "../utils/alphapai-scraper-install-prompt";
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
-import { buildSkillHubAgentInstallPrompt } from "../utils/skillhub-install-prompt";
+import {
+  normalizeSkillHubMarketItems,
+  type SkillHubMarketItem,
+} from "../utils/skillhub-market";
+import { decideSkillInstallRequest } from "../utils/skill-install-queue";
 import { filterAndRankSkills } from "../utils/skill-search";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
@@ -909,16 +913,11 @@ type RegistrySearchItem = {
   author: string;
   source: string;
   source_type: string;
-};
-
-/** Matches SkillHubSearchResult.items from preload / agx serve. */
-type SkillHubRow = {
-  slug: string;
-  name: string;
-  description: string;
-  version: string;
-  author: string;
-  downloads?: string | number;
+  namespace?: string;
+  canonical_name?: string;
+  provenance_source?: "registry" | "skillhub";
+  display_name?: string;
+  recommended_id?: string;
 };
 
 type Props = {
@@ -1169,6 +1168,7 @@ const TOOL_LABELS: Record<string, string> = {
   mcp_import: "MCP Import",
   skill_use: "Skill Use",
   skill_list: "Skill List",
+  skill_market_install: "Skill Market Install",
   skill_manage: "Skill Manage",
   todo_write: "TodoWrite",
   scratchpad_write: "Scratchpad Write",
@@ -1214,6 +1214,8 @@ const TOOL_DESCRIPTIONS_ZH: Record<string, string> = {
   mcp_import: "从外部 mcp.json 导入 MCP 配置到 AgenticX 工作区。",
   skill_use: "将某个技能激活到当前对话上下文。",
   skill_list: "列出本地/远程可用技能的摘要。",
+  skill_market_install:
+    "从 SkillHub/ClawHub 获取已发布技能，自动完成来源解析、安全检查、安装与列表刷新。",
   skill_manage:
     "在 ~/.agenticx/skills/ 下创建、修改或删除技能（SKILL.md）；支持 create / patch / delete（需显式开启环境开关）。",
   todo_write: "更新当前会话的结构化任务列表。",
@@ -3020,6 +3022,8 @@ function SkillsTab() {
   const marketSearchSeqRef = useRef(0);
   const detailRequestSeqRef = useRef(0);
   const marketInstallQueueRef = useRef<RegistrySearchItem[]>([]);
+  const marketActiveInstallKeyRef = useRef<string | null>(null);
+  const marketPendingRef = useRef<RegistrySearchItem | null>(null);
   const skillsListAnchorRef = useRef<HTMLDivElement | null>(null);
   const [pendingProposalCount, setPendingProposalCount] = useState(0);
 
@@ -3029,11 +3033,14 @@ function SkillsTab() {
 
   const [installPromptBusy, setInstallPromptBusy] = useState(false);
   const [skillhubQuery, setSkillhubQuery] = useState("");
-  const [skillhubResults, setSkillhubResults] = useState<SkillHubRow[]>([]);
+  const [skillhubResults, setSkillhubResults] = useState<SkillHubMarketItem[]>([]);
   const [skillhubResultsExpanded, setSkillhubResultsExpanded] = useState(true);
   const [skillhubLoading, setSkillhubLoading] = useState(false);
   const [skillhubMsg, setSkillhubMsg] = useState("");
   const [skillhubHint, setSkillhubHint] = useState("");
+  const [recommendedInstallMessages, setRecommendedInstallMessages] = useState<
+    Record<string, string>
+  >({});
   const [recommendedIconData, setRecommendedIconData] = useState<Record<string, string>>(() =>
     Object.fromEntries(RECOMMENDED_SKILLS.map((skill) => [skill.id, skill.icon_src]))
   );
@@ -3373,6 +3380,16 @@ function SkillsTab() {
     setRecentMarketSkillName(pinName);
   };
 
+  const isMarketSkillInstalled = (skillName: string) => {
+    const slug = String(skillName || "").trim().toLowerCase();
+    if (!slug) return false;
+    return items.some((skill) => {
+      if (String(skill.name || "").trim().toLowerCase() === slug) return true;
+      const baseDir = normalizedPath(skill.base_dir).replace(/\/$/, "");
+      return baseDir.endsWith(`/registry/${slug}`);
+    });
+  };
+
   const runInstallPromptInMetaAgent = useCallback(
     async (prompt: string) => {
       const text = prompt.trim();
@@ -3406,20 +3423,28 @@ function SkillsTab() {
     [addPane, setForwardAutoReply, closeSettings],
   );
 
-  const onSkillHubMarketInstall = (slug: string) => {
-    const prompt = buildSkillHubAgentInstallPrompt(slug);
-    if (!prompt.trim()) return;
-    void runInstallPromptInMetaAgent(prompt);
-  };
-
-  const onRecommendedSkillInstall = (skillId: string) => {
+  const onRecommendedSkillInstall = (skill: RecommendedSkill) => {
+    if (skill.marketplace_slug) {
+      void onMarketInstall({
+        name: skill.marketplace_slug,
+        display_name: skill.name,
+        description: skill.description,
+        version: "latest",
+        author: skill.provider,
+        source: "skillhub",
+        source_type: "skillhub",
+        namespace: skill.marketplace_namespace,
+        provenance_source: "skillhub",
+        recommended_id: skill.id,
+      });
+      return;
+    }
+    const skillId = skill.id;
     const prompt =
       skillId === "officecli"
         ? buildOfficeCliInstallPrompt()
         : skillId === "archscribe"
           ? buildArchscribeInstallPrompt()
-          : skillId === "alphapai-scraper"
-            ? buildAlphapaiScraperInstallPrompt()
           : "";
     if (!prompt.trim()) return;
     void runInstallPromptInMetaAgent(prompt);
@@ -3441,22 +3466,7 @@ function SkillsTab() {
         setSkillhubMsg(res.error || "搜索失败");
         return;
       }
-      const raw = Array.isArray(res.items) ? res.items : [];
-      const rows: SkillHubRow[] = [];
-      for (const row of raw) {
-        const r = row as SkillHubRow;
-        const slug = String(r.slug || r.name || "").trim();
-        if (!slug) continue;
-        rows.push({
-          slug,
-          name: String(r.name || slug).trim() || slug,
-          description: String(r.description || "").trim(),
-          version: String(r.version || "latest"),
-          author: String(r.author || "unknown"),
-          downloads: r.downloads,
-        });
-      }
-      setSkillhubResults(rows);
+      setSkillhubResults(normalizeSkillHubMarketItems(res.items));
       setSkillhubResultsExpanded(true);
       setSkillhubHint(typeof res.hint === "string" ? res.hint : "");
     } catch (e) {
@@ -3496,34 +3506,78 @@ function SkillsTab() {
     }
   };
 
-  const onMarketInstall = async (item: RegistrySearchItem) => {
-    const key = `${item.source}:${item.name}`;
-    if (registryInstallBusy && marketInstallingKey && marketInstallingKey !== key) {
-      const exists = marketInstallQueueRef.current.some(
-        (q) => q.source === item.source && q.name === item.name
-      );
-      if (!exists) {
+  const setMarketInstallMessage = (item: RegistrySearchItem, message: string) => {
+    const recommendedId = item.recommended_id;
+    if (recommendedId) {
+      setRecommendedInstallMessages((current) => ({
+        ...current,
+        [recommendedId]: message,
+      }));
+      return;
+    }
+    if (item.provenance_source === "skillhub") {
+      setSkillhubMsg(message);
+    } else {
+      setMarketMsg(message);
+    }
+  };
+
+  const marketInstallKey = (item: RegistrySearchItem) =>
+    `${item.source}:${item.namespace || ""}:${item.name}`;
+
+  function continueMarketInstallQueue() {
+    if (marketActiveInstallKeyRef.current || marketPendingRef.current) return;
+    const next = marketInstallQueueRef.current.shift();
+    if (!next) return;
+    const nextKey = marketInstallKey(next);
+    setMarketQueuedKeys((prev) => prev.filter((key) => key !== nextKey));
+    // onMarketInstall claims the active slot synchronously before its first await,
+    // so the next queue item cannot be started in parallel by another completion.
+    void onMarketInstall(next);
+  }
+
+  async function onMarketInstall(item: RegistrySearchItem) {
+    const key = marketInstallKey(item);
+    const itemLabel = item.display_name || item.name;
+    const queuedKeys = marketInstallQueueRef.current.map(marketInstallKey);
+    const decision = decideSkillInstallRequest({
+      requestedKey: key,
+      activeKey: marketActiveInstallKeyRef.current,
+      confirmationKey: marketPendingRef.current
+        ? marketInstallKey(marketPendingRef.current)
+        : null,
+      queuedKeys,
+    });
+    if (decision === "ignore") return;
+    if (decision === "queue") {
+      if (!queuedKeys.includes(key)) {
         marketInstallQueueRef.current.push(item);
         setMarketQueuedKeys((prev) => (prev.includes(key) ? prev : [...prev, key]));
       }
-      setMarketMsg(`正在安装「${marketInstallingKey.split(":")[1]}」，已将「${item.name}」加入队列。`);
+      setMarketInstallMessage(
+        item,
+        `正在安装另一个技能，已将「${itemLabel}」加入队列。`,
+      );
       return;
     }
     setMarketQueuedKeys((prev) => prev.filter((k) => k !== key));
     marketInstallQueueRef.current = marketInstallQueueRef.current.filter(
-      (q) => !(q.source === item.source && q.name === item.name)
+      (q) => marketInstallKey(q) !== key
     );
+    marketActiveInstallKeyRef.current = key;
     setMarketInstallingKey(key);
     setRegistryInstallBusy(true);
     setMarketNeedsConfirmNonHigh(false);
     setMarketNeedsConfirmHigh(false);
+    marketPendingRef.current = null;
     setMarketPending(null);
-    setMarketMsg(`正在拉取并扫描「${item.name}」…`);
+    setMarketInstallMessage(item, `正在获取并检查「${itemLabel}」…`);
     let pauseQueue = false;
     try {
       const prev = await window.agenticxDesktop.installFromRegistryPreview({
         source: item.source,
         name: item.name,
+        namespace: item.namespace,
       });
       if (!prev.ok) {
         const rawErr = String(prev.error ?? "未知错误");
@@ -3531,110 +3585,129 @@ function SkillsTab() {
         if (is429) {
           const secMatch = rawErr.match(/about (\d+)s/);
           const waitSec = secMatch ? Math.min(Number(secMatch[1]), 30) : 10;
-          setMarketMsg(`拉取受限：ClawHub 限流中，${waitSec} 秒后自动重试…`);
+          setMarketInstallMessage(item, `商店暂时繁忙，${waitSec} 秒后自动重试…`);
           await new Promise((r) => setTimeout(r, waitSec * 1000));
-          setMarketMsg(`正在重新拉取「${item.name}」…`);
+          setMarketInstallMessage(item, `正在重新获取「${itemLabel}」…`);
           const retry = await window.agenticxDesktop.installFromRegistryPreview({
             source: item.source,
             name: item.name,
+            namespace: item.namespace,
           });
           if (!retry.ok) {
             const retryErr = String(retry.error ?? "未知错误");
-            setMarketMsg(`拉取失败：${retryErr}`);
+            setMarketInstallMessage(item, `获取失败：${retryErr}`);
             return;
           }
           Object.assign(prev, retry);
         } else if (rawErr.includes("fetch failed") || rawErr.includes("Failed to fetch skill")) {
-          setMarketMsg(`拉取失败：${rawErr}`);
+          setMarketInstallMessage(item, `获取失败：${rawErr}`);
           return;
         } else {
-          setMarketMsg(`扫描未通过：${rawErr}`);
+          setMarketInstallMessage(item, `检查未通过：${rawErr}`);
           return;
         }
       }
       if (prev.scan) {
-        setMarketMsg(formatSkillScanSummary(prev.scan));
+        setMarketInstallMessage(item, formatSkillScanSummary(prev.scan));
       }
 
       const res = await window.agenticxDesktop.installFromRegistry({
         source: item.source,
         name: item.name,
+        namespace: item.namespace,
+        provenanceSource: item.provenance_source,
       });
       if (res.ok) {
-        setMarketMsg(
-          formatInstallDoneMsg(`已安装 "${item.name}"`, res.scan_summary ?? prev.scan),
-        );
+        setMarketInstallMessage(item, `已安装好「${itemLabel}」。`);
         await reloadSkillsAfterMarketInstall(String(res.name ?? item.name));
         return;
       }
       if (res.error_code === "non_high_risk_confirm_required") {
+        marketPendingRef.current = item;
         setMarketPending(item);
         setMarketNeedsConfirmNonHigh(true);
         pauseQueue = true;
         if (res.scan_summary) {
-          setMarketMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n当前策略要求你点「确认安装」后再写入。`);
+          setMarketInstallMessage(
+            item,
+            `${formatSkillScanSummary(res.scan_summary)}\n\n当前策略要求你确认后再安装。`,
+          );
         } else {
-          setMarketMsg("当前策略要求你点「确认安装」后再写入。");
+          setMarketInstallMessage(item, "当前策略要求你确认后再安装。");
         }
         return;
       }
       if (res.error_code === "high_risk_confirm_required") {
+        marketPendingRef.current = item;
         setMarketPending(item);
         setMarketNeedsConfirmHigh(true);
         pauseQueue = true;
         if (res.scan_summary) {
-          setMarketMsg(`${formatSkillScanSummary(res.scan_summary)}\n\n命中高危规则：请阅读摘要后点下方按钮确认。`);
+          setMarketInstallMessage(
+            item,
+            `${formatSkillScanSummary(res.scan_summary)}\n\n发现高风险内容，请阅读摘要后确认。`,
+          );
         } else {
-          setMarketMsg("命中高危规则：请阅读说明后点下方按钮确认。");
+          setMarketInstallMessage(item, "发现高风险内容，请阅读说明后确认。");
         }
         return;
       }
-      setMarketMsg(`安装失败: ${res.error ?? "未知错误"}`);
+      setMarketInstallMessage(item, `安装失败：${res.error ?? "未知错误"}`);
     } catch (e) {
-      setMarketMsg(String(e));
+      setMarketInstallMessage(item, String(e));
     } finally {
+      marketActiveInstallKeyRef.current = null;
       setRegistryInstallBusy(false);
       setMarketInstallingKey(null);
-      if (!pauseQueue && marketInstallQueueRef.current.length > 0) {
-        const next = marketInstallQueueRef.current.shift()!;
-        const nextKey = `${next.source}:${next.name}`;
-        setMarketQueuedKeys((prev) => prev.filter((k) => k !== nextKey));
-        setTimeout(() => {
-          void onMarketInstall(next);
-        }, 0);
-      }
+      if (!pauseQueue) continueMarketInstallQueue();
     }
-  };
+  }
 
   const onConfirmMarketInstall = async (kind: "non_high" | "high") => {
-    if (!marketPending) return;
-    const pending = marketPending;
-    setMarketInstallingKey(`${pending.source}:${pending.name}`);
+    const pending = marketPendingRef.current ?? marketPending;
+    if (!pending || marketActiveInstallKeyRef.current) return;
+    const pendingLabel = pending.display_name || pending.name;
+    const pendingKey = marketInstallKey(pending);
+    marketActiveInstallKeyRef.current = pendingKey;
+    setMarketInstallingKey(pendingKey);
     setRegistryInstallBusy(true);
     try {
       const res = await window.agenticxDesktop.installFromRegistry({
         source: pending.source,
         name: pending.name,
+        namespace: pending.namespace,
         confirmNonHighRisk: kind === "non_high",
         acknowledgeHighRisk: kind === "high",
+        provenanceSource: pending.provenance_source,
       });
+      if (res.ok) {
+        setMarketInstallMessage(pending, `已安装好「${pendingLabel}」。`);
+        await reloadSkillsAfterMarketInstall(String(res.name ?? pending.name));
+      } else {
+        setMarketInstallMessage(pending, `安装失败：${res.error ?? "未知错误"}`);
+      }
+    } catch (e) {
+      setMarketInstallMessage(pending, String(e));
+    } finally {
+      marketPendingRef.current = null;
       setMarketNeedsConfirmNonHigh(false);
       setMarketNeedsConfirmHigh(false);
       setMarketPending(null);
-      if (res.ok) {
-        setMarketMsg(
-          formatInstallDoneMsg(`已安装 "${pending.name}"`, res.scan_summary),
-        );
-        await reloadSkillsAfterMarketInstall(String(res.name ?? pending.name));
-      } else {
-        setMarketMsg(`安装失败: ${res.error ?? "未知错误"}`);
-      }
-    } catch (e) {
-      setMarketMsg(String(e));
-    } finally {
+      marketActiveInstallKeyRef.current = null;
       setRegistryInstallBusy(false);
       setMarketInstallingKey(null);
+      continueMarketInstallQueue();
     }
+  };
+
+  const onCancelMarketInstall = () => {
+    const pending = marketPendingRef.current ?? marketPending;
+    if (pending) setMarketInstallMessage(pending, "");
+    marketPendingRef.current = null;
+    setMarketNeedsConfirmNonHigh(false);
+    setMarketNeedsConfirmHigh(false);
+    setMarketPending(null);
+    continueMarketInstallQueue();
   };
 
   const onExpandDetail = async (name: string) => {
@@ -3679,6 +3752,53 @@ function SkillsTab() {
 
   return (
     <div ref={skillsListAnchorRef} className="flex flex-col gap-3">
+      <Modal
+        open={Boolean(marketPending) && (marketNeedsConfirmNonHigh || marketNeedsConfirmHigh)}
+        title="安装第三方技能"
+        onClose={registryInstallBusy ? undefined : onCancelMarketInstall}
+        panelClassName="w-full max-w-[440px] bg-surface-panel"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              disabled={registryInstallBusy}
+              onClick={onCancelMarketInstall}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className={
+                marketNeedsConfirmHigh
+                  ? "rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
+                  : "rounded-md border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-3 py-1.5 text-xs text-[var(--settings-accent-fg-muted)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-40"
+              }
+              disabled={registryInstallBusy}
+              onClick={() =>
+                void onConfirmMarketInstall(marketNeedsConfirmHigh ? "high" : "non_high")
+              }
+            >
+              {registryInstallBusy
+                ? "安装中…"
+                : marketNeedsConfirmHigh
+                  ? "了解风险并继续"
+                  : "允许安装"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3 text-sm leading-6 text-text-subtle">
+          <p>
+            应用将获取第三方技能「{marketPending?.display_name || marketPending?.name || ""}」并加入你的技能列表。
+          </p>
+          <p className={marketNeedsConfirmHigh ? "text-rose-300" : "text-text-muted"}>
+            {marketNeedsConfirmHigh
+              ? "安全检查发现高风险内容。这个技能可能在使用时运行自带脚本；请只在你信任其来源时继续。"
+              : "当前安全策略要求先获得你的允许。确认后将继续安装，无需执行额外操作。"}
+          </p>
+        </div>
+      </Modal>
 
       {pendingProposalCount > 0 ? (
         <Panel title={`待审 (${pendingProposalCount})`}>
@@ -4040,8 +4160,22 @@ function SkillsTab() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredRecommendedSkills.map((skill) => {
                   const canInstall = skill.cta === "install";
+                  const directInstallKey = skill.marketplace_slug
+                    ? `skillhub:${skill.marketplace_namespace || ""}:${skill.marketplace_slug}`
+                    : "";
+                  const directInstalled = Boolean(
+                    skill.marketplace_slug && isMarketSkillInstalled(skill.marketplace_slug),
+                  );
+                  const directInstalling = Boolean(
+                    directInstallKey && marketInstallingKey === directInstallKey,
+                  );
+                  const directQueued = Boolean(
+                    directInstallKey && marketQueuedKeys.includes(directInstallKey),
+                  );
+                  const directPending = marketPending?.recommended_id === skill.id;
+                  const directMessage = recommendedInstallMessages[skill.id] || "";
                   const primaryAction = () => {
-                    if (canInstall) onRecommendedSkillInstall(skill.id);
+                    if (canInstall) onRecommendedSkillInstall(skill);
                     else window.open(skill.official_url, "_blank", "noopener,noreferrer");
                   };
                   return (
@@ -4085,14 +4219,39 @@ function SkillsTab() {
                       </div>
                       <button
                         type="button"
-                        title={canInstall ? "安装" : "打开官网"}
-                        aria-label={canInstall ? `安装 ${skill.name}` : `打开 ${skill.name} 官网`}
-                        disabled={canInstall && installPromptBusy}
+                        title={
+                          directInstalled
+                            ? "已安装"
+                            : directPending
+                              ? "等待确认"
+                              : canInstall
+                                ? "安装"
+                                : "打开官网"
+                        }
+                        aria-label={
+                          directInstalled
+                            ? `${skill.name} 已安装`
+                            : canInstall
+                              ? `安装 ${skill.name}`
+                              : `打开 ${skill.name} 官网`
+                        }
+                        disabled={
+                          canInstall &&
+                          (skill.marketplace_slug
+                            ? directInstalled || directInstalling || directQueued || directPending
+                            : installPromptBusy)
+                        }
                         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-black/[0.06] text-text-strong transition-colors hover:bg-black/[0.1] active:scale-[0.97] disabled:opacity-40 dark:bg-white/10 dark:hover:bg-white/15"
                         onClick={primaryAction}
                       >
                         <span className="text-[17px] font-medium leading-none" aria-hidden>
-                          +
+                          {directInstalled
+                            ? "✓"
+                            : directInstalling || directQueued
+                              ? "…"
+                              : directPending
+                                ? "!"
+                                : "+"}
                         </span>
                       </button>
                     </div>
@@ -4106,6 +4265,19 @@ function SkillsTab() {
                         className="min-h-0 w-full min-w-0 flex-1 break-words text-[12px] leading-4 text-text-muted"
                       />
                     </HoverTip>
+                    {directMessage ? (
+                      <div
+                        className={`mt-2 whitespace-pre-wrap text-[11px] leading-4 ${
+                          directMessage.includes("失败") || directMessage.includes("高风险")
+                            ? "text-amber-300"
+                            : directMessage.includes("已安装")
+                              ? "text-emerald-400"
+                              : "text-text-muted"
+                        }`}
+                      >
+                        {directMessage}
+                      </div>
+                    ) : null}
                     {!canInstall ? (
                       <button
                         type="button"
@@ -4148,49 +4320,15 @@ function SkillsTab() {
                   className={`mt-1.5 whitespace-pre-wrap text-xs ${
                     marketMsg.includes("失败") || marketMsg.includes("未找到")
                       ? "text-amber-400"
-                      : marketNeedsConfirmNonHigh || marketNeedsConfirmHigh || marketMsg.includes("高危")
+                      : ((marketNeedsConfirmNonHigh || marketNeedsConfirmHigh) &&
+                            marketPending?.provenance_source !== "skillhub" &&
+                            !marketPending?.recommended_id) ||
+                          marketMsg.includes("高危")
                         ? "text-amber-300"
                         : "text-emerald-400"
                   }`}
                 >
                   {marketMsg}
-                </div>
-              )}
-              {(marketNeedsConfirmNonHigh || marketNeedsConfirmHigh) && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {marketNeedsConfirmNonHigh && (
-                    <button
-                      type="button"
-                      className="rounded-md border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-3 py-1.5 text-xs text-[var(--settings-accent-fg-muted)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-40"
-                      disabled={registryInstallBusy}
-                      onClick={() => void onConfirmMarketInstall("non_high")}
-                    >
-                      {registryInstallBusy ? "安装中…" : "确认安装"}
-                    </button>
-                  )}
-                  {marketNeedsConfirmHigh && (
-                    <button
-                      type="button"
-                      className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
-                      disabled={registryInstallBusy}
-                      onClick={() => void onConfirmMarketInstall("high")}
-                    >
-                      {registryInstallBusy ? "安装中…" : "我已知晓风险，确认安装"}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
-                    disabled={registryInstallBusy}
-                    onClick={() => {
-                      setMarketNeedsConfirmNonHigh(false);
-                      setMarketNeedsConfirmHigh(false);
-                      setMarketPending(null);
-                      setMarketMsg("");
-                    }}
-                  >
-                    取消
-                  </button>
                 </div>
               )}
               {marketResults.length > 0 && (
@@ -4220,12 +4358,14 @@ function SkillsTab() {
                       <button
                         type="button"
                         className="shrink-0 rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
-                        disabled={marketLoading || marketInstallingKey === `${item.source}:${item.name}` || marketQueuedKeys.includes(`${item.source}:${item.name}`)}
+                        disabled={marketLoading || isMarketSkillInstalled(item.name) || marketInstallingKey === marketInstallKey(item) || marketQueuedKeys.includes(marketInstallKey(item))}
                         onClick={() => void onMarketInstall(item)}
                       >
-                        {marketInstallingKey === `${item.source}:${item.name}`
+                        {isMarketSkillInstalled(item.name)
+                          ? "已安装"
+                          : marketInstallingKey === marketInstallKey(item)
                           ? "安装中…"
-                          : marketQueuedKeys.includes(`${item.source}:${item.name}`)
+                          : marketQueuedKeys.includes(marketInstallKey(item))
                             ? "排队中…"
                             : "安装"}
                       </button>
@@ -4244,9 +4384,9 @@ function SkillsTab() {
                 <button
                   type="button"
                   className="text-[11px] text-text-faint underline decoration-border underline-offset-2 transition hover:text-[var(--settings-accent-fg)]"
-                  onClick={() => window.open("https://skillhub.tencent.com/", "_blank", "noopener,noreferrer")}
+                  onClick={() => window.open("https://skillhub.cn/", "_blank", "noopener,noreferrer")}
                 >
-                  skillhub.tencent.com ↗
+                  skillhub.cn ↗
                 </button>
               </div>
               <div className="flex gap-2">
@@ -4271,7 +4411,15 @@ function SkillsTab() {
               {skillhubMsg && (
                 <div
                   className={`mt-1.5 whitespace-pre-wrap text-xs ${
-                    skillhubMsg.includes("失败") ? "text-amber-400" : "text-rose-400"
+                    skillhubMsg.includes("失败") || skillhubMsg.includes("繁忙")
+                      ? "text-amber-400"
+                      : marketPending?.provenance_source === "skillhub" &&
+                          !marketPending.recommended_id &&
+                          (marketNeedsConfirmNonHigh || marketNeedsConfirmHigh)
+                        ? "text-amber-300"
+                        : skillhubMsg.includes("已安装")
+                          ? "text-emerald-400"
+                          : "text-text-muted"
                   }`}
                 >
                   {skillhubMsg}
@@ -4311,7 +4459,15 @@ function SkillsTab() {
                   </div>
                   {skillhubResultsExpanded ? (
                     <div className="space-y-1">
-                  {skillhubResults.map((item) => (
+                  {skillhubResults.map((item) => {
+                    const installItem: RegistrySearchItem = {
+                      ...item,
+                      name: item.slug,
+                      display_name: item.name,
+                    };
+                    const installKey = marketInstallKey(installItem);
+                    const installed = isMarketSkillInstalled(item.slug);
+                    return (
                     <div
                       key={item.slug}
                       className="flex items-start gap-2 rounded-md border border-transparent bg-surface-card px-3 py-2"
@@ -4335,17 +4491,23 @@ function SkillsTab() {
                         <button
                           type="button"
                           className="rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
-                          disabled={installPromptBusy}
-                          onClick={() => onSkillHubMarketInstall(item.slug)}
+                          disabled={installed || marketInstallingKey === installKey || marketQueuedKeys.includes(installKey)}
+                          onClick={() => void onMarketInstall(installItem)}
                         >
-                          安装
+                          {installed
+                            ? "已安装"
+                            : marketInstallingKey === installKey
+                              ? "安装中…"
+                              : marketQueuedKeys.includes(installKey)
+                                ? "排队中…"
+                                : "安装"}
                         </button>
                         <button
                           type="button"
                           className="rounded border border-border px-2 py-0.5 text-[10px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
                           onClick={() =>
                             window.open(
-                              `https://skillhub.tencent.com/skills/${encodeURIComponent(item.slug)}`,
+                              `https://skillhub.cn/skills/${encodeURIComponent(item.slug)}`,
                               "_blank",
                               "noopener,noreferrer",
                             )
@@ -4355,7 +4517,8 @@ function SkillsTab() {
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                     </div>
                   ) : (
                     <div className="rounded-md border border-dashed border-border px-3 py-2 text-center text-xs text-text-faint">
@@ -5909,14 +6072,6 @@ function SessionMemoryPanel() {
       ) : null}
     </Panel>
   );
-}
-
-function formatInstallDoneMsg(
-  successLine: string,
-  scan?: { overall: string; skills: Parameters<typeof formatSkillScanSummary>[0]["skills"] } | null,
-): string {
-  if (!scan?.skills?.length) return successLine;
-  return `${successLine}\n\n${formatSkillScanSummary(scan)}`;
 }
 
 const GUARD_PATTERN_LABELS: Record<string, string> = {

@@ -12146,8 +12146,10 @@ function registerIpc(): void {
       args: {
         source: string;
         name: string;
+        namespace?: string;
         acknowledgeHighRisk?: boolean;
         confirmNonHighRisk?: boolean;
+        provenanceSource?: "registry" | "skillhub";
       }
     ) => {
       const studioUrl = getStudioUrl();
@@ -12158,8 +12160,10 @@ function registerIpc(): void {
           body: JSON.stringify({
             source: args.source,
             name: args.name,
+            namespace: args.namespace ?? "",
             acknowledge_high_risk: Boolean(args.acknowledgeHighRisk),
             confirm_non_high_risk: Boolean(args.confirmNonHighRisk),
+            provenance_source: args.provenanceSource ?? "registry",
           }),
         });
         return await resp.json();
@@ -12169,13 +12173,13 @@ function registerIpc(): void {
     }
   );
 
-  ipcMain.handle("install-from-registry-preview", async (_event, args: { source: string; name: string }) => {
+  ipcMain.handle("install-from-registry-preview", async (_event, args: { source: string; name: string; namespace?: string }) => {
     const studioUrl = getStudioUrl();
     try {
       const resp = await fetch(`${studioUrl}/api/registry/install-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
-        body: JSON.stringify({ source: args.source, name: args.name }),
+        body: JSON.stringify({ source: args.source, name: args.name, namespace: args.namespace ?? "" }),
       });
       return await resp.json();
     } catch (err) {

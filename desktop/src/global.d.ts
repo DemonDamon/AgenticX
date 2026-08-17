@@ -460,6 +460,9 @@ type RegistrySearchItem = {
   source: string;
   source_type: string;
   install_hint: string;
+  namespace?: string;
+  canonical_name?: string;
+  provenance_source?: "registry" | "skillhub";
 };
 type RegistrySearchResult = {
   ok: boolean;
@@ -477,6 +480,10 @@ type SkillHubSearchItem = {
   version: string;
   author: string;
   downloads?: string | number;
+  source: string;
+  source_type: string;
+  namespace?: string;
+  canonical_name?: string;
 };
 type SkillHubSearchResult = {
   ok: boolean;
@@ -1520,10 +1527,12 @@ declare global {
       installFromRegistry: (args: {
         source: string;
         name: string;
+        namespace?: string;
         acknowledgeHighRisk?: boolean;
         confirmNonHighRisk?: boolean;
+        provenanceSource?: "registry" | "skillhub";
       }) => Promise<RegistryInstallResult>;
-      installFromRegistryPreview: (args: { source: string; name: string }) => Promise<RegistryInstallPreviewResult>;
+      installFromRegistryPreview: (args: { source: string; name: string; namespace?: string }) => Promise<RegistryInstallPreviewResult>;
 
       terminalSpawn: (payload: {
         id: string;

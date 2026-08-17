@@ -969,6 +969,37 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "skill_market_install",
+            "description": (
+                "Install an existing published skill from SkillHub/ClawHub by package name. "
+                "Use this immediately whenever the user asks to install a marketplace skill; "
+                "do not read installation guides, run curl/npm/bash, or recreate the SKILL.md with skill_manage. "
+                "This tool resolves the registry source, downloads, security-scans, installs, and refreshes the "
+                "skills list. It only asks the user for a plain-language confirmation when policy or a high-risk "
+                "scan requires one. Scoped references such as @clawhub_publisher/skill-name are accepted."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Published skill slug or SkillHub package reference.",
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": (
+                            "Optional configured registry source name. Omit it for automatic SkillHub/ClawHub resolution."
+                        ),
+                    },
+                },
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "skill_manage",
             "description": (
                 "Create, patch, or delete skills stored under ~/.agenticx/skills/. "
@@ -6129,6 +6160,112 @@ def _skill_manage_enabled() -> bool:
     return False
 
 
+def _skill_market_scan_label(scan: Any) -> tuple[str, int]:
+    payload = scan if isinstance(scan, dict) else {}
+    verdict = str(payload.get("overall", "") or "").strip().lower()
+    label = {
+        "safe": "未发现高危内容",
+        "caution": "发现需注意内容",
+        "dangerous": "发现高风险内容",
+    }.get(verdict, "扫描结果未知")
+    rows = payload.get("skills")
+    findings_count = 0
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            findings = row.get("findings")
+            if isinstance(findings, list):
+                findings_count += len(findings)
+    return label, findings_count
+
+
+async def _tool_skill_market_install(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession],
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    """Install one published skill through the shared marketplace flow."""
+    raw_name = str(arguments.get("name", "") or "").strip()
+    if not raw_name:
+        return json.dumps(
+            {"ok": False, "error": "name is required"},
+            ensure_ascii=False,
+        )
+
+    from agenticx.extensions.skill_market_install import (
+        install_market_skill,
+        load_non_high_risk_auto_install,
+        preview_market_skill,
+    )
+
+    source_name = str(arguments.get("source", "") or "").strip()
+    preview = await asyncio.to_thread(
+        preview_market_skill,
+        raw_name,
+        source_name=source_name,
+    )
+    if not preview.get("ok"):
+        return json.dumps(preview, ensure_ascii=False)
+
+    scan = preview.get("scan") if isinstance(preview.get("scan"), dict) else {}
+    verdict = str(scan.get("overall", "") or "").strip().lower()
+    auto_non_high = load_non_high_risk_auto_install()
+    needs_high_confirmation = verdict == "dangerous"
+    needs_policy_confirmation = verdict in ("safe", "caution") and not auto_non_high
+
+    approved = True
+    if needs_high_confirmation or needs_policy_confirmation:
+        scan_label, findings_count = _skill_market_scan_label(scan)
+        resolved_name = str(preview.get("name") or raw_name)
+        risk_note = f"（命中 {findings_count} 项）" if findings_count else ""
+        question = (
+            f"准备安装第三方技能「{resolved_name}」。\n\n"
+            "系统会从 SkillHub 获取该技能并加入你的技能列表。"
+            f"安全扫描：{scan_label}{risk_note}。\n\n"
+            + (
+                "该技能包含高风险内容，只有你明确允许后才会继续。是否仍要安装？"
+                if needs_high_confirmation
+                else "当前安全策略要求先获得你的允许。是否继续安装？"
+            )
+        )
+        approved = await _confirm(
+            question,
+            confirm_gate=confirm_gate,
+            context={
+                "tool": "skill_market_install",
+                "action": "install",
+                "skill": resolved_name,
+                "risk": "high" if needs_high_confirmation else "policy",
+            },
+            emit_event=emit_event,
+        )
+    if not approved:
+        return json.dumps(
+            {
+                "ok": False,
+                "error": "user_cancelled",
+                "message": "用户已取消安装。",
+                "name": preview.get("name") or raw_name,
+            },
+            ensure_ascii=False,
+        )
+
+    result = await asyncio.to_thread(
+        install_market_skill,
+        str(preview.get("name") or raw_name),
+        source_name=str(preview.get("source") or source_name),
+        namespace=str(preview.get("namespace") or ""),
+        acknowledge_high_risk=needs_high_confirmation,
+        confirm_non_high_risk=needs_policy_confirmation,
+        auto_non_high=auto_non_high,
+        provenance_source="skillhub",
+    )
+    return json.dumps(result, ensure_ascii=False)
+
+
 def _safe_skill_dir_name(name: str) -> Optional[str]:
     """Validate a skill name, allowing sub-paths like ``ima/notes``.
 
@@ -7915,6 +8052,9 @@ async def dispatch_tool_async(
                 "action（create / patch / delete）, name（skill 名称，可含子路径如 ima/notes）, "
                 "以及 content / from_path / from_url（create）或 old_string / new_string（patch）"
             ),
+            "skill_market_install": (
+                "name（SkillHub/ClawHub 技能名或 @clawhub_发布者/技能名）；source 通常省略自动解析"
+            ),
             "skill_import_repo": (
                 "repo（owner/name）, 可选 branch/path_glob/exclude/dry_run/overwrite"
             ),
@@ -8004,6 +8144,13 @@ async def dispatch_tool_async(
             return _tool_skill_list(session)
         if name == "hook_manage":
             return _tool_hook_manage(arguments, session)
+        if name == "skill_market_install":
+            return await _tool_skill_market_install(
+                arguments,
+                session,
+                confirm_gate=gate,
+                emit_event=event_callback,
+            )
         if name == "skill_manage":
             return await _tool_skill_manage(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "skill_import_repo":

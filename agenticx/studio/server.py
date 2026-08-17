@@ -1375,18 +1375,11 @@ def create_studio_app() -> FastAPI:
 
     def _load_non_high_risk_auto_install() -> bool:
         """Read skills.non_high_risk_auto_install from global config (default True)."""
-        try:
-            raw = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH) or {}
-            skills_block = raw.get("skills") or {}
-            if isinstance(skills_block, dict):
-                v = skills_block.get("non_high_risk_auto_install")
-                if isinstance(v, bool):
-                    return v
-                if isinstance(v, str):
-                    return v.strip().lower() in ("true", "1", "yes", "on")
-            return True
-        except Exception:
-            return True
+        from agenticx.extensions.skill_market_install import (
+            load_non_high_risk_auto_install,
+        )
+
+        return load_non_high_risk_auto_install()
 
     def _tool_install_hint(tool_id: str) -> str:
         platform = os.uname().sysname.lower() if hasattr(os, "uname") else ""
@@ -5099,7 +5092,7 @@ def create_studio_app() -> FastAPI:
             "codegen": "code",
             "lsp_goto_definition": "code", "lsp_find_references": "code", "lsp_hover": "code", "lsp_diagnostics": "code",
             "mcp_connect": "mcp", "mcp_call": "mcp", "mcp_import": "mcp",
-            "skill_use": "skill", "skill_list": "skill", "skill_manage": "skill", "skill_import_repo": "skill",
+            "skill_use": "skill", "skill_list": "skill", "skill_market_install": "skill", "skill_manage": "skill", "skill_import_repo": "skill",
             "todo_write": "agent", "scratchpad_write": "agent", "scratchpad_read": "agent",
             "memory_append": "memory", "memory_search": "memory", "session_search": "memory",
             "liteparse": "document",
@@ -7655,11 +7648,9 @@ def create_studio_app() -> FastAPI:
 
     # --- Registry / Marketplace API ---
 
-    # Short-lived in-memory cache: maps "source:name" -> (content, expiry_ts).
-    # preview fetches SKILL.md and stores it here; install reuses it to avoid
-    # a second round of ClawHub HTTP requests (which can trigger rate limits).
-    _registry_preview_cache: dict[str, tuple[str, float]] = {}
-    _REGISTRY_CACHE_TTL = 120.0  # seconds
+    # Short-lived in-memory cache shared by the preview/install HTTP pair.
+    # The same implementation is also used by the Meta-Agent marketplace tool.
+    _registry_preview_cache: dict[str, tuple[Any, float]] = {}
 
     @app.get("/api/registry/search")
     async def registry_search(
@@ -7696,12 +7687,12 @@ def create_studio_app() -> FastAPI:
         q: str = "",
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
-        """Search Tencent SkillHub market (CLI or ClawHub mirror fallback)."""
+        """Search SkillHub without blocking the Studio event loop."""
         _check_token(x_agx_desktop_token)
         try:
             from agenticx.extensions.skillhub_adapter import search_skillhub_market
 
-            return search_skillhub_market(q)
+            return await asyncio.to_thread(search_skillhub_market, q)
         except Exception as exc:
             logger.warning("registry_skillhub_search error: %s", exc)
             return {"ok": False, "items": [], "count": 0, "error": str(exc)}
@@ -7711,35 +7702,25 @@ def create_studio_app() -> FastAPI:
         payload: dict,
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
-        """Fetch registry skill content and return security scan (no install).
+        """Fetch a complete registry skill package and scan it without installing.
 
-        The downloaded SKILL.md is cached briefly so the subsequent install
-        request can reuse it without a second round of ClawHub HTTP calls.
+        The validated package is cached briefly so the subsequent install
+        request can reuse it without a second registry download.
         """
         _check_token(x_agx_desktop_token)
-        source_name = str(payload.get("source", "")).strip()
         skill_name = str(payload.get("name", "")).strip()
-        if not source_name or not skill_name:
-            raise HTTPException(status_code=400, detail="source and name are required")
+        if not skill_name:
+            raise HTTPException(status_code=400, detail="name is required")
         try:
-            import time as _time
-            from agenticx.extensions.registry_hub import RegistryHub
-            from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
+            from agenticx.extensions.skill_market_install import preview_market_skill
 
-            hub = RegistryHub.from_config()
-            content, err = hub.fetch_skill_markdown(source_name, skill_name)
-            if err or content is None:
-                return {"ok": False, "error": err or "fetch failed"}
-
-            cache_key = f"{source_name}:{skill_name}"
-            _registry_preview_cache[cache_key] = (content, _time.monotonic() + _REGISTRY_CACHE_TTL)
-
-            sr = scan_skill_markdown_text(content)
-            one = scan_result_to_payload(sr, skill_name)
-            return {
-                "ok": True,
-                "scan": {"overall": one["verdict"], "skills": [one]},
-            }
+            return await asyncio.to_thread(
+                preview_market_skill,
+                skill_name,
+                source_name=str(payload.get("source", "")).strip(),
+                namespace=str(payload.get("namespace", "")).strip(),
+                preview_cache=_registry_preview_cache,
+            )
         except Exception as exc:
             logger.warning("registry_install_preview error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -7751,66 +7732,27 @@ def create_studio_app() -> FastAPI:
     ) -> dict:
         """Install a skill from a specific configured registry source.
 
-        Reuses the SKILL.md content cached by install-preview when available,
-        avoiding a redundant second fetch to the remote registry.
+        Reuses the complete package cached by install-preview when available,
+        avoiding a redundant second download from the remote registry.
         """
         _check_token(x_agx_desktop_token)
-        source_name = str(payload.get("source", "")).strip()
         skill_name = str(payload.get("name", "")).strip()
-        if not source_name or not skill_name:
-            raise HTTPException(status_code=400, detail="source and name are required")
+        if not skill_name:
+            raise HTTPException(status_code=400, detail="name is required")
         try:
-            import time as _time
-            from agenticx.extensions.registry_hub import RegistryHub
-            from agenticx.skills.guard import scan_result_to_payload, scan_skill_markdown_text
+            from agenticx.extensions.skill_market_install import install_market_skill
 
-            hub = RegistryHub.from_config()
-
-            cache_key = f"{source_name}:{skill_name}"
-            cached = _registry_preview_cache.get(cache_key)
-            if cached and _time.monotonic() < cached[1]:
-                content = cached[0]
-                err = ""
-            else:
-                content, err = hub.fetch_skill_markdown(source_name, skill_name)
-
-            if err or content is None:
-                return {"ok": False, "error": err or "fetch failed"}
-
-            sr = scan_skill_markdown_text(content)
-            summary = {
-                "overall": sr.verdict,
-                "skills": [scan_result_to_payload(sr, skill_name)],
-            }
-            auto_non_high = _load_non_high_risk_auto_install()
-            acknowledge_high_risk = bool(payload.get("acknowledge_high_risk"))
-            confirm_non_high_risk = bool(payload.get("confirm_non_high_risk"))
-
-            if sr.verdict == "dangerous" and not acknowledge_high_risk:
-                return {
-                    "ok": False,
-                    "error": "high_risk_confirm_required",
-                    "error_code": "high_risk_confirm_required",
-                    "scan_summary": summary,
-                }
-            if sr.verdict in ("safe", "caution") and not auto_non_high and not confirm_non_high_risk:
-                return {
-                    "ok": False,
-                    "error": "non_high_risk_confirm_required",
-                    "error_code": "non_high_risk_confirm_required",
-                    "scan_summary": summary,
-                }
-
-            md_path = hub.write_registry_skill(skill_name, content)
-            from agenticx.studio.skills_list_api import invalidate_skills_list_cache
-
-            invalidate_skills_list_cache()
-            return {
-                "ok": True,
-                "name": skill_name,
-                "installed_path": str(md_path),
-                "scan_summary": summary,
-            }
+            return await asyncio.to_thread(
+                install_market_skill,
+                skill_name,
+                source_name=str(payload.get("source", "")).strip(),
+                namespace=str(payload.get("namespace", "")).strip(),
+                acknowledge_high_risk=bool(payload.get("acknowledge_high_risk")),
+                confirm_non_high_risk=bool(payload.get("confirm_non_high_risk")),
+                auto_non_high=_load_non_high_risk_auto_install(),
+                provenance_source=str(payload.get("provenance_source", "registry")).strip(),
+                preview_cache=_registry_preview_cache,
+            )
         except Exception as exc:
             logger.warning("registry_install error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc

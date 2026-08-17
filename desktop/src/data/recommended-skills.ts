@@ -24,8 +24,12 @@ export type RecommendedSkill = {
   category: string;
   /** 来源档标签，用于推荐区筛选。 */
   tier: RecommendedSkillTier;
-  /** 主 CTA：外链指引 vs Meta-Agent 一键安装。 */
+  /** 主 CTA：外链指引 vs 一键安装。 */
   cta: RecommendedSkillCta;
+  /** 已发布的市场包 slug；存在时复用原生预览/扫描/安装流程。 */
+  marketplace_slug?: string;
+  /** SkillHub 发布者命名空间；与 slug 一起定位唯一包。 */
+  marketplace_namespace?: string;
 };
 
 export const RECOMMENDED_TIER_LABEL: Record<RecommendedSkillTier, string> = {
@@ -59,17 +63,18 @@ export const RECOMMENDED_SKILLS: RecommendedSkill[] = [
     cta: "install",
   },
   {
-    id: "alphapai-scraper",
-    name: "alphapai-scraper",
+    id: "alphapai-research",
+    name: "alphapai-research",
     provider: "Alpha派",
     description:
-      "按 Alpha派官方安装文档抓取与研究网页内容；点击安装后由 Meta-Agent 自动下载、解压并落盘技能。",
+      "从 SkillHub 获取 Alpha派网页研究技能；点击后自动完成整包下载、安全检查和安装。",
     icon_src: "",
-    official_url:
-      "https://open-api.rabyte.cn/alpha/open-api/v1/file/api-docs/alphapai-research/install.md",
+    official_url: "https://skillhub.cn/skills/alphapai-research",
     category: "网页抓取",
     tier: "third_party",
     cta: "install",
+    marketplace_slug: "alphapai-research",
+    marketplace_namespace: "clawhub_boteeenchan-ship-it",
   },
   {
     id: "tencent-docs",

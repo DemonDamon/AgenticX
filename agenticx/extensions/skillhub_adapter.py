@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Tencent SkillHub marketplace search for Near / agx serve.
+"""SkillHub marketplace search for Near / agx serve.
 
-Attempts the local ``skillhub`` CLI (JSON output) when available; otherwise
-falls back to ClawHub results from the user's configured registries, since
-SkillHub mirrors that catalog.
+Uses SkillHub's public HTTP API first, then the configured ClawHub mirror and
+finally the local ``skillhub`` CLI as compatibility fallbacks.  Search results
+keep their namespace so the direct installer can request the exact package.
 
 Author: Damon Li
 """
@@ -19,7 +19,11 @@ from typing import Any, Dict, List
 logger = logging.getLogger(__name__)
 
 
-def _search_via_skillhub_cli(query: str) -> List[Dict[str, Any]]:
+def _search_via_skillhub_cli(
+    query: str,
+    *,
+    install_source: str,
+) -> List[Dict[str, Any]]:
     """Run ``skillhub search`` and parse JSON lines or a JSON array."""
     q = (query or "").strip()
     if not q:
@@ -71,6 +75,21 @@ def _search_via_skillhub_cli(query: str) -> List[Dict[str, Any]]:
             slug = str(row.get("slug") or row.get("name") or "").strip()
             if not slug:
                 continue
+            namespace_block = (
+                row.get("namespace") if isinstance(row.get("namespace"), dict) else {}
+            )
+            namespace = str(
+                namespace_block.get("handle")
+                or row.get("namespace_handle")
+                or row.get("namespaceHandle")
+                or ""
+            ).strip().lstrip("@")
+            canonical_name = str(
+                namespace_block.get("canonicalName")
+                or row.get("canonical_name")
+                or row.get("canonicalName")
+                or (f"@{namespace}/{slug}" if namespace else slug)
+            ).strip()
             display = str(row.get("displayName") or row.get("title") or slug).strip()
             items.append(
                 {
@@ -80,6 +99,10 @@ def _search_via_skillhub_cli(query: str) -> List[Dict[str, Any]]:
                     "version": str(row.get("version") or "latest"),
                     "author": str(row.get("author") or row.get("publisher") or "unknown"),
                     "downloads": row.get("downloads") or row.get("downloadCount"),
+                    "source": install_source,
+                    "source_type": "skillhub",
+                    "namespace": namespace,
+                    "canonical_name": canonical_name,
                 }
             )
         if items:
@@ -99,7 +122,81 @@ def search_skillhub_market(query: str) -> Dict[str, Any]:
     """
     q = (query or "").strip()
 
-    cli_items = _search_via_skillhub_cli(q)
+    from agenticx.extensions.registry_hub import RegistryHub
+
+    hub = RegistryHub.from_config()
+    skillhub_source = hub.source_name_for_type("skillhub") or "skillhub"
+    clawhub_source = hub.source_name_for_type("clawhub") or "clawhub"
+
+    def _to_items(results: List[Any]) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        for r in results:
+            extra = r.extra if isinstance(r.extra, dict) else {}
+            namespace_block = (
+                extra.get("namespace") if isinstance(extra.get("namespace"), dict) else {}
+            )
+            namespace = str(
+                namespace_block.get("handle")
+                or extra.get("namespace_handle")
+                or extra.get("namespaceHandle")
+                or ""
+            ).strip().lstrip("@")
+            canonical_name = str(
+                namespace_block.get("canonicalName")
+                or extra.get("canonical_name")
+                or extra.get("canonicalName")
+                or (f"@{namespace}/{r.name}" if namespace else r.name)
+            ).strip()
+            downloads = extra.get("downloads") or extra.get("downloadCount")
+            display_name = str(extra.get("display_name") or r.name).strip()
+            items.append(
+                {
+                    "slug": r.name,
+                    "name": display_name or r.name,
+                    "description": r.description,
+                    "version": r.version,
+                    "author": r.author,
+                    "downloads": downloads,
+                    "source": r.source,
+                    "source_type": r.source_type,
+                    "namespace": namespace,
+                    "canonical_name": canonical_name,
+                }
+            )
+        return items
+
+    errors: List[str] = []
+    try:
+        native_results = hub.search_source(skillhub_source, q)
+        native_items = _to_items(native_results)
+        if native_items:
+            return {
+                "ok": True,
+                "items": native_items,
+                "count": len(native_items),
+                "source": "skillhub_api",
+                "hint": "",
+            }
+    except Exception as exc:
+        errors.append(f"SkillHub: {exc}")
+        logger.warning("SkillHub API search failed: %s", exc)
+
+    try:
+        mirror_results = hub.search_source(clawhub_source, q)
+        mirror_items = _to_items(mirror_results)
+        if mirror_items:
+            return {
+                "ok": True,
+                "items": mirror_items,
+                "count": len(mirror_items),
+                "source": "clawhub_registry",
+                "hint": "SkillHub 暂时不可用，当前结果来自兼容镜像。",
+            }
+    except Exception as exc:
+        errors.append(f"ClawHub: {exc}")
+        logger.warning("SkillHub mirror search failed: %s", exc)
+
+    cli_items = _search_via_skillhub_cli(q, install_source=skillhub_source)
     if cli_items:
         return {
             "ok": True,
@@ -109,52 +206,18 @@ def search_skillhub_market(query: str) -> Dict[str, Any]:
             "hint": "",
         }
 
-    try:
-        from agenticx.extensions.registry_hub import RegistryHub
-
-        hub = RegistryHub.from_config()
-        results = hub.search(q)
-    except Exception as exc:
-        logger.warning("SkillHub fallback search failed: %s", exc)
+    if errors:
         return {
             "ok": False,
             "items": [],
             "count": 0,
-            "error": str(exc),
+            "error": " | ".join(errors[:2]),
         }
-
-    claw_only = [r for r in results if r.source_type == "clawhub"]
-    items: List[Dict[str, Any]] = []
-    for r in claw_only:
-        extra = r.extra if isinstance(r.extra, dict) else {}
-        downloads = extra.get("downloads") or extra.get("downloadCount")
-        items.append(
-            {
-                "slug": r.name,
-                "name": r.name,
-                "description": r.description,
-                "version": r.version,
-                "author": r.author,
-                "downloads": downloads,
-            }
-        )
-
-    hint = ""
-    if not items and not results:
-        hint = (
-            "未找到匹配技能。可在本机安装 SkillHub CLI 后重试，"
-            "或前往 https://skillhub.tencent.com 浏览。"
-        )
-    elif not items and results:
-        hint = (
-            "当前注册表未返回 ClawHub 类结果。请在 ~/.agenticx/config.yaml 的 "
-            "extensions.registries 中配置 type: clawhub 的源以启用镜像搜索。"
-        )
 
     return {
         "ok": True,
-        "items": items,
-        "count": len(items),
-        "source": "clawhub_fallback",
-        "hint": hint,
+        "items": [],
+        "count": 0,
+        "source": "skillhub_api",
+        "hint": "未找到匹配技能。",
     }
