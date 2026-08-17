@@ -70,7 +70,7 @@ import { collectSessionReferences } from "../../utils/session-references";
 import { resolveWorkPanelTodoFromMessages } from "../../utils/task-stall-policy";
 import {
   ensureArtifactTaskspacesForSession,
-  loadPersistedSessionArtifactPaths,
+  startPersistedArtifactPathResync,
 } from "../../utils/ensure-artifact-taskspaces";
 import { RUNTIME_DEFAULT_TASKSPACES } from "../automation/RuntimeConfigSection";
 import {
@@ -770,26 +770,25 @@ export function WorkPanel({
 
   // Tail-loaded panes only hold the last 3 rounds / 40 messages. Re-scan the
   // full `messages.json` so older file_write / bash artifacts stay listed.
+  // Keep polling while the summary tab exists: group chat writes often land
+  // on disk without file_write rows, and WorkspacePanel already refreshes
+  // every 3s — without this,「任务产物」stays on the first listing.
   useEffect(() => {
     const sid = String(sessionId || "").trim();
     if (!sid) {
       setDiskArtifactPaths([]);
       return;
     }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const paths = await loadPersistedSessionArtifactPaths(sid);
-        if (!cancelled) setDiskArtifactPaths(paths);
-      } catch (err) {
+    return startPersistedArtifactPathResync({
+      sessionId: sid,
+      enabled: summaryTabOpen,
+      onPaths: setDiskArtifactPaths,
+      onError: (err) => {
         console.warn("[WorkPanel] persisted artifacts load failed:", err);
-        if (!cancelled) setDiskArtifactPaths([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, summaryTabOpen]);
+        setDiskArtifactPaths([]);
+      },
+    });
+  }, [sessionId, summaryTabOpen, autoRefreshKey]);
 
   const artifactPaths = useMemo(
     () =>

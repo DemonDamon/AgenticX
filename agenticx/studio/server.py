@@ -6994,6 +6994,38 @@ def create_studio_app() -> FastAPI:
         interrupted = getattr(app.state, "interrupted_sessions", []) or []
         return {"sessions": interrupted, "count": len(interrupted)}
 
+    @app.get("/api/sessions/{session_id}/loop-review")
+    async def get_session_loop_review(
+        session_id: str,
+        refresh: bool = Query(default=False),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Read-only workflow health review for one session."""
+        _check_token(x_agx_desktop_token)
+        import asyncio as _asyncio
+        import dataclasses as _dataclasses
+        import json as _json
+
+        sid = str(session_id or "").strip()
+        if not sid:
+            return {"ok": False, "error": "session not found"}
+        session_dir = Path.home() / ".agenticx" / "sessions" / sid
+        if not session_dir.is_dir():
+            return {"ok": False, "error": "session not found"}
+
+        review_path = session_dir / "loop_review.json"
+        if not refresh and review_path.is_file():
+            try:
+                data = _json.loads(review_path.read_text(encoding="utf-8"))
+                return {"ok": True, "review": data}
+            except (ValueError, OSError):
+                pass  # fall through to recompute
+
+        from agenticx.learning.loop_review import review_session
+
+        review = await _asyncio.to_thread(review_session, session_dir)
+        return {"ok": True, "review": _dataclasses.asdict(review)}
+
     # -- Skills ----------------------------------------------------------------
 
     @app.get("/api/skills")

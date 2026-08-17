@@ -32,6 +32,7 @@ import {
   cacheSessionTail,
 } from "../../utils/session-tail-cache";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "../../utils/session-message-map";
+import { LoopReviewCard } from "../session/LoopReviewCard";
 import {
   SIDEBAR_HISTORY_COLLAPSE_KEY,
   SIDEBAR_HISTORY_FILTER_KEY,
@@ -149,6 +150,8 @@ export function SidebarSessionHistory() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [loopReviewScores, setLoopReviewScores] = useState<Record<string, number>>({});
+  const [loopReviewFor, setLoopReviewFor] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
@@ -206,6 +209,23 @@ export function SidebarSessionHistory() {
             clearSessionHistoryHint(row.session_id);
           }
         }
+        // Best-effort batch fetch of loop-review scores; failures stay silent.
+        // Sessions without tool observations carry no real signal — their score
+        // is a floor imposed by missing evidence, so we show no badge at all.
+        void Promise.allSettled(
+          rows.map(async (row) => {
+            const r = await window.agenticxDesktop.getSessionLoopReview(row.session_id);
+            return r.ok && r.review && r.review.observations_available !== false
+              ? { id: row.session_id, score: r.review.overall }
+              : null;
+          }),
+        ).then((results) => {
+          const next: Record<string, number> = {};
+          for (const res of results) {
+            if (res.status === "fulfilled" && res.value) next[res.value.id] = res.value.score;
+          }
+          setLoopReviewScores(next);
+        });
       }
     } catch (err) {
       console.warn("[SidebarSessionHistory] listSessions failed", err);
@@ -904,6 +924,7 @@ export function SidebarSessionHistory() {
     const showHoverActions = !selectMode && !isEditing;
     const isRunning = row.execution_state === "running";
     const isInterrupted = row.execution_state === "interrupted";
+    const loopScore = loopReviewScores[row.session_id];
 
     return (
       <div
@@ -1009,6 +1030,28 @@ export function SidebarSessionHistory() {
               </span>
             ) : null}
             <span className="min-w-0 flex-1 truncate">{title}</span>
+            {loopScore !== undefined ? (
+              <span
+                role="button"
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (selectMode) return;
+                  setLoopReviewFor(row.session_id);
+                }}
+                className={`inline-flex shrink-0 cursor-pointer items-center rounded-sm px-1 py-px text-[10px] font-semibold leading-tight tabular-nums ${
+                  loopScore >= 80
+                    ? "text-emerald-400"
+                    : loopScore >= 60
+                      ? "text-text-muted"
+                      : "text-amber-400"
+                }`}
+                title={`会话体检 ${loopScore} / 100 · 点击查看`}
+                aria-label={`会话体检 ${loopScore}`}
+              >
+                {loopScore}
+              </span>
+            ) : null}
           </button>
         )}
         {showHoverActions ? (
@@ -1450,6 +1493,20 @@ export function SidebarSessionHistory() {
               })}
             </div>,
             document.body
+          )
+        : null}
+
+      {loopReviewFor
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[240] flex items-start justify-center bg-black/70 pt-[12vh] backdrop-blur-none"
+              onClick={() => setLoopReviewFor(null)}
+            >
+              <div onClick={(e) => e.stopPropagation()}>
+                <LoopReviewCard sessionId={loopReviewFor} onClose={() => setLoopReviewFor(null)} />
+              </div>
+            </div>,
+            document.body,
           )
         : null}
     </div>

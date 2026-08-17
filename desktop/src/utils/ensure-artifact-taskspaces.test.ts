@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SESSION_TASK_ARTIFACTS_DIRNAME,
   SESSION_TASK_ARTIFACTS_LABEL,
+  WORKSPACE_ARTIFACT_RESYNC_MS,
   ensureArtifactTaskspacesForSession,
   loadPersistedSessionArtifactPaths,
   sessionTaskArtifactsDir,
   shouldPruneAutoArtifactRoot,
+  startPersistedArtifactPathResync,
 } from "./ensure-artifact-taskspaces";
 
 describe("sessionTaskArtifactsDir", () => {
@@ -266,5 +268,102 @@ describe("loadPersistedSessionArtifactPaths", () => {
     const paths = await loadPersistedSessionArtifactPaths(sid);
     expect(paths).toEqual([nested]);
     expect(listTaskspaceFiles.mock.calls.map((c) => c[0]?.path)).toEqual([".", "games"]);
+  });
+
+  it("lists both root HTML files from a later workspace listing", async () => {
+    const sid = "33a3bc2a-d494-493f-a62a-e29a3b4f027d";
+    const root = `/Users/damon/.agenticx/taskspaces/${sid}/default`;
+    vi.stubGlobal("window", {
+      agenticxDesktop: {
+        loadSessionMessages: vi.fn(async () => ({
+          ok: true,
+          messages: [
+            { role: "assistant", content: "文件已生成：**tank-battle.html**" },
+          ],
+        })),
+        readLocalTextFile: vi.fn(async () => ({ ok: true, content: "[]" })),
+        listTaskspaces: vi.fn(async () => ({
+          ok: true,
+          workspaces: [{ id: "default", path: root, label: "default" }],
+        })),
+        listTaskspaceFiles: vi.fn(async () => ({
+          ok: true,
+          files: [
+            { name: "memory", type: "dir", path: "memory", size: 0, modified: 0 },
+            {
+              name: "parent-kid-games.html",
+              type: "file",
+              path: "parent-kid-games.html",
+              size: 12,
+              modified: 0,
+            },
+            {
+              name: "tank-battle.html",
+              type: "file",
+              path: "tank-battle.html",
+              size: 20,
+              modified: 0,
+            },
+          ],
+        })),
+      },
+    });
+
+    await expect(loadPersistedSessionArtifactPaths(sid)).resolves.toEqual([
+      `${root}/parent-kid-games.html`,
+      `${root}/tank-battle.html`,
+    ]);
+  });
+});
+
+describe("startPersistedArtifactPathResync", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("rescans after the workspace poll interval so a later HTML is listed", async () => {
+    vi.useFakeTimers();
+    const sid = "group-resync";
+    let files = ["parent-kid-games.html"];
+    const load = vi.fn(async () => files.map((name) => `/tmp/${sid}/${name}`));
+    const onPaths = vi.fn();
+
+    const stop = startPersistedArtifactPathResync({
+      sessionId: sid,
+      enabled: true,
+      load,
+      onPaths,
+    });
+
+    await Promise.resolve();
+    expect(onPaths).toHaveBeenCalledTimes(1);
+    expect(onPaths).toHaveBeenLastCalledWith([`/tmp/${sid}/parent-kid-games.html`]);
+
+    files = ["parent-kid-games.html", "tank-battle.html"];
+    await vi.advanceTimersByTimeAsync(WORKSPACE_ARTIFACT_RESYNC_MS);
+    expect(onPaths).toHaveBeenLastCalledWith([
+      `/tmp/${sid}/parent-kid-games.html`,
+      `/tmp/${sid}/tank-battle.html`,
+    ]);
+    stop();
+  });
+
+  it("does not poll when summary is closed", async () => {
+    vi.useFakeTimers();
+    const load = vi.fn(async () => ["/tmp/a.html"]);
+    const onPaths = vi.fn();
+    const stop = startPersistedArtifactPathResync({
+      sessionId: "s1",
+      enabled: false,
+      load,
+      onPaths,
+    });
+    await vi.runOnlyPendingTimersAsync();
+    expect(load).not.toHaveBeenCalled();
+    expect(onPaths).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(WORKSPACE_ARTIFACT_RESYNC_MS);
+    expect(load).not.toHaveBeenCalled();
+    stop();
   });
 });

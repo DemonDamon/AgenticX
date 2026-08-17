@@ -70,6 +70,25 @@ def test_unverified_writes_produce_change_validation_finding(tmp_path: Path):
     assert finding["verification"]
 
 
+def test_missing_observations_produce_no_findings(tmp_path: Path):
+    # Only messages exist: we never saw a tool call, so we must not claim that
+    # writes happened without verification.
+    _write_json(
+        tmp_path / "messages.json",
+        [
+            {"role": "user", "content": "帮我看看这个问题"},
+            {"role": "assistant", "content": "..."},
+            {"role": "user", "content": "好的"},
+        ],
+    )
+    review = review_session(tmp_path)
+    assert review.observations_available is False
+    assert review.messages_available is True
+    assert review.findings == []
+    text = format_review_text(review)
+    assert "无工具观察数据" in text
+
+
 def test_write_review_persists_loadable_json(tmp_path: Path):
     review = review_session(tmp_path)
     path = write_review(review, tmp_path)

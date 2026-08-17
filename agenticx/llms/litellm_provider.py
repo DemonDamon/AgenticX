@@ -628,9 +628,15 @@ class LiteLLMProvider(BaseLLMProvider):
 
         # Extract tool_calls from the first choice's message
         raw_tool_calls = None
+        reasoning_content = None
         if response.choices:
             msg = getattr(response.choices[0], "message", None)
             if msg is not None:
+                rc_any = getattr(msg, "reasoning_content", None)
+                if rc_any is None:
+                    rc_any = getattr(msg, "reasoning", None)
+                if isinstance(rc_any, str):
+                    reasoning_content = rc_any
                 tc_list = getattr(msg, "tool_calls", None)
                 if tc_list:
                     raw_tool_calls = []
@@ -672,6 +678,7 @@ class LiteLLMProvider(BaseLLMProvider):
                 "custom_llm_provider": getattr(response, "custom_llm_provider", None),
             },
             tool_calls=raw_tool_calls,
+            reasoning_content=reasoning_content,
         )
 
     def generate(self, prompt: Union[str, List[Dict]], **kwargs) -> str:

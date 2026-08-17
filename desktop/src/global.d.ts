@@ -654,6 +654,23 @@ declare global {
           read_files_count?: number;
         }>;
       }>;
+      getSessionLoopReview: (sessionId: string, refresh?: boolean) => Promise<{
+        ok: boolean;
+        review?: {
+          session_id: string;
+          generated_at: string;
+          schema_version: number;
+          overall: number;
+          dimensions: Array<{
+            key: string; label: string; raw_score: number;
+            score: number; evidence: string; rationale: string;
+          }>;
+          findings: Array<{ key: string; impact: string; repair: string; verification: string }>;
+          observations_available?: boolean;
+          messages_available?: boolean;
+        };
+        error?: string;
+      }>;
       interruptSession: (sessionId: string) => Promise<{ ok: boolean; session_id?: string; error?: string }>;
       loadRuntimeConfig: () => Promise<{
         ok: boolean;

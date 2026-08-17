@@ -97,3 +97,31 @@ def test_stream_with_tools_closes_think_when_only_reasoning(monkeypatch):
     text = _collect_content(provider.stream_with_tools([{"role": "user", "content": "hi"}], tools=[]))
 
     assert text == "<think>deciding to call tool</think>"
+
+
+def test_parse_response_preserves_reasoning_content():
+    provider = LiteLLMProvider(model="openai/deepseek-v4-pro", api_key="k")
+    response = SimpleNamespace(
+        id="resp-ds",
+        model="openai/deepseek-v4-pro",
+        created=0,
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        choices=[
+            SimpleNamespace(
+                index=0,
+                finish_reason="tool_calls",
+                message=SimpleNamespace(
+                    content=" ",
+                    reasoning_content="plan the search",
+                    tool_calls=None,
+                ),
+            )
+        ],
+        _response_ms=1,
+        custom_llm_provider="openai",
+    )
+
+    parsed = provider._parse_response(response)
+
+    assert parsed.reasoning_content == "plan the search"
+    assert parsed.content == " "

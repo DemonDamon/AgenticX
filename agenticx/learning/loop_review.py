@@ -58,6 +58,9 @@ class LoopReview:
     dimensions: list[DimensionReview] = field(default_factory=list)
     findings: list[dict[str, Any]] = field(default_factory=list)
     overall: int = 0  # floor of the mean of the five dimension scores
+    # Consumers use these to tell "scored badly" apart from "nothing to score".
+    observations_available: bool = True
+    messages_available: bool = True
 
 
 # Findings are decoupled from scores: a low score alone never produces one.
@@ -67,17 +70,17 @@ FINDING_TEMPLATES: dict[str, dict[str, str]] = {
     "change_validation": {
         "impact": "本次会话产生了写操作但未观察到验证动作",
         "repair": "在收尾轮追加一次测试/类型检查工具调用",
-        "verification": "重跑会话后 change_validation.evidence 应达到 exercised",
+        "verification": "重跑会话后「变更验证」证据应达到「已执行」",
     },
     "reliable_delivery": {
         "impact": "会话缺少用户确认或存在纠偏轮次",
         "repair": "收尾时向用户复述交付物与验收口径",
-        "verification": "user_correction_turns 归零",
+        "verification": "用户纠偏轮次归零",
     },
     "learning_capture": {
         "impact": "复杂会话未沉淀任何技能",
         "repair": "会话结束后触发一次 skill_manage 复盘",
-        "verification": "learning_capture.evidence 达到 exercised",
+        "verification": "「学习沉淀」证据应达到「已执行」",
     },
 }
 
@@ -221,23 +224,27 @@ def review_session(session_dir: Path) -> LoopReview:
 
     findings: list[dict[str, Any]] = []
     weak = {EvidenceState.MISSING, EvidenceState.PRESENT}
-    for dim in dimensions:
-        tpl = FINDING_TEMPLATES.get(dim.key)
-        if not tpl:
-            continue
-        try:
-            state = EvidenceState(dim.evidence)
-        except ValueError:
-            continue
-        if state in weak:
-            findings.append(
-                {
-                    "key": dim.key,
-                    "impact": tpl["impact"],
-                    "repair": tpl["repair"],
-                    "verification": tpl["verification"],
-                }
-            )
+    # Finding templates assert concrete facts ("this session produced writes but
+    # never verified them"). Without observations we did not see writes at all,
+    # so emitting them would state something we never observed.
+    if ev.observations_available:
+        for dim in dimensions:
+            tpl = FINDING_TEMPLATES.get(dim.key)
+            if not tpl:
+                continue
+            try:
+                state = EvidenceState(dim.evidence)
+            except ValueError:
+                continue
+            if state in weak:
+                findings.append(
+                    {
+                        "key": dim.key,
+                        "impact": tpl["impact"],
+                        "repair": tpl["repair"],
+                        "verification": tpl["verification"],
+                    }
+                )
 
     return LoopReview(
         session_id=session_dir.name,
@@ -245,6 +252,8 @@ def review_session(session_dir: Path) -> LoopReview:
         dimensions=dimensions,
         findings=findings,
         overall=overall,
+        observations_available=ev.observations_available,
+        messages_available=ev.messages_available,
     )
 
 
@@ -279,6 +288,9 @@ def format_review_text(review: LoopReview) -> str:
             lines.append(f"  影响：{f['impact']}")
             lines.append(f"  修复：{f['repair']}")
             lines.append(f"  验证：{f['verification']}")
+    elif not review.observations_available:
+        lines.append("Findings (0)")
+        lines.append("本次会话无工具观察数据，无法判定")
     else:
         lines.append("Findings (0)")
         lines.append("未发现需要修复的问题")

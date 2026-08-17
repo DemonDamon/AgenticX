@@ -19,6 +19,55 @@ import { NEAR_ARTIFACT_TASKSPACES_SYNCED } from "./workspace-sidebar-events";
 export const SESSION_TASK_ARTIFACTS_DIRNAME = "task_artifacts";
 export const SESSION_TASK_ARTIFACTS_LABEL = "任务产物";
 
+/** Same cadence as WorkspacePanel's default-root listing poll. */
+export const WORKSPACE_ARTIFACT_RESYNC_MS = 3000;
+
+export type PersistedArtifactPathResyncOpts = {
+  sessionId: string;
+  enabled: boolean;
+  onPaths: (paths: string[]) => void;
+  onError?: (err: unknown) => void;
+  load?: (sessionId: string) => Promise<string[]>;
+  intervalMs?: number;
+};
+
+/**
+ * Immediate scan + interval rescan so「任务产物」picks up files written after
+ * the first mount (group chat often has no file_write rows).
+ */
+export function startPersistedArtifactPathResync(
+  opts: PersistedArtifactPathResyncOpts,
+): () => void {
+  const sid = String(opts.sessionId || "").trim();
+  if (!sid || !opts.enabled) return () => {};
+
+  let cancelled = false;
+  const load = opts.load ?? loadPersistedSessionArtifactPaths;
+  const intervalMs = Number.isFinite(opts.intervalMs)
+    ? Math.max(0, Number(opts.intervalMs))
+    : WORKSPACE_ARTIFACT_RESYNC_MS;
+
+  const run = (): void => {
+    void (async () => {
+      try {
+        const paths = await load(sid);
+        if (!cancelled) opts.onPaths(paths);
+      } catch (err) {
+        if (cancelled) return;
+        if (opts.onError) opts.onError(err);
+        else opts.onPaths([]);
+      }
+    })();
+  };
+
+  run();
+  const timer = globalThis.setInterval(run, intervalMs);
+  return () => {
+    cancelled = true;
+    globalThis.clearInterval(timer);
+  };
+}
+
 function normalizeRoot(path: string): string {
   return String(path || "")
     .trim()

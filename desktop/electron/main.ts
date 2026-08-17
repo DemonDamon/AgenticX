@@ -7245,6 +7245,23 @@ function registerEarlyIpc(): void {
     }
   });
 
+  ipcMain.handle("get-session-loop-review", async (_event, sessionId: string, refresh?: boolean) => {
+    try {
+      await waitForStudio();
+      const sid = String(sessionId ?? "").trim();
+      if (!sid) return { ok: false, error: "sessionId is required" };
+      const q = refresh ? "?refresh=true" : "";
+      const resp = await fetch(
+        `${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/loop-review${q}`,
+        { headers: { "x-agx-desktop-token": getStudioToken() } },
+      );
+      if (!resp.ok) return { ok: false };
+      return await resp.json();
+    } catch {
+      return { ok: false };
+    }
+  });
+
   ipcMain.handle("interrupt-session", async (_event, sessionId: string) => {
     try {
       const sid = String(sessionId ?? "").trim();

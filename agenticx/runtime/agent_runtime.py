@@ -966,6 +966,36 @@ def _deepseek_v4_thinking_kwargs(session: Any, model_name: str) -> Dict[str, Any
     }
 
 
+def _ensure_deepseek_v4_tool_reasoning_content(
+    messages: Sequence[Dict[str, Any]],
+    session: Any,
+    model_name: str,
+) -> List[Dict[str, Any]]:
+    """Echo reasoning_content on assistant+tool_calls rows for DeepSeek V4 thinking.
+
+    Official Chat Completions rejects follow-up tool rounds when the field is
+    missing. An empty string is accepted and is used when no thought was captured.
+    """
+    if not _is_deepseek_v4_model(model_name):
+        return list(messages)
+    if getattr(session, "_thinking_enabled", None) is False:
+        return list(messages)
+    out: List[Dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        if str(msg.get("role", "")).strip() != "assistant" or not msg.get("tool_calls"):
+            out.append(msg)
+            continue
+        if "reasoning_content" in msg:
+            out.append(msg)
+            continue
+        patched = dict(msg)
+        patched["reasoning_content"] = ""
+        out.append(patched)
+    return out
+
+
 def _merge_llm_call_kwargs(base: Dict[str, Any], extra: Dict[str, Any]) -> None:
     """Update call kwargs; merge extra_body instead of replacing prompt-cache extra_body."""
     payload = dict(extra or {})
@@ -2488,6 +2518,7 @@ async def _eager_knowledge_search_events(
     assistant_tool_message: Dict[str, Any] = {
         "role": "assistant",
         "content": "",
+        "reasoning_content": "",
         "tool_calls": [
             {
                 "id": tool_call_id,
@@ -3560,6 +3591,9 @@ class AgentRuntime:
                 )
                 # Drop Studio-only fields (metadata/attachments/…) before upstream call.
                 messages_for_llm = _strip_non_llm_message_fields(messages_for_llm)
+                messages_for_llm = _ensure_deepseek_v4_tool_reasoning_content(
+                    messages_for_llm, session, model_name
+                )
                 if provider_name.strip().lower() == "minimax":
                     messages_for_llm = _merge_consecutive_simple_roles_for_minimax(messages_for_llm)
                 response_text = ""
@@ -4674,8 +4708,11 @@ class AgentRuntime:
             assistant_message: Dict[str, Any] = {"role": "assistant", "content": ac_clean}
             if tool_calls:
                 assistant_message["tool_calls"] = tool_calls
-                if isinstance(reasoning_for_tool_call, str) and reasoning_for_tool_call:
-                    assistant_message["reasoning_content"] = reasoning_for_tool_call
+                assistant_message["reasoning_content"] = (
+                    reasoning_for_tool_call
+                    if isinstance(reasoning_for_tool_call, str) and reasoning_for_tool_call
+                    else ""
+                )
             session.agent_messages.append(assistant_message)
             synced_session_message_count = len(session.agent_messages)
 
