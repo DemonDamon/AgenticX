@@ -14,6 +14,7 @@ import { useAppStore, type ChatPane as ChatPaneState } from "../store";
 import { ChatPane } from "./ChatPane";
 import { PaneDivider } from "./PaneDivider";
 import { SortablePaneWrapper } from "./SortablePaneWrapper";
+import { SHOW_DESKTOP_MULTI_PANE } from "../constants/desktop-feature-visibility";
 
 type Props = {
   onOpenConfirm: (
@@ -237,6 +238,32 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
   const multiPaneMinWidth = isMulti
     ? clamp(Math.floor((containerWidth || 680) / paneCount) - 8, 240, 320)
     : undefined;
+
+  if (!SHOW_DESKTOP_MULTI_PANE) {
+    const focusedPaneId = panes.some((pane) => pane.id === activePaneId)
+      ? activePaneId
+      : panes[0]?.id;
+    return (
+      <div ref={containerRef} className="relative flex h-full min-w-0 flex-1 overflow-hidden">
+        {panes.map((pane) => {
+          const isFocused = pane.id === focusedPaneId;
+          return (
+            <div
+              key={pane.id}
+              className={
+                isFocused
+                  ? "flex h-full min-w-0 flex-1 overflow-hidden"
+                  : "pointer-events-none absolute inset-0 hidden overflow-hidden"
+              }
+              aria-hidden={!isFocused}
+            >
+              {renderChatPane(pane, isFocused)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   const tabBody = paneTabMode ? (
     <>
