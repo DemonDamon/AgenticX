@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { buildShareUrl } from "./share-url";
+import { buildBrowserShareUrl, buildShareUrl } from "./share-url";
 
 const previousBaseUrl = process.env.WEB_PORTAL_PUBLIC_BASE_URL;
 
@@ -29,5 +29,21 @@ describe("share URL", () => {
         WEB_PORTAL_PUBLIC_BASE_URL: "file:///tmp/portal",
       }),
     ).toThrow("must use http or https");
+  });
+
+  it("copies the share path onto the current browser origin", () => {
+    expect(buildBrowserShareUrl("/share/token-4", "https://test.pal.cmccfund.com:3000")).toBe(
+      "https://test.pal.cmccfund.com:3000/share/token-4",
+    );
+  });
+
+  it("does not keep a server-side internal origin when copying in the browser", () => {
+    const apiShareUrl = buildShareUrl("/share/token-5", "http://192.168.16.66/api/chat/shares", {
+      WEB_PORTAL_PUBLIC_BASE_URL: "http://192.168.16.66",
+    });
+    expect(apiShareUrl).toBe("http://192.168.16.66/share/token-5");
+    expect(buildBrowserShareUrl("/share/token-5", "https://test.pal.cmccfund.com:3000")).toBe(
+      "https://test.pal.cmccfund.com:3000/share/token-5",
+    );
   });
 });

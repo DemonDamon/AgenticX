@@ -57,6 +57,7 @@ import { QuotaLimitNotice } from "./QuotaLimitNotice";
 import { ShareDialog } from "./share/ShareDialog";
 import { downloadShareImage } from "./share/share-image";
 import { navigateToExternalLink } from "../lib/external-link";
+import { buildBrowserShareUrl } from "../lib/share-url";
 import {
   CapabilityHoverTip,
   ComposerPlusMenu,
@@ -581,7 +582,7 @@ export function MachiChatView({
         }
         throw new Error(message ?? t("shareFailed"));
       }
-      return payload.data.share_url ?? new URL(payload.data.path, window.location.origin).toString();
+      return buildBrowserShareUrl(payload.data.path, window.location.origin);
     },
     [activeSessionId, t],
   );
