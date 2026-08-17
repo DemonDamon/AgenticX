@@ -876,6 +876,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     confirmNonHighRisk?: boolean;
     provenanceSource?: "registry" | "skillhub";
   }) => ipcRenderer.invoke("install-from-registry", args),
+  uninstallMarketSkill: async (args: { name: string }) =>
+    ipcRenderer.invoke("uninstall-registry-skill", args),
   installFromRegistryPreview: async (args: {
     source: string;
     name: string;

@@ -11,7 +11,10 @@ Author: Damon Li
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
+import shutil
+import stat
 import tempfile
 import threading
 import time
@@ -726,4 +729,159 @@ def install_market_skill(
             "version": package.version,
         },
         "scan_summary": summary,
+    }
+
+
+def uninstall_market_skill(
+    skill_name: str,
+    *,
+    install_root: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Remove one registry-installed skill without crossing ownership bounds.
+
+    Marketplace uninstall is intentionally narrower than the general skill
+    management API.  It only owns direct children of the registry install
+    root, and it requires the installer-written provenance sidecar before
+    deleting the complete package directory.
+    """
+    from agenticx.skills.frontmatter import SKILL_PROVENANCE_FILENAME
+    from agenticx.skills.registry import _validate_skill_name
+
+    normalized_name = normalize_market_skill_name(skill_name)
+    try:
+        validated_name = _validate_skill_name(normalized_name)
+        if validated_name in (".", ".."):
+            raise ValueError("Invalid skill name")
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "removed": False,
+            "name": normalized_name,
+            "error": str(exc),
+            "error_code": "invalid_skill_name",
+        }
+
+    root_input = (
+        Path(install_root)
+        if install_root is not None
+        else Path.home() / ".agenticx" / "skills" / "registry"
+    ).expanduser()
+    root = root_input.resolve(strict=False)
+    candidate = root / validated_name
+
+    # lstat distinguishes an absent target from a broken symlink.  Never call
+    # resolve() first: doing so would follow the exact top-level link that this
+    # ownership boundary must reject.
+    try:
+        candidate_stat = candidate.lstat()
+    except FileNotFoundError:
+        return {
+            "ok": True,
+            "removed": False,
+            "name": validated_name,
+        }
+    except OSError as exc:
+        return {
+            "ok": False,
+            "removed": False,
+            "name": validated_name,
+            "error": f"Unable to inspect installed skill: {exc}",
+            "error_code": "uninstall_inspection_failed",
+        }
+
+    if stat.S_ISLNK(candidate_stat.st_mode):
+        return {
+            "ok": False,
+            "removed": False,
+            "name": validated_name,
+            "error": "Refusing to uninstall a symlinked skill directory",
+            "error_code": "unsafe_install_target",
+        }
+    if not stat.S_ISDIR(candidate_stat.st_mode):
+        return {
+            "ok": False,
+            "removed": False,
+            "name": validated_name,
+            "error": "Installed skill target is not a directory",
+            "error_code": "unsafe_install_target",
+        }
+
+    try:
+        skill_dir = candidate.resolve(strict=True)
+        skill_dir.relative_to(root)
+    except (OSError, ValueError) as exc:
+        return {
+            "ok": False,
+            "removed": False,
+            "name": validated_name,
+            "error": f"Installed skill path is outside the registry root: {exc}",
+            "error_code": "unsafe_install_target",
+        }
+    if skill_dir == root or skill_dir.parent != root:
+        return {
+            "ok": False,
+            "removed": False,
+            "name": validated_name,
+            "error": "Installed skill path is not a direct registry child",
+            "error_code": "unsafe_install_target",
+        }
+
+    provenance_path = skill_dir / SKILL_PROVENANCE_FILENAME
+    try:
+        provenance_stat = provenance_path.lstat()
+    except (FileNotFoundError, OSError):
+        provenance_stat = None
+    if (
+        provenance_stat is None
+        or stat.S_ISLNK(provenance_stat.st_mode)
+        or not stat.S_ISREG(provenance_stat.st_mode)
+    ):
+        return {
+            "ok": False,
+            "removed": False,
+            "name": validated_name,
+            "error": "Registry install provenance is missing or unsafe",
+            "error_code": "invalid_install_provenance",
+        }
+    try:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        provenance = None
+    provenance_source = (
+        str(provenance.get("source", "")).strip().lower()
+        if isinstance(provenance, dict)
+        else ""
+    )
+    if provenance_source not in {"registry", "skillhub"}:
+        return {
+            "ok": False,
+            "removed": False,
+            "name": validated_name,
+            "error": "Skill was not installed by the registry marketplace",
+            "error_code": "invalid_install_provenance",
+        }
+
+    try:
+        shutil.rmtree(skill_dir)
+    except OSError as exc:
+        return {
+            "ok": False,
+            "removed": False,
+            "name": validated_name,
+            "error": f"Skill uninstall failed: {exc}",
+            "error_code": "uninstall_failed",
+        }
+
+    try:
+        from agenticx.studio.skills_list_api import invalidate_skills_list_cache
+
+        invalidate_skills_list_cache()
+    except Exception:
+        # Deletion succeeded; an explicit UI refresh can repopulate the list
+        # if Studio cache helpers are unavailable in a CLI-only context.
+        pass
+    return {
+        "ok": True,
+        "removed": True,
+        "name": validated_name,
     }

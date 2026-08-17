@@ -106,4 +106,59 @@ describe("SkillHubMarketplace", () => {
     expect(getSkillHubDetailUrl({ ...base, origin_source: "clawhub_registry" })).toBeNull();
     expect(getSkillHubDetailUrl({ ...base, origin_source: "skillhub_cli" })).toBeNull();
   });
+
+  it("turns an enabled installed skill into try and management actions", () => {
+    const html = renderToStaticMarkup(
+      <SkillMarketCard
+        item={{
+          slug: "report-reader",
+          name: "报告读取",
+          description: "说明",
+          version: "latest",
+          author: "发布者",
+          source: "skillhub",
+          source_type: "skillhub",
+          origin_source: "skillhub_api",
+          provenance_source: "skillhub",
+        }}
+        installState="installed"
+        skillEnabled
+        onInstall={() => undefined}
+        onTrySkill={() => undefined}
+        onToggleSkill={() => undefined}
+        onEditSkill={() => undefined}
+        onUninstallSkill={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("试一试");
+    expect(html).toContain('aria-label="管理 报告读取"');
+    expect(html).not.toContain(">已安装<");
+  });
+
+  it("offers enable instead of try while an installed skill is closed", () => {
+    const html = renderToStaticMarkup(
+      <SkillMarketCard
+        item={{
+          slug: "report-reader",
+          name: "报告读取",
+          description: "说明",
+          version: "latest",
+          author: "发布者",
+          source: "skillhub",
+          source_type: "skillhub",
+          origin_source: "skillhub_api",
+          provenance_source: "skillhub",
+        }}
+        installState="installed"
+        skillEnabled={false}
+        onInstall={() => undefined}
+        onTrySkill={() => undefined}
+        onToggleSkill={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("启用");
+    expect(html).not.toContain("试一试");
+  });
 });

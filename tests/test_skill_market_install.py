@@ -32,6 +32,7 @@ from agenticx.extensions.skill_market_install import (
     parse_market_skill_reference,
     preview_market_skill,
     resolve_market_source,
+    uninstall_market_skill,
 )
 
 
@@ -668,6 +669,119 @@ def test_package_install_restores_previous_version_when_swap_fails(
     assert old_md.read_text(encoding="utf-8") == SAFE_SKILL
 
 
+def _write_market_install(
+    install_root: Path,
+    name: str,
+    *,
+    source: str = "registry",
+) -> Path:
+    skill_dir = install_root / name
+    (skill_dir / "references").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(SAFE_SKILL, encoding="utf-8")
+    (skill_dir / "references" / "notes.txt").write_text("notes", encoding="utf-8")
+    (skill_dir / ".agx-skill-provenance.json").write_text(
+        json.dumps({"source": source, "name": name}),
+        encoding="utf-8",
+    )
+    return skill_dir
+
+
+@pytest.mark.parametrize("source", ["registry", "skillhub"])
+def test_market_uninstall_removes_complete_owned_package_and_invalidates_cache(
+    tmp_path: Path,
+    monkeypatch: Any,
+    source: str,
+) -> None:
+    from agenticx.studio import skills_list_api
+
+    install_root = tmp_path / "registry"
+    skill_dir = _write_market_install(install_root, "installed-skill", source=source)
+    invalidations: list[bool] = []
+    monkeypatch.setattr(
+        skills_list_api,
+        "invalidate_skills_list_cache",
+        lambda: invalidations.append(True),
+    )
+
+    result = uninstall_market_skill("installed-skill", install_root=install_root)
+
+    assert result == {"ok": True, "removed": True, "name": "installed-skill"}
+    assert not skill_dir.exists()
+    assert invalidations == [True]
+
+
+def test_market_uninstall_is_idempotent_when_target_does_not_exist(tmp_path: Path) -> None:
+    result = uninstall_market_skill("not-installed", install_root=tmp_path / "registry")
+
+    assert result == {"ok": True, "removed": False, "name": "not-installed"}
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "../outside", "nested/skill"])
+def test_market_uninstall_rejects_invalid_or_escaping_names(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+
+    result = uninstall_market_skill(name, install_root=tmp_path / "registry")
+
+    assert result["ok"] is False
+    assert result["removed"] is False
+    assert result["error_code"] == "invalid_skill_name"
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_market_uninstall_rejects_top_level_symlink_and_non_directory(
+    tmp_path: Path,
+) -> None:
+    install_root = tmp_path / "registry"
+    install_root.mkdir()
+    outside = _write_market_install(tmp_path / "outside-root", "outside")
+    (install_root / "linked-skill").symlink_to(outside, target_is_directory=True)
+    (install_root / "plain-file").write_text("not a directory", encoding="utf-8")
+
+    linked = uninstall_market_skill("linked-skill", install_root=install_root)
+    plain = uninstall_market_skill("plain-file", install_root=install_root)
+
+    assert linked["error_code"] == "unsafe_install_target"
+    assert plain["error_code"] == "unsafe_install_target"
+    assert outside.exists()
+
+
+@pytest.mark.parametrize(
+    "sidecar_kind",
+    ["missing", "symlink", "directory", "invalid_json", "invalid_source"],
+)
+def test_market_uninstall_requires_valid_owned_provenance(
+    tmp_path: Path,
+    sidecar_kind: str,
+) -> None:
+    install_root = tmp_path / "registry"
+    skill_dir = _write_market_install(install_root, "installed-skill")
+    sidecar = skill_dir / ".agx-skill-provenance.json"
+    sidecar.unlink()
+    if sidecar_kind == "symlink":
+        outside = tmp_path / "outside-provenance.json"
+        outside.write_text(json.dumps({"source": "registry"}), encoding="utf-8")
+        sidecar.symlink_to(outside)
+    elif sidecar_kind == "directory":
+        sidecar.mkdir()
+    elif sidecar_kind == "invalid_json":
+        sidecar.write_text("not json", encoding="utf-8")
+    elif sidecar_kind == "invalid_source":
+        sidecar.write_text(json.dumps({"source": "agent_created"}), encoding="utf-8")
+
+    result = uninstall_market_skill("installed-skill", install_root=install_root)
+
+    assert result["ok"] is False
+    assert result["removed"] is False
+    assert result["error_code"] == "invalid_install_provenance"
+    assert skill_dir.exists()
+
+
 def test_dangerous_skill_requires_explicit_acknowledgement() -> None:
     hub = _FakeHub(DANGEROUS_SKILL)
     result = install_market_skill(
@@ -938,10 +1052,15 @@ def test_registry_http_endpoints_use_shared_installer(monkeypatch: Any) -> None:
         captured["discard"] = {"name": skill_name, **kwargs}
         return True
 
+    def _uninstall(skill_name: str, **kwargs: Any) -> dict[str, Any]:
+        captured["uninstall"] = {"name": skill_name, **kwargs}
+        return {"ok": True, "name": skill_name, "removed": True}
+
     monkeypatch.delenv("AGX_DESKTOP_TOKEN", raising=False)
     monkeypatch.setattr(market, "preview_market_skill", _preview)
     monkeypatch.setattr(market, "install_market_skill", _install)
     monkeypatch.setattr(market, "discard_market_skill_preview", _discard)
+    monkeypatch.setattr(market, "uninstall_market_skill", _uninstall)
     client = TestClient(create_studio_app())
 
     preview_response = client.post(
@@ -977,6 +1096,25 @@ def test_registry_http_endpoints_use_shared_installer(monkeypatch: Any) -> None:
     assert captured["install"]["origin_source"] == "skillhub_api"
     assert captured["install"]["preview_token"] == "preview-token"
     assert captured["install"]["preview_cache"] is captured["preview"]["preview_cache"]
+
+    uninstall_response = client.request(
+        "DELETE",
+        "/api/registry/install",
+        json={"name": "alphapai-research"},
+    )
+    assert uninstall_response.status_code == 200
+    assert uninstall_response.json() == {
+        "ok": True,
+        "name": "alphapai-research",
+        "removed": True,
+    }
+    assert captured["uninstall"] == {"name": "alphapai-research"}
+    missing_name_response = client.request(
+        "DELETE",
+        "/api/registry/install",
+        json={},
+    )
+    assert missing_name_response.status_code == 400
 
     discard_response = client.post(
         "/api/registry/install-preview/discard",

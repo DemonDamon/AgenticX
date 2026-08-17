@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 export type ContextMenuItem = {
   label?: string;
+  icon?: ReactNode;
   onSelect?: () => void;
   danger?: boolean;
   /** Visual divider between menu groups */
@@ -90,7 +91,7 @@ export function ContextMenu({ open, x, y, anchorRect, items, onClose }: Props) {
             key={i}
             type="button"
             role="menuitem"
-            className={`flex w-full px-3 py-2 text-left text-[13px] transition ${
+            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition ${
               item.danger
                 ? "text-rose-500 hover:bg-surface-hover hover:text-rose-600 hover:font-semibold"
                 : "text-text-primary hover:bg-surface-hover"
@@ -100,6 +101,7 @@ export function ContextMenu({ open, x, y, anchorRect, items, onClose }: Props) {
               onClose();
             }}
           >
+            {item.icon ? <span className="shrink-0" aria-hidden>{item.icon}</span> : null}
             {item.label}
           </button>
         )

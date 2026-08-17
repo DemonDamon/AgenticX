@@ -12238,6 +12238,23 @@ function registerIpc(): void {
     }
   );
 
+  ipcMain.handle(
+    "uninstall-registry-skill",
+    async (_event, args: { name: string }) => {
+      const studioUrl = getStudioUrl();
+      try {
+        const resp = await fetch(`${studioUrl}/api/registry/install`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+          body: JSON.stringify({ name: args.name }),
+        });
+        return await resp.json();
+      } catch (err) {
+        return { ok: false, removed: false, error: String(err) };
+      }
+    }
+  );
+
   ipcMain.handle("install-from-registry-preview", async (_event, args: {
     source: string;
     name: string;

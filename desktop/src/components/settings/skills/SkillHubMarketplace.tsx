@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check,
   Clock3,
+  Eye,
+  EyeOff,
   ExternalLink,
   Loader2,
+  MoreHorizontal,
   Plus,
+  Power,
   RefreshCw,
   Search,
+  Sparkles,
+  SquarePen,
+  Trash2,
 } from "lucide-react";
 
 import { SkillPuzzleIcon } from "../../icons/SkillPuzzleIcon";
+import { ContextMenu, type ContextMenuAnchorRect } from "../../ContextMenu";
 import {
   filterSkillHubCatalog,
   loadSkillHubCatalog as loadSkillHubCatalogSnapshot,
@@ -33,7 +40,12 @@ type Props = {
   installStatusTone?: "neutral" | "success" | "warning";
   getInstallState: (item: SkillHubMarketItem) => SkillHubInstallState;
   getInstallMessage?: (item: SkillHubMarketItem) => string;
+  getSkillEnabled?: (item: SkillHubMarketItem) => boolean;
   onInstall: (item: SkillHubMarketItem) => void;
+  onTrySkill?: (item: SkillHubMarketItem) => void;
+  onToggleSkill?: (item: SkillHubMarketItem, enabled: boolean) => void;
+  onEditSkill?: (item: SkillHubMarketItem) => void;
+  onUninstallSkill?: (item: SkillHubMarketItem) => void;
 };
 
 const CATALOG_PREVIEW_LIMIT = 12;
@@ -59,22 +71,36 @@ export function SkillMarketCard({
   item,
   installState,
   installMessage,
+  skillEnabled = true,
   onInstall,
+  onTrySkill,
+  onToggleSkill,
+  onEditSkill,
+  onUninstallSkill,
 }: {
   item: SkillHubMarketItem;
   installState: SkillHubInstallState;
   installMessage?: string;
+  skillEnabled?: boolean;
   onInstall: () => void;
+  onTrySkill?: () => void;
+  onToggleSkill?: (enabled: boolean) => void;
+  onEditSkill?: () => void;
+  onUninstallSkill?: () => void;
 }) {
+  const [manageMenuAnchor, setManageMenuAnchor] = useState<ContextMenuAnchorRect | null>(null);
   const author = item.author && item.author !== "unknown" ? item.author : "";
   const downloads = formatDownloads(item.downloads);
   const iconUrl = /^https:\/\//iu.test(item.icon_url || "") ? item.icon_url : "";
   const detailUrl = getSkillHubDetailUrl(item);
+  const isInstalled = installState === "installed";
   const isBusy = installState === "installing" || installState === "queued";
-  const isDisabled = installState !== "idle";
+  const isDisabled = installState !== "idle" && !isInstalled;
   const installLabel =
-    installState === "installed"
-      ? "已安装"
+    isInstalled
+      ? skillEnabled
+        ? "试一试"
+        : "启用"
       : installState === "installing"
         ? "安装中"
         : installState === "queued"
@@ -106,24 +132,58 @@ export function SkillMarketCard({
             <h4 className="line-clamp-2 text-[13px] font-semibold leading-5 text-text-strong">
               {item.name || item.slug}
             </h4>
-            <button
-              type="button"
-              className="flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-lg border border-[var(--settings-accent-border-muted)] px-2 text-[11px] font-medium text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:cursor-default disabled:border-border disabled:text-text-faint disabled:opacity-80"
-              disabled={isDisabled}
-              aria-label={`${installLabel} ${item.name || item.slug}`}
-              onClick={onInstall}
-            >
-              {installState === "installed" ? (
-                <Check className="h-3.5 w-3.5" />
-              ) : isBusy ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : installState === "pending" ? (
-                <Clock3 className="h-3.5 w-3.5" />
-              ) : (
-                <Plus className="h-3.5 w-3.5" />
-              )}
-              <span>{installLabel}</span>
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              {isInstalled && (onToggleSkill || onEditSkill || onUninstallSkill) ? (
+                <button
+                  type="button"
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-card-strong hover:text-text-primary"
+                  aria-label={`管理 ${item.name || item.slug}`}
+                  aria-haspopup="menu"
+                  aria-expanded={Boolean(manageMenuAnchor)}
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setManageMenuAnchor((current) =>
+                      current
+                        ? null
+                        : {
+                            left: rect.left,
+                            top: rect.top,
+                            right: rect.right,
+                            bottom: rect.bottom,
+                          },
+                    );
+                  }}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="flex h-7 min-w-7 items-center justify-center gap-1 rounded-lg border border-[var(--settings-accent-border-muted)] px-2 text-[11px] font-medium text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:cursor-default disabled:border-border disabled:text-text-faint disabled:opacity-80"
+                disabled={isDisabled}
+                aria-label={`${installLabel} ${item.name || item.slug}`}
+                onClick={() => {
+                  if (!isInstalled) onInstall();
+                  else if (!skillEnabled) onToggleSkill?.(true);
+                  else onTrySkill?.();
+                }}
+              >
+                {isInstalled ? (
+                  skillEnabled ? (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  ) : (
+                    <Power className="h-3.5 w-3.5" />
+                  )
+                ) : isBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : installState === "pending" ? (
+                  <Clock3 className="h-3.5 w-3.5" />
+                ) : (
+                  <Plus className="h-3.5 w-3.5" />
+                )}
+                <span>{installLabel}</span>
+              </button>
+            </div>
           </div>
           {author || downloads ? (
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[10px] text-text-faint">
@@ -163,6 +223,36 @@ export function SkillMarketCard({
           </button>
         ) : null}
       </div>
+      <ContextMenu
+        open={Boolean(manageMenuAnchor)}
+        x={manageMenuAnchor?.left ?? 0}
+        y={manageMenuAnchor?.bottom ?? 0}
+        anchorRect={manageMenuAnchor}
+        onClose={() => setManageMenuAnchor(null)}
+        items={[
+          {
+            label: skillEnabled ? "关闭" : "开启",
+            icon: skillEnabled ? (
+              <EyeOff className="h-3.5 w-3.5" />
+            ) : (
+              <Eye className="h-3.5 w-3.5" />
+            ),
+            onSelect: () => onToggleSkill?.(!skillEnabled),
+          },
+          {
+            label: "编辑",
+            icon: <SquarePen className="h-3.5 w-3.5" />,
+            onSelect: onEditSkill,
+          },
+          { separator: true },
+          {
+            label: "卸载",
+            icon: <Trash2 className="h-3.5 w-3.5" />,
+            danger: true,
+            onSelect: onUninstallSkill,
+          },
+        ]}
+      />
     </article>
   );
 }
@@ -172,7 +262,12 @@ export function SkillHubMarketplace({
   installStatusTone = "neutral",
   getInstallState,
   getInstallMessage,
+  getSkillEnabled = () => true,
   onInstall,
+  onTrySkill,
+  onToggleSkill,
+  onEditSkill,
+  onUninstallSkill,
 }: Props) {
   const [catalogItems, setCatalogItems] = useState<SkillHubCatalogItem[]>([]);
   const [catalogCategory, setCatalogCategory] =
@@ -402,7 +497,12 @@ export function SkillHubMarketplace({
                   item={item}
                   installState={getInstallState(item)}
                   installMessage={getInstallMessage?.(item)}
+                  skillEnabled={getSkillEnabled(item)}
                   onInstall={() => onInstall(item)}
+                  onTrySkill={() => onTrySkill?.(item)}
+                  onToggleSkill={(enabled) => onToggleSkill?.(item, enabled)}
+                  onEditSkill={() => onEditSkill?.(item)}
+                  onUninstallSkill={() => onUninstallSkill?.(item)}
                 />
               ))}
             </div>
@@ -465,7 +565,12 @@ export function SkillHubMarketplace({
                     item={item}
                     installState={getInstallState(item)}
                     installMessage={getInstallMessage?.(item)}
+                    skillEnabled={getSkillEnabled(item)}
                     onInstall={() => onInstall(item)}
+                    onTrySkill={() => onTrySkill?.(item)}
+                    onToggleSkill={(enabled) => onToggleSkill?.(item, enabled)}
+                    onEditSkill={() => onEditSkill?.(item)}
+                    onUninstallSkill={() => onUninstallSkill?.(item)}
                   />
                 ))}
               </div>

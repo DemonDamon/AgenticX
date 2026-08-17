@@ -66,6 +66,12 @@ import {
 import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt";
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import type { SkillHubMarketItem } from "../utils/skillhub-market";
+import {
+  buildSkillTryPrompt,
+  findInstalledMarketplaceSkill,
+  hasAlternateSkillVariant,
+  skillMarkdownPath,
+} from "../utils/skill-market-actions";
 import { decideSkillInstallRequest } from "../utils/skill-install-queue";
 import { filterAndRankSkills } from "../utils/skill-search";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
@@ -3007,6 +3013,12 @@ function SkillsTab() {
   const [marketPending, setMarketPending] = useState<RegistrySearchItem | null>(null);
   const [marketNeedsConfirmNonHigh, setMarketNeedsConfirmNonHigh] = useState(false);
   const [marketNeedsConfirmHigh, setMarketNeedsConfirmHigh] = useState(false);
+  const [marketUninstallPending, setMarketUninstallPending] = useState<{
+    item: SkillHubMarketItem;
+    skill: SkillItem;
+  } | null>(null);
+  const [marketUninstallBusy, setMarketUninstallBusy] = useState(false);
+  const [marketUninstallError, setMarketUninstallError] = useState("");
   const [marketInstallingKey, setMarketInstallingKey] = useState<string | null>(null);
   const [marketQueuedKeys, setMarketQueuedKeys] = useState<string[]>([]);
   /** After marketplace install: pin this skill at top of its group and surface global section first. */
@@ -3026,7 +3038,6 @@ function SkillsTab() {
   const marketActiveInstallKeyRef = useRef<string | null>(null);
   const marketPendingRef = useRef<RegistrySearchItem | null>(null);
   const marketPendingPreviewTokenRef = useRef("");
-  const skillsListAnchorRef = useRef<HTMLDivElement | null>(null);
   const [pendingProposalCount, setPendingProposalCount] = useState(0);
 
   const addPane = useAppStore((s) => s.addPane);
@@ -3141,11 +3152,6 @@ function SkillsTab() {
     });
     return () => off();
   }, []);
-
-  useEffect(() => {
-    if (!recentMarketSkillName) return;
-    skillsListAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [recentMarketSkillName]);
 
   const persistSkillScanSettings = useCallback(
     async (
@@ -3381,17 +3387,13 @@ function SkillsTab() {
     setRecentMarketSkillName(pinName);
   };
 
-  const isMarketSkillInstalled = (skillName: string) => {
-    const slug = String(skillName || "").trim().toLowerCase();
-    if (!slug) return false;
-    return items.some((skill) => {
-      if (String(skill.name || "").trim().toLowerCase() === slug) return true;
-      const baseDir = normalizedPath(skill.base_dir).replace(/\/$/, "");
-      return baseDir.endsWith(`/registry/${slug}`);
-    });
-  };
+  const getInstalledMarketSkill = (skillName: string) =>
+    findInstalledMarketplaceSkill(items, skillName);
 
-  const runInstallPromptInMetaAgent = useCallback(
+  const isMarketSkillInstalled = (skillName: string) =>
+    Boolean(getInstalledMarketSkill(skillName));
+
+  const runPromptInNewMetaSession = useCallback(
     async (prompt: string) => {
       const text = prompt.trim();
       if (!text) return;
@@ -3448,7 +3450,7 @@ function SkillsTab() {
           ? buildArchscribeInstallPrompt()
           : "";
     if (!prompt.trim()) return;
-    void runInstallPromptInMetaAgent(prompt);
+    void runPromptInNewMetaSession(prompt);
   };
 
   const filteredRecommendedSkills =
@@ -3806,6 +3808,90 @@ function SkillsTab() {
     if (marketPending && marketInstallKey(marketPending) === installKey) return "pending";
     return "idle";
   };
+  const getSkillHubSkillEnabled = (item: SkillHubMarketItem) => {
+    const installed = getInstalledMarketSkill(item.slug);
+    return installed ? !disabledSkillNames.includes(installed.name) : true;
+  };
+  const trySkillHubSkill = (item: SkillHubMarketItem) => {
+    const installed = getInstalledMarketSkill(item.slug);
+    if (!installed) {
+      setMarketInstallMessage(skillHubInstallItem(item), "未找到已安装技能，请刷新后重试。");
+      return;
+    }
+    if (disabledSkillNames.includes(installed.name)) {
+      setMarketInstallMessage(skillHubInstallItem(item), "请先启用这个技能再试用。");
+      return;
+    }
+    void runPromptInNewMetaSession(buildSkillTryPrompt(installed.name));
+  };
+  const toggleSkillHubSkill = (item: SkillHubMarketItem, enabled: boolean) => {
+    const installed = getInstalledMarketSkill(item.slug);
+    if (!installed) {
+      setMarketInstallMessage(skillHubInstallItem(item), "未找到已安装技能，请刷新后重试。");
+      return;
+    }
+    void toggleGlobalSkill(installed.name, enabled);
+  };
+  const editSkillHubSkill = async (item: SkillHubMarketItem) => {
+    const installed = getInstalledMarketSkill(item.slug);
+    if (!installed?.base_dir) {
+      setMarketInstallMessage(skillHubInstallItem(item), "未找到技能文件，请刷新后重试。");
+      return;
+    }
+    const result = await window.agenticxDesktop.shellOpenPath(
+      skillMarkdownPath(installed.base_dir),
+    );
+    if (!result.ok) {
+      setMarketInstallMessage(
+        skillHubInstallItem(item),
+        `打开失败：${result.error || "无法打开技能文件"}`,
+      );
+    }
+  };
+  const requestSkillHubUninstall = (item: SkillHubMarketItem) => {
+    const installed = getInstalledMarketSkill(item.slug);
+    if (!installed) {
+      setMarketInstallMessage(skillHubInstallItem(item), "未找到已安装技能，请刷新后重试。");
+      return;
+    }
+    setMarketUninstallError("");
+    setMarketUninstallPending({ item, skill: installed });
+  };
+  const confirmSkillHubUninstall = async () => {
+    const pending = marketUninstallPending;
+    if (!pending || marketUninstallBusy) return;
+    setMarketUninstallBusy(true);
+    setMarketUninstallError("");
+    try {
+      const result = await window.agenticxDesktop.uninstallMarketSkill({
+        name: pending.item.slug,
+      });
+      if (!result.ok) {
+        setMarketUninstallError(result.error || "卸载失败");
+        return;
+      }
+      const nextDisabled = hasAlternateSkillVariant(pending.skill)
+        ? disabledSkillNames
+        : disabledSkillNames.filter((name) => name !== pending.skill.name);
+      if (nextDisabled.length !== disabledSkillNames.length) {
+        setDisabledSkillNames(nextDisabled);
+        await persistSkillScanSettings(
+          skillScanPresets,
+          skillScanCustomPaths,
+          preferredSkillSources,
+          nextDisabled,
+        );
+      } else {
+        await onRefresh();
+      }
+      setMarketInstallMessage(skillHubInstallItem(pending.item), "已卸载这个技能。");
+      setMarketUninstallPending(null);
+    } catch (error) {
+      setMarketUninstallError(String(error));
+    } finally {
+      setMarketUninstallBusy(false);
+    }
+  };
   const skillHubStatusTone =
     skillhubMsg.includes("失败") ||
     skillhubMsg.includes("繁忙") ||
@@ -3821,7 +3907,7 @@ function SkillsTab() {
   }
 
   return (
-    <div ref={skillsListAnchorRef} className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <Modal
         open={Boolean(marketPending) && (marketNeedsConfirmNonHigh || marketNeedsConfirmHigh)}
         title="安装第三方技能"
@@ -3876,6 +3962,56 @@ function SkillsTab() {
               }`}
             >
               {marketPendingScanSummary}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(marketUninstallPending)}
+        title="卸载技能"
+        onClose={
+          marketUninstallBusy
+            ? undefined
+            : () => {
+                setMarketUninstallPending(null);
+                setMarketUninstallError("");
+              }
+        }
+        panelClassName="w-full max-w-[420px] bg-surface-panel"
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              disabled={marketUninstallBusy}
+              onClick={() => {
+                setMarketUninstallPending(null);
+                setMarketUninstallError("");
+              }}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
+              disabled={marketUninstallBusy}
+              onClick={() => void confirmSkillHubUninstall()}
+            >
+              {marketUninstallBusy ? "卸载中…" : "卸载"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3 text-sm leading-6 text-text-subtle">
+          <p>
+            将从本机删除技能「
+            {marketUninstallPending?.item.name || marketUninstallPending?.skill.name || ""}」。
+            此操作不会删除该技能产生的文档或会话。
+          </p>
+          {marketUninstallError ? (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+              {marketUninstallError}
             </div>
           ) : null}
         </div>
@@ -4465,7 +4601,12 @@ function SkillsTab() {
                   marketInstallKey(skillHubInstallItem(item))
                 ] || ""
               }
+              getSkillEnabled={getSkillHubSkillEnabled}
               onInstall={(item) => void onMarketInstall(skillHubInstallItem(item))}
+              onTrySkill={trySkillHubSkill}
+              onToggleSkill={toggleSkillHubSkill}
+              onEditSkill={(item) => void editSkillHubSkill(item)}
+              onUninstallSkill={requestSkillHubUninstall}
             />
         </div>
       </Panel>

@@ -7760,6 +7760,24 @@ def create_studio_app() -> FastAPI:
             logger.warning("registry_install error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.delete("/api/registry/install")
+    async def registry_uninstall(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Uninstall a complete registry-owned skill package."""
+        _check_token(x_agx_desktop_token)
+        skill_name = str(payload.get("name", "")).strip()
+        if not skill_name:
+            raise HTTPException(status_code=400, detail="name is required")
+        try:
+            from agenticx.extensions.skill_market_install import uninstall_market_skill
+
+            return await asyncio.to_thread(uninstall_market_skill, skill_name)
+        except Exception as exc:
+            logger.warning("registry_uninstall error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     @app.post("/api/registry/install-preview/discard")
     async def registry_install_preview_discard(
         payload: dict,

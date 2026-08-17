@@ -506,6 +506,13 @@ type RegistryInstallResult = {
   preview_token?: string;
   scan_summary?: SkillScanPayload;
 };
+type RegistryUninstallResult = {
+  ok: boolean;
+  name?: string;
+  removed?: boolean;
+  error?: string;
+  error_code?: string;
+};
 type BundleInstallPreviewResult = {
   ok: boolean;
   scan?: SkillScanPayload;
@@ -1547,6 +1554,7 @@ declare global {
         confirmNonHighRisk?: boolean;
         provenanceSource?: "registry" | "skillhub";
       }) => Promise<RegistryInstallResult>;
+      uninstallMarketSkill: (args: { name: string }) => Promise<RegistryUninstallResult>;
       installFromRegistryPreview: (args: {
         source: string;
         name: string;
