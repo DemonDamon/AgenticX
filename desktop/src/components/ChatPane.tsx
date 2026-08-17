@@ -35,6 +35,7 @@ import {
   type PendingConfirm,
   type QueuedMessage,
   type SidePanelTab,
+  type Taskspace,
 } from "../store";
 import { VOICE_UI_ENABLED } from "../constants/feature-flags";
 import { LOCAL_KNOWLEDGE_ENABLED } from "../constants/desktop-feature-visibility";
@@ -141,6 +142,7 @@ import {
   replaceAtMentionAtCaret,
 } from "../utils/composer-input-sync";
 import { Toast } from "./ds/Toast";
+import { ComposerContextControls } from "./ComposerContextControls";
 import { AtMentionPicker } from "./AtMentionPicker";
 import type { AtMentionBrowseState } from "./AtMentionPicker";
 import type { AtMentionCandidate } from "../utils/at-mention-display";
@@ -506,6 +508,7 @@ function shellSingleQuote(input: string): string {
 }
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
+const EMPTY_TASKSPACES: Taskspace[] = [];
 const KB_RETRIEVAL_MODE_OPTIONS: {
   value: "auto" | "always";
   label: string;
@@ -2688,6 +2691,10 @@ type AtCandidate = AtMentionCandidate;
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
+  const preloadedComposerTaskspaces = useAppStore((s) => {
+    const sid = String(pane.sessionId || "").trim();
+    return sid ? s.preloadedTaskspacesBySessionId[sid] ?? EMPTY_TASKSPACES : EMPTY_TASKSPACES;
+  });
   const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
   const metaLeaderDisplayName = useMemo(() => {
@@ -2733,6 +2740,41 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneContextInherited = useAppStore((s) => s.setPaneContextInherited);
+  const confirmStrategy = useAppStore((s) => s.confirmStrategy);
+  const setConfirmStrategy = useAppStore((s) => s.setConfirmStrategy);
+  const [composerTaskspaces, setComposerTaskspaces] = useState<Taskspace[]>(
+    preloadedComposerTaskspaces,
+  );
+  const [composerWorkspaceLoading, setComposerWorkspaceLoading] = useState(false);
+  const [composerWorkspaceError, setComposerWorkspaceError] = useState("");
+  const [composerPermissionSaving, setComposerPermissionSaving] = useState(false);
+  const [composerPermissionError, setComposerPermissionError] = useState("");
+  const composerWorkspaceRequestRef = useRef(0);
+  const composerWorkspaceSessionRef = useRef(String(pane.sessionId || "").trim());
+
+  useEffect(() => {
+    const nextSessionId = String(pane.sessionId || "").trim();
+    const sessionChanged = composerWorkspaceSessionRef.current !== nextSessionId;
+    if (sessionChanged) {
+      composerWorkspaceSessionRef.current = nextSessionId;
+      composerWorkspaceRequestRef.current += 1;
+      setComposerWorkspaceLoading(false);
+    }
+    setComposerTaskspaces(preloadedComposerTaskspaces);
+    setComposerWorkspaceError("");
+    const activeTaskspaceId = String(
+      useAppStore.getState().panes.find((item) => item.id === pane.id)?.activeTaskspaceId ?? "",
+    ).trim();
+    if (
+      preloadedComposerTaskspaces.length > 0 &&
+      (!activeTaskspaceId ||
+        !preloadedComposerTaskspaces.some((item) => item.id === activeTaskspaceId))
+    ) {
+      setActiveTaskspace(pane.id, preloadedComposerTaskspaces[0].id);
+    } else if (sessionChanged && preloadedComposerTaskspaces.length === 0 && activeTaskspaceId) {
+      setActiveTaskspace(pane.id, null);
+    }
+  }, [pane.sessionId, preloadedComposerTaskspaces]);
   const toolRoundCount = useMemo(
     () => (pane.messages ?? []).filter((m) => m.role === "tool" && (m.toolName ?? "").trim()).length,
     [pane.messages]
@@ -4088,6 +4130,100 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (remembered) return remembered;
     }
     return "";
+  };
+
+  const refreshComposerTaskspaces = async () => {
+    const apiSessionId = String(
+      useAppStore.getState().panes.find((item) => item.id === pane.id)?.sessionId ?? "",
+    ).trim();
+    const requestId = ++composerWorkspaceRequestRef.current;
+    if (!apiSessionId) {
+      setComposerTaskspaces([]);
+      setComposerWorkspaceLoading(false);
+      setComposerWorkspaceError("新对话尚未建立会话，请进入工作区面板选择或添加目录。");
+      return;
+    }
+    setComposerWorkspaceLoading(true);
+    setComposerWorkspaceError("");
+    try {
+      const result = await window.agenticxDesktop.listTaskspaces(apiSessionId);
+      const currentSessionId = String(
+        useAppStore.getState().panes.find((item) => item.id === pane.id)?.sessionId ?? "",
+      ).trim();
+      if (
+        requestId !== composerWorkspaceRequestRef.current ||
+        currentSessionId !== apiSessionId
+      ) {
+        return;
+      }
+      if (!result.ok || !Array.isArray(result.workspaces)) {
+        setComposerWorkspaceError(result.error ?? "工作区读取失败");
+        return;
+      }
+      const next = result.workspaces as Taskspace[];
+      setComposerTaskspaces(next);
+      const currentId = String(
+        useAppStore.getState().panes.find((item) => item.id === pane.id)?.activeTaskspaceId ?? "",
+      ).trim();
+      if (next.length === 0) {
+        if (currentId) setActiveTaskspace(pane.id, null);
+        return;
+      }
+      if (!currentId || !next.some((item) => item.id === currentId)) {
+        setActiveTaskspace(pane.id, next[0].id);
+      }
+    } catch (error) {
+      const currentSessionId = String(
+        useAppStore.getState().panes.find((item) => item.id === pane.id)?.sessionId ?? "",
+      ).trim();
+      if (
+        requestId === composerWorkspaceRequestRef.current &&
+        currentSessionId === apiSessionId
+      ) {
+        setComposerWorkspaceError(`工作区读取失败：${String(error)}`);
+      }
+    } finally {
+      if (requestId === composerWorkspaceRequestRef.current) {
+        setComposerWorkspaceLoading(false);
+      }
+    }
+  };
+
+  const openComposerWorkspacePanel = () => {
+    if (!pane.taskspacePanelOpen) {
+      openWorkspaceSidebarForPane(
+        pane.id,
+        paneRef.current?.clientWidth ?? paneWidth,
+        openSidePanel,
+      );
+    }
+    setWorkPanelFocus({ kind: "workspace" });
+  };
+
+  const changeComposerConfirmStrategy = async (
+    strategy: "manual" | "auto",
+  ): Promise<boolean> => {
+    const previous = useAppStore.getState().confirmStrategy;
+    if (previous === strategy) {
+      setComposerPermissionError("");
+      return true;
+    }
+    setComposerPermissionSaving(true);
+    setComposerPermissionError("");
+    setConfirmStrategy(strategy);
+    try {
+      const result = await window.agenticxDesktop.saveConfirmStrategy(strategy);
+      if (!result.ok) throw new Error("保存失败");
+      return true;
+    } catch (error) {
+      if (useAppStore.getState().confirmStrategy === strategy) {
+        setConfirmStrategy(previous);
+      }
+      setComposerPermissionError(`权限保存失败：${String(error)}`);
+      return false;
+    } finally {
+      setComposerPermissionSaving(false);
+    }
   };
 
   const searchAtCandidates = async (
@@ -13023,6 +13159,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
             ) : null}
             </div>
+            <ComposerContextControls
+              workspaces={composerTaskspaces}
+              activeTaskspaceId={pane.activeTaskspaceId}
+              workspacePanelOpen={workspacePanelOpen}
+              workspaceLoading={composerWorkspaceLoading}
+              workspaceError={composerWorkspaceError}
+              onWorkspaceMenuOpen={refreshComposerTaskspaces}
+              onWorkspaceSelect={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
+              onOpenWorkspacePanel={openComposerWorkspacePanel}
+              confirmStrategy={confirmStrategy}
+              permissionSaving={composerPermissionSaving}
+              permissionError={composerPermissionError}
+              onConfirmStrategyChange={changeComposerConfirmStrategy}
+            />
             <div className="agx-pane-composer-actions flex min-w-0 items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
               <div className="flex min-w-0 shrink items-center gap-0.5 overflow-hidden">
                 <input
