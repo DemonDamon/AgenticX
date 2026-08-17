@@ -31,6 +31,7 @@ import {
   Check,
   ChevronDown,
   Cpu,
+  Hash,
   Microscope,
   Paperclip,
   Pencil,
@@ -552,6 +553,7 @@ export function MachiChatView({
   );
   const [sessionTitle, setSessionTitle] = React.useState(t("newConversation"));
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
+  const [copiedSessionId, setCopiedSessionId] = React.useState(false);
   const titleInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -981,6 +983,30 @@ export function MachiChatView({
             )}
           </div>
           <div className="flex items-center gap-1">
+            {activeSessionId ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(activeSessionId).then(
+                        () => {
+                          setCopiedSessionId(true);
+                          window.setTimeout(() => setCopiedSessionId(false), 1600);
+                        },
+                        () => {},
+                      );
+                    }}
+                  >
+                    {copiedSessionId ? <Check className="h-3.5 w-3.5 text-success" /> : <Hash className="h-3.5 w-3.5" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>复制会话 ID</TooltipContent>
+              </Tooltip>
+            ) : null}
             <Badge variant="success" className="mr-2 gap-1 px-2.5 py-0.5 text-[11px] font-medium">
               <Activity className="h-3 w-3" />
               <span className="hidden sm:inline">{t("gatewayOnline")}</span>

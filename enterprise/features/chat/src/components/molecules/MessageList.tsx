@@ -45,6 +45,14 @@ function IconCopy({ className }: { className?: string }) {
   );
 }
 
+function IconHash({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>
+    </svg>
+  );
+}
+
 function IconLink({ className }: { className?: string }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -418,6 +426,7 @@ export function MessageList({
   const [selectedMessages, setSelectedMessages] = React.useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = React.useState(false);
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
+  const [copiedTraceMessageId, setCopiedTraceMessageId] = React.useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = React.useState<string | null>(null);
   const [editingDraft, setEditingDraft] = React.useState("");
   const [sourcesPanelMessageId, setSourcesPanelMessageId] = React.useState<string | null>(null);
@@ -571,6 +580,18 @@ export function MessageList({
     setCopiedId(messageId);
     setTimeout(() => setCopiedId(null), 2000);
     onCopy?.(content);
+  };
+
+  const handleCopyTraceId = (traceId: string, messageId: string) => {
+    void navigator.clipboard.writeText(traceId).then(
+      () => {
+        setCopiedTraceMessageId(messageId);
+        window.setTimeout(() => setCopiedTraceMessageId(null), 1600);
+      },
+      () => {
+        // 剪贴板被浏览器策略拒绝时静默失败，不打断阅读。
+      },
+    );
   };
 
   const startEditMessage = (messageId: string, content: string) => {
@@ -1292,6 +1313,30 @@ export function MessageList({
                                 </TooltipTrigger>
                                 <TooltipContent>没帮助</TooltipContent>
                               </Tooltip>
+                              {message.trace_id ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const tid = message.trace_id;
+                                        if (!tid) return;
+                                        handleCopyTraceId(tid, message.id);
+                                      }}
+                                    >
+                                      {copiedTraceMessageId === message.id ? (
+                                        <IconCheck className="h-3.5 w-3.5 text-success" />
+                                      ) : (
+                                        <IconHash className="h-3.5 w-3.5" />
+                                      )}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>复制请求 ID</TooltipContent>
+                                </Tooltip>
+                              ) : null}
                               {hasCitationSources && citationSources ? (
                                 <>
                                   <div className="mx-1 h-4 w-px bg-border" />
