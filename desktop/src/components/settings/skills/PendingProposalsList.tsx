@@ -17,6 +17,16 @@ export interface SkillProposal {
   diff_summary: string;
   scores: ProposalScore | null;
   status: "pending";
+  author_session_id?: string;
+  author_model?: string;
+}
+
+function humanizeProposalError(raw: string, kind: "approve" | "reject"): string {
+  if (raw === "skill already exists") return "该 skill 已存在，无法重复创建";
+  if (raw.startsWith("blocked:")) {
+    return "这条技能没能写入：安全扫描判定内容有风险。可以改写后再批准，或点拒绝丢弃。";
+  }
+  return raw || (kind === "approve" ? "批准失败" : "拒绝失败");
 }
 
 function ScoreBar({ label, value }: { label: string; value: number }) {
@@ -79,6 +89,7 @@ export function PendingProposalsList({
   const [err, setErr] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [justDone, setJustDone] = useState<Record<string, "approved" | "rejected">>({});
+  const [cardErr, setCardErr] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,7 +121,11 @@ export function PendingProposalsList({
 
   const act = async (id: string, kind: "approve" | "reject") => {
     setBusyId(id);
-    setErr("");
+    setCardErr((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (apiToken) headers["X-AGX-Desktop-Token"] = apiToken;
@@ -122,12 +137,10 @@ export function PendingProposalsList({
       });
       const data = await resp.json();
       if (!resp.ok || !data.ok) {
-        const raw = String(data.error ?? "");
-        const msg =
-          raw === "skill already exists"
-            ? "该 skill 已存在，无法重复创建"
-            : raw || (kind === "approve" ? "批准失败" : "拒绝失败");
-        setErr(msg);
+        setCardErr((prev) => ({
+          ...prev,
+          [id]: humanizeProposalError(String(data.error ?? ""), kind),
+        }));
         return;
       }
       setJustDone((prev) => ({ ...prev, [id]: kind === "approve" ? "approved" : "rejected" }));
@@ -194,6 +207,14 @@ export function PendingProposalsList({
               </div>
               <span className="shrink-0 text-[10px] text-text-faint">{relativeTime(p.created_at)}</span>
             </div>
+            {p.author_session_id || p.author_model ? (
+              <p className="mx-3.5 mb-2 text-[10px] text-text-faint" title={p.author_session_id || undefined}>
+                {p.author_session_id
+                  ? `来自会话 ${p.author_session_id.length > 12 ? `${p.author_session_id.slice(0, 8)}…` : p.author_session_id}`
+                  : "来源会话未记录"}
+                {p.author_model ? ` · ${p.author_model}` : ""}
+              </p>
+            ) : null}
 
             {/* Diff summary */}
             {p.diff_summary ? (
@@ -211,6 +232,12 @@ export function PendingProposalsList({
               </div>
             ) : null}
 
+            {cardErr[p.proposal_id] ? (
+              <div className="mx-3.5 mb-2 whitespace-pre-wrap rounded-md bg-red-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-red-400">
+                {cardErr[p.proposal_id]}
+              </div>
+            ) : null}
+
             {/* Actions */}
             <div className="flex items-center gap-2 border-t border-border px-3.5 py-2.5">
               {done ? (
@@ -223,7 +250,7 @@ export function PendingProposalsList({
                   <button
                     type="button"
                     disabled={isBusy}
-                    className="flex h-7 items-center rounded-md bg-[var(--ui-btn-primary-bg)] px-3 text-[11px] font-medium text-white transition hover:bg-[var(--ui-btn-primary-bg-hover)] disabled:opacity-40"
+                    className="flex h-7 items-center rounded-md bg-[var(--ui-btn-primary-bg)] px-3 text-[11px] font-medium text-[var(--ui-btn-primary-text)] transition hover:bg-[var(--ui-btn-primary-bg-hover)] disabled:opacity-40"
                     onClick={() => void act(p.proposal_id, "approve")}
                   >
                     {isBusy ? "处理中…" : "批准"}

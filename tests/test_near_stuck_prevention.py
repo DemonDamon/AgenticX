@@ -81,6 +81,31 @@ def test_format_guard_rejection_message_structured() -> None:
     assert "skill_manage patch" in msg
 
 
+def test_format_guard_block_for_user_is_chinese() -> None:
+    from agenticx.skills.guard import format_guard_block_for_user
+
+    result = ScanResult(
+        verdict="dangerous",
+        findings=[
+            ScanFinding(
+                severity="dangerous",
+                pattern_name="shell_eval",
+                matched_text='eval "$PAYLOAD"',
+                file_path="SKILL.md",
+                line_number=3,
+                category="code_execution",
+            )
+        ],
+        source="agent-created",
+    )
+    msg = format_guard_block_for_user(result)
+    assert "没能写入" in msg
+    assert "智能体新建" in msg
+    assert "代码执行" in msg
+    assert "blocked:" not in msg
+    assert "skill_manage" not in msg
+
+
 def test_todos_need_disk_promote_with_skill_md_write() -> None:
     messages = [
         {

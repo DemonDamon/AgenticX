@@ -112,6 +112,23 @@ class TestBenignFalsePositives:
         ok, _ = should_allow(r, "community")
         assert ok is True
 
+    def test_eval_set_is_not_shell_eval(self, skill_dir: Path, guard_v2: None) -> None:
+        self._write(
+            skill_dir,
+            "Use when changing an eval set, running Evals, or reviewing behavior eval results.\n",
+        )
+        r = scan_skill(skill_dir, source="agent-created")
+        assert not any(f.pattern_name == "shell_eval" for f in r.findings)
+        ok, _ = should_allow(r, "agent-created")
+        assert ok is True
+
+    def test_eval_quoted_command_is_dangerous(self, skill_dir: Path, guard_v2: None) -> None:
+        self._write(skill_dir, 'eval "$PAYLOAD"\n')
+        r = scan_skill(skill_dir, source="agent-created")
+        assert any(f.pattern_name == "shell_eval" for f in r.findings)
+        ok, _ = should_allow(r, "agent-created")
+        assert ok is False
+
     def test_b4_pinned_pip(self, skill_dir: Path, guard_v2: None) -> None:
         self._write(skill_dir, "Run `pip install foo==1.0.0`")
         r = scan_skill(skill_dir, source="community")

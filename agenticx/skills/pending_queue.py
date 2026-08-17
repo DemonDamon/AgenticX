@@ -90,7 +90,7 @@ def approve(proposal_id: str, *, approver: str = "user") -> dict[str, Any]:
         get_description_from_frontmatter,
         normalize_skill_md,
     )
-    from agenticx.skills.guard import scan_skill, should_allow
+    from agenticx.skills.guard import format_guard_block_for_user, scan_skill, should_allow
     from agenticx.skills.versioning import append_changelog
 
     root = _proposals_root()
@@ -139,13 +139,13 @@ def approve(proposal_id: str, *, approver: str = "user") -> dict[str, Any]:
     try:
         target.write_text(normalized, encoding="utf-8")
         result = scan_skill(skill_dir, source="agent-created")
-        ok, reason = should_allow(result, "agent-created")
+        ok, _reason = should_allow(result, "agent-created")
         if not ok:
             if action == "create":
                 shutil.rmtree(skill_dir, ignore_errors=True)
             else:
                 target.unlink(missing_ok=True)
-            return {"ok": False, "error": reason}
+            return {"ok": False, "error": format_guard_block_for_user(result, source="agent-created")}
         append_changelog(
             skill_dir,
             action="approved",
