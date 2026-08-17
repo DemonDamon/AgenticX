@@ -592,6 +592,7 @@ const KB_MODE_SUBMENU_WIDTH = 200;
 function positionEmbeddedComposerFlyout(
   triggerEl: HTMLElement,
   flyoutWidth: number,
+  preferredMaxHeight?: number,
 ): { top: number; left: number; maxHeight: number } {
   const parent = triggerEl.closest(".agx-menu-pop");
   const band = (parent ?? triggerEl).getBoundingClientRect();
@@ -601,10 +602,15 @@ function positionEmbeddedComposerFlyout(
     left = band.left - flyoutWidth - gap;
   }
   left = Math.max(gap, Math.min(left, window.innerWidth - flyoutWidth - gap));
+  const viewportMaxHeight = Math.max(120, window.innerHeight - gap * 2);
+  const maxHeight = Math.min(
+    Math.max(120, preferredMaxHeight ?? band.height),
+    viewportMaxHeight,
+  );
   return {
-    top: band.top,
+    top: Math.max(gap, Math.min(band.top, window.innerHeight - maxHeight - gap)),
     left,
-    maxHeight: Math.max(120, band.height),
+    maxHeight,
   };
 }
 
@@ -755,6 +761,7 @@ interface SkillPickerButtonProps {
 }
 
 const SKILL_DROPDOWN_WIDTH = 288; // w-72
+const SKILL_DROPDOWN_MAX_HEIGHT = 360;
 
 function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: SkillPickerButtonProps) {
   const [open, setOpen] = useState(false);
@@ -769,7 +776,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
   const iconBtn =
     "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong";
 
-  const fetchSkills = async () => {
+  const fetchSkills = useCallback(async () => {
     if (!apiBase) return;
     setLoading(true);
     try {
@@ -786,12 +793,25 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
     } finally {
       setLoading(false);
     }
-  };
+  }, [apiBase, apiToken]);
 
-  const handleOpen = async () => {
+  useEffect(() => {
+    const off = window.agenticxDesktop.onSkillsChanged(() => {
+      void fetchSkills();
+    });
+    return () => off();
+  }, [fetchSkills]);
+
+  const handleOpen = () => {
     if (btnRef.current) {
       if (embedded) {
-        setDropdownPos(positionEmbeddedComposerFlyout(btnRef.current, SKILL_DROPDOWN_WIDTH));
+        setDropdownPos(
+          positionEmbeddedComposerFlyout(
+            btnRef.current,
+            SKILL_DROPDOWN_WIDTH,
+            SKILL_DROPDOWN_MAX_HEIGHT,
+          ),
+        );
       } else {
         const rect = btnRef.current.getBoundingClientRect();
         const left = Math.max(8, Math.min(rect.right + 8, window.innerWidth - SKILL_DROPDOWN_WIDTH - 8));
@@ -800,7 +820,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
     }
     setOpen(true);
     setQuery("");
-    if (skills.length === 0) await fetchSkills();
+    void fetchSkills();
     setTimeout(() => searchRef.current?.focus(), 60);
   };
 
@@ -853,7 +873,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
               />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-1">
-              {loading ? (
+              {loading && skills.length === 0 ? (
                 <div className="px-3 py-4 text-center text-[11px] text-text-faint">加载中…</div>
               ) : filtered.length === 0 ? (
                 <div className="px-3 py-4 text-center text-[11px] text-text-faint">
