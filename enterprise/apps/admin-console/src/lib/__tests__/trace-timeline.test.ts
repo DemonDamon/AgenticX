@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { PortalLogItem } from "../portal-logs-query";
 import type { AgentTraceSpanRow } from "../agent-trace-store";
-import { assembleTraceTimeline } from "../trace-timeline";
+import {
+  assembleTraceTimeline,
+  computeGanttPlacement,
+  computeTraceTimeWindow,
+} from "../trace-timeline";
 
 function portalLog(partial: Partial<PortalLogItem> & Pick<PortalLogItem, "id" | "event">): PortalLogItem {
   return {
@@ -165,6 +169,61 @@ describe("assembleTraceTimeline", () => {
     expect(timeline.nodes[0]?.children).toHaveLength(1);
     expect(timeline.nodes[0]?.children[0]?.kind).toBe("model_step");
     expect(timeline.totals.tokens).toBe(11);
+  });
+
+  it("maps model step startedAt from span.created_at", () => {
+    const timeline = assembleTraceTimeline({
+      traceId: "01JZTRACEID000000000000004",
+      portalLogs: [
+        portalLog({
+          id: "log-z",
+          event: "chat.completions.finish",
+          log_time: "2026-08-10T08:00:00.000Z",
+          duration_ms: 10000,
+        }),
+      ],
+      modelSpans: [
+        span({
+          id: "s1",
+          step_no: 1,
+          created_at: new Date("2026-08-10T08:00:02.000Z"),
+          duration_ms: 1000,
+        }),
+      ],
+      deepResearchRun: null,
+    });
+
+    const model = timeline.nodes[0]?.children.find((c) => c.kind === "model_step");
+    expect(model?.startedAt).toBe("2026-08-10T08:00:02.000Z");
+
+    const window = computeTraceTimeWindow(timeline.nodes);
+    expect(window.tMinMs).toBe(Date.parse("2026-08-10T08:00:00.000Z"));
+    expect(window.tMaxMs).toBe(Date.parse("2026-08-10T08:00:10.000Z"));
+  });
+
+  it("computeGanttPlacement returns null without startedAt", () => {
+    expect(
+      computeGanttPlacement({ durationMs: 100 }, Date.parse("2026-08-10T08:00:00.000Z"), Date.parse("2026-08-10T08:00:10.000Z")),
+    ).toBeNull();
+  });
+
+  it("computeGanttPlacement offsets later steps to the right", () => {
+    const tMin = Date.parse("2026-08-10T08:00:00.000Z");
+    const tMax = Date.parse("2026-08-10T08:00:10.000Z");
+    const early = computeGanttPlacement(
+      { startedAt: "2026-08-10T08:00:01.000Z", durationMs: 1000 },
+      tMin,
+      tMax,
+    );
+    const late = computeGanttPlacement(
+      { startedAt: "2026-08-10T08:00:05.000Z", durationMs: 1000 },
+      tMin,
+      tMax,
+    );
+    expect(early).not.toBeNull();
+    expect(late).not.toBeNull();
+    expect(late!.offsetPct).toBeGreaterThan(early!.offsetPct);
+    expect(early!.widthPct).toBeGreaterThanOrEqual(1);
   });
 
   it("labels model steps with stage and surfaces duration/error status", () => {
