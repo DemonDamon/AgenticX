@@ -119,7 +119,7 @@ function createDriver(): Driver {
       );
     },
 
-    async casBeginClarification({ runId, revision, events, eventSeq, expiresAt, now }) {
+    async casBeginClarification({ runId, revision, events, eventSeq, expiresAt, phase, now }) {
       return update(
         runId,
         (row) => row.revision === revision && ACTIVE.has(row.status),
@@ -128,7 +128,7 @@ function createDriver(): Driver {
           row.eventSeq = eventSeq;
           row.revision = revision + 1;
           row.status = "awaiting_clarify";
-          row.phase = "clarify";
+          row.phase = phase;
           row.clarifyResume = null;
           row.clarifyExpiresAt = expiresAt;
           row.updatedAt = now;
@@ -446,6 +446,15 @@ describe("sql run store — clarify coordination", () => {
     expect(ok).toBe(true);
     expect(driver.rows.get("r1")!.status).toBe("awaiting_clarify");
     expect(driver.rows.get("r1")!.clarifyResume).toBeNull();
+  });
+
+  it("atomically persists the requested plan-gate phase", async () => {
+    const { driver, store } = await seeded();
+    await expect(
+      store.beginClarification("r1", [narrative("确认计划")], null, "plan"),
+    ).resolves.toBe(true);
+    expect(driver.rows.get("r1")!.status).toBe("awaiting_clarify");
+    expect(driver.rows.get("r1")!.phase).toBe("plan");
   });
 
   it("reports false when the run finished before the gate", async () => {

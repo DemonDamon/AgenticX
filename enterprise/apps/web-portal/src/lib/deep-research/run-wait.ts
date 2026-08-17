@@ -16,6 +16,17 @@ import {
 
 export type { ClarifyResumePayload };
 
+/** Free-form reply key shared by conversational clarification and plan chat. */
+export const CHAT_CLARIFY_ANSWER_KEY = "__chat__";
+/** Plan-gate action key (`approve` / `edit` / `skip`). */
+export const PLAN_GATE_ACTION_KEY = "__plan_action__";
+/** Plan-gate patch key; the payload is a bounded JSON string. */
+export const PLAN_GATE_PATCH_KEY = "__plan_patch__";
+
+/** Input bounds applied by the resume route before persistence. */
+export const MAX_GATE_ANSWER_CHARS = 2_000;
+export const MAX_PLAN_PATCH_CHARS = 4_000;
+
 /** DB poll cadence while a clarify card is on screen. */
 export const CLARIFY_POLL_INTERVAL_MS = 1_000;
 

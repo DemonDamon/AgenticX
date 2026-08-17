@@ -110,6 +110,7 @@ export type RunStore = {
     runId: string,
     events: DeepResearchEvent[],
     expiresAt: Date | null,
+    phase?: string,
   ): Promise<boolean>;
   /** First valid answer wins; repeat submissions never overwrite it. */
   resolveClarification(input: {
@@ -380,7 +381,7 @@ function createMemoryStore(): RunStore {
       row.updatedAt = new Date().toISOString();
     },
 
-    async beginClarification(runId, events, expiresAt) {
+    async beginClarification(runId, events, expiresAt, phase) {
       const row = bucket.get(runId);
       if (!row) return false;
       if (TERMINAL_STATUSES.has(row.status)) return false;
@@ -389,7 +390,7 @@ function createMemoryStore(): RunStore {
         row.eventSeq += events.length;
       }
       row.status = "awaiting_clarify";
-      row.phase = "clarify";
+      row.phase = phase ?? "clarify";
       row.clarifyResume = null;
       row.clarifyExpiresAt = expiresAt;
       row.revision += 1;
@@ -533,6 +534,7 @@ export type RunSqlOps = {
     events: DeepResearchEvent[];
     eventSeq: number;
     expiresAt: Date | null;
+    phase: string;
     now: Date;
   }): Promise<number>;
   appendReportChunk(runId: string, chunk: string, now: Date): Promise<number>;
@@ -643,7 +645,7 @@ function createPgOps(db: PgDb): RunSqlOps {
       return rows.length;
     },
 
-    async casBeginClarification({ runId, revision, events, eventSeq, expiresAt, now }) {
+    async casBeginClarification({ runId, revision, events, eventSeq, expiresAt, phase, now }) {
       const rows = await db
         .update(pgTable)
         .set({
@@ -651,7 +653,7 @@ function createPgOps(db: PgDb): RunSqlOps {
           eventSeq,
           revision: revision + 1,
           status: "awaiting_clarify",
-          phase: "clarify",
+          phase,
           clarifyResume: null,
           clarifyExpiresAt: expiresAt,
           updatedAt: now,
@@ -936,7 +938,7 @@ function createMysqlOps(db: MysqlDb): RunSqlOps {
       return mysqlAffectedRows(result);
     },
 
-    async casBeginClarification({ runId, revision, events, eventSeq, expiresAt, now }) {
+    async casBeginClarification({ runId, revision, events, eventSeq, expiresAt, phase, now }) {
       const result = await db
         .update(mysqlTable)
         .set({
@@ -944,7 +946,7 @@ function createMysqlOps(db: MysqlDb): RunSqlOps {
           eventSeq,
           revision: revision + 1,
           status: "awaiting_clarify",
-          phase: "clarify",
+          phase,
           clarifyResume: null,
           clarifyExpiresAt: expiresAt,
           updatedAt: now,
@@ -1237,7 +1239,7 @@ export function createSqlRunStore(loadOps: () => Promise<RunSqlOps> = resolveDia
       await ops.finishRun({ runId, status, errorMessage, now: new Date() });
     },
 
-    async beginClarification(runId, events, expiresAt) {
+    async beginClarification(runId, events, expiresAt, phase) {
       const outcome = await casMerge(
         runId,
         events,
@@ -1248,6 +1250,7 @@ export function createSqlRunStore(loadOps: () => Promise<RunSqlOps> = resolveDia
             events: merged,
             eventSeq,
             expiresAt,
+            phase: phase ?? "clarify",
             now: new Date(),
           }),
         "beginClarification",
@@ -1366,7 +1369,13 @@ export function createRunWriter(store: RunStore, runId: string): RunWriter {
     pendingEvents = [];
     pendingPatch = undefined;
     pendingReport = "";
-    if (events.length === 0 && !patch && !report) return;
+    if (events.length === 0 && !patch && !report) {
+      // An earlier immediate flush may already own the final report chunk.
+      // `finish()` must wait for that chain before marking the run terminal,
+      // otherwise appendReport observes a terminal row and drops the chunk.
+      await flushChain;
+      return;
+    }
 
     flushChain = flushChain
       .then(async () => {

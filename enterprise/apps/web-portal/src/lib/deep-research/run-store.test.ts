@@ -446,6 +446,17 @@ describe("clarify coordination", () => {
     expect(await store.getClarificationResume("r1")).toBeNull();
   });
 
+  it("keeps the plan phase when arming a plan-alignment gate", async () => {
+    const store = createMemoryRunStore();
+    await store.create({ ...OWNER, runId: "r1", sessionId: "s1", topic: "主题" });
+    await expect(
+      store.beginClarification("r1", [{ type: "narrative", text: "确认计划" }], null, "plan"),
+    ).resolves.toBe(true);
+    const row = await store.get(OWNER.tenantId, OWNER.userId, "r1");
+    expect(row?.status).toBe("awaiting_clarify");
+    expect(row?.phase).toBe("plan");
+  });
+
   it("refuses to arm a run that already finished", async () => {
     const store = createMemoryRunStore();
     await store.create({ ...OWNER, runId: "r1", sessionId: "s1", topic: "主题" });

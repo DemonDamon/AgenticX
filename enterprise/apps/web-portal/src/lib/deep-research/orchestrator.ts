@@ -68,6 +68,7 @@ import {
   readStreamWithIdleTimeout,
 } from "./deadline";
 import {
+  defaultOpenEndedClarification,
   proposeClarification,
   type ClarifierResult,
   type ClarifyQuestion,
@@ -78,16 +79,31 @@ import {
 } from "./clarification-policy";
 import {
   DEFAULT_DELIVERY_PREFS,
-  deliveryClarifyQuestions,
   deliveryPrefsPromptBlock,
-  isDeliveryClarifyQuestionId,
   parseDeliveryPrefs,
   primaryArtifactTitle,
   sanitizeResearchTopic,
   type DeliveryPrefs,
 } from "./delivery-prefs";
-import { looksOpenEndedResearchQuery } from "./research-intent";
-import { waitForClarifyResume } from "./run-wait";
+import {
+  assessClarifyStrategy,
+  buildChatClarifyPrompt,
+  buildInteractionProfile,
+  buildPlanChatPrompt,
+  buildPlanRevisionUserQuery,
+  buildSlotClarifyQuestions,
+  DEFAULT_CLARIFY_MAX_ROUNDS,
+  findMissingBlockingSlots,
+  parseChatClarifyReply,
+  parsePlanChatGateAction,
+  type PlanChatTurn,
+} from "./interaction-policy";
+import {
+  CHAT_CLARIFY_ANSWER_KEY,
+  PLAN_GATE_ACTION_KEY,
+  PLAN_GATE_PATCH_KEY,
+  waitForClarifyResume,
+} from "./run-wait";
 import {
   createArtifactStore,
   type ArtifactStore,
@@ -134,7 +150,11 @@ import {
   reflectOnGaps,
   type ResearchGap,
 } from "./reflector";
-import type { DeepResearchEvent } from "@agenticx/sdk-ts";
+import type {
+  DeepResearchEvent,
+  ResearchInteractionProfile,
+  ResearchPlanSnapshot,
+} from "@agenticx/sdk-ts";
 import { isPolicyErrorCode, toComplianceMessage } from "@agenticx/core-api";
 
 export const SEARCH_CONCURRENCY = 3;
@@ -373,12 +393,14 @@ function stripFlags<T extends Record<string, unknown>>(body: T): Record<string, 
   const {
     agenticx_web_search: _ws,
     agenticx_deep_research: _dr,
+    agenticx_deep_research_interaction: _interaction,
     tools: _tools,
     tool_choice: _tc,
     ...rest
   } = body as T & {
     agenticx_web_search?: unknown;
     agenticx_deep_research?: unknown;
+    agenticx_deep_research_interaction?: unknown;
     tools?: unknown;
     tool_choice?: unknown;
   };
@@ -664,6 +686,22 @@ function applyClarifyAnswers(
   return `${userQuery}\n\n【用户澄清】\n${lines.join("\n")}`;
 }
 
+/** Only sub-questions are editable through the plan card patch. */
+export function parsePlanPatchSubQuestions(raw: string | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as { subQuestions?: unknown };
+    if (!Array.isArray(parsed.subQuestions)) return [];
+    return parsed.subQuestions
+      .map((question) => (typeof question === "string" ? question.trim() : ""))
+      .filter((question): question is string => Boolean(question))
+      .slice(0, MAX_LANES)
+      .map((question) => question.slice(0, 200));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Recover the option labels a user multi-selected from the joined answer string.
  * Longest-label-first avoids false splits when a label itself contains "、".
@@ -731,6 +769,10 @@ export async function runDeepResearchTurn(
     headers: gatewayHeaders,
   };
 
+  const interactionPreference =
+    typeof parsedBody.agenticx_deep_research_interaction === "string"
+      ? parsedBody.agenticx_deep_research_interaction
+      : undefined;
   const baseBody = stripFlags(parsedBody);
   const researchModel =
     typeof baseBody.model === "string" && baseBody.model.trim()
@@ -1105,13 +1147,11 @@ export async function runDeepResearchTurn(
           status: recon.hits.length > 0 ? "ok" : "failed",
         });
 
-        // --- Clarify gate ---
+        // --- Adaptive interaction policy: one unresolved gap uses chat, multiple use a card. ---
         enqueueEvent({ type: "phase", phase: "clarify", message: "正在判断是否需要澄清…" });
         enqueueFlush();
         let clarifyResult: ClarifierResult = { needed: false };
-        let clarifierCompleted = false;
         if (budgetLeft() > 0 && budgetLedger.tryConsume("modelCalls")) {
-          // Bound clarifier so a slow gateway cannot leave the UI silent for minutes.
           const clarifyAbort = new AbortController();
           const onRunAbort = () => clarifyAbort.abort();
           runSignal.addEventListener("abort", onRunAbort, { once: true });
@@ -1128,7 +1168,6 @@ export async function runDeepResearchTurn(
               fetchImpl: deps.fetchImpl,
               signal: clarifyAbort.signal,
             });
-            clarifierCompleted = true;
           } catch {
             clarifyResult = { needed: false };
           } finally {
@@ -1137,101 +1176,150 @@ export async function runDeepResearchTurn(
           }
         }
 
+        const strategy = assessClarifyStrategy({
+          query: userQuery,
+          reconBrief: recon.brief,
+          userPreference: interactionPreference,
+          intentConfidence: deps.intentConfidence,
+          proposedQuestionCount: clarifyResult.needed ? clarifyResult.questions.length : 0,
+        });
+        const profile: ResearchInteractionProfile = buildInteractionProfile({
+          query: userQuery,
+          preference: interactionPreference,
+          strategy,
+        });
+        enqueueEvent({ type: "research_profile", runId, ...profile });
+        console.info(
+          "[deep-research] interaction profile",
+          runId,
+          strategy.reasonCodes.join("+") || "none",
+        );
+
+        const armGate = async (
+          events: DeepResearchEvent[],
+          timeoutMs: number,
+          phase: "clarify" | "plan",
+        ): Promise<boolean> => {
+          await writer?.flush();
+          const stamped = events.map(
+            (event): DeepResearchEvent => ({
+              ...event,
+              ts: event.ts ?? new Date().toISOString(),
+            }),
+          );
+          let armed = false;
+          try {
+            armed = await runStore.beginClarification(
+              runId,
+              stamped,
+              awaitClarify && timeoutMs > 0 ? new Date(Date.now() + timeoutMs) : null,
+              phase,
+            );
+          } catch (error) {
+            console.warn("[deep-research] interaction gate persist failed:", error);
+          }
+          if (!armed) return false;
+          for (const event of stamped) {
+            safeControllerEnqueue(encoder.encode(formatDeepResearchEventSse(event)));
+          }
+          enqueueFlush();
+          return true;
+        };
+
+        const waitGate = async (timeoutMs: number): Promise<ClarifyResumePayload> => {
+          if (!awaitClarify) return { answers: {}, skip: true };
+          deadline.pause();
+          try {
+            return await waitForClarifyResume(runStore, runId, timeoutMs);
+          } finally {
+            deadline.resume();
+          }
+        };
+
+        const narrateClarifyOutcome = (resume: ClarifyResumePayload) => {
+          if (resume.timedOut) {
+            enqueueEvent({ type: "clarify_timeout", runId });
+            enqueueEvent({ type: "narrative", text: "澄清超时，按默认假设继续。" });
+          } else if (resume.skip) {
+            enqueueEvent({ type: "narrative", text: "已跳过确认，按默认假设继续检索。" });
+          } else {
+            enqueueEvent({ type: "narrative", text: "已明确调研方向，开始系统检索。" });
+          }
+        };
+
         let clarifyExpandedLanes: string[] | null = null;
         let deliveryPrefs: DeliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
         let clarifyResume: ClarifyResumePayload = { answers: {}, skip: true };
-        const directionQuestions = clarifyResult.needed ? clarifyResult.questions : [];
-        const trustedNoClarificationDecision =
-          trustNoClarification && clarifierCompleted && !clarifyResult.needed;
-        const askDelivery =
-          clarifyResult.needed ||
-          (!trustedNoClarificationDecision && looksOpenEndedResearchQuery(userQuery));
-        const clarifyQuestions = askDelivery
-          ? [...directionQuestions, ...deliveryClarifyQuestions()].slice(0, 4)
-          : [];
+        let clarifyQuestions: ClarifyQuestion[] = [];
+        let chatClarifyNote = "";
 
-        if (clarifyQuestions.length > 0) {
-          const clarifyGateEvents: DeepResearchEvent[] = [
-            { type: "narrative", text: "现状已校准，再确认一下调研方向与交付偏好。" },
-            ...clarifyQuestions.map((q, i) => ({
-              type: "clarify" as const,
-              runId,
-              step: i + 1,
-              total: clarifyQuestions.length,
-              questionId: q.id,
-              question: q.question,
-              options: q.options,
-              allowCustom: q.allowCustom,
-              multiSelect: q.multiSelect,
-            })),
-          ];
-          // The clarify card is only safe to show once the database says the run
-          // is awaiting an answer — otherwise a resume could land before the row
-          // can accept it and the user would see a false timeout.
-          await writer?.flush();
-          let clarifyArmed = false;
-          try {
-            clarifyArmed = await runStore.beginClarification(
-              runId,
-              clarifyGateEvents,
-              // Wall clock, not the run budget clock: other instances compare this
-              // deadline against their own `now` when accepting an answer.
-              awaitClarify ? new Date(Date.now() + clarifyTimeoutMs) : null,
-            );
-          } catch (error) {
-            console.warn("[deep-research] clarify gate persist failed:", error);
+        if (strategy.mode === "card") {
+          clarifyQuestions = clarifyResult.needed ? clarifyResult.questions : [];
+          if (strategy.blocking && clarifyQuestions.length === 0) {
+            clarifyQuestions = buildSlotClarifyQuestions(userQuery, strategy.maxItems);
           }
-
-          if (clarifyArmed) {
-            // Already persisted above — emit straight to SSE so the writer cannot
-            // append these events a second time.
-            for (const event of clarifyGateEvents) {
-              safeControllerEnqueue(encoder.encode(formatDeepResearchEventSse(event)));
-            }
-            enqueueFlush();
-
-            if (awaitClarify) {
-              // User think-time is explicitly outside the active research budget.
-              deadline.pause();
-              try {
-                clarifyResume = await waitForClarifyResume(runStore, runId, clarifyTimeoutMs);
-              } finally {
-                deadline.resume();
+          if (clarifyQuestions.length === 0) {
+            const fallback = defaultOpenEndedClarification(userQuery);
+            clarifyQuestions = fallback.needed ? fallback.questions : [];
+          }
+          clarifyQuestions = clarifyQuestions.slice(0, strategy.maxItems);
+          if (clarifyQuestions.length > 0) {
+            const clarifyGateEvents: DeepResearchEvent[] = [
+              { type: "narrative", text: "现状已校准，再确认一下关键调研方向。" },
+              ...clarifyQuestions.map((question, index) => ({
+                type: "clarify" as const,
+                runId,
+                step: index + 1,
+                total: clarifyQuestions.length,
+                questionId: question.id,
+                question: question.question,
+                options: question.options,
+                allowCustom: question.allowCustom,
+                multiSelect: question.multiSelect,
+                roundIndex: 0,
+                phase: "preflight" as const,
+                ...(strategy.blocking ? { blocking: true } : {}),
+              })),
+            ];
+            if (await armGate(clarifyGateEvents, clarifyTimeoutMs, "clarify")) {
+              clarifyResume = await waitGate(clarifyTimeoutMs);
+              if (awaitClarify) narrateClarifyOutcome(clarifyResume);
+              if (!clarifyResume.skip && !clarifyResume.timedOut) {
+                deliveryPrefs = parseDeliveryPrefs(clarifyResume.answers);
               }
-              // resolveClarification / expireClarification already flipped the row
-              // back to `running`; no extra status patch here.
-              if (clarifyResume.timedOut) {
-                enqueueEvent({ type: "clarify_timeout", runId });
-                enqueueEvent({ type: "narrative", text: "澄清超时，按默认假设继续。" });
-              } else if (!clarifyResume.skip) {
-                enqueueEvent({ type: "narrative", text: "已明确调研方向，开始系统检索。" });
-              } else {
-                enqueueEvent({ type: "narrative", text: "已跳过确认，按默认假设继续检索。" });
-              }
+              clarifyExpandedLanes = expandLanesFromClarifyAnswers(
+                userQuery,
+                clarifyQuestions,
+                clarifyResume,
+              );
             }
-            if (clarifyResume.skip || clarifyResume.timedOut) {
-              deliveryPrefs = { ...DEFAULT_DELIVERY_PREFS };
-            } else {
-              deliveryPrefs = parseDeliveryPrefs(clarifyResume.answers, clarifyQuestions);
+          }
+        } else if (strategy.mode === "chat") {
+          const promptText = buildChatClarifyPrompt(userQuery, strategy);
+          const clarifyGateEvents: DeepResearchEvent[] = [
+            { type: "clarify_chat", runId, roundIndex: 0, phase: "preflight", promptText },
+          ];
+          if (await armGate(clarifyGateEvents, clarifyTimeoutMs, "clarify")) {
+            clarifyResume = await waitGate(clarifyTimeoutMs);
+            if (awaitClarify) narrateClarifyOutcome(clarifyResume);
+            if (!clarifyResume.skip && !clarifyResume.timedOut) {
+              deliveryPrefs = parseDeliveryPrefs(clarifyResume.answers);
+              const reply = clarifyResume.answers[CHAT_CLARIFY_ANSWER_KEY]?.trim() ?? "";
+              const slots = parseChatClarifyReply({
+                promptText,
+                userReply: reply,
+                pendingSlots: findMissingBlockingSlots(userQuery),
+              });
+              chatClarifyNote = Object.values(slots).join("；").trim();
             }
-            const laneQuestions = clarifyQuestions.filter(
-              (q) => !isDeliveryClarifyQuestionId(q.id),
-            );
-            clarifyExpandedLanes = expandLanesFromClarifyAnswers(
-              userQuery,
-              laneQuestions,
-              clarifyResume,
-            );
           }
         }
 
-        // Clarify + delivery prefs are planner/writer hints only — never mutate the
-        // display topic / final-report title via userQuery concatenation.
-        let planningContext = applyClarifyAnswers(
-          userQuery,
-          clarifyQuestions,
-          clarifyResume,
-        );
+        // Clarification is planner context only; the displayed topic remains stable.
+        let planningContext = applyClarifyAnswers(userQuery, clarifyQuestions, clarifyResume);
+        if (chatClarifyNote) {
+          planningContext = `${planningContext}\n\n【用户澄清】\n- ${chatClarifyNote}`;
+        }
         planningContext = `${planningContext}\n\n${deliveryPrefsPromptBlock(deliveryPrefs)}`;
         const prefsWritingHint = [
           deliveryPrefsPromptBlock(deliveryPrefs),
@@ -1287,6 +1375,167 @@ export async function runDeepResearchTurn(
           ...plan,
           topic: sanitizeResearchTopic(plan.topic || userQuery || "研究主题"),
         };
+
+        const toPlanSnapshot = (version: number): ResearchPlanSnapshot => ({
+          version,
+          objective: plan.topic,
+          scope: [],
+          subQuestions: plan.subQuestions.map((question, index) => ({
+            id: `sq${index + 1}`,
+            title: question,
+          })),
+          sourceStrategy: [],
+          deliverables: [],
+          assumptions: profile.assumptions,
+        });
+
+        let planVersion = 1;
+        if (profile.planVisibility !== "chat_editable" || !awaitClarify) {
+          enqueueEvent({
+            type: "research_plan",
+            runId,
+            action: "proposed",
+            version: planVersion,
+            plan: toPlanSnapshot(planVersion),
+          });
+        } else {
+          const planChatHistory: PlanChatTurn[] = [];
+          let roundsUsed = 0;
+          let nextPlanAction: "proposed" | "updated" = "proposed";
+          const maxRounds = Math.max(
+            1,
+            profile.clarifyBudget.maxRounds || DEFAULT_CLARIFY_MAX_ROUNDS,
+          );
+
+          while (true) {
+            const promptText = buildPlanChatPrompt(planVersion);
+            const gateEvents: DeepResearchEvent[] = [
+              {
+                type: "research_plan",
+                runId,
+                action: nextPlanAction,
+                version: planVersion,
+                plan: toPlanSnapshot(planVersion),
+              },
+              {
+                type: "clarify_chat",
+                runId,
+                roundIndex: roundsUsed,
+                phase: "plan",
+                promptText,
+              },
+            ];
+            if (!(await armGate(gateEvents, 0, "plan"))) {
+              enqueueEvent({
+                type: "research_plan",
+                runId,
+                action: nextPlanAction,
+                version: planVersion,
+                plan: toPlanSnapshot(planVersion),
+              });
+              enqueueEvent({
+                type: "narrative",
+                text: "计划确认暂不可用，已按当前计划继续调研。",
+              });
+              break;
+            }
+
+            const gateResume = await waitGate(0);
+            const action = parsePlanChatGateAction({
+              answers: gateResume.answers,
+              skip: gateResume.skip,
+              planActionKey: PLAN_GATE_ACTION_KEY,
+              chatAnswerKey: CHAT_CLARIFY_ANSWER_KEY,
+            });
+            const explicitAction = gateResume.answers[PLAN_GATE_ACTION_KEY]?.trim() ?? "";
+            const patchQuestions =
+              explicitAction === "edit"
+                ? parsePlanPatchSubQuestions(gateResume.answers[PLAN_GATE_PATCH_KEY])
+                : [];
+
+            if (patchQuestions.length > 0) {
+              plan = enforcePlanBreadth(
+                { ...plan, subQuestions: patchQuestions },
+                userQuery,
+              );
+              planVersion += 1;
+              roundsUsed += 1;
+              nextPlanAction = "updated";
+            } else if (action === "reply") {
+              const reply = gateResume.answers[CHAT_CLARIFY_ANSWER_KEY]?.trim() ?? "";
+              if (!reply || !budgetLedger.tryConsume("modelCalls")) {
+                enqueueEvent({
+                  type: "research_plan",
+                  runId,
+                  action: "approved",
+                  version: planVersion,
+                  plan: toPlanSnapshot(planVersion),
+                });
+                break;
+              }
+              planChatHistory.push({ role: "user", content: reply });
+              enqueueEvent({ type: "narrative", text: `你：${reply}` });
+              enqueueEvent({ type: "narrative", text: "正在根据你的反馈更新计划…" });
+              const revised = await planFn({
+                url: deps.url,
+                headers: gatewayCallHeaders(deps, "dr.plan"),
+                body: baseBody,
+                userQuery: buildPlanRevisionUserQuery({
+                  originalQuery: userQuery,
+                  plan: {
+                    topic: plan.topic,
+                    complexity: plan.complexity,
+                    subQuestions: plan.subQuestions,
+                  },
+                  planVersion,
+                  chatHistory: planChatHistory,
+                }),
+                todayLine,
+                reconBrief: recon.brief,
+                fetchImpl: deps.fetchImpl,
+                signal: runSignal,
+              });
+              plan = enforcePlanBreadth(
+                {
+                  ...revised,
+                  topic: sanitizeResearchTopic(revised.topic || userQuery || "研究主题"),
+                },
+                userQuery,
+              );
+              planVersion += 1;
+              roundsUsed += 1;
+              nextPlanAction = "updated";
+              planChatHistory.push({ role: "assistant", content: `已更新计划 v${planVersion}` });
+            } else {
+              enqueueEvent({
+                type: "research_plan",
+                runId,
+                action: "approved",
+                version: planVersion,
+                plan: toPlanSnapshot(planVersion),
+              });
+              if (action === "skip") {
+                enqueueEvent({ type: "narrative", text: "已按当前计划开始调研。" });
+              }
+              break;
+            }
+
+            if (roundsUsed >= maxRounds) {
+              enqueueEvent({
+                type: "research_plan",
+                runId,
+                action: "approved",
+                version: planVersion,
+                plan: toPlanSnapshot(planVersion),
+              });
+              enqueueEvent({
+                type: "narrative",
+                text: "已达计划调整轮次上限，按当前计划开始调研。",
+              });
+              break;
+            }
+          }
+        }
 
         if (runSignal?.aborted) throw new DOMException("Aborted", "AbortError");
 

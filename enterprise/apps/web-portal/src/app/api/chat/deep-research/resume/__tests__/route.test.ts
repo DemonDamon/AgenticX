@@ -17,6 +17,11 @@ vi.mock("../../../../../../lib/deep-research/run-store", () => ({
 }));
 
 vi.mock("../../../../../../lib/deep-research/run-wait", () => ({
+  CHAT_CLARIFY_ANSWER_KEY: "__chat__",
+  PLAN_GATE_ACTION_KEY: "__plan_action__",
+  PLAN_GATE_PATCH_KEY: "__plan_patch__",
+  MAX_GATE_ANSWER_CHARS: 2_000,
+  MAX_PLAN_PATCH_CHARS: 4_000,
   notifyClarifyResume: (...args: unknown[]) => notifyClarifyResume(...args),
 }));
 
@@ -62,6 +67,30 @@ describe("POST /api/chat/deep-research/resume", () => {
     await POST(request({ runId: "run-1", answers: {} }));
     expect(resolveClarification).toHaveBeenCalledWith(
       expect.objectContaining({ payload: { answers: {}, skip: true } }),
+    );
+  });
+
+  it("normalizes conversational and plan-gate replies into persisted answer keys", async () => {
+    await POST(
+      request({
+        runId: "run-1",
+        chatReply: "  侧重落地案例  ",
+        planAction: "edit",
+        planPatch: '{"subQuestions":["案例"]}',
+      }),
+    );
+
+    expect(resolveClarification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: {
+          answers: {
+            __chat__: "侧重落地案例",
+            __plan_action__: "edit",
+            __plan_patch__: '{"subQuestions":["案例"]}',
+          },
+          skip: false,
+        },
+      }),
     );
   });
 

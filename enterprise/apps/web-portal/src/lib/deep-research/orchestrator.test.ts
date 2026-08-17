@@ -1159,20 +1159,108 @@ describe("runDeepResearchTurn", () => {
     // The row must already be awaiting before the client can answer.
     expect((await runStore.get("t1", "u1", "run-clarify-1"))?.status).toBe("awaiting_clarify");
     await expect(
-      answerClarify(runStore, "run-clarify-1", { answers: { q1: "A" }, skip: false }),
+      answerClarify(runStore, "run-clarify-1", {
+        answers: { __chat__: "场景 A" },
+        skip: false,
+      }),
     ).resolves.toBe("resumed");
     const response = await responsePromise;
     const { text, events } = await readSsePayload(response);
     expect(lanesStarted).toBe(true);
-    expect(events.some((e) => e.type === "clarify")).toBe(true);
+    expect(events.some((e) => e.type === "clarify_chat" && e.phase === "preflight")).toBe(true);
     // After clarify resumes, a final report artifact is produced; chat shows summary only.
     expect(events.some((e) => e.type === "artifact" && String(e.path).endsWith("final-report.md"))).toBe(true);
     expect(text).not.toContain("after-clarify");
     // The gate persisted the cards itself, so the writer must not duplicate them.
     const stored = await runStore.get("t1", "u1", "run-clarify-1");
-    expect(stored?.events.filter((e) => e.type === "clarify")).toHaveLength(
-      events.filter((e) => e.type === "clarify").length,
+    expect(stored?.events.filter((e) => e.type === "clarify_chat")).toHaveLength(
+      events.filter((e) => e.type === "clarify_chat").length,
     );
+  });
+
+  it("supports multi-round plan chat without consuming user wait time", async () => {
+    const runStore = createMemoryRunStore();
+    const buildPlan = vi
+      .fn()
+      .mockResolvedValueOnce({
+        topic: "研究主题",
+        complexity: "moderate" as const,
+        subQuestions: ["现状"],
+      })
+      .mockResolvedValueOnce({
+        topic: "研究主题",
+        complexity: "moderate" as const,
+        subQuestions: ["现状", "落地风险"],
+      });
+    const responsePromise = runDeepResearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "研究主题" }],
+        agenticx_deep_research_interaction: "plan_chat",
+      },
+      {
+        ...baseDeps({
+          awaitClarify: true,
+          runId: "run-plan-chat-1",
+          runStore,
+          fetchImpl: vi.fn(async (_url: string, init?: RequestInit) => {
+            const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+            if (body.stream === false) {
+              return {
+                ok: true,
+                json: async () => ({ choices: [{ message: { content: "memo" } }] }),
+              } as Response;
+            }
+            return synthUpstream("plan-chat-report");
+          }) as unknown as typeof fetch,
+          buildPlan,
+          executeSearch: async (query: string) => [
+            { title: query, url: `https://ex.com/${encodeURIComponent(query)}`, snippet: "s" },
+          ],
+        }),
+      },
+    );
+
+    await vi.waitFor(async () => {
+      const row = await runStore.get("t1", "u1", "run-plan-chat-1");
+      expect(row?.status).toBe("awaiting_clarify");
+      expect(row?.phase).toBe("plan");
+      expect(row?.events.some((event) => event.type === "research_plan")).toBe(true);
+    });
+    await expect(
+      answerClarify(runStore, "run-plan-chat-1", {
+        answers: { __chat__: "增加落地风险" },
+        skip: false,
+      }),
+    ).resolves.toBe("resumed");
+
+    await vi.waitFor(async () => {
+      const row = await runStore.get("t1", "u1", "run-plan-chat-1");
+      expect(row?.status).toBe("awaiting_clarify");
+      expect(
+        row?.events.some(
+          (event) => event.type === "research_plan" && event.action === "updated",
+        ),
+      ).toBe(true);
+    });
+    await expect(
+      answerClarify(runStore, "run-plan-chat-1", {
+        answers: { __plan_action__: "approve" },
+        skip: false,
+      }),
+    ).resolves.toBe("resumed");
+
+    const response = await responsePromise;
+    const { events } = await readSsePayload(response);
+    expect(buildPlan).toHaveBeenCalledTimes(2);
+    expect(
+      events.filter((event) => event.type === "research_plan").map((event) => event.action),
+    ).toEqual(["proposed", "updated", "approved"]);
+    expect(
+      events.some(
+        (event) => event.type === "lane_started" && event.title === "落地风险",
+      ),
+    ).toBe(true);
   });
 
   it("never emits a clarify card when the run row could not be armed", async () => {
@@ -1563,7 +1651,7 @@ describe("recon cold-start", () => {
     expect(researchLanes.length).toBeGreaterThanOrEqual(4);
   });
 
-  it("keeps the card when either upstream confidence is below the stricter threshold", async () => {
+  it("uses conversational clarification for one low-confidence dimension", async () => {
     const clarifyDeps: Array<Record<string, unknown>> = [];
     const response = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
@@ -1589,10 +1677,36 @@ describe("recon cold-start", () => {
 
     const { events } = await readSsePayload(response);
     expect(clarifyDeps[0]?.respectModelNoClarification).toBe(false);
-    expect(events.some((e) => e.type === "clarify")).toBe(true);
+    expect(events.some((e) => e.type === "clarify")).toBe(false);
+    expect(events.some((e) => e.type === "clarify_chat" && e.phase === "preflight")).toBe(true);
   });
 
-  it("keeps the card when the clarifier requests input despite high confidence", async () => {
+  it("uses a structured card when both upstream confidence dimensions are low", async () => {
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
+      {
+        ...baseDeps({
+          fetchImpl: gatewayStub("multi-gap-report") as unknown as typeof fetch,
+          intentConfidence: { routeConfidence: 0.89, queryConfidence: 0.88 },
+          proposeClarify: async () => ({ needed: false as const }),
+          buildPlan: async () => ({
+            topic: "deepseek v4 核心技术点",
+            complexity: "simple" as const,
+            subQuestions: ["deepseek v4 核心技术点"],
+          }),
+          executeSearch: async () => [
+            { title: "t", url: "https://ex.com/multi-gap", snippet: "s" },
+          ],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(events.some((e) => e.type === "clarify")).toBe(true);
+    expect(events.some((e) => e.type === "clarify_chat")).toBe(false);
+  });
+
+  it("uses conversational clarification for one clarifier question", async () => {
     const response = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
       {
@@ -1626,10 +1740,11 @@ describe("recon cold-start", () => {
     );
 
     const { events } = await readSsePayload(response);
-    expect(events.some((e) => e.type === "clarify" && e.questionId === "focus")).toBe(true);
+    expect(events.some((e) => e.type === "clarify")).toBe(false);
+    expect(events.some((e) => e.type === "clarify_chat" && e.phase === "preflight")).toBe(true);
   });
 
-  it("keeps the card when the clarifier fails despite high confidence", async () => {
+  it("falls back to conversational clarification when an open-query clarifier fails", async () => {
     const response = await runDeepResearchTurn(
       { model: "m", messages: [{ role: "user", content: "deepseek v4 核心技术点" }] },
       {
@@ -1652,7 +1767,8 @@ describe("recon cold-start", () => {
     );
 
     const { events } = await readSsePayload(response);
-    expect(events.some((e) => e.type === "clarify")).toBe(true);
+    expect(events.some((e) => e.type === "clarify")).toBe(false);
+    expect(events.some((e) => e.type === "clarify_chat" && e.phase === "preflight")).toBe(true);
   });
 
   it("completes the run even when recon throws", async () => {

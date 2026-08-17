@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../../lib/session";
 import { defaultRunStore } from "../../../../../lib/deep-research/run-store";
-import { notifyClarifyResume } from "../../../../../lib/deep-research/run-wait";
+import {
+  CHAT_CLARIFY_ANSWER_KEY,
+  MAX_GATE_ANSWER_CHARS,
+  MAX_PLAN_PATCH_CHARS,
+  PLAN_GATE_ACTION_KEY,
+  PLAN_GATE_PATCH_KEY,
+  notifyClarifyResume,
+} from "../../../../../lib/deep-research/run-wait";
 import { withRequestLog } from "../../../../../lib/observability/with-request-log";
 
 export async function POST(request: Request) {
@@ -22,13 +29,16 @@ export async function POST(request: Request) {
   });
   logCtx.setMode("deep_research");
 
-  let body: { runId?: unknown; answers?: unknown; skip?: unknown };
+  let body: {
+    runId?: unknown;
+    answers?: unknown;
+    skip?: unknown;
+    chatReply?: unknown;
+    planAction?: unknown;
+    planPatch?: unknown;
+  };
   try {
-    body = (await request.json()) as {
-      runId?: unknown;
-      answers?: unknown;
-      skip?: unknown;
-    };
+    body = (await request.json()) as typeof body;
   } catch {
     logCtx.markNoop();
     return NextResponse.json(
@@ -48,12 +58,29 @@ export async function POST(request: Request) {
   logCtx.setRun(runId);
 
   const answers: Record<string, string> = {};
-  if (body.answers && typeof body.answers === "object" && !Array.isArray(body.answers)) {
+  const chatReply = typeof body.chatReply === "string" ? body.chatReply.trim() : "";
+  if (chatReply) {
+    answers[CHAT_CLARIFY_ANSWER_KEY] = chatReply.slice(0, MAX_GATE_ANSWER_CHARS);
+  } else if (body.answers && typeof body.answers === "object" && !Array.isArray(body.answers)) {
     for (const [key, value] of Object.entries(body.answers as Record<string, unknown>)) {
-      if (typeof value === "string" && value.trim()) answers[key] = value.trim();
+      const normalizedKey = key.trim().slice(0, 128);
+      if (normalizedKey && typeof value === "string" && value.trim()) {
+        answers[normalizedKey] = value.trim().slice(0, MAX_GATE_ANSWER_CHARS);
+      }
     }
   }
-  const skip = body.skip === true || Object.keys(answers).length === 0;
+  if (
+    typeof body.planAction === "string" &&
+    (body.planAction === "approve" || body.planAction === "edit" || body.planAction === "skip")
+  ) {
+    answers[PLAN_GATE_ACTION_KEY] = body.planAction;
+  }
+  if (typeof body.planPatch === "string" && body.planPatch.trim()) {
+    answers[PLAN_GATE_PATCH_KEY] = body.planPatch.trim().slice(0, MAX_PLAN_PATCH_CHARS);
+  }
+  const skip =
+    body.skip === true ||
+    (Object.keys(answers).length === 0 && body.planAction === undefined);
 
   let outcome: "resumed" | "already_continued" | "not_found";
   try {
