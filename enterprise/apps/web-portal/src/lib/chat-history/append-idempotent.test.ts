@@ -132,6 +132,24 @@ function createFakeClient(): SqlClient & {
         return { rows: [], rowCount: 1 };
       }
 
+      if (sql.startsWith("update chat_messages")) {
+        const [content, model, metadata, updatedAt, id, sessionId, tenantId, userId] = params;
+        const row = messages.get(String(id));
+        if (
+          !row ||
+          row.session_id !== sessionId ||
+          row.tenant_id !== tenantId ||
+          row.user_id !== userId
+        ) {
+          return { rows: [], rowCount: 0 };
+        }
+        row.content = content;
+        row.model = model;
+        row.metadata = metadata;
+        row.updated_at = updatedAt;
+        return { rows: [], rowCount: 1 };
+      }
+
       throw new Error(`unhandled sql in fake client: ${statement}`);
     },
     async transaction(callback) {
@@ -282,6 +300,62 @@ describe.each(["postgresql", "mysql"] as const)("append idempotency (%s)", (dial
         sessionId,
         [{ ...base, content: "different" }],
       ),
+    ).rejects.toBeInstanceOf(ChatHistoryConflictError);
+  });
+
+  it("updates only an owned deep-research assistant checkpoint", async () => {
+    const client = createFakeClient();
+    const store = new SqlChatHistoryStore(dialect, client);
+    const sessionId = ulid();
+    seedSession(client, sessionId);
+    const messageId = ulid();
+    const base = {
+      id: messageId,
+      session_id: sessionId,
+      tenant_id: "01TENANTAAAAAAAAAAAAAAAAAA",
+      user_id: "01USERAAAAAAAAAAAAAAAAAAAA",
+      role: "assistant" as const,
+      content: "",
+      created_at: "2026-07-30T00:00:00.000Z",
+      deep_research: {
+        runId: "pending",
+        status: "running" as const,
+        events: [] as Array<{ type: "run_started"; runId: string }>,
+      },
+    };
+    const ctx = {
+      tenantId: "01TENANTAAAAAAAAAAAAAAAAAA",
+      userId: "01USERAAAAAAAAAAAAAAAAAAAA",
+    };
+
+    await store.appendChatMessages(ctx, sessionId, [base]);
+    await store.appendChatMessages(ctx, sessionId, [
+      {
+        ...base,
+        content: "partial",
+        deep_research: {
+          runId: "run-1",
+          status: "running",
+          events: [{ type: "run_started", runId: "run-1" }],
+        },
+      },
+    ]);
+
+    expect(client.messages.get(messageId)?.content).toBe("partial");
+    const metadata = JSON.parse(String(client.messages.get(messageId)?.metadata ?? "{}")) as {
+      deep_research?: { runId?: string; events?: unknown[] };
+    };
+    expect(metadata.deep_research?.runId).toBe("run-1");
+    expect(metadata.deep_research?.events).toHaveLength(1);
+
+    await expect(
+      store.appendChatMessages(ctx, sessionId, [
+        {
+          ...base,
+          content: "different run",
+          deep_research: { ...base.deep_research, runId: "run-2" },
+        },
+      ]),
     ).rejects.toBeInstanceOf(ChatHistoryConflictError);
   });
 

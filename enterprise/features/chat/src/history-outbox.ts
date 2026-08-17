@@ -279,6 +279,14 @@ export function stripToAppendPayload(message: ChatMessage): HistoryAppendPayload
       ...(message.deep_research.clarifyAnswers
         ? { clarifyAnswers: message.deep_research.clarifyAnswers }
         : {}),
+      ...(message.deep_research.profile ? { profile: message.deep_research.profile } : {}),
+      ...(message.deep_research.plan ? { plan: message.deep_research.plan } : {}),
+      ...(message.deep_research.planVersion
+        ? { planVersion: message.deep_research.planVersion }
+        : {}),
+      ...(message.deep_research.assumptions?.length
+        ? { assumptions: message.deep_research.assumptions }
+        : {}),
     };
   }
   return payload;

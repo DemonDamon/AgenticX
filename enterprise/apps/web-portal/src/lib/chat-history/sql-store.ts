@@ -435,6 +435,21 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
     );
   }
 
+  private isDeepResearchCheckpointUpdate(
+    existing: ChatMessage,
+    incoming: ChatMessage,
+  ): boolean {
+    const existingRunId = existing.deep_research?.runId;
+    const incomingRunId = incoming.deep_research?.runId;
+    return (
+      existing.role === "assistant" &&
+      incoming.role === "assistant" &&
+      Boolean(existingRunId) &&
+      Boolean(incomingRunId) &&
+      (existingRunId === "pending" || existingRunId === incomingRunId)
+    );
+  }
+
   private async ensureMessagesCompatible(
     client: SqlClient,
     ctx: ChatHistoryContext,
@@ -457,7 +472,8 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
         mapped.session_id !== sessionId ||
         mapped.tenant_id !== ctx.tenantId ||
         mapped.user_id !== ctx.userId ||
-        !this.messagesEquivalent(mapped, message)
+        (!this.messagesEquivalent(mapped, message) &&
+          !this.isDeepResearchCheckpointUpdate(mapped, message))
       ) {
         throw new ChatHistoryConflictError("message id conflict with different payload");
       }
@@ -465,6 +481,43 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
     if (existingCount === 0) return "none_exist";
     if (existingCount === messages.length) return "all_exist";
     throw new ChatHistoryConflictError("partial message id overlap");
+  }
+
+  /**
+   * Refresh only an existing deep-research assistant shell. Ordinary same-id
+   * messages retain strict immutable-payload idempotency.
+   */
+  private async updateDeepResearchCheckpoints(
+    client: SqlClient,
+    ctx: ChatHistoryContext,
+    sessionId: string,
+    messages: ChatMessage[],
+    now: Date,
+  ): Promise<void> {
+    for (const message of messages) {
+      if (message.role !== "assistant" || !message.deep_research?.runId) continue;
+      await client.query(
+        `update chat_messages
+         set content = ${this.dialect === "postgresql" ? "$1" : "?"},
+             model = ${this.dialect === "postgresql" ? "$2" : "?"},
+             metadata = ${this.dialect === "postgresql" ? "$3" : "?"},
+             updated_at = ${this.dialect === "postgresql" ? "$4" : "?"}
+         where id = ${this.dialect === "postgresql" ? "$5" : "?"}
+           and session_id = ${this.dialect === "postgresql" ? "$6" : "?"}
+           and tenant_id = ${this.dialect === "postgresql" ? "$7" : "?"}
+           and user_id = ${this.dialect === "postgresql" ? "$8" : "?"}`,
+        [
+          message.content,
+          message.model ?? null,
+          serializeMessageMetadata(message),
+          now,
+          message.id,
+          sessionId,
+          ctx.tenantId,
+          ctx.userId,
+        ],
+      );
+    }
   }
 
   public async appendChatMessages(
@@ -515,6 +568,8 @@ export class SqlChatHistoryStore implements ChatHistoryStore {
       const compatibility = await this.ensureMessagesCompatible(tx, ctx, sessionId, messages);
       if (compatibility === "none_exist") {
         await this.insertMessages(tx, ctx, sessionId, messages, now);
+      } else {
+        await this.updateDeepResearchCheckpoints(tx, ctx, sessionId, messages, now);
       }
 
       if (operationId && payloadHash) {

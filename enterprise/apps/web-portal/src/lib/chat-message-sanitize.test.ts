@@ -283,6 +283,61 @@ describe("sanitizeInboundMessages", () => {
     expect(messages[0]?.attachments?.[1]?.attachment_id).toBeUndefined();
   });
 
+  it("bounds deep-research interaction profile and plan metadata", () => {
+    const messages = sanitizeInboundMessages(SESSION, TENANT, USER, [
+      {
+        id: "01HYAAAAAAAAAAAAAAAAAAAAD1",
+        role: "assistant",
+        content: "",
+        created_at: "2026-08-10T00:00:00.000Z",
+        deep_research: {
+          runId: "run-1",
+          status: "running",
+          events: [],
+          profile: {
+            researchDepth: "deep",
+            clarifyMode: "chat",
+            clarifyBudget: { maxRounds: 99, allowMidRun: false },
+            planVisibility: "chat_editable",
+            assumptions: [" a "],
+          },
+          plan: {
+            version: 2,
+            objective: " objective ",
+            scope: [" market "],
+            subQuestions: [{ id: "sq1", title: " size ", purpose: " decide " }],
+            sourceStrategy: [" primary "],
+            deliverables: [" report "],
+            assumptions: [" public data "],
+          },
+          planVersion: 2,
+          assumptions: [" public data "],
+        },
+      },
+    ]);
+
+    expect(messages[0]?.deep_research).toMatchObject({
+      profile: {
+        researchDepth: "deep",
+        clarifyMode: "chat",
+        clarifyBudget: { maxRounds: 3, allowMidRun: false },
+        planVisibility: "chat_editable",
+        assumptions: ["a"],
+      },
+      plan: {
+        version: 2,
+        objective: "objective",
+        scope: ["market"],
+        subQuestions: [{ id: "sq1", title: "size", purpose: "decide" }],
+        sourceStrategy: ["primary"],
+        deliverables: ["report"],
+        assumptions: ["public data"],
+      },
+      planVersion: 2,
+      assumptions: ["public data"],
+    });
+  });
+
   it("rejects empty or illegal message ids", () => {
     expect(() =>
       sanitizeInboundMessages(SESSION, TENANT, USER, [

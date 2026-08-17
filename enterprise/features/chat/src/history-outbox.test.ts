@@ -179,6 +179,24 @@ describe("history-outbox", () => {
           { type: "phase", phase: "done", message: "深度研究完成" },
         ],
         artifactIds: ["art-1"],
+        profile: {
+          researchDepth: "deep",
+          clarifyMode: "chat",
+          clarifyBudget: { maxRounds: 2, allowMidRun: true },
+          planVisibility: "chat_editable",
+          assumptions: ["按公开资料研究"],
+        },
+        plan: {
+          version: 2,
+          objective: "形成可决策报告",
+          scope: ["市场"],
+          subQuestions: [{ id: "sq1", title: "市场规模" }],
+          sourceStrategy: ["优先一手来源"],
+          deliverables: ["摘要"],
+          assumptions: ["按公开资料研究"],
+        },
+        planVersion: 2,
+        assumptions: ["按公开资料研究"],
       },
     });
     expect(payload.deep_research).toEqual({
@@ -189,6 +207,24 @@ describe("history-outbox", () => {
         { type: "phase", phase: "done", message: "深度研究完成" },
       ],
       artifactIds: ["art-1"],
+      profile: {
+        researchDepth: "deep",
+        clarifyMode: "chat",
+        clarifyBudget: { maxRounds: 2, allowMidRun: true },
+        planVisibility: "chat_editable",
+        assumptions: ["按公开资料研究"],
+      },
+      plan: {
+        version: 2,
+        objective: "形成可决策报告",
+        scope: ["市场"],
+        subQuestions: [{ id: "sq1", title: "市场规模" }],
+        sourceStrategy: ["优先一手来源"],
+        deliverables: ["摘要"],
+        assumptions: ["按公开资料研究"],
+      },
+      planVersion: 2,
+      assumptions: ["按公开资料研究"],
     });
   });
 
