@@ -10,8 +10,10 @@ import {
   Check,
   ChevronDown,
   CircleQuestionMark,
+  Folder,
   FolderOpen,
-  PanelRightOpen,
+  Plus,
+  Search,
   ShieldCheck,
   Zap,
 } from "lucide-react";
@@ -21,7 +23,24 @@ import {
   confirmStrategyLabel,
 } from "../constants/confirm-strategy-options";
 
-const MENU_WIDTH = 288;
+const MENU_WIDTH = 272;
+
+function normalizeWorkspaceSearch(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase();
+}
+
+export function filterComposerWorkspaces(
+  workspaces: Taskspace[],
+  query: string,
+): Taskspace[] {
+  const normalizedQuery = normalizeWorkspaceSearch(query);
+  if (!normalizedQuery) return workspaces;
+  return workspaces.filter((workspace) =>
+    [workspace.label, workspace.path].some((value) =>
+      normalizeWorkspaceSearch(String(value || "")).includes(normalizedQuery),
+    ),
+  );
+}
 
 export function composerWorkspaceLabel(
   workspaces: Taskspace[],
@@ -52,10 +71,12 @@ type Props = {
   activeTaskspaceId: string | null;
   workspacePanelOpen: boolean;
   workspaceLoading?: boolean;
+  workspaceActionBusy?: boolean;
   workspaceError?: string;
   onWorkspaceMenuOpen: () => void | Promise<void>;
   onWorkspaceSelect: (taskspaceId: string) => void;
-  onOpenWorkspacePanel: () => void;
+  onCreateWorkspace: (path: string, label: string) => Promise<boolean>;
+  onOpenLocalFolder: () => Promise<boolean>;
   confirmStrategy: ConfirmStrategy;
   permissionSaving?: boolean;
   permissionError?: string;
@@ -81,10 +102,12 @@ export function ComposerContextControls({
   activeTaskspaceId,
   workspacePanelOpen,
   workspaceLoading = false,
+  workspaceActionBusy = false,
   workspaceError = "",
   onWorkspaceMenuOpen,
   onWorkspaceSelect,
-  onOpenWorkspacePanel,
+  onCreateWorkspace,
+  onOpenLocalFolder,
   confirmStrategy,
   permissionSaving = false,
   permissionError = "",
@@ -92,10 +115,23 @@ export function ComposerContextControls({
 }: Props) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const [menuPos, setMenuPos] = useState<{ bottom: number; left: number } | null>(null);
+  const [workspaceQuery, setWorkspaceQuery] = useState("");
+  const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
+  const [newWorkspacePath, setNewWorkspacePath] = useState("");
+  const [newWorkspaceLabel, setNewWorkspaceLabel] = useState("");
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
   const permissionButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const workspaceSearchRef = useRef<HTMLInputElement>(null);
+  const newWorkspacePathRef = useRef<HTMLInputElement>(null);
   const focusedMenuRef = useRef<OpenMenu>(null);
+
+  const resetWorkspaceMenu = useCallback(() => {
+    setWorkspaceQuery("");
+    setShowCreateWorkspace(false);
+    setNewWorkspacePath("");
+    setNewWorkspaceLabel("");
+  }, []);
 
   const closeMenu = useCallback((restoreFocus = false) => {
     const trigger =
@@ -103,15 +139,17 @@ export function ComposerContextControls({
     focusedMenuRef.current = null;
     setOpenMenu(null);
     setMenuPos(null);
+    if (openMenu === "workspace") resetWorkspaceMenu();
     if (restoreFocus) window.requestAnimationFrame(() => trigger?.focus());
-  }, [openMenu]);
+  }, [openMenu, resetWorkspaceMenu]);
 
   useEffect(() => {
     if (active) return;
     focusedMenuRef.current = null;
     setOpenMenu(null);
     setMenuPos(null);
-  }, [active]);
+    resetWorkspaceMenu();
+  }, [active, resetWorkspaceMenu]);
 
   const syncPosition = useCallback(() => {
     const anchor =
@@ -161,7 +199,11 @@ export function ComposerContextControls({
     if (!openMenu || !menuPos || focusedMenuRef.current === openMenu) return;
     focusedMenuRef.current = openMenu;
     const frame = window.requestAnimationFrame(() => {
-      menuRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus();
+      if (openMenu === "workspace") {
+        workspaceSearchRef.current?.focus();
+      } else {
+        menuRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus();
+      }
     });
     return () => window.cancelAnimationFrame(frame);
   }, [menuPos, openMenu]);
@@ -171,6 +213,7 @@ export function ComposerContextControls({
     focusedMenuRef.current = null;
     setMenuPos(null);
     setOpenMenu(next);
+    resetWorkspaceMenu();
     if (next) void onWorkspaceMenuOpen();
   };
 
@@ -185,6 +228,12 @@ export function ComposerContextControls({
       event.preventDefault();
       event.stopPropagation();
       closeMenu(true);
+      return;
+    }
+    if (
+      event.target instanceof HTMLInputElement &&
+      (event.key === "Home" || event.key === "End")
+    ) {
       return;
     }
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -205,6 +254,7 @@ export function ComposerContextControls({
   };
 
   const activeWorkspaceLabel = composerWorkspaceLabel(workspaces, activeTaskspaceId);
+  const filteredWorkspaces = filterComposerWorkspaces(workspaces, workspaceQuery);
   const permissionLabel = composerPermissionLabel(confirmStrategy);
   const permissionIsAuto = confirmStrategy === "auto";
 
@@ -225,14 +275,26 @@ export function ComposerContextControls({
         >
           {openMenu === "workspace" ? (
             <>
-              <div className="px-2.5 pb-1.5 pt-1 text-[11px] font-medium text-text-faint">
-                当前会话的工作区
+              <div className="relative mb-1.5">
+                <Search
+                  className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-faint"
+                  strokeWidth={1.8}
+                  aria-hidden
+                />
+                <input
+                  ref={workspaceSearchRef}
+                  value={workspaceQuery}
+                  onChange={(event) => setWorkspaceQuery(event.target.value)}
+                  placeholder="搜索工作区"
+                  aria-label="搜索工作区"
+                  className="h-8 w-full rounded-lg border border-border bg-surface-card pl-8 pr-2.5 text-[12px] text-text-strong outline-none placeholder:text-text-faint focus:border-[var(--settings-accent-border)]"
+                />
               </div>
-              <div className="max-h-52 overflow-y-auto">
+              <div className="max-h-56 overflow-y-auto">
                 {workspaceLoading ? (
                   <div className="px-2.5 py-3 text-[12px] text-text-faint">正在读取工作区…</div>
-                ) : workspaces.length > 0 ? (
-                  workspaces.map((workspace) => {
+                ) : filteredWorkspaces.length > 0 ? (
+                  filteredWorkspaces.map((workspace) => {
                     const selected =
                       workspace.id === activeTaskspaceId ||
                       (!activeTaskspaceId && workspace === workspaces[0]);
@@ -243,7 +305,8 @@ export function ComposerContextControls({
                         type="button"
                         role="menuitemradio"
                         aria-checked={selected}
-                        className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                        title={workspace.path}
+                        className={`flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left transition-colors ${
                           selected ? "bg-surface-card-strong" : "hover:bg-surface-hover"
                         }`}
                         onClick={() => {
@@ -251,38 +314,103 @@ export function ComposerContextControls({
                           closeMenu(true);
                         }}
                       >
-                        <FolderOpen className="h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[13px] text-text-strong">{rowLabel}</span>
-                          <span className="block truncate text-[10px] text-text-faint" title={workspace.path}>
-                            {workspace.path}
-                          </span>
+                        <Folder className="h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} />
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-text-strong">
+                          {rowLabel}
                         </span>
                         {selected ? <Check className="h-4 w-4 shrink-0 text-theme" strokeWidth={2} /> : null}
                       </button>
                     );
                   })
                 ) : (
-                  <div className="px-2.5 py-3 text-[12px] leading-5 text-text-faint">
-                    {workspaceError || "还没有可选工作区，可进入工作区面板添加文件或目录。"}
+                  <div className="px-2.5 py-3 text-[12px] text-text-faint">
+                    {workspaceQuery.trim() ? "没有匹配的工作区" : "暂无可选工作区"}
                   </div>
                 )}
               </div>
-              {workspaceError && workspaces.length > 0 ? (
+              {workspaceError ? (
                 <div className="px-2.5 py-1 text-[11px] text-status-warning">{workspaceError}</div>
               ) : null}
               <div className="my-1 border-t border-[var(--border-muted)]" />
+              {showCreateWorkspace ? (
+                <form
+                  className="rounded-lg bg-surface-card p-2"
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    if (!newWorkspacePath.trim() || workspaceActionBusy) return;
+                    if (await onCreateWorkspace(newWorkspacePath, newWorkspaceLabel)) {
+                      closeMenu(true);
+                    }
+                  }}
+                >
+                  <div className="mb-1.5 text-[11px] font-medium text-text-muted">新建工作区</div>
+                  <input
+                    ref={newWorkspacePathRef}
+                    value={newWorkspacePath}
+                    onChange={(event) => setNewWorkspacePath(event.target.value)}
+                    placeholder="目录绝对路径"
+                    aria-label="新工作区目录"
+                    className="mb-1.5 h-8 w-full rounded-md border border-border bg-surface-panel px-2 text-[12px] text-text-strong outline-none placeholder:text-text-faint focus:border-[var(--settings-accent-border)]"
+                  />
+                  <input
+                    value={newWorkspaceLabel}
+                    onChange={(event) => setNewWorkspaceLabel(event.target.value)}
+                    placeholder="显示名称（可选）"
+                    aria-label="新工作区名称"
+                    className="h-8 w-full rounded-md border border-border bg-surface-panel px-2 text-[12px] text-text-strong outline-none placeholder:text-text-faint focus:border-[var(--settings-accent-border)]"
+                  />
+                  <div className="mt-2 flex justify-end gap-1.5">
+                    <button
+                      type="button"
+                      className="h-7 rounded-md px-2 text-[11px] text-text-muted hover:bg-surface-hover"
+                      onClick={() => {
+                        setShowCreateWorkspace(false);
+                        setNewWorkspacePath("");
+                        setNewWorkspaceLabel("");
+                        window.requestAnimationFrame(() => workspaceSearchRef.current?.focus());
+                      }}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!newWorkspacePath.trim() || workspaceActionBusy}
+                      className="h-7 rounded-md px-2.5 text-[11px] transition-opacity disabled:opacity-45"
+                      style={{
+                        background: "var(--ui-btn-primary-bg)",
+                        color: "var(--ui-btn-primary-text)",
+                      }}
+                    >
+                      {workspaceActionBusy ? "创建中…" : "创建"}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={workspaceActionBusy}
+                  className="flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover disabled:opacity-50"
+                  onClick={() => {
+                    setShowCreateWorkspace(true);
+                    window.requestAnimationFrame(() => newWorkspacePathRef.current?.focus());
+                  }}
+                >
+                  <Plus className="h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} />
+                  <span>新建工作区</span>
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
-                onClick={() => {
-                  closeMenu(false);
-                  onOpenWorkspacePanel();
+                disabled={workspaceActionBusy}
+                className="flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover disabled:opacity-50"
+                onClick={async () => {
+                  if (await onOpenLocalFolder()) closeMenu(true);
                 }}
               >
-                <PanelRightOpen className="h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} />
-                <span>管理工作区</span>
+                <FolderOpen className="h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} />
+                <span>{workspaceActionBusy ? "正在添加…" : "打开本地文件夹"}</span>
               </button>
             </>
           ) : (

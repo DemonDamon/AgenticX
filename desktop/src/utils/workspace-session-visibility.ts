@@ -7,6 +7,20 @@ export function shouldKeepWorkspaceVisibleWhenSessionMissing(
   return sessionId.trim().length === 0 && awaitingFreshSession;
 }
 
+/**
+ * Workspace selection is a valid first action in a new topic. Materialize the
+ * lazy session before attaching a directory instead of requiring a chat turn.
+ */
+export async function ensureWorkspaceSessionBeforeFirstMessage(
+  sessionId: string,
+  materializeSession: () => Promise<string | null>,
+): Promise<string | null> {
+  const existing = sessionId.trim();
+  if (existing) return existing;
+  const created = (await materializeSession())?.trim() ?? "";
+  return created || null;
+}
+
 export type NewTaskNavPane = {
   id: string;
   avatarId: string | null;

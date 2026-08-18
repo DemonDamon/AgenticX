@@ -352,6 +352,8 @@ import {
   resolveReferenceSourcePath,
 } from "../utils/chat-file-mention";
 import { absoluteTaskspacePath } from "../utils/workspace-file-path";
+import { formatTaskspaceAddError } from "../utils/taskspace-errors";
+import { ensureWorkspaceSessionBeforeFirstMessage } from "../utils/workspace-session-visibility";
 import {
   composerAcceptsDragTypes,
   decodeNearWorkspaceDragEntry,
@@ -2767,6 +2769,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     preloadedComposerTaskspaces,
   );
   const [composerWorkspaceLoading, setComposerWorkspaceLoading] = useState(false);
+  const [composerWorkspaceActionBusy, setComposerWorkspaceActionBusy] = useState(false);
   const [composerWorkspaceError, setComposerWorkspaceError] = useState("");
   const [composerPermissionSaving, setComposerPermissionSaving] = useState(false);
   const [composerPermissionError, setComposerPermissionError] = useState("");
@@ -2780,6 +2783,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       composerWorkspaceSessionRef.current = nextSessionId;
       composerWorkspaceRequestRef.current += 1;
       setComposerWorkspaceLoading(false);
+      setComposerWorkspaceActionBusy(false);
     }
     setComposerTaskspaces(preloadedComposerTaskspaces);
     setComposerWorkspaceError("");
@@ -4154,7 +4158,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return "";
   };
 
-  const refreshComposerTaskspaces = async () => {
+  const refreshComposerTaskspaces = async (): Promise<Taskspace[] | null> => {
     const apiSessionId = String(
       useAppStore.getState().panes.find((item) => item.id === pane.id)?.sessionId ?? "",
     ).trim();
@@ -4162,8 +4166,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (!apiSessionId) {
       setComposerTaskspaces([]);
       setComposerWorkspaceLoading(false);
-      setComposerWorkspaceError("新对话尚未建立会话，请进入工作区面板选择或添加目录。");
-      return;
+      setComposerWorkspaceError("");
+      return null;
     }
     setComposerWorkspaceLoading(true);
     setComposerWorkspaceError("");
@@ -4176,11 +4180,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         requestId !== composerWorkspaceRequestRef.current ||
         currentSessionId !== apiSessionId
       ) {
-        return;
+        return null;
       }
       if (!result.ok || !Array.isArray(result.workspaces)) {
         setComposerWorkspaceError(result.error ?? "工作区读取失败");
-        return;
+        return null;
       }
       const next = result.workspaces as Taskspace[];
       setComposerTaskspaces(next);
@@ -4189,11 +4193,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       ).trim();
       if (next.length === 0) {
         if (currentId) setActiveTaskspace(pane.id, null);
-        return;
+        return next;
       }
       if (!currentId || !next.some((item) => item.id === currentId)) {
         setActiveTaskspace(pane.id, next[0].id);
       }
+      return next;
     } catch (error) {
       const currentSessionId = String(
         useAppStore.getState().panes.find((item) => item.id === pane.id)?.sessionId ?? "",
@@ -4204,6 +4209,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       ) {
         setComposerWorkspaceError(`工作区读取失败：${String(error)}`);
       }
+      return null;
     } finally {
       if (requestId === composerWorkspaceRequestRef.current) {
         setComposerWorkspaceLoading(false);
@@ -4211,15 +4217,89 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
   };
 
-  const openComposerWorkspacePanel = () => {
-    if (!pane.taskspacePanelOpen) {
-      openWorkspaceSidebarForPane(
-        pane.id,
-        paneRef.current?.clientWidth ?? paneWidth,
-        openSidePanel,
-      );
+  const addComposerWorkspace = async (
+    pathValue: string,
+    labelValue: string,
+  ): Promise<boolean> => {
+    const path = pathValue.trim();
+    if (!path) {
+      setComposerWorkspaceError("请输入工作区目录路径");
+      return false;
     }
-    setWorkPanelFocus({ kind: "workspace" });
+
+    const currentSessionId = String(
+      useAppStore.getState().panes.find((item) => item.id === pane.id)?.sessionId ?? "",
+    ).trim();
+    if (!currentSessionId) {
+      setComposerWorkspaceActionBusy(true);
+      setComposerWorkspaceError("");
+    }
+    const sessionId = await ensureWorkspaceSessionBeforeFirstMessage(
+      currentSessionId,
+      materializeLazySession,
+    );
+    if (!sessionId) {
+      if (!currentSessionId) {
+        setComposerWorkspaceActionBusy(false);
+        setComposerWorkspaceError("会话初始化失败，请检查本地服务后重试。");
+      }
+      return false;
+    }
+
+    setComposerWorkspaceActionBusy(true);
+    setComposerWorkspaceError("");
+    try {
+      const result = await window.agenticxDesktop.addTaskspace({
+        sessionId,
+        path,
+        label: labelValue.trim() || undefined,
+      });
+      if (!result.ok) {
+        setComposerWorkspaceError(formatTaskspaceAddError(result.error));
+        return false;
+      }
+
+      const next = await refreshComposerTaskspaces();
+      const added = result.workspace as Taskspace | undefined;
+      const selected =
+        (added?.id ? next?.find((item) => item.id === added.id) : undefined) ??
+        next?.find((item) => item.path === path);
+      if (selected) setActiveTaskspace(pane.id, selected.id);
+      setTaskspaceAutoRefreshKey((value) => value + 1);
+      return true;
+    } catch (error) {
+      setComposerWorkspaceError(`添加工作区失败：${String(error)}`);
+      return false;
+    } finally {
+      setComposerWorkspaceActionBusy(false);
+    }
+  };
+
+  const openComposerLocalFolder = async (): Promise<boolean> => {
+    const picker = window.agenticxDesktop.chooseDirectory;
+    if (typeof picker !== "function") {
+      setComposerWorkspaceError("当前客户端不支持目录选择，请完全重启桌面端后重试。");
+      return false;
+    }
+    setComposerWorkspaceActionBusy(true);
+    setComposerWorkspaceError("");
+    try {
+      const picked = await picker();
+      if (!picked.ok || !picked.path) {
+        if (!picked.canceled) {
+          setComposerWorkspaceError(picked.error ?? "目录选择失败，请重试。");
+        }
+        return false;
+      }
+      const normalized = picked.path.replace(/[\\/]+$/, "");
+      const label = normalized.split(/[\\/]/).filter(Boolean).pop() ?? "";
+      return await addComposerWorkspace(picked.path, label);
+    } catch (error) {
+      setComposerWorkspaceError(`目录选择失败：${String(error)}`);
+      return false;
+    } finally {
+      setComposerWorkspaceActionBusy(false);
+    }
   };
 
   const changeComposerConfirmStrategy = async (
@@ -13240,10 +13320,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     activeTaskspaceId={pane.activeTaskspaceId}
                     workspacePanelOpen={workspacePanelOpen}
                     workspaceLoading={composerWorkspaceLoading}
+                    workspaceActionBusy={composerWorkspaceActionBusy}
                     workspaceError={composerWorkspaceError}
-                    onWorkspaceMenuOpen={refreshComposerTaskspaces}
+                    onWorkspaceMenuOpen={() => {
+                      void refreshComposerTaskspaces();
+                    }}
                     onWorkspaceSelect={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
-                    onOpenWorkspacePanel={openComposerWorkspacePanel}
+                    onCreateWorkspace={addComposerWorkspace}
+                    onOpenLocalFolder={openComposerLocalFolder}
                     confirmStrategy={confirmStrategy}
                     permissionSaving={composerPermissionSaving}
                     permissionError={composerPermissionError}

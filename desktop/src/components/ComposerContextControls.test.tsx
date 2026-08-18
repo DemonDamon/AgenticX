@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ComposerContextControls, composerPermissionLabel, composerWorkspaceLabel } from "./ComposerContextControls";
+import {
+  ComposerContextControls,
+  composerPermissionLabel,
+  composerWorkspaceLabel,
+  filterComposerWorkspaces,
+} from "./ComposerContextControls";
 import { CONFIRM_STRATEGY_OPTIONS } from "../constants/confirm-strategy-options";
+import { ensureWorkspaceSessionBeforeFirstMessage } from "../utils/workspace-session-visibility";
 
 describe("ComposerContextControls", () => {
   it("uses a clear label for the session default workspace", () => {
@@ -21,6 +27,33 @@ describe("ComposerContextControls", () => {
       ),
     ).toBe("财报分析");
     expect(composerWorkspaceLabel([], null)).toBe("选择工作区");
+  });
+
+  it("filters the compact workspace menu by label or path", () => {
+    const workspaces = [
+      { id: "alpha", label: "研究资料", path: "/Users/demo/research" },
+      { id: "beta", label: "产品代码", path: "/Users/demo/agenticx" },
+    ];
+
+    expect(filterComposerWorkspaces(workspaces, "产品")).toEqual([workspaces[1]]);
+    expect(filterComposerWorkspaces(workspaces, "RESEARCH")).toEqual([workspaces[0]]);
+    expect(filterComposerWorkspaces(workspaces, "  ")).toEqual(workspaces);
+  });
+
+  it("materializes a session when workspace is the first new-topic action", async () => {
+    const materialize = vi.fn(async () => "sid-workspace-first");
+    await expect(ensureWorkspaceSessionBeforeFirstMessage("", materialize)).resolves.toBe(
+      "sid-workspace-first",
+    );
+    expect(materialize).toHaveBeenCalledOnce();
+  });
+
+  it("reuses the current session when workspace is selected after materialization", async () => {
+    const materialize = vi.fn(async () => "sid-unexpected");
+    await expect(
+      ensureWorkspaceSessionBeforeFirstMessage("sid-existing", materialize),
+    ).resolves.toBe("sid-existing");
+    expect(materialize).not.toHaveBeenCalled();
   });
 
   it("uses the same three permission modes as settings", () => {
@@ -43,7 +76,8 @@ describe("ComposerContextControls", () => {
         workspacePanelOpen={false}
         onWorkspaceMenuOpen={vi.fn()}
         onWorkspaceSelect={vi.fn()}
-        onOpenWorkspacePanel={vi.fn()}
+        onCreateWorkspace={vi.fn(async () => true)}
+        onOpenLocalFolder={vi.fn(async () => true)}
         confirmStrategy="auto"
         onConfirmStrategyChange={vi.fn(async () => true)}
       />,
@@ -62,7 +96,8 @@ describe("ComposerContextControls", () => {
         workspacePanelOpen={false}
         onWorkspaceMenuOpen={vi.fn()}
         onWorkspaceSelect={vi.fn()}
-        onOpenWorkspacePanel={vi.fn()}
+        onCreateWorkspace={vi.fn(async () => true)}
+        onOpenLocalFolder={vi.fn(async () => true)}
         confirmStrategy="semi-auto"
         onConfirmStrategyChange={vi.fn(async () => true)}
       />,
@@ -82,7 +117,8 @@ describe("ComposerContextControls", () => {
           workspacePanelOpen={false}
           onWorkspaceMenuOpen={vi.fn()}
           onWorkspaceSelect={vi.fn()}
-          onOpenWorkspacePanel={vi.fn()}
+          onCreateWorkspace={vi.fn(async () => true)}
+          onOpenLocalFolder={vi.fn(async () => true)}
           confirmStrategy={confirmStrategy}
           onConfirmStrategyChange={vi.fn(async () => true)}
         />,
@@ -102,7 +138,8 @@ describe("ComposerContextControls", () => {
         workspacePanelOpen={false}
         onWorkspaceMenuOpen={vi.fn()}
         onWorkspaceSelect={vi.fn()}
-        onOpenWorkspacePanel={vi.fn()}
+        onCreateWorkspace={vi.fn(async () => true)}
+        onOpenLocalFolder={vi.fn(async () => true)}
         confirmStrategy="manual"
         onConfirmStrategyChange={vi.fn(async () => true)}
       />,
