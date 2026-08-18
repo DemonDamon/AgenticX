@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus, ChevronDown, ChevronRight } from "lucide-react";
@@ -181,6 +181,8 @@ export function ChatImAvatar({
   );
 }
 
+const MESSAGE_CONTEXT_MENU_MARGIN = 8;
+
 export function ImBubble({
   message,
   resolvedReferences,
@@ -292,6 +294,7 @@ export function ImBubble({
       };
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [menuLayout, setMenuLayout] = useState<{ x: number; y: number } | null>(null);
   const [menuHasSelection, setMenuHasSelection] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const msgContentRef = useRef<HTMLDivElement | null>(null);
@@ -388,6 +391,42 @@ export function ImBubble({
     };
   }, [menuOpen]);
 
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuLayout(null);
+      return;
+    }
+
+    const reposition = () => {
+      const menu = menuRef.current;
+      if (!menu) return;
+      const rect = menu.getBoundingClientRect();
+      const maxLeft = Math.max(
+        MESSAGE_CONTEXT_MENU_MARGIN,
+        window.innerWidth - rect.width - MESSAGE_CONTEXT_MENU_MARGIN,
+      );
+      const maxTop = Math.max(
+        MESSAGE_CONTEXT_MENU_MARGIN,
+        window.innerHeight - rect.height - MESSAGE_CONTEXT_MENU_MARGIN,
+      );
+      const left = Math.min(
+        Math.max(menuPos.x, MESSAGE_CONTEXT_MENU_MARGIN),
+        maxLeft,
+      );
+      const top =
+        menuPos.y + rect.height <= window.innerHeight - MESSAGE_CONTEXT_MENU_MARGIN
+          ? Math.min(Math.max(menuPos.y, MESSAGE_CONTEXT_MENU_MARGIN), maxTop)
+          : menuPos.y - rect.height >= MESSAGE_CONTEXT_MENU_MARGIN
+            ? menuPos.y - rect.height
+            : maxTop;
+      setMenuLayout((prev) => (prev?.x === left && prev.y === top ? prev : { x: left, y: top }));
+    };
+
+    reposition();
+    window.addEventListener("resize", reposition);
+    return () => window.removeEventListener("resize", reposition);
+  }, [menuOpen, menuPos, menuHasSelection, onEditMessage, onQuoteToNewPane, onRetryMessage]);
+
   useEffect(() => {
     // NOTE: Keyword highlight used to mutate React-managed DOM nodes directly,
     // which can trigger removeChild/not-a-child crashes during reconciliation.
@@ -399,6 +438,7 @@ export function ImBubble({
     ev.stopPropagation();
     setMenuHasSelection(Boolean(getContainedSelectionText(msgContentRef.current)));
     setMenuPos({ x: ev.clientX, y: ev.clientY });
+    setMenuLayout(null);
     setMenuOpen(true);
   };
 
@@ -978,8 +1018,12 @@ export function ImBubble({
       {menuOpen ? createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[200] w-44 rounded-lg border border-border bg-surface-base p-1 shadow-2xl"
-          style={{ left: menuPos.x, top: menuPos.y }}
+          className="fixed z-[200] max-h-[calc(100vh-1rem)] w-44 overflow-y-auto rounded-lg border border-border bg-surface-base p-1 shadow-2xl"
+          style={{
+            left: menuLayout?.x ?? menuPos.x,
+            top: menuLayout?.y ?? menuPos.y,
+            visibility: menuLayout ? "visible" : "hidden",
+          }}
           role="menu"
         >
           <button
