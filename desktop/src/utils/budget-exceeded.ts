@@ -43,6 +43,10 @@ export function budgetExceededInfoFromPayload(
 export function findBudgetExceededInMessages(messages: Message[]): BudgetExceededInfo | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
+    // A later user/assistant turn means this historical budget notice is no
+    // longer the active terminal state (for example after an administrator
+    // raises the configured limit and the conversation continues).
+    if (msg.role === "user" || msg.role === "assistant") return null;
     if (msg.role !== "tool") continue;
     if (msg.noticeKind === "budget_exceeded") {
       const current = Number(msg.budgetCurrent);

@@ -70,6 +70,7 @@ from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AutoSuspendCl
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
 from agenticx.runtime.loop_controller import LoopController
+from agenticx.runtime.token_budget import session_token_budget_preflight
 from agenticx.cli.agent_tools import (
     META_TOOL_NAMES,
     STUDIO_TOOLS,
@@ -359,6 +360,29 @@ def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
         tu = SseEvent(type="token_usage", data=usage_meta)
         lines.append(f"data: {json.dumps(tu.model_dump(), ensure_ascii=False)}\n\n")
     return lines
+
+
+def _token_budget_preflight_response(session: Any) -> StreamingResponse | None:
+    """Build an early SSE terminal response before a blocked route mutates session state."""
+    payload = session_token_budget_preflight(getattr(session, "scratchpad", None))
+    if payload is None:
+        return None
+
+    async def _blocked_stream() -> AsyncGenerator[str, None]:
+        event = RuntimeEvent(
+            type=EventType.ERROR.value,
+            data=payload,
+            agent_id="meta",
+        )
+        for line in _runtime_event_to_sse_lines(event):
+            yield line
+        yield 'data: {"type":"done","data":{}}\n\n'
+
+    return StreamingResponse(
+        _blocked_stream(),
+        media_type="text/event-stream",
+        headers=_STREAMING_SSE_HEADERS,
+    )
 
 
 def _buffered_event_to_sse_lines(buffered: BufferedEvent) -> list[str]:
@@ -2503,6 +2527,9 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        token_budget_block = _token_budget_preflight_response(managed.studio_session)
+        if token_budget_block is not None:
+            return token_budget_block
         manager.align_meta_session_workspace(managed)
         # Idempotency guard: dedupe a duplicate POST (double-click / chip burst /
         # retry race) so the backend never persists a second identical user turn.
@@ -3814,6 +3841,9 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(sid, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        token_budget_block = _token_budget_preflight_response(managed.studio_session)
+        if token_budget_block is not None:
+            return token_budget_block
 
         reason = str(payload.reason or "manual").strip().lower()
         if reason not in {"stall", "interrupted", "exhausted", "rate_limit", "manual"}:
@@ -4042,6 +4072,9 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
+        token_budget_block = _token_budget_preflight_response(managed.studio_session)
+        if token_budget_block is not None:
+            return token_budget_block
         setattr(managed.studio_session, "taskspaces", list(managed.taskspaces or []))
         manager.touch(session_id)
         try:

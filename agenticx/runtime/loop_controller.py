@@ -57,6 +57,14 @@ class LoopController:
                 tools=tools,
                 system_prompt=system_prompt,
             ):
+                if (
+                    event.type == EventType.ERROR.value
+                    and bool(event.data.get("budget_exceeded"))
+                ):
+                    # A session-budget preflight is terminal for the whole loop.
+                    # Retrying iterations would only repeat the same blocked turn.
+                    yield event
+                    return
                 if event.type == EventType.FINAL.value:
                     final_text = str(event.data.get("text", ""))
                     continue

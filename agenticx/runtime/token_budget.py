@@ -16,12 +16,14 @@ from typing import Any, Dict, Optional, Tuple
 
 _log = logging.getLogger(__name__)
 
-DEFAULT_MAX_TOKENS_PER_SESSION = 500_000
+DEFAULT_MAX_TOKENS_PER_SESSION = 1_000_000
+DEFAULT_WARNING_TOKENS_PER_SESSION = 500_000
 DEFAULT_MAX_TOKENS_PER_TURN = 100_000
 MIN_MAX_TOKENS_PER_SESSION = 100_000
 MAX_MAX_TOKENS_PER_SESSION = 5_000_000
 MIN_MAX_TOKENS_PER_TURN = 50_000
 MAX_MAX_TOKENS_PER_TURN = 1_000_000
+TOKEN_BUDGET_SCRATCHPAD_KEY = "_token_budget_usage_v1"
 
 
 class BudgetLevel(str, Enum):
@@ -87,10 +89,10 @@ def resolve_token_budget_limits(
 class TokenBudgetGuard:
     """Per-session token budget with tiered enforcement.
 
-    Thresholds (fraction of max_tokens_per_session):
-      - 80%: WARNING  -> inject convergence hint
+    Session thresholds:
+      - fixed 500,000 tokens: WARNING -> notify and inject convergence hint
       - 95%: COMPRESS -> force context compaction
-      - 100%: EXCEEDED -> terminate turn and output current results
+      - 100%: EXCEEDED -> reject the next turn; the current paid turn may finish
     """
 
     def __init__(
@@ -111,6 +113,7 @@ class TokenBudgetGuard:
         self.cumulative_output: int = 0
         self.turn_input: int = 0
         self.turn_output: int = 0
+        self.warning_emitted: bool = False
 
     @property
     def cumulative_total(self) -> int:
@@ -136,16 +139,24 @@ class TokenBudgetGuard:
         self.turn_input += inp
         self.turn_output += out
 
+    def restore_usage(self, data: Optional[Dict[str, Any]]) -> None:
+        """Restore cumulative usage without replacing the active configured limits."""
+        payload = data if isinstance(data, dict) else {}
+        self.cumulative_input = max(0, int(payload.get("cumulative_input", 0) or 0))
+        self.cumulative_output = max(0, int(payload.get("cumulative_output", 0) or 0))
+        self.warning_emitted = bool(payload.get("warning_emitted", False))
+        self.reset_turn()
+
     def check_session(self) -> BudgetLevel:
         """Check cumulative session budget."""
         if self.max_session <= 0:
             return BudgetLevel.OK
-        ratio = self.cumulative_total / self.max_session
-        if ratio >= 1.0:
+        if self.cumulative_total >= self.max_session:
             return BudgetLevel.EXCEEDED
+        ratio = self.cumulative_total / self.max_session
         if ratio >= 0.95:
             return BudgetLevel.COMPRESS
-        if ratio >= 0.80:
+        if self.cumulative_total >= DEFAULT_WARNING_TOKENS_PER_SESSION:
             return BudgetLevel.WARNING
         return BudgetLevel.OK
 
@@ -197,6 +208,7 @@ class TokenBudgetGuard:
         return {
             "cumulative_input": self.cumulative_input,
             "cumulative_output": self.cumulative_output,
+            "warning_emitted": self.warning_emitted,
             "max_session": self.max_session,
             "max_turn": self.max_turn,
         }
@@ -208,6 +220,39 @@ class TokenBudgetGuard:
             max_tokens_per_session=int(data.get("max_session", DEFAULT_MAX_TOKENS_PER_SESSION) or DEFAULT_MAX_TOKENS_PER_SESSION),
             max_tokens_per_turn=int(data.get("max_turn", DEFAULT_MAX_TOKENS_PER_TURN) or DEFAULT_MAX_TOKENS_PER_TURN),
         )
-        guard.cumulative_input = int(data.get("cumulative_input", 0) or 0)
-        guard.cumulative_output = int(data.get("cumulative_output", 0) or 0)
+        guard.restore_usage(data)
         return guard
+
+
+def session_token_budget_preflight(
+    scratchpad: Any,
+    *,
+    max_tokens_per_session: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return a terminal error payload when persisted usage blocks the next turn.
+
+    Only cumulative usage is restored from the session. The active configuration
+    remains authoritative, so increasing the hard cap immediately unlocks a session.
+    """
+    guard = TokenBudgetGuard(max_tokens_per_session=int(max_tokens_per_session or 0))
+    persisted = (
+        scratchpad.get(TOKEN_BUDGET_SCRATCHPAD_KEY)
+        if isinstance(scratchpad, dict)
+        else None
+    )
+    guard.restore_usage(persisted if isinstance(persisted, dict) else None)
+    if guard.check_session() != BudgetLevel.EXCEEDED:
+        return None
+    return {
+        "text": (
+            "本会话已达到 Token 上限 "
+            f"（{guard.cumulative_total}/{guard.max_session}）。"
+            "请新建会话，或在开发者设置提高上限后继续。"
+        ),
+        "detector": "token_budget",
+        "budget_exceeded": True,
+        "budget_source": "session",
+        "current": guard.cumulative_total,
+        "max_allowed": guard.max_session,
+        "blocked_before_model": True,
+    }

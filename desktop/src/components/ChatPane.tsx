@@ -10356,6 +10356,7 @@ export function ChatPane({
       let full = "";
       let cumulativeFull = "";
       let receivedFinalEvent = false;
+      let receivedBudgetExceededEvent = false;
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
@@ -11796,6 +11797,7 @@ export function ChatPane({
                 payload.data as Record<string, unknown> | undefined,
               );
               if (budgetInfo) {
+                receivedBudgetExceededEvent = true;
                 const sid = (pane.sessionId || "").trim();
                 setBudgetExceededInfo({ ...budgetInfo, sessionId: sid || budgetInfo.sessionId });
                 addPaneMessageIfSessionActive(
@@ -11942,7 +11944,11 @@ export function ChatPane({
         } else {
           stampLastAssistantCompletedAt();
         }
-      } else if (!abortController.signal.aborted && !receivedFinalEvent) {
+      } else if (
+        !abortController.signal.aborted &&
+        !receivedFinalEvent &&
+        !receivedBudgetExceededEvent
+      ) {
         // Backend persists turn_interrupted to messages.json; toast is ephemeral.
         setStallHintToast(TURN_INTERRUPTED_TOAST);
         await mergeTailFromDisk(requestSessionId);

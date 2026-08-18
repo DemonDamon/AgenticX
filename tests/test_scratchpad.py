@@ -10,6 +10,7 @@ from pathlib import Path
 
 from agenticx.cli import agent_tools
 from agenticx.cli.studio import StudioSession
+from agenticx.runtime.token_budget import TOKEN_BUDGET_SCRATCHPAD_KEY
 
 
 def test_scratchpad_write_read_and_list() -> None:
@@ -32,6 +33,38 @@ def test_scratchpad_write_read_and_list() -> None:
         session,
     )
     assert "analysis" in list_result
+
+
+def test_token_budget_scratchpad_entry_is_reserved_and_hidden() -> None:
+    session = StudioSession()
+    session.scratchpad[TOKEN_BUDGET_SCRATCHPAD_KEY] = {
+        "version": 1,
+        "cumulative_input": 123,
+        "cumulative_output": 45,
+    }
+    session.scratchpad["notes"] = "visible"
+
+    write_result = agent_tools.dispatch_tool(
+        "scratchpad_write",
+        {"key": TOKEN_BUDGET_SCRATCHPAD_KEY, "value": "reset"},
+        session,
+    )
+    assert write_result.startswith("ERROR: key is reserved")
+    assert isinstance(session.scratchpad[TOKEN_BUDGET_SCRATCHPAD_KEY], dict)
+
+    read_result = agent_tools.dispatch_tool(
+        "scratchpad_read",
+        {"key": TOKEN_BUDGET_SCRATCHPAD_KEY},
+        session,
+    )
+    assert read_result.startswith("ERROR: key is reserved")
+
+    list_result = agent_tools.dispatch_tool(
+        "scratchpad_read",
+        {"list_only": True},
+        session,
+    )
+    assert list_result == "notes"
 
 
 def test_memory_append_daily_and_long_term(monkeypatch, tmp_path: Path) -> None:

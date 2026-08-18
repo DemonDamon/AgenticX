@@ -59,6 +59,7 @@ from agenticx.runtime.clarify import (
     AutoSuspendClarifyGate,
     ClarifyGate,
 )
+from agenticx.runtime.token_budget import TOKEN_BUDGET_SCRATCHPAD_KEY
 from agenticx.workspace.loader import (
     append_daily_memory,
     append_long_term_memory,
@@ -5482,6 +5483,8 @@ def _tool_scratchpad_write(arguments: Dict[str, Any], session: StudioSession) ->
         scratchpad = session.scratchpad
     if not key:
         return "ERROR: key is required"
+    if key == TOKEN_BUDGET_SCRATCHPAD_KEY:
+        return "ERROR: key is reserved for internal session accounting"
     if key not in scratchpad and len(scratchpad) >= 50:
         return "ERROR: scratchpad key limit exceeded (50)"
     if len(value) > 10_000:
@@ -5511,12 +5514,14 @@ def _tool_scratchpad_read(arguments: Dict[str, Any], session: StudioSession) -> 
     if not isinstance(scratchpad, dict):
         return "No scratchpad entries."
     if bool(arguments.get("list_only", False)):
-        keys = sorted(scratchpad.keys())
+        keys = sorted(key for key in scratchpad.keys() if key != TOKEN_BUDGET_SCRATCHPAD_KEY)
         return "\n".join(keys) if keys else "No scratchpad entries."
     key = str(arguments.get("key", "")).strip()
     if not key:
-        keys = sorted(scratchpad.keys())
+        keys = sorted(key for key in scratchpad.keys() if key != TOKEN_BUDGET_SCRATCHPAD_KEY)
         return "\n".join(keys) if keys else "No scratchpad entries."
+    if key == TOKEN_BUDGET_SCRATCHPAD_KEY:
+        return "ERROR: key is reserved for internal session accounting"
     if key not in scratchpad:
         return f"ERROR: key not found: {key}"
     return str(scratchpad[key])

@@ -41,6 +41,22 @@ function findFirstUserGoal(messages: Message[]): string | null {
   return null;
 }
 
+function findLastUserRequest(messages: Message[]): { text: string; index: number } | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+    const text = String(msg.content ?? "").trim();
+    if (text) return { text: truncate(text, ASSISTANT_SNIPPET_MAX), index: i };
+  }
+  return null;
+}
+
+function findFirstUserIndex(messages: Message[]): number {
+  return messages.findIndex(
+    (msg) => msg.role === "user" && Boolean(String(msg.content ?? "").trim()),
+  );
+}
+
 function findRecentAssistantSummaries(messages: Message[]): string[] {
   const out: string[] = [];
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -60,6 +76,10 @@ export function buildBudgetResumeDraft(messages: Message[]): string {
   const goal = findFirstUserGoal(messages);
   if (goal) {
     sections.push(`【原始目标】\n${goal}`);
+  }
+  const pendingRequest = findLastUserRequest(messages);
+  if (pendingRequest && pendingRequest.index !== findFirstUserIndex(messages)) {
+    sections.push(`【待继续请求】\n${pendingRequest.text}`);
   }
   const todo = findLastTodoWrite(messages);
   if (todo) {

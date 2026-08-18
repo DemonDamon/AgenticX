@@ -34,6 +34,10 @@ export function findAssistantBeforeBudgetExceeded(messages: Message[]): Message 
   if (budgetIdx < 0) return null;
   for (let i = budgetIdx - 1; i >= 0; i -= 1) {
     const msg = messages[i];
+    // A preflight budget rejection belongs to the newly submitted user turn.
+    // Never walk across that boundary and mark an older, already-completed
+    // assistant reply as incomplete.
+    if (msg.role === "user") return null;
     if (msg.role !== "assistant") continue;
     if (msg.id === "__stream__" || msg.id === "typing-meta") continue;
     if (!assistantBodyText(msg)) continue;

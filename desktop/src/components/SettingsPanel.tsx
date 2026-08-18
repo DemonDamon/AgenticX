@@ -116,6 +116,7 @@ import {
   type TokenBudgetConfig,
 } from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
+import { DeveloperTokenBudgetPanel } from "./settings/DeveloperTokenBudgetPanel";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { DataSourcesSettings } from "./settings/datasources/DataSourcesSettings";
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
@@ -9457,6 +9458,8 @@ export function SettingsPanel({
                 </div>
 
                 <SessionMemoryPanel />
+
+                <DeveloperTokenBudgetPanel />
 
                 <Panel title="默认工作目录">
                   <label className="block text-sm text-text-muted">

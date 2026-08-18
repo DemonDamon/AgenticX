@@ -45,6 +45,24 @@ describe("budget-exceeded utils", () => {
     ];
     expect(findBudgetExceededInMessages(messages)?.current).toBe(100);
   });
+
+  it("does not keep an old budget notice active after conversation resumes", () => {
+    const messages: Message[] = [
+      {
+        id: "t1",
+        role: "tool",
+        content: "Token budget exceeded (100/90, source=session).",
+        noticeKind: "budget_exceeded",
+        budgetCurrent: 100,
+        budgetMax: 90,
+        budgetSource: "session",
+      },
+      { id: "u2", role: "user", content: "管理员提高上限后继续" },
+      { id: "a2", role: "assistant", content: "已继续完成。" },
+    ];
+
+    expect(findBudgetExceededInMessages(messages)).toBeNull();
+  });
 });
 
 describe("buildBudgetResumeDraft", () => {
@@ -77,6 +95,23 @@ describe("buildBudgetResumeDraft", () => {
     ]);
     expect(draft.includes("x".repeat(601))).toBe(false);
   });
+
+  it("keeps the latest rejected user request in the continuation draft", () => {
+    const draft = buildBudgetResumeDraft([
+      { id: "u1", role: "user", content: "整理这份财报" },
+      { id: "a1", role: "assistant", content: "已完成基础数据提取。" },
+      { id: "u2", role: "user", content: "继续计算各业务线同比并给出结论" },
+      {
+        id: "t-budget",
+        role: "tool",
+        content: "本会话已达到 Token 上限。",
+        noticeKind: "budget_exceeded",
+      },
+    ]);
+
+    expect(draft).toContain("【原始目标】\n整理这份财报");
+    expect(draft).toContain("【待继续请求】\n继续计算各业务线同比并给出结论");
+  });
 });
 
 describe("budget incomplete hint", () => {
@@ -97,6 +132,36 @@ describe("budget incomplete hint", () => {
     ];
     expect(shouldShowBudgetIncompleteHint(messages[0], messages, true)).toBe(true);
     expect(shouldShowBudgetIncompleteHint(messages[1], messages, true)).toBe(false);
+  });
+
+  it("does not mark the previous turn incomplete after a preflight rejection", () => {
+    const messages: Message[] = [
+      { id: "a-old", role: "assistant", content: "上一轮已经完整完成。" },
+      { id: "u-new", role: "user", content: "继续处理下一项" },
+      {
+        id: "t-budget",
+        role: "tool",
+        content: "本会话已达到 Token 上限。",
+        noticeKind: "budget_exceeded",
+      },
+    ];
+
+    expect(shouldShowBudgetIncompleteHint(messages[0], messages, true)).toBe(false);
+  });
+
+  it("still marks a partial assistant from the rejected turn", () => {
+    const messages: Message[] = [
+      { id: "u1", role: "user", content: "完成当前任务" },
+      { id: "a1", role: "assistant", content: "我已经处理到这里：" },
+      {
+        id: "t-budget",
+        role: "tool",
+        content: "Token budget exceeded (100/90, source=turn).",
+        noticeKind: "budget_exceeded",
+      },
+    ];
+
+    expect(shouldShowBudgetIncompleteHint(messages[1], messages, true)).toBe(true);
   });
 });
 

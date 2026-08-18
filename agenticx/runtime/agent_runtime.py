@@ -63,7 +63,13 @@ from agenticx.runtime.hooks import HookRegistry
 from agenticx.runtime.loop_detector import LoopDetector
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
-from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
+from agenticx.runtime.token_budget import (
+    BudgetLevel,
+    DEFAULT_WARNING_TOKENS_PER_SESSION,
+    TOKEN_BUDGET_SCRATCHPAD_KEY,
+    TokenBudgetGuard,
+    session_token_budget_preflight,
+)
 from agenticx.runtime.truncated_final import (
     detect_suspected_truncated_final,
     reasoning_has_action_intent,
@@ -1161,10 +1167,12 @@ def _serialize_scratchpad(session: StudioSession) -> str:
         return "(empty)"
     lines: List[str] = []
     for key in sorted(scratchpad.keys()):
+        if key == TOKEN_BUDGET_SCRATCHPAD_KEY:
+            continue
         value = str(scratchpad.get(key, ""))
         preview = value if len(value) <= 200 else value[:200] + "..."
         lines.append(f"- {key}: {preview.replace(chr(10), ' ')}")
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else "(empty)"
 
 
 def _inject_pending_visual_attachments(
@@ -2296,6 +2304,8 @@ def _build_progress_signature(session: StudioSession) -> str:
     scratch_entries = []
     if isinstance(scratchpad, dict):
         for key, value in scratchpad.items():
+            if key == TOKEN_BUDGET_SCRATCHPAD_KEY:
+                continue
             sval = str(value)
             digest = hashlib.sha1(sval.encode("utf-8")).hexdigest()[:12] if sval else ""
             scratch_entries.append({"key": str(key), "len": len(sval), "hash": digest})
@@ -2636,6 +2646,7 @@ class AgentRuntime:
         self._forced_budget_compact_this_turn = False
         self._proactive_compact_this_turn = False
         self._budget_compress_notice_sent_this_turn = False
+        self._session_budget_crossed_notice_sent_this_turn = False
         self._mid_turn_persist = mid_turn_persist
         self._persist_interval_sec = _resolve_mid_turn_persist_interval()
         self._persist_tool_count = _resolve_mid_turn_persist_tool_count()
@@ -2697,6 +2708,29 @@ class AgentRuntime:
         self.llm = next_llm
         self.compactor.llm = next_llm
         return True
+
+    def _restore_token_budget_usage(self, session: Any) -> None:
+        """Restore this session's totals while keeping current configured limits."""
+        scratchpad = getattr(session, "scratchpad", None)
+        payload = (
+            scratchpad.get(TOKEN_BUDGET_SCRATCHPAD_KEY)
+            if isinstance(scratchpad, dict)
+            else None
+        )
+        self.token_budget.restore_usage(payload if isinstance(payload, dict) else None)
+
+    def _store_token_budget_usage(self, session: Any) -> None:
+        """Place durable usage state in the session's existing scratchpad store."""
+        scratchpad = getattr(session, "scratchpad", None)
+        if not isinstance(scratchpad, dict):
+            scratchpad = {}
+            setattr(session, "scratchpad", scratchpad)
+        scratchpad[TOKEN_BUDGET_SCRATCHPAD_KEY] = {
+            "version": 1,
+            "cumulative_input": self.token_budget.cumulative_input,
+            "cumulative_output": self.token_budget.cumulative_output,
+            "warning_emitted": self.token_budget.warning_emitted,
+        }
 
     def _maybe_mid_turn_persist(self) -> None:
         """Fire incremental persist if interval or tool-count thresholds are met."""
@@ -2896,12 +2930,25 @@ class AgentRuntime:
             except Exception:
                 return False
 
+        self._restore_token_budget_usage(session)
         self.token_budget.reset_turn()
         self.loop_detector.reset()
         self._forced_budget_compact_this_turn = False
         self._proactive_compact_this_turn = False
         self._budget_compress_notice_sent_this_turn = False
+        self._session_budget_crossed_notice_sent_this_turn = False
         self._pending_loop_nudge = None
+        token_budget_preflight = session_token_budget_preflight(
+            getattr(session, "scratchpad", None),
+            max_tokens_per_session=self.token_budget.max_session,
+        )
+        if token_budget_preflight is not None:
+            yield RuntimeEvent(
+                type=EventType.ERROR.value,
+                data=token_budget_preflight,
+                agent_id=agent_id,
+            )
+            return
         setattr(session, "_context_chain_repair_attempted", False)
         self._last_persist_time = time.time()
         self._tools_since_persist = 0
@@ -4120,26 +4167,103 @@ class AgentRuntime:
                             logger.debug("usage persist skipped: %s", exc)
 
                     asyncio.create_task(_persist_usage_row())
-                budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
-                if budget_level == BudgetLevel.EXCEEDED:
+                session_budget_level = self.token_budget.check_session()
+                turn_budget_level = self.token_budget.check_turn()
+                warning_started_now = (
+                    self.token_budget.cumulative_total
+                    >= DEFAULT_WARNING_TOKENS_PER_SESSION
+                    and not self.token_budget.warning_emitted
+                )
+                if warning_started_now:
+                    self.token_budget.warning_emitted = True
+                self._store_token_budget_usage(session)
+
+                # The optional per-turn hard limit retains its original semantics.
+                # It is evaluated before session pressure so a simultaneous session
+                # crossing cannot accidentally weaken an explicitly enforced turn cap.
+                if turn_budget_level == BudgetLevel.EXCEEDED:
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
                         data={
                             "text": (
                                 "Token budget exceeded "
-                                f"({budget_current}/{budget_max}, source={budget_source}). "
+                                f"({self.token_budget.turn_total}/{self.token_budget.max_turn}, source=turn). "
                                 "Stopping to preserve results."
                             ),
                             "detector": "token_budget",
                             "budget_exceeded": True,
-                            "budget_source": budget_source,
-                            "current": budget_current,
-                            "max_allowed": budget_max,
+                            "budget_source": "turn",
+                            "current": self.token_budget.turn_total,
+                            "max_allowed": self.token_budget.max_turn,
                             "unattended_useless": True,
                         },
                         agent_id=agent_id,
                     )
+                    # This branch intentionally has no normal FINAL checkpoint.
+                    # Persist the paid usage/user row before preserving the legacy
+                    # per-turn hard-stop behavior.
+                    self._persist_final_checkpoint()
                     return
+
+                # A paid model response may carry the cumulative session over its
+                # hard cap. Do not discard that result: warn once, request convergence,
+                # and let this run reach its normal FINAL/persistence path. The next
+                # run_turn preflight will reject before touching user history or LLMs.
+                if (
+                    session_budget_level == BudgetLevel.EXCEEDED
+                    and not self._session_budget_crossed_notice_sent_this_turn
+                ):
+                    self._session_budget_crossed_notice_sent_this_turn = True
+                    messages.append(
+                        {"role": "user", "content": self.token_budget.convergence_hint()}
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={
+                            "text": (
+                                "本轮已达到会话 Token 上限，将先完成当前结果；"
+                                "下一轮开始前会停止并提示新建会话或提高上限。"
+                            ),
+                            "severity": "warning",
+                            "detector": "token_budget_session_reached",
+                            "budget_source": "session",
+                            "current": self.token_budget.cumulative_total,
+                            "max_allowed": self.token_budget.max_session,
+                            "block_next_turn": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                elif warning_started_now:
+                    messages.append(
+                        {"role": "user", "content": self.token_budget.convergence_hint()}
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.ERROR.value,
+                        data={
+                            "text": (
+                                "本会话累计 Token 已达到 "
+                                f"{DEFAULT_WARNING_TOKENS_PER_SESSION:,}。当前任务会继续，"
+                                "建议在完成后新建会话以保持稳定。"
+                            ),
+                            "severity": "warning",
+                            "detector": "token_budget_warning",
+                            "budget_source": "session",
+                            "current": self.token_budget.cumulative_total,
+                            "warning_at": DEFAULT_WARNING_TOKENS_PER_SESSION,
+                            "max_allowed": self.token_budget.max_session,
+                        },
+                        agent_id=agent_id,
+                    )
+
+                if session_budget_level == BudgetLevel.EXCEEDED:
+                    budget_level = turn_budget_level
+                    budget_source = "turn"
+                    budget_current = self.token_budget.turn_total
+                    budget_max = self.token_budget.max_turn
+                else:
+                    budget_level, budget_source, budget_current, budget_max = (
+                        self.token_budget.check_with_source()
+                    )
                 if budget_level == BudgetLevel.COMPRESS:
                     did_react = False
                     react_summary = ""
@@ -4180,7 +4304,15 @@ class AgentRuntime:
                                     await self.hooks.run_on_compaction(react_count, react_summary, session)
                                 except Exception:
                                     pass
-                    budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
+                    if session_budget_level == BudgetLevel.EXCEEDED:
+                        budget_level = self.token_budget.check_turn()
+                        budget_source = "turn"
+                        budget_current = self.token_budget.turn_total
+                        budget_max = self.token_budget.max_turn
+                    else:
+                        budget_level, budget_source, budget_current, budget_max = (
+                            self.token_budget.check_with_source()
+                        )
                     if (
                         budget_level == BudgetLevel.COMPRESS
                         and not self._budget_compress_notice_sent_this_turn
@@ -4265,7 +4397,10 @@ class AgentRuntime:
                     elif cf_count == 0 and cf_state:
                         # Reset latch when compactor recovers.
                         self._compactor_failure_warned = False
-                if budget_level == BudgetLevel.WARNING:
+                if budget_level == BudgetLevel.WARNING and (
+                    budget_source == "turn"
+                    or (turn_budget_level == BudgetLevel.WARNING and not warning_started_now)
+                ):
                     messages.append({"role": "user", "content": self.token_budget.convergence_hint()})
             except asyncio.TimeoutError:
                 round_timeout = _resolve_llm_round_timeout_seconds(session)

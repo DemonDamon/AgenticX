@@ -9525,12 +9525,12 @@ function registerIpc(): void {
       raw.token_budget && typeof raw.token_budget === "object" && !Array.isArray(raw.token_budget)
         ? (raw.token_budget as Record<string, unknown>)
         : {};
-    const sessionRaw = Number(nested.max_tokens_per_session ?? raw.max_tokens_per_session ?? 500_000);
+    const sessionRaw = Number(nested.max_tokens_per_session ?? raw.max_tokens_per_session ?? 1_000_000);
     const turnRaw = Number(nested.max_tokens_per_turn ?? raw.max_tokens_per_turn ?? 100_000);
     return {
       max_tokens_per_session: Number.isFinite(sessionRaw)
         ? Math.max(100_000, Math.min(5_000_000, Math.round(sessionRaw)))
-        : 500_000,
+        : 1_000_000,
       max_tokens_per_turn: Number.isFinite(turnRaw)
         ? Math.max(50_000, Math.min(1_000_000, Math.round(turnRaw)))
         : 100_000,
@@ -9611,7 +9611,7 @@ function registerIpc(): void {
         unattended_stall_continue_after_seconds: 120,
         unattended_auto_resume_exhausted: true,
         unattended_auto_resume_interrupted: true,
-        max_tokens_per_session: 500_000,
+        max_tokens_per_session: 1_000_000,
         max_tokens_per_turn: 100_000,
         live_reattach_enabled: false,
       };

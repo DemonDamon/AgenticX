@@ -30,6 +30,7 @@ from agenticx.runtime.truncated_final import (
     ACTION_INTENT_RE,
     detect_suspected_truncated_final,
 )
+from agenticx.runtime.token_budget import TOKEN_BUDGET_SCRATCHPAD_KEY
 from agenticx.studio.chat_attachments import materialize_message_lists_image_uploads
 
 _log = logging.getLogger(__name__)
@@ -1259,6 +1260,9 @@ class SessionManager:
         forked.studio_session.agent_messages = deepcopy(getattr(source.studio_session, "agent_messages", []) or [])
         forked.studio_session.context_files = deepcopy(source.studio_session.context_files or {})
         forked.studio_session.scratchpad = deepcopy(source.studio_session.scratchpad or {})
+        # A fork is a new conversation. Keep user-visible working notes, but do
+        # not inherit the source conversation's cumulative token allowance.
+        forked.studio_session.scratchpad.pop(TOKEN_BUDGET_SCRATCHPAD_KEY, None)
         forked.studio_session.artifacts = deepcopy(source.studio_session.artifacts or {})
         forked.updated_at = time.time()
         self._persist_session_state(forked.session_id, forked.studio_session)
