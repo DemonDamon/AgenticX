@@ -48,6 +48,11 @@ import {
 import { useVoicePushToTalk } from "../hooks/useVoicePushToTalk";
 import { VOICE_FOCUS_ENTRY_ENABLED } from "../voice/focus-mode-ui";
 import { VoicePttOverlay } from "./VoicePttOverlay";
+import { RunLocationPicker } from "./composer/RunLocationPicker";
+import {
+  useComposerWorkspaceFolders,
+  WorkspaceFolderPicker,
+} from "./composer/WorkspaceFolderPicker";
 import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { MemoryGraphPanel } from "./memory/MemoryGraphPanel";
@@ -8652,6 +8657,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setPaneContextInherited,
   ]);
 
+  const composerWorkspace = useComposerWorkspaceFolders({
+    paneId: pane.id,
+    sessionId: pane.sessionId ?? "",
+    paneAvatarId: pane.avatarId,
+    paneAvatarName: pane.avatarName ?? "",
+    onEnsureSessionForWorkspace: materializeLazySession,
+  });
+
   /** Send a team-mode action (ADD_TASK / PAUSE / RESUME / STOP) to TaskLock via Studio API. */
   const sendGroupTeamAction = async (action: string, data?: Record<string, unknown>) => {
     if (!isGroupPane || !groupChatId || !pane?.sessionId) return;
@@ -12112,6 +12125,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return () => window.removeEventListener("resize", onResize);
   }, [pane.historyOpen]);
 
+  const isBrandEmptyState =
+    (!pane.sessionId && !isGroupPane && !isAutomationTaskPane) ||
+    (!!pane.sessionId && visibleMessages.length === 0);
+  const liftComposer = isBrandEmptyState && !workExpandedLayout;
+
   return (
     <div
       ref={paneRef}
@@ -12320,7 +12338,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
         {!workExpandedLayout ? (
         <>
-        <div className="relative min-h-0 min-w-0 flex-1">
+        <div className={`relative min-h-0 min-w-0 transition-[flex-grow] duration-300 ease-out ${liftComposer ? "min-h-[22rem] flex-[4]" : "flex-1"}`}>
           <div
             ref={listRef}
             className="agx-pane-message-list relative h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-3"
@@ -12350,9 +12368,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 ))}
               </div>
             </div>
-          ) : (!pane.sessionId && !isGroupPane && !isAutomationTaskPane) ||
-            (pane.sessionId && visibleMessages.length === 0) ? (
-            <div className="flex h-full flex-col items-center justify-center gap-5 px-4 text-center text-xs">
+          ) : isBrandEmptyState ? (
+            <div className="flex h-full min-h-0 flex-col items-center justify-end gap-5 px-4 pb-3 text-center text-xs">
               <img
                 src={machiEmptyState}
                 alt={`${APP_DISPLAY_NAME} Empty State`}
@@ -12464,7 +12481,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         ) : null}
 
         {/* 外层 px 与列表 agx-pane-message-list 一致，内层 max-w-4xl 单独一层，避免「padding 吃进 max-width」导致输入框比气泡窄一截 */}
-        <div className={`shrink-0 ${workExpandedLayout ? "px-3 pt-2.5 pb-3" : "px-4 pt-2.5 pb-4"}`}>
+        <div className={`shrink-0 ${workExpandedLayout ? "px-3 pt-2.5 pb-3" : liftComposer ? "px-4 pt-5 pb-4" : "px-4 pt-2.5 pb-4"}`}>
           <div
             className={`agx-pane-composer-shell mx-auto min-w-0 w-full ${
               workExpandedLayout ? "max-w-none" : "max-w-4xl"
@@ -13094,6 +13111,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               />
             ) : null}
           </div>
+          {isBrandEmptyState ? (
+            <div className="mt-1.5 flex min-w-0 items-center gap-1 px-0.5">
+              <RunLocationPicker />
+              <WorkspaceFolderPicker api={composerWorkspace} />
+            </div>
+          ) : null}
           {/* AI 免责声明：仅非空会话显示（对齐 Work Buddy，空新建会话不打扰） */}
           {(pane.messages ?? []).some(
             (m) => m.role === "user" || m.role === "assistant"
@@ -13122,6 +13145,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             : null}
           </div>
         </div>
+        {!workExpandedLayout ? (
+          <div
+            aria-hidden
+            className={`agx-composer-lift-spacer min-h-0 shrink transition-[flex-grow] duration-300 ease-out ${
+              liftComposer ? "grow-[2]" : "grow-0"
+            }`}
+          />
+        ) : null}
         </div>
       </div>
 

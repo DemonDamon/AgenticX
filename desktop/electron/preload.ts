@@ -812,6 +812,14 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       mode?: "reference" | "copy" | "link";
       error?: string;
     }>,
+  unlinkFromSessionWorkspace: async (payload: { sessionId: string; sources: string[] }) =>
+    ipcRenderer.invoke("unlink-from-session-workspace", payload) as Promise<{
+      ok: boolean;
+      defaultDir?: string;
+      unlinked?: number;
+      failed?: string[];
+      error?: string;
+    }>,
   copyIntoSessionWorkspace: async (payload: { sessionId: string; sources: string[] }) =>
     ipcRenderer.invoke("copy-into-session-workspace", payload) as Promise<{
       ok: boolean;

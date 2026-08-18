@@ -51,6 +51,8 @@ import {
   type NearArtifactTaskspacesSyncedDetail,
 } from "../utils/workspace-sidebar-events";
 import { ensureSessionArtifactsFromAvailableSources } from "../utils/ensure-artifact-taskspaces";
+import { useAttachWorkspaceSources } from "../hooks/useAttachWorkspaceSources";
+import { MountModeDialog } from "./composer/MountModeDialog";
 
 type TaskspaceFile = {
   name: string;
@@ -241,8 +243,6 @@ export function WorkspacePanel({
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [entriesByDir, setEntriesByDir] = useState<Record<string, TaskspaceFile[]>>({});
   const [truncatedDirs, setTruncatedDirs] = useState<Record<string, { truncated: boolean; totalSeen: number }>>({});
-  const [pendingMountSources, setPendingMountSources] = useState<string[] | null>(null);
-  const [pendingMountMode, setPendingMountMode] = useState<TaskspaceMountMode>("reference");
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [filePreview, setFilePreview] = useState<WorkspacePreview | null>(null);
   const [previewAnchor, setPreviewAnchor] = useState<{ top: number; bottom: number; left: number } | null>(null);
@@ -251,7 +251,32 @@ export function WorkspacePanel({
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPath, setNewPath] = useState("");
   const [newLabel, setNewLabel] = useState("");
-  const [adding, setAdding] = useState(false);
+  const attachWorkspace = useAttachWorkspaceSources({
+    paneId,
+    sessionId,
+    paneAvatarId,
+    paneAvatarName,
+    onEnsureSessionForWorkspace,
+    onError: setErrorText,
+    onAttached: async (sid) => {
+      setShowAddForm(false);
+      setNewPath("");
+      setNewLabel("");
+      window.dispatchEvent(
+        new CustomEvent(NEAR_ARTIFACT_TASKSPACES_SYNCED, {
+          detail: { sessionId: sid, added: 1 },
+        }),
+      );
+    },
+  });
+  const {
+    pendingMountSources,
+    setPendingMountSources,
+    pendingMountMode,
+    setPendingMountMode,
+    adding,
+    confirmMountModeAndAttach,
+  } = attachWorkspace;
   const [maxTaskspaces, setMaxTaskspaces] = useState(RUNTIME_DEFAULT_TASKSPACES);
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
   const [hostPlatform, setHostPlatform] = useState<string | null>(null);
@@ -778,126 +803,6 @@ export function WorkspacePanel({
       observer.disconnect();
     };
   }, []);
-
-  /** Ensure a session exists, then mount sources into its default workspace. */
-  const linkSourcesIntoDefault = async (
-    sources: string[],
-    mode: TaskspaceMountMode = "link",
-  ): Promise<boolean> => {
-    const cleaned = sources.map((s) => String(s || "").trim()).filter(Boolean);
-    if (cleaned.length === 0) return false;
-    setAdding(true);
-    let effectiveSessionId = sessionId;
-    if (!effectiveSessionId) {
-      const isGroupOrAutomationPane =
-        !!paneAvatarId && (paneAvatarId.startsWith("group:") || paneAvatarId.startsWith("automation:"));
-      if (isGroupOrAutomationPane) {
-        setAdding(false);
-        setErrorText("会话正在初始化，请稍候再试");
-        return false;
-      }
-      if (isPaneAwaitingFreshSession(paneId)) {
-        if (typeof onEnsureSessionForWorkspace === "function") {
-          try {
-            const ensured = await onEnsureSessionForWorkspace();
-            if (!ensured) {
-              setAdding(false);
-              setErrorText("创建会话失败，无法添加工作区");
-              return false;
-            }
-            effectiveSessionId = ensured;
-          } catch (err) {
-            setAdding(false);
-            setErrorText(`创建会话失败：${String(err)}`);
-            return false;
-          }
-        } else {
-          setAdding(false);
-          setErrorText("请先发送一条消息，再添加工作区目录");
-          return false;
-        }
-      } else {
-        try {
-          const createPayload: { avatar_id?: string; name?: string } = {};
-          if (paneAvatarId) createPayload.avatar_id = paneAvatarId;
-          if (paneAvatarName) createPayload.name = paneAvatarName;
-          const created = await window.agenticxDesktop.createSession(createPayload);
-          if (!created.ok || !created.session_id) {
-            setAdding(false);
-            setErrorText(created.error ?? "创建会话失败，无法添加工作区");
-            return false;
-          }
-          effectiveSessionId = created.session_id;
-          setPaneSessionId(paneId, effectiveSessionId);
-        } catch (err) {
-          setAdding(false);
-          setErrorText(`创建会话失败：${String(err)}`);
-          return false;
-        }
-      }
-    }
-    const linker = window.agenticxDesktop.linkIntoSessionWorkspace;
-    if (typeof linker !== "function") {
-      setAdding(false);
-      setErrorText("当前客户端不支持添加到工作区，请完全重启桌面端后重试。");
-      return false;
-    }
-    const result = await linker({
-      sessionId: effectiveSessionId,
-      sources: cleaned,
-      mode,
-      // User-initiated mount: allow explicit link even under a covering reference.
-      explicit: true,
-    });
-    setAdding(false);
-    const failed = Array.isArray(result.failed) ? result.failed : [];
-    const linked = Number(result.linked || 0);
-    if (!result.ok || linked === 0 || failed.length > 0) {
-      const firstFail = failed[0] || cleaned[0] || "";
-      const winHint =
-        hostPlatform === "win32" && mode === "link"
-          ? "创建直连需要开启 Windows 开发者模式或以管理员身份运行。"
-          : "";
-      setErrorText(
-        result.error ||
-          (failed.length > 0
-            ? `添加失败 ${failed.length} 项：${firstFail}${winHint ? `。${winHint}` : ""}`
-            : `添加到工作区失败${winHint ? `：${winHint}` : ""}`),
-      );
-      return false;
-    }
-    setErrorText("");
-    setShowAddForm(false);
-    setPendingMountSources(null);
-    setNewPath("");
-    setNewLabel("");
-    await loadTaskspaces();
-    await loadDir("default", ".", true);
-    return true;
-  };
-
-  const confirmMountModeAndAttach = async () => {
-    if (!pendingMountSources?.length) return;
-    if (pendingMountMode === "link") {
-      const desktop = window.agenticxDesktop;
-      const sourcePreview = pendingMountSources[0] || "";
-      const confirmResult =
-        typeof desktop.confirmDialog === "function"
-          ? await desktop.confirmDialog({
-              title: "确认直连原目录",
-              message: "agent 的改动会直接写入所选路径。",
-              detail: sourcePreview
-                ? `目标：${sourcePreview}\n此操作不可自动撤销。`
-                : "此操作不可自动撤销。",
-              confirmText: "确认直连",
-              cancelText: "取消",
-              destructive: true,
-            })
-          : { ok: true, confirmed: false };
-      if (!confirmResult.confirmed) return;
-    }
-    await linkSourcesIntoDefault(pendingMountSources, pendingMountMode);
-  };
 
   /** @deprecated name kept for form handlers — opens mount-mode picker. */
   const addTaskspace = async (pathValue: string, _labelValue: string) => {
@@ -1953,105 +1858,16 @@ export function WorkspacePanel({
         <div className="border-t border-border px-3 py-1.5 text-xs text-rose-300">{errorText}</div>
       ) : null}
 
-      {pendingMountSources
-        ? createPortal(
-            <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/50 p-4">
-              <div className="w-full max-w-md rounded-xl border border-border bg-surface-base p-4 shadow-2xl">
-                <div className="mb-3 text-[15px] font-medium text-text-strong">选择添加方式</div>
-                <div className="mb-3 truncate text-[12px] text-text-faint">
-                  {pendingMountSources.length === 1
-                    ? pendingMountSources[0]
-                    : `${pendingMountSources.length} 个路径`}
-                </div>
-                <div className="space-y-2">
-                  {(
-                    [
-                      {
-                        id: "reference" as const,
-                        title: "引用（只读）",
-                        desc: "agent 只能读取，不会改动你的文件",
-                      },
-                      {
-                        id: "copy" as const,
-                        title: "工作副本",
-                        desc: "复制一份到会话隔离目录，改动需你确认后才回写",
-                      },
-                      {
-                        id: "link" as const,
-                        title: "直连原目录",
-                        desc: `agent 的改动会直接写入 ${pendingMountSources[0] || "所选路径"}`,
-                        danger: true,
-                      },
-                    ] as const
-                  ).map((opt) => {
-                    const active = pendingMountMode === opt.id;
-                    const danger = "danger" in opt && opt.danger;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition ${
-                          active
-                            ? danger
-                              ? "border-rose-400/50 bg-rose-500/10"
-                              : "border-[rgba(var(--theme-color-rgb),0.55)] bg-[rgba(var(--theme-color-rgb),0.12)]"
-                            : "border-border bg-surface-hover hover:bg-surface-card-strong"
-                        }`}
-                        onClick={() => setPendingMountMode(opt.id)}
-                      >
-                        <span
-                          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
-                            active
-                              ? "bg-emerald-500 text-white"
-                              : "border border-border bg-transparent"
-                          }`}
-                          aria-hidden
-                        >
-                          {active ? <Check className="h-3 w-3" strokeWidth={2.5} /> : null}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span
-                            className={`block text-[13px] font-medium ${
-                              danger ? "text-rose-300" : "text-text-primary"
-                            }`}
-                          >
-                            {opt.title}
-                          </span>
-                          <span className="mt-0.5 block text-[11px] leading-relaxed text-text-faint">
-                            {opt.desc}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="rounded-lg px-3 py-1.5 text-[13px] text-text-muted hover:bg-surface-hover"
-                    onClick={() => setPendingMountSources(null)}
-                    disabled={adding}
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-lg px-3 py-1.5 text-[13px] hover:opacity-90 disabled:opacity-50"
-                    style={{
-                      background: "var(--ui-btn-primary-bg)",
-                      color: "var(--ui-btn-primary-text)",
-                    }}
-                    onClick={() => void confirmMountModeAndAttach()}
-                    disabled={adding}
-                  >
-                    {adding ? "添加中…" : "确认添加"}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+      {pendingMountSources ? (
+        <MountModeDialog
+          sources={pendingMountSources}
+          mode={pendingMountMode}
+          adding={adding}
+          onModeChange={setPendingMountMode}
+          onCancel={() => setPendingMountSources(null)}
+          onConfirm={() => void confirmMountModeAndAttach()}
+        />
+      ) : null}
 
       {viewMenuOpen && viewMenuPos
         ? createPortal(

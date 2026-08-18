@@ -261,6 +261,97 @@ def test_bash_exec_rejects_cd_then_relative_redirect_into_reference(
     assert target.read_text(encoding="utf-8") == "base\n"
 
 
+def test_list_files_dot_lists_reference_directory_not_mounts_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Composer reference mounts have no dest dir; list_files('.') must still see them."""
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    default = tmp_path / "taskspaces" / "sid" / "default"
+    attached = tmp_path / "Downloads" / "调研报告"
+    default.mkdir(parents=True)
+    (attached / "assets").mkdir(parents=True)
+    (attached / "报告.md").write_text("hello", encoding="utf-8")
+    (attached / "assets" / "fig.png").write_text("x", encoding="utf-8")
+    (default / ".agx-mounts.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "mounts": [
+                    {
+                        "name": "调研报告",
+                        "mode": "reference",
+                        "source_path": str(attached.resolve()),
+                        "linked_at": 1.0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(default))
+    session = StudioSession()
+    session.workspace_dir = str(default)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(default), "mount_mode": "link"},
+    ]
+
+    assert at._resolve_workspace_path(".", session, pick_existing=True) == attached.resolve()
+    listed = at.dispatch_tool("list_files", {"path": "."}, session)
+    assert listed.startswith(f"root: {attached.resolve()}")
+    assert "报告.md" in listed
+    assert "assets/" in listed
+    assert str(attached / "报告.md") not in listed
+    assert ".agx-mounts.json" not in listed
+    assert at._resolve_workspace_path("调研报告/报告.md", session, pick_existing=True) == (
+        attached / "报告.md"
+    ).resolve()
+    virtual_assets = default / "调研报告" / "assets"
+    assert at._resolve_workspace_path(str(virtual_assets), session, pick_existing=True) == (
+        attached / "assets"
+    ).resolve()
+    with pytest.raises(ValueError, match=r"read-only \(mounted as reference\)"):
+        at._resolve_workspace_path("调研报告/报告.md", session, for_write=True)
+
+
+def test_list_files_dot_keeps_default_when_reference_is_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    src = tmp_path / "src"
+    src.mkdir()
+    target = src / "note.txt"
+    target.write_text("hello", encoding="utf-8")
+    (ws / ".agx-mounts.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "mounts": [
+                    {
+                        "name": "note.txt",
+                        "mode": "reference",
+                        "source_path": str(target.resolve()),
+                        "linked_at": 1.0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(ws))
+    session = StudioSession()
+    session.workspace_dir = str(ws)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(ws), "mount_mode": "link"},
+    ]
+    assert at._resolve_workspace_path(".", session, pick_existing=True) == ws.resolve()
+    listed = at.dispatch_tool("list_files", {"path": "."}, session)
+    assert str(target.resolve()) in listed
+    assert ".agx-mounts.json" not in listed
+    assert at._resolve_workspace_path("note.txt", session, pick_existing=True) == target.resolve()
+
+
 def test_ssh_protected_even_when_mounted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
     ws = tmp_path / "ws"

@@ -71,6 +71,7 @@ import {
   findCoveringNonLinkMount,
   findMountForSource,
   type MountMode,
+  removeMountForSource,
   upsertMount,
   uniqueLinkName as uniqueMountName,
 } from "./workspace-mounts";
@@ -11279,6 +11280,39 @@ function registerIpc(): void {
           failed,
           mode,
         };
+      } catch (err) {
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    "unlink-from-session-workspace",
+    async (
+      _event,
+      payload: { sessionId?: string; sources?: string[] },
+    ) => {
+      try {
+        const sid = String(payload?.sessionId || "").trim();
+        if (!sid || !/^[A-Za-z0-9._-]+$/.test(sid)) {
+          return { ok: false, error: "invalid sessionId" };
+        }
+        const rawSources = Array.isArray(payload?.sources) ? payload.sources : [];
+        const defaultDir = await resolveSessionDefaultWorkspaceDir(sid);
+        let unlinked = 0;
+        const failed: string[] = [];
+        for (const raw of rawSources) {
+          const source = normalizeLocalFsPath(String(raw || ""));
+          if (!source) continue;
+          try {
+            const result = await removeMountForSource(defaultDir, source);
+            if (result.removed) unlinked += 1;
+          } catch (err) {
+            failed.push(source);
+            console.warn("[unlink-from-session-workspace] failed:", source, err);
+          }
+        }
+        return { ok: failed.length === 0, defaultDir, unlinked, failed };
       } catch (err) {
         return { ok: false, error: String(err) };
       }

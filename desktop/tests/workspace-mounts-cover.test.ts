@@ -5,6 +5,8 @@ import path from "node:path";
 
 import {
   findCoveringNonLinkMount,
+  readMounts,
+  removeMountForSource,
   writeMounts,
   type MountRecord,
 } from "../electron/workspace-mounts";
@@ -85,6 +87,36 @@ describe("findCoveringNonLinkMount", () => {
 
       const hit = await findCoveringNonLinkMount(defaultDir, nested);
       expect(hit).toBeNull();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("removeMountForSource", () => {
+  it("removes the mount record and keeps the source directory", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "agx-mount-remove-"));
+    try {
+      const defaultDir = path.join(tmp, "default");
+      const research = path.join(tmp, "research-agent");
+      fs.mkdirSync(defaultDir, { recursive: true });
+      fs.mkdirSync(research, { recursive: true });
+      fs.writeFileSync(path.join(research, "keep.txt"), "ok\n", "utf8");
+
+      await writeMounts(defaultDir, [
+        {
+          name: "research-agent",
+          mode: "reference",
+          source_path: research,
+          linked_at: Date.now() / 1000,
+        },
+      ]);
+
+      const result = await removeMountForSource(defaultDir, research);
+      expect(result.ok).toBe(true);
+      expect(result.removed).toBe(true);
+      expect(await readMounts(defaultDir)).toEqual([]);
+      expect(fs.existsSync(path.join(research, "keep.txt"))).toBe(true);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

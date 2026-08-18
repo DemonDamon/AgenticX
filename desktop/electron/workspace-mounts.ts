@@ -79,6 +79,31 @@ export async function upsertMount(defaultDir: string, record: MountRecord): Prom
   await writeMounts(defaultDir, next);
 }
 
+function isDirectChild(parentDir: string, childPath: string): boolean {
+  return path.dirname(path.resolve(childPath)) === path.resolve(parentDir);
+}
+
+/** Remove a mount by source path. Link/copy dest under defaultDir is deleted; source is not. */
+export async function removeMountForSource(
+  defaultDir: string,
+  sourcePath: string,
+): Promise<{ ok: boolean; removed: boolean; name?: string }> {
+  const record = await findMountForSource(defaultDir, sourcePath);
+  if (!record) return { ok: true, removed: false };
+  if (record.mode !== "reference") {
+    const dest = path.join(defaultDir, record.name);
+    if (isDirectChild(defaultDir, dest)) {
+      await fs.promises.rm(dest, { recursive: true, force: true });
+    }
+  }
+  const mounts = await readMounts(defaultDir);
+  await writeMounts(
+    defaultDir,
+    mounts.filter((item) => item.name !== record.name),
+  );
+  return { ok: true, removed: true, name: record.name };
+}
+
 /** Find an existing mount by canonical source path (or basename match). */
 export async function findMountForSource(
   defaultDir: string,

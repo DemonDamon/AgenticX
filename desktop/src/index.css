@@ -863,3 +863,8 @@ input[type="radio"] {
   background-clip: padding-box;
 }
 
+/* Empty-state composer lift: flex-grow is animatable; keep the spacer mounted. */
+.agx-composer-lift-spacer {
+  flex-basis: 0;
+}
+

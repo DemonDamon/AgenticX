@@ -1370,6 +1370,16 @@ declare global {
         mode?: TaskspaceMountMode;
         error?: string;
       }>;
+      unlinkFromSessionWorkspace: (payload: {
+        sessionId: string;
+        sources: string[];
+      }) => Promise<{
+        ok: boolean;
+        defaultDir?: string;
+        unlinked?: number;
+        failed?: string[];
+        error?: string;
+      }>;
       copyIntoSessionWorkspace: (payload: {
         sessionId: string;
         sources: string[];

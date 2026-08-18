@@ -220,7 +220,9 @@ def _session_workspace_root_sets(
 
     - ``write_roots``: session default workspace + link mounts' source paths +
       non-reference taskspace roots.
-    - ``read_roots``: write_roots + reference mount source paths (read-only).
+    - ``read_roots``: user-attached extra taskspaces and directory reference
+      mounts first, then write_roots, then remaining read-only roots
+      (so ``list_files(".")`` prefers the folder the user just attached).
     """
     write_roots: List[Path] = []
     read_only_roots: List[Path] = []
@@ -272,11 +274,21 @@ def _session_workspace_root_sets(
                         _add(source_path, writable=True)
         _add(str(getattr(session, "workspace_dir", "") or ""), writable=True)
 
-    for p in default_paths:
+    mount_scan_paths = list(default_paths)
+    if session is not None:
+        workspace_dir = str(getattr(session, "workspace_dir", "") or "").strip()
+        if workspace_dir:
+            mount_scan_paths.append(workspace_dir)
+    seen_mount_roots: set[str] = set()
+    for p in mount_scan_paths:
         try:
             default_root = Path(p).expanduser().resolve(strict=False)
         except Exception:
             continue
+        mount_key = str(default_root)
+        if mount_key in seen_mount_roots:
+            continue
+        seen_mount_roots.add(mount_key)
         for mount in _load_default_workspace_mounts(default_root):
             mode = str(mount.get("mode") or "link").strip().lower()
             source_path = str(mount.get("source_path") or "").strip()
@@ -327,7 +339,61 @@ def _session_workspace_root_sets(
     except Exception:
         pass
 
-    read_roots = list(write_roots) + [r for r in read_only_roots if str(r) not in seen_write]
+    default_keys: set[str] = set()
+    for p in default_paths:
+        try:
+            default_keys.add(str(Path(p).expanduser().resolve(strict=False)))
+        except Exception:
+            continue
+    if session is not None:
+        workspace_dir = str(getattr(session, "workspace_dir", "") or "").strip()
+        if workspace_dir:
+            try:
+                default_keys.add(str(Path(workspace_dir).expanduser().resolve(strict=False)))
+            except Exception:
+                pass
+    try:
+        desktop_use_key = str((Path.home() / ".agenticx" / "desktop-use").resolve(strict=False))
+    except Exception:
+        desktop_use_key = ""
+
+    preferred_read: List[Path] = []
+    seen_preferred: set[str] = set()
+
+    def _prefer_dir(path: Path) -> None:
+        key = str(path)
+        if not key or key in seen_preferred or key in default_keys or key == desktop_use_key:
+            return
+        try:
+            if not path.is_dir():
+                return
+        except OSError:
+            return
+        seen_preferred.add(key)
+        preferred_read.append(path)
+
+    for root in write_roots:
+        _prefer_dir(root)
+    for root in read_only_roots:
+        _prefer_dir(root)
+
+    read_roots: List[Path] = []
+    seen_read_roots: set[str] = set()
+
+    def _push_read(path: Path) -> None:
+        key = str(path)
+        if key in seen_read_roots:
+            return
+        seen_read_roots.add(key)
+        read_roots.append(path)
+
+    for root in preferred_read:
+        _push_read(root)
+    for root in write_roots:
+        _push_read(root)
+    for root in read_only_roots:
+        if str(root) not in seen_write:
+            _push_read(root)
     return read_roots, write_roots
 
 
@@ -335,6 +401,84 @@ def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
     """Ordered filesystem roots for this session (read-capable)."""
     read_roots, _write_roots = _session_workspace_root_sets(session)
     return read_roots
+
+
+def _session_default_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
+    """Session default workspace directories that may contain ``.agx-mounts.json``."""
+    scan: List[str] = []
+    if session is None:
+        return []
+    taskspaces = getattr(session, "taskspaces", None)
+    if isinstance(taskspaces, list):
+        for item in taskspaces:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("id", "") or "").strip() != "default":
+                continue
+            raw_path = str(item.get("path", "") or "").strip()
+            if raw_path:
+                scan.append(raw_path)
+    workspace_dir = str(getattr(session, "workspace_dir", "") or "").strip()
+    if workspace_dir:
+        scan.append(workspace_dir)
+    roots: List[Path] = []
+    seen: set[str] = set()
+    for raw in scan:
+        try:
+            root = Path(raw).expanduser().resolve(strict=False)
+        except Exception:
+            continue
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(root)
+    return roots
+
+
+def _session_mount_aliases(session: Optional[StudioSession]) -> dict[str, tuple[Path, str]]:
+    """Map ``.agx-mounts.json`` display names to ``(source_path, mode)``."""
+    aliases: dict[str, tuple[Path, str]] = {}
+    for root in _session_default_workspace_roots(session):
+        for mount in _load_default_workspace_mounts(root):
+            name = str(mount.get("name") or "").strip()
+            source = str(mount.get("source_path") or "").strip()
+            mode = str(mount.get("mode") or "link").strip().lower()
+            if not name or not source:
+                continue
+            try:
+                src = Path(source).expanduser().resolve(strict=False)
+            except Exception:
+                continue
+            aliases.setdefault(name, (src, mode))
+    return aliases
+
+
+def _map_virtual_reference_path(
+    resolved: Path, session: Optional[StudioSession]
+) -> Optional[tuple[Path, str]]:
+    """Map ``<default>/<mount_name>/...`` (no dest dir) onto the reference source."""
+    aliases = _session_mount_aliases(session)
+    if not aliases:
+        return None
+    for default_root in _session_default_workspace_roots(session):
+        try:
+            rel = resolved.relative_to(default_root)
+        except ValueError:
+            continue
+        parts = rel.parts
+        if not parts:
+            continue
+        hit = aliases.get(parts[0])
+        if hit is None:
+            continue
+        source_root, mode = hit
+        rest = Path(*parts[1:]) if len(parts) > 1 else Path()
+        mapped = _safe_resolve_path(source_root / rest) if rest.parts else source_root
+        if mapped != source_root and not _is_path_under_root(mapped, source_root):
+            continue
+        return mapped, mode
+    return None
 
 
 def _is_path_under_root(candidate: Path, root: Path) -> bool:
@@ -1331,7 +1475,13 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "List files/directories under a path.",
+            "description": (
+                "List files/directories under a path. path='.' lists the user's attached "
+                "folder when one exists — that is the answer to 'what is in the folder'. "
+                "Do not also list the session default workspace, and do not re-check with "
+                "bash_exec ls. Reference mounts are not physically under the default "
+                "taskspace path; use the mount name or listed root, not default/name/..."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2997,6 +3147,18 @@ def _resolve_workspace_path(
         resolved = _safe_resolve_path(raw_path)
         if _is_protected_path(resolved):
             raise ValueError(f"path is protected: {resolved}")
+        mapped = _map_virtual_reference_path(resolved, session)
+        if mapped is not None:
+            mapped_path, mount_mode = mapped
+            if _is_protected_path(mapped_path):
+                raise ValueError(f"path is protected: {mapped_path}")
+            if for_write and mount_mode == "reference":
+                raise ValueError(_format_readonly_reference(mapped_path))
+            if for_write and not _under_any_root(mapped_path, write_roots):
+                if _under_any_root(mapped_path, read_roots):
+                    raise ValueError(_format_readonly_reference(mapped_path))
+                raise ValueError(_format_escape(mapped_path))
+            return mapped_path
         for root in roots:
             if _is_path_under_root(resolved, root):
                 return resolved
@@ -3004,6 +3166,25 @@ def _resolve_workspace_path(
         if for_write and _under_any_root(resolved, read_roots):
             raise ValueError(_format_readonly_reference(resolved))
         raise ValueError(_format_escape(resolved))
+
+    parts = raw_path.parts
+    if parts and parts[0] not in {".", ".."}:
+        hit = _session_mount_aliases(session).get(parts[0])
+        if hit is not None:
+            source_root, mount_mode = hit
+            rest = Path(*parts[1:]) if len(parts) > 1 else Path()
+            resolved = _safe_resolve_path(source_root / rest) if rest.parts else source_root
+            if _is_protected_path(resolved):
+                raise ValueError(f"path is protected: {resolved}")
+            if resolved != source_root and not _is_path_under_root(resolved, source_root):
+                raise ValueError(_format_escape(resolved))
+            if for_write and mount_mode == "reference":
+                raise ValueError(_format_readonly_reference(resolved))
+            if for_write and not _under_any_root(resolved, write_roots):
+                if _under_any_root(resolved, read_roots):
+                    raise ValueError(_format_readonly_reference(resolved))
+                raise ValueError(_format_escape(resolved))
+            return resolved
 
     if pick_existing:
         for root in roots:
@@ -7271,6 +7452,28 @@ def _tool_ask_user(arguments: Dict[str, Any], *, service_mode: bool = False) -> 
     return answer or "(empty)"
 
 
+_WORKSPACE_MOUNT_META_NAMES = frozenset({".agx-mounts.json", ".agx-copy-manifest.json"})
+
+
+def _list_files_entries(root: Path, *, recursive: bool) -> List[Path]:
+    """List a workspace directory, injecting reference mounts like the workspace panel."""
+    if recursive:
+        entries = [p for p in root.rglob("*") if p.name not in _WORKSPACE_MOUNT_META_NAMES]
+        return sorted(entries, key=lambda p: str(p))
+    entries = [p for p in root.iterdir() if p.name not in _WORKSPACE_MOUNT_META_NAMES]
+    existing_names = {p.name for p in entries}
+    extras: List[Path] = []
+    for mount in _load_default_workspace_mounts(root):
+        name = str(mount.get("name") or "").strip()
+        mode = str(mount.get("mode") or "").strip().lower()
+        source = str(mount.get("source_path") or "").strip()
+        if not name or name in existing_names or mode != "reference" or not source:
+            continue
+        extras.append(Path(source).expanduser())
+        existing_names.add(name)
+    return sorted(entries + extras, key=lambda p: str(p))
+
+
 def _tool_list_files(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
     path_arg = str(arguments.get("path", "."))
     try:
@@ -7288,19 +7491,21 @@ def _tool_list_files(arguments: Dict[str, Any], session: Optional[StudioSession]
     if not root.is_dir():
         return f"ERROR: not a directory: {root}"
 
-    entries: List[Path]
-    if recursive:
-        entries = sorted((p for p in root.rglob("*")), key=lambda p: str(p))
-    else:
-        entries = sorted(root.iterdir(), key=lambda p: str(p))
-
-    lines: List[str] = []
+    entries = _list_files_entries(root, recursive=recursive)
+    listed_root = _safe_resolve_path(root)
+    lines: List[str] = [f"root: {listed_root}"]
     for item in entries[:limit]:
         suffix = "/" if item.is_dir() else ""
-        lines.append(str(item) + suffix)
+        try:
+            rel = _safe_resolve_path(item).relative_to(listed_root)
+            lines.append(f"{rel}{suffix}")
+        except ValueError:
+            lines.append(f"{item.name}{suffix} -> {item}{suffix}")
     if len(entries) > limit:
         lines.append(f"... (truncated, total {len(entries)} entries)")
-    return "\n".join(lines) if lines else "(empty directory)"
+    if len(lines) == 1:
+        return f"{lines[0]}\n(empty directory)"
+    return "\n".join(lines)
 
 
 async def _tool_liteparse(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:

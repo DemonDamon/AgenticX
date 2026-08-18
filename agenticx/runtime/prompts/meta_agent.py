@@ -457,6 +457,36 @@ def _build_session_summary_context(session: StudioSession, max_age_days: int = 7
     return f"## 其他会话摘要（跨会话延续）\n{preview}\n"
 
 
+def _reference_mounts_from_taskspaces(taskspaces: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Load composer reference mounts from the session default ``.agx-mounts.json``."""
+    default_path = ""
+    for ts in taskspaces:
+        if str(ts.get("id") or "").strip() == "default":
+            default_path = str(ts.get("path") or "").strip()
+            break
+    if not default_path:
+        return []
+    mounts_file = Path(default_path).expanduser() / ".agx-mounts.json"
+    try:
+        raw = json.loads(mounts_file.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    rows = raw.get("mounts") if isinstance(raw, dict) else None
+    if not isinstance(rows, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        source = str(item.get("source_path") or "").strip()
+        mode = str(item.get("mode") or "link").strip().lower()
+        if not name or not source or mode != "reference":
+            continue
+        out.append({"name": name, "source_path": source, "mode": mode})
+    return out
+
+
 def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
     if not taskspaces:
         return ""
@@ -466,6 +496,13 @@ def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
         path = ts.get("path", "")
         ts_id = ts.get("id", "")
         lines.append(f"- **{label}** → `{path}` (id: {ts_id})")
+    mounts = _reference_mounts_from_taskspaces(taskspaces)
+    if mounts:
+        lines.append("用户附加的引用目录（reference，只读；磁盘上不在默认工作区之下）：")
+        for mount in mounts:
+            lines.append(
+                f"- **{mount['name']}** → `{mount['source_path']}`（list_files(\".\") 即列此目录）"
+            )
     lines.append(
         "提示：用户在 UI 中添加的工作区路径即为项目根目录。"
         "执行 bash_exec / file_read / file_write / git clone 时，请基于上述路径操作，"
@@ -474,7 +511,10 @@ def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
         "（或侧栏当前选中的工作区）之下，可在其下建子目录；"
         "**禁止**在 `$HOME` 下另起平行目录（如 `~/codebase-analysis`）。"
         "相对路径（如 list_files(\".\")）会优先落在用户附加的工作区（非「默认工作区」）下；"
-        "若侧栏选中了某一工作区标签，该轮对话会以该标签对应路径为最高优先。\n"
+        "若侧栏选中了某一工作区标签，该轮对话会以该标签对应路径为最高优先。"
+        "问「文件夹有啥」时：一次 list_files(\".\") 即可作答，不要再 list 默认工作区，"
+        "也不要用 bash_exec ls 复核。引用目录的子路径用「挂载名/相对路径」或上面的 source_path，"
+        "禁止拼「默认工作区路径/挂载名/...」。\n"
     )
     return "\n".join(lines) + "\n"
 
