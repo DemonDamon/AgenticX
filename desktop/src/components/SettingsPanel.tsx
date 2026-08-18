@@ -121,6 +121,7 @@ import {
   harnessWindowForCapability,
   resolveHeuristicCapability,
 } from "../utils/model-context-window-heuristic";
+import { resolveManagedContextWindow } from "../utils/managed-context-window";
 import { DeveloperTokenBudgetPanel } from "./settings/DeveloperTokenBudgetPanel";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { DataSourcesSettings } from "./settings/datasources/DataSourcesSettings";
@@ -6761,6 +6762,8 @@ export function SettingsPanel({
   // 按模型的上下文窗口覆盖，键为 `provider/model`；留空表示交给后端按模型名识别。
   const [modelContextWindows, setModelContextWindows] = useState<Record<string, number>>({});
   const [editModelWindowDraft, setEditModelWindowDraft] = useState("");
+  // 托管厂商的模型由企业后台统一配置，本机只读；见 model_context_window.local_override_window。
+  const [editModelWindowManaged, setEditModelWindowManaged] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -8044,16 +8047,46 @@ export function SettingsPanel({
     setEditModelOriginalId("");
     setEditModelFormId("");
     setEditModelWindowDraft("");
+    setEditModelWindowManaged(false);
     setEditModelError(null);
   };
 
   const openEditModelModal = (modelId: string) => {
     setEditModelOriginalId(modelId);
     setEditModelFormId(modelId);
-    const stored = modelContextWindows[`${active}/${modelId}`];
-    setEditModelWindowDraft(stored ? String(stored) : "");
+    const managed = current?.managed === true;
+    setEditModelWindowManaged(managed);
+    if (managed) {
+      const declared = resolveManagedContextWindow(draft, active, modelId);
+      setEditModelWindowDraft(declared ? String(declared) : "");
+    } else {
+      const stored = modelContextWindows[`${active}/${modelId}`];
+      setEditModelWindowDraft(stored ? String(stored) : "");
+    }
     setEditModelError(null);
     setEditModelModalOpen(true);
+  };
+
+  /** 把模型改名落到厂商草稿上（窗口配置与之无关，单独处理）。 */
+  const applyModelRenameFromModal = (newId: string, oldId: string) => {
+    setDraft((prev) => {
+      const prevEntry = prev[active];
+      if (!prevEntry) return prev;
+      const nextModels = prevEntry.models.map((m) => (m === oldId ? newId : m));
+      const next: ProviderEntry = {
+        ...prevEntry,
+        models: nextModels,
+        model: prevEntry.model === oldId ? newId : prevEntry.model,
+      };
+      return { ...prev, [active]: next };
+    });
+    setModelHealthMap((p) => {
+      const next = { ...p };
+      delete next[`${active}:${oldId}`];
+      delete next[`${active}:${newId}`];
+      return next;
+    });
+    closeEditModelModal();
   };
 
   const submitEditModelFromModal = () => {
@@ -8062,6 +8095,17 @@ export function SettingsPanel({
     if (!newId || !oldId) return;
     if (newId !== oldId && current.models.includes(newId)) {
       setEditModelError("列表中已有相同的模型 ID");
+      return;
+    }
+
+    // 托管模型的窗口只在企业后台改，这里不写本机配置。
+    if (editModelWindowManaged) {
+      if (newId === oldId) {
+        closeEditModelModal();
+        return;
+      }
+      setEditModelError(null);
+      applyModelRenameFromModal(newId, oldId);
       return;
     }
 
@@ -8091,24 +8135,7 @@ export function SettingsPanel({
       return;
     }
     setEditModelError(null);
-    setDraft((prev) => {
-      const prevEntry = prev[active];
-      if (!prevEntry) return prev;
-      const nextModels = prevEntry.models.map((m) => (m === oldId ? newId : m));
-      const next: ProviderEntry = {
-        ...prevEntry,
-        models: nextModels,
-        model: prevEntry.model === oldId ? newId : prevEntry.model,
-      };
-      return { ...prev, [active]: next };
-    });
-    setModelHealthMap((p) => {
-      const next = { ...p };
-      delete next[`${active}:${oldId}`];
-      delete next[`${active}:${newId}`];
-      return next;
-    });
-    closeEditModelModal();
+    applyModelRenameFromModal(newId, oldId);
   };
 
   const beginInlineProviderRename = useCallback(
@@ -10378,13 +10405,18 @@ export function SettingsPanel({
                               max={10000000}
                               step={1000}
                               value={editModelWindowDraft}
+                              disabled={editModelWindowManaged}
                               onChange={(e) => {
                                 setEditModelWindowDraft(e.target.value);
                                 setEditModelError(null);
                               }}
-                              placeholder={`自动识别为 ${formatContextWindowShort(
-                                resolveHeuristicCapability(editModelFormId.trim() || editModelOriginalId),
-                              )}`}
+                              placeholder={
+                                editModelWindowManaged
+                                  ? "由企业管理员统一配置"
+                                  : `自动识别为 ${formatContextWindowShort(
+                                      resolveHeuristicCapability(editModelFormId.trim() || editModelOriginalId),
+                                    )}`
+                              }
                               onKeyDown={(e) => {
                                 if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
                                 if (e.key === "Enter" && editModelFormId.trim()) submitEditModelFromModal();
@@ -10412,11 +10444,17 @@ export function SettingsPanel({
                               </p>
                             );
                           })()}
-                          <p className="text-[11px] leading-relaxed text-text-faint">
-                            这里填端点实际能接受的 token 数，留空则按模型名识别。自部署端点的真实上限由 vLLM 的
-                            --max-model-len 等参数决定，常低于模型架构支持的值；填低了只是提前整理上下文，
-                            填高了会让整理触发得太晚、直接被上游拒绝。该项立即生效，无需保存设置。
-                          </p>
+                          {editModelWindowManaged ? (
+                            <p className="text-[11px] leading-relaxed text-text-faint">
+                              该模型由企业统一下发，上下文窗口在企业后台配置，本机的设置不会生效。
+                            </p>
+                          ) : (
+                            <p className="text-[11px] leading-relaxed text-text-faint">
+                              这里填端点实际能接受的 token 数，留空则按模型名识别。自部署端点的真实上限由 vLLM 的
+                              --max-model-len 等参数决定，常低于模型架构支持的值；填低了只是提前整理上下文，
+                              填高了会让整理触发得太晚、直接被上游拒绝。该项立即生效，无需保存设置。
+                            </p>
+                          )}
                         </div>
                       </Modal>
                       <Modal

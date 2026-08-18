@@ -97,3 +97,45 @@ def test_config_read_failure_never_fabricates_a_window(monkeypatch):
 
     monkeypatch.setattr(config_manager.ConfigManager, "get_value", classmethod(_boom))
     assert declared_window_for_session(_Session()) is None
+
+
+def _stub_providers(monkeypatch, providers, windows):
+    from agenticx.cli import config_manager
+
+    def _get(cls, key):
+        if key == "providers":
+            return providers
+        if key == "runtime.model_context_windows":
+            return windows
+        return None
+
+    monkeypatch.setattr(config_manager.ConfigManager, "get_value", classmethod(_get))
+
+
+def test_managed_provider_ignores_local_override_entirely(monkeypatch):
+    """企业统一管理的模型，本机那张表一律不生效——哪怕管理员那边留空。"""
+    from agenticx.runtime.model_context_window import declared_window_for_session
+
+    _stub_providers(
+        monkeypatch,
+        {"enterprise": {"managed": True}},
+        {"enterprise/zhipu/glm-5.2": 64_000},
+    )
+    session = _Session(provider="enterprise", model="zhipu/glm-5.2")
+    # 管理员未声明：不回落到登录前留下的本机值。
+    assert declared_window_for_session(session) is None
+    # 管理员声明了：以管理员为准。
+    session.declared_context_window = 200_000
+    assert declared_window_for_session(session) == 200_000
+
+
+def test_self_configured_provider_still_uses_local_override(monkeypatch):
+    """自配置厂商没有企业目录，本机覆盖仍是它唯一的声明入口。"""
+    from agenticx.runtime.model_context_window import declared_window_for_session
+
+    _stub_providers(
+        monkeypatch,
+        {"custom_openai_local": {"managed": False}, "enterprise": {"managed": True}},
+        {"custom_openai_local/glm-5.2": 128_000},
+    )
+    assert declared_window_for_session(_Session()) == 128_000

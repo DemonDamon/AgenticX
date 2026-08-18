@@ -100,15 +100,40 @@ def parse_context_window_from_name(model_name: str | None) -> int | None:
     return value
 
 
+def provider_is_enterprise_managed(provider_name: str | None) -> bool:
+    """True when this provider's catalog is pushed down by the enterprise console.
+
+    Desktop marks the synced provider with ``managed: true``; everything under a
+    managed provider is the admin's call, not the machine's.
+    """
+    provider = str(provider_name or "").strip()
+    if not provider:
+        return False
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        providers = ConfigManager.get_value("providers")
+    except Exception:
+        return False
+    if not isinstance(providers, dict):
+        return False
+    entry = providers.get(provider)
+    return isinstance(entry, dict) and entry.get("managed") is True
+
+
 def local_override_window(provider_name: str | None, model_name: str | None) -> int | None:
-    """Per-model override from the Desktop developer menu (``runtime.model_context_windows``).
+    """Per-model override from the Desktop model dialog (``runtime.model_context_windows``).
 
     自配置厂商 / 本地自部署端点没有企业目录可依赖，这是它们唯一的声明入口。
+    托管厂商则完全不吃这张表 —— 企业统一管理的模型不该被本机设置改动，哪怕
+    管理员那边留空也不行，否则登录前留下的值会在登录后悄悄复活。
     读配置失败一律当作「没配」，绝不让配置问题冒充一个窗口值。
     """
     provider = str(provider_name or "").strip()
     model = str(model_name or "").strip()
     if not provider or not model:
+        return None
+    if provider_is_enterprise_managed(provider):
         return None
     try:
         from agenticx.cli.config_manager import ConfigManager
