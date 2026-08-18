@@ -34,3 +34,4 @@ export * from "./quota-plans";
 export * from "./desktop-device-auth";
 export * from "./capability-packs";
 export * from "./user-groups";
+export * from "./feature-assignments";

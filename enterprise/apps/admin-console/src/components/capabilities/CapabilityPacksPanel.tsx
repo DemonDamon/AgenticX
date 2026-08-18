@@ -9,7 +9,6 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  Checkbox,
   Dialog,
   DialogContent,
   DialogFooter,
@@ -18,7 +17,6 @@ import {
   Input,
   Label,
   ScrollArea,
-  Switch,
   Textarea,
   toast,
 } from "@agenticx/ui";
@@ -33,6 +31,7 @@ import {
   toAssignmentKeys,
   type AssignmentDraft,
 } from "../../lib/capability-pack-form";
+import { AssignmentScopeEditor } from "../assignment/AssignmentScopeEditor";
 import { CapabilityChoiceList } from "./CapabilityChoiceList";
 import { toggleId, useCapabilityCatalog, type PackRecord } from "./use-capability-catalog";
 
@@ -250,93 +249,13 @@ export function CapabilityPacksPanel() {
 
               <div className="space-y-3">
                 <div className="text-sm font-medium">{t("assignment.title")}</div>
-                <label className="flex items-center gap-2 text-sm">
-                  <Switch
-                    checked={assignment.allMembers}
-                    onCheckedChange={(checked) =>
-                      setAssignment({ ...assignment, allMembers: Boolean(checked) })
-                    }
-                  />
-                  <span>{t("assignment.allMembers")}</span>
-                </label>
-                {assignment.allMembers ? (
-                  <p className="text-xs text-muted-foreground">{t("assignment.allMembersHint")}</p>
-                ) : (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2 rounded-lg border p-3">
-                      <div className="text-xs font-medium text-muted-foreground">
-                        {t("assignment.departments")}
-                      </div>
-                      {catalog.depts.length === 0 && (
-                        <p className="text-xs text-muted-foreground">{t("assignment.noDept")}</p>
-                      )}
-                      {catalog.depts.map((dept) => (
-                        <label key={dept.id} className="flex items-center gap-2 text-sm">
-                          <Checkbox
-                            checked={assignment.deptIds.includes(dept.id)}
-                            onCheckedChange={() =>
-                              setAssignment((prev) => ({
-                                ...prev,
-                                deptIds: toggleId(prev.deptIds, dept.id),
-                              }))
-                            }
-                          />
-                          <span>{dept.name}</span>
-                          <span className="text-xs text-muted-foreground">{dept.path}</span>
-                        </label>
-                      ))}
-                      <p className="text-xs text-muted-foreground">{t("assignment.deptHint")}</p>
-                    </div>
-                    <div className="space-y-2 rounded-lg border p-3">
-                      <div className="text-xs font-medium text-muted-foreground">
-                        {t("assignment.groups")}
-                      </div>
-                      {catalog.groups.length === 0 && (
-                        <p className="text-xs text-muted-foreground">{t("assignment.noGroup")}</p>
-                      )}
-                      {catalog.groups.map((group) => (
-                        <label key={group.id} className="flex items-center gap-2 text-sm">
-                          <Checkbox
-                            checked={assignment.groupIds.includes(group.id)}
-                            onCheckedChange={() =>
-                              setAssignment((prev) => ({
-                                ...prev,
-                                groupIds: toggleId(prev.groupIds, group.id),
-                              }))
-                            }
-                          />
-                          <span>{group.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {t("assignment.groupMemberCount", { count: group.memberIds.length })}
-                          </span>
-                        </label>
-                      ))}
-                      <p className="text-xs text-muted-foreground">{t("assignment.groupHint")}</p>
-                    </div>
-                    <div className="space-y-2 rounded-lg border p-3">
-                      <div className="text-xs font-medium text-muted-foreground">
-                        {t("assignment.users")}
-                      </div>
-                      {catalog.users.length === 0 && (
-                        <p className="text-xs text-muted-foreground">{t("assignment.noUser")}</p>
-                      )}
-                      {catalog.users.map((user) => (
-                        <label key={user.id} className="flex items-center gap-2 text-sm">
-                          <Checkbox
-                            checked={assignment.userIds.includes(user.id)}
-                            onCheckedChange={() =>
-                              setAssignment((prev) => ({
-                                ...prev,
-                                userIds: toggleId(prev.userIds, user.id),
-                              }))
-                            }
-                          />
-                          <span>{user.displayName || user.email}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <AssignmentScopeEditor
+                  value={assignment}
+                  onChange={setAssignment}
+                  depts={catalog.depts}
+                  groups={catalog.groups}
+                  users={catalog.users}
+                />
               </div>
             </div>
           </ScrollArea>

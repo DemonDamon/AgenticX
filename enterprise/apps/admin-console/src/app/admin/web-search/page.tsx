@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
+
+import { FeatureAssignmentCard } from "../../../components/assignment/FeatureAssignmentCard";
 import {
   Badge,
   Button,
@@ -597,6 +599,9 @@ export default function WebSearchSettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <FeatureAssignmentCard feature="web_search" />
+      <FeatureAssignmentCard feature="deep_research" />
     </div>
   );
 }

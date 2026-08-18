@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { isFeatureAllowedForUser } from "@agenticx/iam-core";
+
 import { resolveDesktopIdentity } from "../../../../../lib/desktop-auth";
 import { resolveWebSearchConfig } from "../../../../../lib/web-search/config";
 import {
@@ -70,6 +72,19 @@ export async function POST(request: Request) {
   const config = resolveWebSearchConfig(tenantConfig);
   if (!config.enabled) {
     return errorResponse(403, "40302", "企业管理员已关闭联网搜索");
+  }
+  // 租户总开关之上再看分配范围：没配过分配 = 全员可用，配了就只有命中的人能用。
+  // 查不动时放行：最可能的原因是租户还没跑迁移，没有分配表；为一张还没建的表把
+  // 全公司的搜索停掉，代价远大于让未分配的人多搜一次。
+  const allowed = await isFeatureAllowedForUser(
+    identity.tenantId,
+    "web_search",
+    identity.userId,
+    identity.email,
+    identity.deptId,
+  ).catch(() => true);
+  if (!allowed) {
+    return errorResponse(403, "40304", "企业管理员未向你开放联网搜索");
   }
 
   const attempts: WebSearchProviderAttempt[] = [];

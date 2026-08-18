@@ -590,6 +590,17 @@
           "packs": "能力包",
           "skills": "Skill 注册表"
         }
+      },
+      "featureAssignment": {
+        "description": "选择哪些人可以使用。一条都不选就是全员可用——这是基础能力，打开总开关就是想让大家用。",
+        "ceilingHint": "总开关关掉时，这里选了谁都用不了。",
+        "saved": "已保存",
+        "web_search": {
+          "title": "联网搜索开放范围"
+        },
+        "deep_research": {
+          "title": "深度研究开放范围"
+        }
       }
     },
     "dashboard": {

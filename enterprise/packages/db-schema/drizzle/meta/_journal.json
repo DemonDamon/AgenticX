@@ -379,6 +379,13 @@
       "when": 1787557400000,
       "tag": "0054_enterprise_user_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1787643800000,
+      "tag": "0055_enterprise_feature_assignments",
+      "breakpoints": true
     }
   ]
 }

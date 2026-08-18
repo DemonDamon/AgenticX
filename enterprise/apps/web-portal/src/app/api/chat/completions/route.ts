@@ -1,3 +1,4 @@
+import { isFeatureAllowedForUser } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { ulid } from "ulid";
@@ -254,7 +255,17 @@ export async function POST(request: Request) {
     try {
       tenantSearchConfigSnapshot = await loadTenantWebSearchConfigStrict(session.tenantId);
       tenantSearchConfigLoaded = true;
-      tenantDeepResearchEnabled = tenantSearchConfigSnapshot?.deepResearchEnabled ?? true;
+      // 租户总开关之上再看分配范围。查不动时放行：最可能的原因是租户还没跑迁移，
+      // 没有分配表；为一张还没建的表把全公司的深度研究停掉不划算。
+      const deepResearchAssigned = await isFeatureAllowedForUser(
+        session.tenantId,
+        "deep_research",
+        session.userId,
+        session.email,
+        session.deptId,
+      ).catch(() => true);
+      tenantDeepResearchEnabled =
+        (tenantSearchConfigSnapshot?.deepResearchEnabled ?? true) && deepResearchAssigned;
     } catch (error) {
       console.error(
         "[deep-research] tenant policy unavailable:",
