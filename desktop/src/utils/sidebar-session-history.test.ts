@@ -40,8 +40,15 @@ describe("sidebar-session-history utils", () => {
     expect(sidebarSessionLabel(rows[0]!)).toBe("你好世界");
   });
 
-  it("buckets pinned / today / earlier and skips special ids", () => {
-    const now = Date.now() / 1000;
+  it("buckets pinned and local-calendar date ranges without duplicates", () => {
+    const nowDate = new Date(2026, 7, 18, 12, 0, 0);
+    const now = nowDate.getTime() / 1000;
+    const atLocalTimeDaysAgo = (daysAgo: number, hour = 12) => {
+      const date = new Date(nowDate);
+      date.setDate(date.getDate() - daysAgo);
+      date.setHours(hour, 0, 0, 0);
+      return date.getTime() / 1000;
+    };
     const rows = normalizeSidebarSessionRows([
       {
         session_id: "im",
@@ -54,26 +61,48 @@ describe("sidebar-session-history utils", () => {
         session_id: "p1",
         avatar_id: "av1",
         session_name: "置顶一",
-        updated_at: now - 10,
+        updated_at: atLocalTimeDaysAgo(3),
         pinned: true,
       },
       {
         session_id: "t1",
         avatar_id: null,
         session_name: "今日",
-        updated_at: now - 60,
+        updated_at: atLocalTimeDaysAgo(0, 1),
+      },
+      {
+        session_id: "y1",
+        avatar_id: "av1",
+        session_name: "昨日",
+        updated_at: atLocalTimeDaysAgo(1, 23),
+      },
+      {
+        session_id: "r1",
+        avatar_id: "av1",
+        session_name: "近期",
+        updated_at: atLocalTimeDaysAgo(7, 1),
       },
       {
         session_id: "o1",
         avatar_id: "av1",
         session_name: "更早",
-        updated_at: now - 86400 * 3,
+        updated_at: atLocalTimeDaysAgo(8, 23),
       },
     ]);
     const buckets = bucketSidebarHistoryRows(rows, new Set(["im"]), now);
     expect(buckets.pinned.map((r) => r.session_id)).toEqual(["p1"]);
     expect(buckets.today.map((r) => r.session_id)).toEqual(["t1"]);
+    expect(buckets.yesterday.map((r) => r.session_id)).toEqual(["y1"]);
+    expect(buckets.recent.map((r) => r.session_id)).toEqual(["r1"]);
     expect(buckets.earlier.map((r) => r.session_id)).toEqual(["o1"]);
+    expect(
+      [
+        ...buckets.today,
+        ...buckets.yesterday,
+        ...buckets.recent,
+        ...buckets.earlier,
+      ].map((r) => r.session_id)
+    ).not.toContain("p1");
   });
 
   it("filters by avatar including meta", () => {

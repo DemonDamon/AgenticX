@@ -245,18 +245,30 @@ export function startOfLocalDay(d = new Date()): number {
 export type SidebarHistoryBuckets = {
   pinned: SidebarSessionRow[];
   today: SidebarSessionRow[];
+  yesterday: SidebarSessionRow[];
+  recent: SidebarSessionRow[];
   earlier: SidebarSessionRow[];
 };
 
-/** Partition non-special rows into pinned / today / earlier. */
+function startOfLocalDayDaysAgo(todayStartSec: number, daysAgo: number): number {
+  const date = new Date(todayStartSec * 1000);
+  date.setDate(date.getDate() - daysAgo);
+  return date.getTime() / 1000;
+}
+
+/** Partition non-special rows by local calendar day; pinned rows never repeat in date buckets. */
 export function bucketSidebarHistoryRows(
   rows: readonly SidebarSessionRow[],
   specialIds: ReadonlySet<string>,
   nowSec = Date.now() / 1000
 ): SidebarHistoryBuckets {
   const todayStart = startOfLocalDay(new Date(nowSec * 1000));
+  const yesterdayStart = startOfLocalDayDaysAgo(todayStart, 1);
+  const recentStart = startOfLocalDayDaysAgo(todayStart, 7);
   const pinned: SidebarSessionRow[] = [];
   const today: SidebarSessionRow[] = [];
+  const yesterday: SidebarSessionRow[] = [];
+  const recent: SidebarSessionRow[] = [];
   const earlier: SidebarSessionRow[] = [];
   for (const row of rows) {
     if (specialIds.has(row.session_id)) continue;
@@ -266,9 +278,11 @@ export function bucketSidebarHistoryRows(
     }
     const ts = getSidebarSessionActivityTs(row);
     if (ts >= todayStart) today.push(row);
+    else if (ts >= yesterdayStart) yesterday.push(row);
+    else if (ts >= recentStart) recent.push(row);
     else earlier.push(row);
   }
-  return { pinned, today, earlier };
+  return { pinned, today, yesterday, recent, earlier };
 }
 
 /** Filter key: `"all"` | `"__meta__"` | avatar_id | `group:<id>` */

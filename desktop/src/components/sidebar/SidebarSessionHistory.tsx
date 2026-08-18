@@ -66,6 +66,8 @@ type CollapseState = {
   feishu: boolean;
   pinned: boolean;
   today: boolean;
+  yesterday: boolean;
+  recent: boolean;
   earlier: boolean;
 };
 
@@ -74,6 +76,8 @@ const DEFAULT_COLLAPSE: CollapseState = {
   feishu: false,
   pinned: false,
   today: false,
+  yesterday: false,
+  recent: false,
   earlier: false,
 };
 
@@ -415,13 +419,16 @@ export function SidebarSessionHistory() {
   );
 
   const chronological = useMemo(
-    () => [...buckets.today, ...buckets.earlier],
-    [buckets.today, buckets.earlier]
+    () => [...buckets.today, ...buckets.yesterday, ...buckets.recent, ...buckets.earlier],
+    [buckets.today, buckets.yesterday, buckets.recent, buckets.earlier]
   );
   const visibleChrono = chronological.slice(0, visibleLimit);
   const todayVisible = visibleChrono.filter((r) => buckets.today.includes(r));
+  const yesterdayVisible = visibleChrono.filter((r) => buckets.yesterday.includes(r));
+  const recentVisible = visibleChrono.filter((r) => buckets.recent.includes(r));
   const earlierVisible = visibleChrono.filter((r) => buckets.earlier.includes(r));
   const hasMore = chronological.length > visibleLimit;
+  const hasStandardHistory = buckets.pinned.length > 0 || chronological.length > 0;
 
   const selectableRows = useMemo(() => {
     const map = new Map<string, SidebarSessionRow>();
@@ -1330,40 +1337,50 @@ export function SidebarSessionHistory() {
         ) : null}
 
         {/* Pinned */}
-        {sectionHeader("pinned", "PINNED")}
-        {!collapse.pinned && (
+        {buckets.pinned.length > 0 ? sectionHeader("pinned", "置顶") : null}
+        {buckets.pinned.length > 0 && !collapse.pinned && (
           <div className="mb-1">
-            {buckets.pinned.length === 0 ? (
-              <div className="px-2 py-1 text-[11px] text-text-faint">暂无置顶</div>
-            ) : (
-              buckets.pinned.map((row) => renderRow(row))
-            )}
+            {buckets.pinned.map((row) => renderRow(row))}
           </div>
         )}
 
         {/* Today */}
-        {sectionHeader("today", "今天")}
-        {!collapse.today && (
+        {todayVisible.length > 0 ? sectionHeader("today", "今天") : null}
+        {todayVisible.length > 0 && !collapse.today && (
           <div className="mb-1">
-            {todayVisible.length === 0 ? (
-              <div className="px-2 py-1 text-[11px] text-text-faint">暂无</div>
-            ) : (
-              todayVisible.map((row) => renderRow(row))
-            )}
+            {todayVisible.map((row) => renderRow(row))}
+          </div>
+        )}
+
+        {/* Yesterday */}
+        {yesterdayVisible.length > 0 ? sectionHeader("yesterday", "昨天") : null}
+        {yesterdayVisible.length > 0 && !collapse.yesterday && (
+          <div className="mb-1">
+            {yesterdayVisible.map((row) => renderRow(row))}
+          </div>
+        )}
+
+        {/* Previous seven days */}
+        {recentVisible.length > 0 ? sectionHeader("recent", "过去 7 天") : null}
+        {recentVisible.length > 0 && !collapse.recent && (
+          <div className="mb-1">
+            {recentVisible.map((row) => renderRow(row))}
           </div>
         )}
 
         {/* Earlier */}
-        {sectionHeader("earlier", "更早")}
-        {!collapse.earlier && (
+        {earlierVisible.length > 0 ? sectionHeader("earlier", "更早") : null}
+        {earlierVisible.length > 0 && !collapse.earlier && (
           <div className="mb-1">
-            {earlierVisible.length === 0 ? (
-              <div className="px-2 py-1 text-[11px] text-text-faint">暂无</div>
-            ) : (
-              earlierVisible.map((row) => renderRow(row))
-            )}
+            {earlierVisible.map((row) => renderRow(row))}
           </div>
         )}
+
+        {!hasStandardHistory ? (
+          <div className="px-2 py-3 text-[11px] text-text-faint">
+            {searchQuery.trim() ? "未找到匹配的对话" : "暂无历史对话"}
+          </div>
+        ) : null}
 
         {hasMore ? (
           <button
