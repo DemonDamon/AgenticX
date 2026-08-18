@@ -106,146 +106,6 @@ def resolve_studio_session_id(base_session: Any) -> str:
 # task-board orchestration.  We deliberately keep this rule-based (no LLM call)
 # so the fast path stays fast: simple questions remain on the single-LLM
 # intelligent route.
-_MULTISTEP_MARKERS_CN: tuple[str, ...] = (
-    "然后",
-    "接着",
-    "再",
-    "之后",
-    "先后",
-    "并且",
-    "同时",
-    "并行",
-    "分别",
-    "逐步",
-    "分步",
-    "步骤",
-    "第一步",
-    "第二步",
-    "拆分",
-    "分解",
-    "调研",
-    "研究",
-)
-# Bigram/ordering markers — must contain BOTH halves to count as a step pair.
-_MULTISTEP_BIGRAMS_CN: tuple[tuple[str, str], ...] = (
-    ("先", "后"),
-    ("先", "再"),
-    ("一", "二"),
-    ("1)", "2)"),
-    ("1.", "2."),
-    ("1、", "2、"),
-)
-# Strong markers explicitly imply multi-step orchestration regardless of length.
-_MULTISTEP_STRONG_MARKERS_CN: tuple[str, ...] = (
-    "步骤",
-    "第一步",
-    "第二步",
-    "拆分",
-    "分解",
-    "分步",
-    "并行",
-)
-_MULTISTEP_MIN_LENGTH_FOR_WEAK = 20  # Weak markers require some prose around them.
-
-# Explicit collaboration language should enter the reviewed team workflow even
-# when the request does not contain ordering words such as “先/再”.  These are
-# intentionally phrase-level markers so greetings like “大家好” remain cheap.
-_COLLABORATIVE_TEAM_MARKERS_CN: tuple[str, ...] = (
-    "大家讨论",
-    "你们讨论",
-    "一起讨论",
-    "共同讨论",
-    "分别分析",
-    "各自分析",
-    "一起分析",
-    "共同分析",
-    "交叉评审",
-    "互相评审",
-    "共同完成",
-    "团队协作",
-    "头脑风暴",
-    "集思广益",
-    "专家会诊",
-    "开会讨论",
-    "辩论一下",
-)
-_COLLABORATIVE_TEAM_PATTERNS_CN: tuple[str, ...] = (
-    r"(?:大家|你们|各位|成员们|多个分身|几个分身).{0,10}(?:讨论|商量|分析|评审|提意见|给出意见)",
-    r"(?:分别|各自|从各自角度).{0,10}(?:分析|回答|评估|判断|给出)",
-)
-
-# A collaborative discussion is not automatically an execution request.  Keep
-# this distinction explicit so the Workforce path can fan out viewpoints
-# without inventing implementation, deployment, or PoC work.
-_ANALYSIS_ONLY_MARKERS_CN: tuple[str, ...] = (
-    "分析",
-    "对比",
-    "比较",
-    "竞品",
-    "区别",
-    "差异",
-    "研究",
-    "调研",
-    "讨论",
-    "评审",
-    "评估",
-    "总结",
-    "视角",
-    "观点",
-    "优缺点",
-    "利弊",
-    "选型",
-)
-_ANALYSIS_ONLY_MARKERS_EN: tuple[str, ...] = (
-    "analyze",
-    "analyse",
-    "analysis",
-    "compare",
-    "comparison",
-    "competitor",
-    "difference",
-    "research",
-    "discuss",
-    "review",
-    "evaluate",
-)
-_EXECUTION_PATTERNS_CN: tuple[str, ...] = (
-    # Imperative/continuation cues prevent nouns such as “运行机制” and
-    # “部署架构” from being mistaken for a request to run anything.
-    r"(?:请|帮我|麻烦|直接|现在|接下来|然后|之后|以后|接着|并|再|先|开始)\s*"
-    r"(?:执行|实现|开发|部署|上线|搭建|创建|运行|安装|验证|落地|接入|提交|发布|启动)",
-    r"(?:请|帮我|麻烦|直接|现在|接下来|然后|之后|以后|接着|并|再|先|开始)?\s*"
-    r"(?:写|修改|改|开发)\s*(?:一下|一段|一个|个)?\s*"
-    r"(?:代码|脚本|功能|demo|PoC|原型)(?:验证|测试|运行|检查)?"
-    r"(?=$|[\s\u3000，。！？、；;：:])",
-    r"(?:执行|实现|部署|上线|搭建|创建|运行|安装|验证|落地|接入|提交|发布|启动)\s*"
-    r"(?:一下|一个|个|这|该|此|这个|上述|方案|功能|代码|脚本|demo|PoC|原型|任务|流程|服务|项目|测试|命令)"
-    r"(?=$|[\s\u3000，。！？、；;：:])",
-    r"(?:拉仓库|克隆仓库|clone)\s*(?:下来|一下|到|这个)?",
-    r"(?:用|通过|拿)\s*(?:一个|个)?\s*(?:PoC|demo|原型)\s*(?:验证|测试|跑)",
-)
-_EXECUTION_PATTERNS_EN: tuple[str, ...] = (
-    r"\b(?:please|help me|go ahead|now|then|next|directly)\s+"
-    r"(?:execute|implement|build|deploy|install|create|run|write|modify|start|launch|commit|publish)\b",
-    r"\b(?:write|modify|build|create)\s+(?:a|an|the)?\s*"
-    r"(?:code|script|demo|poc|prototype|feature)\b",
-    r"\b(?:deploy|install|execute|implement|launch|publish|commit|run)\s+"
-    r"(?:a|an|the|this|that)?\s*(?:poc|prototype|service|feature|plan|project|app|application|change|task|test|tests|command)\b",
-    r"\b(?:clone|git\s+clone)\b",
-)
-
-_ANALYSIS_ONLY_SCOPE = """## 本轮范围：只做分析讨论（最高优先级）
-- 只围绕用户当前问题提供事实、比较、不同视角、风险和不确定性分析。
-- 不得把分析自行扩展成实施任务、代码修改、安装、部署、上线或 PoC；不得声称已安排或将要执行这些动作。
-- 可以提出非执行性的判断或待确认项，但不能凭空新增目标、交付物或后续项目。
-- 如果上下文里出现旧的计划、PoC 或部署内容，只把它们当作背景，不得继续推进；优先回答当前用户问题。
-""".strip()
-
-# Open-call markers — phrases where the user is broadcasting a question to the
-# group rather than addressing one specific role. When matched and no member is
-# explicitly @-mentioned, we prefer Near (the meta leader / project manager)
-# to answer first and optionally point to one relevant member, instead of
-# silently picking a single member via single-target route_to.
 _OPEN_CALL_MARKERS_CN: tuple[str, ...] = (
     "群里谁",
     "谁能",
@@ -316,109 +176,59 @@ def _append_zero_exec_fallback(reply: GroupReply, facts: GroupExecutionFacts) ->
     return reply
 
 
-def _is_complex_multistep_task(user_input: str) -> bool:
-    """Heuristic detector for complex multi-step tasks.
-
-    Returns True if the message looks like it should be decomposed into
-    subtasks and orchestrated by the Workforce path; False for simple
-    questions / chitchat.
-
-    The heuristic is intentionally conservative: false negatives (a complex
-    task slipping through to legacy intelligent) are acceptable; false
-    positives (a simple question wrongly routed to Workforce) are NOT,
-    because they incur token overhead and unnecessary task decomposition.
-    """
-    text = (user_input or "").strip()
-    if not text:
-        return False
-
-    # Strong markers fire regardless of length.
-    for marker in _MULTISTEP_STRONG_MARKERS_CN:
-        if marker in text:
-            return True
-
-    # Bigram ordering markers (e.g. "先...后..." / "1)...2)") fire regardless of length.
-    for first, second in _MULTISTEP_BIGRAMS_CN:
-        idx_first = text.find(first)
-        if idx_first == -1:
-            continue
-        idx_second = text.find(second, idx_first + len(first))
-        if idx_second != -1:
-            return True
-
-    # Weak markers require some prose to avoid matching short questions
-    # like "再来一个" / "然后呢".
-    if len(text) < _MULTISTEP_MIN_LENGTH_FOR_WEAK:
-        return False
-    for marker in _MULTISTEP_MARKERS_CN:
-        if marker in text:
-            return True
-    return False
+# 这一轮该怎么开：只读讨论还是可以动手，要不要多成员协作。
+#
+# 之前这是三组中文关键词正则（分析/对比/讨论 → 讨论；步骤/拆分/并行 → 多步任务；
+# 大家讨论/一起分析 → 协作）。问题不在于漏词，而在于**一句话里有没有某个词，和这轮
+# 该不该动手，本来就不是一回事**：「继续」没有任何词，「比较已有 PoC 的优缺点」有
+# PoC 但只是在讨论，「分析完以后部署」两种词都有。靠加词是补不完的。
+#
+# 现在交给模型判，和路由用同一套 JSON 决策形态。判不出来时退回上一轮的模式，
+# 而不是退回默认——见 TurnPlan.fallback。
+_TURN_SCOPES = ("discussion", "execution")
 
 
-def _is_collaborative_team_request(user_input: str) -> bool:
-    """True for an explicit request that several group members collaborate."""
-    text = (user_input or "").strip()
-    if not text:
-        return False
-    if any(marker in text for marker in _COLLABORATIVE_TEAM_MARKERS_CN):
-        return True
-    return any(re.search(pattern, text) for pattern in _COLLABORATIVE_TEAM_PATTERNS_CN)
+@dataclass
+class TurnPlan:
+    """这一轮的编排方式。"""
 
+    scope: str  # "discussion" | "execution"
+    collaboration: bool
+    reason: str
 
-def _has_explicit_execution_intent(user_input: str) -> bool:
-    """True when the message asks for something to actually be built or run."""
-    text = (user_input or "").strip()
-    if not text:
-        return False
-    lowered = text.casefold()
-    return any(
-        re.search(pattern, text, flags=re.IGNORECASE) for pattern in _EXECUTION_PATTERNS_CN
-    ) or any(re.search(pattern, lowered) for pattern in _EXECUTION_PATTERNS_EN)
+    @property
+    def analysis_only(self) -> bool:
+        return self.scope == "discussion"
 
+    @classmethod
+    def fallback(cls, previous_analysis_only: bool, reason: str) -> "TurnPlan":
+        """模型没给出可用答案时的兜底。
 
-def _has_analysis_marker(user_input: str) -> bool:
-    text = (user_input or "").strip()
-    if not text:
-        return False
-    lowered = text.casefold()
-    return any(marker in text for marker in _ANALYSIS_ONLY_MARKERS_CN) or any(
-        marker in lowered for marker in _ANALYSIS_ONLY_MARKERS_EN
-    )
+        退回**上一轮**的模式，而不是某个默认值：正在讨论的对话不该因为一次调用失败
+        就突然拿到 shell 和写文件的权限。新会话从讨论开始，因为两种误判的代价不对
+        等——误判成只读，最坏是它先回答、你再说一次；误判成可执行，它已经动手了。
+        """
+        return cls(
+            scope="discussion" if previous_analysis_only else "execution",
+            collaboration=False,
+            reason=reason,
+        )
 
-
-def _is_analysis_only_request(user_input: str) -> bool:
-    """Return True for research/discussion turns without explicit execution intent."""
-    if not _has_analysis_marker(user_input):
-        return False
-    return not _has_explicit_execution_intent(user_input)
-
-
-def resolve_discussion_scope(user_input: str, previous_analysis_only: bool) -> bool:
-    """Decide whether this turn stays in read-only discussion mode.
-
-    讨论是**会话状态，不是单句属性**。之前每一轮都只看当前这句话，于是「分析一下
-    DeepSeek Harness 和竞品的区别」开了讨论模式，下一句「继续」「展开说说」里没有
-    分析词，模式就悄悄掉回执行档——工具重新放开，群里开始写 PoC。用户看到的就是
-    「没两轮就歪了」。
-
-    所以只有三种情况会改变模式：
-
-      1. 明确要动手（部署/写代码/跑测试）→ 退出讨论。
-      2. 明确要讨论/分析/对比 → 进入讨论。
-      3. 都没说 → **维持上一轮**，而不是回到默认。
-
-    第 3 条是关键：追问、补充、「然后呢」都属于没表态，它们不该改变正在进行的
-    讨论的性质。
-    """
-    text = (user_input or "").strip()
-    if not text:
-        return previous_analysis_only
-    if _has_explicit_execution_intent(text):
-        return False
-    if _has_analysis_marker(text):
-        return True
-    return previous_analysis_only
+    @classmethod
+    def from_payload(
+        cls, payload: Dict[str, Any] | None, previous_analysis_only: bool
+    ) -> "TurnPlan":
+        if not isinstance(payload, dict) or not payload:
+            return cls.fallback(previous_analysis_only, "plan_unparsable")
+        scope = str(payload.get("scope", "") or "").strip().lower()
+        if scope not in _TURN_SCOPES:
+            return cls.fallback(previous_analysis_only, "plan_scope_invalid")
+        reason = str(payload.get("reason", "") or "").strip() or "llm_plan"
+        return cls(
+            scope=scope,
+            collaboration=bool(payload.get("collaboration")),
+            reason=reason,
+        )
 
 
 _META_AT_SUFFIX = r"(?=[\s\u3000\u4e00-\u9fff，。！？、：:；;,.!?\[\]（）()【】\"'「」]|$)"
@@ -1231,6 +1041,70 @@ class GroupChatRouter:
             session_id=resolve_studio_session_id(base_session),
         )
 
+    async def _plan_turn(
+        self,
+        *,
+        base_session: StudioSession,
+        group_name: str,
+        group_avatar_ids: Sequence[str],
+        user_input: str,
+        previous_analysis_only: bool,
+    ) -> TurnPlan:
+        """决定这一轮是只读讨论还是可以动手，以及要不要多成员协作。
+
+        和路由判断分开一次调用，是因为它要在路由之前发生：讨论轮和执行轮拿到的工具集
+        本来就不同，等选完人再判就晚了。预算很小（几百 token 的 JSON），相对这一轮
+        本来就要发生的 N 次成员调用可以忽略。
+        """
+        text = str(user_input or "").strip()
+        if not text:
+            return TurnPlan.fallback(previous_analysis_only, "empty_input")
+
+        members = self._avatar_member_summary(group_avatar_ids)
+        provider = getattr(base_session, "provider_name", None)
+        model = getattr(base_session, "model_name", None)
+        context = GroupChatContext(base_session, max_items=12)
+        prompt = (
+            f"你是群聊「{group_name}」的隐形项目经理，正在决定这一轮怎么开。\n"
+            "只输出 JSON，不要解释。\n\n"
+            "JSON schema:\n"
+            "{\n"
+            '  "scope": "discussion" | "execution",\n'
+            '  "collaboration": true | false,\n'
+            '  "reason": "一句中文，说明为什么"\n'
+            "}\n\n"
+            f"群成员:\n{GroupChatContext.render_members_summary(members)}\n\n"
+            f"最近群聊上下文:\n{context.render_recent_dialogue()}\n\n"
+            f"上一轮的模式: {'discussion' if previous_analysis_only else 'execution'}\n\n"
+            f"用户这条消息:\n{text}\n\n"
+            "判断规则:\n"
+            "- scope=discussion：用户要的是分析、对比、调研、评审、答疑、出主意。\n"
+            "  讨论轮只有只读工具（联网检索、读文件），不能跑命令、不能写文件。\n"
+            "- scope=execution：用户明确要动手——部署、写代码、改文件、跑测试、装东西。\n"
+            "- 这条消息没有表态时（「继续」「那 X 呢」「展开说说」「嗯」），"
+            "沿用上一轮的模式，不要自己切换。\n"
+            "- 讨论里出现「PoC」「脚本」「部署」等词，如果是在**谈论**它们而不是要求"
+            "现在做，仍然是 discussion。\n"
+            "- collaboration=true：需要多位成员分头出意见或分工推进；"
+            "单人就能答完的问题为 false。\n"
+            "- 拿不准 scope 时选 discussion：先回答不会造成损失，动错手会。"
+        )
+        try:
+            raw = await self._call_llm_text(
+                provider=provider,
+                model=model,
+                prompt=prompt,
+                temperature=0.1,
+                max_tokens=group_intent_max_tokens(),
+            )
+        except Exception:
+            _log.warning("group_router: turn plan LLM call failed; keeping previous scope")
+            return TurnPlan.fallback(previous_analysis_only, "plan_llm_error")
+        plan = TurnPlan.from_payload(self._extract_json_object(raw), previous_analysis_only)
+        if plan.reason.startswith("plan_"):
+            _log.warning("group_router: turn plan unusable (%s); keeping previous scope", plan.reason)
+        return plan
+
     async def _analyze_intent(
         self,
         *,
@@ -1797,10 +1671,7 @@ class GroupChatRouter:
             not explicit_member_mentions
             and META_LEADER_AGENT_ID not in mention_set
             and len(valid_members) >= 2
-            and (
-                _is_complex_multistep_task(user_input)
-                or _is_collaborative_team_request(user_input)
-            )
+            and getattr(base_session, "_group_turn_collaboration", False) is True
         ):
             async for reply in self._run_team_turn(
                 base_session=base_session,
@@ -1813,6 +1684,7 @@ class GroupChatRouter:
                 should_stop=should_stop,
                 user_display_name=user_display_name,
                 analysis_only=analysis_only,
+                collaboration=True,
             ):
                 yield reply
             return
@@ -2268,6 +2140,7 @@ class GroupChatRouter:
         should_stop: Callable[[], Any],
         user_display_name: str = "我",
         analysis_only: bool = False,
+        collaboration: bool | None = None,
     ) -> AsyncGenerator[GroupReply, None]:
         """Bridge routing="team" to WorkforcePattern (planning) + AgentRuntime (execution).
 
@@ -2399,6 +2272,11 @@ class GroupChatRouter:
                 "group_name": group_name,
                 "member_count": len(worker_instances),
                 "mode": "discussion" if analysis_only else "execution",
+                # 模式是模型判的，就得把判的理由一起给出去：看不到理由的自动判断，
+                # 用户没法知道它是判对了还是又跑偏了。
+                "mode_reason": str(
+                    getattr(base_session, "_group_turn_plan_reason", "") or ""
+                ),
             },
         ))
 
@@ -2426,7 +2304,12 @@ class GroupChatRouter:
                 else "Group task execution result"
             ),
         )
-        collaborative_request = _is_collaborative_team_request(user_input)
+        # 由本轮的编排计划决定；显式传参优先，省得调用方要先去 session 上埋状态。
+        collaborative_request = bool(
+            collaboration
+            if collaboration is not None
+            else getattr(base_session, "_group_turn_collaboration", False) is True
+        )
         try:
             subtasks = await pattern.decompose_task(main_task)
         except Exception as exc:
@@ -3104,10 +2987,17 @@ class GroupChatRouter:
         if not isinstance(scratchpad, dict):
             scratchpad = {}
             setattr(base_session, "scratchpad", scratchpad)
-        analysis_only = resolve_discussion_scope(
-            user_input,
-            getattr(base_session, "_group_analysis_only", False) is True,
+        previous_analysis_only = getattr(base_session, "_group_analysis_only", False) is True
+        plan = await self._plan_turn(
+            base_session=base_session,
+            group_name=group_name,
+            group_avatar_ids=group_avatar_ids,
+            user_input=user_input,
+            previous_analysis_only=previous_analysis_only,
         )
+        analysis_only = plan.analysis_only
+        setattr(base_session, "_group_turn_collaboration", plan.collaboration)
+        setattr(base_session, "_group_turn_plan_reason", plan.reason)
         # Turn-local scope is also consumed by legacy member/meta paths so an
         # explicit @-mention cannot silently regain mutating tools.
         setattr(base_session, "_group_analysis_only", analysis_only)

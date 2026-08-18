@@ -19,12 +19,9 @@ from agenticx.runtime.group_router import (
     GroupChatRouter,
     GroupReply,
     _get_mention_hops,
-    _is_collaborative_team_request,
-    _is_complex_multistep_task,
-    _is_analysis_only_request,
-    resolve_discussion_scope,
     _is_open_call_question,
     _group_chat_tools,
+    TurnPlan,
     EventType,
     MAX_WORKERS_PER_GROUP,
 )
@@ -83,118 +80,53 @@ class TestGroupChatConfigTeamRouting:
 # _get_mention_hops: config-based, default 2
 # ---------------------------------------------------------------------------
 
-class TestComplexMultistepHeuristic:
-    """Validate the heuristic that drives intelligent → Workforce auto-dispatch."""
+def _stub_plan(router, *, scope: str, collaboration: bool) -> None:
+    """把本轮编排计划固定下来，绕开真正的 LLM 调用。"""
 
-    @pytest.mark.parametrize("text", [
-        "帮我调研一下 X 库，然后基于它写一个 hello world demo",
-        "同时做这两件事：1) 调查 ChromaDB vs Milvus 2) 写一段 RAG 入库 demo",
-        "先调研 streaming API，再写一个 demo 验证",
-        "请按以下步骤执行：分析需求、设计方案、实现代码、写测试。",
-        "拆分这个任务给团队",
-        "需要并行处理多个任务",
-        "把这个任务分解成几个子任务",
-    ])
-    def test_complex_prompts_trip_heuristic(self, text):
-        assert _is_complex_multistep_task(text), f"Should trip on: {text!r}"
+    async def _plan(**_kwargs):
+        return TurnPlan(scope=scope, collaboration=collaboration, reason="stubbed")
 
-    @pytest.mark.parametrize("text", [
-        "你好",
-        "@avatar1 项目主页有什么内容？",
-        "@avatar1 你好",
-        "天气怎么样？",
-        "再来一个",
-        "然后呢",
-        "",
-        "ok",
-    ])
-    def test_simple_prompts_skip_heuristic(self, text):
-        assert not _is_complex_multistep_task(text), f"Should NOT trip on: {text!r}"
-
-    def test_empty_input_returns_false(self):
-        assert _is_complex_multistep_task("") is False
-        assert _is_complex_multistep_task(None) is False  # type: ignore[arg-type]
-        assert _is_complex_multistep_task("   ") is False
+    router._plan_turn = _plan  # type: ignore[assignment]
 
 
-class TestCollaborativeTeamHeuristic:
-    @pytest.mark.parametrize("text", [
-        "请大家讨论一下这个方案",
-        "你们分别分析，再做一次交叉评审",
-        "请两位专家一起分析这个问题",
-        "我们开会讨论一下交付风险",
-        "针对这个方向做一次头脑风暴",
-        "让几个分身先商量一下该怎么做",
-        "请从各自角度给出判断",
-    ])
-    def test_explicit_collaboration_phrases_match(self, text):
-        assert _is_collaborative_team_request(text)
+class TestTurnPlan:
+    """这一轮怎么开，由模型判；这里测的是判不出来时的兜底和边界。
 
-    @pytest.mark.parametrize("text", [
-        "大家好",
-        "你好",
-        "这个方案是什么？",
-        "@av1 帮我看一下",
-        "",
-    ])
-    def test_non_collaboration_phrases_skip(self, text):
-        assert not _is_collaborative_team_request(text)
+    原来是三组中文关键词正则。问题不在于漏词，而在于「一句话里有没有某个词」和
+    「这轮该不该动手」本来就不是一回事——「继续」没有任何词，「比较已有 PoC 的
+    优缺点」有 PoC 但只是在讨论。靠加词补不完，所以只保留模型判不动时的行为约束。
+    """
+
+    def test_valid_payload_is_taken_as_is(self):
+        plan = TurnPlan.from_payload(
+            {"scope": "discussion", "collaboration": True, "reason": "在对比两套方案"},
+            previous_analysis_only=False,
+        )
+        assert plan.analysis_only is True
+        assert plan.collaboration is True
+        assert plan.reason == "在对比两套方案"
+
+    @pytest.mark.parametrize("payload", [None, {}, {"scope": ""}, {"scope": "chat"}])
+    def test_unusable_payload_keeps_the_previous_scope(self, payload):
+        # 正在讨论的对话，不该因为一次调用失败就突然拿到 shell 和写文件的权限。
+        assert TurnPlan.from_payload(payload, previous_analysis_only=True).analysis_only is True
+        assert TurnPlan.from_payload(payload, previous_analysis_only=False).analysis_only is False
+
+    def test_unusable_payload_never_claims_collaboration(self):
+        # 兜底时不该顺带把单人问题升级成多成员协作。
+        assert TurnPlan.from_payload(None, previous_analysis_only=True).collaboration is False
+
+    def test_fallback_reason_is_machine_readable(self):
+        # 前端要显示「判断依据」，兜底原因必须和模型给的理由区分得开。
+        assert TurnPlan.from_payload(None, True).reason == "plan_unparsable"
+        assert TurnPlan.from_payload({"scope": "nope"}, True).reason == "plan_scope_invalid"
+        assert TurnPlan.fallback(True, "plan_llm_error").reason == "plan_llm_error"
+
+    def test_missing_reason_is_labelled_rather_than_left_blank(self):
+        assert TurnPlan.from_payload({"scope": "execution"}, False).reason == "llm_plan"
 
 
-class TestDiscussionScopeHeuristic:
-    @pytest.mark.parametrize("text", [
-        "分析一下 DeepSeek Harness 和竞品的区别",
-        "各位讨论一下，从不同视角分析一下",
-        "请比较两套方案的优缺点",
-        "研究一下这个方案的风险",
-        "分析两个实现方案的差异",
-        "研究运行机制和部署架构",
-        "比较已有 PoC 的优缺点",
-    ])
-    def test_analysis_discussion_is_scoped(self, text):
-        assert _is_analysis_only_request(text)
-
-    @pytest.mark.parametrize("text", [
-        "分析完以后部署一个 PoC",
-        "请讨论并执行这个方案",
-        "比较之后写代码验证",
-        "请帮我部署一个 PoC",
-        "请写一个验证脚本",
-        "现在运行测试",
-        "你好",
-    ])
-    def test_explicit_execution_or_unrelated_prompt_is_not_analysis_only(self, text):
-        assert not _is_analysis_only_request(text)
-
-    @pytest.mark.parametrize("follow_up", [
-        "继续",
-        "那 vLLM 呢",
-        "展开说说第二点",
-        "还有别的吗",
-        "嗯",
-    ])
-    def test_discussion_survives_a_follow_up_without_analysis_words(self, follow_up):
-        """讨论是会话状态，不是单句属性。
-
-        这是「让讨论 harness 对比，没两轮就歪到 PoC」的直接成因：追问里没有分析词，
-        旧实现每轮重算就把模式掉回执行档，工具重新放开，群里开始动手写东西。
-        """
-        assert resolve_discussion_scope(follow_up, True) is True
-
-    def test_explicit_execution_leaves_discussion(self):
-        assert resolve_discussion_scope("写个 PoC 验证一下", True) is False
-
-    def test_analysis_request_enters_discussion_from_execution(self):
-        assert resolve_discussion_scope("对比一下这两个 harness", False) is True
-
-    def test_neutral_follow_up_does_not_start_a_discussion(self):
-        # 没在讨论时的「继续」是继续干活，不该被当成开启讨论。
-        assert resolve_discussion_scope("继续", False) is False
-
-    def test_empty_input_keeps_the_current_mode(self):
-        assert resolve_discussion_scope("", True) is True
-        assert resolve_discussion_scope("   ", False) is False
-
+class TestDiscussionScope:
     def test_analysis_tools_are_read_only(self):
         names = {
             tool.get("function", {}).get("name")
@@ -436,6 +368,8 @@ class TestRoutingDispatch:
             )
 
         router._run_team_turn = fake_team_turn  # type: ignore[assignment]
+        # 是否多成员协作由本轮的编排计划决定，不再由提示词里的关键词决定。
+        _stub_plan(router, scope="execution", collaboration=True)
 
         session = _make_session()
         replies = []
@@ -453,7 +387,7 @@ class TestRoutingDispatch:
             replies.append(r)
 
         assert team_called, (
-            "intelligent routing should auto-dispatch to _run_team_turn for complex prompts"
+            "a collaboration plan should auto-dispatch to _run_team_turn"
         )
         assert "调研" in captured_input[0]
 
@@ -472,6 +406,8 @@ class TestRoutingDispatch:
             )
 
         router._run_team_turn = fake_team_turn  # type: ignore[assignment]
+        # 讨论 + 需要多人分头出意见：既走团队路径，又必须保持只读。
+        _stub_plan(router, scope="discussion", collaboration=True)
 
         async for _ in router.run_group_turn(
             base_session=_make_session(),

@@ -337,6 +337,9 @@ async def test_explicit_collaboration_expands_single_plan_across_members(
                 quoted_content="",
                 should_stop=lambda: False,
                 user_display_name="我",
+                # 「要不要多人分头出意见」现在是本轮编排计划的结论，由调用方传入，
+                # 不再从提示词里查关键词。
+                collaboration=True,
             )
         ]
 

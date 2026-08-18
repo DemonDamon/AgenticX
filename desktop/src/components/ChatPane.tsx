@@ -10892,10 +10892,14 @@ export function ChatPane({
                 // 任务、再安排执行」，用户看到的就是「明明让讨论，它却要动手」——
                 // 后端已经进了只读讨论模式，界面却还在预告执行。
                 groupDiscussionMode = String(wfData.mode ?? "").trim() === "discussion";
+                // 模式是模型判的，把它判的理由一并显示：自动判断如果不给理由，
+                // 用户就只能等它跑偏了才发现判错了。
+                const modeReason = String(wfData.mode_reason ?? "").trim();
+                const modeLine = groupDiscussionMode
+                  ? "这轮是讨论：我请各位分别给出分析，只查资料不动手，最后由我汇总分歧和结论。"
+                  : "这轮要动手：我先拆解任务，再按成员职责安排执行，最后由我汇总并收口。";
                 addGroupWorkflowMessage({
-                  content: groupDiscussionMode
-                    ? "这轮是讨论：我请各位分别给出分析，只查资料不动手，最后由我汇总分歧和结论。"
-                    : "我先拆解任务，再按成员职责安排执行，最后由我汇总并收口。",
+                  content: modeReason ? `${modeLine}（判断依据：${modeReason}）` : modeLine,
                   avatarName: metaLeaderDisplayName,
                   workflowRole: "leader",
                   status: wfStatus,

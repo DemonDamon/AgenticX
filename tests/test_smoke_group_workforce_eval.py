@@ -118,34 +118,9 @@ class TestEvalTaskStructure:
         for task in EVAL_TASKS:
             assert len(task.prompt_seq) >= 1, f"Task {task.id!r} has no prompts"
 
-    def test_workforce_action_tasks_trigger_via_heuristic(self):
-        """Tasks expecting workforce actions must have prompts that trip the heuristic."""
-        from agenticx.runtime.group_router import _is_complex_multistep_task
-        for task in EVAL_TASKS:
-            if not task.expect_workforce_actions:
-                continue
-            for prompt in task.prompt_seq:
-                # At least one prompt in the sequence must trip the heuristic.
-                if _is_complex_multistep_task(prompt):
-                    break
-            else:
-                raise AssertionError(
-                    f"Task {task.id!r} expects workforce actions but no prompt trips "
-                    f"_is_complex_multistep_task heuristic. Prompts: {task.prompt_seq}"
-                )
-
-    def test_no_workforce_action_tasks_do_not_trip_heuristic(self):
-        """Tasks expecting no workforce should NOT trip the heuristic on any prompt."""
-        from agenticx.runtime.group_router import _is_complex_multistep_task
-        for task in EVAL_TASKS:
-            if not task.expect_no_workforce_actions:
-                continue
-            for prompt in task.prompt_seq:
-                assert not _is_complex_multistep_task(prompt), (
-                    f"Task {task.id!r} expects no workforce but prompt {prompt!r} "
-                    "trips heuristic. Adjust prompt or expectations."
-                )
-
+    # 原来这里有两个用例，断言 eval 任务的提示词能/不能触发关键词启发式。
+    # 编排决策交给模型之后，「这句话里有没有某个词」不再是一个有意义的性质——
+    # 任务预期由真正跑一遍 eval 来验证，不是靠静态查词。
     def test_workforce_action_names_are_valid(self):
         from agenticx.collaboration.workforce.events import WorkforceAction
         valid_actions = {a.value for a in WorkforceAction}
