@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
+import {
+  findUnmetSkillDependencies,
+  listAvailableCapabilitiesForUser,
+} from "../../../../lib/capability-packs-reader";
 import { resolveDesktopIdentity } from "../../../../lib/desktop-auth";
 import { resolveDesktopInferenceApiBase } from "../../../../lib/desktop-inference-base";
 import { requestOriginFromRequest } from "../../../../lib/desktop-device-auth";
@@ -14,13 +18,19 @@ export async function GET(request: Request) {
     );
   }
 
-  const [models, tokenBudget] = await Promise.all([
+  const [models, tokenBudget, capabilities] = await Promise.all([
     listAvailableModelsForUser(
       identity.userId,
       identity.email,
       identity.deptId,
     ),
     loadDesktopSessionTokenLimits(identity.tenantId),
+    // 能力包尚未迁移的租户不应因此拿不到模型，登录照常，能力为空。
+    listAvailableCapabilitiesForUser(
+      identity.userId,
+      identity.email,
+      identity.deptId,
+    ).catch(() => []),
   ]);
 
   const origin = requestOriginFromRequest(request);
@@ -36,6 +46,9 @@ export async function GET(request: Request) {
       deptId: identity.deptId,
     },
     models,
+    capabilities,
+    // 依赖没随包一起下发时 Desktop 装了也调不通，这里标出来供前端提示。
+    unmetCapabilityDependencies: findUnmetSkillDependencies(capabilities),
     policy: { strict: true, tokenBudget },
     apiBaseUrl,
     reauthRequiredForDirect: !directEligible,
