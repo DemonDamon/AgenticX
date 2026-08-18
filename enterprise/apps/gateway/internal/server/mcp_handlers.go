@@ -102,6 +102,17 @@ func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request, fn func(http.R
 		return
 	}
 	mcpID := toMCPIdentity(identity, r)
+	// 撤销必须在这里判：桌面端同步时会删掉本地条目，但被撤销的客户端手上还握着
+	// 上次拿到的 token 和地址，能直接绕开本地那一步打过来。
+	scopes, err := s.mcpHost.EffectiveScopes(r.Context(), mcpID, rec)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"code":    "40301",
+			"message": "mcp:capability_revoked",
+		})
+		return
+	}
+	mcpID.Scopes = scopes
 	if err := fn(w, r, s.mcpHost, rec, mcpID); err != nil {
 		s.logger.Warn("mcp transport error", "server", serverName, "error", err)
 	}

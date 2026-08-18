@@ -24,13 +24,14 @@ type PolicyEvaluator func(text string, ctx policyengine.EvalContext) policyengin
 
 // Host orchestrates MCP server resolution, protocol handling, quota, audit, and backends.
 type Host struct {
-	registry *Registry
-	logger   *slog.Logger
-	quota    *quota.Tracker
-	audit    audit.EventWriter
-	policy   PolicyEvaluator
-	backends map[string]Backend
-	mu       sync.RWMutex
+	registry    *Registry
+	entitlement *EntitlementChecker
+	logger      *slog.Logger
+	quota       *quota.Tracker
+	audit       audit.EventWriter
+	policy      PolicyEvaluator
+	backends    map[string]Backend
+	mu          sync.RWMutex
 }
 
 func NewHost(handle *database.Handle, logger *slog.Logger, quotaTracker *quota.Tracker, auditWriter audit.EventWriter, policy PolicyEvaluator) *Host {
@@ -38,11 +39,12 @@ func NewHost(handle *database.Handle, logger *slog.Logger, quotaTracker *quota.T
 		logger = slog.Default()
 	}
 	h := &Host{
-		registry: NewRegistry(handle, logger),
-		logger:   logger,
-		quota:    quotaTracker,
-		audit:    auditWriter,
-		policy:   policy,
+		registry:    NewRegistry(handle, logger),
+		entitlement: NewEntitlementChecker(handle, logger),
+		logger:      logger,
+		quota:       quotaTracker,
+		audit:       auditWriter,
+		policy:      policy,
 		backends: map[string]Backend{
 			BackendEcho:    &EchoBackend{},
 			BackendOpenAPI: NewOpenAPIBackend(),
@@ -61,6 +63,35 @@ func (h *Host) ResolveServer(ctx context.Context, tenantID, name string) (*Serve
 	return h.registry.GetByName(ctx, tenantID, name)
 }
 
+// EffectiveScopes resolves what the caller may do with this server, taking the
+// capability pack into account, and rejects a caller whose entitlement has been
+// revoked. Servers no pack references keep their previous behaviour.
+//
+// 这是撤销真正生效的地方。桌面端在同步时也会删掉本地条目，但那只挡得住正常使用
+// 的人：被撤销的客户端手上握着上次拿到的 token 和地址，照样能直接打过来。
+//
+// 反过来，包分配本身就是授权：企业把包发给你，就等于管理员批了这台服务器，所以
+// 命中分配时补上这台（且仅这台）的读写 scope。否则桌面端的 PAT 只有
+// workspace:chat / desktop:managed，管理员在后台分配完，员工那边照样调不动。
+func (h *Host) EffectiveScopes(ctx context.Context, identity Identity, rec *ServerRecord) ([]string, error) {
+	if h.entitlement == nil {
+		return identity.Scopes, nil
+	}
+	decision, err := h.entitlement.Check(ctx, identity, rec)
+	if err != nil {
+		h.logger.Warn("mcp entitlement check failed; denying",
+			"server", rec.Name, "user", identity.UserID, "error", err)
+		return nil, ErrCapabilityRevoked
+	}
+	if revoked(decision) {
+		return nil, ErrCapabilityRevoked
+	}
+	if !decision.Governed {
+		return identity.Scopes, nil
+	}
+	return grantServerScopes(identity.Scopes, rec.Name), nil
+}
+
 func (h *Host) ListRegistry(ctx context.Context, identity Identity) ([]RegistryEntry, error) {
 	entries, err := h.registry.ListActive(ctx, identity.TenantID)
 	if err != nil {
@@ -72,7 +103,14 @@ func (h *Host) ListRegistry(ctx context.Context, identity Identity) ([]RegistryE
 		if rec.Name == "demo" {
 			hasDemo = true
 		}
-		if !CanListTools(identity.Scopes, rec.Name, rec.RequiredScopes) {
+		// 先算生效 scope 再判可见性：被撤销的要从列表里消失，而不是列出来再在
+		// 调用时报错——列出来就等于告诉员工「你还有这个能力」，然后在他用的时候
+		// 才失败。
+		scopes, err := h.EffectiveScopes(ctx, identity, rec)
+		if err != nil {
+			continue
+		}
+		if !CanListTools(scopes, rec.Name, rec.RequiredScopes) {
 			continue
 		}
 		out = append(out, registryEntryFromRecord(rec))

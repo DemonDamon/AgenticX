@@ -16,6 +16,21 @@ func ScopeInvoke(serverName string) string {
 	return "mcp:server:" + strings.TrimSpace(serverName) + ":invoke"
 }
 
+// grantServerScopes adds this one server's read/invoke scopes to the caller.
+//
+// 只加这一台。宽泛地发 mcp:* 会连没被任何能力包管的服务器一起放开，那就把
+// 「管理员分配了什么」这件事架空了。
+func grantServerScopes(scopes []string, serverName string) []string {
+	out := make([]string, 0, len(scopes)+2)
+	out = append(out, scopes...)
+	for _, want := range []string{ScopeRead(serverName), ScopeInvoke(serverName)} {
+		if !hasScope(out, want) {
+			out = append(out, want)
+		}
+	}
+	return out
+}
+
 func hasScope(scopes []string, want string) bool {
 	for _, s := range scopes {
 		s = strings.TrimSpace(s)

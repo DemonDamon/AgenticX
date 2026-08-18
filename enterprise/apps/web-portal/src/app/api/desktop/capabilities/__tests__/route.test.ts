@@ -75,8 +75,8 @@ describe("/api/desktop/capabilities", () => {
         displayName: "M",
         requires: [],
         state: "on",
-        // 网关反代入口由服务端算好下发，Desktop 不自己拼路径。
-        endpointUrl: "https://gateway.example.invalid/v1/mcp/01JQMZ8K3N4P5Q6R7S8T9VWXYZ/",
+        // 托管 MCP 的路由是按 name 定的，不是 /v1/mcp/<id>/ 那条反代路径。
+        endpointUrl: "https://gateway.example.invalid/mcp/m/streamable-http",
       },
       { id: SKILL_ID, kind: "skill", name: "s", displayName: "S", requires: [], state: "off" },
     ]);
