@@ -620,25 +620,35 @@ def _build_kb_retrieval_policy_block(mode_override: Optional[str] = None) -> str
 
 def _build_web_search_capability_block() -> str:
     """Describe built-in web_search when enabled in config."""
+    enterprise_managed = False
     try:
         from agenticx.cli.config_manager import ConfigManager
+        from agenticx.studio.web_search.enterprise import enterprise_managed_search_active
 
-        raw = ConfigManager.get_value("web_search") or {}
-        if not isinstance(raw, dict):
-            raw = {}
-        enabled = raw.get("enabled", True)
-        if isinstance(enabled, str):
-            enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
-        if not bool(enabled):
-            return (
-                "## 联网搜索\n"
-                "- 内置 `web_search` 已由用户在设置中关闭：不要调用该工具；若用户需要联网，请引导其在「设置 → 通用 → 联网搜索」中开启。\n\n"
-            )
+        enterprise_managed = enterprise_managed_search_active()
+        if not enterprise_managed:
+            raw = ConfigManager.get_value("web_search") or {}
+            if not isinstance(raw, dict):
+                raw = {}
+            enabled = raw.get("enabled", True)
+            if isinstance(enabled, str):
+                enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
+            if not bool(enabled):
+                return (
+                    "## 联网搜索\n"
+                    "- 内置 `web_search` 已由用户在设置中关闭：不要调用该工具；若用户需要联网，请引导其在「设置 → 通用 → 联网搜索」中开启。\n\n"
+                )
     except Exception:
         pass
+    managed_intro = (
+        "- `web_search` 由企业管理员托管：搜索服务、凭据、额度和主备切换均在企业服务器执行；"
+        "不要要求用户在本机填写搜索 API Key。\n"
+        if enterprise_managed
+        else "- 你 **内置** `web_search` 工具，可检索公开网页，获取最新资讯、实时数据、以及超出你知识截止日期的信息。\n"
+    )
     return (
         "## 联网搜索\n"
-        "- 你 **内置** `web_search` 工具，可检索公开网页，获取最新资讯、实时数据、以及超出你知识截止日期的信息。\n"
+        f"{managed_intro}"
         "- 当用户问题明显依赖时效性、当前事实或外部网页时，应 **主动** 调用 `web_search`，无需用户额外开启开关。\n"
         "- **例外（硬性）**：当前日期、星期、时刻**禁止**用 `web_search` 查询，一律以系统提示「当前时间」章节的本机时钟为准；"
         "日期类网页存在缓存快照，曾导致回答日期偏差超过一年。若需结构化确认，用 `get_current_datetime`。\n"

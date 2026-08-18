@@ -5711,7 +5711,7 @@ def _tool_web_search(arguments: Dict[str, Any], session: Optional["StudioSession
                 session,
                 query=query,
                 hits=hits,
-                provider=str(svc._cfg.default_provider or "duckduckgo"),
+                provider=str(svc.last_provider or "duckduckgo"),
             )
         return WebSearchService.format_results(hits)
     except Exception as exc:

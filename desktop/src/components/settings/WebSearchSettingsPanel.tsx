@@ -58,6 +58,7 @@ function webSearchConfigsEqual(a: WebSearchConfig, b: WebSearchConfig): boolean 
 export function WebSearchSettingsPanel() {
   const apiToken = useAppStore((s) => s.apiToken);
   const apiBase = useAppStore((s) => s.apiBase);
+  const enterpriseManaged = useAppStore((s) => s.userAccount.loggedIn);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -103,8 +104,13 @@ export function WebSearchSettingsPanel() {
   }, [headers, resolveApiBase]);
 
   useEffect(() => {
+    if (enterpriseManaged) {
+      setLoading(false);
+      setMessage("");
+      return;
+    }
     void load();
-  }, [load]);
+  }, [enterpriseManaged, load]);
 
   const currentProviderMeta = PROVIDERS.find((p) => p.id === draft.default_provider);
   const needsKey = currentProviderMeta?.needsKey ?? false;
@@ -174,6 +180,22 @@ export function WebSearchSettingsPanel() {
       setTesting(false);
     }
   };
+
+  if (enterpriseManaged) {
+    return (
+      <Panel title="联网搜索">
+        <div className="rounded-lg border border-border bg-surface-panel px-3 py-3">
+          <div className="text-sm font-medium text-text-primary">由企业管理员统一配置</div>
+          <p className="mt-1 text-xs leading-5 text-text-muted">
+            搜索服务、使用额度和主备切换均在企业服务器执行，本机无需填写或保存搜索 API Key。
+          </p>
+          <p className="mt-1 text-xs leading-5 text-text-faint">
+            如搜索不可用，请联系企业管理员检查联网搜索开关、额度或服务状态。
+          </p>
+        </div>
+      </Panel>
+    );
+  }
 
   if (loading) {
     return (

@@ -1572,6 +1572,10 @@ def create_studio_app() -> FastAPI:
 
     def _strip_disabled_web_search_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         try:
+            from agenticx.studio.web_search.enterprise import enterprise_managed_search_active
+
+            if enterprise_managed_search_active():
+                return tools
             raw = ConfigManager.get_value("web_search") or {}
             if not isinstance(raw, dict):
                 return tools

@@ -10,14 +10,21 @@ from typing import List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.studio.web_search.contracts import WEB_SEARCH_MAX_RESULTS_CAP, WebSearchResult, WebSearchRuntimeConfig
+from agenticx.studio.web_search.enterprise import EnterpriseManagedWebSearchClient
 from agenticx.studio.web_search import providers
 
 
 class WebSearchService:
     """Run queries using configured provider with DuckDuckGo fallback."""
 
-    def __init__(self, cfg: WebSearchRuntimeConfig) -> None:
+    def __init__(
+        self,
+        cfg: WebSearchRuntimeConfig,
+        enterprise_client: Optional[EnterpriseManagedWebSearchClient] = None,
+    ) -> None:
         self._cfg = cfg
+        self._enterprise_client = enterprise_client
+        self.last_provider = str(cfg.default_provider or "duckduckgo")
 
     @classmethod
     def from_config(cls, raw: Optional[dict] = None) -> "WebSearchService":
@@ -26,7 +33,8 @@ class WebSearchService:
             base = merged if isinstance(merged, dict) else {}
             merged = {**base, **raw}
         cfg = WebSearchRuntimeConfig.from_merged_yaml(merged if isinstance(merged, dict) else {})
-        return cls(cfg)
+        enterprise_client = EnterpriseManagedWebSearchClient.from_config()
+        return cls(cfg, enterprise_client=enterprise_client)
 
     def search(
         self,
@@ -40,6 +48,11 @@ class WebSearchService:
             return []
         n = int(max_results if max_results is not None else self._cfg.max_results)
         n = max(1, min(WEB_SEARCH_MAX_RESULTS_CAP, n))
+        if self._enterprise_client is not None:
+            batch = self._enterprise_client.search(q, n)
+            self.last_provider = batch.provider
+            return batch.hits
+
         snip = self._cfg.fetch_snippet_chars
         prov = (provider_override or self._cfg.default_provider or "duckduckgo").lower().strip()
         pconf = self._cfg.providers if isinstance(self._cfg.providers, dict) else {}
@@ -70,8 +83,10 @@ class WebSearchService:
             primary = providers.search_duckduckgo_html(q, n, snip)
 
         if primary or prov == "duckduckgo":
+            self.last_provider = prov
             return primary
 
+        self.last_provider = "duckduckgo"
         return providers.search_duckduckgo_html(q, n, snip)
 
     @staticmethod
