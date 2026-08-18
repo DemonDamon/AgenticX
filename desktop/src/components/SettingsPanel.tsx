@@ -81,6 +81,7 @@ import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-p
 import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { VOICE_UI_ENABLED } from "../constants/feature-flags";
 import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
+import { CONFIRM_STRATEGY_OPTIONS } from "../constants/confirm-strategy-options";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
 import { QrConnectModal } from "./QrConnectModal";
 import { AutomationTab } from "./automation/AutomationTab";
@@ -395,11 +396,10 @@ function resolveMcpRowPresentation(server: McpServer): {
 
 type ConfirmMode = "manual" | "semi-auto" | "auto";
 
-const CONFIRM_MODE_OPTIONS = [
-  { value: "manual" as const, label: "每次询问" },
-  { value: "semi-auto" as const, label: "白名单放行" },
-  { value: "auto" as const, label: "全部自动执行" },
-] as const;
+const CONFIRM_MODE_OPTIONS = CONFIRM_STRATEGY_OPTIONS.map(({ value, label }) => ({
+  value,
+  label,
+}));
 
 /** Compact settings dropdown using the shared popover behavior. */
 function ConfirmStrategyDropdown({

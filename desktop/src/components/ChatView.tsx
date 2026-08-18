@@ -19,6 +19,7 @@ import { CommandPalette } from "./CommandPalette";
 import { QuickActions } from "./QuickActions";
 import { ShortcutHints } from "./ShortcutHints";
 import { createPhase1Registry } from "../core/command-registry";
+import { confirmStrategyLabel } from "../constants/confirm-strategy-options";
 import {
   ccBridgeSendToolProgressLabel,
   parseCcBridgeModeFromPayload,
@@ -137,9 +138,9 @@ const statusDot: Record<string, string> = {
 };
 
 const confirmModeLabel: Record<string, string> = {
-  manual: "每次询问",
-  "semi-auto": "白名单放行",
-  auto: "全部自动执行",
+  manual: confirmStrategyLabel("manual"),
+  "semi-auto": confirmStrategyLabel("semi-auto"),
+  auto: confirmStrategyLabel("auto"),
 };
 
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {

@@ -1,3 +1,5 @@
+import { confirmStrategyLabel } from "../constants/confirm-strategy-options";
+
 export type CommandCategory = "model" | "session" | "tools" | "view" | "settings" | "help";
 export type UserMode = "pro" | "lite";
 
@@ -67,12 +69,6 @@ export type Phase1CommandContext = {
   cycleConfirmStrategy: () => Promise<"manual" | "semi-auto" | "auto">;
   addAssistantMessage: (content: string) => void;
 };
-
-function confirmStrategyLabel(strategy: "manual" | "semi-auto" | "auto"): string {
-  if (strategy === "manual") return "每次询问";
-  if (strategy === "semi-auto") return "白名单放行";
-  return "全部自动执行";
-}
 
 export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry {
   const registry = new CommandRegistry();
@@ -145,7 +141,7 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
   registry.register({
     id: "confirm",
     name: "/confirm",
-    description: "循环切换确认策略（每次询问 / 白名单放行 / 全部自动执行）",
+    description: "循环切换确认策略（每次询问 / 同类操作自动允许 / 全部自动执行）",
     category: "settings",
     mode: "both",
     icon: "A",

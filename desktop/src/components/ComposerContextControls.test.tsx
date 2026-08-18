@@ -66,7 +66,7 @@ describe("ComposerContextControls", () => {
       "auto",
     ]);
     expect(composerPermissionLabel("manual")).toBe("每次询问");
-    expect(composerPermissionLabel("semi-auto")).toBe("白名单放行");
+    expect(composerPermissionLabel("semi-auto")).toBe("同类操作自动允许");
     expect(composerPermissionLabel("auto")).toBe("全部自动执行");
     expect(defaultConfirmPolicyForStrategy("manual")).toBe("ask-every-time");
     expect(defaultConfirmPolicyForStrategy("semi-auto")).toBe("use-allowlist");
@@ -109,7 +109,7 @@ describe("ComposerContextControls", () => {
       />,
     );
     expect(html).not.toContain("会话工作区");
-    expect(html).toContain("白名单放行");
+    expect(html).toContain("同类操作自动允许");
     expect(html).toContain('aria-haspopup="menu"');
   });
 

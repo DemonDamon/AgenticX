@@ -8,22 +8,47 @@ export type ConfirmStrategyOption = {
 
 export type ConfirmPolicy = "ask-every-time" | "use-allowlist" | "run-everything";
 
+export type ConfirmPolicyOption = {
+  value: ConfirmPolicy;
+  label: string;
+  description: string;
+};
+
 /** Shared labels for every Desktop confirmation-strategy selector. */
 export const CONFIRM_STRATEGY_OPTIONS: readonly ConfirmStrategyOption[] = [
   {
     value: "manual",
     label: "每次询问",
-    description: "每次执行工具前都由你确认",
+    description: "遇到需要授权的操作时，每次都由你确认",
   },
   {
     value: "semi-auto",
-    label: "白名单放行",
-    description: "确认一次后，本次运行不再询问同类操作",
+    label: "同类操作自动允许",
+    description: "你确认一次后，仅本次运行中的同类操作不再询问",
   },
   {
     value: "auto",
     label: "全部自动执行",
-    description: "所有工具直接执行；工作区边界仍然有效",
+    description: "所有需要授权的操作直接执行；工作区安全边界仍然有效",
+  },
+] as const;
+
+/** Labels used inside a single confirmation dialog. */
+export const CONFIRM_POLICY_OPTIONS: readonly ConfirmPolicyOption[] = [
+  {
+    value: "ask-every-time",
+    label: "仅允许这一次",
+    description: "只执行上方这次操作；下次遇到需要授权的操作仍会询问。",
+  },
+  {
+    value: "use-allowlist",
+    label: "本次运行允许同类操作",
+    description: "当前任务运行结束前，与本次类型和范围相同的操作将自动允许。",
+  },
+  {
+    value: "run-everything",
+    label: "全部自动执行",
+    description: "以后所有需要授权的操作都不再询问；工作区安全边界仍然有效。",
   },
 ] as const;
 

@@ -19,6 +19,7 @@ import { defaultConfirmPolicyForStrategy } from "./constants/confirm-strategy-op
 import type { ForwardConfirmPayload } from "./components/ForwardPicker";
 import { resolveForwardTarget } from "./utils/resolve-forward-target";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
+import { buildConfirmScope } from "./utils/confirm-scope";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
 import type { Message, ProviderEntry } from "./store";
 import { useAppStore } from "./store";
@@ -504,26 +505,6 @@ export function App() {
       console.warn("[App init] MCP startup auto-connect failed:", error);
     }
   }, [refreshMcpStatus]);
-
-  const buildConfirmScope = (
-    question: string,
-    context?: Record<string, unknown>
-  ): string => {
-    const tool = String(context?.tool ?? "");
-    if (tool === "bash_exec") {
-      const command = String(context?.command ?? "").trim();
-      const cmdName = command.split(/\s+/)[0] || "unknown";
-      return `bash_exec:${cmdName}`;
-    }
-    if (tool === "file_write" || tool === "file_edit") {
-      const path = String(context?.path ?? "");
-      const slash = path.lastIndexOf("/");
-      const folder = slash > 0 ? path.slice(0, slash) : path;
-      return `${tool}:${folder || "/"}`;
-    }
-    if (tool) return `tool:${tool}`;
-    return `question:${question}`;
-  };
 
   useEffect(() => {
     if (sessionInitDoneRef.current) return;
@@ -2451,6 +2432,7 @@ export function App() {
         question={confirm.question}
         sourceLabel={confirm.agentId === "meta" ? "主智能体" : `子智能体 ${confirm.agentId}`}
         diff={confirm.diff}
+        context={confirm.context}
         defaultPolicy={defaultConfirmPolicyForStrategy(confirmStrategy)}
         onApprove={(policy) => {
           const scope = confirmScopeRef.current;
