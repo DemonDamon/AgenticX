@@ -11,7 +11,7 @@ import {
   Database,
   GripVertical,
   LayoutList,
-  MessagesSquare,
+  ListTree,
   Quote,
   Search,
   TextSearch,
@@ -12945,10 +12945,10 @@ export function ChatPane({
           type="button"
           className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}
           onClick={toggleHistorySidePanel}
-          title="当前对话目录"
-          aria-label="当前对话目录"
+          title="本对话提问目录"
+          aria-label="本对话提问目录"
         >
-          <MessagesSquare className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          <ListTree className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>
         <HoverTip label="工作台 · ⌘⌃B">
           <button
@@ -13153,9 +13153,10 @@ export function ChatPane({
               ref={historyButtonRef}
               className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}
               onClick={toggleHistorySidePanel}
-              title="本会话提问导航"
+              title="本对话提问目录"
+              aria-label="本对话提问目录"
             >
-              <MessagesSquare className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              <ListTree className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             <HoverTip label="工作台 · ⌘⌃B">
               <button

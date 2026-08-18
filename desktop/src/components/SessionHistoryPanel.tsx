@@ -52,17 +52,10 @@ function extractUserQueries(messages: Message[]): QueryNavItem[] {
   return items;
 }
 
-function queryMatchesSearch(item: QueryNavItem, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return item.text.toLowerCase().includes(q) || String(item.index).includes(q);
-}
-
 export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tintColor }: Props) {
   const setPaneHistoryJumpMessageId = useAppStore((s) => s.setPaneHistoryJumpMessageId);
   const togglePaneHistory = useAppStore((s) => s.togglePaneHistory);
 
-  const [searchQuery, setSearchQuery] = useState("");
   const [fetchedQueries, setFetchedQueries] = useState<QueryNavItem[] | null>(null);
   const [fetchAttempted, setFetchAttempted] = useState(false);
 
@@ -87,14 +80,8 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tin
     return merged.map((item, idx) => ({ ...item, index: idx + 1 }));
   }, [fetchedQueries, liveQueries]);
 
-  const filteredQueries = useMemo(
-    () => queries.filter((item) => queryMatchesSearch(item, searchQuery)),
-    [queries, searchQuery]
-  );
-
   useEffect(() => {
     if (!pane.historyOpen) {
-      setSearchQuery("");
       setFetchedQueries(null);
       setFetchAttempted(false);
       return;
@@ -138,11 +125,7 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tin
   };
 
   const showLoading = !fetchAttempted && queries.length === 0;
-  const emptyLabel = !pane.sessionId
-    ? "当前无会话"
-    : searchQuery.trim()
-      ? "未找到匹配提问"
-      : "本会话还没有提问";
+  const emptyLabel = !pane.sessionId ? "当前无会话" : "本会话还没有提问";
 
   return (
     <div
@@ -160,18 +143,6 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tin
             <span className="shrink-0 text-[11px] text-text-faint">{queries.length} 轮</span>
           ) : null}
         </div>
-        <div className="px-2 pb-1.5">
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索提问…"
-            autoComplete="off"
-            spellCheck={false}
-            aria-label="搜索本会话提问"
-            className="w-full rounded-md border border-border bg-surface-hover px-2 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
-          />
-        </div>
       </div>
       <div className="agx-session-history-scroll min-h-0 flex-1 overflow-y-auto pl-2 pr-[2px] pb-6 pt-0.5">
         {showLoading ? (
@@ -180,13 +151,13 @@ export const SessionHistoryPanel = memo(function SessionHistoryPanel({ pane, tin
               <div key={i} className="h-9 animate-pulse rounded-md bg-surface-hover" />
             ))}
           </div>
-        ) : filteredQueries.length === 0 ? (
+        ) : queries.length === 0 ? (
           <div className="rounded border border-dashed border-border p-3 text-center text-[13px] text-text-faint">
             {emptyLabel}
           </div>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {filteredQueries.map((item) => {
+            {queries.map((item) => {
               const active = pane.historyJumpMessageId === item.id;
               return (
                 <button
