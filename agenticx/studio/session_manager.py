@@ -1122,6 +1122,11 @@ class SessionManager:
             return False
         prov_clean = str(provider or "").strip()
         model_clean = str(model or "").strip()
+        # A declared context window belongs to the model it arrived with. Drop it
+        # on a model switch so the new model cannot inherit the old one's window;
+        # the next /api/chat re-supplies it from the enterprise admin catalog.
+        if model_clean != str(managed.studio_session.model_name or "").strip():
+            managed.studio_session.declared_context_window = None
         managed.studio_session.provider_name = prov_clean
         managed.studio_session.model_name = model_clean
         managed.updated_at = time.time()

@@ -3,6 +3,7 @@ import { useAppStore, type Message, type QueuedMessage } from "../store";
 import { VOICE_UI_ENABLED } from "../constants/feature-flags";
 import { formatModelOptionLabel } from "../utils/model-display";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
+import { resolveManagedContextWindow } from "../utils/managed-context-window";
 import { getProviderDisplayName } from "../utils/provider-display";
 import { SubAgentPanel } from "./SubAgentPanel";
 import { interruptOnInterimResult, interruptTtsOnUserSpeech } from "../voice/interrupt";
@@ -1361,6 +1362,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       if (!isContinuation) body.client_turn_id = clientTurnId;
       if (reqProvider) body.provider = reqProvider;
       if (reqModel) body.model = reqModel;
+      // 管理员在企业后台声明的上下文窗口；未声明时不带该字段，由后端按模型名兜底。
+      {
+        const declaredWindow = resolveManagedContextWindow(
+          useAppStore.getState().settings.providers,
+          reqProvider,
+          reqModel,
+        );
+        if (declaredWindow) body.context_window = declaredWindow;
+      }
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
       const resp = isContinuation && opts?.continuation
         ? await fetch(continueSessionUrl(apiBase, sessionId), {

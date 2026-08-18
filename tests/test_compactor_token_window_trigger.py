@@ -109,3 +109,48 @@ def test_compactor_message_escape_explicit_override() -> None:
     assert changed is True
     assert count == 8
     assert compactor.last_trigger_reason == "message_escape"
+
+
+def test_declared_window_moves_autocompact_threshold() -> None:
+    """管理员声明 128K 时，压缩必须按 128K 触发，而不是按表里的 1M。"""
+    compactor = ContextCompactor(_LLM())
+    assert compactor._resolve_context_window_tokens("glm-5.2") == 1_000_000
+    assert compactor._resolve_context_window_tokens("glm-5.2", 128_000) == 128_000
+
+    declared_threshold = compactor._compute_autocompact_threshold(128_000)
+    table_threshold = compactor._compute_autocompact_threshold(1_000_000)
+    assert declared_threshold < table_threshold
+
+    # 用量落在两个阈值之间：按声明值必须压缩，按表值则不会——这就是超窗的成因。
+    usage = declared_threshold + 1
+    assert usage < table_threshold
+    messages = [{"role": "user", "content": f"msg-{i}"} for i in range(12)]
+    original = ContextCompactor._estimate_token_usage
+    try:
+        ContextCompactor._estimate_token_usage = lambda self, msgs: usage  # type: ignore[assignment]
+        assert compactor._token_threshold_exceeded(messages, "glm-5.2", 128_000) is True
+        assert compactor._token_threshold_exceeded(messages, "glm-5.2") is False
+    finally:
+        ContextCompactor._estimate_token_usage = original  # type: ignore[assignment]
+
+
+def test_declared_window_reaches_maybe_compact() -> None:
+    """declared_context_window 必须一路传到 maybe_compact 的触发判断。"""
+    compactor = ContextCompactor(_LLM())
+    threshold = compactor._compute_autocompact_threshold(128_000)
+    messages = [{"role": "user", "content": "x"} for _ in range(12)]
+
+    original = ContextCompactor._estimate_token_usage
+    try:
+        ContextCompactor._estimate_token_usage = lambda self, msgs: threshold + 1  # type: ignore[assignment]
+        _, changed_declared, _, _, _ = asyncio.run(
+            compactor.maybe_compact(messages, model="glm-5.2", declared_context_window=128_000)
+        )
+        _, changed_table, _, _, _ = asyncio.run(
+            compactor.maybe_compact(messages, model="glm-5.2")
+        )
+    finally:
+        ContextCompactor._estimate_token_usage = original  # type: ignore[assignment]
+
+    assert changed_declared is True
+    assert changed_table is False

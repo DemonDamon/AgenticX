@@ -54,6 +54,11 @@ import {
 } from "lucide-react";
 import { inferModelCapabilities, isEmbeddingModelId } from "../../../lib/infer-model-capabilities";
 import {
+  MAX_MODEL_CONTEXT_WINDOW,
+  MIN_MODEL_CONTEXT_WINDOW,
+  normalizeContextWindow,
+} from "../../../lib/model-context-window";
+import {
   pricePerMillion,
   resolveProviderModelPricing,
   syncPricingToProviderCatalog,
@@ -67,6 +72,7 @@ interface ProviderModel {
   name: string;
   label: string;
   capabilities?: string[];
+  contextWindow?: number;
   enabled: boolean;
 }
 
@@ -115,7 +121,7 @@ type TestResp = {
 type FetchModelsResp = {
   code: string;
   message: string;
-  data?: { models?: string[]; warning?: string };
+  data?: { models?: string[]; contextWindows?: Record<string, number>; warning?: string };
 };
 
 type PricingResp = {
@@ -162,6 +168,10 @@ export default function ModelProvidersPage() {
   const [saving, setSaving] = useState(false);
   const [addingModel, setAddingModel] = useState(false);
   const [newModel, setNewModel] = useState<{ name: string; label: string }>({ name: "", label: "" });
+  // 上游 /models 自报的窗口（vLLM max_model_len 等），用于「获取模型列表」时预填。
+  const [detectedWindows, setDetectedWindows] = useState<Record<string, number>>({});
+  // 上下文窗口输入框的未提交草稿，key = 模型名；提交后清除，回落到已落库值。
+  const [windowDrafts, setWindowDrafts] = useState<Record<string, string>>({});
   const [fetchModelsOpen, setFetchModelsOpen] = useState(false);
   const [fetchModelsSearch, setFetchModelsSearch] = useState("");
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -472,6 +482,59 @@ export default function ModelProvidersPage() {
     setProviders((prev) => prev.map((p) => (p.id === active.id ? json.data!.provider : p)));
   };
 
+  /** 空值 = 清除声明回到自动识别；非法值不提交，直接把草稿退回已落库值。 */
+  const handleCommitContextWindow = async (modelName: string, raw: string) => {
+    if (!active) return;
+    const stored = active.models.find((m) => m.name === modelName)?.contextWindow;
+    const trimmed = raw.trim();
+    const clearDraft = () =>
+      setWindowDrafts((prev) => {
+        const next = { ...prev };
+        delete next[modelName];
+        return next;
+      });
+
+    let payload: number | null;
+    if (!trimmed) {
+      payload = null;
+    } else {
+      const parsed = normalizeContextWindow(trimmed);
+      if (parsed === undefined) {
+        toast.error(
+          t("contextWindowInvalid", {
+            min: MIN_MODEL_CONTEXT_WINDOW,
+            max: MAX_MODEL_CONTEXT_WINDOW,
+          }),
+        );
+        clearDraft();
+        return;
+      }
+      payload = parsed;
+    }
+    if (payload === (stored ?? null)) {
+      clearDraft();
+      return;
+    }
+
+    const res = await fetch(
+      `/api/admin/providers/${active.id}/models/${encodeURIComponent(modelName)}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ contextWindow: payload }),
+      }
+    );
+    const json = (await res.json()) as ProviderResp;
+    if (!res.ok || !json.data) {
+      toast.error(json.message ?? t("toast.updateFailed"));
+      clearDraft();
+      return;
+    }
+    setProviders((prev) => prev.map((p) => (p.id === active.id ? json.data!.provider : p)));
+    clearDraft();
+    toast.success(payload === null ? t("toast.contextWindowCleared") : t("toast.contextWindowSaved"));
+  };
+
   const handleDeleteModel = async (modelName: string) => {
     if (!active) return;
     if (!window.confirm(t("confirm.removeModel", { name: modelName }))) return;
@@ -534,6 +597,7 @@ export default function ModelProvidersPage() {
       if (json.data?.warning) {
         setFetchModelsWarning(json.data.warning);
       }
+      setDetectedWindows(json.data?.contextWindows ?? {});
       const apiModels = json.data?.models ?? [];
       if (apiModels.length === 0) {
         if (!json.data?.warning) {
@@ -568,6 +632,7 @@ export default function ModelProvidersPage() {
           name: modelName,
           label: modelName,
           capabilities,
+          contextWindow: detectedWindows[modelName],
           enabled: true,
         }),
       });
@@ -851,7 +916,7 @@ export default function ModelProvidersPage() {
                         return (
                           <li
                             key={m.name}
-                            className="grid gap-3 py-3 md:grid-cols-[auto_minmax(0,1fr)_130px_130px_auto] md:items-center"
+                            className="grid gap-3 py-3 md:grid-cols-[auto_minmax(0,1fr)_130px_130px_130px_auto] md:items-center"
                           >
                             <Checkbox
                               checked={m.enabled}
@@ -892,6 +957,28 @@ export default function ModelProvidersPage() {
                                 onChange={(event) =>
                                   handlePriceChange(active.id, m.name, "output", Number(event.target.value || 0))
                                 }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[11px] text-muted-foreground">
+                                {t("contextWindowLabel")}
+                              </Label>
+                              <Input
+                                className="h-8 text-right font-mono text-xs"
+                                type="number"
+                                min={MIN_MODEL_CONTEXT_WINDOW}
+                                max={MAX_MODEL_CONTEXT_WINDOW}
+                                step="1000"
+                                placeholder={t("contextWindowAuto")}
+                                title={t("contextWindowHint")}
+                                value={windowDrafts[m.name] ?? (m.contextWindow ? String(m.contextWindow) : "")}
+                                onChange={(event) =>
+                                  setWindowDrafts((prev) => ({ ...prev, [m.name]: event.target.value }))
+                                }
+                                onBlur={(event) => void handleCommitContextWindow(m.name, event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") event.currentTarget.blur();
+                                }}
                               />
                             </div>
                             <Button

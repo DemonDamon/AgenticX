@@ -381,12 +381,18 @@
           "modelRemoved": "已移除",
           "selectTemplate": "请选择模板",
           "idAndBaseUrlRequired": "ID 与 baseUrl 必填",
-          "providerAdded": "已添加"
+          "providerAdded": "已添加",
+          "contextWindowSaved": "上下文窗口已保存",
+          "contextWindowCleared": "已恢复为自动识别"
         },
         "confirm": {
           "deleteProvider": "确认删除厂商「{name}」？该操作不可撤销。",
           "removeModel": "从该厂商移除模型「{name}」？"
-        }
+        },
+        "contextWindowLabel": "上下文窗口",
+        "contextWindowAuto": "自动",
+        "contextWindowHint": "该模型端点实际可用的上下文 token 数。留空则由客户端按模型名自动识别；自部署模型建议按 vLLM 的 --max-model-len 填写。",
+        "contextWindowInvalid": "上下文窗口需在 {min} 到 {max} 之间"
       },
       "webSearch": {
         "title": "联网搜索",

@@ -116,6 +116,7 @@ import {
   type TokenBudgetConfig,
 } from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
+import { DeveloperContextWindowPanel } from "./settings/DeveloperContextWindowPanel";
 import { DeveloperTokenBudgetPanel } from "./settings/DeveloperTokenBudgetPanel";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { DataSourcesSettings } from "./settings/datasources/DataSourcesSettings";
@@ -9527,6 +9528,7 @@ export function SettingsPanel({
                 />
 
                 <DeveloperTokenBudgetPanel />
+                <DeveloperContextWindowPanel />
 
                 <Panel title="会话工作区">
                   <label className="block text-sm text-text-muted">

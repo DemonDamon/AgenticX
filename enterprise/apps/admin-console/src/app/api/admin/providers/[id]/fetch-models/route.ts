@@ -38,6 +38,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     message: "ok",
     data: {
       models: result.models,
+      contextWindows: result.contextWindows,
       warning: result.warning,
     },
   });

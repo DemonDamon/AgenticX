@@ -9,6 +9,8 @@ export type ManagedModelCatalogEntry = {
   route?: "local" | "private-cloud" | "third-party";
   isDefault?: boolean;
   capabilities?: string[];
+  /** 管理员在企业后台声明的上下文窗口；缺省时由后端按模型名兜底。 */
+  contextWindow?: number;
 };
 
 export type ProviderCatalogEntry = {

@@ -73,6 +73,7 @@ import {
   normalizeEnterpriseModelCatalog,
   type EnterpriseModelCatalogEntry,
 } from "./enterprise-model-catalog";
+import { sanitizeModelContextWindowOverrides } from "./model-context-window-overrides";
 import {
   computePollMaxTicks,
   DEFAULT_ENTERPRISE_PORTAL_ORIGIN,
@@ -9677,6 +9678,7 @@ function registerIpc(): void {
         ...readStallPatienceRuntime(raw),
         ...readUnattendedRuntime(raw),
         ...tokenBudgetRuntime,
+        model_context_windows: sanitizeModelContextWindowOverrides(raw.model_context_windows),
         live_reattach_enabled: Boolean(raw.live_reattach_enabled ?? false),
       };
     } catch (err) {
@@ -9708,6 +9710,7 @@ function registerIpc(): void {
         warning_tokens_per_session: 500_000,
         max_tokens_per_turn: 100_000,
         token_budget_managed: false,
+        model_context_windows: {},
         live_reattach_enabled: false,
       };
     }
@@ -9745,6 +9748,10 @@ function registerIpc(): void {
       }
       if (p.auto_resume_on_exhaustion !== undefined) {
         merged.auto_resume_on_exhaustion = Boolean(p.auto_resume_on_exhaustion);
+      }
+      if (p.model_context_windows !== undefined) {
+        // 整表替换：面板清空某一行就是删除该覆盖，回到自动识别。
+        merged.model_context_windows = sanitizeModelContextWindowOverrides(p.model_context_windows);
       }
       if (p.max_auto_resumes !== undefined) {
         const v = Number(p.max_auto_resumes);

@@ -52,6 +52,8 @@ type EnterpriseModelCatalogItem = {
   route?: "local" | "private-cloud" | "third-party";
   isDefault?: boolean;
   capabilities?: string[];
+  /** 管理员在企业后台声明的上下文窗口；缺省时由后端按模型名兜底。 */
+  contextWindow?: number;
 };
 
 type LoadConfigResult = {
@@ -723,6 +725,8 @@ declare global {
         warning_tokens_per_session?: number;
         max_tokens_per_turn?: number;
         token_budget_managed?: boolean;
+        /** 开发者菜单的按模型上下文窗口覆盖，键为 `provider/model`。 */
+        model_context_windows?: Record<string, number>;
         live_reattach_enabled?: boolean;
         error?: string;
       }>;
@@ -751,6 +755,8 @@ declare global {
         unattended_stall_continue_after_seconds?: number;
         unattended_auto_resume_exhausted?: boolean;
         unattended_auto_resume_interrupted?: boolean;
+        /** 整表替换：省略某个键即删除该覆盖，回到自动识别。 */
+        model_context_windows?: Record<string, number>;
       }) => Promise<{ ok: boolean; error?: string }>;
       searchSessions: (payload: { q: string; avatarId?: string }) => Promise<{
         ok: boolean;

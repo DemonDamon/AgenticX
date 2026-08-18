@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { ulid } from "ulid";
 
+import { normalizeContextWindow } from "../../model-context-window";
 import { decryptProviderApiKey, encryptProviderApiKey } from "../../provider-api-key-crypto";
 
 export type ProviderRoute = "local" | "private-cloud" | "third-party";
@@ -20,8 +21,15 @@ export interface ProviderModel {
   name: string;
   label: string;
   capabilities?: string[];
+  /** 管理员声明的上下文窗口（token）；未填写时由 Desktop 运行时按模型名兜底。 */
+  contextWindow?: number;
   enabled: boolean;
 }
+
+export type ProviderModelPatch = Partial<Omit<ProviderModel, "contextWindow">> & {
+  /** null = 清除管理员声明值，回到自动识别。 */
+  contextWindow?: number | null;
+};
 
 export interface ProviderRecord {
   id: string;
@@ -112,6 +120,7 @@ function rowToRecord(row: typeof mpTable.$inferSelect): ProviderRecord {
       name: m.name,
       label: m.label,
       capabilities: m.capabilities,
+      contextWindow: normalizeContextWindow(m.contextWindow),
       enabled: m.enabled,
     })),
     createdAt:
@@ -426,6 +435,7 @@ export async function addProviderModel(id: string, model: ProviderModel): Promis
     name: model.name.trim(),
     label: model.label?.trim() || model.name.trim(),
     capabilities: model.capabilities ?? ["text"],
+    contextWindow: normalizeContextWindow(model.contextWindow),
     enabled: model.enabled ?? true,
   });
   record.updatedAt = nowIso();
@@ -444,7 +454,7 @@ export async function addProviderModel(id: string, model: ProviderModel): Promis
 export async function updateProviderModel(
   id: string,
   modelName: string,
-  patch: Partial<ProviderModel>
+  patch: ProviderModelPatch
 ): Promise<PublicProviderRecord> {
   const tenantId = requiredTenantId();
   await migrateLegacyProvidersIfNeededLocal(tenantId);
@@ -462,6 +472,11 @@ export async function updateProviderModel(
   if (!model) throw new Error("model not found");
   if (patch.label !== undefined) model.label = patch.label.trim();
   if (patch.capabilities !== undefined) model.capabilities = patch.capabilities;
+  if (patch.contextWindow !== undefined) {
+    const declared = patch.contextWindow === null ? undefined : normalizeContextWindow(patch.contextWindow);
+    if (declared === undefined) delete model.contextWindow;
+    else model.contextWindow = declared;
+  }
   if (patch.enabled !== undefined) model.enabled = patch.enabled;
   record.updatedAt = nowIso();
 

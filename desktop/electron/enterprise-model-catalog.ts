@@ -7,6 +7,8 @@ export type EnterpriseModelCatalogEntry = {
   route?: "local" | "private-cloud" | "third-party";
   isDefault?: boolean;
   capabilities?: string[];
+  /** 管理员在企业后台声明的上下文窗口；缺省时由后端按模型名兜底。 */
+  contextWindow?: number;
 };
 
 const FALLBACK_PROVIDER_LABELS: Record<string, string> = {
@@ -68,6 +70,11 @@ export function normalizeEnterpriseModelCatalog(value: unknown): EnterpriseModel
       rawRoute === "local" || rawRoute === "private-cloud" || rawRoute === "third-party"
         ? rawRoute
         : undefined;
+    const rawContextWindow = record?.contextWindow ?? record?.context_window;
+    const contextWindow =
+      typeof rawContextWindow === "number" && Number.isFinite(rawContextWindow) && rawContextWindow > 0
+        ? Math.floor(rawContextWindow)
+        : undefined;
     const rawCapabilities = record?.capabilities;
     const capabilities = Array.isArray(rawCapabilities)
       ? [...new Set(rawCapabilities.map(text).filter(Boolean))]
@@ -87,6 +94,7 @@ export function normalizeEnterpriseModelCatalog(value: unknown): EnterpriseModel
           ? { isDefault: record.is_default }
           : {}),
       ...(capabilities && capabilities.length > 0 ? { capabilities } : {}),
+      ...(contextWindow !== undefined ? { contextWindow } : {}),
     });
   }
 

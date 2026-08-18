@@ -59,6 +59,9 @@ class ChatRequest(BaseModel):
     reasoning_effort: Optional[str] = None
     # DeepSeek V4 thinking switch; None leaves session unset (runtime defaults on).
     thinking_enabled: Optional[bool] = None
+    # Enterprise-managed context window for `model`, forwarded by Desktop from
+    # the admin catalog. None = let the runtime infer it from the model name.
+    context_window: Optional[int] = None
 
 
 class ContinueRequest(BaseModel):

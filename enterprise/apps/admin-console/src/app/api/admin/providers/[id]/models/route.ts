@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../../lib/admin-auth";
+import { normalizeContextWindow } from "../../../../../../lib/model-context-window";
 import { addProviderModel, type ProviderModel } from "../../../../../../lib/model-providers-store";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -15,6 +16,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         Array.isArray(body.capabilities) && body.capabilities.every((c): c is string => typeof c === "string")
           ? (body.capabilities as string[])
           : ["text"],
+      contextWindow: normalizeContextWindow(body.contextWindow),
       enabled: typeof body.enabled === "boolean" ? body.enabled : true,
     };
     const updated = await addProviderModel(id, model);

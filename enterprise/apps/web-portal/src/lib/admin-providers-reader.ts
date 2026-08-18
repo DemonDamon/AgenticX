@@ -37,6 +37,7 @@ export interface ProviderModelRecord {
   label: string;
   enabled: boolean;
   capabilities?: string[];
+  contextWindow?: number;
 }
 
 export interface ProviderRecord {
@@ -59,6 +60,8 @@ export interface PortalModelOption {
   route: ProviderRoute;
   isDefault: boolean;
   capabilities?: string[];
+  /** 管理员声明的上下文窗口；缺省时 Desktop 运行时按模型名兜底。 */
+  contextWindow?: number;
 }
 
 const LEGACY_ADMIN_EMAIL_TO_USER_ID: Record<string, string> = {
@@ -100,6 +103,7 @@ function rowToProvider(row: ProviderRow): ProviderRecord {
       label: m.label ?? m.name,
       enabled: m.enabled,
       capabilities: m.capabilities,
+      contextWindow: typeof m.contextWindow === "number" ? m.contextWindow : undefined,
     })),
   };
 }
@@ -262,6 +266,7 @@ export async function listAvailableModelsForUser(
         route: p.route,
         isDefault: p.isDefault,
         capabilities: m.capabilities,
+        contextWindow: m.contextWindow,
       });
     }
   }

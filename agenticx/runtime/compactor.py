@@ -197,13 +197,13 @@ class ContextCompactor:
         return max(1, int(len(text) / 3.5))
 
     @staticmethod
-    def _resolve_context_window_tokens(model: str) -> int:
+    def _resolve_context_window_tokens(model: str, declared: Optional[int] = None) -> int:
         """Token-window limit shared with Desktop/Studio Context chip."""
-        return int(resolve_context_window(model or None))
+        return int(resolve_context_window(model or None, declared))
 
-    def _get_context_window_chars(self, model: str) -> int:
+    def _get_context_window_chars(self, model: str, declared: Optional[int] = None) -> int:
         """Legacy char proxy; not used for full-compact primary trigger."""
-        window_tokens = self._resolve_context_window_tokens(model)
+        window_tokens = self._resolve_context_window_tokens(model, declared)
         default_chars = _env_int("AGX_CONTEXT_WINDOW_CHARS", window_tokens * 4)
         m = (model or "").strip().lower()
         if not m:
@@ -233,10 +233,11 @@ class ContextCompactor:
         self,
         messages: Sequence[Dict[str, Any]],
         model: str,
+        declared: Optional[int] = None,
     ) -> bool:
         if not messages:
             return False
-        window = self._resolve_context_window_tokens(model)
+        window = self._resolve_context_window_tokens(model, declared)
         threshold = self._compute_autocompact_threshold(window)
         est_tokens = self._estimate_token_usage(messages)
         self._last_window = window
@@ -244,9 +245,14 @@ class ContextCompactor:
         self._last_est_tokens = est_tokens
         return est_tokens >= threshold
 
-    def _should_compact_by_tokens(self, messages: Sequence[Dict[str, Any]], model: str) -> bool:
+    def _should_compact_by_tokens(
+        self,
+        messages: Sequence[Dict[str, Any]],
+        model: str,
+        declared: Optional[int] = None,
+    ) -> bool:
         """Backward-compatible alias for token-window primary trigger."""
-        return self._token_threshold_exceeded(messages, model)
+        return self._token_threshold_exceeded(messages, model, declared)
 
     @staticmethod
     def _has_compacted_prefix(messages: Sequence[Dict[str, Any]]) -> bool:
@@ -289,6 +295,7 @@ class ContextCompactor:
         *,
         model: str = "",
         force: bool = False,
+        declared_context_window: Optional[int] = None,
     ) -> Tuple[bool, str]:
         if force:
             return True, "force"
@@ -308,7 +315,7 @@ class ContextCompactor:
             for item in eval_msgs
             if isinstance(item, dict)
         )
-        token_hit = self._token_threshold_exceeded(eval_msgs, model)
+        token_hit = self._token_threshold_exceeded(eval_msgs, model, declared_context_window)
 
         if _prefix is not None:
             min_tail_before_recompact = self.retain_recent_messages + max(
@@ -335,8 +342,14 @@ class ContextCompactor:
         messages: Sequence[Dict[str, Any]],
         *,
         model: str = "",
+        declared_context_window: Optional[int] = None,
     ) -> bool:
-        should, reason = self._should_compact_with_reason(messages, model=model, force=False)
+        should, reason = self._should_compact_with_reason(
+            messages,
+            model=model,
+            force=False,
+            declared_context_window=declared_context_window,
+        )
         if should:
             self.last_trigger_reason = reason
         return should
@@ -667,6 +680,7 @@ class ContextCompactor:
         *,
         force: bool = False,
         model: str = "",
+        declared_context_window: Optional[int] = None,
     ) -> Tuple[List[Dict[str, Any]], bool, str, int, str]:
         """Compact old messages and return compacted messages.
 
@@ -684,6 +698,7 @@ class ContextCompactor:
             copied,
             model=model,
             force=force,
+            declared_context_window=declared_context_window,
         )
         if not should:
             self.last_trigger_reason = ""

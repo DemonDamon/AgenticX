@@ -61,6 +61,7 @@ from agenticx.runtime.confirm import ConfirmGate
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.hooks import HookRegistry
 from agenticx.runtime.loop_detector import LoopDetector
+from agenticx.runtime.model_context_window import declared_window_for_session
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import (
@@ -3031,6 +3032,7 @@ class AgentRuntime:
                 history,
                 force=True,
                 model=compact_model,
+                declared_context_window=declared_window_for_session(session),
             )
             if _phase_did:
                 session.agent_messages = list(history)
@@ -3043,6 +3045,7 @@ class AgentRuntime:
             compacted_history, did_compact, compact_summary, compacted_count, _pending_q = await self.compactor.maybe_compact(
                 history,
                 model=compact_model,
+                declared_context_window=declared_window_for_session(session),
             )
         except Exception as exc:
             logger.warning(
@@ -4266,6 +4269,7 @@ class AgentRuntime:
                             hist_compact,
                             force=True,
                             model=model_name,
+                            declared_context_window=declared_window_for_session(session),
                         )
                         if did_react:
                             react_hist = _sanitize_context_messages(react_hist)
@@ -4636,6 +4640,7 @@ class AgentRuntime:
                             hist_before,
                             force=True,
                             model=model_name,
+                            declared_context_window=declared_window_for_session(session),
                         )
                         new_hist = _sanitize_context_messages(new_hist) if did else new_hist
                         made_progress = (

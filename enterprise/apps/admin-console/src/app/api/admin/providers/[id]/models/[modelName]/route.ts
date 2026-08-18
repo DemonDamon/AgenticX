@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../../../lib/admin-auth";
+import { normalizeContextWindow } from "../../../../../../../lib/model-context-window";
 import {
   deleteProviderModel,
   updateProviderModel,
-  type ProviderModel,
+  type ProviderModelPatch,
 } from "../../../../../../../lib/model-providers-store";
 
 export async function PATCH(
@@ -15,7 +16,7 @@ export async function PATCH(
   const { id, modelName } = await context.params;
   try {
     const body = (await request.json()) as Record<string, unknown>;
-    const patch: Partial<ProviderModel> = {};
+    const patch: ProviderModelPatch = {};
     if (typeof body.label === "string") patch.label = body.label;
     if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
     if (
@@ -23,6 +24,14 @@ export async function PATCH(
       body.capabilities.every((c): c is string => typeof c === "string")
     ) {
       patch.capabilities = body.capabilities as string[];
+    }
+    // 显式 null / 空串 = 清除声明值回到自动识别；非法数字按未提供处理，不覆盖已存值。
+    if (body.contextWindow === null || body.contextWindow === "") {
+      patch.contextWindow = null;
+    } else if (body.contextWindow !== undefined) {
+      const declared = normalizeContextWindow(body.contextWindow);
+      if (declared === undefined) throw new Error("contextWindow out of range");
+      patch.contextWindow = declared;
     }
     const updated = await updateProviderModel(id, decodeURIComponent(modelName), patch);
     return NextResponse.json({ code: "00000", message: "ok", data: { provider: updated } });

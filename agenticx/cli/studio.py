@@ -86,6 +86,10 @@ class StudioSession:
     # payload so continue/loop prompt builds in the same process honor the
     # session's choice instead of the global retrieval.mode config.
     kb_retrieval_mode: Optional[str] = None
+    # Context window declared by the enterprise admin for the active model
+    # (or probed from the upstream /models endpoint). None = fall back to the
+    # model-name heuristic in agenticx.runtime.model_context_window.
+    declared_context_window: Optional[int] = None
 
     # ------------------------------------------------------------------
     # MCP read-through properties → GlobalMcpManager

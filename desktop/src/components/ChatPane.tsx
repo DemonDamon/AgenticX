@@ -297,6 +297,7 @@ import {
   resolveDirectModelPickerProvider,
   sortModelOptionsByPrefix,
 } from "../utils/model-options";
+import { resolveManagedContextWindow } from "../utils/managed-context-window";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
 import { sessionCreateAvatarId } from "../utils/session-create-avatar";
 import { NEW_TOPIC_INHERITS_CONTEXT, newTopicTriggerLabel } from "../utils/new-topic-label";
@@ -10205,6 +10206,15 @@ export function ChatPane({
       }
       if (requestProvider) body.provider = requestProvider;
       if (requestModel) body.model = requestModel;
+      // 管理员在企业后台声明的上下文窗口；未声明时不带该字段，由后端按模型名兜底。
+      {
+        const declaredWindow = resolveManagedContextWindow(
+          useAppStore.getState().settings.providers,
+          requestProvider,
+          requestModel,
+        );
+        if (declaredWindow) body.context_window = declaredWindow;
+      }
       if (requestModel && supportsKimiK3ReasoningEffort(requestModel)) {
         body.reasoning_effort = normalizeKimiReasoningEffort(
           pane.reasoningEffort ?? DEFAULT_KIMI_REASONING_EFFORT,

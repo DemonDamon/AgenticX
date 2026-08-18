@@ -1,5 +1,17 @@
+import {
+  extractOllamaContextWindow,
+  extractUpstreamContextWindow,
+} from "./model-context-window";
+
 const FETCH_TIMEOUT_MS = 15000;
 const MAX_MODEL_PAGES = 20;
+/** Ollama 每个模型要单独 POST /api/show，限量限并发以免拖垮「获取模型列表」。 */
+const OLLAMA_SHOW_TIMEOUT_MS = 5000;
+const OLLAMA_SHOW_MAX_MODELS = 32;
+const OLLAMA_SHOW_CONCURRENCY = 6;
+
+/** 模型 ID → 上游自报的上下文窗口（token）。取不到的模型不会出现在表里。 */
+export type UpstreamContextWindows = Record<string, number>;
 
 const BAILIAN_EMBEDDING_MODELS = [
   "text-embedding-v4",
@@ -87,7 +99,47 @@ export function mergeProviderCatalogExtras(
   return ordered;
 }
 
-async function fetchOllamaModelNames(baseUrl: string): Promise<{ ok: true; models: string[] } | { ok: false; error: string }> {
+/** Ollama /api/show：拿单个模型的 context_length；任何失败都静默跳过（探测是尽力而为）。 */
+async function fetchOllamaContextWindow(base: string, model: string): Promise<number | undefined> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OLLAMA_SHOW_TIMEOUT_MS);
+  try {
+    const resp = await fetch(`${base}/api/show`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) return undefined;
+    const payload = (await resp.json()) as Record<string, unknown>;
+    return extractOllamaContextWindow(payload);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function probeOllamaContextWindows(base: string, models: string[]): Promise<UpstreamContextWindows> {
+  const targets = models.slice(0, OLLAMA_SHOW_MAX_MODELS);
+  const windows: UpstreamContextWindows = {};
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(OLLAMA_SHOW_CONCURRENCY, targets.length) }, async () => {
+    for (;;) {
+      const index = cursor++;
+      const model = targets[index];
+      if (!model) return;
+      const found = await fetchOllamaContextWindow(base, model);
+      if (found !== undefined) windows[model] = found;
+    }
+  });
+  await Promise.all(workers);
+  return windows;
+}
+
+async function fetchOllamaModelNames(
+  baseUrl: string
+): Promise<{ ok: true; models: string[]; contextWindows: UpstreamContextWindows } | { ok: false; error: string }> {
   const base = normalizeOllamaApiBase(baseUrl);
   if (!base) return { ok: false, error: "API 地址未配置" };
   const controller = new AbortController();
@@ -100,7 +152,9 @@ async function fetchOllamaModelNames(baseUrl: string): Promise<{ ok: true; model
     }
     const data = (await resp.json()) as { models?: Array<{ name?: string }> };
     const models = (data.models ?? []).map((m) => String(m.name ?? "").trim()).filter(Boolean);
-    return { ok: true, models: models.sort((a, b) => a.localeCompare(b)) };
+    models.sort((a, b) => a.localeCompare(b));
+    const contextWindows = await probeOllamaContextWindows(base, models);
+    return { ok: true, models, contextWindows };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       return { ok: false, error: "拉取超时" };
@@ -115,11 +169,12 @@ async function fetchOpenAiCompatibleModelIds(
   baseUrl: string,
   headers: Record<string, string>,
 ): Promise<
-  | { ok: true; models: string[] }
+  | { ok: true; models: string[]; contextWindows: UpstreamContextWindows }
   | { ok: false; error: string; status?: number; body?: string }
 > {
   const seen = new Set<string>();
   const ordered: string[] = [];
+  const contextWindows: UpstreamContextWindows = {};
   let after: string | undefined;
 
   for (let page = 0; page < MAX_MODEL_PAGES; page++) {
@@ -150,6 +205,9 @@ async function fetchOpenAiCompatibleModelIds(
       if (id && !seen.has(id)) {
         seen.add(id);
         ordered.push(id);
+        // vLLM/SGLang 自部署会在这里回报 max_model_len——自部署场景最权威的窗口值。
+        const window = extractUpstreamContextWindow(row);
+        if (window !== undefined) contextWindows[id] = window;
       }
     }
 
@@ -159,11 +217,11 @@ async function fetchOpenAiCompatibleModelIds(
     after = nextAfter;
   }
 
-  return { ok: true, models: ordered };
+  return { ok: true, models: ordered, contextWindows };
 }
 
 export type FetchUpstreamModelsResult =
-  | { ok: true; models: string[]; warning?: string }
+  | { ok: true; models: string[]; contextWindows: UpstreamContextWindows; warning?: string }
   | { ok: false; error: string };
 
 export async function fetchUpstreamModels(input: {
@@ -201,12 +259,14 @@ export async function fetchUpstreamModels(input: {
       return {
         ok: true,
         models: mergeProviderCatalogExtras(providerId, baseUrl, []),
+        contextWindows: {},
       };
     }
     if (listed.status && isModelsCatalogMissing(listed.status, listed.body ?? "")) {
       return {
         ok: true,
         models: [],
+        contextWindows: {},
         warning: "该网关未提供 /models 接口，请使用「添加模型」手动填写模型 ID",
       };
     }
@@ -214,5 +274,5 @@ export async function fetchUpstreamModels(input: {
   }
 
   const models = mergeProviderCatalogExtras(providerId, baseUrl, listed.models);
-  return { ok: true, models };
+  return { ok: true, models, contextWindows: listed.contextWindows };
 }

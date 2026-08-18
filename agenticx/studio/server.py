@@ -2728,6 +2728,10 @@ def create_studio_app() -> FastAPI:
             session.provider_name = payload.provider
         if payload.model:
             session.model_name = payload.model
+        # Declared window belongs to the model it arrived with: always reassign
+        # (including to None) so switching models cannot inherit the old value.
+        if payload.model or payload.provider:
+            session.declared_context_window = payload.context_window
         # Kimi K3 / DeepSeek V4 reasoning_effort; cleared when absent so stale
         # values from a previous turn do not leak onto other models.
         _effort = str(getattr(payload, "reasoning_effort", None) or "").strip().lower()

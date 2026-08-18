@@ -55,3 +55,25 @@ describe("enterprise model catalog", () => {
     ).toHaveLength(1);
   });
 });
+
+describe("enterprise model catalog context window", () => {
+  it("keeps the admin-declared window and accepts the snake_case wire name", () => {
+    const [camel, snake] = normalizeEnterpriseModelCatalog([
+      { id: "zhipu/glm-5.2", contextWindow: 128_000 },
+      { id: "zhipu/glm-5.1", context_window: 200_000 },
+    ]);
+    expect(camel?.contextWindow).toBe(128_000);
+    expect(snake?.contextWindow).toBe(200_000);
+  });
+
+  it("omits the field when unset or unusable, so the backend heuristic stays in charge", () => {
+    const [none, zero, text] = normalizeEnterpriseModelCatalog([
+      { id: "a/b" },
+      { id: "c/d", contextWindow: 0 },
+      { id: "e/f", contextWindow: "128000" },
+    ]);
+    expect(none).not.toHaveProperty("contextWindow");
+    expect(zero).not.toHaveProperty("contextWindow");
+    expect(text).not.toHaveProperty("contextWindow");
+  });
+});

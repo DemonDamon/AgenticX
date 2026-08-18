@@ -10,7 +10,10 @@ from typing import Any
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
-from agenticx.runtime.model_context_window import resolve_context_window
+from agenticx.runtime.model_context_window import (
+    declared_window_for_session,
+    resolve_context_window,
+)
 from agenticx.runtime.prompts.meta_agent import (
     _build_active_subagents_context,
     _build_context_files_block,
@@ -132,7 +135,7 @@ def estimate_session_context_usage(
     }
     used_tokens = sum(categories.values())
     model_name = str(getattr(session, "model_name", "") or "")
-    max_tokens = resolve_context_window(model_name)
+    max_tokens = resolve_context_window(model_name, declared_window_for_session(session))
 
     return {
         "used_tokens": used_tokens,

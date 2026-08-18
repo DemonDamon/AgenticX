@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence
 
-from agenticx.runtime.model_context_window import resolve_context_window
+from agenticx.runtime.model_context_window import (
+    declared_window_for_session,
+    resolve_context_window,
+)
 from agenticx.runtime.tool_search import (
     BUILTIN_DEFER_ALLOWLIST,
     CORE_ALWAYS_LOAD_TOOLS,
@@ -133,7 +136,10 @@ def build_runtime_context(
     pool_names = {_openai_tool_name(t) for t in full_openai_tools}
     tool_search_allowed = TOOL_SEARCH_TOOL_NAME in pool_names
 
-    window = resolve_context_window(str(getattr(session, "model_name", "") or ""))
+    window = resolve_context_window(
+        str(getattr(session, "model_name", "") or ""),
+        declared_window_for_session(session),
+    )
     effective_threshold = resolve_effective_threshold(cfg, context_window=window)
     prev_raw = scratchpad.get(TOOL_SEARCH_DECISION_KEY)
     prev_applied = (
