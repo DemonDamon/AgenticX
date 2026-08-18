@@ -50,9 +50,32 @@ export function isSettingsTab(x: unknown): x is SettingsTab {
   return typeof x === "string" && (SETTINGS_TAB_IDS as readonly string[]).includes(x);
 }
 
-/** Hidden provider management is represented by the enterprise account page. */
-export function resolveDeliverySettingsTab(x: unknown): SettingsTab {
-  if (x === "provider") return "account";
+export type DeliverySettingsAccess = {
+  enterpriseLoggedIn: boolean;
+  enterpriseStrict: boolean;
+};
+
+/** Local credentials are available only before the Desktop enters enterprise-managed mode. */
+export function canConfigureSelfManagedServices(access: DeliverySettingsAccess): boolean {
+  return !access.enterpriseLoggedIn && !access.enterpriseStrict;
+}
+
+/**
+ * Provider management is normally hidden from customer navigation. Guests may
+ * still reach the existing provider page from Developer settings; managed
+ * sessions are redirected to the enterprise account page instead of an empty
+ * or briefly exposed local-credential screen.
+ */
+export function resolveDeliverySettingsTab(
+  x: unknown,
+  access: DeliverySettingsAccess = {
+    enterpriseLoggedIn: true,
+    enterpriseStrict: false,
+  },
+): SettingsTab {
+  if (x === "provider") {
+    return canConfigureSelfManagedServices(access) ? "provider" : "account";
+  }
   if (x === DELIVERY_DEVELOPER_SETTINGS_TAB_ID) return x;
   if (isSettingsTab(x) && DELIVERY_VISIBLE_SETTINGS_TABS.has(x)) return x;
   return "general";

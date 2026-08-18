@@ -149,6 +149,7 @@ import {
 } from "../constants/desktop-feature-visibility";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import {
+  canConfigureSelfManagedServices,
   DELIVERY_DEVELOPER_SETTINGS_TAB_ID,
   DELIVERY_VISIBLE_SETTINGS_TAB_IDS,
   resolveDeliverySettingsTab,
@@ -6168,37 +6169,35 @@ function SessionMemoryPanel() {
 
   if (loading) {
     return (
-      <Panel title="会话与记忆">
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
-      </Panel>
+      <section className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
+        <div className="text-sm font-semibold text-text-strong">会话摘要延续</div>
+        <div className="mt-1 text-xs leading-5 text-text-faint">加载中…</div>
+      </section>
     );
   }
 
   return (
-    <Panel title="会话与记忆">
-      <p className="mb-3 text-xs text-text-faint">
-        控制新会话是否可以承接前一次对话的摘要；修改后重启应用生效。
-      </p>
-      <div className="space-y-3 text-sm text-text-subtle">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div>启用会话摘要延续</div>
-            <div className="mt-0.5 text-[11px] text-text-faint">新会话可继承前次摘要上下文</div>
-          </div>
-          <SettingsSwitch
-            checked={form.session_summary}
-            disabled={saving}
-            onChange={(next) => void update({ session_summary: next })}
-            aria-label="启用会话摘要延续"
-          />
+    <section className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-text-strong">会话摘要延续</div>
+          <p className="mt-1 text-xs leading-5 text-text-faint">
+            新对话可承接前一次对话的摘要；修改后重启应用生效。
+          </p>
         </div>
+        <SettingsSwitch
+          checked={form.session_summary}
+          disabled={saving}
+          onChange={(next) => void update({ session_summary: next })}
+          aria-label="启用会话摘要延续"
+        />
       </div>
       {message ? (
         <div className={`mt-2 text-xs ${message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
           {message}
         </div>
       ) : null}
-    </Panel>
+    </section>
   );
 }
 
@@ -6614,6 +6613,18 @@ export function SettingsPanel({
   const activePaneId = useAppStore((s) => s.activePaneId);
   const memoryContextPane = panes.find((p) => p.id === activePaneId) ?? panes[0];
   const updateSettingsSlice = useAppStore((s) => s.updateSettings);
+  const enterpriseStrictConfigured = Object.values(providers).some(
+    (entry) => entry?.managed === true,
+  );
+  const deliverySettingsAccess = useMemo(
+    () => ({
+      enterpriseLoggedIn: userAccount.loggedIn,
+      enterpriseStrict: enterpriseStrictConfigured,
+    }),
+    [enterpriseStrictConfigured, userAccount.loggedIn],
+  );
+  const selfManagedServiceSettingsAvailable =
+    canConfigureSelfManagedServices(deliverySettingsAccess);
   const initializedForOpenRef = useRef(false);
   const metaWorkspaceHydratedRef = useRef(false);
   const [aiAssistLoading, setAiAssistLoading] = useState<"identity" | "soul" | "preference" | null>(null);
@@ -6634,13 +6645,13 @@ export function SettingsPanel({
   );
   useEffect(() => {
     if (!open || !settingsOpenToTab) return;
-    setTab(resolveDeliverySettingsTab(settingsOpenToTab));
+    setTab(resolveDeliverySettingsTab(settingsOpenToTab, deliverySettingsAccess));
     updateSettingsSlice({ openToTab: undefined });
-  }, [open, settingsOpenToTab, updateSettingsSlice]);
+  }, [deliverySettingsAccess, open, settingsOpenToTab, updateSettingsSlice]);
   useEffect(() => {
     if (!open) return;
-    setTab((current) => resolveDeliverySettingsTab(current));
-  }, [open]);
+    setTab((current) => resolveDeliverySettingsTab(current, deliverySettingsAccess));
+  }, [deliverySettingsAccess, open]);
   useEffect(() => {
     if (!open) return;
     const size = loadSettingsPanelSize();
@@ -7578,7 +7589,8 @@ export function SettingsPanel({
     () => Object.values(draft).some((e) => e?.managed === true),
     [draft],
   );
-  const enterpriseModelManagementLocked = isEnterpriseModelManagementLocked(userAccount);
+  const enterpriseModelManagementLocked =
+    isEnterpriseModelManagementLocked(userAccount) && !enterpriseStrict;
 
   const providerNames = useMemo(() => {
     if (enterpriseStrict) {
@@ -9478,12 +9490,30 @@ export function SettingsPanel({
 
             {tab === "developer" && (
               <div className="space-y-4">
-                <div className="rounded-xl border border-border bg-surface-card px-4 py-3">
-                  <div className="text-sm font-medium text-text-primary">进阶功能</div>
-                  <p className="mt-1 text-xs leading-5 text-text-faint">
-                    日常使用无需调整。这里集中放置会话延续、资源限制和默认工作目录等进阶选项。
-                  </p>
-                </div>
+                {selfManagedServiceSettingsAvailable ? (
+                  <>
+                    <section className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-text-strong">模型供应商</div>
+                          <p className="mt-1 text-xs leading-5 text-text-faint">
+                            未登录企业账号时，可在本机添加模型服务、API 地址和密钥。
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface-panel px-3 py-1.5 text-xs font-medium text-text-muted transition hover:bg-surface-hover hover:text-text-primary"
+                          onClick={() => setTab("provider")}
+                        >
+                          配置
+                          <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+                        </button>
+                      </div>
+                    </section>
+
+                    <WebSearchSettingsPanel />
+                  </>
+                ) : null}
 
                 <SessionMemoryPanel />
 

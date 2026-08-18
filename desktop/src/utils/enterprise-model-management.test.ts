@@ -6,15 +6,15 @@ describe("isEnterpriseModelManagementLocked", () => {
     expect(isEnterpriseModelManagementLocked({ loggedIn: false, baseUrl: "" })).toBe(false);
   });
 
-  it("locks local model creation while an organization awaits login", () => {
+  it("keeps local model management available while an organization awaits login", () => {
     expect(
       isEnterpriseModelManagementLocked({ loggedIn: false, baseUrl: "https://portal.example.com" }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("allows managed model management after enterprise login", () => {
+  it("locks self-managed model credentials after enterprise login", () => {
     expect(
       isEnterpriseModelManagementLocked({ loggedIn: true, baseUrl: "https://portal.example.com" }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });

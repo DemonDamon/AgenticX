@@ -4,10 +4,10 @@ export type DesktopEnterpriseAccount = {
 };
 
 /**
- * A remembered enterprise organization puts Desktop in managed onboarding
- * even before the employee finishes browser login. In that state local model
- * creation must wait for the organization to authenticate the user.
+ * Local model credentials remain available until enterprise authentication
+ * actually succeeds. Remembering an organization URL is only an onboarding
+ * convenience and must not make an otherwise local Desktop unusable.
  */
 export function isEnterpriseModelManagementLocked(account: DesktopEnterpriseAccount): boolean {
-  return !account.loggedIn && Boolean(account.baseUrl?.trim());
+  return account.loggedIn;
 }
