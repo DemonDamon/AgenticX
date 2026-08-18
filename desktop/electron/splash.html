@@ -15,30 +15,19 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #030305;
-        --panel: rgba(255, 255, 255, 0.045);
-        --text: rgba(255, 255, 255, 0.96);
-        --text-muted: rgba(255, 255, 255, 0.46);
-        --hairline: rgba(255, 255, 255, 0.14);
-        --track: rgba(255, 255, 255, 0.11);
-        --shimmer: rgba(255, 255, 255, 0.92);
-        --particle: 255, 255, 255;
-        --cancel-border: rgba(255, 255, 255, 0.18);
-        --cancel-text: rgba(255, 255, 255, 0.68);
+        --text-muted: rgba(206, 220, 246, 0.5);
+        --track: rgba(255, 255, 255, 0.1);
+        --shimmer: rgba(226, 238, 255, 0.9);
+        /* Colour the app itself opens with, so the handoff is not a hard cut. */
+        --wash: #1c1c1e;
       }
 
       :root[data-theme="light"] {
         color-scheme: light;
-        --bg: #f8f8f6;
-        --panel: rgba(0, 0, 0, 0.035);
-        --text: rgba(10, 10, 10, 0.92);
-        --text-muted: rgba(10, 10, 10, 0.48);
-        --hairline: rgba(10, 10, 10, 0.13);
-        --track: rgba(10, 10, 10, 0.12);
-        --shimmer: rgba(10, 10, 10, 0.88);
-        --particle: 10, 10, 10;
-        --cancel-border: rgba(10, 10, 10, 0.16);
-        --cancel-text: rgba(10, 10, 10, 0.64);
+        --text-muted: rgba(38, 48, 68, 0.5);
+        --track: rgba(24, 34, 56, 0.1);
+        --shimmer: rgba(74, 104, 168, 0.9);
+        --wash: #ffffff;
       }
 
       * {
@@ -51,275 +40,589 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background:
-          radial-gradient(circle at 50% 27%, var(--panel), transparent 34%),
-          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 36%),
-          var(--bg);
-        font-family: "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+        background: #04060e;
+        font-family: "SF Pro Display", "Helvetica Neue", "PingFang SC", sans-serif;
         -webkit-font-smoothing: antialiased;
       }
 
-      body {
-        opacity: 1;
-        transition: opacity 180ms ease-out;
-      }
-
-      body.fade-out {
+      /* Hand-off wash: only runs once on ready, right before the app takes over. */
+      .washout {
+        position: fixed;
+        inset: 0;
+        z-index: 9;
+        pointer-events: none;
+        background: var(--wash);
         opacity: 0;
       }
 
-      #particle-canvas {
+      body.is-washing .washout {
+        opacity: 1;
+        transition: opacity 320ms ease-in;
+      }
+
+      body.is-washing .shell,
+      body.is-washing .stars-front,
+      body.is-washing .glass-specular,
+      body.is-washing .meteors {
+        opacity: 0;
+        transition: opacity 240ms ease-out;
+      }
+
+      .cosmos {
         position: fixed;
         inset: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
         z-index: 0;
+        overflow: hidden;
+        pointer-events: none;
+        background:
+          radial-gradient(ellipse 70% 48% at 18% 86%, rgba(16, 44, 88, 0.42), transparent 62%),
+          radial-gradient(ellipse 62% 44% at 88% 12%, rgba(20, 52, 100, 0.34), transparent 58%),
+          linear-gradient(180deg, #040713 0%, #02040b 54%, #03050e 100%);
       }
 
-      .grid {
-        position: fixed;
-        inset: 22px;
-        border: 1px solid var(--hairline);
-        border-radius: 22px;
-        opacity: 0.58;
+      /* Slow-drifting nebula clouds; also the substrate the glass layer refracts. */
+      .nebula {
+        position: absolute;
+        border-radius: 46% 54% 48% 52%;
+        filter: blur(60px);
+      }
+
+      .nebula-a {
+        left: -12%;
+        top: -18%;
+        width: 68%;
+        height: 86%;
+        background: radial-gradient(circle, rgba(72, 124, 200, 0.32), rgba(14, 38, 82, 0.05) 70%);
+        animation: drift-a 12s ease-in-out infinite;
+      }
+
+      .nebula-b {
+        right: -14%;
+        bottom: -22%;
+        width: 72%;
+        height: 92%;
+        background: radial-gradient(circle, rgba(96, 166, 214, 0.24), rgba(12, 34, 74, 0.05) 72%);
+        animation: drift-b 16s ease-in-out infinite;
+      }
+
+      .nebula-c {
+        left: 26%;
+        top: 8%;
+        width: 54%;
+        height: 70%;
+        background: radial-gradient(circle, rgba(186, 212, 255, 0.16), transparent 68%);
+        animation: drift-a 20s ease-in-out infinite reverse;
+      }
+
+      @keyframes drift-a {
+        0%,
+        100% {
+          transform: translate(0, 0) scale(1);
+          border-radius: 46% 54% 48% 52%;
+        }
+        50% {
+          transform: translate(9%, 7%) scale(1.14);
+          border-radius: 56% 44% 58% 42%;
+        }
+      }
+
+      @keyframes drift-b {
+        0%,
+        100% {
+          transform: translate(0, 0) scale(1.04);
+          border-radius: 52% 48% 44% 56%;
+        }
+        50% {
+          transform: translate(-11%, -6%) scale(1.2);
+          border-radius: 42% 58% 52% 48%;
+        }
+      }
+
+      .milky-way,
+      .milky-way-core {
+        position: absolute;
+        left: -22%;
+        width: 144%;
         pointer-events: none;
       }
 
-      .grid::before,
-      .grid::after {
+      .milky-way {
+        top: 14%;
+        height: 52%;
+        background: linear-gradient(
+          106deg,
+          transparent 8%,
+          rgba(170, 196, 255, 0.1) 28%,
+          rgba(226, 236, 255, 0.22) 50%,
+          rgba(130, 170, 230, 0.12) 68%,
+          transparent 90%
+        );
+        filter: blur(18px);
+        transform: rotate(-17deg);
+        animation: galaxy-drift 18s ease-in-out infinite;
+      }
+
+      .milky-way-core {
+        top: 22%;
+        height: 28%;
+        background: linear-gradient(
+          108deg,
+          transparent 18%,
+          rgba(210, 226, 255, 0.08) 36%,
+          rgba(255, 255, 255, 0.28) 50%,
+          rgba(186, 210, 255, 0.1) 64%,
+          transparent 82%
+        );
+        filter: blur(8px);
+        transform: rotate(-17deg);
+        animation: galaxy-core 11s ease-in-out infinite;
+      }
+
+      @keyframes galaxy-drift {
+        0%,
+        100% {
+          transform: rotate(-17deg) translate3d(0, 0, 0) scale(1);
+          opacity: 0.78;
+        }
+        50% {
+          transform: rotate(-13deg) translate3d(3.5%, -2%, 0) scale(1.06);
+          opacity: 1;
+        }
+      }
+
+      @keyframes galaxy-core {
+        0%,
+        100% {
+          transform: rotate(-17deg) translate3d(0, 0, 0);
+          opacity: 0.55;
+        }
+        50% {
+          transform: rotate(-19deg) translate3d(-2.5%, 1.5%, 0);
+          opacity: 1;
+        }
+      }
+
+      .stars,
+      .stars-mid,
+      .stars-bright {
+        position: absolute;
+        inset: -8%;
+      }
+
+      .stars {
+        background-image:
+          radial-gradient(1px 1px at 8% 18%, rgba(255, 255, 255, 0.8), transparent),
+          radial-gradient(1px 1px at 16% 72%, rgba(255, 255, 255, 0.62), transparent),
+          radial-gradient(1px 1px at 24% 34%, rgba(226, 238, 255, 0.85), transparent),
+          radial-gradient(1px 1px at 31% 12%, rgba(255, 255, 255, 0.5), transparent),
+          radial-gradient(1px 1px at 39% 81%, rgba(208, 224, 255, 0.7), transparent),
+          radial-gradient(1px 1px at 54% 63%, rgba(255, 255, 255, 0.55), transparent),
+          radial-gradient(1px 1px at 62% 8%, rgba(216, 230, 255, 0.66), transparent),
+          radial-gradient(1px 1px at 78% 76%, rgba(198, 216, 255, 0.6), transparent),
+          radial-gradient(1px 1px at 86% 28%, rgba(255, 255, 255, 0.72), transparent),
+          radial-gradient(1px 1px at 93% 58%, rgba(255, 255, 255, 0.46), transparent),
+          radial-gradient(1px 1px at 12% 48%, rgba(226, 236, 255, 0.5), transparent),
+          radial-gradient(1px 1px at 28% 90%, rgba(255, 255, 255, 0.42), transparent),
+          radial-gradient(1px 1px at 43% 51%, rgba(255, 255, 255, 0.36), transparent),
+          radial-gradient(1px 1px at 58% 91%, rgba(216, 228, 255, 0.56), transparent),
+          radial-gradient(1px 1px at 67% 17%, rgba(255, 255, 255, 0.46), transparent),
+          radial-gradient(1px 1px at 83% 88%, rgba(255, 255, 255, 0.5), transparent),
+          radial-gradient(1px 1px at 4% 84%, rgba(206, 220, 255, 0.42), transparent),
+          radial-gradient(1px 1px at 96% 14%, rgba(255, 255, 255, 0.6), transparent),
+          radial-gradient(1px 1px at 19% 6%, rgba(255, 255, 255, 0.38), transparent),
+          radial-gradient(1px 1px at 47% 4%, rgba(220, 232, 255, 0.44), transparent),
+          radial-gradient(1px 1px at 73% 52%, rgba(255, 255, 255, 0.4), transparent),
+          radial-gradient(1px 1px at 35% 66%, rgba(206, 226, 255, 0.48), transparent),
+          radial-gradient(1px 1px at 51% 28%, rgba(255, 255, 255, 0.34), transparent),
+          radial-gradient(1px 1px at 91% 42%, rgba(226, 236, 255, 0.5), transparent);
+        animation: star-drift 48s linear infinite;
+      }
+
+      .stars-mid {
+        background-image:
+          radial-gradient(1.1px 1.1px at 11% 29%, rgba(255, 255, 255, 0.7), transparent),
+          radial-gradient(1px 1px at 22% 55%, rgba(214, 230, 255, 0.55), transparent),
+          radial-gradient(1px 1px at 37% 15%, rgba(255, 255, 255, 0.62), transparent),
+          radial-gradient(1.2px 1.2px at 48% 77%, rgba(226, 238, 255, 0.7), transparent),
+          radial-gradient(1px 1px at 61% 41%, rgba(198, 216, 255, 0.5), transparent),
+          radial-gradient(1px 1px at 76% 12%, rgba(255, 255, 255, 0.58), transparent),
+          radial-gradient(1.1px 1.1px at 84% 63%, rgba(216, 230, 255, 0.66), transparent),
+          radial-gradient(1px 1px at 7% 88%, rgba(206, 220, 255, 0.42), transparent),
+          radial-gradient(1px 1px at 69% 86%, rgba(255, 255, 255, 0.48), transparent),
+          radial-gradient(1px 1px at 93% 81%, rgba(226, 236, 255, 0.4), transparent);
+        animation: twinkle 4.4s ease-in-out infinite, star-drift 72s linear infinite reverse;
+      }
+
+      .stars-bright {
+        background-image:
+          radial-gradient(1.8px 1.8px at 47% 22%, rgba(226, 240, 255, 0.95), transparent 70%),
+          radial-gradient(1.7px 1.7px at 71% 44%, rgba(186, 214, 255, 0.85), transparent 70%),
+          radial-gradient(1.6px 1.6px at 24% 34%, rgba(214, 232, 255, 0.8), transparent 70%),
+          radial-gradient(1.5px 1.5px at 88% 66%, rgba(226, 240, 255, 0.7), transparent 70%),
+          radial-gradient(1.6px 1.6px at 14% 70%, rgba(255, 255, 255, 0.78), transparent 70%),
+          radial-gradient(1.5px 1.5px at 58% 8%, rgba(210, 228, 255, 0.72), transparent 70%);
+        animation: twinkle-bright 2.6s ease-in-out infinite;
+      }
+
+      @keyframes star-drift {
+        from {
+          transform: translate3d(0, 0, 0);
+        }
+        to {
+          transform: translate3d(-3.5%, -2%, 0);
+        }
+      }
+
+      @keyframes twinkle {
+        0%,
+        100% {
+          opacity: 0.42;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      @keyframes twinkle-bright {
+        0%,
+        100% {
+          opacity: 0.35;
+          filter: drop-shadow(0 0 0 transparent);
+        }
+        50% {
+          opacity: 1;
+          filter: drop-shadow(0 0 4px rgba(210, 230, 255, 0.55));
+        }
+      }
+
+      .meteors {
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+        overflow: hidden;
+        pointer-events: none;
+      }
+
+      .meteor {
+        position: absolute;
+        top: var(--meteor-top, 8%);
+        left: -46%;
+        width: var(--meteor-width, 260px);
+        height: 3px;
+        --meteor-angle: 7deg;
+        --meteor-distance: 940px;
+        --meteor-peak-opacity: 1;
+        opacity: 0;
+        animation: meteor-fall var(--meteor-duration, 12s) cubic-bezier(0.18, 0.72, 0.28, 1)
+          var(--meteor-delay, 0s) 1 forwards;
+        will-change: transform, opacity;
+      }
+
+      .meteor::before {
         content: "";
         position: absolute;
         inset: 0;
-        border-radius: inherit;
-        background:
-          linear-gradient(var(--hairline) 1px, transparent 1px),
-          linear-gradient(90deg, var(--hairline) 1px, transparent 1px);
-        background-size: 48px 48px;
-        mask-image: radial-gradient(circle at 50% 42%, rgba(0, 0, 0, 0.6), transparent 62%);
-        opacity: 0.22;
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          rgba(126, 174, 255, 0.04) 18%,
+          rgba(158, 202, 255, 0.2) 52%,
+          rgba(212, 232, 255, 0.72) 82%,
+          rgba(255, 248, 225, 1) 96%,
+          transparent 100%
+        );
+        clip-path: polygon(0 50%, 100% 0, 100% 100%);
+        filter:
+          drop-shadow(0 0 3px rgba(174, 210, 255, 0.72))
+          drop-shadow(0 0 10px rgba(112, 168, 255, 0.38));
       }
 
-      .grid::after {
-        background: radial-gradient(circle at 50% 40%, transparent 0 42%, var(--hairline) 43%, transparent 44%);
-        opacity: 0.62;
+      .meteor::after {
+        content: "";
+        position: absolute;
+        right: -2px;
+        top: 50%;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        transform: translateY(-50%);
+        background: #fffdf4;
+        box-shadow:
+          0 0 4px 1px #fff,
+          0 0 12px 4px rgba(194, 224, 255, 0.88),
+          0 0 26px 8px rgba(110, 168, 255, 0.38);
+      }
+
+      .meteor-sparks,
+      .meteor-sparks::before,
+      .meteor-sparks::after {
+        position: absolute;
+        display: block;
+        width: 2px;
+        height: 2px;
+        border-radius: 50%;
+        background: rgba(255, 251, 232, 0.95);
+      }
+
+      .meteor-sparks {
+        right: 14px;
+        top: 50%;
+        box-shadow:
+          -18px -8px 0 rgba(210, 230, 255, 0.82),
+          -38px 7px 0 rgba(176, 210, 255, 0.7),
+          -62px -4px 0 rgba(255, 246, 214, 0.52);
+        animation: meteor-sparks 850ms ease-out infinite;
+      }
+
+      .meteor-sparks::before,
+      .meteor-sparks::after {
+        content: "";
+      }
+
+      .meteor-sparks::before {
+        transform: translate(-28px, -5px) scale(0.75);
+        box-shadow:
+          -30px 11px 0 rgba(188, 218, 255, 0.64),
+          -58px 3px 0 rgba(255, 242, 200, 0.42);
+      }
+
+      .meteor-sparks::after {
+        transform: translate(-12px, 6px) scale(0.55);
+        box-shadow:
+          -42px -13px 0 rgba(210, 230, 255, 0.56),
+          -76px -4px 0 rgba(156, 198, 255, 0.38);
+      }
+
+      .meteor-near {
+        height: 3px;
+      }
+
+      .meteor-far {
+        height: 1px;
+        --meteor-peak-opacity: 0.62;
+        filter: brightness(0.82);
+      }
+
+      .meteor-far::after {
+        width: 4px;
+        height: 4px;
+        box-shadow:
+          0 0 3px 1px rgba(255, 255, 255, 0.9),
+          0 0 8px 2px rgba(194, 224, 255, 0.58);
+      }
+
+      .meteor-far .meteor-sparks {
+        opacity: 0.55;
+      }
+
+      @keyframes meteor-fall {
+        0% {
+          transform: rotate(var(--meteor-angle)) translate3d(0, 0, 0);
+          opacity: 0;
+        }
+        4% {
+          opacity: var(--meteor-peak-opacity);
+        }
+        17% {
+          opacity: var(--meteor-peak-opacity);
+        }
+        24% {
+          transform: rotate(var(--meteor-angle)) translate3d(var(--meteor-distance), 0, 0);
+          opacity: 0;
+        }
+        100% {
+          opacity: 0;
+        }
+      }
+
+      @keyframes meteor-sparks {
+        0% {
+          opacity: 0.25;
+          transform: translate3d(0, -50%, 0) scale(0.7);
+        }
+        45% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+          transform: translate3d(-24px, -50%, 0) scale(1.15);
+        }
+      }
+
+      /*
+       * Liquid glass: one full-window pane. Backdrop blur refracts the nebula
+       * behind it; the mask keeps the outer starfield crisp so the pane reads
+       * as glass rather than as a second panel.
+       */
+      .glass {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        pointer-events: none;
+        backdrop-filter: blur(26px) saturate(1.35);
+        -webkit-backdrop-filter: blur(26px) saturate(1.35);
+        background: linear-gradient(
+          160deg,
+          rgba(255, 255, 255, 0.07) 0%,
+          rgba(255, 255, 255, 0.02) 38%,
+          rgba(8, 14, 30, 0.16) 100%
+        );
+        -webkit-mask-image: radial-gradient(ellipse 78% 82% at 50% 50%, #000 32%, transparent 78%);
+        mask-image: radial-gradient(ellipse 78% 82% at 50% 50%, #000 32%, transparent 78%);
+        animation: glass-breathe 12s ease-in-out infinite;
+      }
+
+      @keyframes glass-breathe {
+        0%,
+        100% {
+          -webkit-mask-position: 0 0;
+          mask-position: 0 0;
+          opacity: 0.92;
+        }
+        50% {
+          -webkit-mask-position: 2% -1%;
+          mask-position: 2% -1%;
+          opacity: 1;
+        }
+      }
+
+      /* Stars in front of the pane, so the glass reads as depth instead of fog. */
+      .stars-front {
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+        pointer-events: none;
+        background-image:
+          radial-gradient(1.2px 1.2px at 6% 26%, rgba(255, 255, 255, 0.9), transparent),
+          radial-gradient(1px 1px at 14% 62%, rgba(214, 230, 255, 0.7), transparent),
+          radial-gradient(1px 1px at 21% 14%, rgba(255, 255, 255, 0.62), transparent),
+          radial-gradient(1.3px 1.3px at 33% 78%, rgba(255, 255, 255, 0.85), transparent),
+          radial-gradient(1px 1px at 41% 33%, rgba(206, 226, 255, 0.6), transparent),
+          radial-gradient(1px 1px at 49% 86%, rgba(255, 255, 255, 0.55), transparent),
+          radial-gradient(1.2px 1.2px at 57% 20%, rgba(255, 255, 255, 0.8), transparent),
+          radial-gradient(1px 1px at 64% 70%, rgba(216, 232, 255, 0.62), transparent),
+          radial-gradient(1.4px 1.4px at 74% 30%, rgba(255, 255, 255, 0.92), transparent),
+          radial-gradient(1px 1px at 81% 58%, rgba(226, 238, 255, 0.6), transparent),
+          radial-gradient(1.2px 1.2px at 90% 78%, rgba(255, 255, 255, 0.78), transparent),
+          radial-gradient(1px 1px at 97% 36%, rgba(206, 226, 255, 0.58), transparent),
+          radial-gradient(1px 1px at 36% 8%, rgba(255, 255, 255, 0.5), transparent),
+          radial-gradient(1px 1px at 69% 92%, rgba(255, 255, 255, 0.48), transparent),
+          radial-gradient(1px 1px at 11% 92%, rgba(216, 232, 255, 0.5), transparent),
+          radial-gradient(1px 1px at 88% 8%, rgba(255, 255, 255, 0.56), transparent);
+        animation: twinkle 3.2s ease-in-out infinite;
+      }
+
+      /* Specular highlight that slides across the pane. */
+      .glass-specular {
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+        pointer-events: none;
+        mix-blend-mode: screen;
+        background: linear-gradient(
+          112deg,
+          transparent 30%,
+          rgba(226, 240, 255, 0.05) 43%,
+          rgba(255, 255, 255, 0.09) 50%,
+          rgba(190, 218, 255, 0.04) 57%,
+          transparent 70%
+        );
+        background-size: 240% 100%;
+        animation: specular 14s ease-in-out infinite;
+      }
+
+      @keyframes specular {
+        0%,
+        100% {
+          background-position: 130% 0;
+        }
+        50% {
+          background-position: -30% 0;
+        }
       }
 
       .shell {
         position: relative;
-        z-index: 1;
+        z-index: 3;
         width: 100%;
         height: 100%;
-        padding: 38px 46px;
+        padding: 32px 36px;
         display: flex;
-        flex-direction: row;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 44px;
         user-select: none;
         -webkit-user-select: none;
       }
 
-      .hero-wrap {
-        flex: 0 0 34%;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 34%;
-        position: relative;
-        min-height: 0;
-      }
-
       .content {
-        flex: 1 1 auto;
-        min-width: 260px;
-        max-width: 360px;
+        width: min(360px, 100%);
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        align-self: stretch;
         text-align: center;
-      }
-
-      .brand-block {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 8px;
-        margin: 0;
-        width: 100%;
-        text-align: center;
-      }
-
-      .brand-name {
-        font-size: 36px;
-        font-weight: 700;
-        letter-spacing: 0.24em;
-        color: var(--text);
-        line-height: 1;
-      }
-
-      .brand-tagline {
-        font-size: 10px;
-        letter-spacing: 0.22em;
-        text-transform: uppercase;
-        color: var(--text-muted);
-        line-height: 1.35;
       }
 
       .content-stack {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 34px;
+        gap: 22px;
         width: 100%;
       }
 
-      .hero-aura {
-        position: absolute;
-        width: min(150px, 72%);
-        height: min(150px, 72%);
-        border-radius: 50%;
-        background:
-          radial-gradient(circle, rgba(255, 255, 255, 0.11) 0%, transparent 63%),
-          conic-gradient(from 120deg, transparent, rgba(255, 255, 255, 0.18), transparent 36%);
-        filter: blur(12px);
-        opacity: 0.72;
-        animation: aura 4s ease-in-out infinite;
+      .brand-block {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
       }
 
-      :root[data-theme="light"] .hero-aura {
-        background:
-          radial-gradient(circle, rgba(0, 0, 0, 0.07) 0%, transparent 64%),
-          conic-gradient(from 120deg, transparent, rgba(0, 0, 0, 0.12), transparent 36%);
+      .brand-name {
+        font-size: 48px;
+        font-weight: 300;
+        line-height: 1;
+        letter-spacing: 0.22em;
+        /* Offset the trailing letter-space so the word stays optically centered. */
+        margin-left: 0.22em;
+        background: linear-gradient(
+          104deg,
+          rgba(222, 232, 252, 0.82) 0%,
+          rgba(222, 232, 252, 0.82) 36%,
+          rgba(255, 255, 255, 1) 47%,
+          rgba(196, 220, 255, 0.95) 53%,
+          rgba(222, 232, 252, 0.82) 64%,
+          rgba(222, 232, 252, 0.82) 100%
+        );
+        background-size: 280% 100%;
+        background-position: 130% 0;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        filter: drop-shadow(0 0 14px rgba(150, 186, 255, 0.3));
       }
 
-      @keyframes aura {
-        0%,
-        100% {
-          transform: scale(0.96) rotate(0deg);
-          opacity: 0.5;
-        }
-        50% {
-          transform: scale(1.05) rotate(8deg);
-          opacity: 0.82;
-        }
+      .brand-name.is-loading {
+        animation: flow-light 2.8s linear infinite;
       }
 
-      .hero-img {
-        position: relative;
-        width: min(175px, 72%);
-        max-height: 72%;
-        object-fit: contain;
-        opacity: 0;
-        transform: translateY(10px) scale(0.965);
-        clip-path: inset(100% 0 0 0);
-        filter: drop-shadow(0 0 18px rgba(255, 255, 255, 0.12));
-        animation:
-          reveal-hero 1.5s cubic-bezier(0.16, 1, 0.3, 1) 160ms forwards,
-          breathe 4.2s ease-in-out 1.6s infinite;
-      }
-
-      /* Wireframe asset is light-on-transparent; invert for readable contrast on light bg */
-      :root[data-theme="light"] .hero-img {
-        filter:
-          invert(1)
-          contrast(1.12)
-          drop-shadow(0 2px 20px rgba(0, 0, 0, 0.12))
-          drop-shadow(0 0 1px rgba(0, 0, 0, 0.28));
-      }
-
-      @keyframes reveal-hero {
-        45% {
-          opacity: 0.72;
+      @keyframes flow-light {
+        from {
+          background-position: 130% 0;
         }
         to {
-          opacity: 1;
-          transform: translateY(0) scale(1);
-          clip-path: inset(0 0 0 0);
+          background-position: -40% 0;
         }
       }
 
-      @keyframes breathe {
-        0%,
-        100% {
-          transform: translateY(0) scale(1);
-          opacity: 0.94;
-        }
-        50% {
-          transform: translateY(-2px) scale(1.008);
-          opacity: 1;
-        }
-      }
-
-      .scanline {
-        position: absolute;
-        left: 4%;
-        right: 4%;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
-        opacity: 0;
-        pointer-events: none;
-        filter: blur(0.4px);
-        animation: scan 3.4s ease-in-out 0.5s infinite;
-      }
-
-      :root[data-theme="light"] .scanline {
-        background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.35), transparent);
-      }
-
-      @keyframes scan {
-        0% {
-          top: 10%;
-          opacity: 0;
-        }
-        12% {
-          opacity: 0.85;
-        }
-        88% {
-          opacity: 0.85;
-        }
-        100% {
-          top: 88%;
-          opacity: 0;
-        }
-      }
-
-      .eye-pulse {
-        position: absolute;
-        width: 7px;
-        height: 7px;
-        left: 43.5%;
-        top: 41%;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.85);
-        box-shadow: 0 0 18px rgba(255, 255, 255, 0.75);
-        opacity: 0;
-        animation: eye 4.8s ease-in-out 1.35s infinite;
-      }
-
-      :root[data-theme="light"] .eye-pulse {
-        background: rgba(10, 10, 10, 0.82);
-        box-shadow: 0 0 16px rgba(0, 0, 0, 0.38);
-      }
-
-      @keyframes eye {
-        0%,
-        62%,
-        100% {
-          opacity: 0;
-          transform: scale(0.6);
-        }
-        68% {
-          opacity: 0.95;
-          transform: scale(1);
-        }
-        75% {
-          opacity: 0.15;
-          transform: scale(1.8);
-        }
+      .brand-tagline {
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        line-height: 1.35;
       }
 
       .footer {
@@ -328,6 +631,21 @@
         flex-direction: column;
         gap: 10px;
         align-items: center;
+      }
+
+      .progress-row {
+        width: 100%;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+      }
+
+      .progress-percent {
+        font-variant-numeric: tabular-nums;
+        color: rgba(226, 238, 255, 0.72);
       }
 
       .progress-track {
@@ -339,35 +657,220 @@
         position: relative;
       }
 
-      .progress-shimmer {
+      .progress-fill {
         position: absolute;
-        top: 0;
-        left: -35%;
-        width: 35%;
-        height: 100%;
+        inset: 0 auto 0 0;
+        width: 0%;
         border-radius: 999px;
-        background: var(--shimmer);
-        animation: shimmer 1.1s ease-in-out infinite;
+        background: linear-gradient(90deg, rgba(150, 190, 255, 0.55), var(--shimmer));
+        box-shadow: 0 0 10px rgba(160, 200, 255, 0.45);
       }
 
-      @keyframes shimmer {
-        0% {
-          transform: translateX(0);
-        }
+      /* Buffering pulse sits at the fill head; it breathes in place rather than sweeping. */
+      .progress-fill::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        top: -1px;
+        width: 26px;
+        height: 4px;
+        border-radius: 999px;
+        background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.9), transparent 70%);
+        animation: buffer-pulse 1.6s ease-in-out infinite;
+      }
+
+      @keyframes buffer-pulse {
+        0%,
         100% {
-          transform: translateX(380%);
+          opacity: 0.35;
         }
+        50% {
+          opacity: 0.95;
+        }
+      }
+
+      .log {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-height: 46px;
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        color: rgba(196, 212, 240, 0.34);
+        text-align: left;
+      }
+
+      .log-line {
+        animation: log-in 260ms ease-out;
+      }
+
+      .log-line.is-current {
+        color: rgba(226, 238, 255, 0.72);
+      }
+
+      @keyframes log-in {
+        from {
+          opacity: 0;
+          transform: translateY(3px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /*
+       * Light theme: the starfield does not read on a pale ground, so the same
+       * layers become a daylight haze — soft indigo blooms under frosted glass.
+       */
+      :root[data-theme="light"] body {
+        background: #f4f6fb;
+      }
+
+      :root[data-theme="light"] .cosmos {
+        background:
+          radial-gradient(ellipse 70% 48% at 18% 86%, rgba(150, 176, 232, 0.36), transparent 62%),
+          radial-gradient(ellipse 62% 44% at 88% 12%, rgba(168, 186, 240, 0.32), transparent 58%),
+          linear-gradient(180deg, #fbfcfe 0%, #eef1f9 54%, #e7ebf5 100%);
+      }
+
+      :root[data-theme="light"] .nebula-a {
+        background: radial-gradient(circle, rgba(126, 158, 226, 0.34), rgba(196, 210, 240, 0.05) 70%);
+      }
+
+      :root[data-theme="light"] .nebula-b {
+        background: radial-gradient(circle, rgba(150, 196, 226, 0.28), rgba(198, 214, 238, 0.05) 72%);
+      }
+
+      :root[data-theme="light"] .nebula-c {
+        background: radial-gradient(circle, rgba(188, 172, 232, 0.22), transparent 68%);
+      }
+
+      :root[data-theme="light"] .milky-way {
+        background: linear-gradient(
+          106deg,
+          transparent 8%,
+          rgba(150, 176, 226, 0.22) 28%,
+          rgba(255, 255, 255, 0.7) 50%,
+          rgba(168, 188, 232, 0.28) 68%,
+          transparent 90%
+        );
+      }
+
+      :root[data-theme="light"] .milky-way-core {
+        background: linear-gradient(
+          108deg,
+          transparent 18%,
+          rgba(255, 255, 255, 0.28) 36%,
+          rgba(255, 255, 255, 0.78) 50%,
+          rgba(214, 226, 248, 0.32) 64%,
+          transparent 82%
+        );
+      }
+
+      /* Light sky: indigo pinpoints instead of white-on-white. */
+      :root[data-theme="light"] .stars,
+      :root[data-theme="light"] .stars-mid,
+      :root[data-theme="light"] .stars-bright,
+      :root[data-theme="light"] .stars-front {
+        filter: brightness(0.45) saturate(1.4);
+        opacity: 0.7;
+      }
+
+      :root[data-theme="light"] .meteor::before {
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          rgba(102, 140, 208, 0.03) 18%,
+          rgba(92, 132, 204, 0.2) 52%,
+          rgba(72, 106, 176, 0.66) 82%,
+          rgba(255, 255, 255, 1) 96%,
+          transparent 100%
+        );
+        filter:
+          drop-shadow(0 0 3px rgba(84, 122, 194, 0.52))
+          drop-shadow(0 0 10px rgba(116, 150, 210, 0.25));
+      }
+
+      :root[data-theme="light"] .meteor::after {
+        background: #fff;
+        box-shadow:
+          0 0 4px 1px #fff,
+          0 0 12px 4px rgba(86, 124, 198, 0.56),
+          0 0 24px 7px rgba(120, 154, 216, 0.24);
+      }
+
+      :root[data-theme="light"] .meteor-sparks,
+      :root[data-theme="light"] .meteor-sparks::before,
+      :root[data-theme="light"] .meteor-sparks::after {
+        background: rgba(76, 108, 174, 0.82);
+      }
+
+      :root[data-theme="light"] .glass {
+        backdrop-filter: blur(30px) saturate(1.2);
+        -webkit-backdrop-filter: blur(30px) saturate(1.2);
+        background: linear-gradient(
+          160deg,
+          rgba(255, 255, 255, 0.62) 0%,
+          rgba(255, 255, 255, 0.34) 38%,
+          rgba(214, 224, 244, 0.28) 100%
+        );
+      }
+
+      :root[data-theme="light"] .glass-specular {
+        mix-blend-mode: soft-light;
+        background: linear-gradient(
+          112deg,
+          transparent 30%,
+          rgba(255, 255, 255, 0.4) 43%,
+          rgba(255, 255, 255, 0.72) 50%,
+          rgba(255, 255, 255, 0.36) 57%,
+          transparent 70%
+        );
+      }
+
+      :root[data-theme="light"] .brand-name {
+        background: linear-gradient(
+          104deg,
+          rgba(38, 50, 76, 0.86) 0%,
+          rgba(38, 50, 76, 0.86) 36%,
+          rgba(96, 132, 206, 1) 47%,
+          rgba(64, 96, 168, 0.95) 53%,
+          rgba(38, 50, 76, 0.86) 64%,
+          rgba(38, 50, 76, 0.86) 100%
+        );
+        background-size: 280% 100%;
+        background-position: 130% 0;
+        -webkit-background-clip: text;
+        background-clip: text;
+        filter: drop-shadow(0 1px 10px rgba(120, 150, 210, 0.28));
+      }
+
+      :root[data-theme="light"] .progress-percent {
+        color: rgba(38, 50, 76, 0.72);
+      }
+
+      :root[data-theme="light"] .progress-fill {
+        background: linear-gradient(90deg, rgba(120, 152, 214, 0.6), var(--shimmer));
+        box-shadow: 0 0 10px rgba(110, 146, 214, 0.35);
+      }
+
+      :root[data-theme="light"] .progress-fill::after {
+        background: radial-gradient(ellipse at center, rgba(74, 104, 168, 0.85), transparent 70%);
+      }
+
+      :root[data-theme="light"] .log {
+        color: rgba(38, 48, 68, 0.36);
+      }
+
+      :root[data-theme="light"] .log-line.is-current {
+        color: rgba(38, 50, 76, 0.72);
       }
 
       @media (max-width: 620px) {
         .shell {
           padding: 30px 28px;
-          gap: 26px;
-        }
-
-        .hero-wrap {
-          flex-basis: 32%;
-          width: 32%;
         }
 
         .content-stack {
@@ -375,83 +878,45 @@
         }
 
         .brand-name {
-          font-size: 30px;
+          font-size: 40px;
         }
-      }
-
-      .stage-text {
-        font-size: 10.5px;
-        color: var(--text-muted);
-        min-height: 16px;
-        text-align: center;
-        letter-spacing: 0.08em;
-      }
-
-      .escape {
-        display: none;
-        flex-direction: column;
-        align-items: center;
-        gap: 8px;
-        margin-top: 4px;
-      }
-
-      .escape.visible {
-        display: flex;
-      }
-
-      .escape-hint {
-        font-size: 10px;
-        color: var(--text-muted);
-        text-align: center;
-        line-height: 1.45;
-      }
-
-      .cancel-btn {
-        appearance: none;
-        border: 1px solid var(--cancel-border);
-        background: transparent;
-        color: var(--cancel-text);
-        font-size: 11px;
-        line-height: 1;
-        padding: 6px 14px;
-        border-radius: 999px;
-        cursor: pointer;
-      }
-
-      .cancel-btn:hover {
-        opacity: 0.85;
       }
     </style>
   </head>
   <body>
-    <canvas id="particle-canvas" aria-hidden="true"></canvas>
-    <div class="grid" aria-hidden="true"></div>
+    <div class="cosmos" aria-hidden="true">
+      <div class="nebula nebula-a"></div>
+      <div class="nebula nebula-b"></div>
+      <div class="nebula nebula-c"></div>
+      <div class="milky-way"></div>
+      <div class="milky-way-core"></div>
+      <div class="stars"></div>
+      <div class="stars-mid"></div>
+      <div class="stars-bright"></div>
+    </div>
+    <div class="glass" aria-hidden="true"></div>
+    <div class="stars-front" aria-hidden="true"></div>
+    <div id="meteors" class="meteors" aria-hidden="true"></div>
+    <div class="glass-specular" aria-hidden="true"></div>
+    <div class="washout" aria-hidden="true"></div>
 
     <div class="shell">
-      <div class="hero-wrap">
-        <div class="hero-aura" aria-hidden="true"></div>
-        <div class="scanline" aria-hidden="true"></div>
-        <div class="eye-pulse" aria-hidden="true"></div>
-        <img id="hero" class="hero-img" alt="Near wireframe" />
-      </div>
-
       <div class="content">
         <div class="content-stack">
           <div class="brand-block">
-            <div class="brand-name">NEAR</div>
+            <div id="brand" class="brand-name is-loading" aria-label="NEAR">NE&#923;R</div>
             <div class="brand-tagline">Near, Always Near.</div>
           </div>
 
           <div class="footer">
+            <div class="progress-row">
+              <span id="stage" class="progress-stage">启动中</span>
+              <span id="percent" class="progress-percent">0%</span>
+            </div>
             <div class="progress-track" aria-hidden="true">
-              <div class="progress-shimmer"></div>
+              <div id="fill" class="progress-fill"></div>
             </div>
-            <div id="stage" class="stage-text">正在初始化…</div>
-
-            <div id="escape" class="escape">
-              <div class="escape-hint">如长时间无响应，可点击取消退出</div>
-              <button id="cancel-btn" type="button" class="cancel-btn">取消</button>
-            </div>
+            <div id="log" class="log" aria-hidden="true"></div>
           </div>
         </div>
       </div>
@@ -459,153 +924,121 @@
 
     <script>
       (function () {
-        var STAGE_LABELS = {
-          initializing: "正在初始化…",
-          "backend-starting": "正在唤醒本地引擎…",
-          "backend-waiting": "正在唤醒本地引擎…",
-          "pinging-remote": "正在连接远程服务器…",
-          "loading-ui": "正在加载界面…",
-          "preloading-core": "正在加载工作数据…",
-          "restoring-session": "正在恢复上次会话…",
-          ready: "准备就绪",
+        var STAGES = {
+          initializing: { label: "启动中", done: "初始化完成", pct: 6 },
+          "backend-starting": { label: "唤醒本地引擎", done: "本地引擎已启动", pct: 22 },
+          "backend-waiting": { label: "等待引擎就绪", done: "引擎已就绪", pct: 44 },
+          "pinging-remote": { label: "连接远程服务", done: "远程服务已连接", pct: 44 },
+          "loading-ui": { label: "加载界面", done: "界面已加载", pct: 66 },
+          "preloading-core": { label: "预载工作数据", done: "工作数据已就绪", pct: 84 },
+          "restoring-session": { label: "恢复上次会话", done: "会话已恢复", pct: 94 },
+          ready: { label: "准备就绪", done: "准备就绪", pct: 100 },
         };
+        var MAX_LOG_LINES = 3;
 
-        var params = new URLSearchParams(window.location.search);
-        var hero = params.get("hero");
-        var heroEl = document.getElementById("hero");
         var stageEl = document.getElementById("stage");
-        var escapeEl = document.getElementById("escape");
-        var cancelBtn = document.getElementById("cancel-btn");
-        var canvas = document.getElementById("particle-canvas");
-        var ctx = canvas.getContext("2d");
-        var isLight = document.documentElement.getAttribute("data-theme") === "light";
-        var particleColor = isLight ? "rgba(10,10,10," : "rgba(255,255,255,";
-        var disperse = false;
+        var percentEl = document.getElementById("percent");
+        var fillEl = document.getElementById("fill");
+        var logEl = document.getElementById("log");
+        var brandEl = document.getElementById("brand");
+        var meteorsEl = document.getElementById("meteors");
+
+        var currentStage = "initializing";
+        var target = STAGES.initializing.pct;
+        var value = 0;
         var rafId = 0;
-        var particles = [];
-        var samplePoints = [];
+        var meteorTimer = 0;
+        var meteorsStopped = false;
 
-        function resizeCanvas() {
-          var dpr = window.devicePixelRatio || 1;
-          canvas.width = Math.floor(window.innerWidth * dpr);
-          canvas.height = Math.floor(window.innerHeight * dpr);
-          canvas.style.width = window.innerWidth + "px";
-          canvas.style.height = window.innerHeight + "px";
-          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        function randomBetween(min, max) {
+          return min + Math.random() * (max - min);
         }
 
-        function spawnParticle(x, y, vx, vy, size, alpha) {
-          return {
-            x: x,
-            y: y,
-            ox: x,
-            oy: y,
-            vx: vx,
-            vy: vy,
-            size: size,
-            alpha: alpha,
-            phase: Math.random() * Math.PI * 2,
-          };
+        function createMeteor(depth, delaySeconds) {
+          if (!meteorsEl || meteorsStopped) return;
+
+          var near = depth === "near";
+          var meteor = document.createElement("span");
+          var sparks = document.createElement("i");
+          var width = near ? randomBetween(230, 300) : randomBetween(105, 165);
+          var duration = near ? randomBetween(10.5, 13.5) : randomBetween(13.5, 18);
+
+          meteor.className = "meteor meteor-" + depth;
+          sparks.className = "meteor-sparks";
+          meteor.style.setProperty("--meteor-top", randomBetween(near ? 0 : 4, near ? 12 : 23).toFixed(1) + "%");
+          meteor.style.setProperty("--meteor-width", width.toFixed(0) + "px");
+          meteor.style.setProperty("--meteor-angle", randomBetween(near ? 5 : 2, near ? 9 : 6).toFixed(1) + "deg");
+          meteor.style.setProperty("--meteor-distance", (window.innerWidth + width + 180).toFixed(0) + "px");
+          meteor.style.setProperty("--meteor-duration", duration.toFixed(2) + "s");
+          meteor.style.setProperty("--meteor-delay", delaySeconds.toFixed(2) + "s");
+          meteor.appendChild(sparks);
+          meteor.addEventListener("animationend", function () {
+            meteor.remove();
+          });
+          meteorsEl.appendChild(meteor);
         }
 
-        function initAmbientParticles() {
-          particles = [];
-          var count = 34;
-          for (var i = 0; i < count; i++) {
-            particles.push(
-              spawnParticle(
-                Math.random() * window.innerWidth,
-                Math.random() * window.innerHeight,
-                (Math.random() - 0.5) * 0.18,
-                (Math.random() - 0.5) * 0.18,
-                Math.random() * 0.9 + 0.3,
-                Math.random() * 0.22 + 0.1
-              )
-            );
-          }
-        }
+        function launchMeteorBurst() {
+          if (meteorsStopped) return;
 
-        function sampleHero(img) {
-          samplePoints = [];
-          var off = document.createElement("canvas");
-          var maxW = 260;
-          var scale = Math.min(1, maxW / img.naturalWidth);
-          off.width = Math.floor(img.naturalWidth * scale);
-          off.height = Math.floor(img.naturalHeight * scale);
-          var octx = off.getContext("2d");
-          octx.drawImage(img, 0, 0, off.width, off.height);
-          var data = octx.getImageData(0, 0, off.width, off.height).data;
-          var rect = img.getBoundingClientRect();
-          var cx = rect.left + rect.width / 2;
-          var cy = rect.top + rect.height / 2;
-          for (var y = 0; y < off.height; y += 3) {
-            for (var x = 0; x < off.width; x += 3) {
-              var idx = (y * off.width + x) * 4;
-              var r = data[idx];
-              var g = data[idx + 1];
-              var b = data[idx + 2];
-              var a = data[idx + 3];
-              var lum = 0.299 * r + 0.587 * g + 0.114 * b;
-              if (a > 36 && lum > 60) {
-                var px = cx + (x - off.width / 2) * (rect.width / off.width);
-                var py = cy + (y - off.height / 2) * (rect.height / off.height);
-                samplePoints.push({ x: px, y: py });
-              }
-            }
-          }
-          var meshCount = Math.min(180, samplePoints.length);
-          for (var j = 0; j < meshCount; j++) {
-            var pt = samplePoints[(Math.random() * samplePoints.length) | 0];
-            if (!pt) continue;
-            var p = spawnParticle(
-              pt.x + (Math.random() - 0.5) * 18,
-              pt.y + (Math.random() - 0.5) * 18,
-              (Math.random() - 0.5) * 0.1,
-              (Math.random() - 0.5) * 0.1,
-              Math.random() * 0.85 + 0.35,
-              Math.random() * 0.45 + 0.18
-            );
-            p.ox = pt.x;
-            p.oy = pt.y;
-            particles.push(p);
-          }
-        }
-
-        function drawParticles(t) {
-          ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-          for (var i = 0; i < particles.length; i++) {
-            var p = particles[i];
-            if (disperse) {
-              p.x += p.vx * 6;
-              p.y += p.vy * 6;
-              p.alpha *= 0.94;
-            } else if (p.ox != null) {
-              p.x += (p.ox - p.x) * 0.018 + Math.sin(t * 0.0015 + p.phase) * 0.25;
-              p.y += (p.oy - p.y) * 0.018 + Math.cos(t * 0.0013 + p.phase) * 0.25;
-              p.alpha = 0.25 + Math.abs(Math.sin(t * 0.002 + p.phase)) * 0.45;
+          var count = 1 + Math.floor(Math.random() * 3);
+          for (var i = 0; i < count; i += 1) {
+            var depth;
+            if (count === 1) {
+              depth = Math.random() < 0.55 ? "near" : "far";
+            } else if (i === 0) {
+              depth = "near";
+            } else if (i === 1) {
+              depth = "far";
             } else {
-              p.x += p.vx;
-              p.y += p.vy;
-              if (p.x < 0) p.x = window.innerWidth;
-              if (p.x > window.innerWidth) p.x = 0;
-              if (p.y < 0) p.y = window.innerHeight;
-              if (p.y > window.innerHeight) p.y = 0;
-              p.alpha = 0.12 + Math.abs(Math.sin(t * 0.0018 + p.phase)) * 0.28;
+              depth = Math.random() < 0.5 ? "near" : "far";
             }
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            ctx.fillStyle = particleColor + p.alpha + ")";
-            ctx.fill();
+            createMeteor(depth, i * randomBetween(0.06, 0.18));
           }
-          rafId = requestAnimationFrame(drawParticles);
+
+          meteorTimer = window.setTimeout(launchMeteorBurst, randomBetween(4200, 6800));
+        }
+
+        function tick() {
+          // Ease toward the current stage target so the bar keeps creeping
+          // instead of sweeping back and forth.
+          value += (target - value) * 0.045;
+          if (target - value < 0.05) value = target;
+          if (fillEl) fillEl.style.width = value.toFixed(2) + "%";
+          if (percentEl) percentEl.textContent = Math.round(value) + "%";
+          rafId = requestAnimationFrame(tick);
+        }
+
+        function appendLog(text) {
+          if (!logEl || !text) return;
+          var line = document.createElement("div");
+          line.className = "log-line is-current";
+          line.textContent = "· " + text;
+          var prev = logEl.lastElementChild;
+          if (prev) prev.classList.remove("is-current");
+          logEl.appendChild(line);
+          while (logEl.childElementCount > MAX_LOG_LINES) {
+            logEl.removeChild(logEl.firstElementChild);
+          }
         }
 
         function setStage(stage) {
-          var label = STAGE_LABELS[stage] || STAGE_LABELS.initializing;
-          if (stageEl) stageEl.textContent = label;
+          var next = STAGES[stage];
+          if (!next || stage === currentStage) return;
+          var prev = STAGES[currentStage];
+          if (prev && next.pct >= prev.pct) appendLog(prev.done);
+          currentStage = stage;
+          target = next.pct;
+          if (stageEl) stageEl.textContent = next.label;
           if (stage === "ready") {
-            disperse = true;
-            document.body.classList.add("fade-out");
+            meteorsStopped = true;
+            if (meteorTimer) window.clearTimeout(meteorTimer);
+            value = 100;
+            target = 100;
+            if (fillEl) fillEl.style.width = "100%";
+            if (percentEl) percentEl.textContent = "100%";
+            if (brandEl) brandEl.classList.remove("is-loading");
+            document.body.classList.add("is-washing");
           }
         }
 
@@ -613,32 +1046,12 @@
           window.nearSplash.onStage(setStage);
         }
 
-        resizeCanvas();
-        initAmbientParticles();
-        rafId = requestAnimationFrame(drawParticles);
-        window.addEventListener("resize", resizeCanvas);
-
-        if (hero && heroEl) {
-          heroEl.addEventListener("load", function () {
-            sampleHero(heroEl);
-          });
-          heroEl.src = hero;
-        }
-
-        setTimeout(function () {
-          if (escapeEl) escapeEl.classList.add("visible");
-        }, 12000);
-
-        if (cancelBtn) {
-          cancelBtn.addEventListener("click", function () {
-            if (window.nearSplash && window.nearSplash.requestQuit) {
-              void window.nearSplash.requestQuit();
-            }
-          });
-        }
+        rafId = requestAnimationFrame(tick);
+        meteorTimer = window.setTimeout(launchMeteorBurst, 260);
 
         window.addEventListener("beforeunload", function () {
           if (rafId) cancelAnimationFrame(rafId);
+          if (meteorTimer) window.clearTimeout(meteorTimer);
         });
       })();
     </script>

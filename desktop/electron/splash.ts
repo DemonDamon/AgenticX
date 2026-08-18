@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, screen } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
 export type SplashStage =
   | "initializing"
@@ -13,7 +12,8 @@ export type SplashStage =
   | "restoring-session"
   | "ready";
 
-const SPLASH_FADE_MS = 180;
+/** Long enough for the splash to wash into the app background colour. */
+const SPLASH_FADE_MS = 380;
 /** After backend is ready: allow preload + session restore before force-showing main window. */
 const SPLASH_FORCE_SHOW_MS = 25_000;
 
@@ -51,37 +51,13 @@ function resolveSplashPreloadPath(): string {
   return packaged;
 }
 
-function resolveSplashIconPath(): string {
-  const iconPath = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "icon.png")
-    : path.resolve(process.cwd(), "assets", "icon.png");
-  if (fs.existsSync(iconPath)) return iconPath;
-  const embedded = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "export_embedded.png")
-    : path.resolve(process.cwd(), "assets", "export_embedded.png");
-  if (fs.existsSync(embedded)) return embedded;
-  return iconPath;
-}
-
-function resolveSplashHeroPath(): string {
-  const heroPath = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "splash-wireframe-cutout.png")
-    : path.resolve(process.cwd(), "assets", "splash-wireframe-cutout.png");
-  if (fs.existsSync(heroPath)) return heroPath;
-  const rawHeroPath = app.isPackaged
-    ? path.join(process.resourcesPath, "assets", "splash-wireframe.png")
-    : path.resolve(process.cwd(), "assets", "splash-wireframe.png");
-  if (fs.existsSync(rawHeroPath)) return rawHeroPath;
-  return resolveSplashIconPath();
-}
-
 function resolveSplashTheme(): "light" | "dark" {
   const theme = readLayoutTheme();
   return theme === "light" ? "light" : "dark";
 }
 
 function splashBackgroundColor(theme: "light" | "dark"): string {
-  return theme === "light" ? "#ffffff" : "#000000";
+  return theme === "light" ? "#f4f6fb" : "#05060c";
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -92,9 +68,9 @@ function centerSplashBounds(): { x: number; y: number; width: number; height: nu
   const { workArea } = screen.getPrimaryDisplay();
   const availableWidth = Math.max(360, workArea.width - 48);
   const availableHeight = Math.max(280, workArea.height - 48);
-  const targetWidth = clamp(Math.round(workArea.width * 0.54), 660, 860);
+  const targetWidth = clamp(Math.round(workArea.width * 0.38), 520, 620);
   const width = Math.min(targetWidth, availableWidth);
-  const targetHeight = clamp(Math.round(width * 0.56), 360, 480);
+  const targetHeight = clamp(Math.round(width * 0.58), 300, 360);
   const height = Math.min(targetHeight, availableHeight);
   return {
     width,
@@ -193,8 +169,6 @@ export function createSplashWindow(): BrowserWindow | null {
   rendererReadyReceived = false;
 
   const theme = resolveSplashTheme();
-  const heroPath = resolveSplashHeroPath();
-  const heroUrl = fs.existsSync(heroPath) ? pathToFileURL(heroPath).href : "";
 
   splashWindow = new BrowserWindow({
     ...centerSplashBounds(),
@@ -234,7 +208,6 @@ export function createSplashWindow(): BrowserWindow | null {
   const query: Record<string, string> = {
     theme,
   };
-  if (heroUrl) query.hero = heroUrl;
 
   if (fs.existsSync(htmlPath)) {
     void splashWindow.loadFile(htmlPath, { query }).catch((err) => {
