@@ -33,6 +33,21 @@ from agenticx.runtime.harden_flags import (
     group_intent_max_tokens,
     group_meta_direct_tools_enabled,
     group_meta_reply_max_tokens,
+    group_review_max_retries,
+)
+from agenticx.runtime.group_workflow import (
+    GroupWorkflowError,
+    WorkflowMember,
+    WorkflowStageRecord,
+    build_review_prompt,
+    build_rework_prompt,
+    parse_review_decision,
+    persist_member_runtime_state,
+    render_execution_dossier,
+    render_review_for_group,
+    restore_member_runtime_state,
+    select_reviewer,
+    write_group_deliverable,
 )
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
@@ -131,6 +146,33 @@ _MULTISTEP_STRONG_MARKERS_CN: tuple[str, ...] = (
     "并行",
 )
 _MULTISTEP_MIN_LENGTH_FOR_WEAK = 20  # Weak markers require some prose around them.
+
+# Explicit collaboration language should enter the reviewed team workflow even
+# when the request does not contain ordering words such as “先/再”.  These are
+# intentionally phrase-level markers so greetings like “大家好” remain cheap.
+_COLLABORATIVE_TEAM_MARKERS_CN: tuple[str, ...] = (
+    "大家讨论",
+    "你们讨论",
+    "一起讨论",
+    "共同讨论",
+    "分别分析",
+    "各自分析",
+    "一起分析",
+    "共同分析",
+    "交叉评审",
+    "互相评审",
+    "共同完成",
+    "团队协作",
+    "头脑风暴",
+    "集思广益",
+    "专家会诊",
+    "开会讨论",
+    "辩论一下",
+)
+_COLLABORATIVE_TEAM_PATTERNS_CN: tuple[str, ...] = (
+    r"(?:大家|你们|各位|成员们|多个分身|几个分身).{0,10}(?:讨论|商量|分析|评审|提意见|给出意见)",
+    r"(?:分别|各自|从各自角度).{0,10}(?:分析|回答|评估|判断|给出)",
+)
 
 # Open-call markers — phrases where the user is broadcasting a question to the
 # group rather than addressing one specific role. When matched and no member is
@@ -245,6 +287,17 @@ def _is_complex_multistep_task(user_input: str) -> bool:
         if marker in text:
             return True
     return False
+
+
+def _is_collaborative_team_request(user_input: str) -> bool:
+    """True for an explicit request that several group members collaborate."""
+    text = (user_input or "").strip()
+    if not text:
+        return False
+    if any(marker in text for marker in _COLLABORATIVE_TEAM_MARKERS_CN):
+        return True
+    return any(re.search(pattern, text) for pattern in _COLLABORATIVE_TEAM_PATTERNS_CN)
+
 
 _META_AT_SUFFIX = r"(?=[\s\u3000\u4e00-\u9fff，。！？、：:；;,.!?\[\]（）()【】\"'「」]|$)"
 
@@ -1118,6 +1171,7 @@ class GroupChatRouter:
         quoted_content: str = "",
         user_display_name: str = "我",
         facts: GroupExecutionFacts | None = None,
+        delivery_mode: bool = False,
     ) -> GroupReply:
         members_summary = GroupChatContext.render_members_summary(
             self._avatar_member_summary(getattr(base_session, "__group_avatar_ids", []) or [])
@@ -1131,24 +1185,50 @@ class GroupChatRouter:
         if quoted_content.strip():
             local_user_input = f"{user_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
         u = str(user_display_name or "").strip() or "用户"
+        if delivery_mode:
+            reply_style = (
+                "这是经过成员执行和独立审核的团队交付轮次。你必须基于执行档案做负责人收口，"
+                "不能把完整产出压缩成普通闲聊。\n"
+            )
+            length_rules = (
+                "## 交付结构（必须遵守）\n"
+                "- 先给明确结论，再整合各阶段通过版本。\n"
+                "- 单列审核状态、未决风险和无法验证的边界；失败阶段不得包装成完成。\n"
+                "- 给出可执行的下一步；避免重复成员原话，但保留关键事实和必要细节。\n\n"
+            )
+            progress_rules = (
+                "## 进展陈述规则（团队交付）\n"
+                "- 用户问题中的「团队执行档案」与上方「群工作台事实」共同构成本轮权威事实。\n"
+                "- 若两者对本轮节点执行状态存在冲突，以带 task_id、审核状态和产出的执行档案为准；"
+                "不得用泛化的历史投影覆盖本轮记录。\n"
+                "- failed / blocked / cancelled 阶段必须明说未闭环；没有产物时不得虚构完成度。\n\n"
+            )
+        else:
+            reply_style = "默认像微信群聊里的组长发言：短、清晰、可执行，先给结论再补关键点。\n"
+            length_rules = (
+                "## 回复长度（必须遵守）\n"
+                "- 默认短聊：通常 2–6 句或少量要点，不要主动写长报告、完整验收表、大段 Markdown 表格。\n"
+                "- 仅当用户明确要求报告/验收清单/完整方案/详细对照表，或问题本身必须交付长文材料时，"
+                "才展开长篇；展开前可先一句说明「下面按验收项展开」。\n"
+                "- 未明确要求长文时：用要点概括关键结论 + 下一步，把细表留给用户追问。\n\n"
+            )
+            progress_rules = (
+                "## 进展陈述规则（必须遵守）\n"
+                "- 只能依据上方「群工作台事实」陈述执行进展；事实块之外的进展一律不得声称。\n"
+                "- 若某成员列在「从未执行过」，必须明说该成员还没开始，禁止描述其产出、完成度或草稿状态。\n"
+                "- 无产出文件时，禁止给出「已跑通」「写了一半」「出了第一版」这类具体完成度描述。\n"
+                "- 你自己或他人在历史消息里的「计划 / 安排 / 将要」不等于已执行，不得当作进展复述。\n\n"
+            )
         prompt = (
             f"你是群聊「{group_name}」的项目经理兼组长。\n"
-            "默认像微信群聊里的组长发言：短、清晰、可执行，先给结论再补关键点。\n"
+            f"{reply_style}"
             "你可以综合所有成员最近发言给出全局判断。\n"
             "禁止输出工具调用细节。\n"
-            "## 回复长度（必须遵守）\n"
-            "- 默认短聊：通常 2–6 句或少量要点，不要主动写长报告、完整验收表、大段 Markdown 表格。\n"
-            "- 仅当用户明确要求报告/验收清单/完整方案/详细对照表，或问题本身必须交付长文材料时，"
-            "才展开长篇；展开前可先一句说明「下面按验收项展开」。\n"
-            "- 未明确要求长文时：用要点概括关键结论 + 下一步，把细表留给用户追问。\n\n"
+            f"{length_rules}"
             f"人类提问者显示名：{u}。请直接对该用户作答（可用「你」或其显示名），不要无故把主答对象换成 @ 某位分身，除非在明确指派后续跟进。\n\n"
             f"群成员:\n{members_summary}\n\n"
             f"{facts_block}\n\n"
-            "## 进展陈述规则（必须遵守）\n"
-            "- 只能依据上方「群工作台事实」陈述执行进展；事实块之外的进展一律不得声称。\n"
-            "- 若某成员列在「从未执行过」，必须明说该成员还没开始，禁止描述其产出、完成度或草稿状态。\n"
-            "- 无产出文件时，禁止给出「已跑通」「写了一半」「出了第一版」这类具体完成度描述。\n"
-            "- 你自己或他人在历史消息里的「计划 / 安排 / 将要」不等于已执行，不得当作进展复述。\n\n"
+            f"{progress_rules}"
             f"最近群聊上下文:\n{context.render_recent_dialogue()}\n\n"
             f"用户问题:\n{local_user_input}\n\n"
             f"{extra_instruction.strip()}\n"
@@ -1158,7 +1238,11 @@ class GroupChatRouter:
             model=model,
             prompt=prompt,
             temperature=0.2,
-            max_tokens=group_meta_reply_max_tokens(),
+            max_tokens=(
+                max(4_000, group_meta_reply_max_tokens())
+                if delivery_mode
+                else group_meta_reply_max_tokens()
+            ),
         )
         final_text = text.strip()
         if not final_text:
@@ -1195,6 +1279,7 @@ class GroupChatRouter:
         force_reply: bool,
         user_display_name: str = "我",
         progress_queue: asyncio.Queue[GroupReply] | None = None,
+        append_to_context: bool = True,
     ) -> GroupReply:
         addressing = self._group_user_addressing_rules(user_display_name)
         if avatar_id == META_LEADER_AGENT_ID:
@@ -1236,6 +1321,20 @@ class GroupChatRouter:
         setattr(local_session, "_session_manager", getattr(base_session, "_session_manager", None))
         setattr(local_session, "__group_chat_mode", True)
         _copy_group_member_runtime_flags(base_session, local_session)
+        try:
+            restore_member_runtime_state(
+                base_session,
+                local_session,
+                group_id=group_id,
+                avatar_id=avatar_id,
+            )
+        except Exception as exc:
+            _log.warning(
+                "group member context restore failed group=%s avatar=%s: %s",
+                group_id,
+                avatar_id,
+                exc,
+            )
 
         dialogue_context = context.render_recent_dialogue()
         force_rule = (
@@ -1318,16 +1417,39 @@ class GroupChatRouter:
             )
         final_text = ""
         error_text = ""
-        async for event in runtime.run_turn(
-            local_user_input,
-            local_session,
-            should_stop=lambda: self._should_stop(should_stop),
-            agent_id=avatar_id,
-            tools=_group_chat_tools(),
-            system_prompt=system_prompt,
-            usage_session_id=str(getattr(base_session, "_usage_owner_session_id", "") or ""),
-            usage_avatar_id=str(avatar_id or ""),
-        ):
+
+        async def _runtime_events() -> AsyncGenerator[Any, None]:
+            try:
+                async for runtime_event in runtime.run_turn(
+                    local_user_input,
+                    local_session,
+                    should_stop=lambda: self._should_stop(should_stop),
+                    agent_id=avatar_id,
+                    tools=_group_chat_tools(),
+                    system_prompt=system_prompt,
+                    usage_session_id=str(
+                        getattr(base_session, "_usage_owner_session_id", "") or ""
+                    ),
+                    usage_avatar_id=str(avatar_id or ""),
+                ):
+                    yield runtime_event
+            finally:
+                try:
+                    persist_member_runtime_state(
+                        base_session,
+                        local_session,
+                        group_id=group_id,
+                        avatar_id=avatar_id,
+                    )
+                except Exception as exc:
+                    _log.warning(
+                        "group member context persist failed group=%s avatar=%s: %s",
+                        group_id,
+                        avatar_id,
+                        exc,
+                    )
+
+        async for event in _runtime_events():
             if progress_queue is not None:
                 progress_text = self._runtime_event_to_progress_text(event.type, event.data)
                 group_evt_type = self._runtime_event_to_group_event_type(event.type)
@@ -1396,12 +1518,13 @@ class GroupChatRouter:
             skipped=False,
             event_type="group_reply",
         )
-        context.append_agent(
-            agent_id=avatar_id,
-            agent_name=avatar_name,
-            text=final_text,
-            avatar_url=avatar_url,
-        )
+        if append_to_context:
+            context.append_agent(
+                agent_id=avatar_id,
+                agent_name=avatar_name,
+                text=final_text,
+                avatar_url=avatar_url,
+            )
         return reply
 
     async def _run_one_target_stream(
@@ -1417,6 +1540,7 @@ class GroupChatRouter:
         should_stop: Callable[[], Any],
         force_reply: bool,
         user_display_name: str = "我",
+        append_to_context: bool = True,
     ) -> AsyncGenerator[GroupReply, None]:
         """Stream target progress events, then final reply/skipped."""
         queue: asyncio.Queue[GroupReply] = asyncio.Queue()
@@ -1433,6 +1557,7 @@ class GroupChatRouter:
                 force_reply=force_reply,
                 user_display_name=user_display_name,
                 progress_queue=queue,
+                append_to_context=append_to_context,
             )
         )
         while not task.done():
@@ -1475,7 +1600,10 @@ class GroupChatRouter:
             not explicit_member_mentions
             and META_LEADER_AGENT_ID not in mention_set
             and len(valid_members) >= 2
-            and _is_complex_multistep_task(user_input)
+            and (
+                _is_complex_multistep_task(user_input)
+                or _is_collaborative_team_request(user_input)
+            )
         ):
             async for reply in self._run_team_turn(
                 base_session=base_session,
@@ -2010,6 +2138,7 @@ class GroupChatRouter:
 
         worker_agents: list[Agent] = []
         worker_id_to_avatar_id: dict[str, str] = {}
+        workflow_members: list[WorkflowMember] = []
 
         for avatar_id in valid_member_ids:
             av = self.avatar_registry.get_avatar(avatar_id)
@@ -2025,6 +2154,14 @@ class GroupChatRouter:
             )
             worker_agents.append(w_agent)
             worker_id_to_avatar_id[avatar_id] = avatar_id
+            workflow_members.append(
+                WorkflowMember(
+                    avatar_id=avatar_id,
+                    name=av_name,
+                    role=av_role,
+                    prompt=av_goal,
+                )
+            )
 
         if not worker_agents:
             # Fallback: nothing to orchestrate, skip team mode.
@@ -2067,6 +2204,7 @@ class GroupChatRouter:
             description=user_input,
             expected_output="Group task execution result",
         )
+        collaborative_request = _is_collaborative_team_request(user_input)
         try:
             subtasks = await pattern.decompose_task(main_task)
         except Exception as exc:
@@ -2083,6 +2221,16 @@ class GroupChatRouter:
 
         async for r in _drain_relay():
             yield r
+
+        if not subtasks and collaborative_request:
+            subtasks = [
+                Task(
+                    id=f"{main_task.id}_collaboration",
+                    description=user_input,
+                    expected_output="Independent professional analysis",
+                    dependencies=[],
+                )
+            ]
 
         if not subtasks:
             # No subtasks: let the meta leader handle it directly.
@@ -2103,6 +2251,34 @@ class GroupChatRouter:
         if len(subtasks) > MAX_DECOMPOSE_SUBTASKS:
             subtasks = subtasks[:MAX_DECOMPOSE_SUBTASKS]
 
+        # An explicit “discuss / analyse independently” request must not collapse
+        # into one executor merely because the planner returned one broad task.
+        # Expand that broad task into role-specific, parallel first passes and
+        # pin one to each member; the normal reviewer gate will cross-check them.
+        forced_collaboration_assignments: dict[str, str] = {}
+        if collaborative_request and len(subtasks) == 1 and len(worker_instances) >= 2:
+            broad_task = subtasks[0]
+            independent_subtasks: list[Task] = []
+            for index, (worker, member) in enumerate(
+                zip(worker_instances, workflow_members),
+                start=1,
+            ):
+                task_id = f"{broad_task.id}_perspective_{index}"
+                independent_subtasks.append(
+                    Task(
+                        id=task_id,
+                        description=(
+                            f"独立首轮（{member.name} / {member.role or '专业成员'}视角）："
+                            "在不依赖其他成员结论的前提下，独立分析并给出可验证、可交付的完整意见。\n\n"
+                            f"原始请求：{user_input}"
+                        ),
+                        expected_output="Independent professional analysis",
+                        dependencies=[],
+                    )
+                )
+                forced_collaboration_assignments[task_id] = str(worker.id)
+            subtasks = independent_subtasks[:MAX_DECOMPOSE_SUBTASKS]
+
         # ── 7. Planning: assign ─────────────────────────────────────────────
         try:
             assignment_map = await pattern.coordinator.assign_tasks(
@@ -2115,6 +2291,19 @@ class GroupChatRouter:
                 st.id: worker_instances[i % len(worker_instances)].id
                 for i, st in enumerate(subtasks)
             }
+
+        if forced_collaboration_assignments:
+            assignment_map.update(forced_collaboration_assignments)
+        elif collaborative_request and len(subtasks) >= 2 and len(worker_instances) >= 2:
+            assigned_workers = {
+                str(assignment_map.get(subtask.id, "") or "") for subtask in subtasks
+            }
+            assigned_workers.discard("")
+            if len(assigned_workers) < 2:
+                # Preserve the coordinator's choices unless they accidentally
+                # collapse an explicit collaboration request onto one member.
+                for subtask, worker in zip(subtasks, worker_instances):
+                    assignment_map[subtask.id] = str(worker.id)
 
         async for r in _drain_relay():
             yield r
@@ -2139,12 +2328,19 @@ class GroupChatRouter:
         # ── 8. Execution: Graph DAG scheduler + AgentRuntime per node ───────
         # Hybrid stack preserved (ADR 0002): Workforce plans; AgentRuntime executes.
         from agenticx.runtime.graph.compiler import compile_workforce_run
-        from agenticx.runtime.graph.models import GraphNode
+        from agenticx.runtime.graph.models import ArtifactRef, GraphNode
         from agenticx.runtime.graph.scheduler import execute_group_run
         from agenticx.runtime.graph.store import get_default_store
 
         responded_this_turn: set[str] = set()
         subtask_by_id = {str(st.id): st for st in subtasks}
+        subtask_index_by_id = {str(st.id): index for index, st in enumerate(subtasks)}
+        stage_records_by_id: dict[str, WorkflowStageRecord] = {}
+        member_runtime_locks: dict[str, asyncio.Lock] = {
+            member.avatar_id: asyncio.Lock() for member in workflow_members
+        }
+        member_runtime_locks[META_LEADER_AGENT_ID] = asyncio.Lock()
+        review_max_retries = group_review_max_retries()
         session_id = resolve_studio_session_id(base_session)
         if not session_id:
             _log.warning(
@@ -2157,6 +2353,12 @@ class GroupChatRouter:
             group_id=group_id,
             subtasks=subtasks,
             assignment_map={str(k): str(v) for k, v in assignment_map.items()},
+        )
+        graph_run.meta.update(
+            {
+                "collaborative_request": collaborative_request,
+                "independent_first_passes": bool(forced_collaboration_assignments),
+            }
         )
         try:
             scratch = getattr(base_session, "scratchpad", None)
@@ -2188,11 +2390,37 @@ class GroupChatRouter:
             while not graph_event_queue.empty():
                 yield graph_event_queue.get_nowait()
 
+        def _member_identity(avatar_id: str) -> tuple[str, str]:
+            if avatar_id == META_LEADER_AGENT_ID:
+                return self._meta_leader_label, ""
+            avatar = self.avatar_registry.get_avatar(avatar_id)
+            if avatar is None:
+                return avatar_id, ""
+            return (
+                str(getattr(avatar, "name", "") or avatar_id),
+                str(getattr(avatar, "avatar_url", "") or ""),
+            )
+
         async def _node_runner(node: GraphNode):
             st = subtask_by_id.get(node.id)
             desc = (st.description if st is not None else node.task_text) or node.task_text
             worker_id = str(node.agent_id or assignment_map.get(node.id, "") or "")
             avatar_id = worker_id_to_avatar_id.get(worker_id, worker_id) or META_LEADER_AGENT_ID
+            executor_name, _executor_url = _member_identity(avatar_id)
+            dependency_outputs: dict[str, str] = {}
+            for dependency_id in graph_run.depends_sources(node.id):
+                dependency_record = stage_records_by_id.get(dependency_id)
+                if dependency_record is not None and dependency_record.final_output.strip():
+                    dependency_outputs[dependency_id] = dependency_record.final_output[:12_000]
+
+            stage_record = WorkflowStageRecord(
+                task_id=node.id,
+                description=desc,
+                executor_id=avatar_id,
+                executor_name=executor_name,
+                dependency_outputs=dependency_outputs,
+            )
+            stage_records_by_id[node.id] = stage_record
 
             event_bus.publish(WorkforceEvent(
                 action=WorkforceAction.TASK_STARTED,
@@ -2205,57 +2433,216 @@ class GroupChatRouter:
             async for r in _drain_graph_events():
                 yield r
 
-            if avatar_id == META_LEADER_AGENT_ID:
-                ty_name = self._meta_leader_label
-            else:
-                av = self.avatar_registry.get_avatar(avatar_id)
-                ty_name = str(getattr(av, "name", "") or avatar_id) if av else avatar_id
-            yield self._typing_event(avatar_id, ty_name)
-
             subtask_input = desc
             if quoted_content.strip():
                 subtask_input = f"{subtask_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
+            if dependency_outputs:
+                handoff = "\n\n".join(
+                    f"### {dependency_id}\n{output}"
+                    for dependency_id, output in dependency_outputs.items()
+                )
+                subtask_input = (
+                    f"{subtask_input}\n\n"
+                    "## 已审核上游交接（必须作为本阶段输入）\n"
+                    f"{handoff}"
+                )
             if node.directives:
                 joined = "\n".join(f"- {d}" for d in node.directives)
                 subtask_input = (
                     f"{subtask_input}\n\n## Graph intervention (authoritative)\n{joined}"
                 )
 
-            reply: GroupReply | None = None
-            async for target_evt in self._run_one_target_stream(
-                base_session=base_session,
-                context=context,
-                group_id=group_id,
-                group_name=group_name,
-                avatar_id=avatar_id,
-                user_input=subtask_input,
-                quoted_content="",
-                should_stop=should_stop,
-                force_reply=True,
-                user_display_name=user_display_name,
-            ):
-                yield target_evt
-                if target_evt.event_type in {"group_reply", "group_skipped"}:
-                    reply = target_evt
+            candidate_input = subtask_input
+            retries_used = 0
+            task_index = subtask_index_by_id.get(node.id, 0)
+            reviewer = select_reviewer(
+                workflow_members,
+                executor_id=avatar_id,
+                task_index=task_index,
+            )
+            reviewer_id = reviewer.avatar_id if reviewer is not None else META_LEADER_AGENT_ID
+            reviewer_name, reviewer_url = _member_identity(reviewer_id)
+            stage_record.reviewer_id = reviewer_id
+            stage_record.reviewer_name = reviewer_name
 
-            if reply is None or reply.skipped:
-                event_bus.publish(WorkforceEvent(
-                    action=WorkforceAction.TASK_FAILED,
-                    task_id=node.id,
-                    agent_id=avatar_id,
-                    data={"error": reply.error if reply else "no response"},
-                ))
-            else:
-                self._record_turn_response(responded_this_turn, reply)
-                task_lock.add_conversation("assistant", reply.content or "")
-                event_bus.publish(WorkforceEvent(
-                    action=WorkforceAction.TASK_COMPLETED,
-                    task_id=node.id,
-                    agent_id=avatar_id,
-                    data={"result": (reply.content or "")[:500]},
-                ))
-            async for r in _drain_relay():
-                yield r
+            while True:
+                if await self._should_stop(should_stop):
+                    stage_record.status = "cancelled"
+                    stage_record.failure_reason = "用户已中止团队任务。"
+                    raise asyncio.CancelledError
+
+                yield self._typing_event(avatar_id, executor_name)
+                candidate_reply: GroupReply | None = None
+                executor_lock = member_runtime_locks.setdefault(avatar_id, asyncio.Lock())
+                async with executor_lock:
+                    async for target_evt in self._run_one_target_stream(
+                        base_session=base_session,
+                        context=context,
+                        group_id=group_id,
+                        group_name=group_name,
+                        avatar_id=avatar_id,
+                        user_input=candidate_input,
+                        quoted_content="",
+                        should_stop=should_stop,
+                        force_reply=True,
+                        user_display_name=user_display_name,
+                    ):
+                        yield target_evt
+                        if target_evt.event_type in {"group_reply", "group_skipped"}:
+                            candidate_reply = target_evt
+
+                if (
+                    candidate_reply is None
+                    or candidate_reply.skipped
+                    or not str(candidate_reply.content or "").strip()
+                ):
+                    reason = (
+                        str(candidate_reply.error or "").strip()
+                        if candidate_reply is not None
+                        else "no response"
+                    ) or "no response"
+                    stage_record.status = "failed"
+                    stage_record.failure_reason = f"执行者未产生候选结果：{reason}"
+                    node.meta.update(
+                        {
+                            "review_status": "failed_before_review",
+                            "failure_reason": stage_record.failure_reason,
+                        }
+                    )
+                    event_bus.publish(WorkforceEvent(
+                        action=WorkforceAction.TASK_FAILED,
+                        task_id=node.id,
+                        agent_id=avatar_id,
+                        data={"error": stage_record.failure_reason},
+                    ))
+                    async for r in _drain_relay():
+                        yield r
+                    raise GroupWorkflowError(stage_record.failure_reason)
+
+                candidate_output = str(candidate_reply.content or "").strip()
+                stage_record.attempts.append(candidate_output)
+
+                review_prompt = build_review_prompt(
+                    original_request=user_input,
+                    task_description=desc,
+                    dependency_outputs=dependency_outputs,
+                    candidate_output=candidate_output,
+                    executor_name=executor_name,
+                )
+                yield self._typing_event(reviewer_id, reviewer_name)
+                raw_review_reply: GroupReply | None = None
+                reviewer_lock = member_runtime_locks.setdefault(reviewer_id, asyncio.Lock())
+                async with reviewer_lock:
+                    async for review_evt in self._run_one_target_stream(
+                        base_session=base_session,
+                        context=context,
+                        group_id=group_id,
+                        group_name=group_name,
+                        avatar_id=reviewer_id,
+                        user_input=review_prompt,
+                        quoted_content="",
+                        should_stop=should_stop,
+                        force_reply=True,
+                        user_display_name=user_display_name,
+                        append_to_context=False,
+                    ):
+                        if review_evt.event_type in {"group_reply", "group_skipped"}:
+                            raw_review_reply = review_evt
+                        else:
+                            yield review_evt
+
+                raw_review_text = (
+                    str(raw_review_reply.content or "").strip()
+                    if raw_review_reply is not None
+                    else ""
+                )
+                decision = parse_review_decision(raw_review_text)
+                stage_record.reviews.append(decision)
+                review_text = render_review_for_group(decision)
+                visible_review = GroupReply(
+                    agent_id=reviewer_id,
+                    avatar_name=reviewer_name,
+                    avatar_url=reviewer_url,
+                    content=review_text,
+                    skipped=False,
+                    event_type="group_reply",
+                    graph_run_id=graph_run.run_id,
+                    graph_node_id=self._graph_node_id_for_agent(reviewer_id),
+                )
+                context.append_agent(
+                    agent_id=reviewer_id,
+                    agent_name=reviewer_name,
+                    text=review_text,
+                    avatar_url=reviewer_url,
+                )
+                yield visible_review
+
+                node.meta.update(
+                    {
+                        "reviewer_id": reviewer_id,
+                        "reviewer_name": reviewer_name,
+                        "review_status": decision.status.value,
+                        "review_summary": decision.summary[:500],
+                        "review_issues": [
+                            {
+                                "severity": issue.severity,
+                                "problem": issue.problem[:500],
+                                "fix": issue.fix[:500],
+                            }
+                            for issue in decision.issues[:10]
+                        ],
+                    }
+                )
+
+                if decision.accepted:
+                    stage_record.final_output = candidate_output
+                    stage_record.status = decision.status.value
+                    self._record_turn_response(responded_this_turn, candidate_reply)
+                    task_lock.add_conversation("assistant", candidate_output)
+                    event_bus.publish(WorkforceEvent(
+                        action=WorkforceAction.TASK_COMPLETED,
+                        task_id=node.id,
+                        agent_id=avatar_id,
+                        data={
+                            "result": candidate_output[:500],
+                            "review_status": decision.status.value,
+                            "reviewer_id": reviewer_id,
+                        },
+                    ))
+                    async for r in _drain_relay():
+                        yield r
+                    return
+
+                if retries_used >= review_max_retries:
+                    stage_record.status = "failed"
+                    stage_record.failure_reason = (
+                        f"独立审核连续 {len(stage_record.reviews)} 次未通过：{decision.summary}"
+                    )
+                    node.meta["failure_reason"] = stage_record.failure_reason
+                    event_bus.publish(WorkforceEvent(
+                        action=WorkforceAction.TASK_FAILED,
+                        task_id=node.id,
+                        agent_id=avatar_id,
+                        data={
+                            "error": stage_record.failure_reason,
+                            "review_status": decision.status.value,
+                            "reviewer_id": reviewer_id,
+                        },
+                    ))
+                    async for r in _drain_relay():
+                        yield r
+                    raise GroupWorkflowError(stage_record.failure_reason)
+
+                retries_used += 1
+                node.retry_count = retries_used
+                candidate_input = build_rework_prompt(
+                    original_request=user_input,
+                    task_description=desc,
+                    previous_output=candidate_output,
+                    decision=decision,
+                    attempt_number=retries_used,
+                    dependency_outputs=dependency_outputs,
+                )
 
         max_parallel = min(4, max(1, len(worker_instances)))
         async for item in execute_group_run(
@@ -2273,13 +2660,69 @@ class GroupChatRouter:
         async for r in _drain_graph_events():
             yield r
 
-        # ── 9. Leader summary ───────────────────────────────────────────────
+        ordered_stage_records: list[WorkflowStageRecord] = []
+        for subtask in subtasks:
+            task_id = str(subtask.id)
+            existing_record = stage_records_by_id.get(task_id)
+            if existing_record is not None:
+                ordered_stage_records.append(existing_record)
+                continue
+            assigned_id = str(assignment_map.get(task_id, "") or "")
+            assigned_avatar_id = worker_id_to_avatar_id.get(assigned_id, assigned_id)
+            assigned_name, _assigned_url = _member_identity(assigned_avatar_id)
+            graph_node = graph_run.nodes.get(task_id)
+            graph_status = (
+                str(getattr(getattr(graph_node, "status", None), "value", "") or "")
+                if graph_node is not None
+                else "blocked"
+            )
+            if graph_status in {"pending", "ready", "running", "paused"}:
+                graph_status = "blocked"
+            ordered_stage_records.append(
+                WorkflowStageRecord(
+                    task_id=task_id,
+                    description=str(subtask.description or ""),
+                    executor_id=assigned_avatar_id,
+                    executor_name=assigned_name,
+                    status=graph_status or "blocked",
+                    failure_reason="上游阶段未通过或任务在执行前被中止。",
+                )
+            )
+
+        graph_run.meta.update(
+            {
+                "review_gate_enabled": True,
+                "workflow_reviewed": all(
+                    bool(record.reviews) for record in ordered_stage_records
+                ),
+                "workflow_complete": all(
+                    record.status in {"pass", "pass_with_risk"}
+                    for record in ordered_stage_records
+                ),
+                "workflow_stages": [
+                    {
+                        "task_id": record.task_id,
+                        "executor_id": record.executor_id,
+                        "reviewer_id": record.reviewer_id,
+                        "status": record.status,
+                        "attempts": len(record.attempts),
+                        "failure_reason": record.failure_reason[:500],
+                    }
+                    for record in ordered_stage_records
+                ],
+            }
+        )
+
+        # ── 9. Leader summary + durable deliverable ─────────────────────────
         if not await self._should_stop(should_stop):
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
+            execution_dossier = render_execution_dossier(ordered_stage_records)
             summary_prompt = (
-                f"{user_input}\n\n"
-                "[系统] 所有子任务已执行完毕，请以项目经理身份综合以上成员的工作成果，"
-                "用微信群短聊风格给出最终答复和下一步建议（默认短，勿主动写长报告）。"
+                f"## 原始用户请求\n{user_input}\n\n"
+                "## 团队执行档案（权威输入）\n"
+                f"{execution_dossier}\n\n"
+                "请以团队负责人身份完成最终交付。阶段状态为 failed / blocked / cancelled 时，"
+                "必须明确列为未闭环项，不得声称所有任务已经完成。"
             )
             pm = await self._run_meta_project_manager_reply(
                 base_session=base_session,
@@ -2288,11 +2731,71 @@ class GroupChatRouter:
                 user_input=summary_prompt,
                 quoted_content="",
                 extra_instruction=(
-                    "请综合所有成员成果，给出最终答复。"
-                    "默认短聊：结论 + 关键点 + 下一步；仅用户本轮明确要求报告/清单时才展开长文。"
+                    "以执行档案为唯一阶段事实来源，整合通过版本；"
+                    "单列审核风险、验证边界、未闭环项和下一步。"
                 ),
                 user_display_name=user_display_name,
+                delivery_mode=True,
             )
+            final_answer_without_artifact = str(pm.content or "")
+            deliverable_path = None
+            try:
+                deliverable_path = write_group_deliverable(
+                    group_id=group_id,
+                    group_name=group_name,
+                    original_request=user_input,
+                    run_id=graph_run.run_id,
+                    records=ordered_stage_records,
+                    final_answer=final_answer_without_artifact,
+                )
+                graph_run.artifacts.append(
+                    ArtifactRef(
+                        id=f"artifact_{graph_run.run_id}_{len(graph_run.artifacts) + 1}",
+                        node_id=META_LEADER_AGENT_ID,
+                        kind="report",
+                        path_or_uri=str(deliverable_path),
+                        summary=f"{group_name}团队协作交付",
+                    )
+                )
+                graph_run.meta["deliverable_path"] = str(deliverable_path)
+                pm.content = (
+                    f"{final_answer_without_artifact.rstrip()}\n\n"
+                    f"协作产物已保存：`{deliverable_path}`"
+                )
+            except Exception as exc:
+                _log.warning(
+                    "group workflow deliverable persist failed group=%s run=%s: %s",
+                    group_id,
+                    graph_run.run_id,
+                    exc,
+                )
+                pm.content = (
+                    f"{final_answer_without_artifact.rstrip()}\n\n"
+                    f"协作结果已生成，但产物文件保存失败：{str(exc)[:300]}"
+                )
+
+            try:
+                get_default_store().save(graph_run, bump_version=True)
+            except Exception as exc:
+                _log.warning(
+                    "group workflow graph metadata persist failed run=%s: %s",
+                    graph_run.run_id,
+                    exc,
+                )
+
+            # _run_meta_project_manager_reply already appended the pre-artifact
+            # text. Replace that tail so restart/reload sees the same message as SSE.
+            history = getattr(base_session, "chat_history", None)
+            if isinstance(history, list):
+                for message in reversed(history):
+                    if not isinstance(message, dict):
+                        continue
+                    message_agent_id = str(
+                        message.get("agent_id") or message.get("sender_id") or ""
+                    )
+                    if message_agent_id == META_LEADER_AGENT_ID:
+                        message["content"] = pm.content
+                        break
             yield pm
             task_lock.add_conversation("assistant", pm.content or "")
 
@@ -2464,4 +2967,3 @@ class GroupChatRouter:
                 responded_this_turn=responded_this_turn,
             ):
                 yield fu
-

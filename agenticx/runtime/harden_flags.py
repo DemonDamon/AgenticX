@@ -139,3 +139,24 @@ def group_meta_reply_max_tokens() -> int:
     if raw is None:
         raw = 2000
     return max(500, min(8000, int(raw)))
+
+
+def group_review_max_retries() -> int:
+    """``AGX_GROUP_REVIEW_MAX_RETRIES`` / ``group.review_max_retries``.
+
+    A retry is one executor rework after an independent reviewer rejects the
+    candidate.  Default 2, clamped to 0..4 so a malformed review loop cannot
+    run without a deterministic bound.
+    """
+    raw: Optional[int] = None
+    env = os.environ.get("AGX_GROUP_REVIEW_MAX_RETRIES", "").strip()
+    if env:
+        try:
+            raw = int(env)
+        except Exception:
+            raw = None
+    if raw is None:
+        raw = _config_int("group.review_max_retries")
+    if raw is None:
+        raw = 2
+    return max(0, min(4, int(raw)))

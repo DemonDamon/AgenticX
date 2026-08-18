@@ -19,6 +19,7 @@ from agenticx.runtime.group_router import (
     GroupChatRouter,
     GroupReply,
     _get_mention_hops,
+    _is_collaborative_team_request,
     _is_complex_multistep_task,
     _is_open_call_question,
     EventType,
@@ -111,6 +112,30 @@ class TestComplexMultistepHeuristic:
         assert _is_complex_multistep_task("") is False
         assert _is_complex_multistep_task(None) is False  # type: ignore[arg-type]
         assert _is_complex_multistep_task("   ") is False
+
+
+class TestCollaborativeTeamHeuristic:
+    @pytest.mark.parametrize("text", [
+        "请大家讨论一下这个方案",
+        "你们分别分析，再做一次交叉评审",
+        "请两位专家一起分析这个问题",
+        "我们开会讨论一下交付风险",
+        "针对这个方向做一次头脑风暴",
+        "让几个分身先商量一下该怎么做",
+        "请从各自角度给出判断",
+    ])
+    def test_explicit_collaboration_phrases_match(self, text):
+        assert _is_collaborative_team_request(text)
+
+    @pytest.mark.parametrize("text", [
+        "大家好",
+        "你好",
+        "这个方案是什么？",
+        "@av1 帮我看一下",
+        "",
+    ])
+    def test_non_collaboration_phrases_skip(self, text):
+        assert not _is_collaborative_team_request(text)
 
 
 class TestOpenCallHeuristic:
@@ -339,6 +364,35 @@ class TestRoutingDispatch:
             "intelligent routing should auto-dispatch to _run_team_turn for complex prompts"
         )
         assert "调研" in captured_input[0]
+
+    @pytest.mark.asyncio
+    async def test_intelligent_routing_collaboration_prompt_auto_dispatches_to_team(self):
+        router = _make_router()
+        team_called = False
+
+        async def fake_team_turn(**kwargs):
+            nonlocal team_called
+            team_called = True
+            yield GroupReply(
+                "__meta__", "Machi", "", "team done", False, event_type="group_reply"
+            )
+
+        router._run_team_turn = fake_team_turn  # type: ignore[assignment]
+
+        async for _ in router.run_group_turn(
+            base_session=_make_session(),
+            group_id="g-collab",
+            group_name="Collaboration Dispatch",
+            routing="intelligent",
+            group_avatar_ids=["av1", "av2"],
+            mentioned_avatar_ids=[],
+            user_input="请大家讨论这个方案并做交叉评审",
+            quoted_content="",
+            should_stop=lambda: False,
+        ):
+            pass
+
+        assert team_called
 
     @pytest.mark.asyncio
     async def test_intelligent_routing_with_explicit_mention_skips_auto_dispatch(self):
