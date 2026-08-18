@@ -6,6 +6,8 @@ export type ConfirmStrategyOption = {
   description: string;
 };
 
+export type ConfirmPolicy = "ask-every-time" | "use-allowlist" | "run-everything";
+
 /** Shared labels for every Desktop confirmation-strategy selector. */
 export const CONFIRM_STRATEGY_OPTIONS: readonly ConfirmStrategyOption[] = [
   {
@@ -16,7 +18,7 @@ export const CONFIRM_STRATEGY_OPTIONS: readonly ConfirmStrategyOption[] = [
   {
     value: "semi-auto",
     label: "白名单放行",
-    description: "确认时可将同类操作加入本次白名单",
+    description: "确认一次后，本次运行不再询问同类操作",
   },
   {
     value: "auto",
@@ -30,4 +32,12 @@ export function confirmStrategyLabel(strategy: ConfirmStrategy): string {
     CONFIRM_STRATEGY_OPTIONS.find((option) => option.value === strategy)?.label ??
     CONFIRM_STRATEGY_OPTIONS[0].label
   );
+}
+
+export function defaultConfirmPolicyForStrategy(
+  strategy: ConfirmStrategy,
+): ConfirmPolicy {
+  if (strategy === "auto") return "run-everything";
+  if (strategy === "semi-auto") return "use-allowlist";
+  return "ask-every-time";
 }

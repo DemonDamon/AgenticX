@@ -2,6 +2,7 @@
 export const SETTINGS_TAB_IDS = [
   "account",
   "general",
+  "permissions",
   "provider",
   "mcp",
   "connectors",
@@ -21,6 +22,28 @@ export const SETTINGS_TAB_IDS = [
 
 export type SettingsTab = (typeof SETTINGS_TAB_IDS)[number];
 
+/** Customer delivery navigation: one level, ordered by common user tasks. */
+export const DELIVERY_VISIBLE_SETTINGS_TAB_IDS = [
+  "account",
+  "general",
+  "permissions",
+  "skills",
+  "mcp",
+  "connectors",
+  "favorites",
+] as const satisfies readonly SettingsTab[];
+
+const DELIVERY_VISIBLE_SETTINGS_TABS = new Set<SettingsTab>(
+  DELIVERY_VISIBLE_SETTINGS_TAB_IDS,
+);
+
 export function isSettingsTab(x: unknown): x is SettingsTab {
   return typeof x === "string" && (SETTINGS_TAB_IDS as readonly string[]).includes(x);
+}
+
+/** Hidden provider management is represented by the enterprise account page. */
+export function resolveDeliverySettingsTab(x: unknown): SettingsTab {
+  if (x === "provider") return "account";
+  if (isSettingsTab(x) && DELIVERY_VISIBLE_SETTINGS_TABS.has(x)) return x;
+  return "general";
 }

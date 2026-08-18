@@ -6,7 +6,10 @@ import {
   composerWorkspaceLabel,
   filterComposerWorkspaces,
 } from "./ComposerContextControls";
-import { CONFIRM_STRATEGY_OPTIONS } from "../constants/confirm-strategy-options";
+import {
+  CONFIRM_STRATEGY_OPTIONS,
+  defaultConfirmPolicyForStrategy,
+} from "../constants/confirm-strategy-options";
 import { ensureWorkspaceSessionBeforeFirstMessage } from "../utils/workspace-session-visibility";
 
 describe("ComposerContextControls", () => {
@@ -65,6 +68,9 @@ describe("ComposerContextControls", () => {
     expect(composerPermissionLabel("manual")).toBe("每次询问");
     expect(composerPermissionLabel("semi-auto")).toBe("白名单放行");
     expect(composerPermissionLabel("auto")).toBe("全部自动执行");
+    expect(defaultConfirmPolicyForStrategy("manual")).toBe("ask-every-time");
+    expect(defaultConfirmPolicyForStrategy("semi-auto")).toBe("use-allowlist");
+    expect(defaultConfirmPolicyForStrategy("auto")).toBe("run-everything");
   });
 
   it("shows workspace and permission controls for a new conversation", () => {

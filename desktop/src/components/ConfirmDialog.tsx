@@ -1,24 +1,32 @@
 import { useEffect, useState } from "react";
 import { Button } from "./ds/Button";
 import { Modal } from "./ds/Modal";
-
-type ConfirmPolicy = "ask-every-time" | "use-allowlist" | "run-everything";
+import type { ConfirmPolicy } from "../constants/confirm-strategy-options";
 
 type Props = {
   open: boolean;
   question: string;
   sourceLabel?: string;
   diff?: string;
+  defaultPolicy?: ConfirmPolicy;
   onApprove: (policy: ConfirmPolicy) => void;
   onReject: (policy: ConfirmPolicy) => void;
 };
 
-export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, onReject }: Props) {
+export function ConfirmDialog({
+  open,
+  question,
+  sourceLabel,
+  diff,
+  defaultPolicy = "ask-every-time",
+  onApprove,
+  onReject,
+}: Props) {
   const [policy, setPolicy] = useState<ConfirmPolicy>("ask-every-time");
 
   useEffect(() => {
-    if (open) setPolicy("ask-every-time");
-  }, [open, question]);
+    if (open) setPolicy(defaultPolicy);
+  }, [defaultPolicy, open, question]);
 
   return (
     <Modal
@@ -63,7 +71,7 @@ export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, on
               onChange={() => setPolicy("use-allowlist")}
               className="h-4 w-4 border-border bg-surface-panel accent-emerald-500"
             />
-            白名单放行（本会话允许同类）
+            白名单放行（本次运行记住同类操作）
           </label>
           <label className="flex cursor-pointer items-center gap-2">
             <input
@@ -73,7 +81,7 @@ export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, on
               onChange={() => setPolicy("run-everything")}
               className="h-4 w-4 border-border bg-surface-panel accent-amber-500"
             />
-            全部自动执行（本会话不再询问）
+            全部自动执行（全局生效）
           </label>
         </div>
     </Modal>

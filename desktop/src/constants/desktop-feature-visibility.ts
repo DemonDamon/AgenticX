@@ -9,3 +9,6 @@ export const LOCAL_KNOWLEDGE_ENABLED = false;
 
 /** Customer navigation keeps conversations in one focused viewport. */
 export const SHOW_DESKTOP_MULTI_PANE = false;
+
+/** Keep operator-facing controls out of the customer-facing General page. */
+export const SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS = false;

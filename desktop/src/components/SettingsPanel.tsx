@@ -48,6 +48,7 @@ import {
   Database,
   X,
   TriangleAlert,
+  ShieldCheck,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
 import { SettingsDropdown } from "./ds/SettingsDropdown";
@@ -77,7 +78,7 @@ import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { decideSkillInstallRequest } from "../utils/skill-install-queue";
 import { filterAndRankSkills } from "../utils/skill-search";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../utils/guard-fix-prompt";
-import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
+import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { VOICE_UI_ENABLED } from "../constants/feature-flags";
 import { shouldDisableMcpToggle } from "../utils/mcp-toggle-state";
 import { ForwardPicker, type ForwardConfirmPayload } from "./ForwardPicker";
@@ -141,10 +142,15 @@ import {
 import { isEnterpriseModelManagementLocked } from "../utils/enterprise-model-management";
 import {
   LOCAL_KNOWLEDGE_ENABLED,
+  SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS,
   SHOW_DESKTOP_EXTERNAL_IM,
 } from "../constants/desktop-feature-visibility";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
-import type { SettingsTab } from "../settings-tab";
+import {
+  DELIVERY_VISIBLE_SETTINGS_TAB_IDS,
+  resolveDeliverySettingsTab,
+  type SettingsTab,
+} from "../settings-tab";
 import type { MCPDiscoveryHit } from "./settings/mcp/MCPDiscoveryPanel";
 import { MCPMarketplacePanel } from "./settings/mcp/MCPMarketplacePanel";
 import { MCPJsonEditorModal } from "./settings/mcp/MCPJsonEditorModal";
@@ -1073,29 +1079,32 @@ function ModelCapabilityBadges({
   );
 }
 
-const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
+const ALL_TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "account", label: "用户账号", icon: User },
   { id: "general", label: "通用偏好", icon: Settings2 },
+  { id: "permissions", label: "权限", icon: ShieldCheck },
   { id: "provider", label: "模型服务", icon: Cpu },
-  { id: "mcp", label: "MCP", icon: Plug },
+  { id: "mcp", label: "MCP 工具", icon: Plug },
   { id: "connectors", label: "连接器", icon: Link2 },
   { id: "tools", label: "内置工具", icon: Wrench },
-  { id: "skills", label: "技能配置", icon: SkillPuzzleIcon },
+  { id: "skills", label: "技能", icon: SkillPuzzleIcon },
   ...(LOCAL_KNOWLEDGE_ENABLED
     ? [{ id: "knowledge" as const, label: "知识库", icon: Library }]
     : []),
   { id: "data_sources", label: "数据源", icon: Database },
   { id: "memory", label: "记忆管理", icon: Network },
   { id: "hooks", label: "钩子管理", icon: Anchor },
-  { id: "automation", label: "定时任务", icon: AutomationTaskIcon },
+  { id: "automation", label: "任务设置", icon: AutomationTaskIcon },
   { id: "email", label: "邮件通知", icon: Mail },
-  { id: "favorites", label: "内容收藏", icon: Bookmark },
+  { id: "favorites", label: "我的收藏", icon: Bookmark },
   { id: "server", label: "远程连接", icon: Globe },
 ];
 
-const PRIMARY_TAB_IDS = new Set<SettingsTab>(["general", "provider", "mcp", "connectors", "skills"]);
-const PRIMARY_TABS = TABS.filter((tab) => PRIMARY_TAB_IDS.has(tab.id));
-const ADVANCED_TABS = TABS.filter((tab) => !PRIMARY_TAB_IDS.has(tab.id));
+const TABS = DELIVERY_VISIBLE_SETTINGS_TAB_IDS.map((id) => {
+  const tab = ALL_TABS.find((item) => item.id === id);
+  if (!tab) throw new Error(`Missing settings tab definition: ${id}`);
+  return tab;
+});
 
 const EMAIL_PRESETS: Array<{
   id: EmailPresetId;
@@ -6610,27 +6619,19 @@ export function SettingsPanel({
   const [tab, setTab] = useState<SettingsTab>("general");
   const [userProfileEditing, setUserProfileEditing] = useState(false);
   const [metaEditorKind, setMetaEditorKind] = useState<"identity" | "soul" | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
   const [navWidth, setNavWidth] = useState(() =>
     loadSettingsNavWidth(loadSettingsPanelSize().width),
   );
   useEffect(() => {
     if (!open || !settingsOpenToTab) return;
-    setTab(
-      settingsOpenToTab === "knowledge" && !LOCAL_KNOWLEDGE_ENABLED
-        ? "general"
-        : settingsOpenToTab,
-    );
+    setTab(resolveDeliverySettingsTab(settingsOpenToTab));
     updateSettingsSlice({ openToTab: undefined });
   }, [open, settingsOpenToTab, updateSettingsSlice]);
   useEffect(() => {
-    if (!open) {
-      setAdvancedOpen(false);
-      return;
-    }
-    if (!PRIMARY_TAB_IDS.has(tab)) setAdvancedOpen(true);
-  }, [open, tab]);
+    if (!open) return;
+    setTab((current) => resolveDeliverySettingsTab(current));
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const size = loadSettingsPanelSize();
@@ -8785,7 +8786,6 @@ export function SettingsPanel({
   if (!open) return null;
 
   const ks = keyStatus[active] ?? "idle";
-  const advancedVisible = advancedOpen || !PRIMARY_TAB_IDS.has(tab);
   const renderTabButton = (item: (typeof TABS)[number]) => {
     const Icon = item.icon;
     const isActive = tab === item.id;
@@ -8825,27 +8825,7 @@ export function SettingsPanel({
         >
           <div className="mb-4 pr-2 text-[15px] font-semibold text-text-strong">设置</div>
           <nav className="agx-settings-nav-scroll flex flex-1 flex-col gap-1 overflow-y-auto">
-            {PRIMARY_TABS.map(renderTabButton)}
-            <div className="mt-3 border-t border-border/70 pt-3 pr-2">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between gap-2 rounded-[10px] px-2.5 py-2 text-left text-[13px] font-semibold text-text-subtle transition hover:bg-surface-card hover:text-text-strong"
-                aria-expanded={advancedVisible}
-                aria-controls="settings-advanced-tabs"
-                onClick={() => setAdvancedOpen((value) => !value)}
-              >
-                <span className="inline-flex min-w-0 items-center gap-2.5">
-                  <Settings2 className="h-4 w-4 shrink-0" aria-hidden />
-                  <span className="truncate">高级设置</span>
-                </span>
-                {advancedVisible ? <ChevronDown className="h-4 w-4 shrink-0" aria-hidden /> : <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />}
-              </button>
-              {advancedVisible ? (
-                <div id="settings-advanced-tabs" className="mt-1 space-y-1">
-                  {ADVANCED_TABS.map(renderTabButton)}
-                </div>
-              ) : null}
-            </div>
+            {TABS.map(renderTabButton)}
           </nav>
           <div
             className="group absolute right-0 top-0 z-20 h-full w-3 cursor-col-resize"
@@ -9373,6 +9353,9 @@ export function SettingsPanel({
                     </div>
                   </div>
                 </Panel>
+                <SuggestedQuestionsSettingsPanel />
+                {SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS ? (
+                  <>
                 <Panel title="权限">
                   <div className="flex items-center justify-between gap-6">
                     <div className="min-w-0">
@@ -9405,7 +9388,6 @@ export function SettingsPanel({
                 </Panel>
                 <PermissionsAdvancedPanel ref={permissionsPanelRef} />
                 <WebSearchSettingsPanel />
-                <SuggestedQuestionsSettingsPanel />
                 <ComputerUseGeneralPanel />
                 <SessionMemoryPanel />
                 <Panel title="工作目录">
@@ -9468,10 +9450,42 @@ export function SettingsPanel({
                     每个分身拥有独立工作区，位于 ~/.agenticx/avatars/&lt;id&gt;/workspace。
                   </div>
                 </Panel>
+                  </>
+                ) : null}
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
-                  当前版本：AgenticX Desktop v0.2.5
+                  当前版本：{APP_DISPLAY_NAME} {APP_VERSION}
                 </div>
             </div>
+
+            {tab === "permissions" && (
+              <div className="space-y-4">
+                <Panel title="执行确认">
+                  <div className="flex items-center justify-between gap-6">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-text-primary">默认权限</div>
+                      <p className="mt-0.5 text-xs leading-5 text-text-faint">
+                        选择运行命令和工具前是否需要你的确认
+                      </p>
+                    </div>
+                    <ConfirmStrategyDropdown
+                      value={confirmStrategy}
+                      onChange={(next) => void onConfirmStrategyChange(next)}
+                    />
+                  </div>
+                  {confirmStrategy === "auto" ? (
+                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-text-subtle">
+                      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" />
+                      <span>所有工具将直接执行。建议仅在你信任的工作区中使用。</span>
+                    </div>
+                  ) : null}
+                </Panel>
+                <Panel title="安全提示">
+                  <p className="text-xs leading-5 text-text-faint">
+                    请勿在对话中发送 API Key、Token 或密码；需要授权时请使用对应服务的登录或连接页面。
+                  </p>
+                </Panel>
+              </div>
+            )}
 
             {/* === PROVIDER TAB === */}
             {tab === "provider" && (
@@ -10699,9 +10713,11 @@ export function SettingsPanel({
                 onRefreshMcp={onRefreshMcp}
               />
             )}
-            <div className={tab === "tools" ? "space-y-4" : "hidden"}>
-              <ToolsTab ref={toolsTabRef} />
-            </div>
+            {SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS && tab === "tools" ? (
+              <div className="space-y-4">
+                <ToolsTab ref={toolsTabRef} />
+              </div>
+            ) : null}
 
             {/* === SKILLS TAB === */}
             {tab === "skills" && (
@@ -11368,13 +11384,15 @@ export function SettingsPanel({
           {/* Footer */}
           <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-2.5">
             <span className="min-w-0 truncate text-[11px] text-text-faint">
-              开关类配置改动即时生效；需手动填写的项请用各区块内的「保存」。退出时会一并写入模型服务、连接、语音等设置。
+              {SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS
+                ? "开关类配置改动即时生效；需手动填写的项请用各区块内的「保存」。退出时会一并写入其它设置。"
+                : "开关类配置改动即时生效；需手动填写的项请使用各区块内的「保存」。"}
             </span>
             <button
               className="shrink-0 rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
-              onClick={handleSave}
+              onClick={SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS ? handleSave : onClose}
             >
-              退出
+              {SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS ? "退出" : "关闭"}
             </button>
           </div>
         </div>

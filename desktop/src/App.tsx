@@ -15,6 +15,7 @@ import { Topbar } from "./components/Topbar";
 import { VoiceFocusMode } from "./components/VoiceFocusMode";
 import { VOICE_UI_ENABLED } from "./constants/feature-flags";
 import { SHOW_DESKTOP_MULTI_PANE } from "./constants/desktop-feature-visibility";
+import { defaultConfirmPolicyForStrategy } from "./constants/confirm-strategy-options";
 import type { ForwardConfirmPayload } from "./components/ForwardPicker";
 import { resolveForwardTarget } from "./utils/resolve-forward-target";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
@@ -2041,6 +2042,9 @@ export function App() {
   };
 
   const handleConfirmStrategyChange = async (strategy: "manual" | "semi-auto" | "auto") => {
+    if (strategy === "manual") {
+      autoApproveScopesRef.current.clear();
+    }
     setConfirmStrategy(strategy);
     await window.agenticxDesktop.saveConfirmStrategy(strategy);
   };
@@ -2447,6 +2451,7 @@ export function App() {
         question={confirm.question}
         sourceLabel={confirm.agentId === "meta" ? "主智能体" : `子智能体 ${confirm.agentId}`}
         diff={confirm.diff}
+        defaultPolicy={defaultConfirmPolicyForStrategy(confirmStrategy)}
         onApprove={(policy) => {
           const scope = confirmScopeRef.current;
           if (scope) {

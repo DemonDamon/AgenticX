@@ -1628,11 +1628,11 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                   onMouseEnter={() => setHoverKey(null)}
                   onClick={() => {
                     setOpen(false);
-                    useAppStore.getState().openSettings("provider");
+                    useAppStore.getState().openSettings("account");
                   }}
                 >
                   <SquarePen className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
-                  配置模型
+                  企业账号与模型
                 </button>
               </div>
             </div>
