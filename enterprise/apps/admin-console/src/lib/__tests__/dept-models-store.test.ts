@@ -8,6 +8,11 @@ const mockOnConflictDoNothing = vi.fn();
 const mockWhereDelete = vi.fn();
 
 vi.mock("@agenticx/iam-core", () => ({
+  // dept-models-store 靠它选方言；缺了这个导出，整组用例在分发那一行就炸。
+  resolveDatabaseConfig: () => ({
+    dialect: "postgresql",
+    url: "postgresql://postgres:postgres@127.0.0.1:5432/agenticx",
+  }),
   getIamDb: () => ({
     select: mockSelect,
     delete: mockDelete,

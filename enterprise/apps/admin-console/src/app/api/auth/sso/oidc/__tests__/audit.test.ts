@@ -41,6 +41,8 @@ vi.mock("../../../../../../lib/admin-pg-auth", () => ({
 }));
 
 vi.mock("../../../../../../lib/admin-session", () => ({
+  // 路由会读它决定 cookie 的 Secure 属性；mock 缺这一项，整个用例在设置 cookie 那行就抛。
+  isAdminCookieSecure: () => false,
   ADMIN_SESSION_COOKIE: "agx_admin_session",
   createAdminSessionToken: () => "stub-admin-token",
 }));

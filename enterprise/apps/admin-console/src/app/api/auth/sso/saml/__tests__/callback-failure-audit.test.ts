@@ -22,6 +22,9 @@ vi.mock("../../../../../../lib/admin-pg-auth", () => ({
 }));
 
 vi.mock("../../../../../../lib/admin-session", () => ({
+  // 这个用例断言 SameSite=None + Secure，也就是跨站回调那条路径；SameSite=None
+  // 在浏览器里必须配 Secure，所以这里返回 true。
+  isAdminCookieSecure: () => true,
   ADMIN_SESSION_COOKIE: "agx_admin_session",
   createAdminSessionToken: vi.fn(() => "session-token"),
 }));
