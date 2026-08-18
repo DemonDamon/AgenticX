@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DELIVERY_DEVELOPER_SETTINGS_TAB_ID,
   DELIVERY_VISIBLE_SETTINGS_TAB_IDS,
   resolveDeliverySettingsTab,
 } from "./settings-tab";
@@ -19,6 +20,12 @@ describe("delivery settings navigation", () => {
 
   it("routes provider management to the enterprise account", () => {
     expect(resolveDeliverySettingsTab("provider")).toBe("account");
+  });
+
+  it("keeps advanced controls behind one separate developer page", () => {
+    expect(DELIVERY_DEVELOPER_SETTINGS_TAB_ID).toBe("developer");
+    expect(DELIVERY_VISIBLE_SETTINGS_TAB_IDS).not.toContain("developer");
+    expect(resolveDeliverySettingsTab("developer")).toBe("developer");
   });
 
   it.each([

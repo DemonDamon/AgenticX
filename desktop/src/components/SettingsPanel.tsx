@@ -147,6 +147,7 @@ import {
 } from "../constants/desktop-feature-visibility";
 import { classifyModelKind, isEmbeddingModelKind } from "../utils/model-kind";
 import {
+  DELIVERY_DEVELOPER_SETTINGS_TAB_ID,
   DELIVERY_VISIBLE_SETTINGS_TAB_IDS,
   resolveDeliverySettingsTab,
   type SettingsTab,
@@ -1097,6 +1098,7 @@ const ALL_TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "automation", label: "任务设置", icon: AutomationTaskIcon },
   { id: "email", label: "邮件通知", icon: Mail },
   { id: "favorites", label: "我的收藏", icon: Bookmark },
+  { id: "developer", label: "开发者设置", icon: Wrench },
   { id: "server", label: "远程连接", icon: Globe },
 ];
 
@@ -1105,6 +1107,11 @@ const TABS = DELIVERY_VISIBLE_SETTINGS_TAB_IDS.map((id) => {
   if (!tab) throw new Error(`Missing settings tab definition: ${id}`);
   return tab;
 });
+
+const DEVELOPER_TAB = ALL_TABS.find(
+  (item) => item.id === DELIVERY_DEVELOPER_SETTINGS_TAB_ID,
+);
+if (!DEVELOPER_TAB) throw new Error("Missing developer settings tab definition");
 
 const EMAIL_PRESETS: Array<{
   id: EmailPresetId;
@@ -5249,8 +5256,8 @@ function SettingsSwitch({
   );
 }
 
-/** 桌面操控开关：在「通用」Tab，不在工作区。 */
-function ComputerUseGeneralPanel() {
+/** 桌面操控属于进阶能力；客户版默认折叠，避免干扰日常设置。 */
+function ComputerUseGeneralPanel({ defaultCollapsed = false }: { defaultCollapsed?: boolean } = {}) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -5303,14 +5310,14 @@ function ComputerUseGeneralPanel() {
 
   if (loading) {
     return (
-      <Panel title="桌面操控">
+      <Panel title="桌面操控" collapsible defaultCollapsed={defaultCollapsed}>
         <div className="py-2 text-sm text-text-faint">加载中…</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="桌面操控">
+    <Panel title="桌面操控" collapsible defaultCollapsed={defaultCollapsed}>
       <p className="mb-3 text-xs text-text-faint">
         写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 中的{" "}
         <code className="text-text-subtle">computer_use.enabled</code>。开启后由和创智派随应用启动的内置助手读取该开关并尝试加载桌面级能力。若对话里仍看不到相关工具，请确认已安装包含该能力的和创智派版本；修改后需完全退出并重新打开和创智派（远程模式见保存成功后的说明）。
@@ -6154,19 +6161,19 @@ function SkillAdvancedPanel() {
   );
 }
 
-function SessionMemoryPanel() {
+function SessionMemoryPanel({ defaultCollapsed = false }: { defaultCollapsed?: boolean } = {}) {
   const { loading, saving, form, message, update } = useTrinityConfig();
 
   if (loading) {
     return (
-      <Panel title="会话与记忆">
+      <Panel title="会话与记忆" collapsible defaultCollapsed={defaultCollapsed}>
         <div className="py-2 text-sm text-text-faint">加载中…</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="会话与记忆">
+    <Panel title="会话与记忆" collapsible defaultCollapsed={defaultCollapsed}>
       <p className="mb-3 text-xs text-text-faint">
         写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
       </p>
@@ -8786,7 +8793,7 @@ export function SettingsPanel({
   if (!open) return null;
 
   const ks = keyStatus[active] ?? "idle";
-  const renderTabButton = (item: (typeof TABS)[number]) => {
+  const renderTabButton = (item: (typeof ALL_TABS)[number]) => {
     const Icon = item.icon;
     const isActive = tab === item.id;
     return (
@@ -8826,6 +8833,9 @@ export function SettingsPanel({
           <div className="mb-4 pr-2 text-[15px] font-semibold text-text-strong">设置</div>
           <nav className="agx-settings-nav-scroll flex flex-1 flex-col gap-1 overflow-y-auto">
             {TABS.map(renderTabButton)}
+            <div className="mt-3 border-t border-border pt-3">
+              {renderTabButton(DEVELOPER_TAB)}
+            </div>
           </nav>
           <div
             className="group absolute right-0 top-0 z-20 h-full w-3 cursor-col-resize"
@@ -8843,7 +8853,7 @@ export function SettingsPanel({
         <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
           <div className="relative z-20 flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-panel pl-5 pr-5 py-3">
             <h3 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-text-strong">
-              {TABS.find((t) => t.id === tab)?.label ?? "设置"}
+              {ALL_TABS.find((t) => t.id === tab)?.label ?? "设置"}
             </h3>
             <button
               type="button"
@@ -9388,68 +9398,6 @@ export function SettingsPanel({
                 </Panel>
                 <PermissionsAdvancedPanel ref={permissionsPanelRef} />
                 <WebSearchSettingsPanel />
-                <ComputerUseGeneralPanel />
-                <SessionMemoryPanel />
-                <Panel title="工作目录">
-                  <label className="block text-sm text-text-muted">
-                    默认工作区目录（元智能体）
-                    <div className="mt-1 flex gap-2">
-                      <input
-                        className="min-w-0 flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
-                        value={workspaceDirDraft}
-                        onChange={(e) => {
-                          setWorkspaceDirDraft(e.target.value);
-                          setWorkspaceDirMessage("");
-                        }}
-                        placeholder="~/.agenticx/workspace"
-                        spellCheck={false}
-                      />
-                      <button
-                        type="button"
-                        className="shrink-0 rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
-                        onClick={() => void chooseWorkspaceDirectory()}
-                      >
-                        选择…
-                      </button>
-                    </div>
-                    {workspaceDirResolved ? (
-                      <span className="mt-1 block text-[11px] text-text-faint">
-                        解析路径：{workspaceDirResolved}
-                      </span>
-                    ) : null}
-                    <span className="mt-1 block text-xs text-text-faint">
-                      和创智派默认读写根目录（IDENTITY / USER / SOUL / MEMORY 等）。保存后新建对话生效；已有会话仍用原路径。
-                    </span>
-                  </label>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      className="rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={!workspaceDirDirty || workspaceDirSaving}
-                      onClick={() => void saveWorkspaceDirectory()}
-                    >
-                      {workspaceDirSaving ? "保存中…" : "保存工作区路径"}
-                    </button>
-                    {workspaceDirDirty ? (
-                      <button
-                        type="button"
-                        className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover"
-                        onClick={() => {
-                          setWorkspaceDirDraft(workspaceDirSaved);
-                          setWorkspaceDirMessage("");
-                        }}
-                      >
-                        撤销
-                      </button>
-                    ) : null}
-                  </div>
-                  {workspaceDirMessage ? (
-                    <p className="mt-2 text-xs text-text-muted">{workspaceDirMessage}</p>
-                  ) : null}
-                  <div className="mt-3 rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
-                    每个分身拥有独立工作区，位于 ~/.agenticx/avatars/&lt;id&gt;/workspace。
-                  </div>
-                </Panel>
                   </>
                 ) : null}
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs text-text-subtle">
@@ -9483,6 +9431,81 @@ export function SettingsPanel({
                   <p className="text-xs leading-5 text-text-faint">
                     请勿在对话中发送 API Key、Token 或密码；需要授权时请使用对应服务的登录或连接页面。
                   </p>
+                </Panel>
+              </div>
+            )}
+
+            {tab === "developer" && (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-border bg-surface-card px-4 py-3">
+                  <div className="text-sm font-medium text-text-primary">进阶功能</div>
+                  <p className="mt-1 text-xs leading-5 text-text-faint">
+                    日常使用无需调整。只有在需要桌面操控、跨会话延续或自定义默认工作目录时再展开对应区块。
+                  </p>
+                </div>
+
+                <ComputerUseGeneralPanel defaultCollapsed />
+                <SessionMemoryPanel defaultCollapsed />
+
+                <Panel title="默认工作目录" collapsible defaultCollapsed>
+                  <label className="block text-sm text-text-muted">
+                    元智能体工作目录
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        className="min-w-0 flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
+                        value={workspaceDirDraft}
+                        onChange={(event) => {
+                          setWorkspaceDirDraft(event.target.value);
+                          setWorkspaceDirMessage("");
+                        }}
+                        placeholder="~/.agenticx/workspace"
+                        spellCheck={false}
+                      />
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-md border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+                        onClick={() => void chooseWorkspaceDirectory()}
+                      >
+                        选择…
+                      </button>
+                    </div>
+                    {workspaceDirResolved ? (
+                      <span className="mt-1 block break-all text-[11px] text-text-faint">
+                        当前路径：{workspaceDirResolved}
+                      </span>
+                    ) : null}
+                    <span className="mt-1 block text-xs leading-5 text-text-faint">
+                      新建对话将使用这里保存的目录；已有对话仍保留原工作目录。
+                    </span>
+                  </label>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={!workspaceDirDirty || workspaceDirSaving}
+                      onClick={() => void saveWorkspaceDirectory()}
+                    >
+                      {workspaceDirSaving ? "保存中…" : "保存工作目录"}
+                    </button>
+                    {workspaceDirDirty ? (
+                      <button
+                        type="button"
+                        className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover"
+                        onClick={() => {
+                          setWorkspaceDirDraft(workspaceDirSaved);
+                          setWorkspaceDirMessage("");
+                        }}
+                      >
+                        撤销
+                      </button>
+                    ) : null}
+                  </div>
+                  {workspaceDirMessage ? (
+                    <p className="mt-2 text-xs text-text-muted">{workspaceDirMessage}</p>
+                  ) : null}
+                  <div className="mt-3 rounded-md border border-border bg-surface-card px-3 py-2.5 text-xs leading-5 text-text-subtle">
+                    分身仍使用各自独立的工作目录，不会与这里的元智能体目录混用。
+                  </div>
                 </Panel>
               </div>
             )}
