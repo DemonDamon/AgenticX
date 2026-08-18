@@ -12,6 +12,7 @@ import { SettingsSwitch } from "../settings/SettingsSwitch";
 import { Modal } from "../ds/Modal";
 import { Toast } from "../ds/Toast";
 import { HoverTip } from "../ds/HoverTip";
+import { TencentMeetingAuthFallback } from "./TencentMeetingAuthFallback";
 import { useAppStore } from "../../store";
 
 const DROPDOWN_WIDTH = 260;
@@ -68,12 +69,16 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
   >(null);
   const [pendingId, setPendingId] = useState<NativeId | null>(null);
   const [tmeetPhase, setTmeetPhase] = useState("");
+  const [tmeetAuthModalOpen, setTmeetAuthModalOpen] = useState(false);
+  const [tmeetAuthorizationUrl, setTmeetAuthorizationUrl] = useState("");
+  const [tmeetBrowserOpenFailed, setTmeetBrowserOpenFailed] = useState(false);
   const [tapdModalOpen, setTapdModalOpen] = useState(false);
   const [tapdToken, setTapdToken] = useState("");
   const [tapdError, setTapdError] = useState("");
   const [toastOpen, setToastOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const btnRef = useRef<HTMLButtonElement>(null);
+  const ownsTmeetLoginRef = useRef(false);
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -153,7 +158,11 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
 
   useEffect(() => {
     void refreshTmeet();
-    return window.agenticxDesktop.onNativeConnectorTmeetProgress(({ phase }) => {
+    return window.agenticxDesktop.onNativeConnectorTmeetProgress(({
+      phase,
+      authorizationUrl,
+      browserOpenFailed,
+    }) => {
       const labels: Record<string, string> = {
         installing: "首次使用，正在下载腾讯会议 CLI…",
         opening_browser: "正在打开授权页面…",
@@ -162,8 +171,18 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
         disconnected: "已断开",
         error: "授权未完成",
       };
-      if (labels[phase]) setTmeetPhase(labels[phase]);
+      if (ownsTmeetLoginRef.current && labels[phase]) setTmeetPhase(labels[phase]);
+      if (ownsTmeetLoginRef.current && authorizationUrl) {
+        setTmeetAuthorizationUrl(authorizationUrl);
+        setTmeetBrowserOpenFailed(Boolean(browserOpenFailed));
+        setTmeetAuthModalOpen(true);
+      }
       if (phase === "success" || phase === "disconnected" || phase === "error") {
+        if (ownsTmeetLoginRef.current) {
+          setTmeetAuthModalOpen(false);
+          setTmeetAuthorizationUrl("");
+          setTmeetBrowserOpenFailed(false);
+        }
         void refreshTmeet();
       }
     });
@@ -289,11 +308,17 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
 
   const connectTencentMeeting = async () => {
     if (pendingId) return;
+    ownsTmeetLoginRef.current = true;
     setPendingId("tencent-meeting");
     setTmeetPhase("准备扫码授权…");
+    setTmeetAuthorizationUrl("");
+    setTmeetBrowserOpenFailed(false);
+    setTmeetAuthModalOpen(true);
+    setOpen(false);
     try {
       const result = await window.agenticxDesktop.nativeConnectorTmeetLogin();
       await refreshTmeet();
+      if (result.error === "已取消") return;
       if (!result.ok || !result.connected) {
         showToast(result.error || "腾讯会议授权未完成");
         return;
@@ -302,8 +327,27 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error));
     } finally {
+      ownsTmeetLoginRef.current = false;
       setPendingId(null);
       setTmeetPhase("");
+      setTmeetAuthModalOpen(false);
+      setTmeetAuthorizationUrl("");
+      setTmeetBrowserOpenFailed(false);
+    }
+  };
+
+  const cancelTencentMeetingLogin = async () => {
+    const shouldCancel = ownsTmeetLoginRef.current;
+    ownsTmeetLoginRef.current = false;
+    setTmeetAuthModalOpen(false);
+    setTmeetAuthorizationUrl("");
+    setTmeetBrowserOpenFailed(false);
+    setTmeetPhase("");
+    if (!shouldCancel) return;
+    try {
+      await window.agenticxDesktop.nativeConnectorTmeetCancel();
+    } catch {
+      // Best-effort cancellation: never trap the user behind the auth modal.
     }
   };
 
@@ -626,6 +670,46 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
         toolbarButton
       )}
       {dropdown}
+
+      <Modal
+        open={tmeetAuthModalOpen}
+        title="腾讯会议扫码授权"
+        onClose={() => void cancelTencentMeetingLogin()}
+        panelClassName="w-[min(600px,94vw)] bg-surface-panel"
+        footer={
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-2 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
+              onClick={() => void cancelTencentMeetingLogin()}
+            >
+              取消
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div
+            className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted"
+            role="status"
+          >
+            {pendingId === "tencent-meeting" ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : null}
+            {tmeetPhase || "正在准备腾讯会议授权…"}
+          </div>
+          {tmeetAuthorizationUrl ? (
+            <TencentMeetingAuthFallback
+              authorizationUrl={tmeetAuthorizationUrl}
+              browserOpenFailed={tmeetBrowserOpenFailed}
+            />
+          ) : (
+            <p className="text-xs leading-relaxed text-text-muted">
+              首次使用可能需要下载官方 CLI。授权地址生成后，可在电脑浏览器或手机扫码完成连接。
+            </p>
+          )}
+        </div>
+      </Modal>
 
       <Modal
         open={tapdModalOpen}

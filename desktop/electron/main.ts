@@ -3195,11 +3195,11 @@ type NativeConnectorStatusResult = {
   account?: string;
 };
 
-const TMEET_PACKAGE_VERSION = "1.0.11";
+const TMEET_PACKAGE_VERSION = "1.0.15";
 const TMEET_PACKAGE_URL =
-  "https://registry.npmjs.org/@tencentcloud/tmeet/-/tmeet-1.0.11.tgz";
+  "https://registry.npmjs.org/@tencentcloud/tmeet/-/tmeet-1.0.15.tgz";
 const TMEET_PACKAGE_SHA512 =
-  "N/TdgdxP+D09y9SschrrdCfMe+sGncIZlHUH9czTjAunC/b/Ck3CFO2BplYcm+lnlPPvguOjD0s8qp3GmJO41Q==";
+  "lMvcaNgEujhYk7RNakghdyjk5VukEeHrJOlpTenNhyiNuBcCEa9XtW8pYMQQDcxltAQpT9omGogkaXXAakN10w==";
 const TMEET_PACKAGE_MAX_BYTES = 20 * 1024 * 1024;
 const NATIVE_CONNECTOR_STATUS_PATH = path.join(
   os.homedir(),
@@ -3277,11 +3277,11 @@ function tmeetBinaryFileName(): string {
 
 function tmeetBinarySha256(): string {
   const hashes: Record<string, string> = {
-    "tmeet-Linux-ARM64": "f3e60afe19e348b8d8009340254de308cc1a2623f9ee521496507e535fe66572",
-    "tmeet-Linux-x86_64": "b052d1501ca911fe4f3a2afefa8ed0be7d21f8d3715b664dd11a11e95834c378",
-    "tmeet-Windows-x86_64.exe": "83e9442e568a8c3b014c4fa4e79c4a9e15903a9054f6872941b48404153ba729",
-    "tmeet-macOS-AppleSilicon": "e59c83f46d2652a3680a7dce305f8fac0b3b372ed61dd7527389638aa3501c9c",
-    "tmeet-macOS-Intel": "1686086ef84fbc585251a32b5f19b631ff3a38773e88f4b57a0edf294eea1367",
+    "tmeet-Linux-ARM64": "789cf1643957c5e6e4cccfcc6e60fdb237fb2c94222316a3a4c2dd05ebdd8bd9",
+    "tmeet-Linux-x86_64": "ef76a60fe2dc630b3b87c1e2e8c0f46b5e065c69dc9441f67d0bdb916116084f",
+    "tmeet-Windows-x86_64.exe": "755ca8d8328a9217b2e3c681b2bf9204b4a725079a1a0339e62eea0c984348e8",
+    "tmeet-macOS-AppleSilicon": "f245226550cda8e1ea8b6e6bafbead2fb91e6e823b52905f5bb1cae485ec3914",
+    "tmeet-macOS-Intel": "f0f954345fca981f8834f2e6d7fa2329e87960ce068310dcabbdd42642b3e71a",
   };
   return hashes[tmeetBinaryFileName()];
 }
@@ -3532,11 +3532,25 @@ async function getTmeetStatus(): Promise<NativeConnectorStatusResult> {
   }
 }
 
+type TmeetProgressPhase =
+  | "installing"
+  | "opening_browser"
+  | "waiting"
+  | "success"
+  | "disconnected"
+  | "error";
+
+type TmeetProgressDetails = {
+  authorizationUrl?: string;
+  browserOpenFailed?: boolean;
+};
+
 function sendTmeetProgress(
-  phase: "installing" | "opening_browser" | "waiting" | "success" | "disconnected" | "error",
+  phase: TmeetProgressPhase,
+  details: TmeetProgressDetails = {},
 ): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send("native-connector-tmeet-progress", { phase });
+  mainWindow.webContents.send("native-connector-tmeet-progress", { phase, ...details });
 }
 
 function startTmeetLogin(): Promise<NativeConnectorStatusResult> {
@@ -3599,19 +3613,20 @@ function startTmeetLogin(): Promise<NativeConnectorStatusResult> {
       const authorizationUrl = extractAuthorizationUrl(output);
       if (!opened && authorizationUrl) {
         opened = true;
-        sendTmeetProgress("opening_browser");
+        sendTmeetProgress("opening_browser", { authorizationUrl });
         void shell
           .openExternal(authorizationUrl)
-          .then(() => sendTmeetProgress("waiting"))
-          .catch(() =>
-            finish({
-              ok: false,
-              available: true,
-              connected: false,
-              label: "连接失败",
-              error: "无法打开腾讯会议授权页面",
-            }, true),
-          );
+          .then(() => {
+            if (!settled) sendTmeetProgress("waiting", { authorizationUrl });
+          })
+          .catch((error) => {
+            if (settled) return;
+            console.warn("[native-connectors] failed to open Tencent Meeting auth page:", String(error));
+            sendTmeetProgress("waiting", {
+              authorizationUrl,
+              browserOpenFailed: true,
+            });
+          });
       }
     };
     void ensureTmeetBinaryInstalled().then((binaryPath) => {

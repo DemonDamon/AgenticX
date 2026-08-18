@@ -53,9 +53,11 @@ describe("extractAuthorizationUrl", () => {
   it("extracts the official Tencent Meeting authorization URL", () => {
     expect(
       extractAuthorizationUrl(
-        "请打开 https://meeting.tencent.com/qrcode-login.html?slim=1&redirect_link=abc 完成授权",
+        "请打开 https://meeting.tencent.com/marketplace/tencentmeeting-cli-auth.html?code=Q152PapZs_X6 完成授权",
       ),
-    ).toBe("https://meeting.tencent.com/qrcode-login.html?slim=1&redirect_link=abc");
+    ).toBe(
+      "https://meeting.tencent.com/marketplace/tencentmeeting-cli-auth.html?code=Q152PapZs_X6",
+    );
   });
 
   it("rejects non-Tencent authorization URLs", () => {

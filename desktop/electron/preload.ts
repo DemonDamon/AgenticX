@@ -554,12 +554,16 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   onNativeConnectorTmeetProgress: (
     callback: (payload: {
       phase: "installing" | "opening_browser" | "waiting" | "success" | "disconnected" | "error";
+      authorizationUrl?: string;
+      browserOpenFailed?: boolean;
     }) => void,
   ): (() => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
       payload: {
         phase: "installing" | "opening_browser" | "waiting" | "success" | "disconnected" | "error";
+        authorizationUrl?: string;
+        browserOpenFailed?: boolean;
       },
     ) => callback(payload);
     ipcRenderer.on("native-connector-tmeet-progress", handler);

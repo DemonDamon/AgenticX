@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronRight, Copy, ExternalLink, Loader2, Plus } from "lucide-react";
 import { Modal } from "../../ds/Modal";
 import { Toast } from "../../ds/Toast";
+import { TencentMeetingAuthFallback } from "../../connectors/TencentMeetingAuthFallback";
 import { SettingsSwitch } from "../SettingsSwitch";
 import { nativeConnectorAvailability } from "../../../../electron/native-connectors-core";
 import { VISIBLE_CONNECTORS, type ConnectorDefinition, type ConnectorId } from "./connector-catalog";
@@ -106,6 +107,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   });
   const [tmeetBusy, setTmeetBusy] = useState(false);
   const [tmeetPhase, setTmeetPhase] = useState("");
+  const [tmeetAuthorizationUrl, setTmeetAuthorizationUrl] = useState("");
+  const [tmeetBrowserOpenFailed, setTmeetBrowserOpenFailed] = useState(false);
   const [githubStatus, setGithubStatus] = useState<GithubStatus>({
     available: true,
     connected: false,
@@ -277,7 +280,11 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
 
   useEffect(() => {
     void refreshTmeetStatus();
-    return window.agenticxDesktop.onNativeConnectorTmeetProgress(({ phase }) => {
+    return window.agenticxDesktop.onNativeConnectorTmeetProgress(({
+      phase,
+      authorizationUrl,
+      browserOpenFailed,
+    }) => {
       const labels = {
         installing: "首次使用，正在安全下载腾讯会议官方 CLI…",
         opening_browser: "正在打开腾讯会议授权页面…",
@@ -287,6 +294,13 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
         error: "授权未完成",
       };
       setTmeetPhase(labels[phase]);
+      if (phase === "success" || phase === "disconnected" || phase === "error") {
+        setTmeetAuthorizationUrl("");
+        setTmeetBrowserOpenFailed(false);
+      } else if (authorizationUrl) {
+        setTmeetAuthorizationUrl(authorizationUrl);
+        setTmeetBrowserOpenFailed(Boolean(browserOpenFailed));
+      }
     });
   }, [refreshTmeetStatus]);
 
@@ -372,6 +386,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     if (nativeConnectorAvailability(item.id) !== "available") return;
     setDialogError("");
     setTmeetPhase("");
+    setTmeetAuthorizationUrl("");
+    setTmeetBrowserOpenFailed(false);
     setGithubPhase("");
     setGithubDeviceCode("");
     setFeishuPhase("");
@@ -389,6 +405,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     setTmeetBusy(true);
     setDialogError("");
     setTmeetPhase("准备腾讯会议扫码授权…");
+    setTmeetAuthorizationUrl("");
+    setTmeetBrowserOpenFailed(false);
     try {
       const result = await window.agenticxDesktop.nativeConnectorTmeetLogin();
       setTmeetStatus({
@@ -399,6 +417,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
       });
       if (result.error === "已取消") {
         setTmeetPhase("");
+        setTmeetAuthorizationUrl("");
+        setTmeetBrowserOpenFailed(false);
         return;
       }
       if (!result.ok || !result.connected) {
@@ -417,6 +437,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     // Close immediately so a broken system browser can never trap the user in
     // Settings while the main process tears down the CLI in the background.
     setTmeetPhase("");
+    setTmeetAuthorizationUrl("");
+    setTmeetBrowserOpenFailed(false);
     setDialogError("");
     setSelectedId(null);
     if (shouldCancelLogin) {
@@ -432,6 +454,8 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   const handleTmeetLogout = async () => {
     setTmeetBusy(true);
     setDialogError("");
+    setTmeetAuthorizationUrl("");
+    setTmeetBrowserOpenFailed(false);
     try {
       const result = await window.agenticxDesktop.nativeConnectorTmeetLogout();
       setTmeetStatus({
@@ -894,6 +918,12 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
               使用腾讯会议官方 CLI 的设备码授权。点击连接后将在系统浏览器打开官方扫码页，凭证由 CLI
               在本机加密保存，和创智派不会读取或保存你的腾讯会议密码。
             </p>
+            {tmeetAuthorizationUrl ? (
+              <TencentMeetingAuthFallback
+                authorizationUrl={tmeetAuthorizationUrl}
+                browserOpenFailed={tmeetBrowserOpenFailed}
+              />
+            ) : null}
             {tmeetPhase ? (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2 text-xs text-text-muted" role="status">
                 {tmeetBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

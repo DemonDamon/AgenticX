@@ -1287,6 +1287,8 @@ declare global {
       onNativeConnectorTmeetProgress: (
         callback: (payload: {
           phase: "installing" | "opening_browser" | "waiting" | "success" | "disconnected" | "error";
+          authorizationUrl?: string;
+          browserOpenFailed?: boolean;
         }) => void,
       ) => () => void;
       onNativeConnectorGithubProgress: (
