@@ -101,6 +101,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "ops",
     items: [
       { href: "/metering", labelKey: "metering", icon: BarChart3 },
+      { href: "/metering/quota", labelKey: "quota", icon: Gauge },
       { href: "/audit", labelKey: "audit", icon: FileWarning },
       { href: "/portal-logs", labelKey: "portalLogs", icon: FileText },
       { href: "/admin/compliance", labelKey: "compliance", icon: Shield },

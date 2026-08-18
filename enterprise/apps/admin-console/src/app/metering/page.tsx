@@ -39,6 +39,8 @@ import {
 import { useTranslations } from "next-intl";
 import { BarChart3, Download, FileSpreadsheet, Filter, RefreshCcw, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { TokenHeatmap, type HeatmapCell } from "../../components/metering/TokenHeatmap";
+import { CompanyMonthlyLimitsCard } from "../../components/CompanyMonthlyLimitsCard";
+import { DefaultMemberQuotaCard } from "../../components/DefaultMemberQuotaCard";
 import { companyMonthlyLimits, type BudgetConfig } from "../../lib/company-monthly-limits";
 
 type MeteringRow = {
@@ -524,6 +526,10 @@ export default function MeteringPage() {
           </>
         }
       />
+
+      <DefaultMemberQuotaCard />
+
+      <CompanyMonthlyLimitsCard />
 
       {/* 筛选 chip 行 */}
       <Card>
