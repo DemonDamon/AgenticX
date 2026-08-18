@@ -206,12 +206,38 @@ class TestWorkforceEventMapping:
         )
         assert reply.event_type == "workforce.task_completed"
         assert not reply.skipped
+        assert reply.workflow_role == "system"
+        assert reply.workflow_task_id == "t1"
+        assert reply.workflow_status == "task_completed"
 
     def test_workforce_started_maps_correctly(self):
         router = _make_router()
         evt = WorkforceEvent(action=WorkforceAction.WORKFORCE_STARTED, data={})
         reply = router._workforce_event_to_group_reply(evt)
         assert reply.event_type == "workforce.workforce_started"
+        assert reply.workflow_role == "leader"
+
+    def test_typing_event_carries_executor_or_reviewer_context(self):
+        router = _make_router()
+        executor = router._typing_event(
+            "avatar1",
+            "Dev",
+            workflow_role="executor",
+            workflow_task_id="task-1",
+            workflow_attempt=2,
+        )
+        reviewer = router._typing_event(
+            "avatar2",
+            "Reviewer",
+            workflow_role="reviewer",
+            workflow_task_id="task-1",
+            workflow_attempt=2,
+        )
+        assert executor.event_type == "group_typing"
+        assert executor.workflow_role == "executor"
+        assert executor.workflow_task_id == "task-1"
+        assert executor.workflow_attempt == 2
+        assert reviewer.workflow_role == "reviewer"
 
     def test_non_event_returns_unknown(self):
         router = _make_router()

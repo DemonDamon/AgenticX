@@ -101,7 +101,7 @@ describe("shouldShowAssistantFollowups", () => {
 });
 
 describe("ImBubble group expert identity", () => {
-  it("shows a prominent expert label without avatar chrome when showSenderIdentity", () => {
+  it("shows an avatar, prominent expert label, and workflow role when showSenderIdentity", () => {
     const html = renderToStaticMarkup(
       <ImBubble
         message={{
@@ -109,6 +109,7 @@ describe("ImBubble group expert identity", () => {
           role: "assistant",
           content: "收到，按 T1–T5 拆解。\n\n## 结论\n1. T1\n2. T2",
           avatarName: "架构师·阿析",
+          metadata: { workflow_role: "reviewer" },
         }}
         showSenderIdentity
         senderAvatarId="avatar-architect"
@@ -117,9 +118,10 @@ describe("ImBubble group expert identity", () => {
     );
 
     expect(html).toContain("架构师·阿析");
+    expect(html).toContain("审核");
     expect(html).toContain("折叠");
     expect(html).toContain("border-color:");
-    expect(html).not.toContain("agx-im-avatar");
+    expect(html).toContain("架构师·阿析 默认图标");
   });
 });
 

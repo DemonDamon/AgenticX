@@ -9980,6 +9980,51 @@ export function ChatPane({
       }
       addPaneMessage(...stamped);
     };
+    const addGroupWorkflowMessage = ({
+      content,
+      agentId = "__meta__",
+      avatarName,
+      avatarUrl,
+      workflowRole = "leader",
+      taskId = "",
+      attempt = 0,
+      status = "",
+      event = "",
+    }: {
+      content: string;
+      agentId?: string;
+      avatarName?: string;
+      avatarUrl?: string;
+      workflowRole?: "leader" | "executor" | "reviewer" | "system";
+      taskId?: string;
+      attempt?: number;
+      status?: string;
+      event?: string;
+    }) => {
+      const text = String(content || "").trim();
+      if (!text) return;
+      addPaneMessageIfSessionActive(
+        pane.id,
+        "assistant",
+        text,
+        agentId,
+        chatProvider,
+        chatModel,
+        undefined,
+        {
+          avatarName: avatarName || undefined,
+          avatarUrl: avatarUrl || undefined,
+          metadata: {
+            kind: "group_workflow_event",
+            workflow_role: workflowRole,
+            workflow_task_id: taskId,
+            workflow_attempt: Math.max(0, Number(attempt) || 0),
+            workflow_status: status,
+            workflow_event: event,
+          },
+        },
+      );
+    };
     const updatePaneToolMessageForSession = (
       toolCallId: string,
       patch: Parameters<typeof updatePaneMessageByToolCallId>[2],
@@ -10481,11 +10526,14 @@ export function ChatPane({
             }
             if (payload.type === "group_progress") {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
+              const workflowRole = String(payload.data?.workflow_role ?? "").trim();
               const nodeId = String(payload.data?.graph_node_id ?? "").trim();
               const callId = String(payload.data?.tool_call_id ?? "").trim();
               const toolName = String(payload.data?.tool_name ?? "").trim();
               const phase = String(payload.data?.tool_phase ?? "").trim();
               const progressText = String(payload.data?.content ?? "").trim();
+              const workflowPrefix =
+                workflowRole === "reviewer" ? "审核中：" : workflowRole === "executor" ? "执行中：" : "";
 
               // Light status: one row per member, in-place update (not a chat message).
               setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
@@ -10495,7 +10543,10 @@ export function ChatPane({
                 !/^开始处理任务/.test(progressText) &&
                 !/^已接收任务/.test(progressText)
               ) {
-                setGroupActivityHint((prev) => ({ ...prev, [eventAgentId]: progressText }));
+                setGroupActivityHint((prev) => ({
+                  ...prev,
+                  [eventAgentId]: `${workflowPrefix}${progressText}`,
+                }));
               }
 
               // Detail: write graph store for member activity side panel / run graph.
@@ -10653,6 +10704,23 @@ export function ChatPane({
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const content = String(payload.data?.content ?? "");
               const errorText = String(payload.data?.error ?? "");
+              const workflowRole = String(payload.data?.workflow_role ?? "").trim();
+              const workflowTaskId = String(payload.data?.workflow_task_id ?? "").trim();
+              const workflowAttempt = Number(payload.data?.workflow_attempt ?? 0);
+              const workflowAttemptSafe = Number.isFinite(workflowAttempt) ? workflowAttempt : 0;
+              const workflowStatus = String(payload.data?.workflow_status ?? "").trim();
+              const workflowExtras = workflowRole
+                ? {
+                    metadata: {
+                      kind: "group_workflow_event",
+                      workflow_role: workflowRole,
+                      workflow_task_id: workflowTaskId,
+                      workflow_attempt: workflowAttemptSafe,
+                      workflow_status: workflowStatus,
+                      workflow_event: "group_reply",
+                    },
+                  }
+                : {};
               updatePaneToolMessageForSession(`${groupProgressRunId}:group-progress:${eventAgentId}`, {
                 toolStatus: errorText.trim() ? "error" : "done",
               });
@@ -10686,7 +10754,7 @@ export function ChatPane({
                   chatProvider,
                   chatModel,
                   undefined,
-                  { avatarName, avatarUrl: avatarUrl || undefined }
+                  { avatarName, avatarUrl: avatarUrl || undefined, ...workflowExtras }
                 );
               } else if (errorText.trim()) {
                 addPaneMessageIfSessionActive(
@@ -10697,8 +10765,19 @@ export function ChatPane({
                   chatProvider,
                   chatModel,
                   undefined,
-                  { avatarName, avatarUrl: avatarUrl || undefined }
+                  { avatarName, avatarUrl: avatarUrl || undefined, ...workflowExtras }
                 );
+              }
+              if (workflowRole === "reviewer" && workflowStatus.toLowerCase() === "revise") {
+                addGroupWorkflowMessage({
+                  content: `审核意见已返回：这个工作项需要返工，我安排原执行成员重新处理（第 ${Math.max(1, workflowAttemptSafe + 1)} 轮）。`,
+                  avatarName: metaLeaderDisplayName,
+                  workflowRole: "leader",
+                  taskId: workflowTaskId,
+                  attempt: workflowAttemptSafe + 1,
+                  status: "rework",
+                  event: "review_rework",
+                });
               }
               continue;
             }
@@ -10790,84 +10869,163 @@ export function ChatPane({
             }
             // ── workforce.* events (routing="team") ──────────────────────
             if (typeof payload.type === "string" && payload.type.startsWith("workforce.")) {
-              const wfAction = payload.type.replace("workforce.", "");
+              const wfAction = payload.type.replace("workforce.", "").replace(/\./g, "_");
               const wfContent = String(payload.data?.content || "").trim();
               const wfData = payload.data || {};
-              // Clear typing indicator for the member
-              setGroupTyping((prev) => {
-                const next = { ...prev };
-                delete next[eventAgentId];
-                return next;
-              });
-              if (wfAction === "message.assistant" && wfContent) {
-                // Route assistant messages to the message area (visible to user)
-                const avatarName = String(wfData.avatar_name ?? eventAgentId);
-                const avatarUrl = String(wfData.avatar_url ?? "");
-                addPaneMessageIfSessionActive(
-                  pane.id,
-                  "assistant",
-                  wfContent,
-                  eventAgentId,
-                  chatProvider,
-                  chatModel,
-                  undefined,
-                  { avatarName, avatarUrl: avatarUrl || undefined }
-                );
-              } else if (wfAction === "task.created" || wfAction === "task.assigned" || wfAction === "task.started") {
-                // Show a brief notice for task lifecycle events (using assistant role, system-like prefix)
-                const desc = String(wfData.task_description || wfData.content || "").slice(0, 120);
-                if (desc) {
-                  const label =
-                    wfAction === "task.created" ? "📋 任务创建" :
-                    wfAction === "task.assigned" ? "👤 任务分配" : "▶️ 执行中";
-                  addPaneMessageIfSessionActive(
-                    pane.id,
-                    "assistant",
-                    `[系统] ${label}：${desc}`,
-                    "__meta__",
-                    chatProvider,
-                    chatModel,
-                    undefined,
-                    { avatarName: "Team", avatarUrl: undefined }
-                  );
+              const wfRole = String(wfData.workflow_role ?? "").trim();
+              const wfTaskId = String(
+                wfData.workflow_task_id ?? wfData.task_id ?? "",
+              ).trim();
+              const wfAttempt = Number(wfData.workflow_attempt ?? 0);
+              const wfStatus = String(wfData.workflow_status ?? wfAction).trim();
+              const memberName = String(wfData.avatar_name ?? eventAgentId).trim() || eventAgentId;
+              const memberUrl = String(wfData.avatar_url ?? "").trim();
+              const description = String(
+                wfData.task_description ?? wfData.description ?? wfData.content ?? "",
+              ).trim();
+
+              if (wfAction === "workforce_started") {
+                addGroupWorkflowMessage({
+                  content: "我先拆解任务，再按成员职责安排执行，最后由我汇总并收口。",
+                  avatarName: metaLeaderDisplayName,
+                  workflowRole: "leader",
+                  status: wfStatus,
+                  event: wfAction,
+                });
+              } else if (wfAction === "decompose_start") {
+                addGroupWorkflowMessage({
+                  content: "我正在拆解任务，确认每个阶段的交付边界。",
+                  avatarName: metaLeaderDisplayName,
+                  workflowRole: "leader",
+                  taskId: wfTaskId,
+                  status: wfStatus,
+                  event: wfAction,
+                });
+              } else if (wfAction === "decompose_complete") {
+                const rawSubtasks = wfData.sub_tasks ?? wfData.subtasks;
+                const subtaskCount = Array.isArray(rawSubtasks)
+                  ? rawSubtasks.length
+                  : Number(wfData.subtasks_count ?? 0);
+                addGroupWorkflowMessage({
+                  content: `任务已拆为 ${Math.max(1, subtaskCount || 1)} 个工作项，接下来按成员职责执行。`,
+                  avatarName: metaLeaderDisplayName,
+                  workflowRole: "leader",
+                  taskId: wfTaskId,
+                  status: wfStatus,
+                  event: wfAction,
+                });
+              } else if (wfAction === "decompose_failed") {
+                const errorText = String(wfData.error || wfContent || "无法拆解").trim();
+                addGroupWorkflowMessage({
+                  content: `任务拆解失败：${errorText.slice(0, 240)}`,
+                  avatarName: metaLeaderDisplayName,
+                  workflowRole: "leader",
+                  taskId: wfTaskId,
+                  attempt: wfAttempt,
+                  status: "failed",
+                  event: wfAction,
+                });
+              } else if (wfAction === "task_created") {
+                if (description) {
+                  addGroupWorkflowMessage({
+                    content: `已建立工作项：${description.slice(0, 180)}`,
+                    avatarName: metaLeaderDisplayName,
+                    workflowRole: "leader",
+                    taskId: wfTaskId,
+                    status: wfStatus,
+                    event: wfAction,
+                  });
                 }
-              } else if (wfAction === "task.completed") {
-                const result = String(wfData.result || wfData.content || "").slice(0, 200);
-                if (result) {
-                  addPaneMessageIfSessionActive(
-                    pane.id,
-                    "assistant",
-                    `[系统] ✅ 任务完成：${result}`,
-                    "__meta__",
-                    chatProvider,
-                    chatModel,
-                    undefined,
-                    { avatarName: "Team", avatarUrl: undefined }
-                  );
+              } else if (wfAction === "task_assigned") {
+                if (description) {
+                  addGroupWorkflowMessage({
+                    content: `我把这项工作交给 ${memberName}：${description.slice(0, 220)}`,
+                    avatarName: metaLeaderDisplayName,
+                    workflowRole: "leader",
+                    taskId: wfTaskId,
+                    status: wfStatus,
+                    event: wfAction,
+                  });
                 }
-              } else if (wfAction === "task.failed") {
-                const err = String(wfData.error || wfData.content || "失败").slice(0, 120);
-                addPaneMessageIfSessionActive(
-                  pane.id,
-                  "assistant",
-                  `[系统] ❌ 任务失败：${err}`,
-                  "__meta__",
-                  chatProvider,
-                  chatModel,
-                  undefined,
-                  { avatarName: "Team", avatarUrl: undefined }
-                );
-              } else if (wfAction === "system.workforce_stopped") {
-                addPaneMessageIfSessionActive(
-                  pane.id,
-                  "assistant",
-                  "[系统] 🏁 团队任务已完成",
-                  "__meta__",
-                  chatProvider,
-                  chatModel,
-                  undefined,
-                  { avatarName: "Team", avatarUrl: undefined }
-                );
+              } else if (wfAction === "task_started") {
+                setGroupTyping((prev) => ({ ...prev, [eventAgentId]: memberName }));
+                setGroupActivityHint((prev) => ({
+                  ...prev,
+                  [eventAgentId]: description ? `执行中：${description.slice(0, 180)}` : "执行中",
+                }));
+                setGroupMemberPhase((prev) => {
+                  if (!(eventAgentId in prev)) return prev;
+                  const next = { ...prev };
+                  delete next[eventAgentId];
+                  return next;
+                });
+              } else if (wfAction === "task_completed") {
+                setGroupTyping((prev) => {
+                  const next = { ...prev };
+                  delete next[eventAgentId];
+                  return next;
+                });
+                setGroupActivityHint((prev) => {
+                  const next = { ...prev };
+                  delete next[eventAgentId];
+                  return next;
+                });
+                addGroupWorkflowMessage({
+                  content: `${memberName} 已完成工作项，审核通过，进入下一阶段。`,
+                  avatarName: metaLeaderDisplayName,
+                  workflowRole: "leader",
+                  taskId: wfTaskId,
+                  attempt: wfAttempt,
+                  status: wfStatus,
+                  event: wfAction,
+                });
+              } else if (wfAction === "task_failed" || wfAction === "task_skipped") {
+                setGroupTyping((prev) => {
+                  const next = { ...prev };
+                  delete next[eventAgentId];
+                  return next;
+                });
+                setGroupActivityHint((prev) => {
+                  const next = { ...prev };
+                  delete next[eventAgentId];
+                  return next;
+                });
+                const reason = String(wfData.error || wfContent || "未完成").trim();
+                addGroupWorkflowMessage({
+                  content: `${memberName} 的工作项${wfAction === "task_skipped" ? "已跳过" : "失败"}：${reason.slice(0, 220)}`,
+                  avatarName: metaLeaderDisplayName,
+                  workflowRole: "leader",
+                  taskId: wfTaskId,
+                  attempt: wfAttempt,
+                  status: wfAction === "task_skipped" ? "skipped" : "failed",
+                  event: wfAction,
+                });
+              } else if (wfAction === "assistant_message" || wfAction === "message_assistant") {
+                setGroupTyping((prev) => {
+                  const next = { ...prev };
+                  delete next[eventAgentId];
+                  return next;
+                });
+                if (wfContent) {
+                  const messageRole =
+                    wfRole === "executor" ? "executor" :
+                    wfRole === "reviewer" ? "reviewer" :
+                    wfRole === "leader" ? "leader" : "system";
+                  addGroupWorkflowMessage({
+                    content: wfContent,
+                    agentId: eventAgentId,
+                    avatarName: memberName,
+                    avatarUrl: memberUrl,
+                    workflowRole: messageRole,
+                    taskId: wfTaskId,
+                    attempt: wfAttempt,
+                    status: wfStatus,
+                    event: wfAction,
+                  });
+                }
+              } else if (wfAction === "workforce_stopped") {
+                setGroupTyping({});
+                setGroupActivityHint({});
               }
               continue;
             }

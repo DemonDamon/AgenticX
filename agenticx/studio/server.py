@@ -3001,14 +3001,26 @@ def create_studio_app() -> FastAPI:
                         if tid not in mentioned_ids:
                             mentioned_ids.append(tid)
 
-                    targets = router.pick_targets(
-                        group_id=group_id,
-                        group_avatar_ids=group_members,
-                        routing=group_routing,
-                        mentioned_avatar_ids=mentioned_ids,
-                        scratchpad=session.scratchpad if isinstance(session.scratchpad, dict) else {},
+                    # Team turns emit their own workflow-scoped typing events when a
+                    # concrete executor or reviewer actually starts.  Do not prime
+                    # the whole group here, otherwise the UI shows every member as
+                    # loading before the host has assigned any work.
+                    targets = (
+                        router.pick_targets(
+                            group_id=group_id,
+                            group_avatar_ids=group_members,
+                            routing=group_routing,
+                            mentioned_avatar_ids=mentioned_ids,
+                            scratchpad=session.scratchpad if isinstance(session.scratchpad, dict) else {},
+                        )
+                        if group_routing != "team"
+                        else []
                     )
-                    mentioned_set = set(mentioned_ids) & set(group_members)
+                    mentioned_set = (
+                        (set(mentioned_ids) & set(group_members))
+                        if group_routing != "team"
+                        else set()
+                    )
                     if META_LEADER_AGENT_ID in targets:
                         typing_evt = SseEvent(
                             type="group_typing",
@@ -3065,6 +3077,10 @@ def create_studio_app() -> FastAPI:
                                 "clarify_allow_free_text": bool(
                                     getattr(reply, "clarify_allow_free_text", True)
                                 ),
+                                "workflow_role": str(getattr(reply, "workflow_role", "") or ""),
+                                "workflow_task_id": str(getattr(reply, "workflow_task_id", "") or ""),
+                                "workflow_attempt": int(getattr(reply, "workflow_attempt", 0) or 0),
+                                "workflow_status": str(getattr(reply, "workflow_status", "") or ""),
                             },
                         )
                         await _emit_group_event(evt)

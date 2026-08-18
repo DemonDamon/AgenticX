@@ -399,6 +399,12 @@ class GroupReply:
     tool_call_id: str = ""
     clarify_options: List[str] = field(default_factory=list)
     clarify_allow_free_text: bool = True
+    # Team workflow semantics for the desktop group-chat timeline.
+    # These fields are optional so legacy routing keeps the same behaviour.
+    workflow_role: str = ""  # leader | executor | reviewer | system
+    workflow_task_id: str = ""
+    workflow_attempt: int = 0
+    workflow_status: str = ""
 
 
 @dataclass
@@ -430,7 +436,14 @@ class GroupChatRouter:
         self._clarify_gate_factory = clarify_gate_factory
 
     @staticmethod
-    def _typing_event(agent_id: str, avatar_name: str) -> GroupReply:
+    def _typing_event(
+        agent_id: str,
+        avatar_name: str,
+        *,
+        workflow_role: str = "",
+        workflow_task_id: str = "",
+        workflow_attempt: int = 0,
+    ) -> GroupReply:
         return GroupReply(
             agent_id=agent_id,
             avatar_name=avatar_name,
@@ -438,6 +451,9 @@ class GroupChatRouter:
             content="",
             skipped=True,
             event_type="group_typing",
+            workflow_role=workflow_role,
+            workflow_task_id=workflow_task_id,
+            workflow_attempt=max(0, int(workflow_attempt or 0)),
         )
 
     def _graph_member_labels(self, group_avatar_ids: Sequence[str]) -> Dict[str, str]:
@@ -2018,7 +2034,7 @@ class GroupChatRouter:
     def _workforce_event_to_group_reply(
         evt: Any,
         *,
-        agent_id: str = "__leader__",
+        agent_id: str = META_LEADER_AGENT_ID,
         avatar_name: str = "组长",
         avatar_url: str = "",
     ) -> "GroupReply":
@@ -2052,6 +2068,9 @@ class GroupChatRouter:
             content=str(content).strip(),
             skipped=False,
             event_type=event_type,
+            workflow_role=("leader" if agent_id_override == META_LEADER_AGENT_ID else "system"),
+            workflow_task_id=str(evt.task_id or ""),
+            workflow_status=str(evt.action.value or ""),
         )
 
     async def _run_team_turn(
@@ -2216,6 +2235,8 @@ class GroupChatRouter:
                 skipped=False,
                 error=f"任务分解失败: {exc}",
                 event_type="group_reply",
+                workflow_role="leader",
+                workflow_status="decompose_failed",
             )
             return
 
@@ -2243,6 +2264,8 @@ class GroupChatRouter:
                 extra_instruction="以项目经理身份直接回答，无需分解任务。",
                 user_display_name=user_display_name,
             )
+            pm.workflow_role = "leader"
+            pm.workflow_status = "direct"
             yield pm
             event_bus.publish(WorkforceEvent(action=WorkforceAction.WORKFORCE_STOPPED, data={}))
             return
@@ -2471,7 +2494,13 @@ class GroupChatRouter:
                     stage_record.failure_reason = "用户已中止团队任务。"
                     raise asyncio.CancelledError
 
-                yield self._typing_event(avatar_id, executor_name)
+                yield self._typing_event(
+                    avatar_id,
+                    executor_name,
+                    workflow_role="executor",
+                    workflow_task_id=node.id,
+                    workflow_attempt=retries_used + 1,
+                )
                 candidate_reply: GroupReply | None = None
                 executor_lock = member_runtime_locks.setdefault(avatar_id, asyncio.Lock())
                 async with executor_lock:
@@ -2487,6 +2516,9 @@ class GroupChatRouter:
                         force_reply=True,
                         user_display_name=user_display_name,
                     ):
+                        target_evt.workflow_role = "executor"
+                        target_evt.workflow_task_id = node.id
+                        target_evt.workflow_attempt = retries_used + 1
                         yield target_evt
                         if target_evt.event_type in {"group_reply", "group_skipped"}:
                             candidate_reply = target_evt
@@ -2529,7 +2561,13 @@ class GroupChatRouter:
                     candidate_output=candidate_output,
                     executor_name=executor_name,
                 )
-                yield self._typing_event(reviewer_id, reviewer_name)
+                yield self._typing_event(
+                    reviewer_id,
+                    reviewer_name,
+                    workflow_role="reviewer",
+                    workflow_task_id=node.id,
+                    workflow_attempt=retries_used + 1,
+                )
                 raw_review_reply: GroupReply | None = None
                 reviewer_lock = member_runtime_locks.setdefault(reviewer_id, asyncio.Lock())
                 async with reviewer_lock:
@@ -2546,6 +2584,9 @@ class GroupChatRouter:
                         user_display_name=user_display_name,
                         append_to_context=False,
                     ):
+                        review_evt.workflow_role = "reviewer"
+                        review_evt.workflow_task_id = node.id
+                        review_evt.workflow_attempt = retries_used + 1
                         if review_evt.event_type in {"group_reply", "group_skipped"}:
                             raw_review_reply = review_evt
                         else:
@@ -2568,6 +2609,10 @@ class GroupChatRouter:
                     event_type="group_reply",
                     graph_run_id=graph_run.run_id,
                     graph_node_id=self._graph_node_id_for_agent(reviewer_id),
+                    workflow_role="reviewer",
+                    workflow_task_id=node.id,
+                    workflow_attempt=retries_used + 1,
+                    workflow_status=decision.status.value,
                 )
                 context.append_agent(
                     agent_id=reviewer_id,
@@ -2715,7 +2760,11 @@ class GroupChatRouter:
 
         # ── 9. Leader summary + durable deliverable ─────────────────────────
         if not await self._should_stop(should_stop):
-            yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
+            yield self._typing_event(
+                META_LEADER_AGENT_ID,
+                self._meta_leader_label,
+                workflow_role="leader",
+            )
             execution_dossier = render_execution_dossier(ordered_stage_records)
             summary_prompt = (
                 f"## 原始用户请求\n{user_input}\n\n"
@@ -2737,6 +2786,8 @@ class GroupChatRouter:
                 user_display_name=user_display_name,
                 delivery_mode=True,
             )
+            pm.workflow_role = "leader"
+            pm.workflow_status = "final"
             final_answer_without_artifact = str(pm.content or "")
             deliverable_path = None
             try:

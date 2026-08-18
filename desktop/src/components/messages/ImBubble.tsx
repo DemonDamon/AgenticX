@@ -38,6 +38,7 @@ import { avatarBgClass, avatarFgClass, expertLabelChipStyle } from "../../utils/
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { Shimmer } from "../ds/Shimmer";
+import { GroupMemberAvatar } from "../groups/GroupMemberAvatar";
 
 type Props = {
   message: Message;
@@ -79,12 +80,9 @@ type Props = {
   actionRhythmBodyTail?: boolean;
   /** Render-only hint when this assistant reply was cut off by session token budget. */
   budgetIncompleteHint?: boolean;
-  /**
-   * Group chat: show a prominent expert name label (no avatar rail).
-   * User bubbles match Meta layout (no name/avatar chrome).
-   */
+  /** Group chat: show the sender identity row above the assistant bubble. */
   showSenderIdentity?: boolean;
-  /** @deprecated Avatars removed from group chat; kept for API compat. */
+  /** Shape of the sender avatar in the group identity row. */
   senderAvatarVariant?: "circle" | "rounded-square";
   /** Fallback tint when no imageUrl (avatar id for color hash). */
   senderAvatarId?: string;
@@ -151,6 +149,9 @@ export function ChatImAvatar({
   const storeColor = useAppStore((s) =>
     avatarId ? s.avatars.find((a) => a.id === avatarId)?.color : undefined,
   );
+  const memberAvatar = useAppStore((s) =>
+    avatarId && avatarId !== "meta" ? s.avatars.find((a) => a.id === avatarId) : undefined,
+  );
   const resolvedColor = color ?? storeColor ?? "";
   const char = label.slice(0, 1) || "?";
   const rounded = variant === "rounded-square" ? "rounded-[6px]" : "rounded-full";
@@ -160,6 +161,17 @@ export function ChatImAvatar({
         src={imageUrl}
         alt={label}
         className={`h-8 w-8 shrink-0 object-cover ${rounded}`}
+      />
+    );
+  }
+  if (avatarId && avatarId !== "meta") {
+    return (
+      <GroupMemberAvatar
+        avatar={memberAvatar}
+        label={label}
+        identity={avatarId}
+        size="sm"
+        className={variant === "circle" ? "rounded-full" : undefined}
       />
     );
   }
@@ -219,9 +231,7 @@ export function ImBubble({
   streamStalled = false,
   streamStalledSeconds = 0,
 }: Props) {
-  void _senderAvatarVariant;
   void userAvatarUrl;
-  void assistantAvatarUrl;
   const theme = useAppStore((s) => s.theme);
   const senderStoreColor = useAppStore((s) =>
     senderAvatarId && senderAvatarId !== "meta"
@@ -242,7 +252,19 @@ export function ImBubble({
     (assistantVisual === "compact-inline" || assistantVisual === "compact-inline-with-actions") &&
     !isGroupTyping &&
     !isMetaPendingWork;
-  /** Group expert label only — no WeChat avatar rail (align with Meta chrome). */
+  const workflowRole =
+    typeof message.metadata?.workflow_role === "string"
+      ? message.metadata.workflow_role.trim()
+      : "";
+  const workflowRoleLabel = showSenderIdentity
+    ? ({
+        leader: "主持人",
+        executor: "执行",
+        reviewer: "审核",
+        system: "流程",
+      } as Record<string, string>)[workflowRole] ?? ""
+    : "";
+  /** Group replies use an explicit identity row and a bordered message bubble. */
   const showExpertLabel = showSenderIdentity && !isUser && !compactAssistant;
   const expertChip = showExpertLabel
     ? expertLabelChipStyle(senderAvatarId, senderStoreColor, theme)
@@ -286,12 +308,18 @@ export function ImBubble({
         background: "var(--chat-im-user-bg)",
         color: "var(--chat-im-user-text)",
       }
-    : {
-        // Frameless assistant text (e.g. Doubao-style): sit on chat surface; keep semantic text color.
-        background: "transparent",
-        borderColor: "transparent",
-        color: "var(--chat-im-assistant-text)",
-      };
+    : showExpertLabel
+      ? {
+          background: "var(--surface-card)",
+          borderColor: "var(--border)",
+          color: "var(--chat-im-assistant-text)",
+        }
+      : {
+          // Frameless assistant text (e.g. Doubao-style): sit on chat surface; keep semantic text color.
+          background: "transparent",
+          borderColor: "transparent",
+          color: "var(--chat-im-assistant-text)",
+        };
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [menuLayout, setMenuLayout] = useState<{ x: number; y: number } | null>(null);
@@ -613,7 +641,7 @@ export function ImBubble({
             {canFoldExpertReply ? (
               <button
                 type="button"
-                className="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-semibold transition hover:opacity-90"
+                className="inline-flex max-w-full items-center gap-2 rounded-xl border px-2 py-1 text-[13px] font-semibold transition hover:opacity-90"
                 style={{
                   backgroundColor: expertChip.backgroundColor,
                   borderColor: expertChip.borderColor,
@@ -622,34 +650,56 @@ export function ImBubble({
                 aria-expanded={!expertCollapsed}
                 title={expertCollapsed ? "展开回复" : "折叠回复"}
               >
-                {expertCollapsed ? (
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-subtle" strokeWidth={2.2} />
-                ) : (
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-subtle" strokeWidth={2.2} />
-                )}
+                <ChatImAvatar
+                  label={displayName}
+                  imageUrl={assistantAvatarUrl}
+                  variant={_senderAvatarVariant}
+                  avatarId={senderAvatarId}
+                />
                 <span className="min-w-0 truncate" style={{ color: expertChip.color }}>
                   {displayName}
                 </span>
+                {workflowRoleLabel ? (
+                  <span className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
+                    {workflowRoleLabel}
+                  </span>
+                ) : null}
                 {headerBadge ? (
                   <span className="shrink-0 font-medium" style={{ color: expertChip.color }}>
                     {headerBadge}
                   </span>
                 ) : null}
+                {expertCollapsed ? (
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-subtle" strokeWidth={2.2} />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-subtle" strokeWidth={2.2} />
+                )}
                 <span className="shrink-0 text-[11px] font-medium text-text-subtle">
                   {expertCollapsed ? "展开" : "折叠"}
                 </span>
               </button>
             ) : (
               <span
-                className="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-semibold"
+                className="inline-flex max-w-full items-center gap-2 rounded-xl border px-2 py-1 text-[13px] font-semibold"
                 style={{
                   backgroundColor: expertChip.backgroundColor,
                   borderColor: expertChip.borderColor,
                 }}
               >
+                <ChatImAvatar
+                  label={displayName}
+                  imageUrl={assistantAvatarUrl}
+                  variant={_senderAvatarVariant}
+                  avatarId={senderAvatarId}
+                />
                 <span className="min-w-0 truncate" style={{ color: expertChip.color }}>
                   {displayName}
                 </span>
+                {workflowRoleLabel ? (
+                  <span className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
+                    {workflowRoleLabel}
+                  </span>
+                ) : null}
                 {headerBadge ? (
                   <span className="shrink-0 font-medium" style={{ color: expertChip.color }}>
                     {headerBadge}
@@ -861,10 +911,10 @@ export function ImBubble({
               className={
                 compactAssistant && noBubbleBorder
                   ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                  : isMetaPendingWork
-                    ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
-                    : showExpertLabel
-                      ? `agx-expert-body relative min-w-0 w-full px-3 pt-0 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                    : isMetaPendingWork
+                      ? `relative min-w-0 w-full px-3 py-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
+                      : showExpertLabel
+                      ? `agx-expert-body relative min-w-0 w-full max-w-[min(100%,56rem)] rounded-2xl border px-4 py-3 text-[var(--agx-chat-im-body-font-size)] shadow-sm ${assistantBodyLeadingClass}`
                       : (message.references?.length ?? 0) > 0
                         ? `relative min-w-0 w-full px-3 pt-1 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
                         : `relative min-w-0 w-full px-3 pt-3 pb-0 text-[var(--agx-chat-im-body-font-size)] ${assistantBodyLeadingClass}`
