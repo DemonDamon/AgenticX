@@ -174,6 +174,73 @@ _COLLABORATIVE_TEAM_PATTERNS_CN: tuple[str, ...] = (
     r"(?:分别|各自|从各自角度).{0,10}(?:分析|回答|评估|判断|给出)",
 )
 
+# A collaborative discussion is not automatically an execution request.  Keep
+# this distinction explicit so the Workforce path can fan out viewpoints
+# without inventing implementation, deployment, or PoC work.
+_ANALYSIS_ONLY_MARKERS_CN: tuple[str, ...] = (
+    "分析",
+    "对比",
+    "比较",
+    "竞品",
+    "区别",
+    "差异",
+    "研究",
+    "调研",
+    "讨论",
+    "评审",
+    "评估",
+    "总结",
+    "视角",
+    "观点",
+    "优缺点",
+    "利弊",
+    "选型",
+)
+_ANALYSIS_ONLY_MARKERS_EN: tuple[str, ...] = (
+    "analyze",
+    "analyse",
+    "analysis",
+    "compare",
+    "comparison",
+    "competitor",
+    "difference",
+    "research",
+    "discuss",
+    "review",
+    "evaluate",
+)
+_EXECUTION_PATTERNS_CN: tuple[str, ...] = (
+    # Imperative/continuation cues prevent nouns such as “运行机制” and
+    # “部署架构” from being mistaken for a request to run anything.
+    r"(?:请|帮我|麻烦|直接|现在|接下来|然后|之后|以后|接着|并|再|先|开始)\s*"
+    r"(?:执行|实现|开发|部署|上线|搭建|创建|运行|安装|验证|落地|接入|提交|发布|启动)",
+    r"(?:请|帮我|麻烦|直接|现在|接下来|然后|之后|以后|接着|并|再|先|开始)?\s*"
+    r"(?:写|修改|改|开发)\s*(?:一下|一段|一个|个)?\s*"
+    r"(?:代码|脚本|功能|demo|PoC|原型)(?:验证|测试|运行|检查)?"
+    r"(?=$|[\s\u3000，。！？、；;：:])",
+    r"(?:执行|实现|部署|上线|搭建|创建|运行|安装|验证|落地|接入|提交|发布|启动)\s*"
+    r"(?:一下|一个|个|这|该|此|这个|上述|方案|功能|代码|脚本|demo|PoC|原型|任务|流程|服务|项目|测试|命令)"
+    r"(?=$|[\s\u3000，。！？、；;：:])",
+    r"(?:拉仓库|克隆仓库|clone)\s*(?:下来|一下|到|这个)?",
+    r"(?:用|通过|拿)\s*(?:一个|个)?\s*(?:PoC|demo|原型)\s*(?:验证|测试|跑)",
+)
+_EXECUTION_PATTERNS_EN: tuple[str, ...] = (
+    r"\b(?:please|help me|go ahead|now|then|next|directly)\s+"
+    r"(?:execute|implement|build|deploy|install|create|run|write|modify|start|launch|commit|publish)\b",
+    r"\b(?:write|modify|build|create)\s+(?:a|an|the)?\s*"
+    r"(?:code|script|demo|poc|prototype|feature)\b",
+    r"\b(?:deploy|install|execute|implement|launch|publish|commit|run)\s+"
+    r"(?:a|an|the|this|that)?\s*(?:poc|prototype|service|feature|plan|project|app|application|change|task|test|tests|command)\b",
+    r"\b(?:clone|git\s+clone)\b",
+)
+
+_ANALYSIS_ONLY_SCOPE = """## 本轮范围：只做分析讨论（最高优先级）
+- 只围绕用户当前问题提供事实、比较、不同视角、风险和不确定性分析。
+- 不得把分析自行扩展成实施任务、代码修改、安装、部署、上线或 PoC；不得声称已安排或将要执行这些动作。
+- 可以提出非执行性的判断或待确认项，但不能凭空新增目标、交付物或后续项目。
+- 如果上下文里出现旧的计划、PoC 或部署内容，只把它们当作背景，不得继续推进；优先回答当前用户问题。
+""".strip()
+
 # Open-call markers — phrases where the user is broadcasting a question to the
 # group rather than addressing one specific role. When matched and no member is
 # explicitly @-mentioned, we prefer Near (the meta leader / project manager)
@@ -299,6 +366,26 @@ def _is_collaborative_team_request(user_input: str) -> bool:
     return any(re.search(pattern, text) for pattern in _COLLABORATIVE_TEAM_PATTERNS_CN)
 
 
+def _is_analysis_only_request(user_input: str) -> bool:
+    """Return True for research/discussion turns without explicit execution intent."""
+    text = (user_input or "").strip()
+    if not text:
+        return False
+    lowered = text.casefold()
+    has_analysis_marker = any(
+        marker in text for marker in _ANALYSIS_ONLY_MARKERS_CN
+    ) or any(marker in lowered for marker in _ANALYSIS_ONLY_MARKERS_EN)
+    if not has_analysis_marker:
+        return False
+    has_explicit_execution = any(
+        re.search(pattern, text, flags=re.IGNORECASE)
+        for pattern in _EXECUTION_PATTERNS_CN
+    ) or any(
+        re.search(pattern, lowered) for pattern in _EXECUTION_PATTERNS_EN
+    )
+    return not has_explicit_execution
+
+
 _META_AT_SUFFIX = r"(?=[\s\u3000\u4e00-\u9fff，。！？、：:；;,.!?\[\]（）()【】\"'「」]|$)"
 
 
@@ -358,12 +445,45 @@ def expand_mentions_with_meta_leader(
     return out
 
 
-def _group_chat_tools() -> Sequence[Dict[str, Any]]:
+def _group_chat_tools(*, analysis_only: bool = False) -> Sequence[Dict[str, Any]]:
     blocked = {"delegate_to_avatar"}
-    return [
+    tools = [
         tool
         for tool in STUDIO_TOOLS
         if tool.get("function", {}).get("name") not in blocked
+    ]
+    if not analysis_only:
+        return tools
+
+    # Discussion turns may still need evidence gathering, but must not expose
+    # mutating tools such as file_write, shell execution, skill installation, or
+    # delegation.  Keep this allow-list deliberately narrow.
+    readonly_names = {
+        "file_read",
+        "skill_list",
+        "scratchpad_read",
+        "memory_search",
+        "session_search",
+        "list_files",
+        "liteparse",
+        "knowledge_search",
+        "knowledge_synthesize",
+        "web_search",
+        "web_fetch",
+        "view_image",
+        "show_widget",
+        "get_current_datetime",
+        "list_data_sources",
+        "code_outline",
+        "lsp_goto_definition",
+        "lsp_find_references",
+        "lsp_hover",
+        "lsp_diagnostics",
+    }
+    return [
+        tool
+        for tool in tools
+        if tool.get("function", {}).get("name") in readonly_names
     ]
 
 
@@ -1201,17 +1321,30 @@ class GroupChatRouter:
         if quoted_content.strip():
             local_user_input = f"{user_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
         u = str(user_display_name or "").strip() or "用户"
+        analysis_only = getattr(base_session, "_group_analysis_only", False) is True
         if delivery_mode:
-            reply_style = (
-                "这是经过成员执行和独立审核的团队交付轮次。你必须基于执行档案做负责人收口，"
-                "不能把完整产出压缩成普通闲聊。\n"
-            )
-            length_rules = (
-                "## 交付结构（必须遵守）\n"
-                "- 先给明确结论，再整合各阶段通过版本。\n"
-                "- 单列审核状态、未决风险和无法验证的边界；失败阶段不得包装成完成。\n"
-                "- 给出可执行的下一步；避免重复成员原话，但保留关键事实和必要细节。\n\n"
-            )
+            if analysis_only:
+                reply_style = (
+                    "这是只做分析讨论的团队收口轮次。你必须基于执行档案整合不同视角，"
+                    "不得把分析结论升级成执行计划。\n"
+                )
+                length_rules = (
+                    "## 分析收口结构（必须遵守）\n"
+                    "- 先给与用户问题直接对应的结论，再整合各视角的共识、分歧和证据边界。\n"
+                    "- 单列未决风险和无法验证的边界；不要新增 PoC、部署、实现或其他执行任务。\n"
+                    "- 不要强行补可执行的下一步；如确有必要，只列为待用户确认的事项。\n\n"
+                )
+            else:
+                reply_style = (
+                    "这是经过成员执行和独立审核的团队交付轮次。你必须基于执行档案做负责人收口，"
+                    "不能把完整产出压缩成普通闲聊。\n"
+                )
+                length_rules = (
+                    "## 交付结构（必须遵守）\n"
+                    "- 先给明确结论，再整合各阶段通过版本。\n"
+                    "- 单列审核状态、未决风险和无法验证的边界；失败阶段不得包装成完成。\n"
+                    "- 给出可执行的下一步；避免重复成员原话，但保留关键事实和必要细节。\n\n"
+                )
             progress_rules = (
                 "## 进展陈述规则（团队交付）\n"
                 "- 用户问题中的「团队执行档案」与上方「群工作台事实」共同构成本轮权威事实。\n"
@@ -1220,14 +1353,22 @@ class GroupChatRouter:
                 "- failed / blocked / cancelled 阶段必须明说未闭环；没有产物时不得虚构完成度。\n\n"
             )
         else:
-            reply_style = "默认像微信群聊里的组长发言：短、清晰、可执行，先给结论再补关键点。\n"
-            length_rules = (
-                "## 回复长度（必须遵守）\n"
-                "- 默认短聊：通常 2–6 句或少量要点，不要主动写长报告、完整验收表、大段 Markdown 表格。\n"
-                "- 仅当用户明确要求报告/验收清单/完整方案/详细对照表，或问题本身必须交付长文材料时，"
-                "才展开长篇；展开前可先一句说明「下面按验收项展开」。\n"
-                "- 未明确要求长文时：用要点概括关键结论 + 下一步，把细表留给用户追问。\n\n"
-            )
+            if analysis_only:
+                reply_style = "这是只做分析讨论的群聊收口：短、清晰、严格围绕用户问题，不主动转入执行。\n"
+                length_rules = (
+                    "## 分析回复长度（必须遵守）\n"
+                    "- 默认 2–6 句或少量要点，优先给结论、证据、分歧和风险。\n"
+                    "- 不主动写实施方案、PoC、部署步骤或执行清单；不要为了显得完整而新增目标。\n\n"
+                )
+            else:
+                reply_style = "默认像微信群聊里的组长发言：短、清晰、可执行，先给结论再补关键点。\n"
+                length_rules = (
+                    "## 回复长度（必须遵守）\n"
+                    "- 默认短聊：通常 2–6 句或少量要点，不要主动写长报告、完整验收表、大段 Markdown 表格。\n"
+                    "- 仅当用户明确要求报告/验收清单/完整方案/详细对照表，或问题本身必须交付长文材料时，"
+                    "才展开长篇；展开前可先一句说明「下面按验收项展开」。\n"
+                    "- 未明确要求长文时：用要点概括关键结论 + 下一步，把细表留给用户追问。\n\n"
+                )
             progress_rules = (
                 "## 进展陈述规则（必须遵守）\n"
                 "- 只能依据上方「群工作台事实」陈述执行进展；事实块之外的进展一律不得声称。\n"
@@ -1248,6 +1389,7 @@ class GroupChatRouter:
             f"最近群聊上下文:\n{context.render_recent_dialogue()}\n\n"
             f"用户问题:\n{local_user_input}\n\n"
             f"{extra_instruction.strip()}\n"
+            f"{_ANALYSIS_ONLY_SCOPE if analysis_only else ''}\n"
         )
         text = await self._call_llm_text(
             provider=provider,
@@ -1297,6 +1439,7 @@ class GroupChatRouter:
         progress_queue: asyncio.Queue[GroupReply] | None = None,
         append_to_context: bool = True,
     ) -> GroupReply:
+        analysis_only = getattr(base_session, "_group_analysis_only", False) is True
         addressing = self._group_user_addressing_rules(user_display_name)
         if avatar_id == META_LEADER_AGENT_ID:
             avatar_name = self._meta_leader_label
@@ -1381,6 +1524,8 @@ class GroupChatRouter:
             f"## 你的长期指令\n{avatar_prompt or '(无)'}\n\n"
             f"## 最近群聊上下文\n{dialogue_context}\n"
         )
+        if analysis_only:
+            system_prompt = f"{system_prompt}\n\n{_ANALYSIS_ONLY_SCOPE}\n"
         # Graph Runtime interventions queued on the owner session scratchpad.
         try:
             from agenticx.runtime.graph.intervene import consume_graph_directives
@@ -1441,7 +1586,7 @@ class GroupChatRouter:
                     local_session,
                     should_stop=lambda: self._should_stop(should_stop),
                     agent_id=avatar_id,
-                    tools=_group_chat_tools(),
+                    tools=_group_chat_tools(analysis_only=analysis_only),
                     system_prompt=system_prompt,
                     usage_session_id=str(
                         getattr(base_session, "_usage_owner_session_id", "") or ""
@@ -1606,6 +1751,7 @@ class GroupChatRouter:
         valid_members = [str(x).strip() for x in group_avatar_ids if str(x).strip()]
         mention_set = {str(i).strip() for i in mentioned_avatar_ids if str(i).strip()}
         responded_this_turn: set[str] = set()
+        analysis_only = getattr(base_session, "_group_analysis_only", False) is True
         # ── Auto-dispatch to Workforce path for complex multi-step tasks ──────
         # If the user did NOT @-mention anyone AND the message looks like a
         # multi-step task AND we have at least 2 members, hand off to the
@@ -1631,6 +1777,7 @@ class GroupChatRouter:
                 quoted_content=quoted_content,
                 should_stop=should_stop,
                 user_display_name=user_display_name,
+                analysis_only=analysis_only,
             ):
                 yield reply
             return
@@ -2085,6 +2232,7 @@ class GroupChatRouter:
         quoted_content: str,
         should_stop: Callable[[], Any],
         user_display_name: str = "我",
+        analysis_only: bool = False,
     ) -> AsyncGenerator[GroupReply, None]:
         """Bridge routing="team" to WorkforcePattern (planning) + AgentRuntime (execution).
 
@@ -2103,6 +2251,11 @@ class GroupChatRouter:
         provider = getattr(base_session, "provider_name", None)
         model = getattr(base_session, "model_name", None)
         llm = self.llm_factory(provider or None, model or None)
+        analysis_only = bool(
+            analysis_only
+            or getattr(base_session, "_group_analysis_only", False) is True
+        )
+        setattr(base_session, "_group_analysis_only", analysis_only)
 
         # ── 1. TaskLock (session-scoped project state) ─────────────────────
         _sid_for_lock = resolve_studio_session_id(base_session) or str(group_id or "")
@@ -2207,7 +2360,11 @@ class GroupChatRouter:
         # ── 5. Emit WORKFORCE_STARTED ───────────────────────────────────────
         event_bus.publish(WorkforceEvent(
             action=WorkforceAction.WORKFORCE_STARTED,
-            data={"group_name": group_name, "member_count": len(worker_instances)},
+            data={
+                "group_name": group_name,
+                "member_count": len(worker_instances),
+                "mode": "discussion" if analysis_only else "execution",
+            },
         ))
 
         # Drain relay_queue helper
@@ -2219,9 +2376,20 @@ class GroupChatRouter:
             yield r
 
         # ── 6. Planning: decompose ──────────────────────────────────────────
+        planner_task_description = user_input
+        if analysis_only:
+            planner_task_description = (
+                f"{_ANALYSIS_ONLY_SCOPE}\n\n"
+                f"## 原始用户问题\n{user_input}\n\n"
+                "请只拆成围绕原始问题的独立分析视角；不要生成实现、部署、PoC、安装或其他执行子任务。"
+            )
         main_task = Task(
-            description=user_input,
-            expected_output="Group task execution result",
+            description=planner_task_description,
+            expected_output=(
+                "Independent discussion analysis"
+                if analysis_only
+                else "Group task execution result"
+            ),
         )
         collaborative_request = _is_collaborative_team_request(user_input)
         try:
@@ -2291,7 +2459,12 @@ class GroupChatRouter:
                     Task(
                         id=task_id,
                         description=(
-                            f"独立首轮（{member.name} / {member.role or '专业成员'}视角）："
+                            (
+                                f"{_ANALYSIS_ONLY_SCOPE}\n\n"
+                                if analysis_only
+                                else ""
+                            )
+                            + f"独立首轮（{member.name} / {member.role or '专业成员'}视角）："
                             "在不依赖其他成员结论的前提下，独立分析并给出可验证、可交付的完整意见。\n\n"
                             f"原始请求：{user_input}"
                         ),
@@ -2381,6 +2554,8 @@ class GroupChatRouter:
             {
                 "collaborative_request": collaborative_request,
                 "independent_first_passes": bool(forced_collaboration_assignments),
+                "discussion_mode": "analysis" if analysis_only else "execution",
+                "analysis_only": analysis_only,
             }
         )
         try:
@@ -2456,7 +2631,11 @@ class GroupChatRouter:
             async for r in _drain_graph_events():
                 yield r
 
-            subtask_input = desc
+            subtask_input = (
+                f"{_ANALYSIS_ONLY_SCOPE}\n\n{desc}"
+                if analysis_only
+                else desc
+            )
             if quoted_content.strip():
                 subtask_input = f"{subtask_input}\n\n[用户引用内容]\n{quoted_content.strip()}"
             if dependency_outputs:
@@ -2561,6 +2740,13 @@ class GroupChatRouter:
                     candidate_output=candidate_output,
                     executor_name=executor_name,
                 )
+                if analysis_only:
+                    review_prompt = (
+                        f"{_ANALYSIS_ONLY_SCOPE}\n\n"
+                        "审核重点是候选产出是否紧扣原始分析问题、证据是否充分、"
+                        "是否把不同视角混淆或引入无关执行目标；不要要求实施方案、PoC 或部署步骤。\n\n"
+                        f"{review_prompt}"
+                    )
                 yield self._typing_event(
                     reviewer_id,
                     reviewer_name,
@@ -2688,6 +2874,8 @@ class GroupChatRouter:
                     attempt_number=retries_used,
                     dependency_outputs=dependency_outputs,
                 )
+                if analysis_only:
+                    candidate_input = f"{_ANALYSIS_ONLY_SCOPE}\n\n{candidate_input}"
 
         max_parallel = min(4, max(1, len(worker_instances)))
         async for item in execute_group_run(
@@ -2767,6 +2955,7 @@ class GroupChatRouter:
             )
             execution_dossier = render_execution_dossier(ordered_stage_records)
             summary_prompt = (
+                f"{_ANALYSIS_ONLY_SCOPE if analysis_only else ''}\n\n"
                 f"## 原始用户请求\n{user_input}\n\n"
                 "## 团队执行档案（权威输入）\n"
                 f"{execution_dossier}\n\n"
@@ -2781,7 +2970,11 @@ class GroupChatRouter:
                 quoted_content="",
                 extra_instruction=(
                     "以执行档案为唯一阶段事实来源，整合通过版本；"
-                    "单列审核风险、验证边界、未闭环项和下一步。"
+                    + (
+                        "单列审核风险、证据边界和未决项，不新增执行计划。"
+                        if analysis_only
+                        else "单列审核风险、验证边界、未闭环项和下一步。"
+                    )
                 ),
                 user_display_name=user_display_name,
                 delivery_mode=True,
@@ -2876,6 +3069,10 @@ class GroupChatRouter:
         if not isinstance(scratchpad, dict):
             scratchpad = {}
             setattr(base_session, "scratchpad", scratchpad)
+        analysis_only = _is_analysis_only_request(user_input)
+        # Turn-local scope is also consumed by legacy member/meta paths so an
+        # explicit @-mention cannot silently regain mutating tools.
+        setattr(base_session, "_group_analysis_only", analysis_only)
         setattr(base_session, "__group_avatar_ids", list(group_avatar_ids))
         context = GroupChatContext(base_session, max_items=24)
         udn = str(user_display_name or "").strip() or "我"
@@ -2908,6 +3105,7 @@ class GroupChatRouter:
                 quoted_content=quoted_content,
                 should_stop=should_stop,
                 user_display_name=udn,
+                analysis_only=analysis_only,
             ):
                 yield reply
             return

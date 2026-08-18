@@ -21,7 +21,9 @@ from agenticx.runtime.group_router import (
     _get_mention_hops,
     _is_collaborative_team_request,
     _is_complex_multistep_task,
+    _is_analysis_only_request,
     _is_open_call_question,
+    _group_chat_tools,
     EventType,
     MAX_WORKERS_PER_GROUP,
 )
@@ -136,6 +138,40 @@ class TestCollaborativeTeamHeuristic:
     ])
     def test_non_collaboration_phrases_skip(self, text):
         assert not _is_collaborative_team_request(text)
+
+
+class TestDiscussionScopeHeuristic:
+    @pytest.mark.parametrize("text", [
+        "分析一下 DeepSeek Harness 和竞品的区别",
+        "各位讨论一下，从不同视角分析一下",
+        "请比较两套方案的优缺点",
+        "研究一下这个方案的风险",
+        "分析两个实现方案的差异",
+        "研究运行机制和部署架构",
+        "比较已有 PoC 的优缺点",
+    ])
+    def test_analysis_discussion_is_scoped(self, text):
+        assert _is_analysis_only_request(text)
+
+    @pytest.mark.parametrize("text", [
+        "分析完以后部署一个 PoC",
+        "请讨论并执行这个方案",
+        "比较之后写代码验证",
+        "请帮我部署一个 PoC",
+        "请写一个验证脚本",
+        "现在运行测试",
+        "你好",
+    ])
+    def test_explicit_execution_or_unrelated_prompt_is_not_analysis_only(self, text):
+        assert not _is_analysis_only_request(text)
+
+    def test_analysis_tools_are_read_only(self):
+        names = {
+            tool.get("function", {}).get("name")
+            for tool in _group_chat_tools(analysis_only=True)
+        }
+        assert {"web_search", "web_fetch", "file_read"}.issubset(names)
+        assert not names.intersection({"bash_exec", "bash_bg_start", "file_write", "skill_manage"})
 
 
 class TestOpenCallHeuristic:
@@ -395,10 +431,12 @@ class TestRoutingDispatch:
     async def test_intelligent_routing_collaboration_prompt_auto_dispatches_to_team(self):
         router = _make_router()
         team_called = False
+        captured_scope: list[object] = []
 
         async def fake_team_turn(**kwargs):
             nonlocal team_called
             team_called = True
+            captured_scope.append(kwargs.get("analysis_only"))
             yield GroupReply(
                 "__meta__", "Machi", "", "team done", False, event_type="group_reply"
             )
@@ -419,6 +457,7 @@ class TestRoutingDispatch:
             pass
 
         assert team_called
+        assert captured_scope == [True]
 
     @pytest.mark.asyncio
     async def test_intelligent_routing_with_explicit_mention_skips_auto_dispatch(self):
