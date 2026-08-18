@@ -56,6 +56,21 @@ type EnterpriseModelCatalogItem = {
   contextWindow?: number;
 };
 
+/** 企业能力包下发的一条能力（MCP / Skill）。 */
+type EnterpriseCapabilityItem = {
+  /** `mcp:<ulid>` / `skill:<ulid>` */
+  id: string;
+  kind: "mcp" | "skill";
+  name: string;
+  displayName: string;
+  requires: string[];
+  version?: string;
+  bundleUri?: string;
+  bundleDigest?: string;
+  /** MCP 专有：网关反代入口。 */
+  endpointUrl?: string;
+};
+
 type LoadConfigResult = {
   defaultProvider: string;
   providers: Record<string, ProviderConfig>;
@@ -939,6 +954,10 @@ declare global {
         models?: string[];
         modelCatalog?: EnterpriseModelCatalogItem[];
         syncedAt?: string;
+        /** 企业下发的 MCP / Skill；没出现在这里就等于已撤销。 */
+        capabilities?: EnterpriseCapabilityItem[];
+        /** Skill 声明了依赖但依赖没随包下发，装了也调不通。 */
+        unmetCapabilityDependencies?: string[];
       }>;
       enterpriseLogin: (payload: {
         baseUrl: string;

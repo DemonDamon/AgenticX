@@ -50,6 +50,9 @@ describe("/api/desktop/capabilities", () => {
     loadUserCapabilityView.mockReset();
     setUserCapabilityPreference.mockReset();
     resolveDesktopIdentity.mockResolvedValue(identity());
+    vi.unstubAllEnvs();
+    vi.stubEnv("NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL", "https://gateway.example.invalid");
+    vi.stubEnv("NODE_ENV", "test");
   });
 
   it("lists capabilities the user turned off, so they can be turned back on", async () => {
@@ -65,9 +68,31 @@ describe("/api/desktop/capabilities", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.data.capabilities).toEqual([
-      { id: MCP_ID, kind: "mcp", name: "m", displayName: "M", requires: [], state: "on" },
+      {
+        id: MCP_ID,
+        kind: "mcp",
+        name: "m",
+        displayName: "M",
+        requires: [],
+        state: "on",
+        // 网关反代入口由服务端算好下发，Desktop 不自己拼路径。
+        endpointUrl: "https://gateway.example.invalid/v1/mcp/01JQMZ8K3N4P5Q6R7S8T9VWXYZ/",
+      },
       { id: SKILL_ID, kind: "skill", name: "s", displayName: "S", requires: [], state: "off" },
     ]);
+  });
+
+  it("omits the endpoint when the gateway base is not configured in production", async () => {
+    // 编一个连不上的地址出来，只会让客户端反复重试。
+    vi.stubEnv("NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL", "");
+    vi.stubEnv("NODE_ENV", "production");
+    loadUserCapabilityView.mockResolvedValue({
+      assigned: [{ id: MCP_ID, kind: "mcp", name: "m", displayName: "M", requires: [] }],
+      optOuts: new Set(),
+    });
+    const { GET } = await import("../route");
+    const json = await (await GET(request())).json();
+    expect(json.data.capabilities[0].endpointUrl).toBeUndefined();
   });
 
   it("rejects enabling a capability the enterprise has not granted", async () => {

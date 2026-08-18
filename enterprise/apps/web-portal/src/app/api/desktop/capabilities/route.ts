@@ -6,6 +6,7 @@ import {
 } from "../../../../lib/capability-packs-reader";
 import { setUserCapabilityPreference } from "../../../../lib/capability-opt-outs-store";
 import { resolveDesktopIdentity } from "../../../../lib/desktop-auth";
+import { withGatewayMcpEndpoints } from "../../../../lib/desktop-capability-endpoints";
 
 /**
  * 「我的能力」：列出企业分配给我的能力，含被我自己关掉的那些。
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       code: "00000",
       message: "ok",
-      data: { capabilities: capabilityStatesFromView(view) },
+      data: { capabilities: withGatewayMcpEndpoints(capabilityStatesFromView(view)) },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed to load capabilities";
@@ -66,7 +67,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({
       code: "00000",
       message: "ok",
-      data: { capabilities: result.capabilities },
+      data: { capabilities: withGatewayMcpEndpoints(result.capabilities) },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed to update capability";

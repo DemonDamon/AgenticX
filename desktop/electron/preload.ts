@@ -985,6 +985,16 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       inferenceBaseUrl?: string;
       transport?: string;
       reauthRequiredForDirect?: boolean;
+      capabilities?: Array<{
+        id: string;
+        kind: "mcp" | "skill";
+        name: string;
+        displayName: string;
+        requires: string[];
+        version?: string;
+        endpointUrl?: string;
+      }>;
+      unmetCapabilityDependencies?: string[];
     }>,
   enterpriseLogin: async (payload: { baseUrl: string; email: string; password: string }) =>
     ipcRenderer.invoke("enterprise-login", payload) as Promise<{

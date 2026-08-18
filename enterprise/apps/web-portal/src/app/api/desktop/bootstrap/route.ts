@@ -5,6 +5,7 @@ import {
   listAvailableCapabilitiesForUser,
 } from "../../../../lib/capability-packs-reader";
 import { resolveDesktopIdentity } from "../../../../lib/desktop-auth";
+import { withGatewayMcpEndpoints } from "../../../../lib/desktop-capability-endpoints";
 import { resolveDesktopInferenceApiBase } from "../../../../lib/desktop-inference-base";
 import { requestOriginFromRequest } from "../../../../lib/desktop-device-auth";
 import { loadDesktopSessionTokenLimits } from "../../../../lib/desktop-token-policy";
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
       deptId: identity.deptId,
     },
     models,
-    capabilities,
+    capabilities: withGatewayMcpEndpoints(capabilities),
     // 依赖没随包一起下发时 Desktop 装了也调不通，这里标出来供前端提示。
     unmetCapabilityDependencies: findUnmetSkillDependencies(capabilities),
     policy: { strict: true, tokenBudget },

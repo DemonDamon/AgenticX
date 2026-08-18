@@ -73,6 +73,14 @@ import {
   normalizeEnterpriseModelCatalog,
   type EnterpriseModelCatalogEntry,
 } from "./enterprise-model-catalog";
+import {
+  normalizeEnterpriseCapabilities,
+  planEnterpriseSkills,
+  removeEnterpriseMcpDocument,
+  syncEnterpriseMcpDocument,
+  type EnterpriseCapability,
+  type McpDocument,
+} from "./enterprise-capabilities";
 import { sanitizeModelContextWindowOverrides } from "./model-context-window-overrides";
 import {
   computePollMaxTicks,
@@ -346,6 +354,14 @@ type EnterpriseConfig = {
   models?: string[];
   /** Structured catalog from Portal; `models` remains for runtime compatibility. */
   model_catalog?: EnterpriseModelCatalogEntry[];
+  /** 企业下发的 MCP / Skill；没出现在这里就等于已撤销。 */
+  capabilities?: EnterpriseCapability[];
+  /** Skill 声明了依赖但依赖没随包下发，装了也调不通，留给前端提示。 */
+  unmet_capability_dependencies?: string[];
+  /** 上次由本机写进 mcp.json 的条目名；撤销时据此精确删除，不按前缀猜。 */
+  managed_mcp_servers?: string[];
+  /** 同上，指 ~/.agenticx/skills/enterprise 下由本机安装的目录名。 */
+  managed_skills?: string[];
   synced_at?: string;
 };
 
@@ -444,6 +460,8 @@ function applyEnterpriseProvider(
     reauthRequiredForDirect?: boolean;
     token: string;
     modelCatalog: EnterpriseModelCatalogEntry[];
+    capabilities?: unknown;
+    unmetCapabilityDependencies?: unknown;
     user: NonNullable<EnterpriseConfig["user"]>;
     strict: boolean;
     tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
@@ -452,6 +470,7 @@ function applyEnterpriseProvider(
   const modelCatalog = normalizeEnterpriseModelCatalog(opts.modelCatalog);
   const models = modelCatalog.map((entry) => entry.id);
   const inferenceBase = opts.inferenceBaseUrl.replace(/\/+$/, "");
+  const previous = cfg.enterprise;
   cfg.enterprise = {
     enabled: true,
     default_portal_url: opts.portalOrigin,
@@ -467,6 +486,14 @@ function applyEnterpriseProvider(
     },
     models,
     model_catalog: modelCatalog,
+    capabilities: normalizeEnterpriseCapabilities(opts.capabilities),
+    unmet_capability_dependencies: Array.isArray(opts.unmetCapabilityDependencies)
+      ? opts.unmetCapabilityDependencies.map(String).filter(Boolean)
+      : [],
+    // 这两份是本机的安装账本，不是后端下发的内容，刷新时必须原样带过去，
+    // 否则撤销时就不知道该删哪些了。
+    managed_mcp_servers: [...(previous?.managed_mcp_servers ?? [])],
+    managed_skills: [...(previous?.managed_skills ?? [])],
     synced_at: new Date().toISOString(),
   };
   cfg.providers = cfg.providers ?? {};
@@ -545,6 +572,8 @@ async function finishEnterpriseLogin(
     data?: {
       user?: EnterpriseTokenUser;
       models?: unknown[];
+      capabilities?: unknown[];
+      unmetCapabilityDependencies?: unknown[];
       policy?: {
         strict?: boolean;
         tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
@@ -590,6 +619,8 @@ async function finishEnterpriseLogin(
     reauthRequiredForDirect: inference.reauthRequiredForDirect,
     token: pat,
     modelCatalog,
+    capabilities: bootJson.data?.capabilities,
+    unmetCapabilityDependencies: bootJson.data?.unmetCapabilityDependencies,
     user: {
       user_id: user.userId ?? "",
       email: user.email ?? "",
@@ -601,6 +632,10 @@ async function finishEnterpriseLogin(
     tokenBudget: bootJson.data?.policy?.tokenBudget,
   });
   saveAgxConfig(cfg);
+  // 登录已经算成功了，能力同步失败不该把人挡在门外。
+  await syncEnterpriseCapabilitiesToDisk().catch((error) => {
+    console.warn(`[enterprise] 能力同步失败：${String(error)}`);
+  });
   return {
     ok: true,
     user: {
@@ -611,6 +646,160 @@ async function finishEnterpriseLogin(
     transport: inference.transport,
     reauthRequiredForDirect: inference.reauthRequiredForDirect,
   };
+}
+
+/** 企业下发的 Skill 落在这个组下，与员工自己装的技能分开。 */
+const ENTERPRISE_SKILL_GROUP = "enterprise";
+const ENTERPRISE_SKILL_MARKER = ".near-managed";
+const ENTERPRISE_SKILL_MAX_BYTES = 512 * 1024;
+const ENTERPRISE_MCP_JSON_PATH = "~/.agenticx/mcp.json";
+
+function enterpriseSkillsRoot(): string {
+  return path.join(os.homedir(), ".agenticx", "skills", ENTERPRISE_SKILL_GROUP);
+}
+
+async function readMcpDocumentViaStudio(): Promise<McpDocument | null> {
+  const resp = await fetch(
+    `${getStudioUrl()}/api/mcp/raw?path=${encodeURIComponent(ENTERPRISE_MCP_JSON_PATH)}`,
+    { headers: { "x-agx-desktop-token": getStudioToken() } },
+  );
+  // 还没有这个文件是正常状态：第一次同步时从空文档开始。
+  if (resp.status === 404) return {};
+  if (!resp.ok) return null;
+  const payload = (await resp.json().catch(() => ({}))) as { text?: string };
+  try {
+    const parsed = JSON.parse(payload.text || "{}") as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as McpDocument)
+      : {};
+  } catch {
+    // 解析不了就别写：覆盖一份自己看不懂的配置会把员工手写的条目一起弄丢。
+    return null;
+  }
+}
+
+async function writeMcpDocumentViaStudio(document: McpDocument): Promise<boolean> {
+  const resp = await fetch(`${getStudioUrl()}/api/mcp/raw`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "x-agx-desktop-token": getStudioToken(),
+    },
+    body: JSON.stringify({
+      path: ENTERPRISE_MCP_JSON_PATH,
+      text: `${JSON.stringify(document, null, 2)}\n`,
+    }),
+  });
+  return resp.ok;
+}
+
+async function fetchSkillBundle(uri: string, expectedDigest: string): Promise<string | null> {
+  const resp = await proxyAwareFetch(uri, {
+    signal: AbortSignal.timeout(ENTERPRISE_PORTAL_FETCH_TIMEOUT_MS),
+  });
+  if (!resp.ok) return null;
+  const body = await resp.text();
+  if (Buffer.byteLength(body, "utf8") > ENTERPRISE_SKILL_MAX_BYTES) return null;
+  const digest = crypto.createHash("sha256").update(body, "utf8").digest("hex");
+  // 对不上就当没下下来：摘要存在的意义就是不信任传输过程。
+  return digest === expectedDigest ? body : null;
+}
+
+function writeManagedSkill(dirName: string, content: string): void {
+  const skillDir = path.join(enterpriseSkillsRoot(), dirName);
+  const markerPath = path.join(skillDir, ENTERPRISE_SKILL_MARKER);
+  const directoryExists = fs.existsSync(skillDir);
+  assertManagedSkillDirectory(directoryExists, fs.existsSync(markerPath));
+  fs.mkdirSync(skillDir, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(skillDir, "SKILL.md"), content, { encoding: "utf8", mode: 0o600 });
+  fs.writeFileSync(markerPath, "managed by enterprise capability pack\n", {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+}
+
+function removeManagedSkill(dirName: string): void {
+  const skillDir = path.join(enterpriseSkillsRoot(), dirName);
+  // 没有标记就不是我们装的，不碰。
+  if (!fs.existsSync(path.join(skillDir, ENTERPRISE_SKILL_MARKER))) return;
+  fs.rmSync(skillDir, { recursive: true, force: true });
+}
+
+/**
+ * 把这次下发的能力落到本机，并撤走上次装过、这次没下发的。
+ *
+ * 尽力而为：失败不影响登录本身，但会在日志里说清楚哪一条没成功——静默失败会让
+ * 「后台明明分配了，员工那边就是没有」变成一个查不动的问题。
+ */
+async function syncEnterpriseCapabilitiesToDisk(): Promise<void> {
+  const cfg = loadAgxConfig();
+  const ent = cfg.enterprise;
+  if (!ent?.enabled) return;
+  const capabilities = normalizeEnterpriseCapabilities(ent.capabilities);
+  const token = String(ent.token ?? "").trim();
+
+  const document = await readMcpDocumentViaStudio();
+  if (document) {
+    const result = syncEnterpriseMcpDocument(
+      document,
+      capabilities,
+      token,
+      ent.managed_mcp_servers ?? [],
+    );
+    if (await writeMcpDocumentViaStudio(result.document)) {
+      cfg.enterprise = { ...cfg.enterprise, managed_mcp_servers: result.managedNames };
+    }
+    for (const name of result.conflicts) {
+      console.warn(`[enterprise] MCP 条目 ${name} 已被本机占用，本次未下发`);
+    }
+  }
+
+  const plan = planEnterpriseSkills(capabilities, ent.managed_skills ?? []);
+  const installed: string[] = [];
+  for (const item of plan.install) {
+    try {
+      const content = await fetchSkillBundle(item.bundleUri, item.bundleDigest);
+      if (!content) {
+        console.warn(`[enterprise] Skill ${item.capability.name} 校验失败或下载失败，跳过`);
+        continue;
+      }
+      writeManagedSkill(item.dirName, content);
+      installed.push(item.dirName);
+    } catch (error) {
+      console.warn(`[enterprise] Skill ${item.capability.name} 安装失败：${String(error)}`);
+    }
+  }
+  for (const skip of plan.skipped) {
+    console.warn(`[enterprise] Skill ${skip.name} 未安装：${skip.reason}`);
+  }
+  for (const dirName of plan.remove) {
+    try {
+      removeManagedSkill(dirName);
+    } catch (error) {
+      console.warn(`[enterprise] Skill 目录 ${dirName} 清理失败：${String(error)}`);
+    }
+  }
+  // 装失败的不记进账本，否则下次撤销时会去删一个根本不存在的目录。
+  cfg.enterprise = { ...cfg.enterprise, managed_skills: installed.sort() };
+  saveAgxConfig(cfg);
+}
+
+/** 退出企业账户：撤走本机装过的企业 MCP 与 Skill。 */
+async function withdrawEnterpriseCapabilitiesFromDisk(cfg: AgxConfig): Promise<void> {
+  const ent = cfg.enterprise;
+  if (!ent) return;
+  const managedMcp = ent.managed_mcp_servers ?? [];
+  if (managedMcp.length > 0) {
+    const document = await readMcpDocumentViaStudio();
+    if (document) await writeMcpDocumentViaStudio(removeEnterpriseMcpDocument(document, managedMcp));
+  }
+  for (const dirName of ent.managed_skills ?? []) {
+    try {
+      removeManagedSkill(dirName);
+    } catch {
+      /* best-effort */
+    }
+  }
 }
 
 type EmailConfig = {
@@ -7697,6 +7886,10 @@ function registerIpc(): void {
     const ent = cfg.enterprise;
     return {
       ok: true,
+      capabilities: normalizeEnterpriseCapabilities(ent?.capabilities),
+      unmetCapabilityDependencies: Array.isArray(ent?.unmet_capability_dependencies)
+        ? ent.unmet_capability_dependencies
+        : [],
       enabled: Boolean(ent?.enabled && ent?.token),
       baseUrl: ent?.base_url ?? "",
       inferenceBaseUrl: ent?.inference_base_url ?? "",
@@ -7780,6 +7973,10 @@ function registerIpc(): void {
   ipcMain.handle("enterprise-logout", async () => {
     clearUserAccountLoginPoll();
     const cfg = loadAgxConfig();
+    // 先撤走本机装过的企业能力，再清配置——顺序反了就不知道该删哪些了。
+    await withdrawEnterpriseCapabilitiesFromDisk(cfg).catch(() => {
+      /* best-effort */
+    });
     clearEnterpriseFromConfig(cfg);
     delete cfg.agx_account;
     saveAgxConfig(cfg);
@@ -7821,6 +8018,8 @@ function registerIpc(): void {
             deptId?: string | null;
           };
           models?: unknown[];
+          capabilities?: unknown[];
+          unmetCapabilityDependencies?: unknown[];
           policy?: {
             strict?: boolean;
             tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
@@ -7862,6 +8061,8 @@ function registerIpc(): void {
         reauthRequiredForDirect: inference.reauthRequiredForDirect,
         token,
         modelCatalog,
+        capabilities: bootJson.data?.capabilities,
+        unmetCapabilityDependencies: bootJson.data?.unmetCapabilityDependencies,
         user: {
           user_id: (user as { userId?: string }).userId ?? ent?.user?.user_id ?? "",
           email: (user as { email?: string }).email ?? ent?.user?.email ?? "",
@@ -7875,6 +8076,10 @@ function registerIpc(): void {
         tokenBudget: bootJson.data?.policy?.tokenBudget,
       });
       saveAgxConfig(cfg);
+      // 刷新的意义之一就是拿到撤销：这里同步失败，本机就还留着已被收回的能力。
+      await syncEnterpriseCapabilitiesToDisk().catch((error) => {
+        console.warn(`[enterprise] 能力同步失败：${String(error)}`);
+      });
       return {
         ok: true,
         models,

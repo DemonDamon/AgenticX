@@ -41,6 +41,8 @@ export type PortalCapability = {
   version?: string;
   bundleUri?: string;
   bundleDigest?: string;
+  /** MCP 专有：网关反代入口，由 desktop-capability-endpoints 在下发前补上。 */
+  endpointUrl?: string;
 };
 
 /** 企业已启用并分配给该用户的能力，附上用户自己那一位开关。 */
