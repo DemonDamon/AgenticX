@@ -61,7 +61,8 @@
         "mcpServers": "MCP Hosting",
         "plugins": "Wasm Plugins",
         "errors": "Error Clustering",
-        "perf": "Performance Profiling"
+        "perf": "Performance Profiling",
+        "capabilityPacks": "Capabilities"
       }
     },
     "health": {
@@ -501,6 +502,78 @@
           "cooldownReset": "Cooldown reset"
         },
         "confirmDelete": "Delete this channel?"
+      },
+      "capabilityPacks": {
+        "title": "Capability Packs",
+        "description": "Bundle MCP servers and skills, enter credentials once, and assign to everyone, a department, or named people. Employees get them on login without configuring anything.",
+        "tabs": {
+          "packs": "Packs",
+          "skills": "Skill Registry"
+        },
+        "status": {
+          "active": "Active",
+          "disabled": "Disabled"
+        },
+        "actions": {
+          "enable": "Enable",
+          "disable": "Disable",
+          "edit": "Edit"
+        },
+        "toast": {
+          "loadFailed": "Failed to load",
+          "saved": "Saved"
+        },
+        "packs": {
+          "createTitle": "New capability pack",
+          "createDescription": "Create the pack first, then pick members and assignment scope in the editor.",
+          "slug": "Slug",
+          "slugRequired": "Slug is required",
+          "displayName": "Name",
+          "displayNamePlaceholder": "Market research",
+          "description": "Description",
+          "empty": "No capability packs yet",
+          "memberCount": "{count} capabilities",
+          "assignedCount": "{count} assignments",
+          "confirmDelete": "Delete this pack? Its members and assignments are deleted with it.",
+          "editTitle": "Edit pack {name}"
+        },
+        "skills": {
+          "createTitle": "Register a skill",
+          "createDescription": "Skills hold no credentials; they declare the MCP servers they need, and the gateway holds the keys.",
+          "slug": "Slug",
+          "slugRequired": "Slug is required",
+          "displayName": "Name",
+          "description": "Description",
+          "version": "Version",
+          "bundleUri": "Bundle URI",
+          "bundleDigest": "Bundle digest",
+          "bundleDigestHint": "sha256 (hex) of the SKILL.md body. Desktop verifies the download against it; a mismatch or a missing digest means the skill is not installed.",
+          "requires": "Required MCP servers",
+          "requiresHint": "A dependency not delivered in the same pack cannot be called; it is reported as an unmet dependency at login.",
+          "requiresCount": "{count} dependencies",
+          "empty": "No skills registered yet",
+          "confirmDelete": "Delete this skill? Packs referencing it will keep a dead member.",
+          "editTitle": "Edit skill {name}"
+        },
+        "member": {
+          "title": "Pack members",
+          "hint": "Disabled members are never delivered, even when checked here.",
+          "disabled": "Disabled",
+          "noMcp": "No MCP servers available yet",
+          "noSkill": "No skills registered yet",
+          "disabledWarning": "These members are disabled and employees will not receive them: {names}",
+          "danglingWarning": "These members point at records that no longer exist; uncheck them: {ids}"
+        },
+        "assignment": {
+          "title": "Assignment scope",
+          "allMembers": "Everyone",
+          "allMembersHint": "With everyone selected only the all-members key is stored. Adding departments and people on top cannot narrow the scope; it only leaves stale assignments behind when everyone is later turned off.",
+          "departments": "Departments",
+          "deptHint": "Assigning to a parent department covers everyone beneath it.",
+          "users": "Named people",
+          "noDept": "No departments yet",
+          "noUser": "No users yet"
+        }
       }
     },
     "dashboard": {

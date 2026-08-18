@@ -61,7 +61,8 @@
         "mcpServers": "MCP 托管",
         "plugins": "Wasm 插件",
         "errors": "错误聚类",
-        "perf": "性能分析"
+        "perf": "性能分析",
+        "capabilityPacks": "企业能力"
       }
     },
     "health": {
@@ -501,6 +502,78 @@
           "cooldownReset": "已重置 cooldown"
         },
         "confirmDelete": "确定删除该 Channel？"
+      },
+      "capabilityPacks": {
+        "title": "企业能力包",
+        "description": "把 MCP 与 Skill 打成一组，由管理员统一录入凭据并分配给全员、部门或指定人；员工登录后自动同步，不用自己配 Key、装 Skill、连服务器。",
+        "tabs": {
+          "packs": "能力包",
+          "skills": "Skill 注册表"
+        },
+        "status": {
+          "active": "已启用",
+          "disabled": "已停用"
+        },
+        "actions": {
+          "enable": "启用",
+          "disable": "停用",
+          "edit": "编辑"
+        },
+        "toast": {
+          "loadFailed": "加载失败",
+          "saved": "已保存"
+        },
+        "packs": {
+          "createTitle": "新建能力包",
+          "createDescription": "先建包，再在编辑里挑成员和分配范围。",
+          "slug": "标识",
+          "slugRequired": "请填写标识",
+          "displayName": "名称",
+          "displayNamePlaceholder": "二级市场研究",
+          "description": "说明",
+          "empty": "还没有能力包",
+          "memberCount": "{count} 项能力",
+          "assignedCount": "{count} 个分配范围",
+          "confirmDelete": "确认删除该能力包？包内成员与分配范围会一并删除。",
+          "editTitle": "编辑能力包 {name}"
+        },
+        "skills": {
+          "createTitle": "登记 Skill",
+          "createDescription": "Skill 自身不存凭据，只声明依赖的 MCP；Key 留在被依赖的 MCP 上由网关代持。",
+          "slug": "标识",
+          "slugRequired": "请填写标识",
+          "displayName": "名称",
+          "description": "说明",
+          "version": "版本",
+          "bundleUri": "Bundle 地址",
+          "bundleDigest": "Bundle 摘要",
+          "bundleDigestHint": "SKILL.md 正文的 sha256（十六进制）。Desktop 下载后按它校验；对不上就不安装，留空则整条跳过。",
+          "requires": "依赖的 MCP",
+          "requiresHint": "依赖没随同一个包下发时，员工装了也调不通，登录时会在未满足依赖里列出来。",
+          "requiresCount": "依赖 {count} 项",
+          "empty": "还没有登记 Skill",
+          "confirmDelete": "确认删除该 Skill？引用它的能力包会留下失效成员。",
+          "editTitle": "编辑 Skill {name}"
+        },
+        "member": {
+          "title": "包内成员",
+          "hint": "停用的成员不会下发给员工；这里勾上也一样。",
+          "disabled": "已停用",
+          "noMcp": "还没有可选的 MCP Server",
+          "noSkill": "还没有登记 Skill",
+          "disabledWarning": "以下成员已停用，员工收不到：{names}",
+          "danglingWarning": "以下成员指向的记录已不存在，建议取消勾选：{ids}"
+        },
+        "assignment": {
+          "title": "分配范围",
+          "allMembers": "全员",
+          "allMembersHint": "勾了全员就只发全员，不再叠加部门与个人——叠加不会让范围变小，只会在之后取消全员时留下没人记得勾过的残留分配。",
+          "departments": "部门",
+          "deptHint": "分给上级部门，下级成员同样拿得到。",
+          "users": "指定人员",
+          "noDept": "还没有部门",
+          "noUser": "还没有用户"
+        }
       }
     },
     "dashboard": {
