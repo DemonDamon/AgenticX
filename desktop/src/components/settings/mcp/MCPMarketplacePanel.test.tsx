@@ -30,6 +30,8 @@ describe("MCPMarketplacePanel", () => {
     expect(html).toContain('aria-label="搜索 MCP 服务"');
     expect(html).toContain('aria-label="搜索 MCP 市场"');
     expect(html).toContain("查看全部 13 个服务");
+    expect(html).toContain("服务 6</span>");
+    expect(html).not.toContain("服务 7</span>");
     expect(html).not.toContain("服务 13</span>");
   });
 

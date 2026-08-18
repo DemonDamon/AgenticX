@@ -190,6 +190,8 @@ import { studioFetch } from "../utils/studio-fetch";
 export type { SettingsTab } from "../settings-tab";
 
 const MCP_MARKETPLACE_ID_MAP_KEY = "agenticx:mcp:marketplaceIdToNames";
+const DEFAULT_MCP_MARKETPLACE_PREVIEW_LIMIT = 6;
+const CURATED_DEFAULT_MCP_SERVER_IDS = ["TianYanCha/tyc-mcp"] as const;
 
 function RemoteBackendHintBanner({ kind = "local-only" }: { kind?: "synced" | "local-only" }) {
   const mode = getConnectionModeSync();
@@ -8473,19 +8475,45 @@ export function SettingsPanel({
           setMcpMarketplaceSummary(`检索到 ${totalCount} 个，已全部展示`);
           return;
         }
-        const filtered = enriched.filter((item) => {
+        let filtered = enriched.filter((item) => {
           const isVerified = Boolean(item.is_verified);
           const isHosted = Boolean(item.is_hosted);
           const names = extractMarketplaceMcpServerNames(item);
           return isVerified && isHosted && names.length > 0;
         });
+
+        if (filtered.length < DEFAULT_MCP_MARKETPLACE_PREVIEW_LIMIT) {
+          const knownIds = new Set(
+            enriched
+              .map((item) => String((item as { id?: unknown }).id ?? "").trim())
+              .filter(Boolean),
+          );
+          const curatedItems = await Promise.all(
+            CURATED_DEFAULT_MCP_SERVER_IDS
+              .filter((id) => !knownIds.has(id))
+              .map(async (id) => {
+                try {
+                  const detail = await window.agenticxDesktop.mcpMarketplaceDetail({ serverId: id });
+                  const item = (detail?.item as Record<string, unknown> | undefined) ?? undefined;
+                  if (!item) return null;
+                  const names = extractMarketplaceMcpServerNames(item);
+                  if (names.length > 0) updateMarketplaceIdMapping(id, names);
+                  return item;
+                } catch {
+                  return null;
+                }
+              }),
+          );
+          const curatedEligible = curatedItems.filter((item): item is Record<string, unknown> => {
+            if (!item) return false;
+            return Boolean(item.is_verified) && Boolean(item.is_hosted) && extractMarketplaceMcpServerNames(item).length > 0;
+          });
+          filtered = filtered.concat(curatedEligible).slice(0, DEFAULT_MCP_MARKETPLACE_PREVIEW_LIMIT);
+        }
         setMcpMarketplaceItems(filtered);
         setMcpMarketplaceSummary(
-          `检索到 ${totalCount} 个，符合“官方认证 + 托管 + 可安装”条件 ${filtered.length} 个`,
+          `精选 ${filtered.length} 个可直接添加的服务`,
         );
-        if (totalCount > filtered.length) {
-          setMcpMessage(`已过滤 ${totalCount - filtered.length} 个非官方或不可安装条目`);
-        }
       } else {
         setMcpMessage(`市场加载失败: ${res?.error ?? "未知错误"}`);
       }
@@ -10346,17 +10374,6 @@ export function SettingsPanel({
                   statusKind={mcpMarketplaceStatus?.kind}
                   statusTargetId={mcpMarketplaceStatus?.serverId}
                 />
-                <div className="space-y-1">
-                  <div className="text-sm text-text-subtle">
-                    MCP（模型上下文协议）服务为 Agent 扩展外部工具 — 文件系统、数据库、网页搜索等。
-                  </div>
-                  <div className="text-[11px] text-text-faint">
-                    已连接的 MCP 服务是和创智派<strong>进程级</strong>资源，所有对话共享；和创智派启动时自动恢复上次的连接记录，新建对话不会触发额外连接或断开。
-                  </div>
-                  <div className="text-[11px] text-status-warning">
-                    所需 API Key 请在本页安装弹窗或 JSON 的 <code className="text-[10px]">env</code> 中填写，勿在聊天里发送给 Agent。
-                  </div>
-                </div>
 
                 {mcpMessage && <div className="text-xs text-text-subtle">{mcpMessage}</div>}
 

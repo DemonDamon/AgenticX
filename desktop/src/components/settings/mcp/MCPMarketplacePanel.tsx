@@ -13,7 +13,7 @@ import {
 import { useMemo, useState } from "react";
 import { Modal } from "../../ds/Modal";
 
-const CATALOG_PREVIEW_LIMIT = 12;
+const CATALOG_PREVIEW_LIMIT = 6;
 
 type MarketplaceItem = {
   id: string;
@@ -134,7 +134,7 @@ export function MCPMarketplacePanel({
         <div>
           <h3 className="text-[13px] font-semibold text-text-strong">MCP 服务目录</h3>
           <p className="mt-0.5 text-[11px] leading-4 text-text-muted">
-            浏览可用服务；添加前会先确认所需凭据和配置。
+            添加前会确认必要配置。
           </p>
         </div>
         <button
