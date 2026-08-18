@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Mapping
 from typing import Any, Optional, Dict, List, AsyncGenerator, Generator, Union, cast
 import litellm  # type: ignore
 
@@ -8,7 +9,30 @@ litellm.suppress_debug_info = True
 
 from pydantic import Field  # type: ignore
 from .base import BaseLLMProvider, StreamChunk
+from .request_context import current_llm_turn_id
 from .response import LLMResponse, TokenUsage, LLMChoice
+
+
+TURN_ID_HEADER = "X-AgenticX-Turn-Id"
+
+
+def _apply_turn_id_header(kwargs: Dict[str, Any], *, enabled: bool) -> None:
+    """Merge the request-scoped task id for an explicitly managed gateway.
+
+    ``extra_headers`` supplied by the caller remain untouched.  The capability
+    flag defaults to false on :class:`LiteLLMProvider`, so request context never
+    leaks to arbitrary OpenAI-compatible or self-managed providers.
+    """
+    if not enabled:
+        return
+    turn_id = current_llm_turn_id()
+    if not turn_id:
+        return
+    raw_headers = kwargs.get("extra_headers")
+    headers = dict(raw_headers) if isinstance(raw_headers, Mapping) else {}
+    if not any(str(key).lower() == TURN_ID_HEADER.lower() for key in headers):
+        headers[TURN_ID_HEADER] = turn_id
+    kwargs["extra_headers"] = headers
 
 
 def _reasoning_detail_text(detail: Any) -> str:
@@ -195,6 +219,13 @@ class LiteLLMProvider(BaseLLMProvider):
         default=None,
         description="Extra request body fields forwarded verbatim to the provider (e.g. chat_template_kwargs for Qwen3).",
     )
+    forward_turn_id_header: bool = Field(
+        default=False,
+        description="Forward the request-scoped task id to an enterprise-managed gateway.",
+    )
+
+    def _apply_request_context_headers(self, kwargs: Dict[str, Any]) -> None:
+        _apply_turn_id_header(kwargs, enabled=self.forward_turn_id_header)
 
     def _apply_drop_params_default(self, kwargs: Dict[str, Any]) -> None:
         if self.drop_params is None:
@@ -245,6 +276,7 @@ class LiteLLMProvider(BaseLLMProvider):
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
         self._apply_sampling_constraints(kwargs)
+        self._apply_request_context_headers(kwargs)
         _no_proxy_client = _build_no_proxy_openai_client(self.api_key, self.base_url)
         if _no_proxy_client is not None:
             kwargs.setdefault("client", _no_proxy_client)
@@ -287,6 +319,7 @@ class LiteLLMProvider(BaseLLMProvider):
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
         self._apply_sampling_constraints(kwargs)
+        self._apply_request_context_headers(kwargs)
         _no_proxy_async_client = _build_no_proxy_async_openai_client(self.api_key, self.base_url)
         if _no_proxy_async_client is not None:
             kwargs.setdefault("client", _no_proxy_async_client)
@@ -328,6 +361,7 @@ class LiteLLMProvider(BaseLLMProvider):
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
         self._apply_sampling_constraints(kwargs)
+        self._apply_request_context_headers(kwargs)
         response_stream = litellm.completion(
             model=self.model,
             messages=messages,
@@ -401,6 +435,7 @@ class LiteLLMProvider(BaseLLMProvider):
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
         self._apply_sampling_constraints(kwargs)
+        self._apply_request_context_headers(kwargs)
         model_lower = str(self.model or "").lower()
         if "minimax" in model_lower:
             extra = kwargs.get("extra_body")
@@ -528,6 +563,7 @@ class LiteLLMProvider(BaseLLMProvider):
         self._apply_drop_params_default(kwargs)
         self._apply_extra_body(kwargs)
         self._apply_sampling_constraints(kwargs)
+        self._apply_request_context_headers(kwargs)
         _no_proxy_async_client = _build_no_proxy_async_openai_client(self.api_key, self.base_url)
         if _no_proxy_async_client is not None:
             kwargs.setdefault("client", _no_proxy_async_client)
@@ -723,4 +759,5 @@ class LiteLLMProvider(BaseLLMProvider):
             fallbacks=config.get("fallbacks"),
             drop_params=config.get("drop_params"),
             extra_body=extra_body,
+            forward_turn_id_header=config.get("forward_turn_id_header") is True,
         )

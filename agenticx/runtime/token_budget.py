@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Token budget guard for session-level and turn-level spending limits.
+"""Token budget guard for session-level notices and turn-level safety limits.
 
-Tracks cumulative token usage per session and enforces configurable
-thresholds with tiered responses (warn -> compress -> terminate).
+Tracks cumulative token usage per session and emits configurable yellow/red
+notices without interrupting work.  The explicit per-turn safety budget keeps
+its existing warn/compress/optional-stop semantics.
 
 Author: Damon Li
 """
@@ -30,7 +31,10 @@ TOKEN_BUDGET_SCRATCHPAD_KEY = "_token_budget_usage_v1"
 
 class BudgetLevel(str, Enum):
     OK = "ok"
+    YELLOW = "warning"
+    # Backward-compatible alias used by the per-turn budget path.
     WARNING = "warning"
+    RED = "red"
     COMPRESS = "compress"
     EXCEEDED = "exceeded"
 
@@ -65,7 +69,7 @@ def resolve_token_budget_settings(
     warning_tokens_per_session: Optional[int] = None,
     max_tokens_per_turn: Optional[int] = None,
 ) -> Tuple[int, int, int]:
-    """Resolve hard/warning/turn limits from explicit, managed, and local policy.
+    """Resolve red/yellow/turn thresholds from explicit, managed, and local policy.
 
     Enterprise policy is active only for an authenticated enterprise session. It
     overrides the local developer settings without rewriting them, so signing out
@@ -138,7 +142,7 @@ def resolve_token_budget_limits(
     max_tokens_per_session: Optional[int] = None,
     max_tokens_per_turn: Optional[int] = None,
 ) -> Tuple[int, int]:
-    """Backward-compatible resolver for callers that only need hard/turn limits."""
+    """Backward-compatible resolver for callers that only need red/turn thresholds."""
     session_limit, _warning_limit, turn_limit = resolve_token_budget_settings(
         max_tokens_per_session=max_tokens_per_session,
         max_tokens_per_turn=max_tokens_per_turn,
@@ -147,12 +151,15 @@ def resolve_token_budget_limits(
 
 
 class TokenBudgetGuard:
-    """Per-session token budget with tiered enforcement.
+    """Cumulative session notices plus an independent per-turn safety budget.
 
     Session thresholds:
-      - configurable threshold (default 500,000): WARNING -> notify and inject convergence hint
-      - 95%: COMPRESS -> force context compaction
-      - 100%: EXCEEDED -> reject the next turn; the current paid turn may finish
+      - ``warning_tokens_per_session`` (default 500,000): yellow notice once
+      - ``max_tokens_per_session`` (default 1,000,000): red notice once
+
+    The historical configuration keys remain stable on the wire, but neither
+    session threshold is a hard limit.  Session usage never triggers compaction,
+    convergence prompts, or rejection of a later turn.
     """
 
     def __init__(
@@ -163,14 +170,14 @@ class TokenBudgetGuard:
     ) -> None:
         resolved_session, resolved_warning, resolved_turn = resolve_token_budget_settings()
         if max_tokens_per_session > 0:
-            self.max_session = int(max_tokens_per_session)
+            self.red_session = int(max_tokens_per_session)
         else:
-            self.max_session = resolved_session
+            self.red_session = resolved_session
         if warning_tokens_per_session > 0:
-            self.warning_session = int(warning_tokens_per_session)
+            self.yellow_session = int(warning_tokens_per_session)
         else:
-            self.warning_session = resolved_warning
-        self.warning_session = max(1, min(self.warning_session, self.max_session - 1))
+            self.yellow_session = resolved_warning
+        self.yellow_session = max(1, min(self.yellow_session, self.red_session - 1))
         if max_tokens_per_turn > 0:
             self.max_turn = int(max_tokens_per_turn)
         else:
@@ -180,7 +187,27 @@ class TokenBudgetGuard:
         self.cumulative_output: int = 0
         self.turn_input: int = 0
         self.turn_output: int = 0
-        self.warning_emitted: bool = False
+        self.yellow_emitted: bool = False
+        self.red_emitted: bool = False
+
+    @property
+    def max_session(self) -> int:
+        """Compatibility alias for the historical red-threshold wire name."""
+        return self.red_session
+
+    @property
+    def warning_session(self) -> int:
+        """Compatibility alias for the historical yellow-threshold wire name."""
+        return self.yellow_session
+
+    @property
+    def warning_emitted(self) -> bool:
+        """Compatibility alias for persisted yellow-notice state."""
+        return self.yellow_emitted
+
+    @warning_emitted.setter
+    def warning_emitted(self, value: bool) -> None:
+        self.yellow_emitted = bool(value)
 
     @property
     def cumulative_total(self) -> int:
@@ -211,25 +238,44 @@ class TokenBudgetGuard:
         payload = data if isinstance(data, dict) else {}
         self.cumulative_input = max(0, int(payload.get("cumulative_input", 0) or 0))
         self.cumulative_output = max(0, int(payload.get("cumulative_output", 0) or 0))
-        emitted_at_raw = payload.get("warning_emitted_at")
+        yellow_at_present = "yellow_emitted_at" in payload or "warning_emitted_at" in payload
+        yellow_at_raw = payload.get("yellow_emitted_at", payload.get("warning_emitted_at"))
         try:
-            emitted_at = max(0, int(emitted_at_raw or 0))
+            yellow_at = max(0, int(yellow_at_raw or 0))
         except (TypeError, ValueError, OverflowError):
-            emitted_at = 0
-        self.warning_emitted = emitted_at == self.warning_session
+            yellow_at = 0
+        if yellow_at_present:
+            self.yellow_emitted = yellow_at == self.yellow_session
+        else:
+            # Metadata written before threshold-aware latches only carried a bool.
+            self.yellow_emitted = bool(
+                payload.get("yellow_emitted", payload.get("warning_emitted", False))
+            )
+
+        red_at_present = "red_emitted_at" in payload
+        red_at_raw = payload.get("red_emitted_at")
+        try:
+            red_at = max(0, int(red_at_raw or 0))
+        except (TypeError, ValueError, OverflowError):
+            red_at = 0
+        if red_at_present:
+            self.red_emitted = red_at == self.red_session
+        else:
+            self.red_emitted = bool(payload.get("red_emitted", False))
+        # A red notice subsumes the yellow notice even if persisted metadata was
+        # partially written or came from an older build.
+        if self.red_emitted:
+            self.yellow_emitted = True
         self.reset_turn()
 
     def check_session(self) -> BudgetLevel:
-        """Check cumulative session budget."""
-        if self.max_session <= 0:
+        """Return the current non-blocking session notice level."""
+        if self.red_session <= 0:
             return BudgetLevel.OK
-        if self.cumulative_total >= self.max_session:
-            return BudgetLevel.EXCEEDED
-        ratio = self.cumulative_total / self.max_session
-        if ratio >= 0.95:
-            return BudgetLevel.COMPRESS
-        if self.cumulative_total >= self.warning_session:
-            return BudgetLevel.WARNING
+        if self.cumulative_total >= self.red_session:
+            return BudgetLevel.RED
+        if self.cumulative_total >= self.yellow_session:
+            return BudgetLevel.YELLOW
         return BudgetLevel.OK
 
     def check_turn(self) -> BudgetLevel:
@@ -251,26 +297,39 @@ class TokenBudgetGuard:
         """Return the highest severity level from session + turn checks."""
         session_level = self.check_session()
         turn_level = self.check_turn()
-        severity = [BudgetLevel.OK, BudgetLevel.WARNING, BudgetLevel.COMPRESS, BudgetLevel.EXCEEDED]
+        severity = [
+            BudgetLevel.OK,
+            BudgetLevel.YELLOW,
+            BudgetLevel.RED,
+            BudgetLevel.COMPRESS,
+            BudgetLevel.EXCEEDED,
+        ]
         return max(session_level, turn_level, key=lambda x: severity.index(x))
 
     def check_with_source(self) -> tuple[BudgetLevel, str, int, int]:
         """Return (level, source, current, max_allowed) with dominant source."""
         session_level = self.check_session()
         turn_level = self.check_turn()
-        severity = [BudgetLevel.OK, BudgetLevel.WARNING, BudgetLevel.COMPRESS, BudgetLevel.EXCEEDED]
+        severity = [
+            BudgetLevel.OK,
+            BudgetLevel.YELLOW,
+            BudgetLevel.RED,
+            BudgetLevel.COMPRESS,
+            BudgetLevel.EXCEEDED,
+        ]
         if severity.index(session_level) >= severity.index(turn_level):
-            return session_level, "session", self.cumulative_total, self.max_session
+            return session_level, "session", self.cumulative_total, self.red_session
         return turn_level, "turn", self.turn_total, self.max_turn
 
-    def convergence_hint(self) -> str:
-        """System hint injected when budget reaches WARNING level."""
+    def turn_convergence_hint(self) -> str:
+        """System hint used only by the independent per-turn safety budget."""
         pct = (
-            int(100 * self.cumulative_total / self.max_session)
-            if self.max_session > 0 else 0
+            int(100 * self.turn_total / self.max_turn)
+            if self.max_turn > 0 else 0
         )
         return (
-            f"<budget_warning>Token budget at {pct}% ({self.cumulative_total}/{self.max_session}). "
+            f"<budget_warning>Current turn token budget at {pct}% "
+            f"({self.turn_total}/{self.max_turn}). "
             "Please wrap up: summarize findings, skip optional exploration, and converge to final answer."
             "</budget_warning>"
         )
@@ -280,10 +339,16 @@ class TokenBudgetGuard:
         return {
             "cumulative_input": self.cumulative_input,
             "cumulative_output": self.cumulative_output,
-            "warning_emitted": self.warning_emitted,
-            "warning_emitted_at": self.warning_session if self.warning_emitted else 0,
-            "warning_tokens_per_session": self.warning_session,
-            "max_session": self.max_session,
+            "yellow_emitted": self.yellow_emitted,
+            "yellow_emitted_at": self.yellow_session if self.yellow_emitted else 0,
+            "red_emitted": self.red_emitted,
+            "red_emitted_at": self.red_session if self.red_emitted else 0,
+            # Legacy metadata remains readable by older Desktop/runtime builds.
+            "warning_emitted": self.yellow_emitted,
+            "warning_emitted_at": self.yellow_session if self.yellow_emitted else 0,
+            "warning_tokens_per_session": self.yellow_session,
+            "max_tokens_per_session": self.red_session,
+            "max_session": self.red_session,
             "max_turn": self.max_turn,
         }
 
@@ -300,37 +365,3 @@ class TokenBudgetGuard:
         )
         guard.restore_usage(data)
         return guard
-
-
-def session_token_budget_preflight(
-    scratchpad: Any,
-    *,
-    max_tokens_per_session: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
-    """Return a terminal error payload when persisted usage blocks the next turn.
-
-    Only cumulative usage is restored from the session. The active configuration
-    remains authoritative, so increasing the hard cap immediately unlocks a session.
-    """
-    guard = TokenBudgetGuard(max_tokens_per_session=int(max_tokens_per_session or 0))
-    persisted = (
-        scratchpad.get(TOKEN_BUDGET_SCRATCHPAD_KEY)
-        if isinstance(scratchpad, dict)
-        else None
-    )
-    guard.restore_usage(persisted if isinstance(persisted, dict) else None)
-    if guard.check_session() != BudgetLevel.EXCEEDED:
-        return None
-    return {
-        "text": (
-            "本会话已达到 Token 上限 "
-            f"（{guard.cumulative_total}/{guard.max_session}）。"
-            "请新建会话，或在开发者设置提高上限后继续。"
-        ),
-        "detector": "token_budget",
-        "budget_exceeded": True,
-        "budget_source": "session",
-        "current": guard.cumulative_total,
-        "max_allowed": guard.max_session,
-        "blocked_before_model": True,
-    }

@@ -9,9 +9,10 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import json
 import os
 import re
-from typing import TYPE_CHECKING, Literal, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, Iterator, Literal, Optional, Set
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
@@ -25,6 +26,91 @@ FaultKind = Literal[
     "transient",
     "unknown",
 ]
+
+_ENTERPRISE_TOKEN_QUOTA_KINDS = {"token_day", "token_week", "monthly"}
+
+
+def _iter_exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    """Yield an exception and its explicit/implicit causes without looping."""
+    seen: Set[int] = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _iter_json_values(text: str) -> Iterator[Any]:
+    """Decode complete JSON values embedded in an SDK exception message."""
+    decoder = json.JSONDecoder()
+    cursor = 0
+    while cursor < len(text):
+        start = text.find("{", cursor)
+        if start < 0:
+            return
+        try:
+            value, consumed = decoder.raw_decode(text[start:])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            cursor = start + 1
+            continue
+        yield value
+        cursor = start + max(consumed, 1)
+
+
+def _structured_error_candidates(exc: BaseException) -> Iterator[Any]:
+    """Read structured provider errors before falling back to embedded JSON."""
+    for current in _iter_exception_chain(exc):
+        response = getattr(current, "response", None)
+        if response is not None:
+            json_method = getattr(response, "json", None)
+            if callable(json_method):
+                try:
+                    yield json_method()
+                except Exception:
+                    pass
+            for attr in ("text", "content"):
+                raw = getattr(response, attr, None)
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", errors="replace")
+                if isinstance(raw, str):
+                    yield from _iter_json_values(raw)
+        for attr in ("body", "error"):
+            raw = getattr(current, attr, None)
+            if isinstance(raw, (dict, list)):
+                yield raw
+            elif isinstance(raw, str):
+                yield from _iter_json_values(raw)
+        yield from _iter_json_values(str(current))
+
+
+def enterprise_token_quota_error(exc: BaseException) -> Optional[Dict[str, Any]]:
+    """Extract the Gateway's typed day/week/month token-quota response.
+
+    Ordinary provider 429s deliberately return ``None`` so callers retain the
+    existing generic rate-limit behaviour.  This function relies on the typed
+    ``error.kind`` contract rather than guessing from prose.
+    """
+    for candidate in _structured_error_candidates(exc):
+        if not isinstance(candidate, dict):
+            continue
+        nested = candidate.get("error")
+        error = nested if isinstance(nested, dict) else candidate
+        kind = str(error.get("kind") or "").strip()
+        if kind not in _ENTERPRISE_TOKEN_QUOTA_KINDS:
+            continue
+        result: Dict[str, Any] = {"kind": kind}
+        for source_key, target_key in (
+            ("message", "message"),
+            ("period", "period"),
+            ("resetAt", "reset_at"),
+            ("used", "used"),
+            ("limit", "limit"),
+        ):
+            value = error.get(source_key)
+            if value not in (None, ""):
+                result[target_key] = value
+        return result
+    return None
 
 
 def provider_fault_escalation_enabled() -> bool:

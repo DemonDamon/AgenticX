@@ -281,6 +281,15 @@ class ProviderResolver:
         if model:
             raw_cfg["model"] = model
         kwargs = cls._build_kwargs(effective_key, raw_cfg)
+        # Request-scoped task identity is an internal enterprise Gateway
+        # contract.  A similarly shaped custom/self-managed provider must not
+        # receive it merely because it also uses the LiteLLM transport.
+        if (
+            provider_cls is LiteLLMProvider
+            and provider_key == "enterprise"
+            and extra.get("managed") is True
+        ):
+            kwargs["forward_turn_id_header"] = True
 
         if not kwargs.get("model"):
             raise ValueError(f"Provider '{provider_key}' is missing model configuration")
@@ -290,6 +299,7 @@ class ProviderResolver:
                 "model", "api_key", "base_url", "api_version",
                 "timeout", "max_retries", "endpoint_id", "secret_key", "group_id",
                 "drop_params", "extra_body",
+                "forward_turn_id_header",
             ):
                 val = kwargs.get(key)
                 if val is not None:

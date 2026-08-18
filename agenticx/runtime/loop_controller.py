@@ -46,6 +46,7 @@ class LoopController:
         agent_id: str = "meta",
         tools: Optional[list[dict]] = None,
         system_prompt: Optional[str] = None,
+        history_user_metadata: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[RuntimeEvent, None]:
         final_text = ""
         for iteration in range(1, self.config.max_iterations + 1):
@@ -56,13 +57,18 @@ class LoopController:
                 agent_id=agent_id,
                 tools=tools,
                 system_prompt=system_prompt,
+                history_user_metadata=(
+                    dict(history_user_metadata) if history_user_metadata else None
+                ),
             ):
                 if (
                     event.type == EventType.ERROR.value
                     and bool(event.data.get("budget_exceeded"))
+                    and event.data.get("budget_source") == "turn"
                 ):
-                    # A session-budget preflight is terminal for the whole loop.
-                    # Retrying iterations would only repeat the same blocked turn.
+                    # An explicitly enforced per-turn safety limit remains terminal
+                    # for the loop. Session thresholds are notice-only and never set
+                    # ``budget_exceeded``.
                     yield event
                     return
                 if event.type == EventType.FINAL.value:

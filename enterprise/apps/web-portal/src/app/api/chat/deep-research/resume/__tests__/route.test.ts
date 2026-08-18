@@ -103,6 +103,7 @@ const PLAN_EVENT = {
 
 const PLAN_RUN = {
   runId: "run-plan-orphan",
+  traceId: "original-run-trace",
   tenantId: "tenant-1",
   userId: "user-1",
   sessionId: "chat-session-1",
@@ -258,6 +259,10 @@ describe("POST /api/chat/deep-research/resume", () => {
         expect.objectContaining({ model: "model" }),
         expect.objectContaining({
           runId: PLAN_RUN.runId,
+          traceId: PLAN_RUN.traceId,
+          headers: expect.objectContaining({
+            "x-agenticx-trace-id": PLAN_RUN.traceId,
+          }),
           continueFromPlanGate: expect.objectContaining({
             planEventEmitted: true,
             planVersion: 1,

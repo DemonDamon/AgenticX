@@ -364,7 +364,7 @@ export async function POST(request: Request) {
     model: body.model,
     session,
     accessToken,
-    traceId: logCtx.traceId,
+    traceId: run.traceId?.trim() || logCtx.traceId,
   });
   }, request);
 }

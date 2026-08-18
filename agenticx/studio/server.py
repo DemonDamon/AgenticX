@@ -19,6 +19,7 @@ import smtplib
 import subprocess
 import tempfile
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -65,12 +66,16 @@ from agenticx.cli.studio_mcp import (
     set_mcp_skip_default_names_config,
 )
 from agenticx.llms.provider_resolver import ProviderResolver, effective_session_llm_names
+from agenticx.llms.request_context import (
+    normalize_llm_turn_id,
+    reset_current_llm_turn_id,
+    set_current_llm_turn_id,
+)
 from agenticx.llms.sampling_params import provider_raw_enabled_for_fallback
 from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AutoSuspendClarifyGate
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
 from agenticx.runtime.loop_controller import LoopController
-from agenticx.runtime.token_budget import session_token_budget_preflight
 from agenticx.cli.agent_tools import (
     META_TOOL_NAMES,
     STUDIO_TOOLS,
@@ -148,6 +153,53 @@ _ERR_STALE_MCP = (
     "会话标记为已连接，但当前未注册任何 MCP 工具；子进程可能已退出或握手不完整。"
     "请先关闭开关再重新打开以重连。"
 )
+
+
+def _resolve_request_turn_id(value: Any) -> str:
+    """Use a valid caller id or generate one request-local fallback."""
+    return normalize_llm_turn_id(value) or str(uuid.uuid4())
+
+
+def _resolve_continuation_turn_id(session: Any) -> str:
+    """Keep a continuation on the latest real user task identity."""
+    history = getattr(session, "chat_history", None)
+    if isinstance(history, list):
+        from agenticx.studio.continuation import is_continuation_user_prompt
+
+        for row in reversed(history):
+            if not isinstance(row, dict) or str(row.get("role", "")).lower() != "user":
+                continue
+            content = row.get("content", "")
+            if isinstance(content, list):
+                text = " ".join(
+                    str(block.get("text", ""))
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                ).strip()
+            else:
+                text = str(content or "").strip()
+            if text and is_continuation_user_prompt(text):
+                continue
+            metadata = row.get("metadata")
+            value = metadata.get("client_turn_id") if isinstance(metadata, dict) else None
+            # The latest real user turn owns the continuation. If its older
+            # persisted row has no usable id, generate one instead of borrowing
+            # an unrelated identity from an earlier turn.
+            return _resolve_request_turn_id(value)
+    return _resolve_request_turn_id(None)
+
+
+async def _stream_with_llm_turn_context(
+    stream: AsyncGenerator[str, None],
+    turn_id: str,
+) -> AsyncGenerator[str, None]:
+    """Bind one stable task id for a producer and every task it spawns."""
+    context_token = set_current_llm_turn_id(turn_id)
+    try:
+        async for line in stream:
+            yield line
+    finally:
+        reset_current_llm_turn_id(context_token)
 
 
 def _mcp_tool_counts_for_session(studio_session: Any) -> dict[str, int]:
@@ -360,29 +412,6 @@ def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
         tu = SseEvent(type="token_usage", data=usage_meta)
         lines.append(f"data: {json.dumps(tu.model_dump(), ensure_ascii=False)}\n\n")
     return lines
-
-
-def _token_budget_preflight_response(session: Any) -> StreamingResponse | None:
-    """Build an early SSE terminal response before a blocked route mutates session state."""
-    payload = session_token_budget_preflight(getattr(session, "scratchpad", None))
-    if payload is None:
-        return None
-
-    async def _blocked_stream() -> AsyncGenerator[str, None]:
-        event = RuntimeEvent(
-            type=EventType.ERROR.value,
-            data=payload,
-            agent_id="meta",
-        )
-        for line in _runtime_event_to_sse_lines(event):
-            yield line
-        yield 'data: {"type":"done","data":{}}\n\n'
-
-    return StreamingResponse(
-        _blocked_stream(),
-        media_type="text/event-stream",
-        headers=_STREAMING_SSE_HEADERS,
-    )
 
 
 def _buffered_event_to_sse_lines(buffered: BufferedEvent) -> list[str]:
@@ -1018,12 +1047,14 @@ def create_studio_app() -> FastAPI:
             if not ok:
                 return False
             await manager.persist_async(sid)
+            continuation_turn_id = _resolve_continuation_turn_id(managed.studio_session)
             chat_payload = ChatRequest(
                 session_id=sid,
                 user_input=prompt,
                 skip_user_history=True,
                 provider=managed.studio_session.provider_name,
                 model=managed.studio_session.model_name,
+                client_turn_id=continuation_turn_id,
             )
 
             class _SupervisorRequest:
@@ -2527,15 +2558,12 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(payload.session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
-        token_budget_block = _token_budget_preflight_response(managed.studio_session)
-        if token_budget_block is not None:
-            return token_budget_block
         manager.align_meta_session_workspace(managed)
         # Idempotency guard: dedupe a duplicate POST (double-click / chip burst /
         # retry race) so the backend never persists a second identical user turn.
         # Keyed by client_turn_id on the managed session (bounded recent set).
-        _ctid = str(getattr(payload, "client_turn_id", "") or "").strip()
-        if _ctid:
+        _ctid = normalize_llm_turn_id(getattr(payload, "client_turn_id", None))
+        if _ctid and not bool(getattr(payload, "skip_user_history", False)):
             _seen = getattr(managed, "_recent_client_turn_ids", None)
             if _seen is None:
                 from collections import deque
@@ -2548,6 +2576,8 @@ def create_studio_app() -> FastAPI:
 
                 return StreamingResponse(_dup_noop_stream(), media_type="text/event-stream")
             _seen.append(_ctid)
+        request_turn_id = _resolve_request_turn_id(_ctid)
+
         setattr(managed.studio_session, "taskspaces", list(managed.taskspaces or []))
         active_ts = str(payload.active_taskspace_id or "").strip() or None
         setattr(managed.studio_session, "active_taskspace_id", active_ts)
@@ -2868,7 +2898,10 @@ def create_studio_app() -> FastAPI:
                     team_manager.event_emitter = prev_emitter
 
                 yield 'data: {"type":"done","data":{}}\n\n'
-            return StreamingResponse(_subagent_message_stream(), media_type="text/event-stream")
+            return StreamingResponse(
+                _stream_with_llm_turn_context(_subagent_message_stream(), request_turn_id),
+                media_type="text/event-stream",
+            )
 
         requested_group_id = str(payload.group_id or "").strip()
         group_payload = _meta_group_chat_payload(
@@ -3131,7 +3164,7 @@ def create_studio_app() -> FastAPI:
                             await group_runtime_task
 
             return StreamingResponse(
-                _group_chat_stream(),
+                _stream_with_llm_turn_context(_group_chat_stream(), request_turn_id),
                 media_type="text/event-stream",
                 headers=_STREAMING_SSE_HEADERS,
             )
@@ -3566,9 +3599,7 @@ def create_studio_app() -> FastAPI:
                             system_prompt=sys_prompt,
                             user_message_content=user_message_content,
                             history_user_attachments=history_user_attachments,
-                            history_user_metadata=(
-                                {"client_turn_id": _ctid} if _ctid else None
-                            ),
+                            history_user_metadata={"client_turn_id": request_turn_id},
                             history_user_content=(
                                 user_display_content or str(payload.user_input or "")
                                 if quoted_content
@@ -3822,7 +3853,7 @@ def create_studio_app() -> FastAPI:
                 yield 'data: {"type":"done","data":{}}\n\n'
 
         return StreamingResponse(
-            _event_stream(),
+            _stream_with_llm_turn_context(_event_stream(), request_turn_id),
             media_type="text/event-stream",
             headers=_STREAMING_SSE_HEADERS,
         )
@@ -3841,10 +3872,6 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(sid, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
-        token_budget_block = _token_budget_preflight_response(managed.studio_session)
-        if token_budget_block is not None:
-            return token_budget_block
-
         reason = str(payload.reason or "manual").strip().lower()
         if reason not in {"stall", "interrupted", "exhausted", "rate_limit", "manual"}:
             reason = "manual"
@@ -3914,6 +3941,7 @@ def create_studio_app() -> FastAPI:
                 )
 
             await manager.persist_async(sid)
+            continuation_turn_id = _resolve_continuation_turn_id(managed.studio_session)
         except Exception:
             continuation_lock.release()
             raise
@@ -3938,6 +3966,7 @@ def create_studio_app() -> FastAPI:
                     provider=managed.studio_session.provider_name,
                     model=managed.studio_session.model_name,
                     keep_runtime_after_disconnect=True,
+                    client_turn_id=continuation_turn_id,
                 )
                 inner = await chat(chat_payload, request, x_agx_desktop_token)
                 if inner.body_iterator is not None:
@@ -4072,9 +4101,6 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
-        token_budget_block = _token_budget_preflight_response(managed.studio_session)
-        if token_budget_block is not None:
-            return token_budget_block
         setattr(managed.studio_session, "taskspaces", list(managed.taskspaces or []))
         manager.touch(session_id)
         try:
@@ -4082,6 +4108,7 @@ def create_studio_app() -> FastAPI:
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="max_iterations must be an integer")
         completion_promise = str(payload.get("completion_promise", "") or "").strip()
+        request_turn_id = _resolve_request_turn_id(payload.get("client_turn_id"))
 
         session = managed.studio_session
         setattr(session, "_session_id", session_id)
@@ -4157,6 +4184,7 @@ def create_studio_app() -> FastAPI:
                     agent_id="meta",
                     tools=loop_tools,
                     system_prompt=loop_sys_prompt,
+                    history_user_metadata={"client_turn_id": request_turn_id},
                 ):
                     if await request.is_disconnected():
                         break
@@ -4176,7 +4204,10 @@ def create_studio_app() -> FastAPI:
                 await manager.persist_async(session_id)
             yield 'data: {"type":"done","data":{}}\n\n'
 
-        return StreamingResponse(_loop_stream(), media_type="text/event-stream")
+        return StreamingResponse(
+            _stream_with_llm_turn_context(_loop_stream(), request_turn_id),
+            media_type="text/event-stream",
+        )
 
     @app.post("/api/subagent/cancel")
     async def cancel_subagent(

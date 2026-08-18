@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, List
 
+from agenticx.llms.request_context import current_llm_turn_id
+
 
 @dataclass
 class GroupMessage:
@@ -56,17 +58,19 @@ class GroupChatContext:
         quoted_content: str = "",
     ) -> None:
         label = str(sender_name or "").strip() or "我"
-        self._history().append(
-            {
-                "role": "user",
-                "content": str(text or ""),
-                "sender_id": "user",
-                "sender_name": label,
-                "agent_id": "user",
-                "quoted_message_id": str(quoted_message_id or ""),
-                "quoted_content": str(quoted_content or ""),
-            }
-        )
+        row: dict[str, Any] = {
+            "role": "user",
+            "content": str(text or ""),
+            "sender_id": "user",
+            "sender_name": label,
+            "agent_id": "user",
+            "quoted_message_id": str(quoted_message_id or ""),
+            "quoted_content": str(quoted_content or ""),
+        }
+        turn_id = current_llm_turn_id().strip()
+        if turn_id:
+            row["metadata"] = {"client_turn_id": turn_id}
+        self._history().append(row)
 
     def append_agent(self, *, agent_id: str, agent_name: str, text: str, avatar_url: str = "") -> None:
         self._history().append(
@@ -181,4 +185,3 @@ class GroupChatContext:
             avatar_role = str(item.get("role", "") or "").strip() or "General Assistant"
             lines.append(f"- {avatar_name}({avatar_id}): {avatar_role}")
         return "\n".join(lines)
-

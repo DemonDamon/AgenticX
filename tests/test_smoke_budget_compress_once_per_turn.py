@@ -19,8 +19,10 @@ async def test_budget_compress_latches_after_first_attempt() -> None:
     """Second COMPRESS check in the same turn must not re-call maybe_compact or re-warn."""
     runtime = AgentRuntime(llm=MagicMock(), confirm_gate=MagicMock())
     runtime.token_budget = TokenBudgetGuard(max_tokens_per_session=1000, max_tokens_per_turn=500)
-    runtime.token_budget.cumulative_input = 960
-    runtime.token_budget.cumulative_output = 0
+    # Session thresholds are notice-only. This exercises the independent
+    # per-turn safety compaction path.
+    runtime.token_budget.turn_input = 480
+    runtime.token_budget.turn_output = 0
 
     compact_mock = AsyncMock(
         return_value=(
@@ -37,7 +39,7 @@ async def test_budget_compress_latches_after_first_attempt() -> None:
     runtime._forced_budget_compact_this_turn = False
     runtime._budget_compress_notice_sent_this_turn = False
 
-    level1, _, _, _ = runtime.token_budget.check_with_source()
+    level1 = runtime.token_budget.check_turn()
     assert level1 == BudgetLevel.COMPRESS
 
     if level1 == BudgetLevel.COMPRESS and not runtime._forced_budget_compact_this_turn:
@@ -49,7 +51,7 @@ async def test_budget_compress_latches_after_first_attempt() -> None:
 
     assert compact_mock.await_count == 1
 
-    level2, _, _, _ = runtime.token_budget.check_with_source()
+    level2 = runtime.token_budget.check_turn()
     assert level2 == BudgetLevel.COMPRESS
 
     if level2 == BudgetLevel.COMPRESS and not runtime._forced_budget_compact_this_turn:

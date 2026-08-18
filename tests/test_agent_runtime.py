@@ -94,6 +94,19 @@ class _RateLimitLLM:
         yield ""
 
 
+class _EnterpriseQuotaLLM:
+    def invoke(self, *_args, **_kwargs):
+        raise RuntimeError(
+            'RateLimitError: {"error":{"kind":"token_week",'
+            '"message":"本周 Token 额度已用尽；新任务请在额度重置后再试。",'
+            '"period":"2026-W34","resetAt":"2026-08-24T00:00:00Z",'
+            '"used":120,"limit":100}}'
+        )
+
+    def stream(self, *_args, **_kwargs):
+        yield ""
+
+
 class _CaptureMessagesLLM:
     def __init__(self) -> None:
         self.messages: List[Dict[str, Any]] = []
@@ -304,6 +317,44 @@ def test_runtime_rate_limit_pauses_subagent(monkeypatch) -> None:
     assert events[-1]["agent_id"] == "worker-1"
     assert events[-1]["data"]["detector"] == "rate_limit"
     assert events[-1]["data"]["retryable"] is True
+
+
+def test_runtime_surfaces_typed_enterprise_quota_to_meta(monkeypatch) -> None:
+    monkeypatch.setenv("AGX_LLM_RETRY_RATE_LIMIT", "0")
+    runtime = AgentRuntime(_EnterpriseQuotaLLM(), _ApproveGate())
+
+    events = __import__("asyncio").run(_collect(runtime, StudioSession(), "new task"))
+
+    event = events[-1]
+    assert event["type"] == EventType.ERROR.value
+    assert event["data"]["detector"] == "enterprise_quota"
+    assert event["data"]["retryable"] is False
+    assert event["data"]["quota_kind"] == "token_week"
+    assert event["data"]["quota_period"] == "2026-W34"
+    assert event["data"]["quota_reset_at"] == "2026-08-24T00:00:00Z"
+    assert event["data"]["text"].startswith("本周 Token 额度已用尽")
+
+
+def test_runtime_pauses_subagent_with_typed_enterprise_quota(monkeypatch) -> None:
+    monkeypatch.setenv("AGX_LLM_RETRY_RATE_LIMIT", "0")
+    runtime = AgentRuntime(_EnterpriseQuotaLLM(), _ApproveGate())
+
+    async def _collect_worker() -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        async for event in runtime.run_turn(
+            "new task", StudioSession(), agent_id="worker-1"
+        ):
+            items.append(
+                {"type": event.type, "data": event.data, "agent_id": event.agent_id}
+            )
+        return items
+
+    events = __import__("asyncio").run(_collect_worker())
+    event = events[-1]
+    assert event["type"] == EventType.SUBAGENT_PAUSED.value
+    assert event["data"]["detector"] == "enterprise_quota"
+    assert event["data"]["retryable"] is False
+    assert event["data"]["quota_kind"] == "token_week"
 
 
 def test_runtime_minimax_does_not_send_non_initial_system_messages() -> None:

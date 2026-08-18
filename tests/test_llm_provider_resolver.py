@@ -305,6 +305,7 @@ def test_enterprise_managed_composite_model_outbound_body_keeps_provider_slash(
 
         provider = ProviderResolver.resolve()
         assert isinstance(provider, LiteLLMProvider)
+        assert provider.forward_turn_id_header is True
         assert provider.model == "openai/provider-a/model-a"
         provider.invoke("hello")
 
@@ -316,6 +317,44 @@ def test_enterprise_managed_composite_model_outbound_body_keeps_provider_slash(
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_resolver_does_not_enable_task_id_for_self_managed_openai_provider(
+    tmp_path: Path, monkeypatch
+):
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "custom_openai_private", scope="global")
+    ConfigManager.set_value("providers.custom_openai_private.api_key", "k", scope="global")
+    ConfigManager.set_value("providers.custom_openai_private.model", "model-a", scope="global")
+    ConfigManager.set_value(
+        "providers.custom_openai_private.base_url",
+        "https://self-managed.example/v1",
+        scope="global",
+    )
+    ConfigManager.set_value("providers.custom_openai_private.interface", "openai", scope="global")
+    # A custom provider cannot opt into the private enterprise header merely by
+    # reusing the generic `managed` spelling.
+    ConfigManager.set_value("providers.custom_openai_private.managed", True, scope="global")
+
+    provider = ProviderResolver.resolve()
+
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.forward_turn_id_header is False
+
+
+def test_resolver_requires_enterprise_provider_to_be_managed(tmp_path: Path, monkeypatch):
+    _setup_paths(tmp_path, monkeypatch)
+    ConfigManager.set_value("default_provider", "enterprise", scope="global")
+    ConfigManager.set_value("providers.enterprise.api_key", "k", scope="global")
+    ConfigManager.set_value("providers.enterprise.model", "model-a", scope="global")
+    ConfigManager.set_value("providers.enterprise.base_url", "https://gateway.example/v1", scope="global")
+    ConfigManager.set_value("providers.enterprise.interface", "openai", scope="global")
+    ConfigManager.set_value("providers.enterprise.managed", False, scope="global")
+
+    provider = ProviderResolver.resolve()
+
+    assert isinstance(provider, LiteLLMProvider)
+    assert provider.forward_turn_id_header is False
 
 
 def test_resolver_uses_deepseek_default_base_url(tmp_path: Path, monkeypatch):

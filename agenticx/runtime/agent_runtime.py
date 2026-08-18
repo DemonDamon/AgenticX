@@ -67,7 +67,6 @@ from agenticx.runtime.token_budget import (
     BudgetLevel,
     TOKEN_BUDGET_SCRATCHPAD_KEY,
     TokenBudgetGuard,
-    session_token_budget_preflight,
 )
 from agenticx.runtime.truncated_final import (
     detect_suspected_truncated_final,
@@ -85,6 +84,7 @@ from agenticx.runtime.followup_stream import (
 )
 from agenticx.llms.provider_fault import (
     classify_provider_fault,
+    enterprise_token_quota_error,
     human_hint_for_fault,
     is_model_param_compat_error,
     record_session_provider_hard_failure,
@@ -2645,7 +2645,6 @@ class AgentRuntime:
         self._forced_budget_compact_this_turn = False
         self._proactive_compact_this_turn = False
         self._budget_compress_notice_sent_this_turn = False
-        self._session_budget_crossed_notice_sent_this_turn = False
         self._mid_turn_persist = mid_turn_persist
         self._persist_interval_sec = _resolve_mid_turn_persist_interval()
         self._persist_tool_count = _resolve_mid_turn_persist_tool_count()
@@ -2726,15 +2725,7 @@ class AgentRuntime:
             setattr(session, "scratchpad", scratchpad)
         scratchpad[TOKEN_BUDGET_SCRATCHPAD_KEY] = {
             "version": 1,
-            "cumulative_input": self.token_budget.cumulative_input,
-            "cumulative_output": self.token_budget.cumulative_output,
-            "warning_emitted": self.token_budget.warning_emitted,
-            "warning_emitted_at": (
-                self.token_budget.warning_session
-                if self.token_budget.warning_emitted
-                else 0
-            ),
-            "warning_tokens_per_session": self.token_budget.warning_session,
+            **self.token_budget.to_metadata(),
         }
 
     def _maybe_mid_turn_persist(self) -> None:
@@ -2941,19 +2932,7 @@ class AgentRuntime:
         self._forced_budget_compact_this_turn = False
         self._proactive_compact_this_turn = False
         self._budget_compress_notice_sent_this_turn = False
-        self._session_budget_crossed_notice_sent_this_turn = False
         self._pending_loop_nudge = None
-        token_budget_preflight = session_token_budget_preflight(
-            getattr(session, "scratchpad", None),
-            max_tokens_per_session=self.token_budget.max_session,
-        )
-        if token_budget_preflight is not None:
-            yield RuntimeEvent(
-                type=EventType.ERROR.value,
-                data=token_budget_preflight,
-                agent_id=agent_id,
-            )
-            return
         setattr(session, "_context_chain_repair_attempted", False)
         self._last_persist_time = time.time()
         self._tools_since_persist = 0
@@ -4172,15 +4151,24 @@ class AgentRuntime:
                             logger.debug("usage persist skipped: %s", exc)
 
                     asyncio.create_task(_persist_usage_row())
-                session_budget_level = self.token_budget.check_session()
                 turn_budget_level = self.token_budget.check_turn()
-                warning_started_now = (
+                red_started_now = (
                     self.token_budget.cumulative_total
-                    >= self.token_budget.warning_session
-                    and not self.token_budget.warning_emitted
+                    >= self.token_budget.red_session
+                    and not self.token_budget.red_emitted
                 )
-                if warning_started_now:
-                    self.token_budget.warning_emitted = True
+                yellow_started_now = (
+                    self.token_budget.cumulative_total
+                    >= self.token_budget.yellow_session
+                    and not self.token_budget.yellow_emitted
+                )
+                if red_started_now:
+                    # A direct jump across both thresholds produces one red notice,
+                    # never a yellow+red burst in the same model round.
+                    self.token_budget.red_emitted = True
+                    self.token_budget.yellow_emitted = True
+                elif yellow_started_now:
+                    self.token_budget.yellow_emitted = True
                 self._store_token_budget_usage(session)
 
                 # The optional per-turn hard limit retains its original semantics.
@@ -4210,77 +4198,66 @@ class AgentRuntime:
                     self._persist_final_checkpoint()
                     return
 
-                # A paid model response may carry the cumulative session over its
-                # hard cap. Do not discard that result: warn once, request convergence,
-                # and let this run reach its normal FINAL/persistence path. The next
-                # run_turn preflight will reject before touching user history or LLMs.
-                if (
-                    session_budget_level == BudgetLevel.EXCEEDED
-                    and not self._session_budget_crossed_notice_sent_this_turn
-                ):
-                    self._session_budget_crossed_notice_sent_this_turn = True
-                    messages.append(
-                        {"role": "user", "content": self.token_budget.convergence_hint()}
-                    )
+                # Session thresholds are informational only.  They never inject a
+                # convergence instruction, compact context, or block a later turn.
+                if red_started_now:
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
                         data={
                             "text": (
-                                "本轮已达到会话 Token 上限，将先完成当前结果；"
-                                "下一轮开始前会停止并提示新建会话或提高上限。"
+                                "本会话累计 Token 已达到红色提醒线 "
+                                f"{self.token_budget.red_session:,}。当前及后续任务仍会继续，"
+                                "不会因单会话用量提醒而中断。"
                             ),
                             "severity": "warning",
                             "detector": "token_budget_session_reached",
+                            "warning_level": "red",
                             "budget_source": "session",
                             "current": self.token_budget.cumulative_total,
-                            "max_allowed": self.token_budget.max_session,
-                            "block_next_turn": True,
+                            "red_at": self.token_budget.red_session,
+                            "max_allowed": self.token_budget.red_session,
+                            "blocking": False,
                         },
                         agent_id=agent_id,
                     )
-                elif warning_started_now:
-                    messages.append(
-                        {"role": "user", "content": self.token_budget.convergence_hint()}
-                    )
+                elif yellow_started_now:
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
                         data={
                             "text": (
-                                "本会话累计 Token 已达到 "
-                                f"{self.token_budget.warning_session:,}。当前任务会继续，"
-                                "建议在完成后新建会话以保持稳定。"
+                                "本会话累计 Token 已达到黄色提醒线 "
+                                f"{self.token_budget.yellow_session:,}。任务会继续执行；"
+                                "可在任务完成后按需新建会话。"
                             ),
                             "severity": "warning",
                             "detector": "token_budget_warning",
+                            "warning_level": "yellow",
                             "budget_source": "session",
                             "current": self.token_budget.cumulative_total,
-                            "warning_at": self.token_budget.warning_session,
-                            "max_allowed": self.token_budget.max_session,
+                            "yellow_at": self.token_budget.yellow_session,
+                            "warning_at": self.token_budget.yellow_session,
+                            "red_at": self.token_budget.red_session,
+                            "max_allowed": self.token_budget.red_session,
+                            "blocking": False,
                         },
                         agent_id=agent_id,
                     )
 
-                if session_budget_level == BudgetLevel.EXCEEDED:
-                    budget_level = turn_budget_level
-                    budget_source = "turn"
-                    budget_current = self.token_budget.turn_total
-                    budget_max = self.token_budget.max_turn
-                else:
-                    budget_level, budget_source, budget_current, budget_max = (
-                        self.token_budget.check_with_source()
-                    )
+                # Only the per-turn safety budget participates in compaction and
+                # optional enforcement.  Cumulative session notices do not.
+                budget_level = turn_budget_level
+                budget_source = "turn"
+                budget_current = self.token_budget.turn_total
+                budget_max = self.token_budget.max_turn
                 if budget_level == BudgetLevel.COMPRESS:
                     did_react = False
                     react_summary = ""
                     react_count = 0
-                    # Session-level token budget counts cumulative LLM usage; compacting
-                    # chat history cannot reduce it. Only attempt forced compaction for
-                    # per-turn budget pressure, and never twice in one turn (proactive
-                    # compaction already ran at turn start).
+                    # Never compact twice in one turn (proactive compaction may have
+                    # already run at turn start).
                     should_force_reactive_compact = (
                         not self._forced_budget_compact_this_turn
                         and not self._proactive_compact_this_turn
-                        and budget_source == "turn"
                     )
                     if should_force_reactive_compact:
                         self._forced_budget_compact_this_turn = True
@@ -4309,15 +4286,9 @@ class AgentRuntime:
                                     await self.hooks.run_on_compaction(react_count, react_summary, session)
                                 except Exception:
                                     pass
-                    if session_budget_level == BudgetLevel.EXCEEDED:
-                        budget_level = self.token_budget.check_turn()
-                        budget_source = "turn"
-                        budget_current = self.token_budget.turn_total
-                        budget_max = self.token_budget.max_turn
-                    else:
-                        budget_level, budget_source, budget_current, budget_max = (
-                            self.token_budget.check_with_source()
-                        )
+                    budget_level = self.token_budget.check_turn()
+                    budget_current = self.token_budget.turn_total
+                    budget_max = self.token_budget.max_turn
                     if (
                         budget_level == BudgetLevel.COMPRESS
                         and not self._budget_compress_notice_sent_this_turn
@@ -4334,12 +4305,7 @@ class AgentRuntime:
                         )
                         # FR-4: one concise notice — skip separate reactive compaction event when
                         # budget is still over limit (Desktop would otherwise show two long lines).
-                        if budget_source == "session":
-                            compress_notice = (
-                                f"本会话 Token 预算已接近上限（{budget_current}/{budget_max}），"
-                                "建议收口交付或新建会话续接。"
-                            )
-                        elif did_react:
+                        if did_react:
                             compress_notice = (
                                 f"本回合上下文接近上限，已压缩 {react_count} 条历史但仍偏紧，"
                                 "建议收口或新建会话。"
@@ -4402,11 +4368,10 @@ class AgentRuntime:
                     elif cf_count == 0 and cf_state:
                         # Reset latch when compactor recovers.
                         self._compactor_failure_warned = False
-                if budget_level == BudgetLevel.WARNING and (
-                    budget_source == "turn"
-                    or (turn_budget_level == BudgetLevel.WARNING and not warning_started_now)
-                ):
-                    messages.append({"role": "user", "content": self.token_budget.convergence_hint()})
+                if budget_level == BudgetLevel.WARNING:
+                    messages.append(
+                        {"role": "user", "content": self.token_budget.turn_convergence_hint()}
+                    )
             except asyncio.TimeoutError:
                 round_timeout = _resolve_llm_round_timeout_seconds(session)
                 retries = _llm_timeout_retry_count(session)
@@ -4545,6 +4510,9 @@ class AgentRuntime:
                 return
             except Exception as exc:
                 fault = classify_provider_fault(exc)
+                quota_error = enterprise_token_quota_error(exc)
+                if quota_error:
+                    fault = "rate_limit"
                 record_session_provider_hard_failure(
                     session,
                     provider_name,
@@ -4590,20 +4558,33 @@ class AgentRuntime:
                     )
                     continue
                 if fault == "rate_limit" and agent_id != "meta":
-                    pause_text = (
-                        f"模型供应商触发限流（provider={provider_name or '(unknown)'}, "
-                        f"model={model_name or '(unknown)'}）。任务已暂停，可等待限流窗口恢复后继续。"
-                    )
+                    pause_text = str(quota_error.get("message") or "").strip() if quota_error else ""
+                    if not pause_text:
+                        pause_text = (
+                            f"模型供应商触发限流（provider={provider_name or '(unknown)'}, "
+                            f"model={model_name or '(unknown)'}）。任务已暂停，可等待限流窗口恢复后继续。"
+                        )
+                    pause_data = {
+                        "agent_id": agent_id,
+                        "round": round_idx,
+                        "max_rounds": self.max_tool_rounds,
+                        "text": pause_text,
+                        "detector": "enterprise_quota" if quota_error else "rate_limit",
+                        "retryable": not bool(quota_error),
+                    }
+                    if quota_error:
+                        pause_data.update(
+                            {
+                                "quota_kind": quota_error.get("kind"),
+                                "quota_period": quota_error.get("period"),
+                                "quota_reset_at": quota_error.get("reset_at"),
+                                "current": quota_error.get("used"),
+                                "max_allowed": quota_error.get("limit"),
+                            }
+                        )
                     yield RuntimeEvent(
                         type=EventType.SUBAGENT_PAUSED.value,
-                        data={
-                            "agent_id": agent_id,
-                            "round": round_idx,
-                            "max_rounds": self.max_tool_rounds,
-                            "text": pause_text,
-                            "detector": "rate_limit",
-                            "retryable": True,
-                        },
+                        data=pause_data,
                         agent_id=agent_id,
                     )
                     return
@@ -4736,7 +4717,11 @@ class AgentRuntime:
                             agent_id=agent_id,
                         )
                         continue
-                if fault in {"billing", "auth", "rate_limit", "context_window", "transient"}:
+                if quota_error:
+                    err_text = str(quota_error.get("message") or "").strip()
+                    if not err_text:
+                        err_text = "当前企业 Token 额度已用尽，请在额度重置后再试。"
+                elif fault in {"billing", "auth", "rate_limit", "context_window", "transient"}:
                     err_text = human_hint_for_fault(fault)
                 else:
                     _prov = str(provider_name or "").strip() or "?"
@@ -4763,14 +4748,25 @@ class AgentRuntime:
                             agent_id=agent_id,
                         )
                         continue
+                error_data = {
+                    "text": err_text,
+                    "detector": "enterprise_quota" if quota_error else fault,
+                    "retryable": False if quota_error else fault in {"rate_limit", "transient"},
+                    "severity": "warning" if fault in {"rate_limit", "context_window"} else "error",
+                }
+                if quota_error:
+                    error_data.update(
+                        {
+                            "quota_kind": quota_error.get("kind"),
+                            "quota_period": quota_error.get("period"),
+                            "quota_reset_at": quota_error.get("reset_at"),
+                            "current": quota_error.get("used"),
+                            "max_allowed": quota_error.get("limit"),
+                        }
+                    )
                 yield RuntimeEvent(
                     type=EventType.ERROR.value,
-                    data={
-                        "text": err_text,
-                        "detector": fault,
-                        "retryable": fault in {"rate_limit", "transient"},
-                        "severity": "warning" if fault in {"rate_limit", "context_window"} else "error",
-                    },
+                    data=error_data,
                     agent_id=agent_id,
                 )
                 return
