@@ -338,6 +338,17 @@ import {
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "../utils/backend-scope";
 import {
+  COMPOSER_DRAFT_SAVE_DEBOUNCE_MS,
+  composerDraftIdentity,
+  deleteComposerDraft,
+  loadComposerDraft,
+  migrateComposerDraft,
+  saveComposerDraft,
+  type ComposerDraft,
+  type ComposerDraftAttachment,
+  type ComposerDraftRefMeta,
+} from "../utils/composer-draft-storage";
+import {
   GLOBAL_SEARCH_REFERENCE_FILE,
   GLOBAL_SEARCH_WORKSPACE_ADDED,
   type GlobalSearchReferenceFileDetail,
@@ -3103,6 +3114,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, []);
   const clearQuoteTargets = useCallback(() => {
     pendingCaretQuoteIdRef.current = null;
+    quoteTargetsRef.current = [];
     setQuoteTargets([]);
   }, []);
   useEffect(() => {
@@ -3126,7 +3138,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const shareBtnRef = useRef<HTMLButtonElement | null>(null);
   const shareMenuRef = useRef<HTMLDivElement | null>(null);
   const [pendingForwardMessages, setPendingForwardMessages] = useState<ForwardPendingMessage[]>([]);
-  const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
+  const contextFilesRef = useRef<Record<string, AttachedFile>>({});
+  const [contextFiles, setContextFilesState] = useState<Record<string, AttachedFile>>({});
+  const setContextFiles = useCallback(
+    (
+      next:
+        | Record<string, AttachedFile>
+        | ((previous: Record<string, AttachedFile>) => Record<string, AttachedFile>),
+    ) => {
+      const resolved =
+        typeof next === "function" ? next(contextFilesRef.current) : next;
+      contextFilesRef.current = resolved;
+      setContextFilesState(resolved);
+    },
+    [],
+  );
   const [attachToastOpen, setAttachToastOpen] = useState(false);
   const [attachToastMessage, setAttachToastMessage] = useState(VISION_UNSUPPORTED_TOAST);
   const [visionFallback, setVisionFallback] = useState<VisionFallbackInfo>({ available: false });
@@ -3169,6 +3195,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
     >
   >({});
+  const activeDraftIdentityRef = useRef(
+    composerDraftIdentity({
+      paneId: pane.id,
+      avatarId: pane.avatarId,
+      sessionId: pane.sessionId,
+    }),
+  );
+  const hydratedDraftIdentityRef = useRef("");
+  const draftSaveTimerRef = useRef<number | null>(null);
+  const draftHydratingRef = useRef(false);
+  const composerDraftTextRef = useRef("");
+  const scheduleComposerDraftSaveRef = useRef<() => void>(() => {});
+  const flushComposerDraftNowRef = useRef<(identity?: string) => void>(() => {});
   const composerRefTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const composerRefTipTargetRef = useRef<HTMLElement | null>(null);
   const [composerRefTip, setComposerRefTip] = useState<{ path: string; x: number; y: number } | null>(null);
@@ -4712,6 +4751,110 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return normalizeComposerQuotePlaceholdersToIndices(raw, orderedIds);
   }, [extractComposerText]);
 
+  const collectComposerDraft = useCallback((): Omit<ComposerDraft, "updatedAt"> => {
+    const text = composerRef.current
+      ? extractComposerText()
+      : composerDraftTextRef.current;
+    composerDraftTextRef.current = text;
+    const attachments: ComposerDraftAttachment[] = Object.entries(contextFilesRef.current)
+      .filter(([, file]) => file.status === "ready")
+      .map(([key, file]) => ({
+        key,
+        name: file.name,
+        size: file.size,
+        mimeType: file.mimeType,
+        status: "ready" as const,
+        content: file.content,
+        ...(file.dataUrl ? { dataUrl: file.dataUrl } : {}),
+        ...(file.sourcePath ? { sourcePath: file.sourcePath } : {}),
+        ...(file.referenceToken ? { referenceToken: true } : {}),
+        ...(file.composerRefLabel ? { composerRefLabel: file.composerRefLabel } : {}),
+        ...(file.lineRange ? { lineRange: file.lineRange } : {}),
+        ...(file.spreadsheetRef ? { spreadsheetRef: file.spreadsheetRef } : {}),
+        ...(file.snippetRef ? { snippetRef: file.snippetRef } : {}),
+        ...(file.snippetContent ? { snippetContent: file.snippetContent } : {}),
+        ...(file.htmlElementRef ? { htmlElementRef: file.htmlElementRef } : {}),
+      }));
+    return {
+      text,
+      attachments,
+      quotes: quoteTargetsRef.current
+        .filter((target) => text.includes(composerQuotePlaceholder(target.id)))
+        .map((target) => ({
+          id: target.id,
+          body: target.body,
+          message: {
+            id: target.message.id,
+            role: target.message.role,
+            content: target.message.content,
+            ...(target.message.avatarName ? { avatarName: target.message.avatarName } : {}),
+            ...(target.message.avatarUrl ? { avatarUrl: target.message.avatarUrl } : {}),
+            ...(target.message.agentId ? { agentId: target.message.agentId } : {}),
+          },
+        })),
+      refPaths: { ...composerRefPathsRef.current },
+      refMetaOverrides: Object.fromEntries(
+        Object.entries(composerRefMetaOverrideRef.current).map(([key, value]) => [
+          key,
+          { ...value },
+        ]),
+      ),
+    };
+  }, [extractComposerText]);
+
+  const flushComposerDraftNow = useCallback(
+    (identity = activeDraftIdentityRef.current) => {
+      if (!identity || draftHydratingRef.current) return;
+      if (draftSaveTimerRef.current != null) {
+        window.clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
+      saveComposerDraft(identity, collectComposerDraft());
+    },
+    [collectComposerDraft],
+  );
+  flushComposerDraftNowRef.current = flushComposerDraftNow;
+
+  const scheduleComposerDraftSave = useCallback(() => {
+    if (draftHydratingRef.current) return;
+    if (composerRef.current) {
+      composerDraftTextRef.current = extractComposerText();
+    }
+    if (draftSaveTimerRef.current != null) {
+      window.clearTimeout(draftSaveTimerRef.current);
+    }
+    draftSaveTimerRef.current = window.setTimeout(() => {
+      draftSaveTimerRef.current = null;
+      flushComposerDraftNowRef.current();
+    }, COMPOSER_DRAFT_SAVE_DEBOUNCE_MS);
+  }, [extractComposerText]);
+  scheduleComposerDraftSaveRef.current = scheduleComposerDraftSave;
+
+  useEffect(() => {
+    scheduleComposerDraftSaveRef.current();
+  }, [contextFiles, quoteTargets]);
+
+  useEffect(() => {
+    const flushOnVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        flushComposerDraftNowRef.current();
+      }
+    };
+    const flushOnUnload = () => flushComposerDraftNowRef.current();
+    document.addEventListener("visibilitychange", flushOnVisibilityChange);
+    window.addEventListener("beforeunload", flushOnUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", flushOnVisibilityChange);
+      window.removeEventListener("beforeunload", flushOnUnload);
+      if (draftSaveTimerRef.current != null) {
+        window.clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
+      draftHydratingRef.current = false;
+      flushComposerDraftNowRef.current();
+    };
+  }, []);
+
   const focusComposerEnd = useCallback(() => {
     const el = composerRef.current;
     if (!el) return;
@@ -4747,6 +4890,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       focusComposerEnd();
     }
     syncComposerFromValue(extractComposerSendText());
+    scheduleComposerDraftSaveRef.current();
   }, [extractComposerSendText, focusComposerEnd, syncComposerFromValue]);
 
   const saveComposerCaret = useCallback(() => {
@@ -5127,6 +5271,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (!target) return;
     insertQuoteTokenAtCaret(target);
     syncComposerFromValue(extractComposerSendText());
+    scheduleComposerDraftSaveRef.current();
   }, [
     quoteTargets,
     insertQuoteTokenAtCaret,
@@ -5168,7 +5313,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [quoteTargets]);
 
   const setComposerText = useCallback(
-    (value: string, options?: { tokenNames?: string[]; refSourcePaths?: Record<string, string> }) => {
+    (
+      value: string,
+      options?: {
+        tokenNames?: string[];
+        refSourcePaths?: Record<string, string>;
+        focus?: boolean;
+      },
+    ) => {
+      composerDraftTextRef.current = value;
       const el = composerRef.current;
       if (!el) {
         syncComposerFromValue(value);
@@ -5254,7 +5407,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
       const visible = stripComposerQuotePlaceholders(value);
       syncComposerFromValue(visible);
-      focusComposerEnd();
+      if (options?.focus !== false) focusComposerEnd();
+      scheduleComposerDraftSaveRef.current();
     },
     [
       contextFiles,
@@ -5264,6 +5418,230 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       focusComposerEnd,
       syncComposerFromValue,
     ]
+  );
+
+  const restoreComposerDraft = useCallback(
+    (identity: string) => {
+      draftHydratingRef.current = true;
+      try {
+        const restored = loadComposerDraft(identity);
+        const restoredText = restored?.text ?? "";
+        const restoredQuotes: QuoteTarget[] = (restored?.quotes ?? [])
+          .filter((quote) => restoredText.includes(composerQuotePlaceholder(quote.id)))
+          .map((quote) => ({
+            id: quote.id,
+            body: quote.body,
+            message: {
+              id: quote.message.id,
+              role: quote.message.role,
+              content: quote.message.content,
+              avatarName: quote.message.avatarName,
+              avatarUrl: quote.message.avatarUrl,
+              agentId: quote.message.agentId,
+            },
+          }));
+        const restoredContextFiles: Record<string, AttachedFile> = Object.fromEntries(
+          (restored?.attachments ?? []).map((attachment) => [
+            attachment.key,
+            {
+              name: attachment.name,
+              size: attachment.size,
+              mimeType: attachment.mimeType,
+              status: attachment.status,
+              content: attachment.content,
+              dataUrl: attachment.dataUrl,
+              sourcePath: attachment.sourcePath,
+              referenceToken: attachment.referenceToken,
+              composerRefLabel: attachment.composerRefLabel,
+              lineRange: attachment.lineRange,
+              spreadsheetRef: attachment.spreadsheetRef,
+              snippetRef: attachment.snippetRef,
+              snippetContent: attachment.snippetContent,
+              htmlElementRef: attachment.htmlElementRef,
+            },
+          ]),
+        );
+        const restoredRefMeta: Record<string, ComposerDraftRefMeta> = {
+          ...(restored?.refMetaOverrides ?? {}),
+        };
+        for (const attachment of restored?.attachments ?? []) {
+          const label =
+            String(attachment.composerRefLabel || "").trim() ||
+            String(attachment.name || "").trim();
+          if (!label) continue;
+          restoredRefMeta[label] = {
+            ...restoredRefMeta[label],
+            ...(attachment.sourcePath ? { sourcePath: attachment.sourcePath } : {}),
+            ...(attachment.composerRefLabel
+              ? { composerRefLabel: attachment.composerRefLabel }
+              : {}),
+            ...(attachment.htmlElementRef
+              ? { htmlElementRef: attachment.htmlElementRef }
+              : {}),
+          };
+        }
+
+        pendingCaretQuoteIdRef.current = null;
+        quoteTargetsRef.current = restoredQuotes;
+        contextFilesRef.current = restoredContextFiles;
+        composerRefPathsRef.current = { ...(restored?.refPaths ?? {}) };
+        composerRefMetaOverrideRef.current = restoredRefMeta;
+        composerSavedRangeRef.current = null;
+        setQuoteTargets(restoredQuotes);
+        setContextFiles(restoredContextFiles);
+        setComposerText(restoredText, {
+          tokenNames: (restored?.attachments ?? [])
+            .flatMap((attachment) => [
+              attachment.composerRefLabel,
+              attachment.name,
+              attachment.sourcePath,
+            ])
+            .filter((value): value is string => Boolean(value))
+            .concat(
+              Object.keys(restored?.refPaths ?? {}),
+              Object.keys(restored?.refMetaOverrides ?? {}),
+            ),
+          refSourcePaths: restored?.refPaths ?? {},
+          focus: false,
+        });
+        hydratedDraftIdentityRef.current = identity;
+
+        const omitted = restored?.omittedAttachmentNames ?? [];
+        if (omitted.length > 0) {
+          const summary =
+            omitted.length === 1
+              ? `草稿已恢复，附件“${omitted[0]}”需重新添加`
+              : `草稿已恢复，${omitted.length} 个较大附件需重新添加`;
+          setAttachToastMessage(summary);
+          setAttachToastOpen(true);
+        }
+
+        for (const attachment of restored?.attachments ?? []) {
+          if (
+            !attachment.mimeType.startsWith("image/") ||
+            attachment.dataUrl ||
+            !attachment.sourcePath ||
+            typeof window.agenticxDesktop?.loadLocalImageDataUrl !== "function"
+          ) {
+            continue;
+          }
+          void window.agenticxDesktop
+            .loadLocalImageDataUrl(attachment.sourcePath)
+            .then((result) => {
+              if (activeDraftIdentityRef.current !== identity) return;
+              setContextFiles((prev) => {
+                const current = prev[attachment.key];
+                if (!current) return prev;
+                if (result.ok && result.dataUrl) {
+                  return {
+                    ...prev,
+                    [attachment.key]: { ...current, status: "ready", dataUrl: result.dataUrl },
+                  };
+                }
+                return {
+                  ...prev,
+                  [attachment.key]: {
+                    ...current,
+                    status: "error",
+                    errorText: "草稿附件已失效，请重新添加",
+                  },
+                };
+              });
+            })
+            .catch(() => {
+              if (activeDraftIdentityRef.current !== identity) return;
+              setContextFiles((prev) => {
+                const current = prev[attachment.key];
+                if (!current) return prev;
+                return {
+                  ...prev,
+                  [attachment.key]: {
+                    ...current,
+                    status: "error",
+                    errorText: "草稿附件已失效，请重新添加",
+                  },
+                };
+              });
+            });
+        }
+      } finally {
+        draftHydratingRef.current = false;
+      }
+    },
+    [setComposerText],
+  );
+
+  useLayoutEffect(() => {
+    const nextIdentity = composerDraftIdentity({
+      paneId: pane.id,
+      avatarId: pane.avatarId,
+      sessionId: pane.sessionId,
+    });
+    const previousIdentity = activeDraftIdentityRef.current;
+    if (
+      previousIdentity === nextIdentity &&
+      hydratedDraftIdentityRef.current === nextIdentity
+    ) {
+      return;
+    }
+    if (previousIdentity && previousIdentity !== nextIdentity) {
+      flushComposerDraftNowRef.current(previousIdentity);
+    }
+    activeDraftIdentityRef.current = nextIdentity;
+    restoreComposerDraft(nextIdentity);
+  }, [pane.id, pane.avatarId, pane.sessionId, restoreComposerDraft]);
+
+  const migrateActiveComposerDraftToSession = useCallback(
+    (sessionId: string) => {
+      const trimmedSessionId = sessionId.trim();
+      if (!trimmedSessionId) return;
+      const fromIdentity = activeDraftIdentityRef.current;
+      const toIdentity = composerDraftIdentity({
+        paneId: pane.id,
+        avatarId: pane.avatarId,
+        sessionId: trimmedSessionId,
+      });
+      flushComposerDraftNowRef.current(fromIdentity);
+      migrateComposerDraft(fromIdentity, toIdentity);
+      activeDraftIdentityRef.current = toIdentity;
+      hydratedDraftIdentityRef.current = toIdentity;
+    },
+    [pane.id, pane.avatarId],
+  );
+
+  const activateFreshComposerDraft = useCallback(
+    (initialText = "") => {
+      const currentIdentity = activeDraftIdentityRef.current;
+      flushComposerDraftNowRef.current(currentIdentity);
+      if (draftSaveTimerRef.current != null) {
+        window.clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
+      const provisionalIdentity = composerDraftIdentity({
+        paneId: pane.id,
+        avatarId: pane.avatarId,
+        sessionId: "",
+      });
+      deleteComposerDraft(provisionalIdentity);
+      activeDraftIdentityRef.current = provisionalIdentity;
+      hydratedDraftIdentityRef.current = provisionalIdentity;
+      draftHydratingRef.current = true;
+      try {
+        pendingCaretQuoteIdRef.current = null;
+        quoteTargetsRef.current = [];
+        contextFilesRef.current = {};
+        composerRefPathsRef.current = {};
+        composerRefMetaOverrideRef.current = {};
+        composerSavedRangeRef.current = null;
+        setQuoteTargets([]);
+        setContextFiles({});
+        setComposerText(initialText);
+      } finally {
+        draftHydratingRef.current = false;
+      }
+      if (initialText.trim()) scheduleComposerDraftSaveRef.current();
+    },
+    [pane.id, pane.avatarId, setComposerText],
   );
 
   const applyAtMentionReplacement = useCallback(
@@ -8682,6 +9060,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }));
 
     if (isImageFile(file)) {
+      const absolutePath = window.agenticxDesktop?.getPathForFile?.(file) || "";
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = typeof reader.result === "string" ? reader.result : "";
@@ -8694,6 +9073,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             status: "ready",
             content: `[图片: ${file.name}]`,
             dataUrl,
+            ...(absolutePath ? { sourcePath: absolutePath } : {}),
           },
         }));
       };
@@ -8707,6 +9087,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             status: "error",
             content: "",
             errorText: "图片解析失败",
+            ...(absolutePath ? { sourcePath: absolutePath } : {}),
           },
         }));
       };
@@ -8905,6 +9286,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         return null;
       }
       const newSessionId = created.session_id;
+      migrateActiveComposerDraftToSession(newSessionId);
       migratePaneKbRetrievalModeToSession(pane.id, newSessionId);
       clearPaneLazyInheritParent(pane.id);
       clearPanePendingSessionMode(pane.id);
@@ -8934,6 +9316,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setPaneSessionId,
     setPaneSessionMode,
     setPaneContextInherited,
+    migrateActiveComposerDraftToSession,
   ]);
 
   /** Send a team-mode action (ADD_TASK / PAUSE / RESUME / STOP) to TaskLock via Studio API. */
@@ -9035,6 +9418,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (found.kind === "hit") {
           setComposerText("");
           clearQuoteTargets();
+          flushComposerDraftNowRef.current();
           await resolveActionConfirmation(found.confirmation, decision, "manual");
           return;
         }
@@ -9083,7 +9467,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       });
       setComposerText("");
       clearQuoteTargets();
+      contextFilesRef.current = {};
       setContextFiles({});
+      flushComposerDraftNowRef.current();
       return true;
     };
 
@@ -9471,7 +9857,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setComposerText("");
     clearQuoteTargets();
     // Clear attachments immediately so chips do not linger until the stream ends (finally also clears).
+    contextFilesRef.current = {};
     setContextFiles({});
+    flushComposerDraftNowRef.current();
     sessionStreamStateRef.current[requestSessionId] = {
       active: true,
       text: "",
@@ -11595,7 +11983,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         setGroupTyping({});
         setGroupActivityHint({});
         setGroupMemberPhase({});
-        setContextFiles({});
+        const displayedSessionId =
+          useAppStore.getState().panes.find((item) => item.id === pane.id)?.sessionId?.trim() ?? "";
+        if (displayedSessionId === requestSessionId) {
+          contextFilesRef.current = {};
+          setContextFiles({});
+        }
         if (!abortController.signal.aborted) {
           useAppStore.getState().clearSessionHistoryHint(requestSessionId);
         }
@@ -11649,6 +12042,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         ...(chatProvider && chatModel ? { provider: chatProvider, model: chatModel } : {}),
       });
       if (result.ok && result.session_id) {
+        migrateActiveComposerDraftToSession(result.session_id);
         setPaneSessionId(pane.id, result.session_id, {
           provider: chatProvider || undefined,
           model: chatModel || undefined,
@@ -11675,8 +12069,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     addPaneMessage(pane.id, "tool", "⚠️ 会话创建失败，已恢复上一会话。请检查后端服务是否正常。", "meta");
   };
 
-  const createNewTopic = (inherit = true, sessionMode: PaneSessionMode = "daily_office") => {
+  const createNewTopic = (
+    inherit = true,
+    sessionMode: PaneSessionMode = "daily_office",
+    initialDraft = "",
+  ) => {
     const prevSessionId = (pane.sessionId || "").trim();
+    activateFreshComposerDraft(initialDraft);
     // 用户主动新建会话时，不应强制中断旧会话流：旧会话允许后台继续执行。
     // 发送锁在 sendChat 里会基于 isPaneAwaitingFreshSession 进行抢占释放。
     clearPaneMessages(pane.id);
@@ -11703,9 +12102,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   resumeInNewSessionRef.current = () => {
     const draft = buildBudgetResumeDraft(pane.messages ?? []);
-    createNewTopic(false, pane.sessionMode ?? "daily_office");
+    createNewTopic(false, pane.sessionMode ?? "daily_office", draft);
     setBudgetExceededInfo(null);
-    setComposerHasText(isComposerNonEmpty(draft));
   };
 
   // "新建任务" nav button dispatches this event to start a fresh conversation
@@ -11717,20 +12115,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     const onNewTopic = (e: Event) => {
       const detail = (e as CustomEvent).detail as { paneId?: string; draftText?: string } | undefined;
       if (detail?.paneId && detail.paneId !== pane.id) return;
-      createNewTopicRef.current(false, pane.sessionMode ?? "daily_office");
-      clearQuoteTargets();
-      setContextFiles({});
-      composerRefPathsRef.current = {};
-      composerRefMetaOverrideRef.current = {};
-      const draftText = detail?.draftText ?? "";
-      // syncComposerFromValue alone only flips React emptiness/@ state; the contenteditable composer
-      // renders from direct DOM writes, so we must go through setComposerText. Always write the
-      // value, including an empty draft, so a new task cannot inherit unsent text or references.
-      window.setTimeout(() => setComposerText(draftText), 0);
+      createNewTopicRef.current(
+        false,
+        pane.sessionMode ?? "daily_office",
+        detail?.draftText ?? "",
+      );
     };
     window.addEventListener("agenticx:pane:new-topic", onNewTopic);
     return () => window.removeEventListener("agenticx:pane:new-topic", onNewTopic);
-  }, [clearQuoteTargets, pane.id, pane.sessionMode, setComposerText]);
+  }, [pane.id, pane.sessionMode]);
 
   const insertGlobalSearchFileReference = useCallback(
     async (filePath: string, mode: "current" | "new") => {
@@ -11738,7 +12131,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (!trimmed) return;
 
       if (mode === "new") {
-        setContextFiles({});
+        activateFreshComposerDraft();
         clearPaneMessages(pane.id);
         setPaneContextInherited(pane.id, false);
         setPaneSessionId(pane.id, "");
@@ -11786,6 +12179,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       focusComposerEnd();
     },
     [
+      activateFreshComposerDraft,
       clearPaneMessages,
       extractComposerText,
       focusComposerEnd,
@@ -13074,6 +13468,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 const live = (composerRef.current?.innerText || "").replace(/\u00a0/g, " ");
                 syncComposerFromValue(live, readLiveComposerCaretOffset(live));
                 saveComposerCaret();
+                scheduleComposerDraftSaveRef.current();
               }}
               onKeyUp={() => {
                 saveComposerCaret();
@@ -13092,6 +13487,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 const live = (composerRef.current?.innerText || "").replace(/\u00a0/g, " ");
                 syncComposerFromValue(live, readLiveComposerCaretOffset(live));
                 saveComposerCaret();
+                scheduleComposerDraftSaveRef.current();
                 window.setTimeout(() => {
                   imeComposingRef.current = false;
                 }, 0);
@@ -13160,6 +13556,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   if (plainText) {
                     document.execCommand("insertText", false, plainText);
                     syncComposerFromValue(extractComposerSendText());
+                    scheduleComposerDraftSaveRef.current();
                   }
                   for (const file of files) {
                     const key = `${file.name}:${file.size}:${file.lastModified}`;
@@ -13173,6 +13570,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 e.preventDefault();
                 document.execCommand("insertText", false, plainText);
                 syncComposerFromValue(extractComposerSendText());
+                scheduleComposerDraftSaveRef.current();
               }}
               onKeyDown={(e) => {
                 const isImeComposing =
