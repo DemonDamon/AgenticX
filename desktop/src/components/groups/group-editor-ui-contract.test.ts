@@ -24,6 +24,14 @@ describe("group management UI contract", () => {
     expect(source).toContain("GroupMemberStack");
   });
 
+  it("keeps compact group member avatars separated instead of overlapping", () => {
+    const source = readSource("ProjectsView.tsx");
+
+    expect(source).toContain('className="flex shrink-0 items-center gap-2"');
+    expect(source).toContain('size="xs"');
+    expect(source).not.toContain('className={index === 0 ? "" : "-ml-2"}');
+  });
+
   it("uses stable icon identities instead of text monograms for defaults", () => {
     const source = readSource("GroupMemberAvatar.tsx");
 

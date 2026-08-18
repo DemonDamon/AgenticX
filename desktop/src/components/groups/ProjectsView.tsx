@@ -58,20 +58,20 @@ function GroupMemberStack({ group, avatars }: { group: GroupChat; avatars: Avata
   const remaining = Math.max(0, members.length - visibleMembers.length);
 
   return (
-    <div className="flex shrink-0 items-center" aria-label={`${group.avatarIds.length} 位群成员`}>
+    <div className="flex shrink-0 items-center gap-2" aria-label={`${group.avatarIds.length} 位群成员`}>
       {visibleMembers.map((avatar, index) => (
-        <div key={avatar?.id ?? group.avatarIds[index]} className={index === 0 ? "" : "-ml-2"}>
+        <div key={avatar?.id ?? group.avatarIds[index]}>
           <GroupMemberAvatar
             avatar={avatar}
             label={avatar?.name ?? group.avatarIds[index]}
             identity={group.avatarIds[index]}
-            size="sm"
-            className="ring-2 ring-surface-card"
+            size="xs"
+            className="ring-1 ring-border"
           />
         </div>
       ))}
       {remaining > 0 ? (
-        <span className="-ml-2 flex h-8 w-8 items-center justify-center rounded-lg bg-surface-panel text-[10px] font-medium text-text-subtle ring-2 ring-surface-card">
+        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-surface-panel text-[10px] font-medium text-text-subtle ring-1 ring-border">
           +{remaining}
         </span>
       ) : null}
