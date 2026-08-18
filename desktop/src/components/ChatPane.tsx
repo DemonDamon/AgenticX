@@ -1016,7 +1016,7 @@ class HistoryPanelBoundary extends Component<
 const PANE_MODEL_PICKER_MARGIN = 8;
 const PANE_MODEL_PICKER_GAP = 4;
 const PANE_MODEL_PICKER_MIN_MAX_HEIGHT = 64;
-const PANE_MODEL_PICKER_PANEL_WIDTH = 280;
+const PANE_MODEL_PICKER_PANEL_WIDTH = 360;
 
 function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
   const vw = window.innerWidth;
@@ -1462,7 +1462,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     <div className="relative min-w-0 max-w-full" ref={anchorRef}>
       <button
         type="button"
-        className={`group flex h-8 min-h-8 max-w-full min-w-0 items-center gap-2 rounded-lg px-1.5 text-[13px] font-medium leading-none transition-colors focus:outline-none focus-visible:bg-surface-hover ${
+        className={`group flex h-8 min-h-8 max-w-full min-w-0 items-center gap-2 rounded-lg px-1.5 text-[13px] font-medium leading-5 transition-colors focus:outline-none focus-visible:bg-surface-hover ${
           open ? "bg-surface-hover" : "hover:bg-surface-hover"
         }`}
         onClick={() => setOpen((v) => !v)}
@@ -1589,7 +1589,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                             type="button"
                             role="option"
                             aria-selected={isActive}
-                            className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-none transition-colors ${
+                            className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg py-2 pl-2.5 pr-2.5 text-left text-[13px] leading-5 transition-colors ${
                               isActive || isHover
                                 ? "bg-surface-cardStrong"
                                 : "hover:bg-surface-hover"
@@ -1606,7 +1606,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                               provider={selectedProviderGroup.visualProvider}
                               model={opt.model}
                             />
-                            <span className="min-w-0 flex-1 truncate font-semibold text-text-strong">
+                            <span className="min-w-0 flex-1 whitespace-normal break-all font-semibold leading-5 text-text-strong">
                               {modelName}
                             </span>
                             <span className="flex w-3.5 shrink-0 justify-end">

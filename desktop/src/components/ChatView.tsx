@@ -2921,7 +2921,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       {/* Reanswer model picker */}
       {modelPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-[300px] rounded-xl border border-border bg-surface-panel p-3">
+          <div className="w-[360px] max-w-[calc(100vw-32px)] rounded-xl border border-border bg-surface-panel p-3">
             <div className="mb-2 text-sm font-medium text-text-muted">选择模型重新回答</div>
             <ModelPickerDropdown
               onSelect={(p, m) => { onReanswerSelect(p, m); setModelPickerOpen(false); }}
@@ -3002,11 +3002,11 @@ function ModelPickerDropdown({ onSelect, onClose }: { onSelect: (p: string, m: s
         <button
           key={`${opt.provider}:${opt.model}`}
           type="button"
-          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-muted transition hover:font-bold hover:text-text-strong"
+          className="flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm leading-5 text-text-muted transition hover:font-bold hover:text-text-strong"
           onClick={() => { onSelect(opt.provider, opt.model); onClose(); }}
         >
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
-          <span className="truncate">{opt.model}</span>
+          <span className="min-w-0 flex-1 whitespace-normal break-all leading-5">{opt.model}</span>
         </button>
       ))}
     </div>
