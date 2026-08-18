@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
+import { Plus, Search, Trash2, UsersRound, X } from "lucide-react";
 import { useAppStore, type Avatar, type Message } from "../../store";
-import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import { resolveCrewSlots } from "../../utils/group-member-activity";
 import { EMPTY_PANE_GRAPH_STATE } from "../graph/graph-types";
 import { deriveRunningToolByAgent } from "../graph/span-derive";
 import { useGraphRunStore } from "../graph/useGraphRun";
+import { GroupMemberAvatar } from "../groups/GroupMemberAvatar";
 import { CrewWorkstationWall } from "./CrewWorkstationWall";
-import { memberInitials } from "./member-avatar";
 
-const AVATAR_SIZE = 36;
-const NAME_CLASS = "text-[10px]";
+const STATUS_LABEL: Record<"idle" | "running" | "waiting" | "replied" | "failed", string> = {
+  idle: "未执行",
+  running: "执行中",
+  waiting: "等待确认",
+  replied: "已回复",
+  failed: "执行失败",
+};
 
-/**
- * Inline group members strip for task-summary Section「成员」.
- * Add / remove stay in-panel (no separate WorkPanel tab).
- */
 function activityDotClass(phase: "idle" | "running" | "waiting" | "replied" | "failed"): string {
   if (phase === "running" || phase === "waiting") return "bg-[var(--status-warning)]";
   if (phase === "failed") return "bg-[var(--status-danger)]";
@@ -22,6 +23,13 @@ function activityDotClass(phase: "idle" | "running" | "waiting" | "replied" | "f
   return "border border-current bg-transparent text-text-faint";
 }
 
+/**
+ * Group workbench member surface.
+ *
+ * Execution status and membership administration are intentionally separate:
+ * the wall answers「谁在执行什么」，the list below answers「群里有哪些人」。
+ * Removing a member is a direct action on that row; there is no selection mode.
+ */
 export function GroupMembersSummaryList({
   groupId,
   paneId,
@@ -49,12 +57,10 @@ export function GroupMembersSummaryList({
 }) {
   const groups = useAppStore((s) => s.groups);
   const setGroups = useAppStore((s) => s.setGroups);
-  const group = groups.find((g) => g.id === groupId);
-
-  const [mode, setMode] = useState<"browse" | "add" | "remove">("browse");
+  const group = groups.find((item) => item.id === groupId);
+  const [addOpen, setAddOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorText, setErrorText] = useState("");
-  const [dialogChecked, setDialogChecked] = useState<Set<string>>(new Set());
   const [dialogSearch, setDialogSearch] = useState("");
 
   const avatarById = useMemo(() => {
@@ -64,18 +70,22 @@ export function GroupMembersSummaryList({
   }, [avatarList]);
 
   const dialogCandidates = useMemo(() => {
-    if (mode !== "add" || !group) return [];
+    if (!addOpen || !group) return [];
     const existing = new Set(group.avatarIds);
-    const q = dialogSearch.trim().toLowerCase();
-    return avatarList.filter((a) => {
-      if (existing.has(a.id)) return false;
-      if (!q) return true;
-      return a.name.toLowerCase().includes(q) || a.role.toLowerCase().includes(q);
+    const query = dialogSearch.trim().toLocaleLowerCase();
+    return avatarList.filter((avatar) => {
+      if (existing.has(avatar.id)) return false;
+      if (!query) return true;
+      return (
+        avatar.name.toLocaleLowerCase().includes(query) ||
+        avatar.role.toLocaleLowerCase().includes(query) ||
+        (avatar.description ?? "").toLocaleLowerCase().includes(query)
+      );
     });
-  }, [mode, group, avatarList, dialogSearch]);
+  }, [addOpen, avatarList, dialogSearch, group]);
 
   const toolStepsByNode = useGraphRunStore(
-    (s) => s.byPane[paneId]?.toolStepsByNode ?? EMPTY_PANE_GRAPH_STATE.toolStepsByNode,
+    (state) => state.byPane[paneId]?.toolStepsByNode ?? EMPTY_PANE_GRAPH_STATE.toolStepsByNode,
   );
   const runningToolByAgent = useMemo(
     () => deriveRunningToolByAgent(toolStepsByNode),
@@ -86,20 +96,18 @@ export function GroupMembersSummaryList({
       activeAgentIds.length > 0 ||
       Object.keys(runningToolByAgent).length > 0 ||
       Object.keys(phaseOverrideById).length > 0,
-    [activeAgentIds, runningToolByAgent, phaseOverrideById],
+    [activeAgentIds, phaseOverrideById, runningToolByAgent],
   );
   const [nowMs, setNowMs] = useState(() => Date.now());
+
   useEffect(() => {
     if (!hasLiveWork) return;
     setNowMs(Date.now());
-    const t = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, [hasLiveWork]);
 
-  const wallIds = useMemo(
-    () => ["__meta__", ...(group?.avatarIds ?? [])],
-    [group?.avatarIds],
-  );
+  const wallIds = useMemo(() => ["__meta__", ...(group?.avatarIds ?? [])], [group?.avatarIds]);
   const slots = useMemo(
     () =>
       resolveCrewSlots({
@@ -111,394 +119,246 @@ export function GroupMembersSummaryList({
         phaseOverrideById,
         nowMs,
       }),
-    [wallIds, messages, activeAgentIds, activityHintById, runningToolByAgent, phaseOverrideById, nowMs],
+    [
+      activeAgentIds,
+      activityHintById,
+      messages,
+      nowMs,
+      phaseOverrideById,
+      runningToolByAgent,
+      wallIds,
+    ],
   );
-  const executedCount = useMemo(() => {
-    let n = 0;
-    for (const item of slots) {
-      if (item.agentId === "__meta__") continue;
-      if (item.phase !== "idle") n += 1;
-    }
-    return n;
-  }, [slots]);
+  const executedCount = useMemo(
+    () => slots.filter((slot) => slot.agentId !== "__meta__" && slot.phase !== "idle").length,
+    [slots],
+  );
   const phaseById = useMemo(() => {
     const map = new Map<string, (typeof slots)[number]>();
-    for (const item of slots) map.set(item.agentId, item);
+    for (const slot of slots) map.set(slot.agentId, slot);
     return map;
   }, [slots]);
 
   if (!group) {
-    return <p className="text-xs text-text-faint">未找到该群配置，可在侧栏刷新群列表后重试。</p>;
+    return <p className="text-xs text-text-faint">未找到该群配置，可刷新群列表后重试。</p>;
   }
 
-  const persistMembers = async (nextAvatarIds: string[]) => {
-    if (saving) return;
+  const persistMembers = async (nextAvatarIds: string[]): Promise<boolean> => {
+    if (saving) return false;
     setSaving(true);
     setErrorText("");
-    const prevAvatarIds = group.avatarIds;
+    const previous = group.avatarIds;
     setGroups(
       groups.map((item) => (item.id === group.id ? { ...item, avatarIds: nextAvatarIds } : item)),
     );
     try {
-      const res = await window.agenticxDesktop.updateGroup({
+      const result = await window.agenticxDesktop.updateGroup({
         id: group.id,
         avatar_ids: nextAvatarIds,
       });
-      if (!res.ok) {
-        throw new Error(res.error || "更新群成员失败");
-      }
-    } catch (err) {
+      if (!result.ok) throw new Error(result.error || "更新群成员失败");
+      return true;
+    } catch (error) {
       setGroups(
-        groups.map((item) => (item.id === group.id ? { ...item, avatarIds: prevAvatarIds } : item)),
+        groups.map((item) => (item.id === group.id ? { ...item, avatarIds: previous } : item)),
       );
-      setErrorText(err instanceof Error ? err.message : "更新群成员失败");
+      setErrorText(error instanceof Error ? error.message : "更新群成员失败");
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const handleRemoveMember = (avatarId: string) => {
-    if (!group.avatarIds.includes(avatarId)) return;
-    void persistMembers(group.avatarIds.filter((id) => id !== avatarId));
+  const handleRemoveMember = async (avatarId: string) => {
+    if (!group.avatarIds.includes(avatarId) || group.avatarIds.length <= 1) {
+      setErrorText("群聊至少需要保留 1 位成员。");
+      return;
+    }
+    const avatar = avatarById.get(avatarId);
+    const api = window.agenticxDesktop;
+    if (typeof api.confirmDialog === "function") {
+      const result = await api.confirmDialog({
+        title: "移出群成员",
+        message: `确定将「${avatar?.name || "该成员"}」移出群聊吗？`,
+        detail: "只会解除群聊关联，不会删除该数字专家。",
+        confirmText: "移出成员",
+        cancelText: "取消",
+        destructive: true,
+      });
+      if (!result.confirmed) return;
+    }
+    await persistMembers(group.avatarIds.filter((id) => id !== avatarId));
   };
 
-  const openAddDialog = () => {
-    setDialogChecked(new Set());
+  const handleAddMember = async (avatarId: string) => {
+    if (group.avatarIds.includes(avatarId)) return;
+    await persistMembers([...group.avatarIds, avatarId]);
+  };
+
+  const closeAddDialog = () => {
+    if (saving) return;
+    setAddOpen(false);
     setDialogSearch("");
-    setMode("add");
-  };
-
-  const handleDialogConfirm = () => {
-    if (dialogChecked.size === 0) return;
-    void persistMembers([...group.avatarIds, ...Array.from(dialogChecked)]);
-    setMode("browse");
   };
 
   return (
-    <div className="space-y-2">
-      <p className="text-[11px] text-text-faint">
-        本会话已执行 {executedCount}/{group.avatarIds.length}
-      </p>
-      {errorText ? <p className="text-[10px] text-rose-300">{errorText}</p> : null}
-      {mode === "remove" ? (
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-rose-300">点击成员头像移出群聊</span>
-          <button
-            type="button"
-            className="rounded px-2 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-            onClick={() => setMode("browse")}
-          >
-            完成
-          </button>
-        </div>
-      ) : null}
-
-      {mode === "browse" ? (
-        <>
-          <CrewWorkstationWall
-            slots={slots}
-            avatarById={avatarById}
-            metaLeaderLabel={metaLeaderLabel}
-            onAppendDirective={onAppendDirective}
-            onSwitchModel={onSwitchModel}
-            onInterrupt={onInterrupt}
-          />
-          <div className="flex flex-wrap gap-x-3 gap-y-2.5">
-            <div className="flex w-[52px] flex-col items-center gap-1 text-center">
-              <button
-                type="button"
-                onClick={openAddDialog}
-                disabled={saving}
-                className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
-                style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-                title="添加成员"
-              >
-                +
-              </button>
-              <span className={`text-text-muted ${NAME_CLASS}`}>添加</span>
-            </div>
-            <div className="flex w-[52px] flex-col items-center gap-1 text-center">
-              <button
-                type="button"
-                onClick={() => setMode("remove")}
-                disabled={saving || group.avatarIds.length === 0}
-                className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
-                style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-                title="移出成员"
-              >
-                −
-              </button>
-              <span className={`text-text-muted ${NAME_CLASS}`}>移出</span>
-            </div>
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3 rounded-xl border border-border bg-surface-card px-3 py-2.5">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <UsersRound className="h-4 w-4 shrink-0 text-text-subtle" strokeWidth={1.8} aria-hidden />
+            <span className="text-xs font-semibold text-text-primary">群聊成员</span>
+            <span className="rounded-full bg-surface-panel px-1.5 py-0.5 text-[10px] tabular-nums text-text-faint">
+              {group.avatarIds.length + 1}
+            </span>
           </div>
-        </>
-      ) : (
-      <div className="flex flex-wrap gap-x-3 gap-y-2.5">
-        <div className="flex w-[52px] flex-col items-center gap-1 text-center">
-          <div
-            className="flex shrink-0 items-center justify-center rounded-xl text-[10px] font-bold leading-tight"
-            style={{
-              width: AVATAR_SIZE,
-              height: AVATAR_SIZE,
-              background: "var(--ui-btn-primary-bg)",
-              color: "var(--ui-btn-primary-text)",
-            }}
-          >
-            {memberInitials(metaLeaderLabel)}
-          </div>
-          <span
-            className={`w-full truncate text-text-muted ${NAME_CLASS}`}
-            title={`${metaLeaderLabel} · 群聊协调者`}
-          >
-            {metaLeaderLabel}
-          </span>
+          <p className="mt-1 text-[10px] leading-relaxed text-text-faint">
+            本轮已执行 {executedCount}/{group.avatarIds.length} 位成员，Meta-Agent 负责统筹。
+          </p>
         </div>
+        <button
+          type="button"
+          disabled={saving}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[rgba(var(--theme-color-rgb,59,130,246),0.12)] px-2 py-1.5 text-[11px] font-medium text-[rgb(var(--theme-color-fg-rgb,59,130,246))] transition hover:bg-[rgba(var(--theme-color-rgb,59,130,246),0.2)] disabled:opacity-40"
+          onClick={() => {
+            setDialogSearch("");
+            setErrorText("");
+            setAddOpen(true);
+          }}
+        >
+          <Plus className="h-3 w-3" strokeWidth={2} aria-hidden />
+          添加
+        </button>
+      </div>
 
-        {group.avatarIds.map((id) => {
-          const a = avatarById.get(id);
-          const label = a?.name ?? id.slice(0, 6);
-          const activity = phaseById.get(id);
-          const statusTitle = activity
-            ? activity.phase === "replied"
-              ? `已回复 ${activity.replies} 次`
-              : activity.phase === "running"
-                ? "执行中"
-                : activity.phase === "waiting"
-                  ? "等待确认"
-                  : activity.phase === "failed"
-                    ? "执行失败"
-                    : "未执行"
-            : "未执行";
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => {
-                if (mode === "remove") handleRemoveMember(id);
-              }}
-              disabled={saving}
-              className={`relative flex w-[52px] flex-col items-center gap-1 text-center transition ${
-                mode === "remove" ? "cursor-pointer hover:opacity-90" : "cursor-default"
-              } disabled:opacity-60`}
-            >
-              <div
-                className="relative shrink-0"
-                style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-              >
-                {a?.avatarUrl ? (
-                  <img
-                    src={a.avatarUrl}
-                    alt=""
-                    className="h-full w-full rounded-xl object-cover"
-                  />
-                ) : (
-                  <div
-                    className={`flex h-full w-full items-center justify-center rounded-xl text-[10px] font-bold ${avatarBgClass(a?.color)} ${avatarFgClass(a?.color)}`}
-                  >
-                    {memberInitials(label)}
+      <div>
+        <div className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-text-faint">执行状态</div>
+        <CrewWorkstationWall
+          slots={slots}
+          avatarById={avatarById}
+          metaLeaderLabel={metaLeaderLabel}
+          onAppendDirective={onAppendDirective}
+          onSwitchModel={onSwitchModel}
+          onInterrupt={onInterrupt}
+        />
+      </div>
+
+      <div className="rounded-xl border border-border bg-surface-card px-3 py-2.5">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div>
+            <div className="text-[11px] font-medium text-text-primary">成员管理</div>
+            <div className="mt-0.5 text-[10px] text-text-faint">移出成员不会删除数字专家。</div>
+          </div>
+          {saving ? <span className="text-[10px] text-text-faint">同步中…</span> : null}
+        </div>
+        <div className="space-y-1">
+          {group.avatarIds.map((id) => {
+            const avatar = avatarById.get(id);
+            const label = avatar?.name || id.slice(0, 8);
+            const slot = phaseById.get(id);
+            const phase = slot?.phase ?? "idle";
+            return (
+              <div key={id} className="flex items-center gap-2 rounded-lg px-1.5 py-1.5 hover:bg-surface-hover">
+                <GroupMemberAvatar avatar={avatar} label={label} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[11px] text-text-primary">{label}</div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-text-faint">
+                    <span className={`h-1.5 w-1.5 rounded-full ${activityDotClass(phase)}`} aria-hidden />
+                    <span>{STATUS_LABEL[phase]}</span>
+                    {avatar?.role ? <span className="truncate">· {avatar.role}</span> : null}
                   </div>
-                )}
-                <span
-                  className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ${activityDotClass(activity?.phase ?? "idle")}`}
-                  title={statusTitle}
-                />
+                </div>
+                <button
+                  type="button"
+                  disabled={saving || group.avatarIds.length <= 1}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-text-faint transition hover:bg-rose-500/10 hover:text-rose-400 disabled:cursor-not-allowed disabled:opacity-35"
+                  aria-label={`移出成员 ${label}`}
+                  title={`移出 ${label}`}
+                  onClick={() => void handleRemoveMember(id)}
+                >
+                  <Trash2 className="h-3 w-3" strokeWidth={1.8} aria-hidden />
+                  移出
+                </button>
               </div>
-              <span
-                className={`w-full truncate text-text-muted ${NAME_CLASS}`}
-                title={`${label}${a?.role ? ` · ${a.role}` : ""} · ${statusTitle}`}
-              >
-                {label}
-              </span>
-              {mode === "remove" ? (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold leading-none text-white shadow">
-                  −
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-
-        <div className="flex w-[52px] flex-col items-center gap-1 text-center">
-          <button
-            type="button"
-            onClick={openAddDialog}
-            disabled={saving}
-            className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
-            style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-            title="添加成员"
-          >
-            +
-          </button>
-          <span className={`text-text-muted ${NAME_CLASS}`}>添加</span>
-        </div>
-        <div className="flex w-[52px] flex-col items-center gap-1 text-center">
-          <button
-            type="button"
-            onClick={() => setMode((prev) => (prev === "remove" ? "browse" : "remove"))}
-            disabled={saving || group.avatarIds.length === 0}
-            className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
-            style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-            title="移出成员"
-          >
-            −
-          </button>
-          <span className={`text-text-muted ${NAME_CLASS}`}>移出</span>
+            );
+          })}
         </div>
       </div>
-      )}
 
-      {mode === "add" ? (
+      {errorText ? (
+        <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-2 text-[10px] leading-relaxed text-rose-300" role="alert">
+          {errorText}
+        </p>
+      ) : null}
+
+      {addOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setMode("browse")}
+          className="fixed inset-0 z-modal flex items-center justify-center bg-black/50 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeAddDialog();
+          }}
         >
           <div
-            className="flex h-[480px] w-[520px] max-w-[90vw] flex-col overflow-hidden rounded-xl border border-border bg-surface-panel shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="group-member-add-title"
+            className="flex max-h-[min(560px,calc(100vh-2rem))] w-[min(440px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-surface-panel shadow-2xl"
           >
-            <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
-              <span className="text-sm font-semibold text-text-strong">添加群成员</span>
-              <span className="text-xs text-text-faint">
-                {dialogChecked.size > 0 ? `已选 ${dialogChecked.size} 人` : ""}
-              </span>
-            </div>
-
-            <div className="flex min-h-0 flex-1">
-              <div className="flex min-h-0 flex-1 flex-col border-r border-border">
-                <div className="shrink-0 px-3 py-2">
-                  <input
-                    type="search"
-                    value={dialogSearch}
-                    onChange={(e) => setDialogSearch(e.target.value)}
-                    placeholder="搜索"
-                    autoFocus
-                    className="w-full rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-faint focus:border-border-strong"
-                  />
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto px-1">
-                  {dialogCandidates.length === 0 ? (
-                    <p className="px-3 py-4 text-center text-xs text-text-faint">
-                      {dialogSearch.trim() ? "无匹配结果" : "所有分身都已在群里"}
-                    </p>
-                  ) : (
-                    <div className="flex flex-col">
-                      {dialogCandidates.map((a) => {
-                        const checked = dialogChecked.has(a.id);
-                        return (
-                          <label
-                            key={a.id}
-                            className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 transition hover:bg-surface-hover"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setDialogChecked((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(a.id)) next.delete(a.id);
-                                  else next.add(a.id);
-                                  return next;
-                                });
-                              }}
-                              className="h-4 w-4 shrink-0 accent-[var(--ui-btn-primary-bg)]"
-                            />
-                            {a.avatarUrl ? (
-                              <img
-                                src={a.avatarUrl}
-                                alt=""
-                                className="h-9 w-9 shrink-0 rounded-lg object-cover"
-                              />
-                            ) : (
-                              <div
-                                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${avatarBgClass(a.color)} ${avatarFgClass(a.color)}`}
-                              >
-                                {memberInitials(a.name || a.id)}
-                              </div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-xs text-text-primary">
-                                {a.name || a.id}
-                              </div>
-                              {a.role ? (
-                                <div className="truncate text-[10px] text-text-faint">{a.role}</div>
-                              ) : null}
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+            <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <h3 id="group-member-add-title" className="text-sm font-semibold text-text-strong">添加成员</h3>
+                <p className="mt-0.5 text-[11px] text-text-faint">直接点击某一行的「加入」，不需要勾选。</p>
               </div>
-
-              <div className="flex w-[160px] shrink-0 flex-col bg-surface-card">
-                <div className="shrink-0 px-3 py-2">
-                  <span className="text-[11px] text-text-faint">已选成员</span>
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto px-2">
-                  {dialogChecked.size === 0 ? (
-                    <p className="px-1 text-[11px] text-text-faint">勾选左侧分身</p>
-                  ) : (
-                    <div className="flex flex-col gap-1.5">
-                      {Array.from(dialogChecked).map((id) => {
-                        const a = avatarById.get(id);
-                        const label = a?.name ?? id.slice(0, 6);
-                        return (
-                          <div key={id} className="flex items-center gap-2 rounded-md px-1 py-1">
-                            {a?.avatarUrl ? (
-                              <img
-                                src={a.avatarUrl}
-                                alt=""
-                                className="h-7 w-7 shrink-0 rounded-md object-cover"
-                              />
-                            ) : (
-                              <div
-                                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[10px] font-bold ${avatarBgClass(a?.color)} ${avatarFgClass(a?.color)}`}
-                              >
-                                {memberInitials(label)}
-                              </div>
-                            )}
-                            <span className="min-w-0 flex-1 truncate text-[11px] text-text-muted">
-                              {label}
-                            </span>
-                            <button
-                              type="button"
-                              className="shrink-0 text-xs text-text-faint transition hover:text-rose-400"
-                              onClick={() =>
-                                setDialogChecked((prev) => {
-                                  const n = new Set(prev);
-                                  n.delete(id);
-                                  return n;
-                                })
-                              }
-                            >
-                              ×
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border px-4 py-3">
               <button
                 type="button"
-                className="rounded-lg border border-border px-4 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
-                onClick={() => setMode("browse")}
+                className="agx-topbar-btn agx-topbar-btn--icon-only"
+                aria-label="关闭添加成员"
+                title="关闭"
+                disabled={saving}
+                onClick={closeAddDialog}
               >
-                取消
+                <X className="h-4 w-4" strokeWidth={2} />
               </button>
-              <button
-                type="button"
-                className="rounded-lg bg-[var(--ui-btn-primary-bg)] px-4 py-1.5 text-xs font-medium text-[var(--ui-btn-primary-text)] transition hover:bg-[var(--ui-btn-primary-bg-hover)] disabled:opacity-50"
-                disabled={dialogChecked.size === 0 || saving}
-                onClick={handleDialogConfirm}
-              >
-                添加{dialogChecked.size > 0 ? ` (${dialogChecked.size})` : ""}
-              </button>
+            </div>
+            <label className="relative shrink-0 px-4 py-3">
+              <Search className="pointer-events-none absolute left-7 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-faint" strokeWidth={1.8} aria-hidden />
+              <input
+                type="search"
+                autoFocus
+                value={dialogSearch}
+                onChange={(event) => setDialogSearch(event.target.value)}
+                placeholder="搜索名称或职责"
+                disabled={saving}
+                className="w-full rounded-lg border border-border bg-surface-card py-2 pl-9 pr-3 text-xs text-text-primary outline-none placeholder:text-text-faint focus:border-border-strong disabled:opacity-60"
+              />
+            </label>
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+              {dialogCandidates.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border px-3 py-10 text-center text-xs leading-relaxed text-text-faint">
+                  {dialogSearch.trim() ? "没有匹配的可加入成员" : "所有数字专家都已在群里"}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {dialogCandidates.map((avatar) => (
+                    <div key={avatar.id} className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 transition hover:bg-surface-hover">
+                      <GroupMemberAvatar avatar={avatar} size="sm" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium text-text-primary">{avatar.name}</div>
+                        <div className="mt-0.5 truncate text-[10px] text-text-faint">{avatar.role || "数字专家"}</div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={saving}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[rgba(var(--theme-color-rgb,59,130,246),0.12)] px-2 py-1.5 text-[11px] font-medium text-[rgb(var(--theme-color-fg-rgb,59,130,246))] transition hover:bg-[rgba(var(--theme-color-rgb,59,130,246),0.2)] disabled:opacity-40"
+                        onClick={() => void handleAddMember(avatar.id)}
+                      >
+                        <Plus className="h-3 w-3" strokeWidth={2} aria-hidden />
+                        加入
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

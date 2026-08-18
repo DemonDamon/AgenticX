@@ -22,6 +22,7 @@ import {
   Plus,
   Wrench,
   Settings,
+  UsersRound,
   X,
   PanelRight,
   ArrowRight,
@@ -66,6 +67,7 @@ import {
   type NearWorkspacePickFileDetail,
 } from "../utils/workspace-sidebar-events";
 import { WorkPanel, type WorkPanelFocus } from "./work-panel/WorkPanel";
+import { GroupMemberAvatar } from "./groups/GroupMemberAvatar";
 import { loadPreparedHtmlSrcDoc } from "../utils/html-preview-assets";
 import { buildHtmlElementContextSnippet } from "../utils/html-preview-inspect";
 import {
@@ -2987,13 +2989,15 @@ export function ChatPane({
       const name = resolveMetaDisplayName(paneName);
       return { name, url: metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL };
     }
-    if (aid.startsWith("group:")) return { name: pane?.avatarName || "AI", url: undefined };
+    if (aid.startsWith("group:")) {
+      return { name: activeGroup?.name || pane?.avatarName || "群聊", url: undefined };
+    }
     const found = avatars.find((a) => a.id === aid);
     return {
       name: found?.name || pane?.avatarName || "AI",
       url: found?.avatarUrl || undefined,
     };
-  }, [pane?.avatarId, pane?.avatarName, avatars, metaAvatarUrl]);
+  }, [activeGroup, pane?.avatarId, pane?.avatarName, avatars, metaAvatarUrl]);
   const newTopicLabel = useMemo(
     () => newTopicTriggerLabel({ displayName: paneAvatarMeta.name, isGroup: isGroupPane }),
     [isGroupPane, paneAvatarMeta.name],
@@ -13042,7 +13046,30 @@ export function ChatPane({
             ) : null}
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-medium text-text-strong">
+                {isGroupPane ? (
+                  groupMembers.length > 0 ? (
+                    <span className="flex shrink-0 -space-x-1" aria-hidden>
+                      {groupMembers.slice(0, 3).map((member) => (
+                        <GroupMemberAvatar
+                          key={member.id}
+                          avatar={member}
+                          size="xs"
+                          className="ring-2 ring-surface-base"
+                        />
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] text-[rgb(var(--theme-color-fg-rgb,59,130,246))]" aria-hidden>
+                      <UsersRound className="h-3.5 w-3.5" strokeWidth={1.8} />
+                    </span>
+                  )
+                ) : null}
                 <span className="shrink-0">{paneAvatarMeta.name}</span>
+                {isGroupPane && activeGroup ? (
+                  <span className="shrink-0 rounded-full bg-surface-card px-1.5 py-0.5 text-[9px] font-normal text-text-faint">
+                    {activeGroup.avatarIds.length} 位成员
+                  </span>
+                ) : null}
                 {(pane.sessionId || "").trim() ? (
                   <span
                     className="select-all font-mono text-[9px] font-normal leading-snug text-text-faint"
@@ -13063,6 +13090,19 @@ export function ChatPane({
                   </span>
                 )}
               </div>
+              {isGroupPane && activeGroup ? (
+                <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
+                  <span className="text-text-subtle">自动协作</span>
+                  <span aria-hidden>·</span>
+                  <span className="truncate">
+                    {groupMembers
+                      .slice(0, 3)
+                      .map((member) => member.name)
+                      .join("、") || "等待加入成员"}
+                    {groupMembers.length > 3 ? ` 等 ${groupMembers.length} 人` : ""}
+                  </span>
+                </div>
+              ) : null}
               {pane.contextInherited ? (
                 <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
                   <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
