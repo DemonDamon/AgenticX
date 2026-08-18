@@ -8,29 +8,25 @@ import {
 
 /**
  * Group create/edit dialog. Extracted verbatim from AvatarSidebar so it can be
- * reused by ProjectsView. `initialName` / `initialAvatarIds` support template
- * pre-fill on the create path.
+ * reused by ProjectsView. This is intentionally the custom-team path: users
+ * choose existing avatars here, while team templates provision their own.
  */
 export function GroupEditorInline({
   avatars,
   initialGroup,
-  initialName,
-  initialAvatarIds,
   onDelete,
   onClose,
   onSaved,
 }: {
   avatars: Avatar[];
   initialGroup?: GroupChat;
-  initialName?: string;
-  initialAvatarIds?: string[];
   onDelete?: (groupId: string) => Promise<void>;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [name, setName] = useState(initialGroup?.name ?? initialName ?? "");
+  const [name, setName] = useState(initialGroup?.name ?? "");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    new Set(initialGroup?.avatarIds ?? initialAvatarIds ?? [])
+    new Set(initialGroup?.avatarIds ?? [])
   );
   const [loading, setLoading] = useState(false);
   const [saveNotice, setSaveNotice] = useState<{ type: "success" | "error" | "warning"; text: string } | null>(null);

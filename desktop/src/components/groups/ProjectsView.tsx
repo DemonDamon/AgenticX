@@ -14,7 +14,10 @@ import {
 import { MainViewShell } from "../ds/MainViewShell";
 import { useAppStore, type GroupChat } from "../../store";
 import { groupColorByIndex } from "../../utils/avatar-color";
-import { GROUP_TEMPLATES, matchTemplateAvatarIds } from "./group-templates";
+import { mapAvatarsFromApi, mapGroupsFromApi } from "../../utils/splash-preload-core";
+import { GROUP_TEMPLATES, type GroupTemplate } from "./group-templates";
+import { nextAvailableTemplateGroupName, type GroupTemplateCreationResult } from "./group-template-creation";
+import { GroupTemplateCreateDialog } from "./GroupTemplateCreateDialog";
 import { GroupEditorInline } from "./GroupEditorInline";
 import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
@@ -29,7 +32,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
 };
 
 type EditorState =
-  | { mode: "create"; name?: string; avatarIds?: string[] }
+  | { mode: "create" }
   | { mode: "edit"; group: GroupChat }
   | null;
 
@@ -44,6 +47,7 @@ const PROJECT_CARD_SELECTED =
 export function ProjectsView() {
   const groups = useAppStore((s) => s.groups);
   const avatars = useAppStore((s) => s.avatars);
+  const setAvatars = useAppStore((s) => s.setAvatars);
   const setGroups = useAppStore((s) => s.setGroups);
   const panes = useAppStore((s) => s.panes);
   const addPane = useAppStore((s) => s.addPane);
@@ -52,23 +56,34 @@ export function ProjectsView() {
   const { openGroupPane } = usePaneNavigation();
 
   const [editorState, setEditorState] = useState<EditorState>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<GroupTemplate | null>(null);
+
+  const refreshAvatars = async () => {
+    try {
+      const result = await window.agenticxDesktop.listAvatars();
+      if (result.ok && Array.isArray(result.avatars)) {
+        const next = mapAvatarsFromApi(result.avatars);
+        setAvatars(next);
+        return next;
+      }
+    } catch {
+      /* App-level refresh remains the fallback for transient backend errors. */
+    }
+    return [];
+  };
 
   const refreshGroups = async () => {
     try {
       const result = await window.agenticxDesktop.listGroups();
       if (result.ok && Array.isArray(result.groups)) {
-        setGroups(
-          result.groups.map((g) => ({
-            id: g.id,
-            name: g.name,
-            avatarIds: g.avatar_ids ?? [],
-            routing: g.routing ?? "intelligent",
-          }))
-        );
+        const next = mapGroupsFromApi(result.groups);
+        setGroups(next);
+        return next;
       }
     } catch {
       /* App.tsx fallback covers cold-start; ignore transient errors here. */
     }
+    return [];
   };
 
   const handleGroupDelete = async (group: GroupChat) => {
@@ -100,8 +115,34 @@ export function ProjectsView() {
   const handleTemplateSelect = (templateId: string) => {
     const tpl = GROUP_TEMPLATES.find((t) => t.id === templateId);
     if (!tpl) return;
-    const avatarIds = matchTemplateAvatarIds(tpl.memberRoleHints, avatars);
-    setEditorState({ mode: "create", name: tpl.name, avatarIds });
+    setEditorState(null);
+    setSelectedTemplate(tpl);
+  };
+
+  const handleTemplateCreated = async (result: GroupTemplateCreationResult) => {
+    const optimisticAvatars = mapAvatarsFromApi(result.avatars);
+    if (optimisticAvatars.length > 0) {
+      const createdIds = new Set(optimisticAvatars.map((avatar) => avatar.id));
+      const currentAvatars = useAppStore.getState().avatars;
+      setAvatars([
+        ...currentAvatars.filter((avatar) => !createdIds.has(avatar.id)),
+        ...optimisticAvatars,
+      ]);
+    }
+    const responseGroup = result.group ? mapGroupsFromApi([result.group])[0] : undefined;
+    if (responseGroup) {
+      const currentGroups = useAppStore.getState().groups;
+      setGroups([
+        ...currentGroups.filter((group) => group.id !== responseGroup.id),
+        responseGroup,
+      ]);
+    }
+    const [, refreshedGroups] = await Promise.all([refreshAvatars(), refreshGroups()]);
+    const createdGroup = responseGroup ?? refreshedGroups.find(
+      (group) => group.name === result.groupName
+        && result.avatarIds.every((avatarId) => group.avatarIds.includes(avatarId)),
+    );
+    if (createdGroup) openGroupPane(createdGroup);
   };
 
   return (
@@ -116,7 +157,10 @@ export function ProjectsView() {
         <button
           type="button"
           className="flex shrink-0 items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
-          onClick={() => setEditorState({ mode: "create" })}
+          onClick={() => {
+            setSelectedTemplate(null);
+            setEditorState({ mode: "create" });
+          }}
         >
           <Plus className="h-4 w-4" />
           新建群聊
@@ -182,6 +226,7 @@ export function ProjectsView() {
                       aria-label="编辑群聊"
                       onClick={(e) => {
                         e.stopPropagation();
+                        setSelectedTemplate(null);
                         setEditorState({ mode: "edit", group });
                       }}
                     >
@@ -219,6 +264,9 @@ export function ProjectsView() {
                   <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-text-muted">
                     {tpl.description}
                   </p>
+                  <div className="mt-1.5 text-[11px] text-text-faint">
+                    自动创建 {tpl.members.length} 个专属分身
+                  </div>
                 </div>
               </button>
             );
@@ -230,8 +278,6 @@ export function ProjectsView() {
         <GroupEditorInline
           avatars={avatars}
           initialGroup={editorState.mode === "edit" ? editorState.group : undefined}
-          initialName={editorState.mode === "create" ? editorState.name : undefined}
-          initialAvatarIds={editorState.mode === "create" ? editorState.avatarIds : undefined}
           onDelete={
             editorState.mode === "edit"
               ? async (groupId) => {
@@ -248,6 +294,19 @@ export function ProjectsView() {
           }}
         />
       )}
+
+      {selectedTemplate ? (
+        <GroupTemplateCreateDialog
+          key={selectedTemplate.id}
+          template={selectedTemplate}
+          initialGroupName={nextAvailableTemplateGroupName(
+            selectedTemplate.name,
+            groups.map((group) => group.name),
+          )}
+          onClose={() => setSelectedTemplate(null)}
+          onCreated={handleTemplateCreated}
+        />
+      ) : null}
     </MainViewShell>
   );
 }
