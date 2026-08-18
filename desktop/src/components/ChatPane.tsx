@@ -10433,6 +10433,9 @@ export function ChatPane({
       let cumulativeFull = "";
       let receivedFinalEvent = false;
       let receivedBudgetExceededEvent = false;
+      // 本轮是不是只读讨论。workforce.started 带下来之后，后续阶段的旁白都要跟着变，
+      // 否则界面会一边说「讨论」一边预告「执行」。
+      let groupDiscussionMode = false;
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
@@ -10885,8 +10888,14 @@ export function ChatPane({
               ).trim();
 
               if (wfAction === "workforce_started") {
+                // 讨论轮和执行轮的开场白必须不同。之前不论哪种模式都说「我先拆解
+                // 任务、再安排执行」，用户看到的就是「明明让讨论，它却要动手」——
+                // 后端已经进了只读讨论模式，界面却还在预告执行。
+                groupDiscussionMode = String(wfData.mode ?? "").trim() === "discussion";
                 addGroupWorkflowMessage({
-                  content: "我先拆解任务，再按成员职责安排执行，最后由我汇总并收口。",
+                  content: groupDiscussionMode
+                    ? "这轮是讨论：我请各位分别给出分析，只查资料不动手，最后由我汇总分歧和结论。"
+                    : "我先拆解任务，再按成员职责安排执行，最后由我汇总并收口。",
                   avatarName: metaLeaderDisplayName,
                   workflowRole: "leader",
                   status: wfStatus,
@@ -10894,7 +10903,9 @@ export function ChatPane({
                 });
               } else if (wfAction === "decompose_start") {
                 addGroupWorkflowMessage({
-                  content: "我正在拆解任务，确认每个阶段的交付边界。",
+                  content: groupDiscussionMode
+                    ? "我正在把问题拆成几个可比的维度，分给各位分别看。"
+                    : "我正在拆解任务，确认每个阶段的交付边界。",
                   avatarName: metaLeaderDisplayName,
                   workflowRole: "leader",
                   taskId: wfTaskId,

@@ -22,6 +22,7 @@ from agenticx.runtime.group_router import (
     _is_collaborative_team_request,
     _is_complex_multistep_task,
     _is_analysis_only_request,
+    resolve_discussion_scope,
     _is_open_call_question,
     _group_chat_tools,
     EventType,
@@ -164,6 +165,35 @@ class TestDiscussionScopeHeuristic:
     ])
     def test_explicit_execution_or_unrelated_prompt_is_not_analysis_only(self, text):
         assert not _is_analysis_only_request(text)
+
+    @pytest.mark.parametrize("follow_up", [
+        "继续",
+        "那 vLLM 呢",
+        "展开说说第二点",
+        "还有别的吗",
+        "嗯",
+    ])
+    def test_discussion_survives_a_follow_up_without_analysis_words(self, follow_up):
+        """讨论是会话状态，不是单句属性。
+
+        这是「让讨论 harness 对比，没两轮就歪到 PoC」的直接成因：追问里没有分析词，
+        旧实现每轮重算就把模式掉回执行档，工具重新放开，群里开始动手写东西。
+        """
+        assert resolve_discussion_scope(follow_up, True) is True
+
+    def test_explicit_execution_leaves_discussion(self):
+        assert resolve_discussion_scope("写个 PoC 验证一下", True) is False
+
+    def test_analysis_request_enters_discussion_from_execution(self):
+        assert resolve_discussion_scope("对比一下这两个 harness", False) is True
+
+    def test_neutral_follow_up_does_not_start_a_discussion(self):
+        # 没在讨论时的「继续」是继续干活，不该被当成开启讨论。
+        assert resolve_discussion_scope("继续", False) is False
+
+    def test_empty_input_keeps_the_current_mode(self):
+        assert resolve_discussion_scope("", True) is True
+        assert resolve_discussion_scope("   ", False) is False
 
     def test_analysis_tools_are_read_only(self):
         names = {

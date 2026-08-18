@@ -366,24 +366,59 @@ def _is_collaborative_team_request(user_input: str) -> bool:
     return any(re.search(pattern, text) for pattern in _COLLABORATIVE_TEAM_PATTERNS_CN)
 
 
-def _is_analysis_only_request(user_input: str) -> bool:
-    """Return True for research/discussion turns without explicit execution intent."""
+def _has_explicit_execution_intent(user_input: str) -> bool:
+    """True when the message asks for something to actually be built or run."""
     text = (user_input or "").strip()
     if not text:
         return False
     lowered = text.casefold()
-    has_analysis_marker = any(
-        marker in text for marker in _ANALYSIS_ONLY_MARKERS_CN
-    ) or any(marker in lowered for marker in _ANALYSIS_ONLY_MARKERS_EN)
-    if not has_analysis_marker:
+    return any(
+        re.search(pattern, text, flags=re.IGNORECASE) for pattern in _EXECUTION_PATTERNS_CN
+    ) or any(re.search(pattern, lowered) for pattern in _EXECUTION_PATTERNS_EN)
+
+
+def _has_analysis_marker(user_input: str) -> bool:
+    text = (user_input or "").strip()
+    if not text:
         return False
-    has_explicit_execution = any(
-        re.search(pattern, text, flags=re.IGNORECASE)
-        for pattern in _EXECUTION_PATTERNS_CN
-    ) or any(
-        re.search(pattern, lowered) for pattern in _EXECUTION_PATTERNS_EN
+    lowered = text.casefold()
+    return any(marker in text for marker in _ANALYSIS_ONLY_MARKERS_CN) or any(
+        marker in lowered for marker in _ANALYSIS_ONLY_MARKERS_EN
     )
-    return not has_explicit_execution
+
+
+def _is_analysis_only_request(user_input: str) -> bool:
+    """Return True for research/discussion turns without explicit execution intent."""
+    if not _has_analysis_marker(user_input):
+        return False
+    return not _has_explicit_execution_intent(user_input)
+
+
+def resolve_discussion_scope(user_input: str, previous_analysis_only: bool) -> bool:
+    """Decide whether this turn stays in read-only discussion mode.
+
+    讨论是**会话状态，不是单句属性**。之前每一轮都只看当前这句话，于是「分析一下
+    DeepSeek Harness 和竞品的区别」开了讨论模式，下一句「继续」「展开说说」里没有
+    分析词，模式就悄悄掉回执行档——工具重新放开，群里开始写 PoC。用户看到的就是
+    「没两轮就歪了」。
+
+    所以只有三种情况会改变模式：
+
+      1. 明确要动手（部署/写代码/跑测试）→ 退出讨论。
+      2. 明确要讨论/分析/对比 → 进入讨论。
+      3. 都没说 → **维持上一轮**，而不是回到默认。
+
+    第 3 条是关键：追问、补充、「然后呢」都属于没表态，它们不该改变正在进行的
+    讨论的性质。
+    """
+    text = (user_input or "").strip()
+    if not text:
+        return previous_analysis_only
+    if _has_explicit_execution_intent(text):
+        return False
+    if _has_analysis_marker(text):
+        return True
+    return previous_analysis_only
 
 
 _META_AT_SUFFIX = r"(?=[\s\u3000\u4e00-\u9fff，。！？、：:；;,.!?\[\]（）()【】\"'「」]|$)"
@@ -3069,7 +3104,10 @@ class GroupChatRouter:
         if not isinstance(scratchpad, dict):
             scratchpad = {}
             setattr(base_session, "scratchpad", scratchpad)
-        analysis_only = _is_analysis_only_request(user_input)
+        analysis_only = resolve_discussion_scope(
+            user_input,
+            getattr(base_session, "_group_analysis_only", False) is True,
+        )
         # Turn-local scope is also consumed by legacy member/meta paths so an
         # explicit @-mention cannot silently regain mutating tools.
         setattr(base_session, "_group_analysis_only", analysis_only)
