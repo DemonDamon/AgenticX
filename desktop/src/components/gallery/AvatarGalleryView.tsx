@@ -26,9 +26,9 @@ const GALLERY_CARD_SELECTED =
 const GALLERY_CREATE_BASE =
   "flex min-h-[168px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed text-text-faint outline-none transition";
 const GALLERY_CREATE_IDLE =
-  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)] hover:text-[rgb(var(--theme-color-rgb,59,130,246))] focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:text-[rgb(var(--theme-color-rgb,59,130,246))] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+  "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)] hover:text-[rgb(var(--theme-color-fg-rgb,59,130,246))] focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:text-[rgb(var(--theme-color-fg-rgb,59,130,246))] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 const GALLERY_CREATE_ACTIVE =
-  "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] text-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
+  "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] text-[rgb(var(--theme-color-fg-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 
 export function AvatarGalleryView() {
   const avatars = useAppStore((s) => s.avatars);
@@ -288,7 +288,7 @@ export function AvatarGalleryView() {
                 <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
                   <button
                     type="button"
-                    className="flex-1 rounded-md border border-border bg-surface-panel px-3 py-2 text-xs font-medium text-text-strong transition hover:border-[rgb(var(--theme-color-rgb,59,130,246))] hover:text-[rgb(var(--theme-color-rgb,59,130,246))] hover:ring-1 hover:ring-[rgba(var(--theme-color-rgb,59,130,246),0.25)]"
+                    className="flex-1 rounded-md border border-border bg-surface-panel px-3 py-2 text-xs font-medium text-text-strong transition hover:border-[rgb(var(--theme-color-rgb,59,130,246))] hover:text-[rgb(var(--theme-color-fg-rgb,59,130,246))] hover:ring-1 hover:ring-[rgba(var(--theme-color-rgb,59,130,246),0.25)]"
                     onClick={(e) => {
                       e.stopPropagation();
                       openMetaOrAvatarPane(avatar.id, avatar.name);

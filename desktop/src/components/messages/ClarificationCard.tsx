@@ -270,7 +270,7 @@ export function ClarificationCard({
     return (
       <div className={`${shellClass} overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-surface-card text-sm`}>
         <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-text-muted">
-          <Check className="h-3.5 w-3.5 text-[var(--ui-btn-primary-bg)]" />
+          <Check className="h-3.5 w-3.5 text-[rgb(var(--theme-color-fg-rgb,59,130,246))]" />
           <span>已回复</span>
           {suspended && <span className="ml-auto text-amber-300/70">（无人值守会话）</span>}
         </div>
@@ -310,7 +310,7 @@ export function ClarificationCard({
       {/* Header — no hard divider; rely on spacing + subtle tint */}
       <div className="flex items-center justify-between bg-surface-card-strong/20 px-3 py-2">
         <div className="flex items-center gap-2 text-[12px] font-medium text-text-strong">
-          <span className="flex h-5 w-5 items-center justify-center text-[var(--ui-btn-primary-bg)]">
+          <span className="flex h-5 w-5 items-center justify-center text-[rgb(var(--theme-color-fg-rgb,59,130,246))]">
             <ClarificationGlyph className="h-4 w-4" />
           </span>
           需要你的输入

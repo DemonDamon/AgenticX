@@ -89,7 +89,7 @@ export function InlineConfirmCard({
 
   const resolvedIcon =
     effectiveStatus === "approved" ? (
-      <Check className="h-3.5 w-3.5 text-[var(--ui-btn-primary-bg)]" aria-hidden />
+      <Check className="h-3.5 w-3.5 text-[rgb(var(--theme-color-fg-rgb,59,130,246))]" aria-hidden />
     ) : effectiveStatus === "rejected" ? (
       <X className="h-3.5 w-3.5 text-text-muted" aria-hidden />
     ) : effectiveStatus === "expired" || effectiveStatus === "uncertain" ? (
@@ -180,7 +180,7 @@ export function InlineConfirmCard({
               disabled={!interactive}
               aria-label={confirmation.rejectLabel}
               onClick={() => void handleResolve("rejected")}
-              className="inline-flex h-9 items-center justify-center rounded-lg border bg-transparent px-3 text-[13px] font-medium text-[rgb(var(--theme-color-rgb))] transition hover:bg-[rgba(var(--theme-color-rgb),0.08)] active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-9 items-center justify-center rounded-lg border bg-transparent px-3 text-[13px] font-medium text-[rgb(var(--theme-color-fg-rgb))] transition hover:bg-[rgba(var(--theme-color-rgb),0.08)] active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-50"
               style={{ borderColor: "var(--ui-btn-primary-border)" }}
             >
               {confirmation.rejectLabel}

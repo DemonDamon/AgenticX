@@ -1158,7 +1158,7 @@ export function SidebarSessionHistory() {
               type="button"
               className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${
                 avatarFilter !== "all"
-                  ? "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] text-[rgb(var(--theme-color-rgb,59,130,246))]"
+                  ? "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] text-[rgb(var(--theme-color-fg-rgb,59,130,246))]"
                   : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
               }`}
               onClick={openFilterMenu}
@@ -1306,7 +1306,7 @@ export function SidebarSessionHistory() {
         {hasMore ? (
           <button
             type="button"
-            className="mx-2 mt-1 w-[calc(100%-1rem)] rounded-md px-2 py-1.5 text-left text-[12px] text-[rgb(var(--theme-color-rgb,59,130,246))] hover:bg-surface-hover"
+            className="mx-2 mt-1 w-[calc(100%-1rem)] rounded-md px-2 py-1.5 text-left text-[12px] text-[rgb(var(--theme-color-fg-rgb,59,130,246))] hover:bg-surface-hover"
             onClick={() => setVisibleLimit((n) => n + SIDEBAR_HISTORY_PAGE_SIZE)}
           >
             显示更多

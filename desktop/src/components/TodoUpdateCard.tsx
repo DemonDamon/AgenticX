@@ -171,7 +171,7 @@ export function TodoUpdateCard({ content }: { content: string }) {
                   {item.content}
                 </div>
                 {item.status === "in_progress" && item.activeForm && item.activeForm !== item.content ? (
-                  <div className="mt-0.5 text-[10px] text-[rgba(var(--theme-color-rgb,59,130,246),0.8)]">
+                  <div className="mt-0.5 text-[10px] text-[rgba(var(--theme-color-fg-rgb,59,130,246),0.8)]">
                     当前动作：{item.activeForm}
                   </div>
                 ) : null}

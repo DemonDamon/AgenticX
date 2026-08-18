@@ -110,7 +110,7 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
               {clickable ? (
                 <button
                   type="button"
-                  className="inline-flex max-w-full items-center gap-1 text-left text-[rgba(var(--theme-color-rgb,6,182,212),0.92)] transition-colors hover:text-[rgba(var(--theme-color-rgb,6,182,212),1)] hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,6,182,212),0.30)]"
+                  className="inline-flex max-w-full items-center gap-1 text-left text-[rgba(var(--theme-color-fg-rgb,6,182,212),0.92)] transition-colors hover:text-[rgba(var(--theme-color-fg-rgb,6,182,212),1)] hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,6,182,212),0.30)]"
                   title={ref.url}
                   onClick={() => openSearchReference(ref)}
                 >
@@ -198,7 +198,7 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
             {!showAll && hiddenCount > 0 ? (
               <button
                 type="button"
-                className="rounded-md px-1 py-0.5 text-[12px] text-[rgba(var(--theme-color-rgb,6,182,212),0.92)] transition-colors hover:bg-surface-hover/20 hover:text-[rgba(var(--theme-color-rgb,6,182,212),1)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,6,182,212),0.30)]"
+                className="rounded-md px-1 py-0.5 text-[12px] text-[rgba(var(--theme-color-fg-rgb,6,182,212),0.92)] transition-colors hover:bg-surface-hover/20 hover:text-[rgba(var(--theme-color-fg-rgb,6,182,212),1)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,6,182,212),0.30)]"
                 onClick={() => setShowAll(true)}
               >
                 显示更多（+{hiddenCount}）

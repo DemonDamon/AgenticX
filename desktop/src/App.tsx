@@ -19,6 +19,7 @@ import { defaultConfirmPolicyForStrategy } from "./constants/confirm-strategy-op
 import type { ForwardConfirmPayload } from "./components/ForwardPicker";
 import { resolveForwardTarget } from "./utils/resolve-forward-target";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
+import { parsePersistedThemeMode } from "./utils/theme-preference";
 import { buildConfirmScope } from "./utils/confirm-scope";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
 import type { Message, ProviderEntry } from "./store";
@@ -1575,16 +1576,10 @@ export function App() {
       try {
         const layout = await window.agenticxDesktop.loadLayout();
         if (!layout.ok) return;
-        const saved = String(layout.theme ?? "").trim();
-        if (saved === "light" || saved === "dark") {
+        const saved = parsePersistedThemeMode(layout.theme);
+        if (saved) {
           if (useAppStore.getState().theme !== saved) {
             setTheme(saved);
-          }
-          return;
-        }
-        if (saved === "dim") {
-          if (useAppStore.getState().theme !== "dark") {
-            setTheme("dark");
           }
           return;
         }

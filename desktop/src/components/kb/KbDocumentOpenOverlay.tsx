@@ -30,7 +30,7 @@ export function KbDocumentOpenOverlay() {
       <div className="min-w-[220px] rounded-2xl border border-border-subtle bg-surface-card px-8 py-7 text-center shadow-[0_12px_40px_rgba(0,0,0,0.45)]">
         {state.status === "loading" ? (
           <Loader2
-            className="mx-auto h-11 w-11 animate-spin text-[rgb(var(--theme-color-rgb))]"
+            className="mx-auto h-11 w-11 animate-spin text-[rgb(var(--theme-color-fg-rgb))]"
             aria-hidden
           />
         ) : (

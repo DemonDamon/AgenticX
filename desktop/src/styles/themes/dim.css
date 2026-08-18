@@ -6,14 +6,14 @@
   --text-subtle: rgba(225, 229, 236, 0.58);
   --text-faint: rgba(225, 229, 236, 0.42);
 
-  --surface-base: #181818;
-  --surface-base-fallback: #181818;
-  --surface-panel: rgba(24, 24, 24, 0.75);
-  --surface-popover: #181818;
-  --surface-sidebar: rgba(30, 30, 30, 0.68);
-  --surface-topbar: rgba(30, 30, 30, 0.68);
+  --surface-base: #2a2a2e;
+  --surface-base-fallback: #2a2a2e;
+  --surface-panel: rgba(42, 42, 46, 0.82);
+  --surface-popover: #323238;
+  --surface-sidebar: rgba(47, 47, 52, 0.82);
+  --surface-topbar: rgba(47, 47, 52, 0.82);
   --surface-messages: transparent;
-  --surface-composer: rgba(26, 26, 26, 0.62);
+  --surface-composer: rgba(50, 50, 55, 0.88);
   --chat-followup-chip-bg: rgba(255, 255, 255, 0.08);
   --chat-followup-chip-bg-hover: rgba(255, 255, 255, 0.12);
   --chat-followup-chip-border: var(--border-subtle);
@@ -58,7 +58,7 @@
   --focus-glass-border: rgba(255, 255, 255, 0);
   --focus-glass-highlight: rgba(255, 255, 255, 0);
   --focus-glass-shadow-outer: rgba(0, 0, 0, 0);
-  --focus-composer-surface: #1f1f1f;
+  --focus-composer-surface: #323237;
   --focus-composer-border: rgba(255, 255, 255, 0.12);
   --focus-composer-text: #d9dce1;
   --focus-composer-text-muted: rgba(225, 229, 236, 0.5);
@@ -91,7 +91,6 @@
 
   --kb-citation-bg: rgba(var(--theme-color-rgb), 0.22);
   --kb-citation-bg-muted: rgba(var(--theme-color-rgb), 0.11);
-  --kb-citation-fg: rgb(var(--theme-color-rgb));
+  --kb-citation-fg: rgb(var(--theme-color-fg-rgb));
   --kb-citation-list-bg: rgba(var(--theme-color-rgb), 0.07);
 }
-

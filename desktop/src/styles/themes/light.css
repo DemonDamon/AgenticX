@@ -92,6 +92,6 @@
 
   --kb-citation-bg: rgba(var(--theme-color-rgb), 0.14);
   --kb-citation-bg-muted: rgba(var(--theme-color-rgb), 0.08);
-  --kb-citation-fg: color-mix(in srgb, rgb(var(--theme-color-rgb)) 82%, var(--text-strong) 18%);
+  --kb-citation-fg: rgb(var(--theme-color-fg-rgb));
   --kb-citation-list-bg: rgba(var(--theme-color-rgb), 0.06);
 }

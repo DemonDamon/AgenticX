@@ -67,7 +67,7 @@ body {
   color: var(--text-strong);
 }
 .msg-content a {
-  color: rgb(var(--theme-color-rgb, 59, 130, 246));
+  color: rgb(var(--theme-color-fg-rgb, 59, 130, 246));
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -228,11 +228,11 @@ body {
 .agx-continuation-reason-chip {
   border: none;
   background: rgba(var(--theme-color-rgb, 59, 130, 246), 0.14);
-  color: rgb(var(--theme-color-rgb, 59, 130, 246));
+  color: rgb(var(--theme-color-fg-rgb, 59, 130, 246));
 }
 :root[data-theme="light"] .agx-continuation-reason-chip {
   background: rgba(var(--theme-color-rgb, 59, 130, 246), 0.12);
-  color: rgb(37, 99, 235);
+  color: rgb(var(--theme-color-fg-rgb, 37, 99, 235));
 }
 
 /* 助手推荐问：柔和填充胶囊、无描边，宽度贴合文字 */
@@ -558,19 +558,33 @@ body.agx-settings-nav-resizing {
 /* Theme Colors */
 :root[data-theme-color="blue"] {
   --theme-color-rgb: 59, 130, 246;
+  --theme-color-fg-rgb: 59, 130, 246;
+  --theme-color-outline-rgb: 59, 130, 246;
   --theme-color-text: #ffffff;
 }
 :root[data-theme-color="black"] {
   --theme-color-rgb: 15, 23, 42;
+  --theme-color-fg-rgb: 15, 23, 42;
+  --theme-color-outline-rgb: 15, 23, 42;
   --theme-color-text: #ffffff;
 }
 :root[data-theme-color="white"] {
   --theme-color-rgb: 255, 255, 255;
+  --theme-color-fg-rgb: 255, 255, 255;
+  --theme-color-outline-rgb: 255, 255, 255;
   --theme-color-text: #0f172a;
 }
+
+/* Keep the selected fill literal; only standalone glyphs and outlines adapt
+   when a neutral accent would otherwise disappear into the appearance. */
 :root[data-theme="light"][data-theme-color="white"] {
-  --theme-color-rgb: 15, 23, 42;
-  --theme-color-text: #ffffff;
+  --theme-color-fg-rgb: 71, 85, 105;
+  --theme-color-outline-rgb: 100, 116, 139;
+}
+:root[data-theme="dark"][data-theme-color="black"],
+:root[data-theme="dim"][data-theme-color="black"] {
+  --theme-color-fg-rgb: 203, 213, 225;
+  --theme-color-outline-rgb: 148, 163, 184;
 }
 
 :root[data-theme-color] {
@@ -578,8 +592,8 @@ body.agx-settings-nav-resizing {
   --chat-im-user-border: rgba(var(--theme-color-rgb), 0.16);
   --chat-im-avatar-bg: rgba(var(--theme-color-rgb), 0.9);
   --chat-im-avatar-fg: var(--theme-color-text);
-  --settings-accent-focus: rgba(var(--theme-color-rgb), 0.5);
-  --ui-btn-primary-border: rgba(var(--theme-color-rgb), 0.5);
+  --settings-accent-focus: rgba(var(--theme-color-outline-rgb), 0.5);
+  --ui-btn-primary-border: rgba(var(--theme-color-outline-rgb), 0.5);
   /* Soft fill, no theme-color stroke — white accent used to read as a wireframe. */
   --chat-composer-chip-border: color-mix(in srgb, var(--text-primary) 8%, transparent);
   --chat-composer-chip-bg: color-mix(in srgb, var(--text-primary) 8%, var(--surface-card));
@@ -776,9 +790,24 @@ body.agx-settings-nav-resizing {
   box-shadow: none;
 }
 
+:root[data-theme="light"][data-theme-color="white"] .agx-im-user-bubble,
+:root[data-theme="dark"][data-theme-color="black"] .agx-im-user-bubble,
+:root[data-theme="dim"][data-theme-color="black"] .agx-im-user-bubble {
+  box-shadow: inset 0 0 0 1px rgba(var(--theme-color-outline-rgb), 0.22);
+}
+
+:root[data-theme="light"][data-theme-color="white"] .bg-btnPrimary,
+:root[data-theme="dark"][data-theme-color="black"] .bg-btnPrimary,
+:root[data-theme="dim"][data-theme-color="black"] .bg-btnPrimary,
+:root[data-theme="light"][data-theme-color="white"] [role="switch"][aria-checked="true"],
+:root[data-theme="dark"][data-theme-color="black"] [role="switch"][aria-checked="true"],
+:root[data-theme="dim"][data-theme-color="black"] [role="switch"][aria-checked="true"] {
+  box-shadow: inset 0 0 0 1px rgba(var(--theme-color-outline-rgb), 0.32);
+}
+
 input[type="checkbox"],
 input[type="radio"] {
-  accent-color: rgb(var(--theme-color-rgb));
+  accent-color: rgb(var(--theme-color-fg-rgb));
 }
 :root[data-theme="light"][data-theme-color] {
   --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.22);
@@ -786,16 +815,30 @@ input[type="radio"] {
   --chat-composer-chip-bg: color-mix(in srgb, var(--text-primary) 6%, var(--surface-card));
   --chat-composer-chip-border: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
+:root[data-theme="light"][data-theme-color="white"] {
+  --chat-im-user-bg: #ffffff;
+  --chat-im-user-border: rgba(var(--theme-color-outline-rgb), 0.18);
+  --chat-im-avatar-bg: #ffffff;
+  --chat-im-avatar-fg: #0f172a;
+  --settings-accent-solid: #ffffff;
+  --settings-accent-solid-hover: #f4f4f5;
+  --settings-accent-solid-text: #0f172a;
+  --settings-accent-focus: rgba(var(--theme-color-outline-rgb), 0.38);
+  --ui-btn-primary-bg: #ffffff;
+  --ui-btn-primary-bg-hover: #f4f4f5;
+  --ui-btn-primary-text: #0f172a;
+  --ui-btn-primary-border: rgba(var(--theme-color-outline-rgb), 0.38);
+}
 :root[data-theme="dim"][data-theme-color] {
   --chat-im-user-bg: rgba(var(--theme-color-rgb), 0.4);
 }
 
 .agx-theme-focus-ring:focus-within {
-  border-color: rgba(var(--theme-color-rgb), 0.4);
-  box-shadow: 0 0 24px rgba(var(--theme-color-rgb), 0.15);
+  border-color: rgba(var(--theme-color-outline-rgb), 0.4);
+  box-shadow: 0 0 24px rgba(var(--theme-color-outline-rgb), 0.15);
 }
 :root[data-theme="dark"] .agx-theme-focus-ring:focus-within {
-  box-shadow: 0 0 24px rgba(var(--theme-color-rgb), 0.2);
+  box-shadow: 0 0 24px rgba(var(--theme-color-outline-rgb), 0.2);
 }
 
 /* Theme-aware focus styles for form inputs in Settings and Panels */
@@ -813,8 +856,8 @@ input[type="radio"] {
 .agx-task-form-panel textarea:focus,
 .agx-session-history-panel input[type="search"]:focus {
   outline: none !important;
-  border-color: rgba(var(--theme-color-rgb, 59, 130, 246), 0.5) !important;
-  box-shadow: 0 0 0 1px rgba(var(--theme-color-rgb, 59, 130, 246), 0.5) !important;
+  border-color: rgba(var(--theme-color-outline-rgb, 59, 130, 246), 0.5) !important;
+  box-shadow: 0 0 0 1px rgba(var(--theme-color-outline-rgb, 59, 130, 246), 0.5) !important;
 }
 
 /* Model picker menu: scales from the trigger edge, never from nothing */

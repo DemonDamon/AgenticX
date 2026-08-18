@@ -26,7 +26,7 @@ const NAV_ITEM_BASE =
   "flex w-full items-center gap-2 rounded-lg px-2.5 py-[7px] text-left text-[13px] leading-none transition-colors";
 const NAV_ITEM_IDLE = "text-text-muted hover:bg-surface-hover hover:text-text-strong";
 const NAV_ITEM_ACTIVE =
-  "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] font-medium text-[rgb(var(--theme-color-rgb,59,130,246))]";
+  "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] font-medium text-[rgb(var(--theme-color-fg-rgb,59,130,246))]";
 
 type NavEntry =
   | { kind: "action"; id: "new-task"; label: string; icon: LucideIcon }

@@ -9123,7 +9123,7 @@ export function SettingsPanel({
                             <button
                               type="button"
                               disabled={aiAssistLoading === "preference"}
-                              className="flex items-center gap-1 text-xs text-[rgba(var(--theme-color-rgb),0.85)] transition-opacity hover:opacity-80 disabled:opacity-40"
+                              className="flex items-center gap-1 text-xs text-[rgba(var(--theme-color-fg-rgb),0.85)] transition-opacity hover:opacity-80 disabled:opacity-40"
                               onClick={() => void callAiAssist("preference")}
                             >
                               {aiAssistLoading === "preference" ? (

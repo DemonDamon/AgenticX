@@ -58,12 +58,12 @@ export const REACT_RAIL_TITLE_CLASS =
 
 /** Theme-primary rail color — shared by thought chain, tool rail, and system status rows. */
 export const REACT_RAIL_ICON_CLASS =
-  "text-[rgb(var(--theme-color-rgb,59,130,246))]";
+  "text-[rgb(var(--theme-color-fg-rgb,59,130,246))]";
 
 export const REACT_RAIL_ICON_TILE_STYLE: CSSProperties = {
   backgroundColor: "rgba(var(--theme-color-rgb, 59, 130, 246), 0.12)",
   boxShadow: "inset 0 0 0 1px rgba(var(--theme-color-rgb, 59, 130, 246), 0.32)",
-  color: "rgb(var(--theme-color-rgb, 59, 130, 246))",
+  color: "rgb(var(--theme-color-fg-rgb, 59, 130, 246))",
 };
 
 export function getAssistantTextClassName(options: AssistantTextClassOptions = {}): string | undefined {

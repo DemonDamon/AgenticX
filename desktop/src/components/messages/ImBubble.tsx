@@ -498,7 +498,7 @@ export function ImBubble({
             type="button"
             className={`rounded p-1 hover:bg-surface-hover ${
               selected
-                ? "text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-90"
+                ? "text-[rgb(var(--theme-color-fg-rgb,59,130,246))] hover:opacity-90"
                 : "hover:text-text-strong"
             }`}
             onMouseDown={(e) => e.preventDefault()}
@@ -787,7 +787,7 @@ export function ImBubble({
                       type="button"
                       className={
                         selected
-                          ? "text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-90"
+                          ? "text-[rgb(var(--theme-color-fg-rgb,59,130,246))] hover:opacity-90"
                           : undefined
                       }
                       onMouseDown={(e) => e.preventDefault()}

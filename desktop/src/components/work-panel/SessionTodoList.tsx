@@ -27,7 +27,7 @@ export function SessionTodoList({ todo }: Props) {
             {item.status === "completed" ? (
               <CircleCheck className={`h-4 w-4 ${TRAE_TODO_CHECK_CLASS}`} strokeWidth={1.75} />
             ) : item.status === "in_progress" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-[rgb(var(--theme-color-rgb,59,130,246))]" />
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[rgb(var(--theme-color-fg-rgb,59,130,246))]" />
             ) : (
               <Circle className="h-3.5 w-3.5 text-text-faint" strokeWidth={1.75} />
             )}
@@ -47,7 +47,7 @@ export function SessionTodoList({ todo }: Props) {
             {item.status === "in_progress" &&
             item.activeForm &&
             item.activeForm !== item.content ? (
-              <div className="mt-0.5 text-[11px] text-[rgba(var(--theme-color-rgb,59,130,246),0.8)]">
+              <div className="mt-0.5 text-[11px] text-[rgba(var(--theme-color-fg-rgb,59,130,246),0.8)]">
                 {item.activeForm}
               </div>
             ) : null}

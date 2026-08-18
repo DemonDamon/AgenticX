@@ -22,8 +22,8 @@ const SUGGESTION_CARD =
 /** 图标容器：背景与描边均走 Near 主题色变量，随用户主题切换。 */
 const THEME_ICON_BOX =
   "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[rgba(var(--theme-color-rgb),0.14)] shadow-[inset_0_0_0_1px_rgba(var(--theme-color-rgb),0.18)]";
-const THEME_ICON_GLYPH = "h-[18px] w-[18px] text-[rgb(var(--theme-color-rgb))]";
-const THEME_ICON_GLYPH_SM = "h-3.5 w-3.5 text-[rgb(var(--theme-color-rgb))]";
+const THEME_ICON_GLYPH = "h-[18px] w-[18px] text-[rgb(var(--theme-color-fg-rgb))]";
+const THEME_ICON_GLYPH_SM = "h-3.5 w-3.5 text-[rgb(var(--theme-color-fg-rgb))]";
 
 const SUGGESTION_CARDS: SuggestionCard[] = [
   {

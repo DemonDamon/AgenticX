@@ -82,7 +82,7 @@ export function ToolActivityIndicator({
     >
       <span className="relative flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
         <span className="absolute h-3.5 w-3.5 animate-ping rounded-full bg-[rgba(var(--theme-color-rgb),0.16)]" />
-        <span className="relative flex h-4 w-4 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.12)] text-[rgb(var(--theme-color-rgb,59,130,246))]">
+        <span className="relative flex h-4 w-4 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.12)] text-[rgb(var(--theme-color-fg-rgb,59,130,246))]">
           <Sparkles className="h-2.5 w-2.5" strokeWidth={2.2} />
         </span>
       </span>

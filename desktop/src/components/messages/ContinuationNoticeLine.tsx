@@ -31,7 +31,7 @@ function RoundLabel({
 }) {
   if (round == null) return null;
   const roundNum = (
-    <span className="font-semibold text-[rgb(var(--theme-color-rgb,59,130,246))]">{round}</span>
+    <span className="font-semibold text-[rgb(var(--theme-color-fg-rgb,59,130,246))]">{round}</span>
   );
   if (maxRounds != null && maxRounds > 0) {
     return (

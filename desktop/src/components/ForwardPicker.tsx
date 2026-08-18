@@ -322,7 +322,7 @@ export function ForwardPicker({
         </div>
         {opts.active ? (
           <Check
-            className="h-4 w-4 shrink-0 text-[rgb(var(--theme-color-rgb))]"
+            className="h-4 w-4 shrink-0 text-[rgb(var(--theme-color-fg-rgb))]"
             strokeWidth={2.25}
             aria-hidden
           />

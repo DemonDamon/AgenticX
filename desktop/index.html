@@ -7,9 +7,13 @@
     <script>
       try {
         var savedTheme = localStorage.getItem("agx-theme");
+        var theme =
+          savedTheme === "light" || savedTheme === "dim" || savedTheme === "dark"
+            ? savedTheme
+            : "dark";
         document.documentElement.setAttribute(
           "data-theme",
-          savedTheme === "light" ? "light" : "dark"
+          theme
         );
         var savedThemeColor = localStorage.getItem("agx-theme-color");
         var themeColor =

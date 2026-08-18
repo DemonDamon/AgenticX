@@ -104,14 +104,14 @@ export function StickyTaskBar({
         aria-label={expanded ? "收起任务列表" : "展开任务列表"}
       >
         <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
-          <ListChecks className="h-4 w-4 text-[rgb(var(--theme-color-rgb,59,130,246))]" />
+          <ListChecks className="h-4 w-4 text-[rgb(var(--theme-color-fg-rgb,59,130,246))]" />
         </span>
         <span className="text-[12px] font-semibold text-text-strong">任务进度</span>
         <span
           className={
             allDone
               ? "rounded bg-[color-mix(in_srgb,var(--status-success)_15%,transparent)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--status-success)]"
-              : "rounded bg-[rgba(var(--theme-color-rgb,59,130,246),0.15)] px-1.5 py-0.5 text-[10px] font-medium text-[rgb(var(--theme-color-rgb,59,130,246))]"
+              : "rounded bg-[rgba(var(--theme-color-rgb,59,130,246),0.15)] px-1.5 py-0.5 text-[10px] font-medium text-[rgb(var(--theme-color-fg-rgb,59,130,246))]"
           }
         >
           {parsed.completed} / {parsed.total}
@@ -141,7 +141,7 @@ export function StickyTaskBar({
         {runIncomplete && onResume ? (
           <button
             type="button"
-            className="text-[10px] font-medium text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-80"
+            className="text-[10px] font-medium text-[rgb(var(--theme-color-fg-rgb,59,130,246))] hover:opacity-80"
             onClick={(e) => {
               e.stopPropagation();
               onResume();
@@ -207,7 +207,7 @@ export function StickyTaskBar({
                 ) : item.status === "in_progress" && liveness === "stalled" ? (
                   <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
                 ) : item.status === "in_progress" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[rgb(var(--theme-color-rgb,59,130,246))]" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[rgb(var(--theme-color-fg-rgb,59,130,246))]" />
                 ) : (
                   <Circle className="h-3.5 w-3.5 text-text-faint" strokeWidth={1.75} />
                 )}
@@ -231,7 +231,7 @@ export function StickyTaskBar({
                   <div className="mt-0.5 text-[11px] text-text-muted">任务已中断</div>
                 ) : null}
                 {item.status === "in_progress" && item.activeForm && item.activeForm !== item.content ? (
-                  <div className="mt-0.5 text-[11px] text-[rgba(var(--theme-color-rgb,59,130,246),0.8)]">{item.activeForm}</div>
+                  <div className="mt-0.5 text-[11px] text-[rgba(var(--theme-color-fg-rgb,59,130,246),0.8)]">{item.activeForm}</div>
                 ) : null}
               </div>
             </li>

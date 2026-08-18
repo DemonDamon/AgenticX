@@ -910,7 +910,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
                       handleClose();
                     }}
                   >
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[rgba(var(--theme-color-rgb,59,130,246),0.22)] text-[rgb(var(--theme-color-rgb,59,130,246))]">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[rgba(var(--theme-color-rgb,59,130,246),0.22)] text-[rgb(var(--theme-color-fg-rgb,59,130,246))]">
                       <SkillPuzzleIcon className="h-3 w-3" />
                     </span>
                     <div className="min-w-0 flex-1">
@@ -8808,7 +8808,7 @@ export function ChatPane({
                               type="button"
                               className={`rounded p-1 hover:bg-surface-hover ${
                                 blockAnySelected
-                                  ? "text-[rgb(var(--theme-color-rgb,59,130,246))] hover:opacity-90"
+                                  ? "text-[rgb(var(--theme-color-fg-rgb,59,130,246))] hover:opacity-90"
                                   : "hover:text-text-strong"
                               }`}
                               onMouseDown={(e) => e.preventDefault()}

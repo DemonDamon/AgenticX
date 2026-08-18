@@ -226,7 +226,7 @@ export function expertLabelChipStyle(
       borderColor: light
         ? "rgba(var(--theme-color-rgb, 59, 130, 246), 0.22)"
         : "rgba(var(--theme-color-rgb, 59, 130, 246), 0.34)",
-      color: "rgb(var(--theme-color-rgb, 59, 130, 246))",
+      color: "rgb(var(--theme-color-fg-rgb, 59, 130, 246))",
     };
   }
   const key =

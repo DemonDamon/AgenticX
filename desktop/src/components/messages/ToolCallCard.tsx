@@ -191,7 +191,7 @@ function renderHighlightedText(content: string, terms: string[]): ReactNode {
           href={seg.value}
           target="_blank"
           rel="noopener noreferrer"
-          className="break-all text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
+          className="break-all text-[rgb(var(--theme-color-fg-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
           onClick={(e) => {
             e.preventDefault();
             openExternalUrl(seg.value);
@@ -478,7 +478,7 @@ export function ToolCallCard({
               <div key={url} className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  className="break-all text-left text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
+                  className="break-all text-left text-[rgb(var(--theme-color-fg-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
                   onClick={() => openExternalUrl(url)}
                 >
                   {url}

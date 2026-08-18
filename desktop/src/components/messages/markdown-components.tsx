@@ -466,7 +466,7 @@ function ChatInlineCode({
     return (
       <button
         type="button"
-        className="cursor-pointer rounded bg-surface-card px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--ui-btn-primary-bg,#38bdf8)] underline-offset-2 transition hover:underline"
+        className="cursor-pointer rounded bg-surface-card px-1.5 py-0.5 font-mono text-[0.85em] text-[rgb(var(--theme-color-fg-rgb,56,189,248))] underline-offset-2 transition hover:underline"
         title="打开此路径（HTML 在工作台内预览；目录打开文件管理器；其它文件定位到任务产物）"
         onClick={(event) => {
           event.preventDefault();
@@ -570,7 +570,7 @@ export const chatMarkdownComponents: Partial<Components> = {
         href={url || undefined}
         target={external ? "_blank" : rest.target}
         rel={external ? "noopener noreferrer" : rest.rel}
-        className={`text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90 ${
+        className={`text-[rgb(var(--theme-color-fg-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90 ${
           typeof rest.className === "string" ? rest.className : ""
         }`.trim()}
         onClick={

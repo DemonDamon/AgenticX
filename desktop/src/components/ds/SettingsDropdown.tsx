@@ -169,7 +169,7 @@ export function SettingsDropdown({
             }`}
           >
             <span className="flex w-3 shrink-0 justify-center">
-              {selected ? <Check className="h-2.5 w-2.5 text-[rgb(var(--theme-color-rgb,59,130,246))]" strokeWidth={2.5} /> : null}
+              {selected ? <Check className="h-2.5 w-2.5 text-[rgb(var(--theme-color-fg-rgb,59,130,246))]" strokeWidth={2.5} /> : null}
             </span>
             <span className="min-w-0 truncate text-left">{opt.label}</span>
           </button>

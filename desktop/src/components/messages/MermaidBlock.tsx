@@ -199,7 +199,7 @@ function ToolbarButton({ title, active, onClick, children }: ToolbarBtnProps) {
       onPointerDown={(e) => e.stopPropagation()}
       className={`no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
         active
-          ? "bg-[rgba(var(--theme-color-rgb),0.16)] text-[rgb(var(--theme-color-rgb))] ring-1 ring-[rgba(var(--theme-color-rgb),0.4)]"
+          ? "bg-[rgba(var(--theme-color-rgb),0.16)] text-[rgb(var(--theme-color-fg-rgb))] ring-1 ring-[rgba(var(--theme-color-rgb),0.4)]"
           : "text-text-primary hover:bg-surface-hover"
       }`}
     >
