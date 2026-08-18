@@ -15,7 +15,7 @@ import {
   Plus,
   Search,
   ShieldCheck,
-  Zap,
+  TriangleAlert,
 } from "lucide-react";
 import type { ConfirmStrategy, Taskspace } from "../store";
 import {
@@ -113,7 +113,7 @@ function permissionStrategyVisual(strategy: ConfirmStrategy) {
   if (strategy === "semi-auto") {
     return { Icon: ShieldCheck, iconClassName: "text-[var(--settings-accent-fg)]" };
   }
-  return { Icon: Zap, iconClassName: "text-status-warning" };
+  return { Icon: TriangleAlert, iconClassName: "text-status-warning" };
 }
 
 export function ComposerContextControls({

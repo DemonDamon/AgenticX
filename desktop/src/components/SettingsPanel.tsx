@@ -5256,8 +5256,8 @@ function SettingsSwitch({
   );
 }
 
-/** 桌面操控属于进阶能力；客户版默认折叠，避免干扰日常设置。 */
-function ComputerUseGeneralPanel({ defaultCollapsed = false }: { defaultCollapsed?: boolean } = {}) {
+/** 桌面操控是会直接影响本机的能力许可，因此放在权限页常显。 */
+function ComputerUseGeneralPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -5310,17 +5310,16 @@ function ComputerUseGeneralPanel({ defaultCollapsed = false }: { defaultCollapse
 
   if (loading) {
     return (
-      <Panel title="桌面操控" collapsible defaultCollapsed={defaultCollapsed}>
+      <Panel title="桌面操控">
         <div className="py-2 text-sm text-text-faint">加载中…</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="桌面操控" collapsible defaultCollapsed={defaultCollapsed}>
+    <Panel title="桌面操控">
       <p className="mb-3 text-xs text-text-faint">
-        写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 中的{" "}
-        <code className="text-text-subtle">computer_use.enabled</code>。开启后由和创智派随应用启动的内置助手读取该开关并尝试加载桌面级能力。若对话里仍看不到相关工具，请确认已安装包含该能力的和创智派版本；修改后需完全退出并重新打开和创智派（远程模式见保存成功后的说明）。
+        允许智能体使用已安装的桌面级截屏、键盘和鼠标能力。系统权限或依赖未就绪时，这些能力仍不会运行。
       </p>
       <div className="flex items-center justify-between gap-4">
         <span className="text-sm text-text-subtle">
@@ -6161,21 +6160,21 @@ function SkillAdvancedPanel() {
   );
 }
 
-function SessionMemoryPanel({ defaultCollapsed = false }: { defaultCollapsed?: boolean } = {}) {
+function SessionMemoryPanel() {
   const { loading, saving, form, message, update } = useTrinityConfig();
 
   if (loading) {
     return (
-      <Panel title="会话与记忆" collapsible defaultCollapsed={defaultCollapsed}>
+      <Panel title="会话与记忆">
         <div className="py-2 text-sm text-text-faint">加载中…</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="会话与记忆" collapsible defaultCollapsed={defaultCollapsed}>
+    <Panel title="会话与记忆">
       <p className="mb-3 text-xs text-text-faint">
-        写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
+        控制新会话是否可以承接前一次对话的摘要；修改后重启应用生效。
       </p>
       <div className="space-y-3 text-sm text-text-subtle">
         <div className="flex items-start justify-between gap-4">
@@ -9423,14 +9422,27 @@ export function SettingsPanel({
                   {confirmStrategy === "auto" ? (
                     <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-text-subtle">
                       <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" />
-                      <span>所有工具将直接执行。建议仅在你信任的工作区中使用。</span>
+                      <span>
+                        此模式会跳过逐次确认。工作区边界和受保护路径仍会限制访问，但其他高风险操作可能直接运行；请只在可信任务中使用。
+                      </span>
                     </div>
                   ) : null}
                 </Panel>
-                <Panel title="安全提示">
-                  <p className="text-xs leading-5 text-text-faint">
-                    请勿在对话中发送 API Key、Token 或密码；需要授权时请使用对应服务的登录或连接页面。
-                  </p>
+                <ComputerUseGeneralPanel />
+                <Panel title="始终保留的安全保护">
+                  <div className="space-y-2 text-xs leading-5 text-text-muted">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-success" aria-hidden />
+                      <span>文件操作仍受当前会话工作区边界约束。</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-success" aria-hidden />
+                      <span>受保护路径和被管理员禁用的工具仍会被拒绝。</span>
+                    </div>
+                    <p className="border-t border-[var(--border-muted)] pt-2 text-text-faint">
+                      请勿在对话中发送 API Key、Token 或密码；需要授权时请使用对应服务的登录或连接页面。
+                    </p>
+                  </div>
                 </Panel>
               </div>
             )}
@@ -9440,14 +9452,13 @@ export function SettingsPanel({
                 <div className="rounded-xl border border-border bg-surface-card px-4 py-3">
                   <div className="text-sm font-medium text-text-primary">进阶功能</div>
                   <p className="mt-1 text-xs leading-5 text-text-faint">
-                    日常使用无需调整。只有在需要桌面操控、跨会话延续或自定义默认工作目录时再展开对应区块。
+                    日常使用无需调整。这里集中放置会话延续、资源限制和默认工作目录等进阶选项。
                   </p>
                 </div>
 
-                <ComputerUseGeneralPanel defaultCollapsed />
-                <SessionMemoryPanel defaultCollapsed />
+                <SessionMemoryPanel />
 
-                <Panel title="默认工作目录" collapsible defaultCollapsed>
+                <Panel title="默认工作目录">
                   <label className="block text-sm text-text-muted">
                     元智能体工作目录
                     <div className="mt-1 flex gap-2">
@@ -11404,20 +11415,19 @@ export function SettingsPanel({
             )}
           </div>
 
-          {/* Footer */}
-          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-2.5">
-            <span className="min-w-0 truncate text-[11px] text-text-faint">
-              {SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS
-                ? "开关类配置改动即时生效；需手动填写的项请用各区块内的「保存」。退出时会一并写入其它设置。"
-                : "开关类配置改动即时生效；需手动填写的项请使用各区块内的「保存」。"}
-            </span>
-            <button
-              className="shrink-0 rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
-              onClick={SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS ? handleSave : onClose}
-            >
-              {SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS ? "退出" : "关闭"}
-            </button>
-          </div>
+          {SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS ? (
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-2.5">
+              <span className="min-w-0 truncate text-[11px] text-text-faint">
+                开关类配置改动即时生效；需手动填写的项请用各区块内的「保存」。退出时会一并写入其它设置。
+              </span>
+              <button
+                className="shrink-0 rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+                onClick={handleSave}
+              >
+                退出
+              </button>
+            </div>
+          ) : null}
         </div>
         <div
           className="agx-settings-panel-resize-handle"

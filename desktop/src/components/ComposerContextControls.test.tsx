@@ -132,7 +132,8 @@ describe("ComposerContextControls", () => {
 
     expect(renderStrategy("manual")).toContain("lucide-circle-question-mark");
     expect(renderStrategy("semi-auto")).toContain("lucide-shield-check");
-    expect(renderStrategy("auto")).toContain("lucide-zap");
+    expect(renderStrategy("auto")).toContain("lucide-triangle-alert");
+    expect(CONFIRM_STRATEGY_OPTIONS[2].description).toContain("其他高风险操作可能直接运行");
   });
 
   it("keeps new-topic controls inline without a second-row padding wrapper", () => {

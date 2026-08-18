@@ -29,7 +29,7 @@ export const CONFIRM_STRATEGY_OPTIONS: readonly ConfirmStrategyOption[] = [
   {
     value: "auto",
     label: "全部自动执行",
-    description: "所有需要授权的操作直接执行；工作区安全边界仍然有效",
+    description: "不再逐次询问；工作区和受保护路径仍受限制，其他高风险操作可能直接运行",
   },
 ] as const;
 
@@ -48,7 +48,7 @@ export const CONFIRM_POLICY_OPTIONS: readonly ConfirmPolicyOption[] = [
   {
     value: "run-everything",
     label: "全部自动执行",
-    description: "以后所有需要授权的操作都不再询问；工作区安全边界仍然有效。",
+    description: "以后不再逐次询问；工作区和受保护路径仍受限制，其他高风险操作可能直接运行。",
   },
 ] as const;
 
