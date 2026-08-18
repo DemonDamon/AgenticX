@@ -12987,12 +12987,11 @@ export function ChatPane({
   return (
     <div
       ref={paneRef}
-      className={`relative agx-chatpane flex h-full min-w-0 flex-1 ${
+      className={`relative agx-chatpane flex h-full min-w-0 flex-1 bg-surface-base ${
         integratedToolbar ? "flex-col" : ""
       } ${
         workExpandedLayout ? "agx-chatpane--work-expanded" : ""
       }`}
-      style={paneTint ? { backgroundColor: paneTint } : undefined}
       onMouseDown={onFocus}
     >
       {integratedToolbarNode}
