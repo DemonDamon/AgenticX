@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ALL_MEMBERS_ASSIGNMENT_KEY,
+  capabilityStatesFromView,
+  effectiveFromView,
   findUnmetSkillDependencies,
   type PortalCapability,
 } from "../capability-packs-reader";
@@ -42,5 +44,23 @@ describe("findUnmetSkillDependencies", () => {
 describe("assignment keys", () => {
   it("pins the all-members key that admin and portal must agree on", () => {
     expect(ALL_MEMBERS_ASSIGNMENT_KEY).toBe("all");
+  });
+});
+
+describe("view -> delivery / listing", () => {
+  const view = {
+    assigned: [skill(SKILL_ID), mcp(MCP_ID)],
+    optOuts: new Set([SKILL_ID]),
+  };
+
+  it("drops user-disabled capabilities from what gets delivered", () => {
+    expect(effectiveFromView(view).map((item) => item.id)).toEqual([MCP_ID]);
+  });
+
+  it("still lists the disabled one, otherwise it can never be turned back on", () => {
+    expect(capabilityStatesFromView(view).map((item) => [item.id, item.state])).toEqual([
+      [SKILL_ID, "off"],
+      [MCP_ID, "on"],
+    ]);
   });
 });

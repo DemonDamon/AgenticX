@@ -12,33 +12,19 @@
 import {
   groupCapabilityIdsByKind,
   parseCapabilityId,
+  resolveCapabilityState,
   resolveEffectiveCapabilities,
   type CapabilityAssignment,
+  type CapabilityState,
 } from "@agenticx/config";
-import {
-  enterpriseCapabilityAssignments as pgAssignments,
-  enterpriseCapabilityOptOuts as pgOptOuts,
-  enterpriseCapabilityPackMembers as pgMembers,
-  enterpriseCapabilityPacks as pgPacks,
-  enterpriseSkills as pgSkills,
-  mcpServers as pgMcpServers,
-} from "@agenticx/db-schema";
-import {
-  enterpriseCapabilityAssignments as myAssignments,
-  enterpriseCapabilityOptOuts as myOptOuts,
-  enterpriseCapabilityPackMembers as myMembers,
-  enterpriseCapabilityPacks as myPacks,
-  enterpriseSkills as mySkills,
-  mcpServers as myMcpServers,
-} from "@agenticx/db-schema/mysql";
-import {
-  createMysqlDb,
-  getIamDb,
-  listDepartmentAncestorIds,
-  resolveDatabaseConfig,
-} from "@agenticx/iam-core";
+import { listDepartmentAncestorIds } from "@agenticx/iam-core";
 import { and, eq, inArray } from "drizzle-orm";
 
+import {
+  dialectCapabilityTables,
+  requiredCapabilityTenant,
+  type DialectQuery,
+} from "./capability-tables";
 import { collectUserAssignmentKeys, deptAssignmentKey } from "./effective-models";
 
 /** 分配给全员的固定 key。 */
@@ -57,6 +43,22 @@ export type PortalCapability = {
   bundleDigest?: string;
 };
 
+/** 企业已启用并分配给该用户的能力，附上用户自己那一位开关。 */
+export type UserCapabilityState = PortalCapability & { state: CapabilityState };
+
+/**
+ * 一次查询的结果快照：企业侧认可的全部能力，外加用户关掉了其中哪些。
+ *
+ * 下发（bootstrap）只要过滤后的结果，而「我的能力」页面还要看见被自己关掉的那些，
+ * 否则关掉之后就再也找不到地方打开。两者共用这一份，避免各查一遍各判一套。
+ */
+export type UserCapabilityView = {
+  /** 企业启用且已分配（含被用户关闭的）。 */
+  assigned: PortalCapability[];
+  /** 其中被用户自己关闭的能力 id。 */
+  optOuts: Set<string>;
+};
+
 type SkillRow = {
   id: string;
   slug: string;
@@ -67,47 +69,6 @@ type SkillRow = {
   requiredCapabilities: unknown;
 };
 type McpRow = { id: string; name: string; displayName: string | null };
-
-/** 本文件用到的 drizzle 查询构造子集。 */
-type DialectQuery = {
-  select: (fields?: unknown) => {
-    from: (table: unknown) => {
-      innerJoin: (table: unknown, on: unknown) => { where: (cond: unknown) => Promise<unknown[]> };
-      where: (cond: unknown) => Promise<unknown[]>;
-    };
-  };
-};
-
-function requiredTenant(): string {
-  const t = process.env.DEFAULT_TENANT_ID?.trim();
-  if (!t) throw new Error("DEFAULT_TENANT_ID is required to resolve enterprise capabilities.");
-  return t;
-}
-
-async function dialectTables() {
-  const config = resolveDatabaseConfig();
-  if (config.dialect === "mysql") {
-    const { raw: db } = await createMysqlDb(config);
-    return {
-      db,
-      packs: myPacks,
-      assignments: myAssignments,
-      members: myMembers,
-      optOuts: myOptOuts,
-      skills: mySkills,
-      mcp: myMcpServers,
-    } as const;
-  }
-  return {
-    db: getIamDb(),
-    packs: pgPacks,
-    assignments: pgAssignments,
-    members: pgMembers,
-    optOuts: pgOptOuts,
-    skills: pgSkills,
-    mcp: pgMcpServers,
-  } as const;
-}
 
 /** 该用户名下所有生效的分配 key：全员 + 部门链 + 用户自身。 */
 export async function resolveAssignmentKeysForUser(
@@ -151,15 +112,14 @@ function toMcpCapability(row: McpRow): PortalCapability {
   };
 }
 
-export async function listAvailableCapabilitiesForUser(
+/** 企业侧认可的能力 + 用户关闭记录，一次查完。 */
+export async function loadUserCapabilityView(
   userId: string,
   email?: string,
   deptId?: string | null,
-): Promise<PortalCapability[]> {
-  const tenantId = requiredTenant();
-  const t = await dialectTables();
-  // PG 与 MySQL 的 drizzle db 类型不同，联合类型会让链式调用无法解析。这里按实际
-  // 用到的最小结构收敛一次；表对象本身仍是各自方言的强类型，字段写错照样报错。
+): Promise<UserCapabilityView> {
+  const tenantId = requiredCapabilityTenant();
+  const t = await dialectCapabilityTables();
   const query = t.db as unknown as DialectQuery;
   const assignmentKeys = await resolveAssignmentKeysForUser(tenantId, userId, email, deptId);
 
@@ -176,14 +136,14 @@ export async function listAvailableCapabilitiesForUser(
       ),
     )) as Array<{ id: string }>;
   const packIds = [...new Set(packRows.map((row) => row.id))];
-  if (packIds.length === 0) return [];
+  if (packIds.length === 0) return { assigned: [], optOuts: new Set() };
 
   const memberRows = (await query
     .select({ capabilityId: t.members.capabilityId })
     .from(t.members)
     .where(inArray(t.members.packId, packIds))) as Array<{ capabilityId: string }>;
   const candidateIds = [...new Set(memberRows.map((row) => row.capabilityId))];
-  if (candidateIds.length === 0) return [];
+  if (candidateIds.length === 0) return { assigned: [], optOuts: new Set() };
 
   const grouped = groupCapabilityIdsByKind(candidateIds);
 
@@ -219,22 +179,46 @@ export async function listAvailableCapabilitiesForUser(
     .where(
       and(eq(t.optOuts.tenantId, tenantId), eq(t.optOuts.userId, userId)),
     )) as Array<{ capabilityId: string }>;
-  const optOuts = new Set(optOutRows.map((row) => row.capabilityId));
 
-  const byId = new Map<string, PortalCapability>();
-  for (const row of skillRows) byId.set(`skill:${row.id}`, toSkillCapability(row));
-  for (const row of mcpRows) byId.set(`mcp:${row.id}`, toMcpCapability(row));
+  const assigned = [
+    ...skillRows.map(toSkillCapability),
+    ...mcpRows.map(toMcpCapability),
+  ].sort((left, right) => left.id.localeCompare(right.id));
 
+  return {
+    assigned,
+    optOuts: new Set(optOutRows.map((row) => row.capabilityId)),
+  };
+}
+
+/** 供下发：用户当下真正能调用的能力。 */
+export async function listAvailableCapabilitiesForUser(
+  userId: string,
+  email?: string,
+  deptId?: string | null,
+): Promise<PortalCapability[]> {
+  const view = await loadUserCapabilityView(userId, email, deptId);
+  return effectiveFromView(view);
+}
+
+export function effectiveFromView(view: UserCapabilityView): PortalCapability[] {
+  const byId = new Map(view.assigned.map((item) => [item.id, item] as const));
   // 走同一个策略函数，避免这里与管理端对「生效」有两套判断。
-  const assignments: CapabilityAssignment[] = candidateIds.map((capabilityId) => ({
-    capabilityId,
-    enterpriseEnabled: byId.has(capabilityId),
+  const assignments: CapabilityAssignment[] = view.assigned.map((item) => ({
+    capabilityId: item.id,
+    enterpriseEnabled: true,
   }));
-
-  return resolveEffectiveCapabilities(assignments, optOuts)
+  return resolveEffectiveCapabilities(assignments, view.optOuts)
     .map((id) => byId.get(id))
-    .filter((item): item is PortalCapability => Boolean(item))
-    .sort((left, right) => left.id.localeCompare(right.id));
+    .filter((item): item is PortalCapability => Boolean(item));
+}
+
+/** 供「我的能力」页面：连被自己关掉的一起列出来，否则关掉之后就找不回来了。 */
+export function capabilityStatesFromView(view: UserCapabilityView): UserCapabilityState[] {
+  return view.assigned.map((item) => ({
+    ...item,
+    state: resolveCapabilityState(true, view.optOuts.has(item.id)),
+  }));
 }
 
 /** Skill 声明的依赖若没随包下发，Desktop 装了也调不通；标出来供前端提示。 */
