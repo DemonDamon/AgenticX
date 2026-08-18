@@ -21,6 +21,15 @@ export async function ensureWorkspaceSessionBeforeFirstMessage(
   return created || null;
 }
 
+/** Keep the new-topic workspace control mounted while its first session loads. */
+export function shouldKeepNewTopicWorkspaceControls(
+  hasStartedChat: boolean,
+  loadingMessages: boolean,
+  workspaceLoading: boolean,
+): boolean {
+  return !hasStartedChat && (!loadingMessages || workspaceLoading);
+}
+
 export type NewTaskNavPane = {
   id: string;
   avatarId: string | null;

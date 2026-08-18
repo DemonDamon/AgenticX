@@ -4,13 +4,17 @@ import {
   ComposerContextControls,
   composerPermissionLabel,
   composerWorkspaceLabel,
+  effectiveComposerWorkspaceId,
   filterComposerWorkspaces,
 } from "./ComposerContextControls";
 import {
   CONFIRM_STRATEGY_OPTIONS,
   defaultConfirmPolicyForStrategy,
 } from "../constants/confirm-strategy-options";
-import { ensureWorkspaceSessionBeforeFirstMessage } from "../utils/workspace-session-visibility";
+import {
+  ensureWorkspaceSessionBeforeFirstMessage,
+  shouldKeepNewTopicWorkspaceControls,
+} from "../utils/workspace-session-visibility";
 
 describe("ComposerContextControls", () => {
   it("uses a clear label for the session default workspace", () => {
@@ -22,14 +26,30 @@ describe("ComposerContextControls", () => {
     ).toBe("会话工作区");
   });
 
-  it("shows an explicit workspace label and a safe empty fallback", () => {
+  it("shows an explicit workspace label and keeps the implicit default stable", () => {
     expect(
       composerWorkspaceLabel(
         [{ id: "finance", label: "财报分析", path: "/tmp/finance" }],
         "finance",
       ),
     ).toBe("财报分析");
-    expect(composerWorkspaceLabel([], null)).toBe("选择工作区");
+    expect(composerWorkspaceLabel([], null)).toBe("会话工作区");
+    expect(
+      composerWorkspaceLabel(
+        [{ id: "default", label: "default", path: "/tmp/session/default" }],
+        null,
+      ),
+    ).toBe("会话工作区");
+  });
+
+  it("uses the session workspace implicitly without persisting a selection", () => {
+    const workspaces = [
+      { id: "project", label: "项目", path: "/tmp/project" },
+      { id: "default", label: "default", path: "/tmp/session/default" },
+    ];
+    expect(effectiveComposerWorkspaceId(workspaces, null)).toBe("default");
+    expect(effectiveComposerWorkspaceId(workspaces, "project")).toBe("project");
+    expect(effectiveComposerWorkspaceId([], null)).toBeNull();
   });
 
   it("filters the compact workspace menu by label or path", () => {
@@ -57,6 +77,12 @@ describe("ComposerContextControls", () => {
       ensureWorkspaceSessionBeforeFirstMessage("sid-existing", materialize),
     ).resolves.toBe("sid-existing");
     expect(materialize).not.toHaveBeenCalled();
+  });
+
+  it("keeps the workspace control mounted while the first session is loading", () => {
+    expect(shouldKeepNewTopicWorkspaceControls(false, true, true)).toBe(true);
+    expect(shouldKeepNewTopicWorkspaceControls(false, true, false)).toBe(false);
+    expect(shouldKeepNewTopicWorkspaceControls(true, true, true)).toBe(false);
   });
 
   it("uses the same three permission modes as settings", () => {

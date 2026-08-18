@@ -9461,9 +9461,9 @@ export function SettingsPanel({
 
                 <DeveloperTokenBudgetPanel />
 
-                <Panel title="默认工作目录">
+                <Panel title="会话工作区">
                   <label className="block text-sm text-text-muted">
-                    元智能体工作目录
+                    默认会话工作目录
                     <div className="mt-1 flex gap-2">
                       <input
                         className="min-w-0 flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
@@ -9489,7 +9489,7 @@ export function SettingsPanel({
                       </span>
                     ) : null}
                     <span className="mt-1 block text-xs leading-5 text-text-faint">
-                      新建对话将使用这里保存的目录；已有对话仍保留原工作目录。
+                      完整路径仅在这里配置；新建元智能体对话默认使用该目录，已有对话仍保留原工作目录。
                     </span>
                   </label>
                   <div className="mt-3 flex flex-wrap items-center gap-2">

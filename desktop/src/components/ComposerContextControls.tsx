@@ -46,9 +46,8 @@ export function composerWorkspaceLabel(
   workspaces: Taskspace[],
   activeTaskspaceId: string | null,
 ): string {
-  const active =
-    workspaces.find((item) => item.id === activeTaskspaceId) ??
-    (activeTaskspaceId ? undefined : workspaces[0]);
+  const effectiveId = effectiveComposerWorkspaceId(workspaces, activeTaskspaceId);
+  const active = workspaces.find((item) => item.id === effectiveId);
   if (active) {
     const raw = String(active.label || "").trim();
     if (active.id === "default" || !raw || raw.toLowerCase() === "default") {
@@ -56,8 +55,20 @@ export function composerWorkspaceLabel(
     }
     return raw;
   }
-  if (activeTaskspaceId === "default") return "会话工作区";
-  return "选择工作区";
+  return "会话工作区";
+}
+
+/**
+ * An empty selection uses the session workspace without persisting a choice.
+ * Only a workspace explicitly selected by the user becomes active state.
+ */
+export function effectiveComposerWorkspaceId(
+  workspaces: Taskspace[],
+  activeTaskspaceId: string | null,
+): string | null {
+  const explicit = String(activeTaskspaceId || "").trim();
+  if (explicit && workspaces.some((item) => item.id === explicit)) return explicit;
+  return workspaces.find((item) => item.id === "default")?.id ?? null;
 }
 
 export function defaultWorkspacePath(workspaces: Taskspace[]): string {
@@ -284,9 +295,7 @@ export function ComposerContextControls({
   };
 
   const activeWorkspaceLabel = composerWorkspaceLabel(workspaces, activeTaskspaceId);
-  const activeWorkspace =
-    workspaces.find((item) => item.id === activeTaskspaceId) ??
-    (activeTaskspaceId ? undefined : workspaces[0]);
+  const effectiveWorkspaceId = effectiveComposerWorkspaceId(workspaces, activeTaskspaceId);
   const filteredWorkspaces = filterComposerWorkspaces(workspaces, workspaceQuery);
   const permissionLabel = composerPermissionLabel(confirmStrategy);
   const permissionIsAuto = confirmStrategy === "auto";
@@ -328,9 +337,7 @@ export function ComposerContextControls({
                   <div className="px-2.5 py-3 text-[12px] text-text-faint">正在读取工作区…</div>
                 ) : filteredWorkspaces.length > 0 ? (
                   filteredWorkspaces.map((workspace) => {
-                    const selected =
-                      workspace.id === activeTaskspaceId ||
-                      (!activeTaskspaceId && workspace === workspaces[0]);
+                    const selected = workspace.id === effectiveWorkspaceId;
                     const rowLabel = composerWorkspaceLabel([workspace], workspace.id);
                     return (
                       <button
@@ -338,8 +345,7 @@ export function ComposerContextControls({
                         type="button"
                         role="menuitemradio"
                         aria-checked={selected}
-                        title={workspace.path}
-                        className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                        className={`flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left transition-colors ${
                           selected ? "bg-surface-card-strong" : "hover:bg-surface-hover"
                         }`}
                         onClick={() => {
@@ -348,13 +354,8 @@ export function ComposerContextControls({
                         }}
                       >
                         <Folder className="h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[13px] text-text-strong">
-                            {rowLabel}
-                          </span>
-                          <span className="block truncate text-[10px] text-text-faint">
-                            {workspace.path}
-                          </span>
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-text-strong">
+                          {rowLabel}
                         </span>
                         {selected ? <Check className="h-4 w-4 shrink-0 text-theme" strokeWidth={2} /> : null}
                       </button>
@@ -526,23 +527,18 @@ export function ComposerContextControls({
     <button
       ref={workspaceButtonRef}
       type="button"
-      className={`flex h-7 min-w-0 max-w-[360px] items-center gap-1.5 rounded-lg px-2 text-[11px] transition-colors ${
+      className={`flex h-7 min-w-0 max-w-[220px] items-center gap-1.5 rounded-lg px-2 text-[11px] transition-colors ${
         openMenu === "workspace" || workspacePanelOpen
           ? "bg-surface-hover text-text-strong"
           : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
       }`}
       onClick={toggleWorkspaceMenu}
-      title={`工作区：${activeWorkspaceLabel}${activeWorkspace?.path ? `\n${activeWorkspace.path}` : ""}`}
+      title={`工作区：${activeWorkspaceLabel}`}
       aria-haspopup="menu"
       aria-expanded={openMenu === "workspace"}
     >
       <FolderOpen className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
       <span className="min-w-0 truncate">{activeWorkspaceLabel}</span>
-      {activeWorkspace?.path ? (
-        <span className="hidden min-w-0 truncate text-[10px] text-text-faint md:inline">
-          {activeWorkspace.path}
-        </span>
-      ) : null}
       <ChevronDown
         className={`h-3 w-3 shrink-0 transition-transform ${openMenu === "workspace" ? "rotate-180" : ""}`}
         strokeWidth={2}

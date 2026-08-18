@@ -27,7 +27,7 @@ describe("composer workspace controls", () => {
     ).toBe("C:\\Users\\demo\\.agenticx\\taskspaces\\sid\\default\\季度-分析");
   });
 
-  it("shows the selected workspace path beside the new-topic control", () => {
+  it("shows only the workspace label beside the new-topic control", () => {
     const html = renderToStaticMarkup(
       <ComposerContextControls
         mode="new-topic"
@@ -43,6 +43,6 @@ describe("composer workspace controls", () => {
       />,
     );
     expect(html).toContain("会话工作区");
-    expect(html).toContain("/tmp/session/default");
+    expect(html).not.toContain("/tmp/session/default");
   });
 });

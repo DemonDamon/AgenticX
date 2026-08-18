@@ -367,7 +367,10 @@ import {
 } from "../utils/chat-file-mention";
 import { absoluteTaskspacePath } from "../utils/workspace-file-path";
 import { formatTaskspaceAddError } from "../utils/taskspace-errors";
-import { ensureWorkspaceSessionBeforeFirstMessage } from "../utils/workspace-session-visibility";
+import {
+  ensureWorkspaceSessionBeforeFirstMessage,
+  shouldKeepNewTopicWorkspaceControls,
+} from "../utils/workspace-session-visibility";
 import {
   composerAcceptsDragTypes,
   decodeNearWorkspaceDragEntry,
@@ -2818,12 +2821,9 @@ export function ChatPane({
       useAppStore.getState().panes.find((item) => item.id === pane.id)?.activeTaskspaceId ?? "",
     ).trim();
     if (
-      preloadedComposerTaskspaces.length > 0 &&
-      (!activeTaskspaceId ||
-        !preloadedComposerTaskspaces.some((item) => item.id === activeTaskspaceId))
+      activeTaskspaceId &&
+      !preloadedComposerTaskspaces.some((item) => item.id === activeTaskspaceId)
     ) {
-      setActiveTaskspace(pane.id, preloadedComposerTaskspaces[0].id);
-    } else if (sessionChanged && preloadedComposerTaskspaces.length === 0 && activeTaskspaceId) {
       setActiveTaskspace(pane.id, null);
     }
   }, [pane.sessionId, preloadedComposerTaskspaces]);
@@ -2839,7 +2839,11 @@ export function ChatPane({
       ),
     [pane.messages],
   );
-  const showNewTopicContext = !hasStartedChat && !pane.loadingMessages;
+  const showNewTopicContext = shouldKeepNewTopicWorkspaceControls(
+    hasStartedChat,
+    pane.loadingMessages,
+    composerWorkspaceLoading,
+  );
   const toolRoundBudget = 60;
   const queuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
   const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
@@ -4250,8 +4254,8 @@ export function ChatPane({
         if (currentId) setActiveTaskspace(pane.id, null);
         return next;
       }
-      if (!currentId || !next.some((item) => item.id === currentId)) {
-        setActiveTaskspace(pane.id, next[0].id);
+      if (currentId && !next.some((item) => item.id === currentId)) {
+        setActiveTaskspace(pane.id, null);
       }
       return next;
     } catch (error) {
