@@ -1,6 +1,19 @@
-import { Activity, AlertCircle, CheckCircle2, Eye, Loader2, Search, ShieldCheck, SquarePlus, Star } from "lucide-react";
+import {
+  Activity,
+  AlertCircle,
+  CheckCircle2,
+  Eye,
+  Loader2,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  SquarePlus,
+  Star,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { Modal } from "../../ds/Modal";
+
+const CATALOG_PREVIEW_LIMIT = 12;
 
 type MarketplaceItem = {
   id: string;
@@ -59,7 +72,11 @@ export function MCPMarketplacePanel({
 }: Props) {
   const [installTarget, setInstallTarget] = useState<MarketplaceItem | null>(null);
   const [envForm, setEnvForm] = useState<Record<string, string>>({});
+  const [catalogExpanded, setCatalogExpanded] = useState(false);
   const required = useMemo(() => envSchema?.required ?? [], [envSchema]);
+  const visibleItems = search.trim() || catalogExpanded
+    ? items
+    : items.slice(0, CATALOG_PREVIEW_LIMIT);
 
   const statusClassName = useMemo(() => {
     switch (statusKind) {
@@ -108,34 +125,62 @@ export function MCPMarketplacePanel({
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-2 top-2.5 h-3.5 w-3.5 text-text-faint" />
+    <section
+      className="rounded-xl border border-border bg-surface-panel p-3.5"
+      aria-label="MCP 服务目录"
+      aria-busy={loading}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-[13px] font-semibold text-text-strong">MCP 服务目录</h3>
+          <p className="mt-0.5 text-[11px] leading-4 text-text-muted">
+            浏览可用服务；添加前会先确认所需凭据和配置。
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-7 items-center gap-1 rounded-lg border border-border px-2 text-[10px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+          disabled={loading}
+          aria-label="刷新 MCP 服务目录"
+          onClick={() => void onRefresh()}
+        >
+          <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} aria-hidden />
+          刷新
+        </button>
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-faint" aria-hidden />
           <input
             value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
+            onChange={(e) => {
+              onSearchChange(e.target.value);
+              setCatalogExpanded(false);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !loading) void onRefresh();
             }}
-            className="w-full rounded-md border border-border bg-surface-panel py-1.5 pl-7 pr-2 text-sm"
-            placeholder="搜索 MCP 服务"
+            className="h-9 w-full rounded-lg border border-border bg-surface-base pl-8 pr-3 text-xs text-text-primary outline-none transition placeholder:text-text-faint focus:border-[var(--settings-accent-border-strong)]"
+            placeholder="搜索名称、用途或发布者"
+            aria-label="搜索 MCP 服务"
           />
         </div>
         <button
           type="button"
-          className="rounded-md border border-border px-2 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover"
+          className="h-9 shrink-0 rounded-lg border border-[var(--settings-accent-border-strong)] bg-[var(--settings-accent-subtle-bg)] px-3 text-xs font-medium text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg-hover)] disabled:opacity-50"
           disabled={loading}
+          aria-label="搜索 MCP 市场"
           onClick={() => void onRefresh()}
         >
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "刷新"}
+          {loading ? "搜索中…" : "搜索"}
         </button>
       </div>
-      {summary ? <div className="text-[11px] text-text-faint">{summary}</div> : null}
+      {summary ? <div className="mt-2 text-[11px] text-text-faint">{summary}</div> : null}
 
       {statusMessage && !(statusKind === "error" && statusTargetId) ? (
         <div
-          className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] ${statusClassName}`}
+          className={`mt-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] ${statusClassName}`}
           role="status"
           aria-live="polite"
         >
@@ -150,9 +195,16 @@ export function MCPMarketplacePanel({
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-        {items.map((item) => (
-          <div key={item.id} className="rounded-md border border-border bg-surface-card px-3 py-2">
+      {loading && items.length === 0 ? (
+        <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3" role="status">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="h-[148px] animate-pulse rounded-xl border border-border bg-surface-card" />
+          ))}
+        </div>
+      ) : visibleItems.length > 0 ? (
+        <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+        {visibleItems.map((item) => (
+          <div key={item.id} className="rounded-xl border border-border bg-surface-card px-3 py-2.5">
             {(() => {
               const title = item.chinese_name || item.name || item.id;
               const categories = Array.isArray(item.categories) ? item.categories.filter(Boolean) : [];
@@ -250,7 +302,22 @@ export function MCPMarketplacePanel({
             ) : null}
           </div>
         ))}
-      </div>
+        </div>
+      ) : (
+        <div className="mt-3 rounded-lg border border-dashed border-border px-3 py-5 text-center text-xs text-text-muted">
+          暂无可展示的服务，可刷新目录或主动搜索。
+        </div>
+      )}
+
+      {!search.trim() && items.length > CATALOG_PREVIEW_LIMIT ? (
+        <button
+          type="button"
+          className="mt-3 w-full rounded-lg border border-dashed border-border py-2 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
+          onClick={() => setCatalogExpanded((expanded) => !expanded)}
+        >
+          {catalogExpanded ? "收起目录" : `查看全部 ${items.length} 个服务`}
+        </button>
+      ) : null}
 
       <Modal
         open={!!installTarget}
@@ -303,6 +370,6 @@ export function MCPMarketplacePanel({
           )}
         </div>
       </Modal>
-    </div>
+    </section>
   );
 }

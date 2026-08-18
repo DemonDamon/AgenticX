@@ -10327,6 +10327,22 @@ export function SettingsPanel({
               return (
               <div className="space-y-5">
                 <RemoteBackendHintBanner />
+                <MCPMarketplacePanel
+                  loading={mcpMarketplaceLoading}
+                  items={mcpMarketplaceItems as Array<Record<string, unknown> & { id: string }>}
+                  summary={mcpMarketplaceSummary}
+                  search={mcpMarketplaceSearch}
+                  onSearchChange={setMcpMarketplaceSearch}
+                  onRefresh={refreshMcpMarketplace}
+                  onInstall={handleInstallMarketplaceMcp}
+                  resolving={mcpMarketplaceInstallBusy}
+                  envSchema={mcpMarketplaceEnvSchema}
+                  installedIds={mcpMarketplaceAllInstalledIds}
+                  installingId={mcpMarketplaceInstallingId}
+                  statusMessage={mcpMarketplaceStatus?.message}
+                  statusKind={mcpMarketplaceStatus?.kind}
+                  statusTargetId={mcpMarketplaceStatus?.serverId}
+                />
                 <div className="space-y-1">
                   <div className="text-sm text-text-subtle">
                     MCP（模型上下文协议）服务为 Agent 扩展外部工具 — 文件系统、数据库、网页搜索等。
@@ -10711,29 +10727,6 @@ export function SettingsPanel({
                   </div>
                 </div>
 
-                {/* —— MCP 市场 —— */}
-                <div className="space-y-2 border-t border-border pt-4">
-                  <div className="text-sm font-medium text-text-muted">MCP 市场</div>
-                  {/* <div className="text-[11px] leading-relaxed text-text-faint">
-                    仅展示官方认证且可安装的托管 MCP（已过滤第三方/不可安装条目），点「添加」直接合并到主配置。
-                  </div> */}
-                  <MCPMarketplacePanel
-                    loading={mcpMarketplaceLoading}
-                    items={mcpMarketplaceItems as Array<Record<string, unknown> & { id: string }>}
-                    summary={mcpMarketplaceSummary}
-                    search={mcpMarketplaceSearch}
-                    onSearchChange={setMcpMarketplaceSearch}
-                    onRefresh={refreshMcpMarketplace}
-                    onInstall={handleInstallMarketplaceMcp}
-                    resolving={mcpMarketplaceInstallBusy}
-                    envSchema={mcpMarketplaceEnvSchema}
-                    installedIds={mcpMarketplaceAllInstalledIds}
-                    installingId={mcpMarketplaceInstallingId}
-                    statusMessage={mcpMarketplaceStatus?.message}
-                    statusKind={mcpMarketplaceStatus?.kind}
-                    statusTargetId={mcpMarketplaceStatus?.serverId}
-                  />
-                </div>
               </div>
               );
             })()}
