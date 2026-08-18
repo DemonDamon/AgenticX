@@ -13,6 +13,7 @@ import {
   type GroupOpenSessionRow,
 } from "../utils/group-pane-open";
 import { schedulePrefetchSessionTail } from "../utils/session-tail-cache";
+import { markPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
 
 /**
  * Shared pane-navigation logic used by the nav sidebar, the avatar gallery
@@ -37,11 +38,47 @@ export function usePaneNavigation() {
   const setMainView = useAppStore((s) => s.setMainView);
   const openingRef = useRef(false);
 
-  /** Open or focus the meta-agent / a normal avatar pane, restoring the most-recent session. */
+  /**
+   * Open the meta-agent or an expert.
+   *
+   * The meta-agent keeps its resume-last-session behaviour. An expert entry is
+   * deliberately a "start a conversation" action: every click opens a lazy
+   * fresh topic in that expert's pane instead of silently restoring old chat.
+   */
   const openMetaOrAvatarPane = useCallback(
     (avatarId: string | null, avatarName: string) => {
       setMainView("chat");
       const existing = panes.find((item) => item.avatarId === avatarId);
+
+      if (avatarId !== null) {
+        if (existing) {
+          setActivePaneId(existing.id);
+          setActiveAvatarId(avatarId);
+          // Existing panes stay mounted even while hidden, so their targeted
+          // listener can reset the conversation synchronously.
+          window.dispatchEvent(
+            new CustomEvent("agenticx:pane:new-topic", {
+              detail: { paneId: existing.id },
+            })
+          );
+          return;
+        }
+
+        if (openingRef.current) return;
+        openingRef.current = true;
+        try {
+          const paneId = addPane(avatarId, avatarName, "");
+          // A newly-created pane is already empty. Mark it directly instead of
+          // racing a one-shot event against the first ChatPane mount.
+          markPaneAwaitingFreshSession(paneId);
+          setActivePaneId(paneId);
+          setActiveAvatarId(avatarId);
+        } finally {
+          openingRef.current = false;
+        }
+        return;
+      }
+
       if (existing) {
         setActivePaneId(existing.id);
         setActiveAvatarId(avatarId);

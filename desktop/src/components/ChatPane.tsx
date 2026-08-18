@@ -9903,6 +9903,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const currentPane = useAppStore.getState().panes.find((p) => p.id === pane.id);
       return (currentPane?.sessionId || "").trim() === requestSessionId;
     };
+    const mergeLastAssistantIfSessionActive = (patch: Partial<Message>) => {
+      if (!isTargetSessionStillActive()) return false;
+      return useAppStore
+        .getState()
+        .mergeLastPaneMessageByRole(pane.id, "assistant", patch);
+    };
     const addPaneMessageIfSessionActive = (...args: Parameters<typeof addPaneMessage>) => {
       // Stamp the owning session on every streamed/committed row so the render
       // layer can never surface it under a different conversation, even if this
@@ -11713,7 +11719,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             if (payload.type === "token_usage") {
               const inp = Number(payload.data?.input_tokens ?? 0);
               const out = Number(payload.data?.output_tokens ?? 0);
-              if (inp > 0 || out > 0) {
+              if ((inp > 0 || out > 0) && isTargetSessionStillActive()) {
                 useAppStore.getState().accumulatePaneTokens(pane.id, inp, out);
               }
             }
@@ -11854,7 +11860,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           : undefined;
       const completedAt = Date.now();
       const stampLastAssistantCompletedAt = () => {
-        useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
+        mergeLastAssistantIfSessionActive({
           timestamp: completedAt,
         });
       };
@@ -11866,7 +11872,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         const mid = streamCommitRegistryRef.current.getMidCommit(requestSessionId);
         if (mid !== null && trimmedFull === mid) {
           streamCommitRegistryRef.current.markCommitted(requestSessionId);
-          useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
+          mergeLastAssistantIfSessionActive({
             ...(turnExtras ?? {}),
             timestamp: completedAt,
           });
@@ -11894,7 +11900,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           receivedFinalEvent,
         );
         if (committedPatch) {
-          useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
+          mergeLastAssistantIfSessionActive({
             ...committedPatch,
             timestamp: completedAt,
           });
@@ -11960,13 +11966,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           requestSessionId,
         );
 
-        if ((pane.sessionId || "").trim() === requestSessionId) {
+        if (isTargetSessionStillActive()) {
           const refPatch = referenceExtrasFromTurn(
             turnRefsSnapshot.references,
             turnRefsSnapshot.queries,
           );
           if (refPatch && !abortController.signal.aborted) {
-            useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", refPatch);
+            mergeLastAssistantIfSessionActive(refPatch);
           }
           syncStreamingUiForCurrentSession();
           // Only transition to idle if there is no queued continuation. A queued
