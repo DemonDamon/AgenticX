@@ -16,7 +16,9 @@ import {
 import {
   createMysqlDb,
   getIamDb,
+  groupAssignmentKey,
   listDepartmentAncestorIds,
+  listUserGroupIdsForUser,
   migrateLegacyUserVisibleModelsIfNeeded,
   resolveDatabaseConfig,
 } from "@agenticx/iam-core";
@@ -153,44 +155,32 @@ function idsFrom(value: unknown): string[] {
   return [...new Set(value.map((id) => String(id).trim()).filter(Boolean))];
 }
 
-type GroupModelPolicy = {
-  groupModelIds: string[];
-  excludedGroupModelIds: string[];
-};
-
-function groupModelPolicyFromQuotaConfig(config: unknown, userId: string): GroupModelPolicy {
-  const root = asRecord(config);
-  const groups = asRecord(root?.groups);
-  if (!groups) return { groupModelIds: [], excludedGroupModelIds: [] };
-  const modelIds = new Set<string>();
-  for (const group of Object.values(groups)) {
-    const record = asRecord(group);
-    if (!record || !idsFrom(record.memberIds).includes(userId)) continue;
-    for (const modelId of idsFrom(record.modelIds)) modelIds.add(modelId);
-  }
-  const exclusions = idsFrom(asRecord(root?.modelExclusions)?.[userId]).filter((modelId) => modelIds.has(modelId));
-  return { groupModelIds: [...modelIds], excludedGroupModelIds: exclusions };
-}
-
-async function readGroupModelPolicy(userId: string): Promise<GroupModelPolicy> {
+/**
+ * 个人关闭的模型。
+ *
+ * 组的可见模型已经和个人、部门一样存在 user_visible_models 里（key 为 `group:<id>`），
+ * 这里只剩「本人关掉了哪些」这一件事还留在配额 JSON 中——它是一份减法清单，不属于
+ * 分配，等有第二个消费方时再单独立表。
+ */
+async function readUserModelOptOuts(userId: string): Promise<string[]> {
   const tid = requiredTenant();
   const config = resolveDatabaseConfig();
+  let rows: Array<{ config: unknown }>;
   if (config.dialect === "mysql") {
     const { raw: db } = await createMysqlDb(config);
-    const rows = await db
+    rows = await db
       .select({ config: mysqlQuotaTable.config })
       .from(mysqlQuotaTable)
       .where(eq(mysqlQuotaTable.tenantId, tid))
       .limit(1);
-    return groupModelPolicyFromQuotaConfig(rows[0]?.config, userId);
+  } else {
+    rows = await getIamDb()
+      .select({ config: pgQuotaTable.config })
+      .from(pgQuotaTable)
+      .where(eq(pgQuotaTable.tenantId, tid))
+      .limit(1);
   }
-  const db = getIamDb();
-  const rows = await db
-    .select({ config: pgQuotaTable.config })
-    .from(pgQuotaTable)
-    .where(eq(pgQuotaTable.tenantId, tid))
-    .limit(1);
-  return groupModelPolicyFromQuotaConfig(rows[0]?.config, userId);
+  return idsFrom(asRecord(asRecord(rows[0]?.config)?.modelExclusions)?.[userId]);
 }
 
 function flattenEnabledModelIds(providers: ProviderRecord[]): string[] {
@@ -205,13 +195,17 @@ function flattenEnabledModelIds(providers: ProviderRecord[]): string[] {
   return ids;
 }
 
-function resolveUserKeys(userId: string, email?: string): string[] {
+/** 个人 key + 邮箱 key + 所属用户组 key —— 三者是同一个并集里的成员。 */
+async function resolveUserKeys(tenantId: string, userId: string, email?: string): Promise<string[]> {
   const keys = collectUserAssignmentKeys(userId, email);
   if (email) {
     const normalizedEmail = email.trim().toLowerCase();
     const legacyUserId = LEGACY_ADMIN_EMAIL_TO_USER_ID[normalizedEmail];
     if (legacyUserId && !keys.includes(legacyUserId)) keys.push(legacyUserId);
   }
+  // 组表尚未建好的租户不该因此看不到模型，登录照常，只是没有组维度的分配。
+  const groupIds = await listUserGroupIdsForUser(tenantId, userId).catch(() => [] as string[]);
+  for (const groupId of groupIds) keys.push(groupAssignmentKey(groupId));
   return keys;
 }
 
@@ -221,10 +215,10 @@ export async function listAvailableModelsForUser(
   email?: string,
   deptId?: string | null,
 ): Promise<PortalModelOption[]> {
-  const [providers, userMap, groupModelPolicy] = await Promise.all([
+  const [providers, userMap, optedOutModelIds] = await Promise.all([
     readProviders(),
     readUserModels(),
-    readGroupModelPolicy(userId),
+    readUserModelOptOuts(userId),
   ]);
   const allEnabled = flattenEnabledModelIds(providers);
 
@@ -239,15 +233,12 @@ export async function listAvailableModelsForUser(
     });
   }
 
-  const userKeys = resolveUserKeys(userId, email);
-  const userStored = mergeUserStoredSet(userMap, userKeys);
+  // 个人、邮箱、用户组都只是分配 key，合并成一个并集后被部门上限夹住，最后减掉
+  // 本人关掉的。三条规则各管一个方向，不再有随上下文翻转含义的那一档。
+  const userKeys = await resolveUserKeys(requiredTenant(), userId, email);
+  const assignedIds = mergeUserStoredSet(userMap, userKeys);
   const effectiveIds = new Set(
-    computeEffectiveUserAllowed(
-      deptEffective,
-      userStored,
-      groupModelPolicy.groupModelIds,
-      groupModelPolicy.excludedGroupModelIds,
-    ),
+    computeEffectiveUserAllowed(deptEffective, assignedIds, optedOutModelIds),
   );
 
   const out: PortalModelOption[] = [];

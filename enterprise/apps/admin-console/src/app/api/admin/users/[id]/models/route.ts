@@ -1,7 +1,10 @@
 import { getAdminUser } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../../lib/admin-auth";
-import { computeEffectiveUserAllowed } from "../../../../../../lib/effective-models";
+import {
+  computeEffectiveUserAllowed,
+  mergeAssignedModelIds,
+} from "../../../../../../lib/effective-models";
 import { getQuotaConfig } from "../../../../../../lib/token-quota-store";
 import {
   groupModelExclusionsForUser,
@@ -43,8 +46,7 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
   const excludedGroupModelIds = groupModelExclusionsForUser(quotaConfig, id).filter((modelId) => groupModelIdSet.has(modelId));
   const effectiveModelIds = computeEffectiveUserAllowed(
     payload.parentAllowedIds,
-    storedModelIds.length > 0 ? storedModelIds : null,
-    groupModelIds,
+    mergeAssignedModelIds(storedModelIds.length > 0 ? storedModelIds : null, groupModelIds),
     excludedGroupModelIds,
   );
   return NextResponse.json({

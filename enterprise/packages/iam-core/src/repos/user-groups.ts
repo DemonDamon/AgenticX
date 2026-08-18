@@ -12,6 +12,7 @@
 import {
   enterpriseRuntimeTokenQuotas as pgQuotas,
   enterpriseUserGroupMembers as pgMembers,
+  enterpriseRuntimeUserVisibleModels as pgUvm,
   enterpriseUserGroups as pgGroups,
   users as pgUsers,
 } from "@agenticx/db-schema";
@@ -26,7 +27,9 @@ import {
   mysqlListExistingUserIds,
   mysqlListGroupIdsForUser,
   mysqlListMembers,
+  mysqlListVisibleModels,
   mysqlReadQuotaConfig,
+  mysqlReplaceVisibleModels,
   mysqlListUserGroups,
   mysqlReplaceMembers,
   mysqlUpdateUserGroup,
@@ -274,4 +277,91 @@ async function listExistingUserIds(
         .from(pgUsers)
         .where(and(eq(pgUsers.tenantId, tenantId), inArray(pgUsers.id, [...candidateIds])));
   return new Set(rows.map((row) => row.id));
+}
+
+/**
+ * 组的可见模型和个人的存在同一张表（enterprise_runtime_user_visible_models），
+ * 只是 assignment_key 换成 `group:<ulid>`。
+ *
+ * 这样「谁能看哪些模型」就只剩一条路径：部门收窄、分配（个人+组）取并集、个人再关。
+ * 原来组走配额 JSON 那条独立路径，是同一个界面出现两种相反语义的根源。
+ */
+export async function listGroupModelIds(
+  tenantId: string,
+  groupIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (groupIds.length === 0) return out;
+  const keys = groupIds.map(groupAssignmentKey);
+  const rows = isMysql()
+    ? await mysqlListVisibleModels(tenantId, keys)
+    : await getIamDb()
+        .select({ assignmentKey: pgUvm.assignmentKey, modelId: pgUvm.modelId })
+        .from(pgUvm)
+        .where(and(eq(pgUvm.tenantId, tenantId), inArray(pgUvm.assignmentKey, keys)));
+  for (const row of rows) {
+    const groupId = row.assignmentKey.slice(GROUP_ASSIGNMENT_PREFIX.length);
+    const list = out.get(groupId) ?? [];
+    list.push(row.modelId);
+    out.set(groupId, list);
+  }
+  for (const [groupId, list] of out) out.set(groupId, [...new Set(list)].sort());
+  return out;
+}
+
+export async function setGroupModelIds(
+  tenantId: string,
+  groupId: string,
+  modelIds: readonly string[],
+): Promise<string[]> {
+  const key = groupAssignmentKey(groupId);
+  const wanted = normalizeIds([...modelIds]);
+  if (isMysql()) {
+    await mysqlReplaceVisibleModels(tenantId, key, wanted);
+  } else {
+    const db = getIamDb();
+    await db.delete(pgUvm).where(and(eq(pgUvm.tenantId, tenantId), eq(pgUvm.assignmentKey, key)));
+    if (wanted.length > 0) {
+      await db
+        .insert(pgUvm)
+        .values(wanted.map((modelId) => ({ tenantId, assignmentKey: key, modelId })))
+        .onConflictDoNothing();
+    }
+  }
+  return wanted;
+}
+
+/**
+ * 把配额 JSON 里 groups[].modelIds 搬进可见模型表，key 为 `group:<id>`。
+ *
+ * 与组本体的迁移分开判定：组表可能已经建好而模型还留在 JSON 里，共用一个开关会让
+ * 后半段被跳过。
+ */
+export async function migrateLegacyGroupModelsIfNeeded(tenantId: string): Promise<{
+  action: "imported" | "skipped";
+  count: number;
+  reason?: string;
+}> {
+  const legacy = await readLegacyGroupModels(tenantId);
+  const pending = Object.entries(legacy).filter(([, modelIds]) => modelIds.length > 0);
+  if (pending.length === 0) return { action: "skipped", count: 0, reason: "no legacy group models" };
+
+  const existing = await listGroupModelIds(tenantId, pending.map(([id]) => id));
+  if (existing.size > 0) return { action: "skipped", count: 0, reason: "already migrated" };
+
+  let imported = 0;
+  for (const [groupId, modelIds] of pending) {
+    await setGroupModelIds(tenantId, groupId, modelIds);
+    imported += modelIds.length;
+  }
+  return { action: "imported", count: imported };
+}
+
+async function readLegacyGroupModels(tenantId: string): Promise<Record<string, string[]>> {
+  const groups = await readLegacyGroups(tenantId);
+  const out: Record<string, string[]> = {};
+  for (const [id, group] of Object.entries(groups)) {
+    out[id] = normalizeIds((group as { modelIds?: string[] }).modelIds);
+  }
+  return out;
 }

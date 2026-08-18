@@ -12,6 +12,7 @@ import { collectUserAssignmentKeys, listAllAssignments, mergeUserStoredSet } fro
 import {
   computeEffectiveDeptAllowed,
   computeEffectiveUserAllowed,
+  mergeAssignedModelIds,
 } from "./effective-models";
 import { listAllEnabledModelIds } from "./model-providers-store";
 
@@ -333,11 +334,14 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
         ? effectiveModelsByDepartment.get(user.deptId) ?? allEnabledModelIds
         : allEnabledModelIds;
       const storedModelIds = mergeUserStoredSet(assignments, collectUserAssignmentKeys(user.id, user.email));
-      const groupModelIds = groupModelIdsForUser(groups, user.id);
+      // 个人与所属组是同一个并集；部门夹住它，个人关闭最后减。
+      const assignedModelIds = mergeAssignedModelIds(
+        storedModelIds,
+        groupModelIdsForUser(groups, user.id),
+      );
       const effectiveModelIds = computeEffectiveUserAllowed(
         parentAllowedModelIds,
-        storedModelIds,
-        groupModelIds,
+        assignedModelIds,
         groupModelExclusionsForUser(config, user.id),
       );
       return {

@@ -1,5 +1,6 @@
 import {
   enterpriseRuntimeTokenQuotas,
+  enterpriseRuntimeUserVisibleModels,
   enterpriseUserGroupMembers,
   enterpriseUserGroups,
   users,
@@ -85,4 +86,41 @@ export async function mysqlListExistingUserIds(tenantId: string, candidateIds: r
     .select({ id: users.id })
     .from(users)
     .where(and(eq(users.tenantId, tenantId), inArray(users.id, [...candidateIds])));
+}
+
+export async function mysqlListVisibleModels(tenantId: string, keys: readonly string[]) {
+  if (keys.length === 0) return [];
+  const db = await getMysqlRepositoryDb();
+  return db
+    .select({
+      assignmentKey: enterpriseRuntimeUserVisibleModels.assignmentKey,
+      modelId: enterpriseRuntimeUserVisibleModels.modelId,
+    })
+    .from(enterpriseRuntimeUserVisibleModels)
+    .where(
+      and(
+        eq(enterpriseRuntimeUserVisibleModels.tenantId, tenantId),
+        inArray(enterpriseRuntimeUserVisibleModels.assignmentKey, [...keys]),
+      ),
+    );
+}
+
+export async function mysqlReplaceVisibleModels(
+  tenantId: string,
+  assignmentKey: string,
+  modelIds: readonly string[],
+): Promise<void> {
+  const db = await getMysqlRepositoryDb();
+  await db
+    .delete(enterpriseRuntimeUserVisibleModels)
+    .where(
+      and(
+        eq(enterpriseRuntimeUserVisibleModels.tenantId, tenantId),
+        eq(enterpriseRuntimeUserVisibleModels.assignmentKey, assignmentKey),
+      ),
+    );
+  if (modelIds.length === 0) return;
+  await db
+    .insert(enterpriseRuntimeUserVisibleModels)
+    .values(modelIds.map((modelId) => ({ tenantId, assignmentKey, modelId })));
 }

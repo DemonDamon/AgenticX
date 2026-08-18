@@ -4,6 +4,7 @@ import {
   clipToAllowed,
   computeEffectiveDeptAllowed,
   computeEffectiveUserAllowed,
+  mergeAssignedModelIds,
   computeParentAllowedIds,
   computePrunedModelIds,
   isUsageModelCurrentlyAllowed,
@@ -70,18 +71,27 @@ describe("effective-models", () => {
     expect(computeEffectiveUserAllowed(dept, null)).toEqual(dept);
   });
 
-  it("group models are available to members and individual models are additive", () => {
+  it("unions personal and group assignments, then clips to the department ceiling", () => {
     const dept = ["a/A", "a/B", "a/C"];
-    expect(computeEffectiveUserAllowed(dept, ["a/C"], ["a/A", "a/B"])).toEqual(["a/A", "a/B", "a/C"]);
-    expect(computeEffectiveUserAllowed(dept, null, ["a/B", "outside/X"])).toEqual(["a/B"]);
+    const assigned = mergeAssignedModelIds(["a/C"], ["a/A", "a/B"]);
+    expect(computeEffectiveUserAllowed(dept, assigned)).toEqual(["a/A", "a/B", "a/C"]);
+    // 组给了部门范围之外的模型也进不来：部门是上限。
+    expect(
+      computeEffectiveUserAllowed(dept, mergeAssignedModelIds(null, ["a/B", "outside/X"])),
+    ).toEqual(["a/B"]);
   });
 
-  it("allows a user to turn off a model inherited from a group", () => {
+  it("treats no assignment at all as inherit, not as an empty grant", () => {
+    // 空集是「什么都不给」，null 是「没意见」，两者不能混。
+    expect(mergeAssignedModelIds(null, [])).toBeNull();
+    expect(computeEffectiveUserAllowed(["a/A"], mergeAssignedModelIds(null, []))).toEqual(["a/A"]);
+    expect(computeEffectiveUserAllowed(["a/A"], [])).toEqual([]);
+  });
+
+  it("allows a user to turn off a model they were granted", () => {
     const dept = ["a/A", "a/B", "a/C"];
-    expect(computeEffectiveUserAllowed(dept, ["a/A", "a/C"], ["a/A", "a/B"], ["a/A"])).toEqual([
-      "a/B",
-      "a/C",
-    ]);
+    const assigned = mergeAssignedModelIds(["a/A", "a/C"], ["a/A", "a/B"]);
+    expect(computeEffectiveUserAllowed(dept, assigned, ["a/A"])).toEqual(["a/B", "a/C"]);
   });
 
   it("clipToAllowed prunes out-of-parent ids", () => {
