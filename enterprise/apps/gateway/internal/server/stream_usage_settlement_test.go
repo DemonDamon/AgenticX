@@ -102,3 +102,56 @@ func TestSettleInterruptedStreamUsageRecordsPartialUsageAndSettlesBudget(t *test
 		t.Fatalf("monthly quota used=%d want=125", remaining.Used)
 	}
 }
+
+func TestChatFailureReceiptRefundsQuotaAndBudgetTogether(t *testing.T) {
+	t.Setenv("GATEWAY_QUOTA_POOL", "off")
+	t.Setenv("GATEWAY_TOKEN_WINDOW_QUOTA", "off")
+	t.Setenv("GATEWAY_QUOTA_POOL_BACKEND", "local")
+	dir := t.TempDir()
+	quotaConfigPath := filepath.Join(dir, "quotas.json")
+	quotaUsagePath := filepath.Join(dir, "quota-usage.json")
+	budgetConfigPath := filepath.Join(dir, "budgets.json")
+	budgetUsagePath := filepath.Join(dir, "budget-usage.json")
+	if err := os.WriteFile(quotaConfigPath, []byte(`{"defaults":{"role":{"staff":{"monthlyTokens":10000,"action":"block"}},"model":{}},"users":{},"departments":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(budgetConfigPath, []byte(`{"defaults":{},"tenants":{},"departments":{},"users":{"user-a":{"unit":"tokens","period":"month","limit":10000,"action":"block"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GATEWAY_BUDGET_CONFIG_FILE", budgetConfigPath)
+	t.Setenv("GATEWAY_BUDGET_USAGE_FILE", budgetUsagePath)
+	tracker := quota.NewTracker(quotaConfigPath, quotaUsagePath, nil)
+	qctx := quota.RequestContext{TenantID: "tenant-a", UserID: "user-a", Role: "staff", Model: "model-a"}
+	check := tracker.CheckRequest(qctx, 100, 0)
+	if !check.Allowed || check.Reservation == nil {
+		t.Fatalf("unexpected reservation: %+v", check)
+	}
+	srv := &Server{
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		quotaTracker: tracker,
+	}
+	srv.rollbackChatQuotaAndBudget(
+		requestIdentity{TenantID: "tenant-a", UserID: "user-a", RoleCodes: []string{"staff"}},
+		"model-a",
+		100,
+		check,
+	)
+	if remaining := tracker.Remaining(qctx); remaining.Used != 0 {
+		t.Fatalf("monthly quota was not refunded: %+v", remaining)
+	}
+	raw, err := os.ReadFile(budgetUsagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []struct {
+		Used float64 `json:"used"`
+	}
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Used != 0 {
+			t.Fatalf("budget was not refunded: %s", raw)
+		}
+	}
+}

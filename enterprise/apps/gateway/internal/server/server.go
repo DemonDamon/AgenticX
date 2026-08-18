@@ -810,7 +810,6 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	qctx := s.quotaContext(identity, req.Model)
-	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
 	reqPolicy := s.evaluatePolicy(latestUserText, makeEvalContext(identity, "request"))
@@ -850,13 +849,16 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		req.Messages = replaceLastUserMessageContent(req.Messages, reqPolicy.RedactedText)
 	}
 	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
-	reserveTokens := estimateTokensWithMax(estimatedInputTokens, maxTokensFromRequest(req))
-	budgetCheck, quotaReservation, ok := s.runChatQuotaGate(w, r, qctx, identity, &req, &decision, estimatedInputTokens, reserveTokens)
+	reserveTokens := estimateTokensWithMax(estimatedInputTokens, ensureBoundedMaxTokens(&req))
+	budgetCheck, _, ok := s.runChatQuotaGate(w, r, qctx, identity, &req, &decision, estimatedInputTokens, reserveTokens)
 	if !ok {
 		return
 	}
-	_ = quotaReservation
-
+	// CheckRequest releases a partially acquired slot when admission fails.
+	// Once admission succeeds, this handler owns exactly one release.
+	if budgetCheck.ConcurrencyAcquired {
+		defer s.billingService.ReleaseContext(qctx)
+	}
 	cacheCtx := cacheServeContext{
 		w: w, r: r, req: req, identity: identity, decision: decision, startedAt: startedAt,
 		estimatedInputTokens: estimatedInputTokens, reservedTokens: reserveTokens,
@@ -873,13 +875,13 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.useChannelRelay() {
-		s.handleChatCompleteRelay(w, r, req, startedAt, identity, estimatedInputTokens, reserveTokens, pluginCtx, qctx)
+		s.handleChatCompleteRelay(w, r, req, startedAt, identity, estimatedInputTokens, reserveTokens, pluginCtx, budgetCheck)
 		return
 	}
 
 	resp, err := s.provider.Complete(r.Context(), req, decision)
 	if err != nil {
-		s.rollbackChatQuotaAndBudget(identity, req.Model, estimatedInputTokens, budgetCheck)
+		s.rollbackChatQuotaAndBudget(identity, req.Model, int(reserveTokens), budgetCheck)
 		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
 			DurationMS:   durationMSSince(startedAt),
 			Status:       "error",
@@ -904,12 +906,15 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if providerOutputTokens == 0 {
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
-	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
+	settlementUsage := resp.Usage
+	settlementUsage.PromptTokens = providerInputTokens
+	settlementUsage.CompletionTokens = providerOutputTokens
+	settlementUsage.TotalTokens = providerInputTokens + providerOutputTokens
+	s.reportUsageDetailed(identity, decision, settlementUsage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
 		PromptText:     joinMessages(req.Messages),
 		CompletionText: responseContent,
 	})
-	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, providerInputTokens+providerOutputTokens)
 
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.Entry{
 		Stream:   false,
@@ -1098,7 +1103,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		quota.LedgerEventReserve,
 	)
 	if !quotaDecision.Allowed {
-		writeAPIError(w, openai.QuotaExceeded("token quota exceeded"))
+		s.writeQuotaError(w, monthlyQuotaErrorCheck(quotaDecision, time.Now().UTC()))
 		return
 	}
 	resp, err := s.provider.Embeddings(r.Context(), req, decision)
@@ -1112,7 +1117,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		inputTokens = estimatedInputTokens
 	}
 	s.reportUsage(identity, decision, inputTokens, 0)
-	s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, inputTokens)
+	s.reconcileMonthlyQuotaUsage(identity, req.Model, estimatedInputTokens, inputTokens)
 
 	if err := s.writeAuditEvent(audit.Event{
 		ID:           makeID("audit"),
@@ -1164,6 +1169,7 @@ func (s *Server) handleStream(
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		s.rollbackChatQuotaAndBudget(identity, req.Model, int(reservedTokens), budgetCheck)
 		writeAPIError(w, openai.Internal("streaming unsupported"))
 		return
 	}
@@ -1325,17 +1331,7 @@ func (s *Server) handleStream(
 		s.metrics.ObserveTPS(req.Model, decision.ChannelID, outputTokens, time.Since(firstTokenAt))
 	}
 	s.writeChatCache(identity.TenantID, identity.UserID, req, cache.BuildStreamEntry(streamChunks, streamUsage, req.Model))
-	var settleDelta int64
-	if s.useChannelRelay() {
-		settle := s.billingService.SettleContext(
-			qctx,
-			reservedTokens,
-			int64(inputTokens+outputTokens),
-		)
-		settleDelta = settle.Delta
-	} else {
-		s.reconcileQuotaUsage(identity, req.Model, estimatedInputTokens, inputTokens+outputTokens)
-	}
+	settleDelta := int64(inputTokens+outputTokens) - reservedTokens
 
 	ev := audit.Event{
 		ID:              makeID("audit"),
@@ -1502,6 +1498,7 @@ type requestIdentity struct {
 	APITokenID    int64
 	AuthViaPAT    bool
 	TraceID       string
+	TurnID        string
 	TraceStep     int
 	TraceStage    string
 }
@@ -1518,6 +1515,7 @@ func (s *Server) quotaContext(identity requestIdentity, model string) quota.Requ
 		APITokenID: apiTokenID,
 		Role:       quotaRoleForIdentity(identity),
 		Model:      model,
+		TurnID:     firstNonEmpty(identity.TurnID, identity.TraceID),
 	}
 }
 
@@ -1538,11 +1536,71 @@ func (s *Server) applyQuotaHeaders(w http.ResponseWriter, check quota.CheckResul
 }
 
 func (s *Server) writeQuotaError(w http.ResponseWriter, check quota.CheckResult) {
-	msg := check.Description
-	if msg == "" {
-		msg = "policy:quota:exceeded"
+	msg := quotaUserMessage(check)
+	for key, value := range check.Headers {
+		w.Header().Set(key, value)
 	}
-	writeAPIError(w, openai.QuotaExceeded(msg))
+	apiErr := openai.QuotaExceeded(msg)
+	if check.Kind == "quota_unavailable" {
+		apiErr = openai.Unavailable(msg)
+	}
+	errorBody := map[string]any{
+		"code":    apiErr.Code,
+		"message": apiErr.Message,
+		"kind":    check.Kind,
+		"used":    check.Used,
+		"limit":   check.Limit,
+	}
+	if check.Period != "" {
+		errorBody["period"] = check.Period
+	}
+	if check.ResetAt != "" {
+		errorBody["resetAt"] = check.ResetAt
+	}
+	writeJSON(w, apiErr.HTTPStatus, map[string]any{"error": errorBody})
+}
+
+func quotaUserMessage(check quota.CheckResult) string {
+	switch strings.TrimSpace(check.Kind) {
+	case "quota_unavailable":
+		return "配额计数服务暂不可用，请稍后重试。"
+	case "token_day":
+		return "今日 Token 额度已用尽；新任务已暂停，已开始的任务仅可在安全续跑额度内继续。"
+	case "token_week":
+		return "本周 Token 额度已用尽；新任务已暂停，已开始的任务仅可在安全续跑额度内继续。"
+	case "monthly":
+		return "本月 Token 额度已用尽；新任务已暂停，已开始的任务仅可在安全续跑额度内继续。"
+	}
+	message := strings.TrimSpace(check.Description)
+	if message == "" || strings.HasPrefix(message, "policy:quota:") {
+		return "当前额度已用尽，请在额度重置后再试。"
+	}
+	return message
+}
+
+func monthlyQuotaErrorCheck(decision quota.Decision, now time.Time) quota.CheckResult {
+	now = now.UTC()
+	period := strings.TrimSpace(decision.Period)
+	if period == "" {
+		period = now.Format("2006-01")
+	}
+	resetAt := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	return quota.CheckResult{
+		Allowed:     false,
+		Kind:        "monthly",
+		Rule:        decision.Rule,
+		Used:        decision.UsedAfter,
+		Limit:       decision.Rule.MonthlyTokens,
+		Period:      period,
+		ResetAt:     resetAt,
+		Description: "policy:quota:monthly_exceeded",
+		Headers: map[string]string{
+			"X-AgenticX-Quota-Used":     fmt.Sprintf("%d", decision.UsedAfter),
+			"X-AgenticX-Quota-Limit":    fmt.Sprintf("%d", decision.Rule.MonthlyTokens),
+			"X-AgenticX-Quota-Period":   period,
+			"X-AgenticX-Quota-Reset-At": resetAt,
+		},
+	}
 }
 
 func (s *Server) identityFromRequest(r *http.Request) (requestIdentity, error) {
@@ -1741,11 +1799,6 @@ func (s *Server) settleInterruptedStreamUsage(
 		span = spans[0]
 	}
 	s.reportUsageDetailed(identity, decision, usage, &budgetCheck, span)
-	if s.useChannelRelay() {
-		s.billingService.SettleContext(qctx, reservedTokens, int64(usage.TotalTokens))
-		return
-	}
-	s.reconcileQuotaUsage(identity, qctx.Model, estimatedInputTokens, usage.TotalTokens)
 }
 
 func (s *Server) reconcileQuotaUsage(
@@ -1754,41 +1807,60 @@ func (s *Server) reconcileQuotaUsage(
 	estimatedInputTokens int,
 	finalTotalTokens int,
 ) {
-	delta := finalTotalTokens - estimatedInputTokens
-	if delta == 0 {
+	if s.quotaTracker == nil {
 		return
 	}
 	qctx := s.quotaContext(identity, model)
-	if delta < 0 {
-		s.rollbackQuotaReservation(qctx, -delta)
-		return
-	}
-	decision := s.quotaTracker.CheckAndAddContext(qctx, int64(delta), quota.LedgerEventSettle)
+	decision := s.quotaTracker.ReconcileRequestUsage(qctx, int64(estimatedInputTokens), int64(finalTotalTokens))
 	if !decision.Allowed {
-		if usedAfter, ok := s.quotaTracker.AddUsageContext(s.quotaContext(identity, model), int64(delta)); !ok {
-			s.logger.Warn("quota settle persist failed",
-				"user_id", identity.UserID,
-				"model", model,
-				"delta_tokens", delta,
-			)
-		} else {
-			s.logger.Warn("quota exceeded during final settle",
-				"user_id", identity.UserID,
-				"model", model,
-				"delta_tokens", delta,
-				"used_after", usedAfter,
-				"limit", decision.Rule.MonthlyTokens,
-			)
-		}
+		s.logger.Warn("quota settle persist failed",
+			"user_id", identity.UserID,
+			"model", model,
+			"reserved_tokens", estimatedInputTokens,
+			"actual_tokens", finalTotalTokens,
+		)
 		return
 	}
 	if decision.Rule.MonthlyTokens > 0 && decision.UsedAfter > decision.Rule.MonthlyTokens {
 		s.logger.Warn("quota exceeded during final settle",
 			"user_id", identity.UserID,
 			"model", model,
-			"delta_tokens", delta,
+			"delta_tokens", finalTotalTokens-estimatedInputTokens,
 			"used_after", decision.UsedAfter,
 			"limit", decision.Rule.MonthlyTokens,
+		)
+	}
+}
+
+// Embeddings reserve only the legacy monthly ledger; unlike chat requests they
+// do not pass through CheckRequest's day/week reservation path.
+func (s *Server) reconcileMonthlyQuotaUsage(
+	identity requestIdentity,
+	model string,
+	reserved int,
+	actual int,
+) {
+	if s.quotaTracker == nil {
+		return
+	}
+	delta := actual - reserved
+	qctx := s.quotaContext(identity, model)
+	if delta < 0 {
+		s.quotaTracker.RollbackContext(qctx, int64(-delta))
+		return
+	}
+	if delta == 0 {
+		return
+	}
+	decision := s.quotaTracker.CheckAndAddContext(qctx, int64(delta), quota.LedgerEventSettle)
+	if decision.Allowed {
+		return
+	}
+	if _, ok := s.quotaTracker.AddUsageContext(qctx, int64(delta)); !ok {
+		s.logger.Warn("quota settle persist failed",
+			"user_id", identity.UserID,
+			"model", model,
+			"delta_tokens", delta,
 		)
 	}
 }

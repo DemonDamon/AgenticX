@@ -18,6 +18,6 @@ func inboundEnabled(envKey string) bool {
 	}
 }
 
-func claudeInboundEnabled() bool  { return inboundEnabled("GATEWAY_INBOUND_CLAUDE") }
-func geminiInboundEnabled() bool  { return inboundEnabled("GATEWAY_INBOUND_GEMINI") }
+func claudeInboundEnabled() bool    { return inboundEnabled("GATEWAY_INBOUND_CLAUDE") }
+func geminiInboundEnabled() bool    { return inboundEnabled("GATEWAY_INBOUND_GEMINI") }
 func responsesInboundEnabled() bool { return inboundEnabled("GATEWAY_INBOUND_RESPONSES") }

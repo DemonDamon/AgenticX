@@ -24,6 +24,10 @@ type RemainingResult struct {
 	Remaining *int64 `json:"remaining,omitempty"`
 	Unlimited bool   `json:"unlimited"`
 	Shared    bool   `json:"shared,omitempty"`
+	// Unavailable is true when the authoritative counter could not be read.
+	// Used remains zero for wire compatibility, but Remaining is intentionally
+	// omitted so callers cannot mistake that zero for a fresh full allowance.
+	Unavailable bool `json:"unavailable,omitempty"`
 }
 
 // Remaining returns quota headroom for the rule that would apply to ctx (selectRuleExtended).
@@ -45,7 +49,7 @@ func (t *Tracker) RemainingForScope(scope, scopeID, tenantID string, ctx Request
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	period := time.Now().UTC().Format("2006-01")
-	cfg := t.loadConfig()
+	cfg := t.loadConfigForTenant(tenantID)
 	rule, resolvedScope, resolvedID := ruleForScope(cfg, scope, scopeID, tenantID, ctx)
 	queryCtx := ctx
 	queryCtx.TenantID = tenantID
@@ -63,14 +67,14 @@ func (t *Tracker) RemainingForScope(scope, scopeID, tenantID string, ctx Request
 
 func (t *Tracker) remainingLocked(ctx RequestContext) RemainingResult {
 	period := time.Now().UTC().Format("2006-01")
-	cfg := t.loadConfig()
+	cfg := t.loadConfigForTenant(ctx.TenantID)
 	rule := selectRuleExtended(cfg, ctx)
 	scope, scopeID := scopeFromRule(rule, ctx)
 	return t.remainingWithRule(rule, ctx, period, scope, scopeID)
 }
 
 func (t *Tracker) remainingForWindowLocked(ctx RequestContext, window QuotaWindow) RemainingResult {
-	cfg := t.loadConfig()
+	cfg := t.loadConfigForTenant(ctx.TenantID)
 	rule := selectRuleExtended(cfg, ctx)
 	period := periodForWindow(window, time.Now().UTC())
 	limit := limitForWindow(rule, window)
@@ -83,10 +87,20 @@ func (t *Tracker) remainingForWindowLocked(ctx RequestContext, window QuotaWindo
 		base.Unlimited = true
 		base.Limit = 0
 		base.Remaining = nil
-		base.Used = t.readWindowUsed(window, ctx, period, rule)
+		used, err := t.readWindowUsed(window, ctx, period, rule)
+		if err != nil {
+			base.Unavailable = true
+			return base
+		}
+		base.Used = used
 		return base
 	}
-	used := t.readWindowUsed(window, ctx, period, rule)
+	used, err := t.readWindowUsed(window, ctx, period, rule)
+	if err != nil {
+		base.Limit = limit
+		base.Unavailable = true
+		return base
+	}
 	base.Used = used
 	base.Limit = limit
 	rem := limit - used
@@ -107,10 +121,21 @@ func (t *Tracker) remainingWithRule(rule Rule, ctx RequestContext, period, scope
 		base.Unlimited = true
 		base.Limit = 0
 		base.Remaining = nil
-		base.Used = t.readUsedForRule(rule, ctx, period)
+		used, err := t.readUsedForRule(rule, ctx, period)
+		if err != nil {
+			base.Unavailable = true
+			return base
+		}
+		base.Used = used
 		return base
 	}
-	used := t.readUsedForRule(rule, ctx, period)
+	used, err := t.readUsedForRule(rule, ctx, period)
+	if err != nil {
+		base.Limit = rule.MonthlyTokens
+		base.Shared = strings.TrimSpace(rule.PoolScope) != "" && t.poolCounter != nil
+		base.Unavailable = true
+		return base
+	}
 	base.Used = used
 	base.Limit = rule.MonthlyTokens
 	base.Shared = strings.TrimSpace(rule.PoolScope) != "" && t.poolCounter != nil
@@ -122,26 +147,42 @@ func (t *Tracker) remainingWithRule(rule Rule, ctx RequestContext, period, scope
 	return base
 }
 
-func (t *Tracker) readUsedForRule(rule Rule, ctx RequestContext, period string) int64 {
+func (t *Tracker) readUsedForRule(rule Rule, ctx RequestContext, period string) (int64, error) {
 	if poolKey, ok := poolKeyFor(rule, ctx, period); ok && t.poolCounter != nil {
 		used, err := t.poolCounter.Current(poolKey)
 		if err != nil {
-			return 0
+			return 0, err
 		}
-		return used
+		return used, nil
+	}
+	if rule.Action == ActionBlock && rule.MonthlyTokens > 0 && t.tokenWindowCounter != nil {
+		key := tokenWindowPoolKey("month", ctx, period)
+		legacyUsed := t.currentUserUsedLocked(ctx.UserID, period)
+		seed, err := t.tokenWindowCounter.ReserveWithTurnGrace(
+			key,
+			0,
+			rule.MonthlyTokens,
+			legacyUsed,
+			"",
+			"",
+		)
+		if err != nil {
+			return 0, err
+		}
+		return seed.UsedAfter, nil
 	}
 	userID := strings.TrimSpace(ctx.UserID)
 	if userID == "" {
-		return 0
+		return 0, nil
 	}
-	return t.currentUserUsedLocked(userID, period)
+	return t.currentUserUsedLocked(userID, period), nil
 }
 
-func (t *Tracker) readWindowUsed(window QuotaWindow, ctx RequestContext, period string, rule Rule) int64 {
+func (t *Tracker) readWindowUsed(window QuotaWindow, ctx RequestContext, period string, rule Rule) (int64, error) {
 	switch window {
 	case QuotaWindowDay, QuotaWindowWeek:
 		if t.tokenWindowCounter == nil {
-			return 0
+			return 0, nil
 		}
 		kind := "day"
 		if window == QuotaWindowWeek {
@@ -150,9 +191,9 @@ func (t *Tracker) readWindowUsed(window QuotaWindow, ctx RequestContext, period 
 		key := tokenWindowPoolKey(kind, ctx, period)
 		used, err := t.tokenWindowCounter.Current(key)
 		if err != nil {
-			return 0
+			return 0, err
 		}
-		return used
+		return used, nil
 	default:
 		return t.readUsedForRule(rule, ctx, period)
 	}
