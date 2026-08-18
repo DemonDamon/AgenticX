@@ -1017,6 +1017,7 @@ class HistoryPanelBoundary extends Component<
 const PANE_MODEL_PICKER_MARGIN = 8;
 const PANE_MODEL_PICKER_GAP = 4;
 const PANE_MODEL_PICKER_MIN_MAX_HEIGHT = 64;
+const PANE_MODEL_PICKER_MAX_HEIGHT = 360;
 const PANE_MODEL_PICKER_PANEL_WIDTH = 360;
 
 function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
@@ -1037,7 +1038,10 @@ function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
   const preferAbove = spaceAbove >= 120 || spaceAbove >= spaceBelow;
 
   if (preferAbove) {
-    const maxHeight = Math.max(PANE_MODEL_PICKER_MIN_MAX_HEIGHT, Math.floor(spaceAbove));
+    const maxHeight = Math.min(
+      PANE_MODEL_PICKER_MAX_HEIGHT,
+      Math.max(PANE_MODEL_PICKER_MIN_MAX_HEIGHT, Math.floor(spaceAbove)),
+    );
     return {
       left,
       width: panelWidth,
@@ -1048,7 +1052,10 @@ function paneModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
     };
   }
 
-  const maxHeight = Math.max(PANE_MODEL_PICKER_MIN_MAX_HEIGHT, Math.floor(spaceBelow));
+  const maxHeight = Math.min(
+    PANE_MODEL_PICKER_MAX_HEIGHT,
+    Math.max(PANE_MODEL_PICKER_MIN_MAX_HEIGHT, Math.floor(spaceBelow)),
+  );
   return {
     left,
     width: panelWidth,
