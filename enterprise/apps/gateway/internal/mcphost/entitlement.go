@@ -159,8 +159,8 @@ LIMIT 1`, args...)
 	return scanExists(row)
 }
 
-// assignmentKeys mirrors the portal's collectUserAssignmentKeys plus the
-// department chain: 全员 + 本人 + 邮箱 + 直属部门一路到根。
+// assignmentKeys mirrors the portal's resolveAssignmentKeysForUser:
+// 全员 + 本人 + 邮箱 + 直属部门一路到根 + 所属用户组。
 //
 // 两边必须给出同一组 key，否则会出现「登录时拿得到、真去调却被拒」这种最难查的
 // 不一致。
@@ -170,21 +170,52 @@ func (e *EntitlementChecker) assignmentKeys(
 	identity Identity,
 ) ([]string, error) {
 	keys := baseAssignmentKeys(identity)
-	deptID := strings.TrimSpace(identity.DepartmentID)
-	if deptID == "" {
-		return keys, nil
+	if deptID := strings.TrimSpace(identity.DepartmentID); deptID != "" {
+		ancestors, err := e.departmentChain(ctx, tenantID, deptID)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ancestors {
+			keys = append(keys, "dept:"+id)
+		}
 	}
-	ancestors, err := e.departmentChain(ctx, tenantID, deptID)
+	groups, err := e.groupIDs(ctx, tenantID, strings.TrimSpace(identity.UserID))
 	if err != nil {
 		return nil, err
 	}
-	for _, id := range ancestors {
-		keys = append(keys, "dept:"+id)
+	for _, id := range groups {
+		keys = append(keys, "group:"+id)
 	}
 	return keys, nil
 }
 
+// groupIDs lists the caller's user groups. 组是授予，属于多个组取并集。
+func (e *EntitlementChecker) groupIDs(ctx context.Context, tenantID, userID string) ([]string, error) {
+	if userID == "" {
+		return nil, nil
+	}
+	rows, err := e.database.QueryContext(ctx, `
+SELECT m.group_id
+FROM enterprise_user_group_members m
+JOIN enterprise_user_groups g ON g.id = m.group_id
+WHERE g.tenant_id = ? AND m.user_id = ?`, tenantID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // baseAssignmentKeys is the part that needs no database: 全员 + 本人 + 邮箱。
+// 部门链与用户组要查库，见 assignmentKeys。
 func baseAssignmentKeys(identity Identity) []string {
 	keys := []string{allMembersAssignmentKey}
 	if userID := strings.TrimSpace(identity.UserID); userID != "" {

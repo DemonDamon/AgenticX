@@ -575,7 +575,11 @@
           "deptHint": "Assigning to a parent department covers everyone beneath it.",
           "users": "Named people",
           "noDept": "No departments yet",
-          "noUser": "No users yet"
+          "noUser": "No users yet",
+          "groups": "User groups",
+          "noGroup": "No user groups yet",
+          "groupMemberCount": "{count} members",
+          "groupHint": "Groups grant: a member of several groups gets the union, so one more group only ever adds."
         }
       },
       "capabilities": {

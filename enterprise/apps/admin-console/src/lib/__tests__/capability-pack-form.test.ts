@@ -24,27 +24,29 @@ describe("assignment drafts", () => {
   it("sends only the all-members key when all members is checked", () => {
     // 叠加部门/个人不会让范围变小，只会在取消全员后留下没人记得勾过的残留分配。
     expect(
-      toAssignmentKeys({ allMembers: true, deptIds: ["d1"], userIds: ["u1"] }),
+      toAssignmentKeys({ allMembers: true, deptIds: ["d1"], groupIds: ["g1"], userIds: ["u1"] }),
     ).toEqual([ALL_MEMBERS_ASSIGNMENT_KEY]);
   });
 
-  it("prefixes departments but leaves user ids bare, matching the portal convention", () => {
-    expect(toAssignmentKeys({ allMembers: false, deptIds: ["d1"], userIds: ["u1"] })).toEqual([
-      "dept:d1",
-      "u1",
-    ]);
+  it("prefixes departments and groups but leaves user ids bare, matching the portal", () => {
+    expect(
+      toAssignmentKeys({ allMembers: false, deptIds: ["d1"], groupIds: ["g1"], userIds: ["u1"] }),
+    ).toEqual(["dept:d1", "group:g1", "u1"]);
   });
 
   it("round-trips a stored key list back into checkboxes", () => {
-    expect(fromAssignmentKeys(["dept:d1", "u1", "all"])).toEqual({
+    expect(fromAssignmentKeys(["dept:d1", "group:g1", "u1", "all"])).toEqual({
       allMembers: true,
       deptIds: ["d1"],
+      groupIds: ["g1"],
       userIds: ["u1"],
     });
   });
 
   it("drops blank entries instead of writing an empty assignment key", () => {
-    expect(toAssignmentKeys({ allMembers: false, deptIds: ["  "], userIds: [""] })).toEqual([]);
+    expect(
+      toAssignmentKeys({ allMembers: false, deptIds: ["  "], groupIds: [""], userIds: [""] }),
+    ).toEqual([]);
   });
 });
 

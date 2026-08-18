@@ -38,6 +38,7 @@ export type PackRecord = {
 export type McpServerRow = { id: string; name: string; displayName: string; status: string };
 export type DeptRow = { id: string; name: string; path: string };
 export type UserRow = { id: string; email: string; displayName?: string };
+export type GroupRow = { id: string; name: string; memberIds: string[] };
 
 /**
  * 能力包与 Skill 两个面板共用的数据源。
@@ -51,6 +52,7 @@ export function useCapabilityCatalog(loadFailedMessage: string, errorMessage: st
   const [mcpServers, setMcpServers] = useState<McpServerRow[]>([]);
   const [depts, setDepts] = useState<DeptRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [groups, setGroups] = useState<GroupRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const choices: CapabilityChoice[] = useMemo(() => {
@@ -76,12 +78,13 @@ export function useCapabilityCatalog(loadFailedMessage: string, errorMessage: st
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [packsRes, skillsRes, mcpRes, deptRes, userRes] = await Promise.all([
+      const [packsRes, skillsRes, mcpRes, deptRes, userRes, groupRes] = await Promise.all([
         adminFetch("/api/admin/capability-packs", { cache: "no-store" }),
         adminFetch("/api/admin/skills", { cache: "no-store" }),
         adminFetch("/api/admin/mcp-servers", { cache: "no-store" }),
         adminFetch("/api/admin/departments?shape=flat", { cache: "no-store" }),
         adminFetch("/api/admin/users?limit=200", { cache: "no-store" }),
+        adminFetch("/api/admin/user-groups", { cache: "no-store" }),
       ]);
       const packsJson = (await packsRes.json()) as {
         message?: string;
@@ -108,6 +111,9 @@ export function useCapabilityCatalog(loadFailedMessage: string, errorMessage: st
 
       const userJson = (await userRes.json().catch(() => ({}))) as { data?: { items?: UserRow[] } };
       setUsers(userJson.data?.items ?? []);
+
+      const groupJson = (await groupRes.json().catch(() => ({}))) as { data?: { items?: GroupRow[] } };
+      setGroups(groupJson.data?.items ?? []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : loadFailedMessage);
     } finally {
@@ -139,7 +145,7 @@ export function useCapabilityCatalog(loadFailedMessage: string, errorMessage: st
     [errorMessage, load],
   );
 
-  return { packs, skills, mcpServers, depts, users, choices, grouped, loading, load, send };
+  return { packs, skills, mcpServers, depts, users, groups, choices, grouped, loading, load, send };
 }
 
 export function toggleId(list: string[], value: string): string[] {

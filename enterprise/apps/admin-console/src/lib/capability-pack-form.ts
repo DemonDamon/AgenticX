@@ -11,6 +11,7 @@ import { formatCapabilityId, parseCapabilityId } from "@agenticx/config";
 /** 分配给全员的固定 key，与 web-portal 侧同一个约定。 */
 export const ALL_MEMBERS_ASSIGNMENT_KEY = "all";
 export const DEPT_ASSIGNMENT_PREFIX = "dept:";
+export const GROUP_ASSIGNMENT_PREFIX = "group:";
 
 export type CapabilityChoice = {
   /** `mcp:<ulid>` / `skill:<ulid>` */
@@ -24,6 +25,8 @@ export type CapabilityChoice = {
 export type AssignmentDraft = {
   allMembers: boolean;
   deptIds: string[];
+  /** 用户组是**授予**：属于多个组取并集，多一个组只会多一份能力。 */
+  groupIds: string[];
   userIds: string[];
 };
 
@@ -39,6 +42,10 @@ export function deptAssignmentKey(deptId: string): string {
   return `${DEPT_ASSIGNMENT_PREFIX}${deptId}`;
 }
 
+export function groupAssignmentKey(groupId: string): string {
+  return `${GROUP_ASSIGNMENT_PREFIX}${groupId}`;
+}
+
 /**
  * 勾选状态 → 落库的 assignmentKey 列表。
  *
@@ -52,6 +59,10 @@ export function toAssignmentKeys(draft: AssignmentDraft): string[] {
     const trimmed = deptId.trim();
     if (trimmed) keys.add(deptAssignmentKey(trimmed));
   }
+  for (const groupId of draft.groupIds) {
+    const trimmed = groupId.trim();
+    if (trimmed) keys.add(groupAssignmentKey(trimmed));
+  }
   for (const userId of draft.userIds) {
     const trimmed = userId.trim();
     if (trimmed) keys.add(trimmed);
@@ -61,7 +72,7 @@ export function toAssignmentKeys(draft: AssignmentDraft): string[] {
 
 /** 落库的 assignmentKey 列表 → 勾选状态。 */
 export function fromAssignmentKeys(keys: readonly string[]): AssignmentDraft {
-  const draft: AssignmentDraft = { allMembers: false, deptIds: [], userIds: [] };
+  const draft: AssignmentDraft = { allMembers: false, deptIds: [], groupIds: [], userIds: [] };
   for (const raw of keys) {
     const key = String(raw ?? "").trim();
     if (!key) continue;
@@ -71,6 +82,10 @@ export function fromAssignmentKeys(keys: readonly string[]): AssignmentDraft {
     }
     if (key.startsWith(DEPT_ASSIGNMENT_PREFIX)) {
       draft.deptIds.push(key.slice(DEPT_ASSIGNMENT_PREFIX.length));
+      continue;
+    }
+    if (key.startsWith(GROUP_ASSIGNMENT_PREFIX)) {
+      draft.groupIds.push(key.slice(GROUP_ASSIGNMENT_PREFIX.length));
       continue;
     }
     draft.userIds.push(key);

@@ -17,7 +17,11 @@ import {
   type CapabilityAssignment,
   type CapabilityState,
 } from "@agenticx/config";
-import { listDepartmentAncestorIds } from "@agenticx/iam-core";
+import {
+  groupAssignmentKey,
+  listDepartmentAncestorIds,
+  listUserGroupIdsForUser,
+} from "@agenticx/iam-core";
 import { and, eq, inArray } from "drizzle-orm";
 
 import {
@@ -72,7 +76,12 @@ type SkillRow = {
 };
 type McpRow = { id: string; name: string; displayName: string | null };
 
-/** 该用户名下所有生效的分配 key：全员 + 部门链 + 用户自身。 */
+/**
+ * 该用户名下所有生效的分配 key：全员 + 部门链 + 用户组 + 用户自身。
+ *
+ * 组的语义是授予：属于多个组取并集，多一个组只会多一份能力。部门链仍然从直属取到
+ * 根——上级分配的包，下级成员同样拿得到。
+ */
 export async function resolveAssignmentKeysForUser(
   tenantId: string,
   userId: string,
@@ -86,6 +95,9 @@ export async function resolveAssignmentKeysForUser(
       keys.add(deptAssignmentKey(ancestor));
     }
   }
+  // 组表尚未建好的租户不该因此拿不到能力，登录照常，只是没有组维度的分配。
+  const groupIds = await listUserGroupIdsForUser(tenantId, userId).catch(() => [] as string[]);
+  for (const groupId of groupIds) keys.add(groupAssignmentKey(groupId));
   return [...keys];
 }
 

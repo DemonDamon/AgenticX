@@ -1,4 +1,12 @@
-import { ulid } from "ulid";
+import {
+  createUserGroup as createGroupRow,
+  deleteUserGroup as deleteGroupRow,
+  getUserGroup as getGroupRow,
+  listUserGroups as listGroupRows,
+  migrateLegacyUserGroupsIfNeeded,
+  updateUserGroup as updateGroupRow,
+  type UserGroupRow,
+} from "@agenticx/iam-core";
 import {
   getQuotaConfig,
   setQuotaConfig,
@@ -23,10 +31,6 @@ export type UserGroupPolicyMember = {
 function normalizeIds(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map((id) => String(id).trim()).filter(Boolean))];
-}
-
-function asRecord(id: string, group: UserGroup): UserGroupRecord {
-  return { id, ...group };
 }
 
 function groupsOf(config: QuotaConfig): Record<string, UserGroup> {
@@ -56,17 +60,51 @@ function normalizeDescription(value: unknown): string | undefined {
   return description || undefined;
 }
 
+/**
+ * 组的身份与成员来自 enterprise_user_groups / _members 两张表；额度与模型范围这一轮
+ * 仍留在配额 JSON 里，按同一个 id 拼回来。
+ *
+ * 写入时把成员投影回 JSON，是因为可见模型那条路径（web-portal 的
+ * groupModelPolicyFromQuotaConfig）目前还直接读 JSON 的 memberIds。投影不同步会让
+ * 「组里有这个人」和「这个人能看到组里的模型」对不上，所以两处必须一起写。
+ */
+function recordFrom(row: UserGroupRow, legacy: UserGroup | undefined): UserGroupRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    ...(row.description ? { description: row.description } : {}),
+    memberIds: row.memberIds,
+    monthlyTokens: legacy?.monthlyTokens ?? 0,
+    modelIds: legacy?.modelIds ?? [],
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 export async function listUserGroups(tenantId: string): Promise<UserGroupRecord[]> {
-  const config = await getQuotaConfig(tenantId);
-  return Object.entries(groupsOf(config))
-    .map(([id, group]) => asRecord(id, group))
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  await migrateLegacyUserGroupsIfNeeded(tenantId);
+  const [rows, config] = await Promise.all([listGroupRows(tenantId), getQuotaConfig(tenantId)]);
+  const legacy = groupsOf(config);
+  return rows.map((row) => recordFrom(row, legacy[row.id]));
 }
 
 export async function getUserGroup(tenantId: string, id: string): Promise<UserGroupRecord | null> {
+  await migrateLegacyUserGroupsIfNeeded(tenantId);
+  const [row, config] = await Promise.all([getGroupRow(tenantId, id), getQuotaConfig(tenantId)]);
+  return row ? recordFrom(row, groupsOf(config)[id]) : null;
+}
+
+/** 把一个组的当前形态写回配额 JSON，供尚未迁移的可见模型/额度路径继续读。 */
+async function projectToQuotaConfig(
+  tenantId: string,
+  id: string,
+  next: Omit<UserGroupRecord, "id">,
+): Promise<void> {
   const config = await getQuotaConfig(tenantId);
-  const group = groupsOf(config)[id];
-  return group ? asRecord(id, group) : null;
+  const groups = groupsOf(config);
+  const { description, ...rest } = next;
+  groups[id] = { ...rest, ...(description ? { description } : {}) };
+  await setQuotaConfig({ groups, updatedAt: config.updatedAt }, tenantId);
 }
 
 export type UserGroupModelSource = Pick<UserGroupRecord, "id" | "name"> & {
@@ -117,23 +155,23 @@ export function groupQuotaSourceForUser(
 }
 
 export async function createUserGroup(tenantId: string, input: UserGroupInput): Promise<UserGroupRecord> {
-  const config = await getQuotaConfig(tenantId);
-  const id = ulid();
-  const now = new Date().toISOString();
-  const description = normalizeDescription(input.description);
-  const group: UserGroup = {
+  await migrateLegacyUserGroupsIfNeeded(tenantId);
+  const row = await createGroupRow(tenantId, {
     name: normalizeName(input.name),
-    ...(description ? { description } : {}),
+    description: normalizeDescription(input.description) ?? null,
     memberIds: normalizeIds(input.memberIds),
+  });
+  const record = recordFrom(row, {
+    name: row.name,
+    memberIds: row.memberIds,
     monthlyTokens: normalizeMonthlyTokens(input.monthlyTokens, 0),
     modelIds: normalizeIds(input.modelIds),
-    createdAt: now,
-    updatedAt: now,
-  };
-  const groups = groupsOf(config);
-  groups[id] = group;
-  await setQuotaConfig({ groups, updatedAt: config.updatedAt }, tenantId);
-  return asRecord(id, group);
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  });
+  const { id, ...rest } = record;
+  await projectToQuotaConfig(tenantId, id, rest);
+  return record;
 }
 
 export async function updateUserGroup(
@@ -141,25 +179,27 @@ export async function updateUserGroup(
   id: string,
   input: Partial<UserGroupInput>,
 ): Promise<UserGroupRecord> {
-  const config = await getQuotaConfig(tenantId);
-  const groups = groupsOf(config);
-  const current = groups[id];
+  const current = await getUserGroup(tenantId, id);
   if (!current) throw new Error("user group not found");
 
-  const description = input.description === undefined ? current.description : normalizeDescription(input.description);
-  const next: UserGroup = {
-    ...current,
-    name: input.name === undefined ? current.name : normalizeName(input.name),
-    memberIds: input.memberIds === undefined ? current.memberIds : normalizeIds(input.memberIds),
+  const row = await updateGroupRow(tenantId, id, {
+    ...(input.name === undefined ? {} : { name: normalizeName(input.name) }),
+    ...(input.description === undefined
+      ? {}
+      : { description: normalizeDescription(input.description) ?? null }),
+    ...(input.memberIds === undefined ? {} : { memberIds: normalizeIds(input.memberIds) }),
+  });
+  const record = recordFrom(row, {
+    name: row.name,
+    memberIds: row.memberIds,
     monthlyTokens: normalizeMonthlyTokens(input.monthlyTokens, current.monthlyTokens),
     modelIds: input.modelIds === undefined ? current.modelIds : normalizeIds(input.modelIds),
-    updatedAt: new Date().toISOString(),
-  };
-  if (description) next.description = description;
-  else delete next.description;
-  groups[id] = next;
-  await setQuotaConfig({ groups, updatedAt: config.updatedAt }, tenantId);
-  return asRecord(id, next);
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  });
+  const { id: _id, ...rest } = record;
+  await projectToQuotaConfig(tenantId, id, rest);
+  return record;
 }
 
 /** 保存用户组的每人额度；模型范围始终在运行时由用户组派生。 */
@@ -184,10 +224,10 @@ export async function applyUserGroupPolicy(
 }
 
 /**
- * Remove a deleted user from every group stored in the quota configuration.
+ * 删用户后同步投影。
  *
- * Group membership is embedded in the quota payload rather than protected by
- * an IAM foreign key, so deleting the IAM row cannot cascade this reference.
+ * 表那边由外键级联删掉了成员行，这里只需要把配额 JSON 里的残留成员刷掉——JSON 没有
+ * 外键，删 IAM 行级联不到它。
  */
 export async function removeUserFromAllGroups(tenantId: string, userId: string): Promise<number> {
   const normalizedUserId = String(userId ?? "").trim();
@@ -197,7 +237,6 @@ export async function removeUserFromAllGroups(tenantId: string, userId: string):
   const groups = groupsOf(config);
   const updatedAt = new Date().toISOString();
   let changedGroups = 0;
-
   for (const [id, group] of Object.entries(groups)) {
     if (!group.memberIds.includes(normalizedUserId)) continue;
     groups[id] = {
@@ -215,9 +254,10 @@ export async function removeUserFromAllGroups(tenantId: string, userId: string):
 }
 
 export async function deleteUserGroup(tenantId: string, id: string): Promise<boolean> {
+  const removed = await deleteGroupRow(tenantId, id);
+  if (!removed) return false;
   const config = await getQuotaConfig(tenantId);
   const groups = groupsOf(config);
-  if (!groups[id]) return false;
   delete groups[id];
   await setQuotaConfig({ groups, updatedAt: config.updatedAt }, tenantId);
   return true;

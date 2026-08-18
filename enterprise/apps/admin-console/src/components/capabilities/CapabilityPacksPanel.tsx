@@ -36,7 +36,12 @@ import {
 import { CapabilityChoiceList } from "./CapabilityChoiceList";
 import { toggleId, useCapabilityCatalog, type PackRecord } from "./use-capability-catalog";
 
-const EMPTY_ASSIGNMENT: AssignmentDraft = { allMembers: false, deptIds: [], userIds: [] };
+const EMPTY_ASSIGNMENT: AssignmentDraft = {
+  allMembers: false,
+  deptIds: [],
+  groupIds: [],
+  userIds: [],
+};
 
 export function CapabilityPacksPanel() {
   const t = useTranslations("pages.admin.capabilityPacks");
@@ -281,6 +286,32 @@ export function CapabilityPacksPanel() {
                         </label>
                       ))}
                       <p className="text-xs text-muted-foreground">{t("assignment.deptHint")}</p>
+                    </div>
+                    <div className="space-y-2 rounded-lg border p-3">
+                      <div className="text-xs font-medium text-muted-foreground">
+                        {t("assignment.groups")}
+                      </div>
+                      {catalog.groups.length === 0 && (
+                        <p className="text-xs text-muted-foreground">{t("assignment.noGroup")}</p>
+                      )}
+                      {catalog.groups.map((group) => (
+                        <label key={group.id} className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={assignment.groupIds.includes(group.id)}
+                            onCheckedChange={() =>
+                              setAssignment((prev) => ({
+                                ...prev,
+                                groupIds: toggleId(prev.groupIds, group.id),
+                              }))
+                            }
+                          />
+                          <span>{group.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {t("assignment.groupMemberCount", { count: group.memberIds.length })}
+                          </span>
+                        </label>
+                      ))}
+                      <p className="text-xs text-muted-foreground">{t("assignment.groupHint")}</p>
                     </div>
                     <div className="space-y-2 rounded-lg border p-3">
                       <div className="text-xs font-medium text-muted-foreground">
