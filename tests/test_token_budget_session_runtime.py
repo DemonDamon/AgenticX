@@ -57,10 +57,16 @@ async def _collect(
     return rows
 
 
-def _runtime(llm: Any, *, session_limit: int) -> AgentRuntime:
+def _runtime(
+    llm: Any,
+    *,
+    session_limit: int,
+    warning_limit: int = 500_000,
+) -> AgentRuntime:
     runtime = AgentRuntime(llm=llm, confirm_gate=MagicMock())
     runtime.token_budget = TokenBudgetGuard(
         max_tokens_per_session=session_limit,
+        warning_tokens_per_session=warning_limit,
         max_tokens_per_turn=2_000_000,
     )
     return runtime
@@ -162,6 +168,39 @@ def test_500k_warning_is_emitted_once_across_runtime_instances() -> None:
     assert not any(
         row["data"].get("detector") == "token_budget_warning" for row in second_events
     )
+
+
+def test_custom_warning_threshold_reaches_runtime_event_and_persistence() -> None:
+    session = StudioSession()
+    session.scratchpad[TOKEN_BUDGET_SCRATCHPAD_KEY] = {
+        "version": 1,
+        "cumulative_input": 699_900,
+        "cumulative_output": 0,
+        "warning_emitted": False,
+        "warning_emitted_at": 0,
+    }
+
+    events = asyncio.run(
+        _collect(
+            _runtime(
+                _CountingUsageLLM(input_tokens=100, output_tokens=1),
+                session_limit=1_000_000,
+                warning_limit=700_000,
+            ),
+            session,
+            "cross custom warning",
+        )
+    )
+
+    notices = [
+        row for row in events if row["data"].get("detector") == "token_budget_warning"
+    ]
+    assert len(notices) == 1
+    assert notices[0]["data"]["warning_at"] == 700_000
+    persisted = session.scratchpad[TOKEN_BUDGET_SCRATCHPAD_KEY]
+    assert persisted["warning_emitted"] is True
+    assert persisted["warning_emitted_at"] == 700_000
+    assert persisted["warning_tokens_per_session"] == 700_000
 
 
 def test_fixed_warning_is_not_skipped_when_usage_jumps_into_compress_range() -> None:

@@ -21,6 +21,8 @@ DEFAULT_WARNING_TOKENS_PER_SESSION = 500_000
 DEFAULT_MAX_TOKENS_PER_TURN = 100_000
 MIN_MAX_TOKENS_PER_SESSION = 100_000
 MAX_MAX_TOKENS_PER_SESSION = 5_000_000
+MIN_WARNING_TOKENS_PER_SESSION = 50_000
+MAX_WARNING_TOKENS_PER_SESSION = MAX_MAX_TOKENS_PER_SESSION - 1
 MIN_MAX_TOKENS_PER_TURN = 50_000
 MAX_MAX_TOKENS_PER_TURN = 1_000_000
 TOKEN_BUDGET_SCRATCHPAD_KEY = "_token_budget_usage_v1"
@@ -47,42 +49,100 @@ def _clamp_int(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
-def resolve_token_budget_limits(
+def _optional_int(value: Any) -> Optional[int]:
+    """Parse a persisted integer without letting one corrupt field discard its siblings."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def resolve_token_budget_settings(
     *,
     max_tokens_per_session: Optional[int] = None,
+    warning_tokens_per_session: Optional[int] = None,
     max_tokens_per_turn: Optional[int] = None,
-) -> Tuple[int, int]:
-    """Resolve session/turn token limits: explicit args > config > env > defaults."""
+) -> Tuple[int, int, int]:
+    """Resolve hard/warning/turn limits from explicit, managed, and local policy.
+
+    Enterprise policy is active only for an authenticated enterprise session. It
+    overrides the local developer settings without rewriting them, so signing out
+    naturally restores the user's self-managed limits.
+    """
     session_limit = max_tokens_per_session
+    warning_limit = warning_tokens_per_session
     turn_limit = max_tokens_per_turn
 
-    if session_limit is None or turn_limit is None:
+    if session_limit is None or warning_limit is None or turn_limit is None:
         try:
             from agenticx.cli.config_manager import ConfigManager
 
             global_data = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
             project_data = ConfigManager._load_yaml(ConfigManager.PROJECT_CONFIG_PATH)
             merged = ConfigManager._deep_merge(global_data, project_data)
-            tb = ConfigManager._get_nested(merged, "runtime.token_budget")
-            if isinstance(tb, dict):
-                if session_limit is None:
-                    raw_session = tb.get("max_tokens_per_session")
-                    if raw_session is not None:
-                        session_limit = int(raw_session)
-                if turn_limit is None:
-                    raw_turn = tb.get("max_tokens_per_turn")
-                    if raw_turn is not None:
-                        turn_limit = int(raw_turn)
+            enterprise = merged.get("enterprise") if isinstance(merged, dict) else None
+            enterprise_active = (
+                isinstance(enterprise, dict)
+                and enterprise.get("enabled") is True
+                and bool(str(enterprise.get("token") or "").strip())
+            )
+            managed_tb = (
+                ConfigManager._get_nested(merged, "enterprise.policy.token_budget")
+                if enterprise_active
+                else None
+            )
+            local_tb = ConfigManager._get_nested(merged, "runtime.token_budget")
+
+            def _configured_value(key: str) -> Optional[int]:
+                if isinstance(managed_tb, dict):
+                    managed_value = _optional_int(managed_tb.get(key))
+                    if managed_value is not None:
+                        return managed_value
+                if isinstance(local_tb, dict):
+                    return _optional_int(local_tb.get(key))
+                return None
+
+            if session_limit is None:
+                session_limit = _configured_value("max_tokens_per_session")
+            if warning_limit is None:
+                warning_limit = _configured_value("warning_tokens_per_session")
+            if turn_limit is None:
+                turn_limit = _configured_value("max_tokens_per_turn")
         except Exception as exc:
             _log.debug("token budget config read skipped: %s", exc)
 
     if session_limit is None:
         session_limit = _env_int("AGX_MAX_TOKENS_PER_SESSION", DEFAULT_MAX_TOKENS_PER_SESSION)
+    if warning_limit is None:
+        warning_limit = _env_int(
+            "AGX_WARNING_TOKENS_PER_SESSION",
+            DEFAULT_WARNING_TOKENS_PER_SESSION,
+        )
     if turn_limit is None:
         turn_limit = _env_int("AGX_MAX_TOKENS_PER_TURN", DEFAULT_MAX_TOKENS_PER_TURN)
 
     session_limit = _clamp_int(int(session_limit), MIN_MAX_TOKENS_PER_SESSION, MAX_MAX_TOKENS_PER_SESSION)
+    warning_limit = _clamp_int(
+        int(warning_limit),
+        MIN_WARNING_TOKENS_PER_SESSION,
+        min(MAX_WARNING_TOKENS_PER_SESSION, session_limit - 1),
+    )
     turn_limit = _clamp_int(int(turn_limit), MIN_MAX_TOKENS_PER_TURN, MAX_MAX_TOKENS_PER_TURN)
+    return session_limit, warning_limit, turn_limit
+
+
+def resolve_token_budget_limits(
+    *,
+    max_tokens_per_session: Optional[int] = None,
+    max_tokens_per_turn: Optional[int] = None,
+) -> Tuple[int, int]:
+    """Backward-compatible resolver for callers that only need hard/turn limits."""
+    session_limit, _warning_limit, turn_limit = resolve_token_budget_settings(
+        max_tokens_per_session=max_tokens_per_session,
+        max_tokens_per_turn=max_tokens_per_turn,
+    )
     return session_limit, turn_limit
 
 
@@ -90,7 +150,7 @@ class TokenBudgetGuard:
     """Per-session token budget with tiered enforcement.
 
     Session thresholds:
-      - fixed 500,000 tokens: WARNING -> notify and inject convergence hint
+      - configurable threshold (default 500,000): WARNING -> notify and inject convergence hint
       - 95%: COMPRESS -> force context compaction
       - 100%: EXCEEDED -> reject the next turn; the current paid turn may finish
     """
@@ -98,16 +158,23 @@ class TokenBudgetGuard:
     def __init__(
         self,
         max_tokens_per_session: int = 0,
+        warning_tokens_per_session: int = 0,
         max_tokens_per_turn: int = 0,
     ) -> None:
+        resolved_session, resolved_warning, resolved_turn = resolve_token_budget_settings()
         if max_tokens_per_session > 0:
             self.max_session = int(max_tokens_per_session)
         else:
-            self.max_session = resolve_token_budget_limits()[0]
+            self.max_session = resolved_session
+        if warning_tokens_per_session > 0:
+            self.warning_session = int(warning_tokens_per_session)
+        else:
+            self.warning_session = resolved_warning
+        self.warning_session = max(1, min(self.warning_session, self.max_session - 1))
         if max_tokens_per_turn > 0:
             self.max_turn = int(max_tokens_per_turn)
         else:
-            self.max_turn = resolve_token_budget_limits()[1]
+            self.max_turn = resolved_turn
         self.enforce_turn_limit = str(os.environ.get("AGX_ENFORCE_TURN_TOKEN_BUDGET", "0")).strip() == "1"
         self.cumulative_input: int = 0
         self.cumulative_output: int = 0
@@ -144,7 +211,12 @@ class TokenBudgetGuard:
         payload = data if isinstance(data, dict) else {}
         self.cumulative_input = max(0, int(payload.get("cumulative_input", 0) or 0))
         self.cumulative_output = max(0, int(payload.get("cumulative_output", 0) or 0))
-        self.warning_emitted = bool(payload.get("warning_emitted", False))
+        emitted_at_raw = payload.get("warning_emitted_at")
+        try:
+            emitted_at = max(0, int(emitted_at_raw or 0))
+        except (TypeError, ValueError, OverflowError):
+            emitted_at = 0
+        self.warning_emitted = emitted_at == self.warning_session
         self.reset_turn()
 
     def check_session(self) -> BudgetLevel:
@@ -156,7 +228,7 @@ class TokenBudgetGuard:
         ratio = self.cumulative_total / self.max_session
         if ratio >= 0.95:
             return BudgetLevel.COMPRESS
-        if self.cumulative_total >= DEFAULT_WARNING_TOKENS_PER_SESSION:
+        if self.cumulative_total >= self.warning_session:
             return BudgetLevel.WARNING
         return BudgetLevel.OK
 
@@ -209,6 +281,8 @@ class TokenBudgetGuard:
             "cumulative_input": self.cumulative_input,
             "cumulative_output": self.cumulative_output,
             "warning_emitted": self.warning_emitted,
+            "warning_emitted_at": self.warning_session if self.warning_emitted else 0,
+            "warning_tokens_per_session": self.warning_session,
             "max_session": self.max_session,
             "max_turn": self.max_turn,
         }
@@ -218,6 +292,10 @@ class TokenBudgetGuard:
         """Restore from persisted metadata."""
         guard = cls(
             max_tokens_per_session=int(data.get("max_session", DEFAULT_MAX_TOKENS_PER_SESSION) or DEFAULT_MAX_TOKENS_PER_SESSION),
+            warning_tokens_per_session=int(
+                data.get("warning_tokens_per_session", DEFAULT_WARNING_TOKENS_PER_SESSION)
+                or DEFAULT_WARNING_TOKENS_PER_SESSION
+            ),
             max_tokens_per_turn=int(data.get("max_turn", DEFAULT_MAX_TOKENS_PER_TURN) or DEFAULT_MAX_TOKENS_PER_TURN),
         )
         guard.restore_usage(data)

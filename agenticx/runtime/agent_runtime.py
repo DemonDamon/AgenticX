@@ -65,7 +65,6 @@ from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import (
     BudgetLevel,
-    DEFAULT_WARNING_TOKENS_PER_SESSION,
     TOKEN_BUDGET_SCRATCHPAD_KEY,
     TokenBudgetGuard,
     session_token_budget_preflight,
@@ -2730,6 +2729,12 @@ class AgentRuntime:
             "cumulative_input": self.token_budget.cumulative_input,
             "cumulative_output": self.token_budget.cumulative_output,
             "warning_emitted": self.token_budget.warning_emitted,
+            "warning_emitted_at": (
+                self.token_budget.warning_session
+                if self.token_budget.warning_emitted
+                else 0
+            ),
+            "warning_tokens_per_session": self.token_budget.warning_session,
         }
 
     def _maybe_mid_turn_persist(self) -> None:
@@ -4171,7 +4176,7 @@ class AgentRuntime:
                 turn_budget_level = self.token_budget.check_turn()
                 warning_started_now = (
                     self.token_budget.cumulative_total
-                    >= DEFAULT_WARNING_TOKENS_PER_SESSION
+                    >= self.token_budget.warning_session
                     and not self.token_budget.warning_emitted
                 )
                 if warning_started_now:
@@ -4242,14 +4247,14 @@ class AgentRuntime:
                         data={
                             "text": (
                                 "本会话累计 Token 已达到 "
-                                f"{DEFAULT_WARNING_TOKENS_PER_SESSION:,}。当前任务会继续，"
+                                f"{self.token_budget.warning_session:,}。当前任务会继续，"
                                 "建议在完成后新建会话以保持稳定。"
                             ),
                             "severity": "warning",
                             "detector": "token_budget_warning",
                             "budget_source": "session",
                             "current": self.token_budget.cumulative_total,
-                            "warning_at": DEFAULT_WARNING_TOKENS_PER_SESSION,
+                            "warning_at": self.token_budget.warning_session,
                             "max_allowed": self.token_budget.max_session,
                         },
                         agent_id=agent_id,
