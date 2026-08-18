@@ -365,6 +365,13 @@
       "when": 1787385600000,
       "tag": "0052_portal_request_logs_session_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1787471000000,
+      "tag": "0053_enterprise_capability_packs",
+      "breakpoints": true
     }
   ]
 }

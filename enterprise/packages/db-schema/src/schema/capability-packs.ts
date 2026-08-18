@@ -1,0 +1,134 @@
+/**
+ * 企业能力包：把若干 Skill / MCP 打成一组，由管理员统一录入凭据并分配给全员、
+ * 部门或指定用户，员工登录后自动同步，不再自己配 Key、装 Skill、连 MCP。
+ *
+ * 两条贯穿性的设计：
+ *
+ * 1. 能力一律按 `mcp:<ulid>` / `skill:<ulid>` 引用，不用 `name`/`slug`。
+ *    名字是管理员起的可变标签，改一次就会让分配记录、用户偏好、用量与审计
+ *    全部指空；用量归属错乱对后续按能力计费尤其致命。前缀用来区分该去哪张表查。
+ *
+ * 2. Skill 自身不存凭据，只声明依赖（requiredCapabilities）。凭据留在被依赖的
+ *    MCP 上由网关代持——Skill 是要落到员工机器上的文件，Key 一旦进了 bundle，
+ *    轮换等于重新分发文件，撤销之后旧文件还留在本地。
+ */
+import { index, jsonb, pgTable, primaryKey, text, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+
+import { auditColumns, ulid } from "./_shared";
+import { tenants } from "./tenants";
+
+/** 企业 Skill 注册表。 */
+export const enterpriseSkills = pgTable(
+  "enterprise_skills",
+  {
+    id: ulid("id").primaryKey(),
+    tenantId: ulid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    slug: varchar("slug", { length: 128 }).notNull(),
+    displayName: varchar("display_name", { length: 128 }),
+    description: text("description"),
+    /** 固定版本分发；灰度与回滚等有真实需求再引入。 */
+    version: varchar("version", { length: 32 }).notNull().default("0.0.0"),
+    bundleUri: text("bundle_uri"),
+    /** 内容摘要，供 Desktop 校验同步下来的 bundle 未被篡改。 */
+    bundleDigest: varchar("bundle_digest", { length: 128 }),
+    /** 依赖的能力 id（`mcp:<ulid>` 等）；此处只声明，不含任何凭据。 */
+    requiredCapabilities: text("required_capabilities").array().notNull().default([]),
+    status: varchar("status", { length: 16 }).notNull().default("active"),
+    ...auditColumns,
+  },
+  (table) => ({
+    tenantSlugUq: uniqueIndex("enterprise_skills_tenant_slug_uq").on(table.tenantId, table.slug),
+    tenantStatusIdx: index("enterprise_skills_tenant_status_idx").on(table.tenantId, table.status),
+  })
+);
+
+/** 能力包本体。`status` 即企业侧开关，也就是用户那一位的上限。 */
+export const enterpriseCapabilityPacks = pgTable(
+  "enterprise_capability_packs",
+  {
+    id: ulid("id").primaryKey(),
+    tenantId: ulid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    slug: varchar("slug", { length: 128 }).notNull(),
+    displayName: varchar("display_name", { length: 128 }),
+    description: text("description"),
+    status: varchar("status", { length: 16 }).notNull().default("active"),
+    metadata: jsonb("metadata").notNull().default({}).$type<Record<string, unknown>>(),
+    ...auditColumns,
+  },
+  (table) => ({
+    tenantSlugUq: uniqueIndex("enterprise_capability_packs_tenant_slug_uq").on(table.tenantId, table.slug),
+    tenantStatusIdx: index("enterprise_capability_packs_tenant_status_idx").on(table.tenantId, table.status),
+  })
+);
+
+/** 包内成员：`mcp:<ulid>` / `skill:<ulid>`。 */
+export const enterpriseCapabilityPackMembers = pgTable(
+  "enterprise_capability_pack_members",
+  {
+    packId: ulid("pack_id")
+      .notNull()
+      .references(() => enterpriseCapabilityPacks.id, { onDelete: "cascade" }),
+    capabilityId: varchar("capability_id", { length: 64 }).notNull(),
+    ...auditColumns,
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.packId, table.capabilityId] }),
+    capabilityIdx: index("enterprise_capability_pack_members_capability_idx").on(table.capabilityId),
+  })
+);
+
+/**
+ * 分配范围。`assignmentKey` 沿用可见模型那套约定：`all` / `dept:<id>` / 用户 ulid，
+ * 好处是级联收窄的语义与已跑通的实现一致，不必另立一套。
+ */
+export const enterpriseCapabilityAssignments = pgTable(
+  "enterprise_capability_assignments",
+  {
+    tenantId: ulid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    packId: ulid("pack_id")
+      .notNull()
+      .references(() => enterpriseCapabilityPacks.id, { onDelete: "cascade" }),
+    assignmentKey: varchar("assignment_key", { length: 128 }).notNull(),
+    ...auditColumns,
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.tenantId, table.packId, table.assignmentKey] }),
+    tenantKeyIdx: index("enterprise_capability_assignments_tenant_key_idx").on(
+      table.tenantId,
+      table.assignmentKey
+    ),
+  })
+);
+
+/**
+ * 用户关闭记录。只记「关掉了什么」——用户无权开启，所以没有反向的表。
+ * 存服务端而非本机：本机存的话换台电脑或重装就全部复原成开启，且无法审计。
+ */
+export const enterpriseCapabilityOptOuts = pgTable(
+  "enterprise_capability_opt_outs",
+  {
+    tenantId: ulid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: varchar("user_id", { length: 64 }).notNull(),
+    capabilityId: varchar("capability_id", { length: 64 }).notNull(),
+    ...auditColumns,
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.tenantId, table.userId, table.capabilityId] }),
+  })
+);
+
+export type EnterpriseSkillRow = typeof enterpriseSkills.$inferSelect;
+export type NewEnterpriseSkillRow = typeof enterpriseSkills.$inferInsert;
+export type EnterpriseCapabilityPackRow = typeof enterpriseCapabilityPacks.$inferSelect;
+export type NewEnterpriseCapabilityPackRow = typeof enterpriseCapabilityPacks.$inferInsert;
+export type EnterpriseCapabilityPackMemberRow = typeof enterpriseCapabilityPackMembers.$inferSelect;
+export type EnterpriseCapabilityAssignmentRow = typeof enterpriseCapabilityAssignments.$inferSelect;
+export type EnterpriseCapabilityOptOutRow = typeof enterpriseCapabilityOptOuts.$inferSelect;
