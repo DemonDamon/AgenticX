@@ -56,12 +56,12 @@ export function TokenBudgetConfigSection({ value, onChange, disabled }: TokenBud
     <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
       <div className="text-sm font-semibold text-text-strong">Token 预算</div>
       <p className="mt-1 text-xs leading-relaxed text-text-muted">
-        控制单个会话累计 token 上限，以及单轮对话 token 上限。达到单独配置的提醒阈值时会提示；达到会话上限的当前轮仍会完成，从下一轮开始停止。修改后请保存，后续对话轮次生效。
+        会话累计值只用于分级提醒，不会中断任务或阻止后续对话；模型上下文接近窗口时仍会按既有机制整理。单轮上限继续控制一次模型请求可使用的 token。修改后请保存，后续对话轮次生效。
       </p>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="block text-xs text-text-muted">
-          会话累计上限
+          会话红色提醒阈值
           <input
             type="number"
             min={TOKEN_BUDGET_MIN_SESSION}

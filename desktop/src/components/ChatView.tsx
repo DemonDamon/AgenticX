@@ -56,7 +56,7 @@ import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
-import { buildCompactionNoticeText } from "../utils/context-notice";
+import { buildCompactionNoticeText, noticeKindForRuntimeWarning } from "../utils/context-notice";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import { StallWaitChip } from "./messages/StallWaitChip";
 import { parseStallWaitPayload, type StallWaitInfo } from "../utils/stall-wait-chip";
@@ -2013,12 +2013,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 || detector === "context_window";
               if (eventAgentId === "meta") {
                 if (isWarning) {
-                  const noticeKind =
-                    detector === "context_budget_compact" || detector === "context_window"
-                      ? "context_compact"
-                      : detector === "compactor_circuit_breaker"
-                        ? "compactor_cb"
-                        : "budget_compress";
+                  const warningLevel = String(payload.data?.warning_level ?? "").trim();
+                  const noticeKind = noticeKindForRuntimeWarning(detector, warningLevel);
                   addMessage("tool", errText, "meta", undefined, undefined, undefined, {
                     noticeKind,
                   });

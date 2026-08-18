@@ -206,6 +206,9 @@ export type ToolCallStatus = "pending" | "running" | "done" | "error" | "cancell
 /** Flat inline notices for context/token budget events (not expandable tool cards). */
 export type ContextNoticeKind =
   | "budget_compress"
+  | "token_warning_yellow"
+  | "token_warning_red"
+  | "enterprise_quota"
   | "context_compact"
   | "compactor_cb"
   | "compaction_reactive"

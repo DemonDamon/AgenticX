@@ -276,7 +276,9 @@ type ProviderConfig = {
 };
 
 type EnterpriseTokenBudgetPolicy = {
+  /** First (yellow) conversation-usage alert. */
   warning_tokens_per_session: number;
+  /** Wire-compatible name for the second (red) alert; it is not a blocking cap. */
   max_tokens_per_session: number;
 };
 
@@ -9729,7 +9731,7 @@ function registerIpc(): void {
         (key) => key !== "max_tokens_per_session" && key !== "warning_tokens_per_session",
       );
       if (tokenBudgetManaged && managedTokenFieldsRequested && !hasNonManagedTokenFields) {
-        return { ok: false, error: "会话 Token 限制由组织统一管理" };
+        return { ok: false, error: "会话 Token 提醒阈值由组织统一管理" };
       }
       const root = cfg as Record<string, unknown>;
       const prev = root.runtime;
@@ -9856,21 +9858,21 @@ function registerIpc(): void {
           p.warning_tokens_per_session ?? currentTokenBudget.warning_tokens_per_session,
         );
         if (!Number.isFinite(sessionValue)) {
-          return { ok: false, error: "会话 Token 停止阈值必须是数字" };
+          return { ok: false, error: "会话 Token 红色提醒阈值必须是数字" };
         }
         if (!Number.isFinite(warningValue)) {
-          return { ok: false, error: "会话 Token 提醒阈值必须是数字" };
+          return { ok: false, error: "会话 Token 黄色提醒阈值必须是数字" };
         }
         const sessionLimit = Math.round(sessionValue);
         const warningLimit = Math.round(warningValue);
         if (sessionLimit < 100_000 || sessionLimit > 5_000_000) {
-          return { ok: false, error: "会话 Token 停止阈值须在 100,000–5,000,000 之间" };
+          return { ok: false, error: "会话 Token 红色提醒阈值须在 100,000–5,000,000 之间" };
         }
         if (warningLimit < 50_000 || warningLimit >= 5_000_000) {
-          return { ok: false, error: "会话 Token 提醒阈值须在 50,000–4,999,999 之间" };
+          return { ok: false, error: "会话 Token 黄色提醒阈值须在 50,000–4,999,999 之间" };
         }
         if (warningLimit >= sessionLimit) {
-          return { ok: false, error: "提醒阈值必须低于停止阈值" };
+          return { ok: false, error: "黄色提醒阈值必须低于红色提醒阈值" };
         }
         tokenBudgetMerged.warning_tokens_per_session = warningLimit;
         tokenBudgetMerged.max_tokens_per_session = sessionLimit;

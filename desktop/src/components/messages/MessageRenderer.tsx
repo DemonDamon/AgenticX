@@ -403,7 +403,7 @@ export function MessageRenderer({
     }
     const contextNotice = parseContextNotice(message);
     if (contextNotice) {
-      return <ContextNoticeLine text={contextNotice.text} />;
+      return <ContextNoticeLine text={contextNotice.text} kind={contextNotice.kind} />;
     }
     if (isSupervisorNoticeMessage(message)) {
       return <SupervisorNoticeLine message={message} />;

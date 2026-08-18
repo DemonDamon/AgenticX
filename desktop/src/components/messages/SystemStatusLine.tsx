@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { ASSISTANT_ICON_RAIL_CLASS } from "./im-layout";
 
-export type SystemStatusTone = "neutral" | "info" | "success" | "warning";
+export type SystemStatusTone = "neutral" | "info" | "success" | "warning" | "danger";
 
 const TONE: Record<
   SystemStatusTone,
@@ -27,6 +27,11 @@ const TONE: Record<
     bg: "rgba(251, 191, 36, 0.12)",
     ring: "rgba(251, 191, 36, 0.34)",
     fg: "rgba(253, 224, 71, 0.96)",
+  },
+  danger: {
+    bg: "rgba(244, 63, 94, 0.12)",
+    ring: "rgba(244, 63, 94, 0.34)",
+    fg: "rgba(251, 113, 133, 0.98)",
   },
 };
 

@@ -32,14 +32,14 @@ describe("enterprise-managed Desktop token budget contract", () => {
     expect(resolver).toContain("token_budget_managed: true");
   });
 
-  it("rejects managed threshold-only saves and never mutates managed thresholds", () => {
+  it("rejects managed alert-only saves and never mutates managed alert thresholds", () => {
     const main = readDesktopSource("electron/main.ts");
     const start = main.indexOf('ipcMain.handle("save-runtime-config"');
     const end = main.indexOf('ipcMain.handle("load-appearance-config"', start);
     const saveHandler = main.slice(start, end);
 
     expect(saveHandler).toContain("tokenBudgetManaged && managedTokenFieldsRequested && !hasNonManagedTokenFields");
-    expect(saveHandler).toContain('error: "会话 Token 限制由组织统一管理"');
+    expect(saveHandler).toContain('error: "会话 Token 提醒阈值由组织统一管理"');
     expect(saveHandler).toContain("!tokenBudgetManaged");
     expect(saveHandler).not.toContain(["policy", "version"].join("_"));
     expect(saveHandler).not.toMatch(new RegExp(["migra", "t"].join(""), "i"));
@@ -56,6 +56,8 @@ describe("enterprise-managed Desktop token budget contract", () => {
     expect(panel.match(/disabled=\{loading \|\| saving \|\| managed\}/g)).toHaveLength(2);
     expect(panel).toContain("当前数值由组织统一管理，登录企业账号期间不可在本机修改。");
     expect(panel).toContain('{managed ? "组织统一管理"');
+    expect(panel).toContain("两级提醒都不会中断任务或阻止后续对话");
+    expect(panel).not.toContain("停止阈值");
   });
 
   it("contains no historical token-budget conversion contract", () => {

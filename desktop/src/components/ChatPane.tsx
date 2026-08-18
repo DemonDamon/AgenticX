@@ -316,7 +316,7 @@ import {
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildMessagesPdfHtml, expandSelectionForCompletePdfExport, messagesForShareExport } from "../utils/export-pdf-html";
 import { ShareImagePreviewModal } from "./ShareImagePreviewModal";
-import { buildCompactionNoticeText } from "../utils/context-notice";
+import { buildCompactionNoticeText, noticeKindForRuntimeWarning } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
 import {
@@ -11849,12 +11849,8 @@ export function ChatPane({
                 || detector === "context_budget_compact"
                 || detector === "context_window"
               ) {
-                const noticeKind =
-                  detector === "context_budget_compact" || detector === "context_window"
-                    ? "context_compact"
-                    : detector === "compactor_circuit_breaker"
-                      ? "compactor_cb"
-                      : "budget_compress";
+                const warningLevel = String(payload.data?.warning_level ?? "").trim();
+                const noticeKind = noticeKindForRuntimeWarning(detector, warningLevel);
                 addPaneMessageIfSessionActive(pane.id, "tool", errText, eventAgentId || "meta", undefined, undefined, undefined, {
                   noticeKind,
                 });

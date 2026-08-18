@@ -15,8 +15,8 @@ function formatTokenCount(value: number): string {
 export const DEVELOPER_TOKEN_BUDGET_MIN_SESSION = TOKEN_BUDGET_MIN_SESSION;
 
 export type DeveloperTokenBudgetValue = {
-  warning: number;
-  hard: number;
+  yellow: number;
+  red: number;
 };
 
 export function normalizeLoadedDeveloperTokenBudget(raw: {
@@ -29,7 +29,7 @@ export function normalizeLoadedDeveloperTokenBudget(raw: {
     && raw.warning_tokens_per_session !== null
     && Number.isFinite(rawWarning);
   const rawHard = Number(raw.max_tokens_per_session);
-  const hard = Number.isFinite(rawHard)
+  const red = Number.isFinite(rawHard)
     ? Math.max(
         TOKEN_BUDGET_MIN_SESSION,
         Math.min(
@@ -39,27 +39,27 @@ export function normalizeLoadedDeveloperTokenBudget(raw: {
       )
     : TOKEN_BUDGET_DEFAULT_SESSION;
   return {
-    warning: normalizeSessionWarningTokenLimit(
+    yellow: normalizeSessionWarningTokenLimit(
       hasWarning ? rawWarning : TOKEN_BUDGET_WARNING_SESSION,
-      hard,
+      red,
     ),
-    hard,
+    red,
   };
 }
 
 export function validateDeveloperTokenBudget(value: DeveloperTokenBudgetValue): string {
-  if (!Number.isFinite(value.warning)) return "提醒阈值必须是数字";
-  if (!Number.isFinite(value.hard)) return "停止阈值必须是数字";
+  if (!Number.isFinite(value.yellow)) return "黄色提醒阈值必须是数字";
+  if (!Number.isFinite(value.red)) return "红色提醒阈值必须是数字";
   if (
-    value.warning < TOKEN_BUDGET_MIN_WARNING_SESSION
-    || value.warning >= TOKEN_BUDGET_MAX_SESSION
+    value.yellow < TOKEN_BUDGET_MIN_WARNING_SESSION
+    || value.yellow >= TOKEN_BUDGET_MAX_SESSION
   ) {
-    return `提醒阈值须在 ${formatTokenCount(TOKEN_BUDGET_MIN_WARNING_SESSION)}–${formatTokenCount(TOKEN_BUDGET_MAX_SESSION - 1)} 之间`;
+    return `黄色提醒阈值须在 ${formatTokenCount(TOKEN_BUDGET_MIN_WARNING_SESSION)}–${formatTokenCount(TOKEN_BUDGET_MAX_SESSION - 1)} 之间`;
   }
-  if (value.hard < DEVELOPER_TOKEN_BUDGET_MIN_SESSION || value.hard > TOKEN_BUDGET_MAX_SESSION) {
-    return `停止阈值须在 ${formatTokenCount(DEVELOPER_TOKEN_BUDGET_MIN_SESSION)}–${formatTokenCount(TOKEN_BUDGET_MAX_SESSION)} 之间`;
+  if (value.red < DEVELOPER_TOKEN_BUDGET_MIN_SESSION || value.red > TOKEN_BUDGET_MAX_SESSION) {
+    return `红色提醒阈值须在 ${formatTokenCount(DEVELOPER_TOKEN_BUDGET_MIN_SESSION)}–${formatTokenCount(TOKEN_BUDGET_MAX_SESSION)} 之间`;
   }
-  if (value.warning >= value.hard) return "提醒阈值必须低于停止阈值";
+  if (value.yellow >= value.red) return "黄色提醒阈值必须低于红色提醒阈值";
   return "";
 }
 
@@ -99,11 +99,11 @@ export function DeveloperTokenBudgetPanel() {
   }, []);
 
   const roundedDraft = {
-    warning: Math.round(draft.warning),
-    hard: Math.round(draft.hard),
+    yellow: Math.round(draft.yellow),
+    red: Math.round(draft.red),
   };
   const validationError = validateDeveloperTokenBudget(roundedDraft);
-  const dirty = roundedDraft.warning !== saved.warning || roundedDraft.hard !== saved.hard;
+  const dirty = roundedDraft.yellow !== saved.yellow || roundedDraft.red !== saved.red;
 
   const save = async () => {
     if (managed) return;
@@ -111,8 +111,8 @@ export function DeveloperTokenBudgetPanel() {
     setMessage("");
     try {
       const result = await window.agenticxDesktop.saveRuntimeConfig({
-        warning_tokens_per_session: roundedDraft.warning,
-        max_tokens_per_session: roundedDraft.hard,
+        warning_tokens_per_session: roundedDraft.yellow,
+        max_tokens_per_session: roundedDraft.red,
       });
       if (!result.ok) {
         setMessage(result.error || "保存失败");
@@ -130,9 +130,9 @@ export function DeveloperTokenBudgetPanel() {
 
   return (
     <section className="rounded-xl border border-border bg-surface-card p-4">
-      <div className="text-sm font-semibold text-text-strong">会话 Token 限制</div>
+      <div className="text-sm font-semibold text-text-strong">会话 Token 两级提醒</div>
       <p className="mt-1 text-xs leading-5 text-text-muted">
-        达到提醒阈值时提示；达到停止阈值的当前轮会完成，下一轮停止。默认提醒 {formatTokenCount(TOKEN_BUDGET_WARNING_SESSION)}，默认停止 {formatTokenCount(TOKEN_BUDGET_DEFAULT_SESSION)}。
+        默认在 {formatTokenCount(TOKEN_BUDGET_WARNING_SESSION)} 时显示黄色提醒，在 {formatTokenCount(TOKEN_BUDGET_DEFAULT_SESSION)} 时显示红色提醒；两级提醒都不会中断任务或阻止后续对话。模型上下文接近窗口时仍会按既有机制整理。
       </p>
       {managed ? (
         <p className="mt-2 text-xs leading-5 text-text-faint">
@@ -142,40 +142,46 @@ export function DeveloperTokenBudgetPanel() {
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="block text-xs font-medium text-text-muted">
-          提醒阈值
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden />
+            黄色提醒阈值
+          </span>
           <input
-            aria-label="会话 Token 提醒阈值"
+            aria-label="会话 Token 黄色提醒阈值"
             type="number"
             min={TOKEN_BUDGET_MIN_WARNING_SESSION}
             max={TOKEN_BUDGET_MAX_SESSION - 1}
             step={50_000}
-            value={draft.warning}
+            value={draft.yellow}
             disabled={loading || saving || managed}
             onChange={(event) => {
               setMessage("");
               setDraft((current) => ({
                 ...current,
-                warning: Math.round(Number(event.target.value)),
+                yellow: Math.round(Number(event.target.value)),
               }));
             }}
             className="mt-1.5 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm font-normal text-text-primary disabled:opacity-50"
           />
         </label>
         <label className="block text-xs font-medium text-text-muted">
-          停止阈值
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-rose-500" aria-hidden />
+            红色提醒阈值
+          </span>
           <input
-            aria-label="会话 Token 停止阈值"
+            aria-label="会话 Token 红色提醒阈值"
             type="number"
             min={DEVELOPER_TOKEN_BUDGET_MIN_SESSION}
             max={TOKEN_BUDGET_MAX_SESSION}
             step={50_000}
-            value={draft.hard}
+            value={draft.red}
             disabled={loading || saving || managed}
             onChange={(event) => {
               setMessage("");
               setDraft((current) => ({
                 ...current,
-                hard: Math.round(Number(event.target.value)),
+                red: Math.round(Number(event.target.value)),
               }));
             }}
             className="mt-1.5 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm font-normal text-text-primary disabled:opacity-50"
@@ -190,7 +196,7 @@ export function DeveloperTokenBudgetPanel() {
           onClick={() => void save()}
           className="rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {managed ? "组织统一管理" : saving ? "保存中…" : "保存限制"}
+          {managed ? "组织统一管理" : saving ? "保存中…" : "保存提醒"}
         </button>
         {validationError || message ? (
           <span className={`text-xs ${!validationError && message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>

@@ -26,6 +26,20 @@ function detectKindFromText(text: string): ContextNoticeKind | null {
   return null;
 }
 
+export function noticeKindForRuntimeWarning(
+  detector: string,
+  warningLevel: string,
+): ContextNoticeKind {
+  if (detector === "enterprise_quota") return "enterprise_quota";
+  if (warningLevel === "red") return "token_warning_red";
+  if (warningLevel === "yellow") return "token_warning_yellow";
+  if (detector === "context_budget_compact" || detector === "context_window") {
+    return "context_compact";
+  }
+  if (detector === "compactor_circuit_breaker") return "compactor_cb";
+  return "budget_compress";
+}
+
 /** keep in sync with agenticx/studio/compaction_notice.py build_compaction_notice_content */
 export function buildCompactionNoticeText(count: number, reactive: boolean): string {
   if (reactive) {
