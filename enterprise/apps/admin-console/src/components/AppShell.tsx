@@ -51,8 +51,16 @@ import {
   Monitor,
   Network,
   Moon,
+  Blocks,
   Boxes,
+  Building2,
+  Fingerprint,
   Package,
+  PieChart,
+  Receipt,
+  Split,
+  Timer,
+  Waypoints,
   Route,
   Search,
   Shield,
@@ -62,7 +70,6 @@ import {
   Database,
   KeyRound,
   FolderTree,
-  PlugZap,
 } from "lucide-react";
 
 type AppShellProps = {
@@ -93,8 +100,25 @@ const NAV_GROUPS: NavGroup[] = [
     label: "iam",
     items: [
       { href: "/iam/roles", labelKey: "users", icon: Users },
+      { href: "/iam/departments", labelKey: "departments", icon: Building2 },
       { href: "/iam/groups", labelKey: "userGroups", icon: Network },
       { href: "/iam/bulk-import", labelKey: "organization", icon: FolderTree },
+      { href: "/settings/sso", labelKey: "sso", icon: Fingerprint },
+    ],
+  },
+  {
+    id: "platform",
+    label: "platform",
+    items: [
+      { href: "/admin/models", labelKey: "models", icon: Package },
+      { href: "/admin/channels", labelKey: "channels", icon: Split },
+      { href: "/admin/routing", labelKey: "autoRouting", icon: Route },
+      { href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes },
+      { href: "/admin/web-search", labelKey: "webSearch", icon: Search },
+      { href: "/admin/plugins", labelKey: "plugins", icon: Blocks },
+      { href: "/admin/cache", labelKey: "cache", icon: Database },
+      { href: "/admin/api-tokens", labelKey: "apiTokens", icon: KeyRound },
+      { href: "/admin/session-grants", labelKey: "sessionGrants", icon: Timer },
     ],
   },
   {
@@ -103,23 +127,19 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/metering", labelKey: "metering", icon: BarChart3 },
       { href: "/metering/quota", labelKey: "quota", icon: Gauge },
+      { href: "/metering/plans", labelKey: "quotaPlans", icon: Receipt },
+      { href: "/metering/split", labelKey: "billingSplit", icon: PieChart },
+      { href: "/metering/agent-traces", labelKey: "agentTraces", icon: Waypoints },
+    ],
+  },
+  {
+    id: "governance",
+    label: "governance",
+    items: [
       { href: "/audit", labelKey: "audit", icon: FileWarning },
       { href: "/portal-logs", labelKey: "portalLogs", icon: FileText },
       { href: "/admin/compliance", labelKey: "compliance", icon: Shield },
       { href: "/policy", labelKey: "policy", icon: Shield },
-    ],
-  },
-  {
-    id: "platform",
-    label: "platform",
-    items: [
-      { href: "/admin/models", labelKey: "models", icon: Package },
-      { href: "/admin/web-search", labelKey: "webSearch", icon: Search },
-      { href: "/admin/routing", labelKey: "autoRouting", icon: Route },
-      { href: "/admin/mcp-servers", labelKey: "mcpServers", icon: PlugZap },
-      { href: "/admin/capability-packs", labelKey: "capabilityPacks", icon: Boxes },
-      { href: "/admin/api-tokens", labelKey: "apiTokens", icon: KeyRound },
-      { href: "/admin/cache", labelKey: "cache", icon: Database },
     ],
   },
   {

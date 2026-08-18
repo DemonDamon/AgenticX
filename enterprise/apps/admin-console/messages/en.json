@@ -29,9 +29,10 @@
       "groups": {
         "overview": "Overview",
         "iam": "Member Management",
-        "ops": "Usage & Compliance",
+        "ops": "Usage & Billing",
         "platform": "Models & Tools",
-        "observability": "Operations (Advanced)"
+        "observability": "Operations (Advanced)",
+        "governance": "Audit & Compliance"
       },
       "items": {
         "dashboard": "Dashboard",
@@ -62,7 +63,9 @@
         "plugins": "Wasm Plugins",
         "errors": "Error Clustering",
         "perf": "Performance Profiling",
-        "capabilityPacks": "Capabilities"
+        "sso": "Single Sign-On",
+        "sessionGrants": "Session Grants",
+        "capabilities": "Tools & Capabilities"
       }
     },
     "health": {
@@ -573,6 +576,15 @@
           "users": "Named people",
           "noDept": "No departments yet",
           "noUser": "No users yet"
+        }
+      },
+      "capabilities": {
+        "title": "Tools & Capabilities",
+        "description": "Register MCP servers and skills, then bundle them into capability packs and assign them. All three are facets of one thing: a pack delivers what is registered here.",
+        "tabs": {
+          "mcp": "MCP Hosting",
+          "packs": "Capability Packs",
+          "skills": "Skill Registry"
         }
       }
     },

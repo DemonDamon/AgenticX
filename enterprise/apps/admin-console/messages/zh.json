@@ -29,9 +29,10 @@
       "groups": {
         "overview": "概览",
         "iam": "成员管理",
-        "ops": "用量与合规",
+        "ops": "用量与计费",
         "platform": "模型与工具",
-        "observability": "运维（高级）"
+        "observability": "运维（高级）",
+        "governance": "审计与合规"
       },
       "items": {
         "dashboard": "仪表盘",
@@ -62,7 +63,9 @@
         "plugins": "Wasm 插件",
         "errors": "错误聚类",
         "perf": "性能分析",
-        "capabilityPacks": "企业能力"
+        "sso": "单点登录",
+        "sessionGrants": "会话授权",
+        "capabilities": "工具与能力"
       }
     },
     "health": {
@@ -573,6 +576,15 @@
           "users": "指定人员",
           "noDept": "还没有部门",
           "noUser": "还没有用户"
+        }
+      },
+      "capabilities": {
+        "title": "工具与能力",
+        "description": "注册 MCP Server、登记 Skill，再打成能力包分配给员工。三者是一件事的三个面：包里发的就是这里注册的东西。",
+        "tabs": {
+          "mcp": "MCP 托管",
+          "packs": "能力包",
+          "skills": "Skill 注册表"
         }
       }
     },
