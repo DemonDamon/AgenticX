@@ -67,30 +67,76 @@ class BrainRegistry:
         with self._data_lock:
             BRAINS_ROOT.mkdir(parents=True, exist_ok=True)
             if REGISTRY_FILE.exists():
+                self._repair_default_docs_metadata()
                 return
             legacy_cfg = self._load_legacy_kb_config()
-            brain_id = DEFAULT_DOCS_BRAIN_ID
-            storage = BRAINS_ROOT / brain_id
-            storage.mkdir(parents=True, exist_ok=True)
-            cfg_dict = legacy_cfg.to_dict()
-            # Keep chroma + document registry paths unchanged (AC-4).
-            brain = Brain(
-                id=brain_id,
-                name="默认文档库",
-                type=BrainType.DOCS,
-                scope=BrainScope.GLOBAL,
-                storage_root=str(storage),
-                enabled=legacy_cfg.enabled,
-                description="从旧版全局知识库自动迁移",
-                owner_avatar_id=None,
-                config=cfg_dict,
-                stats=BrainStats(),
-                created_at=utc_now_iso(),
-                updated_at=utc_now_iso(),
-            )
+            brain = self._build_default_docs_brain(legacy_cfg)
             self._write_brain_yaml(brain)
-            self._write_registry([brain_id])
-            logger.info("brain.bootstrap created default docs brain id=%s", brain_id)
+            self._write_registry([DEFAULT_DOCS_BRAIN_ID])
+            logger.info("brain.bootstrap created default docs brain id=%s", DEFAULT_DOCS_BRAIN_ID)
+
+    def _build_default_docs_brain(self, legacy_cfg: KBConfig) -> Brain:
+        """Build reserved default-docs metadata without touching existing indexes."""
+        storage = BRAINS_ROOT / DEFAULT_DOCS_BRAIN_ID
+        return Brain(
+            id=DEFAULT_DOCS_BRAIN_ID,
+            name="默认文档库",
+            type=BrainType.DOCS,
+            scope=BrainScope.GLOBAL,
+            storage_root=str(storage),
+            enabled=legacy_cfg.enabled,
+            description="从旧版全局知识库自动迁移",
+            owner_avatar_id=None,
+            config=legacy_cfg.to_dict(),
+            stats=BrainStats(),
+            created_at=utc_now_iso(),
+            updated_at=utc_now_iso(),
+        )
+
+    def _repair_default_docs_metadata(self) -> None:
+        """Repair only missing reserved metadata after a partial brain migration.
+
+        ``registry.json`` used to be treated as the sole bootstrap sentinel. A
+        partial copy/delete could therefore leave the reserved ID registered
+        while its ``brain.yaml`` was gone. Recreate only that metadata from the
+        legacy config; never overwrite an existing (even invalid) file and
+        never guess the shape of arbitrary missing brain IDs.
+        """
+        default_root = BRAINS_ROOT / DEFAULT_DOCS_BRAIN_ID
+        default_yaml = default_root / "brain.yaml"
+        ids = self._read_registry_ids()
+
+        if default_yaml.exists():
+            existing = self._load_brain_from_path(default_yaml)
+            if existing is None:
+                logger.warning(
+                    "brain.bootstrap found invalid default docs metadata path=%s; "
+                    "leaving it untouched",
+                    default_yaml,
+                )
+                return
+            if existing.id != DEFAULT_DOCS_BRAIN_ID or existing.type != BrainType.DOCS:
+                logger.warning(
+                    "brain.bootstrap found incompatible default docs metadata id=%s type=%s path=%s; "
+                    "leaving it untouched",
+                    existing.id,
+                    existing.type,
+                    default_yaml,
+                )
+                return
+        else:
+            legacy_cfg = self._load_legacy_kb_config()
+            brain = self._build_default_docs_brain(legacy_cfg)
+            self._write_brain_yaml(brain)
+            logger.warning(
+                "brain.bootstrap repaired missing default docs metadata id=%s path=%s",
+                DEFAULT_DOCS_BRAIN_ID,
+                default_yaml,
+            )
+
+        if DEFAULT_DOCS_BRAIN_ID not in ids:
+            ids.append(DEFAULT_DOCS_BRAIN_ID)
+            self._write_registry(ids)
 
     def _load_legacy_kb_config(self) -> KBConfig:
         if not CONFIG_YAML.exists():

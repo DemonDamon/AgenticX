@@ -46,6 +46,24 @@ def test_bootstrap_creates_default_docs_brain(isolated_brains):
     assert brain.scope == BrainScope.GLOBAL
 
 
+def test_bootstrap_repairs_missing_default_docs_metadata_without_guessing_other_ids(isolated_brains):
+    reg = BrainRegistry.instance()
+    reg.bootstrap()
+    default_root = isolated_brains / "brains" / "default_docs"
+    shutil.rmtree(default_root)
+    brain_registry_mod.REGISTRY_FILE.write_text(
+        json.dumps({"brains": ["default_docs", "missing-brain"], "version": 1}),
+        encoding="utf-8",
+    )
+    BrainRegistry.reset_for_tests()
+
+    repaired = BrainRegistry.instance()
+    assert repaired.get("default_docs") is not None
+    assert (default_root / "brain.yaml").exists()
+    assert repaired.get("missing-brain") is None
+    assert repaired._read_registry_ids() == ["default_docs", "missing-brain"]
+
+
 def test_create_global_and_private_brains(isolated_brains):
     reg = BrainRegistry.instance()
     reg.bootstrap()

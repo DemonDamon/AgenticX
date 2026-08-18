@@ -5601,6 +5601,18 @@ async def _tool_memory_append(
     return f"OK: appended to {target} (scope={scope})"
 
 
+def _read_knowledge_config_for_tool() -> Tuple[Optional[Any], Optional[str]]:
+    """Read the compatibility KB config without leaking a raw runtime error."""
+    try:
+        from agenticx.studio.kb import KBManager
+
+        return KBManager.instance().read_config(), None
+    except Exception as exc:
+        reason = str(exc).strip() or type(exc).__name__
+        _log.warning("knowledge base unavailable during tool config read: %s", reason)
+        return None, f"knowledge base unavailable: {reason}"
+
+
 def _tool_knowledge_search(
     arguments: Dict[str, Any], session: Optional["StudioSession"] = None
 ) -> str:
@@ -5614,14 +5626,18 @@ def _tool_knowledge_search(
         )
     try:
         from agenticx.brain.search import search_docs_brains
-        from agenticx.studio.kb import KBManager
     except Exception as exc:
         return json.dumps(
             {"ok": False, "error": f"KB subsystem unavailable: {exc}", "hits": []},
             ensure_ascii=False,
         )
 
-    cfg = KBManager.instance().read_config()
+    cfg, cfg_error = _read_knowledge_config_for_tool()
+    if cfg is None:
+        return json.dumps(
+            {"ok": False, "error": cfg_error or "knowledge base unavailable", "hits": []},
+            ensure_ascii=False,
+        )
     default_top_k = int(getattr(getattr(cfg, "retrieval", None), "top_k", 5) or 5)
     raw_top_k = arguments.get("top_k")
     try:
@@ -5661,14 +5677,18 @@ def _tool_knowledge_synthesize(
         )
     try:
         from agenticx.brain.synthesis import synthesize_docs_brains
-        from agenticx.studio.kb import KBManager
     except Exception as exc:
         return json.dumps(
             {"ok": False, "error": f"KB subsystem unavailable: {exc}", "answer": ""},
             ensure_ascii=False,
         )
 
-    cfg = KBManager.instance().read_config()
+    cfg, cfg_error = _read_knowledge_config_for_tool()
+    if cfg is None:
+        return json.dumps(
+            {"ok": False, "error": cfg_error or "knowledge base unavailable", "answer": ""},
+            ensure_ascii=False,
+        )
     default_top_k = int(getattr(getattr(cfg, "retrieval", None), "top_k", 5) or 5)
     raw_top_k = arguments.get("top_k")
     try:
