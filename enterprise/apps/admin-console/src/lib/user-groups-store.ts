@@ -17,13 +17,20 @@ import {
   type UserGroup,
 } from "./token-quota-store";
 
-export type UserGroupRecord = UserGroup & { id: string };
+/**
+ * 组不再带月额度。
+ *
+ * 那个字段从来不是继承：网关的额度解析只看 users / departments / defaults，从没读过
+ * groups；管理端的 applyUserGroupPolicy 只是在保存时把数字盖到每个成员的个人额度上，
+ * 而「来源：用户组」那个标签是靠「个人值恰好等于组值」猜出来的——两个组填了同一个
+ * 数字就会猜错。留着一个看起来像继承、实际只是上次盖章值的字段，比没有更糟。
+ */
+export type UserGroupRecord = Omit<UserGroup, "monthlyTokens"> & { id: string };
 
 export type UserGroupInput = {
   name: string;
   description?: string | null;
   memberIds?: string[];
-  monthlyTokens?: number;
   modelIds?: string[];
 };
 
@@ -40,14 +47,6 @@ function groupsOf(config: QuotaConfig): Record<string, UserGroup> {
   return { ...(config.groups ?? {}) };
 }
 
-function normalizeMonthlyTokens(value: unknown, fallback: number): number {
-  if (value === undefined) return fallback;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error("monthlyTokens must be a non-negative number");
-  }
-  return Math.floor(parsed);
-}
 
 function normalizeName(value: unknown): string {
   const name = String(value ?? "").trim();
@@ -68,17 +67,12 @@ function normalizeDescription(value: unknown): string | undefined {
  * enterprise_runtime_user_visible_models 里 key 为 `group:<id>` 的行——和个人、部门
  * 同一张表。只有月额度还留在配额 JSON 里，那属于计费，不是可见性。
  */
-function recordFrom(
-  row: UserGroupRow,
-  modelIds: string[],
-  monthlyTokens: number,
-): UserGroupRecord {
+function recordFrom(row: UserGroupRow, modelIds: string[]): UserGroupRecord {
   return {
     id: row.id,
     name: row.name,
     ...(row.description ? { description: row.description } : {}),
     memberIds: row.memberIds,
-    monthlyTokens,
     modelIds,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -90,45 +84,21 @@ async function ensureMigrated(tenantId: string): Promise<void> {
   await migrateLegacyGroupModelsIfNeeded(tenantId);
 }
 
-function monthlyTokensOf(config: QuotaConfig, id: string): number {
-  return groupsOf(config)[id]?.monthlyTokens ?? 0;
-}
-
 export async function listUserGroups(tenantId: string): Promise<UserGroupRecord[]> {
   await ensureMigrated(tenantId);
-  const [rows, config] = await Promise.all([listGroupRows(tenantId), getQuotaConfig(tenantId)]);
+  const rows = await listGroupRows(tenantId);
   const models = await listGroupModelIds(tenantId, rows.map((row) => row.id));
-  return rows.map((row) => recordFrom(row, models.get(row.id) ?? [], monthlyTokensOf(config, row.id)));
+  return rows.map((row) => recordFrom(row, models.get(row.id) ?? []));
 }
 
 export async function getUserGroup(tenantId: string, id: string): Promise<UserGroupRecord | null> {
   await ensureMigrated(tenantId);
-  const [row, config] = await Promise.all([getGroupRow(tenantId, id), getQuotaConfig(tenantId)]);
+  const row = await getGroupRow(tenantId, id);
   if (!row) return null;
   const models = await listGroupModelIds(tenantId, [id]);
-  return recordFrom(row, models.get(id) ?? [], monthlyTokensOf(config, id));
+  return recordFrom(row, models.get(id) ?? []);
 }
 
-/** 只写月额度。可见模型与成员都已在各自的表里，不再往配额 JSON 投影。 */
-async function writeGroupMonthlyTokens(
-  tenantId: string,
-  id: string,
-  name: string,
-  monthlyTokens: number,
-  timestamps: { createdAt: string; updatedAt: string },
-): Promise<void> {
-  const config = await getQuotaConfig(tenantId);
-  const groups = groupsOf(config);
-  groups[id] = {
-    name,
-    memberIds: [],
-    modelIds: [],
-    monthlyTokens,
-    createdAt: groups[id]?.createdAt ?? timestamps.createdAt,
-    updatedAt: timestamps.updatedAt,
-  };
-  await setQuotaConfig({ groups, updatedAt: config.updatedAt }, tenantId);
-}
 
 export type UserGroupModelSource = Pick<UserGroupRecord, "id" | "name"> & {
   modelIds: string[];
@@ -166,16 +136,6 @@ export async function setUserGroupModelExclusions(
   return normalized;
 }
 
-export function groupQuotaSourceForUser(
-  groups: readonly UserGroupRecord[],
-  userId: string,
-): UserGroupRecord | null {
-  return (
-    groups
-      .filter((group) => group.memberIds.includes(userId))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null
-  );
-}
 
 export async function createUserGroup(tenantId: string, input: UserGroupInput): Promise<UserGroupRecord> {
   await ensureMigrated(tenantId);
@@ -185,9 +145,7 @@ export async function createUserGroup(tenantId: string, input: UserGroupInput): 
     memberIds: normalizeIds(input.memberIds),
   });
   const modelIds = await setGroupModelIds(tenantId, row.id, normalizeIds(input.modelIds));
-  const monthlyTokens = normalizeMonthlyTokens(input.monthlyTokens, 0);
-  await writeGroupMonthlyTokens(tenantId, row.id, row.name, monthlyTokens, row);
-  return recordFrom(row, modelIds, monthlyTokens);
+  return recordFrom(row, modelIds);
 }
 
 export async function updateUserGroup(
@@ -209,31 +167,9 @@ export async function updateUserGroup(
     input.modelIds === undefined
       ? current.modelIds
       : await setGroupModelIds(tenantId, id, normalizeIds(input.modelIds));
-  const monthlyTokens = normalizeMonthlyTokens(input.monthlyTokens, current.monthlyTokens);
-  await writeGroupMonthlyTokens(tenantId, id, row.name, monthlyTokens, row);
-  return recordFrom(row, modelIds, monthlyTokens);
+  return recordFrom(row, modelIds);
 }
 
-/** 保存用户组的每人额度；模型范围始终在运行时由用户组派生。 */
-export async function applyUserGroupPolicy(
-  tenantId: string,
-  group: UserGroupRecord,
-  members: UserGroupPolicyMember[],
-): Promise<void> {
-  if (members.length === 0) return;
-
-  const config = await getQuotaConfig(tenantId);
-  const users = { ...config.users };
-  for (const member of members) {
-    users[member.id] = {
-      ...users[member.id],
-      monthlyTokens: group.monthlyTokens,
-      poolScope: "",
-      action: "block",
-    };
-  }
-  await setQuotaConfig({ users, updatedAt: config.updatedAt }, tenantId);
-}
 
 /**
  * 删用户后清理组成员身份。
@@ -265,6 +201,7 @@ export async function removeUserFromAllGroups(tenantId: string, userId: string):
   return changedGroups;
 }
 
+/** 删组。顺手清掉配额 JSON 里可能还留着的旧条目——新建/更新已经不再往那里写了。 */
 export async function deleteUserGroup(tenantId: string, id: string): Promise<boolean> {
   const removed = await deleteGroupRow(tenantId, id);
   if (!removed) return false;

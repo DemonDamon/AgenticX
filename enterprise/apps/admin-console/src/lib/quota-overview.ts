@@ -4,7 +4,6 @@ import { getQuotaConfig, type QuotaRule } from "./token-quota-store";
 import {
   groupModelExclusionsForUser,
   groupModelIdsForUser,
-  groupQuotaSourceForUser,
   listUserGroups,
   type UserGroupRecord,
 } from "./user-groups-store";
@@ -32,7 +31,6 @@ export type GroupMemberOverview = OverviewMember & {
 export type UserModelSummary = { model: string; tokens: number; currentlyAllowed: boolean };
 
 export type GroupQuotaOverview = UserGroupRecord & {
-  unlimited: boolean;
   memberCount: number;
   members: GroupMemberOverview[];
 };
@@ -43,7 +41,7 @@ export type UserQuotaOverview = OverviewMember & Pick<AdminUserDto, "status" | "
   monthlyTokens: number;
   unlimited: boolean;
   inherited: boolean;
-  quotaSource: "group" | "personal" | "default";
+  quotaSource: "personal" | "default";
   quotaSourceLabel?: string;
   groupNames: string[];
   models: UserModelSummary[];
@@ -197,9 +195,15 @@ function roleRule(config: Awaited<ReturnType<typeof getQuotaConfig>>, code: "adm
   return config.defaults.role[code] as QuotaRule | undefined;
 }
 
+/**
+ * 额度只有两个来源：个人规则，或角色默认。
+ *
+ * 原来还有第三种「用户组」，但它是猜的——判据是「个人值恰好等于组值」，两个组填了
+ * 同一个数字、或管理员手工填了同一个数字，都会被标成来自用户组。组本身也从没参与过
+ * 网关的额度解析，所以这个来源一并去掉。
+ */
 function ruleForUser(
   config: Awaited<ReturnType<typeof getQuotaConfig>>,
-  groups: readonly UserGroupRecord[],
   user: AdminUserDto,
 ): {
   rule?: QuotaRule;
@@ -208,10 +212,6 @@ function ruleForUser(
   quotaSourceLabel?: string;
 } {
   const personal = config.users[user.id] as QuotaRule | undefined;
-  const group = groupQuotaSourceForUser(groups, user.id);
-  if (group && personal && Number(personal.monthlyTokens) === group.monthlyTokens) {
-    return { rule: personal, inherited: true, quotaSource: "group", quotaSourceLabel: group.name };
-  }
   if (personal) return { rule: personal, inherited: false, quotaSource: "personal" };
   return {
     rule: roleRule(config, isAdministrator(user) ? "admin" : "staff"),
@@ -240,12 +240,10 @@ function groupMemberOverview(
   groups: readonly UserGroupRecord[],
   assignments: Record<string, string[]>,
 ): GroupMemberOverview {
-  const quotaSource = groupQuotaSourceForUser(groups, user.id);
   const personalQuota = config.users[user.id] as QuotaRule | undefined;
-  const monthlyTokens = Math.max(0, Number(personalQuota?.monthlyTokens ?? quotaSource?.monthlyTokens ?? 0));
-  const hasIndividualQuotaOverride = Boolean(
-    personalQuota && (!quotaSource || Number(personalQuota.monthlyTokens) !== quotaSource.monthlyTokens),
-  );
+  const monthlyTokens = Math.max(0, Number(personalQuota?.monthlyTokens ?? 0));
+  // 组不再带额度，所以「个人额度覆盖」就是「他有个人规则」，不用再和组值比。
+  const hasIndividualQuotaOverride = Boolean(personalQuota);
   const inheritedModelIds = new Set(groupModelIdsForUser(groups, user.id));
   const directModelIds = mergeUserStoredSet(assignments, collectUserAssignmentKeys(user.id, user.email)) ?? [];
   const individualExtraModelIds = directModelIds.filter((modelId) => !inheritedModelIds.has(modelId));
@@ -285,7 +283,6 @@ export async function loadGroupQuotaOverview(tenantId: string): Promise<{
       // Do not send legacy references to deleted IAM users back into the edit
       // form. Saving this sanitized list also repairs the persisted group.
       memberIds: members.map((member) => member.id),
-      unlimited: group.monthlyTokens <= 0,
       memberCount: members.length,
       members,
     } satisfies GroupQuotaOverview;
@@ -327,7 +324,7 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
 
   return users
     .map((user) => {
-      const selected = ruleForUser(config, groups, user);
+      const selected = ruleForUser(config, user);
       const monthlyTokens = Math.max(0, Number(selected.rule?.monthlyTokens ?? 0));
       const department = user.deptId ? departmentsById.get(user.deptId) : undefined;
       const parentAllowedModelIds = user.deptId

@@ -2,11 +2,9 @@ import { getAdminUser } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../lib/admin-auth";
 import {
-  applyUserGroupPolicy,
   deleteUserGroup,
   getUserGroup,
   updateUserGroup,
-  type UserGroupPolicyMember,
 } from "../../../../../lib/user-groups-store";
 
 function memberIdsFrom(value: unknown): string[] | undefined {
@@ -22,9 +20,9 @@ function modelIdsFrom(value: unknown): string[] | undefined {
 async function resolveExistingMembers(
   tenantId: string,
   memberIds: string[],
-): Promise<{ members: UserGroupPolicyMember[]; missingMemberIds: string[] }> {
+): Promise<{ members: Array<{ id: string }>; missingMemberIds: string[] }> {
   const rows = await Promise.all(memberIds.map((id) => getAdminUser(tenantId, id)));
-  const members: UserGroupPolicyMember[] = [];
+  const members: Array<{ id: string }> = [];
   const missingMemberIds: string[] = [];
   rows.forEach((row, index) => {
     if (row) members.push({ id: row.id });
@@ -71,10 +69,8 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
       ...(typeof body.name === "string" ? { name: body.name } : {}),
       ...(typeof body.description === "string" || body.description === null ? { description: body.description as string | null } : {}),
       memberIds: existingMemberIds,
-      ...(body.monthlyTokens !== undefined ? { monthlyTokens: Number(body.monthlyTokens) } : {}),
       ...(modelIds !== undefined ? { modelIds } : {}),
     });
-    await applyUserGroupPolicy(auth.session.tenantId, group, resolved.members);
     return NextResponse.json({
       code: "00000",
       message: "ok",

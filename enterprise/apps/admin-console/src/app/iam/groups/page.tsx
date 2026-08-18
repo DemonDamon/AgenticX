@@ -40,9 +40,7 @@ type GroupQuotaOverview = {
   name: string;
   description?: string;
   memberIds: string[];
-  monthlyTokens: number;
   modelIds: string[];
-  unlimited: boolean;
   memberCount: number;
   members: GroupMemberOverview[];
 };
@@ -54,13 +52,9 @@ type UserQuotaSnapshot = {
 };
 type ModelOption = { id: string; providerLabel: string; label: string };
 type ApiEnvelope<T> = { code: string; message: string; data?: T };
-type EditorForm = { name: string; description: string; monthlyTokens: string; memberIds: string[]; modelIds: string[] };
+type EditorForm = { name: string; description: string; memberIds: string[]; modelIds: string[] };
 
-const EMPTY_FORM: EditorForm = { name: "", description: "", monthlyTokens: "", memberIds: [], modelIds: [] };
-
-function tokenSetting(monthlyTokens: number): string {
-  return monthlyTokens <= 0 ? "不限制" : `${new Intl.NumberFormat("zh-CN").format(monthlyTokens)} Token`;
-}
+const EMPTY_FORM: EditorForm = { name: "", description: "", memberIds: [], modelIds: [] };
 
 function MemberQuotaRing({
   used,
@@ -288,8 +282,6 @@ export default function GroupsPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<GroupQuotaOverview | null | "new">(null);
   const [form, setForm] = useState<EditorForm>(EMPTY_FORM);
-  const [unlimitedTokens, setUnlimitedTokens] = useState(true);
-  const [finiteMonthlyTokens, setFiniteMonthlyTokens] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editingMember, setEditingMember] = useState<UserDetailTarget | null>(null);
@@ -357,37 +349,21 @@ export default function GroupsPage() {
   const openCreate = () => {
     setEditing("new");
     setConfirmDelete(false);
-    setUnlimitedTokens(true);
-    setFiniteMonthlyTokens("");
-    setForm({ ...EMPTY_FORM, monthlyTokens: "0" });
+    setForm({ ...EMPTY_FORM });
   };
 
   const openEdit = (group: GroupQuotaOverview) => {
     setEditing(group);
     setConfirmDelete(false);
-    const groupHasNoLimit = group.unlimited || group.monthlyTokens <= 0;
-    const initialMonthlyTokens = groupHasNoLimit ? "0" : String(group.monthlyTokens);
-    setUnlimitedTokens(groupHasNoLimit);
-    setFiniteMonthlyTokens(groupHasNoLimit ? "" : initialMonthlyTokens);
     setForm({
       name: group.name,
       description: group.description ?? "",
-      monthlyTokens: initialMonthlyTokens,
       memberIds: group.memberIds,
       modelIds: group.modelIds,
     });
   };
 
-  const setQuotaUnlimited = (next: boolean) => {
-    if (next) {
-      const currentFiniteValue = Number(form.monthlyTokens) > 0 ? form.monthlyTokens : "";
-      setFiniteMonthlyTokens((current) => current || currentFiniteValue);
-      setForm((current) => ({ ...current, monthlyTokens: "0" }));
-    } else {
-      setForm((current) => ({ ...current, monthlyTokens: finiteMonthlyTokens }));
-    }
-    setUnlimitedTokens(next);
-  };
+
 
   const toggleMember = (id: string) => {
     setForm((current) => ({
@@ -409,18 +385,14 @@ export default function GroupsPage() {
 
   const save = async () => {
     if (!editing || saving) return;
-    const monthlyTokens = unlimitedTokens ? 0 : Number(form.monthlyTokens);
     if (!form.name.trim()) return toast.error("请输入用户组名称");
-    if (!unlimitedTokens && (!Number.isInteger(monthlyTokens) || monthlyTokens <= 0)) {
-      return toast.error("请关闭不限额后输入正整数 Token 额度");
-    }
     setSaving(true);
     try {
       const isNew = editing === "new";
       const response = await adminFetch(isNew ? "/api/admin/user-groups" : `/api/admin/user-groups/${editing.id}`, {
         method: isNew ? "POST" : "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...form, monthlyTokens: Math.floor(monthlyTokens) }),
+        body: JSON.stringify(form),
       });
       const json = (await response.json()) as ApiEnvelope<{ removedMissingMembers?: number }>;
       if (!response.ok || json.code !== "00000") throw new Error(json.message || "保存失败");
@@ -552,7 +524,6 @@ export default function GroupsPage() {
                     }) : <span className="text-sm text-muted-foreground">未指定基础模型</span>}
                   </div>
                 </section>
-                <Badge variant="outline" className="shrink-0 font-normal">每人 {tokenSetting(group.monthlyTokens)}</Badge>
               </div>
             </CardContent>
           </Card>
@@ -568,42 +539,9 @@ export default function GroupsPage() {
                 <SheetDescription className="mt-1">保存后会为成员应用每人月额度；基础模型在运行时自动继承，成员可以在用户页面额外开通或关闭模型。</SheetDescription>
               </SheetHeader>
               <div className="min-h-0 flex-1 space-y-6 overflow-y-auto py-6 pr-1">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="group-name">用户组名称</Label>
-                    <Input id="group-name" value={form.name} onChange={(event) => setForm((value) => ({ ...value, name: event.target.value }))} placeholder="例如：项目成员" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <Label htmlFor="group-monthly-tokens">每人月额度（Token）</Label>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={unlimitedTokens ? "secondary" : "outline"}
-                        aria-pressed={unlimitedTokens}
-                        onClick={() => setQuotaUnlimited(!unlimitedTokens)}
-                        disabled={saving}
-                      >
-                        {unlimitedTokens ? "不限额（已启用）" : "不限额"}
-                      </Button>
-                    </div>
-                    <Input
-                      id="group-monthly-tokens"
-                      inputMode="numeric"
-                      value={unlimitedTokens ? "0" : form.monthlyTokens}
-                      onChange={(event) => {
-                        const value = event.target.value.replace(/[^0-9]/g, "");
-                        setForm((current) => ({ ...current, monthlyTokens: value }));
-                        setFiniteMonthlyTokens(value);
-                      }}
-                      placeholder="请输入正整数"
-                      disabled={unlimitedTokens}
-                      className={unlimitedTokens ? "bg-muted text-muted-foreground" : undefined}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {unlimitedTokens ? "已启用不限额，保存后以 0 兼容存储。" : "请输入正整数；如不限制额度，请点击右侧“不限额”。"}
-                    </p>
-                  </div>
+                <div className="space-y-2">
+                  <Label htmlFor="group-name">用户组名称</Label>
+                  <Input id="group-name" value={form.name} onChange={(event) => setForm((value) => ({ ...value, name: event.target.value }))} placeholder="例如：项目成员" />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="group-description">说明（可选）</Label>
@@ -612,7 +550,7 @@ export default function GroupsPage() {
                 <section className="space-y-3">
                   <div>
                     <h2 className="text-sm font-medium">基础可用模型</h2>
-                    <p className="mt-1 text-xs text-muted-foreground">用户组内的用户会自动继承这些模型；所在组织的上限仍会优先生效，个人只能增加组织允许的其他模型。</p>
+                    <p className="mt-1 text-xs text-muted-foreground">组内成员会拿到这些模型；所在部门的上限仍然优先，超出上限的进不来。属于多个组的人取并集。</p>
                   </div>
                   <div className="grid max-h-64 gap-2 overflow-y-auto rounded-xl border border-border p-3 sm:grid-cols-2">
                     {modelOptions.length ? modelOptions.map((model) => (
@@ -634,7 +572,7 @@ export default function GroupsPage() {
                   <div className="max-h-[360px] overflow-y-auto rounded-xl border border-border p-2">
                     <OrganizationTree nodes={organization} users={users} selectable selectedIds={selectedIds} onToggle={toggleMember} />
                   </div>
-                  <p className="text-xs text-muted-foreground">同一用户可存在于多个用户组；额度以最后保存的用户组为准，模型会合并继承。</p>
+                  <p className="text-xs text-muted-foreground">同一用户可属于多个用户组，可见模型取并集；额度按人单独设置，不再随用户组下发。</p>
                 </section>
                 {editing !== "new" ? (
                   <section className="space-y-3 border-t border-border pt-5">

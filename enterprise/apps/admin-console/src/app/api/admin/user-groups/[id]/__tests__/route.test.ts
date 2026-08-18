@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
   getAdminUser: vi.fn(),
   getUserGroup: vi.fn(),
   updateUserGroup: vi.fn(),
-  applyUserGroupPolicy: vi.fn(),
   deleteUserGroup: vi.fn(),
 }));
 
@@ -20,7 +19,6 @@ vi.mock("../../../../../../lib/admin-auth", () => ({
 }));
 
 vi.mock("../../../../../../lib/user-groups-store", () => ({
-  applyUserGroupPolicy: (...args: unknown[]) => mocks.applyUserGroupPolicy(...args),
   deleteUserGroup: (...args: unknown[]) => mocks.deleteUserGroup(...args),
   getUserGroup: (...args: unknown[]) => mocks.getUserGroup(...args),
   updateUserGroup: (...args: unknown[]) => mocks.updateUserGroup(...args),
@@ -55,7 +53,6 @@ describe("user group update route", () => {
       updatedAt: "2026-08-12T00:00:00.000Z",
       ...patch,
     }));
-    mocks.applyUserGroupPolicy.mockResolvedValue(undefined);
   });
 
   it("does not return a deleted legacy member to edit clients", async () => {
@@ -95,11 +92,6 @@ describe("user group update route", () => {
       "tenant-a",
       "group-a",
       expect.objectContaining({ name: "新名称", memberIds: ["live"] }),
-    );
-    expect(mocks.applyUserGroupPolicy).toHaveBeenCalledWith(
-      "tenant-a",
-      expect.objectContaining({ memberIds: ["live"] }),
-      [{ id: "live" }],
     );
   });
 });

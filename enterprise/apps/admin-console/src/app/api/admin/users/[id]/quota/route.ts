@@ -2,7 +2,6 @@ import { getAdminUser } from "@agenticx/iam-core";
 import { NextResponse } from "next/server";
 import { requireAdminScope } from "../../../../../../lib/admin-auth";
 import { getQuotaConfig, setQuotaConfig, type QuotaRule } from "../../../../../../lib/token-quota-store";
-import { groupQuotaSourceForUser, listUserGroups } from "../../../../../../lib/user-groups-store";
 
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireAdminScope(["user:update"]);
@@ -17,24 +16,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     const config = await getQuotaConfig(auth.session.tenantId);
     const users = { ...config.users };
     if (body.inherit === true) {
-      const groupSource = groupQuotaSourceForUser(await listUserGroups(auth.session.tenantId), id);
-      if (groupSource) {
-        users[id] = {
-          ...(users[id] as QuotaRule | undefined),
-          monthlyTokens: groupSource.monthlyTokens,
-          poolScope: "",
-          action: "block",
-        };
-        const quota = await setQuotaConfig(
-          { users, updatedAt: config.updatedAt },
-          auth.session.tenantId,
-        );
-        return NextResponse.json({
-          code: "00000",
-          message: "ok",
-          data: { quota: quota.users[id], inherited: true, source: "group", sourceLabel: groupSource.name },
-        });
-      }
+      // 组不再带额度，所以「继承」只剩一种含义：删掉个人规则，回落到角色默认。
       delete users[id];
       const quota = await setQuotaConfig(
         { users, updatedAt: config.updatedAt },
