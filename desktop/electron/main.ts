@@ -274,6 +274,52 @@ type ProviderConfig = {
   managed?: boolean;
 };
 
+type EnterpriseTokenBudgetPolicy = {
+  warning_tokens_per_session: number;
+  max_tokens_per_session: number;
+};
+
+type EnterpriseTokenBudgetBootstrapPolicy = {
+  warningTokensPerSession?: unknown;
+  maxTokensPerSession?: unknown;
+};
+
+const DEFAULT_ENTERPRISE_TOKEN_BUDGET_POLICY: EnterpriseTokenBudgetPolicy = {
+  warning_tokens_per_session: 500_000,
+  max_tokens_per_session: 1_000_000,
+};
+
+function normalizeEnterpriseTokenBudgetPolicy(
+  value?: EnterpriseTokenBudgetBootstrapPolicy | EnterpriseTokenBudgetPolicy | null,
+): EnterpriseTokenBudgetPolicy {
+  const row = value && typeof value === "object"
+    ? (value as EnterpriseTokenBudgetBootstrapPolicy & Partial<EnterpriseTokenBudgetPolicy>)
+    : {};
+  const hardRaw = Number(
+    row.maxTokensPerSession
+      ?? row.max_tokens_per_session
+      ?? DEFAULT_ENTERPRISE_TOKEN_BUDGET_POLICY.max_tokens_per_session,
+  );
+  const hard = Number.isFinite(hardRaw)
+    ? Math.max(100_000, Math.min(5_000_000, Math.round(hardRaw)))
+    : DEFAULT_ENTERPRISE_TOKEN_BUDGET_POLICY.max_tokens_per_session;
+  const warningRaw = Number(
+    row.warningTokensPerSession
+      ?? row.warning_tokens_per_session
+      ?? DEFAULT_ENTERPRISE_TOKEN_BUDGET_POLICY.warning_tokens_per_session,
+  );
+  const warning = Number.isFinite(warningRaw)
+    ? Math.max(50_000, Math.min(hard - 1, Math.round(warningRaw)))
+    : Math.min(
+        DEFAULT_ENTERPRISE_TOKEN_BUDGET_POLICY.warning_tokens_per_session,
+        hard - 1,
+      );
+  return {
+    warning_tokens_per_session: warning,
+    max_tokens_per_session: hard,
+  };
+}
+
 type EnterpriseConfig = {
   enabled?: boolean;
   /** Portal origin remembered for employees; survives logout. */
@@ -290,7 +336,10 @@ type EnterpriseConfig = {
     tenant_id?: string;
     dept_id?: string | null;
   };
-  policy?: { strict?: boolean };
+  policy?: {
+    strict?: boolean;
+    token_budget?: EnterpriseTokenBudgetPolicy;
+  };
   models?: string[];
   /** Structured catalog from Portal; `models` remains for runtime compatibility. */
   model_catalog?: EnterpriseModelCatalogEntry[];
@@ -394,6 +443,7 @@ function applyEnterpriseProvider(
     modelCatalog: EnterpriseModelCatalogEntry[];
     user: NonNullable<EnterpriseConfig["user"]>;
     strict: boolean;
+    tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
   },
 ): void {
   const modelCatalog = normalizeEnterpriseModelCatalog(opts.modelCatalog);
@@ -408,7 +458,10 @@ function applyEnterpriseProvider(
     reauth_required_for_direct: Boolean(opts.reauthRequiredForDirect),
     token: opts.token,
     user: opts.user,
-    policy: { strict: opts.strict },
+    policy: {
+      strict: opts.strict,
+      token_budget: normalizeEnterpriseTokenBudgetPolicy(opts.tokenBudget),
+    },
     models,
     model_catalog: modelCatalog,
     synced_at: new Date().toISOString(),
@@ -489,7 +542,10 @@ async function finishEnterpriseLogin(
     data?: {
       user?: EnterpriseTokenUser;
       models?: unknown[];
-      policy?: { strict?: boolean };
+      policy?: {
+        strict?: boolean;
+        tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
+      };
       apiBaseUrl?: string;
       inferenceApiBaseUrl?: string;
       inferenceTransport?: string;
@@ -539,6 +595,7 @@ async function finishEnterpriseLogin(
       dept_id: user.deptId ?? null,
     },
     strict: bootJson.data?.policy?.strict !== false,
+    tokenBudget: bootJson.data?.policy?.tokenBudget,
   });
   saveAgxConfig(cfg);
   return {
@@ -7761,7 +7818,10 @@ function registerIpc(): void {
             deptId?: string | null;
           };
           models?: unknown[];
-          policy?: { strict?: boolean };
+          policy?: {
+            strict?: boolean;
+            tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
+          };
           apiBaseUrl?: string;
           inferenceApiBaseUrl?: string;
           inferenceTransport?: string;
@@ -7809,6 +7869,7 @@ function registerIpc(): void {
             (user as { deptId?: string | null }).deptId ?? ent?.user?.dept_id ?? null,
         },
         strict: bootJson.data?.policy?.strict !== false,
+        tokenBudget: bootJson.data?.policy?.tokenBudget,
       });
       saveAgxConfig(cfg);
       return {
@@ -9525,15 +9586,46 @@ function registerIpc(): void {
       raw.token_budget && typeof raw.token_budget === "object" && !Array.isArray(raw.token_budget)
         ? (raw.token_budget as Record<string, unknown>)
         : {};
-    const sessionRaw = Number(nested.max_tokens_per_session ?? raw.max_tokens_per_session ?? 1_000_000);
+    const warningCandidate = nested.warning_tokens_per_session;
+    const hasWarning =
+      warningCandidate !== undefined
+      && warningCandidate !== null
+      && Number.isFinite(Number(warningCandidate));
+    const sessionRaw = Number(
+      nested.max_tokens_per_session ?? raw.max_tokens_per_session ?? 1_000_000,
+    );
+    const warningRaw = Number(hasWarning ? warningCandidate : 500_000);
     const turnRaw = Number(nested.max_tokens_per_turn ?? raw.max_tokens_per_turn ?? 100_000);
-    return {
-      max_tokens_per_session: Number.isFinite(sessionRaw)
+    const maxTokensPerSession = Number.isFinite(sessionRaw)
         ? Math.max(100_000, Math.min(5_000_000, Math.round(sessionRaw)))
-        : 1_000_000,
+        : 1_000_000;
+    return {
+      max_tokens_per_session: maxTokensPerSession,
+      warning_tokens_per_session: Number.isFinite(warningRaw)
+        ? Math.max(50_000, Math.min(maxTokensPerSession - 1, Math.round(warningRaw)))
+        : Math.min(500_000, maxTokensPerSession - 1),
       max_tokens_per_turn: Number.isFinite(turnRaw)
         ? Math.max(50_000, Math.min(1_000_000, Math.round(turnRaw)))
         : 100_000,
+    };
+  };
+
+  const readEffectiveTokenBudget = (
+    cfg: AgxConfig,
+    raw: Record<string, unknown>,
+  ) => {
+    const local = readTokenBudgetRuntime(raw);
+    const enterpriseManaged = Boolean(cfg.enterprise?.enabled && cfg.enterprise?.token);
+    if (!enterpriseManaged) {
+      return { ...local, token_budget_managed: false };
+    }
+    const managed = normalizeEnterpriseTokenBudgetPolicy(
+      cfg.enterprise?.policy?.token_budget,
+    );
+    return {
+      ...local,
+      ...managed,
+      token_budget_managed: true,
     };
   };
 
@@ -9568,6 +9660,7 @@ function registerIpc(): void {
       const toolSearchRatio = Number.isFinite(ratioRaw)
         ? Math.max(0.01, Math.min(0.25, ratioRaw))
         : 0.05;
+      const tokenBudgetRuntime = readEffectiveTokenBudget(cfg, raw);
       return {
         ok: true,
         max_tool_rounds: Number.isFinite(val) ? Math.max(10, Math.min(120, val)) : 30,
@@ -9583,7 +9676,7 @@ function registerIpc(): void {
         ...readStallNudgeRuntime(raw),
         ...readStallPatienceRuntime(raw),
         ...readUnattendedRuntime(raw),
-        ...readTokenBudgetRuntime(raw),
+        ...tokenBudgetRuntime,
         live_reattach_enabled: Boolean(raw.live_reattach_enabled ?? false),
       };
     } catch (err) {
@@ -9612,7 +9705,9 @@ function registerIpc(): void {
         unattended_auto_resume_exhausted: true,
         unattended_auto_resume_interrupted: true,
         max_tokens_per_session: 1_000_000,
+        warning_tokens_per_session: 500_000,
         max_tokens_per_turn: 100_000,
+        token_budget_managed: false,
         live_reattach_enabled: false,
       };
     }
@@ -9623,6 +9718,16 @@ function registerIpc(): void {
     const p = payload as Record<string, unknown>;
     try {
       const cfg = loadAgxConfig();
+      const tokenBudgetManaged = Boolean(cfg.enterprise?.enabled && cfg.enterprise?.token);
+      const managedTokenFieldsRequested =
+        p.max_tokens_per_session !== undefined
+        || p.warning_tokens_per_session !== undefined;
+      const hasNonManagedTokenFields = Object.keys(p).some(
+        (key) => key !== "max_tokens_per_session" && key !== "warning_tokens_per_session",
+      );
+      if (tokenBudgetManaged && managedTokenFieldsRequested && !hasNonManagedTokenFields) {
+        return { ok: false, error: "会话 Token 限制由组织统一管理" };
+      }
       const root = cfg as Record<string, unknown>;
       const prev = root.runtime;
       const merged = prev && typeof prev === "object" && !Array.isArray(prev)
@@ -9729,10 +9834,39 @@ function registerIpc(): void {
           ? { ...(merged.token_budget as Record<string, unknown>) }
           : {};
       const tokenBudgetMerged: Record<string, unknown> = { ...tokenBudgetPrev };
-      if (p.max_tokens_per_session !== undefined) {
-        const v = Number(p.max_tokens_per_session);
-        if (!Number.isFinite(v)) return { ok: false, error: "max_tokens_per_session must be a number" };
-        tokenBudgetMerged.max_tokens_per_session = Math.max(100_000, Math.min(5_000_000, Math.round(v)));
+      if (
+        !tokenBudgetManaged
+        && (
+          p.max_tokens_per_session !== undefined
+          || p.warning_tokens_per_session !== undefined
+        )
+      ) {
+        const currentTokenBudget = readTokenBudgetRuntime(merged);
+        const sessionValue = Number(
+          p.max_tokens_per_session ?? currentTokenBudget.max_tokens_per_session,
+        );
+        const warningValue = Number(
+          p.warning_tokens_per_session ?? currentTokenBudget.warning_tokens_per_session,
+        );
+        if (!Number.isFinite(sessionValue)) {
+          return { ok: false, error: "会话 Token 停止阈值必须是数字" };
+        }
+        if (!Number.isFinite(warningValue)) {
+          return { ok: false, error: "会话 Token 提醒阈值必须是数字" };
+        }
+        const sessionLimit = Math.round(sessionValue);
+        const warningLimit = Math.round(warningValue);
+        if (sessionLimit < 100_000 || sessionLimit > 5_000_000) {
+          return { ok: false, error: "会话 Token 停止阈值须在 100,000–5,000,000 之间" };
+        }
+        if (warningLimit < 50_000 || warningLimit >= 5_000_000) {
+          return { ok: false, error: "会话 Token 提醒阈值须在 50,000–4,999,999 之间" };
+        }
+        if (warningLimit >= sessionLimit) {
+          return { ok: false, error: "提醒阈值必须低于停止阈值" };
+        }
+        tokenBudgetMerged.warning_tokens_per_session = warningLimit;
+        tokenBudgetMerged.max_tokens_per_session = sessionLimit;
       }
       if (p.max_tokens_per_turn !== undefined) {
         const v = Number(p.max_tokens_per_turn);

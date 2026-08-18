@@ -720,7 +720,9 @@ declare global {
         unattended_auto_resume_exhausted?: boolean;
         unattended_auto_resume_interrupted?: boolean;
         max_tokens_per_session?: number;
+        warning_tokens_per_session?: number;
         max_tokens_per_turn?: number;
+        token_budget_managed?: boolean;
         live_reattach_enabled?: boolean;
         error?: string;
       }>;
@@ -734,6 +736,7 @@ declare global {
         tool_search_threshold_strategy?: "adaptive" | "manual";
         tool_search_context_budget_ratio?: number;
         max_tokens_per_session?: number;
+        warning_tokens_per_session?: number;
         max_tokens_per_turn?: number;
         stall_detect_silence_seconds?: number;
         stall_auto_nudge_enabled?: boolean;

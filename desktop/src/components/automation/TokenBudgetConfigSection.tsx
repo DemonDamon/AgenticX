@@ -4,6 +4,7 @@ export const TOKEN_BUDGET_MIN_SESSION = 100_000;
 export const TOKEN_BUDGET_MAX_SESSION = 5_000_000;
 export const TOKEN_BUDGET_WARNING_SESSION = 500_000;
 export const TOKEN_BUDGET_DEFAULT_SESSION = 1_000_000;
+export const TOKEN_BUDGET_MIN_WARNING_SESSION = 50_000;
 export const TOKEN_BUDGET_MIN_TURN = 50_000;
 export const TOKEN_BUDGET_MAX_TURN = 1_000_000;
 export const TOKEN_BUDGET_DEFAULT_TURN = 100_000;
@@ -24,6 +25,20 @@ export function normalizeSessionTokenLimit(raw: number): number {
   return Math.max(TOKEN_BUDGET_MIN_SESSION, Math.min(TOKEN_BUDGET_MAX_SESSION, Math.round(raw)));
 }
 
+export function normalizeSessionWarningTokenLimit(
+  raw: number,
+  hardLimit = TOKEN_BUDGET_DEFAULT_SESSION,
+): number {
+  const normalizedHard = normalizeSessionTokenLimit(hardLimit);
+  if (!Number.isFinite(raw)) {
+    return Math.min(TOKEN_BUDGET_WARNING_SESSION, normalizedHard - 1);
+  }
+  return Math.max(
+    TOKEN_BUDGET_MIN_WARNING_SESSION,
+    Math.min(normalizedHard - 1, Math.round(raw)),
+  );
+}
+
 function clampTurn(raw: number): number {
   if (!Number.isFinite(raw)) return TOKEN_BUDGET_DEFAULT_TURN;
   return Math.max(TOKEN_BUDGET_MIN_TURN, Math.min(TOKEN_BUDGET_MAX_TURN, Math.round(raw)));
@@ -41,7 +56,7 @@ export function TokenBudgetConfigSection({ value, onChange, disabled }: TokenBud
     <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
       <div className="text-sm font-semibold text-text-strong">Token 预算</div>
       <p className="mt-1 text-xs leading-relaxed text-text-muted">
-        控制单个会话累计 token 上限，以及单轮对话 token 上限。累计使用达到 500,000 token 时开始提醒；达到会话上限的当前轮仍会完成，从下一轮开始停止。修改后请保存，后续对话轮次生效。
+        控制单个会话累计 token 上限，以及单轮对话 token 上限。达到单独配置的提醒阈值时会提示；达到会话上限的当前轮仍会完成，从下一轮开始停止。修改后请保存，后续对话轮次生效。
       </p>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">

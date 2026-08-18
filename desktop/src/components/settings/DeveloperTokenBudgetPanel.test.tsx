@@ -3,31 +3,83 @@ import { describe, expect, it } from "vitest";
 import {
   TOKEN_BUDGET_DEFAULT_SESSION,
   TOKEN_BUDGET_MAX_SESSION,
+  TOKEN_BUDGET_MIN_WARNING_SESSION,
   TOKEN_BUDGET_WARNING_SESSION,
   normalizeSessionTokenLimit,
 } from "../automation/TokenBudgetConfigSection";
 import {
   DEVELOPER_TOKEN_BUDGET_MIN_SESSION,
   DeveloperTokenBudgetPanel,
-  normalizeDeveloperSessionTokenLimit,
+  normalizeLoadedDeveloperTokenBudget,
+  validateDeveloperTokenBudget,
 } from "./DeveloperTokenBudgetPanel";
 
 describe("DeveloperTokenBudgetPanel", () => {
-  it("renders the fixed warning threshold and the one-million default without a per-turn control", () => {
+  it("renders separate warning and hard-limit fields with the intended defaults", () => {
     const html = renderToStaticMarkup(<DeveloperTokenBudgetPanel />);
 
-    expect(html).toContain("会话资源限制");
+    expect(html).toContain("会话 Token 限制");
     expect(html).toContain("500,000");
     expect(html).toContain("1,000,000");
-    expect(html).toContain("单对话 token 上限");
+    expect(html).toContain("提醒阈值");
+    expect(html).toContain("停止阈值");
+    expect(html).toContain('aria-label="会话 Token 提醒阈值"');
+    expect(html).toContain('value="500000"');
+    expect(html).toContain('aria-label="会话 Token 停止阈值"');
+    expect(html).toContain('value="1000000"');
     expect(html).not.toContain("单轮上限");
   });
 
-  it("normalizes invalid and out-of-range session limits", () => {
+  it("normalizes invalid and out-of-range shared session limits", () => {
     expect(normalizeSessionTokenLimit(Number.NaN)).toBe(TOKEN_BUDGET_DEFAULT_SESSION);
-    expect(DEVELOPER_TOKEN_BUDGET_MIN_SESSION).toBe(TOKEN_BUDGET_WARNING_SESSION);
-    expect(normalizeDeveloperSessionTokenLimit(1)).toBe(DEVELOPER_TOKEN_BUDGET_MIN_SESSION);
+    expect(DEVELOPER_TOKEN_BUDGET_MIN_SESSION).toBe(100_000);
     expect(normalizeSessionTokenLimit(9_000_000)).toBe(TOKEN_BUDGET_MAX_SESSION);
     expect(normalizeSessionTokenLimit(1_234_567.8)).toBe(1_234_568);
+  });
+
+  it("preserves an explicitly configured 500k local hard limit", () => {
+    expect(normalizeLoadedDeveloperTokenBudget({ max_tokens_per_session: 500_000 })).toEqual({
+      warning: 499_999,
+      hard: 500_000,
+    });
+    expect(normalizeLoadedDeveloperTokenBudget({
+      warning_tokens_per_session: 250_000,
+      max_tokens_per_session: 500_000,
+    })).toEqual({ warning: 250_000, hard: 500_000 });
+    expect(normalizeLoadedDeveloperTokenBudget({
+      warning_tokens_per_session: null,
+      max_tokens_per_session: 500_000,
+    })).toEqual({ warning: 499_999, hard: 500_000 });
+    expect(normalizeLoadedDeveloperTokenBudget({
+      warning_tokens_per_session: "invalid",
+      max_tokens_per_session: 500_000,
+    })).toEqual({ warning: 499_999, hard: 500_000 });
+  });
+
+  it("shows and accepts the runtime-supported 100k local hard limit", () => {
+    const loaded = normalizeLoadedDeveloperTokenBudget({
+      warning_tokens_per_session: 50_000,
+      max_tokens_per_session: 100_000,
+    });
+
+    expect(loaded).toEqual({ warning: 50_000, hard: 100_000 });
+    expect(validateDeveloperTokenBudget(loaded)).toBe("");
+  });
+
+  it("rejects invalid ranges and warning thresholds at or above the hard limit", () => {
+    expect(validateDeveloperTokenBudget({ warning: 500_000, hard: 500_000 })).toBe(
+      "提醒阈值必须低于停止阈值",
+    );
+    expect(validateDeveloperTokenBudget({
+      warning: TOKEN_BUDGET_MIN_WARNING_SESSION - 1,
+      hard: 1_000_000,
+    })).toContain("提醒阈值须在");
+    expect(validateDeveloperTokenBudget({ warning: 500_000, hard: 99_999 })).toContain(
+      "停止阈值须在",
+    );
+    expect(validateDeveloperTokenBudget({ warning: 500_000, hard: 5_000_001 })).toContain(
+      "停止阈值须在",
+    );
+    expect(validateDeveloperTokenBudget({ warning: 500_000, hard: 1_000_000 })).toBe("");
   });
 });
