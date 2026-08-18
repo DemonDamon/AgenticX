@@ -14,6 +14,7 @@ import { SidebarResizer } from "./components/SidebarResizer";
 import { Topbar } from "./components/Topbar";
 import { VoiceFocusMode } from "./components/VoiceFocusMode";
 import { VOICE_UI_ENABLED } from "./constants/feature-flags";
+import { SHOW_DESKTOP_MULTI_PANE } from "./constants/desktop-feature-visibility";
 import type { ForwardConfirmPayload } from "./components/ForwardPicker";
 import { resolveForwardTarget } from "./utils/resolve-forward-target";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
@@ -2364,6 +2365,11 @@ export function App() {
     !focusMode &&
     responsiveStage === 2 &&
     !sidebarCollapsed;
+  const integratedChatToolbar =
+    userMode === "pro" &&
+    mainView === "chat" &&
+    panes.length > 0 &&
+    !SHOW_DESKTOP_MULTI_PANE;
 
   return (
     <div
@@ -2397,8 +2403,8 @@ export function App() {
               aria-hidden
             />
           ) : null}
-          <div className="agx-main-shell">
-            {userMode === "pro" && !focusMode ? (
+          <div className={`agx-main-shell${integratedChatToolbar ? " agx-main-shell--integrated-toolbar" : ""}`}>
+            {userMode === "pro" && !focusMode && !integratedChatToolbar ? (
               <Topbar
                 sidebarCollapsed={sidebarCollapsed}
                 onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
@@ -2423,6 +2429,9 @@ export function App() {
                     onOpenConfirm={onOpenConfirm}
                     onOpenClarification={onOpenClarification}
                     onSubmitClarification={onSubmitClarification}
+                    integratedToolbar={integratedChatToolbar}
+                    sidebarCollapsed={sidebarCollapsed}
+                    onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
                   />
                 )}
               </div>

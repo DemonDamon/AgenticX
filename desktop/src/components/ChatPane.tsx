@@ -11,15 +11,16 @@ import {
   Database,
   GripVertical,
   LayoutList,
+  MessagesSquare,
   Quote,
   Search,
+  TextSearch,
   Forward,
   Sparkles,
   Radar,
   SquarePen,
   Plus,
   Wrench,
-  History,
   Settings,
   X,
   PanelRight,
@@ -143,6 +144,7 @@ import {
   replaceAtMentionAtCaret,
 } from "../utils/composer-input-sync";
 import { Toast } from "./ds/Toast";
+import { TopbarContextControls, TopbarGlobalActions } from "./Topbar";
 import { ComposerContextControls } from "./ComposerContextControls";
 import { AtMentionPicker } from "./AtMentionPicker";
 import type { AtMentionBrowseState } from "./AtMentionPicker";
@@ -317,6 +319,7 @@ import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
 import {
   SHOW_DESKTOP_EXTERNAL_IM,
+  SHOW_DESKTOP_MULTI_PANE,
   SHOW_DESKTOP_RUN_GRAPH,
 } from "../constants/desktop-feature-visibility";
 import { APP_DISPLAY_NAME, APP_TAGLINE, META_AGENT_DISPLAY_NAME } from "../constants/branding";
@@ -2316,6 +2319,9 @@ type Props = {
   paneId: string;
   focused: boolean;
   onFocus: () => void;
+  integratedToolbar?: boolean;
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
   onOpenConfirm: (
     requestId: string,
     question: string,
@@ -2723,7 +2729,17 @@ function resolveReadyAttachment(
 
 type AtCandidate = AtMentionCandidate;
 
-export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
+export function ChatPane({
+  paneId,
+  focused,
+  onFocus,
+  onOpenConfirm,
+  onOpenClarification,
+  onSubmitClarification,
+  integratedToolbar = false,
+  sidebarCollapsed = false,
+  onToggleSidebar,
+}: Props) {
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
   const preloadedComposerTaskspaces = useAppStore((s) => {
     const sid = String(pane.sessionId || "").trim();
@@ -12806,15 +12822,146 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return () => window.removeEventListener("resize", onResize);
   }, [pane.historyOpen]);
 
+  const integratedToolbarNode = integratedToolbar && focused ? (
+    <div className="agx-pane-toolbar agx-pane-toolbar--integrated relative flex shrink-0 items-center justify-between gap-3 px-4">
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+        {onToggleSidebar ? (
+          <div className="agx-topbar-left shrink-0">
+            <TopbarContextControls
+              sidebarCollapsed={sidebarCollapsed}
+              onToggleSidebar={onToggleSidebar}
+            />
+          </div>
+        ) : null}
+        {pane.contextInherited ? (
+          <span className="shrink-0 rounded bg-emerald-500/20 px-1 text-[10px] text-emerald-400">
+            已继承
+          </span>
+        ) : null}
+      </div>
+      <div className="agx-pane-toolbar-actions no-drag flex shrink-0 items-center gap-1">
+        {sessionFindOpen ? (
+          <div
+            className="agx-pane-session-find flex h-8 items-center gap-1 rounded-lg border border-border bg-surface-card px-1.5 shadow-sm"
+            role="search"
+            aria-label="会话内搜索"
+          >
+            <TextSearch className="ml-0.5 h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.8} />
+            <input
+              ref={sessionFindInputRef}
+              type="search"
+              value={sessionFindQuery}
+              onChange={(event) => {
+                sessionFindActiveIndexRef.current = 0;
+                setSessionFindMatchIndex(0);
+                setSessionFindQuery(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  stepSessionFindMatch(event.shiftKey ? -1 : 1);
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeSessionFind();
+                }
+              }}
+              placeholder="搜索…"
+              className="w-[112px] bg-transparent text-[12px] text-text-strong outline-none placeholder:text-text-faint"
+              aria-label="在当前会话中搜索"
+            />
+            <span className="min-w-[2.25rem] shrink-0 text-center text-[11px] tabular-nums text-text-faint">
+              {sessionFindQuery.trim()
+                ? sessionFindMatchCount > 0
+                  ? `${sessionFindMatchIndex + 1}/${sessionFindMatchCount}`
+                  : "0/0"
+                : ""}
+            </span>
+            <button
+              type="button"
+              className="rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-30"
+              disabled={sessionFindMatchCount <= 0}
+              onClick={() => stepSessionFindMatch(-1)}
+              title="上一个匹配"
+              aria-label="上一个匹配"
+            >
+              <ChevronUp className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              className="rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-30"
+              disabled={sessionFindMatchCount <= 0}
+              onClick={() => stepSessionFindMatch(1)}
+              title="下一个匹配"
+              aria-label="下一个匹配"
+            >
+              <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              className="rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
+              onClick={closeSessionFind}
+              title="关闭搜索"
+              aria-label="关闭搜索"
+            >
+              <X className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="agx-topbar-btn !px-[5px]"
+            onClick={openSessionFind}
+            title={
+              typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
+                ? "会话内搜索 (⌘F)"
+                : "会话内搜索 (Ctrl+F)"
+            }
+            aria-label="会话内搜索"
+          >
+            <TextSearch className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          </button>
+        )}
+        <button
+          ref={historyButtonRef}
+          type="button"
+          className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}
+          onClick={toggleHistorySidePanel}
+          title="当前对话目录"
+          aria-label="当前对话目录"
+        >
+          <MessagesSquare className="h-[18px] w-[18px]" strokeWidth={1.8} />
+        </button>
+        <HoverTip label="工作台 · ⌘⌃B">
+          <button
+            type="button"
+            className={`agx-topbar-btn !px-[5px] ${workspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
+            onClick={toggleWorkspaceSidePanel}
+            title="工作台"
+            aria-label="工作台"
+            aria-pressed={workspacePanelOpen}
+          >
+            <PanelRight className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          </button>
+        </HoverTip>
+        <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden />
+        <TopbarGlobalActions showUsageDashboard={false} />
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div
       ref={paneRef}
       className={`relative agx-chatpane flex h-full min-w-0 flex-1 ${
+        integratedToolbar ? "flex-col" : ""
+      } ${
         workExpandedLayout ? "agx-chatpane--work-expanded" : ""
       }`}
       style={paneTint ? { backgroundColor: paneTint } : undefined}
       onMouseDown={onFocus}
     >
+      {integratedToolbarNode}
+      <div className={integratedToolbar ? "relative flex min-h-0 min-w-0 flex-1" : "contents"}>
       <div
         className={
           workExpandedLayout
@@ -12830,7 +12977,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               : "contents"
           }
         >
-        {!workExpandedLayout ? (
+        {!workExpandedLayout && !integratedToolbar ? (
         <div className="agx-pane-toolbar flex h-10 shrink-0 items-center justify-between px-4">
           <div
             className={`flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden ${
@@ -12877,7 +13024,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             </div>
           </div>
           <div className="no-drag flex shrink-0 items-center gap-1">
-            <NewTopicButton onNewTopic={createNewTopic} triggerLabel={newTopicLabel} />
+            {SHOW_DESKTOP_MULTI_PANE ? (
+              <NewTopicButton onNewTopic={createNewTopic} triggerLabel={newTopicLabel} />
+            ) : null}
             {sessionFindOpen ? (
               <div
                 className="flex h-8 items-center gap-1 rounded-lg border border-border bg-surface-card px-1.5 shadow-sm"
@@ -12956,7 +13105,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 }
                 aria-label="会话内搜索"
               >
-                <Search className="h-[18px] w-[18px]" strokeWidth={1.8} />
+                <TextSearch className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
             )}
             {paneSettingsAvatar ? (
@@ -12987,7 +13136,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               onClick={toggleHistorySidePanel}
               title="本会话提问导航"
             >
-              <History className="h-[18px] w-[18px]" strokeWidth={1.8} />
+              <MessagesSquare className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
             <HoverTip label="工作台 · ⌘⌃B">
               <button
@@ -13982,7 +14131,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           <div
             aria-hidden
             role="presentation"
-            className="pointer-events-auto absolute inset-x-0 bottom-0 top-10 z-[45] bg-black/35 backdrop-blur-[1px]"
+            className={`pointer-events-auto absolute inset-x-0 bottom-0 z-[45] bg-black/35 backdrop-blur-[1px] ${
+              integratedToolbar ? "top-0" : "top-10"
+            }`}
             style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
             onClick={dismissAuxiliaryOverlays}
           />
@@ -13991,7 +14142,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               className={
                 workExpandedLayout
                   ? "pointer-events-auto absolute inset-0 z-50 overflow-hidden bg-surface-base"
-                  : "pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+                  : `pointer-events-auto absolute bottom-0 right-0 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)] ${
+                      integratedToolbar ? "top-0" : "top-10"
+                    }`
               }
               style={
                 workExpandedLayout
@@ -14093,7 +14246,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           {pane.runDrawerOpen && pane.runDrawerRunId && pane.sessionId ? (
             <div
-              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              className={`pointer-events-auto absolute bottom-0 right-0 z-50 shrink-0 overflow-hidden shadow-[6px_0_24px_rgba(0,0,0,0.28)] ${
+                integratedToolbar ? "top-0" : "top-10"
+              }`}
               style={{ width: overlayRunDrawerWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
             >
               <SubAgentRunDrawer
@@ -14111,7 +14266,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           {pane.memoryGraphOpen ? (
             <div
-              className="pointer-events-auto absolute bottom-0 right-0 top-10 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)]"
+              className={`pointer-events-auto absolute bottom-0 right-0 z-50 shrink-0 overflow-hidden bg-surface-base shadow-[6px_0_24px_rgba(0,0,0,0.28)] ${
+                integratedToolbar ? "top-0" : "top-10"
+              }`}
               style={{ width: overlayHistoryWidth, WebkitAppRegion: "no-drag" } as CSSProperties}
             >
               <div
@@ -14126,6 +14283,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
         </>
       ) : null}
+      </div>
       {pane.historyOpen && historyAnchorRect
         ? createPortal(
             <>

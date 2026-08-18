@@ -124,6 +124,10 @@ body,
   grid-template-rows: var(--topbar-height, 44px) 1fr;
 }
 
+.agx-main-shell--integrated-toolbar {
+  grid-template-rows: 1fr;
+}
+
 .agx-topbar {
   display: flex;
   align-items: center;
@@ -146,6 +150,55 @@ body,
 
 html[data-platform="win32"] .agx-topbar {
   padding-right: 140px;
+}
+
+.agx-pane-toolbar--integrated {
+  height: var(--topbar-height, 44px);
+  border-bottom: 1px solid var(--border-muted);
+  background: var(--surface-topbar);
+  -webkit-app-region: drag;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.agx-pane-toolbar--integrated button,
+.agx-pane-toolbar--integrated input,
+.agx-pane-toolbar--integrated select,
+.agx-pane-toolbar--integrated .no-drag {
+  -webkit-app-region: no-drag;
+}
+
+html[data-platform="win32"] .agx-pane-toolbar--integrated {
+  padding-right: 140px;
+}
+
+html[data-platform="win32"]
+  .agx-pane-toolbar--integrated
+  .agx-topbar-left-controls--collapsed {
+  padding-left: 0;
+}
+
+@media (max-width: 820px) {
+  .agx-pane-toolbar--integrated .agx-topbar-account-label,
+  .agx-pane-toolbar--integrated .agx-backend-mode-chip {
+    display: none;
+  }
+
+  .agx-pane-toolbar--integrated {
+    gap: 4px;
+    padding-left: 8px;
+  }
+
+  .agx-pane-toolbar--integrated .agx-pane-session-find {
+    position: absolute;
+    right: 168px;
+    top: 6px;
+    z-index: 10;
+  }
+
+  html[data-platform="win32"] .agx-pane-toolbar--integrated .agx-pane-session-find {
+    right: 308px;
+  }
 }
 
 .agx-topbar-left,

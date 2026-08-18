@@ -17,6 +17,9 @@ import { SortablePaneWrapper } from "./SortablePaneWrapper";
 import { SHOW_DESKTOP_MULTI_PANE } from "../constants/desktop-feature-visibility";
 
 type Props = {
+  integratedToolbar?: boolean;
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
   onOpenConfirm: (
     requestId: string,
     question: string,
@@ -114,7 +117,14 @@ function PaneDragOverlayPreview({ pane }: { pane: ChatPaneState }) {
   );
 }
 
-export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
+export function PaneManager({
+  onOpenConfirm,
+  onOpenClarification,
+  onSubmitClarification,
+  integratedToolbar = false,
+  sidebarCollapsed = false,
+  onToggleSidebar,
+}: Props) {
   const panes = useAppStore((s) => s.panes);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
@@ -232,6 +242,9 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
       onOpenConfirm={onOpenConfirm}
       onOpenClarification={onOpenClarification}
       onSubmitClarification={onSubmitClarification}
+      integratedToolbar={integratedToolbar && isFocused}
+      sidebarCollapsed={sidebarCollapsed}
+      onToggleSidebar={onToggleSidebar}
     />
   );
 

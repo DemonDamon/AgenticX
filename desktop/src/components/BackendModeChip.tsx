@@ -18,12 +18,12 @@ export function BackendModeChip() {
   const label = formatBackendChipLabel(backendScope, connectionMode);
   const tooltip =
     connectionMode === "remote"
-      ? `当前连接到远程后端 ${backendScope}。到「设置 → 服务器」可切换。`
-      : "当前使用本机 agx serve。到「设置 → 服务器」可切换远程模式。";
+      ? `当前连接到远程后端 ${backendScope}。`
+      : "当前使用本机服务。";
 
   return (
     <span
-      className="inline-flex max-w-[140px] items-center gap-1.5 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[11px] text-text-subtle"
+      className="agx-backend-mode-chip inline-flex max-w-[140px] items-center gap-1.5 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[11px] text-text-subtle"
       title={tooltip}
     >
       <span
