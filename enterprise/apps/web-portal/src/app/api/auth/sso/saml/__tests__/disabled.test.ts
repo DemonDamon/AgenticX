@@ -25,6 +25,8 @@ vi.mock("../../../../../../lib/auth-runtime", () => ({
 }));
 
 vi.mock("../../../../../../lib/session", () => ({
+  // 路由读它决定 cookie 的 Secure 属性；mock 缺这一项，用例在设置 cookie 那行就抛。
+  isAuthCookieSecure: () => false,
   ACCESS_COOKIE: "agx_access",
   REFRESH_COOKIE: "agx_refresh",
 }));
