@@ -419,6 +419,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const avatars = useAppStore((s) => s.avatars);
   const chatStyle = useAppStore((s) => s.chatStyle);
+  const showToolCalls = useAppStore((s) => s.showToolCalls);
   const liteQueueKey = "lite-pane";
   const queuedMessages = useAppStore((s) => s.pendingMessages[liteQueueKey] ?? EMPTY_QUEUE);
   const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
@@ -2638,7 +2639,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                       onOpenClarification={onOpenClarification}
                       onSubmitClarification={onSubmitClarification}
                     />
-                    {!isLite && (
+                    {!isLite && (m.role !== "tool" || showToolCalls) && (
                       <MessageActions
                         msg={m}
                         onCopy={() => onCopyMessage(m)}
@@ -2738,7 +2739,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               )}
             </div>
           )}
-          {midTurnStreamActivity && chatStyle === "im" ? (
+          {midTurnStreamActivity &&
+          chatStyle === "im" &&
+          (showToolCalls || !lastTurnHasToolActivity(messages)) ? (
             <div className="-mt-2">
               <ImBubble
                 message={{ id: "typing-meta", role: "assistant", content: "" }}

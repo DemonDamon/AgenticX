@@ -138,6 +138,22 @@ export function lastTurnHasToolActivity(messages: Message[]): boolean {
   return false;
 }
 
+/** True only while the last user turn still owns a running/pending tool row. */
+export function lastTurnHasActiveToolActivity(messages: Message[]): boolean {
+  if (!messages.length) return false;
+  let lastUserIdx = -1;
+  for (let idx = 0; idx < messages.length; idx += 1) {
+    if (messages[idx]?.role === "user") lastUserIdx = idx;
+  }
+  if (lastUserIdx < 0) return false;
+  for (let idx = lastUserIdx + 1; idx < messages.length; idx += 1) {
+    const msg = messages[idx];
+    if (msg?.role !== "tool") continue;
+    if (msg.toolStatus === "running" || msg.toolStatus === "pending") return true;
+  }
+  return false;
+}
+
 /**
  * True when a newer user turn started after this todo snapshot (and no newer
  * todo_write replaced it — caller should pass the latest picked snapshot index).

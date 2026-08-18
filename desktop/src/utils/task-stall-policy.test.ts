@@ -8,6 +8,7 @@ import {
   extractDiskWritePathsFromMessages,
   isFutileResume,
   isTodoSnapshotSuperseded,
+  lastTurnHasActiveToolActivity,
   lastTurnHasCompletedAssistantReply,
   lastTurnHasToolActivity,
   lastTurnPromisedActionWithoutFollowThrough,
@@ -266,6 +267,44 @@ describe("lastTurnHasToolActivity", () => {
       msg({ id: "a1", role: "assistant", content: "" }),
     ];
     expect(lastTurnHasToolActivity(messages)).toBe(false);
+  });
+});
+
+describe("lastTurnHasActiveToolActivity", () => {
+  it("distinguishes a live tool from completed history in the last turn", () => {
+    const base: Message[] = [
+      msg({ id: "u1", role: "user", content: "继续处理" }),
+      msg({ id: "t1", role: "tool", toolName: "web_search", toolStatus: "done", content: "[]" }),
+    ];
+
+    expect(lastTurnHasActiveToolActivity(base)).toBe(false);
+    expect(
+      lastTurnHasActiveToolActivity([
+        ...base,
+        msg({
+          id: "t2",
+          role: "tool",
+          toolName: "file_read",
+          toolStatus: "running",
+          content: "",
+        }),
+      ]),
+    ).toBe(true);
+  });
+
+  it("ignores stale running rows from an earlier user turn", () => {
+    expect(
+      lastTurnHasActiveToolActivity([
+        msg({
+          id: "old-tool",
+          role: "tool",
+          toolName: "file_read",
+          toolStatus: "running",
+          content: "",
+        }),
+        msg({ id: "u2", role: "user", content: "新问题" }),
+      ]),
+    ).toBe(false);
   });
 });
 

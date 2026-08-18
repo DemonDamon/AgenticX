@@ -48,6 +48,10 @@ import type {
   ActionConfirmationDecision,
   PendingActionConfirmation,
 } from "../../utils/action-confirmation";
+import {
+  shouldPreserveToolDetails,
+  ToolActivityIndicator,
+} from "./ToolActivityIndicator";
 
 type Props = {
   message: Message;
@@ -273,6 +277,7 @@ export function MessageRenderer({
   onResolveActionConfirmation,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
+  const showToolCalls = useAppStore((s) => s.showToolCalls);
   const resolvedReferences = useMemo(() => {
     if (message.role !== "assistant") return undefined;
     return resolveReferencesForAssistant(message, allMessages);
@@ -511,6 +516,22 @@ export function MessageRenderer({
           }
         />
       );
+    }
+    if (!showToolCalls && isHookBlockedToolMessage(message)) {
+      return (
+        <HookBlockNoticeLine
+          text={buildHookBlockFriendlyNotice({
+            toolName: message.toolName,
+            toolArgs: message.toolArgs,
+          })}
+        />
+      );
+    }
+    if (!showToolCalls && !shouldPreserveToolDetails(message)) {
+      const running = message.toolStatus === "running" || message.toolStatus === "pending";
+      return running ? (
+        <ToolActivityIndicator message={message} flat={noBubbleBorder} />
+      ) : null;
     }
     return (
       <ToolCallCard

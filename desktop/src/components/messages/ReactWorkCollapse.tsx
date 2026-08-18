@@ -1,5 +1,6 @@
 import * as React from "react";
 import { ChevronDown, ChevronRight, ListTree } from "lucide-react";
+import { useAppStore } from "../../store";
 import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS, REACT_RAIL_TITLE_CLASS } from "./im-layout";
 
 type Props = {
@@ -19,6 +20,7 @@ type Props = {
  */
 export function ReactWorkCollapse({ toolCount, active, threshold = 5, children }: Props) {
   const [collapsed, setCollapsed] = React.useState(false);
+  const showToolCalls = useAppStore((state) => state.showToolCalls);
 
   React.useEffect(() => {
     if (active) {
@@ -28,7 +30,7 @@ export function ReactWorkCollapse({ toolCount, active, threshold = 5, children }
     setCollapsed(true);
   }, [active]);
 
-  if (toolCount < threshold) {
+  if (!showToolCalls || toolCount < threshold) {
     return <>{children}</>;
   }
 

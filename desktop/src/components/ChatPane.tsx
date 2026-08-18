@@ -180,6 +180,7 @@ import {
   CHANNEL_C_GRACE_MS,
   stallDetectSilenceMs,
   isFutileResume,
+  lastTurnHasActiveToolActivity,
   lastTurnHasCompletedAssistantReply,
   lastTurnHasToolActivity,
   paneHasPendingHumanGate,
@@ -2930,6 +2931,7 @@ export function ChatPane({
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const userAvatarUrl = useAppStore((s) => s.userAvatarUrl);
   const chatStyle = useAppStore((s) => s.chatStyle);
+  const showToolCalls = useAppStore((s) => s.showToolCalls);
   const userNickname = useAppStore((s) => s.userNickname);
   const userPreference = useAppStore((s) => s.userPreference);
   const userBubbleLabel = useMemo(() => userNickname.trim() || "我", [userNickname]);
@@ -8957,7 +8959,11 @@ export function ChatPane({
         );
       })}
       {((sessionWorkInProgress && !isStreamingCurrentSession) || midTurnStreamActivity) &&
-      !isGroupPane ? (
+      !isGroupPane &&
+      (showToolCalls ||
+        !(isStreamingCurrentSession
+          ? lastTurnHasToolActivity(pane.messages)
+          : lastTurnHasActiveToolActivity(pane.messages))) ? (
         <div className={useReActImLayout ? "-mt-2" : undefined}>
           <ImBubble
             key="typing-meta"
@@ -9050,7 +9056,7 @@ export function ChatPane({
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupActivityHint, groupedVisibleMessages, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupActivityHint, groupedVisibleMessages, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, showToolCalls, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {

@@ -6609,6 +6609,8 @@ export function SettingsPanel({
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
   const setMetaAvatarUrl = useAppStore((s) => s.setMetaAvatarUrl);
+  const showToolCalls = useAppStore((s) => s.showToolCalls);
+  const setShowToolCalls = useAppStore((s) => s.setShowToolCalls);
   const settingsOpenToTab = useAppStore((s) => s.settings.openToTab);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const memoryContextPane = panes.find((p) => p.id === activePaneId) ?? panes[0];
@@ -9516,6 +9518,13 @@ export function SettingsPanel({
                 ) : null}
 
                 <SessionMemoryPanel />
+
+                <SettingsToggleCard
+                  title="显示工具调用详情"
+                  description="默认关闭。关闭时隐藏工具名称、参数和返回内容，仅保留动态工作进度与必要的确认、安全提示。"
+                  checked={showToolCalls}
+                  onChange={setShowToolCalls}
+                />
 
                 <DeveloperTokenBudgetPanel />
 

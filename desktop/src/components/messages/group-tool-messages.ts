@@ -1,4 +1,5 @@
 import type { Message } from "../../store";
+import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
 import { isContinuationNoticeMessage } from "../../utils/continuation-notice";
 import { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
 
@@ -9,18 +10,25 @@ export type GroupedChatRow =
 function canGroupToolMessage(message: Message): boolean {
   if (message.role !== "tool") return false;
   if (isContinuationNoticeMessage(message)) return false;
-  if ((message.toolName ?? "").trim() === "group_progress") return false;
+  const toolName = (message.toolName ?? "").trim();
+  if (toolName === "group_progress") return false;
   // Inline widgets render in the message body, not inside TurnToolGroupCard.
-  if ((message.toolName ?? "").trim() === "show_widget") return false;
+  if (toolName === "show_widget") return false;
   // Clarification cards must render as standalone interactive rows, not nested ToolCallCards.
   if (message.clarificationPrompt) return false;
   // Action confirmation cards must also stay standalone (never fold into TurnToolGroupCard).
   if (message.actionConfirmation) return false;
+  // Customer-facing mode hides grouped technical traces. Keep rows that require
+  // a decision, expose an auth link/preview, or explain a safety block standalone
+  // so MessageRenderer can preserve only that row without revealing its neighbors.
+  if (message.inlineConfirm) return false;
+  if (toolName === "skill_manage" || toolName === "bash_bg_start") return false;
+  if (isHookBlockedToolMessage(message)) return false;
   // Only group the structured tool rows produced by the new SSE path.
   // Legacy history rows often persist as plain text like "工具调用:" /
   // "工具结果(...):"; grouping those together loses the original ReAct
   // replay shape after switching sessions.
-  return Boolean(message.toolGroupId || message.toolCallId || (message.toolName ?? "").trim());
+  return Boolean(message.toolGroupId || message.toolCallId || toolName);
 }
 
 /**

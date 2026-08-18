@@ -13,6 +13,11 @@ import {
 } from "./tool-elapsed-timer";
 import { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
 import { Shimmer } from "../ds/Shimmer";
+import { useAppStore } from "../../store";
+import {
+  resolveToolActivityPresentation,
+  ToolActivityIndicator,
+} from "./ToolActivityIndicator";
 
 type Props = {
   messages: Message[];
@@ -90,6 +95,7 @@ export function TurnToolGroupCard({
   onSkillManageApply,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const showToolCalls = useAppStore((state) => state.showToolCalls);
   // todo_write snapshots are owned by StickyTaskBar; never nest TodoUpdateCard here.
   const visibleMessages = useMemo(
     () =>
@@ -113,6 +119,8 @@ export function TurnToolGroupCard({
     [visibleMessages],
   );
   const activeTool = activeTools[activeTools.length - 1];
+  const activityMessage = activeTool ?? visibleMessages[visibleMessages.length - 1];
+  const presentation = resolveToolActivityPresentation(showToolCalls, inProgress);
   const liveElapsedSec = useLiveToolElapsedSeconds(
     String(activeTool?.toolCallId || activeTool?.id || "tool-group-idle"),
     Boolean(activeTool),
@@ -122,6 +130,13 @@ export function TurnToolGroupCard({
 
   // Group may consist solely of todo_write (hidden); do not render an empty shell.
   if (visibleMessages.length === 0) return null;
+
+  // Customer-facing default: retain a live sense of progress without exposing
+  // tool names, arguments, result payloads, or a permanent technical trace.
+  if (presentation !== "details") {
+    if (presentation === "hidden" || !activityMessage) return null;
+    return <ToolActivityIndicator message={activityMessage} flat={flat} />;
+  }
 
   const cardContent = (
     <div

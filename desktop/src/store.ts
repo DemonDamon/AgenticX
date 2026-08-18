@@ -516,6 +516,8 @@ type AppState = {
     baseUrl?: string;
   };
   chatStyle: ChatStyle;
+  /** Developer-only switch: expose raw tool names, arguments, and result cards. */
+  showToolCalls: boolean;
   themeColor: ThemeColor;
   /** Global user nickname shown on all bubbles and sent as context label (empty → 「我」). */
   userNickname: string;
@@ -612,6 +614,7 @@ type AppState = {
     baseUrl?: string;
   }) => void;
   setChatStyle: (style: ChatStyle) => void;
+  setShowToolCalls: (show: boolean) => void;
   setUserNickname: (name: string) => void;
   setUserAvatarUrl: (url: string) => void;
   setUserPreference: (pref: string) => void;
@@ -883,6 +886,7 @@ const SESSION_MESSAGE_CACHE_MAX = 10;
 const sessionMessageCache: Map<string, Message[]> = new Map();
 
 const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
+const SHOW_TOOL_CALLS_STORAGE_KEY = "agx-show-tool-calls";
 const THEME_STORAGE_KEY = "agx-theme";
 const THEME_COLOR_STORAGE_KEY = "agx-theme-color";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
@@ -899,6 +903,15 @@ function loadChatStyle(): ChatStyle {
     // ignore storage errors
   }
   return "im";
+}
+
+function loadShowToolCalls(): boolean {
+  try {
+    return window.localStorage.getItem(SHOW_TOOL_CALLS_STORAGE_KEY) === "true";
+  } catch {
+    // Default to the customer-facing, non-technical presentation.
+  }
+  return false;
 }
 
 function loadTheme(): ThemeMode {
@@ -1046,6 +1059,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   themeColor: loadThemeColor(),
   userAccount: { loggedIn: false, email: "", displayName: "", baseUrl: "" },
   chatStyle: loadChatStyle(),
+  showToolCalls: loadShowToolCalls(),
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
   userPreference: loadUserPreference(),
@@ -1309,6 +1323,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore storage errors
       }
       return { chatStyle };
+    }),
+  setShowToolCalls: (showToolCalls) =>
+    set(() => {
+      try {
+        if (showToolCalls) window.localStorage.setItem(SHOW_TOOL_CALLS_STORAGE_KEY, "true");
+        else window.localStorage.removeItem(SHOW_TOOL_CALLS_STORAGE_KEY);
+      } catch {
+        // Keep the in-memory preference when storage is unavailable.
+      }
+      return { showToolCalls };
     }),
   setUserNickname: (name) =>
     set(() => {
