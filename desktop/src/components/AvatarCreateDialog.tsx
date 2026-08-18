@@ -26,7 +26,7 @@ type Props = {
 
 type Mode = "manual" | "ai";
 export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }: Props) {
-  const [mode, setMode] = useState<Mode>("manual");
+  const [mode, setMode] = useState<Mode>("ai");
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -47,6 +47,11 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
   const [workspaceDir, setWorkspaceDir] = useState("");
   const customizedCount = Object.keys(toolsEnabled).filter((key) => toolsEnabled[key] !== undefined).length;
   const skillsCustomizedCount = Object.keys(skillsEnabledDraft).filter((k) => skillsEnabledDraft[k] === false).length;
+
+  // AI creation is the onboarding default, including when the dialog is reopened.
+  useEffect(() => {
+    if (open) setMode("ai");
+  }, [open]);
 
   useEffect(() => {
     if (!open || mode !== "manual" || !skillsSectionOpen) return;
@@ -160,7 +165,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
 
           <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="mb-4 flex gap-1 rounded-lg bg-surface-card p-0.5">
-          {([["manual", "手动创建"], ["ai", "AI 创建"]] as const).map(([key, label]) => (
+          {([["ai", "AI 创建"], ["manual", "手动创建"]] as const).map(([key, label]) => (
             <button
               key={key}
               className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium transition ${
