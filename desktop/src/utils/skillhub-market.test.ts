@@ -15,6 +15,8 @@ describe("normalizeSkillHubMarketItems", () => {
           canonical_name: "@clawhub_boteeenchan-ship-it/alphapai-research",
           downloads: 12,
           icon_url: "https://example.test/icon.png",
+          detail_url: "https://skillhub.cn/skills/alphapai-research",
+          requires_api_key: true,
           origin_source: "skillhub_api",
           origin_hint: "原生市场结果",
         },
@@ -28,6 +30,8 @@ describe("normalizeSkillHubMarketItems", () => {
         author: "unknown",
         downloads: 12,
         icon_url: "https://example.test/icon.png",
+        detail_url: "https://skillhub.cn/skills/alphapai-research",
+        requires_api_key: true,
         source: "company-clawhub",
         source_type: "clawhub",
         namespace: "clawhub_boteeenchan-ship-it",
@@ -37,6 +41,31 @@ describe("normalizeSkillHubMarketItems", () => {
         provenance_source: "skillhub",
       },
     ]);
+  });
+
+  it("recognizes only the explicit API key requirement metadata", () => {
+    const rows = normalizeSkillHubMarketItems([
+      {
+        slug: "explicit-key",
+        labels: { requires_api_key: "true" },
+        detailUrl: "https://skillhub.cn/skills/explicit-key",
+      },
+      {
+        slug: "no-key",
+        labels: { requires_api_key: "false" },
+      },
+      {
+        slug: "description-only",
+        description: "请填写 API Key",
+      },
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      requires_api_key: true,
+      detail_url: "https://skillhub.cn/skills/explicit-key",
+    });
+    expect(rows[1].requires_api_key).toBe(false);
+    expect(rows[2].requires_api_key).toBeUndefined();
   });
 
   it("supports older search payloads and ignores invalid rows", () => {

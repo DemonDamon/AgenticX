@@ -4,6 +4,7 @@ import {
   Eye,
   EyeOff,
   ExternalLink,
+  KeyRound,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -16,7 +17,12 @@ import {
 } from "lucide-react";
 
 import { SkillPuzzleIcon } from "../../icons/SkillPuzzleIcon";
-import { ContextMenu, type ContextMenuAnchorRect } from "../../ContextMenu";
+import {
+  ContextMenu,
+  type ContextMenuAnchorRect,
+  type ContextMenuItem,
+} from "../../ContextMenu";
+import { HoverTip } from "../../ds/HoverTip";
 import {
   filterSkillHubCatalog,
   loadSkillHubCatalog as loadSkillHubCatalogSnapshot,
@@ -27,6 +33,7 @@ import {
   type SkillHubCatalogItem,
 } from "../../../utils/skillhub-catalog";
 import type { SkillHubMarketItem } from "../../../utils/skillhub-market";
+import { openExternalUrl } from "../../../utils/open-external";
 
 export type SkillHubInstallState =
   | "idle"
@@ -59,12 +66,154 @@ function formatDownloads(value: SkillHubMarketItem["downloads"]): string {
 }
 
 export function getSkillHubDetailUrl(item: SkillHubMarketItem): string | null {
+  if (/^https?:\/\//iu.test(item.detail_url || "")) return item.detail_url || null;
   const isNative =
     item.origin_source === "skillhub_api" ||
+    item.origin_source === "skillhub_cli" ||
     (!item.origin_source && item.source_type === "skillhub");
   return isNative
     ? `https://skillhub.cn/skills/${encodeURIComponent(item.slug)}`
     : null;
+}
+
+export function SkillMarketActions({
+  label,
+  installState,
+  skillEnabled = true,
+  requiresApiKey = false,
+  onInstall,
+  onTrySkill,
+  onToggleSkill,
+  onEditSkill,
+  onUninstallSkill,
+}: {
+  label: string;
+  installState: SkillHubInstallState;
+  skillEnabled?: boolean;
+  requiresApiKey?: boolean;
+  onInstall: () => void;
+  onTrySkill?: () => void;
+  onToggleSkill?: (enabled: boolean) => void;
+  onEditSkill?: () => void;
+  onUninstallSkill?: () => void;
+}) {
+  const [manageMenuAnchor, setManageMenuAnchor] = useState<ContextMenuAnchorRect | null>(null);
+  const isInstalled = installState === "installed";
+  const isBusy = installState === "installing" || installState === "queued";
+  const isDisabled = installState !== "idle" && !isInstalled;
+  const canManage = isInstalled && Boolean(onToggleSkill || onEditSkill || onUninstallSkill);
+  const installLabel = isInstalled
+    ? skillEnabled
+      ? "试一试"
+      : "启用"
+    : installState === "installing"
+      ? "安装中"
+      : installState === "queued"
+        ? "排队中"
+        : installState === "pending"
+          ? "待确认"
+          : "安装";
+  const manageItems: ContextMenuItem[] = [];
+  if (onToggleSkill) {
+    manageItems.push({
+      label: skillEnabled ? "关闭" : "开启",
+      icon: skillEnabled ? (
+        <EyeOff className="h-3.5 w-3.5" />
+      ) : (
+        <Eye className="h-3.5 w-3.5" />
+      ),
+      onSelect: () => onToggleSkill(!skillEnabled),
+    });
+  }
+  if (onEditSkill) {
+    manageItems.push({
+      label: "编辑",
+      icon: <SquarePen className="h-3.5 w-3.5" />,
+      onSelect: onEditSkill,
+    });
+  }
+  if (onUninstallSkill) {
+    if (manageItems.length > 0) manageItems.push({ separator: true });
+    manageItems.push({
+      label: "卸载",
+      icon: <Trash2 className="h-3.5 w-3.5" />,
+      danger: true,
+      onSelect: onUninstallSkill,
+    });
+  }
+
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      {requiresApiKey ? (
+        <HoverTip label="需配置 API Key">
+          <span
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-amber-400"
+            aria-label={`${label} 需配置 API Key`}
+          >
+            <KeyRound className="h-3.5 w-3.5" />
+          </span>
+        </HoverTip>
+      ) : null}
+      {canManage ? (
+        <button
+          type="button"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-card-strong hover:text-text-primary"
+          aria-label={`管理 ${label}`}
+          aria-haspopup="menu"
+          aria-expanded={Boolean(manageMenuAnchor)}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            setManageMenuAnchor((current) =>
+              current
+                ? null
+                : {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                  },
+            );
+          }}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="flex h-7 min-w-7 items-center justify-center gap-1 rounded-lg border border-[var(--settings-accent-border-muted)] px-2 text-[11px] font-medium text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:cursor-default disabled:border-border disabled:text-text-faint disabled:opacity-80"
+        disabled={isDisabled || (isInstalled && skillEnabled && !onTrySkill)}
+        aria-label={`${installLabel} ${label}`}
+        onClick={() => {
+          if (!isInstalled) onInstall();
+          else if (!skillEnabled) onToggleSkill?.(true);
+          else onTrySkill?.();
+        }}
+      >
+        {isInstalled ? (
+          skillEnabled ? (
+            <Sparkles className="h-3.5 w-3.5" />
+          ) : (
+            <Power className="h-3.5 w-3.5" />
+          )
+        ) : isBusy ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : installState === "pending" ? (
+          <Clock3 className="h-3.5 w-3.5" />
+        ) : (
+          <Plus className="h-3.5 w-3.5" />
+        )}
+        <span>{installLabel}</span>
+      </button>
+      <ContextMenu
+        open={Boolean(manageMenuAnchor)}
+        x={manageMenuAnchor?.left ?? 0}
+        y={manageMenuAnchor?.bottom ?? 0}
+        anchorRect={manageMenuAnchor}
+        onClose={() => setManageMenuAnchor(null)}
+        items={manageItems}
+      />
+    </div>
+  );
 }
 
 export function SkillMarketCard({
@@ -88,26 +237,10 @@ export function SkillMarketCard({
   onEditSkill?: () => void;
   onUninstallSkill?: () => void;
 }) {
-  const [manageMenuAnchor, setManageMenuAnchor] = useState<ContextMenuAnchorRect | null>(null);
   const author = item.author && item.author !== "unknown" ? item.author : "";
   const downloads = formatDownloads(item.downloads);
   const iconUrl = /^https:\/\//iu.test(item.icon_url || "") ? item.icon_url : "";
   const detailUrl = getSkillHubDetailUrl(item);
-  const isInstalled = installState === "installed";
-  const isBusy = installState === "installing" || installState === "queued";
-  const isDisabled = installState !== "idle" && !isInstalled;
-  const installLabel =
-    isInstalled
-      ? skillEnabled
-        ? "试一试"
-        : "启用"
-      : installState === "installing"
-        ? "安装中"
-        : installState === "queued"
-          ? "排队中"
-          : installState === "pending"
-            ? "待确认"
-            : "安装";
 
   return (
     <article className="group flex min-h-[148px] min-w-0 flex-col rounded-xl border border-border bg-surface-card p-3 transition-colors hover:border-border-strong hover:bg-surface-hover">
@@ -132,58 +265,17 @@ export function SkillMarketCard({
             <h4 className="line-clamp-2 text-[13px] font-semibold leading-5 text-text-strong">
               {item.name || item.slug}
             </h4>
-            <div className="flex shrink-0 items-center gap-1">
-              {isInstalled && (onToggleSkill || onEditSkill || onUninstallSkill) ? (
-                <button
-                  type="button"
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-card-strong hover:text-text-primary"
-                  aria-label={`管理 ${item.name || item.slug}`}
-                  aria-haspopup="menu"
-                  aria-expanded={Boolean(manageMenuAnchor)}
-                  onClick={(event) => {
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    setManageMenuAnchor((current) =>
-                      current
-                        ? null
-                        : {
-                            left: rect.left,
-                            top: rect.top,
-                            right: rect.right,
-                            bottom: rect.bottom,
-                          },
-                    );
-                  }}
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="flex h-7 min-w-7 items-center justify-center gap-1 rounded-lg border border-[var(--settings-accent-border-muted)] px-2 text-[11px] font-medium text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:cursor-default disabled:border-border disabled:text-text-faint disabled:opacity-80"
-                disabled={isDisabled}
-                aria-label={`${installLabel} ${item.name || item.slug}`}
-                onClick={() => {
-                  if (!isInstalled) onInstall();
-                  else if (!skillEnabled) onToggleSkill?.(true);
-                  else onTrySkill?.();
-                }}
-              >
-                {isInstalled ? (
-                  skillEnabled ? (
-                    <Sparkles className="h-3.5 w-3.5" />
-                  ) : (
-                    <Power className="h-3.5 w-3.5" />
-                  )
-                ) : isBusy ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : installState === "pending" ? (
-                  <Clock3 className="h-3.5 w-3.5" />
-                ) : (
-                  <Plus className="h-3.5 w-3.5" />
-                )}
-                <span>{installLabel}</span>
-              </button>
-            </div>
+            <SkillMarketActions
+              label={item.name || item.slug}
+              installState={installState}
+              skillEnabled={skillEnabled}
+              requiresApiKey={item.requires_api_key}
+              onInstall={onInstall}
+              onTrySkill={onTrySkill}
+              onToggleSkill={onToggleSkill}
+              onEditSkill={onEditSkill}
+              onUninstallSkill={onUninstallSkill}
+            />
           </div>
           {author || downloads ? (
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[10px] text-text-faint">
@@ -216,43 +308,13 @@ export function SkillMarketCard({
             type="button"
             className="inline-flex shrink-0 items-center gap-1 text-[10px] text-text-subtle transition hover:text-text-primary"
             aria-label={`查看 ${item.name || item.slug} 详情`}
-            onClick={() => window.open(detailUrl, "_blank", "noopener,noreferrer")}
+            onClick={() => openExternalUrl(detailUrl)}
           >
             详情
             <ExternalLink className="h-3 w-3" />
           </button>
         ) : null}
       </div>
-      <ContextMenu
-        open={Boolean(manageMenuAnchor)}
-        x={manageMenuAnchor?.left ?? 0}
-        y={manageMenuAnchor?.bottom ?? 0}
-        anchorRect={manageMenuAnchor}
-        onClose={() => setManageMenuAnchor(null)}
-        items={[
-          {
-            label: skillEnabled ? "关闭" : "开启",
-            icon: skillEnabled ? (
-              <EyeOff className="h-3.5 w-3.5" />
-            ) : (
-              <Eye className="h-3.5 w-3.5" />
-            ),
-            onSelect: () => onToggleSkill?.(!skillEnabled),
-          },
-          {
-            label: "编辑",
-            icon: <SquarePen className="h-3.5 w-3.5" />,
-            onSelect: onEditSkill,
-          },
-          { separator: true },
-          {
-            label: "卸载",
-            icon: <Trash2 className="h-3.5 w-3.5" />,
-            danger: true,
-            onSelect: onUninstallSkill,
-          },
-        ]}
-      />
     </article>
   );
 }
@@ -418,7 +480,7 @@ export function SkillHubMarketplace({
           <button
             type="button"
             className="inline-flex h-7 items-center gap-1 text-[10px] text-text-faint transition hover:text-text-primary"
-            onClick={() => window.open("https://skillhub.cn/", "_blank", "noopener,noreferrer")}
+            onClick={() => openExternalUrl("https://skillhub.cn/")}
           >
             访问市场
             <ExternalLink className="h-3 w-3" />

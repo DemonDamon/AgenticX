@@ -463,6 +463,8 @@ type RegistrySearchItem = {
   namespace?: string;
   canonical_name?: string;
   origin_source?: string;
+  detail_url?: string;
+  requires_api_key?: boolean;
   provenance_source?: "registry" | "skillhub";
 };
 type RegistrySearchResult = {
@@ -487,6 +489,8 @@ type SkillHubSearchItem = {
   namespace?: string;
   canonical_name?: string;
   origin_source?: string;
+  detail_url?: string;
+  requires_api_key?: boolean;
 };
 type SkillHubSearchResult = {
   ok: boolean;

@@ -823,6 +823,8 @@ def test_skillhub_cli_results_include_direct_install_source(monkeypatch: Any) ->
                             "handle": "clawhub_boteeenchan-ship-it",
                             "canonicalName": "@clawhub_boteeenchan-ship-it/alphapai-research",
                         },
+                        "labels": {"requires_api_key": "true"},
+                        "detailUrl": "https://skillhub.cn/skills/alphapai-research",
                     }
                 ]
             ),
@@ -839,6 +841,23 @@ def test_skillhub_cli_results_include_direct_install_source(monkeypatch: Any) ->
     assert rows[0]["source_type"] == "skillhub"
     assert rows[0]["origin_source"] == "skillhub_cli"
     assert rows[0]["namespace"] == "clawhub_boteeenchan-ship-it"
+    assert rows[0]["requires_api_key"] is True
+    assert rows[0]["detail_url"] == "https://skillhub.cn/skills/alphapai-research"
+
+
+def test_skillhub_card_metadata_uses_declared_requirements_only() -> None:
+    from agenticx.extensions import skillhub_adapter
+
+    metadata = skillhub_adapter._extract_market_metadata(
+        {
+            "labels": {"requires_api_key": "true"},
+        }
+    )
+
+    assert metadata == {"requires_api_key": True}
+    assert skillhub_adapter._extract_market_metadata(
+        {"description": "请填写 API Key"}
+    ) == {}
 
 
 def test_registry_hub_native_skillhub_search_preserves_namespace(
@@ -908,6 +927,7 @@ def test_skillhub_search_prefers_native_api_and_skips_broken_local_cli(
                         "display_name": "AlphaPai Research",
                         "icon_url": "https://example.test/icon.png",
                         "downloads": 0,
+                        "labels": {"requires_api_key": "true"},
                         "namespace": {
                             "handle": "clawhub_boteeenchan-ship-it",
                             "canonicalName": "@clawhub_boteeenchan-ship-it/alphapai-research",
@@ -937,6 +957,7 @@ def test_skillhub_search_prefers_native_api_and_skips_broken_local_cli(
     assert result["items"][0]["namespace"] == "clawhub_boteeenchan-ship-it"
     assert result["items"][0]["icon_url"] == "https://example.test/icon.png"
     assert result["items"][0]["downloads"] == 0
+    assert result["items"][0]["requires_api_key"] is True
 
 
 def test_skillhub_search_marks_mirror_results_with_their_real_origin(

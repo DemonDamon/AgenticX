@@ -159,6 +159,8 @@ function metadataQuality(item: SkillHubMarketItem): number {
   if (item.author && item.author !== "unknown") score += 1;
   if (item.downloads != null && item.downloads !== "") score += 1;
   if (item.icon_url) score += 1;
+  if (item.detail_url) score += 1;
+  if (item.requires_api_key != null) score += 1;
   if (item.source_type === "skillhub") score += 1;
   return score;
 }
@@ -191,6 +193,9 @@ function mergeMarketItem(
         ? preferred.downloads
         : fallback.downloads,
     icon_url: preferred.icon_url || fallback.icon_url,
+    detail_url: preferred.detail_url || fallback.detail_url,
+    requires_api_key:
+      preferred.requires_api_key ?? fallback.requires_api_key,
     source: preferred.source || (sameOrigin ? fallback.source : ""),
     source_type: preferred.source_type || (sameOrigin ? fallback.source_type : ""),
     namespace: preferred.namespace || (sameOrigin ? fallback.namespace : undefined),

@@ -66,6 +66,7 @@ import {
 import { buildArchscribeInstallPrompt } from "../utils/archscribe-install-prompt";
 import { buildOfficeCliInstallPrompt } from "../utils/officecli-install-prompt";
 import type { SkillHubMarketItem } from "../utils/skillhub-market";
+import { openExternalUrl } from "../utils/open-external";
 import {
   buildSkillTryDraft,
   findInstalledMarketplaceSkill,
@@ -87,6 +88,7 @@ import { SkillPuzzleIcon } from "./icons/SkillPuzzleIcon";
 import { PendingProposalsList } from "./settings/skills/PendingProposalsList";
 import {
   SkillHubMarketplace,
+  SkillMarketActions,
   type SkillHubInstallState,
 } from "./settings/skills/SkillHubMarketplace";
 import {
@@ -923,6 +925,9 @@ type RegistrySearchItem = {
   source_type: string;
   namespace?: string;
   canonical_name?: string;
+  origin_source?: string;
+  requires_api_key?: boolean;
+  detail_url?: string;
   provenance_source?: "registry" | "skillhub";
   display_name?: string;
   recommended_id?: string;
@@ -3015,7 +3020,9 @@ function SkillsTab() {
   const [marketNeedsConfirmNonHigh, setMarketNeedsConfirmNonHigh] = useState(false);
   const [marketNeedsConfirmHigh, setMarketNeedsConfirmHigh] = useState(false);
   const [marketUninstallPending, setMarketUninstallPending] = useState<{
-    item: SkillHubMarketItem;
+    slug: string;
+    label: string;
+    item: RegistrySearchItem;
     skill: SkillItem;
   } | null>(null);
   const [marketUninstallBusy, setMarketUninstallBusy] = useState(false);
@@ -3428,20 +3435,22 @@ function SkillsTab() {
     [addPane, setForwardAutoReply, closeSettings],
   );
 
+  const recommendedSkillInstallItem = (skill: RecommendedSkill): RegistrySearchItem => ({
+    name: skill.marketplace_slug || skill.id,
+    display_name: skill.name,
+    description: skill.description,
+    version: "latest",
+    author: skill.provider,
+    source: skill.marketplace_slug ? "skillhub" : "registry",
+    source_type: skill.marketplace_slug ? "skillhub" : "registry",
+    namespace: skill.marketplace_namespace,
+    provenance_source: skill.marketplace_slug ? "skillhub" : "registry",
+    recommended_id: skill.id,
+  });
+
   const onRecommendedSkillInstall = (skill: RecommendedSkill) => {
     if (skill.marketplace_slug) {
-      void onMarketInstall({
-        name: skill.marketplace_slug,
-        display_name: skill.name,
-        description: skill.description,
-        version: "latest",
-        author: skill.provider,
-        source: "skillhub",
-        source_type: "skillhub",
-        namespace: skill.marketplace_namespace,
-        provenance_source: "skillhub",
-        recommended_id: skill.id,
-      });
+      void onMarketInstall(recommendedSkillInstallItem(skill));
       return;
     }
     const skillId = skill.id;
@@ -3801,44 +3810,50 @@ function SkillsTab() {
     display_name: item.name,
     provenance_source: "skillhub",
   });
-  const getSkillHubInstallState = (item: SkillHubMarketItem): SkillHubInstallState => {
-    const installItem = skillHubInstallItem(item);
+  const getMarketInstallState = (
+    installItem: RegistrySearchItem,
+    installedSlug = installItem.name,
+  ): SkillHubInstallState => {
     const installKey = marketInstallKey(installItem);
-    if (isMarketSkillInstalled(item.slug)) return "installed";
+    if (isMarketSkillInstalled(installedSlug)) return "installed";
     if (marketInstallingKey === installKey) return "installing";
     if (marketQueuedKeys.includes(installKey)) return "queued";
     if (marketPending && marketInstallKey(marketPending) === installKey) return "pending";
     return "idle";
   };
-  const getSkillHubSkillEnabled = (item: SkillHubMarketItem) => {
-    const installed = getInstalledMarketSkill(item.slug);
+  const getMarketSkillEnabled = (slug: string) => {
+    const installed = getInstalledMarketSkill(slug);
     return installed ? !disabledSkillNames.includes(installed.name) : true;
   };
-  const trySkillHubSkill = (item: SkillHubMarketItem) => {
-    const installed = getInstalledMarketSkill(item.slug);
+  const tryMarketSkill = (slug: string, installItem: RegistrySearchItem) => {
+    const installed = getInstalledMarketSkill(slug);
     if (!installed) {
-      setMarketInstallMessage(skillHubInstallItem(item), "未找到已安装技能，请刷新后重试。");
+      setMarketInstallMessage(installItem, "未找到已安装技能，请刷新后重试。");
       return;
     }
     if (disabledSkillNames.includes(installed.name)) {
-      setMarketInstallMessage(skillHubInstallItem(item), "请先启用这个技能再试用。");
+      setMarketInstallMessage(installItem, "请先启用这个技能再试用。");
       return;
     }
     newMetaTask(buildSkillTryDraft(installed.name));
     closeSettings();
   };
-  const toggleSkillHubSkill = (item: SkillHubMarketItem, enabled: boolean) => {
-    const installed = getInstalledMarketSkill(item.slug);
+  const toggleMarketSkill = (
+    slug: string,
+    installItem: RegistrySearchItem,
+    enabled: boolean,
+  ) => {
+    const installed = getInstalledMarketSkill(slug);
     if (!installed) {
-      setMarketInstallMessage(skillHubInstallItem(item), "未找到已安装技能，请刷新后重试。");
+      setMarketInstallMessage(installItem, "未找到已安装技能，请刷新后重试。");
       return;
     }
     void toggleGlobalSkill(installed.name, enabled);
   };
-  const editSkillHubSkill = async (item: SkillHubMarketItem) => {
-    const installed = getInstalledMarketSkill(item.slug);
+  const editMarketSkill = async (slug: string, installItem: RegistrySearchItem) => {
+    const installed = getInstalledMarketSkill(slug);
     if (!installed?.base_dir) {
-      setMarketInstallMessage(skillHubInstallItem(item), "未找到技能文件，请刷新后重试。");
+      setMarketInstallMessage(installItem, "未找到技能文件，请刷新后重试。");
       return;
     }
     const result = await window.agenticxDesktop.shellOpenPath(
@@ -3846,28 +3861,32 @@ function SkillsTab() {
     );
     if (!result.ok) {
       setMarketInstallMessage(
-        skillHubInstallItem(item),
+        installItem,
         `打开失败：${result.error || "无法打开技能文件"}`,
       );
     }
   };
-  const requestSkillHubUninstall = (item: SkillHubMarketItem) => {
-    const installed = getInstalledMarketSkill(item.slug);
+  const requestMarketSkillUninstall = (
+    slug: string,
+    label: string,
+    installItem: RegistrySearchItem,
+  ) => {
+    const installed = getInstalledMarketSkill(slug);
     if (!installed) {
-      setMarketInstallMessage(skillHubInstallItem(item), "未找到已安装技能，请刷新后重试。");
+      setMarketInstallMessage(installItem, "未找到已安装技能，请刷新后重试。");
       return;
     }
     setMarketUninstallError("");
-    setMarketUninstallPending({ item, skill: installed });
+    setMarketUninstallPending({ slug, label, item: installItem, skill: installed });
   };
-  const confirmSkillHubUninstall = async () => {
+  const confirmMarketSkillUninstall = async () => {
     const pending = marketUninstallPending;
     if (!pending || marketUninstallBusy) return;
     setMarketUninstallBusy(true);
     setMarketUninstallError("");
     try {
       const result = await window.agenticxDesktop.uninstallMarketSkill({
-        name: pending.item.slug,
+        name: pending.slug,
       });
       if (!result.ok) {
         setMarketUninstallError(result.error || "卸载失败");
@@ -3884,10 +3903,9 @@ function SkillsTab() {
           preferredSkillSources,
           nextDisabled,
         );
-      } else {
-        await onRefresh();
       }
-      setMarketInstallMessage(skillHubInstallItem(pending.item), "已卸载这个技能。");
+      await onRefresh();
+      setMarketInstallMessage(pending.item, "已卸载这个技能。");
       setMarketUninstallPending(null);
     } catch (error) {
       setMarketUninstallError(String(error));
@@ -3895,6 +3913,22 @@ function SkillsTab() {
       setMarketUninstallBusy(false);
     }
   };
+  const getSkillHubInstallState = (item: SkillHubMarketItem): SkillHubInstallState =>
+    getMarketInstallState(skillHubInstallItem(item), item.slug);
+  const getSkillHubSkillEnabled = (item: SkillHubMarketItem) =>
+    getMarketSkillEnabled(item.slug);
+  const trySkillHubSkill = (item: SkillHubMarketItem) =>
+    tryMarketSkill(item.slug, skillHubInstallItem(item));
+  const toggleSkillHubSkill = (item: SkillHubMarketItem, enabled: boolean) =>
+    toggleMarketSkill(item.slug, skillHubInstallItem(item), enabled);
+  const editSkillHubSkill = (item: SkillHubMarketItem) =>
+    editMarketSkill(item.slug, skillHubInstallItem(item));
+  const requestSkillHubUninstall = (item: SkillHubMarketItem) =>
+    requestMarketSkillUninstall(
+      item.slug,
+      item.name || item.slug,
+      skillHubInstallItem(item),
+    );
   const skillHubStatusTone =
     skillhubMsg.includes("失败") ||
     skillhubMsg.includes("繁忙") ||
@@ -3999,7 +4033,7 @@ function SkillsTab() {
               type="button"
               className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-40"
               disabled={marketUninstallBusy}
-              onClick={() => void confirmSkillHubUninstall()}
+              onClick={() => void confirmMarketSkillUninstall()}
             >
               {marketUninstallBusy ? "卸载中…" : "卸载"}
             </button>
@@ -4009,7 +4043,7 @@ function SkillsTab() {
         <div className="space-y-3 text-sm leading-6 text-text-subtle">
           <p>
             将从本机删除技能「
-            {marketUninstallPending?.item.name || marketUninstallPending?.skill.name || ""}」。
+            {marketUninstallPending?.label || marketUninstallPending?.skill.name || ""}」。
             此操作不会删除该技能产生的文档或会话。
           </p>
           {marketUninstallError ? (
@@ -4380,24 +4414,17 @@ function SkillsTab() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredRecommendedSkills.map((skill) => {
                   const canInstall = skill.cta === "install";
-                  const directInstallKey = skill.marketplace_slug
-                    ? `skillhub:${skill.marketplace_namespace || ""}:${skill.marketplace_slug}`
-                    : "";
-                  const directInstalled = Boolean(
-                    skill.marketplace_slug && isMarketSkillInstalled(skill.marketplace_slug),
-                  );
-                  const directInstalling = Boolean(
-                    directInstallKey && marketInstallingKey === directInstallKey,
-                  );
-                  const directQueued = Boolean(
-                    directInstallKey && marketQueuedKeys.includes(directInstallKey),
-                  );
-                  const directPending = marketPending?.recommended_id === skill.id;
+                  const installItem = recommendedSkillInstallItem(skill);
+                  const installedSlug = installItem.name;
+                  const directInstalled = canInstall && isMarketSkillInstalled(installedSlug);
+                  const directInstallState: SkillHubInstallState = directInstalled
+                    ? "installed"
+                    : skill.marketplace_slug
+                      ? getMarketInstallState(installItem, installedSlug)
+                      : installPromptBusy
+                        ? "installing"
+                        : "idle";
                   const directMessage = recommendedInstallMessages[skill.id] || "";
-                  const primaryAction = () => {
-                    if (canInstall) onRecommendedSkillInstall(skill);
-                    else window.open(skill.official_url, "_blank", "noopener,noreferrer");
-                  };
                   return (
                   <div
                     key={skill.id}
@@ -4437,43 +4464,39 @@ function SkillsTab() {
                           <span className="font-normal text-text-faint">{skill.category}</span>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        title={
-                          directInstalled
-                            ? "已安装"
-                            : directPending
-                              ? "等待确认"
-                              : canInstall
-                                ? "安装"
-                                : "打开官网"
-                        }
-                        aria-label={
-                          directInstalled
-                            ? `${skill.name} 已安装`
-                            : canInstall
-                              ? `安装 ${skill.name}`
-                              : `打开 ${skill.name} 官网`
-                        }
-                        disabled={
-                          canInstall &&
-                          (skill.marketplace_slug
-                            ? directInstalled || directInstalling || directQueued || directPending
-                            : installPromptBusy)
-                        }
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-black/[0.06] text-text-strong transition-colors hover:bg-black/[0.1] active:scale-[0.97] disabled:opacity-40 dark:bg-white/10 dark:hover:bg-white/15"
-                        onClick={primaryAction}
-                      >
-                        <span className="text-[17px] font-medium leading-none" aria-hidden>
-                          {directInstalled
-                            ? "✓"
-                            : directInstalling || directQueued
-                              ? "…"
-                              : directPending
-                                ? "!"
-                                : "+"}
-                        </span>
-                      </button>
+                      {canInstall ? (
+                        <SkillMarketActions
+                          label={skill.name}
+                          installState={directInstallState}
+                          skillEnabled={getMarketSkillEnabled(installedSlug)}
+                          onInstall={() => onRecommendedSkillInstall(skill)}
+                          onTrySkill={() => tryMarketSkill(installedSlug, installItem)}
+                          onToggleSkill={(enabled) =>
+                            toggleMarketSkill(installedSlug, installItem, enabled)
+                          }
+                          onEditSkill={() => void editMarketSkill(installedSlug, installItem)}
+                          onUninstallSkill={
+                            skill.marketplace_slug
+                              ? () =>
+                                  requestMarketSkillUninstall(
+                                    installedSlug,
+                                    skill.name,
+                                    installItem,
+                                  )
+                              : undefined
+                          }
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          title="打开官网"
+                          aria-label={`打开 ${skill.name} 官网`}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-black/[0.06] text-text-strong transition-colors hover:bg-black/[0.1] active:scale-[0.97] dark:bg-white/10 dark:hover:bg-white/15"
+                          onClick={() => openExternalUrl(skill.official_url)}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                     <HoverTip
                       label={skill.description}
@@ -4502,7 +4525,7 @@ function SkillsTab() {
                       <button
                         type="button"
                         className="mt-2 self-start text-[11px] text-text-faint transition hover:text-text-primary"
-                        onClick={() => window.open(skill.official_url, "_blank", "noopener,noreferrer")}
+                        onClick={() => openExternalUrl(skill.official_url)}
                       >
                         官网
                       </button>
@@ -4553,44 +4576,48 @@ function SkillsTab() {
               )}
               {marketResults.length > 0 && (
                 <div className="mt-2 space-y-1">
-                  {marketResults.map((item) => (
-                    <div
-                      key={`${item.source}:${item.name}`}
-                      className="flex items-start gap-2 rounded-md border border-transparent bg-surface-card px-3 py-2"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="truncate text-sm font-medium text-text-primary">{item.name}</span>
-                          <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
-                            {item.source}
-                          </span>
-                          {item.source_type === "clawhub" && (
-                            <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-400">
-                              ClawHub
-                            </span>
-                          )}
-                        </div>
-                        {item.description && (
-                          <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">{item.description}</p>
-                        )}
-                        <p className="mt-0.5 text-[10px] text-text-faint">by {item.author} · v{item.version}</p>
-                      </div>
-                      <button
-                        type="button"
-                        className="shrink-0 rounded border border-[var(--settings-accent-border-muted)] px-2 py-0.5 text-[10px] text-[var(--settings-accent-fg)] transition hover:bg-[var(--settings-accent-subtle-bg)] disabled:opacity-40"
-                        disabled={marketLoading || isMarketSkillInstalled(item.name) || marketInstallingKey === marketInstallKey(item) || marketQueuedKeys.includes(marketInstallKey(item))}
-                        onClick={() => void onMarketInstall(item)}
+                  {marketResults.map((item) => {
+                    const label = item.display_name || item.name;
+                    return (
+                      <div
+                        key={`${item.source}:${item.name}`}
+                        className="flex items-start gap-2 rounded-md border border-transparent bg-surface-card px-3 py-2"
                       >
-                        {isMarketSkillInstalled(item.name)
-                          ? "已安装"
-                          : marketInstallingKey === marketInstallKey(item)
-                          ? "安装中…"
-                          : marketQueuedKeys.includes(marketInstallKey(item))
-                            ? "排队中…"
-                            : "安装"}
-                      </button>
-                    </div>
-                  ))}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate text-sm font-medium text-text-primary">{label}</span>
+                            <span className="shrink-0 rounded-full border border-border px-1.5 text-[10px] text-text-faint">
+                              {item.source}
+                            </span>
+                            {item.source_type === "clawhub" && (
+                              <span className="shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 text-[10px] text-violet-400">
+                                ClawHub
+                              </span>
+                            )}
+                          </div>
+                          {item.description && (
+                            <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">{item.description}</p>
+                          )}
+                          <p className="mt-0.5 text-[10px] text-text-faint">by {item.author} · v{item.version}</p>
+                        </div>
+                        <SkillMarketActions
+                          label={label}
+                          installState={getMarketInstallState(item)}
+                          skillEnabled={getMarketSkillEnabled(item.name)}
+                          requiresApiKey={item.requires_api_key}
+                          onInstall={() => void onMarketInstall(item)}
+                          onTrySkill={() => tryMarketSkill(item.name, item)}
+                          onToggleSkill={(enabled) =>
+                            toggleMarketSkill(item.name, item, enabled)
+                          }
+                          onEditSkill={() => void editMarketSkill(item.name, item)}
+                          onUninstallSkill={() =>
+                            requestMarketSkillUninstall(item.name, label, item)
+                          }
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </section>

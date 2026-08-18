@@ -6,6 +6,8 @@ export type SkillHubMarketItem = {
   author: string;
   downloads?: string | number;
   icon_url?: string;
+  detail_url?: string;
+  requires_api_key?: boolean;
   source: string;
   source_type: string;
   namespace?: string;
@@ -16,6 +18,17 @@ export type SkillHubMarketItem = {
   origin_hint?: string;
   provenance_source: "skillhub";
 };
+
+function normalizeOptionalBoolean(...values: unknown[]): boolean | undefined {
+  for (const value of values) {
+    if (typeof value === "boolean") return value;
+    if (typeof value !== "string") continue;
+    const normalized = value.trim().toLocaleLowerCase();
+    if (["true", "1", "yes", "required"].includes(normalized)) return true;
+    if (["false", "0", "no", "optional"].includes(normalized)) return false;
+  }
+  return undefined;
+}
 
 /**
  * Normalize Studio search payloads into items that can use the shared
@@ -30,6 +43,21 @@ export function normalizeSkillHubMarketItems(input: unknown): SkillHubMarketItem
     const row = value as Record<string, unknown>;
     const slug = String(row.slug || row.name || "").trim();
     if (!slug) continue;
+    const labels =
+      row.labels && typeof row.labels === "object"
+        ? (row.labels as Record<string, unknown>)
+        : {};
+    const explicitRequiresApiKey = normalizeOptionalBoolean(
+      row.requires_api_key,
+      row.requiresApiKey,
+      row.api_key_required,
+      row.apiKeyRequired,
+      labels.requires_api_key,
+      labels.requiresApiKey,
+      labels.api_key_required,
+      labels.apiKeyRequired,
+    );
+    const detailUrl = String(row.detail_url || row.detailUrl || "").trim();
     rows.push({
       slug,
       name: String(row.name || slug).trim() || slug,
@@ -41,6 +69,8 @@ export function normalizeSkillHubMarketItems(input: unknown): SkillHubMarketItem
           ? row.downloads
           : undefined,
       icon_url: String(row.icon_url || row.iconUrl || "").trim() || undefined,
+      detail_url: /^https?:\/\//iu.test(detailUrl) ? detailUrl : undefined,
+      requires_api_key: explicitRequiresApiKey,
       // Empty source lets the shared backend resolve the built-in SkillHub
       // source. This also works with older search payloads that omitted it.
       source: String(row.source || "").trim(),

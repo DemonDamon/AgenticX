@@ -87,7 +87,7 @@ describe("SkillHubMarketplace", () => {
     expect(html).not.toContain("详情");
   });
 
-  it("uses the verified bare-slug route only for native results", () => {
+  it("uses the verified bare-slug route for native API and CLI results", () => {
     const base = {
       slug: "report-reader",
       name: "Report Reader",
@@ -104,7 +104,16 @@ describe("SkillHubMarketplace", () => {
       "https://skillhub.cn/skills/report-reader",
     );
     expect(getSkillHubDetailUrl({ ...base, origin_source: "clawhub_registry" })).toBeNull();
-    expect(getSkillHubDetailUrl({ ...base, origin_source: "skillhub_cli" })).toBeNull();
+    expect(getSkillHubDetailUrl({ ...base, origin_source: "skillhub_cli" })).toBe(
+      "https://skillhub.cn/skills/report-reader",
+    );
+    expect(
+      getSkillHubDetailUrl({
+        ...base,
+        origin_source: "clawhub_registry",
+        detail_url: "https://example.test/skills/report-reader",
+      }),
+    ).toBe("https://example.test/skills/report-reader");
   });
 
   it("turns an enabled installed skill into try and management actions", () => {
@@ -160,5 +169,29 @@ describe("SkillHubMarketplace", () => {
 
     expect(html).toContain("启用");
     expect(html).not.toContain("试一试");
+  });
+
+  it("shows an API key hint only when the market metadata marks it required", () => {
+    const html = renderToStaticMarkup(
+      <SkillMarketCard
+        item={{
+          slug: "keyed-skill",
+          name: "需密钥技能",
+          description: "说明",
+          version: "latest",
+          author: "发布者",
+          source: "skillhub",
+          source_type: "skillhub",
+          origin_source: "skillhub_api",
+          provenance_source: "skillhub",
+          requires_api_key: true,
+        }}
+        installState="idle"
+        onInstall={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('aria-label="需密钥技能 需配置 API Key"');
+    expect(html).toContain("需配置 API Key");
   });
 });
