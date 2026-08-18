@@ -34,6 +34,9 @@ const CATEGORY_COLORS: Record<string, string> = {
   skills: "bg-violet-500",
 };
 
+const CONTEXT_PANEL_WIDTH = 300;
+const CONTEXT_PANEL_GUTTER = 12;
+
 function formatK(n: number): string {
   if (!Number.isFinite(n)) return "0";
   return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
@@ -88,7 +91,11 @@ export function ContextUsageButton({
   const [open, setOpen] = useState(false);
   const [usage, setUsage] = useState<ContextUsage | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [panelPos, setPanelPos] = useState<{ left: number; bottom: number } | null>(null);
+  const [panelPos, setPanelPos] = useState<{
+    left: number;
+    bottom: number;
+    width: number;
+  } | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const requestSeqRef = useRef(0);
@@ -96,7 +103,19 @@ export function ContextUsageButton({
   const refreshPanelPosition = useCallback(() => {
     const rect = buttonRef.current?.getBoundingClientRect();
     if (!rect) return;
-    setPanelPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+    const width = Math.min(
+      CONTEXT_PANEL_WIDTH,
+      Math.max(0, window.innerWidth - CONTEXT_PANEL_GUTTER * 2)
+    );
+    const maxLeft = Math.max(
+      CONTEXT_PANEL_GUTTER,
+      window.innerWidth - width - CONTEXT_PANEL_GUTTER
+    );
+    setPanelPos({
+      left: Math.min(Math.max(CONTEXT_PANEL_GUTTER, rect.left), maxLeft),
+      bottom: window.innerHeight - rect.top + 8,
+      width,
+    });
   }, []);
 
   const fetchUsage = useCallback(async () => {
@@ -214,8 +233,8 @@ export function ContextUsageButton({
         ? createPortal(
             <div
               ref={panelRef}
-              className="fixed z-[100] w-[300px] rounded-xl border border-border bg-surface-panel p-4 text-text-primary shadow-lg backdrop-blur-xl"
-              style={{ left: panelPos.left, bottom: panelPos.bottom }}
+              className="fixed z-[100] max-h-[calc(100vh-24px)] max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border border-border bg-surface-panel p-4 text-text-primary shadow-lg backdrop-blur-xl"
+              style={{ left: panelPos.left, bottom: panelPos.bottom, width: panelPos.width }}
             >
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-[13px] font-medium text-text-strong">上下文用量</span>
@@ -236,9 +255,9 @@ export function ContextUsageButton({
                 <div className="py-2 text-[12px] text-text-faint">加载中…</div>
               ) : (
                 <>
-                  <div className="mb-1 flex items-baseline gap-2">
-                    <span className="text-2xl font-semibold text-text-strong">{usage.percent}%</span>
-                    <span className="text-[11px] text-text-faint">
+                  <div className="mb-1 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="shrink-0 text-2xl font-semibold text-text-strong">{usage.percent}%</span>
+                    <span className="min-w-0 whitespace-normal text-[11px] text-text-faint">
                       已使用 {formatK(usage.used_tokens)} / {formatK(usage.max_tokens)}
                     </span>
                   </div>
