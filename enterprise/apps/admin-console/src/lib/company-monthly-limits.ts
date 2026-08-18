@@ -1,3 +1,8 @@
+import {
+  normalizeSessionTokenLimits,
+  type SessionTokenLimits,
+} from "@agenticx/config";
+
 export type BudgetAction = "block" | "warn" | "fallback";
 
 export type BudgetRule = {
@@ -17,6 +22,7 @@ export type CompanyMonthlyLimits = {
 export type BudgetConfig = {
   updatedAt: string;
   companyLimits?: CompanyMonthlyLimits;
+  sessionTokenLimits?: SessionTokenLimits;
   defaults?: BudgetRule;
   tenants?: Record<string, BudgetRule>;
   departments?: Record<string, BudgetRule>;
@@ -57,5 +63,21 @@ export function withCompanyMonthlyLimits(
       costUsd: positiveNumber(limits.costUsd),
     },
     defaults: migratedDefaults,
+  };
+}
+
+export function sessionTokenLimits(
+  config: BudgetConfig | null | undefined,
+): SessionTokenLimits {
+  return normalizeSessionTokenLimits(config?.sessionTokenLimits);
+}
+
+export function withSessionTokenLimits(
+  config: BudgetConfig,
+  limits: SessionTokenLimits,
+): BudgetConfig {
+  return {
+    ...config,
+    sessionTokenLimits: normalizeSessionTokenLimits(limits),
   };
 }

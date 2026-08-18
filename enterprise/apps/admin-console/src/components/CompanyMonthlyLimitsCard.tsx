@@ -15,10 +15,13 @@ import {
 } from "@agenticx/ui";
 import { Save } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { isValidSessionTokenLimits } from "@agenticx/config";
 import { adminFetch, readAdminJsonResponse } from "../lib/admin-client-auth";
 import {
   companyMonthlyLimits,
+  sessionTokenLimits,
   withCompanyMonthlyLimits,
+  withSessionTokenLimits,
   type BudgetConfig,
 } from "../lib/company-monthly-limits";
 
@@ -33,15 +36,25 @@ export function CompanyMonthlyLimitsCard() {
   const [budget, setBudget] = useState<BudgetConfig | null>(null);
   const [tokens, setTokens] = useState(0);
   const [costUsd, setCostUsd] = useState(0);
+  const [warningTokensPerSession, setWarningTokensPerSession] = useState(500_000);
+  const [maxTokensPerSession, setMaxTokensPerSession] = useState(1_000_000);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const applyBudget = useCallback((next: BudgetConfig) => {
     const limits = companyMonthlyLimits(next);
+    const sessionLimits = sessionTokenLimits(next);
     setBudget(next);
     setTokens(limits.tokens);
     setCostUsd(limits.costUsd);
+    setWarningTokensPerSession(sessionLimits.warningTokensPerSession);
+    setMaxTokensPerSession(sessionLimits.maxTokensPerSession);
   }, []);
+
+  const validSessionLimits = isValidSessionTokenLimits({
+    warningTokensPerSession,
+    maxTokensPerSession,
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,7 +83,10 @@ export function CompanyMonthlyLimitsCard() {
     if (!budget || saving) return;
     setSaving(true);
     try {
-      const nextBudget = withCompanyMonthlyLimits(budget, { tokens, costUsd });
+      const nextBudget = withSessionTokenLimits(
+        withCompanyMonthlyLimits(budget, { tokens, costUsd }),
+        { warningTokensPerSession, maxTokensPerSession },
+      );
       const response = await adminFetch("/api/metering/budget", {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -96,7 +112,11 @@ export function CompanyMonthlyLimitsCard() {
           <CardTitle>{t("title")}</CardTitle>
           <CardDescription className="mt-1">{t("description")}</CardDescription>
         </div>
-        <Button size="sm" onClick={() => void save()} disabled={loading || saving || !budget}>
+        <Button
+          size="sm"
+          onClick={() => void save()}
+          disabled={loading || saving || !budget || !validSessionLimits}
+        >
           <Save className="h-4 w-4" />
           {saving ? t("saving") : t("save")}
         </Button>
@@ -106,42 +126,100 @@ export function CompanyMonthlyLimitsCard() {
           <div className="grid gap-4 md:grid-cols-2">
             <Skeleton className="h-24" />
             <Skeleton className="h-24" />
+            <Skeleton className="h-24" />
+            <Skeleton className="h-24" />
           </div>
         ) : (
-          <div className="grid overflow-hidden rounded-lg border border-border md:grid-cols-2 md:divide-x md:divide-border">
-            <div className="space-y-2 p-4">
-              <Label htmlFor="company-monthly-token-limit">{t("tokenLabel")}</Label>
-              <Input
-                id="company-monthly-token-limit"
-                inputMode="numeric"
-                value={tokens || ""}
-                placeholder={t("unlimitedPlaceholder")}
-                onChange={(event) => {
-                  const value = event.target.value.replace(/[^0-9]/g, "");
-                  setTokens(value ? Number(value) : 0);
-                }}
-                disabled={!budget || saving}
-              />
-              <p className="text-xs leading-5 text-muted-foreground">{t("tokenDescription")}</p>
-            </div>
-            <div className="space-y-2 border-t border-border p-4 md:border-t-0">
-              <Label htmlFor="company-monthly-cost-limit">{t("costLabel")}</Label>
-              <Input
-                id="company-monthly-cost-limit"
-                type="number"
-                min="0"
-                step="0.01"
-                inputMode="decimal"
-                value={costUsd || ""}
-                placeholder={t("unlimitedPlaceholder")}
-                onChange={(event) => {
-                  const value = Number(event.target.value);
-                  setCostUsd(Number.isFinite(value) && value > 0 ? value : 0);
-                }}
-                disabled={!budget || saving}
-              />
-              <p className="text-xs leading-5 text-muted-foreground">{t("costDescription")}</p>
-            </div>
+          <div className="overflow-hidden rounded-lg border border-border">
+            <section className="space-y-3 p-4">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">{t("monthlySectionTitle")}</h3>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {t("monthlySectionDescription")}
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="company-monthly-token-limit">{t("tokenLabel")}</Label>
+                  <Input
+                    id="company-monthly-token-limit"
+                    inputMode="numeric"
+                    value={tokens || ""}
+                    placeholder={t("unlimitedPlaceholder")}
+                    onChange={(event) => {
+                      const value = event.target.value.replace(/[^0-9]/g, "");
+                      setTokens(value ? Number(value) : 0);
+                    }}
+                    disabled={!budget || saving}
+                  />
+                  <p className="text-xs leading-5 text-muted-foreground">{t("tokenDescription")}</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="company-monthly-cost-limit">{t("costLabel")}</Label>
+                  <Input
+                    id="company-monthly-cost-limit"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={costUsd || ""}
+                    placeholder={t("unlimitedPlaceholder")}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      setCostUsd(Number.isFinite(value) && value > 0 ? value : 0);
+                    }}
+                    disabled={!budget || saving}
+                  />
+                  <p className="text-xs leading-5 text-muted-foreground">{t("costDescription")}</p>
+                </div>
+              </div>
+            </section>
+
+            <section className="space-y-3 border-t border-border p-4">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">{t("sessionSectionTitle")}</h3>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {t("sessionSectionDescription")}
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="session-token-warning-limit">{t("sessionWarningLabel")}</Label>
+                  <Input
+                    id="session-token-warning-limit"
+                    inputMode="numeric"
+                    value={warningTokensPerSession || ""}
+                    onChange={(event) => {
+                      const value = event.target.value.replace(/[^0-9]/g, "");
+                      setWarningTokensPerSession(value ? Number(value) : 0);
+                    }}
+                    disabled={!budget || saving}
+                  />
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {t("sessionWarningDescription")}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="session-token-hard-limit">{t("sessionHardLabel")}</Label>
+                  <Input
+                    id="session-token-hard-limit"
+                    inputMode="numeric"
+                    value={maxTokensPerSession || ""}
+                    onChange={(event) => {
+                      const value = event.target.value.replace(/[^0-9]/g, "");
+                      setMaxTokensPerSession(value ? Number(value) : 0);
+                    }}
+                    disabled={!budget || saving}
+                  />
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {t("sessionHardDescription")}
+                  </p>
+                </div>
+              </div>
+              {!validSessionLimits ? (
+                <p className="text-xs font-medium text-destructive">{t("sessionValidation")}</p>
+              ) : null}
+            </section>
           </div>
         )}
       </CardContent>

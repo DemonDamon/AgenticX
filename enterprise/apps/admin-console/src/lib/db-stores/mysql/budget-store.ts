@@ -1,5 +1,10 @@
 import { getAdminMysqlDb } from "./database";
 import { enterpriseRuntimeBudgets as budgetTable, gatewayBudgetAlerts as alertTable } from "@agenticx/db-schema/mysql";
+import {
+  DEFAULT_SESSION_TOKEN_LIMITS,
+  normalizeSessionTokenLimits,
+  type SessionTokenLimits,
+} from "@agenticx/config";
 import { desc, eq } from "drizzle-orm";
 
 export type BudgetAction = "block" | "warn" | "fallback";
@@ -19,6 +24,7 @@ export type BudgetConfig = {
     tokens: number;
     costUsd: number;
   };
+  sessionTokenLimits: SessionTokenLimits;
   defaults?: BudgetRule;
   tenants?: Record<string, BudgetRule>;
   departments?: Record<string, BudgetRule>;
@@ -28,6 +34,7 @@ export type BudgetConfig = {
 const DEFAULT_CONFIG: BudgetConfig = {
   updatedAt: new Date().toISOString(),
   companyLimits: { tokens: 0, costUsd: 0 },
+  sessionTokenLimits: DEFAULT_SESSION_TOKEN_LIMITS,
   defaults: {
     unit: "cost_usd",
     period: "month",
@@ -40,8 +47,8 @@ const DEFAULT_CONFIG: BudgetConfig = {
   users: {},
 };
 
-function tenant(): string {
-  const t = process.env.DEFAULT_TENANT_ID?.trim();
+function tenant(explicitTenantId?: string): string {
+  const t = (explicitTenantId ?? process.env.DEFAULT_TENANT_ID)?.trim();
   if (!t) throw new Error("DEFAULT_TENANT_ID is required for budget config.");
   return t;
 }
@@ -71,6 +78,7 @@ function normalizeBudget(input: Partial<BudgetConfig> | undefined): BudgetConfig
       tokens: Number.isFinite(tokenLimit) && tokenLimit > 0 ? Math.floor(tokenLimit) : 0,
       costUsd: Number.isFinite(costLimit) && costLimit > 0 ? costLimit : 0,
     },
+    sessionTokenLimits: normalizeSessionTokenLimits(input?.sessionTokenLimits),
     defaults: normalizeRule(input?.defaults ?? DEFAULT_CONFIG.defaults),
     tenants: {},
     departments: {},
@@ -82,8 +90,8 @@ function normalizeBudget(input: Partial<BudgetConfig> | undefined): BudgetConfig
   return next;
 }
 
-export async function getBudgetConfig(): Promise<BudgetConfig> {
-  const tid = tenant();
+export async function getBudgetConfig(tenantId?: string): Promise<BudgetConfig> {
+  const tid = tenant(tenantId);
   const db = getAdminMysqlDb();
   const row = await db.select().from(budgetTable).where(eq(budgetTable.tenantId, tid)).limit(1);
   if (!row.length) {
@@ -107,8 +115,11 @@ export async function getBudgetConfig(): Promise<BudgetConfig> {
   return normalizeBudget(cfg ?? DEFAULT_CONFIG);
 }
 
-export async function setBudgetConfig(input: Partial<BudgetConfig>): Promise<BudgetConfig> {
-  const tid = tenant();
+export async function setBudgetConfig(
+  input: Partial<BudgetConfig>,
+  tenantId?: string,
+): Promise<BudgetConfig> {
+  const tid = tenant(tenantId);
   const next = normalizeBudget(input);
   const db = getAdminMysqlDb();
   await db
@@ -127,12 +138,12 @@ export async function setBudgetConfig(input: Partial<BudgetConfig>): Promise<Bud
   return next;
 }
 
-export async function buildBudgetSnapshotForGateway(): Promise<BudgetConfig> {
-  return getBudgetConfig();
+export async function buildBudgetSnapshotForGateway(tenantId?: string): Promise<BudgetConfig> {
+  return getBudgetConfig(tenantId);
 }
 
-export async function listBudgetAlerts(limit = 50) {
-  const tid = tenant();
+export async function listBudgetAlerts(limit = 50, tenantId?: string) {
+  const tid = tenant(tenantId);
   const db = getAdminMysqlDb();
   return db
     .select()

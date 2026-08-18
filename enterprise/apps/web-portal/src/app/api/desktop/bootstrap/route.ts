@@ -3,6 +3,7 @@ import { listAvailableModelsForUser } from "../../../../lib/admin-providers-read
 import { resolveDesktopIdentity } from "../../../../lib/desktop-auth";
 import { resolveDesktopInferenceApiBase } from "../../../../lib/desktop-inference-base";
 import { requestOriginFromRequest } from "../../../../lib/desktop-device-auth";
+import { loadDesktopSessionTokenLimits } from "../../../../lib/desktop-token-policy";
 
 export async function GET(request: Request) {
   const identity = await resolveDesktopIdentity(request);
@@ -13,11 +14,14 @@ export async function GET(request: Request) {
     );
   }
 
-  const models = await listAvailableModelsForUser(
-    identity.userId,
-    identity.email,
-    identity.deptId,
-  );
+  const [models, tokenBudget] = await Promise.all([
+    listAvailableModelsForUser(
+      identity.userId,
+      identity.email,
+      identity.deptId,
+    ),
+    loadDesktopSessionTokenLimits(identity.tenantId),
+  ]);
 
   const origin = requestOriginFromRequest(request);
   const apiBaseUrl = `${origin}/api/desktop/v1`;
@@ -32,7 +36,7 @@ export async function GET(request: Request) {
       deptId: identity.deptId,
     },
     models,
-    policy: { strict: true },
+    policy: { strict: true, tokenBudget },
     apiBaseUrl,
     reauthRequiredForDirect: !directEligible,
   };
