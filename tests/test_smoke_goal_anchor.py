@@ -17,7 +17,10 @@ import pytest
 # Add parent to path
 sys.path.insert(0, str(__file__).rsplit("/tests", 1)[0])
 
-from agenticx.runtime.agent_runtime import _build_user_goal_anchor
+from agenticx.runtime.agent_runtime import (
+    _build_user_goal_anchor,
+    _detect_pathological_goal_anchor_echo,
+)
 
 
 @dataclass
@@ -101,12 +104,12 @@ class TestBuildUserGoalAnchor:
         )
         assert result is not None
         content = result["content"]
-        # Full mode should contain 4 execution disciplines
-        assert "执行纪律：" in content
+        # Full mode should contain the concise execution requirements.
+        assert "执行要求：" in content
         assert "1. 本轮所有工具调用与最终答复必须直接服务于上述问题" in content
-        assert "2. 若发现自己正在重复上一轮已做过的对比/分析" in content
+        assert "2. 若发现自己正在重复上一轮已做过的分析" in content
         assert "3. 工具调用累计 >= 5 次" in content
-        assert "4. 最终回复必须明确对照原始问题的每个子问题逐点作答" in content
+        assert "4. 不要输出 [user-goal-anchor]" in content
         assert "(round 2/10, tools_used_so_far=3)" in content
 
     def test_complex_chars_trigger_full_mode(self):
@@ -120,10 +123,10 @@ class TestBuildUserGoalAnchor:
             messages_total_chars=25000,
         )
         assert result is not None
-        assert "执行纪律：" in result["content"]
+        assert "执行要求：" in result["content"]
 
-    def test_complex_agent_messages_count_trigger_full_mode(self):
-        """AC-3: len(agent_messages) >= 8 triggers full mode."""
+    def test_historical_agent_messages_do_not_trigger_full_mode(self):
+        """Historical turns alone must not escalate the current anchor."""
         session = MockStudioSession(
             current_user_intent="Process files",
             agent_messages=[{"role": "user"}] * 8,
@@ -136,7 +139,21 @@ class TestBuildUserGoalAnchor:
             messages_total_chars=1000,
         )
         assert result is not None
-        assert "执行纪律：" in result["content"]
+        assert "执行要求：" not in result["content"]
+
+    def test_current_turn_message_count_triggers_full_mode(self):
+        """A long current turn can still escalate the anchor."""
+        session = MockStudioSession(current_user_intent="Process files")
+        result = _build_user_goal_anchor(
+            session=session,
+            round_idx=2,
+            max_rounds=10,
+            tools_used_so_far=1,
+            messages_total_chars=1000,
+            current_turn_message_count=8,
+        )
+        assert result is not None
+        assert "执行要求：" in result["content"]
 
     def test_compact_mode_for_middle_ground(self):
         """AC-3: Not first round and not complex = compact mode."""
@@ -153,7 +170,7 @@ class TestBuildUserGoalAnchor:
         # Compact mode should have anchor marker and query but no disciplines
         assert "[user-goal-anchor]" in content
         assert "Middle ground test" in content
-        assert "执行纪律：" not in content  # No disciplines in compact mode
+        assert "执行要求：" not in content  # No requirements in compact mode
         assert "(round 2/10)" in content
 
     def test_custom_thresholds_via_env(self):
@@ -174,7 +191,7 @@ class TestBuildUserGoalAnchor:
             )
             assert result is not None
             # Should be compact, not full (since threshold is now 5)
-            assert "执行纪律：" not in result["content"]
+            assert "执行要求：" not in result["content"]
 
     def test_anchor_contains_original_query_verbatim(self):
         """AC-2: Anchor must contain original query verbatim (no rewriting)."""
@@ -303,7 +320,7 @@ class TestGoalAnchorEdgeCases:
         )
         assert result is not None
         # Should be compact mode (no disciplines) but still capped
-        assert "执行纪律：" not in result["content"]
+        assert "执行要求：" not in result["content"]
         max_y_run = 0
         cur = 0
         for ch in result["content"]:
@@ -329,7 +346,7 @@ class TestGoalAnchorEdgeCases:
             )
         assert result is not None
         content = result["content"]
-        assert "执行纪律：" in content
+        assert "执行要求：" in content
         # New behavior: discipline #3 should mention 12, not the legacy "5"
         assert "工具调用累计 >= 12 次" in content
         assert "工具调用累计 >= 5 次" not in content
@@ -361,7 +378,7 @@ class TestGoalAnchorEdgeCases:
                 tool_result_tokens_session=5000,
             )
         assert result is not None
-        assert "执行纪律：" in result["content"]
+        assert "执行要求：" in result["content"]
         assert getattr(session, "_goal_anchor_prepend", False) is True
 
     def test_function_does_not_mutate_session(self):
@@ -385,9 +402,8 @@ class TestAnchorEphemeralBehavior:
 
     These tests directly assert the helper signature/behavior. The runtime-level
     non-mutation invariant (anchor never appears in session.agent_messages or
-    persisted history) is enforced by agent_runtime.py constructing
-    `messages_for_llm = list(messages) + [anchor_message]` and passing it to LLM
-    calls without rebinding `messages`.
+    persisted history) is enforced by agent_runtime.py inserting the anchor into
+    a copied message list and passing it to LLM calls without rebinding `messages`.
     """
 
     def test_anchor_message_is_a_fresh_dict(self):
@@ -404,11 +420,11 @@ class TestAnchorEphemeralBehavior:
         assert a1 is not None and a2 is not None
         assert a1 is not a2  # Distinct objects—safe to mutate one without affecting the other.
 
-    def test_list_concat_pattern_isolates_anchor(self):
-        """Verify the `list(messages) + [anchor]` pattern leaves original list unchanged.
+    def test_system_block_insertion_isolates_anchor(self):
+        """Verify leading system insertion leaves original list unchanged.
 
         This is exactly what agent_runtime.py does post-fix:
-            messages_for_llm = list(messages) + [anchor_message]
+            messages_for_llm.insert(insert_idx, anchor_message)
         """
         session = MockStudioSession(current_user_intent="Test")
         anchor = _build_user_goal_anchor(
@@ -424,14 +440,37 @@ class TestAnchorEphemeralBehavior:
         original_len = len(original_messages)
 
         # Simulate agent_runtime's anchor injection pattern
-        messages_for_llm = list(original_messages) + [anchor]
+        insert_idx = 0
+        for i, message in enumerate(original_messages):
+            if message.get("role") == "system":
+                insert_idx = i + 1
+            else:
+                break
+        messages_for_llm = list(original_messages)
+        messages_for_llm.insert(insert_idx, anchor)
 
         # Original list must be untouched
         assert len(original_messages) == original_len
         assert original_messages[-1] == {"role": "user", "content": "hi"}
-        # Temporary view has anchor appended
-        assert messages_for_llm[-1] == anchor
+        # Temporary view keeps the anchor in the leading system block
+        assert messages_for_llm[1] == anchor
         assert len(messages_for_llm) == original_len + 1
+
+
+class TestGoalAnchorEchoGuard:
+    def test_short_or_normal_text_is_not_blocked(self):
+        assert _detect_pathological_goal_anchor_echo("[user-goal-anchor]" * 10) is None
+        normal = "项目 | 说明\n" + "| A | 这是普通表格内容 |\n" * 100
+        assert _detect_pathological_goal_anchor_echo(normal) is None
+
+    def test_repeated_internal_anchor_is_detected(self):
+        repeated = " ".join(
+            ["[user-goal-anchor] 用户目标锚点 执行要求：生成表格"] * 80
+        )
+        result = _detect_pathological_goal_anchor_echo(repeated)
+        assert result is not None
+        assert result["marker"] == "[user-goal-anchor]"
+        assert result["count"] == 80
 
 
 if __name__ == "__main__":

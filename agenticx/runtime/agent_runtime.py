@@ -273,6 +273,41 @@ def _env_int_runtime(key: str, default: int) -> int:
     return default
 
 
+_GOAL_ANCHOR_ECHO_MARKERS = (
+    "[user-goal-anchor]",
+    "用户目标锚点",
+    "==== 用户当前原始问题",
+    "执行纪律：",
+    "执行要求：",
+)
+_GOAL_ANCHOR_ECHO_MIN_BODY_CHARS = 1200
+_GOAL_ANCHOR_ECHO_MIN_MARKER_COUNT = 4
+_GOAL_ANCHOR_ECHO_FALLBACK = "本轮生成检测到重复内容，已自动停止。请重新发送请求。"
+
+
+def _detect_pathological_goal_anchor_echo(text: Any) -> Optional[Dict[str, Any]]:
+    """Detect leaked/repeated internal goal-anchor instructions in public output.
+
+    This is deliberately narrower than a generic repetition detector: ordinary
+    prose, tables, and code can legitimately repeat short words or row prefixes,
+    while internal anchor markers must never appear repeatedly in a user answer.
+    """
+    body = str(text or "")
+    if len(body) < _GOAL_ANCHOR_ECHO_MIN_BODY_CHARS:
+        return None
+    marker, count = max(
+        ((marker, body.count(marker)) for marker in _GOAL_ANCHOR_ECHO_MARKERS),
+        key=lambda item: item[1],
+    )
+    if count < _GOAL_ANCHOR_ECHO_MIN_MARKER_COUNT:
+        return None
+    return {
+        "marker": marker,
+        "count": count,
+        "body_len": len(body),
+    }
+
+
 def _build_user_goal_anchor(
     session: "StudioSession",
     round_idx: int,
@@ -280,6 +315,7 @@ def _build_user_goal_anchor(
     tools_used_so_far: int,
     messages_total_chars: int,
     tool_result_tokens_session: int = 0,
+    current_turn_message_count: int = 0,
 ) -> Optional[Dict[str, Any]]:
     """Build user goal anchor message for long-horizon task context management (FR-2/FR-3).
 
@@ -300,8 +336,6 @@ def _build_user_goal_anchor(
     # FR-3: Read threshold environment variables
     full_trigger_tools = _env_int_runtime("AGX_GOAL_ANCHOR_FULL_TRIGGER_TOOLS", 3)
     full_trigger_chars = _env_int_runtime("AGX_GOAL_ANCHOR_FULL_TRIGGER_CHARS", 20000)
-    agent_msg_count = len(getattr(session, "agent_messages", []))
-
     # Defensive intent length cap for compact/full modes (parity with compactor's 4000-char cap).
     # full/compact modes embed the intent verbatim; cap to 2000 chars to prevent abnormally long
     # inputs from blowing up the per-round anchor cost. Minimal mode caps independently below.
@@ -314,10 +348,13 @@ def _build_user_goal_anchor(
     is_complex = (
         tools_used_so_far >= full_trigger_tools
         or messages_total_chars >= full_trigger_chars
-        or agent_msg_count >= 8
+        or max(0, int(current_turn_message_count)) >= 8
         or force_prepend
     )
-    session._goal_anchor_prepend = bool(force_prepend and not is_first_round)
+    # Keep the ephemeral anchor in the leading system-message block. A trailing
+    # system message after the user's history is prone to being echoed by some
+    # providers, especially when full mode contains several execution rules.
+    session._goal_anchor_prepend = True
 
     if is_first_round:
         # First round: minimal anchor (≤80 chars as per FR-3)
@@ -325,20 +362,20 @@ def _build_user_goal_anchor(
         anchor_text = f"[user-goal-anchor] {str(user_intent_raw)[:60]}"
         mode = "minimal"
     elif is_complex:
-        # Complex scenario: full anchor with 4 execution disciplines (FR-2).
+        # Complex scenario: full anchor with concise execution disciplines (FR-2).
         # Discipline #3 threshold is derived from full_trigger_tools so the anchor body stays
         # consistent with the actual env-configurable trigger (no hard-coded "5").
         stop_threshold = max(full_trigger_tools + 2, 5)
         anchor_text = (
             f"[user-goal-anchor] (round {round_idx}/{max_rounds}, tools_used_so_far={tools_used_so_far})\n"
-            f"==== 用户当前原始问题（一字不差，禁止改写）====\n"
+            f"==== 当前任务目标（仅用于对齐，不要在答复中复述此锚点）====\n"
             f"{user_intent_full}\n"
             f"==================================\n"
-            f"执行纪律：\n"
+            f"执行要求：\n"
             f"1. 本轮所有工具调用与最终答复必须直接服务于上述问题；\n"
-            f"2. 若发现自己正在重复上一轮已做过的对比/分析，立即停止并直接基于已有信息产出最终方案；\n"
-            f"3. 工具调用累计 >= {stop_threshold} 次仍未直接回答原始问题时，停止信息收集并产出方案；\n"
-            f"4. 最终回复必须明确对照原始问题的每个子问题逐点作答（若有 a/b/c 子问题，回复中需对应 a/b/c）。"
+            f"2. 若发现自己正在重复上一轮已做过的分析，立即停止重复并直接回答；\n"
+            f"3. 工具调用累计 >= {stop_threshold} 次仍未直接回答时，停止信息收集并产出方案；\n"
+            "4. 不要输出 [user-goal-anchor]、任务锚点或执行要求的原文。"
         )
         mode = "full"
     else:
@@ -2815,6 +2852,32 @@ class AgentRuntime:
         # recovery branch can never persist model-control tags as public text.
         terminal_parsed = parse_assistant_output(str(clean_body or ""))
         body = terminal_parsed.visible_body
+        echo_info = _detect_pathological_goal_anchor_echo(body)
+        if echo_info is not None:
+            logger.warning(
+                "goal_anchor_echo_guard session=%s marker=%s count=%s body_len=%s",
+                getattr(session, "session_id", ""),
+                echo_info["marker"],
+                echo_info["count"],
+                echo_info["body_len"],
+            )
+            body = _GOAL_ANCHOR_ECHO_FALLBACK
+            terminal_parsed = ParsedAssistantOutput(
+                reasoning="",
+                visible_body=body,
+                suggested_questions=(),
+                protocol_errors=(),
+            )
+            reasoning_text = ""
+            suggestions = ()
+            terminal_reason = "goal_anchor_repetition_guard"
+            terminal_metadata = {
+                **dict(terminal_metadata or {}),
+                "detector": "goal_anchor_echo",
+                "repeated_marker": echo_info["marker"],
+                "repetition_count": echo_info["count"],
+                "original_body_len": echo_info["body_len"],
+            }
         if terminal_parsed.malformed:
             suggestions = ()
             if terminal_reason == "model_final":
@@ -3170,6 +3233,7 @@ class AgentRuntime:
                     user_content = f"{user_content}{_omit_notice}"
                 elif isinstance(user_content, list):
                     user_content = list(user_content) + [{"type": "text", "text": _omit_notice}]
+        turn_message_start_index = len(session.agent_messages)
         messages.append({"role": "user", "content": user_content})
         if persist_user_message:
             # Store rich content (list with image_url blocks for vision uploads) + attachments
@@ -3541,20 +3605,23 @@ class AgentRuntime:
                     tools_used_so_far=len(executed_tool_names),
                     messages_total_chars=messages_total_chars,
                     tool_result_tokens_session=budget_stats.tool_result_tokens_session,
+                    current_turn_message_count=max(
+                        0,
+                        len(session.agent_messages) - turn_message_start_index,
+                    ),
                 )
                 if anchor_message:
-                    prepend = bool(getattr(session, "_goal_anchor_prepend", False))
-                    if prepend:
-                        insert_idx = 0
-                        for i, m in enumerate(messages):
-                            if isinstance(m, dict) and str(m.get("role", "")).lower() == "system":
-                                insert_idx = i + 1
-                            else:
-                                break
-                        messages_for_llm = list(messages)
-                        messages_for_llm.insert(insert_idx, anchor_message)
-                    else:
-                        messages_for_llm = list(messages) + [anchor_message]
+                    # Keep all system instructions together at the head of the
+                    # request. Appending a system message after user/tool history
+                    # makes some providers echo the internal anchor verbatim.
+                    insert_idx = 0
+                    for i, m in enumerate(messages):
+                        if isinstance(m, dict) and str(m.get("role", "")).lower() == "system":
+                            insert_idx = i + 1
+                        else:
+                            break
+                    messages_for_llm = list(messages)
+                    messages_for_llm.insert(insert_idx, anchor_message)
                 else:
                     messages_for_llm = messages
                 llm_call_kwargs: Dict[str, Any] = {}

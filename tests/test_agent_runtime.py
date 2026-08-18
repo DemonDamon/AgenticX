@@ -266,6 +266,33 @@ def test_runtime_stream_fallback_syncs_agent_messages_with_chat_history() -> Non
     assert "metadata" not in session.agent_messages[-1]
 
 
+def test_goal_anchor_echo_guard_replaces_before_persistence() -> None:
+    runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
+    session = StudioSession()
+    repeated = " ".join(
+        ["[user-goal-anchor] 用户目标锚点 执行要求：生成表格"] * 80
+    )
+
+    final = __import__("asyncio").run(
+        runtime._finish_terminal_reply(
+            session,
+            clean_body=repeated,
+            terminal_reason="model_final",
+            agent_id="meta",
+            is_system_trigger=False,
+        )
+    )
+
+    assert final.type == EventType.FINAL.value
+    assert final.data["terminal_reason"] == "goal_anchor_repetition_guard"
+    assert final.data["detector"] == "goal_anchor_echo"
+    assert final.data["repetition_count"] == 80
+    assert final.data["text"] == "本轮生成检测到重复内容，已自动停止。请重新发送请求。"
+    assert session.agent_messages[-1]["content"] == final.data["text"]
+    assert session.chat_history[-1]["content"] == final.data["text"]
+    assert len(session.chat_history[-1]["content"]) < 200
+
+
 def test_runtime_should_stop_interrupts_generation() -> None:
     runtime = AgentRuntime(_TextOnlyLLM(), _ApproveGate())
     calls = {"n": 0}
