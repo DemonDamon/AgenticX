@@ -51,7 +51,7 @@ describe("admin user delete route", () => {
       data: { removedFromGroups: 2, groupCleanupPending: false },
     });
     expect(mocks.softDeleteUser).toHaveBeenCalledWith("tenant-a", "deleted", "admin-a");
-    expect(mocks.removeUserFromAllGroups).toHaveBeenCalledWith("deleted");
+    expect(mocks.removeUserFromAllGroups).toHaveBeenCalledWith("tenant-a", "deleted");
     expect(mocks.softDeleteUser.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.removeUserFromAllGroups.mock.invocationCallOrder[0]!,
     );

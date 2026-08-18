@@ -37,7 +37,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const auth = await requireAdminScope(["user:read"]);
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
-  const group = await getUserGroup(id);
+  const group = await getUserGroup(auth.session.tenantId, id);
   if (!group) return NextResponse.json({ code: "40400", message: "not found" }, { status: 404 });
   const resolved = await resolveExistingMembers(auth.session.tenantId, group.memberIds);
   return NextResponse.json({
@@ -60,21 +60,21 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     const body = (await request.json()) as Record<string, unknown>;
     const memberIds = memberIdsFrom(body.memberIds);
     const modelIds = modelIdsFrom(body.modelIds);
-    const current = await getUserGroup(id);
+    const current = await getUserGroup(auth.session.tenantId, id);
     if (!current) throw new Error("user group not found");
     const resolved = await resolveExistingMembers(
       auth.session.tenantId,
       memberIds ?? current.memberIds,
     );
     const existingMemberIds = resolved.members.map((member) => member.id);
-    const group = await updateUserGroup(id, {
+    const group = await updateUserGroup(auth.session.tenantId, id, {
       ...(typeof body.name === "string" ? { name: body.name } : {}),
       ...(typeof body.description === "string" || body.description === null ? { description: body.description as string | null } : {}),
       memberIds: existingMemberIds,
       ...(body.monthlyTokens !== undefined ? { monthlyTokens: Number(body.monthlyTokens) } : {}),
       ...(modelIds !== undefined ? { modelIds } : {}),
     });
-    await applyUserGroupPolicy(group, resolved.members);
+    await applyUserGroupPolicy(auth.session.tenantId, group, resolved.members);
     return NextResponse.json({
       code: "00000",
       message: "ok",
@@ -94,7 +94,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   const auth = await requireAdminScope(["user:update"]);
   if (!auth.ok) return auth.response;
   const { id } = await context.params;
-  const deleted = await deleteUserGroup(id);
+  const deleted = await deleteUserGroup(auth.session.tenantId, id);
   if (!deleted) return NextResponse.json({ code: "40400", message: "not found" }, { status: 404 });
   return NextResponse.json({ code: "00000", message: "ok", data: { deleted: true } });
 }

@@ -77,17 +77,20 @@ async function listAllUsers(tenantId: string): Promise<AdminUserDto[]> {
   }
 }
 
-async function buildUsageIndex(userIds: string[]): Promise<UsageIndex> {
+async function buildUsageIndex(userIds: string[], tenantId: string): Promise<UsageIndex> {
   const byUser = new Map<string, number>();
   const byUserModel = new Map<string, Map<string, number>>();
   if (userIds.length === 0) return { byUser, byUserModel };
 
-  const result = await queryMetering({
-    user_id: userIds,
-    start: monthStart(),
-    end: new Date().toISOString(),
-    group_by: ["user", "model"],
-  });
+  const result = await queryMetering(
+    {
+      user_id: userIds,
+      start: monthStart(),
+      end: new Date().toISOString(),
+      group_by: ["user", "model"],
+    },
+    tenantId,
+  );
   for (const row of result.data.rows) {
     const userId = row.dims.user;
     if (!userId) continue;
@@ -263,11 +266,11 @@ export async function loadGroupQuotaOverview(tenantId: string): Promise<{
   users: OverviewMember[];
 }> {
   const [groups, users, departments, config, assignments] = await Promise.all([
-    listUserGroups(),
+    listUserGroups(tenantId),
     listAllUsers(tenantId),
     listDepartmentsFlat(tenantId),
-    getQuotaConfig(),
-    listAllAssignments(),
+    getQuotaConfig(tenantId),
+    listAllAssignments(tenantId),
   ]);
   const usersById = new Map(users.map((user) => [user.id, user]));
   const noUsage: UsageIndex = { byUser: new Map(), byUserModel: new Map() };
@@ -293,13 +296,13 @@ export async function loadGroupQuotaOverview(tenantId: string): Promise<{
 export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuotaOverview[]> {
   const [users, config, groups, departments, assignments, allEnabledModelIds] = await Promise.all([
     listAllUsers(tenantId),
-    getQuotaConfig(),
-    listUserGroups(),
+    getQuotaConfig(tenantId),
+    listUserGroups(tenantId),
     listDepartmentsFlat(tenantId),
-    listAllAssignments(),
+    listAllAssignments(tenantId),
     listAllEnabledModelIds(),
   ]);
-  const usage = await buildUsageIndex(users.map((user) => user.id));
+  const usage = await buildUsageIndex(users.map((user) => user.id), tenantId);
   const departmentsById = new Map(departments.map((department) => [department.id, department]));
   const effectiveModelsByDepartment = new Map<string, string[]>();
   for (const department of departments) {

@@ -41,6 +41,28 @@ export type ChatUsage = {
   totalTokens: number;
 };
 
+export type ChatQuotaErrorKind = "token_day" | "token_week" | "monthly";
+
+/** Structured enterprise quota rejection returned by the managed gateway. */
+export type ChatQuotaError = {
+  kind: ChatQuotaErrorKind;
+  message: string;
+  period?: string;
+  resetAt?: string;
+  used?: number;
+  limit?: number;
+};
+
+export type ChatChunkError = {
+  code: string;
+  message: string;
+  kind?: ChatQuotaErrorKind;
+  period?: string;
+  resetAt?: string;
+  used?: number;
+  limit?: number;
+};
+
 export type WebSearchSource = {
   title: string;
   url: string;
@@ -94,10 +116,7 @@ export type ChatChunk = {
   deepResearchEvent?: DeepResearchEvent;
   /** 用户主动中断（非错误）：保留已生成内容，不视为失败。 */
   cancelled?: boolean;
-  error?: {
-    code: string;
-    message: string;
-  };
+  error?: ChatChunkError;
 };
 
 export type SendMessageResult = {

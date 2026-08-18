@@ -25,8 +25,8 @@ import { listAllEnabledModelIds } from "../../model-providers-store";
 
 const LEGACY_PATH = path.join(resolveRuntimeAdminDir(), "user-models.json");
 
-function requiredTenant(): string {
-  const t = process.env.DEFAULT_TENANT_ID?.trim();
+function requiredTenant(explicitTenantId?: string): string {
+  const t = explicitTenantId?.trim() || process.env.DEFAULT_TENANT_ID?.trim();
   if (!t) throw new Error("DEFAULT_TENANT_ID is required for user-visible model assignments.");
   return t;
 }
@@ -133,8 +133,8 @@ export async function setUserModels(
   return { modelIds: saved, prunedModelIds };
 }
 
-export async function listAllAssignments(): Promise<Mapping> {
-  const tid = requiredTenant();
+export async function listAllAssignments(tenantId?: string): Promise<Mapping> {
+  const tid = requiredTenant(tenantId);
   await migrateLegacyIfNeeded(tid);
   const db = getAdminMysqlDb();
   const rows = await db.select().from(uvmTable).where(eq(uvmTable.tenantId, tid));

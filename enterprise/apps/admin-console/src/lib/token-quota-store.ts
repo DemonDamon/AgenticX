@@ -3,7 +3,13 @@ import * as mysql from "./db-stores/mysql/token-quota-store";
 import * as postgresql from "./db-stores/postgresql/token-quota-store";
 
 export type * from "./db-stores/postgresql/token-quota-store";
-export { quotaFilePath, getPlanSources, applyPlanRuleToScope, removePlanRuleFromScope } from "./db-stores/postgresql/token-quota-store";
+export {
+  QuotaConfigConflictError,
+  quotaFilePath,
+  getPlanSources,
+  applyPlanRuleToScope,
+  removePlanRuleFromScope,
+} from "./db-stores/postgresql/token-quota-store";
 
 function implementation(): typeof postgresql {
   const config = resolveDatabaseConfig();

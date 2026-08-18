@@ -253,10 +253,25 @@ export async function migrateLegacyUserVisibleModelsIfNeeded(
 }
 
 /** Token 配额：PG 无行时从 quotas.json 导入。 */
+export function isLegacyQuotaImportTenant(tenantId: string): boolean {
+  const designatedTenant =
+    process.env.ENTERPRISE_LEGACY_TENANT_ID?.trim() ||
+    process.env.DEFAULT_TENANT_ID?.trim() ||
+    "";
+  return Boolean(designatedTenant) && tenantId.trim() === designatedTenant;
+}
+
 export async function migrateLegacyQuotasIfNeeded(
   tenantId: string,
   runtimeDir = resolveRuntimeAdminDir()
 ): Promise<MigrateSliceResult> {
+  if (!isLegacyQuotaImportTenant(tenantId)) {
+    return {
+      action: "skipped",
+      count: 0,
+      reason: "legacy quota file belongs to the designated legacy tenant",
+    };
+  }
   const dialect = resolveDatabaseConfig().dialect;
   if (dialect === "mysql" ? await mysqlHasRuntimeRows("quotas", tenantId) : false) {
     return { action: "skipped", count: 0, reason: "database already has quota config" };
@@ -285,7 +300,7 @@ export async function migrateLegacyQuotasIfNeeded(
   if (dialect === "mysql") {
     await insertMysqlRuntimeQuota(row);
   } else {
-    await db!.insert(qTable).values(row);
+    await db!.insert(qTable).values(row).onConflictDoNothing();
   }
 
   return { action: "imported", count: 1 };

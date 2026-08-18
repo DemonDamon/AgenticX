@@ -73,7 +73,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
     let removedFromGroups = 0;
     let groupCleanupPending = false;
     try {
-      removedFromGroups = await removeUserFromAllGroups(id);
+      removedFromGroups = await removeUserFromAllGroups(auth.session.tenantId, id);
     } catch (cleanupError) {
       // The IAM deletion has already succeeded. Do not report the whole delete
       // as failed; group edit/load paths also prune legacy missing members.

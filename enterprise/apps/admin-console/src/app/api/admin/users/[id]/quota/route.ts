@@ -14,10 +14,10 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     if (!user) return NextResponse.json({ code: "40400", message: "user not found" }, { status: 404 });
 
     const body = (await request.json()) as Record<string, unknown>;
-    const config = await getQuotaConfig();
+    const config = await getQuotaConfig(auth.session.tenantId);
     const users = { ...config.users };
     if (body.inherit === true) {
-      const groupSource = groupQuotaSourceForUser(await listUserGroups(), id);
+      const groupSource = groupQuotaSourceForUser(await listUserGroups(auth.session.tenantId), id);
       if (groupSource) {
         users[id] = {
           ...(users[id] as QuotaRule | undefined),
@@ -25,7 +25,10 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
           poolScope: "",
           action: "block",
         };
-        const quota = await setQuotaConfig({ ...config, users });
+        const quota = await setQuotaConfig(
+          { users, updatedAt: config.updatedAt },
+          auth.session.tenantId,
+        );
         return NextResponse.json({
           code: "00000",
           message: "ok",
@@ -33,7 +36,10 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
         });
       }
       delete users[id];
-      const quota = await setQuotaConfig({ ...config, users });
+      const quota = await setQuotaConfig(
+        { users, updatedAt: config.updatedAt },
+        auth.session.tenantId,
+      );
       return NextResponse.json({ code: "00000", message: "ok", data: { quota: quota.users[id] ?? null, inherited: true, source: "default" } });
     }
 
@@ -48,7 +54,10 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
       poolScope: "",
       action: "block",
     };
-    const quota = await setQuotaConfig({ ...config, users });
+    const quota = await setQuotaConfig(
+      { users, updatedAt: config.updatedAt },
+      auth.session.tenantId,
+    );
     return NextResponse.json({ code: "00000", message: "ok", data: { quota: quota.users[id], inherited: false } });
   } catch (error) {
     return NextResponse.json(

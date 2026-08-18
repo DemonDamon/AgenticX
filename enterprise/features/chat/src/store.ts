@@ -11,6 +11,8 @@ import {
 import {
   normalizeTransportErrorMessage,
   type ChatClient,
+  type ChatChunkError,
+  type ChatQuotaError,
   type ChatRequest as SdkChatRequest,
   type DeepResearchEvent,
 } from "@agenticx/sdk-ts";
@@ -47,6 +49,31 @@ import {
 } from "./utils/deep-research-plan-chat-composer";
 
 const UPDATE_DEPTH_ERROR_RE = /Maximum update depth exceeded/i;
+
+function quotaErrorFromChunk(error: ChatChunkError): ChatQuotaError | null {
+  if (!error.kind) return null;
+  return {
+    kind: error.kind,
+    message: error.message,
+    ...(error.period ? { period: error.period } : {}),
+    ...(error.resetAt ? { resetAt: error.resetAt } : {}),
+    ...(error.used !== undefined ? { used: error.used } : {}),
+    ...(error.limit !== undefined ? { limit: error.limit } : {}),
+  };
+}
+
+function errorPresentationFromChunk(
+  error: ChatChunkError,
+  traceId?: string,
+): { message: string; quotaError: ChatQuotaError | null } {
+  const quotaError = quotaErrorFromChunk(error);
+  return {
+    // Structured day/week/month errors already carry the correct recovery path.
+    // The legacy 42901 mapping would incorrectly replace it with generic monthly copy.
+    message: toComplianceMessage(quotaError ? undefined : error.code, error.message, traceId),
+    quotaError,
+  };
+}
 
 /** Remember last open chat so refresh restores the deep-research session, not only newest-by-created. */
 const LAST_ACTIVE_SESSION_KEY = "agx-portal-last-active-session-v1";
@@ -169,6 +196,8 @@ export type ChatStoreState = {
   activeModel: string;
   activeRequestId: string | null;
   errorMessage: string | null;
+  /** Structured day/week/month enterprise quota rejection for precise user guidance. */
+  quotaError: ChatQuotaError | null;
   sessionTokens: SessionTokenUsage;
   /** 按会话累计 token，切换会话时与 sessionTokens 同步 */
   sessionTokensBySessionId: Record<string, SessionTokenUsage>;
@@ -1008,6 +1037,7 @@ function beginDraftSessionPatch(
     messages: withoutOldDraftMessages,
     status: "idle",
     errorMessage: null,
+    quotaError: null,
     activeRequestId: null,
     historyError: null,
     sessionMessagesLoading: false,
@@ -1060,6 +1090,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   activeModel: DEFAULT_MODEL,
   activeRequestId: null,
   errorMessage: null,
+  quotaError: null,
   sessionTokens: { ...EMPTY_USAGE },
   sessionTokensBySessionId: {},
   responseVersionsByUserMessageId: {},
@@ -1187,6 +1218,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         })
         .concat(userMessage),
       errorMessage: null,
+      quotaError: null,
       planChatRevising: true,
       // 清掉本会话排队，避免随后「立即发送」取消流并开新一轮。
       pendingMessages: prev.pendingMessages.filter((m) => m.sessionId !== sessionId),
@@ -1271,6 +1303,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 };
               }),
               errorMessage: null,
+              quotaError: null,
               planChatRevising: false,
             };
           }
@@ -1307,6 +1340,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               appended,
             ],
             errorMessage: null,
+            quotaError: null,
             planChatRevising: false,
             sessions: prev.sessions.map((session) =>
               session.id === sessionId
@@ -1368,6 +1402,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                     };
                   }),
                   errorMessage: null,
+                  quotaError: null,
                   planChatRevising: false,
                 };
               }
@@ -1401,6 +1436,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                   appended,
                 ],
                 errorMessage: null,
+                quotaError: null,
                 planChatRevising: false,
                 sessions: prev.sessions.map((session) =>
                   session.id === sessionId
@@ -1521,6 +1557,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           status: "idle",
           activeRequestId: null,
           errorMessage: null,
+          quotaError: null,
           sessionTokens: { ...EMPTY_USAGE },
           sessionTokensBySessionId: { [activeSessionId]: { ...EMPTY_USAGE } },
           responseVersionsByUserMessageId: responseVersions,
@@ -1583,6 +1620,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         activeModel: target.active_model ?? DEFAULT_MODEL,
         ...topLevelStreamFieldsForSession(prev, sessionId),
         errorMessage: null,
+        quotaError: null,
         sessionTokens: { ...tokens },
       }));
       return;
@@ -1597,6 +1635,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       activeModel: target.active_model ?? DEFAULT_MODEL,
       ...topLevelStreamFieldsForSession(prev, sessionId),
       errorMessage: null,
+      quotaError: null,
       sessionTokens: { ...tokens },
       sessionMessagesLoading: targetIsStreaming ? false : true,
     }));
@@ -1759,6 +1798,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         status: "idle",
         activeRequestId: null,
         errorMessage: null,
+        quotaError: null,
       };
     });
   },
@@ -1949,6 +1989,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       errorMessage: null,
+      quotaError: null,
       lastWebSearchBySessionId: {
         ...prev.lastWebSearchBySessionId,
         [sessionId]: webSearchEnabled,
@@ -2036,21 +2077,30 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
           setSessionStream(set, sessionId, null);
-          set({ errorMessage: null });
+          set((prev) =>
+            prev.activeSessionId === sessionId
+              ? { errorMessage: null, quotaError: null }
+              : {},
+          );
           break;
         }
 
         if (chunk.error) {
-          const complianceMessage = toComplianceMessage(
-            chunk.error.code,
-            chunk.error.message,
-            chunk.traceId,
-          );
+          const presentation = errorPresentationFromChunk(chunk.error, chunk.traceId);
           setSessionStream(set, sessionId, null);
-          set({ errorMessage: complianceMessage });
+          set((prev) =>
+            prev.activeSessionId === sessionId
+              ? {
+                  errorMessage: presentation.message,
+                  quotaError: presentation.quotaError,
+                }
+              : {},
+          );
           set((prev) => ({
             messages: prev.messages.map((message) =>
-              message.id === assistantMessage.id ? { ...message, content: complianceMessage } : message
+              message.id === assistantMessage.id
+                ? { ...message, content: presentation.message }
+                : message
             ),
           }));
           return;
@@ -2302,6 +2352,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, truncatedSessionMessages),
       errorMessage: null,
+      quotaError: null,
       lastWebSearchBySessionId: {
         ...prev.lastWebSearchBySessionId,
         [sessionId]: webSearchEnabled,
@@ -2362,21 +2413,30 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
           setSessionStream(set, sessionId, null);
-          set({ errorMessage: null });
+          set((prev) =>
+            prev.activeSessionId === sessionId
+              ? { errorMessage: null, quotaError: null }
+              : {},
+          );
           break;
         }
 
         if (chunk.error) {
-          const complianceMessage = toComplianceMessage(
-            chunk.error.code,
-            chunk.error.message,
-            chunk.traceId,
-          );
+          const presentation = errorPresentationFromChunk(chunk.error, chunk.traceId);
           setSessionStream(set, sessionId, null);
-          set({ errorMessage: complianceMessage });
+          set((prev) =>
+            prev.activeSessionId === sessionId
+              ? {
+                  errorMessage: presentation.message,
+                  quotaError: presentation.quotaError,
+                }
+              : {},
+          );
           set((prev) => ({
             messages: prev.messages.map((message) =>
-              message.id === replacementAssistant.id ? { ...message, content: complianceMessage } : message
+              message.id === replacementAssistant.id
+                ? { ...message, content: presentation.message }
+                : message
             ),
           }));
           return;
@@ -2591,6 +2651,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set((prev) => ({
       messages: mergeSessionMessages(prev.messages, sessionId, nextSessionMessages),
       errorMessage: null,
+      quotaError: null,
       lastWebSearchBySessionId: {
         ...prev.lastWebSearchBySessionId,
         [sessionId]: webSearchEnabled,
@@ -2646,21 +2707,30 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       for await (const chunk of client.stream(requestId)) {
         if (chunk.cancelled) {
           setSessionStream(set, sessionId, null);
-          set({ errorMessage: null });
+          set((prev) =>
+            prev.activeSessionId === sessionId
+              ? { errorMessage: null, quotaError: null }
+              : {},
+          );
           break;
         }
 
         if (chunk.error) {
-          const complianceMessage = toComplianceMessage(
-            chunk.error.code,
-            chunk.error.message,
-            chunk.traceId,
-          );
+          const presentation = errorPresentationFromChunk(chunk.error, chunk.traceId);
           setSessionStream(set, sessionId, null);
-          set({ errorMessage: complianceMessage });
+          set((prev) =>
+            prev.activeSessionId === sessionId
+              ? {
+                  errorMessage: presentation.message,
+                  quotaError: presentation.quotaError,
+                }
+              : {},
+          );
           set((prev) => ({
             messages: prev.messages.map((message) =>
-              message.id === replacementAssistant.id ? { ...message, content: complianceMessage } : message
+              message.id === replacementAssistant.id
+                ? { ...message, content: presentation.message }
+                : message
             ),
           }));
           return;

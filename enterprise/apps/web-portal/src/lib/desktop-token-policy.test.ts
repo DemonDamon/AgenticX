@@ -20,15 +20,18 @@ function queryDb(rows: Array<{ config: unknown }>) {
   return { select, from, where, limit };
 }
 
-describe("desktop token policy", () => {
+describe("desktop token alert policy", { timeout: 30_000 }, () => {
   const originalDatabaseUrl = process.env.DATABASE_URL;
+  let warn: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset());
+    warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     process.env.DATABASE_URL = "postgresql://example.invalid/agenticx";
   });
 
   afterEach(() => {
+    warn.mockRestore();
     if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = originalDatabaseUrl;
   });
@@ -85,5 +88,41 @@ describe("desktop token policy", () => {
     });
     expect(db.where).toHaveBeenCalledOnce();
     expect(mocks.getIamDb).not.toHaveBeenCalled();
+  });
+
+  it("falls back to defaults when an older PostgreSQL database has no budget table", async () => {
+    const db = queryDb([]);
+    db.limit.mockRejectedValueOnce(
+      Object.assign(new Error('relation "enterprise_runtime_budgets" does not exist'), {
+        code: "42P01",
+      }),
+    );
+    mocks.resolveDatabaseConfig.mockReturnValue({
+      dialect: "postgresql",
+      url: process.env.DATABASE_URL,
+    });
+    mocks.getIamDb.mockReturnValue(db);
+    const { loadDesktopSessionTokenLimits } = await import("./desktop-token-policy");
+
+    await expect(loadDesktopSessionTokenLimits("tenant-legacy")).resolves.toEqual({
+      warningTokensPerSession: 500_000,
+      maxTokensPerSession: 1_000_000,
+    });
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to defaults when the non-critical MySQL policy query fails", async () => {
+    mocks.resolveDatabaseConfig.mockReturnValue({
+      dialect: "mysql",
+      url: "mysql://example.invalid/agenticx",
+    });
+    mocks.createMysqlDb.mockRejectedValueOnce(new Error("temporary database failure"));
+    const { loadDesktopSessionTokenLimits } = await import("./desktop-token-policy");
+
+    await expect(loadDesktopSessionTokenLimits("tenant-unavailable")).resolves.toEqual({
+      warningTokensPerSession: 500_000,
+      maxTokensPerSession: 1_000_000,
+    });
+    expect(warn).toHaveBeenCalledOnce();
   });
 });

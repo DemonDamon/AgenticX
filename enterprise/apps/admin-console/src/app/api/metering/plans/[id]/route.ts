@@ -13,7 +13,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
   const guard = await requireAdminScope(["metering:read"]);
   if (!guard.ok) return guard.response;
   const { id } = await params;
-  const plan = await getQuotaPlan(id);
+  const plan = await getQuotaPlan(id, guard.session.tenantId);
   if (!plan) {
     return NextResponse.json({ code: "40401", message: "plan not found" }, { status: 404 });
   }
@@ -32,7 +32,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
   }
   try {
     if (body.status === "archived") {
-      const plan = await archiveQuotaPlan(id);
+      const plan = await archiveQuotaPlan(id, guard.session.tenantId);
       return NextResponse.json({ code: "00000", message: "ok", data: { plan } });
     }
     const plan = await updateQuotaPlan(id, {
@@ -57,7 +57,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
         body.status === "draft" || body.status === "active" || body.status === "archived"
           ? body.status
           : undefined,
-    });
+    }, guard.session.tenantId);
     return NextResponse.json({ code: "00000", message: "ok", data: { plan } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "update failed";
@@ -71,7 +71,7 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
   if (!guard.ok) return guard.response;
   const { id } = await params;
   try {
-    await deleteQuotaPlan(id);
+    await deleteQuotaPlan(id, guard.session.tenantId);
     return NextResponse.json({ code: "00000", message: "ok", data: { deleted: true } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "delete failed";

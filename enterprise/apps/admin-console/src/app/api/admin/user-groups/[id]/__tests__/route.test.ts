@@ -45,7 +45,7 @@ describe("user group update route", () => {
     mocks.getAdminUser.mockImplementation(async (_tenantId: string, userId: string) =>
       userId === "live" ? { id: "live" } : null,
     );
-    mocks.updateUserGroup.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({
+    mocks.updateUserGroup.mockImplementation(async (_tenantId: string, id: string, patch: Record<string, unknown>) => ({
       id,
       name: "新名称",
       memberIds: [],
@@ -92,10 +92,12 @@ describe("user group update route", () => {
       },
     });
     expect(mocks.updateUserGroup).toHaveBeenCalledWith(
+      "tenant-a",
       "group-a",
       expect.objectContaining({ name: "新名称", memberIds: ["live"] }),
     );
     expect(mocks.applyUserGroupPolicy).toHaveBeenCalledWith(
+      "tenant-a",
       expect.objectContaining({ memberIds: ["live"] }),
       [{ id: "live" }],
     );

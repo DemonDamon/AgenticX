@@ -5,7 +5,7 @@ import { createQuotaPlan, listQuotaPlans } from "../../../../lib/quota-plans-sto
 export async function GET() {
   const guard = await requireAdminScope(["metering:read"]);
   if (!guard.ok) return guard.response;
-  const plans = await listQuotaPlans();
+  const plans = await listQuotaPlans(guard.session.tenantId);
   return NextResponse.json({ code: "00000", message: "ok", data: { plans } });
 }
 
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
       maxConcurrency: Number(body.maxConcurrency ?? body.max_concurrency ?? 0),
       models: Array.isArray(body.models) ? body.models.map(String) : [],
       period: body.period === "week" ? "week" : "month",
-    });
+    }, guard.session.tenantId);
     return NextResponse.json({ code: "00000", message: "ok", data: { plan } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "create failed";

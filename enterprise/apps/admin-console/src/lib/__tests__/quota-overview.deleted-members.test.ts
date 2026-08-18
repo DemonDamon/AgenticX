@@ -84,5 +84,8 @@ describe("loadGroupQuotaOverview deleted members", () => {
     expect(overview.groups[0]?.memberIds).toEqual(["live"]);
     expect(overview.groups[0]?.memberCount).toBe(1);
     expect(overview.groups[0]?.members.map((member) => member.id)).toEqual(["live"]);
+    expect(mocks.getQuotaConfig).toHaveBeenCalledWith("tenant-a");
+    expect(mocks.listUserGroups).toHaveBeenCalledWith("tenant-a");
+    expect(mocks.listAllAssignments).toHaveBeenCalledWith("tenant-a");
   });
 });

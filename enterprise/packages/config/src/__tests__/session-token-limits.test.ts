@@ -18,7 +18,7 @@ describe("session token limits", () => {
     });
   });
 
-  it("accepts a bounded warning threshold below the hard stop", () => {
+  it("accepts an ordered yellow and red alert pair", () => {
     const value = {
       warningTokensPerSession: 750_000,
       maxTokensPerSession: 1_500_000,

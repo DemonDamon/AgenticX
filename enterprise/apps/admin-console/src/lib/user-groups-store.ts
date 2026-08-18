@@ -56,15 +56,15 @@ function normalizeDescription(value: unknown): string | undefined {
   return description || undefined;
 }
 
-export async function listUserGroups(): Promise<UserGroupRecord[]> {
-  const config = await getQuotaConfig();
+export async function listUserGroups(tenantId: string): Promise<UserGroupRecord[]> {
+  const config = await getQuotaConfig(tenantId);
   return Object.entries(groupsOf(config))
     .map(([id, group]) => asRecord(id, group))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-export async function getUserGroup(id: string): Promise<UserGroupRecord | null> {
-  const config = await getQuotaConfig();
+export async function getUserGroup(tenantId: string, id: string): Promise<UserGroupRecord | null> {
+  const config = await getQuotaConfig(tenantId);
   const group = groupsOf(config)[id];
   return group ? asRecord(id, group) : null;
 }
@@ -91,13 +91,17 @@ export function groupModelExclusionsForUser(config: QuotaConfig, userId: string)
   return normalizeIds(config.modelExclusions?.[userId]);
 }
 
-export async function setUserGroupModelExclusions(userId: string, modelIds: unknown): Promise<string[]> {
-  const config = await getQuotaConfig();
+export async function setUserGroupModelExclusions(
+  tenantId: string,
+  userId: string,
+  modelIds: unknown,
+): Promise<string[]> {
+  const config = await getQuotaConfig(tenantId);
   const exclusions = { ...(config.modelExclusions ?? {}) };
   const normalized = normalizeIds(modelIds);
   if (normalized.length > 0) exclusions[userId] = normalized;
   else delete exclusions[userId];
-  await setQuotaConfig({ ...config, modelExclusions: exclusions });
+  await setQuotaConfig({ modelExclusions: exclusions, updatedAt: config.updatedAt }, tenantId);
   return normalized;
 }
 
@@ -112,8 +116,8 @@ export function groupQuotaSourceForUser(
   );
 }
 
-export async function createUserGroup(input: UserGroupInput): Promise<UserGroupRecord> {
-  const config = await getQuotaConfig();
+export async function createUserGroup(tenantId: string, input: UserGroupInput): Promise<UserGroupRecord> {
+  const config = await getQuotaConfig(tenantId);
   const id = ulid();
   const now = new Date().toISOString();
   const description = normalizeDescription(input.description);
@@ -128,12 +132,16 @@ export async function createUserGroup(input: UserGroupInput): Promise<UserGroupR
   };
   const groups = groupsOf(config);
   groups[id] = group;
-  await setQuotaConfig({ ...config, groups });
+  await setQuotaConfig({ groups, updatedAt: config.updatedAt }, tenantId);
   return asRecord(id, group);
 }
 
-export async function updateUserGroup(id: string, input: Partial<UserGroupInput>): Promise<UserGroupRecord> {
-  const config = await getQuotaConfig();
+export async function updateUserGroup(
+  tenantId: string,
+  id: string,
+  input: Partial<UserGroupInput>,
+): Promise<UserGroupRecord> {
+  const config = await getQuotaConfig(tenantId);
   const groups = groupsOf(config);
   const current = groups[id];
   if (!current) throw new Error("user group not found");
@@ -150,18 +158,19 @@ export async function updateUserGroup(id: string, input: Partial<UserGroupInput>
   if (description) next.description = description;
   else delete next.description;
   groups[id] = next;
-  await setQuotaConfig({ ...config, groups });
+  await setQuotaConfig({ groups, updatedAt: config.updatedAt }, tenantId);
   return asRecord(id, next);
 }
 
 /** 保存用户组的每人额度；模型范围始终在运行时由用户组派生。 */
 export async function applyUserGroupPolicy(
+  tenantId: string,
   group: UserGroupRecord,
   members: UserGroupPolicyMember[],
 ): Promise<void> {
   if (members.length === 0) return;
 
-  const config = await getQuotaConfig();
+  const config = await getQuotaConfig(tenantId);
   const users = { ...config.users };
   for (const member of members) {
     users[member.id] = {
@@ -171,7 +180,7 @@ export async function applyUserGroupPolicy(
       action: "block",
     };
   }
-  await setQuotaConfig({ ...config, users });
+  await setQuotaConfig({ users, updatedAt: config.updatedAt }, tenantId);
 }
 
 /**
@@ -180,11 +189,11 @@ export async function applyUserGroupPolicy(
  * Group membership is embedded in the quota payload rather than protected by
  * an IAM foreign key, so deleting the IAM row cannot cascade this reference.
  */
-export async function removeUserFromAllGroups(userId: string): Promise<number> {
+export async function removeUserFromAllGroups(tenantId: string, userId: string): Promise<number> {
   const normalizedUserId = String(userId ?? "").trim();
   if (!normalizedUserId) return 0;
 
-  const config = await getQuotaConfig();
+  const config = await getQuotaConfig(tenantId);
   const groups = groupsOf(config);
   const updatedAt = new Date().toISOString();
   let changedGroups = 0;
@@ -200,16 +209,16 @@ export async function removeUserFromAllGroups(userId: string): Promise<number> {
   }
 
   if (changedGroups > 0) {
-    await setQuotaConfig({ ...config, groups });
+    await setQuotaConfig({ groups, updatedAt: config.updatedAt }, tenantId);
   }
   return changedGroups;
 }
 
-export async function deleteUserGroup(id: string): Promise<boolean> {
-  const config = await getQuotaConfig();
+export async function deleteUserGroup(tenantId: string, id: string): Promise<boolean> {
+  const config = await getQuotaConfig(tenantId);
   const groups = groupsOf(config);
   if (!groups[id]) return false;
   delete groups[id];
-  await setQuotaConfig({ ...config, groups });
+  await setQuotaConfig({ groups, updatedAt: config.updatedAt }, tenantId);
   return true;
 }

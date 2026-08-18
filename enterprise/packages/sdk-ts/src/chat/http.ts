@@ -3,6 +3,7 @@ import type { DeepResearchEvent } from "../deep-research";
 import { newTraceId } from "../trace/trace-id";
 import type {
   ChatChunk,
+  ChatChunkError,
   ChatMessage,
   ChatRequest,
   SendMessageResult,
@@ -35,14 +36,44 @@ function makeRequestId(): string {
   return `http_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function parseErrorPayload(raw: unknown): { code: string; message: string } {
+const CHAT_QUOTA_ERROR_KINDS = new Set(["token_day", "token_week", "monthly"]);
+
+function optionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function parseErrorObject(raw: unknown): ChatChunkError {
+  const error = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const code = typeof error.code === "string" ? error.code : "50000";
+  const message = typeof error.message === "string" ? error.message : "Gateway request failed";
+  const kind = optionalString(error.kind);
+  if (!kind || !CHAT_QUOTA_ERROR_KINDS.has(kind)) return { code, message };
+  const period = optionalString(error.period);
+  const resetAt = optionalString(error.resetAt);
+  const used = optionalFiniteNumber(error.used);
+  const limit = optionalFiniteNumber(error.limit);
+  return {
+    code,
+    message,
+    kind: kind as NonNullable<ChatChunkError["kind"]>,
+    ...(period ? { period } : {}),
+    ...(resetAt ? { resetAt } : {}),
+    ...(used !== undefined ? { used } : {}),
+    ...(limit !== undefined ? { limit } : {}),
+  };
+}
+
+function parseErrorPayload(raw: unknown): ChatChunkError {
   if (raw && typeof raw === "object" && "error" in raw) {
-    const error = (raw as { error?: { code?: unknown; message?: unknown } }).error;
-    const code = typeof error?.code === "string" ? error.code : "50000";
-    const message = typeof error?.message === "string" ? error.message : "Gateway request failed";
     // A structured server/upstream error is not a browser transport failure.
     // Preserve it so operators can diagnose the real provider error.
-    return { code, message };
+    return parseErrorObject((raw as { error?: unknown }).error);
   }
   return { code: "50000", message: "Gateway request failed" };
 }
@@ -305,7 +336,7 @@ export class HttpChatClient implements ChatClient {
           done: true,
           traceId: pending.traceId,
           error: {
-            code: parsed.code,
+            ...parsed,
             message: appendRequestId(parsed.message, pending.traceId),
           },
         };
@@ -379,7 +410,7 @@ export class HttpChatClient implements ChatClient {
             agenticx_web_search_trace?: unknown;
             agenticx_deep_research_event?: DeepResearchEvent;
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-            error?: { code?: string; message?: string };
+            error?: Record<string, unknown>;
           };
           try {
             chunk = JSON.parse(data) as typeof chunk;
@@ -389,16 +420,17 @@ export class HttpChatClient implements ChatClient {
           }
 
           if (chunk.error) {
+            const parsed = parseErrorObject(chunk.error);
             yield {
               requestId,
               done: true,
               traceId: pending.traceId,
               error: {
-                code: chunk.error.code ?? "50000",
+                ...parsed,
                 // Preserve structured Gateway/upstream errors. Only exceptions thrown
                 // by browser fetch/read are normalized in the outer catch below.
                 message: appendRequestId(
-                  chunk.error.message ?? "Gateway request failed",
+                  parsed.message,
                   pending.traceId,
                 ),
               },

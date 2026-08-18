@@ -6,7 +6,7 @@ export async function POST() {
   const guard = await requireAdminScope(["metering:manage"]);
   if (!guard.ok) return guard.response;
   try {
-    const results = await rolloverDueAssignments();
+    const results = await rolloverDueAssignments(guard.session.tenantId);
     return NextResponse.json({ code: "00000", message: "ok", data: { results } });
   } catch (err) {
     const message = err instanceof Error ? err.message : "rollover failed";

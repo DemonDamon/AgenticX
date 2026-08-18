@@ -33,7 +33,7 @@ describe("company monthly limits", () => {
     expect(next.departments).toEqual(BASE.departments);
   });
 
-  it("uses the standard session defaults without rewriting unrelated limits", () => {
+  it("uses the standard session alert defaults without rewriting unrelated limits", () => {
     expect(sessionTokenLimits(BASE)).toEqual({
       warningTokensPerSession: 500_000,
       maxTokensPerSession: 1_000_000,

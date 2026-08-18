@@ -37,7 +37,7 @@ import {
   toast,
 } from "@agenticx/ui";
 import { useTranslations } from "next-intl";
-import { BarChart3, Download, FileSpreadsheet, Filter, RefreshCcw, Search, Trash2 } from "lucide-react";
+import { BarChart3, Download, FileSpreadsheet, Filter, RefreshCcw, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { TokenHeatmap, type HeatmapCell } from "../../components/metering/TokenHeatmap";
 import { companyMonthlyLimits, type BudgetConfig } from "../../lib/company-monthly-limits";
 
@@ -91,6 +91,7 @@ async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
 
 export default function MeteringPage() {
   const t = useTranslations("pages.ops.metering");
+  const tq = useTranslations("pages.ops.quota");
   const tc = useTranslations("common");
   const ts = useTranslations("shell");
   const [dept, setDept] = useState(ALL);
@@ -495,6 +496,12 @@ export default function MeteringPage() {
         description={t("description")}
         actions={
           <>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/metering/quota">
+                <SlidersHorizontal />
+                {tq("title")}
+              </Link>
+            </Button>
             <Button
               variant="outline"
               size="sm"

@@ -946,20 +946,20 @@
         "restart": "重新开始",
         "monthlyLimits": {
           "title": "组织用量控制",
-          "description": "统一设置组织月度用量和桌面端单会话资源限制。",
+          "description": "统一设置组织月度用量限制和桌面端单会话提醒。",
           "monthlySectionTitle": "月度用量上限",
           "monthlySectionDescription": "Token 与成本预算相互独立，任一达到上限都会停止新的模型请求。设置为 0 表示不限额。",
           "tokenLabel": "每月 Token 上限",
           "tokenDescription": "第一道硬上限，不依赖模型价格配置，价格尚未维护时仍然生效。",
           "costLabel": "每月预算上限（USD）",
           "costDescription": "第二道硬上限，按模型实际输入、输出 Token 与已配置单价累计。",
-          "sessionSectionTitle": "桌面端单会话限制",
-          "sessionSectionDescription": "成员登录企业账号时自动同步；达到停止阈值的当前轮会完成，从下一轮开始停止。",
-          "sessionWarningLabel": "提醒阈值（Token）",
-          "sessionWarningDescription": "默认 500,000。达到后提醒用户收敛当前任务。",
-          "sessionHardLabel": "停止阈值（Token）",
-          "sessionHardDescription": "默认 1,000,000。必须高于提醒阈值。",
-          "sessionValidation": "提醒阈值须为至少 50,000 的整数，停止阈值须更高且不超过 5,000,000。",
+          "sessionSectionTitle": "桌面端单会话提醒",
+          "sessionSectionDescription": "成员登录企业账号时自动同步。黄色和红色均只提醒，不中断任务，也不阻止后续对话；模型上下文接近窗口时仍会按既有机制整理。",
+          "sessionYellowLabel": "黄色提醒阈值（Token）",
+          "sessionYellowDescription": "默认 500,000。达到后提示当前会话已消耗较多 Token。",
+          "sessionRedLabel": "红色提醒阈值（Token）",
+          "sessionRedDescription": "默认 1,000,000；最小 100,000，且必须高于黄色提醒阈值。",
+          "sessionValidation": "黄色提醒阈值须为至少 50,000 的整数；红色提醒阈值须为至少 100,000 的整数、高于黄色提醒阈值且不超过 5,000,000。",
           "unlimitedPlaceholder": "0（不限额）",
           "save": "保存",
           "saving": "保存中…",
@@ -1512,8 +1512,8 @@
       },
       "quota": {
         "breadcrumbQuota": "额度控制",
-        "title": "Token 额度控制",
-        "description": "租户 / 部门 / 用户 / API 令牌四维度配额：monthly、TPM、RPM、并发。",
+        "title": "日 / 周 / 月 Token 额度",
+        "description": "按角色、部门、用户和 API 令牌设置每日、每周、每月额度。选择拦截策略时，已开始的完整任务可继续完成，超额后从下一个任务起拦截；TPM、RPM 与并发限制仍即时生效。",
         "tabs": {
           "roles": "角色默认",
           "departments": "部门",
@@ -1557,9 +1557,20 @@
         "assignDesc": "绑定 tenant / 部门 / 用户；升档可勾选「下周期生效」。",
         "empty": "暂无套餐",
         "pendingUpgrade": "待升档",
-        "period": { "month": "按月", "week": "按周" },
-        "status": { "draft": "草稿", "active": "已发布", "archived": "已归档" },
-        "scope": { "tenant": "租户", "dept": "部门", "user": "用户" },
+        "period": {
+          "month": "按月",
+          "week": "按周"
+        },
+        "status": {
+          "draft": "草稿",
+          "active": "已发布",
+          "archived": "已归档"
+        },
+        "scope": {
+          "tenant": "租户",
+          "dept": "部门",
+          "user": "用户"
+        },
         "fields": {
           "name": "套餐名称",
           "monthlyTokens": "月 Token 额度",

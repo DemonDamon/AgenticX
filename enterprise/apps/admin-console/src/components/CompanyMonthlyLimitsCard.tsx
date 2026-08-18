@@ -21,7 +21,6 @@ import {
   companyMonthlyLimits,
   sessionTokenLimits,
   withCompanyMonthlyLimits,
-  withSessionTokenLimits,
   type BudgetConfig,
 } from "../lib/company-monthly-limits";
 
@@ -37,7 +36,7 @@ export function CompanyMonthlyLimitsCard() {
   const [tokens, setTokens] = useState(0);
   const [costUsd, setCostUsd] = useState(0);
   const [warningTokensPerSession, setWarningTokensPerSession] = useState(500_000);
-  const [maxTokensPerSession, setMaxTokensPerSession] = useState(1_000_000);
+  const [redTokensPerSession, setRedTokensPerSession] = useState(1_000_000);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -48,12 +47,12 @@ export function CompanyMonthlyLimitsCard() {
     setTokens(limits.tokens);
     setCostUsd(limits.costUsd);
     setWarningTokensPerSession(sessionLimits.warningTokensPerSession);
-    setMaxTokensPerSession(sessionLimits.maxTokensPerSession);
+    setRedTokensPerSession(sessionLimits.maxTokensPerSession);
   }, []);
 
   const validSessionLimits = isValidSessionTokenLimits({
     warningTokensPerSession,
-    maxTokensPerSession,
+    maxTokensPerSession: redTokensPerSession,
   });
 
   const load = useCallback(async () => {
@@ -83,14 +82,21 @@ export function CompanyMonthlyLimitsCard() {
     if (!budget || saving) return;
     setSaving(true);
     try {
-      const nextBudget = withSessionTokenLimits(
-        withCompanyMonthlyLimits(budget, { tokens, costUsd }),
-        { warningTokensPerSession, maxTokensPerSession },
-      );
+      const companyPatch = withCompanyMonthlyLimits(budget, { tokens, costUsd });
       const response = await adminFetch("/api/metering/budget", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(nextBudget),
+        body: JSON.stringify({
+          expectedUpdatedAt: budget.updatedAt,
+          companyLimits: companyPatch.companyLimits,
+          sessionTokenLimits: {
+            warningTokensPerSession,
+            maxTokensPerSession: redTokensPerSession,
+          },
+          ...(companyPatch.defaults !== budget.defaults
+            ? { defaults: companyPatch.defaults }
+            : {}),
+        }),
       });
       const json = await readAdminJsonResponse<BudgetEnvelope>(response, t("saveFailed"));
       if (!response.ok || json.code !== "00000" || !json.data?.budget) {
@@ -184,9 +190,15 @@ export function CompanyMonthlyLimitsCard() {
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="session-token-warning-limit">{t("sessionWarningLabel")}</Label>
+                  <Label
+                    htmlFor="session-token-yellow-alert"
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden />
+                    {t("sessionYellowLabel")}
+                  </Label>
                   <Input
-                    id="session-token-warning-limit"
+                    id="session-token-yellow-alert"
                     inputMode="numeric"
                     value={warningTokensPerSession || ""}
                     onChange={(event) => {
@@ -196,23 +208,29 @@ export function CompanyMonthlyLimitsCard() {
                     disabled={!budget || saving}
                   />
                   <p className="text-xs leading-5 text-muted-foreground">
-                    {t("sessionWarningDescription")}
+                    {t("sessionYellowDescription")}
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="session-token-hard-limit">{t("sessionHardLabel")}</Label>
+                  <Label
+                    htmlFor="session-token-red-alert"
+                    className="inline-flex items-center gap-1.5"
+                  >
+                    <span className="h-2 w-2 rounded-full bg-red-500" aria-hidden />
+                    {t("sessionRedLabel")}
+                  </Label>
                   <Input
-                    id="session-token-hard-limit"
+                    id="session-token-red-alert"
                     inputMode="numeric"
-                    value={maxTokensPerSession || ""}
+                    value={redTokensPerSession || ""}
                     onChange={(event) => {
                       const value = event.target.value.replace(/[^0-9]/g, "");
-                      setMaxTokensPerSession(value ? Number(value) : 0);
+                      setRedTokensPerSession(value ? Number(value) : 0);
                     }}
                     disabled={!budget || saving}
                   />
                   <p className="text-xs leading-5 text-muted-foreground">
-                    {t("sessionHardDescription")}
+                    {t("sessionRedDescription")}
                   </p>
                 </div>
               </div>

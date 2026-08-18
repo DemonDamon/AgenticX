@@ -26,7 +26,7 @@ async function resolveKnownMembers(tenantId: string, memberIds: string[]): Promi
 export async function GET() {
   const auth = await requireAdminScope(["user:read"]);
   if (!auth.ok) return auth.response;
-  const items = await listUserGroups();
+  const items = await listUserGroups(auth.session.tenantId);
   return NextResponse.json({ code: "00000", message: "ok", data: { items } });
 }
 
@@ -37,14 +37,14 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const memberIds = memberIdsFrom(body.memberIds);
     const members = await resolveKnownMembers(auth.session.tenantId, memberIds);
-    const group = await createUserGroup({
+    const group = await createUserGroup(auth.session.tenantId, {
       name: typeof body.name === "string" ? body.name : "",
       description: typeof body.description === "string" ? body.description : null,
       memberIds,
       monthlyTokens: typeof body.monthlyTokens === "number" ? body.monthlyTokens : Number(body.monthlyTokens ?? 0),
       modelIds: modelIdsFrom(body.modelIds),
     } satisfies UserGroupInput);
-    await applyUserGroupPolicy(group, members);
+    await applyUserGroupPolicy(auth.session.tenantId, group, members);
     return NextResponse.json({ code: "00000", message: "ok", data: { group } });
   } catch (error) {
     return NextResponse.json(

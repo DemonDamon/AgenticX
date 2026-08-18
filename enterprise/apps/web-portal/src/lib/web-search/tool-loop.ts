@@ -814,6 +814,32 @@ function frameHasContentDelta(data: string): boolean {
   }
 }
 
+function structuredUpstreamErrorFrame(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw) as { error?: unknown };
+    if (!parsed || typeof parsed !== "object" || !parsed.error || typeof parsed.error !== "object") {
+      return null;
+    }
+    const error = parsed.error as Record<string, unknown>;
+    if (!new Set(["token_day", "token_week", "monthly"]).has(String(error.kind ?? ""))) {
+      return null;
+    }
+    if (typeof error.message !== "string" || typeof error.code !== "string") return null;
+    const sanitized: Record<string, unknown> = {
+      code: error.code,
+      message: error.message,
+      kind: error.kind,
+    };
+    if (typeof error.period === "string") sanitized.period = error.period;
+    if (typeof error.resetAt === "string") sanitized.resetAt = error.resetAt;
+    if (typeof error.used === "number" && Number.isFinite(error.used)) sanitized.used = error.used;
+    if (typeof error.limit === "number" && Number.isFinite(error.limit)) sanitized.limit = error.limit;
+    return `data: ${JSON.stringify({ error: sanitized })}\n\n`;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Pipe an upstream SSE body to the browser. Never leave the client with a hard-closed
  * stream after sources were already sent — always finish with an error frame + [DONE].
@@ -826,6 +852,7 @@ export async function pipeUpstreamSse(upstream: Response, options: PipeOptions =
   if (!upstream.ok || !upstream.body) {
     const errText = await upstream.text().catch(() => "gateway error");
     const message = extractUpstreamErrorMessage(errText, upstream.status);
+    const structuredErrorFrame = structuredUpstreamErrorFrame(errText);
     // A diagnostic-only trace must never change HTTP error semantics. Preserve
     // the legacy SSE recovery only when search sources were already produced.
     if (sourcesFrame) {
@@ -836,7 +863,8 @@ export async function pipeUpstreamSse(upstream: Response, options: PipeOptions =
           if (traceFrame) controller.enqueue(encoder.encode(traceFrame));
           controller.enqueue(
             encoder.encode(
-              formatSseErrorFrame(`模型回答失败：${message}`, String(upstream.status || 502)),
+              structuredErrorFrame ??
+                formatSseErrorFrame(`模型回答失败：${message}`, String(upstream.status || 502)),
             ),
           );
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));

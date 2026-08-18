@@ -453,6 +453,122 @@ describe("HttpChatClient stream cancel", () => {
     expect(cancelSpy).toHaveBeenCalled();
   });
 
+  it("preserves structured daily quota details from a rejected HTTP response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          json: async () => ({
+            error: {
+              code: "42901",
+              message: "今日 Token 额度已用尽",
+              kind: "token_day",
+              period: "2026-08-18",
+              resetAt: "2026-08-19T00:00:00Z",
+              used: 1_200,
+              limit: 1_000,
+            },
+          }),
+        } as unknown as Response),
+      ),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+
+    expect(chunks.at(-1)?.error).toMatchObject({
+      code: "42901",
+      kind: "token_day",
+      period: "2026-08-18",
+      resetAt: "2026-08-19T00:00:00Z",
+      used: 1_200,
+      limit: 1_000,
+    });
+  });
+
+  it("preserves structured monthly quota details from an SSE error frame", async () => {
+    const payload =
+      'data: {"error":{"code":"42901","message":"本月 Token 额度已用尽","kind":"monthly","period":"2026-08","resetAt":"2026-09-01T00:00:00Z","used":2100,"limit":2000}}\n\n';
+    const bodyStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(payload));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({}),
+          body: bodyStream,
+        } as unknown as Response),
+      ),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+
+    expect(chunks.at(-1)?.error).toMatchObject({
+      kind: "monthly",
+      period: "2026-08",
+      resetAt: "2026-09-01T00:00:00Z",
+      used: 2_100,
+      limit: 2_000,
+    });
+  });
+
+  it("does not promote an ordinary rate-limit error into a quota error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          json: async () => ({
+            error: {
+              code: "42900",
+              message: "请求过于频繁",
+              kind: "requests_minute",
+              used: 61,
+              limit: 60,
+            },
+          }),
+        } as unknown as Response),
+      ),
+    );
+
+    const client = new HttpChatClient({ endpoint: "/api/chat/completions" });
+    const { requestId } = await client.sendMessage({
+      sessionId: "session-1",
+      model: "test-model",
+      messages: [{ id: "u1", role: "user", content: "hello", createdAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const chunks = [];
+    for await (const chunk of client.stream(requestId)) chunks.push(chunk);
+
+    expect(chunks.at(-1)?.error).toEqual(
+      expect.objectContaining({ code: "42900" }),
+    );
+    expect(chunks.at(-1)?.error).not.toHaveProperty("kind");
+    expect(chunks.at(-1)?.error).not.toHaveProperty("used");
+  });
+
   it("normalizes opaque browser network errors to actionable Chinese copy", () => {
     expect(normalizeTransportErrorMessage("Failed to fetch")).toContain("无法连接门户服务");
     expect(normalizeTransportErrorMessage("network error")).toContain("无法连接门户服务");

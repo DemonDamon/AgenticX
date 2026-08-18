@@ -1,5 +1,7 @@
 export type SessionTokenLimits = {
+  /** First (yellow) alert. */
   warningTokensPerSession: number;
+  /** Wire-compatible name for the second (red) alert; this is not a blocking cap. */
   maxTokensPerSession: number;
 };
 
@@ -21,7 +23,7 @@ function isIntegerInRange(value: unknown, minimum: number, maximum: number): val
   );
 }
 
-/** Strict request validation for the pair saved by an enterprise administrator. */
+/** Strict request validation for the ordered yellow/red alert pair. */
 export function isValidSessionTokenLimits(value: unknown): value is SessionTokenLimits {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;

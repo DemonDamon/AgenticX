@@ -57,5 +57,9 @@ export async function insertMysqlRuntimeQuota(
   row: typeof enterpriseRuntimeTokenQuotas.$inferInsert,
 ): Promise<void> {
   const db = await getMysqlRepositoryDb();
-  await db.insert(enterpriseRuntimeTokenQuotas).values(row);
+  await db.insert(enterpriseRuntimeTokenQuotas).values(row).onDuplicateKeyUpdate({
+    // A concurrent initializer may have inserted the row after our existence
+    // check. Preserve that winner rather than replacing its quota snapshot.
+    set: { tenantId: row.tenantId },
+  });
 }

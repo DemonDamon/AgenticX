@@ -9,7 +9,7 @@ export async function POST(_request: Request, { params }: RouteParams) {
   if (!guard.ok) return guard.response;
   const { id } = await params;
   try {
-    const result = await publishQuotaPlan(id);
+    const result = await publishQuotaPlan(id, guard.session.tenantId);
     return NextResponse.json({ code: "00000", message: "ok", data: result });
   } catch (err) {
     const message = err instanceof Error ? err.message : "publish failed";

@@ -391,25 +391,68 @@ export default function MeteringQuotaPage() {
     void load();
   }, []);
 
-  const save = async () => {
-    const [quotaRes, budgetRes] = await Promise.all([
-      adminFetch("/api/metering/quota", {
+  const saveQuota = async () => {
+    setLoading(true);
+    try {
+      const response = await adminFetch("/api/metering/quota", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(quota),
-      }),
-      adminFetch("/api/metering/budget", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(budget),
-      }),
-    ]);
-    if (!quotaRes.ok || !budgetRes.ok) {
-      toast.error(tc("toast.saveFailed"));
-      return;
+        body: JSON.stringify({
+          expectedUpdatedAt: quota.updatedAt,
+          defaults: quota.defaults,
+          users: quota.users,
+          departments: quota.departments,
+          apiTokens: quota.apiTokens ?? {},
+        }),
+      });
+      const json = (await response.json()) as {
+        message?: string;
+        data?: { quota?: QuotaConfig };
+      };
+      if (!response.ok || !json.data?.quota) {
+        toast.error(
+          response.status === 409
+            ? "配额已被其他管理员更新，请刷新后重试"
+            : (json.message ?? tc("toast.saveFailed")),
+        );
+        return;
+      }
+      setQuota({ ...EMPTY, ...json.data.quota, apiTokens: json.data.quota.apiTokens ?? {} });
+      toast.success("配额已保存");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : tc("toast.saveFailed"));
+    } finally {
+      setLoading(false);
     }
-    toast.success(t("toast.saveSuccess"));
-    await load();
+  };
+
+  const saveBudget = async () => {
+    setLoading(true);
+    try {
+      const response = await adminFetch("/api/metering/budget", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...budget, expectedUpdatedAt: budget.updatedAt }),
+      });
+      const json = (await response.json()) as {
+        message?: string;
+        data?: { budget?: BudgetConfig };
+      };
+      if (!response.ok || !json.data?.budget) {
+        toast.error(
+          response.status === 409
+            ? "预算已被其他管理员更新，请刷新后重试"
+            : (json.message ?? tc("toast.saveFailed")),
+        );
+        return;
+      }
+      setBudget({ ...EMPTY_BUDGET, ...json.data.budget });
+      toast.success("预算已保存");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : tc("toast.saveFailed"));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const updateMap = (scope: "users" | "departments" | "apiTokens", key: string, patch: Partial<QuotaRule>) => {
@@ -493,10 +536,16 @@ export default function MeteringQuotaPage() {
         title={t("title")}
         description={t("description")}
         actions={
-          <Button size="sm" onClick={save} disabled={loading}>
-            <Save className="h-4 w-4" />
-            {tc("actions.save")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={saveQuota} disabled={loading}>
+              <Save className="h-4 w-4" />
+              保存配额
+            </Button>
+            <Button size="sm" onClick={saveBudget} disabled={loading}>
+              <Save className="h-4 w-4" />
+              保存预算
+            </Button>
+          </div>
         }
       />
 

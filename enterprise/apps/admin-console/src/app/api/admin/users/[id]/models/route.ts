@@ -27,9 +27,9 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
   }
   const [payload, groups, assignments, quotaConfig] = await Promise.all([
     readUserEditPayload(id, user.email, user.deptId),
-    listUserGroups(),
+    listUserGroups(auth.session.tenantId),
     listAllAssignments(),
-    getQuotaConfig(),
+    getQuotaConfig(auth.session.tenantId),
   ]);
   const allowed = new Set(payload.parentAllowedIds);
   const storedModelIds = mergeUserStoredSet(assignments, collectUserAssignmentKeys(id, user.email)) ?? [];
@@ -74,7 +74,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     const body = (await request.json()) as Record<string, unknown>;
     const raw = Array.isArray(body.modelIds) ? body.modelIds : [];
     const modelIds = raw.filter((x): x is string => typeof x === "string");
-    const groups = await listUserGroups();
+    const groups = await listUserGroups(auth.session.tenantId);
     const groupModelIds = new Set(groupModelSourcesForUser(groups, id).flatMap((group) => group.modelIds));
     const individualModelIds = modelIds.filter((modelId) => !groupModelIds.has(modelId));
     const rawExclusions = Array.isArray(body.excludedGroupModelIds) ? body.excludedGroupModelIds : [];
@@ -83,7 +83,11 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     );
     const saved = await setUserModels(id, individualModelIds, user.deptId);
     await setUserModels(`email:${user.email.toLowerCase()}`, saved.modelIds, user.deptId);
-    const savedExclusions = await setUserGroupModelExclusions(id, excludedGroupModelIds);
+    const savedExclusions = await setUserGroupModelExclusions(
+      auth.session.tenantId,
+      id,
+      excludedGroupModelIds,
+    );
     return NextResponse.json({
       code: "00000",
       message: "ok",

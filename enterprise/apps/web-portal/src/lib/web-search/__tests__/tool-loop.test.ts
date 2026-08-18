@@ -1310,6 +1310,35 @@ describe("web search tool loop", () => {
     expect(text.trimEnd().endsWith("data: [DONE]")).toBe(true);
   });
 
+  it("preserves a structured weekly quota error after search sources", async () => {
+    const upstream = new Response(
+      JSON.stringify({
+        error: {
+          code: "42901",
+          message: "本周 Token 额度已用尽",
+          kind: "token_week",
+          period: "2026-W34",
+          resetAt: "2026-08-24T00:00:00Z",
+          used: 1_100,
+          limit: 1_000,
+        },
+      }),
+      { status: 429, headers: { "content-type": "application/json" } },
+    );
+    const hits: WebSearchHit[] = [{ title: "T", url: "https://ex.com", snippet: "s" }];
+    const res = await pipeUpstreamSse(upstream, {
+      sourcesFrame: `data: ${JSON.stringify({ agenticx_web_search_sources: hits })}\n\n`,
+    });
+
+    expect(res.status).toBe(200);
+    const text = await readText(res);
+    expect(text).toContain("agenticx_web_search_sources");
+    expect(text).toContain('"kind":"token_week"');
+    expect(text).toContain('"period":"2026-W34"');
+    expect(text).toContain('"resetAt":"2026-08-24T00:00:00Z"');
+    expect(text).not.toContain("模型回答失败");
+  });
+
   it("compacts long snippets before model injection", () => {
     const long = "字".repeat(WEB_SEARCH_CONTEXT_SNIPPET_CHARS + 80);
     const compacted = compactHitsForModel([{ title: "T", url: "https://ex.com", snippet: long }]);

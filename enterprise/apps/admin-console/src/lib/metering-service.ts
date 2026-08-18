@@ -32,9 +32,9 @@ export async function queryMetering(input: {
   start: string;
   end: string;
   group_by: MeteringGroupKey[];
-}) {
+}, tenantId?: string) {
   return meteringApi.query({
-    tenant_id: resolveTenantId(),
+    tenant_id: tenantId?.trim() || resolveTenantId(),
     ...input,
   });
 }

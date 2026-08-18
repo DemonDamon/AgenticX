@@ -5,6 +5,13 @@ import { prepareGatewayForward } from "../../../../../../lib/gateway-forward";
 const GATEWAY_COMPLETIONS_URL =
   process.env.GATEWAY_COMPLETIONS_URL ?? "http://127.0.0.1:8088/v1/chat/completions";
 
+const AGENTIC_REQUEST_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function forwardedAgenticRequestId(request: Request, header: string): string {
+  const value = request.headers.get(header)?.trim() ?? "";
+  return AGENTIC_REQUEST_ID_RE.test(value) ? value : "";
+}
+
 function extractBearer(request: Request): string {
   const header = request.headers.get("authorization") ?? request.headers.get("Authorization") ?? "";
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
@@ -55,6 +62,8 @@ export async function POST(request: Request) {
   }
 
   const pat = extractBearer(request);
+  const turnId = forwardedAgenticRequestId(request, "x-agenticx-turn-id");
+  const traceId = forwardedAgenticRequestId(request, "x-agenticx-trace-id");
   const rawBody = await request.text();
   const prepared = await prepareGatewayForward(rawBody, {
     userId: identity.userId,
@@ -79,6 +88,8 @@ export async function POST(request: Request) {
         "x-user-id": identity.userId,
         "x-dept-id": identity.deptId ?? "",
         "x-user-email": identity.email,
+        ...(turnId ? { "x-agenticx-turn-id": turnId } : {}),
+        ...(traceId ? { "x-agenticx-trace-id": traceId } : {}),
         ...(prepared.providerHint ? { "x-agenticx-provider": prepared.providerHint } : {}),
       },
       body: prepared.forwardBody,

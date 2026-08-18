@@ -946,20 +946,20 @@
         "restart": "Start over",
         "monthlyLimits": {
           "title": "Organization usage controls",
-          "description": "Manage monthly usage and Desktop per-conversation limits in one place.",
+          "description": "Manage monthly usage limits and Desktop per-conversation alerts in one place.",
           "monthlySectionTitle": "Monthly usage limits",
           "monthlySectionDescription": "Token and cost budgets are independent. New model requests stop when either limit is reached. Set 0 for unlimited.",
           "tokenLabel": "Monthly token limit",
           "tokenDescription": "The primary hard limit works even when model prices have not been configured.",
           "costLabel": "Monthly budget limit (USD)",
           "costDescription": "The secondary hard limit uses actual input/output tokens and configured model prices.",
-          "sessionSectionTitle": "Desktop conversation limits",
-          "sessionSectionDescription": "Members receive these limits when they sign in. The current turn completes after the stop threshold, and the next turn is blocked.",
-          "sessionWarningLabel": "Warning threshold (tokens)",
-          "sessionWarningDescription": "Default: 500,000. Members are prompted to converge after this point.",
-          "sessionHardLabel": "Stop threshold (tokens)",
-          "sessionHardDescription": "Default: 1,000,000. Must be higher than the warning threshold.",
-          "sessionValidation": "The warning must be an integer of at least 50,000; the stop threshold must be higher and no more than 5,000,000.",
+          "sessionSectionTitle": "Desktop conversation alerts",
+          "sessionSectionDescription": "Members receive these values when they sign in. Both yellow and red alerts are informational: they neither interrupt work nor block later turns. Existing context-window compaction still applies as the model window fills.",
+          "sessionYellowLabel": "Yellow alert threshold (tokens)",
+          "sessionYellowDescription": "Default: 500,000. Indicates that this conversation has used a substantial number of tokens.",
+          "sessionRedLabel": "Red alert threshold (tokens)",
+          "sessionRedDescription": "Default: 1,000,000. Minimum: 100,000, and it must be higher than the yellow alert threshold.",
+          "sessionValidation": "The yellow threshold must be an integer of at least 50,000. The red threshold must be an integer of at least 100,000, higher than the yellow threshold, and no more than 5,000,000.",
           "unlimitedPlaceholder": "0 (unlimited)",
           "save": "Save",
           "saving": "Saving…",
@@ -1512,8 +1512,8 @@
       },
       "quota": {
         "breadcrumbQuota": "Quota control",
-        "title": "Token quota control",
-        "description": "Tenant / dept / user / API token quotas: monthly, TPM, RPM, concurrency.",
+        "title": "Daily / weekly / monthly token quotas",
+        "description": "Set daily, weekly, and monthly quotas by role, department, user, and API token. With a blocking policy, an in-progress top-level task may finish; the next task is blocked after the quota is exceeded. TPM, RPM, and concurrency limits remain immediate.",
         "tabs": {
           "roles": "Role defaults",
           "departments": "Departments",
@@ -1557,9 +1557,20 @@
         "assignDesc": "Bind tenant / department / user; upgrades can apply next period only.",
         "empty": "No plans yet",
         "pendingUpgrade": "Pending upgrade",
-        "period": { "month": "Monthly", "week": "Weekly" },
-        "status": { "draft": "Draft", "active": "Active", "archived": "Archived" },
-        "scope": { "tenant": "Tenant", "dept": "Department", "user": "User" },
+        "period": {
+          "month": "Monthly",
+          "week": "Weekly"
+        },
+        "status": {
+          "draft": "Draft",
+          "active": "Active",
+          "archived": "Archived"
+        },
+        "scope": {
+          "tenant": "Tenant",
+          "dept": "Department",
+          "user": "User"
+        },
         "fields": {
           "name": "Plan name",
           "monthlyTokens": "Monthly token limit",

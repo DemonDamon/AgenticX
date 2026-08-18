@@ -319,9 +319,9 @@ export async function cancelPlanAssignment(assignmentId: string, tid?: string): 
     .set({ status: "cancelled", updatedAt: new Date() })
     .where(eq(assignTable.id, assignmentId));
   if (row.status === "active") {
-    const config = await getQuotaConfig();
+    const config = await getQuotaConfig(tenant);
     const cleaned = removePlanRuleFromScope(config, row.scopeType as PlanScopeType, row.scopeId, row.planId);
-    await persistQuotaConfig(cleaned);
+    await persistQuotaConfig(cleaned, tenant);
   }
 }
 
@@ -338,7 +338,7 @@ async function loadActivePlanAssignments(tid: string) {
 
 export async function rebuildQuotaMappingFromPlans(tid?: string): Promise<{ mapped: number }> {
   const tenant = tenantId(tid);
-  let config = await getQuotaConfig();
+  let config = await getQuotaConfig(tenant);
   const sources = getPlanSources(config);
   for (const [key, planId] of Object.entries(sources)) {
     const [scopeType, scopeId] = key.split(":");
@@ -357,7 +357,7 @@ export async function rebuildQuotaMappingFromPlans(tid?: string): Promise<{ mapp
       plan.id,
     );
   }
-  await persistQuotaConfig(config);
+  await persistQuotaConfig(config, tenant);
   return { mapped: rows.length };
 }
 

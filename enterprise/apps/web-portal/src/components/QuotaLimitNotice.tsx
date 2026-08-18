@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { useTranslations } from "next-intl";
-import { QUOTA_USAGE_CHANGED_EVENT } from "@agenticx/sdk-ts";
+import { useLocale, useTranslations } from "next-intl";
+import { QUOTA_USAGE_CHANGED_EVENT, type ChatQuotaError } from "@agenticx/sdk-ts";
 import {
   Alert,
   AlertDescription,
@@ -25,10 +25,13 @@ type QuotaSummaryResponse = {
 type QuotaLimitNoticeProps = {
   /** Set when the current chat request was rejected with the gateway quota code. */
   forceOpen?: boolean;
+  /** Structured day/week/month rejection from the managed gateway. */
+  quotaError?: ChatQuotaError | null;
 };
 
-export function QuotaLimitNotice({ forceOpen = false }: QuotaLimitNoticeProps) {
+export function QuotaLimitNotice({ forceOpen = false, quotaError = null }: QuotaLimitNoticeProps) {
   const t = useTranslations("chat");
+  const locale = useLocale();
   const [summaryExhausted, setSummaryExhausted] = React.useState(false);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const exhaustedRef = React.useRef(false);
@@ -71,13 +74,55 @@ export function QuotaLimitNotice({ forceOpen = false }: QuotaLimitNoticeProps) {
   }, [refresh]);
 
   React.useEffect(() => {
-    if (!forceOpen) return;
-    setSummaryExhausted(true);
-    exhaustedRef.current = true;
+    if (!forceOpen && !quotaError) return;
     setDialogOpen(true);
-  }, [forceOpen]);
+  }, [forceOpen, quotaError]);
 
-  const showNotice = summaryExhausted || forceOpen;
+  React.useEffect(() => {
+    if (!summaryExhausted && !forceOpen && !quotaError) setDialogOpen(false);
+  }, [forceOpen, quotaError, summaryExhausted]);
+
+  const showNotice = summaryExhausted || forceOpen || Boolean(quotaError);
+  const quotaTitle = quotaError
+    ? t(
+        quotaError.kind === "token_day"
+          ? "quotaDayExhaustedTitle"
+          : quotaError.kind === "token_week"
+            ? "quotaWeekExhaustedTitle"
+            : "quotaMonthExhaustedTitle",
+      )
+    : t("quotaExhaustedTitle");
+  const quotaDescription = React.useMemo(() => {
+    if (!quotaError) return t("quotaExhaustedDescription");
+    const lines = [t("quotaWindowExhaustedDescription")];
+    if (quotaError.period) {
+      lines.push(t("quotaPeriodDetail", { period: quotaError.period }));
+    }
+    if (quotaError.used !== undefined && quotaError.limit !== undefined) {
+      const number = new Intl.NumberFormat(locale);
+      lines.push(
+        t("quotaUsageDetail", {
+          used: number.format(quotaError.used),
+          limit: number.format(quotaError.limit),
+        }),
+      );
+    }
+    if (quotaError.resetAt) {
+      const resetAt = new Date(quotaError.resetAt);
+      if (!Number.isNaN(resetAt.valueOf())) {
+        lines.push(
+          t("quotaResetAt", {
+            time: new Intl.DateTimeFormat(locale, {
+              dateStyle: "medium",
+              timeStyle: "short",
+            }).format(resetAt),
+          }),
+        );
+      }
+    }
+    return lines.join("\n");
+  }, [locale, quotaError, t]);
+  const pageNotice = quotaError ? quotaDescription : t("quotaExhaustedPageNotice");
 
   return (
     <>
@@ -90,8 +135,8 @@ export function QuotaLimitNotice({ forceOpen = false }: QuotaLimitNoticeProps) {
         >
           <CircleAlert className="h-5 w-5" />
           <div>
-            <AlertTitle>{t("quotaExhaustedTitle")}</AlertTitle>
-            <AlertDescription>{t("quotaExhaustedPageNotice")}</AlertDescription>
+            <AlertTitle>{quotaTitle}</AlertTitle>
+            <AlertDescription className="whitespace-pre-line">{pageNotice}</AlertDescription>
           </div>
         </Alert>
       ) : null}
@@ -101,9 +146,9 @@ export function QuotaLimitNotice({ forceOpen = false }: QuotaLimitNoticeProps) {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CircleAlert className="h-5 w-5 text-warning" />
-              {t("quotaExhaustedTitle")}
+              {quotaTitle}
             </DialogTitle>
-            <DialogDescription>{t("quotaExhaustedDescription")}</DialogDescription>
+            <DialogDescription className="whitespace-pre-line">{quotaDescription}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button type="button" onClick={() => setDialogOpen(false)}>

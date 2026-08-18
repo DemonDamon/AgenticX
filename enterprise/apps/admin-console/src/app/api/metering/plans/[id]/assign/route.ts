@@ -13,7 +13,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
   const guard = await requireAdminScope(["metering:read"]);
   if (!guard.ok) return guard.response;
   const { id } = await params;
-  const assignments = await listPlanAssignments(id);
+  const assignments = await listPlanAssignments(id, guard.session.tenantId);
   return NextResponse.json({ code: "00000", message: "ok", data: { assignments } });
 }
 
@@ -33,7 +33,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (!assignmentId) {
       return NextResponse.json({ code: "40002", message: "assignmentId is required" }, { status: 400 });
     }
-    await cancelPlanAssignment(assignmentId);
+    await cancelPlanAssignment(assignmentId, guard.session.tenantId);
     return NextResponse.json({ code: "00000", message: "ok", data: { cancelled: true } });
   }
 
@@ -46,6 +46,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       scopeType,
       scopeId,
       effectiveNextPeriod,
+      tid: guard.session.tenantId,
     });
     return NextResponse.json({ code: "00000", message: "ok", data: { assignment } });
   } catch (err) {

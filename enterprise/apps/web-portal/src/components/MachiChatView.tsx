@@ -120,9 +120,11 @@ function isComplianceError(message: string): boolean {
   return (/合规|策略|compliance|policy/i.test(message) && !/Gateway/i.test(message));
 }
 
-function isQuotaExhaustedError(message: string | null): boolean {
+export function isLegacyEnterpriseQuotaError(message: string | null): boolean {
   if (!message) return false;
-  return /(?:token\s*(?:配额|quota)|(?:配额|quota)).*(?:用尽|超出|exhausted|exceeded)/i.test(message);
+  return /^(?:Token 配额已用尽，请联系管理员调整额度|当前账号的 Token 配额已用尽|Token quota exhausted)(?:[。.!].*)?$/i.test(
+    message,
+  );
 }
 
 export function MachiChatView({
@@ -141,6 +143,7 @@ export function MachiChatView({
   const planChatRevising = useChatStore((s) => s.planChatRevising);
   const activeModel = useChatStore((s) => s.activeModel);
   const errorMessage = useChatStore((s) => s.errorMessage);
+  const structuredQuotaError = useChatStore((s) => s.quotaError);
   const responseVersionsByUserMessageId = useChatStore((s) => s.responseVersionsByUserMessageId);
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
   const historyError = useChatStore((s) => s.historyError);
@@ -165,7 +168,7 @@ export function MachiChatView({
   const cancel = useChatStore((s) => s.cancel);
   const displayErrorMessage =
     errorMessage === STREAM_UPDATE_DEPTH_ERROR ? t("updateDepthError") : errorMessage;
-  const quotaError = isQuotaExhaustedError(errorMessage);
+  const quotaError = Boolean(structuredQuotaError) || isLegacyEnterpriseQuotaError(errorMessage);
   const [draft, setDraft] = React.useState("");
   /** Default auto (on) — aligned with product expectation for portal chat. */
   const [webSearchMode, setWebSearchMode] = React.useState<WebSearchMode>("auto");
@@ -866,7 +869,10 @@ export function MachiChatView({
 
   const composer = (
     <div className={cn("mx-auto w-full space-y-3", isEmpty ? "max-w-[46rem]" : "max-w-4xl")}>
-      <QuotaLimitNotice forceOpen={quotaError} />
+      <QuotaLimitNotice
+        forceOpen={quotaError && !structuredQuotaError}
+        quotaError={structuredQuotaError}
+      />
       {historyError && (
         <Alert variant="warning" className="border-warning/30 bg-warning-soft/80 shadow-sm">
           <ShieldAlert className="h-5 w-5" />

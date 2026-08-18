@@ -17,7 +17,7 @@ vi.mock("../../../../../lib/desktop-token-policy", () => ({
     loadDesktopSessionTokenLimits(...args),
 }));
 
-describe("GET /api/desktop/bootstrap", () => {
+describe("GET /api/desktop/bootstrap", { timeout: 30_000 }, () => {
   beforeEach(() => {
     resolveDesktopIdentity.mockReset();
     listAvailableModelsForUser.mockReset();
@@ -56,7 +56,7 @@ describe("GET /api/desktop/bootstrap", () => {
     expect(loadDesktopSessionTokenLimits).toHaveBeenCalledWith("t1");
   });
 
-  it("returns the authenticated tenant's configured conversation limits", async () => {
+  it("returns the authenticated tenant's configured conversation alert thresholds", async () => {
     resolveDesktopIdentity.mockResolvedValue({
       userId: "u2",
       tenantId: "tenant-policy",

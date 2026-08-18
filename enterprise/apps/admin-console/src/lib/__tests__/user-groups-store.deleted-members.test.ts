@@ -59,20 +59,22 @@ describe("removeUserFromAllGroups", () => {
     mocks.getQuotaConfig.mockResolvedValue(quotaConfig());
     mocks.setQuotaConfig.mockImplementation(async (config) => config);
 
-    await expect(removeUserFromAllGroups("deleted")).resolves.toBe(2);
+    await expect(removeUserFromAllGroups("tenant-a", "deleted")).resolves.toBe(2);
 
+    expect(mocks.getQuotaConfig).toHaveBeenCalledWith("tenant-a");
     expect(mocks.setQuotaConfig).toHaveBeenCalledTimes(1);
     const saved = mocks.setQuotaConfig.mock.calls[0]?.[0];
     expect(saved.groups.first.memberIds).toEqual(["keep"]);
     expect(saved.groups.second.memberIds).toEqual([]);
     expect(saved.groups.untouched.memberIds).toEqual(["keep"]);
     expect(saved.groups.untouched.updatedAt).toBe("2026-08-12T00:00:00.000Z");
+    expect(mocks.setQuotaConfig.mock.calls[0]?.[1]).toBe("tenant-a");
   });
 
   it("does not write when the user is not referenced by any group", async () => {
     mocks.getQuotaConfig.mockResolvedValue(quotaConfig());
 
-    await expect(removeUserFromAllGroups("missing")).resolves.toBe(0);
+    await expect(removeUserFromAllGroups("tenant-a", "missing")).resolves.toBe(0);
     expect(mocks.setQuotaConfig).not.toHaveBeenCalled();
   });
 });
