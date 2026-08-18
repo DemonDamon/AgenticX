@@ -1,6 +1,7 @@
 package quota
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -126,5 +127,26 @@ func TestRemainingForWindowDayAndWeek(t *testing.T) {
 	week := tracker.RemainingForWindow(ctx, QuotaWindowWeek)
 	if week.Limit != 300 || week.Used != 0 {
 		t.Fatalf("unexpected week remaining: %+v", week)
+	}
+}
+
+func TestRemainingMarksAuthoritativeCounterFailureUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "quotas.json")
+	cfg := `{"defaults":{"role":{},"model":{}},"users":{"u1":{"monthlyTokens":1000,"dailyTokens":100,"action":"block"}},"departments":{},"apiTokens":{}}`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tracker := NewTracker(cfgPath, filepath.Join(dir, "usage.json"), nil)
+	tracker.tokenWindowCounter = &fallbackPoolCounter{
+		primary:  &erroringPoolCounter{err: errors.New("database unavailable")},
+		fallback: &LocalPoolCounter{usagePath: filepath.Join(dir, "stale-local.json"), usageCache: map[string]int64{}},
+	}
+	result := tracker.RemainingForWindow(
+		RequestContext{TenantID: "tenant-1", UserID: "u1", Role: "staff"},
+		QuotaWindowDay,
+	)
+	if !result.Unavailable || result.Remaining != nil {
+		t.Fatalf("database failure was exposed as a usable balance: %+v", result)
 	}
 }

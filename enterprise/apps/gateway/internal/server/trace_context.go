@@ -1,9 +1,12 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -11,6 +14,7 @@ const (
 	headerTraceID    = "X-AgenticX-Trace-Id"
 	headerTraceStep  = "X-AgenticX-Trace-Step"
 	headerTraceStage = "X-AgenticX-Trace-Stage"
+	headerTurnID     = "X-AgenticX-Turn-Id"
 	maxTraceStageLen = 64
 )
 
@@ -18,10 +22,43 @@ func enrichTraceFromRequest(identity requestIdentity, r *http.Request) requestId
 	if r == nil {
 		return identity
 	}
-	identity.TraceID = strings.TrimSpace(r.Header.Get(headerTraceID))
+	identity.TraceID = normalizeCorrelationID(r.Header.Get(headerTraceID))
+	identity.TurnID = normalizeCorrelationID(r.Header.Get(headerTurnID))
+	if identity.TurnID == "" {
+		identity.TurnID = identity.TraceID
+	}
+	if identity.TurnID == "" {
+		// Legacy clients may provide neither header. Give this HTTP request one
+		// non-reusable turn id so a single already-admitted model call can own a
+		// first crossing, without granting grace to a later request.
+		identity.TurnID = newRequestTurnID()
+	}
 	identity.TraceStep = parseTraceStep(r.Header.Get(headerTraceStep))
 	identity.TraceStage = sanitizeStage(r.Header.Get(headerTraceStage))
 	return identity
+}
+
+func normalizeCorrelationID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) == 0 || len(raw) > 128 {
+		return ""
+	}
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' || r == ':' {
+			continue
+		}
+		return ""
+	}
+	return raw
+}
+
+func newRequestTurnID() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err == nil {
+		return "req-" + hex.EncodeToString(buf)
+	}
+	return "req-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
 
 func parseTraceStep(raw string) int {

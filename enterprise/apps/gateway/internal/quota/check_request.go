@@ -2,6 +2,7 @@ package quota
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 )
@@ -24,6 +25,9 @@ type RequestContext struct {
 	APITokenID string
 	Role       string
 	Model      string
+	// TurnID identifies one top-level user task across its internal model calls.
+	// The gateway maps the existing trace id into this field.
+	TurnID string
 }
 
 // CheckResult aggregates quota decision across dimensions.
@@ -34,17 +38,32 @@ type CheckResult struct {
 	Rule                 Rule
 	Used                 int64
 	Limit                int64
+	Period               string
+	ResetAt              string
 	Description          string
 	Headers              map[string]string
 	FallbackModel        string
 	BudgetReservedTokens int64
 	BudgetReservedCost   float64
+	// ConcurrencyAcquired transfers exactly one limiter release to the handler
+	// only after admission succeeds. Rejected checks release internally.
+	ConcurrencyAcquired bool
+	// Reservation is an opaque admission receipt. Settlement and rollback must
+	// use it instead of re-selecting policy or calendar windows at completion.
+	Reservation *ReservationReceipt
 }
 
 func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64) CheckResult {
-	cfg := t.loadConfig()
+	cfg := t.loadConfigForTenant(ctx.TenantID)
 	rule := selectRuleExtended(cfg, ctx)
 	lim := sharedLimiter()
+	result := CheckResult{
+		Allowed:     true,
+		Rule:        rule,
+		Description: "ok",
+		Headers:     map[string]string{},
+	}
+	receipt := newReservationReceipt(tokens, costUSD)
 
 	if rule.RPM > 0 {
 		key := rateKey("rpm", ctx)
@@ -53,16 +72,15 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 			if rule.Action == ActionBlock {
 				return blockedResult("rpm", rule, int64(used), int64(rule.RPM))
 			}
-			return warnResult("rpm", rule)
+			mergeWarning(&result, warnResult("rpm", rule))
 		}
 	}
 
-	if result, ok := t.checkRequestCountLimits(ctx, rule); ok {
-		return result
-	}
-
-	if result, ok := t.checkTokenWindowLimits(ctx, rule, tokens); ok {
-		return result
+	if requestResult, ok := t.checkRequestCountLimits(ctx, rule); ok {
+		if !requestResult.Allowed {
+			return requestResult
+		}
+		mergeWarning(&result, requestResult)
 	}
 
 	if rule.TPM > 0 {
@@ -73,7 +91,7 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 			if rule.Action == ActionBlock {
 				return blockedResult("tpm", rule, used, int64(rule.TPM))
 			}
-			return warnResult("tpm", rule)
+			mergeWarning(&result, warnResult("tpm", rule))
 		}
 	}
 
@@ -84,14 +102,35 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 			if rule.Action == ActionBlock {
 				return blockedResult("concurrency", rule, int64(used), int64(rule.MaxConcurrency))
 			}
-			return warnResult("concurrency", rule)
+			mergeWarning(&result, warnResult("concurrency", rule))
+		} else {
+			result.ConcurrencyAcquired = true
 		}
+	}
+
+	if windowResult, ok := t.checkTokenWindowLimits(ctx, rule, tokens, receipt); ok {
+		if !windowResult.Allowed {
+			if err := t.RollbackReservation(receipt); err != nil {
+				log.Printf("gateway quota: failed to rollback partial token-window reservation: %v", err)
+			}
+			t.ReleaseConcurrency(ctx)
+			result.ConcurrencyAcquired = false
+			return windowResult
+		}
+		mergeWarning(&result, windowResult)
 	}
 
 	monthly := t.CheckAndAddContext(ctx, tokens, LedgerEventReserve)
 	if !monthly.Allowed {
+		if err := t.RollbackReservation(receipt); err != nil {
+			log.Printf("gateway quota: failed to rollback reservation after monthly denial: %v", err)
+		}
 		t.ReleaseConcurrency(ctx)
-		return CheckResult{
+		result.ConcurrencyAcquired = false
+		if monthly.StorageError {
+			return quotaStorageUnavailableResult("monthly", monthly.Period, fmt.Errorf("%s", monthly.Description))
+		}
+		blocked := CheckResult{
 			Allowed:     false,
 			Kind:        "monthly",
 			Rule:        monthly.Rule,
@@ -103,25 +142,41 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 				"X-AgenticX-Quota-Limit": fmt.Sprintf("%d", monthly.Rule.MonthlyTokens),
 			},
 		}
+		applyWindowMetadata(&blocked, "month", monthly.Period, requestCountNow().UTC())
+		return blocked
 	}
-	if monthly.Rule.Action == ActionWarn && monthly.ExceededBy > 0 {
-		return CheckResult{
+	receipt.setMonthly(monthly.reservation)
+	if monthly.ExceededBy > 0 && (monthly.Rule.Action == ActionWarn || monthly.Grace) {
+		monthlyResult := CheckResult{
 			Allowed:     true,
 			Warn:        true,
 			Kind:        "monthly",
 			Rule:        monthly.Rule,
+			Used:        monthly.UsedAfter,
+			Limit:       monthly.Rule.MonthlyTokens,
 			Description: "policy:quota:monthly_warn",
 			Headers:     map[string]string{"X-AgenticX-Quota-Warn": "monthly"},
 		}
+		if monthly.Grace {
+			monthlyResult.Description = "policy:quota:monthly_turn_grace"
+			monthlyResult.Headers["X-AgenticX-Quota-Grace"] = "monthly"
+		}
+		applyWindowMetadata(&monthlyResult, "month", monthly.Period, requestCountNow().UTC())
+		mergeWarning(&result, monthlyResult)
 	}
 
 	budget := t.CheckBudget(ctx, tokens, costUSD)
 	if !budget.Allowed {
+		if err := t.RollbackReservation(receipt); err != nil {
+			log.Printf("gateway quota: failed to rollback reservation after budget denial: %v", err)
+		}
 		t.ReleaseConcurrency(ctx)
+		result.ConcurrencyAcquired = false
 		return budgetDecisionToCheckResult(budget)
 	}
+	receipt.setBudget(budget.reservation)
 	if budget.Warn || budget.FallbackModel != "" {
-		result := CheckResult{
+		budgetResult := CheckResult{
 			Allowed:              true,
 			Warn:                 budget.Warn,
 			Kind:                 "budget",
@@ -132,27 +187,53 @@ func (t *Tracker) CheckRequest(ctx RequestContext, tokens int64, costUSD float64
 			BudgetReservedCost:   budget.ReservedCost,
 		}
 		if budget.Warn {
-			result.Headers["X-AgenticX-Budget-Warn"] = budget.Description
+			budgetResult.Headers["X-AgenticX-Budget-Warn"] = budget.Description
 		}
 		if budget.Limit > 0 {
-			result.Headers["X-AgenticX-Budget-Used"] = fmt.Sprintf("%.6f", budget.Used)
-			result.Headers["X-AgenticX-Budget-Limit"] = fmt.Sprintf("%.6f", budget.Limit)
+			budgetResult.Headers["X-AgenticX-Budget-Used"] = fmt.Sprintf("%.6f", budget.Used)
+			budgetResult.Headers["X-AgenticX-Budget-Limit"] = fmt.Sprintf("%.6f", budget.Limit)
 		}
-		return result
+		mergeWarning(&result, budgetResult)
 	}
 
-	return CheckResult{
-		Allowed:              true,
-		Rule:                 rule,
-		Description:          "ok",
-		BudgetReservedTokens: budget.ReservedTokens,
-		BudgetReservedCost:   budget.ReservedCost,
+	result.BudgetReservedTokens = budget.ReservedTokens
+	result.BudgetReservedCost = budget.ReservedCost
+	result.FallbackModel = budget.FallbackModel
+	result.Reservation = receipt
+	return result
+}
+
+func mergeWarning(target *CheckResult, warning CheckResult) {
+	if target == nil || !warning.Allowed || !warning.Warn {
+		return
+	}
+	if !target.Warn {
+		target.Warn = true
+		target.Kind = warning.Kind
+		target.Used = warning.Used
+		target.Limit = warning.Limit
+		target.Period = warning.Period
+		target.ResetAt = warning.ResetAt
+		target.Description = warning.Description
+	}
+	if target.Headers == nil {
+		target.Headers = map[string]string{}
+	}
+	for key, value := range warning.Headers {
+		if existing := strings.TrimSpace(target.Headers[key]); existing != "" && existing != value {
+			target.Headers[key] = existing + "," + value
+			continue
+		}
+		target.Headers[key] = value
+	}
+	if warning.FallbackModel != "" {
+		target.FallbackModel = warning.FallbackModel
 	}
 }
 
 // CheckMCPToolCall enforces per-minute MCP tool invocation limits.
 func (t *Tracker) CheckMCPToolCall(ctx RequestContext, serverName string, overrideLimit int) CheckResult {
-	cfg := t.loadConfig()
+	cfg := t.loadConfigForTenant(ctx.TenantID)
 	rule := selectRuleExtended(cfg, ctx)
 	limit := rule.ToolCallsPerMinute
 	if overrideLimit > 0 {
@@ -185,7 +266,7 @@ func (t *Tracker) CheckMCPToolCall(ctx RequestContext, serverName string, overri
 }
 
 func (t *Tracker) ReleaseConcurrency(ctx RequestContext) {
-	cfg := t.loadConfig()
+	cfg := t.loadConfigForTenant(ctx.TenantID)
 	rule := selectRuleExtended(cfg, ctx)
 	if rule.MaxConcurrency <= 0 {
 		return

@@ -73,14 +73,7 @@ func (s *Service) SettleContext(ctx quota.RequestContext, reserved, actual int64
 	if s == nil || s.tracker == nil {
 		return result
 	}
-	if result.Delta == 0 {
-		return result
-	}
-	if result.Delta < 0 {
-		s.tracker.RollbackContext(ctx, -result.Delta)
-		return result
-	}
-	s.tracker.CheckAndAddContext(ctx, result.Delta, quota.LedgerEventSettle)
+	s.tracker.ReconcileRequestUsage(ctx, reserved, actual)
 	return result
 }
 
@@ -99,5 +92,5 @@ func (s *Service) RollbackContext(ctx quota.RequestContext, reserved int64) {
 	if s == nil || s.tracker == nil || reserved <= 0 {
 		return
 	}
-	s.tracker.RollbackContext(ctx, reserved)
+	s.tracker.RollbackRequest(ctx, reserved)
 }

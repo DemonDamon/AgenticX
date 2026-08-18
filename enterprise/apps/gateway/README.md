@@ -79,7 +79,7 @@ docker build -f apps/gateway/Dockerfile -t agenticx-gateway:latest .
 | `GATEWAY_INTERNAL_TOKEN` | Bearer Token；附在 `Authorization: Bearer …` |
 | `GATEWAY_REMOTE_POLICY_SNAPSHOT_URL` | HTTPS URL，优先级高于 `GATEWAY_POLICY_SNAPSHOT_FILE`，body 更新时按内容 hash 触发热加载 |
 | `GATEWAY_REMOTE_PROVIDERS_URL` | HTTPS URL（JSON 等价于桌面态 `providers.json`），后台约 5s 轮询 |
-| `GATEWAY_REMOTE_QUOTA_CONFIG_URL` | HTTPS URL（JSON 等价于 `quotas.json`），约 **10 秒** 本地缓存 |
+| `GATEWAY_REMOTE_QUOTA_CONFIG_URL` | admin `GET /api/internal/quotas`；Gateway 按已认证租户附带 `X-AgenticX-Tenant-Id`，并按租户分别缓存约 **10 秒**，禁止跨租户复用快照 |
 | `GATEWAY_REMOTE_PRICING_CONFIG_URL` | admin `GET /api/internal/pricing-snapshot`（JSON 计价快照），约 **10 秒** 本地缓存；失败回落 `GATEWAY_PRICING_FILE` / 默认 `pricing.yaml` |
 | `GATEWAY_REMOTE_BUDGET_CONFIG_URL` | admin `GET /api/internal/budget-snapshot`（JSON 成本/词元预算快照），约 **10 秒** 本地缓存；失败回落 `GATEWAY_BUDGET_CONFIG_FILE` |
 | `GATEWAY_BUDGET_CONFIG_FILE` | 本地预算配置路径（默认 `../../.runtime/admin/budgets.json`） |

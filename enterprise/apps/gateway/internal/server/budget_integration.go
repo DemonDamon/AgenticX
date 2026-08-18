@@ -11,18 +11,14 @@ import (
 	"github.com/agenticx/enterprise/gateway/internal/routing"
 )
 
-func (s *Server) estimateRequestCostUSD(provider, model string, inputTokens int) float64 {
-	if inputTokens <= 0 {
+func (s *Server) estimateRequestCostUSD(provider, model string, inputTokens, outputTokens int) float64 {
+	if inputTokens <= 0 && outputTokens <= 0 {
 		return 0
-	}
-	outEstimate := inputTokens / 4
-	if outEstimate <= 0 {
-		outEstimate = 1
 	}
 	usage := openai.Usage{
 		PromptTokens:     inputTokens,
-		CompletionTokens: outEstimate,
-		TotalTokens:      inputTokens + outEstimate,
+		CompletionTokens: outputTokens,
+		TotalTokens:      inputTokens + outputTokens,
 	}
 	table := s.activePricingTable()
 	if table == nil {
@@ -47,6 +43,21 @@ func (s *Server) rollbackBudgetReservation(identity requestIdentity, model strin
 		return
 	}
 	s.quotaTracker.RollbackBudget(s.quotaContext(identity, model), check.BudgetReservedTokens, check.BudgetReservedCost)
+}
+
+func (s *Server) rollbackChatReservationReceipt(check quota.CheckResult) {
+	if s.quotaTracker == nil || check.Reservation == nil {
+		return
+	}
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := s.quotaTracker.RollbackReservation(check.Reservation); err == nil {
+			return
+		} else {
+			lastErr = err
+		}
+	}
+	s.logger.Error("quota reservation rollback failed", "error", lastErr)
 }
 
 func (s *Server) emitBudgetAuditIfNeeded(identity requestIdentity, check quota.CheckResult, r *http.Request) {
@@ -90,7 +101,11 @@ func (s *Server) runChatQuotaGate(
 	estimatedInputTokens int,
 	reserveTokens int64,
 ) (quota.CheckResult, billing.Reservation, bool) {
-	estimatedCost := s.estimateRequestCostUSD(decision.Provider, decision.Model, estimatedInputTokens)
+	reservedOutputTokens := int(reserveTokens) - estimatedInputTokens
+	if reservedOutputTokens < 0 {
+		reservedOutputTokens = 0
+	}
+	estimatedCost := s.estimateRequestCostUSD(decision.Provider, decision.Model, estimatedInputTokens, reservedOutputTokens)
 	if s.useChannelRelay() {
 		reservation := s.billingService.ReserveContext(qctx, reserveTokens, estimatedCost)
 		if !reservation.Allowed {
@@ -102,7 +117,7 @@ func (s *Server) runChatQuotaGate(
 		s.emitBudgetAuditIfNeeded(identity, reservation.Check, r)
 		return reservation.Check, reservation, true
 	}
-	check := s.quotaTracker.CheckRequest(qctx, int64(estimatedInputTokens), estimatedCost)
+	check := s.quotaTracker.CheckRequest(qctx, reserveTokens, estimatedCost)
 	if !check.Allowed {
 		s.writeQuotaError(w, check)
 		return check, billing.Reservation{}, false
@@ -114,6 +129,12 @@ func (s *Server) runChatQuotaGate(
 }
 
 func (s *Server) rollbackChatQuotaAndBudget(identity requestIdentity, model string, tokens int, check quota.CheckResult) {
-	s.rollbackQuotaReservation(s.quotaContext(identity, model), tokens)
+	if check.Reservation != nil {
+		s.rollbackChatReservationReceipt(check)
+		return
+	}
+	if s.quotaTracker != nil && tokens > 0 {
+		s.quotaTracker.RollbackRequest(s.quotaContext(identity, model), int64(tokens))
+	}
 	s.rollbackBudgetReservation(identity, model, check)
 }

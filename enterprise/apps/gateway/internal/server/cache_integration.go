@@ -68,16 +68,6 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck, spanMeta{
 		DurationMS: durationMSSince(ctx.startedAt),
 	})
-	if s.useChannelRelay() {
-		actual := int64(usage.PromptTokens + usage.CompletionTokens)
-		s.billingService.SettleContext(
-			s.quotaContext(ctx.identity, ctx.req.Model),
-			ctx.reservedTokens,
-			actual,
-		)
-	} else {
-		s.reconcileQuotaUsage(ctx.identity, ctx.req.Model, ctx.estimatedInputTokens, usage.PromptTokens+usage.CompletionTokens)
-	}
 
 	latencyTotal := time.Since(ctx.startedAt).Milliseconds()
 	ev := audit.Event{
@@ -143,7 +133,18 @@ func (s *Server) reportUsageDetailed(
 		cost = result.CostUSD
 		pricingVersion = result.PricingVersion
 	}
-	if budgetCheck != nil && s.quotaTracker != nil {
+	if budgetCheck != nil && s.quotaTracker != nil && budgetCheck.Reservation != nil {
+		var settleErr error
+		for attempt := 0; attempt < 2; attempt++ {
+			settleErr = s.quotaTracker.SettleReservation(budgetCheck.Reservation, int64(n.TotalTokens), cost)
+			if settleErr == nil {
+				break
+			}
+		}
+		if settleErr != nil {
+			s.logger.Error("quota reservation settle failed", "error", settleErr, "trace_id", identity.TraceID)
+		}
+	} else if budgetCheck != nil && s.quotaTracker != nil {
 		qctx := s.quotaContext(identity, decision.Model)
 		s.quotaTracker.SettleBudget(
 			qctx,
@@ -305,16 +306,6 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 	s.reportUsageDetailed(ctx.identity, ctx.decision, usage, ctx.budgetCheck, spanMeta{
 		DurationMS: durationMSSince(ctx.startedAt),
 	})
-	if s.useChannelRelay() {
-		actual := int64(usage.PromptTokens + usage.CompletionTokens)
-		s.billingService.SettleContext(
-			s.quotaContext(ctx.identity, ctx.req.Model),
-			ctx.reservedTokens,
-			actual,
-		)
-	} else {
-		s.reconcileQuotaUsage(ctx.identity, ctx.req.Model, ctx.estimatedInputTokens, usage.PromptTokens+usage.CompletionTokens)
-	}
 	resp := hit.Entry.Response
 	resp.Usage = usage
 	_ = s.writeAuditEvent(audit.Event{

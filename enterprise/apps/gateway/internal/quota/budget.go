@@ -50,6 +50,13 @@ type BudgetConfig struct {
 	Users         map[string]BudgetRule `json:"users"`
 }
 
+type remoteBudgetSnapshot struct {
+	Fetched time.Time
+	Config  BudgetConfig
+}
+
+var budgetUsageNow = time.Now
+
 // BudgetDecision is the outcome of a budget check.
 type BudgetDecision struct {
 	Allowed        bool
@@ -67,6 +74,7 @@ type BudgetDecision struct {
 	FallbackModel  string
 	ReservedTokens int64
 	ReservedCost   float64
+	reservation    *budgetReservationReceipt
 }
 
 type budgetUsageRow struct {
@@ -115,35 +123,46 @@ func DefaultBudgetUsagePath() string {
 	return filepath.Clean(filepath.Join(cwd, "../../.runtime/gateway/budget-usage.json"))
 }
 
-func (t *Tracker) loadBudgetConfig() BudgetConfig {
+func (t *Tracker) loadBudgetConfigForTenant(tenantID string) BudgetConfig {
 	u := strings.TrimSpace(t.budgetRemoteURL)
 	if u != "" && gatewayinternal.IsHTTPURL(u) {
+		tenantID = strings.TrimSpace(tenantID)
+		cacheKey := tenantID
+		if cacheKey == "" {
+			cacheKey = "__default__"
+		}
 		t.budgetRemoteMu.Lock()
 		defer t.budgetRemoteMu.Unlock()
-		if !t.budgetRemoteFetched.IsZero() && time.Since(t.budgetRemoteFetched) < 10*time.Second {
-			return normalizeBudgetConfig(t.budgetRemoteSnapshot)
+		if t.budgetRemoteSnapshots == nil {
+			t.budgetRemoteSnapshots = map[string]remoteBudgetSnapshot{}
 		}
-		raw, code, err := gatewayinternal.HTTPGet(u)
+		cached := t.budgetRemoteSnapshots[cacheKey]
+		if !cached.Fetched.IsZero() && time.Since(cached.Fetched) < 10*time.Second {
+			return normalizeBudgetConfig(cached.Config)
+		}
+		headers := map[string]string{}
+		if tenantID != "" {
+			headers["X-AgenticX-Tenant-Id"] = tenantID
+		}
+		raw, code, err := gatewayinternal.HTTPGetWithHeaders(u, headers)
 		if err != nil {
-			log.Printf("[budget] remote config fetch failed url=%s err=%v", u, err)
-			return normalizeBudgetConfig(t.budgetRemoteSnapshot)
+			log.Printf("[budget] remote config fetch failed url=%s tenant=%s err=%v", u, tenantID, err)
+			return normalizeBudgetConfig(cached.Config)
 		}
 		if code == http.StatusNotFound {
-			t.budgetRemoteSnapshot = BudgetConfig{}
-			t.budgetRemoteFetched = time.Now()
+			t.budgetRemoteSnapshots[cacheKey] = remoteBudgetSnapshot{Fetched: time.Now(), Config: BudgetConfig{}}
 			return BudgetConfig{}
 		}
 		if code < 200 || code >= 300 {
-			log.Printf("[budget] remote config bad status url=%s code=%d", u, code)
-			return normalizeBudgetConfig(t.budgetRemoteSnapshot)
+			log.Printf("[budget] remote config bad status url=%s tenant=%s code=%d", u, tenantID, code)
+			return normalizeBudgetConfig(cached.Config)
 		}
 		var cfg BudgetConfig
 		if err := json.Unmarshal(raw, &cfg); err != nil {
-			log.Printf("[budget] remote config parse failed err=%v", err)
-			return normalizeBudgetConfig(t.budgetRemoteSnapshot)
+			log.Printf("[budget] remote config parse failed tenant=%s err=%v", tenantID, err)
+			return normalizeBudgetConfig(cached.Config)
 		}
-		t.budgetRemoteSnapshot = cfg
-		t.budgetRemoteFetched = time.Now()
+		t.budgetRemoteSnapshots[cacheKey] = remoteBudgetSnapshot{Fetched: time.Now(), Config: cfg}
 		return normalizeBudgetConfig(cfg)
 	}
 
@@ -160,6 +179,10 @@ func (t *Tracker) loadBudgetConfig() BudgetConfig {
 		return BudgetConfig{}
 	}
 	return normalizeBudgetConfig(cfg)
+}
+
+func (t *Tracker) loadBudgetConfig() BudgetConfig {
+	return t.loadBudgetConfigForTenant("")
 }
 
 func normalizeBudgetConfig(cfg BudgetConfig) BudgetConfig {
@@ -327,7 +350,7 @@ func budgetDelta(rule BudgetRule, tokens int64, costUSD float64) float64 {
 // CheckBudget evaluates independent company token/cost limits plus the selected
 // scoped budget rule. Storage failures fail-open.
 func (t *Tracker) CheckBudget(ctx RequestContext, tokens int64, costUSD float64) BudgetDecision {
-	cfg := t.loadBudgetConfig()
+	cfg := t.loadBudgetConfigForTenant(ctx.TenantID)
 	targets := selectBudgetTargets(cfg, ctx)
 	if len(targets) == 0 {
 		return BudgetDecision{Allowed: true, Description: "no budget"}
@@ -352,7 +375,7 @@ func (t *Tracker) CheckBudget(ctx RequestContext, tokens int64, costUSD float64)
 		if delta <= 0 {
 			continue
 		}
-		period := budgetPeriodKey(target.rule.Period, time.Now().UTC())
+		period := budgetPeriodKey(target.rule.Period, budgetUsageNow().UTC())
 		used := t.readBudgetUsedLocked(target.rule, target.dimension, target.key, period)
 		after := used + delta
 		warnAt := target.rule.Limit * target.rule.WarnThresholdPct / 100
@@ -395,10 +418,19 @@ func (t *Tracker) CheckBudget(ctx RequestContext, tokens int64, costUSD float64)
 	if len(pending) == 0 {
 		return BudgetDecision{Allowed: true, Description: "no budget delta"}
 	}
+	receipt := &budgetReservationReceipt{lines: make([]budgetReservationLine, 0, len(pending))}
 	for _, item := range pending {
 		if !t.addBudgetUsageLocked(item.target.rule, item.target.dimension, item.target.key, item.period, item.delta) {
+			for index := len(receipt.lines) - 1; index >= 0; index-- {
+				line := receipt.lines[index]
+				_ = t.addBudgetUsageLocked(line.rule, line.dimension, line.key, line.period, -line.reserved)
+			}
 			return BudgetDecision{Allowed: true, Description: "budget persist fail-open"}
 		}
+		receipt.lines = append(receipt.lines, budgetReservationLine{
+			rule: item.target.rule, dimension: item.target.dimension, key: item.target.key,
+			period: item.period, reserved: item.delta,
+		})
 		if item.decision.Warn {
 			t.emitBudgetAlert(ctx, item.decision, "warn")
 		}
@@ -406,6 +438,7 @@ func (t *Tracker) CheckBudget(ctx RequestContext, tokens int64, costUSD float64)
 	if notable != nil {
 		notable.ReservedTokens = tokens
 		notable.ReservedCost = costUSD
+		notable.reservation = receipt
 		return *notable
 	}
 	return BudgetDecision{
@@ -413,12 +446,13 @@ func (t *Tracker) CheckBudget(ctx RequestContext, tokens int64, costUSD float64)
 		Description:    "ok",
 		ReservedTokens: tokens,
 		ReservedCost:   costUSD,
+		reservation:    receipt,
 	}
 }
 
 // SettleBudget adjusts reserved budget usage after the actual cost/tokens are known.
 func (t *Tracker) SettleBudget(ctx RequestContext, reservedTokens int64, reservedCost float64, actualTokens int64, actualCost float64) {
-	cfg := t.loadBudgetConfig()
+	cfg := t.loadBudgetConfigForTenant(ctx.TenantID)
 	targets := selectBudgetTargets(cfg, ctx)
 	if len(targets) == 0 {
 		return
@@ -435,14 +469,14 @@ func (t *Tracker) SettleBudget(ctx RequestContext, reservedTokens int64, reserve
 		if delta == 0 {
 			continue
 		}
-		period := budgetPeriodKey(target.rule.Period, time.Now().UTC())
+		period := budgetPeriodKey(target.rule.Period, budgetUsageNow().UTC())
 		_ = t.addBudgetUsageLocked(target.rule, target.dimension, target.key, period, delta)
 	}
 }
 
 // RollbackBudget releases a reserved budget delta when a request fails before completion.
 func (t *Tracker) RollbackBudget(ctx RequestContext, tokens int64, costUSD float64) {
-	cfg := t.loadBudgetConfig()
+	cfg := t.loadBudgetConfigForTenant(ctx.TenantID)
 	targets := selectBudgetTargets(cfg, ctx)
 	if len(targets) == 0 {
 		return
@@ -457,9 +491,63 @@ func (t *Tracker) RollbackBudget(ctx RequestContext, tokens int64, costUSD float
 		if delta <= 0 {
 			continue
 		}
-		period := budgetPeriodKey(target.rule.Period, time.Now().UTC())
+		period := budgetPeriodKey(target.rule.Period, budgetUsageNow().UTC())
 		_ = t.addBudgetUsageLocked(target.rule, target.dimension, target.key, period, -delta)
 	}
+}
+
+func (t *Tracker) settleBudgetReceipt(
+	receipt *budgetReservationReceipt,
+	reservedTokens int64,
+	reservedCost float64,
+	actualTokens int64,
+	actualCost float64,
+) error {
+	if t == nil || receipt == nil {
+		return nil
+	}
+	_ = reservedTokens
+	_ = reservedCost
+	unlock, lockOK := t.lockBudgetUsageFile()
+	if !lockOK {
+		return fmt.Errorf("budget usage lock failed")
+	}
+	defer unlock()
+	for index := range receipt.lines {
+		line := &receipt.lines[index]
+		if line.completed {
+			continue
+		}
+		actual := budgetDelta(line.rule, actualTokens, actualCost)
+		delta := actual - line.reserved
+		if delta != 0 && !t.addBudgetUsageLocked(line.rule, line.dimension, line.key, line.period, delta) {
+			return fmt.Errorf("budget settle failed dimension=%s key=%s period=%s", line.dimension, line.key, line.period)
+		}
+		line.completed = true
+	}
+	return nil
+}
+
+func (t *Tracker) rollbackBudgetReceipt(receipt *budgetReservationReceipt) error {
+	if t == nil || receipt == nil {
+		return nil
+	}
+	unlock, lockOK := t.lockBudgetUsageFile()
+	if !lockOK {
+		return fmt.Errorf("budget usage lock failed")
+	}
+	defer unlock()
+	for index := range receipt.lines {
+		line := &receipt.lines[index]
+		if line.completed {
+			continue
+		}
+		if line.reserved != 0 && !t.addBudgetUsageLocked(line.rule, line.dimension, line.key, line.period, -line.reserved) {
+			return fmt.Errorf("budget rollback failed dimension=%s key=%s period=%s", line.dimension, line.key, line.period)
+		}
+		line.completed = true
+	}
+	return nil
 }
 
 func (t *Tracker) emitBudgetAlert(ctx RequestContext, decision BudgetDecision, alertType string) {

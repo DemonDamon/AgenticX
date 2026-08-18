@@ -25,12 +25,12 @@ func (s *Server) handleChatCompleteRelay(
 	estimatedInputTokens int,
 	reservedTokens int64,
 	pluginCtx *wasmhost.HookContext,
-	qctx quota.RequestContext,
+	budgetCheck quota.CheckResult,
 ) {
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
 	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
 	if err != nil {
-		s.billingService.RollbackContext(qctx, reservedTokens)
+		s.rollbackChatQuotaAndBudget(identity, req.Model, int(reservedTokens), budgetCheck)
 		s.recordUpstreamError(identity.TenantID, makeID("req"), result.Channel.ID, 500, []byte(err.Error()))
 		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
 			DurationMS:   durationMSSince(startedAt),
@@ -58,8 +58,12 @@ func (s *Server) handleChatCompleteRelay(
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
 	actualTotal := int64(providerInputTokens + providerOutputTokens)
-	settle := s.billingService.SettleContext(qctx, reservedTokens, actualTotal)
-	s.reportUsageDetailed(identity, decision, resp.Usage, nil, spanMeta{
+	settleDelta := actualTotal - reservedTokens
+	settlementUsage := resp.Usage
+	settlementUsage.PromptTokens = providerInputTokens
+	settlementUsage.CompletionTokens = providerOutputTokens
+	settlementUsage.TotalTokens = providerInputTokens + providerOutputTokens
+	s.reportUsageDetailed(identity, decision, settlementUsage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
 		PromptText:     joinMessages(req.Messages),
 		CompletionText: responseContent,
@@ -95,7 +99,7 @@ func (s *Server) handleChatCompleteRelay(
 				LatencyMS:       time.Since(startedAt).Milliseconds(),
 				EstimatedTokens: estimatedInputTokens,
 				ActualTokens:    providerInputTokens + providerOutputTokens,
-				SettleDelta:     settle.Delta,
+				SettleDelta:     settleDelta,
 			}
 			enrichAuditFromAttempts(&ev, result.Attempts)
 			enrichAuditRoutingPolicy(&ev, result.PickDecision)
@@ -141,7 +145,7 @@ func (s *Server) handleChatCompleteRelay(
 		LatencyMSUpstream: time.Since(startedAt).Milliseconds(),
 		EstimatedTokens:   estimatedInputTokens,
 		ActualTokens:      providerInputTokens + providerOutputTokens,
-		SettleDelta:       settle.Delta,
+		SettleDelta:       settleDelta,
 		CacheLayer:        string(cache.LayerNone),
 		Digest: &audit.Digest{
 			PromptHash:      hashText(joinMessages(req.Messages)),

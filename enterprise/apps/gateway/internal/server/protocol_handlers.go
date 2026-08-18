@@ -139,7 +139,6 @@ func (s *Server) dispatchProtocol(
 	thinkingMode := transform.ThinkingModeFromEnv()
 
 	qctx := s.quotaContext(identity, req.Model)
-	defer s.billingService.ReleaseContext(qctx)
 
 	latestUserText := latestUserMessageContent(req.Messages)
 	reqPolicy := s.evaluatePolicy(latestUserText, makeEvalContext(identity, "request"))
@@ -152,11 +151,16 @@ func (s *Server) dispatchProtocol(
 	}
 
 	estimatedInputTokens := estimateTextTokens(joinMessages(req.Messages))
-	reserveTokens := estimateTokensWithMax(estimatedInputTokens, maxTokensFromRequest(req))
+	reserveTokens := estimateTokensWithMax(estimatedInputTokens, ensureBoundedMaxTokens(&req))
 	probeDecision := routing.Decision{Model: req.Model}
 	budgetCheck, _, ok := s.runChatQuotaGate(w, r, qctx, identity, &req, &probeDecision, estimatedInputTokens, reserveTokens)
 	if !ok {
 		return
+	}
+	// Admission failures release any partially acquired slot internally. A
+	// successful admission transfers one release to this handler.
+	if budgetCheck.ConcurrencyAcquired {
+		defer s.billingService.ReleaseContext(qctx)
 	}
 
 	decision := s.decider.Decide(r, req.Model)
@@ -191,14 +195,14 @@ func (s *Server) protocolComplete(
 	qctx quota.RequestContext,
 ) {
 	if !s.useChannelRelay() {
+		s.rollbackChatQuotaAndBudget(identity, req.Model, int(reservedTokens), budgetCheck)
 		writeAPIError(w, openai.Internal("channel relay required for multi-protocol inbound"))
 		return
 	}
 	result, err := s.relayExecutor.Complete(r.Context(), req, req.Model, channelIdentity(identity))
 	decision := routingDecisionFromRelay(result, req.Model, s.decider.Decide(r, req.Model))
 	if err != nil {
-		s.billingService.RollbackContext(qctx, reservedTokens)
-		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
+		s.rollbackChatQuotaAndBudget(identity, req.Model, int(reservedTokens), budgetCheck)
 		s.reportUsageDetailed(identity, decision, openai.Usage{}, nil, spanMeta{
 			DurationMS:   durationMSSince(startedAt),
 			Status:       "error",
@@ -233,8 +237,12 @@ func (s *Server) protocolComplete(
 		providerOutputTokens = estimateTextTokens(responseContent)
 	}
 	actualTotal := int64(providerInputTokens + providerOutputTokens)
-	settle := s.billingService.SettleContext(qctx, reservedTokens, actualTotal)
-	s.reportUsageDetailed(identity, decision, resp.Usage, &budgetCheck, spanMeta{
+	settleDelta := actualTotal - reservedTokens
+	settlementUsage := resp.Usage
+	settlementUsage.PromptTokens = providerInputTokens
+	settlementUsage.CompletionTokens = providerOutputTokens
+	settlementUsage.TotalTokens = providerInputTokens + providerOutputTokens
+	s.reportUsageDetailed(identity, decision, settlementUsage, &budgetCheck, spanMeta{
 		DurationMS:     durationMSSince(startedAt),
 		PromptText:     joinMessages(req.Messages),
 		CompletionText: responseContent,
@@ -244,7 +252,7 @@ func (s *Server) protocolComplete(
 	})
 
 	outboundProto := outboundProtocolForChannel(result.Channel, session.outbound)
-	ev := s.protocolAuditEvent(identity, r, decision, req.Model, session.inbound, outboundProto, derived, thinkingMode, startedAt, result, streamResultFromComplete(result), estimatedInputTokens, providerInputTokens, providerOutputTokens, settle.Delta, responseContent, req.Messages)
+	ev := s.protocolAuditEvent(identity, r, decision, req.Model, session.inbound, outboundProto, derived, thinkingMode, startedAt, result, streamResultFromComplete(result), estimatedInputTokens, providerInputTokens, providerOutputTokens, settleDelta, responseContent, req.Messages)
 	if err := s.writeAuditEvent(ev); err != nil {
 		writeAPIError(w, openai.Internal("audit write failed"))
 		return
@@ -288,6 +296,7 @@ func (s *Server) protocolStream(
 	w.Header().Set("Connection", "keep-alive")
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		s.rollbackChatQuotaAndBudget(identity, req.Model, int(reservedTokens), budgetCheck)
 		writeAPIError(w, openai.Internal("streaming unsupported"))
 		return
 	}
@@ -378,8 +387,23 @@ func (s *Server) protocolStream(
 	decision := routingDecisionFromStream(streamResult, req.Model, s.decider.Decide(r, req.Model))
 
 	if streamErr != nil {
-		s.billingService.RollbackContext(qctx, reservedTokens)
-		s.rollbackBudgetReservation(identity, req.Model, budgetCheck)
+		partialOutputTokens := estimateTextTokens(responseBuilder.String())
+		s.settleInterruptedStreamUsage(
+			identity,
+			decision,
+			estimatedInputTokens,
+			partialOutputTokens,
+			reservedTokens,
+			budgetCheck,
+			qctx,
+			spanMeta{
+				DurationMS:     durationMSSince(startedAt),
+				Status:         "error",
+				ErrorMessage:   sanitizeTraceError(formatStreamError(streamErr)),
+				PromptText:     joinMessages(req.Messages),
+				CompletionText: responseBuilder.String(),
+			},
+		)
 		if len(blockedHits) > 0 {
 			writeStreamPolicyError(w, flusher, "90002", "响应触发合规拦截", blockedHits)
 			return
@@ -398,11 +422,7 @@ func (s *Server) protocolStream(
 	}
 	inputTokens := estimatedInputTokens
 	outputTokens := estimateTextTokens(responseText)
-	settle := s.billingService.SettleContext(
-		qctx,
-		reservedTokens,
-		int64(inputTokens+outputTokens),
-	)
+	settleDelta := int64(inputTokens+outputTokens) - reservedTokens
 	s.reportUsageDetailed(identity, decision, openai.Usage{
 		PromptTokens: inputTokens, CompletionTokens: outputTokens, TotalTokens: inputTokens + outputTokens,
 	}, &budgetCheck, spanMeta{
@@ -427,7 +447,7 @@ func (s *Server) protocolStream(
 	flusher.Flush()
 
 	outboundProto := outboundProtocolForChannel(streamResult.Channel, session.outbound)
-	ev := s.protocolAuditEvent(identity, r, decision, req.Model, session.inbound, outboundProto, derived, thinkingMode, startedAt, relay.CompleteResult{Channel: streamResult.Channel, KeyRef: streamResult.KeyRef}, streamResult, estimatedInputTokens, inputTokens, outputTokens, settle.Delta, responseText, req.Messages)
+	ev := s.protocolAuditEvent(identity, r, decision, req.Model, session.inbound, outboundProto, derived, thinkingMode, startedAt, relay.CompleteResult{Channel: streamResult.Channel, KeyRef: streamResult.KeyRef}, streamResult, estimatedInputTokens, inputTokens, outputTokens, settleDelta, responseText, req.Messages)
 	_ = s.writeAuditEvent(ev)
 }
 

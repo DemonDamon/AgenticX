@@ -63,6 +63,22 @@ func estimateTokensWithMax(inputTokens, maxTokens int) int64 {
 	return out
 }
 
+const defaultGatewayMaxCompletionTokens = 8_192
+
+// ensureBoundedMaxTokens gives callers that omit an output cap a conservative
+// server-side bound. The same value is forwarded upstream and included in the
+// quota reservation, so one call cannot consume unreserved output indefinitely.
+func ensureBoundedMaxTokens(req *openai.ChatCompletionRequest) int {
+	if req == nil {
+		return defaultGatewayMaxCompletionTokens
+	}
+	if existing := maxTokensFromRequest(*req); existing > 0 {
+		return existing
+	}
+	req.MaxCompletionTokens = defaultGatewayMaxCompletionTokens
+	return defaultGatewayMaxCompletionTokens
+}
+
 func maxTokensFromRequest(req openai.ChatCompletionRequest) int {
 	if req.MaxCompletionTokens > 0 {
 		return req.MaxCompletionTokens
