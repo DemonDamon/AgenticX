@@ -4272,6 +4272,25 @@ export function ChatPane({
     }
   };
 
+  const prepareComposerWorkspaceMenu = async (): Promise<void> => {
+    let sessionId = String(
+      useAppStore.getState().panes.find((item) => item.id === pane.id)?.sessionId ?? "",
+    ).trim();
+    if (!sessionId) {
+      setComposerWorkspaceLoading(true);
+      setComposerWorkspaceError("");
+      sessionId = String(
+        await ensureWorkspaceSessionBeforeFirstMessage("", materializeLazySession),
+      ).trim();
+      if (!sessionId) {
+        setComposerWorkspaceLoading(false);
+        setComposerWorkspaceError("会话工作区初始化失败，请检查本地服务后重试。");
+        return;
+      }
+    }
+    await refreshComposerTaskspaces();
+  };
+
   const addComposerWorkspace = async (
     pathValue: string,
     labelValue: string,
@@ -13876,7 +13895,7 @@ export function ChatPane({
                     workspaceActionBusy={composerWorkspaceActionBusy}
                     workspaceError={composerWorkspaceError}
                     onWorkspaceMenuOpen={() => {
-                      void refreshComposerTaskspaces();
+                      void prepareComposerWorkspaceMenu();
                     }}
                     onWorkspaceSelect={(taskspaceId) => setActiveTaskspace(pane.id, taskspaceId)}
                     onCreateWorkspace={addComposerWorkspace}

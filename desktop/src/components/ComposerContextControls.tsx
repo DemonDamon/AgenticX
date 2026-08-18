@@ -60,6 +60,27 @@ export function composerWorkspaceLabel(
   return "选择工作区";
 }
 
+export function defaultWorkspacePath(workspaces: Taskspace[]): string {
+  return String(
+    workspaces.find((item) => item.id === "default")?.path ?? workspaces[0]?.path ?? "",
+  ).trim();
+}
+
+function workspacePathSeparator(path: string): "/" | "\\" {
+  return path.includes("\\") && !path.includes("/") ? "\\" : "/";
+}
+
+export function workspaceDraftPath(basePath: string, label: string): string {
+  const base = String(basePath || "").trim().replace(/[\\/]+$/, "");
+  if (!base) return "";
+  const segment = String(label || "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
+    .replace(/[. ]+$/g, "") || "新工作区";
+  return `${base}${workspacePathSeparator(base)}${segment}`;
+}
+
 export function composerPermissionLabel(strategy: ConfirmStrategy): string {
   return confirmStrategyLabel(strategy);
 }
@@ -119,10 +140,12 @@ export function ComposerContextControls({
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [newWorkspacePath, setNewWorkspacePath] = useState("");
   const [newWorkspaceLabel, setNewWorkspaceLabel] = useState("");
+  const [workspacePathFollowsLabel, setWorkspacePathFollowsLabel] = useState(true);
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
   const permissionButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const workspaceSearchRef = useRef<HTMLInputElement>(null);
+  const newWorkspaceLabelRef = useRef<HTMLInputElement>(null);
   const newWorkspacePathRef = useRef<HTMLInputElement>(null);
   const focusedMenuRef = useRef<OpenMenu>(null);
 
@@ -131,7 +154,14 @@ export function ComposerContextControls({
     setShowCreateWorkspace(false);
     setNewWorkspacePath("");
     setNewWorkspaceLabel("");
+    setWorkspacePathFollowsLabel(true);
   }, []);
+
+  const sessionWorkspacePath = defaultWorkspacePath(workspaces);
+  useEffect(() => {
+    if (!showCreateWorkspace || !workspacePathFollowsLabel || !sessionWorkspacePath) return;
+    setNewWorkspacePath(workspaceDraftPath(sessionWorkspacePath, newWorkspaceLabel));
+  }, [newWorkspaceLabel, sessionWorkspacePath, showCreateWorkspace, workspacePathFollowsLabel]);
 
   const closeMenu = useCallback((restoreFocus = false) => {
     const trigger =
@@ -254,6 +284,9 @@ export function ComposerContextControls({
   };
 
   const activeWorkspaceLabel = composerWorkspaceLabel(workspaces, activeTaskspaceId);
+  const activeWorkspace =
+    workspaces.find((item) => item.id === activeTaskspaceId) ??
+    (activeTaskspaceId ? undefined : workspaces[0]);
   const filteredWorkspaces = filterComposerWorkspaces(workspaces, workspaceQuery);
   const permissionLabel = composerPermissionLabel(confirmStrategy);
   const permissionIsAuto = confirmStrategy === "auto";
@@ -306,7 +339,7 @@ export function ComposerContextControls({
                         role="menuitemradio"
                         aria-checked={selected}
                         title={workspace.path}
-                        className={`flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left transition-colors ${
+                        className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors ${
                           selected ? "bg-surface-card-strong" : "hover:bg-surface-hover"
                         }`}
                         onClick={() => {
@@ -315,8 +348,13 @@ export function ComposerContextControls({
                         }}
                       >
                         <Folder className="h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} />
-                        <span className="min-w-0 flex-1 truncate text-[13px] text-text-strong">
-                          {rowLabel}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] text-text-strong">
+                            {rowLabel}
+                          </span>
+                          <span className="block truncate text-[10px] text-text-faint">
+                            {workspace.path}
+                          </span>
                         </span>
                         {selected ? <Check className="h-4 w-4 shrink-0 text-theme" strokeWidth={2} /> : null}
                       </button>
@@ -337,7 +375,7 @@ export function ComposerContextControls({
                   className="rounded-lg bg-surface-card p-2"
                   onSubmit={async (event) => {
                     event.preventDefault();
-                    if (!newWorkspacePath.trim() || workspaceActionBusy) return;
+                    if (!newWorkspaceLabel.trim() || !newWorkspacePath.trim() || workspaceActionBusy) return;
                     if (await onCreateWorkspace(newWorkspacePath, newWorkspaceLabel)) {
                       closeMenu(true);
                     }
@@ -345,20 +383,33 @@ export function ComposerContextControls({
                 >
                   <div className="mb-1.5 text-[11px] font-medium text-text-muted">新建工作区</div>
                   <input
-                    ref={newWorkspacePathRef}
-                    value={newWorkspacePath}
-                    onChange={(event) => setNewWorkspacePath(event.target.value)}
-                    placeholder="目录绝对路径"
-                    aria-label="新工作区目录"
+                    ref={newWorkspaceLabelRef}
+                    value={newWorkspaceLabel}
+                    onChange={(event) => {
+                      const nextLabel = event.target.value;
+                      setNewWorkspaceLabel(nextLabel);
+                      if (workspacePathFollowsLabel) {
+                        setNewWorkspacePath(workspaceDraftPath(sessionWorkspacePath, nextLabel));
+                      }
+                    }}
+                    placeholder="工作区名称，例如：财报分析"
+                    aria-label="新工作区名称"
                     className="mb-1.5 h-8 w-full rounded-md border border-border bg-surface-panel px-2 text-[12px] text-text-strong outline-none placeholder:text-text-faint focus:border-[var(--settings-accent-border)]"
                   />
                   <input
-                    value={newWorkspaceLabel}
-                    onChange={(event) => setNewWorkspaceLabel(event.target.value)}
-                    placeholder="显示名称（可选）"
-                    aria-label="新工作区名称"
+                    ref={newWorkspacePathRef}
+                    value={newWorkspacePath}
+                    onChange={(event) => {
+                      setWorkspacePathFollowsLabel(false);
+                      setNewWorkspacePath(event.target.value);
+                    }}
+                    placeholder="工作区文件路径"
+                    aria-label="新工作区目录"
                     className="h-8 w-full rounded-md border border-border bg-surface-panel px-2 text-[12px] text-text-strong outline-none placeholder:text-text-faint focus:border-[var(--settings-accent-border)]"
                   />
+                  <div className="mt-1 text-[10px] leading-4 text-text-faint">
+                    默认保存在当前会话工作区内；需要时可直接修改路径。
+                  </div>
                   <div className="mt-2 flex justify-end gap-1.5">
                     <button
                       type="button"
@@ -367,6 +418,7 @@ export function ComposerContextControls({
                         setShowCreateWorkspace(false);
                         setNewWorkspacePath("");
                         setNewWorkspaceLabel("");
+                        setWorkspacePathFollowsLabel(true);
                         window.requestAnimationFrame(() => workspaceSearchRef.current?.focus());
                       }}
                     >
@@ -374,7 +426,7 @@ export function ComposerContextControls({
                     </button>
                     <button
                       type="submit"
-                      disabled={!newWorkspacePath.trim() || workspaceActionBusy}
+                      disabled={!newWorkspaceLabel.trim() || !newWorkspacePath.trim() || workspaceActionBusy}
                       className="h-7 rounded-md px-2.5 text-[11px] transition-opacity disabled:opacity-45"
                       style={{
                         background: "var(--ui-btn-primary-bg)",
@@ -393,7 +445,10 @@ export function ComposerContextControls({
                   className="flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover disabled:opacity-50"
                   onClick={() => {
                     setShowCreateWorkspace(true);
-                    window.requestAnimationFrame(() => newWorkspacePathRef.current?.focus());
+                    setNewWorkspaceLabel("");
+                    setWorkspacePathFollowsLabel(true);
+                    setNewWorkspacePath(workspaceDraftPath(sessionWorkspacePath, ""));
+                    window.requestAnimationFrame(() => newWorkspaceLabelRef.current?.focus());
                   }}
                 >
                   <Plus className="h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} />
@@ -471,18 +526,23 @@ export function ComposerContextControls({
     <button
       ref={workspaceButtonRef}
       type="button"
-      className={`flex h-7 min-w-0 max-w-[220px] items-center gap-1.5 rounded-lg px-2 text-[11px] transition-colors ${
+      className={`flex h-7 min-w-0 max-w-[360px] items-center gap-1.5 rounded-lg px-2 text-[11px] transition-colors ${
         openMenu === "workspace" || workspacePanelOpen
           ? "bg-surface-hover text-text-strong"
           : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
       }`}
       onClick={toggleWorkspaceMenu}
-      title={`工作区：${activeWorkspaceLabel}`}
+      title={`工作区：${activeWorkspaceLabel}${activeWorkspace?.path ? `\n${activeWorkspace.path}` : ""}`}
       aria-haspopup="menu"
       aria-expanded={openMenu === "workspace"}
     >
       <FolderOpen className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} aria-hidden />
       <span className="min-w-0 truncate">{activeWorkspaceLabel}</span>
+      {activeWorkspace?.path ? (
+        <span className="hidden min-w-0 truncate text-[10px] text-text-faint md:inline">
+          {activeWorkspace.path}
+        </span>
+      ) : null}
       <ChevronDown
         className={`h-3 w-3 shrink-0 transition-transform ${openMenu === "workspace" ? "rotate-180" : ""}`}
         strokeWidth={2}
