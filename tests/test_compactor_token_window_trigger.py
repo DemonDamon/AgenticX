@@ -114,11 +114,12 @@ def test_compactor_message_escape_explicit_override() -> None:
 def test_declared_window_moves_autocompact_threshold() -> None:
     """管理员声明 128K 时，压缩必须按 128K 触发，而不是按表里的 1M。"""
     compactor = ContextCompactor(_LLM())
-    assert compactor._resolve_context_window_tokens("glm-5.2") == 1_000_000
+    # 表里 glm-5.2 的端点能力是 1M，缩放成 harness 窗口后是 250K。
+    assert compactor._resolve_context_window_tokens("glm-5.2") == 250_000
     assert compactor._resolve_context_window_tokens("glm-5.2", 128_000) == 128_000
 
     declared_threshold = compactor._compute_autocompact_threshold(128_000)
-    table_threshold = compactor._compute_autocompact_threshold(1_000_000)
+    table_threshold = compactor._compute_autocompact_threshold(250_000)
     assert declared_threshold < table_threshold
 
     # 用量落在两个阈值之间：按声明值必须压缩，按表值则不会——这就是超窗的成因。

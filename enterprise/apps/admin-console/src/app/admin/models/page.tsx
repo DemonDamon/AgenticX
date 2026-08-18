@@ -60,7 +60,8 @@ import {
 } from "../../../lib/model-context-window";
 import {
   formatContextWindowShort,
-  resolveHeuristicContextWindow,
+  harnessWindowForCapability,
+  resolveHeuristicCapability,
 } from "../../../lib/model-context-window-heuristic";
 import {
   pricePerMillion,
@@ -974,7 +975,7 @@ export default function ModelProvidersPage() {
                                 max={MAX_MODEL_CONTEXT_WINDOW}
                                 step="1000"
                                 placeholder={t("contextWindowAuto", {
-                                  value: formatContextWindowShort(resolveHeuristicContextWindow(m.name)),
+                                  value: formatContextWindowShort(resolveHeuristicCapability(m.name)),
                                 })}
                                 title={t("contextWindowHint")}
                                 value={windowDrafts[m.name] ?? (m.contextWindow ? String(m.contextWindow) : "")}
@@ -986,6 +987,15 @@ export default function ModelProvidersPage() {
                                   if (event.key === "Enter") event.currentTarget.blur();
                                 }}
                               />
+                              <div className="text-[10px] text-muted-foreground">
+                                {t("contextWindowEffective", {
+                                  value: formatContextWindowShort(
+                                    harnessWindowForCapability(
+                                      m.contextWindow ?? resolveHeuristicCapability(m.name),
+                                    ),
+                                  ),
+                                })}
+                              </div>
                             </div>
                             <Button
                               variant="ghost"

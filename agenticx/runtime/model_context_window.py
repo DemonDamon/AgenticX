@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """Model context window lookup shared by ToolSearch and context usage.
 
-Resolution order, most trustworthy first:
+The table and the declared field both describe the **endpoint capability** —
+how many tokens the endpoint will accept. That is not the same as the window
+the agent harness should actually drive: a model being able to take 1M tokens
+does not make a 1M-token agent loop a good idea, and the cost and attention
+quality both argue against it. So the capability is scaled down to a working
+window (see ``harness_window_for_capability``).
+
+Capability resolution order, most trustworthy first:
 
 1. ``declared`` — 企业管理员在后台为该模型填写的窗口，或由上游 ``/models``
    (vLLM ``max_model_len`` 等) 探测到的真实值。
@@ -37,6 +44,20 @@ MODEL_CONTEXT_WINDOWS: list[tuple[str, int]] = [
     ("gemini", 1_000_000),
 ]
 DEFAULT_CONTEXT_WINDOW = 128_000
+
+# 端点能力 → harness 实际驱动的窗口。
+# 1/4 让 1M 级模型落到 ~250K，与主流 agent harness 的量级一致；下限保证不会
+# 因为窗口太小而反复压缩。下限必须再被能力夹住 —— 端点只有 64K 时抬到 128K
+# 必然超窗，那正是这套机制要避免的失败。
+HARNESS_WINDOW_RATIO = 0.25
+MIN_HARNESS_CONTEXT_WINDOW = 128_000
+
+
+def harness_window_for_capability(capability: int) -> int:
+    """Working window for an endpoint that accepts ``capability`` tokens."""
+    cap = max(1, int(capability))
+    scaled = int(cap * HARNESS_WINDOW_RATIO)
+    return min(cap, max(MIN_HARNESS_CONTEXT_WINDOW, scaled))
 
 # 低于此值连系统提示词都放不下，视为脏数据。
 _MIN_DECLARED_WINDOW = 4_000
@@ -114,8 +135,8 @@ def declared_window_for_session(session: object) -> int | None:
     )
 
 
-def resolve_context_window(model_name: str | None, declared: object = None) -> int:
-    """Context window for a model; ``declared`` (admin/upstream) always wins."""
+def resolve_model_capability(model_name: str | None, declared: object = None) -> int:
+    """Tokens the endpoint accepts; ``declared`` (admin/upstream) always wins."""
     explicit = _coerce_declared(declared)
     if explicit is not None:
         return explicit
@@ -129,3 +150,8 @@ def resolve_context_window(model_name: str | None, declared: object = None) -> i
         if key in name:
             return window
     return DEFAULT_CONTEXT_WINDOW
+
+
+def resolve_context_window(model_name: str | None, declared: object = None) -> int:
+    """Working window the harness drives for this model."""
+    return harness_window_for_capability(resolve_model_capability(model_name, declared))

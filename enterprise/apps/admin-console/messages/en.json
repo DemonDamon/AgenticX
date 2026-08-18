@@ -389,10 +389,11 @@
           "deleteProvider": "Delete provider \"{name}\"? This cannot be undone.",
           "removeModel": "Remove model \"{name}\" from this provider?"
         },
-        "contextWindowLabel": "Context window",
+        "contextWindowLabel": "Endpoint limit",
         "contextWindowAuto": "Auto · {value}",
-        "contextWindowHint": "Usable context tokens for this model endpoint. Leave empty to let the client infer it from the model name; for self-hosted models, match your vLLM --max-model-len.",
-        "contextWindowInvalid": "Context window must be between {min} and {max}"
+        "contextWindowHint": "Tokens this model endpoint actually accepts (for self-hosted, your vLLM --max-model-len). Leave empty to infer it from the model name. The driven window is a quarter of the limit with a 128K floor, capped by the endpoint itself.",
+        "contextWindowInvalid": "Context window must be between {min} and {max}",
+        "contextWindowEffective": "Drives {value}"
       },
       "webSearch": {
         "title": "Web Search",

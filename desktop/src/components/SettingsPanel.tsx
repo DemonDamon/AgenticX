@@ -118,7 +118,8 @@ import {
 import { AccountTab } from "./AccountTab";
 import {
   formatContextWindowShort,
-  resolveHeuristicContextWindow,
+  harnessWindowForCapability,
+  resolveHeuristicCapability,
 } from "../utils/model-context-window-heuristic";
 import { DeveloperTokenBudgetPanel } from "./settings/DeveloperTokenBudgetPanel";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
@@ -10369,7 +10370,7 @@ export function SettingsPanel({
                             />
                           </label>
                           <label className="block text-sm text-text-muted">
-                            上下文窗口
+                            上下文窗口（端点上限）
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
                               type="number"
@@ -10382,7 +10383,7 @@ export function SettingsPanel({
                                 setEditModelError(null);
                               }}
                               placeholder={`自动识别为 ${formatContextWindowShort(
-                                resolveHeuristicContextWindow(editModelFormId.trim() || editModelOriginalId),
+                                resolveHeuristicCapability(editModelFormId.trim() || editModelOriginalId),
                               )}`}
                               onKeyDown={(e) => {
                                 if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
@@ -10394,13 +10395,27 @@ export function SettingsPanel({
                           <p className="text-[11px] leading-relaxed text-text-faint">
                             列表项即请求时使用的模型 ID；保存设置后才会写入配置。
                           </p>
+                          {(() => {
+                            const raw = editModelWindowDraft.trim();
+                            const parsed = raw ? Math.floor(Number(raw)) : Number.NaN;
+                            const capability = Number.isFinite(parsed) && parsed > 0
+                              ? parsed
+                              : resolveHeuristicCapability(editModelFormId.trim() || editModelOriginalId);
+                            return (
+                              <p className="text-[11px] leading-relaxed text-text-faint">
+                                端点上限 {formatContextWindowShort(capability)} → 实际驱动{" "}
+                                <span className="text-text-subtle">
+                                  {formatContextWindowShort(harnessWindowForCapability(capability))}
+                                </span>
+                                。模型能吃多少不等于每轮就该塞多少，所以按上限的四分之一驱动，
+                                不低于 128K（端点本身低于 128K 时以端点为准）。
+                              </p>
+                            );
+                          })()}
                           <p className="text-[11px] leading-relaxed text-text-faint">
-                            上下文窗口留空即按模型名自动识别（当前会得到{" "}
-                            {formatContextWindowShort(
-                              resolveHeuristicContextWindow(editModelFormId.trim() || editModelOriginalId),
-                            )}
-                            ）。自部署端点的真实上限由 vLLM 的 --max-model-len 等参数决定，常低于模型架构支持的值；
-                            填低了只是提前整理上下文，填高了会让整理触发得太晚、直接被上游拒绝。该项立即生效，无需保存设置。
+                            这里填端点实际能接受的 token 数，留空则按模型名识别。自部署端点的真实上限由 vLLM 的
+                            --max-model-len 等参数决定，常低于模型架构支持的值；填低了只是提前整理上下文，
+                            填高了会让整理触发得太晚、直接被上游拒绝。该项立即生效，无需保存设置。
                           </p>
                         </div>
                       </Modal>

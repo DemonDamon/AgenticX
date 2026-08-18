@@ -60,8 +60,8 @@ def test_local_override_applies_when_no_admin_declaration(monkeypatch):
     _stub_config(monkeypatch, {"custom_openai_local/glm-5.2": 128_000})
     session = _Session()
     assert declared_window_for_session(session) == 128_000
-    # 没有覆盖时表里的 1M 会让压缩晚到必然超窗。
-    assert resolve_context_window("glm-5.2") == 1_000_000
+    # 没有覆盖时表里的 1M 缩放后仍是 250K，远高于这个端点实际能吃的 128K。
+    assert resolve_context_window("glm-5.2") == 250_000
     assert resolve_context_window("glm-5.2", declared_window_for_session(session)) == 128_000
 
 
