@@ -1,4 +1,9 @@
 import {
+  isModelOptOutSubject,
+  modelIdsFromSubjects,
+  modelOptOutSubject,
+} from "@agenticx/config";
+import {
   createUserGroup as createGroupRow,
   deleteUserGroup as deleteGroupRow,
   getUserGroup as getGroupRow,
@@ -6,6 +11,8 @@ import {
   listUserGroups as listGroupRows,
   migrateLegacyGroupModelsIfNeeded,
   migrateLegacyUserGroupsIfNeeded,
+  listUserOptOuts,
+  replaceUserOptOutSubjects,
   setGroupModelIds,
   updateUserGroup as updateGroupRow,
   type UserGroupRow,
@@ -118,24 +125,25 @@ export function groupModelIdsForUser(groups: readonly UserGroupRecord[], userId:
   return [...new Set(groupModelSourcesForUser(groups, userId).flatMap((group) => group.modelIds))];
 }
 
-export function groupModelExclusionsForUser(config: QuotaConfig, userId: string): string[] {
-  return normalizeIds(config.modelExclusions?.[userId]);
+/**
+ * 本人关掉的模型。与能力的关闭记录同在 enterprise_user_opt_outs，前缀区分。
+ *
+ * 原来它躺在配额 JSON 的 modelExclusions 里：没有外键、删用户清理不掉，而且和能力
+ * 的关闭记录是同一件事却有两套读写。
+ */
+export async function userModelOptOuts(tenantId: string, userId: string): Promise<string[]> {
+  return modelIdsFromSubjects(await listUserOptOuts(tenantId, userId));
 }
 
-export async function setUserGroupModelExclusions(
+export async function setUserModelOptOuts(
   tenantId: string,
   userId: string,
   modelIds: unknown,
 ): Promise<string[]> {
-  const config = await getQuotaConfig(tenantId);
-  const exclusions = { ...(config.modelExclusions ?? {}) };
-  const normalized = normalizeIds(modelIds);
-  if (normalized.length > 0) exclusions[userId] = normalized;
-  else delete exclusions[userId];
-  await setQuotaConfig({ modelExclusions: exclusions, updatedAt: config.updatedAt }, tenantId);
-  return normalized;
+  const subjects = normalizeIds(modelIds).map(modelOptOutSubject);
+  const saved = await replaceUserOptOutSubjects(tenantId, userId, subjects, isModelOptOutSubject);
+  return modelIdsFromSubjects(saved);
 }
-
 
 export async function createUserGroup(tenantId: string, input: UserGroupInput): Promise<UserGroupRecord> {
   await ensureMigrated(tenantId);

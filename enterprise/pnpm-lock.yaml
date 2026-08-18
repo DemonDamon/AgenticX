@@ -100,7 +100,7 @@ importers:
         version: 15.5.20(@babel/core@7.29.7)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       next-intl:
         specifier: ^3
-        version: 3.26.5(next@15.5.20(@babel/core@7.29.7)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
+        version: 3.26.5(next@15.5.20(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
       openid-client:
         specifier: ^6.0.0
         version: 6.8.4
@@ -149,7 +149,7 @@ importers:
         version: 10.7.0(jiti@2.7.0)
       eslint-config-next:
         specifier: ^16.2.6
-        version: 16.2.10(@typescript-eslint/parser@8.65.0(eslint@10.7.0(jiti@2.7.0))(typescript@5.9.3))(eslint@10.7.0(jiti@2.7.0))(typescript@5.9.3)
+        version: 16.2.10(eslint@10.7.0(jiti@2.7.0))(typescript@5.9.3)
       eslint-plugin-i18next:
         specifier: ^6.1.4
         version: 6.1.5
@@ -221,7 +221,7 @@ importers:
         version: 15.5.20(@babel/core@7.29.7)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       next-intl:
         specifier: ^3
-        version: 3.26.5(next@15.5.20(@babel/core@7.29.7)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
+        version: 3.26.5(next@15.5.20(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
       openid-client:
         specifier: ^6.0.0
         version: 6.8.4
@@ -267,7 +267,7 @@ importers:
         version: 10.7.0(jiti@2.7.0)
       eslint-config-next:
         specifier: ^16.2.6
-        version: 16.2.10(eslint@10.7.0(jiti@2.7.0))(typescript@5.9.3)
+        version: 16.2.10(@typescript-eslint/parser@8.65.0(eslint@10.7.0(jiti@2.7.0))(typescript@5.9.3))(eslint@10.7.0(jiti@2.7.0))(typescript@5.9.3)
       eslint-plugin-i18next:
         specifier: ^6.1.4
         version: 6.1.5
@@ -310,6 +310,9 @@ importers:
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.43
+      vitest:
+        specifier: ^4.1.5
+        version: 4.1.10(@types/node@20.19.43)(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0))
 
   features/billing:
     dependencies:
@@ -561,6 +564,9 @@ importers:
       '@agenticx/auth':
         specifier: workspace:*
         version: link:../auth
+      '@agenticx/config':
+        specifier: workspace:*
+        version: link:../config
       '@agenticx/db-schema':
         specifier: workspace:*
         version: link:../db-schema
@@ -8617,7 +8623,7 @@ snapshots:
 
   negotiator@1.0.0: {}
 
-  next-intl@3.26.5(next@15.5.20(@babel/core@7.29.7)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8):
+  next-intl@3.26.5(next@15.5.20(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8):
     dependencies:
       '@formatjs/intl-localematcher': 0.5.10
       negotiator: 1.0.0

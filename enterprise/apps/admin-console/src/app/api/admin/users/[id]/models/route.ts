@@ -5,12 +5,11 @@ import {
   computeEffectiveUserAllowed,
   mergeAssignedModelIds,
 } from "../../../../../../lib/effective-models";
-import { getQuotaConfig } from "../../../../../../lib/token-quota-store";
 import {
-  groupModelExclusionsForUser,
   groupModelSourcesForUser,
   listUserGroups,
-  setUserGroupModelExclusions,
+  setUserModelOptOuts,
+  userModelOptOuts,
 } from "../../../../../../lib/user-groups-store";
 import {
   collectUserAssignmentKeys,
@@ -28,11 +27,11 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
   if (!user) {
     return NextResponse.json({ code: "40400", message: "user not found" }, { status: 404 });
   }
-  const [payload, groups, assignments, quotaConfig] = await Promise.all([
+  const [payload, groups, assignments, optOutModelIds] = await Promise.all([
     readUserEditPayload(id, user.email, user.deptId),
     listUserGroups(auth.session.tenantId),
     listAllAssignments(),
-    getQuotaConfig(auth.session.tenantId),
+    userModelOptOuts(auth.session.tenantId, id),
   ]);
   const allowed = new Set(payload.parentAllowedIds);
   const storedModelIds = mergeUserStoredSet(assignments, collectUserAssignmentKeys(id, user.email)) ?? [];
@@ -43,7 +42,7 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
   const groupModelIds = [...new Set(groupModelSources.flatMap((group) => group.modelIds))];
   const groupModelIdSet = new Set(groupModelIds);
   const individualModelIds = storedModelIds.filter((modelId) => !groupModelIdSet.has(modelId));
-  const excludedGroupModelIds = groupModelExclusionsForUser(quotaConfig, id).filter((modelId) => groupModelIdSet.has(modelId));
+  const excludedGroupModelIds = optOutModelIds.filter((modelId: string) => groupModelIdSet.has(modelId));
   const effectiveModelIds = computeEffectiveUserAllowed(
     payload.parentAllowedIds,
     mergeAssignedModelIds(storedModelIds.length > 0 ? storedModelIds : null, groupModelIds),
@@ -85,7 +84,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     );
     const saved = await setUserModels(id, individualModelIds, user.deptId);
     await setUserModels(`email:${user.email.toLowerCase()}`, saved.modelIds, user.deptId);
-    const savedExclusions = await setUserGroupModelExclusions(
+    const savedExclusions = await setUserModelOptOuts(
       auth.session.tenantId,
       id,
       excludedGroupModelIds,

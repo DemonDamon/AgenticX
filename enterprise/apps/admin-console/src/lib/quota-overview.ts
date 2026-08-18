@@ -1,8 +1,13 @@
-import { listAdminUsers, listDepartmentsFlat, type AdminUserDto } from "@agenticx/iam-core";
+import {
+  listAdminUsers,
+  listDepartmentsFlat,
+  listTenantOptOuts,
+  type AdminUserDto,
+} from "@agenticx/iam-core";
+import { modelIdsFromSubjects } from "@agenticx/config";
 import { queryMetering } from "./metering-service";
 import { getQuotaConfig, type QuotaRule } from "./token-quota-store";
 import {
-  groupModelExclusionsForUser,
   groupModelIdsForUser,
   listUserGroups,
   type UserGroupRecord,
@@ -239,6 +244,7 @@ function groupMemberOverview(
   config: Awaited<ReturnType<typeof getQuotaConfig>>,
   groups: readonly UserGroupRecord[],
   assignments: Record<string, string[]>,
+  optOutsByUser: Map<string, string[]>,
 ): GroupMemberOverview {
   const personalQuota = config.users[user.id] as QuotaRule | undefined;
   const monthlyTokens = Math.max(0, Number(personalQuota?.monthlyTokens ?? 0));
@@ -247,7 +253,9 @@ function groupMemberOverview(
   const inheritedModelIds = new Set(groupModelIdsForUser(groups, user.id));
   const directModelIds = mergeUserStoredSet(assignments, collectUserAssignmentKeys(user.id, user.email)) ?? [];
   const individualExtraModelIds = directModelIds.filter((modelId) => !inheritedModelIds.has(modelId));
-  const excludedGroupModelIds = groupModelExclusionsForUser(config, user.id).filter((modelId) => inheritedModelIds.has(modelId));
+  const excludedGroupModelIds = modelIdsFromSubjects(optOutsByUser.get(user.id) ?? []).filter(
+    (modelId: string) => inheritedModelIds.has(modelId),
+  );
   return {
     ...user,
     monthlyTokens,
@@ -264,19 +272,20 @@ export async function loadGroupQuotaOverview(tenantId: string): Promise<{
   organization: OrganizationNode[];
   users: OverviewMember[];
 }> {
-  const [groups, users, departments, config, assignments] = await Promise.all([
+  const [groups, users, departments, config, assignments, optOutsByUser] = await Promise.all([
     listUserGroups(tenantId),
     listAllUsers(tenantId),
     listDepartmentsFlat(tenantId),
     getQuotaConfig(tenantId),
     listAllAssignments(tenantId),
+    listTenantOptOuts(tenantId),
   ]);
   const usersById = new Map(users.map((user) => [user.id, user]));
   const noUsage: UsageIndex = { byUser: new Map(), byUserModel: new Map() };
   const userDirectory = membersFor(users.map((user) => user.id), usersById, noUsage);
   const groupCards = groups.map((group) => {
     const members = membersFor(group.memberIds, usersById, noUsage).map((member) =>
-      groupMemberOverview(member, config, groups, assignments),
+      groupMemberOverview(member, config, groups, assignments, optOutsByUser),
     );
     return {
       ...group,
@@ -292,14 +301,16 @@ export async function loadGroupQuotaOverview(tenantId: string): Promise<{
 }
 
 export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuotaOverview[]> {
-  const [users, config, groups, departments, assignments, allEnabledModelIds] = await Promise.all([
-    listAllUsers(tenantId),
-    getQuotaConfig(tenantId),
-    listUserGroups(tenantId),
-    listDepartmentsFlat(tenantId),
-    listAllAssignments(tenantId),
-    listAllEnabledModelIds(),
-  ]);
+  const [users, config, groups, departments, assignments, allEnabledModelIds, optOutsByUser] =
+    await Promise.all([
+      listAllUsers(tenantId),
+      getQuotaConfig(tenantId),
+      listUserGroups(tenantId),
+      listDepartmentsFlat(tenantId),
+      listAllAssignments(tenantId),
+      listAllEnabledModelIds(),
+      listTenantOptOuts(tenantId),
+    ]);
   const usage = await buildUsageIndex(users.map((user) => user.id), tenantId);
   const departmentsById = new Map(departments.map((department) => [department.id, department]));
   const effectiveModelsByDepartment = new Map<string, string[]>();
@@ -339,7 +350,7 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
       const effectiveModelIds = computeEffectiveUserAllowed(
         parentAllowedModelIds,
         assignedModelIds,
-        groupModelExclusionsForUser(config, user.id),
+        modelIdsFromSubjects(optOutsByUser.get(user.id) ?? []),
       );
       return {
         id: user.id,

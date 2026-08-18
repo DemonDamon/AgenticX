@@ -7,7 +7,6 @@
 
 import {
   enterpriseCapabilityAssignments as pgAssignments,
-  enterpriseCapabilityOptOuts as pgOptOuts,
   enterpriseCapabilityPackMembers as pgMembers,
   enterpriseCapabilityPacks as pgPacks,
   enterpriseSkills as pgSkills,
@@ -15,7 +14,6 @@ import {
 } from "@agenticx/db-schema";
 import {
   enterpriseCapabilityAssignments as myAssignments,
-  enterpriseCapabilityOptOuts as myOptOuts,
   enterpriseCapabilityPackMembers as myMembers,
   enterpriseCapabilityPacks as myPacks,
   enterpriseSkills as mySkills,
@@ -54,7 +52,6 @@ export async function dialectCapabilityTables() {
       packs: myPacks,
       assignments: myAssignments,
       members: myMembers,
-      optOuts: myOptOuts,
       skills: mySkills,
       mcp: myMcpServers,
     } as const;
@@ -64,7 +61,6 @@ export async function dialectCapabilityTables() {
     packs: pgPacks,
     assignments: pgAssignments,
     members: pgMembers,
-    optOuts: pgOptOuts,
     skills: pgSkills,
     mcp: pgMcpServers,
   } as const;

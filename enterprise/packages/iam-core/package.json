@@ -18,11 +18,12 @@
   },
   "dependencies": {
     "@agenticx/auth": "workspace:*",
+    "@agenticx/config": "workspace:*",
     "@agenticx/db-schema": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "mysql2": "^3.14.1",
     "pg": "^8.20.0",
-    "ulid": "^2.3.0",
-    "mysql2": "^3.14.1"
+    "ulid": "^2.3.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

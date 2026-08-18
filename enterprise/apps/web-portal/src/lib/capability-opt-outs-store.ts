@@ -6,13 +6,9 @@
  */
 
 import { normalizeUserPreferenceWrite } from "@agenticx/config";
-import { and, eq } from "drizzle-orm";
+import { setUserOptOut } from "@agenticx/iam-core";
 
-import {
-  dialectCapabilityTables,
-  requiredCapabilityTenant,
-  type DialectMutation,
-} from "./capability-tables";
+import { requiredCapabilityTenant } from "./capability-tables";
 import {
   capabilityStatesFromView,
   loadUserCapabilityView,
@@ -22,29 +18,6 @@ import {
 export type SetCapabilityPreferenceResult =
   | { ok: true; capabilities: UserCapabilityState[] }
   | { ok: false; reason: "enterprise_disabled" };
-
-async function writeOptOut(
-  userId: string,
-  capabilityId: string,
-  disabled: boolean,
-): Promise<void> {
-  const tenantId = requiredCapabilityTenant();
-  const t = await dialectCapabilityTables();
-  const mutation = t.db as unknown as DialectMutation;
-  const match = and(
-    eq(t.optOuts.tenantId, tenantId),
-    eq(t.optOuts.userId, userId),
-    eq(t.optOuts.capabilityId, capabilityId),
-  );
-  // 先删后插而不是 upsert：两种方言的冲突语法不同，而这张表只有主键没有其他列，
-  // 删掉再插与 upsert 等价。
-  await mutation.delete(t.optOuts).where(match);
-  if (!disabled) return;
-  const now = new Date();
-  await mutation
-    .insert(t.optOuts)
-    .values({ tenantId, userId, capabilityId, createdAt: now, updatedAt: now });
-}
 
 /**
  * 落一次用户开关，并回读最新状态。
@@ -64,7 +37,7 @@ export async function setUserCapabilityPreference(
   const decision = normalizeUserPreferenceWrite(enterpriseEnabled, enabled);
   if (!decision.accepted) return { ok: false, reason: decision.reason };
 
-  await writeOptOut(userId, capabilityId, decision.disabledByUser);
+  await setUserOptOut(requiredCapabilityTenant(), userId, capabilityId, decision.disabledByUser);
 
   const optOuts = new Set(view.optOuts);
   if (decision.disabledByUser) optOuts.add(capabilityId);

@@ -35,3 +35,4 @@ export * from "./desktop-device-auth";
 export * from "./capability-packs";
 export * from "./user-groups";
 export * from "./feature-assignments";
+export * from "./user-opt-outs";

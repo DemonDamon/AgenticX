@@ -386,6 +386,13 @@
       "when": 1787643800000,
       "tag": "0055_enterprise_feature_assignments",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1787730200000,
+      "tag": "0056_enterprise_user_opt_outs",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,7 @@ vi.mock("@agenticx/iam-core", () => ({
     return [deptId];
   }),
   listUserGroupIdsForUser: vi.fn().mockResolvedValue([]),
+  listUserOptOuts: vi.fn().mockResolvedValue([]),
   groupAssignmentKey: (groupId: string) => `group:${groupId}`,
 }));
 

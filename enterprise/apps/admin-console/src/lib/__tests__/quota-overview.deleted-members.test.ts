@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@agenticx/iam-core", () => ({
+  listTenantOptOuts: async () => new Map<string, string[]>(),
   listAdminUsers: (...args: unknown[]) => mocks.listAdminUsers(...args),
   listDepartmentsFlat: (...args: unknown[]) => mocks.listDepartmentsFlat(...args),
 }));
@@ -27,7 +28,6 @@ vi.mock("../user-groups-store", () => ({
   groupQuotaSourceForUser: (groups: Array<{ memberIds: string[] }>, userId: string) =>
     groups.find((group) => group.memberIds.includes(userId)) ?? null,
   groupModelIdsForUser: () => [],
-  groupModelExclusionsForUser: () => [],
 }));
 
 vi.mock("../user-models-store", () => ({

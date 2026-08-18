@@ -13,12 +13,14 @@ import {
   enterpriseRuntimeTokenQuotas as mysqlQuotaTable,
   enterpriseRuntimeUserVisibleModels as mysqlUvmTable,
 } from "@agenticx/db-schema/mysql";
+import { modelIdsFromSubjects } from "@agenticx/config";
 import {
   createMysqlDb,
   getIamDb,
   groupAssignmentKey,
   listDepartmentAncestorIds,
   listUserGroupIdsForUser,
+  listUserOptOuts,
   migrateLegacyUserVisibleModelsIfNeeded,
   resolveDatabaseConfig,
 } from "@agenticx/iam-core";
@@ -155,32 +157,10 @@ function idsFrom(value: unknown): string[] {
   return [...new Set(value.map((id) => String(id).trim()).filter(Boolean))];
 }
 
-/**
- * 个人关闭的模型。
- *
- * 组的可见模型已经和个人、部门一样存在 user_visible_models 里（key 为 `group:<id>`），
- * 这里只剩「本人关掉了哪些」这一件事还留在配额 JSON 中——它是一份减法清单，不属于
- * 分配，等有第二个消费方时再单独立表。
- */
+/** 个人关闭的模型。与能力的关闭记录同在一张表，前缀区分。 */
 async function readUserModelOptOuts(userId: string): Promise<string[]> {
-  const tid = requiredTenant();
-  const config = resolveDatabaseConfig();
-  let rows: Array<{ config: unknown }>;
-  if (config.dialect === "mysql") {
-    const { raw: db } = await createMysqlDb(config);
-    rows = await db
-      .select({ config: mysqlQuotaTable.config })
-      .from(mysqlQuotaTable)
-      .where(eq(mysqlQuotaTable.tenantId, tid))
-      .limit(1);
-  } else {
-    rows = await getIamDb()
-      .select({ config: pgQuotaTable.config })
-      .from(pgQuotaTable)
-      .where(eq(pgQuotaTable.tenantId, tid))
-      .limit(1);
-  }
-  return idsFrom(asRecord(asRecord(rows[0]?.config)?.modelExclusions)?.[userId]);
+  const subjects = await listUserOptOuts(requiredTenant(), userId);
+  return modelIdsFromSubjects(subjects);
 }
 
 function flattenEnabledModelIds(providers: ProviderRecord[]): string[] {

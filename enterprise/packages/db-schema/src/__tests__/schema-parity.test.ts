@@ -130,6 +130,7 @@ describe("mysql baseline migration inventory", () => {
       "0027_enterprise_capability_packs.sql",
       "0028_enterprise_user_groups.sql",
       "0029_enterprise_feature_assignments.sql",
+      "0030_enterprise_user_opt_outs.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -177,6 +178,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 27, tag: "0027_enterprise_capability_packs" }),
       expect.objectContaining({ idx: 28, tag: "0028_enterprise_user_groups" }),
       expect.objectContaining({ idx: 29, tag: "0029_enterprise_feature_assignments" }),
+      expect.objectContaining({ idx: 30, tag: "0030_enterprise_user_opt_outs" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

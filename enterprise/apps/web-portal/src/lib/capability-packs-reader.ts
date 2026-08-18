@@ -17,7 +17,10 @@ import {
   type CapabilityAssignment,
   type CapabilityState,
 } from "@agenticx/config";
-import { resolveAssignmentKeysForUser as resolveKeysForUser } from "@agenticx/iam-core";
+import {
+  listUserOptOuts,
+  resolveAssignmentKeysForUser as resolveKeysForUser,
+} from "@agenticx/iam-core";
 import { and, eq, inArray } from "drizzle-orm";
 
 import {
@@ -165,22 +168,15 @@ export async function loadUserCapabilityView(
         )) as McpRow[])
     : [];
 
-  const optOutRows = (await query
-    .select({ capabilityId: t.optOuts.capabilityId })
-    .from(t.optOuts)
-    .where(
-      and(eq(t.optOuts.tenantId, tenantId), eq(t.optOuts.userId, userId)),
-    )) as Array<{ capabilityId: string }>;
+  // 个人关闭记录与模型的关闭记录同在一张表；这里只取能力那部分。
+  const optOuts = new Set(await listUserOptOuts(tenantId, userId));
 
   const assigned = [
     ...skillRows.map(toSkillCapability),
     ...mcpRows.map(toMcpCapability),
   ].sort((left, right) => left.id.localeCompare(right.id));
 
-  return {
-    assigned,
-    optOuts: new Set(optOutRows.map((row) => row.capabilityId)),
-  };
+  return { assigned, optOuts };
 }
 
 /** 供下发：用户当下真正能调用的能力。 */

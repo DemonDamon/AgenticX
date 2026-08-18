@@ -9,6 +9,7 @@ export * from "./repos/audit";
 export * from "./repos/departments";
 export * from "./repos/user-groups";
 export * from "./repos/feature-assignments";
+export * from "./repos/user-opt-outs";
 export * from "./repos/roles";
 export * from "./repos/sso-providers";
 export * from "./repos/users";

@@ -106,24 +106,6 @@ export const enterpriseCapabilityAssignments = pgTable(
   })
 );
 
-/**
- * 用户关闭记录。只记「关掉了什么」——用户无权开启，所以没有反向的表。
- * 存服务端而非本机：本机存的话换台电脑或重装就全部复原成开启，且无法审计。
- */
-export const enterpriseCapabilityOptOuts = pgTable(
-  "enterprise_capability_opt_outs",
-  {
-    tenantId: ulid("tenant_id")
-      .notNull()
-      .references(() => tenants.id, { onDelete: "cascade" }),
-    userId: varchar("user_id", { length: 64 }).notNull(),
-    capabilityId: varchar("capability_id", { length: 64 }).notNull(),
-    ...auditColumns,
-  },
-  (table) => ({
-    pk: primaryKey({ columns: [table.tenantId, table.userId, table.capabilityId] }),
-  })
-);
 
 export type EnterpriseSkillRow = typeof enterpriseSkills.$inferSelect;
 export type NewEnterpriseSkillRow = typeof enterpriseSkills.$inferInsert;
@@ -131,4 +113,3 @@ export type EnterpriseCapabilityPackRow = typeof enterpriseCapabilityPacks.$infe
 export type NewEnterpriseCapabilityPackRow = typeof enterpriseCapabilityPacks.$inferInsert;
 export type EnterpriseCapabilityPackMemberRow = typeof enterpriseCapabilityPackMembers.$inferSelect;
 export type EnterpriseCapabilityAssignmentRow = typeof enterpriseCapabilityAssignments.$inferSelect;
-export type EnterpriseCapabilityOptOutRow = typeof enterpriseCapabilityOptOuts.$inferSelect;
