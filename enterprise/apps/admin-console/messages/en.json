@@ -390,7 +390,7 @@
           "removeModel": "Remove model \"{name}\" from this provider?"
         },
         "contextWindowLabel": "Context window",
-        "contextWindowAuto": "Auto",
+        "contextWindowAuto": "Auto · {value}",
         "contextWindowHint": "Usable context tokens for this model endpoint. Leave empty to let the client infer it from the model name; for self-hosted models, match your vLLM --max-model-len.",
         "contextWindowInvalid": "Context window must be between {min} and {max}"
       },

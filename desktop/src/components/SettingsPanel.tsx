@@ -116,7 +116,10 @@ import {
   type TokenBudgetConfig,
 } from "./automation/TokenBudgetConfigSection";
 import { AccountTab } from "./AccountTab";
-import { DeveloperContextWindowPanel } from "./settings/DeveloperContextWindowPanel";
+import {
+  formatContextWindowShort,
+  resolveHeuristicContextWindow,
+} from "../utils/model-context-window-heuristic";
 import { DeveloperTokenBudgetPanel } from "./settings/DeveloperTokenBudgetPanel";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { DataSourcesSettings } from "./settings/datasources/DataSourcesSettings";
@@ -6754,6 +6757,23 @@ export function SettingsPanel({
   const [editModelOriginalId, setEditModelOriginalId] = useState("");
   const [editModelFormId, setEditModelFormId] = useState("");
   const [editModelError, setEditModelError] = useState<string | null>(null);
+  // 按模型的上下文窗口覆盖，键为 `provider/model`；留空表示交给后端按模型名识别。
+  const [modelContextWindows, setModelContextWindows] = useState<Record<string, number>>({});
+  const [editModelWindowDraft, setEditModelWindowDraft] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.agenticxDesktop
+      .loadRuntimeConfig()
+      .then((result) => {
+        if (cancelled || !result.ok) return;
+        setModelContextWindows(result.model_context_windows ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [inlineRenameProviderId, setInlineRenameProviderId] = useState<string | null>(null);
   const [inlineRenameValue, setInlineRenameValue] = useState("");
   const [providerDeleteConfirmId, setProviderDeleteConfirmId] = useState<string | null>(null);
@@ -8022,12 +8042,15 @@ export function SettingsPanel({
     setEditModelModalOpen(false);
     setEditModelOriginalId("");
     setEditModelFormId("");
+    setEditModelWindowDraft("");
     setEditModelError(null);
   };
 
   const openEditModelModal = (modelId: string) => {
     setEditModelOriginalId(modelId);
     setEditModelFormId(modelId);
+    const stored = modelContextWindows[`${active}/${modelId}`];
+    setEditModelWindowDraft(stored ? String(stored) : "");
     setEditModelError(null);
     setEditModelModalOpen(true);
   };
@@ -8040,6 +8063,28 @@ export function SettingsPanel({
       setEditModelError("列表中已有相同的模型 ID");
       return;
     }
+
+    // 上下文窗口存在 runtime 配置里（不随厂商草稿走），键跟随模型 ID 改名。
+    const rawWindow = editModelWindowDraft.trim();
+    let declaredWindow: number | null = null;
+    if (rawWindow) {
+      const parsed = Number(rawWindow);
+      if (!Number.isFinite(parsed) || Math.floor(parsed) < 4_000 || Math.floor(parsed) > 10_000_000) {
+        setEditModelError("上下文窗口须在 4,000–10,000,000 之间，留空表示自动识别");
+        return;
+      }
+      declaredWindow = Math.floor(parsed);
+    }
+    const oldKey = `${active}/${oldId}`;
+    const newKey = `${active}/${newId}`;
+    if (declaredWindow !== (modelContextWindows[oldKey] ?? null) || newKey !== oldKey) {
+      const nextWindows = { ...modelContextWindows };
+      delete nextWindows[oldKey];
+      if (declaredWindow !== null) nextWindows[newKey] = declaredWindow;
+      setModelContextWindows(nextWindows);
+      void window.agenticxDesktop.saveRuntimeConfig({ model_context_windows: nextWindows });
+    }
+
     if (newId === oldId) {
       closeEditModelModal();
       return;
@@ -9528,7 +9573,6 @@ export function SettingsPanel({
                 />
 
                 <DeveloperTokenBudgetPanel />
-                <DeveloperContextWindowPanel />
 
                 <Panel title="会话工作区">
                   <label className="block text-sm text-text-muted">
@@ -10324,9 +10368,39 @@ export function SettingsPanel({
                               }}
                             />
                           </label>
+                          <label className="block text-sm text-text-muted">
+                            上下文窗口
+                            <input
+                              className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
+                              type="number"
+                              min={4000}
+                              max={10000000}
+                              step={1000}
+                              value={editModelWindowDraft}
+                              onChange={(e) => {
+                                setEditModelWindowDraft(e.target.value);
+                                setEditModelError(null);
+                              }}
+                              placeholder={`自动识别为 ${formatContextWindowShort(
+                                resolveHeuristicContextWindow(editModelFormId.trim() || editModelOriginalId),
+                              )}`}
+                              onKeyDown={(e) => {
+                                if (e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229) return;
+                                if (e.key === "Enter" && editModelFormId.trim()) submitEditModelFromModal();
+                              }}
+                            />
+                          </label>
                           {editModelError ? <div className="text-[11px] text-rose-400">{editModelError}</div> : null}
                           <p className="text-[11px] leading-relaxed text-text-faint">
                             列表项即请求时使用的模型 ID；保存设置后才会写入配置。
+                          </p>
+                          <p className="text-[11px] leading-relaxed text-text-faint">
+                            上下文窗口留空即按模型名自动识别（当前会得到{" "}
+                            {formatContextWindowShort(
+                              resolveHeuristicContextWindow(editModelFormId.trim() || editModelOriginalId),
+                            )}
+                            ）。自部署端点的真实上限由 vLLM 的 --max-model-len 等参数决定，常低于模型架构支持的值；
+                            填低了只是提前整理上下文，填高了会让整理触发得太晚、直接被上游拒绝。该项立即生效，无需保存设置。
                           </p>
                         </div>
                       </Modal>

@@ -59,6 +59,10 @@ import {
   normalizeContextWindow,
 } from "../../../lib/model-context-window";
 import {
+  formatContextWindowShort,
+  resolveHeuristicContextWindow,
+} from "../../../lib/model-context-window-heuristic";
+import {
   pricePerMillion,
   resolveProviderModelPricing,
   syncPricingToProviderCatalog,
@@ -969,7 +973,9 @@ export default function ModelProvidersPage() {
                                 min={MIN_MODEL_CONTEXT_WINDOW}
                                 max={MAX_MODEL_CONTEXT_WINDOW}
                                 step="1000"
-                                placeholder={t("contextWindowAuto")}
+                                placeholder={t("contextWindowAuto", {
+                                  value: formatContextWindowShort(resolveHeuristicContextWindow(m.name)),
+                                })}
                                 title={t("contextWindowHint")}
                                 value={windowDrafts[m.name] ?? (m.contextWindow ? String(m.contextWindow) : "")}
                                 onChange={(event) =>
