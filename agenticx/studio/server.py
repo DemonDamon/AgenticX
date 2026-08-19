@@ -145,6 +145,18 @@ from agenticx.workspace.loader import (
 
 logger = logging.getLogger(__name__)
 
+def _turn_lease_max_hold_seconds() -> float:
+    """后台收尾等待的上界：超过它就强制放回并发位。见 _release_after_runtime。"""
+    raw = str(os.environ.get("AGX_DESKTOP_TURN_LEASE_MAX_HOLD_SECONDS", "") or "").strip()
+    try:
+        value = float(raw) if raw else 3600.0
+    except ValueError:
+        value = 3600.0
+    return max(60.0, value)
+
+
+_TURN_LEASE_MAX_HOLD_SECONDS = _turn_lease_max_hold_seconds()
+
 _MODELSCOPE_LIST_URL = "https://www.modelscope.cn/openapi/v1/mcp/servers"
 _MODELSCOPE_DETAIL_URL_TMPL = "https://www.modelscope.cn/openapi/v1/mcp/servers/{server_id}"
 _MCP_MARKETPLACE_CACHE_TTL_SECONDS = 1800.0
@@ -2558,8 +2570,7 @@ def create_studio_app() -> FastAPI:
             logger.exception("[clarify] failed to persist clarification answer")
         return {"ok": True}
 
-    @app.post("/api/chat")
-    async def chat(
+    async def _chat_impl(
         payload: ChatRequest,
         request: Request,
         x_agx_desktop_token: str | None = Header(default=None),
@@ -2569,23 +2580,7 @@ def create_studio_app() -> FastAPI:
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         manager.align_meta_session_workspace(managed)
-        # Idempotency guard: dedupe a duplicate POST (double-click / chip burst /
-        # retry race) so the backend never persists a second identical user turn.
-        # Keyed by client_turn_id on the managed session (bounded recent set).
         _ctid = normalize_llm_turn_id(getattr(payload, "client_turn_id", None))
-        if _ctid and not bool(getattr(payload, "skip_user_history", False)):
-            _seen = getattr(managed, "_recent_client_turn_ids", None)
-            if _seen is None:
-                from collections import deque
-
-                _seen = deque(maxlen=64)
-                setattr(managed, "_recent_client_turn_ids", _seen)
-            if _ctid in _seen:
-                async def _dup_noop_stream():
-                    yield 'data: {"type":"done","data":{"duplicate":true}}\n\n'
-
-                return StreamingResponse(_dup_noop_stream(), media_type="text/event-stream")
-            _seen.append(_ctid)
         request_turn_id = _resolve_request_turn_id(_ctid)
 
         setattr(managed.studio_session, "taskspaces", list(managed.taskspaces or []))
@@ -3920,6 +3915,170 @@ def create_studio_app() -> FastAPI:
             headers=_STREAMING_SSE_HEADERS,
         )
 
+    def _turn_rejected_response(
+        *,
+        code: str,
+        text: str,
+        status_code: int,
+        retry_after: str | None = None,
+    ) -> StreamingResponse:
+        async def _rejected_stream() -> AsyncGenerator[str, None]:
+            evt = SseEvent(type="error", data={"error": code, "text": text})
+            yield f"data: {json.dumps(evt.model_dump(), ensure_ascii=False)}\n\n"
+            yield f'data: {{"type":"done","data":{{"reason":"{code}"}}}}\n\n'
+
+        headers = dict(_STREAMING_SSE_HEADERS)
+        if retry_after:
+            headers["Retry-After"] = retry_after
+        return StreamingResponse(
+            _rejected_stream(),
+            status_code=status_code,
+            media_type="text/event-stream",
+            headers=headers,
+        )
+
+    async def _acquire_desktop_turn(session_id: str, *, source: str):
+        from agenticx.studio.turn_limiter import (
+            SessionTurnBusy,
+            TurnQueueFull,
+            TurnQueueTimeout,
+        )
+
+        try:
+            return await manager.turn_limiter.acquire(session_id, source=source), None
+        except SessionTurnBusy:
+            return None, _turn_rejected_response(
+                code="session_turn_in_progress",
+                text="该会话已有任务正在运行，请等待完成后再试。",
+                status_code=409,
+            )
+        except (TurnQueueFull, TurnQueueTimeout):
+            # 上限由 AGX_DESKTOP_MAX_CONCURRENT_TURNS 决定，提示语不能写死 3 ——
+            # 调小了之后界面还说「已有 3 个在运行」，用户会以为是自己数错了。
+            limit = getattr(manager.turn_limiter, "max_active", 3)
+            return None, _turn_rejected_response(
+                code="client_turn_limit_reached",
+                text=f"当前已有 {limit} 个任务正在运行，请稍后重试。",
+                status_code=429,
+                retry_after="3",
+            )
+
+    async def _attach_desktop_turn_lease(
+        response: StreamingResponse,
+        lease,
+        *,
+        session_id: str | None = None,
+    ):
+        body_iterator = response.body_iterator
+        if body_iterator is None:
+            await lease.release()
+        else:
+            async def _leased_body():
+                try:
+                    async for chunk in body_iterator:
+                        yield chunk
+                finally:
+                    async def _release_after_runtime() -> None:
+                        # A live-reattach stream may close while its event-hub
+                        # producer keeps working. Keep the admission token until
+                        # that producer finalizes, not merely until HTTP detach.
+                        #
+                        # 但这个等待必须有上界。execution_state 卡在 running（进程被
+                        # 打断、hub 没能收尾）时，无上界的循环会永久占着一个并发位：
+                        # 攒够 max_active 次就彻底进不来了，而且只能重启才恢复。宁可
+                        # 超时放回去多放进来一个，也不能悄悄把容量吃掉。
+                        if session_id:
+                            deadline = time.monotonic() + _TURN_LEASE_MAX_HOLD_SECONDS
+                            interval = 0.05
+                            while True:
+                                current = manager.get_if_loaded(session_id)
+                                state = str(
+                                    getattr(current, "execution_state", "idle") or "idle"
+                                )
+                                hub = manager.get_event_hub(session_id)
+                                if state != "running" and not (hub is not None and hub.is_active):
+                                    break
+                                if time.monotonic() >= deadline:
+                                    logger.warning(
+                                        "[turn-limiter] session=%s 仍处于 %s，已达 %.0fs 上限，"
+                                        "强制释放并发位（疑似运行态未收尾）",
+                                        session_id,
+                                        state,
+                                        _TURN_LEASE_MAX_HOLD_SECONDS,
+                                    )
+                                    break
+                                await asyncio.sleep(interval)
+                                # 常见的短任务在头几百毫秒内就收尾；之后退避到 1s，
+                                # 免得一个长跑任务把 CPU 耗在空转上。
+                                if interval < 1.0:
+                                    interval = min(1.0, interval * 2)
+                        await lease.release()
+
+                    release_task = asyncio.create_task(_release_after_runtime())
+                    try:
+                        await asyncio.shield(release_task)
+                    except asyncio.CancelledError:
+                        # The detached task intentionally retains and later
+                        # releases the lease after the background runtime ends.
+                        raise
+
+            response.body_iterator = _leased_body()
+        return response
+
+    @app.post("/api/chat")
+    async def chat(
+        payload: ChatRequest,
+        request: Request,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        _check_token(x_agx_desktop_token)
+        managed = manager.get(payload.session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+
+        # Check completed duplicate turns before admission, but append only after
+        # a lease is granted. A rejected/queued request must remain retryable.
+        _ctid = normalize_llm_turn_id(getattr(payload, "client_turn_id", None))
+        _seen = None
+        if _ctid and not bool(getattr(payload, "skip_user_history", False)):
+            _seen = getattr(managed, "_recent_client_turn_ids", None)
+            if _seen is None:
+                from collections import deque
+
+                _seen = deque(maxlen=64)
+                setattr(managed, "_recent_client_turn_ids", _seen)
+            if _ctid in _seen:
+                async def _dup_noop_stream():
+                    yield 'data: {"type":"done","data":{"duplicate":true}}\n\n'
+
+                return StreamingResponse(_dup_noop_stream(), media_type="text/event-stream")
+
+        avatar_id = str(getattr(managed, "avatar_id", "") or "")
+        source = (
+            "automation"
+            if avatar_id.startswith("automation:")
+            else "continuation"
+            if bool(getattr(payload, "skip_user_history", False))
+            else "desktop_chat"
+        )
+        lease, rejected = await _acquire_desktop_turn(payload.session_id, source=source)
+        if rejected is not None:
+            return rejected
+        assert lease is not None
+        if _seen is not None and _ctid:
+            _seen.append(_ctid)
+
+        try:
+            response = await _chat_impl(payload, request, x_agx_desktop_token)
+        except BaseException:
+            await lease.release()
+            raise
+        return await _attach_desktop_turn_lease(
+            response,
+            lease,
+            session_id=payload.session_id,
+        )
+
     @app.post("/api/sessions/{session_id}/continue")
     async def continue_session(
         session_id: str,
@@ -4278,6 +4437,30 @@ def create_studio_app() -> FastAPI:
             _stream_with_llm_turn_context(_loop_stream(), request_turn_id),
             media_type="text/event-stream",
         )
+
+    @app.post("/api/loop")
+    async def run_loop(
+        payload: dict,
+        request: Request,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        _check_token(x_agx_desktop_token)
+        session_id = str(payload.get("session_id", "")).strip()
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        if manager.get(session_id, touch=False) is None:
+            raise HTTPException(status_code=404, detail="session not found")
+
+        lease, rejected = await _acquire_desktop_turn(session_id, source="desktop_loop")
+        if rejected is not None:
+            return rejected
+        assert lease is not None
+        try:
+            response = await _run_loop_impl(payload, request, x_agx_desktop_token)
+        except BaseException:
+            await lease.release()
+            raise
+        return await _attach_desktop_turn_lease(response, lease)
 
     @app.post("/api/subagent/cancel")
     async def cancel_subagent(

@@ -510,10 +510,13 @@ class SessionManager:
     _META_TASKSPACE_SCOPE = "meta"
 
     def __init__(self, *, ttl_seconds: int = 3600) -> None:
+        from agenticx.studio.turn_limiter import TurnLimiter
+
         self.ttl_seconds = ttl_seconds
         self._sessions: Dict[str, ManagedSession] = {}
         self._interrupt_requests: set[str] = set()
         self._continuation_locks: Dict[str, asyncio.Lock] = {}
+        self.turn_limiter = TurnLimiter.from_env()
         self._session_store = SessionStore()
         self._sessions_root = os.path.join(os.path.expanduser("~"), ".agenticx", "sessions")
         self._taskspaces_root = os.path.join(os.path.expanduser("~"), ".agenticx", "taskspaces")
