@@ -6612,6 +6612,9 @@ export function SettingsPanel({
   groups,
   onForwardFavorite,
 }: Props) {
+  // 企业管控：不许自助添加 MCP / 不许扫描本机配置时，对应入口整段消失。
+  const capabilityLocks =
+    useAppStore((s) => s.userAccount.capabilityLocks) ?? UNRESTRICTED_CAPABILITY_LOCKS;
   const userNickname = useAppStore((s) => s.userNickname);
   const userAccount = useAppStore((s) => s.userAccount);
   const setUserNickname = useAppStore((s) => s.setUserNickname);
@@ -8896,13 +8899,23 @@ export function SettingsPanel({
 
   useEffect(() => {
     if (!open || tab !== "mcp") return;
-    if (mcpDiscoverHits.length === 0) {
+    // 打开 MCP 页会自动扫一次本机其它 AI 工具的配置。企业关掉这项时连扫都不能扫——
+    // 客户要的是本机不被读，不是「扫了但不显示」。
+    if (capabilityLocks.allowMcpAutoDiscovery && mcpDiscoverHits.length === 0) {
       void refreshMcpDiscover();
     }
     if (mcpMarketplaceItems.length === 0) {
       void refreshMcpMarketplace();
     }
-  }, [open, tab, mcpDiscoverHits.length, mcpMarketplaceItems.length, refreshMcpDiscover, refreshMcpMarketplace]);
+  }, [
+    open,
+    tab,
+    capabilityLocks.allowMcpAutoDiscovery,
+    mcpDiscoverHits.length,
+    mcpMarketplaceItems.length,
+    refreshMcpDiscover,
+    refreshMcpMarketplace,
+  ]);
 
   useEffect(() => {
     if (!open || tab !== "mcp") return;
@@ -10554,7 +10567,9 @@ export function SettingsPanel({
 
                 {mcpMessage && <div className="text-xs text-text-subtle">{mcpMessage}</div>}
 
-                {/* —— 配置文件路径 —— */}
+                {/* —— 配置文件路径 —— 企业禁止自助添加 MCP 时整段隐藏：
+                    这些路径就是本机自行挂 MCP 的方式，留着等于开了后门。 */}
+                {capabilityLocks.allowLocalMcpInstall ? (
                 <div className="space-y-2">
                   <div className="text-xs text-text-faint">
                     配置文件路径（按顺序合并；同名服务以先出现的为准）。点右侧铅笔图标直接编辑 JSON。
@@ -10627,11 +10642,13 @@ export function SettingsPanel({
                     添加配置路径
                   </button>
                 </div>
+                ) : null}
 
                 {/* —— MCP 服务列表 —— */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-medium text-text-muted">MCP 服务</div>
+                    {capabilityLocks.allowMcpAutoDiscovery ? (
                     <button
                       type="button"
                       className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover disabled:opacity-40"
@@ -10646,6 +10663,7 @@ export function SettingsPanel({
                       />
                       {mcpDiscoverLoading ? "扫描中…" : "扫描发现"}
                     </button>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-text-faint">
                     <span className="text-text-faint">注：</span>
@@ -10880,6 +10898,10 @@ export function SettingsPanel({
                       );
                     })}
 
+                    {/* 自助添加通道。企业锁住时这两个入口消失，但下面的
+                        McpGatewayImportPanel 保留——从企业网关导入是管理员批准的路径，
+                        不是员工自己挂服务。 */}
+                    {capabilityLocks.allowLocalMcpInstall ? (
                     <div className="grid gap-2 sm:grid-cols-2">
                       <button
                         type="button"
@@ -10912,6 +10934,7 @@ export function SettingsPanel({
                         </span>
                       </button>
                     </div>
+                    ) : null}
 
                     <McpGatewayImportPanel
                       configPath={MCP_PRIMARY_CONFIG_PATH}
