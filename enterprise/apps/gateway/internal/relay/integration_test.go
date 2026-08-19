@@ -35,9 +35,9 @@ func TestChannelRotationKillsAFiftyTimes(t *testing.T) {
 			ID:    "ok",
 			Model: "deepseek-chat",
 			Choices: []openai.ChatCompletionChoice{
-				{Index: 0, Message: openai.ChatMessage{Role: "assistant", Content: "hi"}, FinishReason: "stop"},
-				},
-				Usage: openai.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
+				{Index: 0, Message: openai.ChatMessage{Role: "assistant", Content: openai.NewStringContent("hi")}, FinishReason: "stop"},
+			},
+			Usage: openai.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 		})
 	}))
 	defer upB.Close()
@@ -65,7 +65,7 @@ func TestChannelRotationKillsAFiftyTimes(t *testing.T) {
 	ctx := context.Background()
 	req := openai.ChatCompletionRequest{
 		Model:    "deepseek-chat",
-		Messages: []openai.ChatMessage{{Role: "user", Content: "ping"}},
+		Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("ping")}},
 	}
 
 	successes := 0
@@ -102,7 +102,7 @@ func TestRetryAuditCarriesAttempts(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
 			ID: "ok", Model: "m",
-			Choices: []openai.ChatCompletionChoice{{Index: 0, Message: openai.ChatMessage{Role: "assistant", Content: "ok"}}},
+			Choices: []openai.ChatCompletionChoice{{Index: 0, Message: openai.ChatMessage{Role: "assistant", Content: openai.NewStringContent("ok")}}},
 		})
 	}))
 	defer upB.Close()
@@ -122,7 +122,7 @@ func TestRetryAuditCarriesAttempts(t *testing.T) {
 	// 不依赖 affinity 命中 A。
 	res, err := exec.Complete(context.Background(), openai.ChatCompletionRequest{
 		Model:    "m",
-		Messages: []openai.ChatMessage{{Role: "user", Content: "x"}},
+		Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("x")}},
 	}, "m", channel.Identity{TenantID: "t"})
 	if err != nil {
 		t.Fatalf("expected eventual success, got %v", err)
@@ -161,7 +161,7 @@ func TestKeyFailoverWithinChannel401(t *testing.T) {
 			ID:    "ok",
 			Model: "deepseek-chat",
 			Choices: []openai.ChatCompletionChoice{
-				{Index: 0, Message: openai.ChatMessage{Role: "assistant", Content: "hi"}, FinishReason: "stop"},
+				{Index: 0, Message: openai.ChatMessage{Role: "assistant", Content: openai.NewStringContent("hi")}, FinishReason: "stop"},
 			},
 		})
 	}))
@@ -172,7 +172,7 @@ func TestKeyFailoverWithinChannel401(t *testing.T) {
 			ID: "chan-k", TenantID: "t1", Name: "K", ProviderType: "openai",
 			BaseURL: up.URL, Weight: 1, Status: channel.StatusActive,
 			SupportedModels: []string{"deepseek-chat"},
-			Metadata: map[string]any{"keyRefs": []string{keyA, keyB}},
+			Metadata:        map[string]any{"keyRefs": []string{keyA, keyB}},
 		},
 	}
 	reg := channel.NewRegistry(nil, nil)
@@ -183,7 +183,7 @@ func TestKeyFailoverWithinChannel401(t *testing.T) {
 
 	res, err := exec.Complete(context.Background(), openai.ChatCompletionRequest{
 		Model:    "deepseek-chat",
-		Messages: []openai.ChatMessage{{Role: "user", Content: "ping"}},
+		Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("ping")}},
 	}, "deepseek-chat", channel.Identity{TenantID: "t1"})
 	if err != nil {
 		t.Fatalf("expected success after key failover, got %v", err)

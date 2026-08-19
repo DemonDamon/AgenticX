@@ -91,7 +91,7 @@ func TestOpenAIUpstreamCompleteViaPivot(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(openai.ChatCompletionResponse{
 			Model: "m",
 			Choices: []openai.ChatCompletionChoice{{
-				Message: openai.ChatMessage{Role: "assistant", Content: "ok"},
+				Message: openai.ChatMessage{Role: "assistant", Content: openai.NewStringContent("ok")},
 			}},
 			Usage: openai.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
 		})
@@ -105,12 +105,12 @@ func TestOpenAIUpstreamCompleteViaPivot(t *testing.T) {
 	reg.SetSnapshot(channels)
 	exec := NewExecutor(channel.NewPicker(reg, channel.NewStatsStore(), channel.NewAffinityStore(0)), adaptor.NewFactory(adaptor.NewOpenAIAdaptor()), nil)
 	res, err := exec.Complete(context.Background(), openai.ChatCompletionRequest{
-		Model: "m", Messages: []openai.ChatMessage{{Role: "user", Content: "x"}},
+		Model: "m", Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("x")}},
 	}, "m", channel.Identity{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Response.Choices) == 0 || res.Response.Choices[0].Message.Content != "ok" {
+	if len(res.Response.Choices) == 0 || openai.ContentText(res.Response.Choices[0].Message.Content) != "ok" {
 		t.Fatalf("unexpected %+v", res.Response)
 	}
 }
@@ -126,20 +126,20 @@ func TestClaudeAdaptorUpstreamMock(t *testing.T) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "msg_1",
+			"id":      "msg_1",
 			"content": []map[string]any{{"type": "text", "text": "hello"}},
-			"usage": map[string]any{"input_tokens": 1, "output_tokens": 1},
+			"usage":   map[string]any{"input_tokens": 1, "output_tokens": 1},
 		})
 	}))
 	defer up.Close()
 	ad := adaptor.NewClaudeAdaptor()
 	resp, err := ad.Complete(context.Background(), openai.ChatCompletionRequest{
-		Model: "claude-3", Messages: []openai.ChatMessage{{Role: "user", Content: "x"}}, MaxTokens: 10,
+		Model: "claude-3", Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("x")}}, MaxTokens: 10,
 	}, channel.Channel{BaseURL: up.URL, APIKey: "k"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Choices) == 0 || resp.Choices[0].Message.Content != "hello" {
+	if len(resp.Choices) == 0 || openai.ContentText(resp.Choices[0].Message.Content) != "hello" {
 		t.Fatalf("unexpected %+v", resp)
 	}
 }
@@ -162,12 +162,12 @@ func TestGeminiAdaptorUpstreamMock(t *testing.T) {
 	defer up.Close()
 	ad := adaptor.NewGeminiAdaptor()
 	resp, err := ad.Complete(context.Background(), openai.ChatCompletionRequest{
-		Model: "gemini-1.5-pro", Messages: []openai.ChatMessage{{Role: "user", Content: "x"}},
+		Model: "gemini-1.5-pro", Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("x")}},
 	}, channel.Channel{BaseURL: up.URL, APIKey: "k"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Choices[0].Message.Content != "gemini" {
+	if openai.ContentText(resp.Choices[0].Message.Content) != "gemini" {
 		t.Fatalf("unexpected %+v", resp)
 	}
 }

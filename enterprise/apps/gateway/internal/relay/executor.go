@@ -37,11 +37,11 @@ func NewExecutor(picker *channel.Picker, factory *adaptor.Factory, pool *keypool
 }
 
 type CompleteResult struct {
-	Response      openai.ChatCompletionResponse
-	Channel       channel.Channel
-	KeyRef        string
-	Attempts      []channel.Attempt
-	PickDecision  channel.PickDecision
+	Response     openai.ChatCompletionResponse
+	Channel      channel.Channel
+	KeyRef       string
+	Attempts     []channel.Attempt
+	PickDecision channel.PickDecision
 }
 
 type StreamResult struct {
