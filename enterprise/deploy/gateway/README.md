@@ -38,7 +38,7 @@ kubectl apply -f deployment.yaml -f service.yaml -f hpa.yaml
 
 ## 混合部署
 
-公私云 + 私有化词元池路由样例见 [`hybrid/README.md`](./hybrid/README.md)。
+公私云 + 私有化 Token 池路由样例见 [`hybrid/README.md`](./hybrid/README.md)。
 
 ## 验证
 

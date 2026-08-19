@@ -8,7 +8,7 @@
 
 ---
 
-## v0.2 已落地能力（沙箱 + 词元追踪 MVP）
+## v0.2 已落地能力（沙箱 + Token 追踪 MVP）
 
 - `EDGE_AGENT_ENABLED=1` 启动本地 HTTP 服务（默认 `127.0.0.1:7420`）
 - `POST /v1/tasks/run`：在隔离临时目录执行 agent step（model / exec / write）

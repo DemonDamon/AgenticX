@@ -69,7 +69,7 @@ export const enterpriseRuntimePricing = mysqlTable("enterprise_runtime_pricing",
   updatedAt: datetime("updated_at", { fsp: 6 }).default(sql`(UTC_TIMESTAMP(6))`).notNull(),
 });
 
-/** 租户成本/词元预算整包 JSON。 */
+/** 租户成本/Token 预算整包 JSON。 */
 export const enterpriseRuntimeBudgets = mysqlTable("enterprise_runtime_budgets", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
   config: json("config").notNull().$type<Record<string, unknown>>(),

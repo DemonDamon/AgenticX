@@ -51,7 +51,7 @@
       "supportedModels": ["llama3", "qwen2.5", "local-ollama-llama3"],
       "metadata": {
         "pool": "private-token-pool",
-        "description": "私有化词元池 — 本地 Ollama / 自建推理"
+        "description": "私有化 Token 池 — 本地 Ollama / 自建推理"
       }
     },
     {

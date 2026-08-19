@@ -78,7 +78,7 @@ export const enterpriseRuntimePricing = pgTable("enterprise_runtime_pricing", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-/** 租户成本/词元预算整包 JSON。 */
+/** 租户成本/Token 预算整包 JSON。 */
 export const enterpriseRuntimeBudgets = pgTable("enterprise_runtime_budgets", {
   tenantId: varchar("tenant_id", { length: 26 }).primaryKey(),
   config: jsonb("config").notNull().$type<Record<string, unknown>>(),

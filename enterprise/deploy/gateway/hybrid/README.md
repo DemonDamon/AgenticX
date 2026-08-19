@@ -1,6 +1,6 @@
 # 公私混合部署 — 路由编排说明
 
-本目录提供 **公有云模型池** 与 **私有化词元池** 联动的配置样例，复用网关现有 channel relay + YAML 路由能力，不引入新路由引擎。
+本目录提供 **公有云模型池** 与 **私有化 Token 池** 联动的配置样例，复用网关现有 channel relay + YAML 路由能力，不引入新路由引擎。
 
 ## 架构
 
@@ -12,7 +12,7 @@ Client (portal / desktop)
         │
         ├─ route=third-party / private-cloud  → 公有云 API（DeepSeek / Moonshot 等）
         │
-        └─ route=local                         → 私有化词元池（Ollama / vLLM / 内网推理）
+        └─ route=local                         → 私有化 Token 池（Ollama / vLLM / 内网推理）
 ```
 
 ## 启用 Channel Registry

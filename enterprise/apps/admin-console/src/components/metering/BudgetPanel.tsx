@@ -180,7 +180,7 @@ function BudgetRuleEditor({
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="cost_usd">成本 USD</SelectItem>
-            <SelectItem value="tokens">词元</SelectItem>
+            <SelectItem value="tokens">Token</SelectItem>
           </SelectContent>
         </Select>
       </div>

@@ -13,7 +13,7 @@ import { PortalLogsPanel } from "../../../components/governance/PortalLogsPanel"
 const TABS = [
   { id: "audit", label: "操作审计" },
   { id: "logs", label: "请求日志" },
-  { id: "traces", label: "词元追踪" },
+  { id: "traces", label: "Token 追踪" },
   { id: "policy", label: "内容策略" },
   { id: "compliance", label: "合规留存" },
 ] as const;
@@ -27,7 +27,7 @@ function isTabId(value: string | null): value is TabId {
 /**
  * 安全与审计：发生过什么、按什么规则拦、留多久。
  *
- * 原本是五个一级菜单——操作审计、Portal 日志、词元追踪、内容策略、合规留存。查一件事
+ * 原本是五个一级菜单——操作审计、Portal 日志、Token 追踪、内容策略、合规留存。查一件事
  * 通常要串着看：审计里看到一次调用，要去日志里看请求，再去追踪里看这轮花了多少 token。
  * 拆成五个入口的结果是管理员自己在标签页之间来回跳，还得记住哪个页面查得到什么。
  */
