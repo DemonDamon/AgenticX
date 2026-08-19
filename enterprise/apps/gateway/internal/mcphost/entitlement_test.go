@@ -2,7 +2,11 @@ package mcphost
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	mysqlDriver "github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestBaseAssignmentKeysMirrorsPortal(t *testing.T) {
@@ -107,5 +111,33 @@ func TestGrantServerScopesDoesNotDuplicateExistingGrants(t *testing.T) {
 	scopes := grantServerScopes([]string{"mcp:*"}, "market-data")
 	if len(scopes) != 1 {
 		t.Fatalf("scopes = %v, want the wildcard left alone", scopes)
+	}
+}
+
+func TestUnmigratedOnlyExcusesAMissingSchema(t *testing.T) {
+	// 撤销判定唯一允许放行的失败，是「表压根没建过」——那时不可能存在撤销记录。
+	checker := NewEntitlementChecker(nil, nil)
+	if !checker.unmigrated(&pgconn.PgError{Code: "42P01"}) {
+		t.Fatal("missing table must be treated as an unmigrated tenant")
+	}
+	// 连不上/超时/权限不足都证明不了「没有撤销记录」，放行就等于把库弄挂即可绕过撤销。
+	for _, err := range []error{
+		errors.New("dial tcp: connection refused"),
+		context.DeadlineExceeded,
+		&pgconn.PgError{Code: "42501"},
+		&mysqlDriver.MySQLError{Number: 1205},
+	} {
+		if checker.unmigrated(err) {
+			t.Fatalf("transient failure %v must not excuse the check", err)
+		}
+	}
+}
+
+func TestUnmigratedStopsExcusingOnceTheTablesHaveBeenSeen(t *testing.T) {
+	// 表先查得到、后来说不存在，那是有人删了表或连错了库——事故，不是没迁移。
+	checker := NewEntitlementChecker(nil, nil)
+	checker.schemaReady.Store(true)
+	if checker.unmigrated(&mysqlDriver.MySQLError{Number: 1146}) {
+		t.Fatal("a table that vanished after being read must deny, not fall back to ungoverned")
 	}
 }

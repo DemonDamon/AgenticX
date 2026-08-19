@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/agenticx/enterprise/gateway/internal/database"
 )
@@ -36,6 +38,11 @@ const optOutTable = "enterprise_user_opt_outs"
 type EntitlementChecker struct {
 	database *database.Handle
 	logger   *slog.Logger
+	// schemaReady 记住「这套能力包表确实存在」。一旦查成功过一次，之后再报表不存在
+	// 就不是「还没迁移」而是有人把表删了或指错了库，那必须拒绝而不是放行。
+	schemaReady atomic.Bool
+	// 未迁移的租户每次调用都会命中同一个错误，只警告一次就够运维看见了。
+	warnMissingSchema sync.Once
 }
 
 func NewEntitlementChecker(handle *database.Handle, logger *slog.Logger) *EntitlementChecker {
@@ -68,9 +75,17 @@ func mcpCapabilityID(serverID string) string {
 
 // Check resolves the caller's entitlement for one hosted MCP server.
 //
-// 出错时的方向是分两段定的：连「这台服务器归不归能力包管」都查不出来（多半是租户
-// 还没迁移，表不存在），按不归管处理，不影响既有用法；一旦确认归能力包管，后面任何
-// 一步查询失败都判拒绝——否则只要让数据库报错就能绕过撤销。
+// 出错时往哪边倒，只看一件事：这次失败能不能证明「不可能存在撤销记录」。
+//
+// 能证明的只有一种——能力包那几张表根本不存在，即这套功能还没迁移过。这时放行不会
+// 放过任何本该被撤销的人，而拒绝会让所有既有 PAT 用法当场全断。
+//
+// 其余任何失败（连不上、超时、死锁、权限不足）都证明不了这一点：表可能好好地在那儿
+// 装着撤销记录，只是这一刻查不到。放行就等于「把库弄挂即可绕过撤销」，所以一律判拒绝。
+//
+// 这里能这么严还有个前提：走到这一步之前，ResolveServer 已经用同一个 handle 成功读过
+// mcp_servers。库真的挂了，请求在那一步就以 server_not_found 结束，根本到不了这里；
+// 能到这里却查不动，本身就是异常，不是常态运维波动。
 func (e *EntitlementChecker) Check(ctx context.Context, identity Identity, rec *ServerRecord) (Decision, error) {
 	if e == nil || e.database == nil || rec == nil || rec.Builtin {
 		return Decision{Governed: false}, nil
@@ -83,10 +98,16 @@ func (e *EntitlementChecker) Check(ctx context.Context, identity Identity, rec *
 
 	governed, err := e.governed(ctx, tenantID, capabilityID)
 	if err != nil {
-		e.logger.Warn("mcp entitlement lookup failed; treating server as ungoverned",
-			"server", rec.Name, "error", err)
-		return Decision{Governed: false}, nil
+		if e.unmigrated(err) {
+			e.warnMissingSchema.Do(func() {
+				e.logger.Warn("capability pack tables are missing; MCP entitlement checks are inactive until the migration runs",
+					"server", rec.Name, "error", err)
+			})
+			return Decision{Governed: false}, nil
+		}
+		return Decision{Governed: true, Allowed: false}, fmt.Errorf("governed lookup: %w", err)
 	}
+	e.schemaReady.Store(true)
 	if !governed {
 		return Decision{Governed: false}, nil
 	}
@@ -128,6 +149,15 @@ LIMIT 1`, tenantID, capabilityID)
 		return false, err
 	}
 	return scanExists(row)
+}
+
+// unmigrated reports whether this failure is the capability-pack schema simply
+// not being there yet — the one failure that proves no revocation record can exist.
+//
+// schemaReady 一旦置位就再也不认这个理由：表先查得到、后来查不到，说明有人删了表或
+// 连错了库，那是事故，不是「还没迁移」。
+func (e *EntitlementChecker) unmigrated(err error) bool {
+	return !e.schemaReady.Load() && database.IsMissingRelation(err)
 }
 
 // optedOut 查个人关闭记录。表名/列名必须跟着 db-schema 走：0056/0030 把
