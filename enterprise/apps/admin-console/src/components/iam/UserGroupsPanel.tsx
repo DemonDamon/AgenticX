@@ -30,6 +30,7 @@ import {
 } from "@agenticx/ui";
 import { ChevronDown, ChevronRight, CirclePlus, FolderTree, Pencil, RefreshCw, Trash2, UsersRound } from "lucide-react";
 import { adminFetch } from "../../lib/admin-client-auth";
+import { groupAssignmentKey, groupPackBindingChanges } from "../../lib/capability-pack-form";
 import { UserDetailEditor, type UserDetailTarget } from "../../components/UserDetailEditor";
 
 type OverviewMember = { id: string; displayName: string; email: string; deptId: string | null; usedTokens: number };
@@ -59,6 +60,8 @@ type UserQuotaSnapshot = {
 type ModelOption = { id: string; providerLabel: string; label: string };
 type ApiEnvelope<T> = { code: string; message: string; data?: T };
 type EditorForm = { name: string; description: string; memberIds: string[]; modelIds: string[] };
+/** 包的绑定不在用户组表里，存在包的 assignmentKeys 上；表单只是把它一起呈现出来。 */
+type PackRow = { id: string; displayName: string; slug: string; status: string; assignmentKeys: string[] };
 
 const EMPTY_FORM: EditorForm = { name: "", description: "", memberIds: [], modelIds: [] };
 
@@ -292,6 +295,8 @@ export function UserGroupsPanel() {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editingMember, setEditingMember] = useState<UserDetailTarget | null>(null);
+  const [packs, setPacks] = useState<PackRow[]>([]);
+  const [packIds, setPackIds] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -315,6 +320,16 @@ export function UserGroupsPanel() {
       toast.error(error instanceof Error ? error.message : "加载用户组失败");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadPacks = useCallback(async () => {
+    try {
+      const response = await adminFetch("/api/admin/capability-packs", { cache: "no-store" });
+      const json = (await response.json()) as { data?: { packs?: PackRow[] } };
+      setPacks((json.data?.packs ?? []).filter((pack) => pack.status === "active"));
+    } catch {
+      // 拉不到就只是这一节为空，用户组本身照常能建。
     }
   }, []);
 
@@ -351,12 +366,14 @@ export function UserGroupsPanel() {
   useEffect(() => {
     void load();
     void loadModelOptions();
-  }, [load, loadModelOptions]);
+    void loadPacks();
+  }, [load, loadModelOptions, loadPacks]);
 
   const openCreate = () => {
     setEditing("new");
     setConfirmDelete(false);
     setForm({ ...EMPTY_FORM });
+    setPackIds([]);
   };
 
   const openEdit = (group: GroupQuotaOverview) => {
@@ -368,6 +385,10 @@ export function UserGroupsPanel() {
       memberIds: group.memberIds,
       modelIds: group.modelIds,
     });
+    // 绑定关系是从包那边反查出来的，组自己不存这份数据。
+    setPackIds(
+      packs.filter((pack) => pack.assignmentKeys.includes(groupAssignmentKey(group.id))).map((p) => p.id),
+    );
   };
 
 
@@ -401,8 +422,14 @@ export function UserGroupsPanel() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(form),
       });
-      const json = (await response.json()) as ApiEnvelope<{ removedMissingMembers?: number }>;
+      const json = (await response.json()) as ApiEnvelope<{
+        removedMissingMembers?: number;
+        group?: { id?: string };
+      }>;
       if (!response.ok || json.code !== "00000") throw new Error(json.message || "保存失败");
+      // 新建时组 id 到这一刻才存在，绑定只能等它出来再做。
+      const groupId = isNew ? json.data?.group?.id : editing.id;
+      if (groupId) await applyPackBindings(groupId);
       const removedMissingMembers = json.data?.removedMissingMembers ?? 0;
       toast.success(
         removedMissingMembers > 0
@@ -418,6 +445,28 @@ export function UserGroupsPanel() {
     } finally {
       setSaving(false);
     }
+  };
+
+  /**
+   * 把「勾了哪些包」写回到包那一侧。
+   *
+   * 只动真的变了的那几个包，且每个包都在它当下的分配集合上增删这一个 key——整集覆盖会
+   * 把包的部门分配、个人特批一起抹掉，那波及的是一批和这个组无关的人。
+   */
+  const applyPackBindings = async (groupId: string) => {
+    const changes = groupPackBindingChanges(packs, groupAssignmentKey(groupId), packIds);
+    const failed: string[] = [];
+    for (const change of changes) {
+      const res = await adminFetch(`/api/admin/capability-packs/${encodeURIComponent(change.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assignmentKeys: change.assignmentKeys }),
+      });
+      if (!res.ok) failed.push(packs.find((p) => p.id === change.id)?.displayName ?? change.id);
+    }
+    // 组本身已经保存成功了，这里失败不能把整次保存说成失败；但也不能不说。
+    if (failed.length > 0) toast.error(`能力包未更新：${failed.join("、")}`);
+    if (changes.length > 0) await loadPacks();
   };
 
   const remove = async () => {
@@ -563,6 +612,48 @@ export function UserGroupsPanel() {
                         <span className="min-w-0"><span className="block truncate font-medium">{model.label}</span><span className="block truncate text-xs text-muted-foreground">{model.providerLabel} · {model.id}</span></span>
                       </label>
                     )) : <p className="col-span-full p-2 text-sm text-muted-foreground">暂无可下发的已启用模型</p>}
+                  </div>
+                </section>
+                <section className="space-y-3">
+                  <div>
+                    <h2 className="text-sm font-medium">能力包</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      组里的人会拿到这些包里的 Skill、MCP 和平台功能。绑定存在包那一侧，
+                      所以在能力包页面也看得到这个组；属于多个组的人取并集。
+                    </p>
+                  </div>
+                  <div className="grid max-h-48 gap-2 overflow-y-auto rounded-xl border border-border p-3 sm:grid-cols-2">
+                    {packs.length ? (
+                      packs.map((pack) => (
+                        <label
+                          key={pack.id}
+                          className="flex cursor-pointer items-start gap-2 rounded-lg p-2 text-sm hover:bg-muted"
+                        >
+                          <Checkbox
+                            checked={packIds.includes(pack.id)}
+                            onCheckedChange={() =>
+                              setPackIds((current) =>
+                                current.includes(pack.id)
+                                  ? current.filter((id) => id !== pack.id)
+                                  : [...current, pack.id],
+                              )
+                            }
+                          />
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium">
+                              {pack.displayName || pack.slug}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {pack.slug}
+                            </span>
+                          </span>
+                        </label>
+                      ))
+                    ) : (
+                      <p className="col-span-full p-2 text-sm text-muted-foreground">
+                        还没有启用的能力包。到「工具与能力 · 能力包」里建一个。
+                      </p>
+                    )}
                   </div>
                 </section>
                 <section className="space-y-3">

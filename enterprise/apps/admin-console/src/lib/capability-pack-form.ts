@@ -136,3 +136,32 @@ export function capabilityLabel(id: string, choices: readonly CapabilityChoice[]
   const parsed = parseCapabilityId(id);
   return parsed ? `${parsed.kind}:${parsed.rowId}` : id;
 }
+
+/**
+ * 用户组绑定能力包时，哪些包要改、改成什么。
+ *
+ * 绑定这件事存在包那一侧：包的 assignmentKeys 里有 `group:<id>` 就是绑上了。所以从组的
+ * 编辑器保存时，要把「勾了哪些包」翻译成对若干个包的分配集合的增删。
+ *
+ * 只返回真的需要动的那几个包。全量写回所有包意味着每次保存都在改一堆没碰过的记录，
+ * 既会踩到别人并发的修改，也会让审计日志里全是噪音。
+ */
+export function groupPackBindingChanges(
+  packs: readonly { id: string; assignmentKeys: readonly string[] }[],
+  groupKey: string,
+  selectedPackIds: readonly string[],
+): { id: string; assignmentKeys: string[] }[] {
+  const wanted = new Set(selectedPackIds);
+  const changes: { id: string; assignmentKeys: string[] }[] = [];
+  for (const pack of packs) {
+    const bound = pack.assignmentKeys.includes(groupKey);
+    if (wanted.has(pack.id) === bound) continue;
+    changes.push({
+      id: pack.id,
+      assignmentKeys: wanted.has(pack.id)
+        ? [...pack.assignmentKeys, groupKey]
+        : pack.assignmentKeys.filter((key) => key !== groupKey),
+    });
+  }
+  return changes;
+}
