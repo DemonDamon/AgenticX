@@ -11,7 +11,7 @@ import { UsagePanel } from "../../components/metering/UsagePanel";
 const TABS = [
   { id: "usage", label: "用量" },
   { id: "split", label: "分账" },
-  { id: "budget", label: "预算与额度" },
+  { id: "budget", label: "预算" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -64,7 +64,7 @@ function MeteringTabs() {
 export default function MeteringPage() {
   return (
     <div className="space-y-6 p-6">
-      <PageHeader title="用量与成本" description="花了多少、怎么分摊、上限是多少。" />
+      <PageHeader title="用量与成本" description="只读的用量与分账，加上「钱」这一侧的预算。token 额度跟着人走，在「组织与成员」里配。" />
       <Suspense fallback={null}>
         <MeteringTabs />
       </Suspense>

@@ -32,8 +32,6 @@ import {
 import { useTranslations } from "next-intl";
 import { BarChart3, Download, FileSpreadsheet, Filter, RefreshCcw, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { TokenHeatmap, type HeatmapCell } from "../../components/metering/TokenHeatmap";
-import { CompanyMonthlyLimitsCard } from "../../components/CompanyMonthlyLimitsCard";
-import { DefaultMemberQuotaCard } from "../../components/DefaultMemberQuotaCard";
 import { companyMonthlyLimits, type BudgetConfig } from "../../lib/company-monthly-limits";
 
 type MeteringRow = {
@@ -84,6 +82,13 @@ async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
   }
 }
 
+/**
+ * 用量：只读。
+ *
+ * 这里原来还塞着「全员默认额度」和「全公司月度上限」两张配置卡——报表页里能改配置，
+ * 结果是同一个额度在四个地方能设（这里、用户、用户组、预算页），改哪个生效说不清。
+ * 现在配置各归各家：额度跟着人走（组织与成员），预算跟着钱走（本页的「预算」tab）。
+ */
 export function UsagePanel() {
   const t = useTranslations("pages.ops.metering");
   const tq = useTranslations("pages.ops.quota");
@@ -470,9 +475,7 @@ export function UsagePanel() {
   return (
     <div className="space-y-5">
 
-      <DefaultMemberQuotaCard />
 
-      <CompanyMonthlyLimitsCard />
 
       {/* 筛选 chip 行 */}
       <Card>

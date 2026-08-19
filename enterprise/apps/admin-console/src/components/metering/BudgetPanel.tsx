@@ -1,5 +1,6 @@
 "use client";
 import { adminFetch } from "../../lib/admin-client-auth";
+import { CompanyMonthlyLimitsCard } from "../CompanyMonthlyLimitsCard";
 import { QuotaUsageBar, type UsageSnapshot } from "../../components/QuotaUsageBar";
 
 import { useEffect, useState } from "react";
@@ -18,10 +19,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   toast,
 } from "@agenticx/ui";
 import { Plus, Save, Trash2 } from "lucide-react";
@@ -162,111 +159,6 @@ async function loadAllUsages(config: QuotaConfig): Promise<Record<string, UsageS
   return next;
 }
 
-function RuleEditor({
-  label,
-  rule,
-  onChange,
-  onRemove,
-  showPoolScope = false,
-  usage,
-  usageLoading = false,
-}: {
-  label: string;
-  rule: QuotaRule;
-  onChange: (patch: Partial<QuotaRule>) => void;
-  onRemove?: () => void;
-  showPoolScope?: boolean;
-  usage?: UsageSnapshot | null;
-  usageLoading?: boolean;
-}) {
-  const tf = useTranslations("pages.ops.quota.fields");
-
-  return (
-    <div className="grid grid-cols-[140px_repeat(11,minmax(0,1fr))_auto] items-end gap-2 rounded-md border border-border px-3 py-3">
-      <div className="font-medium text-sm pb-2">{label}</div>
-      <div className="space-y-1">
-        <Label className="text-xs">{tf("monthlyTokens")}</Label>
-        <Input type="number" value={rule.monthlyTokens} onChange={(e) => onChange({ monthlyTokens: Number(e.target.value || 0) })} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{tf("dailyTokens")}</Label>
-        <Input type="number" value={rule.dailyTokens ?? 0} onChange={(e) => onChange({ dailyTokens: Number(e.target.value || 0) })} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{tf("weeklyTokens")}</Label>
-        <Input type="number" value={rule.weeklyTokens ?? 0} onChange={(e) => onChange({ weeklyTokens: Number(e.target.value || 0) })} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{tf("tpm")}</Label>
-        <Input type="number" value={rule.tpm ?? 0} onChange={(e) => onChange({ tpm: Number(e.target.value || 0) })} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{tf("rpm")}</Label>
-        <Input type="number" value={rule.rpm ?? 0} onChange={(e) => onChange({ rpm: Number(e.target.value || 0) })} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{tf("concurrency")}</Label>
-        <Input type="number" value={rule.maxConcurrency ?? 0} onChange={(e) => onChange({ maxConcurrency: Number(e.target.value || 0) })} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{tf("requestsPerDay")}</Label>
-        <Input type="number" value={rule.requestsPerDay ?? 0} onChange={(e) => onChange({ requestsPerDay: Number(e.target.value || 0) })} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{tf("requestsPerWeek")}</Label>
-        <Input type="number" value={rule.requestsPerWeek ?? 0} onChange={(e) => onChange({ requestsPerWeek: Number(e.target.value || 0) })} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{tf("requestsPerMonth")}</Label>
-        <Input type="number" value={rule.requestsPerMonth ?? 0} onChange={(e) => onChange({ requestsPerMonth: Number(e.target.value || 0) })} />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">{tf("policy")}</Label>
-        <Select value={rule.action} onValueChange={(v) => onChange({ action: v as QuotaAction })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="warn">warn</SelectItem>
-            <SelectItem value="block">block</SelectItem>
-            <SelectItem value="fallback">fallback</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      {showPoolScope ? (
-        <div className="space-y-1">
-          <Label className="text-xs">共享池</Label>
-          <Select
-            value={rule.poolScope || "none"}
-            onValueChange={(v) => onChange({ poolScope: v === "none" ? "" : (v as "dept" | "tenant") })}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">每成员独立</SelectItem>
-              <SelectItem value="dept">部门共享池</SelectItem>
-              <SelectItem value="tenant">租户共享池</SelectItem>
-            </SelectContent>
-          </Select>
-          <QuotaUsageBar usage={usage} loading={usageLoading} />
-        </div>
-      ) : (
-        <div className="space-y-1">
-          <Label className="text-xs opacity-0">用量</Label>
-          <QuotaUsageBar usage={usage} loading={usageLoading} />
-        </div>
-      )}
-      {onRemove ? (
-        <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={onRemove}>
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      ) : (
-        <div />
-      )}
-    </div>
-  );
-}
 
 function BudgetRuleEditor({
   label,
@@ -505,94 +397,11 @@ export function BudgetPanel() {
   return (
     <div className="space-y-5">
 
-      <Tabs defaultValue="roles">
-        {/* 没有「用户额度」这一档：个人额度已经在成员卡片和批量操作条里改，
-            同一件事留两个入口，改完一处另一处显示的还是旧值。 */}
-        <TabsList>
-          <TabsTrigger value="roles">{t("tabs.roles")}</TabsTrigger>
-          <TabsTrigger value="departments">{t("tabs.departments")}</TabsTrigger>
-          <TabsTrigger value="pats">{t("tabs.pats")}</TabsTrigger>
-          <TabsTrigger value="budget">预算</TabsTrigger>
-          <TabsTrigger value="budget-alerts">预算告警</TabsTrigger>
-        </TabsList>
+      <CompanyMonthlyLimitsCard />
 
-        <TabsContent value="roles" className="mt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("roleDefaultsTitle")}</CardTitle>
-              <CardDescription>{t("roleDefaultsDescription")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {Object.entries(quota.defaults.role).map(([role, rule]) => (
-                <RuleEditor
-                  key={role}
-                  label={role}
-                  rule={rule}
-                  showPoolScope
-                  usage={
-                    rule.poolScope === "tenant"
-                      ? usageByKey[usageKey("tenant", "current")]
-                      : undefined
-                  }
-                  usageLoading={usageLoading}
-                  onChange={(patch) =>
-                  setQuota((prev) => ({
-                    ...prev,
-                    defaults: {
-                      ...prev.defaults,
-                      role: { ...prev.defaults.role, [role]: { ...rule, ...patch } },
-                    },
-                  }))
-                }
-                />
-              ))}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="departments" className="mt-4 space-y-3">
-          <div className="flex gap-2">
-            <Input placeholder={t("deptIdPlaceholder")} value={newDept} onChange={(e) => setNewDept(e.target.value)} />
-            <Button type="button" variant="outline" onClick={() => { addMapKey("departments", newDept); setNewDept(""); }}>
-              <Plus className="h-4 w-4" /> {tc("actions.add")}
-            </Button>
-          </div>
-          {Object.entries(quota.departments).map(([id, rule]) => (
-            <RuleEditor
-              key={id}
-              label={id}
-              rule={rule}
-              showPoolScope
-              usage={usageByKey[usageKey("dept", id)]}
-              usageLoading={usageLoading}
-              onChange={(patch) => updateMap("departments", id, patch)}
-              onRemove={() => removeMapKey("departments", id)}
-            />
-          ))}
-        </TabsContent>
-
-
-        <TabsContent value="pats" className="mt-4 space-y-3">
-          <div className="flex gap-2">
-            <Input placeholder={t("patIdPlaceholder")} value={newPat} onChange={(e) => setNewPat(e.target.value)} />
-            <Button type="button" variant="outline" onClick={() => { addMapKey("apiTokens", newPat); setNewPat(""); }}>
-              <Plus className="h-4 w-4" /> {tc("actions.add")}
-            </Button>
-          </div>
-          {Object.entries(quota.apiTokens ?? {}).map(([id, rule]) => (
-            <RuleEditor
-              key={id}
-              label={t("patLabel", { id })}
-              rule={rule}
-              usage={usageByKey[usageKey("pat", id)]}
-              usageLoading={usageLoading}
-              onChange={(patch) => updateMap("apiTokens", id, patch)}
-              onRemove={() => removeMapKey("apiTokens", id)}
-            />
-          ))}
-        </TabsContent>
-
-        <TabsContent value="budget" className="mt-4 space-y-4">
+      {/* 这一页只管「钱」：全公司预算、成本规则、预算告警。
+          token 额度不在这里——全员默认在成员页工具栏，部门额度在部门树，个人额度在成员
+          卡片，PAT 额度在访问凭据。同一个额度曾经有四个入口，改哪个生效说不清。 */}
           <Card>
             <CardHeader>
               <CardTitle>默认预算</CardTitle>
@@ -640,9 +449,7 @@ export function BudgetPanel() {
               ))}
             </CardContent>
           </Card>
-        </TabsContent>
 
-        <TabsContent value="budget-alerts" className="mt-4">
           <Card>
             <CardHeader>
               <CardTitle>预算告警（只读）</CardTitle>
@@ -671,8 +478,6 @@ export function BudgetPanel() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
     </div>
   );
 }

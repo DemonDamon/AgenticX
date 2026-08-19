@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import {
   Button,
   Card,
@@ -122,10 +121,6 @@ export function DefaultMemberQuotaCard() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="sm" asChild>
-            <Link href="/metering/quota">
-              {t("memberQuotaAdvanced")}
-              <ExternalLink className="h-4 w-4" />
-            </Link>
           </Button>
           <Button
             size="sm"

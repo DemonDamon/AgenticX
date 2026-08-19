@@ -26,6 +26,7 @@ import {
   LayoutGrid,
   List,
   Pencil,
+  Gauge,
   Plus,
   RefreshCw,
   Upload,
@@ -50,6 +51,7 @@ import {
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 import { BulkImportWizard } from "../../../components/BulkImportWizard";
 import { MemberBatchBar } from "../../../components/MemberBatchBar";
+import { DefaultMemberQuotaCard } from "../../../components/DefaultMemberQuotaCard";
 
 type GrantSource = "personal" | "group" | "department" | "all";
 type GrantOrigin = { source?: GrantSource; sourceLabel?: string };
@@ -129,6 +131,7 @@ export default function RolesPage() {
   );
   const [ceilingTarget, setCeilingTarget] = useState<OrganizationNode | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [defaultQuotaOpen, setDefaultQuotaOpen] = useState(false);
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const openedFromQueryRef = useRef<string | null>(null);
 
@@ -287,6 +290,14 @@ export default function RolesPage() {
             onClick={() => setImportOpen(true)}
           >
             <Upload className="h-4 w-4" />导入
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className={`${toolbarButtonClass} px-4`}
+            onClick={() => setDefaultQuotaOpen(true)}
+          >
+            <Gauge className="h-4 w-4" />全员默认额度
           </Button>
           <div className="relative shrink-0 rounded-xl transition-shadow focus-within:shadow-[0_0_0_2px_var(--primary)]">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -602,6 +613,26 @@ export default function RolesPage() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      {/* 全员默认额度：新人不单独配时落到这里。它写的是 quota.defaults.role.staff，
+          原本在用量报表页里还有第二个编辑器改同一个字段——留一个。 */}
+      <Dialog
+        open={defaultQuotaOpen}
+        onOpenChange={(open) => {
+          setDefaultQuotaOpen(open);
+          if (!open) void load();
+        }}
+      >
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>全员默认额度</DialogTitle>
+            <DialogDescription>
+              没有单独配置额度的成员按这里的值走。个人特批在成员卡片上改。
+            </DialogDescription>
+          </DialogHeader>
+          <DefaultMemberQuotaCard />
+        </DialogContent>
+      </Dialog>
 
       {/* 批量导入是「新环境搭起来那几天」的事，不值得占一级菜单，但补人时要顺手够得到。 */}
       <Dialog
