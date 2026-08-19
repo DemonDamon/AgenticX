@@ -344,6 +344,7 @@ function MembersPanel() {
             selected={deptFilter}
             onSelect={setDeptFilter}
             onConfigureModels={setCeilingTarget}
+            onChanged={() => void load()}
             totalCount={items.length}
             unassignedCount={items.filter((user) => !user.deptId).length}
           />
