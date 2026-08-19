@@ -42,6 +42,7 @@ import {
   movableParentOptions,
   type DepartmentNode,
 } from "../lib/department-tree";
+import { MEMBER_DRAG_MIME, parseDragPayload } from "../lib/member-move";
 
 export type OrganizationNode = DepartmentNode;
 
@@ -54,6 +55,39 @@ const ROOT_PARENT = "__root__";
 export type DepartmentFilter = typeof ALL_DEPARTMENTS | typeof NO_DEPARTMENT | string;
 
 export { departmentSubtreeIds };
+
+/**
+ * 部门行的落点。拖进来的必须是成员拖动才接——不然把一段文字拖到树上，整棵树都会亮。
+ *
+ * dragover 阶段拿不到 getData（浏览器只在 drop 时放行数据），所以靠 types 里有没有
+ * 我们那个私有 MIME 来判断。
+ */
+function useMemberDropZone(
+  onDropMembers: ((deptId: string | null, userIds: string[]) => void) | undefined,
+  deptId: string | null,
+) {
+  const [over, setOver] = useState(false);
+  if (!onDropMembers) return { over: false, handlers: {} as Record<string, never> };
+  return {
+    over,
+    handlers: {
+      onDragOver: (event: React.DragEvent) => {
+        if (!event.dataTransfer.types.includes(MEMBER_DRAG_MIME)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setOver(true);
+      },
+      onDragLeave: () => setOver(false),
+      onDrop: (event: React.DragEvent) => {
+        setOver(false);
+        const ids = parseDragPayload(event.dataTransfer.getData(MEMBER_DRAG_MIME));
+        if (ids.length === 0) return;
+        event.preventDefault();
+        onDropMembers(deptId, ids);
+      },
+    },
+  };
+}
 
 type PendingDialog =
   | { kind: "create"; parent: OrganizationNode | null }
@@ -68,6 +102,7 @@ function Branch({
   onSelect,
   onConfigureModels,
   onAction,
+  onDropMembers,
   depth,
 }: {
   node: OrganizationNode;
@@ -76,19 +111,26 @@ function Branch({
   onSelect: (value: DepartmentFilter) => void;
   onConfigureModels: (node: OrganizationNode) => void;
   onAction: (dialog: PendingDialog) => void;
+  onDropMembers?: (deptId: string | null, userIds: string[]) => void;
   depth: number;
 }) {
   const childNodes = children.get(node.id) ?? [];
   const [open, setOpen] = useState(depth < 1);
   const isSelected = selected === node.id;
+  const drop = useMemberDropZone(onDropMembers, node.id);
 
   return (
     <div>
       <div
         className={`group flex items-center gap-1 rounded-md pr-1 text-sm ${
-          isSelected ? "bg-muted font-medium" : "hover:bg-muted/60"
+          drop.over
+            ? "bg-primary/15 outline outline-2 outline-primary"
+            : isSelected
+              ? "bg-muted font-medium"
+              : "hover:bg-muted/60"
         }`}
         style={{ paddingLeft: `${4 + depth * 14}px` }}
+        {...drop.handlers}
       >
         {childNodes.length > 0 ? (
           <button
@@ -170,6 +212,7 @@ function Branch({
               onSelect={onSelect}
               onConfigureModels={onConfigureModels}
               onAction={onAction}
+              onDropMembers={onDropMembers}
               depth={depth + 1}
             />
           ))
@@ -194,6 +237,8 @@ export function DepartmentFilterTree({
   onSelect,
   onConfigureModels,
   onChanged,
+  onDropMembers,
+  membersDragging = false,
   totalCount,
   unassignedCount,
 }: {
@@ -203,11 +248,17 @@ export function DepartmentFilterTree({
   onConfigureModels: (node: OrganizationNode) => void;
   /** 结构改完之后重新拉数据。 */
   onChanged: () => void;
+  /** 有人被拖到某个部门上。不传就没有拖放，其余功能照常。 */
+  onDropMembers?: (deptId: string | null, userIds: string[]) => void;
+  /** 正在拖成员。拖动期间才显示空的「未归属组织」——那是「移出部门」的落点。 */
+  membersDragging?: boolean;
   totalCount: number;
   unassignedCount: number;
 }) {
   const children = useMemo(() => childrenByParent(nodes), [nodes]);
   const roots = children.get(null) ?? [];
+  // 「未归属组织」也收拖放——把人移出部门，否则只能进不能出。
+  const unassignedDrop = useMemberDropZone(onDropMembers, null);
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftParent, setDraftParent] = useState<string>(ROOT_PARENT);
@@ -333,19 +384,27 @@ export function DepartmentFilterTree({
           onSelect={onSelect}
           onConfigureModels={onConfigureModels}
           onAction={openDialog}
+          onDropMembers={onDropMembers}
           depth={0}
         />
       ))}
-      {unassignedCount > 0 ? (
+      {unassignedCount > 0 || membersDragging ? (
         <button
           type="button"
           className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm ${
-            selected === NO_DEPARTMENT ? "bg-muted font-medium" : "hover:bg-muted/60"
+            unassignedDrop.over
+              ? "bg-primary/15 outline outline-2 outline-primary"
+              : selected === NO_DEPARTMENT
+                ? "bg-muted font-medium"
+                : "hover:bg-muted/60"
           }`}
           onClick={() => onSelect(NO_DEPARTMENT)}
+          {...unassignedDrop.handlers}
         >
           <span className="w-3.5" />
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">未归属组织</span>
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {unassignedCount === 0 && membersDragging ? "移出部门" : "未归属组织"}
+          </span>
           <span className="text-xs text-muted-foreground">{unassignedCount}</span>
         </button>
       ) : null}

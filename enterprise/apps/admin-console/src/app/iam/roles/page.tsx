@@ -14,6 +14,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   Sheet,
@@ -57,6 +58,12 @@ import { QuotaScopeEditor } from "../../../components/quota/QuotaScopeEditor";
 import { BudgetScopeEditor } from "../../../components/metering/BudgetScopeEditor";
 import { BulkImportWizard } from "../../../components/BulkImportWizard";
 import { MemberBatchBar } from "../../../components/MemberBatchBar";
+import {
+  MEMBER_DRAG_MIME,
+  dragPayloadIds,
+  moveResultText,
+  planMove,
+} from "../../../lib/member-move";
 import { UserGroupsPanel } from "../../../components/iam/UserGroupsPanel";
 import { DefaultMemberQuotaCard } from "../../../components/DefaultMemberQuotaCard";
 
@@ -230,11 +237,67 @@ function MembersPanel() {
     return checkedIds.filter((id) => visible.has(id));
   }, [checkedIds, visibleItems]);
 
+  // 拖放和批量条共用这一份待确认的移动请求：两个入口，一个确认框。
+  const [moveRequest, setMoveRequest] = useState<{ deptId: string | null; userIds: string[] } | null>(null);
+  const [movingMembers, setMovingMembers] = useState(false);
+  const [dragging, setDragging] = useState(false);
+
   const toggleChecked = useCallback((id: string) => {
     setCheckedIds((current) =>
       current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
     );
   }, []);
+
+  const moveTargetName = useMemo(() => {
+    if (!moveRequest) return "";
+    if (moveRequest.deptId === null) return "未归属组织";
+    const node = organization.find((item) => item.id === moveRequest.deptId);
+    return node?.path || node?.name || "该部门";
+  }, [moveRequest, organization]);
+
+  const movePlan = useMemo(() => {
+    if (!moveRequest) return null;
+    const byId = new Map(items.map((user) => [user.id, user]));
+    const members = moveRequest.userIds
+      .map((id) => byId.get(id))
+      .filter((user): user is UserQuotaOverview => user !== undefined)
+      .map((user) => ({ id: user.id, displayName: user.displayName, deptId: user.deptId ?? null }));
+    return planMove(members, moveRequest.deptId);
+  }, [items, moveRequest]);
+
+  /**
+   * 逐个改。没有批量接口，也不假装有：任何一个失败都要说出是谁，因为失败的那几个
+   * 还留在原部门，只报个数字管理员得自己回去比对。
+   */
+  const confirmMove = useCallback(async () => {
+    if (!moveRequest || !movePlan) return;
+    setMovingMembers(true);
+    const failed: string[] = [];
+    let moved = 0;
+    for (const member of movePlan.move) {
+      try {
+        const res = await adminFetch(`/api/admin/users/${encodeURIComponent(member.id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deptId: moveRequest.deptId }),
+        });
+        const json = (await res.json().catch(() => ({}))) as { code?: string };
+        if (!res.ok || (json.code && json.code !== "00000")) throw new Error("failed");
+        moved += 1;
+      } catch {
+        failed.push(member.displayName);
+      }
+    }
+    setMovingMembers(false);
+    setMoveRequest(null);
+    const text = moveResultText(moveTargetName, moved, movePlan.alreadyThere.length, failed);
+    if (failed.length > 0) toast.error(text);
+    else toast.success(text);
+    if (moved > 0) {
+      setCheckedIds([]);
+      void load();
+    }
+  }, [load, moveRequest, movePlan, moveTargetName]);
 
   const toolbarButtonClass =
     "h-10 !rounded-xl shadow-sm focus-visible:!rounded-xl focus-visible:!outline-none focus-visible:ring-0";
@@ -346,6 +409,8 @@ function MembersPanel() {
             onSelect={setDeptFilter}
             onConfigureModels={setCeilingTarget}
             onChanged={() => void load()}
+            onDropMembers={(deptId, userIds) => setMoveRequest({ deptId, userIds })}
+            membersDragging={dragging}
             totalCount={items.length}
             unassignedCount={items.filter((user) => !user.deptId).length}
           />
@@ -386,6 +451,14 @@ function MembersPanel() {
                 key={user.id}
                 className="group cursor-pointer transition-colors hover:border-primary/50 hover:bg-muted/20"
                 onClick={() => void openEditor(user)}
+                draggable
+                onDragStart={(event) => {
+                  const ids = dragPayloadIds(user.id, selectedIds);
+                  event.dataTransfer.setData(MEMBER_DRAG_MIME, JSON.stringify(ids));
+                  event.dataTransfer.effectAllowed = "move";
+                  setDragging(true);
+                }}
+                onDragEnd={() => setDragging(false)}
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-3">
@@ -529,6 +602,14 @@ function MembersPanel() {
                         role="button"
                         tabIndex={0}
                         className={`${userListGridClass} cursor-pointer px-4 py-3 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset`}
+                        draggable
+                        onDragStart={(event) => {
+                          const ids = dragPayloadIds(user.id, selectedIds);
+                          event.dataTransfer.setData(MEMBER_DRAG_MIME, JSON.stringify(ids));
+                          event.dataTransfer.effectAllowed = "move";
+                          setDragging(true);
+                        }}
+                        onDragEnd={() => setDragging(false)}
                         onClick={() => void openEditor(user)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
@@ -596,6 +677,8 @@ function MembersPanel() {
       )}
           <MemberBatchBar
             selectedIds={selectedIds}
+            departments={organization}
+            onRequestMove={(deptId) => setMoveRequest({ deptId, userIds: [...selectedIds] })}
             onClear={() => setCheckedIds([])}
             onChanged={() => {
               setCheckedIds([]);
@@ -604,6 +687,56 @@ function MembersPanel() {
           />
         </div>
       </div>
+
+      {/*
+        调部门的确认框。拖放和批量条都落到这里——移动会连带换掉这批人继承的模型上限
+        和额度，不该是拖一下就生效的动作。
+      */}
+      <Dialog open={moveRequest !== null} onOpenChange={(open) => (open ? null : setMoveRequest(null))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>移动到「{moveTargetName}」</DialogTitle>
+            <DialogDescription>
+              部门决定这些人能用哪些模型、有多少额度。换了部门，继承来的那一份跟着换。
+            </DialogDescription>
+          </DialogHeader>
+          {movePlan ? (
+            <div className="space-y-2 text-sm">
+              <p>
+                将移动 <span className="font-medium">{movePlan.move.length}</span> 人
+                {movePlan.alreadyThere.length > 0 ? (
+                  <span className="text-muted-foreground">
+                    （另有 {movePlan.alreadyThere.length} 人已在此部门，不动）
+                  </span>
+                ) : null}
+              </p>
+              <div className="max-h-40 overflow-y-auto rounded-md border border-border bg-muted/30 p-2">
+                {movePlan.move.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">这批人已经全在这个部门里了。</p>
+                ) : (
+                  movePlan.move.map((member) => (
+                    <p key={member.id} className="truncate text-xs">
+                      {member.displayName}
+                    </p>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setMoveRequest(null)} disabled={movingMembers}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              disabled={movingMembers || (movePlan?.move.length ?? 0) === 0}
+              onClick={() => void confirmMove()}
+            >
+              {movingMembers ? "移动中…" : "确认移动"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 部门模型天花板：部门管理不再占一级菜单，但天花板必须有地方配——挂在筛选树上。 */}
       <Sheet open={ceilingTarget !== null} onOpenChange={(open) => !open && setCeilingTarget(null)}>

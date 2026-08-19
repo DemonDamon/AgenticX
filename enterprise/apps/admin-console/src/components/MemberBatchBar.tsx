@@ -8,6 +8,11 @@ import { adminFetch } from "../lib/admin-client-auth";
 
 type PackRecord = { id: string; displayName: string; status: string; assignmentKeys: string[] };
 
+export type BatchBarDepartment = { id: string; name: string; path?: string };
+
+/** Select 不接受空字符串做值，「移出部门」用哨兵表示。 */
+const NO_DEPT_VALUE = "__none__";
+
 type Envelope<T> = { code: string; message: string; data?: T };
 
 async function readJson<T>(response: Response, fallback: string): Promise<T> {
@@ -39,16 +44,26 @@ export function nextKeys(current: readonly string[], userIds: readonly string[],
  * 一个是长效规则，一个是临时的一把。选中的这批人本身就是「一伙人」时，「存为用户组」
  * 把这一把变成长效的那一个，不用再去另一个页面把人重挑一遍。
  *
+ * 「移动到部门」也在这条上：调部门原本只能一个个点开详情改，人一多就没法用。
+ *
  * 这里不再有联网搜索/深度研究的开关。那两个按钮写的是 enterprise_feature_assignments，
  * 而这两项功能并入能力包之后，运行时只认包——按下去会提示成功，员工那边却什么都没变。
  * 要调这两项，走「绑定能力包」，或者进包里改。
  */
 export function MemberBatchBar({
   selectedIds,
+  departments,
+  onRequestMove,
   onClear,
   onChanged,
 }: {
   selectedIds: readonly string[];
+  departments: readonly BatchBarDepartment[];
+  /**
+   * 只是「请求」移动，真正的确认弹窗和写入在成员页里——拖放落到组织树上走的是同一条路，
+   * 两个入口共用一个确认框，才不会出现「拖着走有二次确认、点按钮直接就改了」。
+   */
+  onRequestMove: (deptId: string | null) => void;
   onClear: () => void;
   onChanged: () => void;
 }) {
@@ -56,6 +71,7 @@ export function MemberBatchBar({
   const [quotaDraft, setQuotaDraft] = useState("");
   const [groupName, setGroupName] = useState("");
   const [packId, setPackId] = useState("");
+  const [moveDeptId, setMoveDeptId] = useState("");
   const [packs, setPacks] = useState<PackRecord[]>([]);
 
   // 包列表只在真的选了人之后才拉：没人选时这条操作条根本不显示。
@@ -187,6 +203,29 @@ export function MemberBatchBar({
         onClick={() => void createGroup()}
       >
         存为用户组
+      </Button>
+
+      <span className="h-4 w-px bg-border" />
+      <Select value={moveDeptId} onValueChange={setMoveDeptId}>
+        <SelectTrigger className="h-8 w-44">
+          <SelectValue placeholder="移动到部门" />
+        </SelectTrigger>
+        <SelectContent>
+          {departments.map((dept) => (
+            <SelectItem key={dept.id} value={dept.id}>
+              {dept.path || dept.name}
+            </SelectItem>
+          ))}
+          <SelectItem value={NO_DEPT_VALUE}>（移出部门）</SelectItem>
+        </SelectContent>
+      </Select>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy !== null || !moveDeptId}
+        onClick={() => onRequestMove(moveDeptId === NO_DEPT_VALUE ? null : moveDeptId)}
+      >
+        移动
       </Button>
 
       <span className="h-4 w-px bg-border" />
