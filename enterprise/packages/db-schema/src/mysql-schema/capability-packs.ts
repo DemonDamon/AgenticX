@@ -35,6 +35,18 @@ export const enterpriseSkills = mysqlTable(
     bundleDigest: varchar("bundle_digest", { length: 128 }),
     /** 依赖的能力 id（`mcp:<ulid>` 等）；此处只声明，不含任何凭据。 */
     requiredCapabilities: json("required_capabilities").$type<string[]>().notNull().default([]),
+    /**
+     * 安全扫描结论。null 表示从未扫过——手工登记的技能就是这个状态，货架上要能和
+     * 「扫过且判定安全」区分开，否则管理员会把「没查过」看成「查过没问题」。
+     *
+     * 企业侧一个人决定、全公司承受，所以结论必须留痕：谁在什么时候、按什么可信度扫的。
+     */
+    scanVerdict: varchar("scan_verdict", { length: 16 }),
+    scanSource: varchar("scan_source", { length: 32 }),
+    scannedAt: varchar("scanned_at", { length: 32 }),
+    scannedBy: varchar("scanned_by", { length: 128 }),
+    /** 命中的规则条目，原样存扫描器的 payload，不在这里二次解释。 */
+    scanFindings: json("scan_findings").$type<unknown[]>().notNull().default([]),
     status: varchar("status", { length: 16 }).notNull().default("active"),
     ...auditColumns,
   },

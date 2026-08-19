@@ -131,6 +131,7 @@ describe("mysql baseline migration inventory", () => {
       "0028_enterprise_user_groups.sql",
       "0029_enterprise_feature_assignments.sql",
       "0030_enterprise_user_opt_outs.sql",
+      "0031_enterprise_skill_scan_result.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -179,6 +180,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 28, tag: "0028_enterprise_user_groups" }),
       expect.objectContaining({ idx: 29, tag: "0029_enterprise_feature_assignments" }),
       expect.objectContaining({ idx: 30, tag: "0030_enterprise_user_opt_outs" }),
+      expect.objectContaining({ idx: 31, tag: "0031_enterprise_skill_scan_result" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(
@@ -211,7 +213,10 @@ describe("mysql baseline migration inventory", () => {
     // 什么都不写反而永远正确——表继承库的 collation，跟 tenants.id 天然一致。
     const offenders = readdirSync(migrationDir)
       .filter((name) => name.endsWith(".sql"))
-      .filter((name) => /\b(CHARSET|COLLATE)\b/i.test(readFileSync(join(migrationDir, name), "utf8")));
+      // 剥注释再判：解释「为什么不写 CHARSET」的注释本身含这个词，不该被当成违规。
+      .filter((name) =>
+        /\b(CHARSET|COLLATE)\b/i.test(stripSqlComments(readFileSync(join(migrationDir, name), "utf8"))),
+      );
 
     expect(offenders, offenders.join(", ")).toEqual([]);
   });
@@ -221,14 +226,19 @@ describe("mysql baseline migration inventory", () => {
  * 顶层 `;` 才是语句边界——括号内、字符串内、注释内的分号都不算。
  * 注释里的分号很容易漏（`-- deep research on; align ...`），漏了就会误报。
  */
-function countTopLevelStatements(sql: string): number {
-  const withoutComments = sql
+/** 去掉行注释。语句计数和 charset 检查都得先剥，否则注释里的内容会误报。 */
+function stripSqlComments(sql: string): string {
+  return sql
     .split("\n")
     .map((line) => {
       const idx = line.indexOf("--");
       return idx === -1 ? line : line.slice(0, idx);
     })
     .join("\n");
+}
+
+function countTopLevelStatements(sql: string): number {
+  const withoutComments = stripSqlComments(sql);
 
   let count = 0;
   let depth = 0;

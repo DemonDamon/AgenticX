@@ -23,6 +23,10 @@ export type SkillRecord = {
   bundleDigest: string;
   requiredCapabilities: string[];
   status: CapabilityStatus;
+  /** null = 从未扫过（手工登记的技能）。和「扫过且安全」是两回事。 */
+  scanVerdict?: string | null;
+  scannedAt?: string | null;
+  scanFindings?: unknown[];
 };
 
 export type PackRecord = {

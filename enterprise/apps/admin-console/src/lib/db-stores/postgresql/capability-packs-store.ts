@@ -29,6 +29,15 @@ export interface SkillRecord {
   bundleDigest: string;
   requiredCapabilities: string[];
   status: CapabilityStatus;
+  /**
+   * 安全扫描结论。null 表示从未扫过——手工登记的技能就是这个状态。
+   * 货架上必须和「扫过且判定安全」分开显示，否则「没查过」会被看成「查过没问题」。
+   */
+  scanVerdict: string | null;
+  scanSource: string | null;
+  scannedAt: string | null;
+  scannedBy: string | null;
+  scanFindings: unknown[];
   createdAt: string;
   updatedAt: string;
 }
@@ -136,6 +145,11 @@ function rowToSkill(row: typeof enterpriseSkills.$inferSelect): SkillRecord {
       ? row.requiredCapabilities.map(String)
       : [],
     status: (row.status as CapabilityStatus) || "active",
+    scanVerdict: row.scanVerdict ?? null,
+    scanSource: row.scanSource ?? null,
+    scannedAt: row.scannedAt ?? null,
+    scannedBy: row.scannedBy ?? null,
+    scanFindings: Array.isArray(row.scanFindings) ? row.scanFindings : [],
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
   };
@@ -187,6 +201,39 @@ export async function createSkill(input: CreateSkillInput): Promise<SkillRecord>
   const created = await getSkill(id);
   if (!created) throw new Error("create failed");
   return created;
+}
+
+export type SkillScanResult = {
+  verdict: string;
+  source: string;
+  findings: unknown[];
+  scannedBy: string;
+};
+
+/**
+ * 写入一次扫描的结论。
+ *
+ * 单独一个函数而不是并进 updateSkill：扫描结论不是管理员随手能改的字段，它记录的是
+ * 「某次扫描实际扫出了什么」。混进通用 PATCH 里，等于允许把 dangerous 手动改成 safe，
+ * 而这一页上点一下就发给全公司了。
+ */
+export async function recordSkillScan(id: string, result: SkillScanResult): Promise<SkillRecord> {
+  const db = getIamDb();
+  const tenantId = requiredTenantId();
+  await db
+    .update(enterpriseSkills)
+    .set({
+      scanVerdict: result.verdict,
+      scanSource: result.source,
+      scanFindings: result.findings,
+      scannedBy: result.scannedBy,
+      scannedAt: new Date().toISOString(),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(enterpriseSkills.tenantId, tenantId), eq(enterpriseSkills.id, id)));
+  const updated = await getSkill(id);
+  if (!updated) throw new Error("skill not found");
+  return updated;
 }
 
 export async function updateSkill(id: string, input: UpdateSkillInput): Promise<SkillRecord> {

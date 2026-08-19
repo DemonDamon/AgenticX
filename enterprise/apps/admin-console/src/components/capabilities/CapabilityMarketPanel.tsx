@@ -21,6 +21,33 @@ import { useCapabilityCatalog, type PackRecord } from "./use-capability-catalog"
 
 type KindFilter = "all" | "mcp" | "skill";
 
+/**
+ * 扫描结论的呈现。
+ *
+ * 「未扫描」不能和「安全」长得一样——管理员会把「没查过」看成「查过没问题」，而这一页
+ * 上点一下就发给全公司了。所以未扫描单独一档，用中性但显眼的样式。
+ */
+function scanBadge(verdict: string | null | undefined, findingCount: number) {
+  switch (verdict) {
+    case "safe":
+      return { label: "扫描通过", variant: "outline" as const, tone: "text-emerald-600" };
+    case "caution":
+      return {
+        label: findingCount > 0 ? `需警惕 · ${findingCount} 条` : "需警惕",
+        variant: "outline" as const,
+        tone: "text-amber-600",
+      };
+    case "dangerous":
+      return {
+        label: findingCount > 0 ? `高危 · ${findingCount} 条` : "高危",
+        variant: "destructive" as const,
+        tone: "",
+      };
+    default:
+      return { label: "未扫描", variant: "secondary" as const, tone: "" };
+  }
+}
+
 const KIND_TABS: { id: KindFilter; label: string }[] = [
   { id: "all", label: "全部" },
   { id: "mcp", label: "MCP 服务" },
@@ -186,7 +213,30 @@ export function CapabilityMarketPanel() {
                       )}
                       <span className="truncate font-medium">{choice.displayName}</span>
                     </div>
-                    {choice.disabled ? <Badge variant="secondary">已停用</Badge> : null}
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {choice.kind === "skill"
+                        ? (() => {
+                            const scan = scanBadge(
+                              skill?.scanVerdict,
+                              skill?.scanFindings?.length ?? 0,
+                            );
+                            return (
+                              <Badge
+                                variant={scan.variant}
+                                className={`font-normal ${scan.tone}`}
+                                title={
+                                  skill?.scannedAt
+                                    ? `扫描于 ${new Date(skill.scannedAt).toLocaleString()}`
+                                    : "从未扫描，多为手工登记"
+                                }
+                              >
+                                {scan.label}
+                              </Badge>
+                            );
+                          })()
+                        : null}
+                      {choice.disabled ? <Badge variant="secondary">已停用</Badge> : null}
+                    </div>
                   </div>
                   <p className="line-clamp-2 text-sm text-muted-foreground">
                     {skill?.description || choice.name}

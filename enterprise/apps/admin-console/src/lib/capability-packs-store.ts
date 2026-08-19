@@ -18,6 +18,8 @@ export const getSkill: typeof postgresql.getSkill = (...args) => implementation(
 export const createSkill: typeof postgresql.createSkill = (...args) => implementation().createSkill(...args);
 export const updateSkill: typeof postgresql.updateSkill = (...args) => implementation().updateSkill(...args);
 export const deleteSkill: typeof postgresql.deleteSkill = (...args) => implementation().deleteSkill(...args);
+export const recordSkillScan: typeof postgresql.recordSkillScan = (...args) =>
+  implementation().recordSkillScan(...args);
 
 export const listCapabilityPacks: typeof postgresql.listCapabilityPacks = (...args) =>
   implementation().listCapabilityPacks(...args);
