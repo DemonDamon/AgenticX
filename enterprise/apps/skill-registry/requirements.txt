@@ -1,8 +1,0 @@
-# 刻意不写 agenticx 的全部依赖。窄服务只用到注册表和扫描器，那两块是
-# stdlib + httpx + pyyaml + pydantic；把 litellm/openai/tokenizers 一起装进来
-# 会让镜像从百来 MB 涨到 GB 级，而这个服务一次模型调用都不发。
-fastapi>=0.100.0,<1
-uvicorn>=0.23.0,<1
-httpx>=0.25.0,<1
-PyYAML>=6.0,<7
-pydantic>=2.0.0,<3

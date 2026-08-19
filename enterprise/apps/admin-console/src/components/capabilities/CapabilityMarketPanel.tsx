@@ -24,8 +24,12 @@ type KindFilter = "all" | "mcp" | "skill" | "feature";
 /**
  * 扫描结论的呈现。
  *
- * 「未扫描」不能和「安全」长得一样——管理员会把「没查过」看成「查过没问题」，而这一页
- * 上点一下就发给全公司了。所以未扫描单独一档，用中性但显眼的样式。
+ * 只有真的存在结论时才显示。我们自己不扫——218 条正则拦不住想绕的人，而一个绿色的
+ * 「扫描通过」会把「规则没匹配上」翻译成一句安全承诺，那个承诺兑现不了。装什么最终
+ * 是管理员的决定，我们是软件提供商，不替他判断。
+ *
+ * 字段和写入接口留着：管理员如果用自己信任的工具扫过，可以把结论记进来，货架上就显示
+ * 出来。没记就什么都不显示，而不是给每个技能挂一个「未扫描」。
  */
 function scanBadge(verdict: string | null | undefined, findingCount: number) {
   switch (verdict) {
@@ -44,7 +48,7 @@ function scanBadge(verdict: string | null | undefined, findingCount: number) {
         tone: "",
       };
     default:
-      return { label: "未扫描", variant: "secondary" as const, tone: "" };
+      return null;
   }
 }
 
@@ -217,27 +221,27 @@ export function CapabilityMarketPanel() {
                       <span className="truncate font-medium">{choice.displayName}</span>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
-                      {choice.kind === "skill"
-                        ? (() => {
-                            const scan = scanBadge(
-                              skill?.scanVerdict,
-                              skill?.scanFindings?.length ?? 0,
-                            );
-                            return (
-                              <Badge
-                                variant={scan.variant}
-                                className={`font-normal ${scan.tone}`}
-                                title={
-                                  skill?.scannedAt
-                                    ? `扫描于 ${new Date(skill.scannedAt).toLocaleString()}`
-                                    : "从未扫描，多为手工登记"
-                                }
-                              >
-                                {scan.label}
-                              </Badge>
-                            );
-                          })()
-                        : null}
+                      {(() => {
+                        if (choice.kind !== "skill") return null;
+                        const scan = scanBadge(
+                          skill?.scanVerdict,
+                          skill?.scanFindings?.length ?? 0,
+                        );
+                        if (!scan) return null;
+                        return (
+                          <Badge
+                            variant={scan.variant}
+                            className={`font-normal ${scan.tone}`}
+                            title={
+                              skill?.scannedAt
+                                ? `扫描于 ${new Date(skill.scannedAt).toLocaleString()}`
+                                : undefined
+                            }
+                          >
+                            {scan.label}
+                          </Badge>
+                        );
+                      })()}
                       {choice.disabled ? <Badge variant="secondary">已停用</Badge> : null}
                     </div>
                   </div>
