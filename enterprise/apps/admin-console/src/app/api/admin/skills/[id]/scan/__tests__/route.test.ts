@@ -66,11 +66,11 @@ describe("PUT /api/admin/skills/:id/scan", () => {
       request({ verdict: "safe", source: "community", scannedBy: "someone-else@example.com" }),
       { params },
     );
-    expect(recordSkillScan.mock.calls[0][1].scannedBy).toBe("admin@example.com");
+    expect(recordSkillScan.mock.calls[0]?.[1]).toMatchObject({ scannedBy: "admin@example.com" });
   });
 
   it("drops a findings payload that is not a list", async () => {
     await PUT(request({ verdict: "safe", source: "community", findings: "oops" }), { params });
-    expect(recordSkillScan.mock.calls[0][1].findings).toEqual([]);
+    expect(recordSkillScan.mock.calls[0]?.[1]).toMatchObject({ findings: [] });
   });
 });

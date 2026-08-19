@@ -65,7 +65,8 @@
         "sso": "单点登录",
         "sessionGrants": "会话授权",
         "capabilities": "工具与能力",
-        "diagnostics": "网关诊断"
+        "diagnostics": "网关诊断",
+        "governance": "安全与审计"
       }
     },
     "health": {

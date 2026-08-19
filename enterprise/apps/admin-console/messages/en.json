@@ -65,7 +65,8 @@
         "sso": "Single Sign-On",
         "sessionGrants": "Session Grants",
         "capabilities": "Tools & Capabilities",
-        "diagnostics": "Gateway Diagnostics"
+        "diagnostics": "Gateway Diagnostics",
+        "governance": "Security & Audit"
       }
     },
     "health": {

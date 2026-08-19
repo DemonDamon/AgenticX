@@ -40,8 +40,6 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
-  FileText,
-  FileWarning,
   Gauge,
   History,
   Languages,
@@ -52,13 +50,9 @@ import {
   Network,
   Moon,
   Boxes,
-  Fingerprint,
   Package,
   PieChart,
-  Receipt,
   Split,
-  Timer,
-  Waypoints,
   Route,
   Search,
   Shield,
@@ -87,13 +81,25 @@ type NavGroup = {
 };
 
 /**
- * 导航里没有「部门管理」和「组织与批量导入」，这是有意的，别再顺手加回来。
+ * 导航里没有下面这些，都是有意的，别再顺手加回来：
  *
- * 两个页面本身保留、路由可直达：/iam/departments 仍是配置部门模型天花板的地方，
- * /iam/bulk-import 从用户组页的「编辑组织结构」进。它们只是不该占一级菜单——
- * 日常管理的入口是用户、用户组和能力，部门树和一次性导入不是每天要点的东西。
+ * - /iam/departments      部门树已嵌进成员列表左栏，部门模型上限在那儿配。
+ * - /iam/bulk-import      组织结构与批量导入是搭环境那几天的事，导入向导挂在成员工具栏。
+ * - /settings/sso         暂时不用。
+ * - /metering/plans       Token 套餐先砍，等真要按人做 plan 再说。
+ * - /metering/quota       个人额度已在成员卡片与批量条里改。这一页还管全公司总预算
+ *                         （companyLimits）和租户默认规则，那两样目前没有别的入口，
+ *                         所以路由保留、直达可用；要彻底砍得先给它们找个家。
+ * - /admin/session-grants 给单个会话临时加权限、带 TTL 和吊销。网关真的在读
+ *                         session_grants 表，不是死代码，只是日常不会点。
+ * - /audit /portal-logs /policy /admin/compliance /metering/agent-traces
+ *                         已合并进 /admin/governance，旧地址 redirect 到对应 tab。
+ * - /admin/web-search /admin/plugins /admin/mcp-servers /admin/capability-packs
+ *                         已合并进 /admin/capabilities 的 tab。
+ * - /admin/errors /admin/perf
+ *                         已合并进 /admin/diagnostics。
  *
- * 上一次「重建导航」把 /iam/departments 又放了出来，就是因为这里没写下这句话：
+ * 上一次「重建导航」把 /iam/departments 又放了出来，就是因为这里没写下这段：
  * 看到有页面没入口，就当成遗漏给补上了。
  */
 const NAV_GROUPS: NavGroup[] = [
@@ -103,19 +109,14 @@ const NAV_GROUPS: NavGroup[] = [
     items: [{ href: "/dashboard", labelKey: "dashboard", icon: Gauge }],
   },
   {
-    // 人、以及跟着人走的配置。额度是「谁能用多少」，属于这里，不属于用量报表。
     id: "organization",
     label: "organization",
     items: [
       { href: "/iam/roles", labelKey: "users", icon: Users },
       { href: "/iam/groups", labelKey: "userGroups", icon: Network },
-      { href: "/metering/quota", labelKey: "quota", icon: Gauge },
-      { href: "/metering/plans", labelKey: "quotaPlans", icon: Receipt },
-      { href: "/settings/sso", labelKey: "sso", icon: Fingerprint },
     ],
   },
   {
-    // 一次模型调用打出去之前，网关上能拧的所有旋钮。
     id: "gateway",
     label: "gateway",
     items: [
@@ -124,29 +125,20 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/routing", labelKey: "autoRouting", icon: Route },
       { href: "/admin/cache", labelKey: "cache", icon: Database },
       { href: "/admin/api-tokens", labelKey: "apiTokens", icon: KeyRound },
-      { href: "/admin/session-grants", labelKey: "sessionGrants", icon: Timer },
     ],
   },
   {
-    // 模型之外、要分发给员工的东西：能力包、联网搜索、插件。
     id: "capabilities",
     label: "capabilities",
-    items: [
-      { href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes },
-    ],
+    items: [{ href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes }],
   },
   {
-    // 只读：发生过什么、花了多少、合不合规。这一组里不该出现配置输入框。
     id: "analytics",
     label: "analytics",
     items: [
       { href: "/metering", labelKey: "metering", icon: BarChart3 },
       { href: "/metering/split", labelKey: "billingSplit", icon: PieChart },
-      { href: "/metering/agent-traces", labelKey: "agentTraces", icon: Waypoints },
-      { href: "/audit", labelKey: "audit", icon: FileWarning },
-      { href: "/portal-logs", labelKey: "portalLogs", icon: FileText },
-      { href: "/admin/compliance", labelKey: "compliance", icon: Shield },
-      { href: "/policy", labelKey: "policy", icon: Shield },
+      { href: "/admin/governance", labelKey: "governance", icon: Shield },
       { href: "/admin/diagnostics", labelKey: "diagnostics", icon: Activity },
     ],
   },
