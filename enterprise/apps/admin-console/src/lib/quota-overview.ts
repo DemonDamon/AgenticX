@@ -396,7 +396,15 @@ export async function loadGroupQuotaOverview(tenantId: string): Promise<{
   return { groups: groupCards, organization: organizationFrom(users, departments), users: userDirectory };
 }
 
-export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuotaOverview[]> {
+/**
+ * 成员总览连同组织树一起给出。
+ *
+ * 树是成员列表的左栏筛选器，不是另一个页面——分开取就得让页面发两次请求，而这两份
+ * 数据本来就来自同一批 users/departments。
+ */
+export async function loadUserQuotaOverview(
+  tenantId: string,
+): Promise<{ items: UserQuotaOverview[]; organization: OrganizationNode[] }> {
   const [
     users,
     config,
@@ -454,7 +462,7 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
     }
   }
 
-  return users
+  const items = users
     .map((user) => {
       const selected = ruleForUser(config, user);
       const monthlyTokens = Math.max(0, Number(selected.rule?.monthlyTokens ?? 0));
@@ -517,4 +525,5 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
       } satisfies UserQuotaOverview;
     })
     .sort((a, b) => b.usedTokens - a.usedTokens || a.displayName.localeCompare(b.displayName));
+  return { items, organization: organizationFrom(users, departments) };
 }

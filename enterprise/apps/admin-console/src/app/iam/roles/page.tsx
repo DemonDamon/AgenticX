@@ -11,6 +11,9 @@ import {
   CardHeader,
   CardTitle,
   Input,
+  Sheet,
+  SheetContent,
+  SheetTitle,
   Skeleton,
   toast,
 } from "@agenticx/ui";
@@ -30,6 +33,15 @@ import {
   UserDetailEditor,
   type UserDetailOverview,
 } from "../../../components/UserDetailEditor";
+import {
+  ALL_DEPARTMENTS,
+  DepartmentFilterTree,
+  NO_DEPARTMENT,
+  departmentSubtreeIds,
+  type DepartmentFilter,
+  type OrganizationNode,
+} from "../../../components/DepartmentFilterTree";
+import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 
 type GrantSource = "personal" | "group" | "department" | "all";
 type GrantOrigin = { source?: GrantSource; sourceLabel?: string };
@@ -102,6 +114,12 @@ export default function RolesPage() {
   const [viewMode, setViewMode] = useState<"cards" | "list">("cards");
   const [viewModeHydrated, setViewModeHydrated] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [organization, setOrganization] = useState<OrganizationNode[]>([]);
+  // ?dept= 是从别的页面跳过来时带的定位参数，作为初值；之后由左栏树接管。
+  const [deptFilter, setDeptFilter] = useState<DepartmentFilter>(
+    requestedDeptId || ALL_DEPARTMENTS,
+  );
+  const [ceilingTarget, setCeilingTarget] = useState<OrganizationNode | null>(null);
   const openedFromQueryRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -118,9 +136,13 @@ export default function RolesPage() {
     setLoading(true);
     try {
       const response = await adminFetch("/api/admin/users/quota-overview", { cache: "no-store" });
-      const json = (await response.json()) as ApiEnvelope<{ items: UserQuotaOverview[] }>;
+      const json = (await response.json()) as ApiEnvelope<{
+        items: UserQuotaOverview[];
+        organization: OrganizationNode[];
+      }>;
       if (!response.ok || json.code !== "00000") throw new Error(json.message || "加载用户失败");
       setItems(json.data?.items ?? []);
+      setOrganization(json.data?.organization ?? []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载用户失败");
     } finally {
@@ -149,10 +171,20 @@ export default function RolesPage() {
     if (createRequested) setCreateOpen(true);
   }, [createRequested]);
 
+  // 选中一个部门时子部门的人也算进来：点「研发中心」要看的是整棵子树。
+  const deptScope = useMemo(
+    () =>
+      deptFilter === ALL_DEPARTMENTS || deptFilter === NO_DEPARTMENT
+        ? null
+        : departmentSubtreeIds(organization, deptFilter),
+    [organization, deptFilter],
+  );
+
   const visibleItems = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
     return items.filter((user) => {
-      if (requestedDeptId && user.deptId !== requestedDeptId) return false;
+      if (deptFilter === NO_DEPARTMENT && user.deptId) return false;
+      if (deptScope && !(user.deptId && deptScope.has(user.deptId))) return false;
       if (!query) return true;
       return [
           user.displayName,
@@ -169,7 +201,7 @@ export default function RolesPage() {
           .toLocaleLowerCase()
           .includes(query);
     });
-  }, [items, requestedDeptId, searchQuery]);
+  }, [items, deptFilter, deptScope, searchQuery]);
 
   const toolbarButtonClass =
     "h-10 !rounded-xl shadow-sm focus-visible:!rounded-xl focus-visible:!outline-none focus-visible:ring-0";
@@ -257,6 +289,18 @@ export default function RolesPage() {
         </div>
       </div>
 
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <aside className="shrink-0 rounded-xl border border-border bg-card p-2 lg:sticky lg:top-4 lg:w-60">
+          <DepartmentFilterTree
+            nodes={organization}
+            selected={deptFilter}
+            onSelect={setDeptFilter}
+            onConfigureModels={setCeilingTarget}
+            totalCount={items.length}
+            unassignedCount={items.filter((user) => !user.deptId).length}
+          />
+        </aside>
+        <div className="min-w-0 flex-1">
       {viewMode === "cards" ? (
         <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {loading && items.length === 0
@@ -484,6 +528,25 @@ export default function RolesPage() {
           )}
         </div>
       )}
+        </div>
+      </div>
+
+      {/* 部门模型天花板：部门管理不再占一级菜单，但天花板必须有地方配——挂在筛选树上。 */}
+      <Sheet open={ceilingTarget !== null} onOpenChange={(open) => !open && setCeilingTarget(null)}>
+        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-xl">
+          <SheetTitle>{ceilingTarget ? `${ceilingTarget.name} · 模型上限` : "模型上限"}</SheetTitle>
+          {ceilingTarget ? (
+            <div className="pt-4">
+              <VisibleModelsEditor
+                target={{ kind: "dept", id: ceilingTarget.id }}
+                variant="sheet"
+                onClose={() => setCeilingTarget(null)}
+                onSaved={load}
+              />
+            </div>
+          ) : null}
+        </SheetContent>
+      </Sheet>
 
       <UserDetailEditor
         target={selected}

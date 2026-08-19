@@ -6,6 +6,6 @@ export async function GET() {
   const auth = await requireAdminScope(["user:read", "metering:read"]);
   if (!auth.ok) return auth.response;
 
-  const items = await loadUserQuotaOverview(auth.session.tenantId);
-  return NextResponse.json({ code: "00000", message: "ok", data: { items } });
+  const { items, organization } = await loadUserQuotaOverview(auth.session.tenantId);
+  return NextResponse.json({ code: "00000", message: "ok", data: { items, organization } });
 }
