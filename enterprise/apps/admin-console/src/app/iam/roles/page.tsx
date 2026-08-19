@@ -31,9 +31,41 @@ import {
   type UserDetailOverview,
 } from "../../../components/UserDetailEditor";
 
-type UserModelSummary = { model: string; tokens: number; currentlyAllowed: boolean };
-type UserQuotaOverview = UserDetailOverview & { models: UserModelSummary[] };
+type GrantSource = "personal" | "group" | "department" | "all";
+type GrantOrigin = { source?: GrantSource; sourceLabel?: string };
+type UserModelSummary = {
+  model: string;
+  tokens: number;
+  currentlyAllowed: boolean;
+} & GrantOrigin;
+type UserPackSummary = { id: string; name: string } & GrantOrigin;
+type UserFeatureSummary = { enabled: boolean } & GrantOrigin;
+// Omit 掉 models：UserDetailEditor 里另有一个不带来源的同名类型，直接交叉会打架。
+type UserQuotaOverview = Omit<UserDetailOverview, "models"> & {
+  models: UserModelSummary[];
+  packs?: UserPackSummary[];
+  features?: { webSearch: UserFeatureSummary; deepResearch: UserFeatureSummary };
+};
 type ApiEnvelope<T> = { code: string; message: string; data?: T };
+
+/**
+ * 来源短标。卡片的意义就在这一句：同样是「能用 Claude」，继承来的和单独特批的，
+ * 管理员要做的事完全不同——前者改组就动了一片人，后者只动他一个。
+ */
+function grantSourceText(origin: GrantOrigin): string {
+  switch (origin.source) {
+    case "personal":
+      return "特批";
+    case "group":
+      return origin.sourceLabel ? `继承自 ${origin.sourceLabel}` : "继承自用户组";
+    case "department":
+      return origin.sourceLabel ? `继承自 ${origin.sourceLabel}` : "部门继承";
+    case "all":
+      return "全员";
+    default:
+      return "";
+  }
+}
 
 function quotaSourceLabel(user: UserQuotaOverview): string {
   if (user.quotaSource === "group") return user.quotaSourceLabel ? `继承自 ${user.quotaSourceLabel}` : "继承自用户组";
@@ -314,11 +346,43 @@ export default function RolesPage() {
                             >
                               {model.model}
                               {model.tokens > 0 ? ` · ${formatTokenCount(model.tokens)}` : ""}
-                              {` · ${model.currentlyAllowed ? "可用" : "当前不可用"}`}
+                              {model.currentlyAllowed
+                                ? grantSourceText(model)
+                                  ? ` · ${grantSourceText(model)}`
+                                  : ""
+                                : " · 当前不可用"}
                             </Badge>
                           ))
                         : <span className="text-xs text-muted-foreground">当前未开通模型</span>}
                     </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {user.packs?.length
+                        ? user.packs.map((pack) => (
+                            <Badge key={pack.id} variant="outline" className="max-w-full truncate font-normal">
+                              {pack.name}
+                              {grantSourceText(pack) ? ` · ${grantSourceText(pack)}` : ""}
+                            </Badge>
+                          ))
+                        : <span className="text-xs text-muted-foreground">未分配能力包</span>}
+                    </div>
+                    {user.features ? (
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        {([
+                          ["联网搜索", user.features.webSearch],
+                          ["深度研究", user.features.deepResearch],
+                        ] as const).map(([label, feature]) => (
+                          <span key={label}>
+                            {label}
+                            <span className={feature.enabled ? "ml-1 text-foreground" : "ml-1"}>
+                              {feature.enabled ? "已开通" : "未开通"}
+                            </span>
+                            {feature.enabled && grantSourceText(feature)
+                              ? `（${grantSourceText(feature)}）`
+                              : ""}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </CardContent>
               </Card>
