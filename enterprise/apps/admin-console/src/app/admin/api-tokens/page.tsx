@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { SessionGrantsPanel } from "../../../components/credentials/SessionGrantsPanel";
+import { QuotaScopeEditor } from "../../../components/quota/QuotaScopeEditor";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -61,7 +62,38 @@ async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
   }
 }
 
+/**
+ * userId 是一串 ULID。列表上直接印出来，管理员没法判断这是谁——要么去数据库查，
+ * 要么挨个点开用户页比对。拉一次用户目录换成姓名+邮箱，认不出来的才回落到 ID。
+ */
+function useHolderDirectory() {
+  const [byId, setById] = useState<Map<string, { displayName: string; email: string }>>(new Map());
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await adminFetch("/api/admin/users?limit=500", { cache: "no-store" });
+        const json = (await res.json()) as {
+          data?: { items?: Array<{ id: string; displayName?: string; email?: string }> };
+        };
+        setById(
+          new Map(
+            (json.data?.items ?? []).map((u) => [
+              u.id,
+              { displayName: u.displayName ?? "", email: u.email ?? "" },
+            ]),
+          ),
+        );
+      } catch {
+        // 目录拉不到就退回显示 ID，不影响令牌本身的操作。
+      }
+    })();
+  }, []);
+  return byId;
+}
+
 function ApiTokensContent() {
+  const holders = useHolderDirectory();
+  const [quotaFor, setQuotaFor] = useState<number | null>(null);
   const t = useTranslations("pages.admin.apiTokens");
   const tc = useTranslations("common");
   const [tokens, setTokens] = useState<PatRow[]>([]);
@@ -238,6 +270,10 @@ function ApiTokensContent() {
           {tokens.map((row) => {
             const vaultPlain = getPatPlainFromVault(row.id);
             void vaultVersion;
+            const holder = holders.get(row.userId);
+            const holderLabel = holder
+              ? `${holder.displayName || holder.email}${holder.email && holder.displayName ? ` · ${holder.email}` : ""}`
+              : row.userId;
             return (
             <Card key={row.id}>
               <CardContent className="flex items-center justify-between gap-4 pt-4">
@@ -246,7 +282,7 @@ function ApiTokensContent() {
                     <KeyRound className="h-4 w-4" /> {row.name}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {row.tokenPrefix}… · {t("meta.user", { userId: row.userId })} · {row.status}
+                    {row.tokenPrefix}… · {holderLabel} · {row.status}
                     {row.lastUsedAt ? t("meta.lastUsed", { lastUsed: row.lastUsedAt }) : ""}
                   </p>
                   {!vaultPlain ? (
@@ -270,11 +306,25 @@ function ApiTokensContent() {
                       {t("pasteKey")}
                     </Button>
                   )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setQuotaFor((current) => (current === row.id ? null : row.id))}
+                  >
+                    额度
+                  </Button>
                   <Button variant="ghost" size="sm" className="text-destructive" onClick={() => void onRevoke(row.id)}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
               </CardContent>
+              {quotaFor === row.id ? (
+                <CardContent className="border-t pt-4">
+                  {/* 令牌额度原来要把 PAT ID 贴进一个输入框才能配。挂在令牌自己身上，
+                      ID 就不必出现在界面上。 */}
+                  <QuotaScopeEditor scope="apiTokens" id={String(row.id)} />
+                </CardContent>
+              ) : null}
             </Card>
             );
           })}

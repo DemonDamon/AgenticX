@@ -49,6 +49,7 @@ import {
   type OrganizationNode,
 } from "../../../components/DepartmentFilterTree";
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
+import { QuotaScopeEditor } from "../../../components/quota/QuotaScopeEditor";
 import { BulkImportWizard } from "../../../components/BulkImportWizard";
 import { MemberBatchBar } from "../../../components/MemberBatchBar";
 import { DefaultMemberQuotaCard } from "../../../components/DefaultMemberQuotaCard";
@@ -600,15 +601,28 @@ export default function RolesPage() {
       {/* 部门模型天花板：部门管理不再占一级菜单，但天花板必须有地方配——挂在筛选树上。 */}
       <Sheet open={ceilingTarget !== null} onOpenChange={(open) => !open && setCeilingTarget(null)}>
         <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-xl">
-          <SheetTitle>{ceilingTarget ? `${ceilingTarget.name} · 模型上限` : "模型上限"}</SheetTitle>
+          <SheetTitle>{ceilingTarget ? `${ceilingTarget.name} · 部门设置` : "部门设置"}</SheetTitle>
           {ceilingTarget ? (
-            <div className="pt-4">
-              <VisibleModelsEditor
-                target={{ kind: "dept", id: ceilingTarget.id }}
-                variant="sheet"
-                onClose={() => setCeilingTarget(null)}
-                onSaved={load}
-              />
+            <div className="space-y-6 pt-4">
+              <div>
+                <p className="text-sm font-medium">模型上限</p>
+                <p className="mb-3 mt-1 text-xs text-muted-foreground">
+                  这个部门的人最多能看到哪些模型；个人只能在这个范围内再收窄。
+                </p>
+                <VisibleModelsEditor
+                  target={{ kind: "dept", id: ceilingTarget.id }}
+                  variant="sheet"
+                  onClose={() => setCeilingTarget(null)}
+                  onSaved={load}
+                />
+              </div>
+              <div className="border-t pt-6">
+                <p className="text-sm font-medium">部门额度</p>
+                <p className="mb-3 mt-1 text-xs text-muted-foreground">
+                  原来要把部门 ID 贴进一个输入框才能配，现在在部门本身上改。
+                </p>
+                <QuotaScopeEditor scope="departments" id={ceilingTarget.id} onSaved={load} />
+              </div>
             </div>
           ) : null}
         </SheetContent>

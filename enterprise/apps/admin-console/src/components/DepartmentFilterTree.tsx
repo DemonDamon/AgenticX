@@ -109,7 +109,7 @@ function Branch({
           variant="ghost"
           size="icon-sm"
           className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-          title="配置该部门的模型上限"
+          title="配置该部门的模型上限与额度"
           onClick={() => onConfigureModels(node)}
         >
           <SlidersHorizontal className="h-3.5 w-3.5" />
