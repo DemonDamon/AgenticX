@@ -54,6 +54,7 @@ import {
 } from "../../../components/DepartmentFilterTree";
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 import { QuotaScopeEditor } from "../../../components/quota/QuotaScopeEditor";
+import { BudgetScopeEditor } from "../../../components/metering/BudgetScopeEditor";
 import { BulkImportWizard } from "../../../components/BulkImportWizard";
 import { MemberBatchBar } from "../../../components/MemberBatchBar";
 import { UserGroupsPanel } from "../../../components/iam/UserGroupsPanel";
@@ -628,6 +629,14 @@ function MembersPanel() {
                   原来要把部门 ID 贴进一个输入框才能配，现在在部门本身上改。
                 </p>
                 <QuotaScopeEditor scope="departments" id={ceilingTarget.id} onSaved={load} />
+              </div>
+              <div className="border-t pt-6">
+                <p className="text-sm font-medium">部门预算</p>
+                <p className="mb-3 mt-1 text-xs text-muted-foreground">
+                  这个部门每周期最多花多少钱。额度管发多少 token，预算管花多少钱，两个上限
+                  各算各的。
+                </p>
+                <BudgetScopeEditor scope="departments" id={ceilingTarget.id} onSaved={load} />
               </div>
             </div>
           ) : null}

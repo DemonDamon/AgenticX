@@ -21,7 +21,7 @@ import {
   SelectValue,
   toast,
 } from "@agenticx/ui";
-import { Plus, Save, Trash2 } from "lucide-react";
+import { Save, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 type QuotaAction = "block" | "warn" | "fallback";
@@ -243,8 +243,6 @@ export function BudgetPanel() {
   const [newDept, setNewDept] = useState("");
   const [newUser, setNewUser] = useState("");
   const [newPat, setNewPat] = useState("");
-  const [newBudgetDept, setNewBudgetDept] = useState("");
-  const [newBudgetUser, setNewBudgetUser] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -367,32 +365,8 @@ export function BudgetPanel() {
     });
   };
 
-  const updateBudgetMap = (scope: "users" | "departments" | "tenants", key: string, patch: Partial<BudgetRule>) => {
-    setBudget((prev) => ({
-      ...prev,
-      [scope]: {
-        ...(prev[scope] ?? {}),
-        [key]: { ...(prev[scope]?.[key] ?? EMPTY_BUDGET_RULE), ...patch },
-      },
-    }));
-  };
 
-  const addBudgetMapKey = (scope: "users" | "departments" | "tenants", key: string) => {
-    const trimmed = key.trim();
-    if (!trimmed) return;
-    setBudget((prev) => ({
-      ...prev,
-      [scope]: { ...(prev[scope] ?? {}), [trimmed]: prev[scope]?.[trimmed] ?? { ...EMPTY_BUDGET_RULE } },
-    }));
-  };
 
-  const removeBudgetMapKey = (scope: "users" | "departments" | "tenants", key: string) => {
-    setBudget((prev) => {
-      const next = { ...(prev[scope] ?? {}) };
-      delete next[key];
-      return { ...prev, [scope]: next };
-    });
-  };
 
   return (
     <div className="space-y-5">
@@ -420,33 +394,22 @@ export function BudgetPanel() {
             </CardContent>
           </Card>
 
+          {/* 部门预算和用户预算不在这一页。它们原来是两张「把 ID 贴进输入框」的表——
+              想给某个部门配预算得先去别处找到那串 ULID 再粘回来，配完了也认不出哪行是谁。
+              现在挂在对象自己身上：部门在组织树的部门设置里，个人在成员的详细编辑里，
+              就挨着各自的 Token 额度。 */}
           <Card>
-            <CardHeader><CardTitle>部门预算</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex gap-2">
-                <Input placeholder={t("deptIdPlaceholder")} value={newBudgetDept} onChange={(e) => setNewBudgetDept(e.target.value)} />
-                <Button type="button" variant="outline" onClick={() => { addBudgetMapKey("departments", newBudgetDept); setNewBudgetDept(""); }}>
-                  <Plus className="h-4 w-4" /> {tc("actions.add")}
-                </Button>
-              </div>
-              {Object.entries(budget.departments ?? {}).map(([id, rule]) => (
-                <BudgetRuleEditor key={id} label={id} rule={rule} onChange={(patch) => updateBudgetMap("departments", id, patch)} onRemove={() => removeBudgetMapKey("departments", id)} />
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>用户预算</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex gap-2">
-                <Input placeholder={t("userIdPlaceholder")} value={newBudgetUser} onChange={(e) => setNewBudgetUser(e.target.value)} />
-                <Button type="button" variant="outline" onClick={() => { addBudgetMapKey("users", newBudgetUser); setNewBudgetUser(""); }}>
-                  <Plus className="h-4 w-4" /> {tc("actions.add")}
-                </Button>
-              </div>
-              {Object.entries(budget.users ?? {}).map(([id, rule]) => (
-                <BudgetRuleEditor key={id} label={id} rule={rule} onChange={(patch) => updateBudgetMap("users", id, patch)} onRemove={() => removeBudgetMapKey("users", id)} />
-              ))}
+            <CardHeader>
+              <CardTitle>按部门 / 按人的预算</CardTitle>
+              <CardDescription>
+                在「组织与成员」里配：部门预算在组织树点开部门设置，个人预算在成员卡片的
+                详细编辑里，都紧挨着各自的 Token 额度。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/iam/roles">去组织与成员</Link>
+              </Button>
             </CardContent>
           </Card>
 

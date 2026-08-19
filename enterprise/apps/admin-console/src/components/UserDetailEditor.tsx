@@ -18,6 +18,7 @@ import {
 import { Copy, KeyRound, Trash2 } from "lucide-react";
 import { adminFetch } from "../lib/admin-client-auth";
 import { formatTokenCount } from "./QuotaRing";
+import { BudgetScopeEditor } from "./metering/BudgetScopeEditor";
 import {
   UserFormFields,
   type UserFormDeptOption,
@@ -595,6 +596,17 @@ export function UserDetailEditor({ target, onOpenChange, onChanged }: UserDetail
                     </div>
                   </>
                 )}
+              </section>
+
+              <section className="space-y-3 border-t border-border pt-5">
+                <div>
+                  <h2 className="text-sm font-medium">个人预算</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    这个人每周期最多花多少钱。和上面的 Token 额度各算各的，先撞上哪个就被
+                    哪个拦。原来要把用户 ID 贴进预算页的一个输入框才能配。
+                  </p>
+                </div>
+                <BudgetScopeEditor scope="users" id={target.id} onSaved={onChanged} />
               </section>
 
               <section className="space-y-3 border-t border-border pt-5">
