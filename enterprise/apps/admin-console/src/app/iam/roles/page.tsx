@@ -49,6 +49,7 @@ import {
 } from "../../../components/DepartmentFilterTree";
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 import { BulkImportWizard } from "../../../components/BulkImportWizard";
+import { MemberBatchBar } from "../../../components/MemberBatchBar";
 
 type GrantSource = "personal" | "group" | "department" | "all";
 type GrantOrigin = { source?: GrantSource; sourceLabel?: string };
@@ -128,6 +129,7 @@ export default function RolesPage() {
   );
   const [ceilingTarget, setCeilingTarget] = useState<OrganizationNode | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const openedFromQueryRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -210,6 +212,19 @@ export default function RolesPage() {
           .includes(query);
     });
   }, [items, deptFilter, deptScope, searchQuery]);
+
+  const selectedIds = useMemo(() => {
+    // 换了筛选之后，之前勾的人可能已经不在列表里。批量操作只该作用于看得见的那些，
+    // 否则「已选 8 人」里混着屏幕上根本没有的人。
+    const visible = new Set(visibleItems.map((user) => user.id));
+    return checkedIds.filter((id) => visible.has(id));
+  }, [checkedIds, visibleItems]);
+
+  const toggleChecked = useCallback((id: string) => {
+    setCheckedIds((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+    );
+  }, []);
 
   const toolbarButtonClass =
     "h-10 !rounded-xl shadow-sm focus-visible:!rounded-xl focus-visible:!outline-none focus-visible:ring-0";
@@ -355,7 +370,15 @@ export default function RolesPage() {
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-primary"
+                      aria-label={`选择 ${user.displayName}`}
+                      checked={selectedIds.includes(user.id)}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={() => toggleChecked(user.id)}
+                    />
+                    <div className="min-w-0 flex-1">
                       <CardTitle className="truncate">{user.displayName}</CardTitle>
                       <CardDescription className="mt-1 truncate">{user.email}</CardDescription>
                       <p className="mt-1 truncate text-xs text-muted-foreground">
@@ -496,6 +519,14 @@ export default function RolesPage() {
                         }}
                       >
                         <div className="flex min-w-0 items-center gap-3">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 shrink-0 cursor-pointer accent-primary"
+                            aria-label={`选择 ${user.displayName}`}
+                            checked={selectedIds.includes(user.id)}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={() => toggleChecked(user.id)}
+                          />
                           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
                             {user.displayName.slice(0, 1)}
                           </span>
@@ -544,6 +575,14 @@ export default function RolesPage() {
           )}
         </div>
       )}
+          <MemberBatchBar
+            selectedIds={selectedIds}
+            onClear={() => setCheckedIds([])}
+            onChanged={() => {
+              setCheckedIds([]);
+              void load();
+            }}
+          />
         </div>
       </div>
 
