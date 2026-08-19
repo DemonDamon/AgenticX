@@ -300,6 +300,37 @@ const DEFAULT_ENTERPRISE_TOKEN_BUDGET_POLICY: EnterpriseTokenBudgetPolicy = {
   max_tokens_per_session: 1_000_000,
 };
 
+/**
+ * 企业对「员工能不能自己装东西」的管控。
+ *
+ * 默认全开：这三项是后加的，bootstrap 没下发时必须维持加它们之前的行为，否则老租户
+ * 升上来员工突然装不了东西，而管理员根本没配过这一项。
+ */
+export type EnterpriseCapabilityPolicy = {
+  allow_local_skill_install: boolean;
+  allow_local_mcp_install: boolean;
+  allow_mcp_auto_discovery: boolean;
+};
+
+const DEFAULT_ENTERPRISE_CAPABILITY_POLICY: EnterpriseCapabilityPolicy = {
+  allow_local_skill_install: true,
+  allow_local_mcp_install: true,
+  allow_mcp_auto_discovery: true,
+};
+
+/** 只认真正的 false；配歪了当「没配过」。读成「关闭」会静默锁死一整个租户。 */
+export function normalizeEnterpriseCapabilityPolicy(raw: unknown): EnterpriseCapabilityPolicy {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ...DEFAULT_ENTERPRISE_CAPABILITY_POLICY };
+  }
+  const src = raw as Record<string, unknown>;
+  return {
+    allow_local_skill_install: src.allowLocalSkillInstall !== false,
+    allow_local_mcp_install: src.allowLocalMcpInstall !== false,
+    allow_mcp_auto_discovery: src.allowMcpAutoDiscovery !== false,
+  };
+}
+
 function normalizeEnterpriseTokenBudgetPolicy(
   value?: EnterpriseTokenBudgetBootstrapPolicy | EnterpriseTokenBudgetPolicy | null,
 ): EnterpriseTokenBudgetPolicy {
@@ -350,6 +381,8 @@ type EnterpriseConfig = {
   policy?: {
     strict?: boolean;
     token_budget?: EnterpriseTokenBudgetPolicy;
+    /** 企业是否允许本机自行安装 Skill/MCP、以及扫描本机 MCP 配置。 */
+    capability_policy?: EnterpriseCapabilityPolicy;
   };
   models?: string[];
   /** Structured catalog from Portal; `models` remains for runtime compatibility. */
@@ -465,6 +498,7 @@ function applyEnterpriseProvider(
     user: NonNullable<EnterpriseConfig["user"]>;
     strict: boolean;
     tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
+    capabilityPolicy?: unknown;
   },
 ): void {
   const modelCatalog = normalizeEnterpriseModelCatalog(opts.modelCatalog);
@@ -483,6 +517,7 @@ function applyEnterpriseProvider(
     policy: {
       strict: opts.strict,
       token_budget: normalizeEnterpriseTokenBudgetPolicy(opts.tokenBudget),
+      capability_policy: normalizeEnterpriseCapabilityPolicy(opts.capabilityPolicy),
     },
     models,
     model_catalog: modelCatalog,
@@ -577,6 +612,7 @@ async function finishEnterpriseLogin(
       policy?: {
         strict?: boolean;
         tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
+        capabilities?: unknown;
       };
       apiBaseUrl?: string;
       inferenceApiBaseUrl?: string;
@@ -620,6 +656,7 @@ async function finishEnterpriseLogin(
     token: pat,
     modelCatalog,
     capabilities: bootJson.data?.capabilities,
+    capabilityPolicy: bootJson.data?.policy?.capabilities,
     unmetCapabilityDependencies: bootJson.data?.unmetCapabilityDependencies,
     user: {
       user_id: user.userId ?? "",
@@ -7871,6 +7908,18 @@ function registerIpc(): void {
       transport: ent?.transport ?? "",
       reauthRequiredForDirect: Boolean(ent?.reauth_required_for_direct),
       strict: ent?.policy?.strict !== false,
+      // 没登录企业就不受管控：本地用户装什么是自己的事。
+      capabilityPolicy: Boolean(ent?.enabled && ent?.token)
+        ? normalizeEnterpriseCapabilityPolicy(
+            ent?.policy?.capability_policy
+              ? {
+                  allowLocalSkillInstall: ent.policy.capability_policy.allow_local_skill_install,
+                  allowLocalMcpInstall: ent.policy.capability_policy.allow_local_mcp_install,
+                  allowMcpAutoDiscovery: ent.policy.capability_policy.allow_mcp_auto_discovery,
+                }
+              : undefined,
+          )
+        : normalizeEnterpriseCapabilityPolicy(undefined),
       models: Array.isArray(ent?.models) ? ent.models : [],
       modelCatalog: normalizeEnterpriseModelCatalog(
         Array.isArray(ent?.model_catalog) && ent.model_catalog.length > 0
@@ -8023,6 +8072,7 @@ function registerIpc(): void {
           policy?: {
             strict?: boolean;
             tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
+            capabilities?: unknown;
           };
           apiBaseUrl?: string;
           inferenceApiBaseUrl?: string;
@@ -8062,6 +8112,7 @@ function registerIpc(): void {
         token,
         modelCatalog,
         capabilities: bootJson.data?.capabilities,
+        capabilityPolicy: bootJson.data?.policy?.capabilities,
         unmetCapabilityDependencies: bootJson.data?.unmetCapabilityDependencies,
         user: {
           user_id: (user as { userId?: string }).userId ?? ent?.user?.user_id ?? "",

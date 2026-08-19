@@ -13,6 +13,14 @@ vi.mock("../../../../../lib/admin-providers-reader", () => ({
 }));
 
 vi.mock("../../../../../lib/desktop-token-policy", () => ({
+  loadDesktopManagedPolicy: async (...args: unknown[]) => ({
+    tokenLimits: await loadDesktopSessionTokenLimits(...args),
+    capabilities: {
+      allowLocalSkillInstall: true,
+      allowLocalMcpInstall: true,
+      allowMcpAutoDiscovery: true,
+    },
+  }),
   loadDesktopSessionTokenLimits: (...args: unknown[]) =>
     loadDesktopSessionTokenLimits(...args),
 }));

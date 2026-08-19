@@ -1,4 +1,5 @@
 import { arrayMove } from "@dnd-kit/sortable";
+import type { DesktopCapabilityLocks } from "./utils/enterprise-capability-policy";
 import { create } from "zustand";
 import { isSettingsTab } from "./settings-tab";
 import type { SettingsTab } from "./settings-tab";
@@ -517,6 +518,8 @@ type AppState = {
     email: string;
     displayName: string;
     baseUrl?: string;
+    /** 企业下发的自助安装管控。未登录企业时为全开。 */
+    capabilityLocks?: DesktopCapabilityLocks;
   };
   chatStyle: ChatStyle;
   /** Developer-only switch: expose raw tool names, arguments, and result cards. */
@@ -615,6 +618,7 @@ type AppState = {
     email: string;
     displayName: string;
     baseUrl?: string;
+    capabilityLocks?: DesktopCapabilityLocks;
   }) => void;
   setChatStyle: (style: ChatStyle) => void;
   setShowToolCalls: (show: boolean) => void;

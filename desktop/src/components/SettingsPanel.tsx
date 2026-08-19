@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import ReactMarkdown from "react-markdown";
+import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
 import {
   chatUrlTransform,
   normalizeChatMarkdownContent,
@@ -3029,6 +3030,10 @@ function normalizeSkillScanCustomPaths(
 }
 
 function SkillsTab() {
+  // 企业禁止自助安装时，本机相关的入口整段隐藏而不是禁用——留一排点不动的东西
+  // 只会让员工反复点，然后来问为什么。
+  const capabilityLocks =
+    useAppStore((s) => s.userAccount.capabilityLocks) ?? UNRESTRICTED_CAPABILITY_LOCKS;
   const [items, setItems] = useState<SkillItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -4088,7 +4093,10 @@ function SkillsTab() {
         <PendingProposalsList onCountChange={setPendingProposalCount} hideWhenEmpty />
       )}
 
-      {/* Skill scan roots (presets + custom paths) */}
+      {/* Skill scan roots (presets + custom paths) —— 企业禁止自助安装时整段消失。
+          扫描路径存在的意义就是让本机自行放置的技能被认出来；不许自装还留着这一段，
+          等于摆一个改了也不会有任何效果的开关。 */}
+      {capabilityLocks.allowLocalSkillInstall ? (
       <Panel
         title="技能来源与扫描路径"
         collapsible
@@ -4276,6 +4284,7 @@ function SkillsTab() {
           </div>
         ) : null}
       </Panel>
+      ) : null}
 
       {err && (
         <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">

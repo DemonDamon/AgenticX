@@ -8,7 +8,7 @@ import { resolveDesktopIdentity } from "../../../../lib/desktop-auth";
 import { withGatewayMcpEndpoints } from "../../../../lib/desktop-capability-endpoints";
 import { resolveDesktopInferenceApiBase } from "../../../../lib/desktop-inference-base";
 import { requestOriginFromRequest } from "../../../../lib/desktop-device-auth";
-import { loadDesktopSessionTokenLimits } from "../../../../lib/desktop-token-policy";
+import { loadDesktopManagedPolicy } from "../../../../lib/desktop-token-policy";
 
 export async function GET(request: Request) {
   const identity = await resolveDesktopIdentity(request);
@@ -19,13 +19,13 @@ export async function GET(request: Request) {
     );
   }
 
-  const [models, tokenBudget, capabilities] = await Promise.all([
+  const [models, managedPolicy, capabilities] = await Promise.all([
     listAvailableModelsForUser(
       identity.userId,
       identity.email,
       identity.deptId,
     ),
-    loadDesktopSessionTokenLimits(identity.tenantId),
+    loadDesktopManagedPolicy(identity.tenantId),
     // 能力包尚未迁移的租户不应因此拿不到模型，登录照常，能力为空。
     listAvailableCapabilitiesForUser(
       identity.userId,
@@ -33,6 +33,8 @@ export async function GET(request: Request) {
       identity.deptId,
     ).catch(() => []),
   ]);
+
+  const { tokenLimits: tokenBudget, capabilities: capabilityPolicy } = managedPolicy;
 
   const origin = requestOriginFromRequest(request);
   const apiBaseUrl = `${origin}/api/desktop/v1`;
@@ -50,7 +52,7 @@ export async function GET(request: Request) {
     capabilities: withGatewayMcpEndpoints(capabilities),
     // 依赖没随包一起下发时 Desktop 装了也调不通，这里标出来供前端提示。
     unmetCapabilityDependencies: findUnmetSkillDependencies(capabilities),
-    policy: { strict: true, tokenBudget },
+    policy: { strict: true, tokenBudget, capabilities: capabilityPolicy },
     apiBaseUrl,
     reauthRequiredForDirect: !directEligible,
   };

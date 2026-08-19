@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { readCapabilityLocks } from "./utils/enterprise-capability-policy";
 import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ClarificationDialog, type ClarificationAnswer } from "./components/ClarificationDialog";
@@ -1619,6 +1620,9 @@ export function App() {
           email: String(r.email ?? ""),
           displayName: String(r.displayName ?? ""),
           baseUrl: String(r.baseUrl ?? ""),
+          capabilityLocks: readCapabilityLocks(
+            (r as { capabilityPolicy?: unknown }).capabilityPolicy,
+          ),
         });
       } catch {
         // ignore; account is optional for most local workflows
