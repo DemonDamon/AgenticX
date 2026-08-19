@@ -173,6 +173,8 @@ class AgxConfig:
     longrun: LongRunSettings = field(default_factory=LongRunSettings)
     # Built-in web search (duckduckgo + optional API providers); see studio web_search routes.
     web_search: Dict[str, Any] = field(default_factory=dict)
+    # Declarative async media-generation plugins. Credentials remain in providers.
+    generation_plugins: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def get_provider(self, name: Optional[str] = None) -> ProviderConfig:
         """Get provider config by name or default provider."""
@@ -295,6 +297,9 @@ class ConfigManager:
         web_search_raw = merged.get("web_search", {}) or {}
         if not isinstance(web_search_raw, dict):
             web_search_raw = {}
+        generation_plugins_raw = merged.get("generation_plugins", {}) or {}
+        if not isinstance(generation_plugins_raw, dict):
+            generation_plugins_raw = {}
 
         config = AgxConfig(
             version=str(merged.get("version", "1")),
@@ -334,6 +339,7 @@ class ConfigManager:
                 linear_team_ids=str(longrun_raw.get("linear_team_ids", "") or "").strip(),
             ),
             web_search=dict(web_search_raw),
+            generation_plugins=dict(generation_plugins_raw),
         )
         return cls._env_fallback(config)
 

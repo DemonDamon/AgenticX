@@ -19,6 +19,7 @@ import smtplib
 import subprocess
 import tempfile
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -101,6 +102,12 @@ from agenticx.studio.protocols import (
     ContinueRequest,
     SessionState,
     SseEvent,
+    GenerationSubmitRequest,
+)
+from agenticx.studio.generation_plugins import (
+    load_generation_plugins,
+    mapped_task_response,
+    resolve_video_payload,
 )
 from agenticx.studio.continuation import (
     ContinuationReason,
@@ -2587,6 +2594,142 @@ def create_studio_app() -> FastAPI:
         except Exception:
             logger.exception("[clarify] failed to persist clarification answer")
         return {"ok": True}
+
+    def _generation_plugin_for_id(plugin_id: str):
+        cfg = ConfigManager.load()
+        for plugin in load_generation_plugins(cfg):
+            if plugin.plugin_id == plugin_id and plugin.enabled:
+                provider = cfg.get_provider(plugin.provider)
+                if str(provider.api_key or "").strip() or str(provider.base_url or "").strip():
+                    return plugin, provider
+        raise HTTPException(status_code=404, detail="生成插件未安装、未启用或未完成服务配置")
+
+    def _generation_task_row(session: Any, task_id: str) -> dict[str, Any] | None:
+        for row in reversed(getattr(session, "chat_history", []) or []):
+            meta = row.get("metadata") if isinstance(row, dict) else None
+            task = meta.get("generation_task") if isinstance(meta, dict) else None
+            if isinstance(task, dict) and str(task.get("task_id") or "") == task_id:
+                return row
+        return None
+
+    @app.get("/api/generation/plugins")
+    async def list_generation_plugins(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        cfg = ConfigManager.load()
+        items = []
+        for plugin in load_generation_plugins(cfg):
+            provider = cfg.get_provider(plugin.provider)
+            configured = bool(str(provider.api_key or "").strip() or str(provider.base_url or "").strip())
+            if plugin.enabled and configured:
+                items.append({
+                    "id": plugin.plugin_id,
+                    "name": plugin.display_name,
+                    "capability": "video" if plugin.is_video else "generation",
+                    "provider": plugin.provider,
+                    "model": plugin.model,
+                    "defaults": plugin.defaults,
+                })
+        return {"items": items}
+
+    @app.post("/api/generation/tasks")
+    async def submit_generation_task(
+        payload: GenerationSubmitRequest,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        managed = manager.get(payload.session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        plugin, provider = _generation_plugin_for_id(payload.plugin_id)
+        image_urls = []
+        for item in payload.image_inputs or []:
+            data_url = str(item.data_url or "").strip()
+            if not data_url.startswith("data:image/"):
+                raise HTTPException(status_code=400, detail="视频参考图必须是 data:image URL")
+            image_urls.append(data_url)
+        try:
+            request_body = resolve_video_payload(
+                plugin,
+                prompt=payload.prompt,
+                image_urls=image_urls,
+                params=dict(payload.params or {}),
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        headers = {"Content-Type": "application/json"}
+        if str(provider.api_key or "").strip():
+            headers["Authorization"] = f"Bearer {provider.api_key.strip()}"
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(plugin.submit_url, json=request_body, headers=headers)
+            raw = response.json() if response.content else {}
+            if response.is_error:
+                detail = mapped_task_response(plugin, raw).get("error") or response.text[:400]
+                raise HTTPException(status_code=502, detail=f"生成服务请求失败: {detail}")
+        except HTTPException:
+            raise
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail=f"生成服务不可用: {exc}") from exc
+        parsed = mapped_task_response(plugin, raw)
+        task_id = str(parsed.get("task_id") or uuid.uuid4().hex)
+        task = {
+            "task_id": task_id,
+            "plugin_id": plugin.plugin_id,
+            "plugin_name": plugin.display_name,
+            "status": str(parsed.get("status") or "submitted"),
+            "progress": parsed.get("progress"),
+            "result_url": parsed.get("result_url"),
+            "error": parsed.get("error"),
+            "params": request_body,
+        }
+        session = managed.studio_session
+        session.chat_history.append({"id": uuid.uuid4().hex, "role": "user", "content": payload.prompt})
+        session.chat_history.append({
+            "id": uuid.uuid4().hex,
+            "role": "assistant",
+            "content": "视频生成任务已提交",
+            "metadata": {"kind": "generation_task", "generation_task": task},
+        })
+        await manager.persist_async(payload.session_id)
+        return {"ok": True, "task": task}
+
+    @app.get("/api/generation/tasks/{task_id}")
+    async def get_generation_task(
+        task_id: str,
+        session_id: str = Query(...),
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        row = _generation_task_row(managed.studio_session, task_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="generation task not found")
+        meta = row["metadata"]["generation_task"]
+        plugin, provider = _generation_plugin_for_id(str(meta.get("plugin_id") or ""))
+        if not plugin.status_url_template:
+            return {"ok": True, "task": meta}
+        headers = {"Authorization": f"Bearer {provider.api_key.strip()}"} if str(provider.api_key or "").strip() else {}
+        url = plugin.status_url_template.replace("{task_id}", task_id)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, headers=headers)
+            raw = response.json() if response.content else {}
+            if response.is_error:
+                raise HTTPException(status_code=502, detail=response.text[:400])
+            parsed = mapped_task_response(plugin, raw)
+            for key in ("status", "progress", "result_url", "error"):
+                if parsed.get(key) is not None:
+                    meta[key] = parsed[key]
+            await manager.persist_async(session_id)
+        except HTTPException:
+            raise
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail=f"生成任务查询失败: {exc}") from exc
+        return {"ok": True, "task": meta}
 
     @app.post("/api/chat")
     async def chat(

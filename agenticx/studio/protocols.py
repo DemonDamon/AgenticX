@@ -18,6 +18,14 @@ class ChatImageInput(BaseModel):
     size: Optional[int] = None
 
 
+class GenerationSubmitRequest(BaseModel):
+    session_id: str
+    plugin_id: str
+    prompt: str = Field(..., min_length=1)
+    image_inputs: Optional[List[ChatImageInput]] = None
+    params: Optional[Dict[str, Any]] = None
+
+
 class ChatRequest(BaseModel):
     session_id: str
     user_input: str = Field(..., min_length=1)
