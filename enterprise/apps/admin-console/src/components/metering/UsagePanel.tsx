@@ -1,0 +1,934 @@
+"use client";
+import { adminFetch } from "../../lib/admin-client-auth";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  BarCard,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  Input,
+  Label,
+  LineCard,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Separator,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  chartPalette,
+  toast,
+} from "@agenticx/ui";
+import { useTranslations } from "next-intl";
+import { BarChart3, Download, FileSpreadsheet, Filter, RefreshCcw, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { TokenHeatmap, type HeatmapCell } from "../../components/metering/TokenHeatmap";
+import { CompanyMonthlyLimitsCard } from "../../components/CompanyMonthlyLimitsCard";
+import { DefaultMemberQuotaCard } from "../../components/DefaultMemberQuotaCard";
+import { companyMonthlyLimits, type BudgetConfig } from "../../lib/company-monthly-limits";
+
+type MeteringRow = {
+  dims: Record<string, string | null>;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cached_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  cost_usd: number;
+};
+
+type HeatmapDimension = "dept" | "user" | "model" | "pat" | "provider";
+type HeatmapGranularity = "hour" | "day";
+type HeatmapMetric = "total_tokens" | "cost_usd";
+
+type RoiRow = {
+  label: string;
+  cost_usd: number;
+  revenue_usd: number;
+  net_usd: number;
+  roi: number | null;
+};
+
+type RevenueRecord = {
+  id: string;
+  scenario_label: string;
+  period_start: string;
+  period_end: string;
+  revenue_usd: number;
+  notes: string | null;
+};
+
+type UserOption = { id: string; name: string; deptId: string | null };
+type PatOption = { id: number; name: string; tokenPrefix: string };
+type ProviderOption = { id: string; name: string; models: string[] };
+
+const ALL = "__all__";
+
+async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
+  const raw = await res.text();
+  if (!raw.trim()) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export function UsagePanel() {
+  const t = useTranslations("pages.ops.metering");
+  const tq = useTranslations("pages.ops.quota");
+  const tc = useTranslations("common");
+  const ts = useTranslations("shell");
+  const [dept, setDept] = useState(ALL);
+  const [user, setUser] = useState(ALL);
+  const [apiToken, setApiToken] = useState(ALL);
+  const [provider, setProvider] = useState(ALL);
+  const [model, setModel] = useState(ALL);
+  const [start, setStart] = useState(new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10));
+  const [end, setEnd] = useState(new Date().toISOString().slice(0, 10));
+  const [rows, setRows] = useState<MeteringRow[]>([]);
+  const [heatmapDimensions, setHeatmapDimensions] = useState<string[]>([]);
+  const [heatmapTimeSlots, setHeatmapTimeSlots] = useState<string[]>([]);
+  const [heatmapCells, setHeatmapCells] = useState<HeatmapCell[]>([]);
+  const [heatmapDimension, setHeatmapDimension] = useState<HeatmapDimension>("dept");
+  const [heatmapGranularity, setHeatmapGranularity] = useState<HeatmapGranularity>("day");
+  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>("total_tokens");
+  const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const [roiRows, setRoiRows] = useState<RoiRow[]>([]);
+  const [roiDimension, setRoiDimension] = useState<HeatmapDimension>("dept");
+  const [roiLoading, setRoiLoading] = useState(false);
+  const [revenues, setRevenues] = useState<RevenueRecord[]>([]);
+  const [revenueLabel, setRevenueLabel] = useState("");
+  const [revenueStart, setRevenueStart] = useState(start);
+  const [revenueEnd, setRevenueEnd] = useState(end);
+  const [revenueAmount, setRevenueAmount] = useState("");
+  const [revenueNotes, setRevenueNotes] = useState("");
+  const [revenueSaving, setRevenueSaving] = useState(false);
+  const [usersData, setUsersData] = useState<UserOption[]>([]);
+  const [patOptions, setPatOptions] = useState<PatOption[]>([]);
+  const [providersData, setProvidersData] = useState<ProviderOption[]>([]);
+  const [companyTokenLimit, setCompanyTokenLimit] = useState(0);
+  const [companyCostLimit, setCompanyCostLimit] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  const deptOptions = useMemo(() => {
+    const buckets = new Set<string>();
+    for (const row of rows) if (row.dims.dept) buckets.add(row.dims.dept);
+    for (const item of usersData) if (item.deptId) buckets.add(item.deptId);
+    return Array.from(buckets).sort();
+  }, [rows, usersData]);
+
+  const users = useMemo(() => {
+    if (dept === ALL) return usersData;
+    return usersData.filter((item) => item.deptId === dept);
+  }, [dept, usersData]);
+
+  const providers = useMemo(() => providersData, [providersData]);
+
+  const models = useMemo(() => {
+    if (provider === ALL) {
+      const allModels = new Set<string>();
+      for (const p of providersData) for (const m of p.models) allModels.add(m);
+      return Array.from(allModels).sort();
+    }
+    return providersData.find((item) => item.id === provider)?.models ?? [];
+  }, [provider, providersData]);
+
+  useEffect(() => {
+    let active = true;
+    const loadMeta = async () => {
+      try {
+        const [usersRes, providersRes, patRes] = await Promise.all([
+          adminFetch("/api/admin/users?limit=200", { cache: "no-store" }),
+          adminFetch("/api/admin/providers", { cache: "no-store" }),
+          adminFetch("/api/admin/api-tokens", { cache: "no-store" }),
+        ]);
+        const emptyUsers = { data: { items: [] as Array<{ id: string; displayName: string; deptId: string | null }> } };
+        const emptyProviders = {
+          data: {
+            providers: [] as Array<{ id: string; displayName: string; enabled: boolean; models?: Array<{ name: string; enabled: boolean }> }>,
+          },
+        };
+        const emptyPats = { data: { tokens: [] as Array<{ id: number; name: string; tokenPrefix: string }> } };
+        const usersJson = await readJsonBody(usersRes, emptyUsers);
+        const providersJson = await readJsonBody(providersRes, emptyProviders);
+        const patJson = await readJsonBody(patRes, emptyPats);
+        if (!active) return;
+        setUsersData(
+          (usersJson.data?.items ?? []).map((item) => ({
+            id: item.id,
+            name: item.displayName || item.id,
+            deptId: item.deptId ?? null,
+          }))
+        );
+        setPatOptions(
+          (patJson.data?.tokens ?? []).map((item) => ({
+            id: item.id,
+            name: item.name,
+            tokenPrefix: item.tokenPrefix,
+          }))
+        );
+        setProvidersData(
+          (providersJson.data?.providers ?? [])
+            .filter((item) => item.enabled)
+            .map((item) => ({
+              id: item.id,
+              name: item.displayName || item.id,
+              models: (item.models ?? []).filter((modelItem) => modelItem.enabled).map((modelItem) => modelItem.name),
+            }))
+        );
+      } catch {
+        if (!active) return;
+        setUsersData([]);
+        setPatOptions([]);
+        setProvidersData([]);
+      }
+    };
+    void loadMeta();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const loadCompanyCostLimit = useCallback(async () => {
+    try {
+      const response = await adminFetch("/api/metering/budget", { cache: "no-store" });
+      const payload = await readJsonBody<{ data?: { budget?: BudgetConfig } }>(response, {});
+      const limits = response.ok ? companyMonthlyLimits(payload.data?.budget) : { tokens: 0, costUsd: 0 };
+      setCompanyTokenLimit(limits.tokens);
+      setCompanyCostLimit(limits.costUsd);
+    } catch {
+      setCompanyTokenLimit(0);
+      setCompanyCostLimit(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCompanyCostLimit();
+  }, [loadCompanyCostLimit]);
+
+  useEffect(() => {
+    if (user !== ALL && !users.find((item) => item.id === user)) {
+      setUser(ALL);
+    }
+  }, [users, user]);
+
+  useEffect(() => {
+    if (model !== ALL && !models.includes(model)) {
+      setModel(ALL);
+    }
+  }, [models, model]);
+
+  const query = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await adminFetch("/api/metering/query", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          dept_id: dept !== ALL ? [dept] : [],
+          user_id: user !== ALL ? [user] : [],
+          api_token_id: apiToken !== ALL ? [apiToken] : [],
+          provider: provider !== ALL ? [provider] : [],
+          model: model !== ALL ? [model] : [],
+          start: `${start}T00:00:00.000Z`,
+          end: `${end}T23:59:59.999Z`,
+          group_by: ["day", "dept", "user", "pat", "provider", "model"],
+        }),
+      });
+      const payload = await readJsonBody<{ data?: { rows?: MeteringRow[] } }>(response, { data: { rows: [] } });
+      setRows(payload.data?.rows ?? []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("toast.queryFailed"));
+    } finally {
+      setLoading(false);
+    }
+  }, [dept, user, apiToken, provider, model, start, end]);
+
+  const filterPayload = useMemo(
+    () => ({
+      dept_id: dept !== ALL ? [dept] : [],
+      user_id: user !== ALL ? [user] : [],
+      api_token_id: apiToken !== ALL ? [apiToken] : [],
+      provider: provider !== ALL ? [provider] : [],
+      model: model !== ALL ? [model] : [],
+      start: `${start}T00:00:00.000Z`,
+      end: `${end}T23:59:59.999Z`,
+    }),
+    [dept, user, apiToken, provider, model, start, end]
+  );
+
+  const queryHeatmap = useCallback(async () => {
+    setHeatmapLoading(true);
+    try {
+      const response = await adminFetch("/api/metering/heatmap", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...filterPayload,
+          dimension: heatmapDimension,
+          time_granularity: heatmapGranularity,
+          metric: heatmapMetric,
+        }),
+      });
+      const payload = await readJsonBody<{
+        data?: { dimensions?: string[]; time_slots?: string[]; cells?: HeatmapCell[] };
+      }>(response, { data: { dimensions: [], time_slots: [], cells: [] } });
+      setHeatmapDimensions(payload.data?.dimensions ?? []);
+      setHeatmapTimeSlots(payload.data?.time_slots ?? []);
+      setHeatmapCells(payload.data?.cells ?? []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("toast.queryFailed"));
+      setHeatmapDimensions([]);
+      setHeatmapTimeSlots([]);
+      setHeatmapCells([]);
+    } finally {
+      setHeatmapLoading(false);
+    }
+  }, [filterPayload, heatmapDimension, heatmapGranularity, heatmapMetric, t]);
+
+  const loadRevenues = useCallback(async () => {
+    try {
+      const response = await adminFetch("/api/metering/roi?mode=revenues", { cache: "no-store" });
+      const payload = await readJsonBody<{ data?: { items?: RevenueRecord[] } }>(response, { data: { items: [] } });
+      setRevenues(payload.data?.items ?? []);
+    } catch {
+      setRevenues([]);
+    }
+  }, []);
+
+  const queryRoi = useCallback(async () => {
+    setRoiLoading(true);
+    try {
+      const params = new URLSearchParams({
+        dimension: roiDimension,
+        start: filterPayload.start,
+        end: filterPayload.end,
+      });
+      for (const key of ["dept_id", "user_id", "api_token_id", "provider", "model"] as const) {
+        for (const value of filterPayload[key]) {
+          params.append(key, value);
+        }
+      }
+      const response = await adminFetch(`/api/metering/roi?${params.toString()}`, { cache: "no-store" });
+      const payload = await readJsonBody<{ data?: { rows?: RoiRow[] } }>(response, { data: { rows: [] } });
+      setRoiRows(payload.data?.rows ?? []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("toast.queryFailed"));
+      setRoiRows([]);
+    } finally {
+      setRoiLoading(false);
+    }
+  }, [filterPayload, roiDimension, t]);
+
+  useEffect(() => {
+    void query();
+    void queryHeatmap();
+    void queryRoi();
+    void loadRevenues();
+  }, [query, queryHeatmap, queryRoi, loadRevenues]);
+
+  const exportCsv = async () => {
+    const response = await adminFetch("/api/metering/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        dept_id: dept !== ALL ? [dept] : [],
+        user_id: user !== ALL ? [user] : [],
+        provider: provider !== ALL ? [provider] : [],
+        model: model !== ALL ? [model] : [],
+        start: `${start}T00:00:00.000Z`,
+        end: `${end}T23:59:59.999Z`,
+        group_by: ["day", "dept", "user", "provider", "model"],
+      }),
+    });
+    const csv = await response.text();
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `metering-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    toast.success(t("toast.exportSuccess", { count: rows.length }));
+  };
+
+  const exportRoiCsv = async () => {
+    const params = new URLSearchParams({
+      dimension: roiDimension,
+      start: filterPayload.start,
+      end: filterPayload.end,
+      format: "csv",
+    });
+    for (const key of ["dept_id", "user_id", "api_token_id", "provider", "model"] as const) {
+      for (const value of filterPayload[key]) {
+        params.append(key, value);
+      }
+    }
+    const response = await adminFetch(`/api/metering/roi?${params.toString()}`, { cache: "no-store" });
+    const csv = await response.text();
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `roi-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    toast.success(t("roi.toast.exportSuccess"));
+  };
+
+  const saveRevenue = async () => {
+    if (!revenueLabel.trim()) {
+      toast.error(t("roi.toast.labelRequired"));
+      return;
+    }
+    const amount = Number(revenueAmount);
+    if (!Number.isFinite(amount)) {
+      toast.error(t("roi.toast.amountInvalid"));
+      return;
+    }
+    setRevenueSaving(true);
+    try {
+      const response = await adminFetch("/api/metering/roi", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          scenario_label: revenueLabel.trim(),
+          period_start: `${revenueStart}T00:00:00.000Z`,
+          period_end: `${revenueEnd}T23:59:59.999Z`,
+          revenue_usd: amount,
+          notes: revenueNotes.trim() || null,
+        }),
+      });
+      const payload = await readJsonBody<{ code?: string; message?: string }>(response, {});
+      if (payload.code && payload.code !== "00000") {
+        throw new Error(payload.message ?? t("roi.toast.saveFailed"));
+      }
+      setRevenueLabel("");
+      setRevenueAmount("");
+      setRevenueNotes("");
+      toast.success(t("roi.toast.saveSuccess"));
+      await loadRevenues();
+      await queryRoi();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("roi.toast.saveFailed"));
+    } finally {
+      setRevenueSaving(false);
+    }
+  };
+
+  const removeRevenue = async (id: string) => {
+    try {
+      const response = await adminFetch(`/api/metering/roi?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const payload = await readJsonBody<{ code?: string; message?: string }>(response, {});
+      if (payload.code && payload.code !== "00000") {
+        throw new Error(payload.message ?? t("roi.toast.deleteFailed"));
+      }
+      toast.success(t("roi.toast.deleteSuccess"));
+      await loadRevenues();
+      await queryRoi();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("roi.toast.deleteFailed"));
+    }
+  };
+
+  const callsSeriesKey = t("callsSeries");
+  const costSeriesKey = t("costSeries");
+
+  const trendData = useMemo(
+    () =>
+      rows.map((row, index) => ({
+        day: row.dims.day ?? `slot-${index + 1}`,
+        [callsSeriesKey]: row.total_tokens,
+        [costSeriesKey]: Number(row.cost_usd.toFixed(4)),
+      })),
+    [rows, callsSeriesKey, costSeriesKey]
+  );
+
+  const deptBarData = useMemo(
+    () =>
+      rows.map((row, index) => ({
+        name: row.dims.day ?? `slot-${index + 1}`,
+        tokens: row.total_tokens,
+      })),
+    [rows]
+  );
+
+  const totalTokens = rows.reduce((sum, row) => sum + row.total_tokens, 0);
+  const totalCost = rows.reduce((sum, row) => sum + row.cost_usd, 0);
+
+  return (
+    <div className="space-y-5">
+
+      <DefaultMemberQuotaCard />
+
+      <CompanyMonthlyLimitsCard />
+
+      {/* 筛选 chip 行 */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Filter className="h-4 w-4" />
+            {t("filtersTitle")}
+          </CardTitle>
+          <CardDescription>{t("filtersDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+          <div className="space-y-1.5">
+            <Label>{t("dept")}</Label>
+            <Select value={dept} onValueChange={setDept}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("allDept")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("all")}</SelectItem>
+                {deptOptions.map((deptId) => (
+                  <SelectItem key={deptId} value={deptId}>
+                    {deptId}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t("user")}</Label>
+            <Select value={user} onValueChange={setUser}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("allUser")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("all")}</SelectItem>
+                {users.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t("apiToken")}</Label>
+            <Select value={apiToken} onValueChange={setApiToken}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("allPat")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("all")}</SelectItem>
+                {patOptions.map((item) => (
+                  <SelectItem key={item.id} value={String(item.id)}>
+                    {item.name} ({item.tokenPrefix}…)
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t("provider")}</Label>
+            <Select value={provider} onValueChange={setProvider}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("allProvider")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("all")}</SelectItem>
+                {providers.map((providerItem) => (
+                  <SelectItem key={providerItem.id} value={providerItem.id}>
+                    {providerItem.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t("model")}</Label>
+            <Select value={model} onValueChange={setModel}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("allModel")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>{t("all")}</SelectItem>
+                {models.map((modelName) => (
+                  <SelectItem key={modelName} value={modelName}>
+                    {modelName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="mt-start">{t("startDate")}</Label>
+            <Input id="mt-start" type="date" value={start} onChange={(event) => setStart(event.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="mt-end">{t("endDate")}</Label>
+            <Input id="mt-end" type="date" value={end} onChange={(event) => setEnd(event.target.value)} />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Summary */}
+      <section className="grid gap-3 sm:grid-cols-3">
+        <Card>
+          <CardContent className="flex items-center gap-3 p-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary">
+              <BarChart3 className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("totalTokens")}</div>
+              <div className="text-xl font-semibold">
+                {companyTokenLimit > 0
+                  ? `${totalTokens.toLocaleString()} / ${companyTokenLimit.toLocaleString()}`
+                  : totalTokens.toLocaleString()}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-3 p-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-success-soft text-success">
+              <FileSpreadsheet className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("totalCost")}</div>
+              <div className="text-xl font-semibold">
+                {companyCostLimit > 0
+                  ? `$${totalCost.toFixed(4)} / $${companyCostLimit.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                  : `$${totalCost.toFixed(4)}`}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-3 p-4">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning-soft text-warning-foreground">
+              <Search className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("recordCount")}</div>
+              <div className="text-xl font-semibold">{rows.length}</div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      {/* 图表 + 表格 切换 */}
+      <Tabs defaultValue="charts" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="charts">{t("tabCharts")}</TabsTrigger>
+          <TabsTrigger value="heatmap">{t("tabHeatmap")}</TabsTrigger>
+          <TabsTrigger value="roi">{t("tabRoi")}</TabsTrigger>
+          <TabsTrigger value="table">{t("tabTable")}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="charts" className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <LineCard
+              title={t("trendTitle")}
+              description={t("trendDescription")}
+              variant="area"
+              data={trendData}
+              xKey="day"
+              series={[
+                { key: t("callsSeries"), color: chartPalette[0] },
+                { key: t("costSeries"), color: chartPalette[2] },
+              ]}
+              height={280}
+            />
+            <BarCard
+              title={t("dailyTitle")}
+              description={t("dailyDescription")}
+              data={deptBarData}
+              xKey="name"
+              series={[{ key: "tokens", label: "Token", color: chartPalette[4] }]}
+              height={280}
+              hideLegend
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="heatmap" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">{t("heatmap.title")}</CardTitle>
+              <CardDescription>{t("heatmap.description")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label>{t("heatmap.dimension")}</Label>
+                  <Select value={heatmapDimension} onValueChange={(value) => setHeatmapDimension(value as HeatmapDimension)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dept">{t("dept")}</SelectItem>
+                      <SelectItem value="user">{t("user")}</SelectItem>
+                      <SelectItem value="pat">{t("apiToken")}</SelectItem>
+                      <SelectItem value="provider">{t("provider")}</SelectItem>
+                      <SelectItem value="model">{t("model")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>{t("heatmap.granularity")}</Label>
+                  <Select value={heatmapGranularity} onValueChange={(value) => setHeatmapGranularity(value as HeatmapGranularity)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="day">{t("heatmap.granularityDay")}</SelectItem>
+                      <SelectItem value="hour">{t("heatmap.granularityHour")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>{t("heatmap.metric")}</Label>
+                  <Select value={heatmapMetric} onValueChange={(value) => setHeatmapMetric(value as HeatmapMetric)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="total_tokens">{t("totalTokens")}</SelectItem>
+                      <SelectItem value="cost_usd">{t("costSeries")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <TokenHeatmap
+                dimensions={heatmapDimensions}
+                timeSlots={heatmapTimeSlots}
+                cells={heatmapCells}
+                metric={heatmapMetric}
+                loading={heatmapLoading}
+                emptyTitle={heatmapLoading ? t("emptyLoadingTitle") : t("emptyTitle")}
+                emptyDescription={heatmapLoading ? t("emptyLoadingDescription") : t("emptyDescription")}
+                dimHeader={t("heatmap.dimHeader")}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="roi" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">{t("roi.title")}</CardTitle>
+                  <CardDescription>{t("roi.description")}</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => void exportRoiCsv()}>
+                  <Download className="mr-1.5 h-4 w-4" />
+                  {t("roi.exportCsv")}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-4">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label>{t("roi.dimension")}</Label>
+                  <Select value={roiDimension} onValueChange={(value) => setRoiDimension(value as HeatmapDimension)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dept">{t("dept")}</SelectItem>
+                      <SelectItem value="user">{t("user")}</SelectItem>
+                      <SelectItem value="pat">{t("apiToken")}</SelectItem>
+                      <SelectItem value="provider">{t("provider")}</SelectItem>
+                      <SelectItem value="model">{t("model")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {roiRows.length === 0 ? (
+                <EmptyState
+                  icon={<FileSpreadsheet className="h-5 w-5" />}
+                  title={roiLoading ? t("emptyLoadingTitle") : t("roi.emptyTitle")}
+                  description={roiLoading ? t("emptyLoadingDescription") : t("roi.emptyDescription")}
+                  size="default"
+                  className="border border-dashed"
+                />
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40">
+                      <tr className="border-b border-border">
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.label")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("costSeries")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.revenue")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.net")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.roi")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {roiRows.map((row) => (
+                        <tr key={row.label} className="border-b border-border last:border-0 hover:bg-muted/30">
+                          <td className="px-4 py-2.5 font-medium">{row.label}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">${row.cost_usd.toFixed(6)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">${row.revenue_usd.toFixed(6)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">${row.net_usd.toFixed(6)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">{row.roi == null ? "—" : `${(row.roi * 100).toFixed(2)}%`}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">{t("roi.revenueTitle")}</CardTitle>
+              <CardDescription>{t("roi.revenueDescription")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="space-y-1.5 lg:col-span-2">
+                  <Label htmlFor="roi-label">{t("roi.form.label")}</Label>
+                  <Input id="roi-label" value={revenueLabel} onChange={(event) => setRevenueLabel(event.target.value)} placeholder={t("roi.form.labelPlaceholder")} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="roi-rev-start">{t("startDate")}</Label>
+                  <Input id="roi-rev-start" type="date" value={revenueStart} onChange={(event) => setRevenueStart(event.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="roi-rev-end">{t("endDate")}</Label>
+                  <Input id="roi-rev-end" type="date" value={revenueEnd} onChange={(event) => setRevenueEnd(event.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="roi-amount">{t("roi.form.amount")}</Label>
+                  <Input id="roi-amount" type="number" step="0.01" value={revenueAmount} onChange={(event) => setRevenueAmount(event.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="roi-notes">{t("roi.form.notes")}</Label>
+                <Input id="roi-notes" value={revenueNotes} onChange={(event) => setRevenueNotes(event.target.value)} />
+              </div>
+              <Button onClick={() => void saveRevenue()} disabled={revenueSaving}>
+                {revenueSaving ? t("roi.form.saving") : t("roi.form.save")}
+              </Button>
+              {revenues.length === 0 ? (
+                <EmptyState
+                  icon={<FileSpreadsheet className="h-5 w-5" />}
+                  title={t("roi.revenueEmptyTitle")}
+                  description={t("roi.revenueEmptyDescription")}
+                  size="sm"
+                  className="border border-dashed"
+                />
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40">
+                      <tr className="border-b border-border">
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.label")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("startDate")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("endDate")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.revenue")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("roi.table.actions")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {revenues.map((item) => (
+                        <tr key={item.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                          <td className="px-4 py-2.5 font-medium">{item.scenario_label}</td>
+                          <td className="px-4 py-2.5 font-mono text-xs">{item.period_start.slice(0, 10)}</td>
+                          <td className="px-4 py-2.5 font-mono text-xs">{item.period_end.slice(0, 10)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">${item.revenue_usd.toFixed(6)}</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <Button variant="ghost" size="icon" onClick={() => void removeRevenue(item.id)} aria-label={t("roi.form.delete")}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="table">
+          <Card>
+            <CardContent className="p-0">
+              {rows.length === 0 ? (
+                <EmptyState
+                  icon={<FileSpreadsheet className="h-5 w-5" />}
+                  title={loading ? t("emptyLoadingTitle") : t("emptyTitle")}
+                  description={loading ? t("emptyLoadingDescription") : t("emptyDescription")}
+                  size="default"
+                  className="m-6 border-0"
+                />
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40">
+                      <tr className="border-b border-border">
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.date")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("dept")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.user")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("model")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.tokens")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.cached")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.cacheRead")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("table.cacheWrite")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("costSeries")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, index) => (
+                        <tr
+                          key={`${row.dims.day ?? "na"}-${index}`}
+                          className="border-b border-border last:border-0 hover:bg-muted/30"
+                        >
+                          <td className="px-4 py-2.5 font-mono text-xs">{row.dims.day ?? "-"}</td>
+                          <td className="px-4 py-2.5">
+                            <Badge variant="soft">{row.dims.dept ?? "—"}</Badge>
+                          </td>
+                          <td className="px-4 py-2.5 text-muted-foreground">{row.dims.user ?? "—"}</td>
+                          <td className="px-4 py-2.5">
+                            <Badge variant="soft" className="font-mono text-[10px]">
+                              {row.dims.model ?? "—"}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono">{row.total_tokens.toLocaleString()}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{(row.cached_tokens ?? 0).toLocaleString()}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{(row.cache_read_input_tokens ?? 0).toLocaleString()}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{(row.cache_creation_input_tokens ?? 0).toLocaleString()}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">${row.cost_usd.toFixed(6)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-muted/40 font-medium">
+                        <td colSpan={4} className="px-4 py-2.5 text-right text-muted-foreground">
+                          {t("table.total")}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono">{totalTokens.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">—</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">—</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">—</td>
+                        <td className="px-4 py-2.5 text-right font-mono">${totalCost.toFixed(4)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

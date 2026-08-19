@@ -51,7 +51,6 @@ import {
   Moon,
   Boxes,
   Package,
-  PieChart,
   Split,
   Route,
   Search,
@@ -90,8 +89,8 @@ type NavGroup = {
  * - /metering/quota       个人额度已在成员卡片与批量条里改。这一页还管全公司总预算
  *                         （companyLimits）和租户默认规则，那两样目前没有别的入口，
  *                         所以路由保留、直达可用；要彻底砍得先给它们找个家。
- * - /admin/session-grants 给单个会话临时加权限、带 TTL 和吊销。网关真的在读
- *                         session_grants 表，不是死代码，只是日常不会点。
+ * - /admin/session-grants 已并入 /admin/api-tokens 的「会话授权」tab。它和 PAT 是同一件事的
+ *                         长短两端：都是带 scope 的授权、都能吊销，区别只在有没有 TTL。
  * - /audit /portal-logs /policy /admin/compliance /metering/agent-traces
  *                         已合并进 /admin/governance，旧地址 redirect 到对应 tab。
  * - /admin/web-search /admin/plugins /admin/mcp-servers /admin/capability-packs
@@ -137,7 +136,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "analytics",
     items: [
       { href: "/metering", labelKey: "metering", icon: BarChart3 },
-      { href: "/metering/split", labelKey: "billingSplit", icon: PieChart },
       { href: "/admin/governance", labelKey: "governance", icon: Shield },
       { href: "/admin/diagnostics", labelKey: "diagnostics", icon: Activity },
     ],

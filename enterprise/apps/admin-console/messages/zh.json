@@ -57,7 +57,7 @@
         "webSearch": "联网搜索",
         "channels": "Channel 管理",
         "cache": "AI 缓存",
-        "apiTokens": "API 令牌",
+        "apiTokens": "访问凭据",
         "mcpServers": "MCP 托管",
         "plugins": "Wasm 插件",
         "errors": "错误聚类",

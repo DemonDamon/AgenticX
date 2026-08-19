@@ -1,8 +1,11 @@
 "use client";
 import { adminFetch } from "../../../lib/admin-client-auth";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+
+import { SessionGrantsPanel } from "../../../components/credentials/SessionGrantsPanel";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -24,6 +27,10 @@ import {
   Label,
   PageHeader,
   toast,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@agenticx/ui";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -54,7 +61,7 @@ async function readJsonBody<T>(res: Response, fallback: T): Promise<T> {
   }
 }
 
-export default function ApiTokensPage() {
+function ApiTokensContent() {
   const t = useTranslations("pages.admin.apiTokens");
   const tc = useTranslations("common");
   const [tokens, setTokens] = useState<PatRow[]>([]);
@@ -332,5 +339,49 @@ export default function ApiTokensPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * 访问凭据：API 令牌与会话临时授权。
+ *
+ * 两者是同一件事的长短两端——都是带 scope 的授权、都能吊销，区别只在 PAT 长期有效、
+ * 会话授权带 TTL 到点自动失效。会话授权原本单独占一个一级菜单，但它是应急用的，
+ * 一年点不了几次，不值得和日常项并列。
+ */
+export default function ApiTokensPage() {
+  return (
+    <div className="space-y-6 p-6">
+      <PageHeader title="访问凭据" description="长期令牌与会话临时授权，都带 scope，都能吊销。" />
+      <Suspense fallback={null}>
+        <CredentialTabs />
+      </Suspense>
+    </div>
+  );
+}
+
+function CredentialTabs() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const active = params.get("tab") === "grants" ? "grants" : "tokens";
+  const onChange = useCallback(
+    (value: string) => {
+      router.replace(value === "grants" ? "/admin/api-tokens?tab=grants" : "/admin/api-tokens");
+    },
+    [router],
+  );
+  return (
+    <Tabs value={active} onValueChange={onChange}>
+      <TabsList>
+        <TabsTrigger value="tokens">API 令牌</TabsTrigger>
+        <TabsTrigger value="grants">会话授权</TabsTrigger>
+      </TabsList>
+      <TabsContent value="tokens" className="pt-4">
+        <ApiTokensContent />
+      </TabsContent>
+      <TabsContent value="grants" className="pt-4">
+        <SessionGrantsPanel />
+      </TabsContent>
+    </Tabs>
   );
 }

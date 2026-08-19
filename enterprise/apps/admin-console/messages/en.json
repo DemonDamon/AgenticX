@@ -57,7 +57,7 @@
         "webSearch": "Web Search",
         "channels": "Channel Management",
         "cache": "AI Cache",
-        "apiTokens": "API Tokens",
+        "apiTokens": "Access Credentials",
         "mcpServers": "MCP Hosting",
         "plugins": "Wasm Plugins",
         "errors": "Error Clustering",
