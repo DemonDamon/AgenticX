@@ -1,6 +1,11 @@
 import {
+  ALL_MEMBERS_ASSIGNMENT_KEY,
+  deptAssignmentKey,
+  groupAssignmentKey,
+  isFeatureAllowedByAssignments,
   listAdminUsers,
   listDepartmentsFlat,
+  listFeatureAssignments,
   listTenantOptOuts,
   type AdminUserDto,
 } from "@agenticx/iam-core";
@@ -9,9 +14,11 @@ import { queryMetering } from "./metering-service";
 import { getQuotaConfig, type QuotaRule } from "./token-quota-store";
 import {
   groupModelIdsForUser,
+  groupModelSourcesForUser,
   listUserGroups,
   type UserGroupRecord,
 } from "./user-groups-store";
+import { listCapabilityPacks } from "./capability-packs-store";
 import { collectUserAssignmentKeys, listAllAssignments, mergeUserStoredSet } from "./user-models-store";
 import {
   computeEffectiveDeptAllowed,
@@ -33,7 +40,26 @@ export type GroupMemberOverview = OverviewMember & {
   hasIndividualOverride: boolean;
 };
 
-export type UserModelSummary = { model: string; tokens: number; currentlyAllowed: boolean };
+/**
+ * 一项能力是「从哪来的」。卡片上要把继承和特批分开显示，靠的就是这个。
+ *
+ * 这个字段之所以存在得起，是因为个人的、组的、部门的分配是分开存、读时才合并的。
+ * 如果改成「把组的配置批量写进每个人的记录」，写进去的那一刻就再也分不出来了。
+ */
+export type GrantSource = "personal" | "group" | "department" | "all";
+
+export type GrantOrigin = { source: GrantSource; sourceLabel?: string };
+
+export type UserModelSummary = {
+  model: string;
+  tokens: number;
+  currentlyAllowed: boolean;
+  /** 只有当前可用的模型才有来源；历史用量那几行是「用过但现在没有」，无来源可言。 */
+} & Partial<GrantOrigin>;
+
+export type UserPackSummary = { id: string; name: string } & GrantOrigin;
+
+export type UserFeatureSummary = { enabled: boolean } & GrantOrigin;
 
 export type GroupQuotaOverview = UserGroupRecord & {
   memberCount: number;
@@ -50,6 +76,8 @@ export type UserQuotaOverview = OverviewMember & Pick<AdminUserDto, "status" | "
   quotaSourceLabel?: string;
   groupNames: string[];
   models: UserModelSummary[];
+  packs: UserPackSummary[];
+  features: { webSearch: UserFeatureSummary; deepResearch: UserFeatureSummary };
 };
 
 export type OrganizationNode = {
@@ -134,7 +162,70 @@ function usageMatchesModelId(usageModel: string, modelId: string): boolean {
   return normalizedModelId === normalizedUsage || normalizedModelId.endsWith(`/${normalizedUsage}`);
 }
 
-function modelsFor(memberIds: string[], usage: UsageIndex, allowedModelIds: readonly string[]): UserModelSummary[] {
+/** 最具体的来源优先：个人特批 > 组授予 > 部门继承 > 全员。 */
+const SOURCE_RANK: Record<GrantSource, number> = {
+  personal: 0,
+  group: 1,
+  department: 2,
+  all: 3,
+};
+
+export type OriginContext = {
+  userKeys: Set<string>;
+  groupNameByKey: Map<string, string>;
+  deptNameByKey: Map<string, string>;
+};
+
+/**
+ * 一条分配命中了这个人身上的哪个键，就按那个键报来源。
+ *
+ * 命中多个时报最具体的：既在「全员」里又被单独特批过，卡片该显示「特批」，因为把他
+ * 移出全员范围也不会收回这一项。
+ */
+export function originForKeys(matched: readonly string[], ctx: OriginContext): GrantOrigin | null {
+  let best: GrantOrigin | null = null;
+  for (const key of matched) {
+    if (!ctx.userKeys.has(key)) continue;
+    const groupName = ctx.groupNameByKey.get(key);
+    const deptName = ctx.deptNameByKey.get(key);
+    const candidate: GrantOrigin =
+      key === ALL_MEMBERS_ASSIGNMENT_KEY
+        ? { source: "all" }
+        : groupName !== undefined
+          ? { source: "group", sourceLabel: groupName }
+          : deptName !== undefined
+            ? { source: "department", sourceLabel: deptName }
+            : { source: "personal" };
+    if (!best || SOURCE_RANK[candidate.source] < SOURCE_RANK[best.source]) best = candidate;
+  }
+  return best;
+}
+
+/** 模型的来源：本人自己那份 > 某个组给的 > 剩下的都是部门天花板放下来的。 */
+export function modelOrigin(
+  modelId: string,
+  personalModelIds: ReadonlySet<string>,
+  groupSources: readonly { name: string; modelIds: string[] }[],
+): GrantOrigin {
+  if (personalModelIds.has(modelId)) return { source: "personal" };
+  const granting = groupSources.find((group) => group.modelIds.includes(modelId));
+  if (granting) return { source: "group", sourceLabel: granting.name };
+  return { source: "department" };
+}
+
+/** 一行分配都没有 = 全员可用，此时来源是「全员」而不是「没配过」。 */
+export function featureSummary(assignments: readonly string[], ctx: OriginContext): UserFeatureSummary {
+  if (assignments.length === 0) return { enabled: true, source: "all" };
+  const origin = originForKeys(assignments, ctx);
+  return origin ? { enabled: true, ...origin } : { enabled: false, source: "all" };
+}
+
+function modelsFor(
+  memberIds: string[],
+  usage: UsageIndex,
+  allowedModelIds: readonly string[],
+  originOf: (modelId: string) => GrantOrigin,
+): UserModelSummary[] {
   const totals = new Map<string, number>();
   for (const memberId of memberIds) {
     for (const [model, tokens] of usage.byUserModel.get(memberId) ?? []) {
@@ -150,7 +241,12 @@ function modelsFor(memberIds: string[], usage: UsageIndex, allowedModelIds: read
         tokens += usageTokens;
         unmatchedUsage.delete(usageModel);
       }
-      return { model: modelLabel(modelId), tokens, currentlyAllowed: true } satisfies UserModelSummary;
+      return {
+        model: modelLabel(modelId),
+        tokens,
+        currentlyAllowed: true,
+        ...originOf(modelId),
+      } satisfies UserModelSummary;
     })
     .sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model));
   const unavailableHistory = [...unmatchedUsage.entries()]
@@ -301,16 +397,29 @@ export async function loadGroupQuotaOverview(tenantId: string): Promise<{
 }
 
 export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuotaOverview[]> {
-  const [users, config, groups, departments, assignments, allEnabledModelIds, optOutsByUser] =
-    await Promise.all([
-      listAllUsers(tenantId),
-      getQuotaConfig(tenantId),
-      listUserGroups(tenantId),
-      listDepartmentsFlat(tenantId),
-      listAllAssignments(tenantId),
-      listAllEnabledModelIds(),
-      listTenantOptOuts(tenantId),
-    ]);
+  const [
+    users,
+    config,
+    groups,
+    departments,
+    assignments,
+    allEnabledModelIds,
+    optOutsByUser,
+    packs,
+    webSearchAssignments,
+    deepResearchAssignments,
+  ] = await Promise.all([
+    listAllUsers(tenantId),
+    getQuotaConfig(tenantId),
+    listUserGroups(tenantId),
+    listDepartmentsFlat(tenantId),
+    listAllAssignments(tenantId),
+    listAllEnabledModelIds(),
+    listTenantOptOuts(tenantId),
+    listCapabilityPacks(),
+    listFeatureAssignments(tenantId, "web_search"),
+    listFeatureAssignments(tenantId, "deep_research"),
+  ]);
   const usage = await buildUsageIndex(users.map((user) => user.id), tenantId);
   const departmentsById = new Map(departments.map((department) => [department.id, department]));
   const effectiveModelsByDepartment = new Map<string, string[]>();
@@ -324,6 +433,18 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
       }),
     );
   }
+  // 分配表里存的是 group:<id> / dept:<id>，卡片要显示的是名字。
+  const groupNameByKey = new Map(groups.map((group) => [groupAssignmentKey(group.id), group.name]));
+  const deptNameByKey = new Map(
+    departments.map((department) => [deptAssignmentKey(department.id), department.name]),
+  );
+  // capability-packs-store 内部按 process.env.DEFAULT_TENANT_ID 取租户，而这里拿的是
+  // 会话租户。单租户部署下两者相同，多租户下不是——按记录自带的 tenantId 再筛一道，
+  // 这段代码就不依赖那个假设了。
+  const activePacks = packs.filter(
+    (pack) => pack.status === "active" && pack.tenantId === tenantId,
+  );
+
   const groupNamesByUser = new Map<string, string[]>();
   for (const group of groups) {
     for (const userId of group.memberIds) {
@@ -342,6 +463,19 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
         ? effectiveModelsByDepartment.get(user.deptId) ?? allEnabledModelIds
         : allEnabledModelIds;
       const storedModelIds = mergeUserStoredSet(assignments, collectUserAssignmentKeys(user.id, user.email));
+      const groupSources = groupModelSourcesForUser(groups, user.id);
+      const personalModelIds = new Set(storedModelIds ?? []);
+      // 这个人身上所有能被分配命中的键：全员 + 本人/邮箱 + 所属组 + 部门链。
+      const originContext: OriginContext = {
+        userKeys: new Set([
+          ALL_MEMBERS_ASSIGNMENT_KEY,
+          ...collectUserAssignmentKeys(user.id, user.email),
+          ...groupSources.map((group) => groupAssignmentKey(group.id)),
+          ...departmentAncestorChain(user.deptId ?? "", departmentsById).map(deptAssignmentKey),
+        ]),
+        groupNameByKey,
+        deptNameByKey,
+      };
       // 个人与所属组是同一个并集；部门夹住它，个人关闭最后减。
       const assignedModelIds = mergeAssignedModelIds(
         storedModelIds,
@@ -369,7 +503,17 @@ export async function loadUserQuotaOverview(tenantId: string): Promise<UserQuota
         quotaSource: selected.quotaSource,
         ...(selected.quotaSourceLabel ? { quotaSourceLabel: selected.quotaSourceLabel } : {}),
         groupNames: groupNamesByUser.get(user.id) ?? [],
-        models: modelsFor([user.id], usage, effectiveModelIds),
+        models: modelsFor([user.id], usage, effectiveModelIds, (modelId) =>
+          modelOrigin(modelId, personalModelIds, groupSources),
+        ),
+        packs: activePacks.flatMap((pack) => {
+          const origin = originForKeys(pack.assignmentKeys, originContext);
+          return origin ? [{ id: pack.id, name: pack.displayName, ...origin }] : [];
+        }),
+        features: {
+          webSearch: featureSummary(webSearchAssignments, originContext),
+          deepResearch: featureSummary(deepResearchAssignments, originContext),
+        },
       } satisfies UserQuotaOverview;
     })
     .sort((a, b) => b.usedTokens - a.usedTokens || a.displayName.localeCompare(b.displayName));
