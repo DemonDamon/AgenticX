@@ -212,6 +212,19 @@ export function CapabilityPacksPanel() {
                 <div className="text-sm font-medium">{t("member.title")}</div>
                 <p className="text-xs text-muted-foreground">{t("member.hint")}</p>
                 <div className="grid gap-4 sm:grid-cols-2">
+                  {/* 平台功能也是包成员（feature:web_search / feature:deep_research）。
+                      漏了这一栏的后果是：包里明明装着它们，界面上看不见、勾不掉，也点不到
+                      它们各自的配置。 */}
+                  <div className="space-y-2 rounded-lg border p-3 sm:col-span-2">
+                    <div className="text-xs font-medium text-muted-foreground">平台功能</div>
+                    <CapabilityChoiceList
+                      items={catalog.grouped.feature}
+                      selected={members}
+                      onToggle={(id) => setMembers((prev) => toggleId(prev, id))}
+                      emptyLabel="没有可选的平台功能"
+                      disabledLabel={t("member.disabled")}
+                    />
+                  </div>
                   <div className="space-y-2 rounded-lg border p-3">
                     <div className="text-xs font-medium text-muted-foreground">MCP</div>
                     <CapabilityChoiceList

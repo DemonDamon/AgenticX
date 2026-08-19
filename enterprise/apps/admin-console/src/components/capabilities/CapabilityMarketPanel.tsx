@@ -15,9 +15,10 @@ import {
   Skeleton,
   toast,
 } from "@agenticx/ui";
-import { Boxes, Globe, Puzzle, Search, Server, X } from "lucide-react";
+import { Boxes, Globe, Puzzle, Search, Server, Store, X } from "lucide-react";
 
 import { useCapabilityCatalog, type PackRecord } from "./use-capability-catalog";
+import { MarketImportDialog, type MarketSource } from "./MarketImportDialog";
 
 type KindFilter = "all" | "mcp" | "skill" | "feature";
 
@@ -76,7 +77,7 @@ function packsHolding(packs: readonly PackRecord[], capabilityId: string): PackR
  * 走注册表那一侧，不在这里。
  */
 export function CapabilityMarketPanel() {
-  const { packs, skills, choices, loading, send } = useCapabilityCatalog(
+  const { packs, skills, choices, loading, send, load: catalogReload } = useCapabilityCatalog(
     "加载能力失败",
     "操作失败",
   );
@@ -85,6 +86,7 @@ export function CapabilityMarketPanel() {
   const [picked, setPicked] = useState<string[]>([]);
   const [targetPackId, setTargetPackId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [marketSource, setMarketSource] = useState<MarketSource | null>(null);
 
   const skillById = useMemo(
     () => new Map(skills.map((skill) => [`skill:${skill.id.toUpperCase()}`, skill])),
@@ -153,6 +155,14 @@ export function CapabilityMarketPanel() {
             </button>
           ))}
         </div>
+        <Button variant="outline" size="sm" onClick={() => setMarketSource("skill")}>
+          <Store className="h-4 w-4" />
+          从 SkillHub 添加
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => setMarketSource("mcp")}>
+          <Store className="h-4 w-4" />
+          浏览 MCP 市场
+        </Button>
         <div className="relative min-w-56 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -181,7 +191,7 @@ export function CapabilityMarketPanel() {
         <Card className="border-dashed">
           <CardContent className="p-8 text-center text-sm text-muted-foreground">
             {choices.length === 0
-              ? "货架是空的。先在「MCP 托管」或「Skill 注册表」里登记，这里才有东西可发。"
+              ? "货架是空的。点上面的「从 SkillHub 添加」挑技能，或在「MCP 托管」里登记服务。"
               : "没有匹配的能力。"}
           </CardContent>
         </Card>
@@ -291,6 +301,16 @@ export function CapabilityMarketPanel() {
           </Button>
         </div>
       ) : null}
+      <MarketImportDialog
+        source={marketSource ?? "skill"}
+        open={marketSource !== null}
+        onOpenChange={(open) => setMarketSource(open ? marketSource : null)}
+        onImported={() => {
+          setMarketSource(null);
+          void catalogReload();
+        }}
+      />
+
     </div>
   );
 }
