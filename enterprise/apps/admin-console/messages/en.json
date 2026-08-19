@@ -583,11 +583,13 @@
       },
       "capabilities": {
         "title": "Tools & Capabilities",
-        "description": "Register MCP servers and skills, then bundle them into capability packs and assign them. All three are facets of one thing: a pack delivers what is registered here.",
+        "description": "Register MCP servers and skills, bundle them into packs, and configure web search and Wasm plugins. Everything you hand to employees beyond models lives here.",
         "tabs": {
           "mcp": "MCP Hosting",
           "packs": "Capability Packs",
-          "skills": "Skill Registry"
+          "skills": "Skill Registry",
+          "search": "Web Search",
+          "plugins": "Wasm Plugins"
         }
       },
       "featureAssignment": {

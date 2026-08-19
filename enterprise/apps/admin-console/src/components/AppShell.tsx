@@ -51,7 +51,6 @@ import {
   Monitor,
   Network,
   Moon,
-  Blocks,
   Boxes,
   Fingerprint,
   Package,
@@ -134,8 +133,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "capabilities",
     items: [
       { href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes },
-      { href: "/admin/web-search", labelKey: "webSearch", icon: Search },
-      { href: "/admin/plugins", labelKey: "plugins", icon: Blocks },
     ],
   },
   {
