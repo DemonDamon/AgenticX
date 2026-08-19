@@ -590,7 +590,8 @@
           "packs": "Capability Packs",
           "skills": "Skill Registry",
           "search": "Web Search",
-          "plugins": "Wasm Plugins"
+          "plugins": "Wasm Plugins",
+          "governance": "Desktop Governance"
         }
       },
       "featureAssignment": {

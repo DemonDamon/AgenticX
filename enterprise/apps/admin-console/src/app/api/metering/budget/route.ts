@@ -9,6 +9,7 @@ import {
 import { requireAdminScope } from "../../../../lib/admin-auth";
 
 const PATCHABLE_BUDGET_KEYS = [
+  "desktopCapabilityPolicy",
   "companyLimits",
   "sessionTokenLimits",
   "defaults",

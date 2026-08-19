@@ -6,12 +6,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback } from "react";
 
 import { CapabilityPacksPanel } from "../../../components/capabilities/CapabilityPacksPanel";
+import { DesktopGovernancePanel } from "../../../components/capabilities/DesktopGovernancePanel";
 import { McpServersPanel } from "../../../components/capabilities/McpServersPanel";
 import { PluginsPanel } from "../../../components/capabilities/PluginsPanel";
 import { SkillsPanel } from "../../../components/capabilities/SkillsPanel";
 import { WebSearchPanel } from "../../../components/capabilities/WebSearchPanel";
 
-const TABS = ["mcp", "packs", "skills", "search", "plugins"] as const;
+const TABS = ["mcp", "packs", "skills", "search", "plugins", "governance"] as const;
 type TabId = (typeof TABS)[number];
 
 function isTabId(value: string | null): value is TabId {
@@ -66,6 +67,9 @@ function CapabilitiesTabs() {
       </TabsContent>
       <TabsContent value="plugins" className="pt-4">
         <PluginsPanel />
+      </TabsContent>
+      <TabsContent value="governance" className="pt-4">
+        <DesktopGovernancePanel />
       </TabsContent>
     </Tabs>
   );

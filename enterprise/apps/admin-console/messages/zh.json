@@ -590,7 +590,8 @@
           "packs": "能力包",
           "skills": "Skill 注册表",
           "search": "联网搜索",
-          "plugins": "Wasm 插件"
+          "plugins": "Wasm 插件",
+          "governance": "桌面管控"
         }
       },
       "featureAssignment": {

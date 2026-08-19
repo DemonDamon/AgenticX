@@ -1,6 +1,8 @@
 import {
   DEFAULT_SESSION_TOKEN_LIMITS,
+  normalizeDesktopCapabilityPolicy,
   normalizeSessionTokenLimits,
+  type DesktopCapabilityPolicy,
   type SessionTokenLimits,
 } from "@agenticx/config";
 
@@ -22,6 +24,8 @@ export type BudgetConfig = {
     costUsd: number;
   };
   sessionTokenLimits: SessionTokenLimits;
+  /** 桌面端能不能自助装 Skill/MCP、能不能扫本机配置。和会话额度同住这份配置。 */
+  desktopCapabilityPolicy: DesktopCapabilityPolicy;
   defaults?: BudgetRule;
   tenants?: Record<string, BudgetRule>;
   departments?: Record<string, BudgetRule>;
@@ -41,6 +45,7 @@ const DEFAULT_RULE: BudgetRule = {
 const PATCHABLE_KEYS = [
   "companyLimits",
   "sessionTokenLimits",
+  "desktopCapabilityPolicy",
   "defaults",
   "tenants",
   "departments",
@@ -85,6 +90,7 @@ export function normalizeBudgetConfig(
       costUsd: Number.isFinite(costLimit) && costLimit > 0 ? costLimit : 0,
     },
     sessionTokenLimits: normalizeSessionTokenLimits(input?.sessionTokenLimits),
+    desktopCapabilityPolicy: normalizeDesktopCapabilityPolicy(input?.desktopCapabilityPolicy),
     defaults: normalizeRule(input?.defaults ?? DEFAULT_RULE),
     tenants: {},
     departments: {},
