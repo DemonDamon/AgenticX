@@ -16,7 +16,7 @@ export const GROUP_ASSIGNMENT_PREFIX = "group:";
 export type CapabilityChoice = {
   /** `mcp:<ulid>` / `skill:<ulid>` */
   id: string;
-  kind: "mcp" | "skill";
+  kind: "mcp" | "skill" | "feature";
   name: string;
   displayName: string;
   disabled: boolean;
@@ -97,10 +97,12 @@ export function fromAssignmentKeys(keys: readonly string[]): AssignmentDraft {
 export function groupCapabilityChoices(choices: readonly CapabilityChoice[]): {
   mcp: CapabilityChoice[];
   skill: CapabilityChoice[];
+  feature: CapabilityChoice[];
 } {
   return {
     mcp: choices.filter((item) => item.kind === "mcp"),
     skill: choices.filter((item) => item.kind === "skill"),
+    feature: choices.filter((item) => item.kind === "feature"),
   };
 }
 

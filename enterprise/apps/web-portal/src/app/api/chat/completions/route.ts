@@ -1,5 +1,6 @@
-import { isFeatureAllowedForUser } from "@agenticx/iam-core";
+
 import { NextResponse } from "next/server";
+import { isPlatformFeatureAllowedForUser } from "../../../../lib/capability-packs-reader";
 import { cookies } from "next/headers";
 import { ulid } from "ulid";
 import {
@@ -256,9 +257,11 @@ export async function POST(request: Request) {
       tenantSearchConfigSnapshot = await loadTenantWebSearchConfigStrict(session.tenantId);
       tenantSearchConfigLoaded = true;
       // 租户总开关之上再看分配范围。查不动时放行：最可能的原因是租户还没跑迁移，
-      // 没有分配表；为一张还没建的表把全公司的深度研究停掉不划算。
-      const deepResearchAssigned = await isFeatureAllowedForUser(
-        session.tenantId,
+      // 深度研究现在是能力包的成员（feature:deep_research），谁能用由包的分配决定。
+      // 没有任何包引用它时视为还没纳管、保持全员可用——直接改成「不在包里就不能用」，
+      // 所有现存租户会在升级当天静默失效，现场看到的只是「深度研究突然不工作了」。
+      // 查询本身出错也放行：为一次数据库抖动把全公司的深度研究停掉不划算。
+      const deepResearchAssigned = await isPlatformFeatureAllowedForUser(
         "deep_research",
         session.userId,
         session.email,

@@ -10,7 +10,9 @@
  */
 
 import {
+  featureCapabilityId,
   groupCapabilityIdsByKind,
+  type PlatformFeature,
   parseCapabilityId,
   resolveCapabilityState,
   resolveEffectiveCapabilities,
@@ -177,6 +179,52 @@ export async function loadUserCapabilityView(
   ].sort((left, right) => left.id.localeCompare(right.id));
 
   return { assigned, optOuts };
+}
+
+/**
+ * 这项功能有没有被任何能力包引用过。
+ *
+ * 只看引用，不看包的状态或分配——停用的包同样说明「管理员已经开始用能力包管这项功能了」，
+ * 此时谁都拿不到是正确结果；而一个引用都没有才意味着还没纳管，该保持原样。
+ */
+async function isFeatureGovernedByAnyPack(capabilityId: string): Promise<boolean> {
+  const tenantId = requiredCapabilityTenant();
+  const t = await dialectCapabilityTables();
+  const query = t.db as unknown as DialectQuery;
+  const rows = (await query
+    .select({ packId: t.members.packId })
+    .from(t.members)
+    .innerJoin(t.packs, eq(t.packs.id, t.members.packId))
+    .where(
+      and(eq(t.packs.tenantId, tenantId), eq(t.members.capabilityId, capabilityId)),
+    )) as Array<{ packId: string }>;
+  return rows.length > 0;
+}
+
+/**
+ * 这个人能不能用某项平台功能（联网搜索、深度研究）。
+ *
+ * 判定和 MCP/Skill 走同一条路：功能是能力包的成员，包分给谁谁就有。原本它有自己的
+ * enterprise_feature_assignments 表和自己的分配 UI，等于两套并行的授权系统——管理员想的
+ * 只是「这个人能用什么」，不该因为这一项是「平台功能」就换一个地方配。
+ *
+ * 迁移安全：**没有任何包引用这项功能时，视为还没纳入能力包管理，保持全员可用。**
+ * 直接改成「不在包里就不能用」会让所有现存租户的搜索在升级当天静默失效，而现场看到的
+ * 现象是「搜索突然不工作了」，查不到是权限在拦。这和网关那边 governed 的处理是同一条：
+ * 不被任何包引用的东西保持原有行为。
+ */
+export async function isPlatformFeatureAllowedForUser(
+  feature: PlatformFeature,
+  userId: string,
+  email?: string,
+  deptId?: string | null,
+): Promise<boolean> {
+  const capabilityId = featureCapabilityId(feature);
+  const governed = await isFeatureGovernedByAnyPack(capabilityId);
+  if (!governed) return true;
+  const view = await loadUserCapabilityView(userId, email, deptId);
+  if (view.optOuts.has(capabilityId)) return false;
+  return view.assigned.some((item) => item.id === capabilityId);
 }
 
 /** 供下发：用户当下真正能调用的能力。 */

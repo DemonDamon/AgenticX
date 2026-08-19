@@ -15,11 +15,11 @@ import {
   Skeleton,
   toast,
 } from "@agenticx/ui";
-import { Boxes, Puzzle, Search, Server, X } from "lucide-react";
+import { Boxes, Globe, Puzzle, Search, Server, X } from "lucide-react";
 
 import { useCapabilityCatalog, type PackRecord } from "./use-capability-catalog";
 
-type KindFilter = "all" | "mcp" | "skill";
+type KindFilter = "all" | "mcp" | "skill" | "feature";
 
 /**
  * 扫描结论的呈现。
@@ -52,6 +52,7 @@ const KIND_TABS: { id: KindFilter; label: string }[] = [
   { id: "all", label: "全部" },
   { id: "mcp", label: "MCP 服务" },
   { id: "skill", label: "Skill" },
+  { id: "feature", label: "平台功能" },
 ];
 
 /** 一项能力已经躺在哪些包里。卡片上要显示这个，否则管理员会重复往包里加。 */
@@ -208,6 +209,8 @@ export function CapabilityMarketPanel() {
                     <div className="flex min-w-0 items-center gap-2">
                       {choice.kind === "mcp" ? (
                         <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      ) : choice.kind === "feature" ? (
+                        <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
                       ) : (
                         <Puzzle className="h-4 w-4 shrink-0 text-muted-foreground" />
                       )}

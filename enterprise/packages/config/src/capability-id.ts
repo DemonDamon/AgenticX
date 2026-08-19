@@ -8,8 +8,39 @@
  * 各处手拼字符串迟早会拼出 `mcp:` 与 `mcp/` 两种写法，所以只留这一个入口。
  */
 
-export const CAPABILITY_KINDS = ["mcp", "skill"] as const;
+export const CAPABILITY_KINDS = ["mcp", "skill", "feature"] as const;
 export type CapabilityKind = (typeof CAPABILITY_KINDS)[number];
+
+/**
+ * 平台功能不是租户建的行，没有 ULID，用固定标识。
+ *
+ * 上面那条「必须用 ULID」的理由是「name 是管理员起的可变标签，改名会让分配记录指空」。
+ * 这些标识由平台定义，管理员改不了，也不会有第二个租户的同名冲突——所以那条理由在这里
+ * 不成立，硬塞一个 ULID 反而要为两个常量建表。
+ *
+ * 之所以让它们成为能力而不是另一套开关：「谁能用联网搜索」和「谁能用某个 MCP」是同一个
+ * 问题。分成两套授权系统的结果是两处分配 UI、两张表、两套判定，而管理员想的只是
+ * 「这个人能用什么」。
+ */
+export const PLATFORM_FEATURES = ["web_search", "deep_research"] as const;
+export type PlatformFeature = (typeof PLATFORM_FEATURES)[number];
+
+export function isPlatformFeature(value: unknown): value is PlatformFeature {
+  return typeof value === "string" && (PLATFORM_FEATURES as readonly string[]).includes(value);
+}
+
+/** `feature:web_search` / `feature:deep_research`。 */
+export function featureCapabilityId(feature: PlatformFeature): string {
+  if (!isPlatformFeature(feature)) throw new Error(`unknown platform feature: ${String(feature)}`);
+  return `feature:${feature}`;
+}
+
+export function parseFeatureCapabilityId(capabilityId: string): PlatformFeature | null {
+  const raw = String(capabilityId ?? "").trim();
+  if (!raw.startsWith("feature:")) return null;
+  const feature = raw.slice("feature:".length);
+  return isPlatformFeature(feature) ? feature : null;
+}
 
 export type ParsedCapabilityId = {
   kind: CapabilityKind;
@@ -29,8 +60,10 @@ export function normalizeRowId(rowId: string): string {
 }
 
 export function formatCapabilityId(kind: CapabilityKind, rowId: string): string {
-  const normalized = normalizeRowId(rowId);
   if (!isCapabilityKind(kind)) throw new Error(`unknown capability kind: ${String(kind)}`);
+  // feature 走固定标识，不是 ULID：见 PLATFORM_FEATURES 上的说明。
+  if (kind === "feature") return featureCapabilityId(rowId as PlatformFeature);
+  const normalized = normalizeRowId(rowId);
   if (!ULID_RE.test(normalized)) throw new Error(`capability id requires a ULID, got: ${rowId}`);
   return `${kind}:${normalized}`;
 }
@@ -41,8 +74,13 @@ export function parseCapabilityId(capabilityId: string): ParsedCapabilityId | nu
   const separator = raw.indexOf(":");
   if (separator <= 0) return null;
   const kind = raw.slice(0, separator);
+  if (!isCapabilityKind(kind)) return null;
+  if (kind === "feature") {
+    const feature = parseFeatureCapabilityId(raw);
+    return feature ? { kind, rowId: feature } : null;
+  }
   const rowId = normalizeRowId(raw.slice(separator + 1));
-  if (!isCapabilityKind(kind) || !ULID_RE.test(rowId)) return null;
+  if (!ULID_RE.test(rowId)) return null;
   return { kind, rowId };
 }
 
@@ -54,7 +92,7 @@ export function isCapabilityId(value: unknown): value is string {
 export function groupCapabilityIdsByKind(
   capabilityIds: readonly string[],
 ): Record<CapabilityKind, string[]> {
-  const out: Record<CapabilityKind, string[]> = { mcp: [], skill: [] };
+  const out: Record<CapabilityKind, string[]> = { mcp: [], skill: [], feature: [] };
   for (const id of capabilityIds) {
     const parsed = parseCapabilityId(id);
     if (!parsed) continue;

@@ -52,10 +52,10 @@ describe("groupCapabilityIdsByKind", () => {
         `mcp:${ULID_A}`,
         "garbage",
       ]),
-    ).toEqual({ mcp: [ULID_A], skill: [ULID_B] });
+    ).toEqual({ mcp: [ULID_A], skill: [ULID_B], feature: [] });
   });
 
-  it("returns both buckets even when empty", () => {
-    expect(groupCapabilityIdsByKind([])).toEqual({ mcp: [], skill: [] });
+  it("returns every bucket even when empty", () => {
+    expect(groupCapabilityIdsByKind([])).toEqual({ mcp: [], skill: [], feature: [] });
   });
 });

@@ -4,12 +4,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "@agenticx/ui";
 
 import { adminFetch } from "../../lib/admin-client-auth";
+import { featureCapabilityId, PLATFORM_FEATURES } from "@agenticx/config";
+
 import {
   groupCapabilityChoices,
   mcpCapabilityId,
   skillCapabilityId,
   type CapabilityChoice,
 } from "../../lib/capability-pack-form";
+
+/** 平台功能是常量，不来自数据库；名字给中文，id 仍走统一入口构造。 */
+const FEATURE_LABELS: Record<(typeof PLATFORM_FEATURES)[number], string> = {
+  web_search: "联网搜索",
+  deep_research: "深度研究",
+};
 
 export type CapabilityStatus = "active" | "disabled";
 
@@ -74,7 +82,16 @@ export function useCapabilityCatalog(loadFailedMessage: string, errorMessage: st
       displayName: skill.displayName || skill.slug,
       disabled: skill.status !== "active",
     }));
-    return [...mcp, ...skillChoices];
+    // 平台功能和 MCP/Skill 并列成为能力：「谁能用联网搜索」和「谁能用某个 MCP」
+    // 是同一个问题，不该因为这一项是平台内置的就换一套分配系统。
+    const featureChoices = PLATFORM_FEATURES.map((feature) => ({
+      id: featureCapabilityId(feature),
+      kind: "feature" as const,
+      name: feature,
+      displayName: FEATURE_LABELS[feature],
+      disabled: false,
+    }));
+    return [...featureChoices, ...mcp, ...skillChoices];
   }, [mcpServers, skills]);
 
   const grouped = useMemo(() => groupCapabilityChoices(choices), [choices]);

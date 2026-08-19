@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 
-import { FeatureAssignmentCard } from "../../components/assignment/FeatureAssignmentCard";
 import {
   Badge,
   Button,
@@ -595,8 +594,9 @@ export function WebSearchPanel() {
         </CardContent>
       </Card>
 
-      <FeatureAssignmentCard feature="web_search" />
-      <FeatureAssignmentCard feature="deep_research" />
+      {/* 「谁能用」不在这里配了。联网搜索和深度研究现在是能力包的成员
+          （feature:web_search / feature:deep_research），分配走「能力货架」和能力包，
+          和 MCP、Skill、模型走同一套。这一页只管 provider 的 key 和配额。 */}
     </div>
   );
 }

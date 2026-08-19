@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { isPlatformFeatureAllowedForUser } from "../../../../../lib/capability-packs-reader";
 
-import { isFeatureAllowedForUser } from "@agenticx/iam-core";
+
 
 import { resolveDesktopIdentity } from "../../../../../lib/desktop-auth";
 import { resolveWebSearchConfig } from "../../../../../lib/web-search/config";
@@ -75,9 +76,10 @@ export async function POST(request: Request) {
   }
   // 租户总开关之上再看分配范围：没配过分配 = 全员可用，配了就只有命中的人能用。
   // 查不动时放行：最可能的原因是租户还没跑迁移，没有分配表；为一张还没建的表把
-  // 全公司的搜索停掉，代价远大于让未分配的人多搜一次。
-  const allowed = await isFeatureAllowedForUser(
-    identity.tenantId,
+  // 联网搜索现在是能力包的成员（feature:web_search），谁能用由包的分配决定。
+  // 没有任何包引用它时保持全员可用，见 isPlatformFeatureAllowedForUser 的说明。
+  // 查询出错也放行：把全公司的搜索停掉，代价远大于让未分配的人多搜一次。
+  const allowed = await isPlatformFeatureAllowedForUser(
     "web_search",
     identity.userId,
     identity.email,
