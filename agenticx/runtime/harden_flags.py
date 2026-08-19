@@ -139,3 +139,31 @@ def group_meta_reply_max_tokens() -> int:
     if raw is None:
         raw = 2000
     return max(500, min(8000, int(raw)))
+
+
+def group_open_floor_enabled() -> bool:
+    """``AGX_GROUP_OPEN_FLOOR`` / ``group.open_floor``. Default True.
+
+    Off 时 ``_analyze_intent`` 不再产出 ``open_floor``，群聊回到「路由器指派单一
+    发言人」的旧行为，用于快速回滚。
+    """
+    return _resolve_bool("AGX_GROUP_OPEN_FLOOR", "group.open_floor", True)
+
+
+def group_open_floor_max_speakers() -> int:
+    """``AGX_GROUP_OPEN_FLOOR_MAX_SPEAKERS`` / ``group.open_floor_max_speakers``.
+
+    Default 2, clamp 1..3. 一轮闲聊里最多让几个人有机会开口（他们仍可跳过）。
+    """
+    raw: Optional[int] = None
+    env = os.environ.get("AGX_GROUP_OPEN_FLOOR_MAX_SPEAKERS", "").strip()
+    if env:
+        try:
+            raw = int(env)
+        except Exception:
+            raw = None
+    if raw is None:
+        raw = _config_int("group.open_floor_max_speakers")
+    if raw is None:
+        raw = 2
+    return max(1, min(3, int(raw)))

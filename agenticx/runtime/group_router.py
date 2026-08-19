@@ -33,6 +33,8 @@ from agenticx.runtime.harden_flags import (
     group_intent_max_tokens,
     group_meta_direct_tools_enabled,
     group_meta_reply_max_tokens,
+    group_open_floor_enabled,
+    group_open_floor_max_speakers,
 )
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
@@ -245,6 +247,26 @@ def _is_complex_multistep_task(user_input: str) -> bool:
         if marker in text:
             return True
     return False
+
+
+def _normalize_reply_text(text: str) -> str:
+    """Collapse whitespace so 'A  B\\n' and 'A B' compare equal."""
+    return " ".join(str(text or "").split())
+
+
+def _is_verbatim_duplicate(text: str, already_spoken: Sequence[str]) -> bool:
+    """True when this reply is byte-identical (after whitespace collapse) to a
+    reply already emitted in the same user turn.
+
+    Deliberately literal: it only kills copy-paste collisions between two
+    members answering the same prompt. Paraphrases are left alone — judging
+    semantic overlap needs a model call and would suppress legitimate
+    "I agree, and also..." replies.
+    """
+    norm = _normalize_reply_text(text)
+    if not norm:
+        return False
+    return any(_normalize_reply_text(prev) == norm for prev in already_spoken)
 
 _META_AT_SUFFIX = r"(?=[\s\u3000\u4e00-\u9fff，。！？、：:；;,.!?\[\]（）()【】\"'「」]|$)"
 
@@ -1039,7 +1061,7 @@ class GroupChatRouter:
             "请判断这条用户消息应由谁回复。只输出 JSON，不要输出解释。\n\n"
             "JSON schema:\n"
             "{\n"
-            '  "action": "route_to" | "meta_direct" | "continue_thread",\n'
+            '  "action": "route_to" | "meta_direct" | "continue_thread" | "open_floor",\n'
             '  "target_ids": ["avatar_id"],\n'
             '  "reason": "short_reason"\n'
             "}\n\n"
@@ -1052,7 +1074,11 @@ class GroupChatRouter:
             "- 项目全局进度、跨角色总结问题 => meta_direct。\n"
             "- 明确属于某角色职责 => route_to。\n"
             "- 明显在追问上一位成员 => continue_thread。\n"
-            "- 不确定时优先 route_to 最可能成员。"
+            "- 闲聊、寒暄、开玩笑、随口问「你们平时都聊啥」这类没有明确职责归属的话 => open_floor，"
+            "并在 target_ids 里按相关性给出 1–2 个最可能想搭话的成员（可以为空）。\n"
+            "- open_floor 表示「把话丢进群里，谁想接谁接」，成员有权不接；"
+            "不要为了有人回答而硬选一个不相关的成员。\n"
+            "- 有明确专业问题或可执行诉求、但没点名时，仍然 route_to 最可能成员。"
         )
         try:
             text = await self._call_llm_text(
@@ -1095,13 +1121,18 @@ class GroupChatRouter:
         reason = str(payload.get("reason", "") or "").strip() or (
             "intent_parse_failed" if not payload else "llm_decision"
         )
-        if action not in {"route_to", "meta_direct", "continue_thread"}:
+        if action == "open_floor" and not group_open_floor_enabled():
+            # Flag off：退回今天的行为，不引入新分支
+            action = "route_to" if target_ids else "meta_direct"
+        if action not in {"route_to", "meta_direct", "continue_thread", "open_floor"}:
             action = "route_to" if target_ids else "meta_direct"
         if action == "continue_thread":
             if active_thread is None or active_thread.partner_id not in member_ids:
                 action = "route_to"
             else:
                 target_ids = [active_thread.partner_id]
+        if action == "open_floor":
+            target_ids = target_ids[: group_open_floor_max_speakers()]
         if action == "route_to" and not target_ids and members:
             target_ids = [members[0]["id"]]
             reason = f"{reason}|fallback_first_member"
@@ -1260,6 +1291,11 @@ class GroupChatRouter:
             "或当前问题显然是在交付文档材料时，才仔细展开长篇；否则保持短回复，细项留给追问。\n"
             "- 回答有执行性，贴合你的角色职责；能一句话说清就不要写成章节。\n"
             "- 你能看到其他成员最近发言，可基于上下文补充或纠正。\n"
+            "- 群里有人被点名时，这一轮就让当事人先答；你没被点到又没有独特信息，就只输出 __SKIP__。\n"
+            "- 接话要顺着「最近群聊上下文」里**已经发出**的内容往下说；"
+            "不要猜别人接下来会说什么，也不要把别人刚说过的话换个说法再说一遍。\n"
+            "- 宁可不说，也不要为了凑一句而输出没有信息量的客套或复述；"
+            "但如果这事明显该有人接、而群里没人接，你就补位。\n"
             "- 查看「最近群聊上下文」，若已有成员提出了相同的澄清问题，不要重复；"
             "给出你独特的专业判断、不同视角，或主动用工具查找答案。\n"
             "- 当你能通过搜索等工具找到答案时，优先研究后直接给出结论，而非反问用户。\n\n"
@@ -1664,6 +1700,113 @@ class GroupChatRouter:
                 if zero_exec_progress:
                     pm = _append_zero_exec_fallback(pm, facts)
                 yield pm
+            self._record_turn_response(responded_this_turn, pm)
+            async for fu in self._emit_mention_follow_ups(
+                reply=pm,
+                group_avatar_ids=group_avatar_ids,
+                base_session=base_session,
+                context=context,
+                group_id=group_id,
+                group_name=group_name,
+                should_stop=should_stop,
+                user_display_name=user_display_name,
+                hops=_get_mention_hops(),
+                responded_this_turn=responded_this_turn,
+            ):
+                yield fu
+            return
+        if decision.action == "open_floor":
+            context.clear_active_thread()
+            candidates = [x for x in decision.target_ids if x in valid_members]
+            if not candidates:
+                candidates = valid_members[: group_open_floor_max_speakers()]
+            candidates = candidates[: group_open_floor_max_speakers()]
+            if candidates:
+                for ge in self._project_h2a_fanout(
+                    base_session=base_session,
+                    group_id=group_id,
+                    group_avatar_ids=group_avatar_ids,
+                    target_agent_ids=candidates,
+                ):
+                    yield ge
+            spoken_texts: list[str] = []
+            for target in candidates:
+                if await self._should_stop(should_stop):
+                    return
+                av = self.avatar_registry.get_avatar(target)
+                ty_name = str(getattr(av, "name", "") or target) if av else target
+                yield self._typing_event(target, ty_name)
+                if await self._should_stop(should_stop):
+                    return
+                reply: GroupReply | None = None
+                async for target_evt in self._run_one_target_stream(
+                    base_session=base_session,
+                    context=context,
+                    group_id=group_id,
+                    group_name=group_name,
+                    avatar_id=target,
+                    user_input=user_input,
+                    quoted_content=quoted_content,
+                    should_stop=should_stop,
+                    force_reply=False,
+                    user_display_name=user_display_name,
+                ):
+                    if target_evt.event_type == "group_reply" and _is_verbatim_duplicate(
+                        target_evt.content, spoken_texts
+                    ):
+                        # 跟本轮已经发出的正文一字不差 → 不再发第二条一样的气泡
+                        target_evt = GroupReply(
+                            agent_id=target_evt.agent_id,
+                            avatar_name=target_evt.avatar_name,
+                            avatar_url=target_evt.avatar_url,
+                            content="",
+                            skipped=True,
+                            event_type="group_skipped",
+                        )
+                    yield target_evt
+                    if target_evt.event_type in {"group_reply", "group_skipped"}:
+                        reply = target_evt
+                if reply is None:
+                    continue
+                self._record_turn_response(responded_this_turn, reply)
+                if not reply.skipped and reply.content.strip():
+                    spoken_texts.append(reply.content)
+                    context.bump_active_thread(
+                        partner_id=reply.agent_id,
+                        partner_name=reply.avatar_name,
+                        last_topic=user_input[:120],
+                    )
+                async for fu in self._emit_mention_follow_ups(
+                    reply=reply,
+                    group_avatar_ids=group_avatar_ids,
+                    base_session=base_session,
+                    context=context,
+                    group_id=group_id,
+                    group_name=group_name,
+                    should_stop=should_stop,
+                    user_display_name=user_display_name,
+                    hops=_get_mention_hops(),
+                    responded_this_turn=responded_this_turn,
+                ):
+                    yield fu
+            if spoken_texts:
+                return
+            yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
+            if await self._should_stop(should_stop):
+                return
+            pm = await self._run_meta_project_manager_reply(
+                base_session=base_session,
+                context=context,
+                group_name=group_name,
+                user_input=user_input,
+                quoted_content=quoted_content,
+                extra_instruction=(
+                    "群里这会儿没人接话，你随口接一句就行：**1–2 句**，像微信群里群主随手回一下。"
+                    "不要点评谁没回、不要催人回答、不要罗列进度或下一步，也不要 @ 任何成员。"
+                ),
+                user_display_name=user_display_name,
+            )
+            yield pm
             self._record_turn_response(responded_this_turn, pm)
             async for fu in self._emit_mention_follow_ups(
                 reply=pm,
