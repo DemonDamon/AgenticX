@@ -44,7 +44,6 @@
     "brandSubtitle": "Workspace",
     "newChat": "New chat",
     "deepResearch": "深度研究",
-    "deepResearchEmptySubtitle": "拆解问题、联网检索并生成带引用的研究报告",
     "deepResearchPlaceholder": "描述你的问题，生成深度研究报告",
     "deepResearchChip": "深度研究",
     "deepResearchTokenHint": "可能消耗较多 Token；识别为非研究意图时，本轮可能不启动深度研究",

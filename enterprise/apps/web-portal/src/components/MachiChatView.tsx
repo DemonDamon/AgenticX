@@ -1275,7 +1275,6 @@ export function MachiChatView({
             /* 空态：品牌字标靠上 + 收窄加高输入区（深度研究入口暂走侧栏） */
             <div className="relative flex h-full flex-col items-center justify-start gap-10 overflow-y-auto px-4 pt-14 pb-10 md:gap-12 md:pt-16 md:pb-16">
               <NearEmptyWordmark
-                caption={deepResearchMode !== "off" ? tw("deepResearchEmptySubtitle") : undefined}
                 badgeLabel={t("beta")}
               />
 

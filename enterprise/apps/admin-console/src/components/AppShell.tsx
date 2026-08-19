@@ -147,8 +147,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/portal-logs", labelKey: "portalLogs", icon: FileText },
       { href: "/admin/compliance", labelKey: "compliance", icon: Shield },
       { href: "/policy", labelKey: "policy", icon: Shield },
-      { href: "/admin/errors", labelKey: "errors", icon: FileWarning },
-      { href: "/admin/perf", labelKey: "perf", icon: Activity },
+      { href: "/admin/diagnostics", labelKey: "diagnostics", icon: Activity },
     ],
   },
 ];

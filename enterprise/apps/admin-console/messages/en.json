@@ -64,7 +64,8 @@
         "perf": "Performance Profiling",
         "sso": "Single Sign-On",
         "sessionGrants": "Session Grants",
-        "capabilities": "Tools & Capabilities"
+        "capabilities": "Tools & Capabilities",
+        "diagnostics": "Gateway Diagnostics"
       }
     },
     "health": {
@@ -601,6 +602,14 @@
         },
         "deep_research": {
           "title": "Deep research availability"
+        }
+      },
+      "diagnostics": {
+        "title": "Gateway Diagnostics",
+        "description": "Two views of the same traffic: what failed, and what was slow.",
+        "tabs": {
+          "errors": "Errors",
+          "perf": "Performance"
         }
       }
     },

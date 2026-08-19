@@ -70,16 +70,19 @@ kubectl apply -f ../deployment.yaml -f ../service.yaml -f ../hpa.yaml
 
 ## 多周期配额生产启用
 
-默认行为保持关闭（升级后零行为变化）；与客户确认限额数值后再开启：
+日/周 Token 窗口默认启用；`dailyTokens` / `weeklyTokens` 为 `0` 时仍表示不限额，因此未配置额度的升级不会改变行为。请求次数配额仍需显式启用：
 
 ```bash
 export GATEWAY_REQUEST_COUNT_QUOTA=on
-export GATEWAY_TOKEN_WINDOW_QUOTA=on
 export GATEWAY_REQUEST_COUNT_BACKEND=pg
+export GATEWAY_QUOTA_POOL_BACKEND=pg
 export DATABASE_URL=postgres://...
 ```
 
 - `GATEWAY_REQUEST_COUNT_QUOTA=on`：启用日/周/月请求次数配额。
-- `GATEWAY_TOKEN_WINDOW_QUOTA=on`：启用日/周 Token 窗口硬顶。
+- `GATEWAY_TOKEN_WINDOW_QUOTA=off`：仅在需要紧急回退时显式关闭日/周 Token 窗口硬顶；缺省为启用。
 - `GATEWAY_REQUEST_COUNT_BACKEND=pg`：多副本部署建议使用 PG 后端，保证跨实例计数一致。
+- `GATEWAY_QUOTA_POOL_BACKEND=pg`（MySQL 部署填 `mysql`）：日/周/月 Token 硬配额使用数据库计数与同一顶层任务的续跑标记；未配置数据库时的本地计数仅保证同一主机共享文件下的行为。数据库运行期故障时，硬配额原子预留会 fail-closed，不会退回各副本各自判定。
 - `DATABASE_URL`：PG 计数/池用量所需连接。
+
+顶层任务续跑不是无限豁免：Gateway 会将客户端任务 ID 与已认证租户、用户及访问令牌绑定为不可逆租约指纹；租约最长 30 分钟、最多 64 次越界预留，且累计超额受限（额度的 25%，最低 16,384、最高 1,000,000 token）。过期、超预算、跨身份重放或新任务都会按日/周/月硬配额阻断。Gateway 当前没有可信的跨请求“任务结束”信号，因此使用上述短期有界租约；若以后协议增加显式结束事件，可在此基础上提前回收租约。

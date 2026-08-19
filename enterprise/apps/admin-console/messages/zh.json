@@ -64,7 +64,8 @@
         "perf": "性能分析",
         "sso": "单点登录",
         "sessionGrants": "会话授权",
-        "capabilities": "工具与能力"
+        "capabilities": "工具与能力",
+        "diagnostics": "网关诊断"
       }
     },
     "health": {
@@ -601,6 +602,14 @@
         },
         "deep_research": {
           "title": "深度研究开放范围"
+        }
+      },
+      "diagnostics": {
+        "title": "网关诊断",
+        "description": "同一批请求的两个侧面：出错的那些，和慢的那些。",
+        "tabs": {
+          "errors": "错误聚合",
+          "perf": "性能指标"
         }
       }
     },
