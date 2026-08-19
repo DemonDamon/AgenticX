@@ -5,11 +5,10 @@ import {
   isFeatureAllowedByAssignments,
   listAdminUsers,
   listDepartmentsFlat,
-  listFeatureAssignments,
   listTenantOptOuts,
   type AdminUserDto,
 } from "@agenticx/iam-core";
-import { modelIdsFromSubjects } from "@agenticx/config";
+import { featureCapabilityId, modelIdsFromSubjects } from "@agenticx/config";
 import { queryMetering } from "./metering-service";
 import { getQuotaConfig, type QuotaRule } from "./token-quota-store";
 import {
@@ -213,11 +212,41 @@ export function modelOrigin(
   return { source: "department" };
 }
 
-/** 一行分配都没有 = 全员可用，此时来源是「全员」而不是「没配过」。 */
-export function featureSummary(assignments: readonly string[], ctx: OriginContext): UserFeatureSummary {
-  if (assignments.length === 0) return { enabled: true, source: "all" };
-  const origin = originForKeys(assignments, ctx);
-  return origin ? { enabled: true, ...origin } : { enabled: false, source: "all" };
+/** 判定平台功能所需的那部分包信息。 */
+export type PackFeatureView = {
+  capabilityIds: readonly string[];
+  assignmentKeys: readonly string[];
+  active: boolean;
+};
+
+/**
+ * 这个人能不能用某项平台功能，以及是谁给的。
+ *
+ * 判定必须和运行时逐条对齐（web-portal 的 isPlatformFeatureAllowedForUser）：
+ * 后台显示「已开通」而实际调用被拒，是最难查的一类问题。所以这里也是
+ * 「没有任何包引用过 = 还没纳管 = 全员可用」，引用过之后只认 active 包的分配，
+ * 本人关掉的最后减。
+ *
+ * 原先这一列读的是 enterprise_feature_assignments。那张表在功能并入能力包之后
+ * 就没有任何运行时再查了 —— 它显示的是一套早已不生效的配置。
+ */
+export function featureSummary(
+  capabilityId: string,
+  packs: readonly PackFeatureView[],
+  ctx: OriginContext,
+  optOutSubjects: readonly string[] = [],
+): UserFeatureSummary {
+  const governed = packs.some((pack) => pack.capabilityIds.includes(capabilityId));
+  if (!governed) return { enabled: true, source: "all" };
+  if (optOutSubjects.includes(capabilityId)) return { enabled: false, source: "all" };
+  let best: GrantOrigin | null = null;
+  for (const pack of packs) {
+    if (!pack.active || !pack.capabilityIds.includes(capabilityId)) continue;
+    const origin = originForKeys(pack.assignmentKeys, ctx);
+    if (!origin) continue;
+    if (!best || SOURCE_RANK[origin.source] < SOURCE_RANK[best.source]) best = origin;
+  }
+  return best ? { enabled: true, ...best } : { enabled: false, source: "all" };
 }
 
 function modelsFor(
@@ -414,8 +443,6 @@ export async function loadUserQuotaOverview(
     allEnabledModelIds,
     optOutsByUser,
     packs,
-    webSearchAssignments,
-    deepResearchAssignments,
   ] = await Promise.all([
     listAllUsers(tenantId),
     getQuotaConfig(tenantId),
@@ -425,8 +452,6 @@ export async function loadUserQuotaOverview(
     listAllEnabledModelIds(),
     listTenantOptOuts(tenantId),
     listCapabilityPacks(),
-    listFeatureAssignments(tenantId, "web_search"),
-    listFeatureAssignments(tenantId, "deep_research"),
   ]);
   const usage = await buildUsageIndex(users.map((user) => user.id), tenantId);
   const departmentsById = new Map(departments.map((department) => [department.id, department]));
@@ -449,9 +474,16 @@ export async function loadUserQuotaOverview(
   // capability-packs-store 内部按 process.env.DEFAULT_TENANT_ID 取租户，而这里拿的是
   // 会话租户。单租户部署下两者相同，多租户下不是——按记录自带的 tenantId 再筛一道，
   // 这段代码就不依赖那个假设了。
-  const activePacks = packs.filter(
-    (pack) => pack.status === "active" && pack.tenantId === tenantId,
-  );
+  const tenantPacks = packs.filter((pack) => pack.tenantId === tenantId);
+  const activePacks = tenantPacks.filter((pack) => pack.status === "active");
+  // 功能是否「已纳管」要连停用的包一起看，和运行时同一条规则；分配只认 active 的。
+  const packFeatureViews: PackFeatureView[] = tenantPacks.map((pack) => ({
+    capabilityIds: pack.capabilityIds,
+    assignmentKeys: pack.assignmentKeys,
+    active: pack.status === "active",
+  }));
+  const webSearchCapabilityId = featureCapabilityId("web_search");
+  const deepResearchCapabilityId = featureCapabilityId("deep_research");
 
   const groupNamesByUser = new Map<string, string[]>();
   for (const group of groups) {
@@ -519,8 +551,18 @@ export async function loadUserQuotaOverview(
           return origin ? [{ id: pack.id, name: pack.displayName, ...origin }] : [];
         }),
         features: {
-          webSearch: featureSummary(webSearchAssignments, originContext),
-          deepResearch: featureSummary(deepResearchAssignments, originContext),
+          webSearch: featureSummary(
+            webSearchCapabilityId,
+            packFeatureViews,
+            originContext,
+            optOutsByUser.get(user.id) ?? [],
+          ),
+          deepResearch: featureSummary(
+            deepResearchCapabilityId,
+            packFeatureViews,
+            originContext,
+            optOutsByUser.get(user.id) ?? [],
+          ),
         },
       } satisfies UserQuotaOverview;
     })

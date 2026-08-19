@@ -19,8 +19,8 @@ async function readJson<T>(response: Response, fallback: string): Promise<T> {
 /**
  * 把一组用户 id 并入/移出某个分配集合。
  *
- * 两个分配接口都是整集替换——按它们自己的注释，「让前端 diff 两个集合再发细粒度调用，
- * 正是『只改了一半』的成因」。所以这里也读全量、算好再整集写回，不拼增量。
+ * 分配接口是整集替换——按它自己的注释，「让前端 diff 两个集合再发细粒度调用，正是
+ * 『只改了一半』的成因」。所以这里也读全量、算好再整集写回，不拼增量。
  */
 export function nextKeys(current: readonly string[], userIds: readonly string[], grant: boolean): string[] {
   const set = new Set(current);
@@ -36,7 +36,12 @@ export function nextKeys(current: readonly string[], userIds: readonly string[],
  *
  * 「把一堆人一块改」这件事在这里发生，而不是靠让用户组去持有一份配置——组仍然是授予，
  * 改组会实时影响所有成员；这条操作条改的是被选中的这几个人自己那一份。两者不冲突：
- * 一个是长效规则，一个是临时的一把。
+ * 一个是长效规则，一个是临时的一把。选中的这批人本身就是「一伙人」时，「存为用户组」
+ * 把这一把变成长效的那一个，不用再去另一个页面把人重挑一遍。
+ *
+ * 这里不再有联网搜索/深度研究的开关。那两个按钮写的是 enterprise_feature_assignments，
+ * 而这两项功能并入能力包之后，运行时只认包——按下去会提示成功，员工那边却什么都没变。
+ * 要调这两项，走「绑定能力包」，或者进包里改。
  */
 export function MemberBatchBar({
   selectedIds,
@@ -49,6 +54,7 @@ export function MemberBatchBar({
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [quotaDraft, setQuotaDraft] = useState("");
+  const [groupName, setGroupName] = useState("");
   const [packId, setPackId] = useState("");
   const [packs, setPacks] = useState<PackRecord[]>([]);
 
@@ -73,11 +79,11 @@ export function MemberBatchBar({
   }, [packs.length, selectedIds.length]);
 
   const run = useCallback(
-    async (label: string, task: () => Promise<void>) => {
+    async (label: string, task: () => Promise<void>, successText?: string) => {
       setBusy(label);
       try {
         await task();
-        toast.success(`已对 ${selectedIds.length} 人${label}`);
+        toast.success(successText ?? `已对 ${selectedIds.length} 人${label}`);
         onChanged();
       } catch (error) {
         toast.error(error instanceof Error ? error.message : `${label}失败`);
@@ -88,35 +94,26 @@ export function MemberBatchBar({
     [onChanged, selectedIds.length],
   );
 
-  const toggleFeature = useCallback(
-    (feature: "web_search" | "deep_research", grant: boolean, label: string) =>
-      run(label, async () => {
-        const path = `/api/admin/feature-assignments/${feature}`;
-        const current = await readJson<{ assignmentKeys: string[] }>(
-          await adminFetch(path, { cache: "no-store" }),
-          "读取分配失败",
-        );
-        // 一行分配都没有 = 这项功能当前对全员开放。这时候写入「被选中的这几个人」
-        // 不是给他们开通，是把其他所有人关掉——同一个写操作，效果正好相反。
-        if (current.assignmentKeys.length === 0) {
-          throw new Error(
-            grant
-              ? "该功能当前对全员开放，这几个人已经有了，无需单独开通"
-              : "该功能当前对全员开放，无法只关掉其中几个人。请先在「工具与能力」里改成按范围分配，再回来调整",
-          );
-        }
-        await readJson(
-          await adminFetch(path, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              assignmentKeys: nextKeys(current.assignmentKeys, selectedIds, grant),
+  const createGroup = useCallback(
+    () =>
+      run(
+        "创建用户组",
+        async () => {
+          const name = groupName.trim();
+          if (!name) throw new Error("请填组名");
+          await readJson(
+            await adminFetch("/api/admin/user-groups", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name, memberIds: [...selectedIds] }),
             }),
-          }),
-          "保存分配失败",
-        );
-      }),
-    [run, selectedIds],
+            "创建用户组失败",
+          );
+          setGroupName("");
+        },
+        `已创建用户组「${groupName.trim()}」，${selectedIds.length} 人在内`,
+      ),
+    [groupName, run, selectedIds],
   );
 
   const bindPack = useCallback(
@@ -177,17 +174,19 @@ export function MemberBatchBar({
       <span className="text-sm font-medium">已选 {selectedIds.length} 人</span>
       <span className="h-4 w-px bg-border" />
 
-      <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void toggleFeature("web_search", true, "开通联网搜索")}>
-        开通联网搜索
-      </Button>
-      <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void toggleFeature("web_search", false, "关闭联网搜索")}>
-        关闭
-      </Button>
-      <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void toggleFeature("deep_research", true, "开通深度研究")}>
-        开通深度研究
-      </Button>
-      <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => void toggleFeature("deep_research", false, "关闭深度研究")}>
-        关闭
+      <Input
+        className="h-8 w-36"
+        placeholder="新用户组名称"
+        value={groupName}
+        onChange={(event) => setGroupName(event.target.value)}
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy !== null || groupName.trim() === ""}
+        onClick={() => void createGroup()}
+      >
+        存为用户组
       </Button>
 
       <span className="h-4 w-px bg-border" />

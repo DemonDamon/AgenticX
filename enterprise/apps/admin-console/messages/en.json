@@ -596,17 +596,6 @@
           "governance": "Desktop Governance"
         }
       },
-      "featureAssignment": {
-        "description": "Choose who may use it. Selecting nothing means everyone — this is a baseline capability, and turning the master switch on means you want people using it.",
-        "ceilingHint": "With the master switch off, nobody here can use it regardless of scope.",
-        "saved": "Saved",
-        "web_search": {
-          "title": "Web search availability"
-        },
-        "deep_research": {
-          "title": "Deep research availability"
-        }
-      },
       "diagnostics": {
         "title": "Gateway Diagnostics",
         "description": "Two views of the same traffic: what failed, and what was slow.",

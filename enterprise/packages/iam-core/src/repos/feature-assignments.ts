@@ -1,9 +1,16 @@
 /**
- * 功能级分配（联网搜索、深度研究）与**唯一一处**分配键解析。
+ * **唯一一处**分配键解析，外加一张已经退役的功能分配表。
  *
  * 可见模型、能力包、功能开关此前各自拼一遍「这个人算哪些 key」，网关那边还有第四份。
  * 拼得不一样就会出现「后台说他有、真去用被拒」这种最难查的故障，所以这里收成一个
- * 函数，各处只管拿到键集合之后查自己的表。
+ * 函数（resolveAssignmentKeysForUser），各处只管拿到键集合之后查自己的表。这部分仍在用。
+ *
+ * ⚠️ enterprise_feature_assignments 这张表已经没有任何运行时再查了。联网搜索和深度研究
+ * 现在是能力包的成员（`feature:web_search` / `feature:deep_research`），判定在 web-portal
+ * 的 isPlatformFeatureAllowedForUser。listFeatureAssignments / replaceFeatureAssignments /
+ * isFeatureAllowedForUser 一并没有调用方了——**不要拿它们做新的开关**：写进去不会影响
+ * 任何人能不能用，只会得到一个「保存成功」。表和函数暂留，是因为它是老部署里「谁有搜索」
+ * 的最后一份记录，删表得单独走一次迁移。
  */
 
 import { enterpriseFeatureAssignments as pgTable } from "@agenticx/db-schema";

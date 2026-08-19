@@ -61,20 +61,58 @@ describe("modelOrigin", () => {
 });
 
 describe("featureSummary", () => {
-  it("treats no assignment rows at all as open to everyone", () => {
-    // 一行都没有 = 还没管过这项功能，全员可用；不是「谁都没有」。
-    expect(featureSummary([], ctx)).toEqual({ enabled: true, source: "all" });
+  const WEB_SEARCH = "feature:web_search";
+  const pack = (
+    capabilityIds: string[],
+    assignmentKeys: string[],
+    active = true,
+  ) => ({ capabilityIds, assignmentKeys, active });
+
+  it("treats a feature no pack references as still open to everyone", () => {
+    // 没有任何包引用过 = 还没纳入能力包管理，保持原样全员可用；不是「谁都没有」。
+    // 和运行时 isPlatformFeatureAllowedForUser 的第一条判断必须一致。
+    expect(featureSummary(WEB_SEARCH, [pack(["skill:x"], ["all"])], ctx)).toEqual({
+      enabled: true,
+      source: "all",
+    });
   });
 
-  it("reports which group switched the feature on", () => {
-    expect(featureSummary(["group:g_rd"], ctx)).toEqual({
+  it("reports which group's pack switched the feature on", () => {
+    expect(featureSummary(WEB_SEARCH, [pack([WEB_SEARCH], ["group:g_rd"])], ctx)).toEqual({
       enabled: true,
       source: "group",
       sourceLabel: "研发组",
     });
   });
 
-  it("reports off when the rows exist but none name this user", () => {
-    expect(featureSummary(["group:g_sales"], ctx)).toEqual({ enabled: false, source: "all" });
+  it("reports off when a pack governs it but none of them reach this user", () => {
+    expect(featureSummary(WEB_SEARCH, [pack([WEB_SEARCH], ["group:g_sales"])], ctx)).toEqual({
+      enabled: false,
+      source: "all",
+    });
+  });
+
+  it("counts a disabled pack as governance but never as a grant", () => {
+    // 停用的包同样说明管理员已经开始用能力包管这项功能，此时谁都拿不到才是对的；
+    // 若把停用的包当作「没引用过」，升级当天会退回全员可用。
+    expect(
+      featureSummary(WEB_SEARCH, [pack([WEB_SEARCH], ["all"], false)], ctx),
+    ).toEqual({ enabled: false, source: "all" });
+  });
+
+  it("lets the user's own opt-out win over the pack that granted it", () => {
+    expect(
+      featureSummary(WEB_SEARCH, [pack([WEB_SEARCH], ["all"])], ctx, [WEB_SEARCH]),
+    ).toEqual({ enabled: false, source: "all" });
+  });
+
+  it("names the most specific pack when several reach the same user", () => {
+    expect(
+      featureSummary(
+        WEB_SEARCH,
+        [pack([WEB_SEARCH], ["all"]), pack([WEB_SEARCH], ["group:g_rd"])],
+        ctx,
+      ),
+    ).toEqual({ enabled: true, source: "group", sourceLabel: "研发组" });
   });
 });

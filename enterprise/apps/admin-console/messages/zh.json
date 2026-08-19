@@ -596,17 +596,6 @@
           "governance": "桌面管控"
         }
       },
-      "featureAssignment": {
-        "description": "选择哪些人可以使用。一条都不选就是全员可用——这是基础能力，打开总开关就是想让大家用。",
-        "ceilingHint": "总开关关掉时，这里选了谁都用不了。",
-        "saved": "已保存",
-        "web_search": {
-          "title": "联网搜索开放范围"
-        },
-        "deep_research": {
-          "title": "深度研究开放范围"
-        }
-      },
       "diagnostics": {
         "title": "网关诊断",
         "description": "同一批请求的两个侧面：出错的那些，和慢的那些。",

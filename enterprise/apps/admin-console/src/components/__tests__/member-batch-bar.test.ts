@@ -20,10 +20,10 @@ describe("nextKeys", () => {
     expect(nextKeys(["u_a"], ["u_a"], true)).toEqual(["u_a"]);
   });
 
-  it("would silently revoke everyone if handed an empty feature set", () => {
-    // 这不是 nextKeys 的 bug，是功能开关那条语义的陷阱：分配表一行都没有 = 全员可用。
-    // 此时写入「被选中的这几个人」，效果是把其他所有人关掉。MemberBatchBar 因此在
-    // 调用之前就拦住空集合——这个用例把「为什么必须拦」钉在这儿。
+  it("turns an unassigned pack into one assigned to exactly these users", () => {
+    // 能力包的空分配 = 谁都没有，所以从空集合起步写入选中的人就是字面意思。
+    // （功能开关那边曾经是反的——空 = 全员，写入几个人等于把其余所有人关掉。
+    // 那条语义已经随功能并入能力包一起消失，操作条上也不再有那两个开关。）
     expect(nextKeys([], ["u_a"], true)).toEqual(["u_a"]);
   });
 });
