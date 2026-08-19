@@ -22,7 +22,7 @@ async function readJson<T>(response: Response, fallback: string): Promise<T> {
  * 两个分配接口都是整集替换——按它们自己的注释，「让前端 diff 两个集合再发细粒度调用，
  * 正是『只改了一半』的成因」。所以这里也读全量、算好再整集写回，不拼增量。
  */
-function nextKeys(current: readonly string[], userIds: readonly string[], grant: boolean): string[] {
+export function nextKeys(current: readonly string[], userIds: readonly string[], grant: boolean): string[] {
   const set = new Set(current);
   for (const id of userIds) {
     if (grant) set.add(id);
@@ -96,6 +96,15 @@ export function MemberBatchBar({
           await adminFetch(path, { cache: "no-store" }),
           "读取分配失败",
         );
+        // 一行分配都没有 = 这项功能当前对全员开放。这时候写入「被选中的这几个人」
+        // 不是给他们开通，是把其他所有人关掉——同一个写操作，效果正好相反。
+        if (current.assignmentKeys.length === 0) {
+          throw new Error(
+            grant
+              ? "该功能当前对全员开放，这几个人已经有了，无需单独开通"
+              : "该功能当前对全员开放，无法只关掉其中几个人。请先在「工具与能力」里改成按范围分配，再回来调整",
+          );
+        }
         await readJson(
           await adminFetch(path, {
             method: "PUT",
