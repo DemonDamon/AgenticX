@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback } from "react";
 
+import { CapabilityMarketPanel } from "../../../components/capabilities/CapabilityMarketPanel";
 import { CapabilityPacksPanel } from "../../../components/capabilities/CapabilityPacksPanel";
 import { DesktopGovernancePanel } from "../../../components/capabilities/DesktopGovernancePanel";
 import { McpServersPanel } from "../../../components/capabilities/McpServersPanel";
@@ -12,7 +13,7 @@ import { PluginsPanel } from "../../../components/capabilities/PluginsPanel";
 import { SkillsPanel } from "../../../components/capabilities/SkillsPanel";
 import { WebSearchPanel } from "../../../components/capabilities/WebSearchPanel";
 
-const TABS = ["mcp", "packs", "skills", "search", "plugins", "governance"] as const;
+const TABS = ["market", "packs", "mcp", "skills", "search", "plugins", "governance"] as const;
 type TabId = (typeof TABS)[number];
 
 function isTabId(value: string | null): value is TabId {
@@ -34,12 +35,12 @@ function CapabilitiesTabs() {
   const router = useRouter();
   const params = useSearchParams();
   const raw = params.get("tab");
-  const active: TabId = isTabId(raw) ? raw : "mcp";
+  const active: TabId = isTabId(raw) ? raw : "market";
 
   const onChange = useCallback(
     (value: string) => {
       // replace 而不是 push：切 tab 不该在浏览器后退栈里堆一层。
-      router.replace(value === "mcp" ? "/admin/capabilities" : `/admin/capabilities?tab=${value}`);
+      router.replace(value === "market" ? "/admin/capabilities" : `/admin/capabilities?tab=${value}`);
     },
     [router],
   );
@@ -53,6 +54,9 @@ function CapabilitiesTabs() {
           </TabsTrigger>
         ))}
       </TabsList>
+      <TabsContent value="market" className="pt-4">
+        <CapabilityMarketPanel />
+      </TabsContent>
       <TabsContent value="mcp" className="pt-4">
         <McpServersPanel />
       </TabsContent>

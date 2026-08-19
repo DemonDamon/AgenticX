@@ -586,6 +586,7 @@
         "title": "Tools & Capabilities",
         "description": "Register MCP servers and skills, bundle them into packs, and configure web search and Wasm plugins. Everything you hand to employees beyond models lives here.",
         "tabs": {
+          "market": "Capability Shelf",
           "mcp": "MCP Hosting",
           "packs": "Capability Packs",
           "skills": "Skill Registry",

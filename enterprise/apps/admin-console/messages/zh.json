@@ -586,6 +586,7 @@
         "title": "工具与能力",
         "description": "注册 MCP Server、登记 Skill，打成能力包分配给员工，联网搜索与 Wasm 插件也在这里配。模型之外要发给员工的东西都在这一页。",
         "tabs": {
+          "market": "能力货架",
           "mcp": "MCP 托管",
           "packs": "能力包",
           "skills": "Skill 注册表",
