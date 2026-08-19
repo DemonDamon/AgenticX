@@ -225,6 +225,13 @@
       "when": 1787816600000,
       "tag": "0031_enterprise_skill_scan_result",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "5",
+      "when": 1787903000000,
+      "tag": "0032_drop_feature_assignments",
+      "breakpoints": true
     }
   ]
 }

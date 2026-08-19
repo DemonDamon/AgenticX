@@ -54,8 +54,8 @@ describe("postgresql/mysql schema parity", () => {
   const pgTables = collectTables(postgresSchema);
   const mysqlTables = collectTables(mysqlSchema);
 
-  it("mirrors all 59 PostgreSQL tables in MySQL", () => {
-    expect(pgTables.size).toBe(59);
+  it("mirrors all 58 PostgreSQL tables in MySQL", () => {
+    expect(pgTables.size).toBe(58);
     expect([...mysqlTables.keys()].sort()).toEqual([...pgTables.keys()].sort());
   });
 
@@ -132,6 +132,7 @@ describe("mysql baseline migration inventory", () => {
       "0029_enterprise_feature_assignments.sql",
       "0030_enterprise_user_opt_outs.sql",
       "0031_enterprise_skill_scan_result.sql",
+      "0032_drop_feature_assignments.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -181,6 +182,7 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 29, tag: "0029_enterprise_feature_assignments" }),
       expect.objectContaining({ idx: 30, tag: "0030_enterprise_user_opt_outs" }),
       expect.objectContaining({ idx: 31, tag: "0031_enterprise_skill_scan_result" }),
+      expect.objectContaining({ idx: 32, tag: "0032_drop_feature_assignments" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(

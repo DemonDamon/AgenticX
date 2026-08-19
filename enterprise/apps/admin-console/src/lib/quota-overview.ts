@@ -2,7 +2,6 @@ import {
   ALL_MEMBERS_ASSIGNMENT_KEY,
   deptAssignmentKey,
   groupAssignmentKey,
-  isFeatureAllowedByAssignments,
   listAdminUsers,
   listDepartmentsFlat,
   listTenantOptOuts,
