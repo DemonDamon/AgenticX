@@ -22,6 +22,7 @@ from agenticx.runtime.prompts.credential_safety import (
     CREDENTIAL_SAFETY_BLOCK,
     CREDENTIAL_SAFETY_MCP_HINT,
 )
+from agenticx.runtime.prompts.file_delivery import build_file_delivery_choice_prompt_block
 from agenticx.runtime.context_file_budget import (
     CONTEXT_FILES_USAGE_HINT,
     MAX_CONTEXT_FILE_CHARS,
@@ -812,6 +813,7 @@ def build_meta_agent_system_prompt(
     user_nickname: str = "",
     user_preference: str = "",
     kb_retrieval_mode_override: Optional[str] = None,
+    include_file_delivery_choice: bool = False,
 ) -> str:
     bound_skill = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
     try:
@@ -891,6 +893,9 @@ def build_meta_agent_system_prompt(
         or str(getattr(session, "kb_retrieval_mode", None) or "").strip().lower()
     )
     kb_retrieval_block = _build_kb_retrieval_policy_block(effective_kb_mode or None)
+    file_delivery_choice_block = (
+        build_file_delivery_choice_prompt_block() if include_file_delivery_choice else ""
+    )
     base_prompt = (
         f"{workspace_context}\n"
         f"{provider_fault_block}"
@@ -1061,6 +1066,7 @@ def build_meta_agent_system_prompt(
         "- 需要列出/核对当前已注册分身（尤其本轮刚创建过分身、上文 Avatars 列表可能滞后）时，使用 `list_avatars` 获取实时名单。\n"
         "- 用户要求把分身拉群、新建项目群/团队群时，使用 `create_group_chat(name, members, routing?)`；members 可传分身名或 id。创建成功后向用户汇报群名与成员，并提示可在「项目群」列表进入群聊。\n"
         "- **严禁对已注册分身使用 `spawn_subagent`**。若用户指令中提到的人名/角色在 Avatars 列表中存在，必须用 `delegate_to_avatar(avatar_id=..., task=...)`。用 `spawn_subagent` 创建同名临时智能体是严重错误。\n\n"
+        f"{file_delivery_choice_block}"
         "## 向用户提问（human-in-the-loop）\n"
         "- 当你需要用户做开放式决策（方案确认、二选一、风格/配色偏好、缺失参数、是否锁定某约束）时，**必须调用 `request_clarification` 工具**发起阻塞提问，**禁止把开放式问题写进正文然后结束回合**。\n"
         "- `request_clarification` 会弹出阻塞交互框让用户点选预设选项或填写自定义文本；用户提交后，工具结果即用户答复，你须在同一回合内基于该答复继续执行，而不是结束回合等待用户重新发消息。\n"

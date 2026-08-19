@@ -772,7 +772,11 @@ def loop(
             session=session,
             agent_id="meta",
             tools=META_AGENT_TOOLS,
-            system_prompt=build_meta_agent_system_prompt(session, mode="interactive"),
+            system_prompt=build_meta_agent_system_prompt(
+                session,
+                mode="interactive",
+                include_file_delivery_choice=False,
+            ),
         ):
             if event.type == "token":
                 text = str(event.data.get("text", ""))

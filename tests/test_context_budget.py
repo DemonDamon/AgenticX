@@ -11,6 +11,7 @@ from agenticx.runtime.context_budget import (
     model_prefers_compact_meta_context,
 )
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
+from agenticx.runtime.prompts.file_delivery import FILE_DELIVERY_CHOICE_PROMPT_MARKER
 from agenticx.runtime.prompts.meta_agent import build_meta_agent_system_prompt
 
 
@@ -33,14 +34,21 @@ def test_force_compact_meta_turn_context() -> None:
     assert "精简模式" in notice
     assert len(compact_prompt) < 25_000
     assert len(compact_tools) < len(META_AGENT_TOOLS)
+    assert FILE_DELIVERY_CHOICE_PROMPT_MARKER not in compact_prompt
 
 
 def test_maybe_compact_meta_turn_context_shrinks_full_meta_prompt() -> None:
     session = StudioSession()
     session.provider_name = "custom_openai_v"
     session.model_name = "Qwen3-32B"
-    full_prompt = build_meta_agent_system_prompt(session, mode="interactive", taskspaces=[])
-    assert len(full_prompt) > 40_000
+    full_prompt = build_meta_agent_system_prompt(
+        session,
+        mode="interactive",
+        taskspaces=[],
+        include_file_delivery_choice=True,
+    )
+    assert len(full_prompt) > 30_000
+    assert full_prompt.count(FILE_DELIVERY_CHOICE_PROMPT_MARKER) == 1
     compact_prompt, compact_tools, notice = maybe_compact_meta_turn_context(
         session,
         system_prompt=full_prompt,
@@ -49,7 +57,29 @@ def test_maybe_compact_meta_turn_context_shrinks_full_meta_prompt() -> None:
     assert notice
     assert len(compact_prompt) < len(full_prompt)
     assert len(compact_tools) <= len(META_AGENT_TOOLS)
-    assert compact_prompt == build_compact_meta_system_prompt(session)
+    assert compact_prompt.count(FILE_DELIVERY_CHOICE_PROMPT_MARKER) == 1
+    assert compact_prompt == build_compact_meta_system_prompt(
+        session,
+        source_system_prompt=full_prompt,
+    )
+
+
+def test_force_compact_preserves_opted_in_delivery_rule() -> None:
+    session = StudioSession()
+    session.provider_name = "custom_openai_v"
+    session.model_name = "Qwen3-32B"
+    full_prompt = build_meta_agent_system_prompt(
+        session,
+        mode="interactive",
+        taskspaces=[],
+        include_file_delivery_choice=True,
+    )
+    compact_prompt, _, _ = force_compact_meta_turn_context(
+        session,
+        tools=list(META_AGENT_TOOLS),
+        source_system_prompt=full_prompt,
+    )
+    assert compact_prompt.count(FILE_DELIVERY_CHOICE_PROMPT_MARKER) == 1
 
 
 def test_meta_prompt_includes_large_artifact_file_write_discipline() -> None:
@@ -58,3 +88,4 @@ def test_meta_prompt_includes_large_artifact_file_write_discipline() -> None:
     assert "大文件落盘" in prompt
     assert "骨架" in prompt
     assert "再分章追加" in prompt
+    assert FILE_DELIVERY_CHOICE_PROMPT_MARKER not in prompt

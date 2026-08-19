@@ -4674,6 +4674,7 @@ class AgentRuntime:
                         compact_prompt, compact_tools, compact_notice = force_compact_meta_turn_context(
                             session,
                             tools=full_tool_pool,
+                            source_system_prompt=current_system_prompt,
                         )
                         current_system_prompt = compact_prompt
                         full_tool_pool = list(compact_tools)

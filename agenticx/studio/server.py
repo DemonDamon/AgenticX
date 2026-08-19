@@ -84,6 +84,7 @@ from agenticx.cli.agent_tools import (
 )
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
 from agenticx.runtime.prompts.current_time import build_current_time_block
+from agenticx.runtime.prompts.file_delivery import build_file_delivery_choice_prompt_block
 from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
 from agenticx.runtime.group_router import (
     META_LEADER_AGENT_ID,
@@ -3379,6 +3380,9 @@ def create_studio_app() -> FastAPI:
                 "- **流程/链路/架构**：先写 1–3 句可见衔接语，再 `show_widget` 出 SVG 图，后分节解读；"
                 "禁止在 ```text``` 或正文里用 `A->B->C`、`↓` 文字链代替可视化。\n"
             )
+            # Direct interactive avatar sessions share the same delivery-choice policy.
+            if not turn_is_unattended:
+                prompt += "\n" + build_file_delivery_choice_prompt_block()
             prompt += (
                 "\n## 浏览器操作指南（browser-use MCP）\n"
                 "操作网页时严格遵循以下流程，每步都必须调用工具，禁止空转：\n"
@@ -3611,6 +3615,7 @@ def create_studio_app() -> FastAPI:
                                 user_nickname=_u_nickname,
                                 user_preference=_u_preference,
                                 kb_retrieval_mode_override=_kb_mode_req or None,
+                                include_file_delivery_choice=not turn_is_unattended,
                             )
                         user_message_content: Any | None = None
                         history_user_attachments: list[dict[str, Any]] | None = None
@@ -4237,6 +4242,7 @@ def create_studio_app() -> FastAPI:
             mode="interactive",
             taskspaces=managed.taskspaces,
             group_chat=_meta_group_chat_payload(managed),
+            include_file_delivery_choice=False,
         )
 
         async def _loop_stream() -> AsyncGenerator[str, None]:

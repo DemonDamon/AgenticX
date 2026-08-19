@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from agenticx.cli.studio import StudioSession
+from agenticx.runtime.prompts.file_delivery import (
+    build_file_delivery_choice_prompt_block,
+    has_file_delivery_choice_prompt_block,
+)
 from agenticx.runtime.tool_result_budget import approx_tokens
 
 _MACHI_COMPACT_HEADER = (
@@ -69,10 +73,18 @@ def _compact_meta_tools(
     return compact
 
 
-def build_compact_meta_system_prompt(session: StudioSession) -> str:
+def build_compact_meta_system_prompt(
+    session: StudioSession,
+    *,
+    source_system_prompt: str = "",
+) -> str:
     from agenticx.runtime.agent_runtime import _build_agent_system_prompt
 
-    return _MACHI_COMPACT_HEADER + _build_agent_system_prompt(session)
+    prompt = _MACHI_COMPACT_HEADER + _build_agent_system_prompt(session)
+    source_has_delivery_choice = has_file_delivery_choice_prompt_block(source_system_prompt)
+    if source_has_delivery_choice and not has_file_delivery_choice_prompt_block(prompt):
+        prompt = prompt.rstrip() + "\n\n" + build_file_delivery_choice_prompt_block()
+    return prompt
 
 
 def compact_meta_notice(
@@ -99,9 +111,13 @@ def force_compact_meta_turn_context(
     session: StudioSession,
     *,
     tools: Sequence[Dict[str, Any]],
+    source_system_prompt: str = "",
 ) -> Tuple[str, List[Dict[str, Any]], str]:
     """Always switch Meta turns to compact prompt/tools for small-window models."""
-    compact_prompt = build_compact_meta_system_prompt(session)
+    compact_prompt = build_compact_meta_system_prompt(
+        session,
+        source_system_prompt=source_system_prompt,
+    )
     compact_tools = _compact_meta_tools(session, tools)
     model = str(getattr(session, "model_name", "") or "")
     est_tokens = approx_tokens(compact_prompt)
@@ -127,7 +143,10 @@ def maybe_compact_meta_turn_context(
     large_meta_toolset = len(tools) >= 40
     if len(prompt) <= _COMPACT_PROMPT_CHAR_THRESHOLD and not large_meta_toolset:
         return system_prompt, list(tools), None
-    compact_prompt = build_compact_meta_system_prompt(session)
+    compact_prompt = build_compact_meta_system_prompt(
+        session,
+        source_system_prompt=prompt,
+    )
     compact_tools = _compact_meta_tools(session, tools)
     est_before = approx_tokens(prompt) + approx_tokens(str(len(tools)))
     est_after = approx_tokens(compact_prompt) + approx_tokens(str(len(compact_tools)))
