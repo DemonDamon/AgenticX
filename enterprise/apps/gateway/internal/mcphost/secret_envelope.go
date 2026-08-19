@@ -15,7 +15,7 @@ import (
 //
 // 信封与 TS 侧 provider-api-key-crypto 完全同构（AES-256-GCM，key 取
 // sha256(AGX_PROVIDER_SECRET_KEY)），两边共用同一份密钥材料；
-// cross_language_test.go 用 TS 产出的密文钉住这个兼容性。
+// secret_envelope_test.go 的 tsProducedCipher 用一段 TS 产出的密文钉住这个兼容性。
 const (
 	secretEnvelopePrefix = "agx:gcm1:"
 	// 密文信封在 backend_config JSON 里的键名。存在该键即表示整份配置已加密。

@@ -22,6 +22,9 @@ const allMembersAssignmentKey = "all"
 // maxDepartmentDepth bounds the parent walk so a cyclic row cannot hang a request.
 const maxDepartmentDepth = 32
 
+// optOutTable is asserted against db-schema in entitlement_schema_test.go.
+const optOutTable = "enterprise_user_opt_outs"
+
 // EntitlementChecker answers "may this caller still use this MCP server right now"
 // against the capability pack tables.
 //
@@ -52,8 +55,15 @@ type Decision struct {
 	Allowed bool
 }
 
+// mcpCapabilityID 必须和 config 包的 formatCapabilityId 逐字节一致。
+//
+// ULID 的规范形态是大写 Crockford base32，TS 侧 normalizeRowId 会强制抬成大写；
+// 这边只 trim 的话，遇到小写的 mcp_servers.id 就会拼出对不上的 capability id。
+// PG 的 varchar 比较区分大小写，于是 governed 查成 false，这台服务器被当作「不归
+// 能力包管」——撤销静默失效，而且是往放行那一侧失效。（MySQL 的 _ci collation
+// 恰好不区分大小写，所以这个洞只在 PG 上现形，更难查。）
 func mcpCapabilityID(serverID string) string {
-	return "mcp:" + strings.TrimSpace(serverID)
+	return "mcp:" + strings.ToUpper(strings.TrimSpace(serverID))
 }
 
 // Check resolves the caller's entitlement for one hosted MCP server.
@@ -120,11 +130,17 @@ LIMIT 1`, tenantID, capabilityID)
 	return scanExists(row)
 }
 
+// optedOut 查个人关闭记录。表名/列名必须跟着 db-schema 走：0056/0030 把
+// enterprise_capability_opt_outs 并进了 enterprise_user_opt_outs，能力 id 存在
+// subject 列里（模型则是 model:<provider>/<name>，同一张表）。
+//
+// 查错表在这里不是「少判一次 opt-out」——归能力包管之后任何一步查询失败都判拒绝，
+// 于是所有被能力包管的 MCP 服务器会对所有人一起消失。
 func (e *EntitlementChecker) optedOut(ctx context.Context, tenantID, userID, capabilityID string) (bool, error) {
 	row, err := e.database.QueryRowContext(ctx, `
 SELECT 1
-FROM enterprise_capability_opt_outs
-WHERE tenant_id = ? AND user_id = ? AND capability_id = ?
+FROM `+optOutTable+`
+WHERE tenant_id = ? AND user_id = ? AND subject = ?
 LIMIT 1`, tenantID, userID, capabilityID)
 	if err != nil {
 		return false, err

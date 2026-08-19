@@ -33,6 +33,14 @@ func TestMcpCapabilityIDUsesRowPrimaryKey(t *testing.T) {
 	}
 }
 
+func TestMcpCapabilityIDNormalizesCaseLikeThePortal(t *testing.T) {
+	// config 包的 normalizeRowId 把 ULID 抬成大写。这边不抬，PG 上就会因为
+	// varchar 区分大小写而查不到 pack 引用，撤销往放行那一侧静默失效。
+	if got := mcpCapabilityID("01jqmz8k3n4p5q6r7s8t9vwxyz"); got != "mcp:01JQMZ8K3N4P5Q6R7S8T9VWXYZ" {
+		t.Fatalf("mcpCapabilityID = %q, want the uppercase ULID", got)
+	}
+}
+
 func TestRevokedOnlyAppliesToGovernedServers(t *testing.T) {
 	// 不被任何能力包引用的服务器保持原有行为，否则现有 PAT 用法会当场全断。
 	if revoked(Decision{Governed: false, Allowed: false}) {
