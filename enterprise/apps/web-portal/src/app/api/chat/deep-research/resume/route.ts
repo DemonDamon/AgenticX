@@ -31,6 +31,11 @@ import {
 } from "../../../../../lib/deep-research/run-wait";
 import { loadTenantWebSearchConfig } from "../../../../../lib/web-search/tenant-config";
 import { reserveTenantDailySearchProviderCall } from "../../../../../lib/web-search/daily-provider-quota";
+import {
+  chatConcurrencyLimitResponse,
+  tryAcquireChatTurn,
+  type ChatTurnLease,
+} from "../../../../../lib/chat-concurrency";
 import { withRequestLog } from "../../../../../lib/observability/with-request-log";
 
 export const runtime = "nodejs";
@@ -72,10 +77,15 @@ async function continueClaimedPlanGate(input: {
   session: SessionAuth["session"];
   accessToken: string;
   traceId: string;
+  turnLease: ChatTurnLease;
 }): Promise<Response> {
+  const finishWithoutBackground = (response: Response): Response => {
+    input.turnLease.release();
+    return response;
+  };
   const latestPlan = latestResearchPlanEvent(input.run.events);
   if (!latestPlan || (latestPlan.action !== "proposed" && latestPlan.action !== "updated")) {
-    return alreadyContinued(input.runId);
+    return finishWithoutBackground(alreadyContinued(input.runId));
   }
 
   let plan = snapshotToResearchPlan(latestPlan.plan, input.run.topic);
@@ -123,7 +133,7 @@ async function continueClaimedPlanGate(input: {
       plan = snapshotToResearchPlan(revised.plan, input.run.topic);
       planVersion = revised.version;
       if (!("skippedApprove" in revised && revised.skippedApprove)) {
-        return NextResponse.json({
+        return finishWithoutBackground(NextResponse.json({
           code: "00000",
           message: "ok",
           data: {
@@ -134,15 +144,15 @@ async function continueClaimedPlanGate(input: {
             version: revised.version,
             plan: revised.plan,
           },
-        });
+        }));
       }
     } catch (error) {
       await defaultRunStore.beginClarification(input.runId, [], null, "plan");
       console.warn("[deep-research] orphan plan revision failed:", error);
-      return NextResponse.json(
+      return finishWithoutBackground(NextResponse.json(
         { error: { code: "50000", message: "计划更新失败，请重试。" } },
         { status: 500 },
-      );
+      ));
     }
   } else {
     const action = input.answers[PLAN_GATE_ACTION_KEY] ?? (input.skip ? "skip" : "approve");
@@ -176,10 +186,10 @@ async function continueClaimedPlanGate(input: {
     } catch (error) {
       await defaultRunStore.beginClarification(input.runId, [], null, "plan");
       console.warn("[deep-research] orphan plan persist failed:", error);
-      return NextResponse.json(
+      return finishWithoutBackground(NextResponse.json(
         { error: { code: "50000", message: "failed to continue plan gate" } },
         { status: 500 },
-      );
+      ));
     }
   }
 
@@ -212,7 +222,8 @@ async function continueClaimedPlanGate(input: {
         "[deep-research] orphan plan continue failed:",
         error instanceof Error ? error.message : error,
       );
-    });
+    })
+    .finally(() => input.turnLease.release());
 
   return NextResponse.json({
     code: "00000",
@@ -306,6 +317,18 @@ export async function POST(request: Request) {
     run?.status === "awaiting_clarify" && orphanGateKind(run.events) === "plan";
   const hadLiveWaiter = hasLiveClarifyWaiter(runId);
 
+  // A local live waiter already owns the original top-level turn. A possible
+  // orphan must reserve capacity before resolveClarification/claim/write so a
+  // rejected takeover remains safely retryable.
+  let orphanTurnLease: ChatTurnLease | null = null;
+  if (initialPlanGate && !hadLiveWaiter) {
+    orphanTurnLease = tryAcquireChatTurn({
+      tenantId: session.tenantId,
+      userId: session.userId,
+    });
+    if (!orphanTurnLease) return chatConcurrencyLimitResponse();
+  }
+
   let outcome: "resumed" | "already_continued" | "not_found";
   try {
     outcome = await defaultRunStore.resolveClarification({
@@ -315,6 +338,7 @@ export async function POST(request: Request) {
       payload: { answers, skip },
     });
   } catch (error) {
+    orphanTurnLease?.release();
     // A storage failure must not masquerade as "already continued" — the run is
     // still waiting and the client needs to be able to retry.
     console.warn("[deep-research] clarify resume failed:", error);
@@ -325,6 +349,7 @@ export async function POST(request: Request) {
   }
 
   if (outcome === "not_found") {
+    orphanTurnLease?.release();
     // Same 404 for missing, cross-tenant and cross-user runs so a valid runId
     // cannot be probed from another account.
     return NextResponse.json(
@@ -334,37 +359,67 @@ export async function POST(request: Request) {
   }
 
   if (outcome === "already_continued") {
+    orphanTurnLease?.release();
     logCtx.markNoop();
     return alreadyContinued(runId);
   }
 
   notifyClarifyResume(runId);
   if (!initialPlanGate || hadLiveWaiter) {
+    orphanTurnLease?.release();
     return NextResponse.json({ code: "00000", message: "ok", data: { runId, resumed: true } });
   }
 
   // A waiter in another instance polls once per second. Only take over if the
   // explicit user action remains unclaimed after a full poll interval.
   await new Promise((resolve) => setTimeout(resolve, ORPHAN_HANDOFF_MS));
-  run = await defaultRunStore.get(session.tenantId, session.userId, runId);
+  try {
+    run = await defaultRunStore.get(session.tenantId, session.userId, runId);
+  } catch (error) {
+    orphanTurnLease?.release();
+    console.warn("[deep-research] orphan handoff lookup failed:", error);
+    return NextResponse.json(
+      { error: { code: "50000", message: "clarify resume failed" } },
+      { status: 500 },
+    );
+  }
   if (!run || run.phase !== "plan" || orphanGateKind(run.events) !== "plan") {
+    orphanTurnLease?.release();
     return NextResponse.json({ code: "00000", message: "ok", data: { runId, resumed: true } });
   }
-  if (!(await defaultRunStore.claimPlanGateResume(runId))) {
+  let claimed = false;
+  try {
+    claimed = await defaultRunStore.claimPlanGateResume(runId);
+  } catch (error) {
+    orphanTurnLease?.release();
+    console.warn("[deep-research] orphan claim failed:", error);
+    return NextResponse.json(
+      { error: { code: "50000", message: "clarify resume failed" } },
+      { status: 500 },
+    );
+  }
+  if (!claimed) {
+    orphanTurnLease?.release();
     logCtx.markNoop();
     return alreadyContinued(runId);
   }
 
-  return continueClaimedPlanGate({
-    run,
-    runId,
-    answers,
-    chatReply,
-    skip,
-    model: body.model,
-    session,
-    accessToken,
-    traceId: run.traceId?.trim() || logCtx.traceId,
-  });
+  try {
+    return await continueClaimedPlanGate({
+      run,
+      runId,
+      answers,
+      chatReply,
+      skip,
+      model: body.model,
+      session,
+      accessToken,
+      traceId: run.traceId?.trim() || logCtx.traceId,
+      turnLease: orphanTurnLease!,
+    });
+  } catch (error) {
+    orphanTurnLease?.release();
+    throw error;
+  }
   }, request);
 }

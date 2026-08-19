@@ -45,6 +45,11 @@ import {
 } from "../../../../lib/deep-research/auto-need";
 import type { DeepResearchIntentConfidence } from "../../../../lib/deep-research/clarification-policy";
 import { withCalculatorContext } from "../../../../lib/calculator/chat-context";
+import {
+  chatConcurrencyLimitResponse,
+  holdChatTurnUntilResponseEnds,
+  tryAcquireChatTurn,
+} from "../../../../lib/chat-concurrency";
 import { log } from "../../../../lib/observability/logger";
 import { withRequestLog } from "../../../../lib/observability/with-request-log";
 
@@ -303,6 +308,13 @@ export async function POST(request: Request) {
     }
   }
 
+  const turnLease = tryAcquireChatTurn({
+    tenantId: session.tenantId,
+    userId: session.userId,
+  });
+  if (!turnLease) return chatConcurrencyLimitResponse();
+
+  const produceAdmittedTurn = async (): Promise<Response> => {
   let automaticTurnPlan: AutomaticTurnPlan | undefined;
   if (
     tenantDeepResearchEnabled &&
@@ -570,5 +582,13 @@ export async function POST(request: Request) {
       "x-agenticx-trace-id": traceId,
     },
   });
+  };
+
+  try {
+    return holdChatTurnUntilResponseEnds(await produceAdmittedTurn(), turnLease);
+  } catch (error) {
+    turnLease.release();
+    throw error;
+  }
   }, request);
 }

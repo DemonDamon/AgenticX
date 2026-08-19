@@ -60,6 +60,7 @@ vi.mock("../../../../../lib/calculator/chat-context", () => ({
 }));
 
 import { POST } from "../route";
+import { resetChatConcurrencyForTests } from "../../../../../lib/chat-concurrency";
 
 const session = {
   userId: "user-1",
@@ -89,6 +90,7 @@ function request(body: Record<string, unknown>): Request {
 
 describe("POST /api/chat/completions deep-research preflight", () => {
   beforeEach(() => {
+    resetChatConcurrencyForTests();
     vi.clearAllMocks();
     mocks.getSessionAuthFromCookies.mockResolvedValue({
       session,
@@ -124,6 +126,34 @@ describe("POST /api/chat/completions deep-research preflight", () => {
       reason: "classifier_unavailable",
     });
     mocks.withCalculatorContext.mockResolvedValue(null);
+  });
+
+  it("counts plain, web and deep as one top-level turn each, then rejects the fourth", async () => {
+    mocks.resolveManualDeepResearchQuery.mockResolvedValue({
+      kind: "resolved",
+      value: { query: "研究请求", confidence: 1, source: "current" },
+    });
+    const fetchMock = vi.fn(async () => new Response("plain"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const responses: Response[] = [];
+    try {
+      responses.push(await POST(request({})));
+      responses.push(await POST(request({ agenticx_web_search: true })));
+      responses.push(await POST(request({ agenticx_deep_research: true })));
+
+      const rejected = await POST(request({}));
+      expect(rejected.status).toBe(429);
+      await expect(rejected.json()).resolves.toMatchObject({
+        error: { code: "42903", limit: 3 },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(mocks.runWebSearchTurn).toHaveBeenCalledTimes(1);
+      expect(mocks.runDeepResearchTurn).toHaveBeenCalledTimes(1);
+    } finally {
+      await Promise.all(responses.map((response) => response.body?.cancel()));
+      vi.unstubAllGlobals();
+    }
   });
 
   it("gives manual activation priority and skips the automatic gate", async () => {

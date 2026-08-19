@@ -73,6 +73,10 @@ vi.mock("../../../../../../lib/deep-research/run-wait", () => ({
 }));
 
 import { POST } from "../route";
+import {
+  resetChatConcurrencyForTests,
+  tryAcquireChatTurn,
+} from "../../../../../../lib/chat-concurrency";
 
 const SESSION = {
   tenantId: "tenant-1",
@@ -128,6 +132,7 @@ function request(body: unknown): Request {
 
 describe("POST /api/chat/deep-research/resume", () => {
   beforeEach(() => {
+    resetChatConcurrencyForTests();
     for (const mock of [
       getSessionAuthFromCookies,
       resolveClarification,
@@ -225,6 +230,46 @@ describe("POST /api/chat/deep-research/resume", () => {
     expect(notifyClarifyResume).toHaveBeenCalledWith(PLAN_RUN.runId);
   });
 
+  it("does not count a live waiter resume against Portal turn capacity", async () => {
+    getRun.mockResolvedValue(PLAN_RUN);
+    orphanGateKind.mockReturnValue("plan");
+    hasLiveClarifyWaiter.mockReturnValue(true);
+    const leases = Array.from({ length: 3 }, () =>
+      tryAcquireChatTurn({ tenantId: SESSION.tenantId, userId: SESSION.userId }),
+    );
+
+    try {
+      const response = await POST(
+        request({ runId: PLAN_RUN.runId, planAction: "approve" }),
+      );
+      expect(response.status).toBe(200);
+      expect(resolveClarification).toHaveBeenCalledTimes(1);
+      expect(claimPlanGateResume).not.toHaveBeenCalled();
+    } finally {
+      leases.forEach((lease) => lease?.release());
+    }
+  });
+
+  it("rejects an orphan takeover before clarification writes or claims when full", async () => {
+    getRun.mockResolvedValue(PLAN_RUN);
+    orphanGateKind.mockReturnValue("plan");
+    const leases = Array.from({ length: 3 }, () =>
+      tryAcquireChatTurn({ tenantId: SESSION.tenantId, userId: SESSION.userId }),
+    );
+
+    try {
+      const response = await POST(
+        request({ runId: PLAN_RUN.runId, planAction: "approve" }),
+      );
+      expect(response.status).toBe(429);
+      expect(resolveClarification).not.toHaveBeenCalled();
+      expect(claimPlanGateResume).not.toHaveBeenCalled();
+      expect(appendEvents).not.toHaveBeenCalled();
+    } finally {
+      leases.forEach((lease) => lease?.release());
+    }
+  });
+
   it("claims and continues an active orphaned plan gate exactly once", async () => {
     vi.useFakeTimers();
     try {
@@ -270,6 +315,61 @@ describe("POST /api/chat/deep-research/resume", () => {
         }),
       );
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds orphan capacity until the detached research response reaches EOF", async () => {
+    vi.useFakeTimers();
+    let backgroundController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const extraLeases: Array<ReturnType<typeof tryAcquireChatTurn>> = [];
+    try {
+      getRun.mockResolvedValue(PLAN_RUN);
+      orphanGateKind.mockReturnValue("plan");
+      latestResearchPlanEvent.mockReturnValue(PLAN_EVENT);
+      snapshotToResearchPlan.mockReturnValue({
+        topic: "研究主题",
+        complexity: "simple",
+        subQuestions: ["现状"],
+      });
+      toPlanSnapshot.mockReturnValue(PLAN_SNAPSHOT);
+      runDeepResearchTurn.mockResolvedValue(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              backgroundController = controller;
+            },
+          }),
+        ),
+      );
+
+      const pending = POST(
+        request({ runId: PLAN_RUN.runId, planAction: "approve", model: "provider/model" }),
+      );
+      await vi.advanceTimersByTimeAsync(1_250);
+      const response = await pending;
+      expect(response.status).toBe(200);
+
+      extraLeases.push(
+        tryAcquireChatTurn({ tenantId: SESSION.tenantId, userId: SESSION.userId }),
+        tryAcquireChatTurn({ tenantId: SESSION.tenantId, userId: SESSION.userId }),
+      );
+      expect(extraLeases.every(Boolean)).toBe(true);
+      expect(
+        tryAcquireChatTurn({ tenantId: SESSION.tenantId, userId: SESSION.userId }),
+      ).toBeNull();
+
+      backgroundController!.close();
+      await vi.advanceTimersByTimeAsync(0);
+      for (let index = 0; index < 5; index += 1) await Promise.resolve();
+      const afterEof = tryAcquireChatTurn({
+        tenantId: SESSION.tenantId,
+        userId: SESSION.userId,
+      });
+      expect(afterEof).not.toBeNull();
+      afterEof?.release();
+    } finally {
+      extraLeases.forEach((lease) => lease?.release());
       vi.useRealTimers();
     }
   });
