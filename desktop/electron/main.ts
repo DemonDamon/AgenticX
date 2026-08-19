@@ -8039,7 +8039,20 @@ function registerIpc(): void {
     return { ok: true };
   });
 
-  ipcMain.handle("enterprise-refresh", async () => {
+  /**
+   * 从门户重新拉一次配置，并把能力落到本机磁盘。
+   *
+   * 手动「刷新」和后台定时都走这一个：撤销一个 Skill 之后，员工机器上那份要真的被删掉，
+   * 而删除只发生在这次同步里。两条路径各写一份的话，迟早只有一条记得删。
+   */
+  async function refreshEnterpriseFromPortal(): Promise<{
+    ok: boolean;
+    error?: string;
+    unauthorized?: boolean;
+    models?: string[];
+    transport?: string;
+    reauthRequiredForDirect?: boolean;
+  }> {
     const cfg = loadAgxConfig();
     const ent = cfg.enterprise;
     const baseUrl = normalizePortalOrigin(ent?.base_url ?? "");
@@ -8140,7 +8153,45 @@ function registerIpc(): void {
     } catch (err) {
       return { ok: false, error: enterpriseFetchErrorMessage(err) };
     }
-  });
+  }
+
+  ipcMain.handle("enterprise-refresh", refreshEnterpriseFromPortal);
+
+  /**
+   * 定时把撤销捡回来。
+   *
+   * MCP 每次调用都过网关，管理员一收回立刻就断了。Skill 不是——它是落到本机的一份代码，
+   * 后端从下发清单里拿掉之后，员工机器上那个目录还在，照样能用；真正的删除只发生在
+   * syncEnterpriseCapabilitiesToDisk 里，而它此前只在登录和「刷新」按钮上跑。
+   *
+   * 也就是说：不重新登录、不去设置页点一下，撤销可以一直不生效。企业管理员在后台点了
+   * 「移出能力包」，看到的是已经收回了。这个定时就是把那个窗口从「无限长」压到一个周期。
+   *
+   * 15 分钟：这是治理动作，不是实时通道，再密只是白拉接口。失败不重试也不提示——下一轮
+   * 自然会再来一次，而后台弹窗只会教会用户忽略它。
+   */
+  const ENTERPRISE_REVOCATION_SWEEP_MS = 15 * 60 * 1000;
+  let enterpriseSweepRunning = false;
+  setInterval(() => {
+    void (async () => {
+      // 手动刷新正在跑时跳过这一轮：两次同时写同一份 config 和同一批技能目录，
+      // 账本会对不上，之后就不知道该删哪些了。
+      if (enterpriseSweepRunning) return;
+      const ent = loadAgxConfig().enterprise;
+      if (!ent?.enabled || !String(ent.token ?? "").trim()) return;
+      enterpriseSweepRunning = true;
+      try {
+        const result = await refreshEnterpriseFromPortal();
+        // 401 说明这台机器的登录已经失效，再定时拉只会一直 401。停下来等用户重新登录，
+        // 那条路径自己会同步一次。
+        if (!result.ok && result.unauthorized) return;
+      } catch (error) {
+        console.warn(`[enterprise] 定时同步失败：${String(error)}`);
+      } finally {
+        enterpriseSweepRunning = false;
+      }
+    })();
+  }, ENTERPRISE_REVOCATION_SWEEP_MS);
 
   ipcMain.handle("load-gateway-im", async () => {
     const cfg = loadAgxConfig();

@@ -2,33 +2,64 @@ package mcphost
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 )
 
-// 由 admin-console 的 TS 实现（provider-api-key-crypto，AGX_PROVIDER_SECRET_KEY=
-// test-provider-secret）实际产出的密文。两边信封一旦走偏，这个用例先红——
-// 否则最早的症状会是生产上 MCP 连不上上游，而且看不出是解密问题。
-const (
-	tsProducedCipher = "agx:gcm1:qw3aCpZkf5i1NmKI.aG5X0kswkVOMS49UZBycXpmGPgmSefTTodSOXO9uAWlgGWl5XpeLvz1Eo3jJr3mUcemHkQIKaMNMTulLJTWIWnXk_rh7t7tsduu80bkYcMKYRvJR_oYgeqcK-AOkhSXt.Sru95VcTtvmvZm7FOG2QZA"
-	tsProducedPlain  = `{"base_url":"https://data.example.com","api_key":"sk-market-data-123","headers":{"X-Seat":"42"}}`
+// 跨语言信封的那一份样本：admin-console 的 TS 实现实际产出的密文，Go 这边必须解得开。
+//
+// 样本存在 testdata/cross_language_envelope.json，**TS 那边的测试读的是同一个文件**
+// （packages/iam-core/src/provider-api-key-crypto.test.ts）。以前它是这个文件里的一个
+// 常量，只有 Go 这一侧盯着：TS 改了信封格式，这个常量就是一段历史数据，Go 照样解得开，
+// 测试照样绿，最早的症状要等到生产上 MCP 连不上上游。现在两边读同一份，谁走偏谁自己先红。
+type crossLanguageEnvelope struct {
+	Secret     string `json:"secret"`
+	Plaintext  string `json:"plaintext"`
+	Ciphertext string `json:"ciphertext"`
+}
+
+var (
+	envelopeOnce   sync.Once
+	envelopeSample crossLanguageEnvelope
+	envelopeErr    error
 )
 
-func TestDecryptSecretEnvelopeReadsCiphertextProducedByAdminConsole(t *testing.T) {
-	t.Setenv("AGX_PROVIDER_SECRET_KEY", "test-provider-secret")
+func loadCrossLanguageEnvelope(t *testing.T) crossLanguageEnvelope {
+	t.Helper()
+	envelopeOnce.Do(func() {
+		raw, err := os.ReadFile(filepath.Join("testdata", "cross_language_envelope.json"))
+		if err != nil {
+			envelopeErr = err
+			return
+		}
+		envelopeErr = json.Unmarshal(raw, &envelopeSample)
+	})
+	if envelopeErr != nil {
+		t.Fatalf("read cross-language envelope fixture: %v", envelopeErr)
+	}
+	return envelopeSample
+}
 
-	got, err := decryptSecretEnvelope(tsProducedCipher)
+func TestDecryptSecretEnvelopeReadsCiphertextProducedByAdminConsole(t *testing.T) {
+	sample := loadCrossLanguageEnvelope(t)
+	t.Setenv("AGX_PROVIDER_SECRET_KEY", sample.Secret)
+
+	got, err := decryptSecretEnvelope(sample.Ciphertext)
 	if err != nil {
 		t.Fatalf("decrypt TS-produced ciphertext: %v", err)
 	}
-	if got != tsProducedPlain {
-		t.Fatalf("plaintext mismatch:\n got: %s\nwant: %s", got, tsProducedPlain)
+	if got != sample.Plaintext {
+		t.Fatalf("plaintext mismatch:\n got: %s\nwant: %s", got, sample.Plaintext)
 	}
 }
 
 func TestDecodeBackendConfigUnwrapsEncryptedRow(t *testing.T) {
-	t.Setenv("AGX_PROVIDER_SECRET_KEY", "test-provider-secret")
+	sample := loadCrossLanguageEnvelope(t)
+	t.Setenv("AGX_PROVIDER_SECRET_KEY", sample.Secret)
 
-	row, err := json.Marshal(map[string]any{backendConfigCipherKey: tsProducedCipher})
+	row, err := json.Marshal(map[string]any{backendConfigCipherKey: sample.Ciphertext})
 	if err != nil {
 		t.Fatalf("marshal row: %v", err)
 	}
@@ -55,9 +86,10 @@ func TestDecodeBackendConfigPassesThroughLegacyPlaintextRows(t *testing.T) {
 
 func TestDecodeBackendConfigYieldsNothingWhenTheKeyIsWrong(t *testing.T) {
 	// 解不开时宁可给空配置让后端构造失败，也不要带着半份配置去连上游。
+	sample := loadCrossLanguageEnvelope(t)
 	t.Setenv("AGX_PROVIDER_SECRET_KEY", "a-different-secret")
 
-	row, err := json.Marshal(map[string]any{backendConfigCipherKey: tsProducedCipher})
+	row, err := json.Marshal(map[string]any{backendConfigCipherKey: sample.Ciphertext})
 	if err != nil {
 		t.Fatalf("marshal row: %v", err)
 	}
@@ -67,7 +99,7 @@ func TestDecodeBackendConfigYieldsNothingWhenTheKeyIsWrong(t *testing.T) {
 }
 
 func TestDecryptSecretEnvelopeRejectsMalformedInput(t *testing.T) {
-	t.Setenv("AGX_PROVIDER_SECRET_KEY", "test-provider-secret")
+	t.Setenv("AGX_PROVIDER_SECRET_KEY", loadCrossLanguageEnvelope(t).Secret)
 
 	for _, bad := range []string{
 		"",

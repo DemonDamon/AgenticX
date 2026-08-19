@@ -1,0 +1,6 @@
+{
+  "note": "由 admin-console 的 TS 实现（provider-api-key-crypto）实际产出的一段密文。Go 和 TS 两侧的测试都读这一份，所以它只有一个副本，不会各自跑偏。要重新生成：AGX_PROVIDER_SECRET_KEY=test-provider-secret node -e \"const{encryptProviderApiKey}=require('./enterprise/packages/iam-core/src/provider-api-key-crypto');console.log(encryptProviderApiKey(PLAINTEXT))\"，把输出写回 ciphertext。",
+  "secret": "test-provider-secret",
+  "plaintext": "{\"base_url\":\"https://data.example.com\",\"api_key\":\"sk-market-data-123\",\"headers\":{\"X-Seat\":\"42\"}}",
+  "ciphertext": "agx:gcm1:qw3aCpZkf5i1NmKI.aG5X0kswkVOMS49UZBycXpmGPgmSefTTodSOXO9uAWlgGWl5XpeLvz1Eo3jJr3mUcemHkQIKaMNMTulLJTWIWnXk_rh7t7tsduu80bkYcMKYRvJR_oYgeqcK-AOkhSXt.Sru95VcTtvmvZm7FOG2QZA"
+}
