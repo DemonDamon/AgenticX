@@ -11,6 +11,11 @@ import {
   CardHeader,
   CardTitle,
   Input,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   Sheet,
   SheetContent,
   SheetTitle,
@@ -23,6 +28,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Upload,
   Search,
   UsersRound,
 } from "lucide-react";
@@ -42,6 +48,7 @@ import {
   type OrganizationNode,
 } from "../../../components/DepartmentFilterTree";
 import { VisibleModelsEditor } from "../../../components/visible-models-editor";
+import { BulkImportWizard } from "../../../components/BulkImportWizard";
 
 type GrantSource = "personal" | "group" | "department" | "all";
 type GrantOrigin = { source?: GrantSource; sourceLabel?: string };
@@ -120,6 +127,7 @@ export default function RolesPage() {
     requestedDeptId || ALL_DEPARTMENTS,
   );
   const [ceilingTarget, setCeilingTarget] = useState<OrganizationNode | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const openedFromQueryRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -256,6 +264,14 @@ export default function RolesPage() {
             onClick={() => setCreateOpen(true)}
           >
             <Plus className="h-4 w-4" />新建用户
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className={`${toolbarButtonClass} px-4`}
+            onClick={() => setImportOpen(true)}
+          >
+            <Upload className="h-4 w-4" />导入
           </Button>
           <div className="relative shrink-0 rounded-xl transition-shadow focus-within:shadow-[0_0_0_2px_var(--primary)]">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -547,6 +563,26 @@ export default function RolesPage() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      {/* 批量导入是「新环境搭起来那几天」的事，不值得占一级菜单，但补人时要顺手够得到。 */}
+      <Dialog
+        open={importOpen}
+        onOpenChange={(open) => {
+          setImportOpen(open);
+          // 导入向导自己不回调，关窗时重新拉一次——否则刚导进来的人不出现在列表里。
+          if (!open) void load();
+        }}
+      >
+        <DialogContent className="max-h-[85vh] max-w-5xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>批量导入成员</DialogTitle>
+            <DialogDescription>
+              上传 CSV，按列映射后批量建号。导入完成后关闭本窗口即可刷新列表。
+            </DialogDescription>
+          </DialogHeader>
+          <BulkImportWizard />
+        </DialogContent>
+      </Dialog>
 
       <UserDetailEditor
         target={selected}
