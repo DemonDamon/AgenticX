@@ -2,6 +2,7 @@ import type { Message } from "../../store";
 import { isHookBlockedToolMessage } from "../../utils/hook-block-message";
 import { isContinuationNoticeMessage } from "../../utils/continuation-notice";
 import { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
+import { shouldPreserveToolDetails } from "./ToolActivityIndicator";
 
 export type GroupedChatRow =
   | { kind: "message"; message: Message }
@@ -22,7 +23,7 @@ function canGroupToolMessage(message: Message): boolean {
   // a decision, expose an auth link/preview, or explain a safety block standalone
   // so MessageRenderer can preserve only that row without revealing its neighbors.
   if (message.inlineConfirm) return false;
-  if (toolName === "skill_manage" || toolName === "bash_bg_start") return false;
+  if (shouldPreserveToolDetails(message)) return false;
   if (isHookBlockedToolMessage(message)) return false;
   // Only group the structured tool rows produced by the new SSE path.
   // Legacy history rows often persist as plain text like "工具调用:" /

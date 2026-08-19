@@ -5,13 +5,16 @@ import {
   formatToolElapsedSeconds,
   useLiveToolElapsedSeconds,
 } from "./tool-elapsed-timer";
+import { parseBashBgStart } from "./bash-bg-preview";
 
 type ToolActivityMessage = Pick<
   Message,
   | "id"
   | "toolCallId"
   | "toolName"
+  | "toolStatus"
   | "toolElapsedSec"
+  | "content"
   | "inlineConfirm"
   | "clarificationPrompt"
   | "actionConfirmation"
@@ -43,17 +46,68 @@ export function resolveToolActivityLabel(toolNameRaw: unknown): string {
 export function shouldPreserveToolDetails(message: ToolActivityMessage): boolean {
   if (message.inlineConfirm || message.clarificationPrompt || message.actionConfirmation) return true;
   const toolName = String(message.toolName ?? "").trim();
-  return toolName === "skill_manage" || toolName === "bash_bg_start";
+  if (toolName === "skill_manage") return true;
+  if (toolName !== "bash_bg_start") return false;
+  return (parseBashBgStart(String(message.content ?? ""))?.authUrls.length ?? 0) > 0;
 }
 
-export type ToolActivityPresentation = "details" | "activity" | "hidden";
+export type ToolActivityPresentation = "details" | "summary";
 
 export function resolveToolActivityPresentation(
   showToolCalls: boolean,
   inProgress: boolean,
 ): ToolActivityPresentation {
   if (showToolCalls) return "details";
-  return inProgress ? "activity" : "hidden";
+  void inProgress;
+  return "summary";
+}
+
+export type ToolActivitySummary = {
+  active: boolean;
+  tone: "normal" | "error" | "cancelled";
+  label: string;
+};
+
+/** Aggregate one tool group into a stable, non-technical activity headline. */
+export function resolveToolActivitySummary(messages: ToolActivityMessage[]): ToolActivitySummary {
+  const visible = messages.filter(Boolean);
+  const activeMessage = [...visible]
+    .reverse()
+    .find((message) => message.toolStatus === "running" || message.toolStatus === "pending");
+  const errorCount = visible.filter((message) => message.toolStatus === "error").length;
+  if (activeMessage) {
+    return {
+      active: true,
+      tone: errorCount > 0 ? "error" : "normal",
+      label: errorCount > 0
+        ? `正在继续处理（${errorCount} 个步骤失败）`
+        : resolveToolActivityLabel(activeMessage.toolName),
+    };
+  }
+
+  if (errorCount > 0) {
+    return {
+      active: false,
+      tone: "error",
+      label: errorCount === 1 ? "1 个步骤执行失败" : `${errorCount} 个步骤执行失败`,
+    };
+  }
+
+  const cancelledCount = visible.filter((message) => message.toolStatus === "cancelled").length;
+  if (cancelledCount > 0) {
+    return {
+      active: false,
+      tone: "cancelled",
+      label: visible.length === 1 ? "执行已停止" : `${cancelledCount} 个步骤已停止`,
+    };
+  }
+
+  const count = Math.max(1, visible.length);
+  return {
+    active: false,
+    tone: "normal",
+    label: `已完成 ${count} 个步骤`,
+  };
 }
 
 export function ToolActivityIndicator({
@@ -67,7 +121,9 @@ export function ToolActivityIndicator({
 }) {
   const identity = String(message.toolCallId || message.id || "tool-activity");
   const elapsed = useLiveToolElapsedSeconds(identity, active, message.toolElapsedSec);
-  const label = resolveToolActivityLabel(message.toolName);
+  const summary = resolveToolActivitySummary([message]);
+  const isActive = active && summary.active;
+  const label = isActive ? resolveToolActivityLabel(message.toolName) : summary.label;
 
   return (
     <div
@@ -86,11 +142,17 @@ export function ToolActivityIndicator({
           <Sparkles className="h-2.5 w-2.5" strokeWidth={2.2} />
         </span>
       </span>
-      <Shimmer
-        variant="status"
-        text={`${label} · ${formatToolElapsedSeconds(elapsed)}`}
-        className="min-w-0 truncate font-medium tabular-nums"
-      />
+      {isActive ? (
+        <Shimmer
+          variant="status"
+          text={`${label} · ${formatToolElapsedSeconds(elapsed)}`}
+          className="min-w-0 truncate font-medium tabular-nums"
+        />
+      ) : (
+        <span className={`min-w-0 truncate font-medium ${summary.tone === "error" ? "text-rose-400" : ""}`}>
+          {label}
+        </span>
+      )}
     </div>
   );
 }

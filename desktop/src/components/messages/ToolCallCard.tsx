@@ -33,6 +33,7 @@ import {
   formatToolElapsedSeconds,
   useLiveToolElapsedSeconds,
 } from "./tool-elapsed-timer";
+import { resolveToolActivityLabel } from "./ToolActivityIndicator";
 
 type Props = {
   message: Message;
@@ -50,6 +51,8 @@ type Props = {
   selected?: boolean;
   onToggleSelectMessage?: (message: Message) => void;
   onSkillManageApply?: (message: Message, payload: SkillPatchPreviewPayload, targetIndex: number | null) => void;
+  /** Hide implementation names until the user explicitly expands this card. */
+  compactSummary?: boolean;
 };
 
 /** Legacy: extract tool name from old 🔧/✅ prefixed content */
@@ -216,6 +219,7 @@ export function ToolCallCard({
   selected,
   onToggleSelectMessage,
   onSkillManageApply,
+  compactSummary = false,
 }: Props) {
   const normalizedTerms = useMemo(() => normalizeHighlightTerms(highlightTerms), [highlightTerms]);
   const isHookBlocked = useMemo(() => isHookBlockedToolMessage(message), [message.content, message.toolStatus]);
@@ -388,14 +392,34 @@ export function ToolCallCard({
       </div>
     );
   }
-  const Icon = isHookBlocked
+  const compactHeader = compactSummary && !expanded;
+  const Icon = compactHeader
+    ? status === "error" ? ShieldAlert : Wrench
+    : isHookBlocked
     ? ShieldAlert
     : pickToolIcon(toolName || extractToolSummary(message.content).split(/\s/)[0] || "tool");
   const hasDetail = !isHookBlocked && (message.content.length > 0 || hasStream);
 
   const iconColorClass = isHookBlocked ? "text-amber-400" : iconTone(status);
 
-  const titleEl = isHookBlocked ? (
+  const compactTitle =
+    status === "error"
+      ? "执行遇到问题"
+      : status === "cancelled"
+        ? "执行已停止"
+        : toolIsActive
+          ? resolveToolActivityLabel(toolName)
+          : "已完成 1 个步骤";
+
+  const titleEl = compactHeader ? (
+    toolIsActive ? (
+      <Shimmer text={compactTitle} className="text-[13px] font-medium" />
+    ) : (
+      <span className={`text-[13px] font-medium ${status === "error" ? "text-rose-400" : "text-text-subtle"}`}>
+        {compactTitle}
+      </span>
+    )
+  ) : isHookBlocked ? (
     <span className="inline-flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
       <span className="min-w-0 truncate text-[13px] font-medium text-text-subtle">{title}</span>
       <span className="shrink-0 rounded-[4px] bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-400">

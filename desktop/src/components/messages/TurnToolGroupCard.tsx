@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Message } from "../../store";
-import { Check, ChevronDown, ChevronRight, Wrench } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, TriangleAlert, Wrench } from "lucide-react";
 import { buildToolCardTitle, ToolCallCard } from "./ToolCallCard";
 import type { ReactNode } from "react";
 import { isTodoUpdateToolMessage } from "./MessageRenderer";
@@ -16,7 +16,7 @@ import { Shimmer } from "../ds/Shimmer";
 import { useAppStore } from "../../store";
 import {
   resolveToolActivityPresentation,
-  ToolActivityIndicator,
+  resolveToolActivitySummary,
 } from "./ToolActivityIndicator";
 
 type Props = {
@@ -119,8 +119,13 @@ export function TurnToolGroupCard({
     [visibleMessages],
   );
   const activeTool = activeTools[activeTools.length - 1];
-  const activityMessage = activeTool ?? visibleMessages[visibleMessages.length - 1];
   const presentation = resolveToolActivityPresentation(showToolCalls, inProgress);
+  const resolvedCompactSummary = resolveToolActivitySummary(visibleMessages);
+  const compactSummary = inProgress
+    && !resolvedCompactSummary.active
+    && resolvedCompactSummary.tone === "normal"
+    ? { active: true, tone: "normal" as const, label: "正在继续处理" }
+    : resolvedCompactSummary;
   const liveElapsedSec = useLiveToolElapsedSeconds(
     String(activeTool?.toolCallId || activeTool?.id || "tool-group-idle"),
     Boolean(activeTool),
@@ -130,13 +135,6 @@ export function TurnToolGroupCard({
 
   // Group may consist solely of todo_write (hidden); do not render an empty shell.
   if (visibleMessages.length === 0) return null;
-
-  // Customer-facing default: retain a live sense of progress without exposing
-  // tool names, arguments, result payloads, or a permanent technical trace.
-  if (presentation !== "details") {
-    if (presentation === "hidden" || !activityMessage) return null;
-    return <ToolActivityIndicator message={activityMessage} flat={flat} />;
-  }
 
   const cardContent = (
     <div
@@ -154,7 +152,11 @@ export function TurnToolGroupCard({
         onClick={() => setExpanded((v) => !v)}
       >
         <span className="flex h-[20px] w-[20px] shrink-0 items-center justify-center" aria-hidden>
-          {inProgress ? (
+          {presentation === "summary" && compactSummary.tone === "error" ? (
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-rose-500/12 text-rose-400 ring-1 ring-rose-500/30">
+              <TriangleAlert className="h-2.5 w-2.5" strokeWidth={2.45} />
+            </span>
+          ) : inProgress ? (
             <span
               className="flex h-4 w-4 items-center justify-center rounded-full"
               style={REACT_RAIL_ICON_TILE_STYLE}
@@ -168,7 +170,29 @@ export function TurnToolGroupCard({
           )}
         </span>
         <span className="flex min-w-0 items-center gap-1.5">
-          {inProgress ? (
+          {presentation === "summary" ? (
+            compactSummary.active ? (
+              <Shimmer
+                variant="status"
+                text={activeTool
+                  ? `${compactSummary.label} · ${formatToolElapsedSeconds(liveElapsedSec)}`
+                  : compactSummary.label}
+                className={`min-w-0 truncate tabular-nums ${REACT_RAIL_TITLE_CLASS}`}
+              />
+            ) : (
+              <span
+                className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS} ${
+                  compactSummary.tone === "error"
+                    ? "!text-rose-400"
+                    : compactSummary.tone === "cancelled"
+                      ? "!text-text-faint"
+                      : ""
+                }`}
+              >
+                {compactSummary.label}
+              </span>
+            )
+          ) : inProgress ? (
             <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>
               调用 {activeToolTitle}
               {activeTools.length > 1 ? ` 等 ${activeTools.length} 个工具` : ""}
@@ -176,7 +200,7 @@ export function TurnToolGroupCard({
           ) : (
             <CompletedToolSummary messages={visibleMessages} />
           )}
-          {activeTool ? (
+          {presentation === "details" && activeTool ? (
             <Shimmer
               variant="status"
               text={`运行中 · ${formatToolElapsedSeconds(liveElapsedSec)}`}

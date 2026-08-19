@@ -1,7 +1,9 @@
 import * as React from "react";
 import { ChevronDown, ChevronRight, ListTree } from "lucide-react";
-import { useAppStore } from "../../store";
+import { useAppStore, type Message } from "../../store";
 import { ASSISTANT_ICON_RAIL_CLASS, REACT_RAIL_ICON_CLASS, REACT_RAIL_TITLE_CLASS } from "./im-layout";
+import { Shimmer } from "../ds/Shimmer";
+import { shouldPreserveToolDetails } from "./ToolActivityIndicator";
 
 type Props = {
   /** 该过程段内工具调用总数（用于阈值判定与标题文案） */
@@ -13,26 +15,72 @@ type Props = {
   children: React.ReactNode;
 };
 
+function messageHasCriticalWorkState(message: Message): boolean {
+  if (message.role !== "tool") return false;
+  if (message.toolStatus === "error") return true;
+  if (message.noticeKind) return true;
+  const toolName = String(message.toolName ?? "").trim();
+  if (toolName === "show_widget" || toolName === "group_progress") return true;
+  return shouldPreserveToolDetails(message);
+}
+
+/**
+ * Process rows arrive as rendered React elements, not raw Message arrays. Walk
+ * their props conservatively so a collapsed process can never swallow an
+ * error, confirmation, skill preview, widget, or background-auth link.
+ */
+function workTreeHasCriticalState(node: React.ReactNode): boolean {
+  if (Array.isArray(node)) return node.some(workTreeHasCriticalState);
+  if (!React.isValidElement(node)) return false;
+  const props = node.props as {
+    message?: Message;
+    messages?: Message[];
+    children?: React.ReactNode;
+  };
+  if (props.message && messageHasCriticalWorkState(props.message)) return true;
+  if (Array.isArray(props.messages) && props.messages.some(messageHasCriticalWorkState)) return true;
+  return workTreeHasCriticalState(props.children);
+}
+
 /**
  * 把「一整段思考 + 工具执行过程」折成一张过程卡（类 Cursor「执行了 N 步」）。
  * 仅当工具调用轮数达到阈值时才套折叠外壳；未达阈值时原样透传，保持现状。
  * 流式执行中保持展开让用户看到进度，回合结束后自动折叠。
  */
 export function ReactWorkCollapse({ toolCount, active, threshold = 5, children }: Props) {
-  const [collapsed, setCollapsed] = React.useState(false);
   const showToolCalls = useAppStore((state) => state.showToolCalls);
+  const [collapsed, setCollapsed] = React.useState(
+    () => !useAppStore.getState().showToolCalls,
+  );
+  const hasCriticalState = React.useMemo(
+    () => workTreeHasCriticalState(children),
+    [children],
+  );
 
   React.useEffect(() => {
+    if (!showToolCalls) {
+      setCollapsed(true);
+      return;
+    }
     if (active) {
       setCollapsed(false);
       return;
     }
     setCollapsed(true);
-  }, [active]);
+  }, [active, showToolCalls]);
 
-  if (!showToolCalls || toolCount < threshold) {
+  if (toolCount <= 0 || (showToolCalls && toolCount < threshold)) {
     return <>{children}</>;
   }
+
+  // Safety and user-decision states take precedence over visual compaction.
+  // They are rare, and expanding the process is preferable to hiding them.
+  if (!showToolCalls && hasCriticalState) return <>{children}</>;
+
+  const compactMode = !showToolCalls;
+  const title = compactMode
+    ? active ? "正在执行任务" : `已完成 ${toolCount} 个步骤`
+    : `已思考并调用 ${toolCount} 次工具`;
 
   return (
     <div className="bg-transparent text-text-primary">
@@ -44,7 +92,15 @@ export function ReactWorkCollapse({ toolCount, active, threshold = 5, children }
         <span className={ASSISTANT_ICON_RAIL_CLASS}>
           <ListTree className={`h-[18px] w-[18px] shrink-0 ${REACT_RAIL_ICON_CLASS}`} strokeWidth={2.2} aria-hidden />
         </span>
-        <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>已思考并调用 {toolCount} 次工具</span>
+        {compactMode && active ? (
+          <Shimmer
+            variant="status"
+            text={title}
+            className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}
+          />
+        ) : (
+          <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>{title}</span>
+        )}
         <span className="shrink-0" aria-hidden>
           {collapsed ? (
             <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} />

@@ -7,6 +7,7 @@ import { TurnToolGroupCard } from "./TurnToolGroupCard";
 import {
   resolveToolActivityPresentation,
   resolveToolActivityLabel,
+  resolveToolActivitySummary,
   shouldPreserveToolDetails,
 } from "./ToolActivityIndicator";
 
@@ -48,28 +49,62 @@ describe("customer-facing tool activity", () => {
       }),
     ).toBe(true);
     expect(shouldPreserveToolDetails({ ...toolMessage("running"), toolName: "skill_manage" })).toBe(true);
+    expect(
+      shouldPreserveToolDetails({
+        ...toolMessage("running"),
+        toolName: "bash_bg_start",
+        content: "job_id=ordinary\nstatus=running\nauth_urls:\n(none)",
+      }),
+    ).toBe(false);
+    expect(
+      shouldPreserveToolDetails({
+        ...toolMessage("running"),
+        toolName: "bash_bg_start",
+        content: "job_id=auth\nstatus=running\nauth_urls:\n- https://open.feishu.cn/page/cli?code=1",
+      }),
+    ).toBe(true);
     expect(shouldPreserveToolDetails(toolMessage("running"))).toBe(false);
   });
 
-  it("shows generic live progress and removes completed technical traces by default", () => {
+  it("shows expandable non-technical summaries for running, completed, and failed work", () => {
     useAppStore.setState({ showToolCalls: false });
     const runningHtml = renderToStaticMarkup(
       <TurnToolGroupCard messages={[toolMessage("running")]} />,
     );
     expect(runningHtml).toContain("正在查找资料");
     expect(runningHtml).not.toContain("web_search");
-    expect(
-      renderToStaticMarkup(<TurnToolGroupCard messages={[toolMessage("done")]} />),
-    ).toBe("");
+
+    const doneHtml = renderToStaticMarkup(
+      <TurnToolGroupCard messages={[toolMessage("done")]} />,
+    );
+    expect(doneHtml).toContain("已完成 1 个步骤");
+    expect(doneHtml).not.toContain("web_search");
+    expect(doneHtml).not.toContain("technical result");
+
+    const errorHtml = renderToStaticMarkup(
+      <TurnToolGroupCard messages={[toolMessage("error")]} />,
+    );
+    expect(errorHtml).toContain("1 个步骤执行失败");
+    expect(errorHtml).not.toContain("technical result");
   });
 
   it("uses the developer switch to restore details", () => {
-    expect(resolveToolActivityPresentation(false, true)).toBe("activity");
-    expect(resolveToolActivityPresentation(false, false)).toBe("hidden");
+    expect(resolveToolActivityPresentation(false, true)).toBe("summary");
+    expect(resolveToolActivityPresentation(false, false)).toBe("summary");
     expect(resolveToolActivityPresentation(true, false)).toBe("details");
 
     useAppStore.getState().setShowToolCalls(true);
     expect(useAppStore.getState().showToolCalls).toBe(true);
+  });
+
+  it("does not hide an earlier failure while a later step is still running", () => {
+    const summary = resolveToolActivitySummary([
+      toolMessage("error"),
+      { ...toolMessage("running"), id: "tool-2", toolCallId: "call-2" },
+    ]);
+    expect(summary.active).toBe(true);
+    expect(summary.tone).toBe("error");
+    expect(summary.label).toContain("1 个步骤失败");
   });
 
   it("keeps required interaction and safety rows outside technical groups", () => {
@@ -94,5 +129,25 @@ describe("customer-facing tool activity", () => {
 
     expect(groupConsecutiveToolMessages([normal, confirmation, blocked]).map((row) => row.kind))
       .toEqual(["tool_group", "message", "message"]);
+  });
+
+  it("groups ordinary background jobs but leaves authorization links visible", () => {
+    const ordinary = {
+      ...toolMessage("running"),
+      id: "tool-background",
+      toolCallId: "call-background",
+      toolName: "bash_bg_start",
+      content: "job_id=ordinary\nstatus=running\nauth_urls:\n(none)",
+    };
+    const auth = {
+      ...toolMessage("running"),
+      id: "tool-auth",
+      toolCallId: "call-auth",
+      toolName: "bash_bg_start",
+      content: "job_id=auth\nstatus=running\nauth_urls:\n- https://open.feishu.cn/page/cli?code=1",
+    };
+
+    expect(groupConsecutiveToolMessages([ordinary, auth]).map((row) => row.kind))
+      .toEqual(["tool_group", "message"]);
   });
 });

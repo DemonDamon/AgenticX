@@ -50,7 +50,6 @@ import type {
 } from "../../utils/action-confirmation";
 import {
   shouldPreserveToolDetails,
-  ToolActivityIndicator,
 } from "./ToolActivityIndicator";
 
 type Props = {
@@ -528,10 +527,20 @@ export function MessageRenderer({
       );
     }
     if (!showToolCalls && !shouldPreserveToolDetails(message)) {
-      const running = message.toolStatus === "running" || message.toolStatus === "pending";
-      return running ? (
-        <ToolActivityIndicator message={message} flat={noBubbleBorder} />
-      ) : null;
+      return (
+        <ToolCallCard
+          message={message}
+          highlightTerms={highlightTerms}
+          compactSummary
+          omitLeadingSpacer={toolCardOmitLeadingSpacer}
+          variant={noBubbleBorder ? "flat" : "default"}
+          selectable={selectable}
+          selected={selected}
+          onToggleSelectMessage={onToggleSelectMessage}
+          action={renderToolMessageExtras(message, { onRevealPath, onResolveInlineConfirm })}
+          onSkillManageApply={onSkillManageApply}
+        />
+      );
     }
     return (
       <ToolCallCard
