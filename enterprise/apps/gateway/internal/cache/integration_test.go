@@ -10,13 +10,13 @@ func TestL1HitSkipsUpstream(t *testing.T) {
 	svc := NewService(Config{L1Enabled: true, L1TTL: 0}, NewMemoryStore(32))
 	req := openai.ChatCompletionRequest{
 		Model:    "gpt-4o",
-		Messages: []openai.ChatMessage{{Role: "user", Content: "same prompt"}},
+		Messages: []openai.ChatMessage{{Role: "user", Content: openai.NewStringContent("same prompt")}},
 	}
 	entry := Entry{
 		Response: openai.ChatCompletionResponse{
 			Model: req.Model,
 			Choices: []openai.ChatCompletionChoice{{
-				Message: openai.ChatMessage{Role: "assistant", Content: "cached answer"},
+				Message: openai.ChatMessage{Role: "assistant", Content: openai.NewStringContent("cached answer")},
 			}},
 			Usage: openai.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 		},
