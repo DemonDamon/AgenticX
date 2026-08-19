@@ -11,4 +11,4 @@ CREATE TABLE IF NOT EXISTS `enterprise_feature_assignments` (
   KEY `enterprise_feature_assignments_tenant_feature_idx` (`tenant_id`, `feature`),
   CONSTRAINT `enterprise_feature_assignments_tenant_fk` FOREIGN KEY (`tenant_id`)
     REFERENCES `tenants` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+);

@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS `enterprise_user_groups` (
   UNIQUE KEY `enterprise_user_groups_tenant_name_uq` (`tenant_id`, `name`),
   CONSTRAINT `enterprise_user_groups_tenant_fk` FOREIGN KEY (`tenant_id`)
     REFERENCES `tenants` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
+);
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `enterprise_user_group_members` (
   `group_id` varchar(26) NOT NULL,
   `user_id` varchar(26) NOT NULL,
@@ -25,4 +25,4 @@ CREATE TABLE IF NOT EXISTS `enterprise_user_group_members` (
     REFERENCES `enterprise_user_groups` (`id`) ON DELETE CASCADE,
   CONSTRAINT `enterprise_user_group_members_user_fk` FOREIGN KEY (`user_id`)
     REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+);

@@ -10,9 +10,9 @@ CREATE TABLE IF NOT EXISTS `enterprise_user_opt_outs` (
   KEY `enterprise_user_opt_outs_tenant_user_idx` (`tenant_id`, `user_id`),
   CONSTRAINT `enterprise_user_opt_outs_tenant_fk` FOREIGN KEY (`tenant_id`)
     REFERENCES `tenants` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
+);
+--> statement-breakpoint
 INSERT IGNORE INTO `enterprise_user_opt_outs` (`tenant_id`, `user_id`, `subject`)
 SELECT `tenant_id`, `user_id`, `capability_id` FROM `enterprise_capability_opt_outs`;
-
+--> statement-breakpoint
 DROP TABLE IF EXISTS `enterprise_capability_opt_outs`;

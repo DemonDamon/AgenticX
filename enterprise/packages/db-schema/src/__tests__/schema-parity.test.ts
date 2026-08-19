@@ -185,4 +185,63 @@ describe("mysql baseline migration inventory", () => {
       "0025_enterprise_runtime_mcp_servers.sql",
     );
   });
+
+  it("separates every statement with --> statement-breakpoint", () => {
+    // drizzle 只按 `--> statement-breakpoint` 切分迁移文件，没有标记就把整个文件
+    // 当一条查询发出去。mysql2 默认 multipleStatements:false，于是多语句的手写迁移
+    // 在 MySQL 上整个执行不了——而 PG 的 simple query 允许多语句，所以只有 MySQL 炸。
+    const failures: string[] = [];
+    for (const name of readdirSync(migrationDir).filter((f) => f.endsWith(".sql"))) {
+      const sql = readFileSync(join(migrationDir, name), "utf8");
+      const breakpoints = sql.split("--> statement-breakpoint").length - 1;
+      const statements = countTopLevelStatements(sql);
+      if (statements > 1 && breakpoints !== statements - 1) {
+        failures.push(`${name}: ${statements} statements but ${breakpoints} breakpoints`);
+      }
+    }
+    expect(failures, failures.join("\n")).toEqual([]);
+  });
+
+  it("never declares an explicit charset or collation on a table", () => {
+    // 写 `DEFAULT CHARSET=utf8mb4` 不是「更明确」，是覆盖掉库默认：MySQL 会取该
+    // charset 的服务器级默认 collation（MySQL 8 是 utf8mb4_0900_ai_ci），而不是建
+    // 库时定的那个。库若按 utf8mb4_unicode_ci 建（MySQL 5.7 迁上来的很常见），新表
+    // 的 tenant_id 就和 tenants.id 对不上，外键直接 errno 3780，整条迁移链断在这。
+    //
+    // 什么都不写反而永远正确——表继承库的 collation，跟 tenants.id 天然一致。
+    const offenders = readdirSync(migrationDir)
+      .filter((name) => name.endsWith(".sql"))
+      .filter((name) => /\b(CHARSET|COLLATE)\b/i.test(readFileSync(join(migrationDir, name), "utf8")));
+
+    expect(offenders, offenders.join(", ")).toEqual([]);
+  });
 });
+
+/**
+ * 顶层 `;` 才是语句边界——括号内、字符串内、注释内的分号都不算。
+ * 注释里的分号很容易漏（`-- deep research on; align ...`），漏了就会误报。
+ */
+function countTopLevelStatements(sql: string): number {
+  const withoutComments = sql
+    .split("\n")
+    .map((line) => {
+      const idx = line.indexOf("--");
+      return idx === -1 ? line : line.slice(0, idx);
+    })
+    .join("\n");
+
+  let count = 0;
+  let depth = 0;
+  let inString = false;
+  for (const ch of withoutComments) {
+    if (inString) {
+      if (ch === "'") inString = false;
+      continue;
+    }
+    if (ch === "'") inString = true;
+    else if (ch === "(") depth += 1;
+    else if (ch === ")") depth -= 1;
+    else if (ch === ";" && depth === 0) count += 1;
+  }
+  return count;
+}
