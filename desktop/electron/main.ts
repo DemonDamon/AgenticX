@@ -71,6 +71,7 @@ import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import { selectEnterpriseInferenceBase } from "./enterprise-routing";
 import {
   normalizeEnterpriseModelCatalog,
+  resolveEnterpriseModelSelection,
   type EnterpriseModelCatalogEntry,
 } from "./enterprise-model-catalog";
 import {
@@ -505,6 +506,10 @@ function applyEnterpriseProvider(
   const models = modelCatalog.map((entry) => entry.id);
   const inferenceBase = opts.inferenceBaseUrl.replace(/\/+$/, "");
   const previous = cfg.enterprise;
+  const previousManagedModel =
+    cfg.providers?.enterprise?.model
+    ?? (cfg.active_provider === "enterprise" ? cfg.active_model : "");
+  const selectedModel = resolveEnterpriseModelSelection(models, previousManagedModel);
   cfg.enterprise = {
     enabled: true,
     default_portal_url: opts.portalOrigin,
@@ -538,14 +543,14 @@ function applyEnterpriseProvider(
     base_url: inferenceBase,
     api_key: opts.token,
     models,
-    model: models[0] ?? "",
+    model: selectedModel,
     enabled: true,
     managed: true,
     drop_params: true,
   };
   cfg.default_provider = "enterprise";
   cfg.active_provider = "enterprise";
-  if (models[0]) cfg.active_model = models[0];
+  cfg.active_model = selectedModel;
 }
 
 function clearEnterpriseFromConfig(cfg: AgxConfig): void {
@@ -11381,16 +11386,29 @@ function registerIpc(): void {
     const prev = cfg.providers[payload.name] ?? {};
     // Managed enterprise provider: keep credential/base_url/models owned by enterprise-login/refresh.
     if (prev.managed === true || payload.managed === true) {
+      const managedModels = Array.isArray(prev.models) ? prev.models : [];
+      const requestedModel = String(payload.model ?? "").trim();
+      if (requestedModel && !managedModels.includes(requestedModel)) {
+        return { ok: false, error: "所选企业模型不在组织下发的可用列表中" };
+      }
+      const selectedModel = resolveEnterpriseModelSelection(
+        managedModels,
+        requestedModel || prev.model,
+      );
       const nextManaged: ProviderConfig = {
         ...prev,
         managed: true,
         interface: prev.interface ?? "openai",
         display_name: prev.display_name ?? "企业模型",
         enabled: payload.enabled === false ? false : true,
+        model: selectedModel,
       };
       if (payload.dropParams === true) nextManaged.drop_params = true;
       else if (payload.dropParams === false) delete nextManaged.drop_params;
       cfg.providers[payload.name] = nextManaged;
+      if (cfg.active_provider === payload.name && selectedModel) {
+        cfg.active_model = selectedModel;
+      }
       saveAgxConfig(cfg);
       return { ok: true };
     }

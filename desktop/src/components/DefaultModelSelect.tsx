@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
-import { useAppStore } from "../store";
+import { useAppStore, type ProviderEntry } from "../store";
 import { collectSelectableModelOptions, isModelSelectable } from "../utils/model-options";
 import { getProviderDisplayName } from "../utils/provider-display";
 
@@ -11,6 +11,10 @@ type Props = {
   onChange: (provider: string, model: string) => void;
   /** Placeholder label for the "inherit global default" option. */
   inheritLabel?: string;
+  /** Avatar editors allow inheritance; the global default picker must not. */
+  allowInherit?: boolean;
+  /** Optional persisted snapshot; avoids reading unrelated in-panel drafts. */
+  providersSnapshot?: Record<string, ProviderEntry>;
 };
 
 const PICKER_MARGIN = 8;
@@ -50,22 +54,30 @@ function defaultModelPickerPanelStyle(anchor: DOMRect): CSSProperties {
   };
 }
 
-/** Compact inline dropdown for picking an avatar's default provider/model. */
-export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: Props) {
+/** Compact inline dropdown for picking a provider/model pair. */
+export function DefaultModelSelect({
+  provider,
+  model,
+  onChange,
+  inheritLabel,
+  allowInherit = true,
+  providersSnapshot,
+}: Props) {
   const settings = useAppStore((s) => s.settings);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 
+  const selectableProviders = providersSnapshot ?? settings.providers;
   const options = useMemo(() => {
-    return collectSelectableModelOptions(settings.providers, " | ").map((row) => ({
+    return collectSelectableModelOptions(selectableProviders, " | ").map((row) => ({
       value: `${row.provider}|${row.model}`,
       label: row.label,
       provider: row.provider,
       model: row.model,
     }));
-  }, [settings.providers]);
+  }, [selectableProviders]);
 
   const providerGroups = useMemo(() => {
     const byProvider = new Map<string, typeof options>();
@@ -77,15 +89,15 @@ export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: 
     return [...byProvider.entries()].map(([providerId, items]) => ({
       provider: providerId,
       items,
-      label: getProviderDisplayName(providerId, settings.providers[providerId]),
+      label: getProviderDisplayName(providerId, selectableProviders[providerId]),
     }));
-  }, [options, settings.providers]);
+  }, [options, selectableProviders]);
   const selectedProviderGroup = expandedProvider
     ? providerGroups.find((group) => group.provider === expandedProvider) ?? null
     : null;
 
   const placeholder = inheritLabel ?? "继承全局默认";
-  const currentKnown = provider && model && isModelSelectable(provider, model, settings.providers);
+  const currentKnown = provider && model && isModelSelectable(provider, model, selectableProviders);
   const inheritSelected = !currentKnown;
 
   const displayLabel = useMemo(() => {
@@ -147,18 +159,20 @@ export function DefaultModelSelect({ provider, model, onChange, inheritLabel }: 
               style={{ ...panelStyle, backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
               role="listbox"
             >
-              <button
-                type="button"
-                className={`flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
-                  inheritSelected ? "bg-surface-hover text-text-strong" : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
-                }`}
-                onClick={() => handleSelect("", "")}
-              >
-                <span className="min-w-0 flex-1 truncate">{placeholder}</span>
-                <span className="flex w-4 shrink-0 justify-end">
-                  {inheritSelected ? <Check className="h-3.5 w-3.5" strokeWidth={2} /> : null}
-                </span>
-              </button>
+              {allowInherit ? (
+                <button
+                  type="button"
+                  className={`flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+                    inheritSelected ? "bg-surface-hover text-text-strong" : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                  }`}
+                  onClick={() => handleSelect("", "")}
+                >
+                  <span className="min-w-0 flex-1 truncate">{placeholder}</span>
+                  <span className="flex w-4 shrink-0 justify-end">
+                    {inheritSelected ? <Check className="h-3.5 w-3.5" strokeWidth={2} /> : null}
+                  </span>
+                </button>
+              ) : null}
               {options.length === 0 ? (
                 <div className="px-3 py-2 text-center text-xs text-text-faint">请先在设置中配置 Provider 和模型</div>
               ) : !selectedProviderGroup ? (

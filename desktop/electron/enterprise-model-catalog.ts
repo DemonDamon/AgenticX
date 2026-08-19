@@ -100,3 +100,14 @@ export function normalizeEnterpriseModelCatalog(value: unknown): EnterpriseModel
 
   return result;
 }
+
+/** Preserve a user's managed-model choice while it remains in the refreshed catalog. */
+export function resolveEnterpriseModelSelection(
+  models: readonly string[],
+  preferred: unknown,
+): string {
+  const candidates = models.map((item) => text(item)).filter(Boolean);
+  const requested = text(preferred);
+  if (requested && candidates.includes(requested)) return requested;
+  return candidates[0] ?? "";
+}

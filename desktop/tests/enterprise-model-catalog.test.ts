@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { normalizeEnterpriseModelCatalog } from "../electron/enterprise-model-catalog";
+import {
+  normalizeEnterpriseModelCatalog,
+  resolveEnterpriseModelSelection,
+} from "../electron/enterprise-model-catalog";
 
 describe("enterprise model catalog", () => {
   it("keeps provider metadata returned by bootstrap", () => {
@@ -75,5 +78,18 @@ describe("enterprise model catalog context window", () => {
     expect(none).not.toHaveProperty("contextWindow");
     expect(zero).not.toHaveProperty("contextWindow");
     expect(text).not.toHaveProperty("contextWindow");
+  });
+});
+
+describe("enterprise managed-model selection", () => {
+  it("keeps a still-valid local choice across catalog refreshes", () => {
+    expect(resolveEnterpriseModelSelection(["model-a", "model-b"], "model-b"))
+      .toBe("model-b");
+  });
+
+  it("falls back to the first available model when the old choice is revoked", () => {
+    expect(resolveEnterpriseModelSelection(["model-a", "model-b"], "removed"))
+      .toBe("model-a");
+    expect(resolveEnterpriseModelSelection([], "removed")).toBe("");
   });
 });

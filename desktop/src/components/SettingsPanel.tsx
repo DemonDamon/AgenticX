@@ -124,6 +124,7 @@ import {
 } from "../utils/model-context-window-heuristic";
 import { resolveManagedContextWindow } from "../utils/managed-context-window";
 import { DeveloperTokenBudgetPanel } from "./settings/DeveloperTokenBudgetPanel";
+import { DefaultModelSelect } from "./DefaultModelSelect";
 import { KnowledgeSettings, type KnowledgeSettingsHandle } from "./settings/knowledge/KnowledgeSettings";
 import { DataSourcesSettings } from "./settings/datasources/DataSourcesSettings";
 import { MemoryGraphExplorer } from "./memory/MemoryGraphExplorer";
@@ -149,6 +150,7 @@ import {
   type ManagedModelCatalogEntry,
 } from "../utils/model-options";
 import { isEnterpriseModelManagementLocked } from "../utils/enterprise-model-management";
+import { applyGlobalDefaultModelChoice } from "../utils/default-model-setting";
 import {
   LOCAL_KNOWLEDGE_ENABLED,
   SHOW_DESKTOP_GENERAL_EXPERT_CONTROLS,
@@ -6750,6 +6752,8 @@ export function SettingsPanel({
   const [providerSavedDefProv, setProviderSavedDefProv] = useState(defaultProvider);
   const [providerConfigMessage, setProviderConfigMessage] = useState("");
   const [providerConfigSaving, setProviderConfigSaving] = useState(false);
+  const [generalDefaultModelSaving, setGeneralDefaultModelSaving] = useState(false);
+  const [generalDefaultModelMessage, setGeneralDefaultModelMessage] = useState("");
   const [defProv, setDefProv] = useState(defaultProvider);
   const [keyStatus, setKeyStatus] = useState<Record<string, "idle" | "checking" | "ok" | "fail">>({});
   const [keyError, setKeyError] = useState<Record<string, string>>({});
@@ -7048,6 +7052,8 @@ export function SettingsPanel({
     setProviderSavedDefProv(defaultProvider || ALL_PROVIDERS[0]);
     setProviderConfigMessage("");
     setProviderConfigSaving(false);
+    setGeneralDefaultModelMessage("");
+    setGeneralDefaultModelSaving(false);
     setProviderEnableHint(null);
     setDefaultProvHint(null);
     setDefProv(defaultProvider || ALL_PROVIDERS[0]);
@@ -7727,6 +7733,47 @@ export function SettingsPanel({
       setProviderConfigSaving(false);
     }
   }, [defProv, draft, onSave, providerConfigDirty, providerConfigSaving]);
+
+  const saveGeneralDefaultModel = useCallback(async (
+    nextProvider: string,
+    nextModel: string,
+  ) => {
+    if (generalDefaultModelSaving) return;
+    // Deliberately start from the last saved snapshot. `draft` may contain API
+    // keys, URLs, or catalog edits that still await the Provider tab's Save.
+    const savedBase = Object.keys(providerSavedSnapshot).length > 0
+      ? providerSavedSnapshot
+      : providers;
+    const update = applyGlobalDefaultModelChoice(savedBase, nextProvider, nextModel);
+    if (!update) {
+      setGeneralDefaultModelMessage("该模型不在已保存的可用列表中，请先到模型服务保存配置。");
+      return;
+    }
+
+    setGeneralDefaultModelSaving(true);
+    setGeneralDefaultModelMessage("");
+    try {
+      await onSave(update);
+      const nextSaved = cloneProviderDraftMap(update.providers);
+      setProviderSavedSnapshot(nextSaved);
+      setProviderSavedDefProv(update.defaultProvider);
+      setDefProv(update.defaultProvider);
+      // Preserve every unrelated unsaved draft field while aligning the one
+      // model choice the user explicitly committed from General Preferences.
+      setDraft((currentDraft) => ({
+        ...currentDraft,
+        [update.defaultProvider]: {
+          ...(currentDraft[update.defaultProvider] ?? nextSaved[update.defaultProvider]),
+          model: nextModel.trim(),
+        },
+      }));
+      setGeneralDefaultModelMessage("已保存");
+    } catch (err) {
+      setGeneralDefaultModelMessage(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGeneralDefaultModelSaving(false);
+    }
+  }, [generalDefaultModelSaving, onSave, providerSavedSnapshot, providers]);
 
   const onValidateKey = async () => {
     if (!providerCredentialed(current)) return;
@@ -9104,6 +9151,50 @@ export function SettingsPanel({
                           );
                         })}
                       </div>
+                    </div>
+                  </div>
+                </Panel>
+                <Panel title="模型">
+                  <div className="flex items-center justify-between gap-6">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-text-primary">默认模型</div>
+                      <p className="mt-0.5 text-[11px] leading-5 text-text-faint">
+                        用于没有单独指定模型的新对话；已有对话和数字专家的专属模型不会被覆盖。
+                      </p>
+                      {generalDefaultModelMessage ? (
+                        <p
+                          className={`mt-1 text-[11px] ${
+                            generalDefaultModelMessage === "已保存"
+                              ? "text-text-subtle"
+                              : "text-rose-400"
+                          }`}
+                        >
+                          {generalDefaultModelMessage}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className={`w-[min(20rem,48%)] shrink-0 ${generalDefaultModelSaving ? "pointer-events-none opacity-60" : ""}`}>
+                      <DefaultModelSelect
+                        provider={providerSavedDefProv || defaultProvider}
+                        model={
+                          providerSavedSnapshot[providerSavedDefProv]?.model
+                          ?? providers[defaultProvider]?.model
+                          ?? ""
+                        }
+                        providersSnapshot={
+                          Object.keys(providerSavedSnapshot).length > 0
+                            ? providerSavedSnapshot
+                            : providers
+                        }
+                        inheritLabel="请选择默认模型"
+                        allowInherit={false}
+                        onChange={(providerId, modelId) => {
+                          void saveGeneralDefaultModel(providerId, modelId);
+                        }}
+                      />
+                      {generalDefaultModelSaving ? (
+                        <div className="mt-1 text-right text-[11px] text-text-faint">保存中…</div>
+                      ) : null}
                     </div>
                   </div>
                 </Panel>
