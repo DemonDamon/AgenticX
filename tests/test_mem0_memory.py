@@ -3,8 +3,14 @@ from unittest.mock import MagicMock, patch
 
 from agenticx.llms.base import BaseLLMProvider
 from agenticx.llms.response import LLMResponse
-from agenticx.memory.mem0_memory import Mem0
-from agenticx.integrations.mem0.configs.base import MemoryConfig
+
+# mem0ai 是可选依赖（pyproject 的 memory extra）。没装的时候这里会在 import 阶段炸，
+# 而收集期的异常会中断整轮 `pytest tests/` —— 一个可选集成把全套测试拖下水。
+try:
+    from agenticx.memory.mem0_memory import Mem0
+    from agenticx.integrations.mem0.configs.base import MemoryConfig
+except Exception as exc:  # PackageNotFoundError 不是 ImportError，importorskip 兜不住
+    pytest.skip(f"mem0ai 未安装，跳过 Mem0 集成测试：{exc}", allow_module_level=True)
 
 # Mock AgenticX LLM for testing purposes
 class MockAgenticXLLM(BaseLLMProvider):

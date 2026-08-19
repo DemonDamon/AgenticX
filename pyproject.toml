@@ -285,7 +285,12 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# tests/ 和 tests/cli/ 下有同名文件（如 test_mcp_schema.py）。默认的 prepend 导入模式
+# 按 basename 建模块名，两个同名文件必然撞车；撞车会中断整轮收集——`pytest tests/`
+# 因此一个用例都跑不了，输出还只是一句 "7 errors during collection"。
+# importlib 模式按路径导入，不需要给 tests/ 铺一层 __init__.py。
 addopts = [
+    "--import-mode=importlib",
     "--strict-markers",
     "--strict-config",
     "--verbose",
