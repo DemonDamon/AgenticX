@@ -9653,7 +9653,7 @@ export function SettingsPanel({
                     <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-text-subtle">
                       <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" />
                       <span>
-                        此模式会跳过逐次确认。工作区边界和受保护路径仍会限制访问，但其他高风险操作可能直接运行；请只在可信任务中使用。
+                        此模式仅自动执行明确标记为低风险的操作。高风险、破坏性、桌面操控和未知风险操作仍会逐次询问。
                       </span>
                     </div>
                   ) : null}

@@ -21,7 +21,11 @@ import type { ForwardConfirmPayload } from "./components/ForwardPicker";
 import { resolveForwardTarget } from "./utils/resolve-forward-target";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
 import { parsePersistedThemeMode } from "./utils/theme-preference";
-import { buildConfirmScope } from "./utils/confirm-scope";
+import {
+  buildConfirmScope,
+  isProtectedConfirmContext,
+  shouldAutoApproveConfirm,
+} from "./utils/confirm-scope";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
 import type { Message, ProviderEntry } from "./store";
 import { useAppStore } from "./store";
@@ -1833,16 +1837,18 @@ export function App() {
     context?: Record<string, unknown>
   ): Promise<boolean> =>
     await new Promise<boolean>((resolve) => {
-      if (useAppStore.getState().confirmStrategy === "auto") {
-        resolve(true);
-        return;
-      }
       const scope = buildConfirmScope(question, context);
       if (denyScopesRef.current.has(scope)) {
         resolve(false);
         return;
       }
-      if (autoApproveScopesRef.current.has(scope)) {
+      if (
+        shouldAutoApproveConfirm(
+          useAppStore.getState().confirmStrategy,
+          autoApproveScopesRef.current.has(scope),
+          context,
+        )
+      ) {
         resolve(true);
         return;
       }
@@ -2434,14 +2440,15 @@ export function App() {
         context={confirm.context}
         defaultPolicy={defaultConfirmPolicyForStrategy(confirmStrategy)}
         onApprove={(policy) => {
+          const protectedRequest = isProtectedConfirmContext(confirm.context);
           const scope = confirmScopeRef.current;
-          if (scope) {
+          if (!protectedRequest && scope) {
             if (policy === "use-allowlist") {
               autoApproveScopesRef.current.add(scope);
               denyScopesRef.current.delete(scope);
             }
           }
-          if (policy === "run-everything") {
+          if (!protectedRequest && policy === "run-everything") {
             setConfirmStrategy("auto");
             void window.agenticxDesktop.saveConfirmStrategy("auto");
           }

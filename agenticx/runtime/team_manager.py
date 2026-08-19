@@ -24,10 +24,10 @@ from agenticx.cli.studio import StudioSession
 from agenticx.llms.provider_resolver import ProviderResolver
 from agenticx.runtime import (
     AgentRuntime,
-    AutoApproveConfirmGate,
     AsyncClarifyGate,
-    AsyncConfirmGate,
+    ConfirmGate,
     EventType,
+    RiskAwareAutoConfirmGate,
     RuntimeEvent,
 )
 from agenticx.runtime.prompts.current_time import build_current_time_block
@@ -123,7 +123,9 @@ class SubAgentContext:
     agent_messages: List[Dict[str, Any]] = field(default_factory=list)
     artifacts: Dict[Path, str] = field(default_factory=dict)
     context_files: Dict[str, str] = field(default_factory=dict)
-    confirm_gate: AsyncConfirmGate = field(default_factory=AsyncConfirmGate)
+    confirm_gate: ConfirmGate = field(
+        default_factory=lambda: RiskAwareAutoConfirmGate(unattended=True)
+    )
     clarify_gate: AsyncClarifyGate = field(default_factory=AsyncClarifyGate)
     result_summary: str = ""
     created_at: float = field(default_factory=time.time)
@@ -169,6 +171,7 @@ class AgentTeamManager:
         max_concurrent_subagents: int = 4,
         resource_monitor: Optional[ResourceMonitor] = None,
         spawn_config: Optional[SpawnConfig] = None,
+        confirm_gate_factory: Optional[Callable[[str], ConfirmGate]] = None,
     ) -> None:
         self._manager_id = uuid.uuid4().hex
         AgentTeamManager._registry[self._manager_id] = self
@@ -180,6 +183,9 @@ class AgentTeamManager:
         self.max_concurrent_subagents = max_concurrent_subagents
         self.resource_monitor = resource_monitor or ResourceMonitor()
         self.spawn_config = spawn_config or SpawnConfig(max_concurrent=max_concurrent_subagents)
+        self.confirm_gate_factory = confirm_gate_factory or (
+            lambda _agent_id: RiskAwareAutoConfirmGate(unattended=True)
+        )
 
         self._lock = asyncio.Lock()
         self._agents: Dict[str, SubAgentContext] = {}
@@ -555,7 +561,7 @@ class AgentTeamManager:
                 task=task.strip(),
                 source_tool_call_id=source_tool_call_id,
                 context_files=dict(self.base_session.context_files),
-                confirm_gate=AutoApproveConfirmGate(),
+                confirm_gate=self.confirm_gate_factory(agent_id),
                 parent_agent_id=parent_agent_id,
                 depth=parent_depth + 1,
                 mode=resolved_mode,
@@ -1075,7 +1081,7 @@ class AgentTeamManager:
         )
         return {"ok": True, "subagents": merged_rows}
 
-    def get_confirm_gate(self, agent_id: str) -> Optional[AsyncConfirmGate]:
+    def get_confirm_gate(self, agent_id: str) -> Optional[ConfirmGate]:
         context = self._agents.get(agent_id)
         if context is None:
             return None
@@ -1108,9 +1114,12 @@ class AgentTeamManager:
 
     def _serialize_status(self, context: SubAgentContext) -> Dict[str, Any]:
         pending_confirm = None
-        if context.confirm_gate and context.confirm_gate.last_request:
-            req = context.confirm_gate.last_request
-            if context.confirm_gate._pending.get(str(req.get("id", ""))):
+        confirm_gate = context.confirm_gate
+        confirm_request = getattr(confirm_gate, "last_request", None)
+        confirm_pending = getattr(confirm_gate, "_pending", {})
+        if confirm_request and isinstance(confirm_pending, dict):
+            req = confirm_request
+            if confirm_pending.get(str(req.get("id", ""))):
                 pending_confirm = {
                     "request_id": req.get("id", ""),
                     "question": req.get("question", ""),

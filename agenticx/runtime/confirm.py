@@ -16,6 +16,30 @@ from typing import Any, Dict, Optional
 _log = logging.getLogger(__name__)
 
 _VALID_TIMEOUT_ACTIONS = frozenset({"approve", "reject", "skip"})
+CONFIRM_RISK_LOW = "low"
+PROTECTED_CONFIRM_RISKS = frozenset(
+    {"high", "destructive", "computer_use", "non_whitelisted", "policy"}
+)
+
+
+def normalize_confirm_risk(context: Optional[Dict[str, Any]] = None) -> str:
+    """Normalize risk for auto-confirm decisions.
+
+    Only an explicit ``risk=low`` is eligible for automatic approval. Missing,
+    unknown, or misspelled values are intentionally treated as protected so a
+    newly added tool cannot silently bypass confirmation.
+    """
+
+    raw_risk = (context or {}).get("risk")
+    if isinstance(raw_risk, str) and raw_risk.strip().lower() == CONFIRM_RISK_LOW:
+        return CONFIRM_RISK_LOW
+    return "protected"
+
+
+def is_protected_confirm(context: Optional[Dict[str, Any]] = None) -> bool:
+    """Return whether a confirmation must not be auto-approved."""
+
+    return normalize_confirm_risk(context) != CONFIRM_RISK_LOW
 
 
 def _resolve_confirm_timeout_seconds() -> float:
@@ -37,6 +61,21 @@ class ConfirmGate(ABC):
     @abstractmethod
     async def request_confirm(self, question: str, context: Optional[Dict[str, Any]] = None) -> bool:
         """Request user confirmation and return approval."""
+
+    def should_emit_prompt(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        """Whether the caller should publish a user-facing confirmation event."""
+
+        return False
+
+    def is_service_mode(self) -> bool:
+        """Whether this gate is driven by an HTTP/SSE service adapter."""
+
+        return False
+
+    def resolve(self, request_id: str, approved: bool) -> bool:
+        """Resolve a pending confirmation when supported by the gate."""
+
+        return False
 
 
 class SyncConfirmGate(ConfirmGate):
@@ -89,11 +128,15 @@ class AsyncConfirmGate(ConfirmGate):
         try:
             return await asyncio.wait_for(future, timeout=self.timeout_seconds)
         except asyncio.TimeoutError:
-            approved = self.timeout_action == "approve"
+            effective_action = (
+                "reject" if is_protected_confirm(payload) else self.timeout_action
+            )
+            approved = effective_action == "approve"
             self.last_timeout_info = {
                 "request_id": request_id,
                 "question": question,
-                "action_taken": self.timeout_action,
+                "action_taken": effective_action,
+                "configured_action": self.timeout_action,
                 "approved": approved,
                 "timeout_seconds": self.timeout_seconds,
             }
@@ -101,7 +144,7 @@ class AsyncConfirmGate(ConfirmGate):
                 "Confirm gate timed out after %.1fs for request %s, action=%s",
                 self.timeout_seconds,
                 request_id,
-                self.timeout_action,
+                effective_action,
             )
             if not future.done():
                 future.cancel()
@@ -117,9 +160,77 @@ class AsyncConfirmGate(ConfirmGate):
         fut.set_result(bool(approved))
         return True
 
+    def should_emit_prompt(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        return True
+
+    def is_service_mode(self) -> bool:
+        return True
+
+
+class RiskAwareAutoConfirmGate(ConfirmGate):
+    """Auto-approve explicit low-risk requests while protecting everything else.
+
+    Interactive callers may supply a managed delegate so protected requests are
+    surfaced to the user. Unattended callers deliberately reject protected
+    requests immediately instead of creating a pending future that can hang an
+    automation indefinitely.
+    """
+
+    def __init__(
+        self,
+        delegate: Optional[ConfirmGate] = None,
+        *,
+        unattended: bool = False,
+    ) -> None:
+        self.delegate = delegate
+        self.unattended = bool(unattended)
+        self._pending = getattr(delegate, "_pending", {})
+        self.last_request: Optional[Dict[str, Any]] = None
+
+    async def request_confirm(self, question: str, context: Optional[Dict[str, Any]] = None) -> bool:
+        payload = dict(context or {})
+        if not is_protected_confirm(payload):
+            self.last_request = None
+            return True
+
+        request_id = str(payload.get("request_id") or uuid.uuid4())
+        payload["request_id"] = request_id
+        self.last_request = {
+            "id": request_id,
+            "question": question,
+            "context": payload,
+        }
+        if self.unattended or self.delegate is None:
+            self.last_request["decision"] = "blocked_unattended"
+            return False
+
+        approved = await self.delegate.request_confirm(question, payload)
+        self.last_request = getattr(self.delegate, "last_request", None)
+        return approved
+
+    def should_emit_prompt(self, context: Optional[Dict[str, Any]] = None) -> bool:
+        return (
+            not self.unattended
+            and self.delegate is not None
+            and is_protected_confirm(context)
+            and self.delegate.should_emit_prompt(context)
+        )
+
+    def is_service_mode(self) -> bool:
+        return True
+
+    def resolve(self, request_id: str, approved: bool) -> bool:
+        if self.delegate is None:
+            return False
+        return self.delegate.resolve(request_id, approved)
+
 
 class AutoApproveConfirmGate(ConfirmGate):
-    """Always approve confirmation requests (best for autonomous sub-agents)."""
+    """Legacy unconditional gate.
+
+    Production unattended paths must use :class:`RiskAwareAutoConfirmGate`.
+    This class remains for backwards compatibility with external integrations.
+    """
 
     def __init__(self) -> None:
         self._pending: Dict[str, asyncio.Future[bool]] = {}

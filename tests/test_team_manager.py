@@ -8,6 +8,7 @@ from typing import List
 
 from agenticx.cli.studio import StudioSession
 from agenticx.runtime.events import EventType, RuntimeEvent
+from agenticx.runtime.confirm import RiskAwareAutoConfirmGate
 from agenticx.runtime.team_manager import AgentTeamManager
 
 
@@ -83,6 +84,30 @@ def test_team_manager_spawn_and_collect_summary() -> None:
         assert "已完成" in summaries[0]
         assert any(item.type == EventType.SUBAGENT_STARTED.value for item in emitted)
         assert any(item.type == EventType.SUBAGENT_COMPLETED.value for item in emitted)
+
+    asyncio.run(_run())
+
+
+def test_team_manager_uses_injected_confirm_gate_for_each_subagent() -> None:
+    async def _run() -> None:
+        created: dict[str, RiskAwareAutoConfirmGate] = {}
+
+        def _gate_factory(agent_id: str) -> RiskAwareAutoConfirmGate:
+            gate = RiskAwareAutoConfirmGate(unattended=True)
+            created[agent_id] = gate
+            return gate
+
+        manager = AgentTeamManager(
+            llm_factory=lambda: _QuickTextLLM(),
+            base_session=StudioSession(),
+            confirm_gate_factory=_gate_factory,
+        )
+        result = await manager.spawn_subagent(name="安全执行器", role="worker", task="检查")
+        assert result["ok"] is True
+        agent_id = result["agent_id"]
+        assert manager._agents[agent_id].confirm_gate is created[agent_id]
+        await _wait_until(lambda: len(manager._tasks) == 0)
+        manager.shutdown_now()
 
     asyncio.run(_run())
 

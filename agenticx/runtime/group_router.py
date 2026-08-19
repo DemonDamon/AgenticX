@@ -20,7 +20,7 @@ from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio import StudioSession
 from agenticx.runtime import AgentRuntime
-from agenticx.runtime import AsyncClarifyGate, AsyncConfirmGate
+from agenticx.runtime import AsyncClarifyGate, AsyncConfirmGate, ConfirmGate
 from agenticx.runtime.events import EventType
 from agenticx.runtime.group_context import GroupChatContext
 from agenticx.runtime.group_facts import (
@@ -356,6 +356,7 @@ class GroupReply:
     error: str = ""
     event_type: str = "group_reply"
     confirm_request_id: str = ""
+    confirm_context: Dict[str, Any] = field(default_factory=dict)
     # Structured fields for graph projection / member activity side panel.
     graph_run_id: str = ""
     graph_node_id: str = ""
@@ -389,7 +390,7 @@ class GroupChatRouter:
         llm_factory: Callable[[str | None, str | None], Any],
         max_tool_rounds: int,
         meta_leader_display_name: str | None = None,
-        confirm_gate_factory: Callable[[str], "AsyncConfirmGate"] | None = None,
+        confirm_gate_factory: Callable[[str], ConfirmGate] | None = None,
         clarify_gate_factory: Callable[[str], "AsyncClarifyGate"] | None = None,
     ) -> None:
         self.avatar_registry = avatar_registry
@@ -1529,6 +1530,14 @@ class GroupChatRouter:
                         if group_evt_type in ("group_blocked", "group_clarification")
                         else ""
                     )
+                    raw_confirm_context = (
+                        event.data.get("context") if group_evt_type == "group_blocked" else None
+                    )
+                    confirm_context = (
+                        dict(raw_confirm_context)
+                        if isinstance(raw_confirm_context, dict)
+                        else {}
+                    )
                     tool_step = self._runtime_event_to_tool_step(event.type, event.data)
                     raw_opts = event.data.get("options") if group_evt_type == "group_clarification" else None
                     clarify_options = (
@@ -1547,6 +1556,7 @@ class GroupChatRouter:
                             skipped=True,
                             event_type=group_evt_type,
                             confirm_request_id=confirm_request_id,
+                            confirm_context=confirm_context,
                             graph_run_id=graph_run_id,
                             graph_node_id=graph_node_id,
                             tool_name=tool_step.get("tool_name", ""),

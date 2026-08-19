@@ -28,8 +28,8 @@ export const CONFIRM_STRATEGY_OPTIONS: readonly ConfirmStrategyOption[] = [
   },
   {
     value: "auto",
-    label: "全部自动执行",
-    description: "不再逐次询问；工作区和受保护路径仍受限制，其他高风险操作可能直接运行",
+    label: "低风险自动执行",
+    description: "仅自动执行明确标记为低风险的操作；受保护操作仍会逐次询问",
   },
 ] as const;
 
@@ -47,8 +47,8 @@ export const CONFIRM_POLICY_OPTIONS: readonly ConfirmPolicyOption[] = [
   },
   {
     value: "run-everything",
-    label: "全部自动执行",
-    description: "以后不再逐次询问；工作区和受保护路径仍受限制，其他高风险操作可能直接运行。",
+    label: "低风险自动执行",
+    description: "以后自动执行明确标记为低风险的操作；受保护操作仍会逐次询问。",
   },
 ] as const;
 

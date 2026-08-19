@@ -301,6 +301,7 @@ import {
 } from "../utils/model-options";
 import { resolveManagedContextWindow } from "../utils/managed-context-window";
 import { isAutomationPaneAvatarId } from "../utils/automation-pane";
+import { shouldAutoApproveConfirm } from "../utils/confirm-scope";
 import { sessionCreateAvatarId } from "../utils/session-create-avatar";
 import { NEW_TOPIC_INHERITS_CONTEXT, newTopicTriggerLabel } from "../utils/new-topic-label";
 import {
@@ -10577,6 +10578,13 @@ export function ChatPane({
               const blockedText =
                 String(payload.data?.content ?? "").trim() || "等待确认后继续执行";
               const requestId = String(payload.data?.confirm_request_id ?? "").trim();
+              const rawConfirmContext = payload.data?.confirm_context;
+              const confirmContext =
+                rawConfirmContext &&
+                typeof rawConfirmContext === "object" &&
+                !Array.isArray(rawConfirmContext)
+                  ? (rawConfirmContext as Record<string, unknown>)
+                  : undefined;
               setGroupTyping((prev) => {
                 const next = { ...prev };
                 delete next[eventAgentId];
@@ -10594,7 +10602,7 @@ export function ChatPane({
               if (prevText === blockedText) continue;
               lastGroupProgressRef.current[eventAgentId] = blockedText;
               const strategy = useAppStore.getState().confirmStrategy;
-              if (strategy === "auto" && requestId) {
+              if (requestId && shouldAutoApproveConfirm(strategy, false, confirmContext)) {
                 addPaneMessageIfSessionActive(
                   pane.id,
                   "tool",
@@ -10634,6 +10642,7 @@ export function ChatPane({
                         question: blockedText,
                         agentId: eventAgentId,
                         sessionId: requestSessionId,
+                        context: confirmContext,
                       }
                     : undefined,
                 }

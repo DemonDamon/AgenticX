@@ -5,7 +5,10 @@ import {
   CONFIRM_POLICY_OPTIONS,
   type ConfirmPolicy,
 } from "../constants/confirm-strategy-options";
-import { parentPathForConfirmScope } from "../utils/confirm-scope";
+import {
+  isProtectedConfirmContext,
+  parentPathForConfirmScope,
+} from "../utils/confirm-scope";
 
 type Props = {
   open: boolean;
@@ -165,10 +168,14 @@ export function ConfirmDialog({
 }: Props) {
   const [policy, setPolicy] = useState<ConfirmPolicy>("ask-every-time");
   const presentation = buildConfirmRequestPresentation(question, context);
+  const protectedRequest = isProtectedConfirmContext(context);
+  const policyOptions = protectedRequest
+    ? CONFIRM_POLICY_OPTIONS.filter((option) => option.value === "ask-every-time")
+    : CONFIRM_POLICY_OPTIONS;
 
   useEffect(() => {
-    if (open) setPolicy(defaultPolicy);
-  }, [defaultPolicy, open, question]);
+    if (open) setPolicy(protectedRequest ? "ask-every-time" : defaultPolicy);
+  }, [defaultPolicy, open, protectedRequest, question]);
 
   return (
     <Modal
@@ -234,8 +241,13 @@ export function ConfirmDialog({
 
         <div className="mb-3 rounded-md border border-border bg-surface-card p-3 text-xs text-text-muted">
           <div className="mb-2 font-medium text-text-primary">这次许可如何生效</div>
+          {protectedRequest ? (
+            <p className="mb-2 rounded bg-amber-500/10 px-2 py-1.5 leading-5 text-[var(--status-warning)]">
+              这是受保护操作，只能逐次确认，不能加入同类允许或自动执行。
+            </p>
+          ) : null}
           <div className="space-y-1.5">
-            {CONFIRM_POLICY_OPTIONS.map((option) => (
+            {policyOptions.map((option) => (
               <label
                 key={option.value}
                 className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-surface-hover"

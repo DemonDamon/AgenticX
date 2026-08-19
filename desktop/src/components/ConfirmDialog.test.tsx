@@ -74,7 +74,7 @@ describe("ConfirmDialog", () => {
         question={`Write changes to ${path}?`}
         sourceLabel="主智能体"
         diff="--- old\n+++ new"
-        context={{ tool: "file_write", path }}
+        context={{ tool: "file_write", path, risk: "low" }}
         onApprove={vi.fn()}
         onReject={vi.fn()}
       />,
@@ -86,9 +86,27 @@ describe("ConfirmDialog", () => {
     expect(html).toContain("查看文件改动预览");
     expect(html).toContain("仅允许这一次");
     expect(html).toContain("本次运行允许同类操作");
-    expect(html).toContain("全部自动执行");
+    expect(html).toContain("低风险自动执行");
     expect(html).toContain("将自动允许");
     expect(html).not.toContain("白名单放行");
+  });
+
+  it("does not offer allowlist or auto-execute policies for protected requests", () => {
+    const html = renderToStaticMarkup(
+      <ConfirmDialog
+        open
+        question="Run dangerous command?"
+        context={{ tool: "bash_exec", command: "rm -rf build", risk: "high" }}
+        defaultPolicy="run-everything"
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("只能逐次确认");
+    expect(html).toContain("仅允许这一次");
+    expect(html).not.toContain("本次运行允许同类操作");
+    expect(html).not.toContain("低风险自动执行");
   });
 
   it("keeps the three dialog policies aligned with the three settings strategies", () => {

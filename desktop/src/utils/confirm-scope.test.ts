@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildConfirmScope, parentPathForConfirmScope } from "./confirm-scope";
+import {
+  buildConfirmScope,
+  isProtectedConfirmContext,
+  normalizeConfirmRisk,
+  parentPathForConfirmScope,
+  shouldAutoApproveConfirm,
+} from "./confirm-scope";
 
 describe("confirmation scope", () => {
   it("groups Windows file changes by their parent directory", () => {
@@ -21,5 +27,26 @@ describe("confirmation scope", () => {
       "bash_exec:git",
     );
     expect(buildConfirmScope("run?", { tool: "custom_tool" })).toBe("tool:custom_tool");
+  });
+
+  it("only treats an explicit low-risk marker as auto-approvable", () => {
+    expect(normalizeConfirmRisk({ risk: " low " })).toBe("low");
+    expect(isProtectedConfirmContext({ risk: "low" })).toBe(false);
+
+    for (const risk of ["high", "destructive", "computer_use", "policy", "unknown"]) {
+      expect(isProtectedConfirmContext({ risk })).toBe(true);
+    }
+    expect(isProtectedConfirmContext({})).toBe(true);
+    expect(isProtectedConfirmContext()).toBe(true);
+  });
+
+  it("does not let global auto or an existing scope bypass protected risk", () => {
+    expect(shouldAutoApproveConfirm("auto", false, { risk: "high" })).toBe(false);
+    expect(shouldAutoApproveConfirm("semi-auto", true, { risk: "destructive" })).toBe(false);
+    expect(shouldAutoApproveConfirm("auto", true)).toBe(false);
+
+    expect(shouldAutoApproveConfirm("auto", false, { risk: "low" })).toBe(true);
+    expect(shouldAutoApproveConfirm("semi-auto", true, { risk: "low" })).toBe(true);
+    expect(shouldAutoApproveConfirm("manual", false, { risk: "low" })).toBe(false);
   });
 });

@@ -47,6 +47,9 @@ class ChatRequest(BaseModel):
     skip_user_history: Optional[bool] = False
     # Internal: allow runtime to continue even if SSE client disconnects (IM confirm flow).
     keep_runtime_after_disconnect: Optional[bool] = False
+    # Internal: automatic/supervised turn with no human available to answer a
+    # protected confirmation. Low-risk work may proceed; protected work fails closed.
+    unattended_run: Optional[bool] = False
     # Skill slugs referenced via @skill:// tokens in the user message; content injected into context.
     skill_slugs: Optional[List[str]] = None
     # Per-session KB retrieval mode override ("auto" | "always"). When set, this

@@ -2,6 +2,33 @@ function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+export type NormalizedConfirmRisk = "low" | "protected";
+
+/**
+ * Mirror the backend's fail-closed confirmation policy. Only an explicit
+ * `risk: "low"` may be auto-approved; missing and future values stay protected.
+ */
+export function normalizeConfirmRisk(
+  context?: Record<string, unknown>,
+): NormalizedConfirmRisk {
+  return text(context?.risk).toLowerCase() === "low" ? "low" : "protected";
+}
+
+export function isProtectedConfirmContext(
+  context?: Record<string, unknown>,
+): boolean {
+  return normalizeConfirmRisk(context) === "protected";
+}
+
+export function shouldAutoApproveConfirm(
+  strategy: "manual" | "semi-auto" | "auto",
+  scopeAlreadyAllowed: boolean,
+  context?: Record<string, unknown>,
+): boolean {
+  if (isProtectedConfirmContext(context)) return false;
+  return strategy === "auto" || scopeAlreadyAllowed;
+}
+
 export function parentPathForConfirmScope(pathValue: unknown): string {
   const path = text(pathValue).replace(/[\\/]+$/, "");
   if (!path) return "";

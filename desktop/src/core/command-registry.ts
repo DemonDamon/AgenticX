@@ -141,7 +141,7 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
   registry.register({
     id: "confirm",
     name: "/confirm",
-    description: "循环切换确认策略（每次询问 / 同类操作自动允许 / 全部自动执行）",
+    description: "循环切换确认策略（每次询问 / 同类操作自动允许 / 低风险自动执行）",
     category: "settings",
     mode: "both",
     icon: "A",

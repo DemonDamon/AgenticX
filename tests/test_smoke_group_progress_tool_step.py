@@ -12,6 +12,8 @@ import pytest
 
 from agenticx.runtime.events import EventType
 from agenticx.runtime.group_router import GroupChatRouter, GroupReply
+from agenticx.runtime.group_context import GroupChatContext
+from agenticx.cli.studio import StudioSession
 
 
 def test_group_reply_defaults_new_fields_empty() -> None:
@@ -26,6 +28,7 @@ def test_group_reply_defaults_new_fields_empty() -> None:
     assert reply.tool_name == ""
     assert reply.tool_phase == ""
     assert reply.tool_call_id == ""
+    assert reply.confirm_context == {}
     assert reply.clarify_options == []
     assert reply.clarify_allow_free_text is True
 
@@ -142,6 +145,63 @@ def test_should_forward_hitl_even_when_content_empty() -> None:
     assert GroupChatRouter._should_forward_progress(clarify) is True
     assert GroupChatRouter._should_forward_progress(blocked) is True
     assert GroupChatRouter._should_forward_progress(empty_progress) is False
+
+
+@pytest.mark.asyncio
+async def test_group_blocked_forwards_structured_confirm_context(monkeypatch) -> None:
+    from agenticx.runtime import group_router as group_router_module
+
+    class _ConfirmRuntime:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def run_turn(self, *_args, **_kwargs):
+            yield type(
+                "Event",
+                (),
+                {
+                    "type": EventType.CONFIRM_REQUIRED.value,
+                    "data": {
+                        "id": "confirm-high",
+                        "question": "run?",
+                        "context": {"tool": "bash_exec", "risk": "high"},
+                    },
+                },
+            )()
+            yield type(
+                "Event",
+                (),
+                {"type": EventType.FINAL.value, "data": {"text": "done"}},
+            )()
+
+    monkeypatch.setattr(group_router_module, "AgentRuntime", _ConfirmRuntime)
+    router = GroupChatRouter(
+        avatar_registry=MagicMock(),
+        llm_factory=MagicMock(return_value=MagicMock()),
+        max_tool_rounds=5,
+    )
+    queue: asyncio.Queue[GroupReply] = asyncio.Queue()
+    session = StudioSession(provider_name="fake", model_name="fake")
+    session.scratchpad = {}
+
+    reply = await router._run_one_target(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_id="g1",
+        group_name="G",
+        avatar_id="meta",
+        user_input="hi",
+        quoted_content="",
+        should_stop=lambda: False,
+        force_reply=True,
+        progress_queue=queue,
+    )
+
+    assert reply.content == "done"
+    queued = [queue.get_nowait(), queue.get_nowait()]
+    blocked = next(item for item in queued if item.event_type == "group_blocked")
+    assert blocked.confirm_request_id == "confirm-high"
+    assert blocked.confirm_context == {"tool": "bash_exec", "risk": "high"}
 
 
 def _hitl_reply() -> GroupReply:

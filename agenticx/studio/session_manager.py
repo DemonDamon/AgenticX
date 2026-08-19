@@ -294,7 +294,7 @@ def _harness_list_fields(session: StudioSession) -> dict[str, Any]:
         "read_files_count": read_count,
     }
 from agenticx.memory.session_store import SessionStore, session_fts_enabled
-from agenticx.runtime import AsyncClarifyGate, AsyncConfirmGate
+from agenticx.runtime import AsyncClarifyGate, AsyncConfirmGate, ConfirmGate
 from agenticx.runtime.team_manager import AgentTeamManager, SubAgentContext
 from agenticx.utils.atomic_writer import atomic_write_json
 from agenticx.studio.session_event_hub import SessionEventHub
@@ -358,6 +358,7 @@ class ManagedSession:
         llm_factory: Callable[[], Any],
         event_emitter: Optional[EventEmitter] = None,
         summary_sink: Optional[SummarySink] = None,
+        confirm_gate_factory: Optional[Callable[[str], ConfirmGate]] = None,
     ) -> AgentTeamManager:
         if self.team_manager is None:
             self.team_manager = AgentTeamManager(
@@ -366,6 +367,7 @@ class ManagedSession:
                 owner_session_id=self.session_id,
                 event_emitter=event_emitter,
                 summary_sink=summary_sink,
+                confirm_gate_factory=confirm_gate_factory,
             )
         else:
             self.team_manager.llm_factory = llm_factory
@@ -373,6 +375,8 @@ class ManagedSession:
             self.team_manager.owner_session_id = self.session_id
             self.team_manager.event_emitter = event_emitter
             self.team_manager.summary_sink = summary_sink
+            if confirm_gate_factory is not None:
+                self.team_manager.confirm_gate_factory = confirm_gate_factory
         return self.team_manager
 
 

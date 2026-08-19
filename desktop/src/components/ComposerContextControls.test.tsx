@@ -93,7 +93,7 @@ describe("ComposerContextControls", () => {
     ]);
     expect(composerPermissionLabel("manual")).toBe("每次询问");
     expect(composerPermissionLabel("semi-auto")).toBe("同类操作自动允许");
-    expect(composerPermissionLabel("auto")).toBe("全部自动执行");
+    expect(composerPermissionLabel("auto")).toBe("低风险自动执行");
     expect(defaultConfirmPolicyForStrategy("manual")).toBe("ask-every-time");
     expect(defaultConfirmPolicyForStrategy("semi-auto")).toBe("use-allowlist");
     expect(defaultConfirmPolicyForStrategy("auto")).toBe("run-everything");
@@ -115,7 +115,7 @@ describe("ComposerContextControls", () => {
       />,
     );
     expect(html).toContain("会话工作区");
-    expect(html).toContain("全部自动执行");
+    expect(html).toContain("低风险自动执行");
     expect(html).toContain('aria-haspopup="menu"');
   });
 
@@ -159,7 +159,7 @@ describe("ComposerContextControls", () => {
     expect(renderStrategy("manual")).toContain("lucide-circle-question-mark");
     expect(renderStrategy("semi-auto")).toContain("lucide-shield-check");
     expect(renderStrategy("auto")).toContain("lucide-triangle-alert");
-    expect(CONFIRM_STRATEGY_OPTIONS[2].description).toContain("其他高风险操作可能直接运行");
+    expect(CONFIRM_STRATEGY_OPTIONS[2].description).toContain("受保护操作仍会逐次询问");
   });
 
   it("keeps new-topic controls inline without a second-row padding wrapper", () => {
