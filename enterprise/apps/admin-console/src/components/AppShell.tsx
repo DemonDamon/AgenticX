@@ -53,7 +53,6 @@ import {
   Moon,
   Blocks,
   Boxes,
-  Building2,
   Fingerprint,
   Package,
   PieChart,
@@ -69,7 +68,6 @@ import {
   Users,
   Database,
   KeyRound,
-  FolderTree,
 } from "lucide-react";
 
 type AppShellProps = {
@@ -89,6 +87,16 @@ type NavGroup = {
   collapsible?: boolean;
 };
 
+/**
+ * 导航里没有「部门管理」和「组织与批量导入」，这是有意的，别再顺手加回来。
+ *
+ * 两个页面本身保留、路由可直达：/iam/departments 仍是配置部门模型天花板的地方，
+ * /iam/bulk-import 从用户组页的「编辑组织结构」进。它们只是不该占一级菜单——
+ * 日常管理的入口是用户、用户组和能力，部门树和一次性导入不是每天要点的东西。
+ *
+ * 上一次「重建导航」把 /iam/departments 又放了出来，就是因为这里没写下这句话：
+ * 看到有页面没入口，就当成遗漏给补上了。
+ */
 const NAV_GROUPS: NavGroup[] = [
   {
     id: "overview",
@@ -100,9 +108,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "iam",
     items: [
       { href: "/iam/roles", labelKey: "users", icon: Users },
-      { href: "/iam/departments", labelKey: "departments", icon: Building2 },
       { href: "/iam/groups", labelKey: "userGroups", icon: Network },
-      { href: "/iam/bulk-import", labelKey: "organization", icon: FolderTree },
       { href: "/settings/sso", labelKey: "sso", icon: Fingerprint },
     ],
   },
