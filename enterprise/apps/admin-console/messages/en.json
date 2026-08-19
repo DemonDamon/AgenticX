@@ -28,11 +28,10 @@
     "nav": {
       "groups": {
         "overview": "Overview",
-        "iam": "Member Management",
-        "ops": "Usage & Billing",
-        "platform": "Models & Tools",
-        "observability": "Operations (Advanced)",
-        "governance": "Audit & Compliance"
+        "organization": "Organization & Members",
+        "gateway": "Models & Gateway",
+        "capabilities": "Capabilities & Tools",
+        "analytics": "Analytics & Audit"
       },
       "items": {
         "dashboard": "Dashboard",

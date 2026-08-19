@@ -104,55 +104,52 @@ const NAV_GROUPS: NavGroup[] = [
     items: [{ href: "/dashboard", labelKey: "dashboard", icon: Gauge }],
   },
   {
-    id: "iam",
-    label: "iam",
+    // 人、以及跟着人走的配置。额度是「谁能用多少」，属于这里，不属于用量报表。
+    id: "organization",
+    label: "organization",
     items: [
       { href: "/iam/roles", labelKey: "users", icon: Users },
       { href: "/iam/groups", labelKey: "userGroups", icon: Network },
+      { href: "/metering/quota", labelKey: "quota", icon: Gauge },
+      { href: "/metering/plans", labelKey: "quotaPlans", icon: Receipt },
       { href: "/settings/sso", labelKey: "sso", icon: Fingerprint },
     ],
   },
   {
-    id: "platform",
-    label: "platform",
+    // 一次模型调用打出去之前，网关上能拧的所有旋钮。
+    id: "gateway",
+    label: "gateway",
     items: [
       { href: "/admin/models", labelKey: "models", icon: Package },
       { href: "/admin/channels", labelKey: "channels", icon: Split },
       { href: "/admin/routing", labelKey: "autoRouting", icon: Route },
-      { href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes },
-      { href: "/admin/web-search", labelKey: "webSearch", icon: Search },
-      { href: "/admin/plugins", labelKey: "plugins", icon: Blocks },
       { href: "/admin/cache", labelKey: "cache", icon: Database },
       { href: "/admin/api-tokens", labelKey: "apiTokens", icon: KeyRound },
       { href: "/admin/session-grants", labelKey: "sessionGrants", icon: Timer },
     ],
   },
   {
-    id: "ops",
-    label: "ops",
+    // 模型之外、要分发给员工的东西：能力包、联网搜索、插件。
+    id: "capabilities",
+    label: "capabilities",
     items: [
-      { href: "/metering", labelKey: "metering", icon: BarChart3 },
-      { href: "/metering/quota", labelKey: "quota", icon: Gauge },
-      { href: "/metering/plans", labelKey: "quotaPlans", icon: Receipt },
-      { href: "/metering/split", labelKey: "billingSplit", icon: PieChart },
-      { href: "/metering/agent-traces", labelKey: "agentTraces", icon: Waypoints },
+      { href: "/admin/capabilities", labelKey: "capabilities", icon: Boxes },
+      { href: "/admin/web-search", labelKey: "webSearch", icon: Search },
+      { href: "/admin/plugins", labelKey: "plugins", icon: Blocks },
     ],
   },
   {
-    id: "governance",
-    label: "governance",
+    // 只读：发生过什么、花了多少、合不合规。这一组里不该出现配置输入框。
+    id: "analytics",
+    label: "analytics",
     items: [
+      { href: "/metering", labelKey: "metering", icon: BarChart3 },
+      { href: "/metering/split", labelKey: "billingSplit", icon: PieChart },
+      { href: "/metering/agent-traces", labelKey: "agentTraces", icon: Waypoints },
       { href: "/audit", labelKey: "audit", icon: FileWarning },
       { href: "/portal-logs", labelKey: "portalLogs", icon: FileText },
       { href: "/admin/compliance", labelKey: "compliance", icon: Shield },
       { href: "/policy", labelKey: "policy", icon: Shield },
-    ],
-  },
-  {
-    id: "observability",
-    label: "observability",
-    collapsible: true,
-    items: [
       { href: "/admin/errors", labelKey: "errors", icon: FileWarning },
       { href: "/admin/perf", labelKey: "perf", icon: Activity },
     ],

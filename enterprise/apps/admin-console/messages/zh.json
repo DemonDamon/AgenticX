@@ -28,11 +28,10 @@
     "nav": {
       "groups": {
         "overview": "概览",
-        "iam": "成员管理",
-        "ops": "用量与计费",
-        "platform": "模型与工具",
-        "observability": "运维（高级）",
-        "governance": "审计与合规"
+        "organization": "组织与成员",
+        "gateway": "模型与网关",
+        "capabilities": "技能与能力",
+        "analytics": "审计与分析"
       },
       "items": {
         "dashboard": "仪表盘",
