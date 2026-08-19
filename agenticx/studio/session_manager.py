@@ -555,6 +555,15 @@ class SessionManager:
         self._ensure_default_taskspace(managed)
         # Per-session workspaces: do not pull avatar/meta global_workspaces into new sessions.
         self.align_meta_session_workspace(managed)
+        active_taskspace_id = str(
+            getattr(managed.studio_session, "active_taskspace_id", None) or ""
+        ).strip()
+        if active_taskspace_id and not any(
+            str(item.get("id", "")).strip() == active_taskspace_id
+            for item in managed.taskspaces
+            if isinstance(item, dict)
+        ):
+            managed.studio_session.active_taskspace_id = None
         self._sessions[sid] = managed
         return managed
 
@@ -947,6 +956,10 @@ class SessionManager:
                 "model": str(getattr(managed.studio_session, "model_name", "") or ""),
                 "session_mode": normalize_session_mode(
                     getattr(managed.studio_session, "session_mode", None)
+                ),
+                **self._active_taskspace_listing_fields(
+                    getattr(managed.studio_session, "active_taskspace_id", None),
+                    getattr(managed, "taskspaces", None),
                 ),
                 **_harness_list_fields(managed.studio_session),
             })
@@ -1948,6 +1961,8 @@ class SessionManager:
         managed.pinned = bool(metadata.get("pinned", False))
         managed.archived = bool(metadata.get("archived", False))
         managed.taskspaces = self._sanitize_taskspaces(session_id, metadata.get("taskspaces"))
+        raw_active_taskspace_id = str(metadata.get("active_taskspace_id") or "").strip()
+        managed.studio_session.active_taskspace_id = raw_active_taskspace_id or None
 
         if "avatar_id" in metadata:
             raw_av = metadata.get("avatar_id")
@@ -2075,6 +2090,10 @@ class SessionManager:
                     "pinned": bool(getattr(managed_ref, "pinned", False)),
                     "archived": bool(getattr(managed_ref, "archived", False)),
                     "taskspaces": list(getattr(managed_ref, "taskspaces", []) or []),
+                    "active_taskspace_id": str(
+                        getattr(session, "active_taskspace_id", None) or ""
+                    ).strip()
+                    or None,
                     "execution_state": getattr(managed_ref, "execution_state", "idle"),
                     "session_mode": normalize_session_mode(
                         getattr(session, "session_mode", None)
@@ -2694,6 +2713,65 @@ class SessionManager:
             return None
         return s
 
+    @staticmethod
+    def _active_taskspace_listing_fields(
+        raw_active_id: Any,
+        taskspaces: Any,
+    ) -> dict[str, str | None]:
+        """Return compact project metadata for the desktop session list.
+
+        ``default`` is retained in the id so the UI can distinguish an explicit
+        default selection from legacy rows, but it is still rendered as a task.
+        Invalid/stale ids are omitted rather than incorrectly turning a task into
+        a project.
+        """
+        active_id = str(raw_active_id or "").strip()
+        inferred_item: dict[str, Any] | None = None
+        if not active_id and isinstance(taskspaces, list):
+            # ``active_taskspace_id`` was introduced after users could already
+            # attach folders to a conversation.  Treat the newest attached
+            # non-default folder as the legacy active project instead of
+            # collapsing every pre-migration project into the task list.
+            # Historical auto-generated artifact roots are not user projects.
+            for item in reversed(taskspaces):
+                if not isinstance(item, dict):
+                    continue
+                candidate_id = str(item.get("id", "")).strip()
+                if not candidate_id or candidate_id == "default":
+                    continue
+                label = str(item.get("label", "")).strip()
+                path = str(item.get("path", "")).strip().replace("\\", "/").rstrip("/")
+                if label == "任务产物" or path.endswith("/task_artifacts"):
+                    continue
+                active_id = candidate_id
+                inferred_item = item
+                break
+        if not active_id:
+            return {"active_taskspace_id": None, "active_taskspace_label": None}
+        label = ""
+        if inferred_item is not None:
+            label = str(inferred_item.get("label", "")).strip()
+        if isinstance(taskspaces, list):
+            for item in taskspaces:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("id", "")).strip() != active_id:
+                    continue
+                label = str(item.get("label", "")).strip()
+                break
+        if not label and active_id != "default":
+            # A stale active id should not be advertised as a project. The
+            # taskspace list is the source of truth for valid project ids.
+            if isinstance(taskspaces, list) and not any(
+                isinstance(item, dict) and str(item.get("id", "")).strip() == active_id
+                for item in taskspaces
+            ):
+                return {"active_taskspace_id": None, "active_taskspace_label": None}
+        return {
+            "active_taskspace_id": active_id,
+            "active_taskspace_label": label or None,
+        }
+
     def _list_persisted_sessions(self, avatar_id: str | None = None) -> list[dict]:
         """Load persisted session rows, optionally scoped to one avatar_id.
 
@@ -2767,6 +2845,10 @@ class SessionManager:
                     "execution_state": str(metadata.get("execution_state", "idle") or "idle"),
                     "provider": str(metadata.get("provider", "") or ""),
                     "model": str(metadata.get("model", "") or ""),
+                    **self._active_taskspace_listing_fields(
+                        metadata.get("active_taskspace_id"),
+                        metadata.get("taskspaces"),
+                    ),
                 }
             )
         known = {str(row.get("session_id", "")) for row in rows}
@@ -2824,6 +2906,10 @@ class SessionManager:
                         "execution_state": str(fs_meta.get("execution_state", "idle") or "idle"),
                         "provider": str(fs_meta.get("provider", "") or ""),
                         "model": str(fs_meta.get("model", "") or ""),
+                        **self._active_taskspace_listing_fields(
+                            fs_meta.get("active_taskspace_id"),
+                            fs_meta.get("taskspaces"),
+                        ),
                     }
                 )
         return rows

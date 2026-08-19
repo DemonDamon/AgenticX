@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   Archive,
   ChevronDown,
+  FolderKanban,
   GitBranch,
   ListChecks,
   ListFilter,
   ListTree,
+  ListTodo,
   MessageSquare,
   MoreHorizontal,
   Pencil,
@@ -44,6 +46,7 @@ import {
   getSidebarSessionActivityTs,
   matchesSidebarAvatarFilter,
   normalizeSidebarSessionRows,
+  partitionSidebarSessionRows,
   parseDesktopBoundSessionId,
   resolveSidebarAvatarChipName,
   sidebarSessionHasRenderableMessages,
@@ -61,6 +64,8 @@ type MoreMenuState = {
 };
 
 type CollapseState = {
+  projects: boolean;
+  tasks: boolean;
   wechat: boolean;
   feishu: boolean;
   pinned: boolean;
@@ -71,6 +76,8 @@ type CollapseState = {
 };
 
 const DEFAULT_COLLAPSE: CollapseState = {
+  projects: false,
+  tasks: false,
   wechat: false,
   feishu: false,
   pinned: false,
@@ -134,6 +141,7 @@ export function SidebarSessionHistory() {
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
+  const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const setPaneLoadingMessages = useAppStore((s) => s.setPaneLoadingMessages);
   const setPaneMessagePaging = useAppStore((s) => s.setPaneMessagePaging);
@@ -377,31 +385,71 @@ export function SidebarSessionHistory() {
     [sessionsWithHints, avatarFilter]
   );
 
-  const buckets = useMemo(
-    () => bucketSidebarHistoryRows(filteredForBuckets, specialIds),
-    [filteredForBuckets, specialIds]
+  // A pane can have a newer local workspace selection than the last persisted
+  // turn. Prefer that signal for the current session so the row moves between
+  // 项目 / 任务 immediately; historical rows keep the backend metadata.
+  const rowsWithLiveWorkspace = useMemo(() => {
+    const liveWorkspaceBySession = new Map<string, string>();
+    for (const pane of panes) {
+      const sid = String(pane.sessionId ?? "").trim();
+      const active = String(pane.activeTaskspaceId ?? "").trim();
+      if (!sid || !active) continue;
+      liveWorkspaceBySession.set(sid, active);
+    }
+    if (liveWorkspaceBySession.size === 0) return filteredForBuckets;
+    return filteredForBuckets.map((row) => {
+      const active = liveWorkspaceBySession.get(row.session_id);
+      return active ? { ...row, active_taskspace_id: active } : row;
+    });
+  }, [filteredForBuckets, panes]);
+
+  const { projects: projectRows, tasks: taskRows } = useMemo(() => {
+    // Bound IM sessions have dedicated rows inside 任务 and must never also
+    // appear in 项目 even if a connector happened to carry workspace metadata.
+    const regularRows = rowsWithLiveWorkspace.filter((row) => !specialIds.has(row.session_id));
+    return partitionSidebarSessionRows(regularRows);
+  }, [rowsWithLiveWorkspace, specialIds]);
+
+  const taskBuckets = useMemo(
+    () => bucketSidebarHistoryRows(taskRows, specialIds),
+    [taskRows, specialIds]
   );
 
-  const chronological = useMemo(
-    () => [...buckets.today, ...buckets.yesterday, ...buckets.recent, ...buckets.earlier],
-    [buckets.today, buckets.yesterday, buckets.recent, buckets.earlier]
+  const taskChronological = useMemo(
+    () => [
+      ...taskBuckets.today,
+      ...taskBuckets.yesterday,
+      ...taskBuckets.recent,
+      ...taskBuckets.earlier,
+    ],
+    [taskBuckets.today, taskBuckets.yesterday, taskBuckets.recent, taskBuckets.earlier]
   );
-  const visibleChrono = chronological.slice(0, visibleLimit);
-  const todayVisible = visibleChrono.filter((r) => buckets.today.includes(r));
-  const yesterdayVisible = visibleChrono.filter((r) => buckets.yesterday.includes(r));
-  const recentVisible = visibleChrono.filter((r) => buckets.recent.includes(r));
-  const earlierVisible = visibleChrono.filter((r) => buckets.earlier.includes(r));
-  const hasMore = chronological.length > visibleLimit;
-  const hasStandardHistory = buckets.pinned.length > 0 || chronological.length > 0;
+  const visibleProjectRows = projectRows.slice(0, visibleLimit);
+  const taskVisibleLimit = Math.max(0, visibleLimit - visibleProjectRows.length);
+  const visibleTaskChrono = taskChronological.slice(0, taskVisibleLimit);
+  const taskTodayVisible = visibleTaskChrono.filter((r) => taskBuckets.today.includes(r));
+  const taskYesterdayVisible = visibleTaskChrono.filter((r) => taskBuckets.yesterday.includes(r));
+  const taskRecentVisible = visibleTaskChrono.filter((r) => taskBuckets.recent.includes(r));
+  const taskEarlierVisible = visibleTaskChrono.filter((r) => taskBuckets.earlier.includes(r));
+  const specialTaskRows = SHOW_DESKTOP_EXTERNAL_IM
+    ? [wechatRow, feishuRow].filter((row): row is SidebarSessionRow => !!row)
+    : [];
+  const taskRowCount =
+    specialTaskRows.length +
+    taskBuckets.pinned.length +
+    taskChronological.length;
+  const hasMore = projectRows.length + taskBuckets.pinned.length + taskChronological.length > visibleLimit;
+  const hasStandardHistory = projectRows.length > 0 || taskRowCount > 0;
 
   const selectableRows = useMemo(() => {
     const map = new Map<string, SidebarSessionRow>();
     if (SHOW_DESKTOP_EXTERNAL_IM && wechatRow) map.set(wechatRow.session_id, wechatRow);
     if (SHOW_DESKTOP_EXTERNAL_IM && feishuRow) map.set(feishuRow.session_id, feishuRow);
-    for (const row of buckets.pinned) map.set(row.session_id, row);
-    for (const row of chronological) map.set(row.session_id, row);
+    for (const row of projectRows) map.set(row.session_id, row);
+    for (const row of taskBuckets.pinned) map.set(row.session_id, row);
+    for (const row of taskChronological) map.set(row.session_id, row);
     return Array.from(map.values());
-  }, [wechatRow, feishuRow, buckets.pinned, chronological]);
+  }, [wechatRow, feishuRow, projectRows, taskBuckets.pinned, taskChronological]);
 
   const selectableIds = useMemo(
     () => selectableRows.map((r) => r.session_id),
@@ -580,6 +628,9 @@ export function SidebarSessionHistory() {
         provider: row.provider,
         model: row.model,
       });
+      if (Object.prototype.hasOwnProperty.call(row, "active_taskspace_id")) {
+        setActiveTaskspace(paneId, row.active_taskspace_id ?? null);
+      }
       if (row.session_mode === "code_dev" || row.session_mode === "daily_office") {
         setPaneSessionMode(paneId, row.session_mode);
       }
@@ -671,6 +722,7 @@ export function SidebarSessionHistory() {
       setPaneMessages,
       setPaneSessionId,
       setPaneSessionMode,
+      setActiveTaskspace,
     ]
   );
 
@@ -694,6 +746,9 @@ export function SidebarSessionHistory() {
       provider: row.provider,
       model: row.model,
     });
+    if (Object.prototype.hasOwnProperty.call(row, "active_taskspace_id")) {
+      setActiveTaskspace(paneId, row.active_taskspace_id ?? null);
+    }
     if (row.session_mode === "code_dev" || row.session_mode === "daily_office") {
       setPaneSessionMode(paneId, row.session_mode);
     }
@@ -1095,6 +1150,7 @@ export function SidebarSessionHistory() {
     opts?: {
       accentClass?: string;
       badge?: { text: string; className: string };
+      icon?: ReactNode;
       trailing?: ReactNode;
     }
   ) => (
@@ -1106,6 +1162,7 @@ export function SidebarSessionHistory() {
         }`}
         onClick={() => toggleSection(key)}
       >
+        {opts?.icon ? <span className="shrink-0">{opts.icon}</span> : null}
         <ChevronDown
           className={`h-3 w-3 shrink-0 transition-transform ${collapse[key] ? "-rotate-90" : ""}`}
           strokeWidth={2}
@@ -1134,10 +1191,7 @@ export function SidebarSessionHistory() {
         }`}
         aria-hidden={showFileManage}
       >
-      <div className="flex items-center gap-1 px-2 pb-1 pt-2">
-        <div className="min-w-0 flex-1 truncate px-1 text-[11px] font-medium text-text-faint">
-          历史对话
-        </div>
+      <div className="flex items-center justify-end gap-1 px-2 pb-1 pt-2">
         {!selectMode ? (
           <>
             <button
@@ -1211,93 +1265,110 @@ export function SidebarSessionHistory() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-3">
-        {SHOW_DESKTOP_EXTERNAL_IM ? (
+        {/* Projects stay above tasks. A project means the user selected a
+            non-default workspace for that session; the default root remains a task. */}
+        {projectRows.length > 0 ? (
           <>
-            {/* WeChat IM */}
-            {sectionHeader("wechat", "微信 IM", {
-              accentClass: "text-[#25D366]",
-              badge: wechatBoundId
-                ? {
-                    text: "已绑定",
-                    className: "bg-[rgba(37,211,102,0.15)] text-[#25D366]",
-                  }
-                : undefined,
+            {sectionHeader("projects", "项目", {
+              accentClass: "text-[rgb(var(--theme-color-fg-rgb,59,130,246))]",
+              icon: <FolderKanban className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden />,
+              badge: {
+                text: String(projectRows.length),
+                className: "bg-[rgba(var(--theme-color-rgb,59,130,246),0.14)] text-[rgb(var(--theme-color-fg-rgb,59,130,246))]",
+              },
             })}
-            {!collapse.wechat && (
-              <div className="mb-1">
-                {wechatRow ? (
-                  renderRow(wechatRow)
-                ) : (
-                  <div className="px-2 py-1 text-[11px] text-text-faint">
-                    未绑定会话
-                  </div>
-                )}
+            {!collapse.projects ? (
+              <div className="mb-2">
+                {visibleProjectRows.map((row) => renderRow(row))}
               </div>
-            )}
-
-            {/* Feishu IM */}
-            {sectionHeader("feishu", "飞书 IM", {
-              accentClass: "text-[#3370FF]",
-              badge: feishuBoundId
-                ? {
-                    text: "已绑定",
-                    className: "bg-[rgba(51,112,255,0.15)] text-[#3370FF]",
-                  }
-                : undefined,
-            })}
-            {!collapse.feishu && (
-              <div className="mb-1">
-                {feishuRow ? (
-                  renderRow(feishuRow)
-                ) : (
-                  <div className="px-2 py-1 text-[11px] text-text-faint">
-                    未绑定会话
-                  </div>
-                )}
-              </div>
-            )}
+            ) : null}
           </>
         ) : null}
 
-        {/* Pinned */}
-        {buckets.pinned.length > 0 ? sectionHeader("pinned", "置顶") : null}
-        {buckets.pinned.length > 0 && !collapse.pinned && (
-          <div className="mb-1">
-            {buckets.pinned.map((row) => renderRow(row))}
-          </div>
-        )}
+        {taskRowCount > 0 ? (
+          <>
+            {sectionHeader("tasks", "任务", {
+              accentClass: "text-text-faint",
+              icon: <ListTodo className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden />,
+              badge: {
+                text: String(taskRowCount),
+                className: "bg-surface-card text-text-faint",
+              },
+            })}
+            {!collapse.tasks ? (
+              <div>
+                {SHOW_DESKTOP_EXTERNAL_IM && wechatRow ? (
+                  <>
+                    {sectionHeader("wechat", "微信 IM", {
+                      accentClass: "text-[#25D366]",
+                      badge: wechatBoundId
+                        ? {
+                            text: "已绑定",
+                            className: "bg-[rgba(37,211,102,0.15)] text-[#25D366]",
+                          }
+                        : undefined,
+                    })}
+                    {!collapse.wechat ? (
+                      <div className="mb-1">{renderRow(wechatRow)}</div>
+                    ) : null}
+                  </>
+                ) : null}
 
-        {/* Today */}
-        {todayVisible.length > 0 ? sectionHeader("today", "今天") : null}
-        {todayVisible.length > 0 && !collapse.today && (
-          <div className="mb-1">
-            {todayVisible.map((row) => renderRow(row))}
-          </div>
-        )}
+                {SHOW_DESKTOP_EXTERNAL_IM && feishuRow ? (
+                  <>
+                    {sectionHeader("feishu", "飞书 IM", {
+                      accentClass: "text-[#3370FF]",
+                      badge: feishuBoundId
+                        ? {
+                            text: "已绑定",
+                            className: "bg-[rgba(51,112,255,0.15)] text-[#3370FF]",
+                          }
+                        : undefined,
+                    })}
+                    {!collapse.feishu ? (
+                      <div className="mb-1">{renderRow(feishuRow)}</div>
+                    ) : null}
+                  </>
+                ) : null}
 
-        {/* Yesterday */}
-        {yesterdayVisible.length > 0 ? sectionHeader("yesterday", "昨天") : null}
-        {yesterdayVisible.length > 0 && !collapse.yesterday && (
-          <div className="mb-1">
-            {yesterdayVisible.map((row) => renderRow(row))}
-          </div>
-        )}
+                {taskBuckets.pinned.length > 0 ? sectionHeader("pinned", "置顶") : null}
+                {taskBuckets.pinned.length > 0 && !collapse.pinned ? (
+                  <div className="mb-1">
+                    {taskBuckets.pinned.map((row) => renderRow(row))}
+                  </div>
+                ) : null}
 
-        {/* Previous seven days */}
-        {recentVisible.length > 0 ? sectionHeader("recent", "过去 7 天") : null}
-        {recentVisible.length > 0 && !collapse.recent && (
-          <div className="mb-1">
-            {recentVisible.map((row) => renderRow(row))}
-          </div>
-        )}
+                {taskTodayVisible.length > 0 ? sectionHeader("today", "今天") : null}
+                {taskTodayVisible.length > 0 && !collapse.today ? (
+                  <div className="mb-1">
+                    {taskTodayVisible.map((row) => renderRow(row))}
+                  </div>
+                ) : null}
 
-        {/* Earlier */}
-        {earlierVisible.length > 0 ? sectionHeader("earlier", "更早") : null}
-        {earlierVisible.length > 0 && !collapse.earlier && (
-          <div className="mb-1">
-            {earlierVisible.map((row) => renderRow(row))}
-          </div>
-        )}
+                {taskYesterdayVisible.length > 0 ? sectionHeader("yesterday", "昨天") : null}
+                {taskYesterdayVisible.length > 0 && !collapse.yesterday ? (
+                  <div className="mb-1">
+                    {taskYesterdayVisible.map((row) => renderRow(row))}
+                  </div>
+                ) : null}
+
+                {taskRecentVisible.length > 0 ? sectionHeader("recent", "过去 7 天") : null}
+                {taskRecentVisible.length > 0 && !collapse.recent ? (
+                  <div className="mb-1">
+                    {taskRecentVisible.map((row) => renderRow(row))}
+                  </div>
+                ) : null}
+
+                {taskEarlierVisible.length > 0 ? sectionHeader("earlier", "更早") : null}
+                {taskEarlierVisible.length > 0 && !collapse.earlier ? (
+                  <div className="mb-1">
+                    {taskEarlierVisible.map((row) => renderRow(row))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        ) : null}
 
         {!hasStandardHistory ? (
           <div className="px-2 py-3 text-[11px] text-text-faint">暂无历史对话</div>

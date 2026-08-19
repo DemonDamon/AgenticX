@@ -11,6 +11,10 @@ export type SidebarSessionRow = {
   avatar_id: string | null;
   avatar_name?: string | null;
   session_name: string | null;
+  /** Workspace explicitly active for the last turn (`default` means task). */
+  active_taskspace_id?: string | null;
+  /** Best-effort display label for the active project workspace. */
+  active_taskspace_label?: string | null;
   updated_at: number;
   created_at?: number;
   pinned?: boolean;
@@ -102,6 +106,14 @@ export function normalizeSidebarSessionRows(input: unknown): SidebarSessionRow[]
     if (Boolean(row.archived)) continue;
     const updatedAtRaw = Number(row.updated_at ?? 0);
     const createdAtRaw = Number(row.created_at ?? updatedAtRaw);
+    const hasActiveTaskspaceId = Object.prototype.hasOwnProperty.call(row, "active_taskspace_id");
+    const activeTaskspaceId = hasActiveTaskspaceId
+      ? String(row.active_taskspace_id ?? "").trim() || null
+      : undefined;
+    const hasActiveTaskspaceLabel = Object.prototype.hasOwnProperty.call(row, "active_taskspace_label");
+    const activeTaskspaceLabel = hasActiveTaskspaceLabel
+      ? String(row.active_taskspace_label ?? "").trim() || null
+      : undefined;
     const execRaw = String(row.execution_state ?? "idle").trim();
     const execution_state: SidebarSessionExecutionState =
       execRaw === "running" || execRaw === "interrupted" || execRaw === "failed"
@@ -112,6 +124,8 @@ export function normalizeSidebarSessionRows(input: unknown): SidebarSessionRow[]
       avatar_id: avatarId,
       avatar_name: row.avatar_name == null ? null : String(row.avatar_name),
       session_name: row.session_name == null ? null : String(row.session_name),
+      ...(hasActiveTaskspaceId ? { active_taskspace_id: activeTaskspaceId } : {}),
+      ...(hasActiveTaskspaceLabel ? { active_taskspace_label: activeTaskspaceLabel } : {}),
       updated_at: Number.isFinite(updatedAtRaw) && updatedAtRaw > 0 ? updatedAtRaw : 0,
       created_at: Number.isFinite(createdAtRaw) && createdAtRaw > 0 ? createdAtRaw : undefined,
       pinned: Boolean(row.pinned),
@@ -126,6 +140,29 @@ export function normalizeSidebarSessionRows(input: unknown): SidebarSessionRow[]
     });
   }
   return sortSidebarSessionRows(rows);
+}
+
+/**
+ * A project is a session whose last explicit workspace is not the implicit
+ * per-session `default` workspace. Missing metadata is intentionally treated
+ * as a task so older sessions fail safe into the task list.
+ */
+export function isSidebarProjectRow(
+  row: Pick<SidebarSessionRow, "active_taskspace_id">,
+): boolean {
+  const activeId = String(row.active_taskspace_id ?? "").trim();
+  return activeId.length > 0 && activeId !== "default";
+}
+
+export function partitionSidebarSessionRows(
+  rows: readonly SidebarSessionRow[],
+): { projects: SidebarSessionRow[]; tasks: SidebarSessionRow[] } {
+  const projects: SidebarSessionRow[] = [];
+  const tasks: SidebarSessionRow[] = [];
+  for (const row of rows) {
+    (isSidebarProjectRow(row) ? projects : tasks).push(row);
+  }
+  return { projects, tasks };
 }
 
 /** Keep pin-first / activity-desc order after hint merge. */

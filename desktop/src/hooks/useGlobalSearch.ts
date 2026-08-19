@@ -28,6 +28,7 @@ export type ConversationHit = {
   updatedAt: number;
   provider?: string;
   model?: string;
+  activeTaskspaceId?: string | null;
 };
 
 export type GlobalSearchPreview = {
@@ -116,6 +117,7 @@ type SessionListRow = {
   updated_at: number;
   provider?: string;
   model?: string;
+  active_taskspace_id?: string | null;
 };
 
 /** Search chat history via FTS and resolve titles/avatars from the session list. */
@@ -153,6 +155,7 @@ async function fetchConversationHits(trimmed: string): Promise<{
       updatedAt: Number(row?.updated_at || 0),
       provider: row?.provider,
       model: row?.model,
+      activeTaskspaceId: row?.active_taskspace_id,
     });
   }
   mapped.sort((a, b) => b.updatedAt - a.updatedAt);

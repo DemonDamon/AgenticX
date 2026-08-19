@@ -27,6 +27,7 @@ type SessionListItem = GroupOpenSessionRow & {
   updated_at: number;
   provider?: string;
   model?: string;
+  active_taskspace_id?: string | null;
 };
 
 export function usePaneNavigation() {
@@ -35,6 +36,7 @@ export function usePaneNavigation() {
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
+  const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const setMainView = useAppStore((s) => s.setMainView);
   const openingRef = useRef(false);
 
@@ -44,11 +46,14 @@ export function usePaneNavigation() {
    * The meta-agent keeps its resume-last-session behaviour. An expert entry is
    * deliberately a "start a conversation" action: every click opens a lazy
    * fresh topic in that expert's pane instead of silently restoring old chat.
+   * An optional draft is placed in the fresh composer for the user to review;
+   * it is never sent automatically.
    */
   const openMetaOrAvatarPane = useCallback(
-    (avatarId: string | null, avatarName: string) => {
+    (avatarId: string | null, avatarName: string, draftText?: string) => {
       setMainView("chat");
       const existing = panes.find((item) => item.avatarId === avatarId);
+      const expertDraft = typeof draftText === "string" ? draftText : undefined;
 
       if (avatarId !== null) {
         if (existing) {
@@ -58,7 +63,10 @@ export function usePaneNavigation() {
           // listener can reset the conversation synchronously.
           window.dispatchEvent(
             new CustomEvent("agenticx:pane:new-topic", {
-              detail: { paneId: existing.id },
+              detail: {
+                paneId: existing.id,
+                ...(expertDraft !== undefined ? { draftText: expertDraft } : {}),
+              },
             })
           );
           return;
@@ -73,6 +81,17 @@ export function usePaneNavigation() {
           markPaneAwaitingFreshSession(paneId);
           setActivePaneId(paneId);
           setActiveAvatarId(avatarId);
+          if (expertDraft !== undefined) {
+            // A first-open expert pane is mounted by the store update above.
+            // Defer the targeted draft event so ChatPane can subscribe first.
+            window.setTimeout(() => {
+              window.dispatchEvent(
+                new CustomEvent("agenticx:pane:new-topic", {
+                  detail: { paneId, draftText: expertDraft },
+                })
+              );
+            }, 0);
+          }
         } finally {
           openingRef.current = false;
         }
@@ -96,6 +115,9 @@ export function usePaneNavigation() {
                 provider: currentRow.provider,
                 model: currentRow.model,
               });
+              if (Object.prototype.hasOwnProperty.call(currentRow, "active_taskspace_id")) {
+                setActiveTaskspace(existing.id, currentRow.active_taskspace_id ?? null);
+              }
               return;
             }
           }
@@ -131,6 +153,9 @@ export function usePaneNavigation() {
                   provider: preferredRow?.provider,
                   model: preferredRow?.model,
                 });
+                if (preferredRow && Object.prototype.hasOwnProperty.call(preferredRow, "active_taskspace_id")) {
+                  setActiveTaskspace(existing.id, preferredRow.active_taskspace_id ?? null);
+                }
               }
             }
           }
@@ -176,6 +201,9 @@ export function usePaneNavigation() {
               provider: preferredRow?.provider,
               model: preferredRow?.model,
             });
+            if (preferredRow && Object.prototype.hasOwnProperty.call(preferredRow, "active_taskspace_id")) {
+              setActiveTaskspace(paneId, preferredRow.active_taskspace_id ?? null);
+            }
             return;
           }
           // Lazy session: first real send in ChatPane will createSession.
@@ -184,7 +212,15 @@ export function usePaneNavigation() {
         }
       })();
     },
-    [panes, addPane, setActivePaneId, setActiveAvatarId, setPaneSessionId, setMainView]
+    [
+      panes,
+      addPane,
+      setActivePaneId,
+      setActiveAvatarId,
+      setPaneSessionId,
+      setActiveTaskspace,
+      setMainView,
+    ]
   );
 
   /** Open or focus a group-chat pane. */

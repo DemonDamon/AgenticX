@@ -7,6 +7,8 @@ import {
   formatSidebarRelativeTime,
   matchesSidebarAvatarFilter,
   normalizeSidebarSessionRows,
+  isSidebarProjectRow,
+  partitionSidebarSessionRows,
   resolveSidebarAvatarChipName,
   sidebarSessionHasRenderableMessages,
   sidebarSessionLabel,
@@ -38,6 +40,33 @@ describe("sidebar-session-history utils", () => {
     ]);
     expect(rows.map((r) => r.session_id)).toEqual(["a"]);
     expect(sidebarSessionLabel(rows[0]!)).toBe("你好世界");
+  });
+
+  it("classifies only explicitly selected non-default workspaces as projects", () => {
+    expect(isSidebarProjectRow({ active_taskspace_id: "ts-project" })).toBe(true);
+    expect(isSidebarProjectRow({ active_taskspace_id: "default" })).toBe(false);
+    expect(isSidebarProjectRow({ active_taskspace_id: null })).toBe(false);
+    expect(isSidebarProjectRow({})).toBe(false);
+
+    const rows = normalizeSidebarSessionRows([
+      {
+        session_id: "project",
+        avatar_id: null,
+        session_name: "项目",
+        active_taskspace_id: "ts-1",
+        active_taskspace_label: "产品仓库",
+        updated_at: 2,
+      },
+      { session_id: "default", avatar_id: null, session_name: "任务", active_taskspace_id: "default", updated_at: 1 },
+      { session_id: "legacy", avatar_id: null, session_name: "旧任务", updated_at: 0 },
+    ]);
+    const partitioned = partitionSidebarSessionRows(rows);
+    expect(partitioned.projects.map((row) => row.session_id)).toEqual(["project"]);
+    expect(partitioned.tasks.map((row) => row.session_id)).toEqual(["default", "legacy"]);
+    expect(partitioned.projects[0]?.active_taskspace_label).toBe("产品仓库");
+    expect(partitioned.tasks.find((row) => row.session_id === "legacy")).not.toHaveProperty(
+      "active_taskspace_id",
+    );
   });
 
   it("buckets pinned and local-calendar date ranges without duplicates", () => {

@@ -129,6 +129,31 @@ describe("usePaneNavigation expert conversations", () => {
     expect(isPaneAwaitingFreshSession(expertPane?.id ?? "")).toBe(true);
   });
 
+  it("prefills an editable draft after mounting a never-opened expert pane", () => {
+    const navigation = renderNavigation();
+
+    navigation.openMetaOrAvatarPane(
+      "expert-finance",
+      "数字专家",
+      "请先检查工作区依赖，不要自动安装。",
+    );
+
+    const expertPane = navStore.state.panes.find(
+      (item) => item.avatarId === "expert-finance",
+    );
+    expect(expertPane?.sessionId).toBe("");
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    const event = dispatchEvent.mock.calls[0]![0] as CustomEvent<{
+      paneId?: string;
+      draftText?: string;
+    }>;
+    expect(event.type).toBe("agenticx:pane:new-topic");
+    expect(event.detail).toEqual({
+      paneId: expertPane?.id,
+      draftText: "请先检查工作区依赖，不要自动安装。",
+    });
+  });
+
   it("turns an already-open expert pane into a fresh topic instead of resuming its old session", () => {
     navStore.state.panes.push(
       pane({
@@ -151,6 +176,34 @@ describe("usePaneNavigation expert conversations", () => {
     const event = dispatchEvent.mock.calls[0]![0] as CustomEvent<{ paneId?: string }>;
     expect(event.type).toBe("agenticx:pane:new-topic");
     expect(event.detail).toEqual({ paneId: "pane-expert" });
+  });
+
+  it("passes an editable draft to an already-open expert's fresh topic", () => {
+    navStore.state.panes.push(
+      pane({
+        id: "pane-expert",
+        avatarId: "expert-finance",
+        avatarName: "数字专家",
+        sessionId: "session-old",
+      }),
+    );
+    const navigation = renderNavigation();
+
+    navigation.openMetaOrAvatarPane(
+      "expert-finance",
+      "数字专家",
+      "环境配置向导草稿",
+    );
+
+    expect(dispatchEvent).toHaveBeenCalledTimes(1);
+    const event = dispatchEvent.mock.calls[0]![0] as CustomEvent<{
+      paneId?: string;
+      draftText?: string;
+    }>;
+    expect(event.detail).toEqual({
+      paneId: "pane-expert",
+      draftText: "环境配置向导草稿",
+    });
   });
 
   it("does not reinterpret the meta-agent entry as an expert new-topic action", () => {

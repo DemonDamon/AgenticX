@@ -193,6 +193,90 @@ def test_list_sessions_restores_from_persisted_state_after_restart(tmp_path: Pat
     assert sid in session_ids
 
 
+def test_active_taskspace_is_persisted_and_returned_for_project_sidebar_rows(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    taskspaces_root = tmp_path / "taskspaces"
+
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+    manager._taskspaces_root = str(taskspaces_root)
+
+    sid = "project-sidebar-session"
+    managed = manager.create(session_id=sid)
+    managed.taskspaces.append({"id": "ts-project", "label": "产品仓库", "path": str(tmp_path / "repo")})
+    managed.studio_session.active_taskspace_id = "ts-project"
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "inspect the project"},
+    ]
+    assert manager.persist(sid) is True
+
+    row = next(item for item in manager.list_sessions() if item["session_id"] == sid)
+    assert row["active_taskspace_id"] == "ts-project"
+    assert row["active_taskspace_label"] == "产品仓库"
+
+    fresh = SessionManager()
+    fresh._session_store = store
+    fresh._sessions_root = str(sessions_root)
+    fresh._taskspaces_root = str(taskspaces_root)
+    restored = fresh.get(sid, touch=False)
+    assert restored is not None
+    assert restored.studio_session.active_taskspace_id == "ts-project"
+    fresh_row = next(item for item in fresh.list_sessions() if item["session_id"] == sid)
+    assert fresh_row["active_taskspace_id"] == "ts-project"
+
+
+def test_session_list_infers_legacy_project_workspace_but_ignores_artifacts(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+    manager._taskspaces_root = str(tmp_path / "taskspaces")
+
+    sid = "legacy-project-sidebar-session"
+    managed = manager.create(session_id=sid)
+    managed.taskspaces.extend(
+        [
+            {
+                "id": "legacy-artifacts",
+                "label": "任务产物",
+                "path": str(tmp_path / "task_artifacts"),
+            },
+            {
+                "id": "legacy-project",
+                "label": "客户项目",
+                "path": str(tmp_path / "customer-repo"),
+            },
+        ]
+    )
+    managed.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "continue the project"},
+    ]
+    assert manager.persist(sid) is True
+
+    row = next(item for item in manager.list_sessions() if item["session_id"] == sid)
+    assert row["active_taskspace_id"] == "legacy-project"
+    assert row["active_taskspace_label"] == "客户项目"
+
+    artifact_only = SessionManager._active_taskspace_listing_fields(
+        None,
+        [
+            {"id": "default", "label": "默认工作区", "path": str(tmp_path / "default")},
+            {
+                "id": "legacy-artifacts",
+                "label": "任务产物",
+                "path": str(tmp_path / "task_artifacts"),
+            },
+        ],
+    )
+    assert artifact_only == {
+        "active_taskspace_id": None,
+        "active_taskspace_label": None,
+    }
+
+
 def test_get_lazy_restores_persisted_session(tmp_path: Path) -> None:
     store = SessionStore(tmp_path / "sessions.sqlite")
     sessions_root = tmp_path / "sessions"
@@ -1073,4 +1157,3 @@ def test_add_taskspace_respects_configurable_limit(tmp_path: Path, monkeypatch: 
 
     with pytest.raises(ValueError, match=r"taskspace limit reached \(3\)"):
         manager.add_taskspace(sid, path=str(tmp_path / "ws-c"), label="c")
-

@@ -683,6 +683,8 @@ declare global {
           avatar_id: string | null;
           avatar_name?: string | null;
           session_name: string | null;
+          active_taskspace_id?: string | null;
+          active_taskspace_label?: string | null;
           updated_at: number;
           created_at?: number;
           pinned?: boolean;

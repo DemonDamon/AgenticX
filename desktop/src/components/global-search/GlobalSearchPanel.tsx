@@ -99,6 +99,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const setActiveAvatarId = useAppStore((s) => s.setActiveAvatarId);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
+  const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const setPaneHistorySearchTerms = useAppStore((s) => s.setPaneHistorySearchTerms);
 
   const jumpToConversation = useCallback(
@@ -110,6 +111,9 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
       setActivePaneId(paneId);
       setActiveAvatarId(hit.avatarId);
       setPaneSessionId(paneId, hit.sessionId, { provider: hit.provider, model: hit.model });
+      if (hit.activeTaskspaceId !== undefined) {
+        setActiveTaskspace(paneId, hit.activeTaskspaceId ?? null);
+      }
       setPaneHistorySearchTerms(paneId, buildHighlightTermsFromQuery(search.query));
       onClose();
     },
@@ -120,6 +124,7 @@ export function GlobalSearchPanel({ open, onClose }: Props) {
       setActivePaneId,
       setActiveAvatarId,
       setPaneSessionId,
+      setActiveTaskspace,
       setPaneHistorySearchTerms,
       search.query,
       onClose,
