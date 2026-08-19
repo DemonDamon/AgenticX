@@ -16,7 +16,7 @@
 | `REDIS_URL` | ⚪ | 当前 portal/admin 主要落 DB，Redis 用于 gateway 限流/缓存 |
 | `AUTH_JWT_PRIVATE_KEY` | ✅ | RS256 私钥 PEM（portal/admin 签发） |
 | `AUTH_JWT_PUBLIC_KEY` | ✅ | RS256 公钥（gateway 校验） |
-| `AUTH_JWT_PRIVATE_KEY_FILE` | ⚪ | `.env.local` 习惯写 `*_FILE`，`start-dev.sh` 展开为内容 |
+| `AUTH_JWT_PRIVATE_KEY_FILE` | ⚪ | 裸变量未设时按此路径读取；PEM 多行不便写进 `.env`，这是推荐写法 |
 | `AUTH_JWT_PUBLIC_KEY_FILE` | ⚪ | 同上 |
 | `DEFAULT_TENANT_ID` | 🟡 | 默认租户 ULID（seed 之后） |
 | `DEFAULT_DEPT_ID` | ⚪ | 默认部门 ULID |
@@ -59,6 +59,7 @@
 | `ADMIN_CONSOLE_SESSION_SECRET` | ✅ | 管理台 session 签名 |
 | `GATEWAY_BASE_URL` | 🟡 | 管理台健康检查目标（默认 `http://127.0.0.1:8088`） |
 | `GATEWAY_INTERNAL_TOKEN` | ✅ Vercel 分体 | Gateway 拉取 internal API 的 Bearer |
+| `GATEWAY_INTERNAL_TOKEN_FILE` | ⚪ | 裸变量未设时按此路径读取（gateway 与 admin-console 两侧都支持） |
 | `GATEWAY_INTERNAL_BASE_URL` | ⚪ | Channel 健康聚合；注意区分 gateway 8088 vs internal mgmt 端口 |
 | `AGX_PROVIDER_SECRET_KEY` | ✅ | Provider API Key AES-256-GCM 密钥（32 字节 base64） |
 | `SSO_PROVIDER_SECRET_KEY` | ✅ | SSO client_secret AES-256-GCM 密钥 |

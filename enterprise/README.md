@@ -172,9 +172,7 @@ bash scripts/bootstrap.sh --mode=server
 ```bash
 # 在 enterprise/ 根目录，环境变量需自行注入
 set -a; source .env.local; set +a
-# .env.local 里存的是 *_FILE，需要手动展开 PEM 内容
-export AUTH_JWT_PRIVATE_KEY="$(cat "$AUTH_JWT_PRIVATE_KEY_FILE")"
-export AUTH_JWT_PUBLIC_KEY="$(cat "$AUTH_JWT_PUBLIC_KEY_FILE")"
+# .env.local 里存的是 *_FILE，代码会直接按路径读取，无需手动展开 PEM
 pnpm install
 pnpm exec turbo run dev \
   --filter=@agenticx/app-web-portal \

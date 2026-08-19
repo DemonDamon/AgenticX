@@ -9,6 +9,7 @@ import {
   SignJWT,
 } from "jose";
 import type { AuthContext } from "../types";
+import { readSecretFromEnv } from "./secret-from-env";
 
 type JwtConfig = {
   issuer?: string;
@@ -46,8 +47,8 @@ export class JwtService {
   }
 
   private async bootstrap(privateKeyPem?: string, publicKeyPem?: string): Promise<void> {
-    const resolvedPrivateKeyPem = privateKeyPem ?? process.env.AUTH_JWT_PRIVATE_KEY;
-    const resolvedPublicKeyPem = publicKeyPem ?? process.env.AUTH_JWT_PUBLIC_KEY;
+    const resolvedPrivateKeyPem = privateKeyPem ?? readSecretFromEnv("AUTH_JWT_PRIVATE_KEY");
+    const resolvedPublicKeyPem = publicKeyPem ?? readSecretFromEnv("AUTH_JWT_PUBLIC_KEY");
 
     if (resolvedPrivateKeyPem && resolvedPublicKeyPem) {
       this.privateKey = await importPKCS8(resolvedPrivateKeyPem, "RS256");
@@ -57,7 +58,9 @@ export class JwtService {
 
     const allowEphemeralKeys = process.env.NODE_ENV !== "production" && process.env.ALLOW_EPHEMERAL_JWT_KEYS === "true";
     if (!allowEphemeralKeys) {
-      throw new Error("AUTH_JWT_PRIVATE_KEY and AUTH_JWT_PUBLIC_KEY are required.");
+      throw new Error(
+        "AUTH_JWT_PRIVATE_KEY and AUTH_JWT_PUBLIC_KEY are required (or their *_FILE paths).",
+      );
     }
 
     // 仅允许在显式开发模式下生成临时密钥。

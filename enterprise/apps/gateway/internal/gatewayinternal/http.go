@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -29,7 +28,7 @@ func HTTPGetWithHeaders(url string, headers map[string]string) ([]byte, int, err
 	if !IsHTTPURL(url) {
 		return nil, 0, fmt.Errorf("gatewayinternal: URL must start with http:// or https://")
 	}
-	token := strings.TrimSpace(os.Getenv("GATEWAY_INTERNAL_TOKEN"))
+	token := SecretFromEnv("GATEWAY_INTERNAL_TOKEN")
 	client := &http.Client{Timeout: 25 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, strings.TrimSpace(url), nil)
 	if err != nil {
