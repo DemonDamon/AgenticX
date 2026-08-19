@@ -10,6 +10,8 @@
 
 const SKILLHUB_SEARCH = "https://api.skillhub.cn/api/v1/search";
 const MODELSCOPE_MCP = "https://www.modelscope.cn/openapi/v1/mcp/servers";
+const MODELSCOPE_MCP_DETAIL = (id: string) =>
+  `${MODELSCOPE_MCP}/${encodeURIComponent(id)}`;
 const TIMEOUT_MS = 15_000;
 
 export type MarketSkill = {
@@ -126,5 +128,82 @@ export async function searchMcpMarketplace(
       };
     }),
     total: Number(payload.data?.total_count ?? 0),
+  };
+}
+
+/** 市场详情里能直接用来预填登记表单的部分。 */
+export type MarketMcpDetail = {
+  id: string;
+  name: string;
+  description: string;
+  /** 建议的服务名：企业注册表里要唯一，用市场 id 的最后一段。 */
+  suggestedName: string;
+  /** stdio 启动命令，来自 server_config 的 mcpServers 段。 */
+  command: string;
+  args: string[];
+  /** 托管地址，有就优先用它（不需要在企业机器上装运行时）。 */
+  endpoint: string;
+  /** 需要哪些环境变量——凭据得管理员自己填，市场不会给。 */
+  requiredEnv: string[];
+  readme: string;
+  detailUrl: string;
+};
+
+/**
+ * 从 server_config 里挑一条能用的连接方式。
+ *
+ * ModelScope 的 server_config 是标准 mcp.json 形状：[{mcpServers:{名字:{command,args,env}}}]，
+ * 一个条目里可能有多个服务。取第一个——多数只有一个，多的那些是同一服务的不同变体，
+ * 让管理员在表单里改比在这儿猜规则强。
+ */
+function firstServerEntry(config: unknown): { name: string; command: string; args: string[] } {
+  const blocks = Array.isArray(config) ? config : [config];
+  for (const block of blocks) {
+    const servers = (block as Record<string, unknown> | null)?.mcpServers;
+    if (!servers || typeof servers !== "object") continue;
+    for (const [name, raw] of Object.entries(servers as Record<string, unknown>)) {
+      const entry = (raw ?? {}) as Record<string, unknown>;
+      return {
+        name,
+        command: text(entry.command),
+        args: Array.isArray(entry.args) ? entry.args.map((a) => String(a)) : [],
+      };
+    }
+  }
+  return { name: "", command: "", args: [] };
+}
+
+export async function fetchMcpDetail(id: string): Promise<MarketMcpDetail> {
+  const token = process.env.MODELSCOPE_API_TOKEN?.trim();
+  const payload = (await getJson(
+    MODELSCOPE_MCP_DETAIL(id),
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "User-Agent": "AgenticX-Enterprise",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    },
+    "ModelScope MCP 市场",
+  )) as { data?: Record<string, unknown> };
+
+  const data = payload.data ?? {};
+  const entry = firstServerEntry(data.server_config);
+  const urls = Array.isArray(data.operational_urls) ? data.operational_urls : [];
+  const envSchema = (data.env_schema ?? {}) as { required?: unknown; properties?: unknown };
+  // 服务名要能进企业注册表且唯一：市场 id 形如 @scope/name，取末段并去掉不合法字符。
+  const tail = String(id).split("/").pop() ?? String(id);
+  return {
+    id: String(id),
+    name: text(data.chinese_name, text(data.name, String(id))),
+    description: text(data.description),
+    suggestedName: (entry.name || tail).replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase(),
+    command: entry.command,
+    args: entry.args,
+    endpoint: text((urls[0] as Record<string, unknown> | undefined)?.url, text(urls[0])),
+    requiredEnv: Array.isArray(envSchema.required) ? envSchema.required.map((k) => String(k)) : [],
+    readme: text(data.readme).slice(0, 4000),
+    detailUrl: `https://www.modelscope.cn/mcp/servers/${encodeURIComponent(String(id))}`,
   };
 }

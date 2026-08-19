@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireAdminScope } from "../../../../../lib/admin-auth";
 import {
+  fetchMcpDetail,
   searchMcpMarketplace,
   searchSkillHub,
   UpstreamUnreachableError,
@@ -21,7 +22,15 @@ export async function GET(request: Request) {
   const source = url.searchParams.get("source") ?? "skill";
   const query = url.searchParams.get("q") ?? "";
 
+  const detailId = url.searchParams.get("id");
+
   try {
+    if (source === "mcp" && detailId) {
+      // 详情单独一次请求：列表里没有连接信息，而一次把 9973 个服务的详情都拉回来
+      // 既慢又没人看。管理员点了哪个才去取哪个。
+      const detail = await fetchMcpDetail(detailId);
+      return NextResponse.json({ code: "00000", message: "ok", data: { source, detail } });
+    }
     if (source === "mcp") {
       const { items, total } = await searchMcpMarketplace(query);
       return NextResponse.json({ code: "00000", message: "ok", data: { source, items, total } });
