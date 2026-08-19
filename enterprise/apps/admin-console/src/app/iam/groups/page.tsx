@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { OrganizationEditor } from "../../../components/OrganizationEditor";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Badge,
@@ -21,8 +22,13 @@ import {
   Skeleton,
   Textarea,
   toast,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
 } from "@agenticx/ui";
-import { ArrowUpRight, ChevronDown, ChevronRight, CirclePlus, Pencil, RefreshCw, Trash2, UsersRound } from "lucide-react";
+import { ChevronDown, ChevronRight, CirclePlus, FolderTree, Pencil, RefreshCw, Trash2, UsersRound } from "lucide-react";
 import { adminFetch } from "../../../lib/admin-client-auth";
 import { UserDetailEditor, type UserDetailTarget } from "../../../components/UserDetailEditor";
 
@@ -280,6 +286,7 @@ export default function GroupsPage() {
   const [users, setUsers] = useState<OverviewMember[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [orgOpen, setOrgOpen] = useState(false);
   const [editing, setEditing] = useState<GroupQuotaOverview | null | "new">(null);
   const [form, setForm] = useState<EditorForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -445,8 +452,8 @@ export default function GroupsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" asChild>
-            <Link href="/iam/bulk-import">编辑组织结构<ArrowUpRight /></Link>
+          <Button variant="outline" onClick={() => setOrgOpen(true)}>
+            <FolderTree />编辑组织结构
           </Button>
           <Button variant="outline" onClick={() => void load()} disabled={loading}>
             <RefreshCw className={loading ? "animate-spin" : ""} />刷新
@@ -609,6 +616,18 @@ export default function GroupsPage() {
         }}
         onChanged={load}
       />
+    {/* 组织结构直接在这儿编，不再跳去 /iam/bulk-import 那个老页面。
+        跳走的代价是回来之后这一页的数据是旧的，而且那页还带着一整套批量导入。 */}
+      <Dialog open={orgOpen} onOpenChange={(open) => { setOrgOpen(open); if (!open) void load(); }}>
+        <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>组织结构</DialogTitle>
+            <DialogDescription>增删部门、调整层级。改完关窗，本页会重新加载。</DialogDescription>
+          </DialogHeader>
+          <OrganizationEditor />
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

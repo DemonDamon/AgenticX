@@ -156,8 +156,14 @@ export function DepartmentFilterTree({
   const children = useMemo(() => childrenByParent(nodes), [nodes]);
   const roots = children.get(null) ?? [];
 
+  // 只有一个顶级部门、又没有未归属的人时，「全部成员」和那个部门点下去结果一模一样。
+  // 两行显示同一个数字、筛出同一批人，是纯噪音——这种时候只留部门那一行（它还带着
+  // 模型上限和额度的入口），把「全部成员」隐掉。
+  const allMembersIsRedundant = roots.length === 1 && unassignedCount === 0;
+
   return (
     <div className="space-y-0.5">
+      {allMembersIsRedundant ? null : (
       <button
         type="button"
         className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm ${
@@ -169,12 +175,13 @@ export function DepartmentFilterTree({
         <span className="min-w-0 flex-1 truncate">全部成员</span>
         <span className="text-xs text-muted-foreground">{totalCount}</span>
       </button>
+      )}
       {roots.map((node) => (
         <Branch
           key={node.id}
           node={node}
           children={children}
-          selected={selected}
+          selected={allMembersIsRedundant && selected === ALL_DEPARTMENTS ? node.id : selected}
           onSelect={onSelect}
           onConfigureModels={onConfigureModels}
           depth={0}
