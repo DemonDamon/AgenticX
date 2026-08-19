@@ -47,7 +47,6 @@ import {
   LucideIcon,
   Menu,
   Monitor,
-  Network,
   Moon,
   Boxes,
   Package,
@@ -82,7 +81,9 @@ type NavGroup = {
 /**
  * 导航里没有下面这些，都是有意的，别再顺手加回来：
  *
- * - /iam/departments      部门树已嵌进成员列表左栏，部门模型上限在那儿配。
+ * - /iam/departments      部门树已嵌进成员列表左栏，部门模型上限与额度在那儿配。
+ * - /iam/groups           已并入 /iam/roles 的「用户组」tab。它不是一类独立的东西，
+ *                         是「把一批人一起改」的载体，和成员名册看的是同一批人。
  * - /iam/bulk-import      组织结构与批量导入是搭环境那几天的事，导入向导挂在成员工具栏。
  * - /settings/sso         暂时不用。
  * - /metering/plans       Token 套餐先砍，等真要按人做 plan 再说。
@@ -112,7 +113,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "organization",
     items: [
       { href: "/iam/roles", labelKey: "users", icon: Users },
-      { href: "/iam/groups", labelKey: "userGroups", icon: Network },
     ],
   },
   {

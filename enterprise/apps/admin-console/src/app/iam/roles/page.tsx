@@ -1,7 +1,7 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -21,6 +21,10 @@ import {
   SheetTitle,
   Skeleton,
   toast,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@agenticx/ui";
 import {
   LayoutGrid,
@@ -52,6 +56,7 @@ import { VisibleModelsEditor } from "../../../components/visible-models-editor";
 import { QuotaScopeEditor } from "../../../components/quota/QuotaScopeEditor";
 import { BulkImportWizard } from "../../../components/BulkImportWizard";
 import { MemberBatchBar } from "../../../components/MemberBatchBar";
+import { UserGroupsPanel } from "../../../components/iam/UserGroupsPanel";
 import { DefaultMemberQuotaCard } from "../../../components/DefaultMemberQuotaCard";
 
 type GrantSource = "personal" | "group" | "department" | "all";
@@ -114,7 +119,7 @@ function userStatusMeta(status: UserQuotaOverview["status"]) {
   return { label: "停用", variant: "warning" as const };
 }
 
-export default function RolesPage() {
+function MembersPanel() {
   const searchParams = useSearchParams();
   const requestedDeptId = searchParams.get("dept")?.trim() ?? "";
   const createRequested = searchParams.get("create") === "1";
@@ -682,6 +687,49 @@ export default function RolesPage() {
         defaultDeptId={requestedDeptId || undefined}
         onCreated={load}
       />
+    </div>
+  );
+}
+
+/**
+ * 组织与成员：成员名册 + 用户组，同一页两个 tab。
+ *
+ * 用户组原本是一个独立菜单，但它不是一类独立的东西——它是「把一批人一起改」的载体，
+ * 和成员名册看的是同一批人。分成两个页面的结果是：想确认某人属于哪个组、组里有谁，
+ * 得在两个页面之间来回跳，而两边对「现在有哪些人」还各自加载一次。
+ */
+export default function IamRolesPage() {
+  return (
+    <Suspense fallback={null}>
+      <OrganizationTabs />
+    </Suspense>
+  );
+}
+
+function OrganizationTabs() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const active = params.get("tab") === "groups" ? "groups" : "members";
+  const onChange = useCallback(
+    (value: string) => {
+      router.replace(value === "groups" ? "/iam/roles?tab=groups" : "/iam/roles");
+    },
+    [router],
+  );
+  return (
+    <div className="space-y-6">
+      <Tabs value={active} onValueChange={onChange}>
+        <TabsList>
+          <TabsTrigger value="members">成员</TabsTrigger>
+          <TabsTrigger value="groups">用户组</TabsTrigger>
+        </TabsList>
+        <TabsContent value="members" className="pt-4">
+          <MembersPanel />
+        </TabsContent>
+        <TabsContent value="groups" className="pt-4">
+          <UserGroupsPanel />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
