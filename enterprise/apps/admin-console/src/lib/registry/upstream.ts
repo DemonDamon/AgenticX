@@ -131,6 +131,9 @@ export async function searchMcpMarketplace(
   };
 }
 
+/** 一个待填的环境变量：名字 + 市场对它的说明。 */
+export type MarketMcpEnvVar = { key: string; description: string };
+
 /** 市场详情里能直接用来预填登记表单的部分。 */
 export type MarketMcpDetail = {
   id: string;
@@ -143,11 +146,33 @@ export type MarketMcpDetail = {
   args: string[];
   /** 托管地址，有就优先用它（不需要在企业机器上装运行时）。 */
   endpoint: string;
-  /** 需要哪些环境变量——凭据得管理员自己填，市场不会给。 */
-  requiredEnv: string[];
+  /**
+   * 需要哪些环境变量。
+   *
+   * 市场只声明**要哪几个**，从不给值——值是本企业在那个第三方服务上的账号凭据。
+   * 说明一并带上：光看 `GITHUB_PERSONAL_ACCESS_TOKEN` 这个名字，管理员还得去详情页
+   * 翻一遍才知道该填什么、去哪儿申请。
+   */
+  requiredEnv: MarketMcpEnvVar[];
   readme: string;
   detailUrl: string;
 };
+
+/**
+ * env_schema 里必填的那几项，配上它们各自的说明。
+ *
+ * 形状是 JSON Schema：required 是名字数组，properties 里才有 description。
+ * 拿不到说明就只给名字——少一句解释总好过因为形状不对整个表单都填不出来。
+ */
+function requiredEnvFrom(schema: { required?: unknown; properties?: unknown }): MarketMcpEnvVar[] {
+  if (!Array.isArray(schema.required)) return [];
+  const properties = (schema.properties ?? {}) as Record<string, unknown>;
+  return schema.required.map((raw) => {
+    const key = String(raw);
+    const property = (properties[key] ?? {}) as Record<string, unknown>;
+    return { key, description: text(property.description, text(property.title)) };
+  });
+}
 
 /**
  * 从 server_config 里挑一条能用的连接方式。
@@ -202,7 +227,7 @@ export async function fetchMcpDetail(id: string): Promise<MarketMcpDetail> {
     command: entry.command,
     args: entry.args,
     endpoint: text((urls[0] as Record<string, unknown> | undefined)?.url, text(urls[0])),
-    requiredEnv: Array.isArray(envSchema.required) ? envSchema.required.map((k) => String(k)) : [],
+    requiredEnv: requiredEnvFrom(envSchema),
     readme: text(data.readme).slice(0, 4000),
     detailUrl: `https://www.modelscope.cn/mcp/servers/${encodeURIComponent(String(id))}`,
   };

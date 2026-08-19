@@ -14,12 +14,14 @@ export const DEPT_ASSIGNMENT_PREFIX = "dept:";
 export const GROUP_ASSIGNMENT_PREFIX = "group:";
 
 export type CapabilityChoice = {
-  /** `mcp:<ulid>` / `skill:<ulid>` */
+  /** `mcp:<ulid>` / `skill:<ulid>` / `feature:<name>` */
   id: string;
   kind: "mcp" | "skill" | "feature";
   name: string;
   displayName: string;
   disabled: boolean;
+  /** 货架卡片上那一句「这是干什么的」。三种能力各有各的来路，见 useCapabilityCatalog。 */
+  description?: string;
 };
 
 export type AssignmentDraft = {

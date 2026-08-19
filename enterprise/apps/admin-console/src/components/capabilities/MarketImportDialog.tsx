@@ -17,6 +17,7 @@ import {
 import { ExternalLink, Loader2, Search } from "lucide-react";
 
 import { adminFetch } from "../../lib/admin-client-auth";
+import { plainText } from "../../lib/plain-text";
 
 type MarketSkill = {
   name: string;
@@ -47,7 +48,7 @@ type McpDetail = {
   command: string;
   args: string[];
   endpoint: string;
-  requiredEnv: string[];
+  requiredEnv: { key: string; description: string }[];
   detailUrl: string;
 };
 
@@ -156,7 +157,7 @@ export function MarketImportDialog({
       const d = json.data.detail;
       setDetail(d);
       setMcpName(d.suggestedName);
-      setMcpEnv(Object.fromEntries(d.requiredEnv.map((key) => [key, ""])));
+      setMcpEnv(Object.fromEntries(d.requiredEnv.map((item) => [item.key, ""])));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "读取详情失败");
     } finally {
@@ -231,6 +232,11 @@ export function MarketImportDialog({
           <div className="space-y-4 rounded-lg border p-4">
             <div>
               <p className="font-medium">{detail.name}</p>
+              {plainText(detail.description) ? (
+                <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">
+                  {plainText(detail.description)}
+                </p>
+              ) : null}
               <p className="mt-1 text-xs text-muted-foreground">
                 连接方式已从市场带过来，确认后写进企业注册表。凭据市场不会给，得你自己填。
               </p>
@@ -262,22 +268,36 @@ export function MarketImportDialog({
 
             {detail.requiredEnv.length > 0 ? (
               <div className="space-y-2">
-                <Label className="text-xs">凭据 / 环境变量</Label>
-                {detail.requiredEnv.map((key) => (
-                  <div key={key} className="flex items-center gap-2">
-                    <span className="w-44 shrink-0 truncate font-mono text-xs">{key}</span>
+                <Label className="text-xs">凭据</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  这几项是本服务要访问的第三方系统的账号凭据——公司自己在那边申请的 API
+                  Key、Token。市场只声明要哪几项，不会给值。
+                </p>
+                {detail.requiredEnv.map((item) => (
+                  <div key={item.key} className="flex items-start gap-2">
+                    <div className="w-52 shrink-0">
+                      <p className="truncate font-mono text-xs" title={item.key}>
+                        {item.key}
+                      </p>
+                      {item.description ? (
+                        <p className="text-[11px] leading-tight text-muted-foreground">
+                          {plainText(item.description)}
+                        </p>
+                      ) : null}
+                    </div>
                     <Input
                       type="password"
-                      value={mcpEnv[key] ?? ""}
+                      value={mcpEnv[item.key] ?? ""}
                       onChange={(event) =>
-                        setMcpEnv((current) => ({ ...current, [key]: event.target.value }))
+                        setMcpEnv((current) => ({ ...current, [item.key]: event.target.value }))
                       }
                       placeholder="留空则登记后再补"
                     />
                   </div>
                 ))}
                 <p className="text-[11px] text-muted-foreground">
-                  入库时加密，网关代持，不会随能力包下发到员工机器上。
+                  入库时加密，网关代持，不会随能力包下发到员工机器上。全公司共用这一份，
+                  所以第三方那边看到的是同一个身份；谁调用了什么只在本平台的审计日志里分得清。
                 </p>
               </div>
             ) : null}
@@ -330,7 +350,7 @@ export function MarketImportDialog({
                     </p>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>
                     <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                      {item.description || "（无说明）"}
+                      {plainText(item.description) || "（无说明）"}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">

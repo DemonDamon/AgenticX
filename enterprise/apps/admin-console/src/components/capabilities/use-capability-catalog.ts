@@ -13,11 +13,35 @@ import {
   type CapabilityChoice,
 } from "../../lib/capability-pack-form";
 
-/** 平台功能是常量，不来自数据库；名字给中文，id 仍走统一入口构造。 */
-const FEATURE_LABELS: Record<(typeof PLATFORM_FEATURES)[number], string> = {
-  web_search: "联网搜索",
-  deep_research: "深度研究",
+/** 平台功能是常量，不来自数据库；名字和说明写死在这里，id 仍走统一入口构造。 */
+const FEATURE_LABELS: Record<
+  (typeof PLATFORM_FEATURES)[number],
+  { displayName: string; description: string }
+> = {
+  web_search: {
+    displayName: "联网搜索",
+    description: "对话中检索公网信息。搜索服务商和 Key 在「联网搜索」页配置，这里管的是谁能用。",
+  },
+  deep_research: {
+    displayName: "深度研究",
+    description: "多轮检索加汇总成文的长任务，比单次搜索更费额度。",
+  },
 };
+
+/** MCP 卡片上没有说明可显示，就说它连到哪儿去——这正是管理员想确认的那件事。 */
+function mcpConnectionSummary(server: McpServerRow): string {
+  const config = (server.backendConfig ?? {}) as {
+    endpoint?: unknown;
+    command?: unknown;
+    args?: unknown;
+  };
+  if (typeof config.endpoint === "string" && config.endpoint) return config.endpoint;
+  if (typeof config.command === "string" && config.command) {
+    const args = Array.isArray(config.args) ? config.args.map(String) : [];
+    return [config.command, ...args].join(" ");
+  }
+  return "";
+}
 
 export type CapabilityStatus = "active" | "disabled";
 
@@ -47,7 +71,13 @@ export type PackRecord = {
   assignmentKeys: string[];
 };
 
-export type McpServerRow = { id: string; name: string; displayName: string; status: string };
+export type McpServerRow = {
+  id: string;
+  name: string;
+  displayName: string;
+  status: string;
+  backendConfig?: unknown;
+};
 export type DeptRow = { id: string; name: string; path: string };
 export type UserRow = { id: string; email: string; displayName?: string };
 export type GroupRow = { id: string; name: string; memberIds: string[] };
@@ -74,6 +104,7 @@ export function useCapabilityCatalog(loadFailedMessage: string, errorMessage: st
       name: server.name,
       displayName: server.displayName || server.name,
       disabled: server.status !== "active",
+      description: mcpConnectionSummary(server),
     }));
     const skillChoices = skills.map((skill) => ({
       id: skillCapabilityId(skill.id),
@@ -81,6 +112,7 @@ export function useCapabilityCatalog(loadFailedMessage: string, errorMessage: st
       name: skill.slug,
       displayName: skill.displayName || skill.slug,
       disabled: skill.status !== "active",
+      description: skill.description,
     }));
     // 平台功能和 MCP/Skill 并列成为能力：「谁能用联网搜索」和「谁能用某个 MCP」
     // 是同一个问题，不该因为这一项是平台内置的就换一套分配系统。
@@ -88,8 +120,9 @@ export function useCapabilityCatalog(loadFailedMessage: string, errorMessage: st
       id: featureCapabilityId(feature),
       kind: "feature" as const,
       name: feature,
-      displayName: FEATURE_LABELS[feature],
+      displayName: FEATURE_LABELS[feature].displayName,
       disabled: false,
+      description: FEATURE_LABELS[feature].description,
     }));
     return [...featureChoices, ...mcp, ...skillChoices];
   }, [mcpServers, skills]);

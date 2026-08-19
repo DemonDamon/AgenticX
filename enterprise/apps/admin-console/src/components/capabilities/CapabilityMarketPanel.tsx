@@ -17,6 +17,7 @@ import {
 } from "@agenticx/ui";
 import { Boxes, Globe, Puzzle, Search, Server, Store, X } from "lucide-react";
 
+import { plainText } from "../../lib/plain-text";
 import { useCapabilityCatalog, type PackRecord } from "./use-capability-catalog";
 import { MarketImportDialog, type MarketSource } from "./MarketImportDialog";
 
@@ -98,14 +99,13 @@ export function CapabilityMarketPanel() {
     return choices.filter((choice) => {
       if (kind !== "all" && choice.kind !== kind) return false;
       if (!q) return true;
-      const skill = skillById.get(choice.id);
-      return [choice.displayName, choice.name, skill?.description]
+      return [choice.displayName, choice.name, plainText(choice.description)]
         .filter(Boolean)
         .join(" ")
         .toLocaleLowerCase()
         .includes(q);
     });
-  }, [choices, kind, query, skillById]);
+  }, [choices, kind, query]);
 
   const toggle = useCallback((id: string) => {
     setPicked((current) =>
@@ -255,8 +255,9 @@ export function CapabilityMarketPanel() {
                       {choice.disabled ? <Badge variant="secondary">已停用</Badge> : null}
                     </div>
                   </div>
-                  <p className="line-clamp-2 text-sm text-muted-foreground">
-                    {skill?.description || choice.name}
+                  <p className="truncate font-mono text-xs text-muted-foreground">{choice.name}</p>
+                  <p className="line-clamp-2 min-h-10 text-sm text-muted-foreground">
+                    {plainText(choice.description) || "（无说明）"}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {holders.length > 0 ? (
