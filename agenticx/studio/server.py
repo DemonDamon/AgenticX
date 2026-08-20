@@ -2758,6 +2758,25 @@ def create_studio_app() -> FastAPI:
         except Exception:
             logger.debug("attachment routing skipped", exc_info=True)
             _routing_decision = None
+
+        if _routing_decision is not None:
+            # 锁到多模态模型之后就别再走抽文本那条有损通路了：PDF 直接渲染成页图。
+            # 原来的路径把整份文档压进 MAX_HYDRATED_CHARS=8000 的截断文本，一份 50 页
+            # 的报告到模型手里只剩开头几页。
+            #
+            # 渲染不了（没装 PyMuPDF、加密、损坏）就什么都不做，让抽文本接着跑——此时
+            # 会话已经锁在私有模型上，文本同样不出这台部署。
+            try:
+                from agenticx.studio.attachment_routing import read_policy as _read_routing
+                from agenticx.studio.document_pages import stage_pdf_pages
+
+                stage_pdf_pages(
+                    session,
+                    filenames=list(turn_context_files.keys()),
+                    max_pages=_read_routing().max_rendered_pages,
+                )
+            except Exception:
+                logger.debug("pdf page rendering skipped", exc_info=True)
         # Kimi K3 / DeepSeek V4 reasoning_effort; cleared when absent so stale
         # values from a previous turn do not leak onto other models.
         _effort = str(getattr(payload, "reasoning_effort", None) or "").strip().lower()
