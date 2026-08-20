@@ -11,6 +11,7 @@ import time
 import pytest
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS, studio_tools_for_session
+from agenticx.runtime import AgentRuntime, ConfirmGate
 from agenticx.runtime.prompts.current_time import (
     build_current_time_block,
     build_current_time_reminder,
@@ -236,3 +237,89 @@ def test_fixed_request_overhead_stays_under_budget():
     )
     assert total < 16_000, f"fixed overhead regressed to {total} tokens"
     assert estimate_schema_tokens(projected) < estimate_schema_tokens(pool)
+
+
+# --------------------------------------------------------------------------
+# 7. 端到端：真的走一遍 run_turn，看发给 provider 的 messages
+# --------------------------------------------------------------------------
+class _FakeResponse:
+    def __init__(self, content: str, tool_calls):
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class _CaptureMessagesLLM:
+    """记下每一轮发给 provider 的 messages。"""
+
+    def __init__(self) -> None:
+        self.turns: list[list[dict]] = []
+
+    def invoke(self, messages, **_kwargs):
+        self.turns.append([dict(item) for item in messages])
+        return _FakeResponse("ok", [])
+
+
+class _ApproveGate(ConfirmGate):
+    async def request_confirm(self, question, context=None) -> bool:
+        return True
+
+
+@pytest.mark.asyncio
+async def test_run_turn_sends_session_context_after_history_and_keeps_prompt_stable():
+    llm = _CaptureMessagesLLM()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+
+    async for _ in runtime.run_turn("第一轮", session):
+        pass
+    first = llm.turns[-1]
+
+    system_prompt = first[0]
+    assert system_prompt["role"] == "system"
+    # 易变状态不在 messages[0] 里了。
+    assert "## 当前 Todo 列表" not in system_prompt["content"]
+    assert "## 可用元 Skills 摘要" not in system_prompt["content"]
+
+    ctx_rows = [
+        m for m in first if str(m.get("content", "")).startswith("<session-context>")
+    ]
+    assert len(ctx_rows) == 1, "exactly one <session-context> per request"
+    assert "当前时刻：" in ctx_rows[0]["content"]
+    # 它坐在最后一条 user 消息之前：历史在它前面照常命中缓存，它离用户的问题最近。
+    # （中间还会插一条 [user-goal-anchor]，同样是本轮临时消息，位置不做强断言。）
+    ctx_idx = first.index(ctx_rows[0])
+    last_user_idx = max(i for i, m in enumerate(first) if m.get("role") == "user")
+    assert 0 < ctx_idx < last_user_idx
+
+    # 它是本轮临时的，不能进持久历史——否则下一轮的历史前缀跟着变，等于白搬。
+    for row in list(session.agent_messages) + list(session.chat_history):
+        assert not str(row.get("content", "")).startswith("<session-context>")
+
+    # 改一堆会话状态，再走一轮：system prompt 必须一字不差。
+    session.todo_manager.update(
+        [{"content": "第二轮任务", "status": "in_progress", "activeForm": "干活中"}]
+    )
+    session.scratchpad["note"] = "something new"
+    async for _ in runtime.run_turn("第二轮", session):
+        pass
+    second = llm.turns[-1]
+
+    assert second[0]["content"] == system_prompt["content"]
+    second_ctx = next(
+        m for m in second if str(m.get("content", "")).startswith("<session-context>")
+    )
+    assert "第二轮任务" in second_ctx["content"]
+    assert "something new" in second_ctx["content"]
+    # 第二轮已经有历史了：<session-context> 必须排在历史之后，否则历史前缀又要被它
+    # 顶开——搬家就白搬了。
+    second_ctx_idx = second.index(second_ctx)
+    history_idx = [
+        i
+        for i, m in enumerate(second)
+        if m.get("role") in {"assistant", "tool"} or m.get("content") == "第一轮"
+    ]
+    assert history_idx, "second turn should replay the first turn"
+    assert second_ctx_idx > max(history_idx)
+    assert sum(
+        1 for m in second if str(m.get("content", "")).startswith("<session-context>")
+    ) == 1, "第一轮那条不能被带进历史里重复发送"
