@@ -10,11 +10,13 @@
  */
 
 import {
+  type CapabilitySurface,
   featureCapabilityId,
   groupCapabilityIdsByKind,
   isPlatformFeature,
   type PlatformFeature,
   parseCapabilityId,
+  platformFeatureSurfaces,
   resolveCapabilityState,
   resolveEffectiveCapabilities,
   type CapabilityAssignment,
@@ -48,7 +50,18 @@ export type PortalCapability = {
   bundleDigest?: string;
   /** MCP 专有：网关反代入口，由 desktop-capability-endpoints 在下发前补上。 */
   endpointUrl?: string;
+  /** 这条能力在哪些客户端生效。 */
+  surfaces: readonly CapabilitySurface[];
 };
+
+/**
+ * 租户自建的 Skill/MCP 暂时两端通用。
+ *
+ * 真要区分得在 enterprise_skills / mcp_servers 上加列并配管理端 UI；在出现第一个
+ * 单端 Skill 之前，加列只是给迁移和表单添负担。字段先立起来，调用方按 surface 过滤
+ * 的路径也就通了，将来换成读列即可，过滤那一侧不用改。
+ */
+export const DEFAULT_CAPABILITY_SURFACES: readonly CapabilitySurface[] = ["web", "desktop"];
 
 /** 企业已启用并分配给该用户的能力，附上用户自己那一位开关。 */
 export type UserCapabilityState = PortalCapability & { state: CapabilityState };
@@ -89,6 +102,7 @@ export const resolveAssignmentKeysForUser = resolveKeysForUser;
 
 function toSkillCapability(row: SkillRow): PortalCapability {
   return {
+    surfaces: DEFAULT_CAPABILITY_SURFACES,
     id: `skill:${row.id}`,
     kind: "skill",
     name: row.slug,
@@ -104,6 +118,7 @@ function toSkillCapability(row: SkillRow): PortalCapability {
 
 function toMcpCapability(row: McpRow): PortalCapability {
   return {
+    surfaces: DEFAULT_CAPABILITY_SURFACES,
     id: `mcp:${row.id}`,
     kind: "mcp",
     name: row.name,
@@ -242,21 +257,49 @@ export async function listAvailableCapabilitiesForUser(
   userId: string,
   email?: string,
   deptId?: string | null,
+  surface?: CapabilitySurface,
 ): Promise<PortalCapability[]> {
   const view = await loadUserCapabilityView(userId, email, deptId);
-  return effectiveFromView(view);
+  return effectiveFromView(view, surface);
 }
 
-export function effectiveFromView(view: UserCapabilityView): PortalCapability[] {
+/**
+ * @param surface 只返回在该客户端生效的能力；不传表示不过滤（管理端「我的能力」
+ *   要看到全部，下发路径才需要收窄）。
+ */
+export function effectiveFromView(
+  view: UserCapabilityView,
+  surface?: CapabilitySurface,
+): PortalCapability[] {
   const byId = new Map(view.assigned.map((item) => [item.id, item] as const));
   // 走同一个策略函数，避免这里与管理端对「生效」有两套判断。
   const assignments: CapabilityAssignment[] = view.assigned.map((item) => ({
     capabilityId: item.id,
     enterpriseEnabled: true,
   }));
-  return resolveEffectiveCapabilities(assignments, view.optOuts)
+  const effective = resolveEffectiveCapabilities(assignments, view.optOuts)
     .map((id) => byId.get(id))
     .filter((item): item is PortalCapability => Boolean(item));
+  if (!surface) return effective;
+  return effective.filter((item) => item.surfaces.includes(surface));
+}
+
+/**
+ * 这个人在指定客户端上能不能用某项平台功能。
+ *
+ * 平台功能的 surface 由平台定义（platformFeatureSurfaces），管理员分配的是「能不能
+ * 用」，不是「在哪能用」。附件自动路由两端都要，但比如将来出现只在 Desktop 成立的
+ * 功能，portal 侧就该直接判 false 而不是下发一个点不动的开关。
+ */
+export async function isPlatformFeatureAllowedOnSurface(
+  feature: PlatformFeature,
+  surface: CapabilitySurface,
+  userId: string,
+  email?: string,
+  deptId?: string | null,
+): Promise<boolean> {
+  if (!platformFeatureSurfaces(feature).includes(surface)) return false;
+  return isPlatformFeatureAllowedForUser(feature, userId, email, deptId);
 }
 
 /** 供「我的能力」页面：连被自己关掉的一起列出来，否则关掉之后就找不回来了。 */

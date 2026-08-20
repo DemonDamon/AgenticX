@@ -22,8 +22,46 @@ export type CapabilityKind = (typeof CAPABILITY_KINDS)[number];
  * 问题。分成两套授权系统的结果是两处分配 UI、两张表、两套判定，而管理员想的只是
  * 「这个人能用什么」。
  */
-export const PLATFORM_FEATURES = ["web_search", "deep_research"] as const;
+export const PLATFORM_FEATURES = [
+  "web_search",
+  "deep_research",
+  "attachment_routing",
+] as const;
 export type PlatformFeature = (typeof PLATFORM_FEATURES)[number];
+
+/**
+ * 能力生效在哪个客户端。
+ *
+ * 同一个人在 web portal 和 Desktop 上能用的东西并不一样：附件自动路由要锁 Desktop
+ * 的模型选择器，而 portal 的会话模型是另一套；某些 Skill 依赖本机文件系统，下发到
+ * portal 只会是一个点不动的条目。以前不分是因为只有 Skill/MCP，两边行为恰好一致。
+ *
+ * 平台功能的 surface 写死在代码里：它们由平台定义，管理员改不了——和
+ * PLATFORM_FEATURES 用固定标识而不是 ULID 是同一条理由。租户自己建的 Skill/MCP 行
+ * 暂时视为两端通用（见 capability-packs-reader 的 DEFAULT_CAPABILITY_SURFACES），
+ * 等真的出现单端 Skill 时再加列。
+ */
+export const CAPABILITY_SURFACES = ["web", "desktop"] as const;
+export type CapabilitySurface = (typeof CAPABILITY_SURFACES)[number];
+
+const PLATFORM_FEATURE_SURFACES: Record<PlatformFeature, readonly CapabilitySurface[]> = {
+  web_search: ["web", "desktop"],
+  deep_research: ["web", "desktop"],
+  // 路由要锁住会话模型并把选择器灰掉，两端都要做，但表现形式各自实现。
+  attachment_routing: ["web", "desktop"],
+};
+
+export function platformFeatureSurfaces(
+  feature: PlatformFeature,
+): readonly CapabilitySurface[] {
+  return PLATFORM_FEATURE_SURFACES[feature];
+}
+
+export function isCapabilitySurface(value: unknown): value is CapabilitySurface {
+  return (
+    typeof value === "string" && (CAPABILITY_SURFACES as readonly string[]).includes(value)
+  );
+}
 
 export function isPlatformFeature(value: unknown): value is PlatformFeature {
   return typeof value === "string" && (PLATFORM_FEATURES as readonly string[]).includes(value);

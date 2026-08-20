@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { listAvailableModelsForUser } from "../../../../lib/admin-providers-reader";
+import { buildAttachmentRoutingPolicy } from "../../../../lib/attachment-routing-policy";
 import {
   findUnmetSkillDependencies,
+  isPlatformFeatureAllowedOnSurface,
   listAvailableCapabilitiesForUser,
 } from "../../../../lib/capability-packs-reader";
 import { resolveDesktopIdentity } from "../../../../lib/desktop-auth";
@@ -19,7 +21,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const [models, managedPolicy, capabilities] = await Promise.all([
+  const [models, managedPolicy, capabilities, attachmentRoutingAllowed] = await Promise.all([
     listAvailableModelsForUser(
       identity.userId,
       identity.email,
@@ -31,8 +33,22 @@ export async function GET(request: Request) {
       identity.userId,
       identity.email,
       identity.deptId,
+      "desktop",
     ).catch(() => []),
+    // 这里 fail-closed，和 deep_research 的 fail-open 相反：那条要照顾「升级当天不能
+    // 静默失效」的存量租户，而附件路由是新功能，没有人在依赖它。查不动时保持原样
+    // （不锁模型）比"疑似授权就把会话锁到某个模型"安全得多。
+    isPlatformFeatureAllowedOnSurface(
+      "attachment_routing",
+      "desktop",
+      identity.userId,
+      identity.email,
+      identity.deptId,
+    ).catch(() => false),
   ]);
+  const attachmentRouting = buildAttachmentRoutingPolicy(models, {
+    enabled: attachmentRoutingAllowed,
+  });
 
   const { tokenLimits: tokenBudget, capabilities: capabilityPolicy } = managedPolicy;
 
@@ -49,6 +65,7 @@ export async function GET(request: Request) {
       deptId: identity.deptId,
     },
     models,
+    attachmentRouting,
     capabilities: withGatewayMcpEndpoints(capabilities),
     // 依赖没随包一起下发时 Desktop 装了也调不通，这里标出来供前端提示。
     unmetCapabilityDependencies: findUnmetSkillDependencies(capabilities),
