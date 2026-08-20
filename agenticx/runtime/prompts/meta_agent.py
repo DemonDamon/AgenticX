@@ -684,16 +684,23 @@ def _build_url_vision_capability_block() -> str:
 
 
 def _build_widget_capability_block() -> str:
-    """Describe built-in show_widget for inline Mermaid/SVG/HTML visualizations."""
+    """Trigger rules for show_widget. Format specs live in the tool description.
+
+    这里只留"什么时候必须出图"——模型得先知道该出图，才谈得上去调工具。而"Mermaid
+    怎么写 / SVG 尺寸怎么算 / CDN 白名单"这些用法细则搬去了
+    ``tool_discipline.SHOW_WIDGET_USAGE``，跟着工具的 description 走：工具被延迟
+    时它们一起消失，工具被加载时又原样回来。
+    """
     return (
         "## 内联可视化（show_widget）— 硬性纪律\n"
-        "- 你 **内置** `show_widget` 工具，可在聊天气泡内直接渲染矢量图或交互图表，用户可见、可复制为图片。\n"
+        "- 你 **内置** `show_widget` 工具，可在聊天气泡内直接渲染矢量图或交互图表，用户可见、可复制为图片。"
+        "它可能未随本轮请求发送 schema（见 `<session-context>` 的延迟工具清单）——**直接调用即可**，系统会自动加载。\n"
         "- **凡是要向用户展示流程/链路/步骤/时序/架构/数据走向/代理路径，必须调用 `show_widget` 并在其后写正文解读。**\n"
         "  哪怕只有 3 个节点（如「客户端 → 代理 → 服务端」），也 **必须** 出图，不得用文字链凑合。\n"
         "- **推荐工作流（衔接语不可省略）**：\n"
         "  1) **先**在可见正文中写 1–3 句衔接语（说明要回答什么、图展示什么，例如「下面用一张图概括整体实现链路」）；\n"
         "  2) **再**调用 `show_widget(title=..., widget_format=\"mermaid\", widget_code=...)` "
-        "渲染主架构/流程（流程类图优先 Mermaid）；\n"
+        "渲染主架构/流程（流程类图优先 Mermaid，其余格式规范见工具 description）；\n"
         "  3) **最后**分节解读各模块；如需第二张图（时序/对比/细节）可再调用 `show_widget`。\n"
         "- **思考块纪律**：`<think>` / 推理内容仅限内部分析与规划；"
         "不得把本应展示给用户的过渡句、方案引言、目录预告、「让我重新组织…」类话术写进思考块。"
@@ -710,60 +717,27 @@ def _build_widget_capability_block() -> str:
         "  - ASCII/框线字符（`+---`、`│`、`┌─┐`）画架构/流程；\n"
         "  - 已调用 `show_widget` 出图后，又在正文/代码块重复画架构或实现路径；\n"
         "  - 正文写「流程如下」「链路如下」却不调用 `show_widget`。\n"
-        "- **格式选择**：\n"
-        "  - 流程图、架构图、链路图、时序图 → `widget_format=\"mermaid\"`（自动布局，避免节点重叠）。\n"
-        "  - 自由矢量插图或 Mermaid 无法表达的特殊几何 → `widget_format=\"svg\"`。\n"
-        "  - 需要交互或数据驱动（折线/饼图/动态筛选）→ `widget_format=\"html\"` + Chart.js/D3，从 CDN 白名单加载脚本。\n"
-        "- **Mermaid 规范**（`widget_format=\"mermaid\"`）：\n"
-        "  - `widget_code` 直接从 `flowchart` / `sequenceDiagram` 等声明开始，不要包 Markdown 代码围栏；\n"
-        "  - 每个节点优先使用短标签；长标签拆成 `<br/>`，不要塞完整段落；\n"
-        "  - 根据结构选择 `TB` 或 `LR`，避免为了横向展示塞入过多同层节点；\n"
-        "  - 不在 Mermaid 中写大段自定义 HTML/CSS。\n"
-        "- **SVG 规范**（仅 `widget_format=\"svg\"`）：文字用 `var(--text-primary)` / `var(--text-muted)`；"
-        "背景/边框可用 `var(--surface-card)` / `var(--border-subtle)`；"
-        "强调色用 `rgb(var(--theme-color-rgb))`；箭头 marker 用 `stroke=\"context-stroke\"` 跟随连线颜色；"
-        "模块用圆角矩形，层与层之间用箭头连接，中文标签要完整可读。\n"
-        "- **主题自适应（落盘 HTML/SVG 或独立预览页）**：禁止把背景/正文色写死为仅深色（如 `#0d1117` / `#e6edf3`）；"
-        "页面用 CSS 变量 + `@media (prefers-color-scheme: light)`（及可选 `html[data-theme=light|dark|dim]`）；"
-        "SVG 内同样用 CSS 变量定义 `--svg-bg*` / `--svg-text*` 并提供 light 覆盖；"
-        "Mermaid 初始化按当前主题选 `default`（浅色）或 `dark`（深色/暗灰），不要写死 `theme: 'dark'`。\n"
-        "- **SVG 尺寸（防叠字/防裁切，仅手写 SVG）**：`viewBox=\"0 0 W H\"` 的 W/H 必须**完整包住**所有图形与文字并留 ≥24px 边距；"
-        "表格/热力图/多行对比等内容越多 H 越大（按行数预估，禁止所有图共用同一固定高度）；"
-        "单元格内文字不得与相邻格重叠，标签列与数据列之间留足 x 间距；"
-        "长句用 `<foreignObject>` 换行或拆成多行 `<tspan>`，禁止把多段文字堆在同一坐标。\n"
-        "- **CDN 白名单**（HTML 模式仅允许）：`cdnjs.cloudflare.com`、`esm.sh`、`cdn.jsdelivr.net`、`unpkg.com`。\n"
-        "- 每次调用渲染 **一个** widget；`title` 必填且简短（会显示在工具卡标题）。\n"
-        "- **禁止**用 ImageGen/截图/HTML 文件落盘替代；纯矢量 SVG、Mermaid 或 sandbox iframe 内 HTML 即可。\n"
         "- **技能已渲染的预览图例外**：若本轮技能/脚本已在工作区生成 PNG/GIF/SVG，"
         "必须在正文用 Markdown 图片语法嵌入**绝对路径**（`![说明](/abs/path.gif)`），"
         "让用户在气泡内直接看到成品；不得只用文件名表格或 Mermaid 顶替。"
-        "`show_widget` 可作为结构概览，但不能替代已生成的预览图。\n"
-        "- **时间序列行情/宏观走势**：取数后优先 `show_widget(widget_code=<stock_chart JSON>)`；"
-        "K 线用 `chart_type: \"candlestick\"`，宏观趋势用 `chart_type: \"line\"`；"
-        "用户同时关注多只股票时，用 `watchlist` 数组一次出图（Desktop 顶部 Tab 可切换），"
-        "不要拆成多个 widget；并保留 `attribution` / `data_source_label` 来源角标。\n\n"
+        "`show_widget` 可作为结构概览，但不能替代已生成的预览图。\n\n"
     )
 
+
 def _build_data_source_discipline() -> str:
-    """Describe when the model must call query_data_source instead of guessing facts."""
+    """Trigger rules for query_data_source; the how-to lives in its description.
+
+    细则（默认 60 天窗口、同一 symbol 只查一次、stock_chart JSON 出图、失败降级）
+    搬去了 ``tool_discipline.QUERY_DATA_SOURCE_USAGE``。
+    """
     return (
         "## 查数纪律（query_data_source）— 硬性纪律\n"
         "- 涉及股价/财务指标/宏观经济数据/企业工商/学术引用等**可核实的量化事实**时，"
         "**禁止**凭训练记忆直接给出具体数字，必须先调用 `list_data_sources`（如不确定用哪个源）"
-        "再调用 `query_data_source` 取得真实数据。\n"
-        "- 取到的时间序列数据用于可视化时，按 show_widget 纪律渲染图表（`stock_chart` JSON 或 ECharts HTML），"
-        "不要退化为纯文字表格罗列。\n"
-        "- 股价 K 线**默认取 `days: 60`（约 3 个月）**：用户说「最近走势/最近一周走势/近期表现」等"
-        "泛化表述时，也按 60 天取数以保证图表不稀疏；仅当用户明确要精确的极短窗口（如「对比昨天和前天」）才用更小 days。\n"
-        "- **股票图必须用结构化 `stock_chart` JSON**（单股 `points` 或多股 `watchlist`），"
-        "把 `query_data_source` 返回的 OHLCV 行**原样**填进 `points`；"
-        "**严禁手写 `<div>`+ECharts `<script>` HTML 画股票图**（会出现白字看不见、图稀疏等问题）。\n"
-        "- `query_data_source` 返回已裁剪为 date/OHLC/volume，完整 60 行可一次拿全；"
-        "**禁止**因为「看起来被截断」就用更小 days 反复重查同一支股票——同一 symbol 至多查一次。\n"
+        "再调用 `query_data_source` 取得真实数据。取数与出图的参数细则见工具 description。\n"
+        "- 取到的时间序列数据用于可视化时，按 show_widget 纪律渲染图表，不要退化为纯文字表格罗列。\n"
         "- 工作流：**先** 1–3 句可见衔接语 → **`query_data_source` 取数** → **`show_widget` 出图** → **后**分节解读；"
-        "解读中的数字必须与工具返回一致。\n"
-        "- 若所选数据源返回凭证缺失/连接失败，先尝试免费替代源（如 akshare/world_bank）；"
-        "全部失败时必须明确告知用户「当前数据源暂不可用，无法核实最新数据」，**严禁编造具体数值**。\n\n"
+        "解读中的数字必须与工具返回一致。数据源全部失败时必须明说无法核实，**严禁编造具体数值**。\n\n"
     )
 
 
