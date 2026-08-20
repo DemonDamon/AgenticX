@@ -4,8 +4,31 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from agenticx.runtime.global_mcp_manager import GlobalMcpManager
 from agenticx.studio import server as studio_server
 from agenticx.studio.server import create_studio_app
+
+
+def _install_mcp_config(monkeypatch, name: str, config: object) -> None:
+    """让 /api/mcp/servers 只看到这一个 MCP 配置。
+
+    两处坑：
+
+    1. ``StudioSession.mcp_configs`` / ``connected_servers`` 已经是对
+       GlobalMcpManager 的只读透传属性，赋值只打一条 DeprecationWarning 就被忽略
+       （见 cli/studio.py 的 setter）。用例原来直接给 session 赋值，配置压根没进去，
+       接口返回空列表，断言以 StopIteration 挂掉——看着像接口少了字段，其实是 setup
+       没生效。
+    2. ``GlobalMcpManager.mcp_configs`` 每次读都会调 _reload_configs_if_needed()，
+       从 ``agenticx.cli.studio_mcp.load_available_servers`` 重新加载，直接往返回的
+       dict 里塞东西下一次读就没了。所以要打在那个加载函数上——它是在函数体里 import
+       的，patch 源模块就能生效。
+    """
+    from agenticx.cli import studio_mcp as studio_mcp_mod
+
+    monkeypatch.setattr(studio_mcp_mod, "load_available_servers", lambda: {name: config})
+    GlobalMcpManager.reset_for_testing()
+    GlobalMcpManager.singleton().connected_servers.clear()
 
 
 def _headers() -> dict[str, str]:
@@ -28,10 +51,7 @@ def test_mcp_servers_includes_operation_status_fields(monkeypatch) -> None:
     managed = app.state.session_manager.get(sid, touch=False)
     assert managed is not None
     sess = managed.studio_session
-    sess.mcp_configs = {
-        "github": SimpleNamespace(command="docker"),
-    }
-    sess.connected_servers = set()
+    _install_mcp_config(monkeypatch, "github", SimpleNamespace(command="docker"))
     sess.mcp_server_ops = {
         "github": {
             "phase": "connecting",
@@ -68,7 +88,7 @@ def test_connect_mcp_failure_persists_failed_status(monkeypatch) -> None:
     sid = _create_session(client)
     managed = app.state.session_manager.get(sid, touch=False)
     assert managed is not None
-    managed.studio_session.mcp_configs = {"github": SimpleNamespace(command="docker")}
+    _install_mcp_config(monkeypatch, "github", SimpleNamespace(command="docker"))
 
     connect_resp = client.post(
         "/api/mcp/connect",

@@ -37,7 +37,7 @@ def test_memory_graph_status_ok(client):
 def test_group_access_denied(client, monkeypatch):
     monkeypatch.setenv("AGX_MEMORY_GRAPH_ENABLED", "1")
     # Reload config path by patching load
-    from agenticx.memory.graph import config as cfg_mod
+    from agenticx.memory.graph import routes as routes_mod
 
     class _Cfg:
         enabled = True
@@ -50,7 +50,11 @@ def test_group_access_denied(client, monkeypatch):
         telemetry = False
         status_path = __import__("pathlib").Path("/tmp/status.json")
 
-    monkeypatch.setattr(cfg_mod, "load_memory_graph_config", lambda: _Cfg())
+    # 必须打在 routes 模块自己的名字上：routes.py 顶部是
+    # `from agenticx.memory.graph.config import load_memory_graph_config`，
+    # 打在 config 模块上改不到已经绑好的那个引用。三条用例里只有设了
+    # AGX_MEMORY_GRAPH_ENABLED 的那条能过——过的原因是环境变量，不是这个桩。
+    monkeypatch.setattr(routes_mod, "load_memory_graph_config", lambda: _Cfg())
     app = create_studio_app()
     c = TestClient(app)
     resp = c.get(
@@ -62,7 +66,7 @@ def test_group_access_denied(client, monkeypatch):
 
 def test_memory_graph_overview_meta_group_without_session(monkeypatch):
     """Settings → 记忆 (meta scope) may call overview with group_id only."""
-    from agenticx.memory.graph import config as cfg_mod
+    from agenticx.memory.graph import routes as routes_mod
     from agenticx.memory.graph import store as store_mod
 
     class _Cfg:
@@ -90,7 +94,11 @@ def test_memory_graph_overview_meta_group_without_session(monkeypatch):
                 },
             }
 
-    monkeypatch.setattr(cfg_mod, "load_memory_graph_config", lambda: _Cfg())
+    # 必须打在 routes 模块自己的名字上：routes.py 顶部是
+    # `from agenticx.memory.graph.config import load_memory_graph_config`，
+    # 打在 config 模块上改不到已经绑好的那个引用。三条用例里只有设了
+    # AGX_MEMORY_GRAPH_ENABLED 的那条能过——过的原因是环境变量，不是这个桩。
+    monkeypatch.setattr(routes_mod, "load_memory_graph_config", lambda: _Cfg())
     monkeypatch.setattr(store_mod.MemoryGraphStore, "singleton", classmethod(lambda cls: _Store()))
     app = create_studio_app()
     c = TestClient(app)
@@ -102,7 +110,7 @@ def test_memory_graph_overview_meta_group_without_session(monkeypatch):
 
 
 def test_memory_graph_overview_session_group_requires_session_id(monkeypatch):
-    from agenticx.memory.graph import config as cfg_mod
+    from agenticx.memory.graph import routes as routes_mod
     from agenticx.memory.graph import store as store_mod
 
     class _Cfg:
@@ -124,7 +132,11 @@ def test_memory_graph_overview_session_group_requires_session_id(monkeypatch):
                 "meta": {"groupId": group_id, "generatedAt": "2026-01-01T00:00:00+00:00", "truncated": False},
             }
 
-    monkeypatch.setattr(cfg_mod, "load_memory_graph_config", lambda: _Cfg())
+    # 必须打在 routes 模块自己的名字上：routes.py 顶部是
+    # `from agenticx.memory.graph.config import load_memory_graph_config`，
+    # 打在 config 模块上改不到已经绑好的那个引用。三条用例里只有设了
+    # AGX_MEMORY_GRAPH_ENABLED 的那条能过——过的原因是环境变量，不是这个桩。
+    monkeypatch.setattr(routes_mod, "load_memory_graph_config", lambda: _Cfg())
     monkeypatch.setattr(store_mod.MemoryGraphStore, "singleton", classmethod(lambda cls: _Store()))
     app = create_studio_app()
     c = TestClient(app)

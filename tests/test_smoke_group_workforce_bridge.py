@@ -245,21 +245,30 @@ class TestWorkforceEventMapping:
 
 
 class TestGroupProgressTextMapping:
-    def test_tool_call_progress_includes_args_preview(self):
+    """群聊进度行只给一句可扫读的状态，参数和结果留给侧栏详情。
+
+    这两条原来断言进度行里要带上参数预览（"VibeVoice"）和结果预览（"count"）。
+    工具调用展示后来被有意简化了（见 group_router._runtime_event_to_progress_text
+    里的注释：args/result belong in side-panel detail, not the line），所以断言反过来：
+    保证正文里**不会**漏出参数和结果 —— 群聊里可能有多个人，工具参数常常带着文件路径、
+    查询词这类不该在群消息流里刷屏的东西。
+    """
+
+    def test_tool_call_progress_is_a_one_line_status(self):
         text = GroupChatRouter._runtime_event_to_progress_text(
             EventType.TOOL_CALL.value,
             {"name": "knowledge_search", "arguments": {"query": "VibeVoice", "limit": 3}},
         )
-        assert "正在调用工具：knowledge_search" in text
-        assert "VibeVoice" in text
+        assert text == "正在调用工具：knowledge_search"
+        assert "VibeVoice" not in text
 
-    def test_tool_result_progress_includes_result_preview(self):
+    def test_tool_result_progress_is_a_one_line_status(self):
         text = GroupChatRouter._runtime_event_to_progress_text(
             EventType.TOOL_RESULT.value,
             {"name": "session_search", "result": {"count": 2, "hits": ["a", "b"]}},
         )
-        assert "工具已完成：session_search" in text
-        assert "count" in text
+        assert text == "工具已完成：session_search"
+        assert "count" not in text
 
 
 # ---------------------------------------------------------------------------
