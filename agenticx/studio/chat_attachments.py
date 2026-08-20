@@ -120,6 +120,24 @@ def _is_readable_abs_file(key: str) -> bool:
         return False
 
 
+#: 交给专门的文档抽取器处理的扩展名（与 context_file_hydration.ALLOWED_EXTENSIONS 同源）。
+#: 这些文件**不能**当纯文本直接读进上下文：读得出来不代表读对了。
+def _needs_document_extraction(key: str) -> bool:
+    """True when this attachment must go through the document extractor.
+
+    ``rehydrate_session_text_context_files`` 会把「能按 utf-8 读出来的绝对路径文件」
+    直接当正文塞进上下文。PDF 里只要内容流没压缩，整份文件就是可解码的 ASCII——于是
+    占位符被替换成 PDF 源码，后面的 hydrate_turn_context_files 一看已经不是占位符就
+    跳过，模型最终读到的是 `%PDF-1.4`、`/MediaBox`、`endobj` 这些东西，而不是正文。
+
+    Word/Chrome 导出的 PDF 多数带压缩流（二进制，解码失败）所以侥幸没事；不压缩的那
+    一类就会中招。是否走文档抽取不能取决于「这份文件的字节碰巧能不能解码」。
+    """
+    from agenticx.studio.context_file_hydration import ALLOWED_EXTENSIONS
+
+    return os.path.splitext(str(key or ""))[1].lower() in ALLOWED_EXTENSIONS
+
+
 def _is_text_attachment_placeholder(body: str) -> bool:
     stripped = str(body or "").strip()
     if not stripped:
@@ -235,6 +253,10 @@ def rehydrate_session_text_context_files(
         if not key:
             continue
         if not _is_text_attachment_placeholder(body):
+            out[key] = body
+            continue
+        # 文档类附件保留占位符，交给文档抽取器；当纯文本读会把 PDF 源码灌进上下文。
+        if _needs_document_extraction(key):
             out[key] = body
             continue
         # Prefer reading the key itself when it already points at a durable file.
