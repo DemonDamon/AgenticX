@@ -11201,6 +11201,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 streamReasoningStartedAt = null;
                 cancelStreamRenderFrame();
                 scheduleStreamTextUpdate("");
+                addPaneMessageIfSessionActive(
+                  pane.id,
+                  "tool",
+                  errText || "正文按图示规范重写中，上一稿已撤回。",
+                  eventAgentId || "meta",
+                  undefined,
+                  undefined,
+                  undefined,
+                  { noticeKind: "widget_flow_retry" },
+                );
                 continue;
               }
               const budgetInfo = budgetExceededInfoFromPayload(

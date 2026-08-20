@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from agenticx.runtime.widget_flow_guard import contains_text_flow_diagram
+from agenticx.runtime.widget_flow_guard import (
+    WIDGET_FLOW_MAX_RETRIES_PER_SESSION,
+    build_widget_flow_retry_hint,
+    contains_text_flow_diagram,
+)
 
 
 def test_detects_fenced_text_block_with_arrows() -> None:
@@ -90,3 +94,77 @@ flowchart LR
     A --> B --> C
 ```"""
     assert not contains_text_flow_diagram(text)
+
+
+def test_language_fences_with_hr_between_not_flagged() -> None:
+    """Closing ``` of a tagged fence must not start a bare-fence scan.
+
+    Session f8918b11: bash then --- then yaml was treated as a text fence,
+    and ``---`` matched ASCII_BOX.
+    """
+    text = """```bash
+echo hi
+```
+
+---
+
+```yaml
+foo: 1
+```
+"""
+    assert not contains_text_flow_diagram(text)
+
+
+def test_markdown_table_after_language_fence_not_flagged() -> None:
+    text = """```yaml
+stream: false
+```
+
+| 优先级 | 方案 | 风险 |
+|--------|------|------|
+| 1 | 工具配置调优 | 无 |
+"""
+    assert not contains_text_flow_diagram(text)
+
+
+def test_implication_bullets_with_single_arrow_not_flagged() -> None:
+    text = """**判断逻辑**：
+- 断开时间高度一致 → 指向固定超时策略
+- 断开时间随机 → 指向 idle timeout
+- 断开时收到 TCP RST → 主动断开
+"""
+    assert not contains_text_flow_diagram(text)
+
+
+def test_consecutive_node_hops_in_prose_still_flagged() -> None:
+    text = """客户端 → 公司代理
+公司代理 → API 端点
+"""
+    assert contains_text_flow_diagram(text)
+
+
+def test_arrow_chain_after_language_fence_still_flagged() -> None:
+    text = """```bash
+echo hi
+```
+
+客户端 → 代理 → 防火墙
+  ↓
+服务端
+"""
+    assert contains_text_flow_diagram(text)
+
+
+def test_retry_hint_includes_hit_snippet() -> None:
+    text = """微信PC客户端 → mitmproxy → 微信服务器
+  ↓
+拦截接口
+"""
+    hint = build_widget_flow_retry_hint(text)
+    assert "命中片段" in hint
+    assert "mitmproxy" in hint
+    assert hint.startswith("[系统纪律违规]")
+
+
+def test_widget_flow_max_retries_is_one() -> None:
+    assert WIDGET_FLOW_MAX_RETRIES_PER_SESSION == 1

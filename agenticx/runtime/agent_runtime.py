@@ -4868,8 +4868,9 @@ class AgentRuntime:
             # --- Widget flow guard: detect text-based diagrams and force retry ---
             if not tool_calls and "show_widget" in allowed_tool_names:
                 from agenticx.runtime.widget_flow_guard import (
+                    WIDGET_FLOW_DISCARD_NOTICE,
                     WIDGET_FLOW_MAX_RETRIES_PER_SESSION,
-                    WIDGET_FLOW_RETRY_HINT,
+                    build_widget_flow_retry_hint,
                     contains_text_flow_diagram,
                 )
 
@@ -4889,19 +4890,21 @@ class AgentRuntime:
                         "widget_flow_guard: detected text flow diagram, forcing retry (count=%s)",
                         _widget_flow_retry_count + 1,
                     )
+                    retry_hint = build_widget_flow_retry_hint(response_text)
                     yield RuntimeEvent(
                         type=EventType.ERROR.value,
                         data={
                             "detector": "widget_flow_guard",
                             "action": "discard_stream",
                             "severity": "internal",
+                            "text": WIDGET_FLOW_DISCARD_NOTICE,
                         },
                         agent_id=agent_id,
                     )
                     messages.append({"role": "assistant", "content": ac_clean})
-                    messages.append({"role": "system", "content": WIDGET_FLOW_RETRY_HINT})
+                    messages.append({"role": "system", "content": retry_hint})
                     session.agent_messages.append({"role": "assistant", "content": ac_clean})
-                    session.agent_messages.append({"role": "system", "content": WIDGET_FLOW_RETRY_HINT})
+                    session.agent_messages.append({"role": "system", "content": retry_hint})
                     continue
             # --- End widget flow guard ---
             # --- Data source flow guard: uncited quantitative claims ---

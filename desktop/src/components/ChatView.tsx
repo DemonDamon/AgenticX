@@ -1990,6 +1990,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 full = "";
                 cancelStreamRenderFrame();
                 scheduleStreamTextUpdate("");
+                addMessage(
+                  "tool",
+                  errText || "正文按图示规范重写中，上一稿已撤回。",
+                  "meta",
+                  undefined,
+                  undefined,
+                  undefined,
+                  { noticeKind: "widget_flow_retry" },
+                );
                 continue;
               }
               const isWarning = severity === "warning"

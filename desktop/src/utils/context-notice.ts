@@ -23,6 +23,7 @@ function detectKindFromText(text: string): ContextNoticeKind | null {
   if (text.includes("Token 接近上限，已自动压缩")) return "compaction_reactive";
   if (text.includes("已压缩") && text.includes("任务继续")) return "compaction_proactive";
   if (text.includes("已自动压缩") && text.includes("历史")) return "compaction_proactive";
+  if (text.includes("正文按图示规范重写中")) return "widget_flow_retry";
   return null;
 }
 

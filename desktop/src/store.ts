@@ -212,7 +212,8 @@ export type ContextNoticeKind =
   | "compactor_cb"
   | "compaction_reactive"
   | "compaction_proactive"
-  | "budget_exceeded";
+  | "budget_exceeded"
+  | "widget_flow_retry";
 
 export type Message = {
   id: string;
