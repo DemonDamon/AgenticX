@@ -42,6 +42,14 @@ class MockGUIAgentContext:
             **self.data
         }
 
+    def dict(self) -> Dict[str, Any]:
+        """真实的 GUIAgentContext 是 pydantic 模型，被测代码调的是 .dict()。
+
+        替身只提供 to_dict()，于是报 AttributeError，看起来像产品代码找错了方法。
+        （顺带：.dict() 在 pydantic v2 已废弃，产品侧迟早要换成 model_dump()。）
+        """
+        return self.to_dict()
+
 
 class TestHumanInterventionRequest:
     """测试人工干预请求模型"""

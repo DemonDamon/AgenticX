@@ -16,6 +16,22 @@ from agenticx.embodiment.core.context import GUIAgentContext
 from agenticx.embodiment.core.models import GUIAgentResult
 
 
+
+def _require_networkx():
+    """返回 networkx，缺失时给一句能照着做的错误。
+
+    networkx 是可选依赖（见本文件顶部的 try/except）。缺了它，原来会在
+    ``nx.DiGraph()`` 处抛 "'NoneType' object has no attribute 'DiGraph'" —— 看起来像
+    内部状态坏了，而不是少装一个包。参考 tools/document_text 里缺 PDF 库时的写法，
+    把该装什么直接说出来。
+    """
+    if nx is None:
+        raise RuntimeError(
+            "GUIWorkflow 需要 networkx，当前环境没有安装。"
+            '请执行：pip install "agenticx[graph]"'
+        )
+    return nx
+
 class GUIWorkflow(Workflow):
     """GUI task workflow representation.
     
@@ -36,19 +52,23 @@ class GUIWorkflow(Workflow):
     )
     
     # Internal graph representation
-    graph: Optional[nx.DiGraph] = Field(default=None, exclude=True)
+    # 故意不写成 Optional[nx.DiGraph]：networkx 是可选依赖，缺了它 nx 就是 None，
+    # 这行注解在**类定义时**求值，会直接把整个模块的 import 打断，报的还是
+    # "'NoneType' object has no attribute 'DiGraph'"。运行时的缺失检查交给
+    # _require_networkx()，那里会告诉你装什么。
+    graph: Optional[Any] = Field(default=None, exclude=True)
     
     def __init__(self, **data):
         """Initialize GUI workflow."""
         super().__init__(**data)
         if self.graph is None:
-            self.graph = nx.DiGraph()
+            self.graph = _require_networkx().DiGraph()
         self._build_graph()
     
     def _build_graph(self) -> None:
         """Build NetworkX graph from nodes and edges."""
         if self.graph is None:
-            self.graph = nx.DiGraph()
+            self.graph = _require_networkx().DiGraph()
         else:
             self.graph.clear()  # Clear existing graph instead of reassigning
         
@@ -81,7 +101,7 @@ class GUIWorkflow(Workflow):
             self.graph.add_node(node.id, node=node)
         else:
             # Recreate graph if it was None
-            self.graph = nx.DiGraph()
+            self.graph = _require_networkx().DiGraph()
             self.graph.add_node(node.id, node=node)
             # Rebuild the rest of the graph
             self._build_graph()
@@ -93,7 +113,7 @@ class GUIWorkflow(Workflow):
             self.graph.add_edge(edge.source, edge.target, edge=edge)
         else:
             # Recreate graph if it was None
-            self.graph = nx.DiGraph()
+            self.graph = _require_networkx().DiGraph()
             self.graph.add_edge(edge.source, edge.target, edge=edge)
             # Rebuild the rest of the graph
             self._build_graph()
@@ -144,7 +164,7 @@ class GUIWorkflow(Workflow):
             self._build_graph()
         
         # Check for cycles (optional - some workflows may allow cycles)
-        if self.graph is not None and not nx.is_directed_acyclic_graph(self.graph):
+        if self.graph is not None and not _require_networkx().is_directed_acyclic_graph(self.graph):
             raise ValueError("Workflow contains cycles")
         
         # Check if all edges reference valid nodes

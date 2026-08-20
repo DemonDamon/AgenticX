@@ -49,7 +49,10 @@ class FeedbackCollector(Component):
         }
         
         # 注册事件监听器
-        self.event_bus.subscribe("human_feedback_received", self.on_feedback_received, async_handler=True)
+        # EventBus.subscribe 现在按 inspect.iscoroutinefunction 自动判定同步/异步，
+        # 早年的 async_handler= 参数已经没有了；留着它会让 FeedbackCollector 根本构造不出来
+        # （TypeError: unexpected keyword argument）。
+        self.event_bus.subscribe("human_feedback_received", self.on_feedback_received)
         
         # 处理任务（延迟启动）
         self._processing_task = None

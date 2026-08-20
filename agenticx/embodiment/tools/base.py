@@ -52,12 +52,15 @@ class GUIActionTool(BaseTool):
         tool_name = getattr(self, 'name', 'gui_action_tool')
         tool_description = getattr(self, 'description', 'Base GUI action tool')
         
+        # platform_adapter 是 pydantic 的必填字段，必须在 __init__ 里一起交给 BaseTool。
+        # 只在 super().__init__ 之后赋实例属性是不够的：pydantic v2 在 __init__ 就校验，
+        # 缺字段直接抛 ValidationError —— 于是 ClickTool/TypeTool/ScrollTool 这一整族
+        # 工具根本构造不出来。
         super().__init__(
             name=tool_name,
-            description=tool_description
+            description=tool_description,
+            platform_adapter=platform_adapter,
         )
-        # Store platform adapter as instance attribute
-        self.platform_adapter = platform_adapter
     
     def execute(self, args=None, **kwargs) -> ToolResult:
         """Execute the GUI action synchronously.

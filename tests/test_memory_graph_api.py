@@ -158,6 +158,11 @@ async def test_finalize_chat_runtime_schedules_ingest_without_saw_final(monkeypa
     )
 
     class _Manager:
+        def should_interrupt(self, _sid: str) -> bool:
+            # finalize 路径会问「这一轮是不是用户主动中断的」（turn_interruption.py），
+            # 替身缺这个方法就会 AttributeError，看起来像产品代码坏了。
+            return False
+
         def clear_interrupt(self, _sid: str) -> None:
             pass
 
