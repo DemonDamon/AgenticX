@@ -1045,28 +1045,32 @@ class ContextCompiler:
         
         # 时间窗口大小（秒）
         window_size = self.config.time_window_seconds
-        
-        # 按时间窗口分组
+
+        # 分桶以**最新事件**为基准往回数，而不是按绝对时间戳切
+        # （原来是 int(event_ts // window_size)）。绝对切分的问题是"当前窗口"有多长
+        # 取决于现在离窗口边界多远：刚跨过 5 分钟边界时，当前窗口只有几秒，于是
+        # 一秒钟前发生的事件也会被压掉。表现出来就是同一份日志在一天里大部分时候
+        # 行为正确，有一小段时间会把刚发生的上下文压走。
+        # 以最新事件为基准之后，"最近一个 window_size" 才是真的最近一个 window_size。
+        latest_ts = max(self._get_event_timestamp(e) for e in events)
         time_buckets: Dict[int, List[AnyEvent]] = {}
         for event in events:
             event_ts = self._get_event_timestamp(event)
-            bucket_key = int(event_ts // window_size)
-            if bucket_key not in time_buckets:
-                time_buckets[bucket_key] = []
-            time_buckets[bucket_key].append(event)
-        
+            # 0 = 最近的窗口，数字越大越旧
+            bucket_key = int(max(0.0, latest_ts - event_ts) // window_size)
+            time_buckets.setdefault(bucket_key, []).append(event)
+
         if len(time_buckets) < 2:
             # 只有一个时间窗口，不压缩
             return []
-        
-        # 对 bucket_key 排序，压缩最早的窗口（保留最近的窗口）
-        sorted_keys = sorted(time_buckets.keys())
-        
-        # 压缩所有已完成的时间窗口（除了最后一个）
-        events_to_compact = []
-        for key in sorted_keys[:-1]:
+
+        # 保留最近的窗口（key == 0），压缩其余的；按从旧到新的顺序返回。
+        events_to_compact: List[AnyEvent] = []
+        for key in sorted(time_buckets.keys(), reverse=True):
+            if key == 0:
+                continue
             events_to_compact.extend(time_buckets[key])
-        
+
         return events_to_compact
     
     def _topic_based_events(self, event_log: EventLog) -> List[AnyEvent]:

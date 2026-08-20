@@ -15,6 +15,8 @@ Context Compiler 冒烟测试（增强版）
 9. 可观测性功能
 """
 
+import time
+
 import pytest
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -948,6 +950,61 @@ class TestTimeBasedStrategy:
         recent_tool_names = [e.tool_name for e in events_to_compact if hasattr(e, 'tool_name')]
         assert not any('recent_tool' in name for name in recent_tool_names)
     
+    @pytest.mark.asyncio
+    async def test_time_based_keeps_recent_window_across_a_clock_boundary(
+        self, sample_agent, sample_task
+    ):
+        """刚跨过窗口边界时，也不能把几十秒前的事件压掉。
+
+        分桶原来是按绝对时间戳切的（int(ts // window_size)）。这样"当前窗口"有多长
+        取决于现在离边界多远：刚跨过 5 分钟边界时当前窗口只有几秒，于是几十秒前的
+        事件落到上一个桶里被压走。同一份日志，一天里有一小段时间行为就是错的——
+        test_time_based_strategy_groups_by_window 因此会按 wall clock 间歇性变红。
+
+        这里把时间戳钉死在"刚过边界 20 秒"的位置，让这个场景可复现。
+        """
+        window = 300
+        # latest_ts % window == 20：最近的窗口才刚开始 20 秒
+        latest_ts = float((int(time.time()) // window) * window + 20)
+
+        event_log = EventLog(agent_id=sample_agent.id, task_id=sample_task.id)
+
+        # 10 分钟前的一批，应该被压缩
+        for i in range(3):
+            event = ToolCallEvent(
+                tool_name=f"old_tool_{i}",
+                tool_args={"arg": i},
+                intent="old intent",
+                agent_id=sample_agent.id,
+                task_id=sample_task.id,
+            )
+            event.timestamp = latest_ts - 600 + i * 10
+            event_log.append(event)
+
+        # 最近 40 秒内的一批，横跨绝对边界，必须保留
+        for i in range(5):
+            event = ToolCallEvent(
+                tool_name=f"recent_tool_{i}",
+                tool_args={"arg": i},
+                intent="recent intent",
+                agent_id=sample_agent.id,
+                task_id=sample_task.id,
+            )
+            event.timestamp = latest_ts - 40 + i * 10
+            event_log.append(event)
+
+        compiler = ContextCompiler(
+            summarizer=SimpleEventSummarizer(),
+            config=CompactionConfig(
+                enabled=True, compaction_interval=3, time_window_seconds=window
+            ),
+            strategy=CompactionStrategy.TIME_BASED,
+        )
+        events_to_compact = compiler._time_based_events(event_log)
+
+        names = [e.tool_name for e in events_to_compact if hasattr(e, "tool_name")]
+        assert names == ["old_tool_0", "old_tool_1", "old_tool_2"]
+
     @pytest.mark.asyncio
     async def test_time_based_single_window_no_compact(self, populated_event_log):
         """测试单窗口情况不压缩"""
