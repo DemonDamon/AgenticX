@@ -2740,6 +2740,24 @@ def create_studio_app() -> FastAPI:
         # (including to None) so switching models cannot inherit the old value.
         if payload.model or payload.provider:
             session.declared_context_window = payload.context_window
+
+        # 附件自动路由：本轮带文档时把会话锁到私有部署的多模态模型。
+        #
+        # 位置很关键——必须在客户端选的 provider/model 落到 session 之后、在
+        # ProviderResolver.resolve 之前。晚一步 LLM 就已经按公网模型建好了；而
+        # Office 文档最终会被抽成文本进上下文，先解析后决定的话文本已经发出去了。
+        #
+        # 前端也会拦一道（选择器变灰 + 说明弹窗），但这里不能省：CLI、定时任务、
+        # 子智能体、分身委派都不经过那段 UI 代码。
+        try:
+            from agenticx.studio.attachment_routing import apply_to_session as _apply_routing
+
+            _routing_decision = _apply_routing(
+                session, filenames=list(turn_context_files.keys())
+            )
+        except Exception:
+            logger.debug("attachment routing skipped", exc_info=True)
+            _routing_decision = None
         # Kimi K3 / DeepSeek V4 reasoning_effort; cleared when absent so stale
         # values from a previous turn do not leak onto other models.
         _effort = str(getattr(payload, "reasoning_effort", None) or "").strip().lower()

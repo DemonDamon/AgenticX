@@ -11,6 +11,7 @@ import pytest
 
 from agenticx.studio.attachment_routing import (
     ROUTING_OFF,
+    apply_to_session,
     AttachmentRoutingPolicy,
     RoutingModelRef,
     decide,
@@ -163,3 +164,42 @@ def test_project_local_config_cannot_override_the_policy(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ConfigManager, "get_value", staticmethod(_boom), raising=False)
     assert read_policy().document_target == QWEN
+
+
+class _Session:
+    def __init__(self, provider="zhipu", model="glm-5.2", window=128000):
+        self.provider_name = provider
+        self.model_name = model
+        self.declared_context_window = window
+
+
+def test_apply_switches_the_session_and_clears_the_declared_window():
+    session = _Session()
+    decision = apply_to_session(session, filenames=["年报.pdf"], policy=read_policy(WIRE))
+    assert decision is not None and decision.announce is True
+    assert (session.provider_name, session.model_name) == (QWEN.provider, QWEN.model)
+    # declared_context_window 是跟客户端选的模型一起传上来的，换了模型就是错的。
+    assert session.declared_context_window is None
+
+
+def test_apply_is_a_noop_for_images():
+    session = _Session()
+    assert apply_to_session(session, filenames=["shot.png"], policy=read_policy(WIRE)) is None
+    assert (session.provider_name, session.model_name) == ("zhipu", "glm-5.2")
+    assert session.declared_context_window == 128000
+
+
+def test_apply_stays_locked_on_later_turns_without_attachments():
+    policy = read_policy(WIRE)
+    session = _Session()
+    apply_to_session(session, filenames=["年报.pdf"], policy=policy)
+    session.provider_name, session.model_name = "zhipu", "glm-5.2"  # 客户端又传了旧模型
+    decision = apply_to_session(session, filenames=[], policy=policy)
+    assert decision is not None and decision.announce is False
+    assert (session.provider_name, session.model_name) == (QWEN.provider, QWEN.model)
+
+
+def test_apply_does_nothing_while_routing_is_off():
+    session = _Session()
+    assert apply_to_session(session, filenames=["年报.pdf"], policy=ROUTING_OFF) is None
+    assert session.provider_name == "zhipu"

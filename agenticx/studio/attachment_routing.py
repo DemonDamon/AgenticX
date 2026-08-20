@@ -181,3 +181,49 @@ def lock_reason(target: RoutingModelRef) -> str:
         f"本会话包含文档附件，已锁定到「{target.label}」（私有部署）。"
         "文档内容不会离开这台部署。"
     )
+
+
+def apply_to_session(
+    session: Any,
+    *,
+    filenames: Sequence[str],
+    policy: Optional[AttachmentRoutingPolicy] = None,
+) -> Optional[RoutingDecision]:
+    """判定并把结果落到 session 上。
+
+    必须在解析 LLM **之前**调用：下游是拿 ``session.provider_name`` /
+    ``session.model_name`` 去 ``ProviderResolver.resolve`` 的，晚一步就来不及了。
+
+    Args:
+        filenames: 本轮附件的名字或路径。只看扩展名，不看内容——判定发生在解析之前。
+        policy: 覆盖下发策略，仅供测试。
+
+    Returns:
+        锁定时返回决策（``announce`` 为真表示这是本会话第一次锁定，该告诉用户），
+        不需要动模型时返回 ``None``。
+    """
+    resolved = read_policy() if policy is None else policy
+    decision = decide(
+        policy=resolved,
+        filenames=list(filenames),
+        locked_target=session_locked_target(session),
+    )
+    target = decision.target
+    if decision.action != "lock" or target is None:
+        return None
+    switched = (
+        str(getattr(session, "provider_name", "") or "") != target.provider
+        or str(getattr(session, "model_name", "") or "") != target.model
+    )
+    session.provider_name = target.provider
+    session.model_name = target.model
+    if switched:
+        # declared_context_window 是跟着客户端选的那个模型一起传上来的。模型被我们
+        # 换掉之后它就是错的，留着会让运行时按错误的窗口做预算，清掉以回落到按模型
+        # 名推断。
+        try:
+            session.declared_context_window = None
+        except Exception:
+            pass
+    remember_lock(session, target)
+    return decision
