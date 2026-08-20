@@ -21,6 +21,7 @@ type ReplaceSnapshotOptions = {
 };
 
 let legacyFileMigrated = false;
+let legacyMigrationInFlight: Promise<void> | null = null;
 
 export function resolveSnapshotPath(): string {
   const cwd = process.cwd();
@@ -38,8 +39,25 @@ export function resolveSnapshotPath(): string {
 
 async function migrateLegacySnapshotFileOnce(): Promise<void> {
   if (legacyFileMigrated) return;
-  legacyFileMigrated = true;
+  // 这里原本是先把 legacyFileMigrated 置 true 再干活。只要迁移过程中数据库抖一下
+  // （下面的探测查询或者插入抛错），标记已经留在 true 了：调用方看到报错重试一次，
+  // 第二次直接从这里 return，旧文件里的租户快照**永远不会**再被导入。结果就是升级
+  // 之后策略包静悄悄全没了，只能靠人重新发布。改成"成功才置位"，失败时清掉 in-flight
+  // 让下一次调用重试；并发调用共用同一个 promise，避免重复迁移。
+  legacyMigrationInFlight ??= runLegacySnapshotMigration().then(
+    () => {
+      legacyFileMigrated = true;
+      legacyMigrationInFlight = null;
+    },
+    (err) => {
+      legacyMigrationInFlight = null;
+      throw err;
+    },
+  );
+  return legacyMigrationInFlight;
+}
 
+async function runLegacySnapshotMigration(): Promise<void> {
   const dialect = resolveDatabaseConfig().dialect;
   const hasRows =
     dialect === "mysql"
@@ -58,24 +76,36 @@ async function migrateLegacySnapshotFileOnce(): Promise<void> {
   if (hasRows) return;
 
   const fp = resolveSnapshotPath();
+  let parsed: Partial<SnapshotStoreFile>;
   try {
-    const raw = await fs.readFile(fp, "utf-8");
-    const parsed = JSON.parse(raw) as Partial<SnapshotStoreFile>;
-    if (!parsed?.tenants || typeof parsed.tenants !== "object") return;
-    for (const [tid, snapshot] of Object.entries(parsed.tenants)) {
-      const values = {
-        tenantId: tid,
-        snapshot: snapshot as unknown as Record<string, unknown>,
-        updatedAt: new Date(parsed.updatedAt ?? new Date().toISOString()),
-      };
-      if (dialect === "mysql") {
-        await getPolicyMysqlDb().insert(mysqlSnapTable).values(values);
-      } else {
-        await getIamDb().insert(pgSnapTable).values(values);
-      }
-    }
+    parsed = JSON.parse(await fs.readFile(fp, "utf-8")) as Partial<SnapshotStoreFile>;
   } catch {
-    /* ENOENT ok */
+    // 旧文件不存在（ENOENT，全新部署的正常情况）或者内容不是合法 JSON —— 两种都当作
+    // "没有需要迁移的东西"。注意 try 只包住读文件+解析：原来它一直包到插入结束，
+    // 于是写库失败也会被这句注释掉的 "ENOENT ok" 吞掉，外面记成迁移完成。
+    return;
+  }
+  if (!parsed?.tenants || typeof parsed.tenants !== "object") return;
+
+  const rows = Object.entries(parsed.tenants).map(([tid, snapshot]) => ({
+    tenantId: tid,
+    snapshot: snapshot as unknown as Record<string, unknown>,
+    updatedAt: new Date(parsed.updatedAt ?? new Date().toISOString()),
+  }));
+  if (!rows.length) return;
+
+  // 必须整体成败：逐条插入时如果插到一半失败，库里已经有行了，重试会被上面的
+  // hasRows 判成"已经迁过"直接返回，剩下的租户就永久丢了。
+  if (dialect === "mysql") {
+    const db = getPolicyMysqlDb();
+    await db.transaction(async (tx) => {
+      for (const values of rows) await tx.insert(mysqlSnapTable).values(values);
+    });
+  } else {
+    const db = getIamDb();
+    await db.transaction(async (tx) => {
+      for (const values of rows) await tx.insert(pgSnapTable).values(values);
+    });
   }
 }
 
@@ -206,4 +236,5 @@ export async function buildPolicySnapshotBundleForGateway(): Promise<SnapshotSto
 /** test-only */
 export function __resetLegacySnapshotMigrationFlag(): void {
   legacyFileMigrated = false;
+  legacyMigrationInFlight = null;
 }
