@@ -750,6 +750,11 @@ def test_server_chat_rebinds_team_callbacks_each_turn(monkeypatch) -> None:
     session_id = client.get("/api/session").json()["session_id"]
 
     def _run_chat() -> List[Dict[str, Any]]:
+        # 每轮重新计数。原来按「全局第几次 resolve」的奇偶来决定发 meta 还是 subagent
+        # 替身，但一轮里 resolve 不止两次——FINAL 之后还会起一个会猜会话标题的后台任务，
+        # 它也走 resolve，于是第二轮的奇偶被顶偏，meta 那次拿到了 subagent 替身，看起来
+        # 就像「回调没重新绑定」。这是替身的计数假设太脆，不是被测行为。
+        calls["n"] = 0
         with client.stream(
             "POST",
             "/api/chat",
