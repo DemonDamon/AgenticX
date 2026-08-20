@@ -59,7 +59,20 @@ def test_provider_breakdown_label_reads_config(monkeypatch) -> None:
     assert provider_breakdown_label("custom_openai_deleted") == "历史厂商"
 
 
-def test_build_provider_catalog_block_mentions_display_names() -> None:
+def test_build_provider_catalog_block_mentions_display_names(monkeypatch) -> None:
+    # 必须把 provider 配置桩掉。这条用例原来什么都不 patch，靠的是开发机上真实的
+    # ~/.agenticx/config.yaml 里恰好配了 custom_openai_moma —— 换台机器、或者
+    # conftest 把 HOME 指到临时目录之后，load_provider_configs() 返回空 dict，
+    # build_provider_catalog_block 直接返回 ""，断言就挂了。
+    monkeypatch.setattr(
+        "agenticx.llms.provider_display.load_provider_configs",
+        lambda: {
+            "custom_openai_moma": {
+                "display_name": "MOMA",
+                "models": ["ZHIPU/GLM-5.2"],
+            }
+        },
+    )
     block = build_provider_catalog_block(
         current_provider="custom_openai_moma",
         current_model="ZHIPU/GLM-5.2",

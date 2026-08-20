@@ -319,9 +319,10 @@ class AgentTeamManager:
             workspace_dir=resolved_workspace_dir,
         )
         # MCP clients are shared, while per-agent messages/artifacts remain isolated.
-        session.mcp_hub = self.base_session.mcp_hub
-        session.mcp_configs = self.base_session.mcp_configs
-        session.connected_servers = self.base_session.connected_servers
+        # 这里原本有三行 session.mcp_hub / mcp_configs / connected_servers = ... 的赋值。
+        # 它们早就变成对 GlobalMcpManager 的只读透传属性了：赋值不会生效，只会每建一个
+        # 子会话就打三条 DeprecationWarning。共享本来就是自动的——两个 session 读到的
+        # 都是同一个进程级 GlobalMcpManager。
         session.context_files = dict(self.base_session.context_files)
         try:
             session.todo_manager.load_payload(self.base_session.todo_manager.to_payload())

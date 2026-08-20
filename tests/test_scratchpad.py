@@ -68,17 +68,25 @@ def test_token_budget_scratchpad_entry_is_reserved_and_hidden() -> None:
 
 
 def test_memory_append_daily_and_long_term(monkeypatch, tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    memory_dir = workspace / "memory"
-    memory_dir.mkdir(parents=True, exist_ok=True)
-    daily = memory_dir / "2026-03-10.md"
-    daily.write_text("# Daily Memory\n- Date: 2026-03-10\n- Notes:\n", encoding="utf-8")
-    long_term = workspace / "MEMORY.md"
-    long_term.write_text("# MEMORY.md\n", encoding="utf-8")
+    """memory_append 分别写进当天的日记和长期 MEMORY.md。
 
-    monkeypatch.setattr(agent_tools, "ensure_workspace", lambda **_kwargs: workspace)
-    monkeypatch.setattr(agent_tools, "append_daily_memory", lambda _w, note: daily.write_text(daily.read_text(encoding="utf-8") + f"\n  - {note}\n", encoding="utf-8"))
-    monkeypatch.setattr(agent_tools, "append_long_term_memory", lambda _w, note: long_term.write_text(long_term.read_text(encoding="utf-8") + f"\n- {note}\n", encoding="utf-8"))
+    原来的写法是 monkeypatch agent_tools 上的 ensure_workspace /
+    append_daily_memory / append_long_term_memory。但这三个名字是在
+    _tool_memory_append 函数体里 `from agenticx.workspace.loader import ...` 现取的，
+    打在 agent_tools 模块上根本改不到——桩形同虚设，用例写到的是真实工作区。
+    改成只把工作区解析指到 tmp_path，让真正的 append 逻辑跑起来。
+    """
+    from datetime import date
+
+    from agenticx.workspace import loader as workspace_loader
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        workspace_loader, "resolve_subject_workspace_dir", lambda **_kwargs: workspace
+    )
+    monkeypatch.setattr(workspace_loader, "resolve_workspace_dir", lambda *_a, **_k: workspace)
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")
 
     session = StudioSession()
@@ -87,13 +95,17 @@ def test_memory_append_daily_and_long_term(monkeypatch, tmp_path: Path) -> None:
         {"target": "daily", "content": "daily-note"},
         session,
     )
-    assert result_daily == "OK: appended to daily"
-    assert "daily-note" in daily.read_text(encoding="utf-8")
+    # 返回文案带上了 scope（memory_append 现在区分 subject / user_global 两种写入范围）。
+    assert result_daily.startswith("OK: appended to daily"), result_daily
+    assert "scope=subject" in result_daily
+    today_file = workspace / "memory" / f"{date.today().isoformat()}.md"
+    assert "daily-note" in today_file.read_text(encoding="utf-8")
 
     result_long = agent_tools.dispatch_tool(
         "memory_append",
         {"target": "long_term", "content": "long-note"},
         session,
     )
-    assert result_long == "OK: appended to long_term"
-    assert "long-note" in long_term.read_text(encoding="utf-8")
+    assert result_long.startswith("OK: appended to long_term"), result_long
+    assert "scope=subject" in result_long
+    assert "long-note" in (workspace / "MEMORY.md").read_text(encoding="utf-8")

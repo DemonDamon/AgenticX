@@ -73,11 +73,28 @@ def test_meta_tools_spawn_query_cancel_and_resource_check() -> None:
 
 def test_meta_tools_list_skills_and_mcps() -> None:
     async def _run() -> None:
+        # StudioSession.mcp_configs / connected_servers 已经是对 GlobalMcpManager 的
+        # 只读透传属性，赋值只打一条 DeprecationWarning 就被忽略。用例原来给 session
+        # 赋值，实际读到的是内置的默认配置（browser-use + firecrawl 两条），于是
+        # count 断言从 1 变成 2。要装配置得走进程级的那个 manager。
+        from agenticx.cli import studio_mcp as studio_mcp_mod
+        from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+
+        github_cfg = SimpleNamespace(
+            command="npx", args=["-y", "@modelcontextprotocol/server-github"]
+        )
+        original_loader = studio_mcp_mod.load_available_servers
+        studio_mcp_mod.load_available_servers = lambda: {"github": github_cfg}
+        GlobalMcpManager.reset_for_testing()
+        try:
+            GlobalMcpManager.singleton().connected_servers.add("github")
+            await _assert_list_skills_and_mcps()
+        finally:
+            studio_mcp_mod.load_available_servers = original_loader
+            GlobalMcpManager.reset_for_testing()
+
+    async def _assert_list_skills_and_mcps() -> None:
         session = StudioSession()
-        session.mcp_configs = {
-            "github": SimpleNamespace(command="npx", args=["-y", "@modelcontextprotocol/server-github"])
-        }
-        session.connected_servers = {"github"}
 
         manager = AgentTeamManager(
             llm_factory=lambda: _QuickTextLLM(),
