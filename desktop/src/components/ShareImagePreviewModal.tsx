@@ -4,11 +4,12 @@ import { Copy, Download, X } from "lucide-react";
 import { marked } from "marked";
 import { toPng } from "html-to-image";
 import type { Message } from "../store";
+import { buildShareImageTurns, formatShareCardDate } from "../utils/share-image-model";
 import {
-  SHARE_WIDGET_HINT,
-  buildShareImageTurns,
-  formatShareCardDate,
-} from "../utils/share-image-model";
+  hydrateShareImageTurns,
+  type HydratedShareGraphic,
+  type HydratedShareTurn,
+} from "../utils/share-image-graphics";
 import { APP_DISPLAY_NAME, APP_TAGLINE } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 
@@ -55,8 +56,29 @@ async function waitForImages(el: HTMLElement): Promise<void> {
   );
 }
 
+function ShareGraphicView({ graphic }: { graphic: HydratedShareGraphic }) {
+  if (graphic.status === "fallback") {
+    return <div className="mt-1 text-[13px] text-text-muted">{graphic.hint}</div>;
+  }
+  return (
+    <div className="my-2 w-full">
+      {graphic.title ? (
+        <div className="mb-1.5 text-[12px] font-medium text-text-muted">{graphic.title}</div>
+      ) : null}
+      <div
+        className="share-graphic w-full overflow-hidden [&_svg]:mx-auto [&_svg]:block [&_svg]:h-auto [&_svg]:max-w-full [&_svg]:w-full"
+        dangerouslySetInnerHTML={{ __html: graphic.svgHtml }}
+      />
+    </div>
+  );
+}
+
+const SHARE_MD_CLASS =
+  "share-md [&_p]:my-2.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_h1]:text-[17px] [&_h2]:text-[16px] [&_h3]:text-[15px] [&_table]:w-full [&_table]:border-collapse [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_td]:px-2.5 [&_td]:py-1.5";
+
 async function cardToPngBuffer(el: HTMLElement): Promise<ArrayBuffer> {
   await waitForImages(el);
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   const bg = opaqueShareSurface();
   const color =
     getComputedStyle(document.documentElement).getPropertyValue("--text-strong").trim() ||
@@ -84,17 +106,33 @@ export function ShareImagePreviewModal({
   const [busy, setBusy] = useState<"copy" | "download" | null>(null);
   const [error, setError] = useState("");
   const [exportedAt, setExportedAt] = useState(() => Date.now());
+  const [hydrated, setHydrated] = useState<HydratedShareTurn[] | null>(null);
   const turns = useMemo(() => buildShareImageTurns(messages), [messages]);
   const dateLabel = formatShareCardDate(exportedAt);
+  const graphicsReady = hydrated !== null;
 
   useEffect(() => {
     if (!open) {
       setBusy(null);
       setError("");
+      setHydrated(null);
       return;
     }
     setExportedAt(Date.now());
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setHydrated(null);
+    const appTheme = document.documentElement.getAttribute("data-theme") || "dark";
+    void hydrateShareImageTurns(turns, { appTheme }).then((rows) => {
+      if (!cancelled) setHydrated(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, turns]);
 
   useEffect(() => {
     if (!open) return;
@@ -108,7 +146,7 @@ export function ShareImagePreviewModal({
   const runCapture = useCallback(
     async (mode: "copy" | "download") => {
       const el = shareCardRef.current;
-      if (!el) {
+      if (!el || !graphicsReady) {
         setError("栅格化失败：卡片未就绪");
         return;
       }
@@ -143,7 +181,7 @@ export function ShareImagePreviewModal({
         setBusy(null);
       }
     },
-    [onToast, sessionTitle],
+    [graphicsReady, onToast, sessionTitle],
   );
 
   if (!open) return null;
@@ -177,32 +215,42 @@ export function ShareImagePreviewModal({
               <div className="mt-0.5 text-[13px] text-text-muted">内容由 AI 生成，不能完全保障真实</div>
               <div className="mt-5 border-t border-border pt-5">
                 <div className="flex flex-col gap-4">
-                  {turns.map((turn, idx) =>
-                    turn.kind === "user" ? (
-                      <div key={`u-${idx}`} className="flex justify-end">
-                        <div
-                          className="max-w-[78%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed"
-                          style={{
-                            backgroundColor:
-                              "color-mix(in srgb, var(--text-strong) 12%, var(--surface-base-fallback) 88%)",
-                          }}
-                        >
-                          {turn.text}
-                        </div>
-                      </div>
-                    ) : (
-                      <div key={`a-${idx}`} className="msg-content w-full text-left text-[14px] leading-relaxed">
-                        {turn.text ? (
+                  {!hydrated ? (
+                    <div className="py-6 text-center text-[13px] text-text-muted">正在渲染图表…</div>
+                  ) : (
+                    hydrated.map((turn, idx) =>
+                      turn.kind === "user" ? (
+                        <div key={`u-${idx}`} className="flex justify-end">
                           <div
-                            className="share-md [&_p]:my-2.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_h1]:text-[17px] [&_h2]:text-[16px] [&_h3]:text-[15px] [&_table]:w-full [&_table]:border-collapse [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_td]:px-2.5 [&_td]:py-1.5"
-                            dangerouslySetInnerHTML={{ __html: assistantMarkdownHtml(turn.text) }}
-                          />
-                        ) : null}
-                        {turn.hasWidgetHint ? (
-                          <div className="mt-1 text-[13px] text-text-muted">{SHARE_WIDGET_HINT}</div>
-                        ) : null}
-                      </div>
-                    ),
+                            className="max-w-[78%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed"
+                            style={{
+                              backgroundColor:
+                                "color-mix(in srgb, var(--text-strong) 12%, var(--surface-base-fallback) 88%)",
+                            }}
+                          >
+                            {turn.text}
+                          </div>
+                        </div>
+                      ) : turn.kind === "widget" ? (
+                        <div key={`w-${idx}`} className="w-full text-left">
+                          <ShareGraphicView graphic={turn.graphic} />
+                        </div>
+                      ) : (
+                        <div key={`a-${idx}`} className="msg-content w-full text-left text-[14px] leading-relaxed">
+                          {turn.parts.map((part, partIdx) =>
+                            part.kind === "md" ? (
+                              <div
+                                key={`md-${partIdx}`}
+                                className={SHARE_MD_CLASS}
+                                dangerouslySetInnerHTML={{ __html: assistantMarkdownHtml(part.text) }}
+                              />
+                            ) : (
+                              <ShareGraphicView key={`g-${partIdx}`} graphic={part.graphic} />
+                            ),
+                          )}
+                        </div>
+                      ),
+                    )
                   )}
                 </div>
               </div>
@@ -228,7 +276,7 @@ export function ShareImagePreviewModal({
         <div className="flex items-center justify-center gap-3 px-5 py-4">
           <button
             type="button"
-            disabled={busy !== null}
+            disabled={busy !== null || !graphicsReady}
             className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-[13px] text-text-strong transition-opacity hover:opacity-90 disabled:opacity-40"
             style={{ backgroundColor: "var(--surface-base-fallback)" }}
             onClick={() => void runCapture("copy")}
@@ -238,7 +286,7 @@ export function ShareImagePreviewModal({
           </button>
           <button
             type="button"
-            disabled={busy !== null}
+            disabled={busy !== null || !graphicsReady}
             className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-[13px] font-medium transition-opacity hover:opacity-90 disabled:opacity-40"
             style={{
               background: "var(--ui-btn-primary-bg)",
