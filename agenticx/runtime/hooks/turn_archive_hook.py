@@ -26,6 +26,14 @@ class TurnArchiveHook(AgentHook):
     def __init__(self, *, enabled: bool = False) -> None:
         self._enabled = enabled
         self._archived_hashes: set[str] = set()
+        #: 归档任务的强引用。
+        #:
+        #: asyncio 只对运行中的 task 持弱引用，create_task 的返回值不留住就可能在跑到
+        #: 一半时被 GC 掉——归档就这么静悄悄地丢了。测试里更明显：这个游离 task 活过了
+        #: 用例自己的事件循环，等 GC 时循环已经关掉，抛出 "Event loop is closed" 的
+        #: unraisable 异常，被 pytest 记在当时**碰巧**在跑的那个用例头上（实测这个报错
+        #: 在不同轮次里落到不同文件上，一直没人对得上号）。
+        self._pending: set[asyncio.Task[None]] = set()
 
     async def on_agent_end(self, final_text: str, session: Any) -> None:
         if not self._enabled:
@@ -44,7 +52,9 @@ class TurnArchiveHook(AgentHook):
             )
             if not chunks:
                 return
-            asyncio.create_task(self._archive(session_id, avatar_id, chunks))
+            task = asyncio.create_task(self._archive(session_id, avatar_id, chunks))
+            self._pending.add(task)
+            task.add_done_callback(self._pending.discard)
         except Exception:
             logger.debug("TurnArchiveHook.on_agent_end failed silently", exc_info=True)
 
