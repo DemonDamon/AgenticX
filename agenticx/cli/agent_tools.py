@@ -1928,6 +1928,38 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "document_read_pages",
+            "description": (
+                "Render more pages of a PDF that was attached to this conversation, so you can "
+                "read them visually in the next turn. Use this when an attachment note says only "
+                "part of the document was rendered — do NOT guess what the unread pages contain. "
+                "Pages are 1-based and inclusive of start_page. Returns an error if the file is "
+                "not a PDF attached to this session."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path of the PDF, exactly as given in the attachment note.",
+                    },
+                    "start_page": {
+                        "type": "integer",
+                        "description": "First page to render (1-based). Clamped to the document length.",
+                    },
+                    "max_pages": {
+                        "type": "integer",
+                        "description": "How many pages to render this time. Defaults to the deployment cap.",
+                    },
+                },
+                "required": ["path", "start_page"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "view_image",
             "description": (
                 "Load an image so the model can visually inspect it in the next turn. Accepts a "
@@ -5917,6 +5949,70 @@ async def _fetch_http_bytes(url: str, *, timeout: float, max_bytes: int) -> tupl
         return data, content_type, final_url
 
 
+async def _tool_document_read_pages(
+    arguments: Dict[str, Any], session: Optional["StudioSession"] = None
+) -> str:
+    """接着读 PDF 的后续页。
+
+    只允许读**本会话已附加**的文件。这个工具会把任意路径渲染成图送进上下文，不限制
+    范围就等于给模型开了一个读本机任意 PDF 的口子。
+    """
+    from agenticx.studio.document_pages import (
+        DEFAULT_MAX_PAGES,
+        pdf_rendering_available,
+        render_pdf_pages,
+    )
+
+    raw_path = str(arguments.get("path", "") or "").strip()
+    if not raw_path:
+        return "ERROR: document_read_pages requires 'path'"
+    if session is None:
+        return "ERROR: no active session"
+    context_files = getattr(session, "context_files", None)
+    if not isinstance(context_files, dict) or raw_path not in context_files:
+        return (
+            f"ERROR: '{raw_path}' is not an attachment of this conversation. "
+            "Use the exact path from the attachment note."
+        )
+    if not pdf_rendering_available():
+        return "ERROR: PDF rendering is unavailable in this deployment (PyMuPDF missing)."
+    try:
+        start_page = int(arguments.get("start_page") or 1)
+    except (TypeError, ValueError):
+        return "ERROR: start_page must be an integer"
+    try:
+        max_pages = int(arguments.get("max_pages") or DEFAULT_MAX_PAGES)
+    except (TypeError, ValueError):
+        max_pages = DEFAULT_MAX_PAGES
+
+    result = render_pdf_pages(raw_path, first_page=start_page, max_pages=max_pages)
+    if not result.available:
+        return f"ERROR: {result.error}"
+
+    display = os.path.basename(raw_path)
+    pending = _pending_visual_attachments(session)
+    for page in result.pages:
+        pending.append(
+            {
+                "data_url": page.data_url,
+                "name": f"{display} · 第 {page.page_number} 页",
+                "source": "document_pages",
+            }
+        )
+    first = result.pages[0].page_number
+    last = result.pages[-1].page_number
+    tail = ""
+    if result.next_page is not None:
+        tail = (
+            f" 还有第 {result.next_page}–{result.total_pages} 页未读，"
+            f'需要时再调用 document_read_pages(path="{raw_path}", start_page={result.next_page})。'
+        )
+    return (
+        f"已渲染 {display} 第 {first}–{last} 页（共 {result.total_pages} 页），"
+        f"将在下一轮作为图片出现在你的输入中。{tail}"
+    )
+
+
 def _pending_visual_attachments(session: Optional[StudioSession]) -> list[dict[str, Any]]:
     if session is None:
         return []
@@ -8294,6 +8390,8 @@ async def dispatch_tool_async(
             return await _tool_web_fetch(arguments, session)
         if name == "view_image":
             return await _tool_view_image(arguments, session)
+        if name == "document_read_pages":
+            return await _tool_document_read_pages(arguments, session)
         if name == "analyze_image":
             return await _tool_analyze_image(arguments, session)
         if name == "session_search":

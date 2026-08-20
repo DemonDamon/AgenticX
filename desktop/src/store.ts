@@ -1,4 +1,9 @@
 import { arrayMove } from "@dnd-kit/sortable";
+import type {
+  AttachmentRoutingPolicy,
+  RoutingModelRef,
+} from "./utils/attachment-routing";
+import { ATTACHMENT_ROUTING_OFF } from "./utils/attachment-routing";
 import type { DesktopCapabilityLocks } from "./utils/enterprise-capability-policy";
 import { create } from "zustand";
 import { isSettingsTab } from "./settings-tab";
@@ -520,7 +525,16 @@ type AppState = {
     baseUrl?: string;
     /** 企业下发的自助安装管控。未登录企业时为全开。 */
     capabilityLocks?: DesktopCapabilityLocks;
+    /** 企业下发的附件自动路由策略。未登录 / 未授权时为关闭。 */
+    attachmentRouting?: AttachmentRoutingPolicy;
   };
+  /**
+   * 本会话已被附件路由锁定的模型；没锁过为 null。
+   *
+   * sticky：一旦锁定本会话不再解锁。文档内容已经进了这段对话的上下文（PDF 是页图、
+   * Office 是文本），换回纯文本云端模型要么看不见它、要么得抽成文本再发出去。
+   */
+  attachmentRoutingLock: RoutingModelRef | null;
   chatStyle: ChatStyle;
   /** Developer-only switch: expose raw tool names, arguments, and result cards. */
   showToolCalls: boolean;
@@ -619,7 +633,9 @@ type AppState = {
     displayName: string;
     baseUrl?: string;
     capabilityLocks?: DesktopCapabilityLocks;
+    attachmentRouting?: AttachmentRoutingPolicy;
   }) => void;
+  setAttachmentRoutingLock: (target: RoutingModelRef | null) => void;
   setChatStyle: (style: ChatStyle) => void;
   setShowToolCalls: (show: boolean) => void;
   setUserNickname: (name: string) => void;
@@ -1064,7 +1080,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusExitScrollBottomPaneId: null,
   theme: loadTheme(),
   themeColor: loadThemeColor(),
-  userAccount: { loggedIn: false, email: "", displayName: "", baseUrl: "" },
+  userAccount: {
+    loggedIn: false,
+    email: "",
+    displayName: "",
+    baseUrl: "",
+    attachmentRouting: ATTACHMENT_ROUTING_OFF,
+  },
+  attachmentRoutingLock: null,
   chatStyle: loadChatStyle(),
   showToolCalls: loadShowToolCalls(),
   userNickname: loadUserNickname(),
@@ -1322,6 +1345,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { themeColor };
     }),
   setUserAccount: (userAccount) => set({ userAccount }),
+  setAttachmentRoutingLock: (attachmentRoutingLock) => set({ attachmentRoutingLock }),
   setChatStyle: (chatStyle) =>
     set(() => {
       try {

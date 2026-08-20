@@ -1,5 +1,14 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import {
+  addressForSession,
+  ATTACHMENT_ROUTING_OFF,
+  decideAttachmentRouting,
+  dismissRoutingNotice,
+  routingLockReason,
+  routingNoticeDismissed,
+  type RoutingModelRef,
+} from "../utils/attachment-routing";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent, CSSProperties, RefObject } from "react";
 import {
   Bookmark,
@@ -2945,6 +2954,12 @@ export function ChatPane({
   const showToolCalls = useAppStore((s) => s.showToolCalls);
   const userNickname = useAppStore((s) => s.userNickname);
   const userPreference = useAppStore((s) => s.userPreference);
+  const attachmentRoutingPolicy =
+    useAppStore((s) => s.userAccount.attachmentRouting) ?? ATTACHMENT_ROUTING_OFF;
+  const attachmentRoutingLock = useAppStore((s) => s.attachmentRoutingLock);
+  const setAttachmentRoutingLock = useAppStore((s) => s.setAttachmentRoutingLock);
+  /** 本会话第一次被锁定时弹一次说明；勾了「不再显示」之后就不再弹。 */
+  const [routingNotice, setRoutingNotice] = useState<RoutingModelRef | null>(null);
   const userBubbleLabel = useMemo(() => userNickname.trim() || "我", [userNickname]);
   const groupChatUserLabel = useMemo(() => userNickname.trim() || "用户", [userNickname]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
@@ -10293,6 +10308,9 @@ export function ChatPane({
         body.meta_leader_display_name = metaLeaderDisplayName;
         body.user_display_name = groupChatUserLabel;
       }
+      // 提到外层：sticky 判定必须**每轮**都跑，包括本轮没带任何附件的时候——否则
+      // 已经锁定的会话下一轮就溜回云端模型了。
+      const routedAttachmentNames: Record<string, string> = {};
       const outboundUserNickname = isGroupPane ? groupChatUserLabel : userBubbleLabel;
       if (outboundUserNickname && outboundUserNickname !== "我" && outboundUserNickname !== "用户") {
         body.user_nickname = outboundUserNickname;
@@ -10322,7 +10340,7 @@ export function ChatPane({
         if (imageInputs.length > 0) {
           body.image_inputs = imageInputs;
         }
-        const contextFilePayload: Record<string, string> = {};
+        const contextFilePayload: Record<string, string> = routedAttachmentNames;
         for (const file of sendAttachments) {
           const key = buildContextFileKeyFromAttachment(file);
           if (!key) continue;
@@ -10355,6 +10373,35 @@ export function ChatPane({
         if (Object.keys(contextFilePayload).length > 0) {
           body.context_files = contextFilePayload;
         }
+      }
+      // 附件自动路由：本轮带文档时把会话锁到私有部署的多模态模型。
+      //
+      // 服务端也会判一遍（那边才是权威，CLI / 定时任务 / 子智能体都只经过它）。这里
+      // 判的目的是**即时反馈**：用户一挂上文档，选择器就该灰掉并给出理由，而不是发完
+      // 才发现被切走了。两边用同一份下发策略，判定逻辑逐条对齐。
+      try {
+        const routingDecision = decideAttachmentRouting({
+          policy: attachmentRoutingPolicy,
+          filenames: Object.keys(routedAttachmentNames),
+          lockedTarget: attachmentRoutingLock,
+        });
+        if (routingDecision.action === "lock") {
+          const addressed = addressForSession(
+            { provider: String(body.provider ?? storeActiveProvider ?? "") },
+            routingDecision.target,
+          );
+          body.provider = addressed.provider;
+          body.model = addressed.model;
+          // 客户端选的窗口是跟着它自己那个模型来的，换了模型就是错的。
+          delete (body as Record<string, unknown>).context_window;
+          if (!attachmentRoutingLock) setAttachmentRoutingLock(routingDecision.target);
+          if (routingDecision.announce && !routingNoticeDismissed()) {
+            setRoutingNotice(routingDecision.target);
+          }
+        }
+      } catch (error) {
+        // 路由判定不该挡住发送——服务端还会再判一次。
+        console.warn("[ChatPane] attachment routing skipped", error);
       }
       const sendChatRequest = (sessionId: string) => {
         if (isContinuation && continuation) {
@@ -13193,6 +13240,39 @@ export function ChatPane({
       }`}
       onMouseDown={onFocus}
     >
+      {routingNotice ? (
+        <div
+          role="status"
+          className="pointer-events-auto absolute inset-x-0 top-3 z-[70] mx-auto w-full max-w-md rounded-xl border border-border bg-surface-card px-4 py-3 shadow-lg"
+        >
+          <div className="text-sm font-medium text-text-primary">已切换到私有部署模型</div>
+          <p className="mt-1 text-xs leading-5 text-text-subtle">
+            {routingLockReason(routingNotice)}
+            本会话后续对话都会留在这个模型上。
+          </p>
+          <div className="mt-2.5 flex items-center justify-between gap-3">
+            {/* 「不再显示」只静音这个弹窗；模型选择器仍然是灰的、hover 仍然给理由。
+                被切走的是数据流向，不是一个 UI 偏好。 */}
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-faint">
+              <input
+                type="checkbox"
+                className="h-3 w-3 accent-[var(--settings-accent-fg)]"
+                onChange={(event) => {
+                  if (event.target.checked) dismissRoutingNotice();
+                }}
+              />
+              不再显示此提示
+            </label>
+            <button
+              type="button"
+              className="rounded-lg bg-surface-hover px-3 py-1 text-xs text-text-standard transition-colors hover:bg-surface-card-strong"
+              onClick={() => setRoutingNotice(null)}
+            >
+              知道了
+            </button>
+          </div>
+        </div>
+      ) : null}
       {integratedToolbarNode}
       <div className={integratedToolbar ? "relative flex min-h-0 min-w-0 flex-1" : "contents"}>
       <div

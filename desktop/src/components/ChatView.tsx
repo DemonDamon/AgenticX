@@ -17,6 +17,7 @@ import {
 import { useVoicePushToTalk } from "../hooks/useVoicePushToTalk";
 import { VoicePttOverlay } from "./VoicePttOverlay";
 import { CommandPalette } from "./CommandPalette";
+import { modelPickerLock } from "../utils/attachment-routing";
 import { QuickActions } from "./QuickActions";
 import { ShortcutHints } from "./ShortcutHints";
 import { createPhase1Registry } from "../core/command-registry";
@@ -409,6 +410,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const setPlanMode = useAppStore((s) => s.setPlanMode);
   const commandPaletteOpen = useAppStore((s) => s.commandPaletteOpen);
   const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
+  // 会话被附件路由锁定时，模型选择器灰掉并给出理由。
+  //
+  // 「不再显示」只静音那个说明弹窗，**不影响这里**——被切走的是数据流向，不是一个
+  // UI 偏好，状态必须一直看得见。
+  const routingPickerLock = modelPickerLock(useAppStore((s) => s.attachmentRoutingLock));
   const keybindingsPanelOpen = useAppStore((s) => s.keybindingsPanelOpen);
   const setKeybindingsPanelOpen = useAppStore((s) => s.setKeybindingsPanelOpen);
   const confirmStrategy = useAppStore((s) => s.confirmStrategy);
@@ -2495,9 +2501,13 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
             <div className="relative">
               <button
                 ref={modelBtnRef}
-                className="no-drag flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-cyan-400"
-                onClick={() => setHeaderModelPickerOpen((v) => !v)}
-                title="切换模型"
+                disabled={routingPickerLock.disabled}
+                className="no-drag flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-text-subtle"
+                onClick={() => {
+                  if (routingPickerLock.disabled) return;
+                  setHeaderModelPickerOpen((v) => !v);
+                }}
+                title={routingPickerLock.reason || "切换模型"}
               >
                 <span className="max-w-[200px] truncate">{modelLabel}</span>
                 <span className="text-[10px]">▾</span>

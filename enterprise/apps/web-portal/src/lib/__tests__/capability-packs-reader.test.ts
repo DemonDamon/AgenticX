@@ -1,21 +1,29 @@
-import type { PlatformFeature } from "@agenticx/config";
+import type { CapabilitySurface, PlatformFeature } from "@agenticx/config";
 import { describe, expect, it } from "vitest";
 import {
   ALL_MEMBERS_ASSIGNMENT_KEY,
   capabilityStatesFromView,
   effectiveFromView,
   findUnmetSkillDependencies,
+  DEFAULT_CAPABILITY_SURFACES,
   type PortalCapability,
 } from "../capability-packs-reader";
 
 const MCP_ID = "mcp:01JQMZ8K3N4P5Q6R7S8T9VWXYZ";
 const SKILL_ID = "skill:01JQMZ8K3N4P5Q6R7S8T9VWXY0";
 
-function skill(id: string, requires: string[] = []): PortalCapability {
-  return { id, kind: "skill", name: "s", displayName: "S", requires };
+function skill(
+  id: string,
+  requires: string[] = [],
+  surfaces: readonly CapabilitySurface[] = DEFAULT_CAPABILITY_SURFACES,
+): PortalCapability {
+  return { id, kind: "skill", name: "s", displayName: "S", requires, surfaces };
 }
-function mcp(id: string): PortalCapability {
-  return { id, kind: "mcp", name: "m", displayName: "M", requires: [] };
+function mcp(
+  id: string,
+  surfaces: readonly CapabilitySurface[] = DEFAULT_CAPABILITY_SURFACES,
+): PortalCapability {
+  return { id, kind: "mcp", name: "m", displayName: "M", requires: [], surfaces };
 }
 
 describe("findUnmetSkillDependencies", () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { readAttachmentRoutingPolicy } from "./utils/attachment-routing";
 import { readCapabilityLocks } from "./utils/enterprise-capability-policy";
 import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -1626,6 +1627,9 @@ export function App() {
           baseUrl: String(r.baseUrl ?? ""),
           capabilityLocks: readCapabilityLocks(
             (r as { capabilityPolicy?: unknown }).capabilityPolicy,
+          ),
+          attachmentRouting: readAttachmentRoutingPolicy(
+            (r as { attachmentRouting?: unknown }).attachmentRouting,
           ),
         });
       } catch {

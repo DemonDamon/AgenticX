@@ -392,6 +392,11 @@ type EnterpriseConfig = {
   capabilities?: EnterpriseCapability[];
   /** Skill 声明了依赖但依赖没随包下发，装了也调不通，留给前端提示。 */
   unmet_capability_dependencies?: string[];
+  /**
+   * 附件自动路由策略。原样落盘，供 Python 运行时读取——它不经过渲染进程，CLI、定时
+   * 任务、子智能体都只能从这里拿到策略（agenticx/studio/attachment_routing.py）。
+   */
+  attachment_routing?: Record<string, unknown> | null;
   /** 上次由本机写进 mcp.json 的条目名；撤销时据此精确删除，不按前缀猜。 */
   managed_mcp_servers?: string[];
   /** 同上，指 ~/.agenticx/skills/enterprise 下由本机安装的目录名。 */
@@ -496,6 +501,7 @@ function applyEnterpriseProvider(
     modelCatalog: EnterpriseModelCatalogEntry[];
     capabilities?: unknown;
     unmetCapabilityDependencies?: unknown;
+    attachmentRouting?: unknown;
     user: NonNullable<EnterpriseConfig["user"]>;
     strict: boolean;
     tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
@@ -530,6 +536,12 @@ function applyEnterpriseProvider(
     unmet_capability_dependencies: Array.isArray(opts.unmetCapabilityDependencies)
       ? opts.unmetCapabilityDependencies.map(String).filter(Boolean)
       : [],
+    // 原样存，不在这里解释：解释的规则只有一处出处（后端），客户端只负责搬运。
+    // 后端没下发时写 null 而不是保留旧值——策略被撤销后必须真的失效。
+    attachment_routing:
+      opts.attachmentRouting && typeof opts.attachmentRouting === "object"
+        ? (opts.attachmentRouting as Record<string, unknown>)
+        : null,
     // 这两份是本机的安装账本，不是后端下发的内容，刷新时必须原样带过去，
     // 否则撤销时就不知道该删哪些了。
     managed_mcp_servers: [...(previous?.managed_mcp_servers ?? [])],
@@ -614,6 +626,7 @@ async function finishEnterpriseLogin(
       models?: unknown[];
       capabilities?: unknown[];
       unmetCapabilityDependencies?: unknown[];
+      attachmentRouting?: unknown;
       policy?: {
         strict?: boolean;
         tokenBudget?: EnterpriseTokenBudgetBootstrapPolicy;
@@ -662,6 +675,7 @@ async function finishEnterpriseLogin(
     modelCatalog,
     capabilities: bootJson.data?.capabilities,
     capabilityPolicy: bootJson.data?.policy?.capabilities,
+    attachmentRouting: bootJson.data?.attachmentRouting,
     unmetCapabilityDependencies: bootJson.data?.unmetCapabilityDependencies,
     user: {
       user_id: user.userId ?? "",
@@ -7925,6 +7939,11 @@ function registerIpc(): void {
               : undefined,
           )
         : normalizeEnterpriseCapabilityPolicy(undefined),
+      // 没登录企业就没有策略。原样透传，解释交给渲染进程的
+      // readAttachmentRoutingPolicy —— 规则只有后端一处出处。
+      attachmentRouting: Boolean(ent?.enabled && ent?.token)
+        ? (ent?.attachment_routing ?? null)
+        : null,
       models: Array.isArray(ent?.models) ? ent.models : [],
       modelCatalog: normalizeEnterpriseModelCatalog(
         Array.isArray(ent?.model_catalog) && ent.model_catalog.length > 0
