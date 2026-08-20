@@ -448,3 +448,37 @@ async def test_cacheable_prefix_grows_with_history():
     history_roles = {str(m.get("role")) for m in last[1:ctx_idx]}
     assert history_roles <= {"user", "assistant", "tool"}, history_roles
     assert last[-1]["content"].startswith("[user-goal-anchor]")
+
+
+# --------------------------------------------------------------------------
+# 切模型不该动 system prompt
+# --------------------------------------------------------------------------
+def test_switching_models_does_not_move_the_system_prompt(monkeypatch):
+    """provider 目录块原来带一行「当前会话模型」，它在 system prompt 的稳定区、不受
+    include_volatile 门控——于是每次切模型 messages[0] 都变字节，整段前缀缓存作废。
+
+    附件路由一检测到文档就切到私有化 Qwen，正好是上下文最大、最该命中缓存的时刻。
+    """
+    monkeypatch.setattr(
+        "agenticx.llms.provider_display.load_provider_configs",
+        lambda: {
+            "custom_openai_moma": {"display_name": "MOMA", "models": ["ZHIPU/GLM-5.2"]},
+            "enterprise": {"display_name": "私有化", "models": ["qwen3-vl-27b"]},
+        },
+    )
+    session = StudioSession()
+    session.provider_name = "custom_openai_moma"
+    session.model_name = "ZHIPU/GLM-5.2"
+    before = build_meta_agent_system_prompt(session, include_volatile=False)
+    pop_volatile_sections(session)
+
+    session.provider_name = "enterprise"
+    session.model_name = "qwen3-vl-27b"
+    after = build_meta_agent_system_prompt(session, include_volatile=False)
+    sections = pop_volatile_sections(session)
+
+    assert after == before
+    # provider 目录本身还在——稳定的部分没被误伤。
+    assert "MOMA/GLM-5.2" in after
+    # 当前模型没丢，只是搬进了易变区。
+    assert any("qwen3-vl-27b" in body for _, body in sections)

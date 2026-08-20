@@ -127,12 +127,17 @@ def provider_breakdown_label(provider_id: str) -> str:
     return get_provider_display_name(provider_id, cfg)
 
 
-def build_provider_catalog_block(
-    *,
-    current_provider: str = "",
-    current_model: str = "",
-) -> str:
-    """Inject configured model services so Meta-Agent uses display names with users."""
+def build_provider_catalog_block() -> str:
+    """Inject configured model services so Meta-Agent uses display names with users.
+
+    这个块**必须保持稳定**：它在 system prompt 里，不受 include_volatile 门控，所以
+    任何随会话变化的值放进来都会让 messages[0] 变字节、整段前缀缓存作废。provider
+    列表本身只在用户增删 provider 时才变，够稳；曾经在这里的「当前会话模型」那行不是——
+    它每次切模型都变，而附件路由一检测到文档就会切到私有化 Qwen，等于在最该命中缓存
+    的时刻把缓存打穿。同样的信息已经在 <session-context> 的 model_service / provider /
+    model 三个字段里（见 meta_agent.build_meta_agent_volatile_sections），那里是易变区，
+    放在历史之后，不碰前缀。
+    """
     providers = load_provider_configs()
     if not providers:
         return ""
@@ -163,10 +168,4 @@ def build_provider_catalog_block(
             f"(spawn 参数 provider={provider_id}, model=<模型 id>)"
         )
 
-    cur_prov = str(current_provider or "").strip()
-    cur_model = str(current_model or "").strip()
-    if cur_prov and cur_model:
-        cur_cfg = resolve_provider_config(cur_prov, providers)
-        cur_label = format_model_option_label(cur_prov, cur_model, cur_cfg)
-        lines.append(f"- 当前会话模型（用户可见）: {cur_label}")
     return "\n".join(lines) + "\n\n"

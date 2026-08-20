@@ -1129,7 +1129,7 @@ def build_meta_agent_system_prompt(
         "- `request_action_confirmation` 会弹出等宽「确认/取消」按钮；用户点击或输入「确认」「取消」后，工具结果会返回 `[ACTION_CONFIRMED]` / `[ACTION_REJECTED]` / `[ACTION_CONFIRMATION_EXPIRED]`，你须在同一回合内继续或停止。禁止在参数中放入 secret / OAuth / confirmation token。\n"
         "- 权限类确认（写文件、执行命令）仍走原有 `confirm_required` 流程，不要用 `request_clarification` 或 `request_action_confirmation` 替代。\n"
         "- 涉及模型/厂商选择时，`prompt` 与 `options` 只能写用户可见的「厂商展示名/模型短名」（如「彩讯-外网/kimi-k2.6」「MOMA/GLM-5.2」），禁止出现 `custom_openai_*` 等内部配置 id。\n\n"
-        f"{build_provider_catalog_block(current_provider=session.provider_name or '', current_model=session.model_name or '')}"
+        f"{build_provider_catalog_block()}"
         f"{lsp_context}"
         f"{_tail_state_block if include_volatile else ''}"
         f"{_build_user_profile_block(user_nickname, user_preference)}"

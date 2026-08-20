@@ -73,9 +73,9 @@ def test_build_provider_catalog_block_mentions_display_names(monkeypatch) -> Non
             }
         },
     )
-    block = build_provider_catalog_block(
-        current_provider="custom_openai_moma",
-        current_model="ZHIPU/GLM-5.2",
-    )
+    block = build_provider_catalog_block()
     assert "MOMA/GLM-5.2" in block
     assert "custom_openai_*" in block
+    # 这个块在 system prompt 的稳定区。当前会话模型是易变值，进来就会让每次切模型都
+    # 把整段前缀缓存打穿——它已经在 <session-context> 里了。
+    assert "当前会话模型" not in block

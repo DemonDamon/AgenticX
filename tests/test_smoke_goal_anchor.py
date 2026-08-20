@@ -481,3 +481,92 @@ class TestGoalAnchorEchoGuard:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# --------------------------------------------------------------------------
+# 强模型不注入 anchor
+# --------------------------------------------------------------------------
+@dataclass
+class _ModelSession(MockStudioSession):
+    provider_name: str = ""
+    model_name: str = ""
+    declared_context_window: Optional[int] = None
+
+
+def _anchor_for(session) -> Optional[Dict[str, Any]]:
+    return _build_user_goal_anchor(
+        session=session,
+        round_idx=3,
+        max_rounds=10,
+        tools_used_so_far=1,
+        messages_total_chars=5_000,
+    )
+
+
+class TestStrongModelSuppression:
+    """anchor 是给注意力会在长上下文里漂的模型用的护栏；强模型上它是噪声。"""
+
+    def test_million_token_model_gets_no_anchor(self):
+        for model in ("kimi-k3", "glm-5.2", "gemini-2.5-pro"):
+            session = _ModelSession(
+                current_user_intent="帮我分析这份财报", provider_name="p", model_name=model
+            )
+            assert _anchor_for(session) is None, model
+
+    def test_smaller_models_keep_the_anchor(self):
+        for model in ("kimi-k2", "gpt-5", "claude-opus-4", "deepseek-v3", "qwen3-vl-27b"):
+            session = _ModelSession(
+                current_user_intent="帮我分析这份财报", provider_name="p", model_name=model
+            )
+            anchor = _anchor_for(session)
+            assert anchor is not None and "[user-goal-anchor]" in anchor["content"], model
+
+    def test_strength_reads_endpoint_capability_not_the_harness_window(self):
+        """1M 模型的 harness 窗口是 262K —— 拿它去和 512K 比会得出「弱模型」，正好反了。"""
+        from agenticx.runtime.model_context_window import (
+            is_strong_context_model,
+            resolve_context_window,
+            resolve_model_capability,
+        )
+
+        assert resolve_model_capability("kimi-k3") == 1_048_576
+        assert resolve_context_window("kimi-k3") == 262_144    # < 512K
+        assert is_strong_context_model("kimi-k3") is True
+
+    def test_admin_declared_window_decides_for_models_the_table_never_heard_of(self):
+        """企业管理员填的窗口最可信，前缀表只是兜底。"""
+        weak = _ModelSession(
+            current_user_intent="分析",
+            provider_name="enterprise",
+            model_name="vendor-internal-x",
+            declared_context_window=200_000,
+        )
+        strong = _ModelSession(
+            current_user_intent="分析",
+            provider_name="enterprise",
+            model_name="vendor-internal-x",
+            declared_context_window=1_000_000,
+        )
+        assert _anchor_for(weak) is not None
+        assert _anchor_for(strong) is None
+
+    def test_force_env_brings_the_anchor_back_for_a_b_testing(self):
+        session = _ModelSession(
+            current_user_intent="分析", provider_name="p", model_name="kimi-k3"
+        )
+        assert _anchor_for(session) is None
+        with patch.dict(os.environ, {"AGX_GOAL_ANCHOR_FORCE": "1"}):
+            assert _anchor_for(session) is not None
+
+    def test_switching_models_mid_session_re_evaluates(self):
+        """附件路由会在会话中途把模型切到私有化 Qwen —— 缓存必须跟着 key 失效。"""
+        session = _ModelSession(
+            current_user_intent="分析这份 PDF", provider_name="p", model_name="kimi-k3"
+        )
+        assert _anchor_for(session) is None
+        session.model_name = "qwen3-vl-27b"
+        session.provider_name = "enterprise"
+        assert _anchor_for(session) is not None
+        session.model_name = "kimi-k3"
+        session.provider_name = "p"
+        assert _anchor_for(session) is None

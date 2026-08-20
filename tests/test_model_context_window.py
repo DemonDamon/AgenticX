@@ -94,3 +94,80 @@ def test_parameter_count_is_not_read_as_a_window():
     assert resolve_model_capability("qwen3-32b") == 128_000
     assert resolve_model_capability("llama3.1:8b") == 128_000
     assert resolve_model_capability("minimax-m2") == 192_000
+
+
+# --------------------------------------------------------------------------
+# Kimi K3 是 1M，不是 256K
+# --------------------------------------------------------------------------
+def test_kimi_k3_is_a_million_token_model():
+    """更具体的条目必须排在 "kimi" 前面 —— 前缀表先命中者胜。"""
+    from agenticx.runtime.model_context_window import is_strong_context_model
+
+    assert resolve_model_capability("kimi-k3") == 1_048_576
+    assert resolve_model_capability("kimi-k3-turbo") == 1_048_576
+    assert resolve_context_window("kimi-k3") == 262_144
+    assert is_strong_context_model("kimi-k3") is True
+    # K2 那一支不受影响。
+    assert resolve_model_capability("kimi-k2-0905-preview") == 256_000
+    assert is_strong_context_model("kimi-k2-0905-preview") is False
+
+
+def test_strength_boundary_sits_at_one_million():
+    from agenticx.runtime.model_context_window import (
+        STRONG_MODEL_CAPABILITY_TOKENS,
+        is_strong_context_model,
+    )
+
+    assert STRONG_MODEL_CAPABILITY_TOKENS == 1_000_000
+    assert is_strong_context_model("x", declared=1_000_000) is True
+    assert is_strong_context_model("x", declared=999_999) is False
+    # 512K–1M 之间归弱侧（保留现有行为，取保守的一侧）。
+    assert is_strong_context_model("x", declared=512_000) is False
+
+
+def test_capability_at_or_below_512k_is_invisible_in_the_harness_window():
+    """harness = min(cap, max(128K, cap × 0.25))，所以 cap ≤ 512K 时恒等于 128K。
+
+    这正是「Kimi 明明 256K，界面上却写 128K」的来源 —— 不是某条表项写错了，是下限
+    把 128K…512K 这一整段都压平了。强弱判据因此必须读能力值，不能读 harness 窗口。
+    """
+    for capability in (128_000, 192_000, 200_000, 256_000, 512_000):
+        assert harness_window_for_capability(capability) == MIN_HARNESS_CONTEXT_WINDOW
+    assert harness_window_for_capability(600_000) > MIN_HARNESS_CONTEXT_WINDOW
+
+
+# --------------------------------------------------------------------------
+# 两张表必须一致：TS 那份是填写界面用的镜像，走偏了用户看到的「自动」就是假的
+# --------------------------------------------------------------------------
+def test_python_and_typescript_tables_agree():
+    import re
+    from pathlib import Path
+
+    from agenticx.runtime.model_context_window import (
+        DEFAULT_CONTEXT_WINDOW,
+        HARNESS_WINDOW_RATIO,
+        MODEL_CONTEXT_WINDOWS,
+    )
+
+    ts_path = (
+        Path(__file__).resolve().parents[1]
+        / "desktop/src/utils/model-context-window-heuristic.ts"
+    )
+    ts = ts_path.read_text(encoding="utf-8")
+
+    def _num(text: str) -> int:
+        return int(text.replace("_", ""))
+
+    table_src = ts.split("MODEL_CONTEXT_WINDOWS", 1)[1].split("];", 1)[0]
+    ts_table = [
+        (key, _num(value))
+        for key, value in re.findall(r'\["([^"]+)",\s*([\d_]+)\]', table_src)
+    ]
+    assert ts_table == list(MODEL_CONTEXT_WINDOWS)
+
+    def _const(name: str) -> str:
+        return re.search(rf"{name}\s*=\s*([\d_.]+)", ts).group(1)
+
+    assert _num(_const("DEFAULT_CONTEXT_WINDOW")) == DEFAULT_CONTEXT_WINDOW
+    assert _num(_const("MIN_HARNESS_CONTEXT_WINDOW")) == MIN_HARNESS_CONTEXT_WINDOW
+    assert float(_const("HARNESS_WINDOW_RATIO")) == HARNESS_WINDOW_RATIO

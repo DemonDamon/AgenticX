@@ -38,6 +38,10 @@ MODEL_CONTEXT_WINDOWS: list[tuple[str, int]] = [
     ("glm-5.2", 1_000_000),
     ("glm-5.1", 200_000),
     ("glm", 128_000),
+    # K3 是 1M（1,048,576）。前缀表先命中者胜，所以更具体的条目必须排在 "kimi" 前面，
+    # 否则 kimi-k3 会落到下面那条 256K —— 既让 harness 窗口卡在 128K 下限，也会被
+    # is_strong_context_model 误判成弱模型。
+    ("kimi-k3", 1_048_576),
     ("kimi", 256_000),
     ("minimax", 192_000),
     ("gemini-2.5", 1_048_576),
@@ -180,3 +184,20 @@ def resolve_model_capability(model_name: str | None, declared: object = None) ->
 def resolve_context_window(model_name: str | None, declared: object = None) -> int:
     """Working window the harness drives for this model."""
     return harness_window_for_capability(resolve_model_capability(model_name, declared))
+
+
+#: 端点能力到这个量级就算「强模型」。
+#:
+#: 分界放在 1M 而不是 512K：1M 是明确被点名的那一侧，而 512K–1M 之间的模型归入弱侧，
+#: 保留现有行为（更保守的一侧）。注意 512K 以下的能力值在 harness 窗口上是**看不出
+#: 差别**的 —— harness = min(cap, max(128K, cap × 0.25))，cap ≤ 512K 时恒等于 128K。
+STRONG_MODEL_CAPABILITY_TOKENS = 1_000_000
+
+
+def is_strong_context_model(model_name: str | None, declared: object = None) -> bool:
+    """按**端点能力**判定强弱，不是按 harness 窗口。
+
+    这个区别是本函数存在的全部理由：1M 模型的 harness 窗口是 262K，拿它去和 512K
+    比会得出「弱模型」—— 正好反了。
+    """
+    return resolve_model_capability(model_name, declared) >= STRONG_MODEL_CAPABILITY_TOKENS

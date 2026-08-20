@@ -61,7 +61,10 @@ from agenticx.runtime.confirm import ConfirmGate
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.hooks import HookRegistry
 from agenticx.runtime.loop_detector import LoopDetector
-from agenticx.runtime.model_context_window import declared_window_for_session
+from agenticx.runtime.model_context_window import (
+    declared_window_for_session,
+    is_strong_context_model,
+)
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import (
@@ -339,6 +342,39 @@ def _inject_goal_anchor(
     return [*messages, anchor_message]
 
 
+def _goal_anchor_suppressed_for_model(session: Any) -> bool:
+    """强模型不注入 anchor。
+
+    anchor 是给「注意力会在长上下文里漂」的模型用的护栏。端点能力到 1M 的模型，
+    我们的 harness 窗口只驱动到 ~262K（HARNESS_WINDOW_RATIO=0.25），它根本走不到
+    自己会漂的那个区间——这时候每轮重复一遍目标和执行纪律，收益是负的。
+
+    判据用**端点能力**而不是 harness 窗口，见 is_strong_context_model 的说明：
+    1M 模型的 harness 窗口是 262K，拿它去和 512K 比会得出「弱模型」，正好反了。
+
+    结果按 (provider, model) 缓存在会话上：这个函数每轮都会被问一次，而
+    declared_window_for_session 在没有企业声明时要去读配置。附件路由那类模型切换
+    会换掉 key，于是自动重算。
+    """
+    provider = str(getattr(session, "provider_name", "") or "")
+    model = str(getattr(session, "model_name", "") or "")
+    key = (provider, model)
+    cached = getattr(session, "_goal_anchor_strong_model", None)
+    if isinstance(cached, tuple) and len(cached) == 2 and cached[0] == key:
+        return bool(cached[1])
+    try:
+        strong = is_strong_context_model(model, declared_window_for_session(session))
+    except Exception:
+        # 读不出来一律当弱模型：保留 anchor 是原行为，不能让配置问题悄悄改变行为。
+        logger.debug("strong-model probe failed; keeping the goal anchor", exc_info=True)
+        strong = False
+    try:
+        setattr(session, "_goal_anchor_strong_model", (key, strong))
+    except Exception:
+        pass
+    return strong
+
+
 def _build_user_goal_anchor(
     session: "StudioSession",
     round_idx: int,
@@ -355,6 +391,17 @@ def _build_user_goal_anchor(
     """
     # NFR-6: Escape hatch to disable anchor injection
     if os.environ.get("AGX_GOAL_ANCHOR_DISABLE", "").strip() == "1":
+        return None
+
+    # 强模型默认关闭；AGX_GOAL_ANCHOR_FORCE=1 可以强制开回来做 A/B 对比。
+    if os.environ.get("AGX_GOAL_ANCHOR_FORCE", "").strip() != "1" and (
+        _goal_anchor_suppressed_for_model(session)
+    ):
+        logging.getLogger(__name__).info(
+            "goal_anchor_skipped=strong_model session=%s model=%s",
+            getattr(session, "session_id", "unknown"),
+            getattr(session, "model_name", ""),
+        )
         return None
 
     session._goal_anchor_placement = "tail"

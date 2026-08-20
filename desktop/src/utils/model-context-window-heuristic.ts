@@ -21,6 +21,8 @@ export const MODEL_CONTEXT_WINDOWS: ReadonlyArray<readonly [string, number]> = [
   ["glm-5.2", 1_000_000],
   ["glm-5.1", 200_000],
   ["glm", 128_000],
+  // K3 是 1M（1,048,576）。先命中者胜，更具体的条目必须排在 "kimi" 前面。
+  ["kimi-k3", 1_048_576],
   ["kimi", 256_000],
   ["minimax", 192_000],
   ["gemini-2.5", 1_048_576],
