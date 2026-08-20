@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 
 from .base import BaseTool, ToolError
+from agenticx.utils.async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ class SandboxFileTool(BaseTool):
     def _run(self, **kwargs) -> Dict[str, Any]:
         """同步执行（不推荐）"""
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(self._arun(**kwargs))
+        return run_sync(self._arun(**kwargs))
     
     async def _arun(
         self,
@@ -315,7 +316,7 @@ class SandboxCommandTool(BaseTool):
     def _run(self, **kwargs) -> Dict[str, Any]:
         """同步执行"""
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(self._arun(**kwargs))
+        return run_sync(self._arun(**kwargs))
     
     async def _arun(
         self,
@@ -500,7 +501,7 @@ class SandboxCodeInterpreterTool(BaseTool):
     def _run(self, **kwargs) -> Dict[str, Any]:
         """同步执行"""
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(self._arun(**kwargs))
+        return run_sync(self._arun(**kwargs))
     
     async def _arun(
         self,

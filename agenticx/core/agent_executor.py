@@ -45,6 +45,7 @@ from ..hooks.tool_hooks import (
 from ..hooks import HookEvent, trigger_hook_event_sync
 from ..utils.workspace_dir import resolve_workspace_dir
 from ..hooks import load_discovered_hooks
+from agenticx.utils.async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -626,7 +627,7 @@ class AgentExecutor:
                 # === Context Compilation Check ===
                 # 在每次 LLM 调用前检查是否需要压缩上下文
                 if self.context_compiler and self.enable_context_compilation:
-                    asyncio.get_event_loop().run_until_complete(
+                    run_sync(
                         self._maybe_compact_context(event_log)
                     )
                 

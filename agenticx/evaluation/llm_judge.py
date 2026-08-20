@@ -20,6 +20,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, Union
+from agenticx.utils.async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ class MockLLMProvider:
     def complete(self, prompt: str) -> str:
         """Synchronous mock completion."""
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(self.acomplete(prompt))
+        return run_sync(self.acomplete(prompt))
 
 
 class LLMJudge:
