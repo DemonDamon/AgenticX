@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -397,3 +398,53 @@ def test_provider_hard_failure_does_not_move_the_system_prompt():
 
     assert after == before
     assert any("some_provider" in body for _, body in sections)
+
+
+# --------------------------------------------------------------------------
+# 9. system prompt 之后必须**立刻**是历史
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_cacheable_prefix_grows_with_history():
+    """历史是 append-only 的，所以它必须紧贴 system prompt。
+
+    ``[user-goal-anchor]`` 原来插在 ``messages[1]``——系统提示词之后、历史之前——
+    而它每轮都变（内含用户当前问题）。于是可缓存前缀被**焊死**在系统提示词末尾，
+    对话越长占比越低。实测 8 轮真实请求：
+
+        anchor 在头部：可缓存前缀恒为 2928 字符，占比 25.2% → 13.6% 一路下滑
+        anchor 在尾部：可缓存前缀 2887 → 12877 字符，占比 25.0% → 59.8% 一路上升
+
+    这条用例钉的就是"上升"：相邻两轮的共享前缀必须随历史增长，而不是停在某个常数。
+    """
+    llm = _CaptureMessagesLLM()
+    runtime = AgentRuntime(llm, _ApproveGate())
+    session = StudioSession()
+    reply = "这是一段有实际长度的助手回复。" * 40
+    llm.invoke = lambda messages, **_k: (  # type: ignore[method-assign]
+        llm.turns.append([dict(m) for m in messages]) or _FakeResponse(reply, [])
+    )
+
+    for i in range(1, 5):
+        async for _ in runtime.run_turn(f"第{i}轮：请继续推进这个任务并说明理由", session):
+            pass
+
+    def shared_prefix(a: list[dict], b: list[dict]) -> int:
+        x, y = json.dumps(a, ensure_ascii=False), json.dumps(b, ensure_ascii=False)
+        n = min(len(x), len(y))
+        i = 0
+        while i < n and x[i] == y[i]:
+            i += 1
+        return i
+
+    grew = [shared_prefix(llm.turns[k - 1], llm.turns[k]) for k in range(1, len(llm.turns))]
+    assert grew == sorted(grew), f"cacheable prefix must not shrink: {grew}"
+    assert grew[-1] > grew[0], f"cacheable prefix must grow with history: {grew}"
+
+    # 结构上：messages[0] 之后到 <session-context> 之前，只能是历史（user/assistant/tool）。
+    last = llm.turns[-1]
+    ctx_idx = next(
+        i for i, m in enumerate(last) if str(m.get("content", "")).startswith("<session-context>")
+    )
+    history_roles = {str(m.get("role")) for m in last[1:ctx_idx]}
+    assert history_roles <= {"user", "assistant", "tool"}, history_roles
+    assert last[-1]["content"].startswith("[user-goal-anchor]")

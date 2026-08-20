@@ -313,6 +313,32 @@ def _detect_pathological_goal_anchor_echo(text: Any) -> Optional[Dict[str, Any]]
     }
 
 
+def _inject_goal_anchor(
+    messages: List[Dict[str, Any]],
+    anchor_message: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return a copy of ``messages`` with the ephemeral anchor at the tail.
+
+    锚点原来插在**开头那串 system 消息之后**，也就是 ``messages[1]``——紧挨着系统
+    提示词、在对话历史**前面**。而它每轮都在变（内含用户当前问题、round_idx、
+    tools_used_so_far），于是 prompt 前缀缓存在第 1 条消息就断了：整段
+    append-only 的历史每轮全价重算。实测连续三轮真实请求，相邻两轮的共享前缀只有
+    31.7%，分叉点精确落在 ``[user-goal-anchor] 第|二轮问题``。
+
+    当初放在头部是为了躲 MiniMax 复读锚点原文（见 a8ef5d1b）。那条路径已经基本不
+    用，而 ``_detect_pathological_goal_anchor_echo`` 这道防线原样保留着。
+
+    放到最尾还顺带对了它的本意：锚点是"动手前对照原始目标自检一遍"，越贴近模型下
+    一步决策越有用。多轮工具调用时它排在 tool 结果之后，模型每轮看到的都是最新的
+    一份，而不是被埋在历史前面那份。
+
+    不改入参 ``messages``：锚点是 ephemeral 的，绝不能进 ``session.agent_messages``。
+    """
+    if not anchor_message:
+        return messages
+    return [*messages, anchor_message]
+
+
 def _build_user_goal_anchor(
     session: "StudioSession",
     round_idx: int,
@@ -331,7 +357,7 @@ def _build_user_goal_anchor(
     if os.environ.get("AGX_GOAL_ANCHOR_DISABLE", "").strip() == "1":
         return None
 
-    session._goal_anchor_prepend = False
+    session._goal_anchor_placement = "tail"
 
     user_intent_raw = getattr(session, "current_user_intent", None)
     # NFR-4: Skip if None or whitespace-only (including empty string)
@@ -347,19 +373,15 @@ def _build_user_goal_anchor(
     user_intent_full = str(user_intent_raw)[:2000]
 
     restrengthen_threshold = _env_int_runtime("AGX_ANCHOR_RESTRENGTHEN_THRESHOLD", 12000)
-    force_prepend = tool_result_tokens_session >= restrengthen_threshold
+    force_full_anchor = tool_result_tokens_session >= restrengthen_threshold
 
     is_first_round = round_idx == 1 and tools_used_so_far == 0
     is_complex = (
         tools_used_so_far >= full_trigger_tools
         or messages_total_chars >= full_trigger_chars
         or max(0, int(current_turn_message_count)) >= 8
-        or force_prepend
+        or force_full_anchor
     )
-    # Keep the ephemeral anchor in the leading system-message block. A trailing
-    # system message after the user's history is prone to being echoed by some
-    # providers, especially when full mode contains several execution rules.
-    session._goal_anchor_prepend = True
 
     if is_first_round:
         # First round: minimal anchor (≤80 chars as per FR-3)
@@ -3678,20 +3700,7 @@ class AgentRuntime:
                         len(session.agent_messages) - turn_message_start_index,
                     ),
                 )
-                if anchor_message:
-                    # Keep all system instructions together at the head of the
-                    # request. Appending a system message after user/tool history
-                    # makes some providers echo the internal anchor verbatim.
-                    insert_idx = 0
-                    for i, m in enumerate(messages):
-                        if isinstance(m, dict) and str(m.get("role", "")).lower() == "system":
-                            insert_idx = i + 1
-                        else:
-                            break
-                    messages_for_llm = list(messages)
-                    messages_for_llm.insert(insert_idx, anchor_message)
-                else:
-                    messages_for_llm = messages
+                messages_for_llm = _inject_goal_anchor(messages, anchor_message)
                 llm_call_kwargs: Dict[str, Any] = {}
                 try:
                     messages_for_llm, cache_telemetry = apply_prompt_cache_breakpoints(
@@ -3772,7 +3781,7 @@ class AgentRuntime:
                     "tool_result_tokens_session": budget_stats.tool_result_tokens_session,
                     "archived_tool_calls": budget_stats.archived_replaced,
                     "anchor_mode": getattr(session, "_goal_anchor_mode", None),
-                    "anchor_prepend": bool(getattr(session, "_goal_anchor_prepend", False)),
+                    "anchor_placement": str(getattr(session, "_goal_anchor_placement", "tail")),
                     "cache_mode": latest_cache_telemetry.get("cache_mode", "disabled"),
                     "cache_breakpoints": latest_cache_telemetry.get("cache_breakpoints", 0),
                     "cache_eligible_chars": latest_cache_telemetry.get("cache_eligible_chars", 0),
