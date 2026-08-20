@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { extractTableRows, rowsToCsv, rowsToMarkdown } from "./markdown-table-export";
 
 test("extractTableRows reads header and body cells", () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 
 import { DOUBAO_EVENT, encodeChatTtsText } from "./doubao-wire.ts";
 

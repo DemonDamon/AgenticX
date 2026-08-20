@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { extractSourceAttribution } from "./source-attribution-parse";
 
 test("extractSourceAttribution: blockquote legend with [N] markers", () => {
