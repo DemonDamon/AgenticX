@@ -195,11 +195,31 @@ class AgxConfig:
         )
 
 
-class ConfigManager:
+class _ConfigManagerMeta(type):
+    """让 GLOBAL_CONFIG_PATH 在**读取时**解析，而不是 import 时。
+
+    原来它是类属性 ``Path.home() / ".agenticx" / "config.yaml"``，import 那一刻就定死了。
+    tests/conftest.py 把 HOME 指到沙箱是用例开始时才生效的，拦不住它——于是测试读的是
+    开发者真实的 config.yaml，**里面有各家 provider 的 API key**。后果不只是脏数据：
+    测试会拿真实凭证去打真实端点，之前有一条用例就卡在对内网网关的连接上不动。
+
+    元类的 __getattr__ 只在正常查找失败时才走，所以
+    ``monkeypatch.setattr(ConfigManager, "GLOBAL_CONFIG_PATH", tmp)`` 这类既有写法照常
+    生效（它往类字典里塞值），撤销后又回落到这里。
+    """
+
+    def __getattr__(cls, name: str):
+        if name == "GLOBAL_CONFIG_PATH":
+            return Path.home() / ".agenticx" / "config.yaml"
+        raise AttributeError(
+            f"type object {cls.__name__!r} has no attribute {name!r}"
+        )
+
+
+class ConfigManager(metaclass=_ConfigManagerMeta):
     """Manager for AGX user/project configuration."""
 
     PROJECT_CONFIG_PATH = Path(".agenticx/config.yaml")
-    GLOBAL_CONFIG_PATH = Path.home() / ".agenticx" / "config.yaml"
 
     @classmethod
     def _load_yaml(cls, path: Path) -> Dict[str, Any]:
