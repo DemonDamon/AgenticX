@@ -2078,7 +2078,10 @@ def create_studio_app() -> FastAPI:
         group_chat = _meta_group_chat_payload(managed)
 
         try:
-            usage = estimate_session_context_usage(
+            # 丢到线程里跑：这是纯同步的只读估算，放在 async def 里会把事件循环
+            # 整个占住——正在流式输出的那一轮会跟着卡。
+            usage = await asyncio.to_thread(
+                estimate_session_context_usage,
                 managed,
                 avatar_context=avatar_context,
                 group_chat=group_chat,

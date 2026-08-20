@@ -6,10 +6,12 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict, dataclass, field
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+import threading
+from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
@@ -221,21 +223,57 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
 
     PROJECT_CONFIG_PATH = Path(".agenticx/config.yaml")
 
+    #: 解析结果缓存：path -> (stat 指纹, 解析出来的 dict)。
+    #:
+    #: get_value() 每次都会把全局 + 项目两份配置**重新从磁盘解析一遍**，而它在读路径上
+    #: 被调用得非常频繁：实测一次上下文用量估算触发 36 次 get_value / 57 次
+    #: yaml.safe_load，占掉那一次请求 584ms 里的 558ms（96%）。配置文件几乎不变，
+    #: 反复解析纯属浪费。
+    #:
+    #: 指纹用 (mtime_ns, size, inode)：任一变化就重新解析。写入方向由 _dump_yaml 主动
+    #: 失效，不依赖时间戳精度。
+    _yaml_cache: Dict[Path, Tuple[Tuple[int, int, int], Dict[str, Any]]] = {}
+    _yaml_cache_lock = threading.Lock()
+
     @classmethod
     def _load_yaml(cls, path: Path) -> Dict[str, Any]:
-        if not path.exists():
+        try:
+            st = path.stat()
+        except OSError:
+            # 文件不存在（或读不到 stat）：和原来一样当作空配置，并清掉可能的旧缓存。
+            cls._invalidate_yaml_cache(path)
             return {}
+        fingerprint = (st.st_mtime_ns, st.st_size, st.st_ino)
+        with cls._yaml_cache_lock:
+            cached = cls._yaml_cache.get(path)
+        if cached is not None and cached[0] == fingerprint:
+            # 返回深拷贝：调用方（_deep_merge 等）会就地改这个 dict，不能让它污染缓存。
+            return copy.deepcopy(cached[1])
+
         with path.open("r", encoding="utf-8") as f:
             loaded = yaml.safe_load(f) or {}
         if not isinstance(loaded, dict):
             raise ValueError(f"Config at {path} must be a YAML object")
+        with cls._yaml_cache_lock:
+            cls._yaml_cache[path] = (fingerprint, copy.deepcopy(loaded))
         return loaded
+
+    @classmethod
+    def _invalidate_yaml_cache(cls, path: Optional[Path] = None) -> None:
+        """写入后主动失效。``None`` 清空全部（测试换 GLOBAL_CONFIG_PATH 时用得上）。"""
+        with cls._yaml_cache_lock:
+            if path is None:
+                cls._yaml_cache.clear()
+            else:
+                cls._yaml_cache.pop(path, None)
 
     @classmethod
     def _dump_yaml(cls, path: Path, data: Dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+        # 不靠 mtime 兜底：同一纳秒内先写后读理论上会读到陈旧值。
+        cls._invalidate_yaml_cache(path)
 
     @classmethod
     def _deep_merge(cls, base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
