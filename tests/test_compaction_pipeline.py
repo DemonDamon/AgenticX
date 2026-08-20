@@ -297,3 +297,110 @@ async def test_no_lock_is_taken_when_nothing_qualifies(rooted):
     assert did is False
     assert _journal(rooted) == []
     assert cj.detect_orphan(session) is None
+
+
+# --------------------------------------------------------------------------
+# "只剪枝没摘要"是一个明确的返回契约，不是靠调用方猜
+# --------------------------------------------------------------------------
+def test_is_prune_only_result_reads_return_values_not_instance_state():
+    """故意只看返回值：last_trigger_reason 是实例上的可变状态，两次调用之间会被
+    覆盖，而返回值是调用方自己那一次的事实。"""
+    from agenticx.runtime.compactor import is_prune_only_result
+
+    assert is_prune_only_result(True, 0) is True
+    assert is_prune_only_result(True, 7) is False
+    assert is_prune_only_result(False, 0) is False
+
+
+@pytest.mark.asyncio
+async def test_every_prune_only_path_carries_an_explanation(rooted, monkeypatch):
+    """还有第二条 prune-only 出口：剪完之后没有可压缩区间。它原来返回空 summary，
+    调用方只能回落到通用的"已压缩 0 条较早历史"——正是要修掉的那句误导文案。"""
+    from agenticx.runtime.compactor import is_prune_only_result
+
+    llm = _LLM()
+    compactor = ContextCompactor(llm)
+    monkeypatch.setattr(
+        ContextCompactor,
+        "_split_for_compaction",
+        lambda self, working, **kw: ([], list(working)),
+    )
+    history = [{"role": "user", "content": "开始"}]
+    for i in range(30):
+        history.append({"role": "assistant", "content": "", "tool_calls": [{"id": str(i)}]})
+        history.append({"role": "tool", "name": "bash_exec", "content": "y" * 9000})
+
+    _out, did, summary, count, _ = await compactor.maybe_compact(
+        history, force=True, model="glm-5", session=_Session("sess-nosplit")
+    )
+    assert is_prune_only_result(did, count) is True
+    assert llm.calls == []
+    assert summary and "剪除" in summary
+
+
+# --------------------------------------------------------------------------
+# 进程内并发：文件锁只防跨进程，同进程两个协程同时压缩会静默丢历史
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_one_session_never_compacts_twice_concurrently(rooted, caplog):
+    """没有这把锁时，两次压缩会真的重叠：后进来的那次在 journal 里看到前一次还没
+    结束的锁，于是"接管孤儿锁"并放行——两份摘要同时在飞，最后写的那份赢，另一份
+    遮蔽掉的原文永久丢失，而且是静默的。
+
+    判据用 journal 的严格交替而不是"同时在飞的 LLM 调用数"：token 估算是同步 CPU
+    工作、不让出事件循环，所以就算没有锁，两次 to_thread 也**碰巧**不重叠——那个
+    断言不区分有锁没锁，等于什么都没测。
+    """
+    import asyncio as _asyncio
+
+    llm = _LLM()
+    compactor = ContextCompactor(llm)
+    session = _Session("sess-concurrent")
+    history = [{"role": "user", "content": f"第 {i} 轮" + "字" * 1200} for i in range(120)]
+
+    with caplog.at_level("WARNING", logger="agenticx.runtime.compaction_journal"):
+        await _asyncio.gather(
+            *(
+                compactor.maybe_compact(list(history), model="glm-5", session=session)
+                for _ in range(4)
+            )
+        )
+
+    assert len(llm.calls) == 4                      # 四次都真的跑了
+    events = [e["event"] for e in _journal(rooted, "sess-concurrent")]
+    assert events == [cj.EVENT_START, cj.EVENT_END] * 4   # 严格交替，从不嵌套
+    assert not any(e.get("recovered_from_orphan") for e in _journal(rooted, "sess-concurrent"))
+    assert "orphan lock" not in caplog.text
+
+
+def test_lock_is_per_session_so_unrelated_sessions_do_not_block_each_other():
+    """摘要是一次 LLM 调用，可能好几秒。全局一把锁会让不相干的会话互相等。"""
+    import asyncio as _asyncio
+
+    async def _probe():
+        compactor = ContextCompactor(_LLM())
+        a, b = _Session("sess-a"), _Session("sess-b")
+        assert compactor._process_lock_for(a) is compactor._process_lock_for(a)
+        assert compactor._process_lock_for(a) is not compactor._process_lock_for(b)
+        # session=None（老调用方）也要有一把，退化成按 compactor 实例共享。
+        assert compactor._process_lock_for(None) is compactor._process_lock_for(None)
+
+    _asyncio.run(_probe())
+
+
+def test_lock_survives_a_session_outliving_its_event_loop():
+    """asyncio.Lock 首次 await 时绑定 loop，跨 loop 复用会炸。生产里一个会话只活在
+    一个 loop 上，但测试和重启路径会换 loop。"""
+    import asyncio as _asyncio
+
+    session = _Session("sess-two-loops")
+    history = [{"role": "user", "content": f"第 {i} 轮" + "字" * 1200} for i in range(120)]
+
+    def _run():
+        compactor = ContextCompactor(_LLM())
+        return _asyncio.run(
+            compactor.maybe_compact(list(history), model="glm-5", session=session)
+        )
+
+    assert _run()[1] is True
+    assert _run()[1] is True   # 第二个 loop 上不能抛 RuntimeError

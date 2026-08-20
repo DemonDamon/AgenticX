@@ -57,7 +57,7 @@ import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
-import { buildCompactionNoticeText, noticeKindForRuntimeWarning } from "../utils/context-notice";
+import { buildCompactionEventNotice, noticeKindForRuntimeWarning } from "../utils/context-notice";
 import { StallRecoveryCard } from "./messages/StallRecoveryCard";
 import { StallWaitChip } from "./messages/StallWaitChip";
 import { parseStallWaitPayload, type StallWaitInfo } from "../utils/stall-wait-chip";
@@ -1951,9 +1951,10 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               // FR-3: surface auto-compaction so users can see it in real time.
               const count = Number(payload.data?.compacted_count ?? 0) || 0;
               const reactive = Boolean(payload.data?.reactive);
-              const note = buildCompactionNoticeText(count, reactive);
-              addMessage("tool", note, eventAgentId || "meta", undefined, undefined, undefined, {
-                noticeKind: reactive ? "compaction_reactive" : "compaction_proactive",
+              const summary = typeof payload.data?.summary === "string" ? payload.data.summary : "";
+              const notice = buildCompactionEventNotice(count, reactive, summary);
+              addMessage("tool", notice.text, eventAgentId || "meta", undefined, undefined, undefined, {
+                noticeKind: notice.noticeKind,
               });
             }
             if (payload.type === "subagent_completed") {

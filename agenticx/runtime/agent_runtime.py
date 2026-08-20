@@ -45,7 +45,7 @@ from agenticx.cli.agent_tools import (
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.llms.vision import is_vision_capable, strip_nonvision_multimodal_messages
-from agenticx.runtime.compactor import ContextCompactor
+from agenticx.runtime.compactor import ContextCompactor, is_prune_only_result
 from agenticx.runtime.context_file_budget import serialize_context_files
 from agenticx.runtime.tool_result_budget import (
     apply_tool_result_budget,
@@ -3157,20 +3157,7 @@ class AgentRuntime:
             _enrich_attachments_from_chat_history(history, getattr(session, "chat_history", None) or [])
         except Exception:
             pass
-        if getattr(session, "_code_dev_phase_compact_pending", False):
-            setattr(session, "_code_dev_phase_compact_pending", False)
-            compact_model = str(getattr(session, "model_name", "") or "")
-            history, _phase_did, _phase_sum, _phase_cnt, _ = await self.compactor.maybe_compact(
-                history,
-                force=True,
-                model=compact_model,
-                declared_context_window=declared_window_for_session(session),
-                session=session,
-                system_prompt=current_system_prompt,
-                tools=list(full_tool_pool),
-            )
-            if _phase_did:
-                session.agent_messages = list(history)
+
         def _compaction_prefix() -> tuple[str, list[Dict[str, Any]]]:
             """摘要调用要重放的前缀：会话自己的 system prompt + 本轮真实发出的工具表。
 
@@ -3183,6 +3170,21 @@ class AgentRuntime:
                 projected = list(full_tool_pool)
             return current_system_prompt, list(projected)
 
+        if getattr(session, "_code_dev_phase_compact_pending", False):
+            setattr(session, "_code_dev_phase_compact_pending", False)
+            compact_model = str(getattr(session, "model_name", "") or "")
+            _phase_sys, _phase_tools = _compaction_prefix()
+            history, _phase_did, _phase_sum, _phase_cnt, _ = await self.compactor.maybe_compact(
+                history,
+                force=True,
+                model=compact_model,
+                declared_context_window=declared_window_for_session(session),
+                session=session,
+                system_prompt=_phase_sys,
+                tools=_phase_tools,
+            )
+            if _phase_did:
+                session.agent_messages = list(history)
         compact_model = str(getattr(session, "model_name", "") or "")
         _compact_sys, _compact_tools = _compaction_prefix()
         did_compact = False
@@ -3256,6 +3258,10 @@ class AgentRuntime:
         # Defer chat_history compaction notice until after the user row is appended
         # so transcript order stays [user] → [compaction notice] → [assistant].
         pending_compaction_notice_count: Optional[int] = None
+        pending_prune_notice_summary: Optional[str] = None
+        # 剪枝**不是**摘要：消息还在原位，只是过大的工具结果被剪掉了中段。拿摘要那套
+        # 文案播报会变成"已压缩 0 条较早历史"，既不准确也看不懂。
+        prune_only = is_prune_only_result(did_compact, compacted_count)
         if did_compact:
             yield RuntimeEvent(
                 type=EventType.COMPACTION.value,
@@ -3276,7 +3282,10 @@ class AgentRuntime:
             # instead of re-summarizing full agent_messages every turn.
             session.agent_messages = list(compacted_history)
             self._proactive_compact_this_turn = True
-            if not _is_system_trigger and str(user_input or "").strip():
+            # 这条 system 行只为一件事存在：别让模型把 [compacted] 当成任务终止信号。
+            # 剪枝路径没有 [compacted]，而 PRUNE_MARKER 就在被剪的那条结果里、带内说明
+            # 了"需要完整内容请重新调用该工具"——带内比带外好，这里不必再花 token。
+            if not prune_only and not _is_system_trigger and str(user_input or "").strip():
                 messages.append(
                     {
                         "role": "system",
@@ -3288,7 +3297,10 @@ class AgentRuntime:
                 )
             # Visible notice is deferred (system triggers stay silent for users).
             if not _is_system_trigger:
-                pending_compaction_notice_count = int(compacted_count)
+                if prune_only:
+                    pending_prune_notice_summary = str(compact_summary or "")
+                else:
+                    pending_compaction_notice_count = int(compacted_count)
         user_content: Any = user_message_content if user_message_content is not None else user_input
         attached_hint = _build_attached_files_hint(session)
         if attached_hint:
@@ -3427,7 +3439,17 @@ class AgentRuntime:
                     _should_mid_turn_persist = True
         # FR-1: append visible compaction notice after the user chat_history row
         # so reload order is [user] → [compaction notice] → [assistant].
-        if pending_compaction_notice_count is not None:
+        if pending_prune_notice_summary is not None:
+            from agenticx.studio.compaction_notice import append_or_update_prune_notice
+
+            append_or_update_prune_notice(
+                session,
+                summary=pending_prune_notice_summary,
+                agent_id=agent_id,
+            )
+            pending_prune_notice_summary = None
+            _should_mid_turn_persist = True
+        elif pending_compaction_notice_count is not None:
             from agenticx.studio.compaction_notice import append_or_update_compaction_notice
 
             append_or_update_compaction_notice(
@@ -4440,11 +4462,15 @@ class AgentRuntime:
                     if should_force_reactive_compact:
                         self._forced_budget_compact_this_turn = True
                         hist_compact = _sanitize_context_messages(session.agent_messages)
+                        _react_sys, _react_tools = _compaction_prefix()
                         react_hist, did_react, react_summary, react_count, _pending_q_react = await self.compactor.maybe_compact(
                             hist_compact,
                             force=True,
                             model=model_name,
                             declared_context_window=declared_window_for_session(session),
+                            session=session,
+                            system_prompt=_react_sys,
+                            tools=_react_tools,
                         )
                         if did_react:
                             react_hist = _sanitize_context_messages(react_hist)
@@ -4484,7 +4510,12 @@ class AgentRuntime:
                         )
                         # FR-4: one concise notice — skip separate reactive compaction event when
                         # budget is still over limit (Desktop would otherwise show two long lines).
-                        if did_react:
+                        if is_prune_only_result(did_react, react_count):
+                            compress_notice = (
+                                "本回合上下文接近上限，已清理超大工具结果但仍偏紧，"
+                                "建议收口或新建会话。"
+                            )
+                        elif did_react:
                             compress_notice = (
                                 f"本回合上下文接近上限，已压缩 {react_count} 条历史但仍偏紧，"
                                 "建议收口或新建会话。"
@@ -4518,14 +4549,27 @@ class AgentRuntime:
                         )
                         # FR-2: persist reactive compaction notice into chat_history
                         # so reload / session switch still shows the ContextNoticeLine.
-                        from agenticx.studio.compaction_notice import append_or_update_compaction_notice
+                        if is_prune_only_result(did_react, react_count):
+                            from agenticx.studio.compaction_notice import (
+                                append_or_update_prune_notice,
+                            )
 
-                        append_or_update_compaction_notice(
-                            session,
-                            count=react_count,
-                            reactive=True,
-                            agent_id=agent_id,
-                        )
+                            append_or_update_prune_notice(
+                                session,
+                                summary=str(react_summary or ""),
+                                agent_id=agent_id,
+                            )
+                        else:
+                            from agenticx.studio.compaction_notice import (
+                                append_or_update_compaction_notice,
+                            )
+
+                            append_or_update_compaction_notice(
+                                session,
+                                count=react_count,
+                                reactive=True,
+                                agent_id=agent_id,
+                            )
                     # FR-5: surface compactor circuit-breaker tripping so the user
                     # knows long-session stability may degrade.
                     cf_state = getattr(self, "_compactor_failure_warned", False)
@@ -4812,11 +4856,15 @@ class AgentRuntime:
                         and self._overflow_retries_this_turn < max_overflow_retries()
                     ):
                         hist_before = _sanitize_context_messages(session.agent_messages)
+                        _of_sys, _of_tools = _compaction_prefix()
                         new_hist, did, summary, count, _pending_q = await self.compactor.maybe_compact(
                             hist_before,
                             force=True,
                             model=model_name,
                             declared_context_window=declared_window_for_session(session),
+                            session=session,
+                            system_prompt=_of_sys,
+                            tools=_of_tools,
                         )
                         new_hist = _sanitize_context_messages(new_hist) if did else new_hist
                         made_progress = (

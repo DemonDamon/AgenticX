@@ -397,7 +397,11 @@ export function mapLoadedSessionMessage(
     // survives session switch / reload without relying on Chinese text matching.
     if (meta && typeof meta === "object") {
       const kind = String((meta as Record<string, unknown>).kind ?? "").trim();
-      if (kind === "compaction_proactive" || kind === "compaction_reactive") {
+      if (
+        kind === "compaction_proactive"
+        || kind === "compaction_reactive"
+        || kind === "compaction_prune"
+      ) {
         mapped.noticeKind = kind;
       }
     }

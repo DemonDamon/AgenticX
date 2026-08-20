@@ -55,6 +55,24 @@ DEFAULT_PRUNE_HEAD_CHARS = 1_200
 DEFAULT_PRUNE_TAIL_CHARS = 400
 PRUNE_MARKER = "\n\n[... 工具结果中段已剪除，需要完整内容请重新调用该工具 ...]\n\n"
 
+#: 剪枝独自解除压力时的 trigger_reason。剪枝**不是摘要**：消息还在原位，只是过大的
+#: 工具结果被剪掉了中段，所以调用方不能拿它当摘要来播报。
+TOOL_RESULT_PRUNE_REASON = "tool_result_prune"
+
+
+def prune_only_summary(pruned_messages: int, pruned_chars: int) -> str:
+    """剪枝独自解除压力时的说明文案（既进 COMPACTION 事件也进可见通知）。"""
+    return f"剪除了 {int(pruned_messages)} 条过大的工具结果（约 {int(pruned_chars)} 字符），未做摘要。"
+
+
+def is_prune_only_result(did_compact: bool, compacted_count: int) -> bool:
+    """``maybe_compact`` 的返回值是否表示"只剪枝、没摘要"。
+
+    只看返回值、不读 ``last_trigger_reason``：后者是实例上的可变状态，两次调用之间
+    会被覆盖，而返回值是调用方自己那一次的事实。
+    """
+    return bool(did_compact) and int(compacted_count) == 0
+
 # Legacy char-proxy hints (escape-hatch / AGX_CONTEXT_WINDOW_CHARS only; not full-compact primary).
 _MODEL_CONTEXT_CHARS_HINT: Dict[str, int] = {
     "gpt-4o": 128_000,
@@ -939,6 +957,37 @@ class ContextCompactor:
         snippets = [_stringify_message(item)[:160] for item in messages_to_compact[-12:]]
         return "；".join(snippets)[:700]
 
+    def _process_lock_for(self, session: Any) -> asyncio.Lock:
+        """同一进程内、同一会话的压缩互斥锁。
+
+        和 ``compaction_journal`` 的文件锁不冲突，两者管的是不同的事：文件锁管**跨进程**
+        和崩溃后的孤儿检测，这把锁管**同进程并发**。少了它，两个协程同时进 maybe_compact
+        时文件锁只会互相"接管"（各记一条 warning 就放行），但两份摘要会打架——
+        ``session.agent_messages`` 留下最后写的那份，另一份遮蔽掉的原文就永久丢了，
+        而且是静默的。当前调用点碰巧是串行的，但"碰巧串行"是调用方的事实，不是这里的不变量。
+
+        注意这把锁只保证两次压缩**不交错**，不会把等锁期间变陈旧的 ``messages`` 快照
+        重新基线化——调用方传进来的是它自己那一份快照。
+        """
+        try:
+            loop: Any = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        holder: Any = self if session is None else session
+        attr = "_agx_compaction_lock"
+        current = getattr(holder, attr, None)
+        # 记住创建时的 loop：asyncio.Lock 在首次 await 时绑定 loop，跨 loop 复用会炸。
+        # 生产里一个会话只活在一个 loop 上，但测试里 asyncio.run 会换 loop。
+        if isinstance(current, tuple) and len(current) == 2 and current[0] is loop:
+            return current[1]
+        lock = asyncio.Lock()
+        try:
+            setattr(holder, attr, (loop, lock))
+        except Exception:
+            # session 不让写属性（__slots__ 之类）：退化成不互斥，但不能因此炸掉压缩。
+            _log.debug("cannot cache compaction lock on session; falling back to unlocked")
+        return lock
+
     async def maybe_compact(
         self,
         messages: Sequence[Dict[str, Any]],
@@ -955,6 +1004,28 @@ class ContextCompactor:
         Returns:
             (new_messages, did_compact, summary, compacted_count, pending_question)
         """
+        async with self._process_lock_for(session):
+            return await self._maybe_compact_body(
+                messages,
+                force=force,
+                model=model,
+                declared_context_window=declared_context_window,
+                session=session,
+                system_prompt=system_prompt,
+                tools=tools,
+            )
+
+    async def _maybe_compact_body(
+        self,
+        messages: Sequence[Dict[str, Any]],
+        *,
+        force: bool,
+        model: str,
+        declared_context_window: Optional[int],
+        session: Any,
+        system_prompt: str,
+        tools: Optional[Sequence[Dict[str, Any]]],
+    ) -> Tuple[List[Dict[str, Any]], bool, str, int, str]:
         copied = [m for m in messages if isinstance(m, dict)]
         compact_block, tail = self._split_compacted_messages(copied)
         working = tail if compact_block is not None else copied
@@ -1041,7 +1112,7 @@ class ContextCompactor:
 
         # 第二步：重新计量。压力已经解除就完全跳过摘要。
         if pruned_n and _no_longer_needs_compaction(copied):
-            self.last_trigger_reason = "tool_result_prune"
+            self.last_trigger_reason = TOOL_RESULT_PRUNE_REASON
             _log.info(
                 "context_compaction resolved_by_prune pruned=%s chars=%s est_tokens=%s threshold=%s",
                 pruned_n,
@@ -1055,7 +1126,7 @@ class ContextCompactor:
             return (
                 copied,
                 True,
-                f"剪除了 {pruned_n} 条过大的工具结果（约 {pruned_chars} 字符），未做摘要。",
+                prune_only_summary(pruned_n, pruned_chars),
                 0,
                 "",
             )
@@ -1064,13 +1135,17 @@ class ContextCompactor:
             working, retain_tokens=self._retained_token_budget(window)
         )
         if not to_compact:
-            self.last_trigger_reason = "tool_result_prune" if pruned_n else ""
+            self.last_trigger_reason = TOOL_RESULT_PRUNE_REASON if pruned_n else ""
             _journal.end(
                 lock,
                 outcome="pruned" if pruned_n else "nothing-to-compact",
                 pruned_messages=pruned_n,
             )
-            return copied, bool(pruned_n), "", 0, ""
+            if not pruned_n:
+                return copied, False, "", 0, ""
+            # 这条路径同样是"剪了但没摘要"，必须带上说明——否则调用方拿到空 summary，
+            # 只能回落到通用的"已压缩 0 条"，正是要修掉的那句误导文案。
+            return copied, True, prune_only_summary(pruned_n, pruned_chars), 0, ""
         compacted_count = len(to_compact)
         _log.info(
             "context_compaction trigger_reason=%s est_tokens=%s threshold=%s window=%s compacted_count=%s",

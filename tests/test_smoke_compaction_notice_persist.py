@@ -114,3 +114,60 @@ def test_safe_when_chat_history_missing() -> None:
         pass
 
     assert append_or_update_compaction_notice(_Bad(), count=1, reactive=False) is False
+
+
+# --------------------------------------------------------------------------
+# 剪枝通知：剪枝不是摘要，不能共用"已压缩 N 条"那套文案
+# --------------------------------------------------------------------------
+def test_prune_notice_uses_the_compactor_summary_not_the_compaction_wording() -> None:
+    """剪枝时消息还在原位、没有摘要，走摘要文案会变成"已压缩 0 条较早历史"。"""
+    from agenticx.runtime.compactor import prune_only_summary
+    from agenticx.studio.compaction_notice import (
+        COMPACTION_PRUNE_KIND,
+        append_or_update_prune_notice,
+        build_prune_notice_content,
+    )
+
+    summary = prune_only_summary(3, 24_000)
+    assert build_prune_notice_content(summary) == summary
+
+    session = _Session([{"role": "user", "content": "继续"}])
+    assert append_or_update_prune_notice(session, summary=summary, agent_id="meta") is True
+
+    rows = _compaction_rows(session.chat_history, COMPACTION_PRUNE_KIND)
+    assert len(rows) == 1
+    assert rows[0]["content"] == "剪除了 3 条过大的工具结果（约 24000 字符），未做摘要。"
+    assert "已压缩 0" not in rows[0]["content"]
+    # compacted_count 在剪枝语境下没有意义，别写进去让前端拿去渲染。
+    assert "compacted_count" not in rows[0]["metadata"]
+    assert rows[0]["metadata"]["pruned_only"] is True
+
+
+def test_prune_notice_falls_back_when_the_compactor_gave_no_summary() -> None:
+    from agenticx.studio.compaction_notice import (
+        DEFAULT_PRUNE_NOTICE,
+        build_prune_notice_content,
+    )
+
+    assert build_prune_notice_content("") == DEFAULT_PRUNE_NOTICE
+    assert build_prune_notice_content("   ") == DEFAULT_PRUNE_NOTICE
+    # 兜底文案也不能出现"已压缩"，否则前端的文本识别会把它归到摘要那一类。
+    assert "已压缩" not in DEFAULT_PRUNE_NOTICE
+
+
+def test_prune_notice_is_its_own_kind_and_dedupes_separately() -> None:
+    from agenticx.studio.compaction_notice import (
+        COMPACTION_PRUNE_KIND,
+        append_or_update_prune_notice,
+    )
+
+    session = _Session([{"role": "user", "content": "继续"}])
+    append_or_update_prune_notice(session, summary="剪除了 1 条过大的工具结果", agent_id="meta")
+    append_or_update_prune_notice(session, summary="剪除了 4 条过大的工具结果", agent_id="meta")
+    rows = _compaction_rows(session.chat_history, COMPACTION_PRUNE_KIND)
+    assert len(rows) == 1 and rows[0]["content"] == "剪除了 4 条过大的工具结果"
+
+    # 摘要通知不该被剪枝通知就地覆盖：两者是不同的 kind。
+    append_or_update_compaction_notice(session, count=9, reactive=False, agent_id="meta")
+    assert len(_compaction_rows(session.chat_history, COMPACTION_PROACTIVE_KIND)) == 1
+    assert len(_compaction_rows(session.chat_history, COMPACTION_PRUNE_KIND)) == 1

@@ -328,7 +328,7 @@ import {
 import { messagePlainTextForClipboard } from "../utils/markdown-copy-format";
 import { buildMessagesPdfHtml, expandSelectionForCompletePdfExport, messagesForShareExport } from "../utils/export-pdf-html";
 import { ShareImagePreviewModal } from "./ShareImagePreviewModal";
-import { buildCompactionNoticeText, noticeKindForRuntimeWarning } from "../utils/context-notice";
+import { buildCompactionEventNotice, noticeKindForRuntimeWarning } from "../utils/context-notice";
 import { usePaneSortableHandle } from "./pane-sortable-context";
 import { FeishuBadge } from "./FeishuBadge";
 import {
@@ -12024,9 +12024,10 @@ export function ChatPane({
               // only when the model later "explains" it as a failure cause.
               const count = Number(payload.data?.compacted_count ?? 0) || 0;
               const reactive = Boolean(payload.data?.reactive);
-              const text = buildCompactionNoticeText(count, reactive);
-              addPaneMessageIfSessionActive(pane.id, "tool", text, eventAgentId || "meta", undefined, undefined, undefined, {
-                noticeKind: reactive ? "compaction_reactive" : "compaction_proactive",
+              const summary = typeof payload.data?.summary === "string" ? payload.data.summary : "";
+              const notice = buildCompactionEventNotice(count, reactive, summary);
+              addPaneMessageIfSessionActive(pane.id, "tool", notice.text, eventAgentId || "meta", undefined, undefined, undefined, {
+                noticeKind: notice.noticeKind,
               });
             }
             if (payload.type === "context_stats") {

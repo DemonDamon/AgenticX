@@ -9,6 +9,11 @@ export function stripLegacyNoticePrefix(content: string): string {
 }
 
 function detectKindFromText(text: string): ContextNoticeKind | null {
+  // 剪枝的两句文案都不含「已压缩」，但兜底那句含「任务继续」——必须排在下面的
+  // 通用规则之前，否则会被误判成 compaction_proactive。
+  if (text.includes("过大的工具结果") || text.includes("超大工具结果")) {
+    return "compaction_prune";
+  }
   if (
     text.includes("已自动切换为精简模式")
     || text.includes("已自动切换精简模式")
@@ -46,6 +51,40 @@ export function buildCompactionNoticeText(count: number, reactive: boolean): str
     return `上下文接近上限，已压缩 ${count} 条历史，任务继续。`;
   }
   return `已压缩 ${count} 条较早历史，任务继续。`;
+}
+
+/** keep in sync with agenticx/studio/compaction_notice.py DEFAULT_PRUNE_NOTICE */
+export const DEFAULT_PRUNE_NOTICE_TEXT = "已清理较早的超大工具结果，历史未被摘要，任务继续。";
+
+/** keep in sync with agenticx/studio/compaction_notice.py build_prune_notice_content */
+export function buildPruneNoticeText(summary: string): string {
+  return String(summary ?? "").trim() || DEFAULT_PRUNE_NOTICE_TEXT;
+}
+
+/**
+ * 剪枝独自解除了压力：动了历史，但一条都没被摘要替换掉。
+ * 对齐 Python 侧 agenticx/runtime/compactor.py is_prune_only_result。
+ */
+export function isPruneOnlyCompaction(compactedCount: number): boolean {
+  return compactedCount === 0;
+}
+
+/**
+ * COMPACTION 事件 → 可见通知。剪枝和摘要是两件事，别共用文案：剪枝时消息还在原位，
+ * 说「已压缩 0 条较早历史」既不准确也看不懂，改用 compactor 自己给的说明。
+ */
+export function buildCompactionEventNotice(
+  compactedCount: number,
+  reactive: boolean,
+  summary: string,
+): { text: string; noticeKind: ContextNoticeKind } {
+  if (isPruneOnlyCompaction(compactedCount)) {
+    return { text: buildPruneNoticeText(summary), noticeKind: "compaction_prune" };
+  }
+  return {
+    text: buildCompactionNoticeText(compactedCount, reactive),
+    noticeKind: reactive ? "compaction_reactive" : "compaction_proactive",
+  };
 }
 
 /** Context/token budget notices should render as a flat inline line, not ToolCallCard. */
