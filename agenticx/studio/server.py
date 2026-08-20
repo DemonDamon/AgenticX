@@ -3217,6 +3217,26 @@ def create_studio_app() -> FastAPI:
             llm = _resolve_llm()
         except Exception as exc:
             llm_init_err_text = f"LLM init failed: {exc}"
+
+            # 这一步失败发生在 run_turn 之前，而用户那条消息是 run_turn 才写进
+            # chat_history 的。不补的话：这个会话一条可见消息都没有，list_sessions 会
+            # 把它当成「还没说过话的空壳」直接过滤掉——用户刚敲的字连同整个会话一起
+            # 从历史里消失，而他看到的只是一句报错。模型没配好、企业 token 过期、
+            # 网络在解析时断了，都会走到这里。
+            _failed_user_text = str(getattr(payload, "user_input", "") or "").strip()
+            if _failed_user_text and not bool(getattr(payload, "skip_user_history", False)):
+                session.chat_history.append({"role": "user", "content": _failed_user_text})
+                session.chat_history.append(
+                    {
+                        "role": "assistant",
+                        "content": llm_init_err_text,
+                        "metadata": {"source": "llm-init-failed"},
+                    }
+                )
+                manager.set_execution_state(payload.session_id, "interrupted")
+                with contextlib.suppress(Exception):
+                    await manager.persist_async(payload.session_id)
+
             async def _error_stream() -> AsyncGenerator[str, None]:
                 # Python 3.13 no longer allows closing over `exc` from except scope.
                 # Copy the message into a normal local before defining the generator.

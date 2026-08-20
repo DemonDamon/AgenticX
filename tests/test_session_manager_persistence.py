@@ -678,32 +678,63 @@ def test_list_sessions_normalizes_stale_interrupted_state(tmp_path: Path) -> Non
     manager._session_store = store
     manager._sessions_root = str(sessions_root)
 
-    sid = "stale-interrupted-session-id"
-    managed = manager.create(session_id=sid)
+    # 判定「陈旧」的依据是磁盘上最后一轮到底有没有产出可见回复，不是「此刻还有没有
+    # 未处理的中断请求」。后者只在中断进行中为真，一结束就清掉——按它判的话
+    # interrupted 永远回不来，一轮跑挂的会话在历史里会和正常跑完的长得一模一样。
+    #
+    # （这条用例最早写于 2026-04-29，当时确实只有「有没有中断请求」这一个判据；
+    # 2026-06-06 加了按磁盘内容判定的 _last_turn_has_completed_reply，但旧的那句无条件
+    # 降级留在原地，把新检查变成了死代码。）
+
+    # 只有用户消息、没有任何回复 —— 这一轮真的没跑完，历史里就该显示已中断。
+    unfinished = "interrupted-no-reply-session-id"
+    managed = manager.create(session_id=unfinished)
     managed.studio_session.chat_history = [
         {"id": "u1", "role": "user", "content": "hello"},
+    ]
+    manager.set_execution_state(unfinished, "interrupted")
+    assert manager.persist(unfinished) is True
+
+    rows = manager.list_sessions()
+    row = next(r for r in rows if r["session_id"] == unfinished)
+    assert row["execution_state"] == "interrupted"
+
+    # 最后一轮已经有完整回复 —— 状态位只是没刷新，降级成 idle，别在已完成的答案上
+    # 顶一个「已中断」。
+    sid = "stale-interrupted-session-id"
+    stale = manager.create(session_id=sid)
+    stale.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "hello"},
+        {
+            "id": "a1",
+            "role": "assistant",
+            "content": "这是完整答复。",
+            "metadata": {"turn_terminal": True},
+        },
     ]
     manager.set_execution_state(sid, "interrupted")
     assert manager.persist(sid) is True
 
-    # No active interrupt request -> listing should not keep stale "interrupted".
     rows = manager.list_sessions()
     row = next(r for r in rows if r["session_id"] == sid)
     assert row["execution_state"] == "idle"
 
-    # Active interrupt request -> keep "interrupted" visible.
+    # 正在中断中 -> 无论磁盘上是什么，都显示 interrupted。
     assert manager.request_interrupt(sid) is True
     rows = manager.list_sessions()
     row = next(r for r in rows if r["session_id"] == sid)
     assert row["execution_state"] == "interrupted"
 
-    # Restarted manager (no in-memory interrupt request) should also normalize stale metadata.
+    # 重启后（进程内没有中断请求了）仍按磁盘内容判定。
     fresh = SessionManager()
     fresh._session_store = store
     fresh._sessions_root = str(sessions_root)
     fresh_rows = fresh.list_sessions()
-    fresh_row = next(r for r in fresh_rows if r["session_id"] == sid)
-    assert fresh_row["execution_state"] == "idle"
+    assert next(r for r in fresh_rows if r["session_id"] == sid)["execution_state"] == "idle"
+    assert (
+        next(r for r in fresh_rows if r["session_id"] == unfinished)["execution_state"]
+        == "interrupted"
+    )
 
 
 def test_list_sessions_prefers_message_timestamp_over_polluted_touch(tmp_path: Path) -> None:

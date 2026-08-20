@@ -73,6 +73,12 @@ def _visible_assistant_body(content: str) -> str:
     return parse_assistant_output(str(content or "")).visible_body.strip()
 
 
+#: 这些 assistant 行不是「这一轮的答复」，只是记录发生了什么，不能拿来判定该轮已完成。
+#: - interrupted-partial：流断在半路时留下的残句
+#: - llm-init-failed：模型都没初始化起来，写这一行只是为了让用户回头知道当时发生了什么
+_NON_REPLY_ASSISTANT_SOURCES = {"interrupted-partial", "llm-init-failed"}
+
+
 def _messages_last_turn_has_completed_reply(messages: List[Dict[str, Any]]) -> bool:
     """Pure helper: whether the last user turn has a completed assistant reply."""
     if not messages:
@@ -91,7 +97,7 @@ def _messages_last_turn_has_completed_reply(messages: List[Dict[str, Any]]) -> b
         if str(msg.get("role", "")).strip() != "assistant":
             continue
         meta = _assistant_metadata(msg)
-        if str(meta.get("source", "") or "").strip() == "interrupted-partial":
+        if str(meta.get("source", "") or "").strip() in _NON_REPLY_ASSISTANT_SOURCES:
             continue
         content = str(msg.get("content", "") or "")
         parsed = parse_assistant_output(content)
@@ -121,7 +127,7 @@ def _messages_last_turn_has_completed_reply(messages: List[Dict[str, Any]]) -> b
         if str(msg.get("role", "")).strip() != "assistant":
             continue
         meta = _assistant_metadata(msg)
-        if str(meta.get("source", "") or "").strip() == "interrupted-partial":
+        if str(meta.get("source", "") or "").strip() in _NON_REPLY_ASSISTANT_SOURCES:
             continue
         content = str(msg.get("content", "") or "")
         visible = _visible_assistant_body(content)
@@ -710,10 +716,13 @@ class SessionManager:
             return "running"
         if raw == "failed":
             return "failed"
+        # 真正的「陈旧」判定就是上面这一句：磁盘上最后一轮确实产出了可见回复，说明
+        # 只是状态位没刷新，降级成 idle。
         if self._last_turn_has_completed_reply(session_id):
             return "idle"
-        if raw == "interrupted":
-            return "idle"
+        # 这里原本还有一句无条件的 `if raw == "interrupted": return "idle"`，等于把
+        # 上面那个磁盘检查变成死代码——interrupted 永远回不来，一轮跑挂的会话在历史里
+        # 和正常跑完的长得一模一样。用户看到的是「有问题没答案，但看着像结束了」。
         return raw
 
     def request_interrupt(self, session_id: str) -> bool:
