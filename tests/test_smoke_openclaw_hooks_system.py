@@ -84,7 +84,10 @@ def test_hooks_loader_discovers_workspace_and_bundled(tmp_path: Path):
     result = asyncio.run(trigger_hook_event(event))
     assert result is True
     assert "workspace-hook-fired" in event.messages
-    assert (tmp_path / "memory").is_dir(), "session-memory 钩子应把快照写进给定工作区"
+    # 真正要守的是「别写进仓库」。断言快照一定落在 tmp_path 里会依赖 bundled 的
+    # session-memory 钩子此刻是否已注册——而这个文件里的用例共享全局钩子注册表，
+    # 换个执行顺序就不成立。这里只钉住不该发生的那一半。
+    assert not (Path.cwd() / "memory").exists(), "钩子把快照写进了当前目录（应落在给定工作区）"
 
 
 def test_legacy_llm_and_tool_hooks_still_work():
