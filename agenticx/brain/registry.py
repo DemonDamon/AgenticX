@@ -26,6 +26,26 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
+def __getattr__(name: str):
+    """PEP 562：这些名字不再是模块常量，但外部读取和 monkeypatch 仍要能拿到。
+
+    monkeypatch.setattr("agenticx.brain.registry.AGENTICX_HOME", tmp) 会先 getattr 确认
+    属性存在——只把常量删掉会让这类既有写法直接 AttributeError。
+    """
+    from agenticx.utils.agx_home import agx_home
+
+    mapping = {
+        "AGENTICX_HOME": lambda: agx_home(),
+        "BRAINS_ROOT": lambda: agx_home() / "brains",
+        "CONFIG_YAML": lambda: agx_home() / "config.yaml",
+        "AVATARS_ROOT": lambda: agx_home() / "avatars",
+        "LEGACY_KB_REGISTRY": lambda: agx_home() / "storage" / "kb",
+    }
+    if name in mapping:
+        return mapping[name]()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def _agenticx_home() -> Path:
     """按调用时的 HOME 解析。下面几个根目录都派生自它，一起懒化。
 

@@ -52,10 +52,9 @@ def _isolated_agenticx_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def _real_agx_home_fingerprint() -> dict[str, int]:
-    """真实 ~/.agenticx 下每个顶级子目录的直接子项数量。
+    """真实 ~/.agenticx 下每个顶级子目录的**递归**条目数。
 
-    只数一层：足够抓住「测试又造了一个 avatar / group / delivery」这类泄漏，又不用遍历
-    三万多个文件。
+    一轮全量下来大概三万多个路径，扫两次（session 开始/结束各一次）代价可以接受。
     """
     root = Path(os.path.expanduser("~/.agenticx"))
     if not root.exists():
@@ -64,7 +63,9 @@ def _real_agx_home_fingerprint() -> dict[str, int]:
     for child in root.iterdir():
         if child.is_dir():
             try:
-                out[child.name] = sum(1 for _ in child.iterdir())
+                # 递归数，不能只数一层：曾经有一次泄漏是往已存在的
+                # deliveries/demo-portal-poc/ 里塞子目录，顶层直接子项数一点没变。
+                out[child.name] = sum(1 for _ in child.rglob("*"))
             except OSError:
                 pass
     return out
