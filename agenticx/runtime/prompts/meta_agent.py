@@ -15,6 +15,7 @@ from typing import Any, Optional
 from agenticx.cli.studio import StudioSession
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.prompts.skill_authoring import build_skill_authoring_prompt_block
+from agenticx.runtime.prompts.session_context import stash_volatile_sections
 from agenticx.skills.meta_skill import MetaSkillInjector
 from agenticx.runtime.prompts.code_mode import build_code_dev_prompt_blocks
 from agenticx.runtime.prompts.current_time import build_current_time_block
@@ -36,6 +37,21 @@ MAX_WORKSPACE_BLOCK_CHARS = 1800
 MAX_WORKSPACE_TOTAL_CHARS = 6000
 
 
+#: 目录里单条技能描述的字符上限。目录只负责"路由"——让模型判断该不该加载这个
+#: 技能——完整正文本来就要靠 skill_use 拉。描述没有上限时，一条能写到几百字符，
+#: 22 个技能就是 4770 字符，而且每轮都在发。DeepSeek Harness 同样的目录里这个
+#: 上限是 500。
+MAX_SKILL_DESCRIPTION_CHARS = 500
+
+
+def _clip_skill_description(description: str) -> str:
+    """Whitespace-normalize and cap one catalog description."""
+    text = " ".join(str(description or "").split())
+    if len(text) <= MAX_SKILL_DESCRIPTION_CHARS:
+        return text
+    return text[: MAX_SKILL_DESCRIPTION_CHARS - 1] + "…"
+
+
 def _build_skills_context(
     skills: list[dict[str, Any]] | None = None,
     *,
@@ -52,7 +68,7 @@ def _build_skills_context(
     for skill in skills:
         name = str(skill.get("name", "")).strip() or "(unknown)"
         description = str(skill.get("description", "")).strip() or "(无描述)"
-        lines.append(f"- {name}: {description}")
+        lines.append(f"- {name}: {_clip_skill_description(description)}")
     return "\n".join(lines) + "\n"
 
 
@@ -788,7 +804,23 @@ def build_meta_agent_system_prompt(
     user_preference: str = "",
     kb_retrieval_mode_override: Optional[str] = None,
     include_file_delivery_choice: bool = False,
+    include_volatile: bool = True,
 ) -> str:
+    """Build the meta-agent system prompt.
+
+    Args:
+        include_volatile: keep每轮都在变的会话状态（技能目录、MCP、分身、todo、
+            子智能体、记忆召回、附件正文……）留在 system prompt 里。默认 ``True``
+            保持老行为，供那些自己拼 prompt、不走 ``<session-context>`` 的调用方
+            使用。主运行时传 ``False``，改由
+            :func:`build_meta_agent_volatile_sections` 渲染到对话末尾——因为
+            system prompt 是 ``messages[0]``，里面任何一处变动都会让它后面的整段
+            对话历史前缀缓存失效（实测稳定前缀只剩 9.6%）。
+
+            注意：静态规则里那些"见 Avatars 列表 / 已注册能力章节 / 当前子智能体
+            状态"的指路话依然成立——数据只是挪到了同一个请求的后半段，而且离用户
+            的问题更近。
+    """
     bound_skill = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
     try:
         skill_summaries = get_all_skill_summaries(bound_avatar_id=bound_skill)
@@ -869,6 +901,26 @@ def build_meta_agent_system_prompt(
     kb_retrieval_block = _build_kb_retrieval_policy_block(effective_kb_mode or None)
     file_delivery_choice_block = (
         build_file_delivery_choice_prompt_block() if include_file_delivery_choice else ""
+    )
+    _capabilities_block = (
+        "## 已注册能力\n"
+        f"{skills_context}"
+        f"{native_connectors_context}"
+        f"{mcp_context}\n"
+        f"{avatars_context}\n"
+    )
+    _tail_state_block = (
+        f"{todo_context}\n"
+        f"{active_subagents}"
+        f"{memory_recall}"
+        f"{session_summary}"
+        f"{taskspaces_context}"
+        f"{build_code_dev_prompt_blocks(session)}"
+        "## 当前会话上下文\n"
+        f"- model_service: {format_model_option_label(session.provider_name or '', session.model_name or '', resolve_provider_config(session.provider_name or ''))}\n"
+        f"- provider: {session.provider_name or 'default'}\n"
+        f"- model: {session.model_name or 'default'}\n"
+        f"{_build_context_files_block(session)}"
     )
     base_prompt = (
         f"{workspace_context}\n"
@@ -1022,11 +1074,7 @@ def build_meta_agent_system_prompt(
         "- 绝不能启动子智能体后只说「已启动，请等待」就不管了。子智能体完成后你必须主动总结汇报，不能等用户追问。\n"
         "- 如果本轮看到已完成的子智能体但还未向用户汇报过，可调用一次 `query_subagent_status` 校验后给出结构化汇报；禁止循环查询。\n"
         "- 严禁编造进度百分比（如 75%）。只有工具返回明确数值时才可引用，否则用“进行中/已完成/失败”描述。\n\n"
-        "## 已注册能力\n"
-        f"{skills_context}"
-        f"{native_connectors_context}"
-        f"{mcp_context}\n"
-        f"{avatars_context}\n"
+        f"{_capabilities_block if include_volatile else ''}"
         "## 分身协作\n"
         f"{group_collab_line}"
         "- 当用户问“某分身是谁/角色是什么/ID 是什么”等身份类问题时，直接基于 Avatars 列表回答，禁止调用 `delegate_to_avatar`。\n"
@@ -1051,18 +1099,71 @@ def build_meta_agent_system_prompt(
         "- 权限类确认（写文件、执行命令）仍走原有 `confirm_required` 流程，不要用 `request_clarification` 或 `request_action_confirmation` 替代。\n"
         "- 涉及模型/厂商选择时，`prompt` 与 `options` 只能写用户可见的「厂商展示名/模型短名」（如「彩讯-外网/kimi-k2.6」「MOMA/GLM-5.2」），禁止出现 `custom_openai_*` 等内部配置 id。\n\n"
         f"{build_provider_catalog_block(current_provider=session.provider_name or '', current_model=session.model_name or '')}"
-        f"{todo_context}\n"
         f"{lsp_context}"
-        f"{active_subagents}"
-        f"{memory_recall}"
-        f"{session_summary}"
-        f"{taskspaces_context}"
-        f"{build_code_dev_prompt_blocks(session)}"
-        "## 当前会话上下文\n"
+        f"{_tail_state_block if include_volatile else ''}"
+        f"{_build_user_profile_block(user_nickname, user_preference)}"
+    )
+    if not include_volatile:
+        # 侧信道交给 AgentRuntime：它会把这些区块框成 <session-context>，追加在对话
+        # 历史之后、当前用户消息之前。
+        stash_volatile_sections(
+            session,
+            build_meta_agent_volatile_sections(
+                session, taskspaces=taskspaces, group_chat=group_chat
+            ),
+        )
+    return MetaSkillInjector().inject(
+        base_prompt,
+        skill_summaries,
+        # 目录已经在 ``skills_context`` 里渲染过一次了；再让 injector 追加一份
+        # ``## Available Skills`` 就是同样 22 个技能原样列两遍。
+        include_catalog=False,
+    )
+
+
+def build_meta_agent_volatile_sections(
+    session: StudioSession,
+    *,
+    taskspaces: list[dict[str, str]] | None = None,
+    group_chat: dict[str, Any] | None = None,
+) -> list[tuple[str, str]]:
+    """Render the volatile state that :func:`build_meta_agent_system_prompt` omits.
+
+    与 ``include_volatile=False`` 严格配对：那边少了什么，这边就补什么。返回
+    ``(title, body)`` 列表，交给
+    :func:`agenticx.runtime.prompts.session_context.build_session_context_message`
+    框成一条追加在对话历史之后的 system 消息。
+    """
+    bound = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+    try:
+        skill_summaries = get_all_skill_summaries(bound_avatar_id=bound)
+    except Exception:
+        skill_summaries = []
+    group_allowed: set[str] | None = None
+    if group_chat and isinstance(group_chat, dict):
+        raw_ids = group_chat.get("avatar_ids")
+        if isinstance(raw_ids, list):
+            group_allowed = {str(x).strip() for x in raw_ids if str(x).strip()}
+    capabilities = (
+        _build_skills_context(skill_summaries)
+        + _build_native_connectors_context()
+        + _build_mcps_context(session)
+        + "\n"
+        + _build_avatars_context(allowed_avatar_ids=group_allowed)
+    )
+    session_line = (
         f"- model_service: {format_model_option_label(session.provider_name or '', session.model_name or '', resolve_provider_config(session.provider_name or ''))}\n"
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"
         f"{_build_context_files_block(session)}"
-        f"{_build_user_profile_block(user_nickname, user_preference)}"
     )
-    return MetaSkillInjector().inject(base_prompt, skill_summaries)
+    return [
+        ("已注册能力", capabilities),
+        ("", _build_todo_context(session)),
+        ("", _build_active_subagents_context(session)),
+        ("", _build_memory_recall_context(session)),
+        ("", _build_session_summary_context(session)),
+        ("", _build_taskspaces_context(taskspaces)),
+        ("", build_code_dev_prompt_blocks(session)),
+        ("当前会话上下文", session_line),
+    ]

@@ -101,6 +101,11 @@ from agenticx.runtime.provider_fallback import (
     reset_provider_timeout_streak,
     resolve_provider_read_timeout,
 )
+from agenticx.runtime.prompts.session_context import (
+    build_session_context_message,
+    pop_volatile_sections,
+    stash_volatile_sections,
+)
 from agenticx.runtime.prompt_cache_policy import (
     apply_prompt_cache_breakpoints,
     build_context_management_kwargs,
@@ -1338,7 +1343,40 @@ def _promote_user_image_attachments(
     return out
 
 
-def _build_agent_system_prompt(session: StudioSession) -> str:
+def _build_agent_volatile_sections(session: StudioSession) -> list[tuple[str, str]]:
+    """Volatile state omitted from the implement-agent system prompt.
+
+    与 ``_build_agent_system_prompt(include_volatile=False)`` 严格配对。
+    """
+    mcp_context = ""
+    if session.mcp_hub is not None:
+        try:
+            from agenticx.runtime.tool_search_runtime import read_tool_search_config
+
+            defer_schemas = read_tool_search_config().mode in {"auto", "always"}
+        except Exception:
+            defer_schemas = False
+        mcp_context = build_mcp_tools_context(session.mcp_hub, defer_schemas=defer_schemas)
+    return [
+        ("可用元 Skills 摘要", _serialize_skill_summaries(session)),
+        ("当前会话 artifacts", _serialize_artifacts(session)),
+        ("当前 Todo 列表", _serialize_todos(session)),
+        ("当前 Scratchpad 摘要", _serialize_scratchpad(session)),
+        ("当前 context_files", _serialize_context_files(session)),
+        ("当前 MCP 工具上下文", _truncate(mcp_context or "(no MCP tools connected)", 6000)),
+    ]
+
+
+def _build_agent_system_prompt(
+    session: StudioSession, *, include_volatile: bool = True
+) -> str:
+    """Build the implement-agent system prompt.
+
+    ``include_volatile=False`` 把每轮都在变的会话状态（技能目录、artifacts、todo、
+    scratchpad、附件正文、MCP 上下文）从 ``messages[0]`` 里摘出去，改由
+    ``<session-context>`` 追加在对话历史之后——见
+    :mod:`agenticx.runtime.prompts.session_context` 里关于前缀缓存的说明。
+    """
     mcp_context = ""
     if session.mcp_hub is not None:
         # When ToolSearch mode != off, defer MCP schema dumping into the system
@@ -1377,26 +1415,33 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         widget_block = _build_widget_capability_block()
     except Exception:
         widget_block = ""
+    if include_volatile:
+        _volatile_block = (
+            "## 可用元 Skills 摘要\n"
+            f"{_serialize_skill_summaries(session)}\n\n"
+            "## 当前会话 artifacts\n"
+            f"{_serialize_artifacts(session)}\n\n"
+            "## 当前 Todo 列表\n"
+            f"{_serialize_todos(session)}\n\n"
+            "## 当前 Scratchpad 摘要\n"
+            f"{_serialize_scratchpad(session)}\n\n"
+            "## 当前 context_files\n"
+            f"{_serialize_context_files(session)}\n\n"
+            "## 当前 MCP 工具上下文\n"
+            f"{_truncate(mcp_context, 6000)}\n\n"
+        )
+    else:
+        _volatile_block = ""
+        stash_volatile_sections(session, _build_agent_volatile_sections(session))
     return (
         "你是 AgenticX Studio 的执行型 Agent（implement 角色）。\n"
         "核心目标：根据用户请求完成代码/命令操作，并在不确定或高风险动作前主动确认。\n\n"
         "## 回复语言\n"
         "- 必须使用中文回复。\n"
         "- 简洁、可执行、优先给出当前进度。\n\n"
-        "## 可用元 Skills 摘要\n"
-        f"{_serialize_skill_summaries(session)}\n\n"
-        "## 当前会话 artifacts\n"
-        f"{_serialize_artifacts(session)}\n\n"
-        "## 当前 Todo 列表\n"
-        f"{_serialize_todos(session)}\n\n"
-        "## 当前 Scratchpad 摘要\n"
-        f"{_serialize_scratchpad(session)}\n\n"
-        "## 当前 context_files\n"
-        f"{_serialize_context_files(session)}\n\n"
+        f"{_volatile_block}"
         f"{code_dev_block}"
         f"{project_state_block}"
-        "## 当前 MCP 工具上下文\n"
-        f"{_truncate(mcp_context, 6000)}\n\n"
         "## 浏览器自动化（browser-use 等 MCP）\n"
         "- MCP 工具**不会**自动变成单独的 function；须先用 `mcp_connect` 连接配置好的服务器（如 `browser-use`），再用 `mcp_call` 调用，"
         "`tool_name` / `arguments` 与上方「当前 MCP 工具上下文」中的名称和 schema 一致。\n"
@@ -3011,7 +3056,9 @@ class AgentRuntime:
         self._recent_exploratory_fps.clear()
         self._exploratory_error_streak = 0
 
-        current_system_prompt = system_prompt or _build_agent_system_prompt(session)
+        current_system_prompt = system_prompt or _build_agent_system_prompt(
+            session, include_volatile=False
+        )
         full_tool_pool: list[Dict[str, Any]] = list(
             studio_tools_for_session(session) if tools is None else tools
         )
@@ -3234,6 +3281,27 @@ class AgentRuntime:
                 elif isinstance(user_content, list):
                     user_content = list(user_content) + [{"type": "text", "text": _omit_notice}]
         turn_message_start_index = len(session.agent_messages)
+        # <session-context>：本轮的易变会话状态。它**不写进 session.agent_messages**
+        # ——那是持久历史，把每轮都在变的快照存进去既会撑爆历史，也会让下一轮的历史
+        # 前缀跟着变，等于白搬。它只活在这一次请求里，位置在历史之后、用户消息之前：
+        # 前面的内容照常命中前缀缓存，而它离用户的问题最近。
+        _volatile_sections = pop_volatile_sections(session)
+        try:
+            from agenticx.runtime.tool_search import known_unloaded_names
+
+            _deferred_names = (
+                sorted(known_unloaded_names(ts_ctx))
+                if project_tools_for_round(ts_ctx, full_openai_tools=full_tool_pool)
+                is not full_tool_pool
+                else []
+            )
+        except Exception:
+            _deferred_names = []
+        _session_ctx_msg = build_session_context_message(
+            _volatile_sections, deferred_tool_names=_deferred_names
+        )
+        if _session_ctx_msg is not None:
+            messages.append(_session_ctx_msg)
         messages.append({"role": "user", "content": user_content})
         if persist_user_message:
             # Store rich content (list with image_url blocks for vision uploads) + attachments

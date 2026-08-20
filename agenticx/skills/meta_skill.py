@@ -45,10 +45,26 @@ class MetaSkillInjector:
             enabled = flag not in {"0", "false", "off", "no"}
         self.enabled = enabled
 
-    def inject(self, base_prompt: str, skill_summaries: list[dict[str, Any]]) -> str:
-        """Append protocol and available skill summaries to prompt text."""
+    def inject(
+        self,
+        base_prompt: str,
+        skill_summaries: list[dict[str, Any]],
+        *,
+        include_catalog: bool = True,
+    ) -> str:
+        """Append protocol and (optionally) available skill summaries to prompt text.
+
+        ``include_catalog=False`` 只追加协议正文，不再追加技能目录。元智能体走的就
+        是这条路：它的 system prompt 里本来已经有一份 ``### Skills（共 N 个）``，
+        这里再追加一份 ``## Available Skills`` 就是**同样 22 个技能、同样的描述，
+        原样列了两遍**——实测 4770 + 5013 = 9783 字符（约 2795 token），其中一半
+        是纯重复。现在目录只渲染一次，并且跟着其它易变状态搬到了对话末尾的
+        ``<session-context>``（见 ``agenticx.runtime.prompts.session_context``）。
+        """
         if not self.enabled:
             return base_prompt
+        if not include_catalog:
+            return f"{base_prompt}\n\n{USING_AGENTICX_SKILL}\n"
         lines = ["## Available Skills"]
         if not skill_summaries:
             lines.append("- (no registered skills)")

@@ -776,6 +776,7 @@ def loop(
                 session,
                 mode="interactive",
                 include_file_delivery_choice=False,
+                include_volatile=False,
             ),
         ):
             if event.type == "token":
