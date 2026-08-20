@@ -180,17 +180,21 @@ class TestMemoryComponent:
     
     async def test_add_intelligent(self, component):
         """Test intelligent memory addition."""
-        content = "def hello_world():\n    print('Hello, World!')"
+        # topics 走的是 _extract_topics 里的关键词表（python 对应
+        # python/django/flask/pandas）。原来的内容是 `def hello_world(): print(...)`，
+        # 一个关键词都不含，所以 topics 恒为空——这条断言从写下那天起就不可能成立。
+        # 换成真的带 Python 关键词的代码，content_type=code 和 topics 两条才都有意义。
+        content = "import pandas as pd\n\ndef hello_world():\n    print('Hello, World!')"
         metadata = {"source": "test"}
-        
+
         record_id = await component.add_intelligent(
             content=content,
             metadata=metadata,
             enable_pipeline=True
         )
-        
+
         assert record_id is not None
-        
+
         # Verify the record was enhanced by the pipeline
         record = await component.primary_memory.get(record_id)
         assert record is not None

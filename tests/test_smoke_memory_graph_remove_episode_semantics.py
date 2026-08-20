@@ -43,7 +43,15 @@ async def test_delete_episode_uses_isolated_removal(monkeypatch):
     async def _fake_remove_isolated(episode_uuid: str) -> None:
         removed.append(episode_uuid)
 
-    store = MemoryGraphStore()
+    # _ensure_ready_impl 一进来就先 require_graphiti() → require_enabled()，在
+    # _ready 短路之前，所以光设 _ready/_graphiti 不够——没开 memory_graph 就抛
+    # MemoryGraphDisabledError。和上面那条用例一样，直接把 _ensure_ready_impl 覆盖掉：
+    # 这里要测的是 delete_episode 走不走 remove_episode_isolated，不是初始化。
+    class _Store(MemoryGraphStore):
+        async def _ensure_ready_impl(self) -> None:
+            return None
+
+    store = _Store()
     store._ready = True
     store._graphiti = object()
     monkeypatch.setattr(

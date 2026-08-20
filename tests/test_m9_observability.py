@@ -261,21 +261,36 @@ class TestMonitoringCallbackHandler:
         assert metrics["performance_metrics"]["task_duration_avg"] > 0
         
     def test_prometheus_export(self):
-        """测试Prometheus格式导出"""
+        """测试Prometheus格式导出（OTel 命名，默认）。
+
+        注意工具指标在两套命名里差一个字母：OTel 是 agenticx_tool**s**_calls_total，
+        旧版是 agenticx_tool_calls_total。这条用例原来只断言旧版那个名字，而
+        get_prometheus_metrics() 的默认值早就是 use_otel_naming=True 了。
+        """
         handler = MonitoringCallbackHandler(collect_system_metrics=False)
-        
-        # 收集一些指标
+
         handler.on_tool_start("test_tool", {"arg": "value"})
         handler.on_tool_end("test_tool", "result", True)
-        
-        # 获取Prometheus格式
+
         prometheus_data = handler.get_prometheus_metrics()
-        
-        # 验证格式
+
         assert "agenticx_tasks_total" in prometheus_data
-        assert "agenticx_tool_calls_total" in prometheus_data
+        assert "agenticx_tools_calls_total" in prometheus_data
         assert "# TYPE" in prometheus_data
         assert "# HELP" in prometheus_data
+
+    def test_prometheus_export_legacy_naming(self):
+        """use_otel_naming=False 时保持旧版指标名（向后兼容那条路要有人守着）。"""
+        handler = MonitoringCallbackHandler(collect_system_metrics=False)
+
+        handler.on_tool_start("test_tool", {"arg": "value"})
+        handler.on_tool_end("test_tool", "result", True)
+
+        legacy = handler.get_prometheus_metrics(use_otel_naming=False)
+
+        assert "agenticx_tasks_total" in legacy
+        assert "agenticx_tool_calls_total" in legacy
+        assert "agenticx_tools_calls_total" not in legacy
 
 
 class TestTrajectorySummarizer:

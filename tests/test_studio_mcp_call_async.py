@@ -62,10 +62,18 @@ async def test_dispatch_mcp_call_nested_asyncio() -> None:
     hub = MCPHub(clients=[client], auto_mode=False)
     await hub.discover_all_tools()
 
+    # StudioSession.mcp_hub / mcp_configs / connected_servers 都是对
+    # GlobalMcpManager 的只读透传属性，赋值只打一条 DeprecationWarning 就被忽略。
+    # 用例原来给 session 赋值，mcp_call 实际拿到的是进程级那个空 hub，于是报
+    # "no MCP tools connected"——看起来像 mcp_call 坏了，其实是 setup 没生效。
+    from agenticx.runtime.global_mcp_manager import GlobalMcpManager
+
+    GlobalMcpManager.reset_for_testing()
+    manager = GlobalMcpManager.singleton()
+    manager._hub = hub  # 没有公开 setter，测试里直接装
+    manager.connected_servers.add("demo")
+
     session = StudioSession()
-    session.mcp_hub = hub
-    session.mcp_configs = {}
-    session.connected_servers = {"demo"}
 
     result = await dispatch_tool_async(
         "mcp_call",
