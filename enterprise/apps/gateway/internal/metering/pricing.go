@@ -43,6 +43,14 @@ type ModelPricing struct {
 	ReasoningPerM   float64         `yaml:"reasoning_per_m,omitempty" json:"reasoningPerM,omitempty"`
 	Surcharges      []SurchargeRule `yaml:"surcharges,omitempty" json:"surcharges,omitempty"`
 	EffectiveDate   string          `yaml:"effective_date,omitempty" json:"effectiveDate,omitempty"`
+
+	// BillingMultiplier scales the computed cost. nil = unset (1.0); 0 = free.
+	//
+	// 指针不是洁癖：normalizePricing 把 0 当成"没填"并替换成默认价，所以在普通
+	// float 字段上写 0 得到的是**默认费率**而不是免费——正好和意图相反。私有化
+	// 部署是固定成本、不按量付费，这个字段就是用来表达那件事的：填 0 表示当前
+	// 不计费，将来想按厂家报价的一折计就改成 0.1，费率本身留在原处不用动。
+	BillingMultiplier *float64 `yaml:"billing_multiplier,omitempty" json:"billingMultiplier,omitempty"`
 }
 
 type pricingFile struct {
@@ -370,7 +378,19 @@ func (t *PricingTable) ComputeCostForProvider(provider, model string, usage open
 	if version == "" {
 		version = "local"
 	}
-	return CostResult{CostUSD: base + surcharge, PricingVersion: version}
+	return CostResult{CostUSD: billingMultiplier(p) * (base + surcharge), PricingVersion: version}
+}
+
+// billingMultiplier returns the configured scale factor, defaulting to 1.0 when
+// unset. Negative values are rejected rather than credited back.
+func billingMultiplier(p ModelPricing) float64 {
+	if p.BillingMultiplier == nil {
+		return 1
+	}
+	if *p.BillingMultiplier < 0 {
+		return 0
+	}
+	return *p.BillingMultiplier
 }
 
 func applySurcharges(rules []SurchargeRule, n NormalizedUsage, ctx CostContext, inputCost, outputCost, reasoningCost, base float64) float64 {
