@@ -634,11 +634,13 @@ function ComposerMoreActionsButton({
   renderSkillPicker,
   renderKbRetrieval,
   renderConnectors,
+  renderGenerationPlugins,
 }: {
   onPickFile: () => void;
   renderSkillPicker: () => ReactNode;
   renderKbRetrieval: () => ReactNode;
   renderConnectors: () => ReactNode;
+  renderGenerationPlugins: () => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [panelPos, setPanelPos] = useState<{ bottom: number; left: number } | null>(null);
@@ -667,6 +669,7 @@ function ComposerMoreActionsButton({
         "agx-skill-picker-dropdown",
         "agx-kb-retrieval-mode-menu",
         "agx-connectors-menu-dropdown",
+        "agx-generation-plugin-menu",
       ];
       for (const id of flyoutIds) {
         const el = document.getElementById(id);
@@ -720,6 +723,7 @@ function ComposerMoreActionsButton({
             {renderSkillPicker()}
             {renderKbRetrieval()}
             {renderConnectors()}
+            {renderGenerationPlugins()}
           </div>,
           document.body
         )
@@ -745,6 +749,37 @@ function ComposerMoreActionsButton({
       {panel}
     </>
   );
+}
+
+type GenerationPluginItem = { id: string; name: string; capability: string; model: string };
+
+function GenerationPluginPickerButton({ apiBase, apiToken, onSelect }: {
+  apiBase: string; apiToken: string; onSelect: (plugin: GenerationPluginItem) => void;
+}) {
+  const [items, setItems] = useState<GenerationPluginItem[]>([]);
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const load = useCallback(async () => {
+    if (!apiBase) return;
+    try {
+      const response = await fetch(`${apiBase}/api/generation/plugins`, { headers: { "x-agx-desktop-token": apiToken } });
+      const data = await response.json() as { items?: GenerationPluginItem[] };
+      setItems(response.ok && Array.isArray(data.items) ? data.items : []);
+    } catch { setItems([]); }
+  }, [apiBase, apiToken]);
+  const toggle = async () => { if (!open) await load(); setOpen((value) => !value); };
+  if (items.length === 0 && !open) {
+    return <button type="button" role="menuitem" className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-faint" onClick={toggle}>插件调用</button>;
+  }
+  const position = open && buttonRef.current ? positionEmbeddedComposerFlyout(buttonRef.current, 220) : null;
+  return <>
+    <button ref={buttonRef} type="button" role="menuitem" className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover" onClick={toggle}>
+      <span className="flex-1">插件调用</span><span className="text-text-faint">›</span>
+    </button>
+    {open && position ? createPortal(<div id="agx-generation-plugin-menu" className="fixed z-[9999] overflow-hidden rounded-xl border border-border bg-surface-panel p-1 shadow-xl" style={{ left: position.left, top: position.top, width: 220 }}>
+      {items.length ? items.map((item) => <button key={item.id} type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-text-standard hover:bg-surface-hover" onClick={() => { onSelect(item); setOpen(false); }}><span>{item.name}</span><span className="ml-2 text-[11px] text-text-faint">{item.model}</span></button>) : <p className="px-3 py-2 text-[12px] text-text-faint">没有已配置的插件</p>}
+    </div>, document.body) : null}
+  </>;
 }
 
 interface SkillItem {
@@ -3039,6 +3074,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
   const [attachToastMessage, setAttachToastMessage] = useState(VISION_UNSUPPORTED_TOAST);
+  const [activeGenerationPlugin, setActiveGenerationPlugin] = useState<GenerationPluginItem | null>(null);
+  const [generationSubmitting, setGenerationSubmitting] = useState(false);
   const [visionFallback, setVisionFallback] = useState<VisionFallbackInfo>({ available: false });
   const fallbackHintedRef = useRef<string>("");
 
@@ -8680,6 +8717,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
   };
 
+  const submitGenerationTask = async () => {
+    const plugin = activeGenerationPlugin;
+    const prompt = extractComposerSendText().trim();
+    if (!plugin || !prompt || generationSubmitting) return;
+    const sessionId = await materializeLazySession();
+    if (!sessionId) return;
+    setGenerationSubmitting(true);
+    try {
+      const image_inputs = readyAttachments
+        .filter((file) => file.mimeType.startsWith("image/") && !!file.dataUrl)
+        .map((file) => ({ name: file.name, data_url: file.dataUrl, mime_type: file.mimeType, size: file.size }));
+      const response = await fetch(`${apiBase}/api/generation/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
+        body: JSON.stringify({ session_id: sessionId, plugin_id: plugin.id, prompt, image_inputs }),
+      });
+      const data = await response.json() as { task?: Record<string, unknown>; detail?: string };
+      if (!response.ok || !data.task) throw new Error(data.detail || "视频任务提交失败");
+      addPaneMessage(pane.id, "user", prompt, "meta", undefined, undefined, readyAttachments.map((file) => ({ name: file.name, mimeType: file.mimeType, size: file.size, dataUrl: file.dataUrl })));
+      addPaneMessage(pane.id, "assistant", "视频生成任务已提交", "meta", undefined, undefined, undefined, { metadata: { kind: "generation_task", generation_task: data.task } });
+      setComposerText("");
+      setContextFiles({});
+    } catch (err) {
+      setAttachToastMessage(err instanceof Error ? err.message : "视频任务提交失败");
+      setAttachToastOpen(true);
+    } finally { setGenerationSubmitting(false); }
+  };
+
   const sendChat = async (
     userText: string,
     options?: {
@@ -12919,7 +12984,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     if (e.metaKey || e.ctrlKey) {
                       e.preventDefault();
                       lastComposerEnterAtRef.current = 0;
-                      void sendChat(extractComposerSendText());
+                      if (activeGenerationPlugin) void submitGenerationTask();
+                      else void sendChat(extractComposerSendText());
                     }
                     return;
                   }
@@ -13030,7 +13096,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   renderConnectors={() => (
                     <ConnectorsMenuButton sessionId={pane.sessionId} embedded />
                   )}
+                  renderGenerationPlugins={() => (
+                    <GenerationPluginPickerButton apiBase={apiBase} apiToken={apiToken} onSelect={setActiveGenerationPlugin} />
+                  )}
                 />
+                {activeGenerationPlugin ? (
+                  <button type="button" className="ml-1 flex h-7 items-center gap-1 rounded-lg bg-violet-500/15 px-2 text-[11px] text-violet-300 hover:bg-violet-500/25" onClick={() => setActiveGenerationPlugin(null)}>
+                    {activeGenerationPlugin.name}<X className="h-3 w-3" aria-hidden />
+                  </button>
+                ) : null}
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
               <div className="flex min-w-0 shrink-0 items-center gap-1.5">
@@ -13092,7 +13166,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   transcribing={voiceTranscribing}
                   onSend={() => {
                     lastComposerEnterAtRef.current = 0;
-                    void sendChat(extractComposerSendText());
+                    if (activeGenerationPlugin) void submitGenerationTask();
+                    else void sendChat(extractComposerSendText());
                   }}
                   onMic={onMicClick}
                   onStop={stopCurrentRun}
