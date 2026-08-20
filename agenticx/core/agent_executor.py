@@ -43,6 +43,7 @@ from ..hooks.tool_hooks import (
     execute_after_tool_call_hooks,
 )
 from ..hooks import HookEvent, trigger_hook_event_sync
+from ..utils.workspace_dir import resolve_workspace_dir
 from ..hooks import load_discovered_hooks
 
 logger = logging.getLogger(__name__)
@@ -269,7 +270,7 @@ class AgentExecutor:
             agent_id=agent.id,
             task_id=task.id,
             session_key=_session_key,
-            context={"workspace_dir": str(Path.cwd())},
+            context={"workspace_dir": str(resolve_workspace_dir())},
         )
         self._emit_hook_event(
             event_type="session",

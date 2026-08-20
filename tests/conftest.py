@@ -41,4 +41,9 @@ def _isolated_agenticx_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     fake_home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("USERPROFILE", str(fake_home))
+    # 同一类问题的另一半：工作区产物（session-memory 快照等）过去按 Path.cwd() 落盘，
+    # 于是跑一次测试就在仓库根目录留下一个 memory/。$HOME 管不到它，得单独指。
+    workspace = fake_home / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("AGENTICX_WORKSPACE_DIR", str(workspace))
     yield
