@@ -461,13 +461,13 @@ class KimiProvider(BaseLLMProvider):
         messages = self._convert_prompt_to_messages(prompt)
         return self._stream_with_messages(messages, **kwargs)
     
-    async def astream(self, prompt: Union[str, List[Dict]], **kwargs) -> AsyncGenerator[Union[str, Dict], None]:
+    def astream(self, prompt: Union[str, List[Dict]], **kwargs) -> AsyncGenerator[Union[str, Dict], None]:
         """Stream the Kimi model's response asynchronously."""
         messages = self._convert_prompt_to_messages(prompt)
-        async_gen = self._astream_with_messages(messages, **kwargs)
-        # 为了满足类型检查器的要求，我们需要返回一个协程
-        # 但实际上我们直接返回异步生成器
-        return async_gen
+        # 返回异步生成器本身，不要写成 async def —— 那样调用方拿到的是协程，
+        # `async for chunk in provider.astream(...)` 直接 TypeError。仓库里绝大多数调用点
+        # （agent_executor、failover）都是直接 async for 的。
+        return self._astream_with_messages(messages, **kwargs)
     
     def _parse_response(self, response) -> LLMResponse:
         """Parse OpenAI response into AgenticX LLMResponse format."""

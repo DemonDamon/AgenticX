@@ -77,14 +77,18 @@ class BaseLLMProvider(ABC, BaseModel):
         raise NotImplementedError("stream_with_tools is not implemented for this provider")
 
     @abstractmethod
-    async def astream(self, prompt: Union[str, List[Dict]], **kwargs: Any) -> AsyncGenerator[Union[str, Dict], None]:
+    def astream(self, prompt: Union[str, List[Dict]], **kwargs: Any) -> AsyncGenerator[Union[str, Dict], None]:
         """
         Stream the language model's response asynchronously.
+
+        实现要么本身是异步生成器（内部 yield），要么返回一个异步生成器——**不要**写成
+        `async def` 再 `return` 生成器：那样调用方拿到的是协程，`async for` 会直接
+        TypeError。Ark/Bailian/Failover 是前者，其余是后者，两种都满足这个签名。
 
         Yields:
             Chunks of the response, typically strings.
         """
-        pass 
+        ...
 
     def supports_auth_profile_rotation(self) -> bool:
         """Whether this provider can receive per-call rotated credentials."""
