@@ -18,6 +18,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+#: 用户库文件名。位置的解析见 :func:`default_user_db_path`。
+_USER_DB_FILENAME = "users.db"
+
 try:
     import jwt  # type: ignore
     JWT_AVAILABLE = True
@@ -32,14 +35,14 @@ class UserManager:
     使用 SQLite 数据库存储用户信息。
     """
     
-    def __init__(self, db_path: str = "users.db", jwt_secret: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, jwt_secret: Optional[str] = None):
         """初始化用户管理器
 
         Args:
-            db_path: SQLite 数据库文件路径
+            db_path: SQLite 数据库文件路径；缺省走 :func:`default_user_db_path`
             jwt_secret: JWT 签名密钥（默认从 AGENTICX_JWT_SECRET 环境变量读取）
         """
-        self.db_path = db_path
+        self.db_path = db_path or default_user_db_path()
         self._jwt_secret = jwt_secret or os.environ.get("AGENTICX_JWT_SECRET", "agenticx-dev-secret-change-in-production")
         self._init_database()
     
@@ -503,11 +506,41 @@ class UserManager:
 _user_manager: Optional[UserManager] = None
 
 
-def get_user_manager(db_path: str = "users.db") -> UserManager:
+def default_user_db_path() -> str:
+    """用户库的落盘位置。
+
+    原来的默认值是相对路径 ``"users.db"``——进程的 cwd 在哪就写到哪。换个目录启动服务，
+    用户看到的现象是「人全没了」（其实是又建了一个空库）；跑测试则会在仓库根目录留下
+    一个 users.db。同一份数据有几个副本、哪个是真的，全看当时是从哪个目录敲的命令。
+
+    优先级：环境变量 > cwd 里已有的老库 > ``~/.agenticx/users.db``。
+
+    中间那一档是给老部署留的：那儿要是已经躺着一个 users.db，就继续用它，不搬也不改。
+    直接改成新路径等于让他们的账号在升级后凭空消失——搬不搬由使用者决定，程序不替他
+    动数据。
+    """
+    override = str(os.environ.get("AGENTICX_USER_DB", "") or "").strip()
+    if override:
+        return override
+    legacy = Path.cwd() / _USER_DB_FILENAME
+    if legacy.exists():
+        logger.warning(
+            "[UserManager] 正在使用当前目录下的历史用户库 %s；"
+            "建议迁移到 ~/.agenticx/%s，否则换个目录启动服务就会读到另一个库。",
+            legacy,
+            _USER_DB_FILENAME,
+        )
+        return str(legacy)
+    target = Path.home() / ".agenticx" / _USER_DB_FILENAME
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return str(target)
+
+
+def get_user_manager(db_path: Optional[str] = None) -> UserManager:
     """获取用户管理器实例（单例模式）
     
     Args:
-        db_path: 数据库文件路径
+        db_path: 数据库文件路径；缺省走 :func:`default_user_db_path`
         
     Returns:
         UserManager 实例
