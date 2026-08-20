@@ -16,6 +16,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from agenticx.runtime import compaction_journal as _journal
 from agenticx.runtime.model_context_window import resolve_context_window
 
 _log = logging.getLogger(__name__)
@@ -24,8 +25,35 @@ _MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3
 
 DEFAULT_THRESHOLD_MESSAGES = 200
 DEFAULT_THRESHOLD_CHARS = 200_000
-DEFAULT_SUMMARY_RESERVE_TOKENS = 20_000
+#: 摘要调用要预留多少 token。
+#:
+#: 从 20_000 降到 4_000：摘要现在**重放会话自己的前缀**（system prompt + 工具表 +
+#: 被遮蔽区间的原文），新增的只有那条压缩指令和 400 token 的输出，前缀本身走的是
+#: provider 的热缓存。原来那个 20k 是按"另起一个完整 prompt"估的，现在不成立了。
+#: 这一项留着是因为它仍然是小窗口上的绝对安全网（见 _compute_autocompact_threshold）。
+DEFAULT_SUMMARY_RESERVE_TOKENS = 4_000
 DEFAULT_COMPACT_BUFFER_TOKENS = 13_000
+
+#: 主触发规则：估算 token 达到 window 的这个比例就压缩。
+#:
+#: 原来只有"window − reserve − buffer"这条绝对式，跨窗口尺寸的表现差得离谱：128k 上
+#: 是 0.74，32k 上只有 0.34，256k 上却到 0.87。比例式跨尺寸一致，绝对式退化成小窗口
+#: 上的安全网（两者取更紧的那个，所以只会更早压缩，不会更晚）。
+DEFAULT_COMPACT_TRIGGER_RATIO = 0.80
+
+#: 保留多少：最近这个比例的 window 值得原样留着。
+#:
+#: 按 **token** 算而不是按消息条数。条数对不同形态的历史意义完全不同——8 条纯文本对话
+#: 和 8 条塞满工具结果的消息差两个数量级，而窗口压力只认 token。
+DEFAULT_RETAIN_SURFACE_RATIO = 0.16
+
+#: 压力剪枝的预算。**必须比入库预算更紧才有意义**：
+#: micro_compact_tool_result 在工具结果入库时就已经截到 AGX_MICRO_COMPACT_BUDGET
+#: （默认 4000 字符），所以照搬一个 8192 的阈值会一条都命中不了、白跑一趟。
+DEFAULT_PRUNE_THRESHOLD_CHARS = 2_000
+DEFAULT_PRUNE_HEAD_CHARS = 1_200
+DEFAULT_PRUNE_TAIL_CHARS = 400
+PRUNE_MARKER = "\n\n[... 工具结果中段已剪除，需要完整内容请重新调用该工具 ...]\n\n"
 
 # Legacy char-proxy hints (escape-hatch / AGX_CONTEXT_WINDOW_CHARS only; not full-compact primary).
 _MODEL_CONTEXT_CHARS_HINT: Dict[str, int] = {
@@ -50,6 +78,16 @@ def _env_int(key: str, default: int) -> int:
         except ValueError:
             pass
     return default
+
+
+def _env_float(key: str, default: float) -> float:
+    raw = os.environ.get(key)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        return float(str(raw).strip())
+    except ValueError:
+        return default
 
 
 def _env_autocompact_pct() -> Optional[float]:
@@ -143,7 +181,7 @@ class ContextCompactor:
         threshold_messages: Optional[int] = None,
         threshold_chars: Optional[int] = None,
         retain_recent_messages: int = 8,
-        token_compact_ratio: float = 0.80,
+        token_compact_ratio: float = DEFAULT_COMPACT_TRIGGER_RATIO,
     ) -> None:
         self.llm = llm
         if threshold_messages is None:
@@ -159,11 +197,14 @@ class ContextCompactor:
         self.threshold_messages = max(8, int(threshold_messages))
         self.threshold_chars = max(4_000, int(threshold_chars))
         self.retain_recent_messages = max(4, retain_recent_messages)
-        # Deprecated: retained for API compatibility; not used by _should_compact.
+        # 主触发比例。这个字段以前挂着"deprecated / 不被使用"，现在它就是
+        # _compute_autocompact_threshold 的主规则。
         self.token_compact_ratio = min(0.99, max(0.5, token_compact_ratio))
         self._consecutive_failures = 0
         self._tiktoken_encoder: Any = None
         self.last_trigger_reason: str = ""
+        #: 上一次摘要是否用上了前缀重放（没用上说明回落到了单条 prompt）。
+        self.last_summary_replayed_prefix: bool = False
         self._last_est_tokens: int = 0
         self._last_threshold: int = 0
         self._last_window: int = 0
@@ -214,7 +255,17 @@ class ContextCompactor:
         return default_chars
 
     def _compute_autocompact_threshold(self, window: int) -> int:
-        """effective_window - buffer, optionally tightened by AGX_AUTOCOMPACT_PCT."""
+        """``min(window × ratio, window − reserve − buffer)``，env 只能再收紧。
+
+        两条规则取更紧的那个：
+
+        * **比例式**（主）跨窗口尺寸表现一致，是 routedContextWindow × 0.8。
+        * **绝对式**（网）在小窗口上仍然要留够绝对余量——32k 窗口留 20% 只有 6.4k，
+          不够摘要调用周转。
+
+        取 min 而不是取其一，保证这条性质不变：任何配置只能让压缩**更早**发生，不会
+        更晚。
+        """
         window = max(1024, int(window))
         summary_reserve = _env_int(
             "AGX_COMPACT_SUMMARY_RESERVE_TOKENS",
@@ -222,12 +273,21 @@ class ContextCompactor:
         )
         buffer = _env_int("AGX_COMPACT_BUFFER_TOKENS", DEFAULT_COMPACT_BUFFER_TOKENS)
         effective = max(1024, window - min(summary_reserve, max(1, window // 4)))
-        threshold = max(1, effective - buffer)
+        threshold = min(
+            max(1, int(window * self.token_compact_ratio)),
+            max(1, effective - buffer),
+        )
         pct = _env_autocompact_pct()
         if pct is not None:
             # Only allow earlier compaction (tighter threshold), never later.
             threshold = min(threshold, max(1, int(effective * pct)))
         return max(1, int(threshold))
+
+    def _retained_token_budget(self, window: int) -> int:
+        """原样保留多少 token 的尾巴。"""
+        ratio = _env_float("AGX_COMPACT_RETAIN_RATIO", DEFAULT_RETAIN_SURFACE_RATIO)
+        ratio = min(0.6, max(0.02, ratio))
+        return max(512, int(max(1024, int(window)) * ratio))
 
     def _token_threshold_exceeded(
         self,
@@ -354,17 +414,52 @@ class ContextCompactor:
             self.last_trigger_reason = reason
         return should
 
+    def _tail_split_by_tokens(
+        self,
+        items: Sequence[Dict[str, Any]],
+        retain_tokens: int,
+    ) -> int:
+        """从尾巴往前走，凑够 ``retain_tokens`` 为止，返回切点下标。
+
+        按 token 而不是条数：8 条纯文本对话和 8 条塞满工具结果的消息差两个数量级，
+        而窗口压力只认 token。仍然至少保留 ``retain_recent_messages`` 条，免得一条
+        巨大的工具结果就把整段对话的上下文吃光。
+        """
+        used = 0
+        index = len(items)
+        while index > 0:
+            used += self._estimate_token_usage([items[index - 1]])
+            index -= 1
+            if used >= retain_tokens:
+                break
+        floor = max(0, len(items) - self.retain_recent_messages)
+        return min(index, floor)
+
     def _split_for_compaction(
         self,
         working: Sequence[Dict[str, Any]],
+        *,
+        retain_tokens: Optional[int] = None,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Split working history without orphan tool rows at the retain boundary."""
+        """Split working history without orphan tool rows at the retain boundary.
+
+        ``retain_tokens`` 给了就按 token 走尾巴，否则回落到按条数（老行为，供不知道
+        窗口大小的调用方使用）。
+        """
         items = [m for m in working if isinstance(m, dict)]
         retain_n = self.retain_recent_messages
         if len(items) <= retain_n:
             return [], list(items)
 
         split_at = len(items) - retain_n
+        if retain_tokens is not None:
+            by_tokens = self._tail_split_by_tokens(items, retain_tokens)
+            # by_tokens == 0 表示整段历史都还没到保留预算。token 触发时这本来就不该
+            # 发生（阈值 0.8 远大于保留 0.16），但我们的触发器不止 token 一种：条数、
+            # 字符数、以及 force 都会走到这里。那些情况下按 token 保留会变成"什么都
+            # 不压"，所以回落到按条数——决定了要压就得真的压掉点什么。
+            if by_tokens > 0:
+                split_at = by_tokens
 
         # Never start retained segment with a tool message (assistant owner was compacted away).
         while split_at > 0 and str(items[split_at].get("role", "")).strip().lower() == "tool":
@@ -386,6 +481,112 @@ class ContextCompactor:
         to_compact = list(items[:split_at])
         retained = list(items[split_at:])
         return to_compact, retained
+
+    # ---- 压力剪枝（无模型） ------------------------------------------------
+    #
+    # 摘要要花一次 LLM 调用，而且是在上下文最大的时候花。所以先跑一遍确定性的剪枝，
+    # 重新计量；压力解除了就完全跳过摘要。
+    #
+    # 和 DeepSeek Harness 那版的区别有两处，都是被我们自己的形态逼出来的：
+    #
+    # 1. 阈值必须比**入库**预算更紧。micro_compact_tool_result 在工具结果进历史时就
+    #    截到 4000 字符了，照搬一个 8192 的阈值一条都命中不了。
+    # 2. **从旧往新剪，够了就停**，而不是把整个 surface 扫一遍。我们保留的尾巴是按
+    #    token 算的连续区间，把最近那几条工具结果也剪掉等于自己削自己的近期上下文；
+    #    从旧的开始剪，最近的能留多久留多久。
+
+    _PRUNE_EXEMPT_TOOLS = frozenset({"show_widget", "query_data_source"})
+
+    @classmethod
+    def _prune_one_tool_message(
+        cls,
+        message: Dict[str, Any],
+        *,
+        threshold: int,
+        head: int,
+        tail: int,
+    ) -> Optional[Dict[str, Any]]:
+        """剪一条工具消息；不需要剪或不能剪时返回 ``None``。"""
+        if str(message.get("role", "")).strip().lower() != "tool":
+            return None
+        name = str(message.get("name", "") or "").strip().lower()
+        if name in cls._PRUNE_EXEMPT_TOOLS:
+            # 结构化载荷截断之后不是"内容变少"，是渲染直接坏掉。
+            return None
+        content = message.get("content")
+        if not isinstance(content, str) or len(content) <= threshold:
+            return None
+        if PRUNE_MARKER in content:
+            return None  # 已经剪过，别越剪越碎
+        pruned = dict(message)
+        pruned["content"] = content[:head] + PRUNE_MARKER + content[-tail:]
+        return pruned
+
+    def prune_tool_results(
+        self,
+        messages: Sequence[Dict[str, Any]],
+        *,
+        target_tokens: Optional[int] = None,
+        stop_when: Optional[Any] = None,
+        threshold_chars: Optional[int] = None,
+        head_chars: Optional[int] = None,
+        tail_chars: Optional[int] = None,
+    ) -> Tuple[List[Dict[str, Any]], int, int]:
+        """确定性地剪除过大的工具结果中段，从旧往新。
+
+        Args:
+            target_tokens: 降到这个估算值以下就停手。``None`` 表示能剪的都剪。
+            stop_when: 收当前消息列表、返回"可以停了"的判据。比 ``target_tokens``
+                更准，因为触发压缩的不止 token 一条——字符数、消息条数都会触发，只
+                盯着 token 停手会出现"剪了 0 条然后照样去摘要"。给了它就以它为准。
+
+        Returns:
+            ``(新消息列表, 剪掉的条数, 剪掉的字符数)``。
+        """
+        threshold = int(
+            threshold_chars
+            if threshold_chars is not None
+            else _env_int("AGX_COMPACT_PRUNE_THRESHOLD_CHARS", DEFAULT_PRUNE_THRESHOLD_CHARS)
+        )
+        head = int(
+            head_chars
+            if head_chars is not None
+            else _env_int("AGX_COMPACT_PRUNE_HEAD_CHARS", DEFAULT_PRUNE_HEAD_CHARS)
+        )
+        tail = int(
+            tail_chars
+            if tail_chars is not None
+            else _env_int("AGX_COMPACT_PRUNE_TAIL_CHARS", DEFAULT_PRUNE_TAIL_CHARS)
+        )
+        # 剪完必须真的更小，否则就是白改一遍还让历史更难读。
+        if head + len(PRUNE_MARKER) + tail >= threshold:
+            return list(messages), 0, 0
+
+        out = [m for m in messages if isinstance(m, dict)]
+        pruned_count = 0
+        chars_removed = 0
+        def _relieved() -> bool:
+            if stop_when is not None:
+                try:
+                    return bool(stop_when(out))
+                except Exception:
+                    return False
+            if target_tokens is None:
+                return False
+            return self._estimate_token_usage(out) <= target_tokens
+
+        for index, message in enumerate(out):
+            if _relieved():
+                break
+            replacement = self._prune_one_tool_message(
+                message, threshold=threshold, head=head, tail=tail
+            )
+            if replacement is None:
+                continue
+            chars_removed += len(message["content"]) - len(replacement["content"])
+            out[index] = replacement
+            pruned_count += 1
+        return out, pruned_count, chars_removed
 
     def micro_compact_tool_result(self, tool_name: str, result: str, budget: Optional[int] = None) -> str:
         """Condense verbose tool results preserving head/tail."""
@@ -534,7 +735,7 @@ class ContextCompactor:
 
     def _build_compaction_prompt(
         self,
-        messages_to_compact: Sequence[Dict[str, Any]],
+        messages_to_compact: Optional[Sequence[Dict[str, Any]]],
         *,
         memory_prefix: str = "",
     ) -> str:
@@ -555,6 +756,9 @@ class ContextCompactor:
         if memory_prefix:
             lines.append(memory_prefix)
             lines.append("")
+        if messages_to_compact is None:
+            # 重放形态：被遮蔽区间的原文已经作为真实消息在请求里了，这里只留指令。
+            return "\n".join(lines).rstrip() + "\n\n请压缩本次对话中位于本条指令之前的全部内容。"
         lines.append("原始上下文：")
         for item in messages_to_compact:
             lines.append(_stringify_message(item))
@@ -633,29 +837,90 @@ class ContextCompactor:
                 return False
         return True
 
-    async def _summarize(self, messages_to_compact: Sequence[Dict[str, Any]], memory_prefix: str = "") -> str:
+    def _build_summary_request(
+        self,
+        messages_to_compact: Sequence[Dict[str, Any]],
+        *,
+        memory_prefix: str,
+        system_prompt: str,
+        window: int,
+    ) -> Tuple[List[Dict[str, Any]], bool]:
+        """摘要请求的消息列表；第二个返回值表示是否用上了前缀重放。
+
+        重放形态是：**会话自己的 system prompt + 被遮蔽区间的原文 + 一条压缩指令**。
+
+        这么排是为了吃 provider 的热前缀缓存。原来的写法是另起一个 ``[{"role":
+        "user", "content": <把整段历史序列化成一个大字符串>}]`` —— 前缀和真实请求
+        完全不同，于是在**上下文最大的那一刻**必然全量重算。而被遮蔽区间本来就是真实
+        对话的前缀，原样重放就能命中已经缓存的部分，新增的只有末尾那条指令。
+
+        重放放不下时（典型是 provider 报了 context overflow 才强制压缩的情况）回落到
+        老的单条 prompt 形态：那时缓存已经无所谓了，能算出摘要才是要紧的。
+        """
+        directive = self._build_compaction_prompt(None, memory_prefix=memory_prefix)
+        replay: List[Dict[str, Any]] = []
+        if system_prompt:
+            replay.append({"role": "system", "content": system_prompt})
+        replay.extend(dict(m) for m in messages_to_compact if isinstance(m, dict))
+        replay.append({"role": "user", "content": directive})
+        # 留出摘要输出的余量再判；差一点点就整段回落不划算。
+        if self._estimate_token_usage(replay) + 600 <= max(1024, int(window)):
+            return replay, True
+        prompt = self._build_compaction_prompt(messages_to_compact, memory_prefix=memory_prefix)
+        return [{"role": "user", "content": prompt}], False
+
+    async def _invoke_summary(
+        self,
+        messages: Sequence[Dict[str, Any]],
+        *,
+        tools: Optional[Sequence[Dict[str, Any]]],
+        max_tokens: int,
+    ) -> Any:
+        """调一次摘要。带上工具表——它是热前缀的一部分，去掉反而对不上缓存。"""
+        kwargs: Dict[str, Any] = {"temperature": 0.0, "max_tokens": max_tokens}
+        if tools:
+            kwargs["tools"] = list(tools)
+        try:
+            return await asyncio.to_thread(self.llm.invoke, list(messages), **kwargs)
+        except TypeError:
+            if not tools:
+                raise
+            # provider 不认 tools=：宁可丢掉缓存对齐，也不能让摘要整个失败。
+            kwargs.pop("tools", None)
+            return await asyncio.to_thread(self.llm.invoke, list(messages), **kwargs)
+
+    async def _summarize(
+        self,
+        messages_to_compact: Sequence[Dict[str, Any]],
+        memory_prefix: str = "",
+        *,
+        system_prompt: str = "",
+        tools: Optional[Sequence[Dict[str, Any]]] = None,
+        window: int = 0,
+    ) -> str:
         hard_constraints = self._extract_hard_constraints(messages_to_compact)
+        request, replayed = self._build_summary_request(
+            messages_to_compact,
+            memory_prefix=memory_prefix,
+            system_prompt=system_prompt,
+            window=window or self._last_window or 128_000,
+        )
+        self.last_summary_replayed_prefix = replayed
         prompt = self._build_compaction_prompt(messages_to_compact, memory_prefix=memory_prefix)
         try:
-            response = await asyncio.to_thread(
-                self.llm.invoke,
-                [{"role": "user", "content": prompt}],
-                temperature=0.0,
-                max_tokens=400,
-            )
+            response = await self._invoke_summary(request, tools=tools, max_tokens=400)
             text = str(getattr(response, "content", "") or "").strip()
             text = self._sanitize_summary_text(text)
             if text and hard_constraints and (not self._summary_keeps_constraints(text, hard_constraints)):
+                base_directive = str(request[-1].get("content", "")) if request else prompt
                 retry_prompt = (
-                    prompt
+                    base_directive
                     + "\n\n补充要求：你刚才遗漏了用户硬约束。请重写摘要，并逐字包含以下片段：\n"
                     + "\n".join(f"- {item}" for item in hard_constraints)
                 )
-                retry_resp = await asyncio.to_thread(
-                    self.llm.invoke,
-                    [{"role": "user", "content": retry_prompt}],
-                    temperature=0.0,
-                    max_tokens=500,
+                retry_request = [*request[:-1], {"role": "user", "content": retry_prompt}]
+                retry_resp = await self._invoke_summary(
+                    retry_request, tools=tools, max_tokens=500
                 )
                 retry_text = str(getattr(retry_resp, "content", "") or "").strip()
                 retry_text = self._sanitize_summary_text(retry_text)
@@ -681,6 +946,9 @@ class ContextCompactor:
         force: bool = False,
         model: str = "",
         declared_context_window: Optional[int] = None,
+        session: Any = None,
+        system_prompt: str = "",
+        tools: Optional[Sequence[Dict[str, Any]]] = None,
     ) -> Tuple[List[Dict[str, Any]], bool, str, int, str]:
         """Compact old messages and return compacted messages.
 
@@ -712,10 +980,97 @@ class ContextCompactor:
             )
             return copied, False, "", 0, ""
 
-        to_compact, retained = self._split_for_compaction(working)
+        # 从这里开始动真格：先记账建锁，最后才释放。中途崩溃留下的是一个可检测的
+        # 孤儿锁，而不是"看起来已经压完了"——压缩是破坏性的，把真实历史换成摘要之后
+        # 那段原文就找不回来了，得让下一次启动看得见出过事。
+        lock = _journal.begin(session, trigger=self.last_trigger_reason)
+        try:
+            return await self._compact_locked(
+                copied,
+                working,
+                compact_block,
+                lock=lock,
+                force=force,
+                model=model,
+                declared_context_window=declared_context_window,
+                system_prompt=system_prompt,
+                tools=tools,
+            )
+        except Exception:
+            _journal.end(lock, outcome="failed")
+            raise
+
+    async def _compact_locked(
+        self,
+        copied: List[Dict[str, Any]],
+        working: List[Dict[str, Any]],
+        compact_block: Optional[Dict[str, Any]],
+        *,
+        lock: Any,
+        force: bool,
+        model: str,
+        declared_context_window: Optional[int],
+        system_prompt: str,
+        tools: Optional[Sequence[Dict[str, Any]]],
+    ) -> Tuple[List[Dict[str, Any]], bool, str, int, str]:
+        window = self._resolve_context_window_tokens(model, declared_context_window)
+        threshold = self._compute_autocompact_threshold(window)
+
+        # 第一步：无模型的确定性剪枝。摘要要花一次 LLM 调用，而且正好花在上下文最大的
+        # 时候——能不花就别花。
+        def _no_longer_needs_compaction(candidate: List[Dict[str, Any]]) -> bool:
+            if force:
+                # 强制压缩（provider 已经报了 overflow）不设早停：这时候能少多少是多少。
+                return False
+            should, _reason = self._should_compact_with_reason(
+                candidate,
+                model=model,
+                force=False,
+                declared_context_window=declared_context_window,
+            )
+            return not should
+
+        pruned_all, pruned_n, pruned_chars = self.prune_tool_results(
+            copied, stop_when=_no_longer_needs_compaction
+        )
+        if pruned_n:
+            copied = pruned_all
+            # 剪枝改的是消息内容不是结构，所以重新切一次已压缩前缀就够了。
+            compact_block, tail = self._split_compacted_messages(copied)
+            working = tail if compact_block is not None else copied
+
+        # 第二步：重新计量。压力已经解除就完全跳过摘要。
+        if pruned_n and _no_longer_needs_compaction(copied):
+            self.last_trigger_reason = "tool_result_prune"
+            _log.info(
+                "context_compaction resolved_by_prune pruned=%s chars=%s est_tokens=%s threshold=%s",
+                pruned_n,
+                pruned_chars,
+                self._estimate_token_usage(copied),
+                threshold,
+            )
+            _journal.end(
+                lock, outcome="pruned", pruned_messages=pruned_n, pruned_chars=pruned_chars
+            )
+            return (
+                copied,
+                True,
+                f"剪除了 {pruned_n} 条过大的工具结果（约 {pruned_chars} 字符），未做摘要。",
+                0,
+                "",
+            )
+
+        to_compact, retained = self._split_for_compaction(
+            working, retain_tokens=self._retained_token_budget(window)
+        )
         if not to_compact:
-            self.last_trigger_reason = ""
-            return copied, False, "", 0, ""
+            self.last_trigger_reason = "tool_result_prune" if pruned_n else ""
+            _journal.end(
+                lock,
+                outcome="pruned" if pruned_n else "nothing-to-compact",
+                pruned_messages=pruned_n,
+            )
+            return copied, bool(pruned_n), "", 0, ""
         compacted_count = len(to_compact)
         _log.info(
             "context_compaction trigger_reason=%s est_tokens=%s threshold=%s window=%s compacted_count=%s",
@@ -750,7 +1105,13 @@ class ContextCompactor:
             if prior_text:
                 prior_summary_prefix = f"[prior_compacted_summary]\n{prior_text[:1200]}\n\n"
         memory_prefix = f"{prior_summary_prefix}[session_memory]{memory_json[:1800]}"
-        summary = await self._summarize(to_compact, memory_prefix=memory_prefix)
+        summary = await self._summarize(
+            to_compact,
+            memory_prefix=memory_prefix,
+            system_prompt=system_prompt,
+            tools=tools,
+            window=window,
+        )
 
         # FR-6: Build compacted message with pending question hard-coded at top
         content_parts = []
@@ -766,4 +1127,11 @@ class ContextCompactor:
             "role": "system",
             "content": "\n\n".join(content_parts),
         }
+        _journal.end(
+            lock,
+            outcome="summarized",
+            compacted_count=compacted_count,
+            pruned_messages=pruned_n,
+            replayed_prefix=self.last_summary_replayed_prefix,
+        )
         return [compacted_message, *retained], True, summary, compacted_count, pending_question

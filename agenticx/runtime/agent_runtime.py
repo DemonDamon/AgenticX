@@ -3165,10 +3165,26 @@ class AgentRuntime:
                 force=True,
                 model=compact_model,
                 declared_context_window=declared_window_for_session(session),
+                session=session,
+                system_prompt=current_system_prompt,
+                tools=list(full_tool_pool),
             )
             if _phase_did:
                 session.agent_messages = list(history)
+        def _compaction_prefix() -> tuple[str, list[Dict[str, Any]]]:
+            """摘要调用要重放的前缀：会话自己的 system prompt + 本轮真实发出的工具表。
+
+            工具表必须是**投影后**的那一份而不是整池：prefix 缓存是按字节对的，多发
+            46 个 schema 就意味着这一段对不上，热缓存白等。
+            """
+            try:
+                projected = project_tools_for_round(ts_ctx, full_openai_tools=full_tool_pool)
+            except Exception:
+                projected = list(full_tool_pool)
+            return current_system_prompt, list(projected)
+
         compact_model = str(getattr(session, "model_name", "") or "")
+        _compact_sys, _compact_tools = _compaction_prefix()
         did_compact = False
         compact_summary = ""
         compacted_count = 0
@@ -3178,6 +3194,9 @@ class AgentRuntime:
                 history,
                 model=compact_model,
                 declared_context_window=declared_window_for_session(session),
+                session=session,
+                system_prompt=_compact_sys,
+                tools=_compact_tools,
             )
         except Exception as exc:
             logger.warning(
