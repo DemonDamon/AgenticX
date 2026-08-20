@@ -16,8 +16,22 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
+from agenticx.utils.agx_home import agx_home, lazy_home_path
 
-DEFAULT_WORKSPACE_MEMORY_DB = Path.home() / ".agenticx" / "memory" / "main.sqlite"
+def _default_ws_db() -> Path:
+    """``~/.agenticx/memory/main.sqlite``，按调用时的 HOME 解析。
+
+    原来是模块级常量，import 时就被 Path.home() 定死；测试的 HOME 重定向拦不住，
+    数据会写进开发者真实的 ~/.agenticx。见 agenticx/utils/agx_home.py。
+    """
+    return lazy_home_path(__name__, "DEFAULT_WORKSPACE_MEMORY_DB", 'memory', 'main.sqlite')
+
+
+def __getattr__(name: str):
+    # PEP 562：给外部读取用；模块内部一律调 _default_ws_db()。
+    if name == "DEFAULT_WORKSPACE_MEMORY_DB":
+        return agx_home().joinpath('memory', 'main.sqlite')
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 _TURN_RECALL_HALFLIFE_DAYS = 7.0
 _CHUNK_RECALL_HALFLIFE_DAYS = 7.0
@@ -95,7 +109,7 @@ class WorkspaceMemoryStore:
         embedding_provider: str = "hashing-v1",
         embedding_model: str = "hashing-64d",
     ) -> None:
-        self.db_path = Path(db_path or DEFAULT_WORKSPACE_MEMORY_DB).expanduser().resolve(strict=False)
+        self.db_path = Path(db_path or _default_ws_db()).expanduser().resolve(strict=False)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.embedding_provider = embedding_provider
         self.embedding_model = embedding_model

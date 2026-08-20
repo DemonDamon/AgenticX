@@ -3509,7 +3509,11 @@ class _BashBgJob:
     exit_code: Optional[int]
 
 
-_BASH_BG_LOG_DIR = Path.home() / ".agenticx" / "logs" / "bash_bg"
+def _bash_bg_log_dir() -> Path:
+    """``~/.agenticx/logs/bash_bg``，按调用时的 HOME 解析（见 utils/agx_home.py）。"""
+    from agenticx.utils.agx_home import lazy_home_path
+
+    return lazy_home_path(__name__, "_BASH_BG_LOG_DIR", "logs", "bash_bg")
 _BASH_BG_MAX_JOBS_DEFAULT = 8
 _AUTH_URL_RE = re.compile(r"https?://[^\s'\"<>）)]+")
 _BASH_BG_JOBS: Dict[str, _BashBgJob] = {}
@@ -3840,12 +3844,12 @@ async def _tool_bash_bg_start(
         )
 
     try:
-        _BASH_BG_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        _bash_bg_log_dir().mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
 
     job_id = uuid.uuid4().hex[:12]
-    log_path = _BASH_BG_LOG_DIR / f"{job_id}.log"
+    log_path = _bash_bg_log_dir() / f"{job_id}.log"
     try:
         proc = await asyncio.create_subprocess_exec(
             *prepared.argv,

@@ -17,8 +17,32 @@ from agenticx.cli.config_manager import ConfigManager
 from agenticx.memory.graph.group_id import classify_subject, parse_group_id_from_avatar
 
 
-DEFAULT_WORKSPACE_DIR = Path.home() / ".agenticx" / "workspace"
-DEFAULT_AGENTICX_HOME = Path.home() / ".agenticx"
+def _default_agenticx_home() -> Path:
+    """``~/.agenticx``，按调用时的 HOME 解析。
+
+    原来是 import 时定死的常量，测试的 HOME 重定向拦不住——群工作区会建到开发者
+    真实的 ~/.agenticx/groups 下。见 agenticx/utils/agx_home.py。
+    """
+    from agenticx.utils.agx_home import lazy_home_path
+
+    return lazy_home_path(__name__, "DEFAULT_AGENTICX_HOME")
+
+
+def _default_workspace_dir() -> Path:
+    from agenticx.utils.agx_home import lazy_home_path
+
+    return lazy_home_path(__name__, "DEFAULT_WORKSPACE_DIR", "workspace")
+
+
+def __getattr__(name: str):
+    # PEP 562：给外部读取用；模块内部一律调上面两个函数。
+    from agenticx.utils.agx_home import agx_home
+
+    if name == "DEFAULT_AGENTICX_HOME":
+        return agx_home()
+    if name == "DEFAULT_WORKSPACE_DIR":
+        return agx_home() / "workspace"
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 MEMORY_DIR_NAME = "memory"
 SKILLS_DIR_NAME = "skills"
 MCP_FILE_NAME = "mcp.json"
@@ -319,7 +343,7 @@ def resolve_workspace_dir() -> Path:
     if raw.lower() in {"none", "null"}:
         raw = ""
     if not raw:
-        return DEFAULT_WORKSPACE_DIR
+        return _default_workspace_dir()
     return Path(raw).expanduser().resolve(strict=False)
 
 
@@ -377,7 +401,7 @@ def resolve_subject_workspace_dir(
     cfg = AvatarRegistry().get_avatar(aid)
     if cfg is not None and str(cfg.workspace_dir or "").strip():
         return Path(cfg.workspace_dir).expanduser().resolve(strict=False)
-    return (DEFAULT_AGENTICX_HOME / "avatars" / aid / "workspace").expanduser().resolve(strict=False)
+    return (_default_agenticx_home() / "avatars" / aid / "workspace").expanduser().resolve(strict=False)
 
 
 def ensure_group_workspace(group_id: str, *, group_name: str = "") -> Path:
@@ -385,7 +409,7 @@ def ensure_group_workspace(group_id: str, *, group_name: str = "") -> Path:
     gid = (group_id or "").strip()
     if not gid:
         raise ValueError("group_id is required")
-    ws = (DEFAULT_AGENTICX_HOME / "groups" / gid / "workspace").expanduser().resolve(strict=False)
+    ws = (_default_agenticx_home() / "groups" / gid / "workspace").expanduser().resolve(strict=False)
     ws.mkdir(parents=True, exist_ok=True)
     memory_dir = ws / MEMORY_DIR_NAME
     memory_dir.mkdir(parents=True, exist_ok=True)
@@ -469,7 +493,7 @@ def ensure_workspace(*, index_memory: bool = True) -> Path:
     """Create workspace and default files if they do not exist."""
     workspace_dir = resolve_workspace_dir()
     workspace_dir.mkdir(parents=True, exist_ok=True)
-    agenticx_home = DEFAULT_AGENTICX_HOME
+    agenticx_home = _default_agenticx_home()
     agenticx_home.mkdir(parents=True, exist_ok=True)
     (agenticx_home / SKILLS_DIR_NAME).mkdir(parents=True, exist_ok=True)
     memory_dir = workspace_dir / MEMORY_DIR_NAME

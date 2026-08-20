@@ -26,14 +26,26 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
-AGENTICX_HOME = Path(os.path.expanduser("~/.agenticx"))
-BRAINS_ROOT = AGENTICX_HOME / "brains"
-REGISTRY_FILE = BRAINS_ROOT / "registry.json"
-CONFIG_YAML = AGENTICX_HOME / "config.yaml"
-AVATARS_ROOT = AGENTICX_HOME / "avatars"
+def _agenticx_home() -> Path:
+    """按调用时的 HOME 解析。下面几个根目录都派生自它，一起懒化。
+
+    原来是 import 时定死的常量，测试的 HOME 重定向拦不住，扫描/写入都会落到开发者
+    真实的 ~/.agenticx。见 agenticx/utils/agx_home.py。
+    """
+    from agenticx.utils.agx_home import lazy_home_path
+
+    return lazy_home_path(__name__, "AGENTICX_HOME")
+def _brains_root() -> Path:
+    return _agenticx_home() / "brains"
+REGISTRY_FILE = _brains_root() / "registry.json"
+def _config_yaml() -> Path:
+    return _agenticx_home() / "config.yaml"
+def _avatars_root() -> Path:
+    return _agenticx_home() / "avatars"
 
 DEFAULT_DOCS_BRAIN_ID = "default_docs"
-LEGACY_KB_REGISTRY = AGENTICX_HOME / "storage" / "kb"
+def _legacy_kb_registry() -> Path:
+    return _agenticx_home() / "storage" / "kb"
 
 
 class BrainError(Exception):
@@ -65,7 +77,7 @@ class BrainRegistry:
     def bootstrap(self) -> None:
         """One-time migration from singleton knowledge_base."""
         with self._data_lock:
-            BRAINS_ROOT.mkdir(parents=True, exist_ok=True)
+            _brains_root().mkdir(parents=True, exist_ok=True)
             if REGISTRY_FILE.exists():
                 self._repair_default_docs_metadata()
                 return
@@ -77,7 +89,7 @@ class BrainRegistry:
 
     def _build_default_docs_brain(self, legacy_cfg: KBConfig) -> Brain:
         """Build reserved default-docs metadata without touching existing indexes."""
-        storage = BRAINS_ROOT / DEFAULT_DOCS_BRAIN_ID
+        storage = _brains_root() / DEFAULT_DOCS_BRAIN_ID
         return Brain(
             id=DEFAULT_DOCS_BRAIN_ID,
             name="默认文档库",
@@ -102,7 +114,7 @@ class BrainRegistry:
         legacy config; never overwrite an existing (even invalid) file and
         never guess the shape of arbitrary missing brain IDs.
         """
-        default_root = BRAINS_ROOT / DEFAULT_DOCS_BRAIN_ID
+        default_root = _brains_root() / DEFAULT_DOCS_BRAIN_ID
         default_yaml = default_root / "brain.yaml"
         ids = self._read_registry_ids()
 
@@ -139,10 +151,10 @@ class BrainRegistry:
             self._write_registry(ids)
 
     def _load_legacy_kb_config(self) -> KBConfig:
-        if not CONFIG_YAML.exists():
+        if not _config_yaml().exists():
             return KBConfig()
         try:
-            raw = yaml.safe_load(CONFIG_YAML.read_text(encoding="utf-8")) or {}
+            raw = yaml.safe_load(_config_yaml().read_text(encoding="utf-8")) or {}
         except Exception:
             raw = {}
         node = raw.get("knowledge_base") if isinstance(raw, dict) else None
@@ -174,12 +186,12 @@ class BrainRegistry:
             p = b / "brain.yaml"
             if p.exists():
                 return p
-        return BRAINS_ROOT / brain_id / "brain.yaml"
+        return _brains_root() / brain_id / "brain.yaml"
 
     def _iter_brain_paths(self, brain_id: str) -> List[Path]:
-        paths = [BRAINS_ROOT / brain_id]
-        if AVATARS_ROOT.exists():
-            for av in AVATARS_ROOT.iterdir():
+        paths = [_brains_root() / brain_id]
+        if _avatars_root().exists():
+            for av in _avatars_root().iterdir():
                 if av.is_dir():
                     p = av / "brains" / brain_id
                     if p.exists():
@@ -225,8 +237,8 @@ class BrainRegistry:
             if include_disabled or b.enabled:
                 out.append(b)
         # Private brains may not be in registry.json until we add registry scan
-        if AVATARS_ROOT.exists():
-            for av in AVATARS_ROOT.iterdir():
+        if _avatars_root().exists():
+            for av in _avatars_root().iterdir():
                 brains_dir = av / "brains"
                 if not brains_dir.is_dir():
                     continue
@@ -244,10 +256,10 @@ class BrainRegistry:
 
     def _storage_root_for(self, scope: BrainScope, owner_avatar_id: Optional[str], brain_id: str) -> Path:
         if scope == BrainScope.GLOBAL:
-            return BRAINS_ROOT / brain_id
+            return _brains_root() / brain_id
         if not owner_avatar_id:
             raise BrainError("owner_avatar_id required for private brain")
-        return AVATARS_ROOT / owner_avatar_id / "brains" / brain_id
+        return _avatars_root() / owner_avatar_id / "brains" / brain_id
 
     def create(
         self,
@@ -433,7 +445,7 @@ class BrainRegistry:
         return True
 
     def delete_private_brains_for_avatar(self, avatar_id: str) -> None:
-        brains_dir = AVATARS_ROOT / avatar_id / "brains"
+        brains_dir = _avatars_root() / avatar_id / "brains"
         if not brains_dir.exists():
             return
         with self._data_lock:
@@ -461,5 +473,5 @@ class BrainRegistry:
     def kb_registry_dir_for(self, brain: Brain) -> Path:
         """Document registry directory for a docs brain."""
         if brain.id == DEFAULT_DOCS_BRAIN_ID:
-            return LEGACY_KB_REGISTRY
+            return _legacy_kb_registry()
         return Path(brain.storage_root) / "kb_data"

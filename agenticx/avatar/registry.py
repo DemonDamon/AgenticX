@@ -17,8 +17,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import yaml
+from agenticx.utils.agx_home import agx_home, lazy_home_path
 
-AVATARS_ROOT = Path.home() / ".agenticx" / "avatars"
+def _avatars_root() -> Path:
+    """``~/.agenticx/avatars``，按调用时的 HOME 解析。
+
+    原来是模块级常量，import 时就被 Path.home() 定死；测试的 HOME 重定向拦不住，
+    数据会写进开发者真实的 ~/.agenticx。见 agenticx/utils/agx_home.py。
+    """
+    return lazy_home_path(__name__, "AVATARS_ROOT", 'avatars')
+
+
+def __getattr__(name: str):
+    # PEP 562：给外部读取用；模块内部一律调 _avatars_root()。
+    if name == "AVATARS_ROOT":
+        return agx_home().joinpath('avatars')
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 AVATAR_CONFIG_FILE = "avatar.yaml"
 
 # Must stay aligned with desktop/src/utils/avatar-color.ts AVATAR_PALETTE.
@@ -124,7 +138,7 @@ class AvatarRegistry:
     """CRUD operations for avatars with YAML persistence."""
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = Path(root) if root else AVATARS_ROOT
+        self.root = Path(root) if root else _avatars_root()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _avatar_dir(self, avatar_id: str) -> Path:

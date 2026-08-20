@@ -13,9 +13,23 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from agenticx.utils.agx_home import agx_home, lazy_home_path
 
-_STORE_ROOT = Path.home() / ".agenticx" / "delivery"
-_TASKS_JSON = _STORE_ROOT / "tasks.json"
+def _store_root() -> Path:
+    """``~/.agenticx/delivery``，按调用时的 HOME 解析。
+
+    原来是模块级常量，import 时就被 Path.home() 定死；测试的 HOME 重定向拦不住，
+    数据会写进开发者真实的 ~/.agenticx。见 agenticx/utils/agx_home.py。
+    """
+    return lazy_home_path(__name__, "_STORE_ROOT", 'delivery')
+
+
+def __getattr__(name: str):
+    # PEP 562：给外部读取用；模块内部一律调 _store_root()。
+    if name == "_STORE_ROOT":
+        return agx_home().joinpath('delivery')
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+_TASKS_JSON = _store_root() / "tasks.json"
 _lock = threading.RLock()
 
 
@@ -52,7 +66,7 @@ class DeliveryTaskRecord:
 
 
 def _load_registry() -> dict[str, Any]:
-    _STORE_ROOT.mkdir(parents=True, exist_ok=True)
+    _store_root().mkdir(parents=True, exist_ok=True)
     if not _TASKS_JSON.is_file():
         return {"tasks": {}}
     try:
@@ -65,7 +79,7 @@ def _load_registry() -> dict[str, Any]:
 
 
 def _save_registry(data: dict[str, Any]) -> None:
-    _STORE_ROOT.mkdir(parents=True, exist_ok=True)
+    _store_root().mkdir(parents=True, exist_ok=True)
     _TASKS_JSON.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
