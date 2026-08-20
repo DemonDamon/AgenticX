@@ -234,3 +234,19 @@ def test_ref_id_defaults_to_provider_slash_model():
     policy = read_policy(WIRE)
     assert policy.document_target is not None
     assert policy.document_target.id == "qwen_local/qwen3.8-27b"
+
+
+# --------------------------------------------------------------------------
+# 接线层的兜底：读策略失败 vs 应用策略失败，含义不同，处理也不同
+# --------------------------------------------------------------------------
+def test_unreadable_global_config_is_off_but_not_silent(monkeypatch, caplog):
+    """对 containment 特性来说，静默退化成"关闭"是最不该发生的事。"""
+    from agenticx.cli.config_manager import ConfigManager
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(ConfigManager, "_load_yaml", staticmethod(_boom), raising=False)
+    with caplog.at_level("WARNING", logger="agenticx.studio.attachment_routing"):
+        assert read_policy() == ROUTING_OFF
+    assert any("global config unreadable" in r.message for r in caplog.records)

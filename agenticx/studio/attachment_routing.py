@@ -15,9 +15,12 @@ CLI、定时任务、子智能体、分身委派都不经过那段 UI 代码，�
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_RENDERED_PAGES = 20
 
@@ -115,6 +118,10 @@ def _load_from_global_config() -> Dict[str, Any]:
 
         global_config = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
     except Exception:
+        # 读不到全局配置和"没配过"在这里是同一种结果（策略关闭），但成因完全不同。
+        # 对一个 containment 特性来说，静默地退化成"关闭"是最不该发生的事——至少要在
+        # 正常日志级别留下痕迹，否则运维只会看到"路由怎么没生效"。
+        logger.warning("attachment routing: global config unreadable", exc_info=True)
         return {}
     enterprise = global_config.get("enterprise")
     if not isinstance(enterprise, dict):
@@ -254,3 +261,58 @@ def apply_to_session(
             pass
     remember_lock(session, target)
     return decision
+
+
+class AttachmentRoutingUnavailable(RuntimeError):
+    """策略本该生效，但没能应用上。调用方必须中止本轮，不能回退到公网模型。"""
+
+
+def route_turn(
+    session: Any,
+    *,
+    filenames: Sequence[str],
+    policy: Optional[AttachmentRoutingPolicy] = None,
+) -> Optional[RoutingDecision]:
+    """聊天回合的入口：读策略、应用、决定失败时能不能放行。
+
+    读策略失败和应用策略失败的含义完全不同，所以分开兜底：
+
+    * **读不到策略** == 没配过 == 保持原样。绝大多数装机就是这种，拦掉等于把没接企业
+      的用户全挡在门外。记一条 warning 让它可观测就够了。
+    * **读到了、本轮确实有文档（或会话已经锁定）、但应用失败** == containment 失败。
+      继续往下走，文档就会发给调用方指定的那个公网模型——正是这个特性存在的理由。
+      抛 :class:`AttachmentRoutingUnavailable`，由调用方转成对用户可见的失败。
+
+    已锁定的会话尤其不能放行：调用方通常刚把客户端传来的 provider/model 落到 session
+    上，应用失败就等于回到客户端选的模型，而这段历史里已经有文档内容了。
+
+    Raises:
+        AttachmentRoutingUnavailable: 必须中止本轮。
+    """
+    names = list(filenames)
+    if policy is None:
+        try:
+            policy = read_policy()
+        except Exception:
+            logger.warning(
+                "attachment routing unavailable; this turn will not be routed", exc_info=True
+            )
+            return None
+    try:
+        return apply_to_session(session, filenames=names, policy=policy)
+    except Exception as exc:
+        must_contain = bool(
+            session_locked_target(session) or has_routed_document(names, policy)
+        )
+        # 只记数量不记文件名：日志的落点和模型不是一回事。
+        logger.warning(
+            "attachment routing failed (attachments=%d, containment_required=%s)",
+            len(names),
+            must_contain,
+            exc_info=True,
+        )
+        if must_contain:
+            raise AttachmentRoutingUnavailable(
+                "attachment routing failed while containment was required"
+            ) from exc
+        return None

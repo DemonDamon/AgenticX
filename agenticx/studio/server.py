@@ -2749,14 +2749,29 @@ def create_studio_app() -> FastAPI:
         #
         # 前端也会拦一道（选择器变灰 + 说明弹窗），但这里不能省：CLI、定时任务、
         # 子智能体、分身委派都不经过那段 UI 代码。
+        # 读策略、应用、以及"失败了能不能放行"都在 attachment_routing.route_turn 里，
+        # 这里只把它的失败翻译成 HTTP。判断逻辑抄在这儿的话，两边迟早会漂——而漂的方向
+        # 一旦是"放行"，就是文档发给了公网模型。
+        _routing_names = list(turn_context_files.keys())
         try:
-            from agenticx.studio.attachment_routing import apply_to_session as _apply_routing
-
-            _routing_decision = _apply_routing(
-                session, filenames=list(turn_context_files.keys())
+            from agenticx.studio.attachment_routing import (
+                AttachmentRoutingUnavailable,
+                route_turn as _route_turn,
             )
-        except Exception:
-            logger.debug("attachment routing skipped", exc_info=True)
+
+            _routing_decision = _route_turn(session, filenames=_routing_names)
+        except AttachmentRoutingUnavailable:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "附件路由暂时不可用，本轮已停止。"
+                    "这条会话包含需要留在私有部署的附件，无法回退到公网模型。"
+                    "请稍后重试或联系管理员。"
+                ),
+            )
+        except ImportError:
+            # 模块本身导入不了（打包漏了之类）：此时连策略都读不到，等同于没配。
+            logger.warning("attachment routing module unavailable", exc_info=True)
             _routing_decision = None
 
         if _routing_decision is not None:
@@ -2776,7 +2791,9 @@ def create_studio_app() -> FastAPI:
                     max_pages=_read_routing().max_rendered_pages,
                 )
             except Exception:
-                logger.debug("pdf page rendering skipped", exc_info=True)
+                # 这一条**可以**放行，和上面那条不一样：走到这里说明会话已经锁在私有
+                # 模型上了，回落到抽文本同样不出这台部署。丢的是保真度，不是 containment。
+                logger.warning("pdf page rendering skipped, falling back to text", exc_info=True)
         # Kimi K3 / DeepSeek V4 reasoning_effort; cleared when absent so stale
         # values from a previous turn do not leak onto other models.
         _effort = str(getattr(payload, "reasoning_effort", None) or "").strip().lower()
