@@ -33,6 +33,9 @@ MODEL_CONTEXT_WINDOWS: list[tuple[str, int]] = [
     ("gpt-4", 128_000),
     ("o1", 200_000),
     ("o3", 200_000),
+    # V4 全系（Pro / Flash）都是 1M。0731 那版实际是 1,310,720，但这里按 1M 记：
+    # 猜低只是提前压缩，猜高会让 autocompact 触发太晚、被上游直接拒。
+    ("deepseek-v4", 1_048_576),
     ("deepseek", 128_000),
     ("qwen", 128_000),
     ("glm-5.2", 1_000_000),
