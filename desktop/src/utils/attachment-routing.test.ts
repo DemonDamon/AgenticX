@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addressForSession,
   ATTACHMENT_ROUTING_OFF,
   decideAttachmentRouting,
   hasRoutedDocument,
@@ -7,7 +8,12 @@ import {
   routingLockReason,
 } from "./attachment-routing";
 
-const QWEN = { provider: "qwen_local", model: "qwen3.8-27b", label: "本地推理/Qwen3.8 27B" };
+const QWEN = {
+  id: "qwen_local/qwen3.8-27b",
+  provider: "qwen_local",
+  model: "qwen3.8-27b",
+  label: "本地推理/Qwen3.8 27B",
+};
 
 const WIRE = {
   enabled: true,
@@ -54,12 +60,14 @@ describe("readAttachmentRoutingPolicy", () => {
     expect(readAttachmentRoutingPolicy({ ...WIRE, maxRenderedPages: 5 }).maxRenderedPages).toBe(5);
   });
 
-  it("keeps a label even when the server omits one", () => {
+  it("fills in label and id when the server omits them", () => {
     const policy = readAttachmentRoutingPolicy({
       ...WIRE,
       documentTarget: { provider: "p", model: "m" },
     });
     expect(policy.documentTarget?.label).toBe("p/m");
+    // id 留空会让企业会话切到一个空模型名。
+    expect(policy.documentTarget?.id).toBe("p/m");
   });
 });
 
@@ -114,7 +122,12 @@ describe("decideAttachmentRouting", () => {
   it("follows the currently delivered target after an admin swap", () => {
     const swapped = readAttachmentRoutingPolicy({
       ...WIRE,
-      documentTarget: { provider: "qwen_local", model: "qwen4-32b", label: "新模型" },
+      documentTarget: {
+        id: "qwen_local/qwen4-32b",
+        provider: "qwen_local",
+        model: "qwen4-32b",
+        label: "新模型",
+      },
     });
     const decision = decideAttachmentRouting({
       policy: swapped,
@@ -124,7 +137,12 @@ describe("decideAttachmentRouting", () => {
     // 老会话不该卡在一个已经下线的模型上。
     expect(decision).toEqual({
       action: "lock",
-      target: { provider: "qwen_local", model: "qwen4-32b", label: "新模型" },
+      target: {
+        id: "qwen_local/qwen4-32b",
+        provider: "qwen_local",
+        model: "qwen4-32b",
+        label: "新模型",
+      },
       announce: false,
     });
   });
@@ -145,5 +163,24 @@ describe("routingLockReason", () => {
     const reason = routingLockReason(QWEN);
     expect(reason).toContain(QWEN.label);
     expect(reason).toContain("私有部署");
+  });
+});
+
+
+describe("addressForSession", () => {
+  it("uses the full id for enterprise-managed sessions", () => {
+    // 企业登录后所有模型挂在单一 enterprise provider 下，模型名就是全 id。
+    expect(addressForSession({ provider: "enterprise" }, QWEN)).toEqual({
+      provider: "enterprise",
+      model: "qwen_local/qwen3.8-27b",
+    });
+  });
+
+  it("uses provider + model for directly configured sessions", () => {
+    expect(addressForSession({ provider: "zhipu" }, QWEN)).toEqual({
+      provider: "qwen_local",
+      model: "qwen3.8-27b",
+    });
+    expect(addressForSession(null, QWEN).provider).toBe("qwen_local");
   });
 });

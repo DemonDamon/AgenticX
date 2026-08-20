@@ -22,7 +22,12 @@ from agenticx.studio.attachment_routing import (
     session_locked_target,
 )
 
-QWEN = RoutingModelRef(provider="qwen_local", model="qwen3.8-27b", label="本地推理/Qwen3.8 27B")
+QWEN = RoutingModelRef(
+    provider="qwen_local",
+    model="qwen3.8-27b",
+    label="本地推理/Qwen3.8 27B",
+    id="qwen_local/qwen3.8-27b",
+)
 
 WIRE = {
     "enabled": True,
@@ -203,3 +208,29 @@ def test_apply_does_nothing_while_routing_is_off():
     session = _Session()
     assert apply_to_session(session, filenames=["年报.pdf"], policy=ROUTING_OFF) is None
     assert session.provider_name == "zhipu"
+
+
+def test_enterprise_sessions_are_addressed_by_full_id():
+    """Desktop 企业登录后所有模型挂在单一 enterprise provider 下，模型名就是全 id。
+
+    按 provider/model 寻址会切到一个不存在的模型。
+    """
+    policy = read_policy(WIRE)
+    session = _Session(provider="enterprise", model="zhipu/glm-5.2")
+    apply_to_session(session, filenames=["年报.pdf"], policy=policy)
+    assert session.provider_name == "enterprise"
+    assert session.model_name == "qwen_local/qwen3.8-27b"
+
+
+def test_direct_sessions_are_addressed_by_provider_and_model():
+    policy = read_policy(WIRE)
+    session = _Session(provider="zhipu", model="glm-5.2")
+    apply_to_session(session, filenames=["年报.pdf"], policy=policy)
+    assert (session.provider_name, session.model_name) == ("qwen_local", "qwen3.8-27b")
+
+
+def test_ref_id_defaults_to_provider_slash_model():
+    """服务端漏发 id 时自己拼一个，而不是留空导致企业会话切到 ""。"""
+    policy = read_policy(WIRE)
+    assert policy.document_target is not None
+    assert policy.document_target.id == "qwen_local/qwen3.8-27b"

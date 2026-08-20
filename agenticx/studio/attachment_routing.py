@@ -24,9 +24,18 @@ DEFAULT_MAX_RENDERED_PAGES = 20
 
 @dataclass(frozen=True)
 class RoutingModelRef:
+    """三种寻址方式一起下发，因为两端寻址不一样。
+
+    portal 直接用 ``provider`` + ``model``；Desktop 把企业下发的模型全部挂在**单一**
+    ``enterprise`` provider 下、拿 ``id``（``<provider>/<model>``）当模型名——见
+    main.ts 的 applyEnterpriseProvider。只带 provider/model 的话客户端就得自己拼 id，
+    拼错就是切到一个不存在的模型。
+    """
+
     provider: str
     model: str
     label: str
+    id: str = ""
 
 
 @dataclass(frozen=True)
@@ -50,7 +59,8 @@ def _model_ref(raw: Any) -> Optional[RoutingModelRef]:
     if not provider or not model:
         return None
     label = str(raw.get("label") or "").strip() or f"{provider}/{model}"
-    return RoutingModelRef(provider=provider, model=model, label=label)
+    ref_id = str(raw.get("id") or "").strip() or f"{provider}/{model}"
+    return RoutingModelRef(provider=provider, model=model, label=label, id=ref_id)
 
 
 def read_policy(raw: Any = None) -> AttachmentRoutingPolicy:
@@ -161,6 +171,22 @@ def decide(
     return RoutingDecision(action="lock", target=policy.document_target, announce=True)
 
 
+#: Desktop 企业登录后所有模型都挂在这个 provider 下。
+ENTERPRISE_PROVIDER = "enterprise"
+
+
+def address_for_session(session: Any, target: RoutingModelRef) -> tuple[str, str]:
+    """把目标模型翻译成这个会话能用的 (provider, model)。
+
+    企业托管的 Desktop 会话只有一个 ``enterprise`` provider，模型名就是全 id；直连
+    配置的会话则按 provider/model 寻址。判错的后果是切到一个不存在的模型，所以看当前
+    会话实际在用哪种，而不是猜。
+    """
+    if str(getattr(session, "provider_name", "") or "").strip() == ENTERPRISE_PROVIDER:
+        return ENTERPRISE_PROVIDER, (target.id or f"{target.provider}/{target.model}")
+    return target.provider, target.model
+
+
 LOCK_ATTR = "_attachment_routing_lock"
 
 
@@ -211,12 +237,13 @@ def apply_to_session(
     target = decision.target
     if decision.action != "lock" or target is None:
         return None
+    provider, model = address_for_session(session, target)
     switched = (
-        str(getattr(session, "provider_name", "") or "") != target.provider
-        or str(getattr(session, "model_name", "") or "") != target.model
+        str(getattr(session, "provider_name", "") or "") != provider
+        or str(getattr(session, "model_name", "") or "") != model
     )
-    session.provider_name = target.provider
-    session.model_name = target.model
+    session.provider_name = provider
+    session.model_name = model
     if switched:
         # declared_context_window 是跟着客户端选的那个模型一起传上来的。模型被我们
         # 换掉之后它就是错的，留着会让运行时按错误的窗口做预算，清掉以回落到按模型

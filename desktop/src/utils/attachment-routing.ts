@@ -13,10 +13,32 @@
  */
 
 export type RoutingModelRef = {
+  /**
+   * `<provider>/<model>` 形式的全 id。
+   *
+   * 企业登录后 Desktop 把所有下发模型挂在**单一** `enterprise` provider 下、拿这个
+   * id 当模型名（见 electron/main.ts 的 applyEnterpriseProvider）。所以三种寻址都得
+   * 带着：按 provider/model 去切企业会话，会切到一个不存在的模型。
+   */
+  id: string;
   provider: string;
   model: string;
   label: string;
 };
+
+/** 企业登录后所有模型都挂在这个 provider 下。 */
+export const ENTERPRISE_PROVIDER = "enterprise";
+
+/** 把目标翻译成当前会话能用的 (provider, model)。 */
+export function addressForSession(
+  current: { provider: string } | null | undefined,
+  target: RoutingModelRef,
+): { provider: string; model: string } {
+  if ((current?.provider ?? "").trim() === ENTERPRISE_PROVIDER) {
+    return { provider: ENTERPRISE_PROVIDER, model: target.id };
+  }
+  return { provider: target.provider, model: target.model };
+}
 
 export type ImageStrategy = "vision-fallback" | "sticky";
 
@@ -46,7 +68,9 @@ function readModelRef(raw: unknown): RoutingModelRef | null {
   const model = typeof src.model === "string" ? src.model.trim() : "";
   if (!provider || !model) return null;
   const label = typeof src.label === "string" && src.label.trim() ? src.label.trim() : `${provider}/${model}`;
-  return { provider, model, label };
+  // 服务端漏发 id 时自己拼一个，而不是留空导致企业会话切到空模型名。
+  const id = typeof src.id === "string" && src.id.trim() ? src.id.trim() : `${provider}/${model}`;
+  return { id, provider, model, label };
 }
 
 /**

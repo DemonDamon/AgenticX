@@ -29,7 +29,12 @@ function hasCapability(model: PortalModelOption, capability: string): boolean {
 }
 
 function toRef(model: PortalModelOption): RoutingModelRef {
-  return { provider: model.provider, model: model.model, label: model.label };
+  return {
+    id: model.id,
+    provider: model.provider,
+    model: model.model,
+    label: model.label,
+  };
 }
 
 /**

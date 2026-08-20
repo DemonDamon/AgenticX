@@ -39,6 +39,15 @@ export const DOCUMENT_EXTENSIONS: readonly string[] = [
 export const DEFAULT_MAX_RENDERED_PAGES = 20;
 
 export type RoutingModelRef = {
+  /**
+   * `<provider>/<model>` 形式的全 id。
+   *
+   * 三个字段都要带，是因为两端的寻址方式不一样：portal 直接用 provider + model；
+   * 而 Desktop 把企业下发的模型全部挂在**单一** `enterprise` provider 下、拿这个 id
+   * 当 model 名（见 main.ts 的 applyEnterpriseProvider）。只下发 provider/model 的话
+   * 桌面端就得自己拼 id，拼错就是切到一个不存在的模型。
+   */
+  id: string;
   /** provider id，如 `custom_openai_qwen_local`。 */
   provider: string;
   /** 模型名。 */

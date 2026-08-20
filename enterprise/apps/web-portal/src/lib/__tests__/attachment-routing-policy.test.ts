@@ -40,6 +40,9 @@ describe("buildAttachmentRoutingPolicy", () => {
     const policy = buildAttachmentRoutingPolicy([GLM, QWEN, CLOUD_VISION], { enabled: true });
     expect(policy.enabled).toBe(true);
     expect(policy.documentTarget).toEqual({
+      // id 也要带：Desktop 把企业模型全挂在单一 enterprise provider 下、拿这个 id
+      // 当 model 名，只给 provider/model 它就得自己拼，拼错就切到不存在的模型。
+      id: "qwen_local/qwen3.8-27b",
       provider: "qwen_local",
       model: "qwen3.8-27b",
       label: "qwen_local/qwen3.8-27b",

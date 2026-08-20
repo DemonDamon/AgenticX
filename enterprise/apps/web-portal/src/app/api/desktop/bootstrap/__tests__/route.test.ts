@@ -222,6 +222,7 @@ describe("GET /api/desktop/bootstrap · 附件路由", { timeout: 30_000 }, () =
     const data = await bootstrapPayload();
     expect(data.attachmentRouting.enabled).toBe(true);
     expect(data.attachmentRouting.documentTarget).toEqual({
+      id: "qwen_local/qwen3.8-27b",
       provider: "qwen_local",
       model: "qwen3.8-27b",
       label: "本地推理/Qwen3.8 27B",
