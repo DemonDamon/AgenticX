@@ -10,6 +10,9 @@ Tests core functionality of frontend-compatible API endpoints:
 Author: Damon Li
 """
 
+import asyncio  # type: ignore
+import json  # type: ignore
+
 import pytest  # type: ignore
 from fastapi.testclient import TestClient  # type: ignore
 from fastapi import FastAPI  # type: ignore
@@ -34,6 +37,63 @@ def client(app):
     return TestClient(app)
 
 
+async def _first_sse_frame(app, payload: dict, *, timeout: float = 8.0) -> tuple[int, str]:
+    """直接驱动 ASGI 应用，取 SSE 的第一帧。
+
+    为什么不用 TestClient：它和 httpx 的 ASGITransport 都会把响应体读完才返回，而
+    /chat 的 SSE 流没有终点（没事件时每 timeout 秒发一个 sync 心跳，见
+    sse_adapter.create_sse_stream）。两者在这个接口上都只会挂住——这条用例之所以能把
+    整轮 `pytest tests/` 卡死，就是这个原因，不是接口坏了：真实 uvicorn 下首字节 5ms
+    就到。
+
+    receive 的写法是关键：先给一次请求体，之后**阻塞**等断开。starlette 的
+    listen_for_disconnect 会一直 await receive()，如果它每次都立刻返回，就成了一个把
+    事件循环饿死的死循环，连 http.response.start 都发不出来。
+    """
+    body = json.dumps(payload).encode()
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "method": "POST", "path": "/chat", "raw_path": b"/chat",
+        "query_string": b"", "root_path": "", "scheme": "http",
+        "server": ("testserver", 80), "client": ("testclient", 123),
+        "headers": [
+            (b"host", b"testserver"),
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+        ],
+    }
+    sent_body = False
+    disconnect = asyncio.Event()
+
+    async def receive():
+        nonlocal sent_body
+        if not sent_body:
+            sent_body = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        await disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    status = 0
+    chunk = ""
+    got_frame = asyncio.Event()
+
+    async def send(message):
+        nonlocal status, chunk
+        if message["type"] == "http.response.start":
+            status = int(message["status"])
+        elif message["type"] == "http.response.body" and message.get("body"):
+            chunk = message["body"].decode("utf-8", errors="ignore")
+            got_frame.set()
+
+    task = asyncio.create_task(app(scope, receive, send))
+    try:
+        await asyncio.wait_for(got_frame.wait(), timeout=timeout)
+    finally:
+        disconnect.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    return status, chunk
+
 def test_health_endpoint(client):
     """测试 GET /health"""
     response = client.get("/health")
@@ -43,43 +103,28 @@ def test_health_endpoint(client):
     assert data["service"] == "agenticx"
 
 
-@pytest.mark.skip(
-    reason=(
-        "POST /chat 会阻塞事件循环：直接驱动 ASGI 应用时，连 http.response.start 都发不出来，"
-        "更不用说 enhanced_stream 的第一帧 confirmed。这条用例因此从来没有通过过，只会把整轮 "
-        "`pytest tests/` 卡死（本机实测 20 分钟以上无进展）。"
-        "另外 create_sse_stream 的主循环没有终止条件，没事件时每 timeout 秒发一个 sync 心跳、"
-        "永不结束；原来的写法要读满 1000 字节才 break，就算不阻塞也要等约 30 个心跳。"
-        "要修的是接口本身（找出同步阻塞点 + 给流一个收尾条件），不是这条断言——"
-        "所以这里标 skip 让它可见，而不是删掉假装没有。"
+@pytest.mark.asyncio
+async def test_start_chat_endpoint(app):
+    """测试 POST /chat 返回 SSE 流，且首帧就是 confirmed。"""
+    status, chunk = await _first_sse_frame(
+        app,
+        {
+            "project_id": "test_project_1",
+            "task_id": "task_1",
+            "question": "Test question",
+            "model_platform": "openai",
+            "email": "test@example.com",
+            "model_type": "gpt-4",
+            "api_key": "test_key",
+        },
     )
-)
-def test_start_chat_endpoint(client):
-    """测试 POST /chat 返回 SSE 流"""
-    request_data = {
-        "project_id": "test_project_1",
-        "task_id": "task_1",
-        "question": "Test question",
-        "model_platform": "openai",
-        "email": "test@example.com",
-        "model_type": "gpt-4",
-        "api_key": "test_key",
-    }
-    
-    response = client.post("/chat", json=request_data)
-    assert response.status_code == 200
-    # TestClient 可能不会设置正确的 content-type，检查状态码即可
-    # assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-    
-    # 读取 SSE 流的前几行（使用 stream=True）
-    content = ""
-    for chunk in response.iter_bytes():
-        content += chunk.decode("utf-8", errors="ignore")
-        if len(content) > 1000:  # 限制读取长度
-            break
-    
-    assert "data: " in content
-    assert "confirmed" in content or "sync" in content
+
+    assert status == 200
+    assert chunk.startswith("data: ")
+    # 首帧必须是 confirmed：这是「已收到、开始处理」的回执，前端靠它把输入框从
+    # 等待态切出来。心跳 sync 也是合法帧，但不该排在 confirmed 前面。
+    assert '"step": "confirmed"' in chunk
+    assert "Test question" in chunk
 
 
 def test_supplement_chat_endpoint(client):
@@ -157,32 +202,37 @@ def test_invalid_supplement_request(client):
     assert response.status_code == 400
 
 
-@pytest.mark.skip(reason="同 test_start_chat_endpoint：POST /chat 阻塞事件循环，这条也会把整轮测试卡死。")
-def test_multiple_chat_requests(client):
-    """测试多个聊天请求（多轮对话）"""
+@pytest.mark.asyncio
+async def test_multiple_chat_requests(app):
+    """测试多个聊天请求（多轮对话）：同一 project 连续两轮都能拿到 confirmed 首帧。"""
     project_id = "test_project_7"
-    
-    # 第一个请求
-    request_data_1 = {
-        "project_id": project_id,
-        "task_id": "task_1",
-        "question": "First question",
-        "model_platform": "openai",
-        "email": "test@example.com",
-        "model_type": "gpt-4",
-        "api_key": "test_key",
-    }
-    response1 = client.post("/chat", json=request_data_1)
-    assert response1.status_code == 200
-    
-    # 第二个请求（多轮对话）
-    request_data_2 = {
-        "question": "Second question",
-        "task_id": None,
-    }
-    response2 = client.post(f"/chat/{project_id}", json=request_data_2)
-    assert response2.status_code == 201
 
+    status1, chunk1 = await _first_sse_frame(
+        app,
+        {
+            "project_id": project_id,
+            "task_id": "task_1",
+            "question": "First question",
+            "model_platform": "openai",
+            "email": "test@example.com",
+            "model_type": "gpt-4",
+            "api_key": "test_key",
+        },
+    )
+    assert status1 == 200
+    assert "First question" in chunk1
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    status2, chunk2 = await _first_sse_frame(
+        app,
+        {
+            "project_id": project_id,
+            "task_id": "task_2",
+            "question": "Second question",
+            "model_platform": "openai",
+            "email": "test@example.com",
+            "model_type": "gpt-4",
+            "api_key": "test_key",
+        },
+    )
+    assert status2 == 200
+    assert "Second question" in chunk2
