@@ -36,13 +36,23 @@ def _full_pool() -> list[dict]:
 
 
 def test_build_runtime_context_adaptive_threshold_by_model():
-    session = SimpleNamespace(model_name="claude-sonnet-5", scratchpad={}, mcp_hub=None)
+    """阈值随模型的**harness 窗口**走，不是随端点能力走。
+
+    这条用例原来用 claude-sonnet-5 断言 context_window == 200_000、阈值 == 10_000。
+    model_context_window 后来加了 harness_window_for_capability()：端点能力先按 1/4
+    缩放再夹到 [128K, 能力]，理由写在那个模块的文档字符串里（能吃 1M 不代表跑 1M 的
+    agent 循环是个好主意）。于是 200K 能力落到 128K 工作窗口 —— 和 qwen-plus 一样，
+    两半用例变成了同一个断言，"by model"也就名存实亡了。换成 glm-5.2（1M 能力 →
+    250K 工作窗口）跟 qwen-plus 对比，差异才是真的。
+    """
+    session = SimpleNamespace(model_name="glm-5.2", scratchpad={}, mcp_hub=None)
     ctx = build_runtime_context(session=session, full_openai_tools=_full_pool())
-    assert ctx.effective_threshold == 10_000
-    assert session.scratchpad[TOOL_SEARCH_DECISION_KEY]["context_window"] == 200_000
+    assert session.scratchpad[TOOL_SEARCH_DECISION_KEY]["context_window"] == 250_000
+    assert ctx.effective_threshold == 12_500
 
     session2 = SimpleNamespace(model_name="qwen-plus", scratchpad={}, mcp_hub=None)
     ctx2 = build_runtime_context(session=session2, full_openai_tools=_full_pool())
+    assert session2.scratchpad[TOOL_SEARCH_DECISION_KEY]["context_window"] == 128_000
     assert ctx2.effective_threshold == 6400
 
 

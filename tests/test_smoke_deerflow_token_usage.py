@@ -19,7 +19,16 @@ class _RespWithTokenUsage:
 
 def test_usage_metadata_from_llm_response_happy() -> None:
     um = usage_metadata_from_llm_response(_RespWithTokenUsage())
-    assert um == {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30}
+    # 返回值后来多了 cached_tokens / reasoning_tokens（上游给了就带上，没给就是 0）。
+    # 按子集断言，别把整个 dict 钉死——不然以后再加一个字段又要红一次。
+    assert um is not None
+    assert {k: um[k] for k in ("input_tokens", "output_tokens", "total_tokens")} == {
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "total_tokens": 30,
+    }
+    assert um["cached_tokens"] == 0
+    assert um["reasoning_tokens"] == 0
 
 
 def test_usage_metadata_from_llm_response_zeros_returns_none() -> None:

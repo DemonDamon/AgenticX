@@ -39,7 +39,12 @@ def test_atomic_snapshot_writes_and_cleanup(manager: SessionManager, tmp_path: P
     refs_path = Path(manager._context_refs_path(sid))
     global_path = Path(manager._global_taskspaces_path())
 
-    assert json.loads(messages_path.read_text(encoding="utf-8")) == [{"role": "user", "content": "hello"}]
+    # 落盘时会补一个 timestamp（毫秒），所以只核对 role/content。
+    saved_messages = json.loads(messages_path.read_text(encoding="utf-8"))
+    assert [{"role": m["role"], "content": m["content"]} for m in saved_messages] == [
+        {"role": "user", "content": "hello"}
+    ]
+    assert isinstance(saved_messages[0]["timestamp"], int)
     assert len(json.loads(agent_messages_path.read_text(encoding="utf-8"))) == 40
     assert json.loads(refs_path.read_text(encoding="utf-8")) == [str(tmp_path / "a.txt")]
     payload = json.loads(global_path.read_text(encoding="utf-8"))
