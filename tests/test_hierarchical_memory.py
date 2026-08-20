@@ -1003,9 +1003,13 @@ class TestIntegration:
             # Add association from core to semantic
             await core_memory.add_association(core_id, semantic_records[0].id)
             
-            # Get associations
-            associations = await core_memory.get_associations(core_id)
-            assert len(associations) == 2
+            # 跨层关联要用 get_association_ids 读：get_associations 只解析 core 层
+            # 内部的记录，指向 episodic / semantic 的 id 查不到会被静默丢掉，所以
+            # 原来那句 `len(get_associations(core_id)) == 2` 恒为 0。
+            association_ids = await core_memory.get_association_ids(core_id)
+            assert association_ids == [episodic_records[0].id, semantic_records[0].id]
+            # 这两条都不在 core 层，所以解析后的结果是空的。
+            assert await core_memory.get_associations(core_id) == []
     
     @pytest.mark.asyncio
     async def test_memory_system_performance(self, complete_system):

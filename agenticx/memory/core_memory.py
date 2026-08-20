@@ -348,8 +348,25 @@ class CoreMemory(BaseHierarchicalMemory):
             return True
         return False
     
+    async def get_association_ids(self, record_id: str) -> List[str]:
+        """关联的记录 id 原样返回，不解析。
+
+        ``add_association`` 接受任何 id —— 包括别的记忆层（episodic / semantic）里的
+        记录。但 ``get_associations`` 只会在 core 自己的 ``_core_records`` 里查，查不到
+        就静默丢掉，于是跨层关联变成只能写、读不回来。要拿到完整的关联关系用这个方法，
+        再各自到对应的层里去取。
+        """
+        record = self._core_records.get(record_id)
+        if record is None:
+            return []
+        return list(record.associations)
+
     async def get_associations(self, record_id: str) -> List[HierarchicalMemoryRecord]:
-        """Get associations for a record."""
+        """Get associations for a record.
+
+        只返回**core 层内部**能解析到的记录。指向其他层的关联不会出现在结果里
+        （core 拿不到那些层的句柄），需要完整列表请用 :meth:`get_association_ids`。
+        """
         if record_id in self._core_records:
             associated_records = []
             record = self._core_records[record_id]

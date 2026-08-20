@@ -45,6 +45,20 @@ def test_recall_reinforces_chunks_when_enabled(tmp_path: Path, monkeypatch) -> N
             "agenticx.memory.recall.WorkspaceMemoryStore",
             lambda: WorkspaceMemoryStore(db_path),
         )
+        # search_memory_for_chat 搜到结果之后还会过一道
+        # _filter_workspace_rows_for_subject：只保留落在
+        # resolve_workspace_dir() / resolve_subject_workspace_dir() 之下的行。用例
+        # 原来只换了 store，没管工作区解析，于是命中的 tmp_path/workspace/MEMORY.md
+        # 全被这道过滤器丢掉，matches 里一条 source="workspace" 都没有。
+        #
+        # 注意要打 agenticx.workspace.loader 里的这两个：recall 是在函数体里从那儿
+        # import 的。（agenticx.utils.workspace_dir 里另有一个同名函数，认
+        # AGENTICX_WORKSPACE_DIR 环境变量，但不是这条路上用的那个。）
+        m.setattr("agenticx.workspace.loader.resolve_workspace_dir", lambda *a, **k: workspace)
+        m.setattr(
+            "agenticx.workspace.loader.resolve_subject_workspace_dir",
+            lambda *a, **k: workspace,
+        )
         result = asyncio.run(
             search_memory_for_chat("recall reinforce", limit=3, include_turns=False)
         )
