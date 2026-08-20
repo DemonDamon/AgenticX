@@ -69,7 +69,7 @@ def test_bash_exec_non_whitelisted_command_requires_confirmation(monkeypatch) ->
     monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
 
     result = agent_tools.dispatch_tool("bash_exec", {"command": "rm -rf /tmp/demo"}, StudioSession())
-    assert result == "CANCELLED: user denied non-whitelisted command"
+    assert result == "CANCELLED: 非白名单命令未执行（用户拒绝）"
     assert called["run"] is False
 
 
@@ -103,7 +103,7 @@ def test_bash_exec_python_dash_c_requires_confirmation(monkeypatch) -> None:
         {"command": "python -c \"print('hi')\""},
         StudioSession(),
     )
-    assert result == "CANCELLED: user denied high-risk command"
+    assert result == "CANCELLED: 高风险命令未执行（用户拒绝）"
     assert called["run"] is False
 
 
@@ -396,7 +396,7 @@ def test_bash_exec_python_workspace_script_requires_confirmation(monkeypatch, tm
         {"command": "python script.py"},
         StudioSession(),
     )
-    assert result == "CANCELLED: user denied high-risk command"
+    assert result == "CANCELLED: 高风险命令未执行（用户拒绝）"
     assert called["run"] is False
 
 
@@ -412,7 +412,7 @@ def test_file_write_denied_by_confirmation(monkeypatch, tmp_path: Path) -> None:
         StudioSession(),
     )
 
-    assert result == "CANCELLED: user denied file write"
+    assert result == "CANCELLED: 文件未写入（用户拒绝）"
     assert target.read_text(encoding="utf-8") == "old"
 
 
@@ -428,7 +428,7 @@ def test_file_edit_denied_by_confirmation(monkeypatch, tmp_path: Path) -> None:
         StudioSession(),
     )
 
-    assert result == "CANCELLED: user denied file edit"
+    assert result == "CANCELLED: 文件未修改（用户拒绝）"
     assert target.read_text(encoding="utf-8") == "hello world"
 
 

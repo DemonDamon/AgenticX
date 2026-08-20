@@ -2512,8 +2512,12 @@ def _cancelled(what: str, confirm_gate: ConfirmGate) -> str:
     不存在的点击；等待超时同理。原因由 _confirm 在拒绝时挂到 gate 上。
     """
 
-    note = str(getattr(confirm_gate, "last_denial_note", "") or "用户拒绝")
-    return f"CANCELLED: {what}（{note}）"
+    note = getattr(confirm_gate, "last_denial_note", "")
+    # 只认真正的字符串。gate 可能是测试替身或第三方实现，getattr 拿回来的东西直接
+    # str() 会把 <MagicMock ...> 这种原样拼进给模型看的工具结果里。
+    if not isinstance(note, str) or not note.strip():
+        note = "用户拒绝"
+    return f"CANCELLED: {what}（{note.strip()}）"
 
 
 async def _confirm(

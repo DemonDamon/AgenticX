@@ -195,7 +195,7 @@ async def test_bg_reuses_safety_gate(monkeypatch: pytest.MonkeyPatch) -> None:
         confirm_gate=MagicMock(),
         emit_event=None,
     )
-    assert "CANCELLED: user denied non-whitelisted command" in out
+    assert "CANCELLED: 非白名单命令未执行" in out
 
 
 def test_bg_session_id_reads_underscore_prefixed_attribute() -> None:
