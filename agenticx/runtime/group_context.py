@@ -7,7 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, List
+from typing import Any, List, Mapping, Sequence
 
 
 @dataclass
@@ -68,18 +68,27 @@ class GroupChatContext:
             }
         )
 
-    def append_agent(self, *, agent_id: str, agent_name: str, text: str, avatar_url: str = "") -> None:
-        self._history().append(
-            {
-                "role": "assistant",
-                "content": str(text or ""),
-                "sender_id": str(agent_id or ""),
-                "sender_name": str(agent_name or "") or str(agent_id or ""),
-                "agent_id": str(agent_id or ""),
-                "avatar_name": str(agent_name or "") or str(agent_id or ""),
-                "avatar_url": str(avatar_url or ""),
-            }
-        )
+    def append_agent(
+        self,
+        *,
+        agent_id: str,
+        agent_name: str,
+        text: str,
+        avatar_url: str = "",
+        attachments: Sequence[Mapping[str, Any]] | None = None,
+    ) -> None:
+        row: dict[str, Any] = {
+            "role": "assistant",
+            "content": str(text or ""),
+            "sender_id": str(agent_id or ""),
+            "sender_name": str(agent_name or "") or str(agent_id or ""),
+            "agent_id": str(agent_id or ""),
+            "avatar_name": str(agent_name or "") or str(agent_id or ""),
+            "avatar_url": str(avatar_url or ""),
+        }
+        if attachments:
+            row["attachments"] = [dict(item) for item in attachments]
+        self._history().append(row)
 
     def recent(self) -> List[GroupMessage]:
         out: List[GroupMessage] = []

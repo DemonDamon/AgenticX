@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
-import { ImBubble } from "./ImBubble";
+import { ChatImAvatar, ImBubble } from "./ImBubble";
 
 const baseVisible = {
   hideActions: false,
@@ -52,6 +52,17 @@ describe("shouldShowAssistantIconButtons", () => {
       })
     ).toBe(true);
   });
+
+  it("keeps group committed reply actions while the session is still busy", () => {
+    expect(
+      shouldShowAssistantIconButtons({
+        ...baseVisible,
+        sessionBusy: true,
+        isLastAssistantInPane: true,
+        keepActionsWhileBusy: true,
+      })
+    ).toBe(true);
+  });
 });
 
 const baseFollowups = {
@@ -98,28 +109,122 @@ describe("shouldShowAssistantFollowups", () => {
   it("hides followups when assistant body is empty", () => {
     expect(shouldShowAssistantFollowups({ ...baseFollowups, hasBody: false })).toBe(false);
   });
+
+  it("keeps group committed reply followups while the session is still busy", () => {
+    expect(
+      shouldShowAssistantFollowups({
+        ...baseFollowups,
+        sessionBusy: true,
+        isLastAssistantInPane: true,
+        keepActionsWhileBusy: true,
+      })
+    ).toBe(true);
+  });
 });
 
 describe("ImBubble group expert identity", () => {
-  it("shows a prominent expert label without avatar chrome when showSenderIdentity", () => {
+  it("shows digital expert avatar and compact solid bubble in group chat", () => {
     const html = renderToStaticMarkup(
       <ImBubble
         message={{
-          id: "expert-1",
+          id: "g1",
           role: "assistant",
-          content: "收到，按 T1–T5 拆解。\n\n## 结论\n1. T1\n2. T2",
-          avatarName: "架构师·阿析",
+          content: "结论：建议采用方案 A。",
+          avatarName: "架构师",
+          avatarUrl: "https://example.test/avatar.png",
         }}
         showSenderIdentity
-        senderAvatarId="avatar-architect"
-        assistantName="架构师·阿析"
+        senderAvatarId="architect"
+        assistantName="架构师"
+        assistantAvatarUrl="https://example.test/avatar.png"
       />,
     );
+    expect(html).toContain("agx-im-avatar");
+    expect(html).toContain("https://example.test/avatar.png");
+    expect(html).toContain("agx-im-group-bubble");
+    expect(html).toContain("架构师");
+    expect(html).toContain("结论：建议采用方案 A。");
+    expect(html).not.toContain("展开");
+    expect(html).not.toContain("折叠");
+  });
 
-    expect(html).toContain("架构师·阿析");
-    expect(html).toContain("折叠");
-    expect(html).toContain("border-color:");
-    expect(html).not.toContain("agx-im-avatar");
+  it("keeps copy/quote on a group reply while the session is still running", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "g-busy",
+          role: "assistant",
+          content: "结论：今天可以出门。",
+          avatarName: "途鉴",
+        }}
+        showSenderIdentity
+        senderAvatarId="tujian"
+        assistantName="途鉴"
+        sessionBusy
+        isLastAssistantInPane
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onFavoriteMessage={() => {}}
+      />,
+    );
+    expect(html).toContain("agx-assistant-action-icons");
+    expect(html).toContain("lucide-copy");
+    expect(html).toContain("lucide-quote");
+    expect(html).toContain("lucide-bookmark");
+  });
+
+  it("still hides Meta last-assistant actions while the session is busy", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "meta-busy",
+          role: "assistant",
+          content: "我来帮你看一下这段代码。",
+        }}
+        assistantName="Near"
+        sessionBusy
+        isLastAssistantInPane
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onFavoriteMessage={() => {}}
+      />,
+    );
+    expect(html).not.toContain("agx-assistant-action-icons");
+    expect(html).not.toContain("lucide-copy");
+  });
+
+  it("keeps Meta single chat free of group avatar chrome", () => {
+    const metaHtml = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "meta-1",
+          role: "assistant",
+          content: "我来帮你看一下这段代码。",
+        }}
+        assistantName="Near"
+      />,
+    );
+    expect(metaHtml).toContain("我来帮你看一下这段代码。");
+    expect(metaHtml).not.toContain("agx-im-avatar");
+    expect(metaHtml).not.toContain("agx-im-group-bubble");
+  });
+});
+
+describe("ChatImAvatar", () => {
+  it("renders an image with the sm size class", () => {
+    const html = renderToStaticMarkup(
+      <ChatImAvatar label="调研" imageUrl="https://example.test/r.png" size="sm" />,
+    );
+    expect(html).toContain("agx-im-avatar");
+    expect(html).toContain("h-7 w-7");
+    expect(html).toContain("https://example.test/r.png");
+  });
+
+  it("keeps the default md size at 32px", () => {
+    const html = renderToStaticMarkup(<ChatImAvatar label="N" />);
+    expect(html).toContain("agx-im-avatar");
+    expect(html).toContain("h-8 w-8");
+    expect(html).toContain("N");
   });
 });
 

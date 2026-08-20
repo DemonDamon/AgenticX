@@ -95,9 +95,9 @@ export const ASSISTANT_TIMELINE_PX = {
 export const ASSISTANT_INLINE_CARD_SHELL_CLASS =
   "my-2 ml-3 min-w-0 w-full max-w-[min(calc(100%-0.75rem),520px)]";
 
-/** Group chat: same content inset as Meta (no avatar column). */
+/** Group chat: sit inside GroupSenderRail; do not add a second left gutter. */
 export const GROUP_INLINE_CARD_SHELL_CLASS =
-  "my-2 ml-3 min-w-0 w-full max-w-[min(calc(100%-0.75rem),520px)]";
+  "my-1 min-w-0 w-full max-w-[520px]";
 
 /** Uniform vertical gap: body → icon row → follow-up chips (matches composer pt-2.5 rhythm). */
 export const ASSISTANT_ACTION_RHYTHM_GAP_CLASS = "gap-2.5";

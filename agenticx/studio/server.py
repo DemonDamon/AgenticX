@@ -3110,10 +3110,21 @@ def create_studio_app() -> FastAPI:
                                 "tool_name": str(getattr(reply, "tool_name", "") or ""),
                                 "tool_phase": str(getattr(reply, "tool_phase", "") or ""),
                                 "tool_call_id": str(getattr(reply, "tool_call_id", "") or ""),
+                                "tool_detail": str(getattr(reply, "tool_detail", "") or ""),
                                 "clarify_options": list(getattr(reply, "clarify_options", None) or []),
                                 "clarify_allow_free_text": bool(
                                     getattr(reply, "clarify_allow_free_text", True)
                                 ),
+                                "artifacts": [
+                                    {
+                                        "name": item.name,
+                                        "mime_type": item.mime_type,
+                                        "size": item.size,
+                                        "source_path": item.source_path,
+                                        "reference_token": True,
+                                    }
+                                    for item in (getattr(reply, "artifacts", None) or [])
+                                ],
                             },
                         )
                         await _emit_group_event(evt)

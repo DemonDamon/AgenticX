@@ -102,8 +102,16 @@ import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
 import { ReactWorkCollapse } from "./messages/ReactWorkCollapse";
 import { StallWaitChip } from "./messages/StallWaitChip";
 import { parseStallWaitPayload, type StallWaitInfo } from "../utils/stall-wait-chip";
+import { parseGroupArtifacts } from "../utils/group-artifacts";
+import {
+  hasActiveGroupExpertActivities,
+  reduceGroupExpertActivity,
+  sortGroupExpertActivities,
+  type GroupExpertActivity,
+} from "../utils/group-expert-activity";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
+import { GroupExpertActivityCard } from "./messages/GroupExpertActivityCard";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
 import {
   ASSISTANT_ACTION_ICON_ROW_CLASS,
@@ -2821,7 +2829,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const isDedicatedAvatarPane =
     Boolean(pane?.avatarId) && !isGroupPane && !isAutomationTaskPane;
   const showInlineAssistantModelBadge =
-    !isMachiMetaPane && !isDedicatedAvatarPane && !isAutomationTaskPane;
+    !isMachiMetaPane &&
+    !isDedicatedAvatarPane &&
+    !isAutomationTaskPane &&
+    !isGroupPane;
   const groupChatId = isGroupPane && pane?.avatarId ? pane.avatarId.slice("group:".length) : "";
   const activeGroup = useMemo(
     () => (isGroupPane ? groups.find((g) => g.id === groupChatId) : undefined),
@@ -2985,6 +2996,45 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [groupTyping, setGroupTyping] = useState<Record<string, string>>({});
   /** One-line activity hint per group member (tool progress); not a chat message. */
   const [groupActivityHint, setGroupActivityHint] = useState<Record<string, string>>({});
+  const [groupExpertActivities, setGroupExpertActivities] = useState<
+    Record<string, GroupExpertActivity>
+  >({});
+  const [activityClockNow, setActivityClockNow] = useState(() => Date.now());
+  const applyGroupActivityEvent = useCallback(
+    (agentId: string, event: Parameters<typeof reduceGroupExpertActivity>[1]) => {
+      setGroupExpertActivities((prev) => ({
+        ...prev,
+        [agentId]: reduceGroupExpertActivity(prev[agentId], event),
+      }));
+    },
+    [],
+  );
+  const clearGroupActivity = useCallback((agentId: string) => {
+    setGroupExpertActivities((prev) => {
+      if (!(agentId in prev)) return prev;
+      const next = { ...prev };
+      delete next[agentId];
+      return next;
+    });
+  }, []);
+  const resumeGroupActivityThinking = useCallback((agentId: string) => {
+    const id = String(agentId ?? "").trim();
+    if (!id) return;
+    setGroupExpertActivities((prev) => {
+      const current = prev[id];
+      if (!current) return prev;
+      return {
+        ...prev,
+        [id]: reduceGroupExpertActivity(current, {
+          type: "typing",
+          agentId: id,
+          avatarName: current.avatarName,
+          avatarUrl: current.avatarUrl,
+          now: Date.now(),
+        }),
+      };
+    });
+  }, []);
   const groupActiveAgentIds = useMemo(
     () => Array.from(new Set([...Object.keys(groupTyping), ...Object.keys(groupActivityHint)])),
     [groupTyping, groupActivityHint],
@@ -3122,7 +3172,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setAtQuery("");
     setAtCandidates([]);
     setAtBrowse(null);
+    setGroupExpertActivities({});
   }, [pane.sessionId]);
+  useEffect(() => {
+    if (!hasActiveGroupExpertActivities(groupExpertActivities)) return;
+    const id = window.setInterval(() => setActivityClockNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [groupExpertActivities]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [taskspaceAutoRefreshKey, setTaskspaceAutoRefreshKey] = useState(0);
   const [taskspaceWidth, setTaskspaceWidth] = useState(() => {
@@ -6879,6 +6935,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (isCurrent()) {
           setStreamedAssistantText("");
           syncStreamingUiForCurrentSession();
+          setGroupExpertActivities({});
         }
         await mergeTailFromDisk(sid);
       }
@@ -7129,6 +7186,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       setStreamedAssistantText("⏹ 正在中断...");
       setStreaming(false);
       setStreamingSessionId("");
+      setGroupExpertActivities({});
     }
 
     try {
@@ -7794,6 +7852,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     setSelectedSubAgent(agentId);
   };
 
+  const handleSubmitClarification = useCallback(
+    (
+      requestId: string,
+      answer: { answerText: string; selectedOptions: string[] },
+      sessionId?: string,
+      agentId?: string,
+    ) => {
+      if (agentId) resumeGroupActivityThinking(agentId);
+      return onSubmitClarification?.(requestId, answer, sessionId, agentId) ?? false;
+    },
+    [onSubmitClarification, resumeGroupActivityThinking],
+  );
+
   const renderedMessages = useMemo(() => {
     const reactActionStyle = getAssistantActionStyle({ inReActRow: true });
     const renderGroupedRow = (
@@ -7928,7 +7999,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               streamStalledSeconds={message.id === "__stream__" ? silentSeconds : 0}
               onSkillManageApply={applySkillPatchPreview}
               onOpenClarification={onOpenClarification}
-              onSubmitClarification={onSubmitClarification}
+              onSubmitClarification={handleSubmitClarification}
               onResolveActionConfirmation={(confirmation, decision) =>
                 void resolveActionConfirmation(confirmation, decision, "button")
               }
@@ -8236,32 +8307,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return (
     <>
       {mainRows}
-      {Object.entries(groupTyping).map(([agentId, name]) => {
-        const typingSender = resolveGroupSender({
-          role: "assistant",
-          avatarName: name,
-          avatarUrl: undefined,
-          agentId,
-        });
-        const activityHint = String(groupActivityHint[agentId] ?? "").trim();
-        return (
-          <ImBubble
-            key={`typing-${agentId}`}
-            message={{
-              id: `typing-${agentId}`,
-              role: "assistant",
-              content: activityHint,
-              avatarName: name,
-              agentId,
-            }}
-            assistantName={typingSender.name}
-            assistantAvatarUrl={typingSender.url}
-            showSenderIdentity={isGroupPane}
-            senderAvatarVariant="rounded-square"
-            senderAvatarId={typingSender.avatarId}
-          />
-        );
-      })}
+      {sortGroupExpertActivities(groupExpertActivities).map((activity) => (
+        <GroupExpertActivityCard
+          key={activity.agentId}
+          activity={activity}
+          now={activityClockNow}
+        />
+      ))}
       {((sessionWorkInProgress && !isStreamingCurrentSession) || midTurnStreamActivity) &&
       !isGroupPane ? (
         <div className={useReActImLayout ? "-mt-2" : undefined}>
@@ -8356,7 +8408,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupTyping, groupActivityHint, groupedVisibleMessages, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -9204,6 +9256,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     };
     clearStopSuppressForSession(requestSessionId);
     setRunGuardSessionId(requestSessionId);
+    setGroupExpertActivities({});
     setSessionExecutionState("running");
     prevExecutionStateBySidRef.current[requestSessionId] = "running";
     useAppStore.getState().markSessionHistoryActive(requestSessionId);
@@ -9731,7 +9784,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "group_typing") {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
+              const rawUrl = String(payload.data?.avatar_url ?? "").trim();
+              const sender = resolveGroupSender({
+                role: "assistant",
+                avatarName,
+                avatarUrl: rawUrl || undefined,
+                agentId: eventAgentId,
+              });
               setGroupTyping((prev) => ({ ...prev, [eventAgentId]: avatarName }));
+              applyGroupActivityEvent(eventAgentId, {
+                type: "typing",
+                agentId: eventAgentId,
+                avatarName: sender.name,
+                avatarUrl: sender.url,
+                now: Date.now(),
+              });
               setGroupMemberPhase((prev) => {
                 if (!(eventAgentId in prev)) return prev;
                 const next = { ...prev };
@@ -9776,6 +9843,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 delete next[eventAgentId];
                 return next;
               });
+              const progressSender = resolveGroupSender({
+                role: "assistant",
+                avatarName,
+                avatarUrl: String(payload.data?.avatar_url ?? "").trim() || undefined,
+                agentId: eventAgentId,
+              });
+              applyGroupActivityEvent(eventAgentId, {
+                type: "progress",
+                agentId: eventAgentId,
+                avatarName: progressSender.name,
+                avatarUrl: progressSender.url,
+                content: progressText,
+                toolName,
+                toolPhase: phase,
+                toolCallId: callId,
+                toolDetail: String(payload.data?.tool_detail ?? "").trim(),
+                now: Date.now(),
+              });
               continue;
             }
             if (payload.type === "group_blocked") {
@@ -9784,6 +9869,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const blockedText =
                 String(payload.data?.content ?? "").trim() || "等待确认后继续执行";
               const requestId = String(payload.data?.confirm_request_id ?? "").trim();
+              const blockedSender = resolveGroupSender({
+                role: "assistant",
+                avatarName,
+                avatarUrl: avatarUrl || undefined,
+                agentId: eventAgentId,
+              });
+              applyGroupActivityEvent(eventAgentId, {
+                type: "blocked",
+                agentId: eventAgentId,
+                avatarName: blockedSender.name,
+                avatarUrl: blockedSender.url,
+                content: blockedText,
+                now: Date.now(),
+              });
               setGroupTyping((prev) => {
                 const next = { ...prev };
                 delete next[eventAgentId];
@@ -9853,6 +9952,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const prompt =
                 String(payload.data?.content ?? "").trim() || "等待你的输入后继续";
               const requestId = String(payload.data?.confirm_request_id ?? "").trim();
+              const clarifySender = resolveGroupSender({
+                role: "assistant",
+                avatarName,
+                avatarUrl: avatarUrl || undefined,
+                agentId: eventAgentId,
+              });
+              applyGroupActivityEvent(eventAgentId, {
+                type: "clarification",
+                agentId: eventAgentId,
+                avatarName: clarifySender.name,
+                avatarUrl: clarifySender.url,
+                content: prompt,
+                now: Date.now(),
+              });
               const rawOptions = payload.data?.clarify_options;
               const options = Array.isArray(rawOptions)
                 ? rawOptions.map((o) => String(o)).filter(Boolean)
@@ -9928,6 +10041,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 delete next[eventAgentId];
                 return next;
               });
+              clearGroupActivity(eventAgentId);
               if (errorText.trim()) {
                 setGroupMemberPhase((prev) => ({ ...prev, [eventAgentId]: "failed" }));
               } else {
@@ -9938,6 +10052,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   return next;
                 });
               }
+              const artifacts = parseGroupArtifacts(payload.data?.artifacts);
               if (content.trim()) {
                 addPaneMessageIfSessionActive(
                   pane.id,
@@ -9946,7 +10061,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   eventAgentId,
                   chatProvider,
                   chatModel,
-                  undefined,
+                  artifacts,
                   { avatarName, avatarUrl: avatarUrl || undefined }
                 );
               } else if (errorText.trim()) {
@@ -9996,6 +10111,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 delete next[eventAgentId];
                 return next;
               });
+              clearGroupActivity(eventAgentId);
               continue;
             }
             // Graph Runtime events → Run Graph panel store (do not render as chat bubbles).
@@ -10059,6 +10175,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 delete next[eventAgentId];
                 return next;
               });
+              if (wfAction === "message.assistant") {
+                clearGroupActivity(eventAgentId);
+              }
               if (wfAction === "message.assistant" && wfContent) {
                 // Route assistant messages to the message area (visible to user)
                 const avatarName = String(wfData.avatar_name ?? eventAgentId);
@@ -11316,6 +11435,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         setGroupTyping({});
         setGroupActivityHint({});
         setGroupMemberPhase({});
+        setGroupExpertActivities({});
         setContextFiles({});
         if (!abortController.signal.aborted) {
           useAppStore.getState().clearSessionHistoryHint(requestSessionId);
@@ -11827,6 +11947,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       chatProvider,
       chatModel
     );
+    if (approved) resumeGroupActivityThinking(confirm.agentId);
+    else clearGroupActivity(confirm.agentId);
     try {
       await fetch(`${apiBase}/api/confirm`, {
         method: "POST",

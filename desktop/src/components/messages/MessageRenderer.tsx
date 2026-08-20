@@ -29,6 +29,7 @@ import { BudgetExceededCard } from "./BudgetExceededCard";
 import { WidgetBlock } from "./WidgetBlock";
 import { ClarificationCard } from "./ClarificationCard";
 import { InlineConfirmCard } from "./InlineConfirmCard";
+import { GroupSenderRail } from "./GroupSenderRail";
 import { parseWidgetPayload, isBrokenStockChartAttempt, stockChartDegradedMessage } from "./widget-preview";
 import { parseContextNotice } from "../../utils/context-notice";
 import { parseBudgetExceededFromText } from "../../utils/budget-exceeded";
@@ -169,6 +170,37 @@ function GroupProgressLine({ message }: { message: Message }) {
       </span>
       <span className="min-w-0 break-words leading-[1.65]">{text}</span>
     </div>
+  );
+}
+
+function isExplicitGroupExpert(message: Message): boolean {
+  const agentId = String(message.agentId ?? "").trim();
+  return Boolean(agentId) && agentId !== "meta" && agentId !== "__meta__";
+}
+
+function wrapGroupIntervention(
+  show: boolean,
+  message: Message,
+  fallbackName: string | undefined,
+  fallbackAvatarUrl: string | undefined,
+  fallbackAvatarId: string | undefined,
+  children: ReactNode,
+): ReactNode {
+  if (!show || message.role !== "tool" || !isExplicitGroupExpert(message)) {
+    return children;
+  }
+  const name =
+    String(message.avatarName ?? "").trim() ||
+    String(fallbackName ?? "").trim() ||
+    String(message.agentId ?? "").trim();
+  return (
+    <GroupSenderRail
+      name={name}
+      avatarUrl={message.avatarUrl || fallbackAvatarUrl}
+      avatarId={fallbackAvatarId || message.agentId}
+    >
+      {children}
+    </GroupSenderRail>
   );
 }
 
@@ -445,7 +477,12 @@ export function MessageRenderer({
       }
     }
     if (message.actionConfirmation) {
-      return (
+      return wrapGroupIntervention(
+        showSenderIdentity,
+        message,
+        assistantName,
+        assistantAvatarUrl,
+        senderAvatarId,
         <InlineConfirmCard
           confirmation={message.actionConfirmation}
           groupChatRail={showSenderIdentity}
@@ -454,7 +491,7 @@ export function MessageRenderer({
               ? (confirmation, decision) => onResolveActionConfirmation(confirmation, decision)
               : async () => undefined
           }
-        />
+        />,
       );
     }
     if (message.clarificationPrompt) {
@@ -466,7 +503,12 @@ export function MessageRenderer({
         clarMeta && clarMeta.clarification_answered === true
           ? extractClarificationAnswerFromMeta(clarMeta)
           : null;
-      return (
+      return wrapGroupIntervention(
+        showSenderIdentity,
+        message,
+        assistantName,
+        assistantAvatarUrl,
+        senderAvatarId,
         <ClarificationCard
           prompt={message.clarificationPrompt}
           suspended={message.clarificationSuspended}
@@ -509,10 +551,10 @@ export function MessageRenderer({
                 }
               : undefined
           }
-        />
+        />,
       );
     }
-    return (
+    const toolCard = (
       <ToolCallCard
         message={message}
         highlightTerms={highlightTerms}
@@ -526,6 +568,18 @@ export function MessageRenderer({
         onSkillManageApply={onSkillManageApply}
       />
     );
+    const wrapToolCard =
+      message.toolStatus === "error" || Boolean(message.inlineConfirm);
+    return wrapToolCard
+      ? wrapGroupIntervention(
+          showSenderIdentity,
+          message,
+          assistantName,
+          assistantAvatarUrl,
+          senderAvatarId,
+          toolCard,
+        )
+      : toolCard;
   }
   return <SystemNotice text={message.content} />;
 }

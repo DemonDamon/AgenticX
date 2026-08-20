@@ -31,6 +31,10 @@ from agenticx.runtime.truncated_final import (
     detect_suspected_truncated_final,
 )
 from agenticx.studio.chat_attachments import materialize_message_lists_image_uploads
+from agenticx.workspace.loader import (
+    ensure_group_workspace,
+    resolve_default_session_workspace_dir,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -3310,16 +3314,21 @@ class SessionManager:
         *,
         avatar_workspace_dir: str | None = None,
     ) -> None:
-        """Set session workspace_dir from avatar override or per-session Meta default."""
-        from agenticx.workspace.loader import resolve_default_session_workspace_dir
-
+        """Set session workspace_dir from avatar override, group share, or Meta default."""
         avatar_raw = (avatar_workspace_dir or "").strip()
+        avatar_id_raw = str(getattr(managed, "avatar_id", "") or "").strip()
         if avatar_raw:
             resolved = resolve_default_session_workspace_dir(
-                avatar_workspace_dir=avatar_raw,
+                avatar_workspace_dir=avatar_raw
             )
-        elif not str(getattr(managed, "avatar_id", "") or "").strip():
-            # Meta sessions: isolate work under ~/.agenticx/taskspaces/<sid>/default
+        elif avatar_id_raw.startswith("group:"):
+            group_id = avatar_id_raw.removeprefix("group:").strip()
+            resolved = (
+                ensure_group_workspace(group_id)
+                if group_id
+                else Path(self._resolve_taskspace_root(managed.session_id, None))
+            )
+        elif not avatar_id_raw:
             resolved = Path(self._resolve_taskspace_root(managed.session_id, None))
         else:
             resolved = resolve_default_session_workspace_dir()

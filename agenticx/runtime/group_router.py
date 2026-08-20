@@ -10,9 +10,11 @@ import asyncio
 import inspect
 import json
 import logging
+import mimetypes
 import re
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Callable, Dict, List, Sequence
+from pathlib import Path
+from typing import Any, AsyncGenerator, Callable, Dict, List, Mapping, Sequence
 
 _log = logging.getLogger(__name__)
 
@@ -26,8 +28,10 @@ from agenticx.runtime.group_context import GroupChatContext
 from agenticx.runtime.group_facts import (
     GroupExecutionFacts,
     build_group_execution_facts,
+    changed_artifact_paths,
     format_zero_exec_fallback,
     render_facts_block,
+    scan_artifact_snapshot,
 )
 from agenticx.runtime.harden_flags import (
     group_intent_max_tokens,
@@ -47,6 +51,28 @@ META_LEADER_NAME = "组长"
 _META_EMPTY_REPLY_NOTICE = (
     "这轮我没有产出内容（模型回复长度上限可能被推理占满）。"
     "请再发一次，或直接 @ 对应成员派活，例如「@程基岩 先搭一个能飞能撞的原型」。"
+)
+_GROUP_CONTROL_PLANE_CONTRACT = (
+    "## 群聊控制面答复\n"
+    "- 默认 1–3 句：先结论，再给产物或下一步；不要复述其他成员。\n"
+    "- 没有独特增量且未被用户点名时，内部输出 __SKIP__。\n"
+    "- 工具过程由系统状态卡展示，正文不要写“正在调用工具 / 已回答 / 等待追问”。\n"
+    "- 长代码、长报告、详细表格优先写入群工作区，最终只给摘要和产物；用户明确要求全文贴群时例外。\n"
+    "- FINAL 表示本轮结束，禁止以“稍等 / 等我回复 / 我去处理”作为 FINAL。\n"
+)
+_EXECUTION_TURN_INSTRUCTION = (
+    "这是执行请求。你必须在本轮使用必要工具实际推进；FINAL 只能汇报本轮已经发生的事实。\n"
+    "禁止以“我去处理 / 稍等 / 等我回复 / 后续给你”结束本轮。"
+)
+_DEFERRED_PROMISE_REPLACEMENT = (
+    "本轮没有产生实际执行记录，不能让你继续空等。请重试，或明确指定要执行的专家。"
+)
+_UNVERIFIED_COMPLETION_NOTE = (
+    "\n\n（系统核验：本轮没有成功工具结果或产物记录，以上完成状态未被确认。）"
+)
+_ROUTE_SKIP_FALLBACK_INSTRUCTION = (
+    "被路由的成员没有提供有效回复。请只根据现有上下文给 1–2 句诚实兜底："
+    "能答就直接答；不能答就说明当前缺少什么。不要催成员、不要描述路由过程、不要 @ 人。"
 )
 # Max @-mention follow-up hops per user turn.
 # Can be overridden in ~/.agenticx/config.yaml under group_chat.mention_hops.
@@ -254,6 +280,74 @@ def _normalize_reply_text(text: str) -> str:
     return " ".join(str(text or "").split())
 
 
+def _looks_like_execution_request(text: str) -> bool:
+    """Heuristic: user is asking someone to actually do work this turn."""
+    normalized = " ".join(str(text or "").lower().split())
+    markers = (
+        "帮我做", "去做", "实现", "修改", "修复", "创建", "新建", "写入",
+        "保存", "落盘", "运行", "执行", "安装", "下载", "查仓库", "搜索并",
+        "生成", "build", "implement", "fix", "create", "write", "run", "install",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _cited_mention_requires_execution(text: str) -> bool:
+    """True when an @-assignment is telling the cited expert to actually do work."""
+    raw = str(text or "")
+    if _looks_like_execution_request(raw):
+        return True
+    return bool(re.search(r"`[^`]{8,}`", raw) or re.search(r"```[\s\S]{8,}?```", raw))
+
+
+def _parse_requires_execution(payload: Mapping[str, Any], user_input: str) -> bool:
+    """Honor an explicit JSON bool; otherwise fall back to the heuristic."""
+    if not isinstance(payload, Mapping) or "requires_execution" not in payload:
+        return _looks_like_execution_request(user_input)
+    raw = payload.get("requires_execution")
+    if isinstance(raw, bool):
+        return raw
+    return _looks_like_execution_request(user_input)
+
+
+def _tool_result_succeeded(data: Mapping[str, Any]) -> bool:
+    if data.get("success") is False:
+        return False
+    if str(data.get("error") or "").strip():
+        return False
+    return True
+
+
+def _looks_like_deferred_promise(text: str) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
+    markers = ("等我回复", "稍等", "我去处理", "后续给你", "完成后告诉你")
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_completion_claim(text: str) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
+    markers = ("已完成", "已修复", "已落地", "已经写入", "done", "completed")
+    return any(marker in normalized for marker in markers)
+
+
+def _apply_execution_evidence_gate(reply: "GroupReply") -> "GroupReply":
+    if reply.skipped or str(reply.error or "").strip():
+        return reply
+    has_evidence = int(getattr(reply, "successful_tool_results", 0) or 0) > 0 or bool(
+        getattr(reply, "artifacts", None)
+    )
+    if has_evidence:
+        return reply
+    text = str(reply.content or "")
+    if _looks_like_deferred_promise(text):
+        reply.content = _DEFERRED_PROMISE_REPLACEMENT
+        return reply
+    if _looks_like_completion_claim(text):
+        if "完成状态未被确认" not in text:
+            reply.content = text.rstrip() + _UNVERIFIED_COMPLETION_NOTE
+        return reply
+    return reply
+
+
 def _is_verbatim_duplicate(text: str, already_spoken: Sequence[str]) -> bool:
     """True when this reply is byte-identical (after whitespace collapse) to a
     reply already emitted in the same user turn.
@@ -366,8 +460,39 @@ class GroupReply:
     tool_name: str = ""
     tool_phase: str = ""  # "calling" | "done" | ""
     tool_call_id: str = ""
+    tool_detail: str = ""  # short command/path/query or one-line result; not raw args JSON
     clarify_options: List[str] = field(default_factory=list)
     clarify_allow_free_text: bool = True
+    successful_tool_results: int = 0
+    artifacts: list["GroupArtifact"] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GroupArtifact:
+    name: str
+    source_path: str
+    mime_type: str
+    size: int
+
+
+def _group_artifacts_from_paths(paths: Sequence[str]) -> list[GroupArtifact]:
+    artifacts: list[GroupArtifact] = []
+    for raw in paths:
+        path = Path(raw)
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        mime_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        artifacts.append(
+            GroupArtifact(
+                name=path.name,
+                source_path=str(path.resolve(strict=False)),
+                mime_type=mime_type,
+                size=int(st.st_size),
+            )
+        )
+    return artifacts
 
 
 @dataclass
@@ -375,6 +500,7 @@ class IntentDecision:
     action: str
     target_ids: List[str]
     reason: str
+    requires_execution: bool = False
 
 
 class GroupChatRouter:
@@ -628,6 +754,69 @@ class GroupChatRouter:
         return {"tool_name": tool_name, "tool_phase": phase, "tool_call_id": call_id}
 
     @staticmethod
+    def _clip_tool_detail(text: str, limit: int = 80) -> str:
+        compact = " ".join(str(text or "").split())
+        if not compact:
+            return ""
+        if len(compact) <= limit:
+            return compact
+        return compact[: limit - 1] + "…"
+
+    @staticmethod
+    def _preview_from_tool_args(tool_name: str, args: Mapping[str, Any]) -> str:
+        name = str(tool_name or "").strip()
+        if name in {"bash_exec", "shell", "bash"}:
+            return GroupChatRouter._clip_tool_detail(str(args.get("command") or args.get("cmd") or ""))
+        if name in {"file_read", "file_write", "file_edit"}:
+            path = str(args.get("path") or args.get("file") or "").strip()
+            base = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            return GroupChatRouter._clip_tool_detail(base or path)
+        if name in {"web_search", "knowledge_search", "session_search"}:
+            return GroupChatRouter._clip_tool_detail(
+                str(args.get("query") or args.get("q") or args.get("text") or "")
+            )
+        if name == "mcp_call":
+            return GroupChatRouter._clip_tool_detail(str(args.get("tool_name") or args.get("name") or ""))
+        for key in ("query", "path", "command", "url", "q", "text"):
+            val = str(args.get(key) or "").strip()
+            if val:
+                return GroupChatRouter._clip_tool_detail(val)
+        return ""
+
+    @staticmethod
+    def _preview_from_tool_result(raw: Any) -> str:
+        if raw is None:
+            return ""
+        if isinstance(raw, Mapping):
+            for key in ("text", "output", "stdout", "summary", "message"):
+                val = str(raw.get(key) or "").strip()
+                if val:
+                    return GroupChatRouter._clip_tool_detail(val)
+            return ""
+        text = str(raw).strip()
+        if text.startswith("{") and len(text) > 40:
+            return ""
+        return GroupChatRouter._clip_tool_detail(text)
+
+    @staticmethod
+    def _runtime_event_to_tool_detail(event_type: str, data: Dict[str, Any]) -> str:
+        """One-line preview for the folded activity list. Never dump full args/result."""
+        payload = data if isinstance(data, dict) else {}
+        args = payload.get("arguments") or payload.get("args") or {}
+        if not isinstance(args, Mapping):
+            args = {}
+        name = str(payload.get("name") or payload.get("tool_name") or "")
+        et = str(event_type or "")
+        if et == EventType.TOOL_CALL.value:
+            return GroupChatRouter._preview_from_tool_args(name, args)
+        if et == EventType.TOOL_RESULT.value:
+            preview = GroupChatRouter._preview_from_tool_result(
+                payload.get("result", payload.get("content", payload.get("text", "")))
+            )
+            return preview or GroupChatRouter._preview_from_tool_args(name, args)
+        return ""
+
+    @staticmethod
     def _graph_run_id_of(base_session: StudioSession) -> str:
         pad = getattr(base_session, "scratchpad", None)
         if not isinstance(pad, dict):
@@ -825,8 +1014,6 @@ class GroupChatRouter:
             speaker_id=reply.agent_id,
             group_avatar_ids=group_avatar_ids,
         ):
-            if tid in responded_this_turn:
-                continue
             if await self._should_stop(should_stop):
                 return
             for ge in self._project_a2a_message_edge(
@@ -864,6 +1051,11 @@ class GroupChatRouter:
                 should_stop=should_stop,
                 force_reply=True,
                 user_display_name=user_display_name,
+                extra_instruction=(
+                    _EXECUTION_TURN_INSTRUCTION
+                    if _cited_mention_requires_execution(reply.content)
+                    else ""
+                ),
             ):
                 yield sub_evt
                 if sub_evt.event_type in {"group_reply", "group_skipped"}:
@@ -1044,6 +1236,7 @@ class GroupChatRouter:
                 action="route_to",
                 target_ids=[str(x).strip() for x in explicit_targets if str(x).strip()],
                 reason="explicit_mention",
+                requires_execution=_looks_like_execution_request(user_input),
             )
         members = self._avatar_member_summary(group_avatar_ids)
         member_ids = {item["id"] for item in members}
@@ -1063,6 +1256,7 @@ class GroupChatRouter:
             "{\n"
             '  "action": "route_to" | "meta_direct" | "continue_thread" | "open_floor",\n'
             '  "target_ids": ["avatar_id"],\n'
+            '  "requires_execution": true,\n'
             '  "reason": "short_reason"\n'
             "}\n\n"
             f"群成员:\n{GroupChatContext.render_members_summary(members)}\n\n"
@@ -1078,7 +1272,10 @@ class GroupChatRouter:
             "并在 target_ids 里按相关性给出 1–2 个最可能想搭话的成员（可以为空）。\n"
             "- open_floor 表示「把话丢进群里，谁想接谁接」，成员有权不接；"
             "不要为了有人回答而硬选一个不相关的成员。\n"
-            "- 有明确专业问题或可执行诉求、但没点名时，仍然 route_to 最可能成员。"
+            "- 有明确专业问题或可执行诉求、但没点名时，仍然 route_to 最可能成员。\n"
+            "- requires_execution=true：创建、修改、运行、安装、下载、搜索核验、写文件、查仓库、生成产物。\n"
+            "- requires_execution=false：解释概念、打招呼、观点讨论、读取已有上下文即可回答。\n"
+            "- 用户问「进度如何」本身不是新执行请求 => requires_execution=false。"
         )
         try:
             text = await self._call_llm_text(
@@ -1089,22 +1286,26 @@ class GroupChatRouter:
                 max_tokens=group_intent_max_tokens(),
             )
         except Exception:
+            fallback_exec = _looks_like_execution_request(user_input)
             if active_thread is not None and active_thread.partner_id in member_ids:
                 return IntentDecision(
                     action="continue_thread",
                     target_ids=[active_thread.partner_id],
                     reason="intent_fallback_active_thread",
+                    requires_execution=fallback_exec,
                 )
             if members:
                 return IntentDecision(
                     action="route_to",
                     target_ids=[members[0]["id"]],
                     reason="intent_fallback_first_member",
+                    requires_execution=fallback_exec,
                 )
             return IntentDecision(
                 action="meta_direct",
                 target_ids=[],
                 reason="intent_fallback_meta_direct",
+                requires_execution=fallback_exec,
             )
         payload = self._extract_json_object(text)
         if not payload:
@@ -1136,7 +1337,13 @@ class GroupChatRouter:
         if action == "route_to" and not target_ids and members:
             target_ids = [members[0]["id"]]
             reason = f"{reason}|fallback_first_member"
-        return IntentDecision(action=action, target_ids=target_ids, reason=reason)
+        requires_execution = _parse_requires_execution(payload, user_input)
+        return IntentDecision(
+            action=action,
+            target_ids=target_ids,
+            reason=reason,
+            requires_execution=requires_execution,
+        )
 
     async def _run_meta_project_manager_reply(
         self,
@@ -1180,6 +1387,7 @@ class GroupChatRouter:
             "- 若某成员列在「从未执行过」，必须明说该成员还没开始，禁止描述其产出、完成度或草稿状态。\n"
             "- 无产出文件时，禁止给出「已跑通」「写了一半」「出了第一版」这类具体完成度描述。\n"
             "- 你自己或他人在历史消息里的「计划 / 安排 / 将要」不等于已执行，不得当作进展复述。\n\n"
+            f"{_GROUP_CONTROL_PLANE_CONTRACT}\n"
             f"最近群聊上下文:\n{context.render_recent_dialogue()}\n\n"
             f"用户问题:\n{local_user_input}\n\n"
             f"{extra_instruction.strip()}\n"
@@ -1226,6 +1434,7 @@ class GroupChatRouter:
         force_reply: bool,
         user_display_name: str = "我",
         progress_queue: asyncio.Queue[GroupReply] | None = None,
+        extra_instruction: str = "",
     ) -> GroupReply:
         addressing = self._group_user_addressing_rules(user_display_name)
         if avatar_id == META_LEADER_AGENT_ID:
@@ -1263,6 +1472,7 @@ class GroupChatRouter:
         local_session.workspace_dir = getattr(base_session, "workspace_dir", None)
         local_session.context_files = dict(getattr(base_session, "context_files", {}) or {})
         local_session.taskspaces = list(getattr(base_session, "taskspaces", []) or [])
+        artifact_before = scan_artifact_snapshot(local_session.taskspaces)
         setattr(local_session, "_team_manager", getattr(base_session, "_team_manager", None))
         setattr(local_session, "_session_manager", getattr(base_session, "_session_manager", None))
         setattr(local_session, "__group_chat_mode", True)
@@ -1270,7 +1480,8 @@ class GroupChatRouter:
 
         dialogue_context = context.render_recent_dialogue()
         force_rule = (
-            "- 本轮用户明确点名你，你必须给出明确回复。\n"
+            "- 本轮用户明确点名你，你必须给出明确回复；"
+            "即使暂无增量，也要短答「目前没有新增结论」并说明原因，不得输出 __SKIP__。\n"
             if force_reply
             else "- 若本轮问题与你职责无关，请只输出 __SKIP__（不要输出任何解释）。\n"
         )
@@ -1299,6 +1510,14 @@ class GroupChatRouter:
             "- 查看「最近群聊上下文」，若已有成员提出了相同的澄清问题，不要重复；"
             "给出你独特的专业判断、不同视角，或主动用工具查找答案。\n"
             "- 当你能通过搜索等工具找到答案时，优先研究后直接给出结论，而非反问用户。\n\n"
+            f"{_GROUP_CONTROL_PLANE_CONTRACT}\n"
+            "## 群共享工作区\n"
+            f"- 当前工作目录：{getattr(base_session, 'workspace_dir', None) or ''}\n"
+            "- 需要交付长文、代码、数据时写入该目录或已绑定 taskspace。\n"
+            "- FINAL 只需给 1–3 句结论；系统会自动把本轮新增/修改文件显示为产物芯片。\n"
+            "- 不要伪造路径，不要把未写成的文件说成已交付。\n"
+            "- 用户明确要求全文贴群时，按用户要求直接回答。\n"
+            f"{str(extra_instruction or '').strip()}\n"
             f"## 你的长期指令\n{avatar_prompt or '(无)'}\n\n"
             f"## 最近群聊上下文\n{dialogue_context}\n"
         )
@@ -1354,6 +1573,7 @@ class GroupChatRouter:
             )
         final_text = ""
         error_text = ""
+        successful_tool_results = 0
         async for event in runtime.run_turn(
             local_user_input,
             local_session,
@@ -1374,6 +1594,7 @@ class GroupChatRouter:
                         else ""
                     )
                     tool_step = self._runtime_event_to_tool_step(event.type, event.data)
+                    tool_detail = self._runtime_event_to_tool_detail(event.type, event.data)
                     raw_opts = event.data.get("options") if group_evt_type == "group_clarification" else None
                     clarify_options = (
                         [str(o).strip() for o in raw_opts if str(o).strip()]
@@ -1396,14 +1617,20 @@ class GroupChatRouter:
                             tool_name=tool_step.get("tool_name", ""),
                             tool_phase=tool_step.get("tool_phase", ""),
                             tool_call_id=tool_step.get("tool_call_id", ""),
+                            tool_detail=tool_detail,
                             clarify_options=clarify_options,
                             clarify_allow_free_text=event.data.get("allow_free_text") is not False,
                         )
                     )
+            if event.type == EventType.TOOL_RESULT.value:
+                data = event.data if isinstance(event.data, Mapping) else {}
+                if _tool_result_succeeded(data):
+                    successful_tool_results += 1
             if event.type == EventType.FINAL.value:
                 final_text = str(event.data.get("text", "") or "").strip()
             elif event.type == EventType.ERROR.value:
                 error_text = str(event.data.get("text", "") or "").strip()
+        artifact_after = scan_artifact_snapshot(local_session.taskspaces)
         skipped = (not final_text) or final_text == "__SKIP__"
         if skipped and not error_text:
             return GroupReply(
@@ -1424,6 +1651,9 @@ class GroupChatRouter:
                 error=error_text,
                 event_type="group_reply",
             )
+        artifacts = _group_artifacts_from_paths(
+            changed_artifact_paths(artifact_before, artifact_after)
+        )
         reply = GroupReply(
             agent_id=avatar_id,
             avatar_name=avatar_name,
@@ -1431,12 +1661,27 @@ class GroupChatRouter:
             content=final_text,
             skipped=False,
             event_type="group_reply",
+            successful_tool_results=successful_tool_results,
+            artifacts=artifacts,
         )
+        reply = _apply_execution_evidence_gate(reply)
+        attachments = [
+            {
+                "name": item.name,
+                "mime_type": item.mime_type,
+                "size": item.size,
+                "source_path": item.source_path,
+                "reference_token": True,
+                "kind": "context_file",
+            }
+            for item in artifacts
+        ]
         context.append_agent(
             agent_id=avatar_id,
             agent_name=avatar_name,
-            text=final_text,
+            text=reply.content,
             avatar_url=avatar_url,
+            attachments=attachments or None,
         )
         return reply
 
@@ -1453,6 +1698,7 @@ class GroupChatRouter:
         should_stop: Callable[[], Any],
         force_reply: bool,
         user_display_name: str = "我",
+        extra_instruction: str = "",
     ) -> AsyncGenerator[GroupReply, None]:
         """Stream target progress events, then final reply/skipped."""
         queue: asyncio.Queue[GroupReply] = asyncio.Queue()
@@ -1469,6 +1715,7 @@ class GroupChatRouter:
                 force_reply=force_reply,
                 user_display_name=user_display_name,
                 progress_queue=queue,
+                extra_instruction=extra_instruction,
             )
         )
         while not task.done():
@@ -1640,6 +1887,7 @@ class GroupChatRouter:
                 action="route_to",
                 target_ids=list(explicit),
                 reason=f"{decision.reason}|explicit_member_override",
+                requires_execution=decision.requires_execution,
             )
         if decision.action == "meta_direct":
             context.clear_active_thread()
@@ -1662,7 +1910,9 @@ class GroupChatRouter:
                     "不要描述任何产出或完成度。\n"
                     + extra_instruction
                 )
-            if group_meta_direct_tools_enabled():
+            must_execute = bool(decision.requires_execution)
+            use_runtime = must_execute or group_meta_direct_tools_enabled()
+            if use_runtime:
                 pm = None
                 async for pm_evt in self._run_one_target_stream(
                     base_session=base_session,
@@ -1675,6 +1925,9 @@ class GroupChatRouter:
                     should_stop=should_stop,
                     force_reply=True,
                     user_display_name=user_display_name,
+                    extra_instruction=(
+                        _EXECUTION_TURN_INSTRUCTION if must_execute else ""
+                    ),
                 ):
                     if (
                         zero_exec_progress
@@ -1831,7 +2084,7 @@ class GroupChatRouter:
         if explicit:
             primary_targets = [x for x in primary_targets if x in explicit]
         else:
-            primary_targets = primary_targets[:2]
+            primary_targets = primary_targets[:1]
         # H2A fan-out: project human→agent MESSAGE edges for God-View.
         if primary_targets:
             for ge in self._project_h2a_fanout(
@@ -1894,101 +2147,6 @@ class GroupChatRouter:
                 )
         if any_success:
             return
-        nudge_target = primary_targets[0] if primary_targets else ""
-        if not nudge_target:
-            yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
-            if await self._should_stop(should_stop):
-                return
-            pm = await self._run_meta_project_manager_reply(
-                base_session=base_session,
-                context=context,
-                group_name=group_name,
-                user_input=user_input,
-                quoted_content=quoted_content,
-                extra_instruction="请直接兜底回答用户问题。",
-                user_display_name=user_display_name,
-            )
-            yield pm
-            self._record_turn_response(responded_this_turn, pm)
-            async for fu in self._emit_mention_follow_ups(
-                reply=pm,
-                group_avatar_ids=group_avatar_ids,
-                base_session=base_session,
-                context=context,
-                group_id=group_id,
-                group_name=group_name,
-                should_stop=should_stop,
-                user_display_name=user_display_name,
-                hops=_get_mention_hops(),
-                responded_this_turn=responded_this_turn,
-            ):
-                yield fu
-            return
-        nudge_avatar = self.avatar_registry.get_avatar(nudge_target)
-        nudge_name = str(getattr(nudge_avatar, "name", "") or nudge_target)
-        nudge_text = f"@{nudge_name} 团长刚才的问题需要你来回答，请直接给出进度和下一步。"
-        context.append_agent(
-            agent_id=META_LEADER_AGENT_ID,
-            agent_name=self._meta_leader_label,
-            text=nudge_text,
-            avatar_url="",
-        )
-        nudge_reply = GroupReply(
-            agent_id=META_LEADER_AGENT_ID,
-            avatar_name=self._meta_leader_label,
-            avatar_url="",
-            content=nudge_text,
-            skipped=False,
-            event_type="group_nudge",
-        )
-        yield nudge_reply
-        self._record_turn_response(responded_this_turn, nudge_reply)
-        if await self._should_stop(should_stop):
-            return
-        nudge_av = self.avatar_registry.get_avatar(nudge_target)
-        nudge_ty = str(getattr(nudge_av, "name", "") or nudge_target) if nudge_av else nudge_target
-        yield self._typing_event(nudge_target, nudge_ty)
-        if await self._should_stop(should_stop):
-            return
-        retry_reply: GroupReply | None = None
-        async for retry_evt in self._run_one_target_stream(
-            base_session=base_session,
-            context=context,
-            group_id=group_id,
-            group_name=group_name,
-            avatar_id=nudge_target,
-            user_input=user_input,
-            quoted_content=quoted_content,
-            should_stop=should_stop,
-            force_reply=True,
-            user_display_name=user_display_name,
-        ):
-            yield retry_evt
-            if retry_evt.event_type in {"group_reply", "group_skipped"}:
-                retry_reply = retry_evt
-        if retry_reply is None:
-            return
-        self._record_turn_response(responded_this_turn, retry_reply)
-        async for fu in self._emit_mention_follow_ups(
-            reply=retry_reply,
-            group_avatar_ids=group_avatar_ids,
-            base_session=base_session,
-            context=context,
-            group_id=group_id,
-            group_name=group_name,
-            should_stop=should_stop,
-            user_display_name=user_display_name,
-            hops=_get_mention_hops(),
-            responded_this_turn=responded_this_turn,
-        ):
-            yield fu
-        if not retry_reply.skipped and retry_reply.content.strip():
-            context.bump_active_thread(
-                partner_id=retry_reply.agent_id,
-                partner_name=retry_reply.avatar_name,
-                last_topic=user_input[:120],
-            )
-            return
         yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
         if await self._should_stop(should_stop):
             return
@@ -1998,7 +2156,7 @@ class GroupChatRouter:
             group_name=group_name,
             user_input=user_input,
             quoted_content=quoted_content,
-            extra_instruction="目标成员未响应，请你作为组长兜底回答。",
+            extra_instruction=_ROUTE_SKIP_FALLBACK_INSTRUCTION,
             user_display_name=user_display_name,
         )
         yield pm

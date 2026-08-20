@@ -15,6 +15,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+GROUP_INTERNAL_FILENAMES = frozenset(
+    {"IDENTITY.md", "MEMORY.md", "USER.md", "SOUL.md", "favorites.json"}
+)
+_SKIP_DIR_NAMES = frozenset({"memory", ".git", "node_modules", ".venv", "__pycache__"})
+
+
+@dataclass(frozen=True)
+class ArtifactFingerprint:
+    size: int
+    mtime_ns: int
+
 
 @dataclass
 class MemberFact:
@@ -55,9 +66,32 @@ def _taskspace_path(item: Any) -> str:
     return str(getattr(item, "path", "") or "").strip()
 
 
-def collect_artifact_paths(taskspaces: Sequence[Any] | None) -> list[str]:
-    """List real files under each taskspace, excluding the memory/ subtree."""
-    found: list[str] = []
+def _is_internal_root_file(root: Path, full: Path) -> bool:
+    try:
+        rel = full.relative_to(root)
+    except ValueError:
+        return False
+    return len(rel.parts) == 1 and rel.name in GROUP_INTERNAL_FILENAMES
+
+
+def _iter_artifact_files(root: Path):
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [name for name in dirnames if name not in _SKIP_DIR_NAMES]
+        rel = Path(dirpath).relative_to(root)
+        if rel.parts and rel.parts[0] in _SKIP_DIR_NAMES:
+            continue
+        for name in filenames:
+            full = Path(dirpath) / name
+            if full.is_symlink() or _is_internal_root_file(root, full):
+                continue
+            if full.is_file():
+                yield full
+
+
+def scan_artifact_snapshot(
+    taskspaces: Sequence[Any] | None,
+) -> dict[str, ArtifactFingerprint]:
+    snapshot: dict[str, ArtifactFingerprint] = {}
     for item in taskspaces or []:
         raw = _taskspace_path(item)
         if not raw:
@@ -65,17 +99,33 @@ def collect_artifact_paths(taskspaces: Sequence[Any] | None) -> list[str]:
         root = Path(raw).expanduser()
         if not root.is_dir():
             continue
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [name for name in dirnames if name != "memory"]
-            rel = Path(dirpath).relative_to(root)
-            if rel.parts and rel.parts[0] == "memory":
+        for full in _iter_artifact_files(root):
+            try:
+                st = full.stat()
+            except OSError:
                 continue
-            for name in filenames:
-                full = Path(dirpath) / name
-                if full.is_file():
-                    found.append(str(full))
-    found.sort()
-    return found
+            snapshot[str(full)] = ArtifactFingerprint(size=st.st_size, mtime_ns=st.st_mtime_ns)
+    return snapshot
+
+
+def changed_artifact_paths(
+    before: Mapping[str, ArtifactFingerprint],
+    after: Mapping[str, ArtifactFingerprint],
+    *,
+    limit: int = 8,
+) -> list[str]:
+    changed: list[tuple[int, str]] = []
+    for path, fingerprint in after.items():
+        prev = before.get(path)
+        if prev is None or prev != fingerprint:
+            changed.append((fingerprint.mtime_ns, path))
+    changed.sort(key=lambda item: (-item[0], item[1]))
+    return [path for _, path in changed[: max(0, int(limit))]]
+
+
+def collect_artifact_paths(taskspaces: Sequence[Any] | None) -> list[str]:
+    """List real files under each taskspace using the shared artifact filter."""
+    return sorted(scan_artifact_snapshot(taskspaces))
 
 
 def _load_graph_status_by_agent(session_id: str) -> dict[str, str]:

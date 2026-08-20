@@ -9,6 +9,13 @@
 
 :root {
   font-family: "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  --chat-im-group-bg: var(--surface-card-strong);
+}
+
+.agx-im-group-bubble {
+  border: none;
+  box-shadow: none;
+  box-sizing: border-box;
 }
 
 body {

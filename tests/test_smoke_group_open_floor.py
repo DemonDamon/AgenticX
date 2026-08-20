@@ -323,21 +323,28 @@ async def test_open_floor_all_skipped_gets_casual_meta_reply_not_nudge() -> None
 
 
 @pytest.mark.asyncio
-async def test_route_to_nudge_path_unchanged() -> None:
+async def test_route_to_skip_has_no_public_nudge() -> None:
     router = _make_router_with_spies(["a1", "a2"])
+    extra_instructions: list[str] = []
     _install_turn_stubs(
         router,
         decision=IntentDecision("route_to", ["a1"], "duty"),
         stream_by_id={
             "a1": _reply("a1", "", skipped=True, event_type="group_skipped"),
         },
+        extra_instructions=extra_instructions,
     )
     events = await _collect_turn(
         router,
         avatar_ids=["a1", "a2"],
         user_input="帮我看下这个报错",
     )
-    assert any(e.event_type == "group_nudge" for e in events)
+    assert all(e.event_type != "group_nudge" for e in events)
+    replies = [e for e in events if e.event_type == "group_reply"]
+    assert replies
+    assert replies[-1].agent_id == META_LEADER_AGENT_ID
+    assert extra_instructions
+    assert "诚实兜底" in extra_instructions[-1]
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,8 @@ export function shouldShowAssistantIconButtons(args: {
   hasBody: boolean;
   sessionBusy?: boolean;
   isLastAssistantInPane?: boolean;
+  /** Group replies are committed on arrival; keep copy/quote visible while others still run. */
+  keepActionsWhileBusy?: boolean;
 }): boolean {
   const base =
     !args.hideActions &&
@@ -18,7 +20,7 @@ export function shouldShowAssistantIconButtons(args: {
     !args.isMetaPendingWork &&
     args.hasBody;
   if (!base) return false;
-  if (args.sessionBusy && args.isLastAssistantInPane) return false;
+  if (args.sessionBusy && args.isLastAssistantInPane && !args.keepActionsWhileBusy) return false;
   return true;
 }
 
@@ -32,6 +34,7 @@ export function shouldShowAssistantFollowups(args: {
   hasFollowupHandler: boolean;
   sessionBusy?: boolean;
   isLastAssistantInPane?: boolean;
+  keepActionsWhileBusy?: boolean;
 }): boolean {
   if (args.isUser) return false;
   if (args.isStreaming) return false;
@@ -40,6 +43,6 @@ export function shouldShowAssistantFollowups(args: {
   if (!args.hasBody) return false;
   if (!args.hasSuggestedQuestions) return false;
   if (!args.hasFollowupHandler) return false;
-  if (args.sessionBusy && args.isLastAssistantInPane) return false;
+  if (args.sessionBusy && args.isLastAssistantInPane && !args.keepActionsWhileBusy) return false;
   return true;
 }
