@@ -323,3 +323,77 @@ async def test_run_turn_sends_session_context_after_history_and_keeps_prompt_sta
     assert sum(
         1 for m in second if str(m.get("content", "")).startswith("<session-context>")
     ) == 1, "第一轮那条不能被带进历史里重复发送"
+
+
+# --------------------------------------------------------------------------
+# 8. 身份/长期上下文与 provider 隔离也不许钉在 messages[0] 的开头
+# --------------------------------------------------------------------------
+def test_memory_append_does_not_move_the_system_prompt(monkeypatch):
+    """一次 memory_append 原来能从**第 0 字节**炸掉缓存。
+
+    workspace_context（全局用户偏好 / 身份定义 / 行为准则 / 长期记忆 / 今日记忆）
+    过去钉在整段 prompt 的最开头，而 prompt 自己就在鼓励模型"会话结束前主动
+    memory_append"——写一次，整段对话历史的前缀缓存全废。
+    """
+    state = {"memory": "旧的长期记忆"}
+
+    def _fake_loader(avatar_id=None, *, session=None, subject_label=""):
+        return {
+            "global_user": "用户偏好：说中文",
+            "subject_label": subject_label or "元智能体",
+            "is_meta_subject": True,
+            "identity": "身份定义",
+            "soul": "行为准则",
+            "memory": state["memory"],
+            "daily_memory": "今日记忆",
+        }
+
+    monkeypatch.setattr(
+        "agenticx.runtime.prompts.meta_agent.load_subject_workspace_context", _fake_loader
+    )
+    session = StudioSession()
+    before = build_meta_agent_system_prompt(session, include_volatile=False)
+    before_sections = pop_volatile_sections(session)
+    assert any("旧的长期记忆" in body for _, body in before_sections)
+    assert "旧的长期记忆" not in before
+
+    state["memory"] = "刚刚 memory_append 写进来的新事实"
+    after = build_meta_agent_system_prompt(session, include_volatile=False)
+    after_sections = pop_volatile_sections(session)
+
+    assert after == before, "memory_append must not perturb the cached prefix"
+    assert any("刚刚 memory_append 写进来的新事实" in body for _, body in after_sections)
+
+
+def test_identity_block_leads_the_session_context(monkeypatch):
+    """背景在前、要动手的材料在后——身份属于背景。"""
+    monkeypatch.setattr(
+        "agenticx.runtime.prompts.meta_agent.load_subject_workspace_context",
+        lambda avatar_id=None, *, session=None, subject_label="": {
+            "global_user": "g",
+            "subject_label": "元智能体",
+            "is_meta_subject": True,
+            "identity": "我是谁",
+            "soul": "",
+            "memory": "",
+            "daily_memory": "",
+        },
+    )
+    session = StudioSession()
+    sections = build_meta_agent_volatile_sections(session)
+    non_empty = [(t, b) for t, b in sections if b.strip()]
+    assert "身份与长期上下文" in non_empty[0][1]
+
+
+def test_provider_hard_failure_does_not_move_the_system_prompt():
+    """provider 硬失败隔离是运行中才出现的，原来也钉在 prompt 最开头。"""
+    session = StudioSession()
+    before = build_meta_agent_system_prompt(session, include_volatile=False)
+    pop_volatile_sections(session)
+
+    session.provider_hard_failure_providers = ["some_provider"]
+    after = build_meta_agent_system_prompt(session, include_volatile=False)
+    sections = pop_volatile_sections(session)
+
+    assert after == before
+    assert any("some_provider" in body for _, body in sections)

@@ -207,6 +207,37 @@ def _build_workspace_context_block(
     return "\n\n".join(parts) + "\n"
 
 
+def _resolve_workspace_context(
+    session: StudioSession,
+    *,
+    avatar_context: dict[str, str] | None = None,
+    group_chat: dict[str, Any] | None = None,
+) -> str:
+    """Resolve the subject label and render the identity / long-term block.
+
+    抽出来是因为它现在有两个调用点（system prompt 的 include_volatile 分支和
+    :func:`build_meta_agent_volatile_sections`），而 subject_label 的取法有点绕
+    （群名 > 分身名 > "元智能体"），两边各写一遍迟早会漂。
+    """
+    group_allowed: set[str] | None = None
+    group_name = ""
+    if group_chat and isinstance(group_chat, dict):
+        raw_ids = group_chat.get("avatar_ids")
+        if isinstance(raw_ids, list):
+            group_allowed = {str(x).strip() for x in raw_ids if str(x).strip()}
+        group_name = str(group_chat.get("name", "") or "").strip()
+    avatar_name = str((avatar_context or {}).get("name", "")).strip()
+    return _build_workspace_context_block(
+        str(getattr(session, "bound_avatar_id", "") or "").strip() or None,
+        session=session,
+        subject_label=(
+            (group_name if group_allowed is not None else "")
+            or avatar_name
+            or "元智能体"
+        ),
+    )
+
+
 def _build_computer_use_capabilities_block() -> str:
     """When ``computer_use.enabled``, tell the model about injected desktop tools."""
     try:
@@ -847,14 +878,8 @@ def build_meta_agent_system_prompt(
     avatar_role = str((avatar_context or {}).get("role", "")).strip()
     avatar_system_prompt = str((avatar_context or {}).get("system_prompt", "")).strip()
     has_avatar_context = bool(avatar_name)
-    workspace_context = _build_workspace_context_block(
-        str(getattr(session, "bound_avatar_id", "") or "").strip() or None,
-        session=session,
-        subject_label=(
-            (group_name if group_allowed is not None else "")
-            or (avatar_name if has_avatar_context else "")
-            or "元智能体"
-        ),
+    workspace_context = _resolve_workspace_context(
+        session, avatar_context=avatar_context, group_chat=group_chat
     )
     avatar_block = ""
     if has_avatar_context:
@@ -922,9 +947,15 @@ def build_meta_agent_system_prompt(
         f"- model: {session.model_name or 'default'}\n"
         f"{_build_context_files_block(session)}"
     )
+    # workspace_context（身份/长期记忆/今日记忆）和 provider_fault_block（本会话
+    # provider 硬失败隔离）原来钉在整段 prompt 的**最开头**。两者都是易变的：prompt
+    # 自己在鼓励模型"会话结束前主动 memory_append"，一次写入就从第 0 字节炸掉缓存；
+    # provider 隔离更是运行中才出现。它们跟其它易变状态一起去 <session-context>。
+    _head_state = (
+        f"{workspace_context}\n{provider_fault_block}" if include_volatile else ""
+    )
     base_prompt = (
-        f"{workspace_context}\n"
-        f"{provider_fault_block}"
+        f"{_head_state}"
         f"{avatar_block}"
         f"{group_block}"
         f"{identity_line}"
@@ -935,7 +966,7 @@ def build_meta_agent_system_prompt(
         f"{mode_line}"
         f"{computer_use_block}"
         "## 身份应答策略\n"
-        "- 当用户询问“你是谁/你的定位”时，优先基于“身份与长期上下文”简洁回答（身份、职责、边界）。\n"
+        "- 当用户询问“你是谁/你的定位”时，优先基于对话末尾 `<session-context>` 里的“身份与长期上下文”简洁回答（身份、职责、边界）。\n"
         "- 回答身份问题时不要罗列完整 skills/MCP 清单，除非用户明确要求查看能力清单。\n\n"
         "## 技能市场安装\n"
         "- 用户要求安装 SkillHub/ClawHub 上已发布的技能时，直接调用 `skill_market_install(name=...)`；该工具会自动解析来源、下载、扫描并安装。\n"
@@ -1109,7 +1140,10 @@ def build_meta_agent_system_prompt(
         stash_volatile_sections(
             session,
             build_meta_agent_volatile_sections(
-                session, taskspaces=taskspaces, group_chat=group_chat
+                session,
+                taskspaces=taskspaces,
+                group_chat=group_chat,
+                avatar_context=avatar_context,
             ),
         )
     return MetaSkillInjector().inject(
@@ -1126,6 +1160,7 @@ def build_meta_agent_volatile_sections(
     *,
     taskspaces: list[dict[str, str]] | None = None,
     group_chat: dict[str, Any] | None = None,
+    avatar_context: dict[str, str] | None = None,
 ) -> list[tuple[str, str]]:
     """Render the volatile state that :func:`build_meta_agent_system_prompt` omits.
 
@@ -1158,6 +1193,15 @@ def build_meta_agent_volatile_sections(
         f"{_build_context_files_block(session)}"
     )
     return [
+        # 背景在前、要动手的材料在后：身份与长期上下文属于背景，而且放在这里离用户
+        # 的问题更近，遵循度只会更好。
+        (
+            "",
+            _resolve_workspace_context(
+                session, avatar_context=avatar_context, group_chat=group_chat
+            ),
+        ),
+        ("", _build_provider_hard_failure_block(session)),
         ("已注册能力", capabilities),
         ("", _build_todo_context(session)),
         ("", _build_active_subagents_context(session)),
