@@ -11,6 +11,7 @@ requirements.txt) without actually calling Volcengine APIs.
 Author: Damon Li
 """
 
+import re
 import logging
 import os
 import shutil
@@ -34,6 +35,19 @@ from .dockerfile_generator import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _requirement_name(line: str) -> str:
+    """requirements 行里的包名（去掉版本约束、extras 和注释）。
+
+    ``agenticx[all]>=0.1.0  # comment`` → ``agenticx``。用来判断某个依赖是不是已经
+    写在项目的 requirements.txt 里了，避免重复追加成两行不同 pin 的同一个包。
+    """
+    text = line.split("#", 1)[0].strip()
+    if not text:
+        return ""
+    text = re.split(r"[<>=!~;\[\s]", text, maxsplit=1)[0]
+    return text.strip().lower()
 
 
 class VolcEngineComponent(DeploymentComponent):
@@ -250,20 +264,33 @@ class VolcEngineComponent(DeploymentComponent):
                 requirements_content = project_requirements_path.read_text(
                     encoding="utf-8"
                 )
-                if extra_deps:
-                    existing_lines = {
-                        line.strip()
-                        for line in requirements_content.splitlines()
-                        if line.strip()
-                    }
-                    for dep in extra_deps:
-                        dep = dep.strip()
-                        if dep and dep not in existing_lines:
-                            requirements_content += (
-                                ("" if requirements_content.endswith("\n") else "\n")
-                                + dep
-                                + "\n"
-                            )
+                # agenticx 必须在里面：生成出来的 wrapper.py 第一行就是
+                # `from agenticx.deploy.components.volcengine.wrapper import ...`，
+                # 缺了它函数冷启动直接 ImportError。走 generate_requirements() 的那条
+                # 分支注释写着 "Always include agenticx"，但"优先用项目 requirements"
+                # 这条分支是后加的，把这个保证漏掉了 —— 用户的 requirements.txt 里没写
+                # agenticx（比如本地 pip install -e 装的），产出的部署包就是坏的。
+                missing_deps = [
+                    dep.strip()
+                    for dep in ([*(extra_deps or []), "agenticx"])
+                    if dep and dep.strip()
+                ]
+                existing_lines = {
+                    line.strip()
+                    for line in requirements_content.splitlines()
+                    if line.strip() and not line.strip().startswith("#")
+                }
+                existing_names = {_requirement_name(line) for line in existing_lines}
+                for dep in missing_deps:
+                    if dep in existing_lines or _requirement_name(dep) in existing_names:
+                        continue
+                    requirements_content += (
+                        ("" if requirements_content.endswith("\n") else "\n")
+                        + dep
+                        + "\n"
+                    )
+                    existing_lines.add(dep)
+                    existing_names.add(_requirement_name(dep))
                 logger.info(
                     f"Using project requirements: {project_requirements_path}"
                 )

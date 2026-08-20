@@ -190,13 +190,28 @@ SKILL_SCAN_PRESET_DEFAULTS: List[Dict[str, Any]] = [
 # Higher wins when duplicated skill names appear across roots.
 # This ensures explicit preset sources (e.g. Cursor/Claude) can override
 # earlier scanned mirror copies with the same `name`.
+# 同名技能来自多个来源时谁赢。数字大的赢。
+#
+# ``.agents`` 必须排在 ``.claude`` 前面。7ee0c863（2026-03-03）的标题就是
+# "support .agents skill search paths with higher priority"，配套用例
+# test_smoke_cherry_studio_agents_skills.py::test_agents_path_has_higher_priority_than_claude
+# 也是那时候写的。3c6a55b4（04-01）引入这张表时把 agents 放到了 claude 下面
+# （95 vs 90），既没说明理由也没动那条用例，于是它红了四个多月。这里恢复原来的意图：
+# 放在 .agents/ 下的技能就是用来盖掉第三方工具目录里同名技能的，盖不动就失去意义。
+#
+# 两处需要留意：
+# - agents 抬到 96 的同时也越过了 skillhub(92)。skillhub 正夹在 agents 和 claude
+#   中间，只调整这一对而不碰它做不到。
+# - ``.cursor`` / ``.claude`` 在 infer_skill_source 里不分作用域（家目录和仓库里都记成
+#   cursor / claude），只有 ``.agents`` 分，仓库级会降级成 project_agents。所以要让
+#   "项目自己的 .agents 优先"真正生效，project_agents 也得排在 claude 前面。
 _SKILL_SOURCE_PRIORITY: Dict[str, int] = {
     "cursor": 100,
+    "project_agents": 97,
+    "agents": 96,
     "claude": 95,
     "skillhub": 92,
-    "agents": 90,
     "agent_global": 80,
-    "project_agents": 70,
     "project_agent": 65,
     "agenticx": 60,
     "registry": 55,
