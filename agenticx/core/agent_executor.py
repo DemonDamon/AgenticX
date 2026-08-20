@@ -935,10 +935,9 @@ class AgentExecutor:
 
                 # 执行全局 after hooks
                 modified_result = execute_after_tool_call_hooks(hook_context)
-                # execute_after_tool_call_hooks 不管钩子有没有改，都会把 tool_result
-                # 原样回传（见 agenticx/hooks/tool_hooks.py），所以"和喂进去的一样"
-                # 就等于没人动过。不这么判的话，工具返回的 int/dict/list 会被这里
-                # 无条件压成 str —— 单元测试里 math_tool 返回 6，事件里拿到的是 '6'。
+                # 没人改就保留工具原样的返回值，别把 int/dict/list 压成 str
+                # （math_tool 返回 6，事件里不该变成 '6'）。多判一次 != result_text
+                # 是防御：钩子层的返回契约（改了才回传，否则 None）曾经是坏的。
                 if modified_result is not None and modified_result != result_text:
                     hook_modified = True
 

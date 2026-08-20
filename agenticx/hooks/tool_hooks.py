@@ -304,7 +304,8 @@ def execute_before_tool_call_hooks(context: ToolCallHookContext) -> bool:
         task_id=context.task_id,
         context={"tool_context": context},
     )
-    return get_global_hook_registry().trigger_sync(event)
+    # before_tool_call 是闸门：第一个钩子否决之后，后面的钩子不该再跑。
+    return get_global_hook_registry().trigger_sync(event, stop_on_false=True)
 
 
 def execute_after_tool_call_hooks(context: ToolCallHookContext) -> str | None:
@@ -323,13 +324,16 @@ def execute_after_tool_call_hooks(context: ToolCallHookContext) -> str | None:
         task_id=context.task_id,
         context={"tool_context": context, "tool_result": context.tool_result},
     )
+    original_result = context.tool_result
     get_global_hook_registry().trigger_sync(event)
-    modified_result = None
     event_result = event.context.get("tool_result")
-    if isinstance(event_result, str):
-        modified_result = event_result
+    # 只有真的被改过才回传。原来是"只要是 str 就回传"，而 context 里那份初值本来就是
+    # str —— 于是这个函数永远返回非 None，调用方（agent_executor）分不清"钩子改了"
+    # 和"没人动过"，工具返回的 int/dict 就被这里的字符串顶掉了。
+    if isinstance(event_result, str) and event_result != original_result:
         context.tool_result = event_result
-    return modified_result
+        return event_result
+    return None
 
 
 def _to_before_tool_hook_handler(hook: BeforeToolCallHookType) -> HookHandler:
@@ -353,6 +357,10 @@ def _to_after_tool_hook_handler(hook: AfterToolCallHookType) -> HookHandler:
         result = hook(ctx)
         if isinstance(result, str):
             event.context["tool_result"] = result
+            # 同步回 ctx，后一个钩子才看得到前一个的产物。原来只写 event.context，
+            # 于是 after 钩子无法串联：hook1 把 "hello" 改成 "HELLO" 之后，hook2 读到的
+            # ctx.tool_result 仍然是 "hello"。
+            ctx.tool_result = result
         return True
 
     return _handler
