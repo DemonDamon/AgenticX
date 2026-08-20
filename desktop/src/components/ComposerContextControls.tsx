@@ -15,7 +15,7 @@ import {
   Plus,
   Search,
   ShieldCheck,
-  TriangleAlert,
+  CircleCheck,
 } from "lucide-react";
 import type { ConfirmStrategy, Taskspace } from "../store";
 import {
@@ -124,7 +124,9 @@ function permissionStrategyVisual(strategy: ConfirmStrategy) {
   if (strategy === "semi-auto") {
     return { Icon: ShieldCheck, iconClassName: "text-[var(--settings-accent-fg)]" };
   }
-  return { Icon: TriangleAlert, iconClassName: "text-status-warning" };
+  // auto 是 fail-closed 的（见 constants/confirm-strategy-options.ts 顶部说明），
+  // 用中性图标而不是告警三角。
+  return { Icon: CircleCheck, iconClassName: "text-[var(--settings-accent-fg)]" };
 }
 
 export function ComposerContextControls({

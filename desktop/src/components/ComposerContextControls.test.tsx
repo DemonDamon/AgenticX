@@ -9,6 +9,7 @@ import {
 } from "./ComposerContextControls";
 import {
   CONFIRM_STRATEGY_OPTIONS,
+  confirmStrategyLabel,
   defaultConfirmPolicyForStrategy,
 } from "../constants/confirm-strategy-options";
 import {
@@ -93,7 +94,7 @@ describe("ComposerContextControls", () => {
     ]);
     expect(composerPermissionLabel("manual")).toBe("每次询问");
     expect(composerPermissionLabel("semi-auto")).toBe("同类操作自动允许");
-    expect(composerPermissionLabel("auto")).toBe("低风险自动执行");
+    expect(composerPermissionLabel("auto")).toBe(confirmStrategyLabel("auto"));
     expect(defaultConfirmPolicyForStrategy("manual")).toBe("ask-every-time");
     expect(defaultConfirmPolicyForStrategy("semi-auto")).toBe("use-allowlist");
     expect(defaultConfirmPolicyForStrategy("auto")).toBe("run-everything");
@@ -115,7 +116,7 @@ describe("ComposerContextControls", () => {
       />,
     );
     expect(html).toContain("会话工作区");
-    expect(html).toContain("低风险自动执行");
+    expect(html).toContain(confirmStrategyLabel("auto"));
     expect(html).toContain('aria-haspopup="menu"');
   });
 
@@ -156,10 +157,20 @@ describe("ComposerContextControls", () => {
         />,
       );
 
-    expect(renderStrategy("manual")).toContain("lucide-circle-question-mark");
-    expect(renderStrategy("semi-auto")).toContain("lucide-shield-check");
-    expect(renderStrategy("auto")).toContain("lucide-triangle-alert");
-    expect(CONFIRM_STRATEGY_OPTIONS[2].description).toContain("受保护操作仍会逐次询问");
+    // 三个策略的图标必须互不相同；具体用哪个图标不钉死——auto 从告警三角换成中性的
+    // circle-check，是因为它 fail-closed（见 confirm-strategy-options.ts 顶部说明），
+    // 告警配色高估了它。
+    const icons = (["manual", "semi-auto", "auto"] as const).map((strategy) => {
+      const match = /lucide lucide-([a-z-]+)/u.exec(renderStrategy(strategy));
+      return match?.[1] ?? "";
+    });
+    expect(icons.every(Boolean)).toBe(true);
+    expect(new Set(icons).size).toBe(3);
+    expect(icons[2]).not.toBe("triangle-alert");
+    // 措辞可以变，但「受保护的那些仍然会问你」这层意思必须还在。
+    const autoDescription = CONFIRM_STRATEGY_OPTIONS[2].description;
+    expect(autoDescription).toContain("高风险");
+    expect(autoDescription).toContain("仍会");
   });
 
   it("keeps new-topic controls inline without a second-row padding wrapper", () => {

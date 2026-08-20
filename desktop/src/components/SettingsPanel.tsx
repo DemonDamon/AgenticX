@@ -38,6 +38,7 @@ import {
   Star,
   CircleMinus,
   CheckCircle2,
+  CircleCheck,
   Compass,
   Eye,
   EyeOff,
@@ -9650,10 +9651,10 @@ export function SettingsPanel({
                     />
                   </div>
                   {confirmStrategy === "auto" ? (
-                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-text-subtle">
-                      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" />
+                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-border bg-surface-card px-3 py-2 text-xs leading-5 text-text-subtle">
+                      <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--settings-accent-fg)]" />
                       <span>
-                        此模式仅自动执行明确标记为低风险的操作。高风险、破坏性、桌面操控和未知风险操作仍会逐次询问。
+                        低风险操作由我代你批准。高风险、破坏性、桌面操控和未知风险操作仍会逐次询问。
                       </span>
                     </div>
                   ) : null}

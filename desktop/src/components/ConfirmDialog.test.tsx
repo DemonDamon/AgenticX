@@ -9,6 +9,11 @@ import {
   CONFIRM_STRATEGY_OPTIONS,
 } from "../constants/confirm-strategy-options";
 
+/** 文案的唯一出处是 CONFIRM_POLICY_OPTIONS，用例别再钉死字符串。 */
+function runEverythingLabel(): string {
+  return CONFIRM_POLICY_OPTIONS.find((option) => option.value === "run-everything")!.label;
+}
+
 describe("buildConfirmRequestPresentation", () => {
   it("uses structured file context instead of asking the UI to translate the English prompt", () => {
     const path = "C:\\Users\\demo\\.agenticx\\taskspaces\\run-1\\default\\report.md";
@@ -86,7 +91,7 @@ describe("ConfirmDialog", () => {
     expect(html).toContain("查看文件改动预览");
     expect(html).toContain("仅允许这一次");
     expect(html).toContain("本次运行允许同类操作");
-    expect(html).toContain("低风险自动执行");
+    expect(html).toContain(runEverythingLabel());
     expect(html).toContain("将自动允许");
     expect(html).not.toContain("白名单放行");
   });
@@ -106,7 +111,7 @@ describe("ConfirmDialog", () => {
     expect(html).toContain("只能逐次确认");
     expect(html).toContain("仅允许这一次");
     expect(html).not.toContain("本次运行允许同类操作");
-    expect(html).not.toContain("低风险自动执行");
+    expect(html).not.toContain(runEverythingLabel());
   });
 
   it("keeps the three dialog policies aligned with the three settings strategies", () => {
