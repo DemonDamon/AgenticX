@@ -16,11 +16,15 @@ export const MODEL_CONTEXT_WINDOWS: ReadonlyArray<readonly [string, number]> = [
   ["gpt-4", 128_000],
   ["o1", 200_000],
   ["o3", 200_000],
+  // V4 全系（Pro / Flash）都是 1M；0731 那版实际 1,310,720，按保守的一侧记。
+  ["deepseek-v4", 1_048_576],
   ["deepseek", 128_000],
   ["qwen", 128_000],
   ["glm-5.2", 1_000_000],
   ["glm-5.1", 200_000],
   ["glm", 128_000],
+  // K3 是 1M（1,048,576）。先命中者胜，更具体的条目必须排在 "kimi" 前面。
+  ["kimi-k3", 1_048_576],
   ["kimi", 256_000],
   ["minimax", 192_000],
   ["gemini-2.5", 1_048_576],

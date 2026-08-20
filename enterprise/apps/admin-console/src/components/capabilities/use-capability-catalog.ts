@@ -26,6 +26,11 @@ const FEATURE_LABELS: Record<
     displayName: "深度研究",
     description: "多轮检索加汇总成文的长任务，比单次搜索更费额度。",
   },
+  attachment_routing: {
+    displayName: "附件自动路由",
+    description:
+      "检测到文档就把会话锁到私有化部署的多模态模型，之后整段对话都留在私有部署里；图片走视觉兜底，不切模型。",
+  },
 };
 
 /** MCP 卡片上没有说明可显示，就说它连到哪儿去——这正是管理员想确认的那件事。 */

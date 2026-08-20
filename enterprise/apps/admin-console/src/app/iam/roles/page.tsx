@@ -65,6 +65,7 @@ import {
   planMove,
 } from "../../../lib/member-move";
 import { UserGroupsPanel } from "../../../components/iam/UserGroupsPanel";
+import { DefaultMemberBudgetCard } from "../../../components/DefaultMemberBudgetCard";
 import { DefaultMemberQuotaCard } from "../../../components/DefaultMemberQuotaCard";
 
 type GrantSource = "personal" | "group" | "department" | "all";
@@ -792,7 +793,12 @@ function MembersPanel() {
               没有单独配置额度的成员按这里的值走。个人特批在成员卡片上改。
             </DialogDescription>
           </DialogHeader>
-          <DefaultMemberQuotaCard />
+          <div className="space-y-4">
+            <DefaultMemberQuotaCard />
+            {/* 额度管发多少 token，预算管花多少钱，两个上限先撞上哪个算哪个——
+                分开两个页面看只会得到「明明还有额度为什么被拦」。 */}
+            <DefaultMemberBudgetCard />
+          </div>
         </DialogContent>
       </Dialog>
 
