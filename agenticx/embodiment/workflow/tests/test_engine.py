@@ -12,6 +12,10 @@ from agenticx.embodiment.core.context import GUIAgentContext
 from agenticx.core.workflow import WorkflowNode, WorkflowEdge
 from agenticx.core.tool import BaseTool
 
+# GUIWorkflow 依赖 networkx（可选依赖，见 pyproject 的 [graph] extra）。缺了它整个
+# 文件都跑不了，跳过比报一屏 RuntimeError 有用。
+pytest.importorskip("networkx", reason='需要 pip install "agenticx[graph]"')
+
 
 class MockTool:
     """Mock tool for testing."""
@@ -98,13 +102,15 @@ class TestWorkflowEngine:
         """Test WorkflowEngine initialization."""
         assert engine.tools == {}
         assert engine.node_processors == {}
-        assert engine.is_initialized() is False
+        # is_initialized 是 @property，不是方法；当成方法调会
+        # TypeError: 'bool' object is not callable。
+        assert engine.is_initialized is False
     
     @pytest.mark.asyncio
     async def test_initialize(self, engine):
         """Test WorkflowEngine initialization."""
         await engine.initialize()
-        assert engine.is_initialized() is True
+        assert engine.is_initialized is True
         
         # Check default node processors are registered
         assert "tool" in engine.node_processors

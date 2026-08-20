@@ -12,6 +12,11 @@ from agenticx.embodiment.workflow.builder import (
 from agenticx.embodiment.workflow.workflow import GUIWorkflow
 from agenticx.core.workflow import WorkflowNode, WorkflowEdge
 
+# GUIWorkflow 依赖 networkx（可选依赖，见 pyproject 的 [graph] extra）。缺了它整个
+# 文件都跑不了，跳过比报一屏 RuntimeError 有用。
+pytest.importorskip("networkx", reason='需要 pip install "agenticx[graph]"')
+
+
 
 class TestWorkflowBuilder:
     """Test cases for WorkflowBuilder class."""

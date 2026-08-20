@@ -281,7 +281,10 @@ strict_equality = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+# agenticx/embodiment/workflow/tests/ 是随包一起放的单测（5 个文件 55 条），
+# 因为不在 testpaths 里，从来没跑过。加进来之后：装了 networkx 就真跑，没装就
+# 整体 skip（各文件顶部有 pytest.importorskip）。
+testpaths = ["tests", "agenticx"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
