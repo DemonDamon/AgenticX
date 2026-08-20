@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   addressForSession,
   ATTACHMENT_ROUTING_OFF,
+  dismissRoutingNotice,
+  modelPickerLock,
+  routingNoticeDismissed,
   decideAttachmentRouting,
   hasRoutedDocument,
   readAttachmentRoutingPolicy,
@@ -182,5 +185,49 @@ describe("addressForSession", () => {
       model: "qwen3.8-27b",
     });
     expect(addressForSession(null, QWEN).provider).toBe("qwen_local");
+  });
+});
+
+describe("notice dismissal", () => {
+  function fakeStorage(initial: Record<string, string> = {}) {
+    const map = new Map(Object.entries(initial));
+    return {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      map,
+    };
+  }
+
+  it("round-trips the dismissal flag", () => {
+    const store = fakeStorage();
+    expect(routingNoticeDismissed(store)).toBe(false);
+    dismissRoutingNotice(store);
+    expect(routingNoticeDismissed(store)).toBe(true);
+  });
+
+  it("treats a throwing storage as not dismissed", () => {
+    const boom = {
+      getItem() {
+        throw new Error("private mode");
+      },
+      setItem() {
+        throw new Error("private mode");
+      },
+    };
+    expect(routingNoticeDismissed(boom)).toBe(false);
+    expect(() => dismissRoutingNotice(boom)).not.toThrow();
+  });
+});
+
+describe("modelPickerLock", () => {
+  it("is open when nothing is locked", () => {
+    expect(modelPickerLock(null)).toEqual({ disabled: false, reason: "" });
+  });
+
+  it("disables with a reason once locked — the state stays visible even if the dialog is muted", () => {
+    const lock = modelPickerLock(QWEN);
+    expect(lock.disabled).toBe(true);
+    expect(lock.reason).toContain(QWEN.label);
+    expect(lock.reason).toContain("私有部署");
   });
 });

@@ -939,6 +939,8 @@ declare global {
         transport?: string;
         reauthRequiredForDirect?: boolean;
         strict?: boolean;
+        /** 附件自动路由策略；原样透传，由 readAttachmentRoutingPolicy 解释。 */
+        attachmentRouting?: unknown;
         models?: string[];
         modelCatalog?: EnterpriseModelCatalogItem[];
         syncedAt?: string;

@@ -7939,6 +7939,11 @@ function registerIpc(): void {
               : undefined,
           )
         : normalizeEnterpriseCapabilityPolicy(undefined),
+      // 没登录企业就没有策略。原样透传，解释交给渲染进程的
+      // readAttachmentRoutingPolicy —— 规则只有后端一处出处。
+      attachmentRouting: Boolean(ent?.enabled && ent?.token)
+        ? (ent?.attachment_routing ?? null)
+        : null,
       models: Array.isArray(ent?.models) ? ent.models : [],
       modelCatalog: normalizeEnterpriseModelCatalog(
         Array.isArray(ent?.model_catalog) && ent.model_catalog.length > 0

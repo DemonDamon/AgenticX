@@ -159,3 +159,44 @@ export function decideAttachmentRouting(input: {
 export function routingLockReason(target: RoutingModelRef): string {
   return `本会话包含文档附件，已锁定到「${target.label}」（私有部署）。文档内容不会离开这台部署。`;
 }
+
+/**
+ * 「不再显示」只静音**弹窗**，不隐藏状态。
+ *
+ * 用户勾了之后下次就不会再弹，但模型选择器仍然是灰的、hover 仍然给出理由——被切走的
+ * 是数据流向，不是一个 UI 偏好。通知可以静音，状态必须常驻。
+ */
+export const ROUTING_NOTICE_DISMISSED_KEY = "agx.attachmentRouting.noticeDismissed";
+
+export function routingNoticeDismissed(storage?: Pick<Storage, "getItem">): boolean {
+  const store = storage ?? (typeof window === "undefined" ? null : window.localStorage);
+  if (!store) return false;
+  try {
+    return store.getItem(ROUTING_NOTICE_DISMISSED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function dismissRoutingNotice(storage?: Pick<Storage, "setItem">): void {
+  const store = storage ?? (typeof window === "undefined" ? null : window.localStorage);
+  if (!store) return;
+  try {
+    store.setItem(ROUTING_NOTICE_DISMISSED_KEY, "true");
+  } catch {
+    // 隐私模式下 localStorage 会抛。静音失败最坏是多弹一次，不值得让它冒泡。
+  }
+}
+
+/**
+ * 模型选择器该不该禁用，以及禁用时说什么。
+ *
+ * 单独抽出来是因为它有两个调用方（输入框上的下拉、设置里的默认模型），两边各判一遍
+ * 迟早会出现一处灰了一处没灰。
+ */
+export function modelPickerLock(
+  lockedTarget: RoutingModelRef | null,
+): { disabled: boolean; reason: string } {
+  if (!lockedTarget) return { disabled: false, reason: "" };
+  return { disabled: true, reason: routingLockReason(lockedTarget) };
+}

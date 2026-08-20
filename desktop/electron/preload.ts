@@ -955,6 +955,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       transport?: string;
       reauthRequiredForDirect?: boolean;
       strict?: boolean;
+      attachmentRouting?: unknown;
       models?: string[];
       modelCatalog?: Array<{
         id: string;
