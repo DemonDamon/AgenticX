@@ -1,3 +1,4 @@
+import type { PlatformFeature } from "@agenticx/config";
 import { describe, expect, it } from "vitest";
 import {
   ALL_MEMBERS_ASSIGNMENT_KEY,
@@ -50,10 +51,11 @@ describe("assignment keys", () => {
 describe("view -> delivery / listing", () => {
   const view = {
     assigned: [skill(SKILL_ID), mcp(MCP_ID)],
+    assignedPlatformFeatures: new Set<PlatformFeature>(["deep_research"]),
     optOuts: new Set([SKILL_ID]),
   };
 
-  it("drops user-disabled capabilities from what gets delivered", () => {
+  it("does not deliver user-disabled or server-only platform capabilities", () => {
     expect(effectiveFromView(view).map((item) => item.id)).toEqual([MCP_ID]);
   });
 

@@ -12,6 +12,7 @@
 import {
   featureCapabilityId,
   groupCapabilityIdsByKind,
+  isPlatformFeature,
   type PlatformFeature,
   parseCapabilityId,
   resolveCapabilityState,
@@ -59,8 +60,10 @@ export type UserCapabilityState = PortalCapability & { state: CapabilityState };
  * 否则关掉之后就再也找不到地方打开。两者共用这一份，避免各查一遍各判一套。
  */
 export type UserCapabilityView = {
-  /** 企业启用且已分配（含被用户关闭的）。 */
+  /** 企业启用且已分配、需要下发到客户端的 Skill/MCP（含被用户关闭的）。 */
   assigned: PortalCapability[];
+  /** 平台功能只参与服务端授权，不伪装成 Skill/MCP 下发给 Desktop。 */
+  assignedPlatformFeatures: Set<PlatformFeature>;
   /** 其中被用户自己关闭的能力 id。 */
   optOuts: Set<string>;
 };
@@ -133,16 +136,23 @@ export async function loadUserCapabilityView(
       ),
     )) as Array<{ id: string }>;
   const packIds = [...new Set(packRows.map((row) => row.id))];
-  if (packIds.length === 0) return { assigned: [], optOuts: new Set() };
+  if (packIds.length === 0) {
+    return { assigned: [], assignedPlatformFeatures: new Set(), optOuts: new Set() };
+  }
 
   const memberRows = (await query
     .select({ capabilityId: t.members.capabilityId })
     .from(t.members)
     .where(inArray(t.members.packId, packIds))) as Array<{ capabilityId: string }>;
   const candidateIds = [...new Set(memberRows.map((row) => row.capabilityId))];
-  if (candidateIds.length === 0) return { assigned: [], optOuts: new Set() };
+  if (candidateIds.length === 0) {
+    return { assigned: [], assignedPlatformFeatures: new Set(), optOuts: new Set() };
+  }
 
   const grouped = groupCapabilityIdsByKind(candidateIds);
+  // feature 没有租户行可查；能进入 grouped.feature 已经说明 id 通过了平台枚举校验。
+  // 单独保留授权结果，避免既把它丢掉，又把它误下发成 Desktop 的 MCP/Skill。
+  const assignedPlatformFeatures = new Set(grouped.feature.filter(isPlatformFeature));
 
   // 成员行只是引用；被引用的那一行自身也可能已停用，两层都要过。
   const skillRows = grouped.skill.length
@@ -178,7 +188,7 @@ export async function loadUserCapabilityView(
     ...mcpRows.map(toMcpCapability),
   ].sort((left, right) => left.id.localeCompare(right.id));
 
-  return { assigned, optOuts };
+  return { assigned, assignedPlatformFeatures, optOuts };
 }
 
 /**
@@ -224,7 +234,7 @@ export async function isPlatformFeatureAllowedForUser(
   if (!governed) return true;
   const view = await loadUserCapabilityView(userId, email, deptId);
   if (view.optOuts.has(capabilityId)) return false;
-  return view.assigned.some((item) => item.id === capabilityId);
+  return view.assignedPlatformFeatures.has(feature);
 }
 
 /** 供下发：用户当下真正能调用的能力。 */

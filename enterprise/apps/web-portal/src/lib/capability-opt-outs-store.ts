@@ -42,5 +42,5 @@ export async function setUserCapabilityPreference(
   const optOuts = new Set(view.optOuts);
   if (decision.disabledByUser) optOuts.add(capabilityId);
   else optOuts.delete(capabilityId);
-  return { ok: true, capabilities: capabilityStatesFromView({ assigned: view.assigned, optOuts }) };
+  return { ok: true, capabilities: capabilityStatesFromView({ ...view, optOuts }) };
 }
