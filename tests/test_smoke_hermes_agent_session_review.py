@@ -96,7 +96,7 @@ class TestRunReview:
                 "_run_skill_review_agent",
                 new=AsyncMock(),
             ) as mock_review:
-                asyncio.get_event_loop().run_until_complete(hook._run_review(session))
+                asyncio.run(hook._run_review(session))
                 mock_review.assert_awaited_once()
 
     def test_skips_simple_session(self, tmp_path: Path) -> None:
@@ -111,7 +111,7 @@ class TestRunReview:
                 "_run_skill_review_agent",
                 new=AsyncMock(),
             ) as mock_review:
-                asyncio.get_event_loop().run_until_complete(hook._run_review(session))
+                asyncio.run(hook._run_review(session))
                 mock_review.assert_not_awaited()
 
     def test_skips_no_observations(self, tmp_path: Path) -> None:
@@ -124,7 +124,7 @@ class TestRunReview:
                 "_run_skill_review_agent",
                 new=AsyncMock(),
             ) as mock_review:
-                asyncio.get_event_loop().run_until_complete(hook._run_review(session))
+                asyncio.run(hook._run_review(session))
                 mock_review.assert_not_awaited()
 
 
@@ -132,7 +132,7 @@ class TestOnAgentEnd:
     def test_disabled_by_default(self) -> None:
         hook = SessionReviewHook()
         session = _FakeSession()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             hook.on_agent_end("done", session)
         )
 
@@ -154,4 +154,4 @@ class TestOnAgentEnd:
                     await asyncio.sleep(0.05)
                     mock_run.assert_awaited_once()
 
-        asyncio.get_event_loop().run_until_complete(_run())
+        asyncio.run(_run())

@@ -109,7 +109,7 @@ class TestObservationHookIntegration:
         session = _FakeSession()
 
         with patch("agenticx.learning.observer.Path.home", return_value=tmp_path):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 self._run_hook_cycle(hook, "bash_exec", {"cmd": "ls"}, "file1.txt\nfile2.txt", session)
             )
 
@@ -132,7 +132,7 @@ class TestObservationHookIntegration:
         session = _FakeSession()
 
         with patch("agenticx.learning.observer.Path.home", return_value=tmp_path):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 self._run_hook_cycle(hook, "bash_exec", {"cmd": "bad"}, "Error: command not found", session)
             )
 
@@ -152,7 +152,7 @@ class TestObservationHookIntegration:
                 await self._run_hook_cycle(hook, "tool", {}, "ok", session)
 
         with patch("agenticx.learning.observer.Path.home", return_value=tmp_path):
-            asyncio.get_event_loop().run_until_complete(_run_three())
+            asyncio.run(_run_three())
 
         obs_path = tmp_path / ".agenticx" / "sessions" / session.session_id / "tool_call_observations.json"
         observations = json.loads(obs_path.read_text())
@@ -165,7 +165,7 @@ class TestObservationHookIntegration:
         session = _FakeSession()
 
         with patch("agenticx.learning.observer.Path.home", return_value=tmp_path):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 hook.after_tool_call("tool", "data", session)
             )
 

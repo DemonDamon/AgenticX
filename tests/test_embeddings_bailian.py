@@ -47,6 +47,18 @@ except ImportError:
     HTTPStatus = None
 
 
+_BAILIAN_API_KEY = os.getenv("BAILIAN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
+
+# 这一整个文件打的都是百炼的真实接口（text-embedding-v4 / multimodal-embedding-v1），
+# 没有凭据时每条都会以 "Missing credentials" 失败。9 条常红看久了就没人看了，真正的
+# 回归也跟着一起被忽略。没配 key 就整体跳过——要跑就设 BAILIAN_API_KEY 或
+# DASHSCOPE_API_KEY（tests/.env 也会被 load_dotenv 读进来）。
+pytestmark = pytest.mark.skipif(
+    not _BAILIAN_API_KEY,
+    reason="需要 BAILIAN_API_KEY / DASHSCOPE_API_KEY 才能打百炼真实接口",
+)
+
+
 class TestBailianEmbedding:
     """百炼Embedding测试类"""
     
