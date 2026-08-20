@@ -29,7 +29,7 @@ from agenticx.core import (
     PromptManager, ContextRenderer, XMLContextRenderer, PromptTemplate,
     ErrorHandler, ErrorClassifier, CircuitBreaker, CircuitBreakerOpenError,
     CommunicationInterface, BroadcastCommunication, AsyncCommunicationInterface,
-    AgentExecutor, ToolRegistry, ActionParser
+    AgentExecutor, LegacyToolRegistry, ActionParser
 )
 from agenticx.llms.base import BaseLLMProvider
 from agenticx.llms.response import LLMResponse, TokenUsage
@@ -437,8 +437,14 @@ class TestAgentExecutor:
     """测试智能体执行器"""
     
     def test_tool_registry(self):
-        """测试工具注册表"""
-        registry = ToolRegistry()
+        """测试工具注册表
+
+        用 LegacyToolRegistry：agenticx.core 里同名的 ToolRegistry 已经是
+        core/registry.py 那个（register_tool(tool_class)/get_tool()），而
+        AgentExecutor 自己用的仍然是 agent_executor.py 里 register(tool)/get(name)
+        的那个，导出时改名成了 LegacyToolRegistry。这条用例测的是后者。
+        """
+        registry = LegacyToolRegistry()
         
         @tool()
         def test_tool(x: int) -> int:

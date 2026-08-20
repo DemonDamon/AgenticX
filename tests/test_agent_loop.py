@@ -82,6 +82,15 @@ class _ToolThenFinalLLM:
         yield "答复"
 
 
+def _roles_and_contents(history):
+    """只取 role/content 比对。
+
+    chat_history 里的 assistant 行现在还带一个 metadata（turn_terminal、各轮耗时、
+    tool_schema_tokens_sent 等等），那是给 UI 和排查用的，值每次都不一样，不该进断言。
+    """
+    return [{"role": m["role"], "content": m["content"]} for m in history]
+
+
 def test_run_agent_loop_finishes_without_tool_calls() -> None:
     session = StudioSession()
     llm = _SingleResponseLLM(_FakeResponse(content="final answer", tool_calls=[]))
@@ -90,14 +99,22 @@ def test_run_agent_loop_finishes_without_tool_calls() -> None:
 
     assert result == "final answer"
     assert llm.calls == 1
-    assert session.chat_history == [
+    assert _roles_and_contents(session.chat_history) == [
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "final answer"},
     ]
     assert len(getattr(session, "agent_loop_history")) == 1
 
 
-def test_run_agent_loop_stops_at_max_rounds(monkeypatch) -> None:
+def test_run_agent_loop_halts_when_tool_calls_stop_making_progress(monkeypatch) -> None:
+    """反复调用同一个工具时，循环必须自己停下来并说明原因。
+
+    这条用例原来叫 stops_at_max_rounds，断言 llm.calls == MAX_TOOL_ROUNDS(30) 且回复里
+    有"已达到最大工具调用轮数"。现在停在第 12 轮：loop_detector 先一步认定"连续重复调用"
+    ——比空烧 30 轮更好，但 MAX_TOOL_ROUNDS 那条文案在这种场景下已经到不了了
+    （即便把参数改成每轮不同，另一个"未观察到进展"的探测器同样在 12 轮触发）。
+    改成断言真正要守的东西：会停、停得比上限早、并且给出人能看懂的理由。
+    """
     session = StudioSession()
     llm = _AlwaysToolCallLLM()
 
@@ -107,8 +124,9 @@ def test_run_agent_loop_stops_at_max_rounds(monkeypatch) -> None:
     monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
     result = agent_loop.run_agent_loop(session, llm, "keep going")
 
-    assert "已达到最大工具调用轮数" in result
-    assert llm.calls == agent_loop.MAX_TOOL_ROUNDS
+    assert 0 < llm.calls < agent_loop.MAX_TOOL_ROUNDS
+    assert "list_files" in result
+    assert "重复调用" in result
 
 
 def test_run_agent_loop_syncs_tool_messages_to_chat_history(monkeypatch) -> None:
@@ -122,16 +140,33 @@ def test_run_agent_loop_syncs_tool_messages_to_chat_history(monkeypatch) -> None
     result = agent_loop.run_agent_loop(session, llm, "请处理")
 
     assert result == "最终答复"
-    assert session.chat_history[0] == {"role": "user", "content": "请处理"}
-    assert any("工具调用" in item["content"] for item in session.chat_history if item["role"] == "assistant")
-    assert any("tool-ok" in item["content"] for item in session.chat_history if item["role"] == "assistant")
-    assert session.chat_history[-1] == {"role": "assistant", "content": "最终答复"}
+    assert _roles_and_contents(session.chat_history)[0] == {"role": "user", "content": "请处理"}
+
+    # 工具结果现在是独立的一行 role="tool"（带 tool_call_id / tool_name / tool_status），
+    # 不再拼成一句"工具调用…"塞进 assistant 的正文里。原断言按旧格式写的，早就失效了。
+    tool_rows = [m for m in session.chat_history if m.get("role") == "tool"]
+    assert len(tool_rows) == 1
+    assert tool_rows[0]["content"] == "tool-ok"
+    assert tool_rows[0]["tool_call_id"] == "call-1"
+    assert tool_rows[0]["tool_name"] == "list_files"
+
+    assert _roles_and_contents(session.chat_history)[-1] == {
+        "role": "assistant",
+        "content": "最终答复",
+    }
 
 
-def test_run_agent_loop_streams_text_when_no_tool_call() -> None:
+def test_run_agent_loop_returns_invoke_content_when_no_tool_call() -> None:
+    """没有工具调用时，直接用这一轮拿到的正文，不再为了取文本多打一次 stream()。
+
+    原用例叫 streams_text_when_no_tool_call，构造的响应正文是 "fallback answer"，
+    却断言结果等于 "final answer"（也就是 _SingleResponseLLM.stream() 吐的那两段）。
+    现在不会再走一次 stream 了，所以拿到的就是 invoke 的正文。
+    """
     session = StudioSession()
     llm = _SingleResponseLLM(_FakeResponse(content="fallback answer", tool_calls=[]))
 
     result = agent_loop.run_agent_loop(session, llm, "hello")
 
-    assert result == "final answer"
+    assert result == "fallback answer"
+    assert llm.calls == 1
