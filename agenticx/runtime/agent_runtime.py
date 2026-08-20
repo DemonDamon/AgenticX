@@ -101,6 +101,11 @@ from agenticx.runtime.provider_fallback import (
     reset_provider_timeout_streak,
     resolve_provider_read_timeout,
 )
+from agenticx.runtime.prompts.session_context import (
+    build_session_context_message,
+    pop_volatile_sections,
+    stash_volatile_sections,
+)
 from agenticx.runtime.prompt_cache_policy import (
     apply_prompt_cache_breakpoints,
     build_context_management_kwargs,
@@ -308,6 +313,32 @@ def _detect_pathological_goal_anchor_echo(text: Any) -> Optional[Dict[str, Any]]
     }
 
 
+def _inject_goal_anchor(
+    messages: List[Dict[str, Any]],
+    anchor_message: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return a copy of ``messages`` with the ephemeral anchor at the tail.
+
+    锚点原来插在**开头那串 system 消息之后**，也就是 ``messages[1]``——紧挨着系统
+    提示词、在对话历史**前面**。而它每轮都在变（内含用户当前问题、round_idx、
+    tools_used_so_far），于是 prompt 前缀缓存在第 1 条消息就断了：整段
+    append-only 的历史每轮全价重算。实测连续三轮真实请求，相邻两轮的共享前缀只有
+    31.7%，分叉点精确落在 ``[user-goal-anchor] 第|二轮问题``。
+
+    当初放在头部是为了躲 MiniMax 复读锚点原文（见 a8ef5d1b）。那条路径已经基本不
+    用，而 ``_detect_pathological_goal_anchor_echo`` 这道防线原样保留着。
+
+    放到最尾还顺带对了它的本意：锚点是"动手前对照原始目标自检一遍"，越贴近模型下
+    一步决策越有用。多轮工具调用时它排在 tool 结果之后，模型每轮看到的都是最新的
+    一份，而不是被埋在历史前面那份。
+
+    不改入参 ``messages``：锚点是 ephemeral 的，绝不能进 ``session.agent_messages``。
+    """
+    if not anchor_message:
+        return messages
+    return [*messages, anchor_message]
+
+
 def _build_user_goal_anchor(
     session: "StudioSession",
     round_idx: int,
@@ -326,7 +357,7 @@ def _build_user_goal_anchor(
     if os.environ.get("AGX_GOAL_ANCHOR_DISABLE", "").strip() == "1":
         return None
 
-    session._goal_anchor_prepend = False
+    session._goal_anchor_placement = "tail"
 
     user_intent_raw = getattr(session, "current_user_intent", None)
     # NFR-4: Skip if None or whitespace-only (including empty string)
@@ -342,19 +373,15 @@ def _build_user_goal_anchor(
     user_intent_full = str(user_intent_raw)[:2000]
 
     restrengthen_threshold = _env_int_runtime("AGX_ANCHOR_RESTRENGTHEN_THRESHOLD", 12000)
-    force_prepend = tool_result_tokens_session >= restrengthen_threshold
+    force_full_anchor = tool_result_tokens_session >= restrengthen_threshold
 
     is_first_round = round_idx == 1 and tools_used_so_far == 0
     is_complex = (
         tools_used_so_far >= full_trigger_tools
         or messages_total_chars >= full_trigger_chars
         or max(0, int(current_turn_message_count)) >= 8
-        or force_prepend
+        or force_full_anchor
     )
-    # Keep the ephemeral anchor in the leading system-message block. A trailing
-    # system message after the user's history is prone to being echoed by some
-    # providers, especially when full mode contains several execution rules.
-    session._goal_anchor_prepend = True
 
     if is_first_round:
         # First round: minimal anchor (≤80 chars as per FR-3)
@@ -1338,7 +1365,40 @@ def _promote_user_image_attachments(
     return out
 
 
-def _build_agent_system_prompt(session: StudioSession) -> str:
+def _build_agent_volatile_sections(session: StudioSession) -> list[tuple[str, str]]:
+    """Volatile state omitted from the implement-agent system prompt.
+
+    与 ``_build_agent_system_prompt(include_volatile=False)`` 严格配对。
+    """
+    mcp_context = ""
+    if session.mcp_hub is not None:
+        try:
+            from agenticx.runtime.tool_search_runtime import read_tool_search_config
+
+            defer_schemas = read_tool_search_config().mode in {"auto", "always"}
+        except Exception:
+            defer_schemas = False
+        mcp_context = build_mcp_tools_context(session.mcp_hub, defer_schemas=defer_schemas)
+    return [
+        ("可用元 Skills 摘要", _serialize_skill_summaries(session)),
+        ("当前会话 artifacts", _serialize_artifacts(session)),
+        ("当前 Todo 列表", _serialize_todos(session)),
+        ("当前 Scratchpad 摘要", _serialize_scratchpad(session)),
+        ("当前 context_files", _serialize_context_files(session)),
+        ("当前 MCP 工具上下文", _truncate(mcp_context or "(no MCP tools connected)", 6000)),
+    ]
+
+
+def _build_agent_system_prompt(
+    session: StudioSession, *, include_volatile: bool = True
+) -> str:
+    """Build the implement-agent system prompt.
+
+    ``include_volatile=False`` 把每轮都在变的会话状态（技能目录、artifacts、todo、
+    scratchpad、附件正文、MCP 上下文）从 ``messages[0]`` 里摘出去，改由
+    ``<session-context>`` 追加在对话历史之后——见
+    :mod:`agenticx.runtime.prompts.session_context` 里关于前缀缓存的说明。
+    """
     mcp_context = ""
     if session.mcp_hub is not None:
         # When ToolSearch mode != off, defer MCP schema dumping into the system
@@ -1377,26 +1437,33 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         widget_block = _build_widget_capability_block()
     except Exception:
         widget_block = ""
+    if include_volatile:
+        _volatile_block = (
+            "## 可用元 Skills 摘要\n"
+            f"{_serialize_skill_summaries(session)}\n\n"
+            "## 当前会话 artifacts\n"
+            f"{_serialize_artifacts(session)}\n\n"
+            "## 当前 Todo 列表\n"
+            f"{_serialize_todos(session)}\n\n"
+            "## 当前 Scratchpad 摘要\n"
+            f"{_serialize_scratchpad(session)}\n\n"
+            "## 当前 context_files\n"
+            f"{_serialize_context_files(session)}\n\n"
+            "## 当前 MCP 工具上下文\n"
+            f"{_truncate(mcp_context, 6000)}\n\n"
+        )
+    else:
+        _volatile_block = ""
+        stash_volatile_sections(session, _build_agent_volatile_sections(session))
     return (
         "你是 AgenticX Studio 的执行型 Agent（implement 角色）。\n"
         "核心目标：根据用户请求完成代码/命令操作，并在不确定或高风险动作前主动确认。\n\n"
         "## 回复语言\n"
         "- 必须使用中文回复。\n"
         "- 简洁、可执行、优先给出当前进度。\n\n"
-        "## 可用元 Skills 摘要\n"
-        f"{_serialize_skill_summaries(session)}\n\n"
-        "## 当前会话 artifacts\n"
-        f"{_serialize_artifacts(session)}\n\n"
-        "## 当前 Todo 列表\n"
-        f"{_serialize_todos(session)}\n\n"
-        "## 当前 Scratchpad 摘要\n"
-        f"{_serialize_scratchpad(session)}\n\n"
-        "## 当前 context_files\n"
-        f"{_serialize_context_files(session)}\n\n"
+        f"{_volatile_block}"
         f"{code_dev_block}"
         f"{project_state_block}"
-        "## 当前 MCP 工具上下文\n"
-        f"{_truncate(mcp_context, 6000)}\n\n"
         "## 浏览器自动化（browser-use 等 MCP）\n"
         "- MCP 工具**不会**自动变成单独的 function；须先用 `mcp_connect` 连接配置好的服务器（如 `browser-use`），再用 `mcp_call` 调用，"
         "`tool_name` / `arguments` 与上方「当前 MCP 工具上下文」中的名称和 schema 一致。\n"
@@ -3011,7 +3078,9 @@ class AgentRuntime:
         self._recent_exploratory_fps.clear()
         self._exploratory_error_streak = 0
 
-        current_system_prompt = system_prompt or _build_agent_system_prompt(session)
+        current_system_prompt = system_prompt or _build_agent_system_prompt(
+            session, include_volatile=False
+        )
         full_tool_pool: list[Dict[str, Any]] = list(
             studio_tools_for_session(session) if tools is None else tools
         )
@@ -3234,6 +3303,27 @@ class AgentRuntime:
                 elif isinstance(user_content, list):
                     user_content = list(user_content) + [{"type": "text", "text": _omit_notice}]
         turn_message_start_index = len(session.agent_messages)
+        # <session-context>：本轮的易变会话状态。它**不写进 session.agent_messages**
+        # ——那是持久历史，把每轮都在变的快照存进去既会撑爆历史，也会让下一轮的历史
+        # 前缀跟着变，等于白搬。它只活在这一次请求里，位置在历史之后、用户消息之前：
+        # 前面的内容照常命中前缀缓存，而它离用户的问题最近。
+        _volatile_sections = pop_volatile_sections(session)
+        try:
+            from agenticx.runtime.tool_search import known_unloaded_names
+
+            _deferred_names = (
+                sorted(known_unloaded_names(ts_ctx))
+                if project_tools_for_round(ts_ctx, full_openai_tools=full_tool_pool)
+                is not full_tool_pool
+                else []
+            )
+        except Exception:
+            _deferred_names = []
+        _session_ctx_msg = build_session_context_message(
+            _volatile_sections, deferred_tool_names=_deferred_names
+        )
+        if _session_ctx_msg is not None:
+            messages.append(_session_ctx_msg)
         messages.append({"role": "user", "content": user_content})
         if persist_user_message:
             # Store rich content (list with image_url blocks for vision uploads) + attachments
@@ -3610,20 +3700,7 @@ class AgentRuntime:
                         len(session.agent_messages) - turn_message_start_index,
                     ),
                 )
-                if anchor_message:
-                    # Keep all system instructions together at the head of the
-                    # request. Appending a system message after user/tool history
-                    # makes some providers echo the internal anchor verbatim.
-                    insert_idx = 0
-                    for i, m in enumerate(messages):
-                        if isinstance(m, dict) and str(m.get("role", "")).lower() == "system":
-                            insert_idx = i + 1
-                        else:
-                            break
-                    messages_for_llm = list(messages)
-                    messages_for_llm.insert(insert_idx, anchor_message)
-                else:
-                    messages_for_llm = messages
+                messages_for_llm = _inject_goal_anchor(messages, anchor_message)
                 llm_call_kwargs: Dict[str, Any] = {}
                 try:
                     messages_for_llm, cache_telemetry = apply_prompt_cache_breakpoints(
@@ -3704,7 +3781,7 @@ class AgentRuntime:
                     "tool_result_tokens_session": budget_stats.tool_result_tokens_session,
                     "archived_tool_calls": budget_stats.archived_replaced,
                     "anchor_mode": getattr(session, "_goal_anchor_mode", None),
-                    "anchor_prepend": bool(getattr(session, "_goal_anchor_prepend", False)),
+                    "anchor_placement": str(getattr(session, "_goal_anchor_placement", "tail")),
                     "cache_mode": latest_cache_telemetry.get("cache_mode", "disabled"),
                     "cache_breakpoints": latest_cache_telemetry.get("cache_breakpoints", 0),
                     "cache_eligible_chars": latest_cache_telemetry.get("cache_eligible_chars", 0),

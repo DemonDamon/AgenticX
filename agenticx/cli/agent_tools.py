@@ -384,6 +384,12 @@ def _detect_target(text: str) -> str:
     return "agent"
 
 
+from agenticx.runtime.prompts.tool_discipline import (
+    QUERY_DATA_SOURCE_USAGE,
+    SHOW_WIDGET_USAGE,
+    SKILL_MANAGE_USAGE,
+)
+
 STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
@@ -1020,6 +1026,7 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "For 'delete': provide action + name. "
                 "Sub-paths are supported (e.g. name='ima/notes'). "
                 "IMPORTANT: never call with empty arguments — action and name are always required."
+                + SKILL_MANAGE_USAGE
             ),
             "parameters": {
                 "type": "object",
@@ -1476,6 +1483,7 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "Call list_data_sources first if you don't know the exact api_name or "
                 "params shape. Returns structured JSON; follow up with show_widget to "
                 "visualize when appropriate (e.g. price history as a chart)."
+                + QUERY_DATA_SOURCE_USAGE
             ),
             "parameters": {
                 "type": "object",
@@ -1514,6 +1522,7 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "For structured stock/macro charts, widget_code MUST be JSON starting with "
                 '\'{"type": "stock_chart", ...}\' — the "type" field is REQUIRED, omitting it '
                 "will render as unreadable raw text instead of a chart."
+                + SHOW_WIDGET_USAGE
             ),
             "parameters": {
                 "type": "object",

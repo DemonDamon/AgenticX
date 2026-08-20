@@ -3631,6 +3631,9 @@ def create_studio_app() -> FastAPI:
                                 user_preference=_u_preference,
                                 kb_retrieval_mode_override=_kb_mode_req or None,
                                 include_file_delivery_choice=not turn_is_unattended,
+                                # 易变会话状态改由 <session-context> 追加在历史之后，
+                                # 让 system prompt 成为真正稳定的缓存前缀。
+                                include_volatile=False,
                             )
                         user_message_content: Any | None = None
                         history_user_attachments: list[dict[str, Any]] | None = None
@@ -4422,6 +4425,7 @@ def create_studio_app() -> FastAPI:
             taskspaces=managed.taskspaces,
             group_chat=_meta_group_chat_payload(managed),
             include_file_delivery_choice=False,
+            include_volatile=False,
         )
 
         async def _loop_stream() -> AsyncGenerator[str, None]:

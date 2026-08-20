@@ -15,6 +15,7 @@ from typing import Any, Optional
 from agenticx.cli.studio import StudioSession
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.prompts.skill_authoring import build_skill_authoring_prompt_block
+from agenticx.runtime.prompts.session_context import stash_volatile_sections
 from agenticx.skills.meta_skill import MetaSkillInjector
 from agenticx.runtime.prompts.code_mode import build_code_dev_prompt_blocks
 from agenticx.runtime.prompts.current_time import build_current_time_block
@@ -36,6 +37,21 @@ MAX_WORKSPACE_BLOCK_CHARS = 1800
 MAX_WORKSPACE_TOTAL_CHARS = 6000
 
 
+#: 目录里单条技能描述的字符上限。目录只负责"路由"——让模型判断该不该加载这个
+#: 技能——完整正文本来就要靠 skill_use 拉。描述没有上限时，一条能写到几百字符，
+#: 22 个技能就是 4770 字符，而且每轮都在发。DeepSeek Harness 同样的目录里这个
+#: 上限是 500。
+MAX_SKILL_DESCRIPTION_CHARS = 500
+
+
+def _clip_skill_description(description: str) -> str:
+    """Whitespace-normalize and cap one catalog description."""
+    text = " ".join(str(description or "").split())
+    if len(text) <= MAX_SKILL_DESCRIPTION_CHARS:
+        return text
+    return text[: MAX_SKILL_DESCRIPTION_CHARS - 1] + "…"
+
+
 def _build_skills_context(
     skills: list[dict[str, Any]] | None = None,
     *,
@@ -52,7 +68,7 @@ def _build_skills_context(
     for skill in skills:
         name = str(skill.get("name", "")).strip() or "(unknown)"
         description = str(skill.get("description", "")).strip() or "(无描述)"
-        lines.append(f"- {name}: {description}")
+        lines.append(f"- {name}: {_clip_skill_description(description)}")
     return "\n".join(lines) + "\n"
 
 
@@ -189,6 +205,37 @@ def _build_workspace_context_block(
         _append_block(f"本主体（{label}）长期记忆", workspace.get("memory", ""))
         _append_block(f"本主体（{label}）今日记忆", workspace.get("daily_memory", ""))
     return "\n\n".join(parts) + "\n"
+
+
+def _resolve_workspace_context(
+    session: StudioSession,
+    *,
+    avatar_context: dict[str, str] | None = None,
+    group_chat: dict[str, Any] | None = None,
+) -> str:
+    """Resolve the subject label and render the identity / long-term block.
+
+    抽出来是因为它现在有两个调用点（system prompt 的 include_volatile 分支和
+    :func:`build_meta_agent_volatile_sections`），而 subject_label 的取法有点绕
+    （群名 > 分身名 > "元智能体"），两边各写一遍迟早会漂。
+    """
+    group_allowed: set[str] | None = None
+    group_name = ""
+    if group_chat and isinstance(group_chat, dict):
+        raw_ids = group_chat.get("avatar_ids")
+        if isinstance(raw_ids, list):
+            group_allowed = {str(x).strip() for x in raw_ids if str(x).strip()}
+        group_name = str(group_chat.get("name", "") or "").strip()
+    avatar_name = str((avatar_context or {}).get("name", "")).strip()
+    return _build_workspace_context_block(
+        str(getattr(session, "bound_avatar_id", "") or "").strip() or None,
+        session=session,
+        subject_label=(
+            (group_name if group_allowed is not None else "")
+            or avatar_name
+            or "元智能体"
+        ),
+    )
 
 
 def _build_computer_use_capabilities_block() -> str:
@@ -684,16 +731,23 @@ def _build_url_vision_capability_block() -> str:
 
 
 def _build_widget_capability_block() -> str:
-    """Describe built-in show_widget for inline Mermaid/SVG/HTML visualizations."""
+    """Trigger rules for show_widget. Format specs live in the tool description.
+
+    这里只留"什么时候必须出图"——模型得先知道该出图，才谈得上去调工具。而"Mermaid
+    怎么写 / SVG 尺寸怎么算 / CDN 白名单"这些用法细则搬去了
+    ``tool_discipline.SHOW_WIDGET_USAGE``，跟着工具的 description 走：工具被延迟
+    时它们一起消失，工具被加载时又原样回来。
+    """
     return (
         "## 内联可视化（show_widget）— 硬性纪律\n"
-        "- 你 **内置** `show_widget` 工具，可在聊天气泡内直接渲染矢量图或交互图表，用户可见、可复制为图片。\n"
+        "- 你 **内置** `show_widget` 工具，可在聊天气泡内直接渲染矢量图或交互图表，用户可见、可复制为图片。"
+        "它可能未随本轮请求发送 schema（见 `<session-context>` 的延迟工具清单）——**直接调用即可**，系统会自动加载。\n"
         "- **凡是要向用户展示流程/链路/步骤/时序/架构/数据走向/代理路径，必须调用 `show_widget` 并在其后写正文解读。**\n"
         "  哪怕只有 3 个节点（如「客户端 → 代理 → 服务端」），也 **必须** 出图，不得用文字链凑合。\n"
         "- **推荐工作流（衔接语不可省略）**：\n"
         "  1) **先**在可见正文中写 1–3 句衔接语（说明要回答什么、图展示什么，例如「下面用一张图概括整体实现链路」）；\n"
         "  2) **再**调用 `show_widget(title=..., widget_format=\"mermaid\", widget_code=...)` "
-        "渲染主架构/流程（流程类图优先 Mermaid）；\n"
+        "渲染主架构/流程（流程类图优先 Mermaid，其余格式规范见工具 description）；\n"
         "  3) **最后**分节解读各模块；如需第二张图（时序/对比/细节）可再调用 `show_widget`。\n"
         "- **思考块纪律**：`<think>` / 推理内容仅限内部分析与规划；"
         "不得把本应展示给用户的过渡句、方案引言、目录预告、「让我重新组织…」类话术写进思考块。"
@@ -710,60 +764,27 @@ def _build_widget_capability_block() -> str:
         "  - ASCII/框线字符（`+---`、`│`、`┌─┐`）画架构/流程；\n"
         "  - 已调用 `show_widget` 出图后，又在正文/代码块重复画架构或实现路径；\n"
         "  - 正文写「流程如下」「链路如下」却不调用 `show_widget`。\n"
-        "- **格式选择**：\n"
-        "  - 流程图、架构图、链路图、时序图 → `widget_format=\"mermaid\"`（自动布局，避免节点重叠）。\n"
-        "  - 自由矢量插图或 Mermaid 无法表达的特殊几何 → `widget_format=\"svg\"`。\n"
-        "  - 需要交互或数据驱动（折线/饼图/动态筛选）→ `widget_format=\"html\"` + Chart.js/D3，从 CDN 白名单加载脚本。\n"
-        "- **Mermaid 规范**（`widget_format=\"mermaid\"`）：\n"
-        "  - `widget_code` 直接从 `flowchart` / `sequenceDiagram` 等声明开始，不要包 Markdown 代码围栏；\n"
-        "  - 每个节点优先使用短标签；长标签拆成 `<br/>`，不要塞完整段落；\n"
-        "  - 根据结构选择 `TB` 或 `LR`，避免为了横向展示塞入过多同层节点；\n"
-        "  - 不在 Mermaid 中写大段自定义 HTML/CSS。\n"
-        "- **SVG 规范**（仅 `widget_format=\"svg\"`）：文字用 `var(--text-primary)` / `var(--text-muted)`；"
-        "背景/边框可用 `var(--surface-card)` / `var(--border-subtle)`；"
-        "强调色用 `rgb(var(--theme-color-rgb))`；箭头 marker 用 `stroke=\"context-stroke\"` 跟随连线颜色；"
-        "模块用圆角矩形，层与层之间用箭头连接，中文标签要完整可读。\n"
-        "- **主题自适应（落盘 HTML/SVG 或独立预览页）**：禁止把背景/正文色写死为仅深色（如 `#0d1117` / `#e6edf3`）；"
-        "页面用 CSS 变量 + `@media (prefers-color-scheme: light)`（及可选 `html[data-theme=light|dark|dim]`）；"
-        "SVG 内同样用 CSS 变量定义 `--svg-bg*` / `--svg-text*` 并提供 light 覆盖；"
-        "Mermaid 初始化按当前主题选 `default`（浅色）或 `dark`（深色/暗灰），不要写死 `theme: 'dark'`。\n"
-        "- **SVG 尺寸（防叠字/防裁切，仅手写 SVG）**：`viewBox=\"0 0 W H\"` 的 W/H 必须**完整包住**所有图形与文字并留 ≥24px 边距；"
-        "表格/热力图/多行对比等内容越多 H 越大（按行数预估，禁止所有图共用同一固定高度）；"
-        "单元格内文字不得与相邻格重叠，标签列与数据列之间留足 x 间距；"
-        "长句用 `<foreignObject>` 换行或拆成多行 `<tspan>`，禁止把多段文字堆在同一坐标。\n"
-        "- **CDN 白名单**（HTML 模式仅允许）：`cdnjs.cloudflare.com`、`esm.sh`、`cdn.jsdelivr.net`、`unpkg.com`。\n"
-        "- 每次调用渲染 **一个** widget；`title` 必填且简短（会显示在工具卡标题）。\n"
-        "- **禁止**用 ImageGen/截图/HTML 文件落盘替代；纯矢量 SVG、Mermaid 或 sandbox iframe 内 HTML 即可。\n"
         "- **技能已渲染的预览图例外**：若本轮技能/脚本已在工作区生成 PNG/GIF/SVG，"
         "必须在正文用 Markdown 图片语法嵌入**绝对路径**（`![说明](/abs/path.gif)`），"
         "让用户在气泡内直接看到成品；不得只用文件名表格或 Mermaid 顶替。"
-        "`show_widget` 可作为结构概览，但不能替代已生成的预览图。\n"
-        "- **时间序列行情/宏观走势**：取数后优先 `show_widget(widget_code=<stock_chart JSON>)`；"
-        "K 线用 `chart_type: \"candlestick\"`，宏观趋势用 `chart_type: \"line\"`；"
-        "用户同时关注多只股票时，用 `watchlist` 数组一次出图（Desktop 顶部 Tab 可切换），"
-        "不要拆成多个 widget；并保留 `attribution` / `data_source_label` 来源角标。\n\n"
+        "`show_widget` 可作为结构概览，但不能替代已生成的预览图。\n\n"
     )
 
+
 def _build_data_source_discipline() -> str:
-    """Describe when the model must call query_data_source instead of guessing facts."""
+    """Trigger rules for query_data_source; the how-to lives in its description.
+
+    细则（默认 60 天窗口、同一 symbol 只查一次、stock_chart JSON 出图、失败降级）
+    搬去了 ``tool_discipline.QUERY_DATA_SOURCE_USAGE``。
+    """
     return (
         "## 查数纪律（query_data_source）— 硬性纪律\n"
         "- 涉及股价/财务指标/宏观经济数据/企业工商/学术引用等**可核实的量化事实**时，"
         "**禁止**凭训练记忆直接给出具体数字，必须先调用 `list_data_sources`（如不确定用哪个源）"
-        "再调用 `query_data_source` 取得真实数据。\n"
-        "- 取到的时间序列数据用于可视化时，按 show_widget 纪律渲染图表（`stock_chart` JSON 或 ECharts HTML），"
-        "不要退化为纯文字表格罗列。\n"
-        "- 股价 K 线**默认取 `days: 60`（约 3 个月）**：用户说「最近走势/最近一周走势/近期表现」等"
-        "泛化表述时，也按 60 天取数以保证图表不稀疏；仅当用户明确要精确的极短窗口（如「对比昨天和前天」）才用更小 days。\n"
-        "- **股票图必须用结构化 `stock_chart` JSON**（单股 `points` 或多股 `watchlist`），"
-        "把 `query_data_source` 返回的 OHLCV 行**原样**填进 `points`；"
-        "**严禁手写 `<div>`+ECharts `<script>` HTML 画股票图**（会出现白字看不见、图稀疏等问题）。\n"
-        "- `query_data_source` 返回已裁剪为 date/OHLC/volume，完整 60 行可一次拿全；"
-        "**禁止**因为「看起来被截断」就用更小 days 反复重查同一支股票——同一 symbol 至多查一次。\n"
+        "再调用 `query_data_source` 取得真实数据。取数与出图的参数细则见工具 description。\n"
+        "- 取到的时间序列数据用于可视化时，按 show_widget 纪律渲染图表，不要退化为纯文字表格罗列。\n"
         "- 工作流：**先** 1–3 句可见衔接语 → **`query_data_source` 取数** → **`show_widget` 出图** → **后**分节解读；"
-        "解读中的数字必须与工具返回一致。\n"
-        "- 若所选数据源返回凭证缺失/连接失败，先尝试免费替代源（如 akshare/world_bank）；"
-        "全部失败时必须明确告知用户「当前数据源暂不可用，无法核实最新数据」，**严禁编造具体数值**。\n\n"
+        "解读中的数字必须与工具返回一致。数据源全部失败时必须明说无法核实，**严禁编造具体数值**。\n\n"
     )
 
 
@@ -814,7 +835,23 @@ def build_meta_agent_system_prompt(
     user_preference: str = "",
     kb_retrieval_mode_override: Optional[str] = None,
     include_file_delivery_choice: bool = False,
+    include_volatile: bool = True,
 ) -> str:
+    """Build the meta-agent system prompt.
+
+    Args:
+        include_volatile: keep每轮都在变的会话状态（技能目录、MCP、分身、todo、
+            子智能体、记忆召回、附件正文……）留在 system prompt 里。默认 ``True``
+            保持老行为，供那些自己拼 prompt、不走 ``<session-context>`` 的调用方
+            使用。主运行时传 ``False``，改由
+            :func:`build_meta_agent_volatile_sections` 渲染到对话末尾——因为
+            system prompt 是 ``messages[0]``，里面任何一处变动都会让它后面的整段
+            对话历史前缀缓存失效（实测稳定前缀只剩 9.6%）。
+
+            注意：静态规则里那些"见 Avatars 列表 / 已注册能力章节 / 当前子智能体
+            状态"的指路话依然成立——数据只是挪到了同一个请求的后半段，而且离用户
+            的问题更近。
+    """
     bound_skill = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
     try:
         skill_summaries = get_all_skill_summaries(bound_avatar_id=bound_skill)
@@ -841,14 +878,8 @@ def build_meta_agent_system_prompt(
     avatar_role = str((avatar_context or {}).get("role", "")).strip()
     avatar_system_prompt = str((avatar_context or {}).get("system_prompt", "")).strip()
     has_avatar_context = bool(avatar_name)
-    workspace_context = _build_workspace_context_block(
-        str(getattr(session, "bound_avatar_id", "") or "").strip() or None,
-        session=session,
-        subject_label=(
-            (group_name if group_allowed is not None else "")
-            or (avatar_name if has_avatar_context else "")
-            or "元智能体"
-        ),
+    workspace_context = _resolve_workspace_context(
+        session, avatar_context=avatar_context, group_chat=group_chat
     )
     avatar_block = ""
     if has_avatar_context:
@@ -896,9 +927,35 @@ def build_meta_agent_system_prompt(
     file_delivery_choice_block = (
         build_file_delivery_choice_prompt_block() if include_file_delivery_choice else ""
     )
+    _capabilities_block = (
+        "## 已注册能力\n"
+        f"{skills_context}"
+        f"{native_connectors_context}"
+        f"{mcp_context}\n"
+        f"{avatars_context}\n"
+    )
+    _tail_state_block = (
+        f"{todo_context}\n"
+        f"{active_subagents}"
+        f"{memory_recall}"
+        f"{session_summary}"
+        f"{taskspaces_context}"
+        f"{build_code_dev_prompt_blocks(session)}"
+        "## 当前会话上下文\n"
+        f"- model_service: {format_model_option_label(session.provider_name or '', session.model_name or '', resolve_provider_config(session.provider_name or ''))}\n"
+        f"- provider: {session.provider_name or 'default'}\n"
+        f"- model: {session.model_name or 'default'}\n"
+        f"{_build_context_files_block(session)}"
+    )
+    # workspace_context（身份/长期记忆/今日记忆）和 provider_fault_block（本会话
+    # provider 硬失败隔离）原来钉在整段 prompt 的**最开头**。两者都是易变的：prompt
+    # 自己在鼓励模型"会话结束前主动 memory_append"，一次写入就从第 0 字节炸掉缓存；
+    # provider 隔离更是运行中才出现。它们跟其它易变状态一起去 <session-context>。
+    _head_state = (
+        f"{workspace_context}\n{provider_fault_block}" if include_volatile else ""
+    )
     base_prompt = (
-        f"{workspace_context}\n"
-        f"{provider_fault_block}"
+        f"{_head_state}"
         f"{avatar_block}"
         f"{group_block}"
         f"{identity_line}"
@@ -909,7 +966,7 @@ def build_meta_agent_system_prompt(
         f"{mode_line}"
         f"{computer_use_block}"
         "## 身份应答策略\n"
-        "- 当用户询问“你是谁/你的定位”时，优先基于“身份与长期上下文”简洁回答（身份、职责、边界）。\n"
+        "- 当用户询问“你是谁/你的定位”时，优先基于对话末尾 `<session-context>` 里的“身份与长期上下文”简洁回答（身份、职责、边界）。\n"
         "- 回答身份问题时不要罗列完整 skills/MCP 清单，除非用户明确要求查看能力清单。\n\n"
         "## 技能市场安装\n"
         "- 用户要求安装 SkillHub/ClawHub 上已发布的技能时，直接调用 `skill_market_install(name=...)`；该工具会自动解析来源、下载、扫描并安装。\n"
@@ -1048,11 +1105,7 @@ def build_meta_agent_system_prompt(
         "- 绝不能启动子智能体后只说「已启动，请等待」就不管了。子智能体完成后你必须主动总结汇报，不能等用户追问。\n"
         "- 如果本轮看到已完成的子智能体但还未向用户汇报过，可调用一次 `query_subagent_status` 校验后给出结构化汇报；禁止循环查询。\n"
         "- 严禁编造进度百分比（如 75%）。只有工具返回明确数值时才可引用，否则用“进行中/已完成/失败”描述。\n\n"
-        "## 已注册能力\n"
-        f"{skills_context}"
-        f"{native_connectors_context}"
-        f"{mcp_context}\n"
-        f"{avatars_context}\n"
+        f"{_capabilities_block if include_volatile else ''}"
         "## 分身协作\n"
         f"{group_collab_line}"
         "- 当用户问“某分身是谁/角色是什么/ID 是什么”等身份类问题时，直接基于 Avatars 列表回答，禁止调用 `delegate_to_avatar`。\n"
@@ -1077,18 +1130,84 @@ def build_meta_agent_system_prompt(
         "- 权限类确认（写文件、执行命令）仍走原有 `confirm_required` 流程，不要用 `request_clarification` 或 `request_action_confirmation` 替代。\n"
         "- 涉及模型/厂商选择时，`prompt` 与 `options` 只能写用户可见的「厂商展示名/模型短名」（如「彩讯-外网/kimi-k2.6」「MOMA/GLM-5.2」），禁止出现 `custom_openai_*` 等内部配置 id。\n\n"
         f"{build_provider_catalog_block(current_provider=session.provider_name or '', current_model=session.model_name or '')}"
-        f"{todo_context}\n"
         f"{lsp_context}"
-        f"{active_subagents}"
-        f"{memory_recall}"
-        f"{session_summary}"
-        f"{taskspaces_context}"
-        f"{build_code_dev_prompt_blocks(session)}"
-        "## 当前会话上下文\n"
+        f"{_tail_state_block if include_volatile else ''}"
+        f"{_build_user_profile_block(user_nickname, user_preference)}"
+    )
+    if not include_volatile:
+        # 侧信道交给 AgentRuntime：它会把这些区块框成 <session-context>，追加在对话
+        # 历史之后、当前用户消息之前。
+        stash_volatile_sections(
+            session,
+            build_meta_agent_volatile_sections(
+                session,
+                taskspaces=taskspaces,
+                group_chat=group_chat,
+                avatar_context=avatar_context,
+            ),
+        )
+    return MetaSkillInjector().inject(
+        base_prompt,
+        skill_summaries,
+        # 目录已经在 ``skills_context`` 里渲染过一次了；再让 injector 追加一份
+        # ``## Available Skills`` 就是同样 22 个技能原样列两遍。
+        include_catalog=False,
+    )
+
+
+def build_meta_agent_volatile_sections(
+    session: StudioSession,
+    *,
+    taskspaces: list[dict[str, str]] | None = None,
+    group_chat: dict[str, Any] | None = None,
+    avatar_context: dict[str, str] | None = None,
+) -> list[tuple[str, str]]:
+    """Render the volatile state that :func:`build_meta_agent_system_prompt` omits.
+
+    与 ``include_volatile=False`` 严格配对：那边少了什么，这边就补什么。返回
+    ``(title, body)`` 列表，交给
+    :func:`agenticx.runtime.prompts.session_context.build_session_context_message`
+    框成一条追加在对话历史之后的 system 消息。
+    """
+    bound = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
+    try:
+        skill_summaries = get_all_skill_summaries(bound_avatar_id=bound)
+    except Exception:
+        skill_summaries = []
+    group_allowed: set[str] | None = None
+    if group_chat and isinstance(group_chat, dict):
+        raw_ids = group_chat.get("avatar_ids")
+        if isinstance(raw_ids, list):
+            group_allowed = {str(x).strip() for x in raw_ids if str(x).strip()}
+    capabilities = (
+        _build_skills_context(skill_summaries)
+        + _build_native_connectors_context()
+        + _build_mcps_context(session)
+        + "\n"
+        + _build_avatars_context(allowed_avatar_ids=group_allowed)
+    )
+    session_line = (
         f"- model_service: {format_model_option_label(session.provider_name or '', session.model_name or '', resolve_provider_config(session.provider_name or ''))}\n"
         f"- provider: {session.provider_name or 'default'}\n"
         f"- model: {session.model_name or 'default'}\n"
         f"{_build_context_files_block(session)}"
-        f"{_build_user_profile_block(user_nickname, user_preference)}"
     )
-    return MetaSkillInjector().inject(base_prompt, skill_summaries)
+    return [
+        # 背景在前、要动手的材料在后：身份与长期上下文属于背景，而且放在这里离用户
+        # 的问题更近，遵循度只会更好。
+        (
+            "",
+            _resolve_workspace_context(
+                session, avatar_context=avatar_context, group_chat=group_chat
+            ),
+        ),
+        ("", _build_provider_hard_failure_block(session)),
+        ("已注册能力", capabilities),
+        ("", _build_todo_context(session)),
+        ("", _build_active_subagents_context(session)),
+        ("", _build_memory_recall_context(session)),
+        ("", _build_session_summary_context(session)),
+        ("", _build_taskspaces_context(taskspaces)),
+        ("", build_code_dev_prompt_blocks(session)),
+        ("当前会话上下文", session_line),
+    ]

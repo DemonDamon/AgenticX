@@ -43,5 +43,11 @@ class TestSkillsLearningGuidance:
             fromlist=["build_skill_authoring_prompt_block"],
         ).build_skill_authoring_prompt_block()
         guidance_pos = block.find("Skill 学习协议")
-        spec_pos = block.find("skill_manage / skill_import_repo 使用规范")
-        assert guidance_pos < spec_pos
+        spec_pos = block.find("skill_manage / skill_import_repo")
+        assert 0 <= guidance_pos < spec_pos
+        # 详细参数规范（大文件走 from_url/from_path、frontmatter 格式、落盘自检）
+        # 搬去了 skill_manage 自己的 description，见 tool_discipline.SKILL_MANAGE_USAGE。
+        from agenticx.runtime.prompts.tool_discipline import SKILL_MANAGE_USAGE
+
+        assert "discoverable=true" in SKILL_MANAGE_USAGE
+        assert "discoverable=true" not in block

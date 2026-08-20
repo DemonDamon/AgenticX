@@ -18,6 +18,7 @@ import pytest
 sys.path.insert(0, str(__file__).rsplit("/tests", 1)[0])
 
 from agenticx.runtime.agent_runtime import (
+    _inject_goal_anchor,
     _build_user_goal_anchor,
     _detect_pathological_goal_anchor_echo,
 )
@@ -365,8 +366,14 @@ class TestGoalAnchorEdgeCases:
         # Default keeps "5" so existing behavior preserved.
         assert "工具调用累计 >= 5 次" in result["content"]
 
-    def test_tool_result_tokens_trigger_full_mode_and_prepend(self):
-        """M4: high cumulative tool_result tokens force complex anchor + prepend flag."""
+    def test_tool_result_tokens_trigger_full_mode(self):
+        """M4: 工具结果累计 token 高时强制走 full 锚点。
+
+        原来这条还断言 ``_goal_anchor_prepend is True``。那个标志描述的是"锚点插在
+        开头的 system 块里"，而位置已经统一改到尾部（见 _inject_goal_anchor 的注释：
+        插在头部会让整段 append-only 的历史每轮全价重算）。``force_full_anchor``
+        这个信号本身还在，它决定的是**用哪种模式**，从来不是插在哪。
+        """
         session = MockStudioSession(current_user_intent="Install skills from repo")
         with patch.dict(os.environ, {"AGX_ANCHOR_RESTRENGTHEN_THRESHOLD": "1000"}):
             result = _build_user_goal_anchor(
@@ -379,7 +386,7 @@ class TestGoalAnchorEdgeCases:
             )
         assert result is not None
         assert "执行要求：" in result["content"]
-        assert getattr(session, "_goal_anchor_prepend", False) is True
+        assert getattr(session, "_goal_anchor_placement", "") == "tail"
 
     def test_function_does_not_mutate_session(self):
         """_build_user_goal_anchor must not alter intent or agent_messages."""
@@ -420,11 +427,12 @@ class TestAnchorEphemeralBehavior:
         assert a1 is not None and a2 is not None
         assert a1 is not a2  # Distinct objects—safe to mutate one without affecting the other.
 
-    def test_system_block_insertion_isolates_anchor(self):
-        """Verify leading system insertion leaves original list unchanged.
+    def test_injection_appends_at_the_tail_without_touching_the_original(self):
+        """锚点追加在末尾，且不动入参列表。
 
-        This is exactly what agent_runtime.py does post-fix:
-            messages_for_llm.insert(insert_idx, anchor_message)
+        这条原来自己把 agent_runtime 的插入算法抄了一遍再断言，等于测自己抄的那份；
+        现在直接调真的 ``_inject_goal_anchor``。位置也从 ``messages_for_llm[1]``
+        改成了末尾——历史必须紧贴 system prompt，否则每轮都白算一遍。
         """
         session = MockStudioSession(current_user_intent="Test")
         anchor = _build_user_goal_anchor(
@@ -438,23 +446,21 @@ class TestAnchorEphemeralBehavior:
             {"role": "user", "content": "hi"},
         ]
         original_len = len(original_messages)
+        messages_for_llm = _inject_goal_anchor(original_messages, anchor)
 
-        # Simulate agent_runtime's anchor injection pattern
-        insert_idx = 0
-        for i, message in enumerate(original_messages):
-            if message.get("role") == "system":
-                insert_idx = i + 1
-            else:
-                break
-        messages_for_llm = list(original_messages)
-        messages_for_llm.insert(insert_idx, anchor)
-
-        # Original list must be untouched
+        # 入参必须原样：锚点是 ephemeral 的，绝不能进 session.agent_messages。
         assert len(original_messages) == original_len
         assert original_messages[-1] == {"role": "user", "content": "hi"}
-        # Temporary view keeps the anchor in the leading system block
-        assert messages_for_llm[1] == anchor
+        assert messages_for_llm is not original_messages
+        # 系统提示词之后立刻就是历史，锚点在最末。
+        assert messages_for_llm[0]["role"] == "system"
+        assert messages_for_llm[1] == {"role": "user", "content": "hi"}
+        assert messages_for_llm[-1] == anchor
         assert len(messages_for_llm) == original_len + 1
+
+    def test_injection_is_a_noop_without_an_anchor(self):
+        messages = [{"role": "system", "content": "sys"}]
+        assert _inject_goal_anchor(messages, None) is messages
 
 
 class TestGoalAnchorEchoGuard:
