@@ -1,0 +1,7 @@
+name: notify-on-new
+description: Print a one-line notice whenever a session is created or reset.
+events:
+  - command:new
+  - command:reset
+export: handle
+enabled: true
