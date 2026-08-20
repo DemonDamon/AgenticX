@@ -22,6 +22,7 @@ import {
   buildHookBlockFriendlyNotice,
   findNearbyHookBlockedTool,
   isHookBlockEchoAssistantMessage,
+  isHookBlockedToolMessage,
 } from "../../utils/hook-block-message";
 import { HookBlockNoticeLine } from "./HookBlockNoticeLine";
 import { ViewImageInjectCard } from "./ViewImageInjectCard";

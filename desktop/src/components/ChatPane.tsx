@@ -36,6 +36,7 @@ import {
   PanelRight,
   ArrowRight,
   Loader2,
+  PhoneCall,
 } from "lucide-react";
 import {
   useAppStore,
