@@ -3,7 +3,110 @@ import { isAbsoluteFilePath } from "../../utils/workspace-file-path";
 /** Inline code spans — leave literal backtick content unchanged. */
 const INLINE_CODE_RE = /(`[^`\n]+`)/g;
 
-const FENCED_BLOCK_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
+type FenceLine = {
+  indent: number;
+  marker: "`" | "~";
+  length: number;
+  info: string;
+};
+
+/** CommonMark fence line: 0–3 spaces, 3+ backticks/tildes, optional info string. */
+function parseFenceLine(line: string): FenceLine | null {
+  const match = /^(\s{0,3})(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!match) return null;
+  const ticks = match[2];
+  const marker = ticks[0] as "`" | "~";
+  const info = match[3];
+  if (marker === "`" && info.includes("`")) return null;
+  return { indent: match[1].length, marker, length: ticks.length, info };
+}
+
+function isFenceCloser(opener: FenceLine, candidate: FenceLine): boolean {
+  return (
+    candidate.marker === opener.marker &&
+    candidate.length >= opener.length &&
+    candidate.indent <= opener.indent &&
+    candidate.info.trim() === ""
+  );
+}
+
+function findFenceCloser(lines: string[], openerIndex: number, opener: FenceLine): number {
+  for (let index = openerIndex + 1; index < lines.length; index += 1) {
+    const candidate = parseFenceLine(lines[index]);
+    if (candidate && isFenceCloser(opener, candidate)) return index;
+  }
+  return -1;
+}
+
+/**
+ * Models wrap a whole prompt in ```markdown and then nest ``` error dumps inside.
+ * CommonMark closes the outer fence at the first same-length ``` (even if indented 1–3 spaces).
+ * Lift the outer fence so remark keeps one copyable block.
+ */
+function repairNestedMarkdownFences(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const opener = parseFenceLine(lines[index]);
+    if (!opener) {
+      out.push(lines[index]);
+      index += 1;
+      continue;
+    }
+    const closer = findFenceCloser(lines, index, opener);
+    if (closer < 0) {
+      out.push(...lines.slice(index));
+      break;
+    }
+    const content = lines.slice(index + 1, closer);
+    let maxInnerLength = 0;
+    for (const line of content) {
+      const inner = parseFenceLine(line);
+      if (inner && inner.marker === opener.marker) {
+        maxInnerLength = Math.max(maxInnerLength, inner.length);
+      }
+    }
+    const outerLength = maxInnerLength >= opener.length ? maxInnerLength + 1 : opener.length;
+    const indent = " ".repeat(opener.indent);
+    const ticks = opener.marker.repeat(outerLength);
+    out.push(`${indent}${ticks}${opener.info}`);
+    out.push(...content);
+    out.push(`${indent}${ticks}`);
+    index = closer + 1;
+  }
+  return out.join("\n");
+}
+
+function mapFencedAndProse(text: string, onProse: (chunk: string) => string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let index = 0;
+  let proseLines: string[] = [];
+  const flushProse = () => {
+    if (proseLines.length === 0) return;
+    out.push(onProse(proseLines.join("\n")));
+    proseLines = [];
+  };
+  while (index < lines.length) {
+    const opener = parseFenceLine(lines[index]);
+    if (!opener) {
+      proseLines.push(lines[index]);
+      index += 1;
+      continue;
+    }
+    const closer = findFenceCloser(lines, index, opener);
+    flushProse();
+    if (closer < 0) {
+      out.push(lines.slice(index).join("\n"));
+      break;
+    }
+    out.push(lines.slice(index, closer + 1).join("\n"));
+    index = closer + 1;
+  }
+  flushProse();
+  return out.join("\n");
+}
 
 /** Standalone line that is only an absolute file path (not already in backticks). */
 const STANDALONE_ABS_PATH_LINE_RE =
@@ -153,8 +256,6 @@ export function normalizeChatMarkdownContent(
   options?: NormalizeChatMarkdownOptions,
 ): string {
   if (!raw) return raw;
-  const fencedChunks = raw.split(FENCED_BLOCK_RE);
-  return fencedChunks
-    .map((chunk, idx) => (idx % 2 === 1 ? chunk : normalizeProseChunk(chunk, options)))
-    .join("");
+  const repaired = repairNestedMarkdownFences(raw);
+  return mapFencedAndProse(repaired, (chunk) => normalizeProseChunk(chunk, options));
 }
