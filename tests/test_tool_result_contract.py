@@ -87,3 +87,51 @@ def test_falsy_tool_result_is_not_swallowed() -> None:
     event = _run_tool_through_executor(_zero)
     assert event.success is True, event.error
     assert event.result == 0
+
+
+def test_parallel_tool_calls_run_without_an_event_log() -> None:
+    """execute_parallel_tool_calls 的 event_log 是 Optional，不传也必须能跑。
+
+    原来函数体直接取 event_log.agent_id，不传就每个工具都以
+    "'NoneType' object has no attribute 'agent_id'" 失败——而且错误被包进
+    ParallelToolResult(success=False)，看起来像工具自己挂了。文档里的 Example
+    恰好就是不传 event_log 的写法。
+    """
+    executor = AgentExecutor(llm_provider=None, tools=[_add, _payload])
+    summary = asyncio.run(
+        executor.execute_parallel_tool_calls(
+            [
+                {"tool": "_add", "args": {"x": 1, "y": 2}},
+                {"tool": "_payload", "args": {}},
+            ]
+        )
+    )
+    assert summary.total_tools == 2
+    assert summary.successful == 2, [r.error for r in summary.results]
+    assert summary.results[0].result == 3
+
+
+def test_parallel_tool_calls_actually_run_concurrently() -> None:
+    """并行执行必须真的并行。
+
+    原来在协程里调的是同步的 executor.execute()，它会一路阻塞到跑完才交出控制权，
+    asyncio.gather 收到的任务实际是串行的——4 个各 0.3s 的工具要 1.2s。
+    """
+    import time
+
+    @tool()
+    def _slow(n: int) -> int:
+        """Sleep a bit, then echo."""
+        time.sleep(0.3)
+        return n
+
+    executor = AgentExecutor(llm_provider=None, tools=[_slow])
+    calls = [{"tool": "_slow", "args": {"n": i}} for i in range(4)]
+
+    started = time.perf_counter()
+    summary = asyncio.run(executor.execute_parallel_tool_calls(calls))
+    elapsed = time.perf_counter() - started
+
+    assert summary.successful == 4, [r.error for r in summary.results]
+    # 串行需要 ~1.2s；并行 ~0.3s。0.8s 的门槛留足了余量，又能把串行挡在外面。
+    assert elapsed < 0.8, f"并行执行耗时 {elapsed:.2f}s，看起来仍然是串行的"

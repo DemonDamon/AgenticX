@@ -1191,13 +1191,23 @@ class AgentExecutor:
                 if not tool:
                     raise ValueError(f"Tool '{tool_name}' not found")
                 
-                # 使用 ToolExecutor 执行工具
+                # 使用 ToolExecutor 执行工具。
+                #
+                # 两处要点：
+                # 1) event_log 签名上是 Optional 且默认 None，文档和 Example 里也都
+                #    不传它，但这里原来直接取 event_log.agent_id —— 不传就每个工具都
+                #    以 "'NoneType' object has no attribute 'agent_id'" 失败，而且错误
+                #    被包进 ParallelToolResult(success=False)，看起来像是工具自己挂了。
+                # 2) 原来调的是同步的 executor.execute()。它在协程里是阻塞的，
+                #    asyncio.gather 收到的每个任务都会一路跑完才交出控制权 —— 名字叫
+                #    并行执行，实际是串行。改用 aexecute()：同步工具的默认 _arun 会把
+                #    _run 丢进线程池（见 tools/base.py:201），这才真的并发起来。
                 from ..tools.executor import ToolExecutor
                 executor = ToolExecutor()
-                execution_result = executor.execute(
+                execution_result = await executor.aexecute(
                     tool,
-                    agent_id=event_log.agent_id,
-                    task_id=event_log.task_id,
+                    agent_id=getattr(event_log, "agent_id", None),
+                    task_id=getattr(event_log, "task_id", None),
                     **tool_args
                 )
                 
@@ -1303,13 +1313,11 @@ class AgentExecutor:
         """
         并行工具执行的同步版本（便于在非异步上下文中使用）。
         """
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        return loop.run_until_complete(
+        # 原来是 get_event_loop / except: new_event_loop + run_until_complete。它能
+        # 绕过 "asyncio.run 之后 get_event_loop 抛错"，但当前线程已经在跑事件循环时
+        # 会抛 "This event loop is already running"，而且每次走 except 分支都会留下
+        # 一个没人关的循环。run_sync 两种情况都盖住。
+        return run_sync(
             self.execute_parallel_tool_calls(
                 tool_calls=tool_calls,
                 event_log=event_log,
