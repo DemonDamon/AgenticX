@@ -628,11 +628,20 @@ class TestIntegration:
         return memory
     
     @pytest.fixture
-    def system(self, event_bus, memory):
-        """完整系统"""
+    async def system(self, event_bus, memory):
+        """完整系统。
+
+        用 yield 收尾：collector.start() 起的是一个常驻后台任务，用例中途断言失败就
+        走不到末尾的 shutdown()，任务活到事件循环关闭之后，接着刷
+        "Task was destroyed but it is pending" / "Event loop is closed" —— 真正的失败
+        原因被埋在这堆噪声下面。
+        """
         component = HumanInTheLoopComponent(event_bus)
         collector = FeedbackCollector(event_bus, memory)
-        return component, collector
+        try:
+            yield component, collector
+        finally:
+            await collector.shutdown()
     
     @pytest.mark.asyncio
     async def test_end_to_end_workflow(self, system, memory):
@@ -686,8 +695,11 @@ class TestIntegration:
         # 5. 验证结果
         assert request.request_id not in component.pending_requests
         
-        # 验证轨迹数据存储
-        memory.store.assert_called()
+        # 验证轨迹数据存储。收集器写的是 memory.add(...)（见
+        # collector._store_trajectory），不是 memory.store —— memory 是 MagicMock，
+        # `.store` 属性会被自动造出来，所以这条断言从接口改名那天起就一直在等一个
+        # 永远不会发生的调用。
+        memory.add.assert_called()
         
         # 验证统计更新
         collector_stats = collector.get_stats()

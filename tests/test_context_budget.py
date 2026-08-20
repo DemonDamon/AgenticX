@@ -47,7 +47,12 @@ def test_maybe_compact_meta_turn_context_shrinks_full_meta_prompt() -> None:
         taskspaces=[],
         include_file_delivery_choice=True,
     )
-    assert len(full_prompt) > 30_000
+    # 触发压缩的是工具数量（META_AGENT_TOOLS 有 83 个，阈值 40），不是提示词长度。
+    # 原来这里钉的是 `len(full_prompt) > 30_000`，和 context_budget 里的
+    # _COMPACT_PROMPT_CHAR_THRESHOLD 是同一个数——但提示词长度会随本机装了多少技能、
+    # 知识库上下浮动，实测干净环境下是 29,988，正好压线挂掉。把会漂的环境量从前提里
+    # 拿掉。
+    assert len(META_AGENT_TOOLS) >= 40
     assert full_prompt.count(FILE_DELIVERY_CHOICE_PROMPT_MARKER) == 1
     compact_prompt, compact_tools, notice = maybe_compact_meta_turn_context(
         session,
