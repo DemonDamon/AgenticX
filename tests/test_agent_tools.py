@@ -42,61 +42,99 @@ def test_dispatch_tool_unknown_tool_returns_error() -> None:
     assert "unknown tool" in result
 
 
+class _FakeAsyncStream:
+    """异步版 stdout/stderr：`async for raw in stream` 逐行吐 bytes。"""
+
+    def __init__(self, text: str) -> None:
+        self._lines = [f"{line}\n".encode() for line in text.splitlines()] if text else []
+
+    def __aiter__(self):
+        async def _gen():
+            for line in self._lines:
+                yield line
+
+        return _gen()
+
+
+class _FakeAsyncProcess:
+    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = _FakeAsyncStream(stdout)
+        self.stderr = _FakeAsyncStream(stderr)
+
+    async def wait(self) -> int:
+        return self.returncode
+
+    def kill(self) -> None:  # pragma: no cover - 只有超时分支才会调用
+        pass
+
+
+def _capture_subprocess_exec(
+    monkeypatch,
+    *,
+    returncode: int = 0,
+    stdout: str = "ok",
+    stderr: str = "",
+) -> dict:
+    """替换 asyncio.create_subprocess_exec，记录 bash_exec 真正启动了什么。
+
+    这一组用例原来 patch 的是 ``agent_tools.subprocess.run``。但 bash_exec 从
+    2026-04-16 的 c7c1dd30（bash streaming）起就改走 asyncio.create_subprocess_exec
+    了，patch 打在了一个它根本不碰的函数上：argv / shell=False / cwd 这些断言全部
+    落空，用例还在本机真的跑 `ls -la`，靠"碰巧 exit_code=0"蒙混过关。
+
+    同时把 create_subprocess_shell 换成会炸的桩——"不经过 shell"本身就是这里要守的
+    安全属性，与其断言一个 shell=False 关键字，不如直接断言那条路径没人走。
+    """
+    captured: dict = {}
+
+    async def _fake_exec(*argv, **kwargs):
+        captured["argv"] = list(argv)
+        captured["kwargs"] = kwargs
+        return _FakeAsyncProcess(returncode=returncode, stdout=stdout, stderr=stderr)
+
+    async def _fake_shell(*_a, **_k):
+        raise AssertionError("bash_exec 不允许走 create_subprocess_shell")
+
+    monkeypatch.setattr(agent_tools.asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(agent_tools.asyncio, "create_subprocess_shell", _fake_shell)
+    return captured
+
+
 def test_bash_exec_whitelisted_command_skips_confirmation(monkeypatch) -> None:
     def _confirm_should_not_be_called(_question: str) -> bool:
         raise AssertionError("confirmation should not be requested for whitelisted command")
 
     monkeypatch.setattr(agent_tools, "_confirm", _confirm_should_not_be_called)
-    monkeypatch.setattr(
-        agent_tools.subprocess,
-        "run",
-        lambda *args, **kwargs: _DummyProcess(returncode=0, stdout="ok", stderr=""),
-    )
+    captured = _capture_subprocess_exec(monkeypatch, stdout="ok")
 
     result = agent_tools.dispatch_tool("bash_exec", {"command": "ls"}, StudioSession())
     assert "exit_code=0" in result
     assert "stdout:\nok" in result
+    assert captured["argv"] == ["ls"]
 
 
 def test_bash_exec_non_whitelisted_command_requires_confirmation(monkeypatch) -> None:
-    called = {"run": False}
-
-    def _fake_run(*args, **kwargs):
-        called["run"] = True
-        return _DummyProcess(returncode=0, stdout="", stderr="")
-
+    captured = _capture_subprocess_exec(monkeypatch)
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
 
     result = agent_tools.dispatch_tool("bash_exec", {"command": "rm -rf /tmp/demo"}, StudioSession())
     assert result == "CANCELLED: 非白名单命令未执行（用户拒绝）"
-    assert called["run"] is False
+    assert "argv" not in captured
 
 
 def test_bash_exec_command_injection_pattern_requires_confirmation(monkeypatch) -> None:
-    called = {"run": False}
-
-    def _fake_run(*args, **kwargs):
-        called["run"] = True
-        return _DummyProcess(returncode=0, stdout="", stderr="")
-
+    captured = _capture_subprocess_exec(monkeypatch)
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
 
     result = agent_tools.dispatch_tool("bash_exec", {"command": "ls && pwd"}, StudioSession())
     assert result.startswith("CANCELLED:")
-    assert called["run"] is False
+    assert "argv" not in captured
 
 
 def test_bash_exec_python_dash_c_requires_confirmation(monkeypatch) -> None:
-    called = {"run": False}
-
-    def _fake_run(*args, **kwargs):
-        called["run"] = True
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
+    captured = _capture_subprocess_exec(monkeypatch)
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
 
     result = agent_tools.dispatch_tool(
         "bash_exec",
@@ -104,22 +142,15 @@ def test_bash_exec_python_dash_c_requires_confirmation(monkeypatch) -> None:
         StudioSession(),
     )
     assert result == "CANCELLED: 高风险命令未执行（用户拒绝）"
-    assert called["run"] is False
+    assert "argv" not in captured
 
 
-def test_bash_exec_uses_shell_false_and_argv(monkeypatch) -> None:
-    captured = {}
+def test_bash_exec_uses_argv_and_never_a_shell(monkeypatch) -> None:
+    captured = _capture_subprocess_exec(monkeypatch)
 
-    def _fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
     result = agent_tools.dispatch_tool("bash_exec", {"command": "ls -la"}, StudioSession())
     assert "exit_code=0" in result
-    assert captured["args"][0] == ["ls", "-la"]
-    assert captured["kwargs"]["shell"] is False
+    assert captured["argv"] == ["ls", "-la"]
 
 
 async def _confirm_yes(*_a, **_k) -> bool:
@@ -127,55 +158,33 @@ async def _confirm_yes(*_a, **_k) -> bool:
 
 
 def test_bash_exec_shell_mode_uses_cmd_on_win32(monkeypatch) -> None:
-    captured: dict = {}
-
-    def _fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
     monkeypatch.setattr(agent_tools, "_confirm", _confirm_yes)
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
+    captured = _capture_subprocess_exec(monkeypatch)
     monkeypatch.setattr(agent_tools.sys, "platform", "win32")
     monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
 
     cmd = "echo a && echo b"
     result = agent_tools.dispatch_tool("bash_exec", {"command": cmd}, StudioSession())
     assert "exit_code=0" in result
-    argv = captured["args"][0]
+    argv = captured["argv"]
     assert argv[0] == r"C:\Windows\System32\cmd.exe"
     assert argv[1:4] == ["/d", "/s", "/c"]
     assert argv[4] == cmd
-    assert captured["kwargs"]["shell"] is False
 
 
 def test_bash_exec_shell_mode_uses_bash_on_posix(monkeypatch) -> None:
-    captured: dict = {}
-
-    def _fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
     monkeypatch.setattr(agent_tools, "_confirm", _confirm_yes)
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
+    captured = _capture_subprocess_exec(monkeypatch)
     monkeypatch.setattr(agent_tools.sys, "platform", "linux")
 
     cmd = "echo a && echo b"
     result = agent_tools.dispatch_tool("bash_exec", {"command": cmd}, StudioSession())
     assert "exit_code=0" in result
-    assert captured["args"][0] == ["/bin/bash", "-c", cmd]
-    assert captured["kwargs"]["shell"] is False
+    assert captured["argv"] == ["/bin/bash", "-c", cmd]
 
 
 def test_bash_exec_win32_resolves_executable_via_which(monkeypatch) -> None:
-    captured: dict = {}
-
-    def _fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
+    captured = _capture_subprocess_exec(monkeypatch)
     real_which = agent_tools.shutil.which
 
     def _which(cmd: str, path=None):
@@ -184,13 +193,12 @@ def test_bash_exec_win32_resolves_executable_via_which(monkeypatch) -> None:
         return real_which(cmd, path=path)
 
     monkeypatch.setattr(agent_tools.shutil, "which", _which)
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
     monkeypatch.setattr(agent_tools.sys, "platform", "win32")
 
     result = agent_tools.dispatch_tool("bash_exec", {"command": "ls -la"}, StudioSession())
     assert "exit_code=0" in result
-    assert captured["args"][0][0] == r"C:\Program Files\Git\usr\bin\ls.exe"
-    assert captured["args"][0][1:] == ["-la"]
+    assert captured["argv"][0] == r"C:\Program Files\Git\usr\bin\ls.exe"
+    assert captured["argv"][1:] == ["-la"]
 
 
 def test_bash_exec_peels_cd_then_and_sets_cwd(monkeypatch, tmp_path: Path) -> None:
@@ -199,21 +207,14 @@ def test_bash_exec_peels_cd_then_and_sets_cwd(monkeypatch, tmp_path: Path) -> No
     sub = workspace / "sub"
     sub.mkdir()
     monkeypatch.chdir(workspace)
-    captured: dict = {}
+    captured = _capture_subprocess_exec(monkeypatch)
 
-    def _fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
     session = StudioSession()
     session.workspace_dir = str(workspace)
     result = agent_tools.dispatch_tool("bash_exec", {"command": "cd sub && ls"}, session)
     assert "exit_code=0" in result
     assert captured["kwargs"]["cwd"] == str(sub.resolve())
-    assert captured["args"][0] == ["ls"]
-    assert captured["kwargs"]["shell"] is False
+    assert captured["argv"] == ["ls"]
 
 
 def test_cc_bridge_http_autostarts_on_connect_error(monkeypatch) -> None:
@@ -400,6 +401,21 @@ def test_bash_exec_python_workspace_script_requires_confirmation(monkeypatch, tm
     assert called["run"] is False
 
 
+def _session_in(workspace: Path) -> StudioSession:
+    """把会话的工作区钉在 ``workspace`` 上。
+
+    不带工作区的 ``StudioSession()``，其 root 会回退到 ``~/.agenticx/workspace``
+    （见 ``_session_workspace_root_sets`` 末尾的 ``_workspace_root()``），而不是当前
+    目录。下面这些用例原本只 ``monkeypatch.chdir(tmp_path)`` 就直接传路径，等于默认
+    "沙箱边界 = cwd"——那是回退改掉之前的行为，现在一律撞在
+    "ERROR: path escapes workspace"。显式绑定工作区，用例测的才是它们各自想测的那件事
+    （确认拒绝、参数校验、元数据剥离、liteparse），而不是沙箱。
+    """
+    session = StudioSession()
+    session.workspace_dir = str(workspace)
+    return session
+
+
 def test_file_write_denied_by_confirmation(monkeypatch, tmp_path: Path) -> None:
     target = tmp_path / "demo.txt"
     target.write_text("old", encoding="utf-8")
@@ -409,7 +425,7 @@ def test_file_write_denied_by_confirmation(monkeypatch, tmp_path: Path) -> None:
     result = agent_tools.dispatch_tool(
         "file_write",
         {"path": str(target), "content": "new"},
-        StudioSession(),
+        _session_in(tmp_path),
     )
 
     assert result == "CANCELLED: 文件未写入（用户拒绝）"
@@ -425,7 +441,7 @@ def test_file_edit_denied_by_confirmation(monkeypatch, tmp_path: Path) -> None:
     result = agent_tools.dispatch_tool(
         "file_edit",
         {"path": str(target), "old_text": "world", "new_text": "agent"},
-        StudioSession(),
+        _session_in(tmp_path),
     )
 
     assert result == "CANCELLED: 文件未修改（用户拒绝）"
@@ -440,7 +456,7 @@ def test_file_edit_empty_old_text_returns_error(monkeypatch, tmp_path: Path) -> 
     result = agent_tools.dispatch_tool(
         "file_edit",
         {"path": str(target), "old_text": "", "new_text": "agent"},
-        StudioSession(),
+        _session_in(tmp_path),
     )
 
     assert result == "ERROR: old_text cannot be empty"
@@ -453,7 +469,7 @@ def test_workspace_boundary_blocks_outside_file_read(monkeypatch, tmp_path: Path
     outside.write_text("secret", encoding="utf-8")
     monkeypatch.chdir(workspace)
 
-    result = agent_tools.dispatch_tool("file_read", {"path": "../outside.txt"}, StudioSession())
+    result = agent_tools.dispatch_tool("file_read", {"path": "../outside.txt"}, _session_in(workspace))
     assert result.startswith("ERROR: path escapes workspace:")
 
 
@@ -484,7 +500,7 @@ def test_workspace_boundary_blocks_outside_file_write(monkeypatch, tmp_path: Pat
     result = agent_tools.dispatch_tool(
         "file_write",
         {"path": "../outside.txt", "content": "blocked"},
-        StudioSession(),
+        _session_in(workspace),
     )
     assert result.startswith("ERROR: path escapes workspace:")
 
@@ -494,7 +510,7 @@ def test_workspace_boundary_blocks_outside_list_files(monkeypatch, tmp_path: Pat
     workspace.mkdir()
     monkeypatch.chdir(workspace)
 
-    result = agent_tools.dispatch_tool("list_files", {"path": ".."}, StudioSession())
+    result = agent_tools.dispatch_tool("list_files", {"path": ".."}, _session_in(workspace))
     assert result.startswith("ERROR: path escapes workspace:")
 
 
@@ -519,7 +535,7 @@ def test_file_write_strips_metadata_lines_before_persist(monkeypatch, tmp_path: 
     result = agent_tools.dispatch_tool(
         "file_write",
         {"path": str(target), "content": payload},
-        StudioSession(),
+        _session_in(tmp_path),
     )
     assert result.startswith("OK: wrote")
     text = target.read_text(encoding="utf-8")
@@ -584,7 +600,7 @@ def test_liteparse_returns_error_when_adapter_fails(monkeypatch, tmp_path: Path)
 
     monkeypatch.setattr("agenticx.tools.adapters.liteparse.LiteParseAdapter", _FakeLiteParseAdapter)
 
-    result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, StudioSession())
+    result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, _session_in(tmp_path))
     assert result.startswith("ERROR: liteparse parsing failed:")
 
 
@@ -606,7 +622,7 @@ def test_liteparse_returns_extracted_text(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr("agenticx.tools.adapters.liteparse.LiteParseAdapter", _FakeLiteParseAdapter)
 
-    result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, StudioSession())
+    result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, _session_in(tmp_path))
     assert result == "parsed result"
 
 
