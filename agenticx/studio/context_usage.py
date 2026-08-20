@@ -101,6 +101,21 @@ def estimate_session_context_usage(
 
     is_avatar = bound_avatar_id is not None
     tool_defs = list(STUDIO_TOOLS) if is_avatar else list(META_AGENT_TOOLS)
+    # 按 ToolSearch 的投影结果计价，而不是整池工具。开了 auto 之后请求里实际只带
+    # 常驻工具加已加载的那几个（实测 65 个里带 19 个），照全池算会把这一格虚报一万
+    # 多 token，用户看着的上下文占用条就永远是错的。投影失败就退回全池（保守高估）。
+    try:
+        from agenticx.runtime.tool_search import project_tools_for_round
+        from agenticx.runtime.tool_search_runtime import build_runtime_context
+
+        tool_defs = list(
+            project_tools_for_round(
+                build_runtime_context(session=session, full_openai_tools=tool_defs),
+                full_openai_tools=tool_defs,
+            )
+        )
+    except Exception:
+        pass
     try:
         tools_chars = len(json.dumps(tool_defs, ensure_ascii=False, default=str))
     except Exception:
