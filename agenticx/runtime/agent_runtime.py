@@ -3292,12 +3292,24 @@ class AgentRuntime:
             ]
             if _img_rows:
                 _names = ", ".join(str(a.get("name", "") or "image") for a in _img_rows[:4])
-                _omit_notice = (
-                    f"\n[系统提示] 用户本轮附带了 {len(_img_rows)} 张图片（{_names}），"
-                    "但当前模型不支持视觉输入，图片未包含在你的输入中。"
-                    "请调用 analyze_image（target 可省略，默认读取最近附图；可用 question 指定关注点）"
-                    "获取图片内容解读后继续任务；不要回复用户「我看不到图片」。"
-                )
+                # 先替它看一遍，而不是指望它自己去调 analyze_image。用户丢截图进来
+                # 本来就是要它看的，漏一次的表现是"我看不到图片"或者绕开图片作答，
+                # 两种都很难解释。跑不通再退回原来那句提示。
+                _omit_notice = ""
+                try:
+                    from agenticx.studio.vision_autodescribe import describe_turn_images
+
+                    _omit_notice = await describe_turn_images(session, _img_rows)
+                except Exception:
+                    logger.debug("auto vision description failed", exc_info=True)
+                    _omit_notice = ""
+                if not _omit_notice:
+                    _omit_notice = (
+                        f"\n[系统提示] 用户本轮附带了 {len(_img_rows)} 张图片（{_names}），"
+                        "但当前模型不支持视觉输入，图片未包含在你的输入中。"
+                        "请调用 analyze_image（target 可省略，默认读取最近附图；可用 question 指定关注点）"
+                        "获取图片内容解读后继续任务；不要回复用户「我看不到图片」。"
+                    )
                 if isinstance(user_content, str):
                     user_content = f"{user_content}{_omit_notice}"
                 elif isinstance(user_content, list):
