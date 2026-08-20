@@ -8,6 +8,7 @@ import {
 import {
   isProtectedConfirmContext,
   parentPathForConfirmScope,
+  protectedConfirmReason,
 } from "../utils/confirm-scope";
 
 type Props = {
@@ -169,6 +170,10 @@ export function ConfirmDialog({
   const [policy, setPolicy] = useState<ConfirmPolicy>("ask-every-time");
   const presentation = buildConfirmRequestPresentation(question, context);
   const protectedRequest = isProtectedConfirmContext(context);
+  const protectedReason = protectedConfirmReason(context);
+  // 用户开着「低风险自动执行」，这个框还是弹了出来。先回答他的第一个问题——
+  // 「我不是开了自动吗，这个怎么还问我」——再谈允许范围，否则只会被当成故障。
+  const autoModeInterrupted = protectedRequest && defaultPolicy === "run-everything";
   const policyOptions = protectedRequest
     ? CONFIRM_POLICY_OPTIONS.filter((option) => option.value === "ask-every-time")
     : CONFIRM_POLICY_OPTIONS;
@@ -243,7 +248,8 @@ export function ConfirmDialog({
           <div className="mb-2 font-medium text-text-primary">这次许可如何生效</div>
           {protectedRequest ? (
             <p className="mb-2 rounded bg-amber-500/10 px-2 py-1.5 leading-5 text-[var(--status-warning)]">
-              这是受保护操作，只能逐次确认，不能加入同类允许或自动执行。
+              {autoModeInterrupted ? "自动执行已开启，但这一步不在自动范围内：" : "这是受保护操作："}
+              {protectedReason}。只能逐次确认，不能加入同类允许或自动执行。
             </p>
           ) : null}
           <div className="space-y-1.5">

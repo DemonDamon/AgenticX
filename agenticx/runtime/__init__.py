@@ -9,8 +9,10 @@ from agenticx.runtime.confirm import (
     ConfirmGate,
     RiskAwareAutoConfirmGate,
     SyncConfirmGate,
+    confirm_denial_note,
     is_protected_confirm,
     normalize_confirm_risk,
+    protected_confirm_reason,
 )
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.scratchpad import Scratchpad
@@ -71,6 +73,8 @@ __all__ = [
     "PROTECTED_CONFIRM_RISKS",
     "normalize_confirm_risk",
     "is_protected_confirm",
+    "protected_confirm_reason",
+    "confirm_denial_note",
     "ClarifyGate",
     "AsyncClarifyGate",
     "AutoSuspendClarifyGate",

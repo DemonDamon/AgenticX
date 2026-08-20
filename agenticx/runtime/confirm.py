@@ -42,6 +42,54 @@ def is_protected_confirm(context: Optional[Dict[str, Any]] = None) -> bool:
     return normalize_confirm_risk(context) != CONFIRM_RISK_LOW
 
 
+#: 为什么这一步会被拦下来。自动模式下弹出确认时，用户的第一反应是「我不是开了全自动
+#: 吗，这个怎么还问我」——不给出理由，他下次就会把整个功能关掉。
+PROTECTED_CONFIRM_REASONS: Dict[str, str] = {
+    "high": "这条操作被标记为高风险",
+    "destructive": "这条操作会删除或覆盖已有内容",
+    "computer_use": "这条操作会读取或控制本机桌面",
+    "non_whitelisted": "这条命令不在默认可直接执行的白名单里",
+    "policy": "这条操作会改动技能或长期记忆等配置",
+}
+UNKNOWN_PROTECTED_CONFIRM_REASON = "系统无法判定这步的风险，按受保护处理"
+
+
+def protected_confirm_reason(context: Optional[Dict[str, Any]] = None) -> str:
+    """One line explaining why a request cannot be auto-approved.
+
+    Unknown/missing risks intentionally get a reason too: fail-closed means new
+    tools land here by default, and "no explanation" is exactly what makes an
+    unexplained prompt feel like a bug.
+    """
+
+    if not is_protected_confirm(context):
+        return ""
+    raw = (context or {}).get("risk")
+    key = raw.strip().lower() if isinstance(raw, str) else ""
+    return PROTECTED_CONFIRM_REASONS.get(key, UNKNOWN_PROTECTED_CONFIRM_REASON)
+
+
+def confirm_denial_note(gate: Any, request_id: str) -> str:
+    """Why a confirmation came back denied.
+
+    「用户拒绝了」和「无人值守下策略直接拦下」对使用者是两件事：前者他自己按的，
+    后者他根本没在场。工具结果里一律写 user denied，会让人回头去找一个不存在的点击。
+    """
+
+    last = getattr(gate, "last_request", None)
+    if isinstance(last, dict) and last.get("id") == request_id:
+        if last.get("decision") == "blocked_unattended":
+            return "无人值守运行不批准受保护操作"
+    timeout_info = getattr(gate, "last_timeout_info", None)
+    if (
+        isinstance(timeout_info, dict)
+        and timeout_info.get("request_id") == request_id
+        and not timeout_info.get("approved")
+    ):
+        return "等待确认超时"
+    return "用户拒绝"
+
+
 def _resolve_confirm_timeout_seconds() -> float:
     """Read confirm timeout from env AGX_CONFIRM_TIMEOUT_SEC, default 120."""
     raw = os.environ.get("AGX_CONFIRM_TIMEOUT_SEC", "").strip()

@@ -4,6 +4,7 @@ import {
   isProtectedConfirmContext,
   normalizeConfirmRisk,
   parentPathForConfirmScope,
+  protectedConfirmReason,
   shouldAutoApproveConfirm,
 } from "./confirm-scope";
 
@@ -48,5 +49,24 @@ describe("confirmation scope", () => {
     expect(shouldAutoApproveConfirm("auto", false, { risk: "low" })).toBe(true);
     expect(shouldAutoApproveConfirm("semi-auto", true, { risk: "low" })).toBe(true);
     expect(shouldAutoApproveConfirm("manual", false, { risk: "low" })).toBe(false);
+  });
+
+  it("每个受保护请求都说得出为什么，包括没标 risk 的", () => {
+    // 后端给了理由就用后端的：理由的唯一出处在那边
+    expect(
+      protectedConfirmReason({ risk: "high", protected_reason: "后端说的理由" }),
+    ).toBe("后端说的理由");
+
+    // 拿不到才回退本地镜像
+    expect(protectedConfirmReason({ risk: "non_whitelisted" })).toContain("白名单");
+    expect(protectedConfirmReason({ risk: "destructive" })).toContain("删除或覆盖");
+    expect(protectedConfirmReason({ risk: "computer_use" })).toContain("本机桌面");
+
+    // fail-closed 的那一档也必须有话说 —— 弹了框却不给理由，用户只会当成故障
+    expect(protectedConfirmReason({})).not.toBe("");
+    expect(protectedConfirmReason({ risk: "某个将来才有的档" })).not.toBe("");
+
+    // 低风险不该有理由：它根本不会弹框
+    expect(protectedConfirmReason({ risk: "low" })).toBe("");
   });
 });
