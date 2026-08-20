@@ -264,8 +264,15 @@ def _session_workspace_root_sets(
                 mode = str(item.get("mount_mode") or "link").strip().lower()
                 source_path = str(item.get("source_path") or "").strip()
                 if ts_id == "default":
+                    # 先记下、循环结束后再加。Desktop 传过来的 taskspaces 里"默认工作区"
+                    # 恒在第一位，如果在这里就 _add，它会占住 write_roots[0]，于是
+                    # list_files(".")、相对路径的 file_write 全都落到数字专家自己的
+                    # ~/.agenticx/avatars/<id>/workspace，而不是用户在工作区面板里绑定的
+                    # 目录。c33a31c0 当初就是为这件事把 extra/default 分开收集的，
+                    # ee5b7d6c 重写成 read/write 两套 root 时把这个顺序丢了。
+                    # 注意这条路径只在用户没点过工作区页签（active_taskspace_id 为空，
+                    # 也就是 Desktop 的默认状态）时生效；点过就走下面的 active 置顶。
                     default_paths.append(raw_path)
-                    _add(raw_path, writable=True)
                     continue
                 if mode == "reference":
                     _add(source_path or raw_path, writable=False)
@@ -273,6 +280,8 @@ def _session_workspace_root_sets(
                     _add(raw_path, writable=True)
                     if mode == "link" and source_path:
                         _add(source_path, writable=True)
+        for raw_path in default_paths:
+            _add(raw_path, writable=True)
         _add(str(getattr(session, "workspace_dir", "") or ""), writable=True)
 
     for p in default_paths:
