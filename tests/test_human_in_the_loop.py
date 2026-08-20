@@ -328,25 +328,24 @@ class TestFeedbackCollector:
         return memory
     
     @pytest.fixture
-    def collector(self, event_bus, memory):
-        """收集器fixture"""
+    async def collector(self, event_bus, memory):
+        """收集器fixture。
+
+        teardown 原来是同步的，靠 asyncio.get_event_loop() + run_until_complete 去关
+        收集器。用例跑完之后那个循环已经关了，get_event_loop() 抛 RuntimeError，退到
+        except 里 cancel 一个属于已关闭循环的任务，于是每条用例 teardown 都报一次
+        "Event loop is closed"（整套跑下来是 2 个 ERROR）。改成 async fixture，在还有
+        循环的时候正常 await shutdown()。
+        """
         config = {
             "quality_threshold": 0.7,
             "batch_size": 5
         }
         collector = FeedbackCollector(event_bus, memory, config)
-        yield collector
-        # 清理：关闭收集器（如果已启动）
-        if collector._processing_task is not None:
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-                if not loop.is_closed():
-                    loop.run_until_complete(collector.shutdown())
-            except RuntimeError:
-                # 如果事件循环已关闭，直接取消任务
-                if collector._processing_task:
-                    collector._processing_task.cancel()
+        try:
+            yield collector
+        finally:
+            await collector.shutdown()
     
     @pytest.mark.asyncio
     async def test_feedback_processing(self, collector, event_bus, memory):

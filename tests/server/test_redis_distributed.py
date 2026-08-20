@@ -11,16 +11,23 @@ Redis 共享状态分布式验证测试
 用法：
   python tests/server/test_redis_distributed.py
   python tests/server/test_redis_distributed.py --url redis://:password@localhost:6379/0
+
+也可以在 pytest 里跑：设了 AGX_TEST_REDIS_URL 就连那个地址，没设就整体跳过。
+下面的检查函数一律叫 check_*，不叫 test_*：它们收 url 参数，pytest 会把 url 当 fixture
+去找，然后每个都报 "fixture 'url' not found"——整套跑下来 6 个 ERROR，一直挂在那儿。
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 import time
 import uuid
 from pathlib import Path
+
+import pytest
 
 # tests/server/ → project root
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -52,7 +59,7 @@ async def cleanup(backend, *keys: str):
 # 测试集
 # ──────────────────────────────────────────────
 
-async def test_t0_connectivity(url: str) -> bool:
+async def check_t0_connectivity(url: str) -> bool:
     """T0: Redis 基本连通性"""
     b, connected = await make_backend(url)
     ok = connected and await b.ping()
@@ -61,7 +68,7 @@ async def test_t0_connectivity(url: str) -> bool:
     return ok
 
 
-async def test_t1_rate_limit_shared(url: str) -> bool:
+async def check_t1_rate_limit_shared(url: str) -> bool:
     """T1: 分布式限流 — 两个实例共享滑动窗口计数器
 
     实例 A 消耗 2 次额度，实例 B 再消耗 1 次后应触发限制（总 limit=3）。
@@ -96,7 +103,7 @@ async def test_t1_rate_limit_shared(url: str) -> bool:
     return ok
 
 
-async def test_t2_task_cross_instance(url: str) -> bool:
+async def check_t2_task_cross_instance(url: str) -> bool:
     """T2: 任务状态跨实例可见 — 模拟进程重启
 
     队列 A 提交任务并写入 Redis；
@@ -136,7 +143,7 @@ async def test_t2_task_cross_instance(url: str) -> bool:
     return ok
 
 
-async def test_t3_idempotency_cross_instance(url: str) -> bool:
+async def check_t3_idempotency_cross_instance(url: str) -> bool:
     """T3: 幂等性跨实例 — 同一请求 key 只被处理一次
 
     实例 A 注册幂等 key；实例 B 再次注册同一 key 应返回 False。
@@ -169,7 +176,7 @@ async def test_t3_idempotency_cross_instance(url: str) -> bool:
     return ok
 
 
-async def test_t4_circuit_breaker_shared(url: str) -> bool:
+async def check_t4_circuit_breaker_shared(url: str) -> bool:
     """T4: 断路器状态跨实例传播
 
     实例 A 记录 N 次失败后断路器变 open；
@@ -202,7 +209,7 @@ async def test_t4_circuit_breaker_shared(url: str) -> bool:
     return ok
 
 
-async def test_t5_graceful_fallback() -> bool:
+async def check_t5_graceful_fallback() -> bool:
     """T5: Redis 不可用时优雅降级，不抛异常"""
     from agenticx.server.redis_backend import RedisBackend
 
@@ -231,7 +238,7 @@ async def test_t5_graceful_fallback() -> bool:
     return ok
 
 
-async def test_t6_redis_health_check(url: str) -> bool:
+async def check_t6_redis_health_check(url: str) -> bool:
     """T6: Redis 健康检查集成到 DependencyChecker"""
     from agenticx.server.redis_backend import set_redis_backend
     from agenticx.server.health import DependencyChecker, HealthStatus
@@ -274,7 +281,7 @@ async def main(url: str):
     results = {}
 
     print("\n── 基础连通性 ─────────────────────────────────────")
-    results["T0"] = await test_t0_connectivity(url)
+    results["T0"] = await check_t0_connectivity(url)
 
     if not results["T0"]:
         print("\n❌  Redis 连不上，后续测试跳过。")
@@ -282,14 +289,14 @@ async def main(url: str):
         sys.exit(1)
 
     print("\n── 分布式状态验证（双实例） ──────────────────────────")
-    results["T1"] = await test_t1_rate_limit_shared(url)
-    results["T2"] = await test_t2_task_cross_instance(url)
-    results["T3"] = await test_t3_idempotency_cross_instance(url)
-    results["T4"] = await test_t4_circuit_breaker_shared(url)
+    results["T1"] = await check_t1_rate_limit_shared(url)
+    results["T2"] = await check_t2_task_cross_instance(url)
+    results["T3"] = await check_t3_idempotency_cross_instance(url)
+    results["T4"] = await check_t4_circuit_breaker_shared(url)
 
     print("\n── 降级与健康检查 ─────────────────────────────────")
-    results["T5"] = await test_t5_graceful_fallback()
-    results["T6"] = await test_t6_redis_health_check(url)
+    results["T5"] = await check_t5_graceful_fallback()
+    results["T6"] = await check_t6_redis_health_check(url)
 
     passed = sum(1 for v in results.values() if v)
     total = len(results)
@@ -313,3 +320,25 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     asyncio.run(main(args.url))
+
+
+# ──────────────────────────────────────────────
+# pytest 入口
+# ──────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_redis_distributed_state() -> None:
+    """整套分布式状态验证；没有可用的 Redis 就跳过。"""
+    url = os.getenv("AGX_TEST_REDIS_URL", "").strip()
+    if not url:
+        pytest.skip("需要 AGX_TEST_REDIS_URL 指向一个可用的 Redis")
+
+    if not await check_t0_connectivity(url):
+        pytest.skip(f"连不上 Redis: {url.split('@')[-1]}")
+
+    assert await check_t1_rate_limit_shared(url)
+    assert await check_t2_task_cross_instance(url)
+    assert await check_t3_idempotency_cross_instance(url)
+    assert await check_t4_circuit_breaker_shared(url)
+    assert await check_t5_graceful_fallback()
+    assert await check_t6_redis_health_check(url)
