@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import remarkParse from "remark-parse";
+import { unified } from "unified";
+import { visit } from "unist-util-visit";
+
 import {
   normalizeChatMarkdownContent,
   normalizeLenientEmphasisInText,
 } from "./markdown-normalize.ts";
+
+function fencedCodeBlocks(markdown: string): { lang: string; value: string }[] {
+  const tree = unified().use(remarkParse).parse(markdown);
+  const blocks: { lang: string; value: string }[] = [];
+  visit(tree, "code", (node) => {
+    blocks.push({
+      lang: typeof node.lang === "string" ? node.lang : "",
+      value: String(node.value ?? ""),
+    });
+  });
+  return blocks;
+}
 
 test("normalizeLenientEmphasisInText: trims spaces inside ** delimiters", () => {
   assert.equal(normalizeLenientEmphasisInText("** Effort 校准**"), "**Effort 校准**");
@@ -49,10 +65,10 @@ test("normalizeChatMarkdownContent: auto-closes dangling ** while streaming", ()
 });
 
 test("normalizeChatMarkdownContent: skips fenced and inline code", () => {
-  const input = "prose ** spaced** and `** keep **` and ```\n** code **\n```";
+  const input = "prose ** spaced** and `** keep **` and\n```\n** code **\n```";
   assert.equal(
     normalizeChatMarkdownContent(input),
-    "prose **spaced** and `** keep **` and ```\n** code **\n```",
+    "prose **spaced** and `** keep **` and\n```\n** code **\n```",
   );
 });
 
@@ -87,4 +103,56 @@ test("normalizeChatMarkdownContent: linkifies inline labeled saved paths", () =>
 test("normalizeChatMarkdownContent: does not alter paths already in backticks", () => {
   const input = "已保存至: `/Users/damon/out/report.md`";
   assert.equal(normalizeChatMarkdownContent(input), input);
+});
+
+test("normalizeChatMarkdownContent: keeps nested prompt fences as one markdown block", () => {
+  const input = [
+    "## 整理后的提示词",
+    "",
+    "```markdown",
+    "# 问题诊断：公司网络环境下 AI 编码工具流式请求中断",
+    "",
+    "### 1. CC Switch + Codex",
+    "- 报错：",
+    "  ```",
+    "  Error: unexpected status 502 Bad Gateway: CC Switch local proxy failed",
+    "  ```",
+    "",
+    "### 2. 直接配置火山引擎 Coding Plan",
+    "- 报错：",
+    "  ```",
+    "  Error: stream disconnected before completion",
+    "  ```",
+    "```",
+    "",
+    "团长可以直接复制使用。",
+  ].join("\n");
+
+  const normalized = normalizeChatMarkdownContent(input);
+  const blocks = fencedCodeBlocks(normalized);
+
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0]?.lang, "markdown");
+  assert.match(blocks[0]?.value ?? "", /问题诊断：公司网络环境下 AI 编码工具流式请求中断/);
+  assert.match(blocks[0]?.value ?? "", /502 Bad Gateway/);
+  assert.match(blocks[0]?.value ?? "", /直接配置火山引擎 Coding Plan/);
+  assert.match(blocks[0]?.value ?? "", /stream disconnected before completion/);
+  assert.match(normalized, /^````+markdown\s*$/m);
+  assert.match(normalized, /团长可以直接复制使用。/);
+});
+
+test("normalizeChatMarkdownContent: does not rewrite sibling fences or fence interiors", () => {
+  const input = "prose ** spaced**\n\n```\n** keep **\n```\n\nmore ** spaced**";
+  assert.equal(
+    normalizeChatMarkdownContent(input),
+    "prose **spaced**\n\n```\n** keep **\n```\n\nmore **spaced**",
+  );
+});
+
+test("normalizeChatMarkdownContent: leaves an unclosed fence untouched while streaming", () => {
+  const input = "## 标题\n\n```markdown\n# 问题诊断\n  ```\n  Error: 502\n";
+  assert.equal(
+    normalizeChatMarkdownContent(input, { isStreaming: true }),
+    input,
+  );
 });
