@@ -9,8 +9,6 @@ from agenticx.runtime.model_context_window import (
     resolve_context_window,
 )
 from agenticx.runtime.tool_search import (
-    BUILTIN_DEFER_ALLOWLIST,
-    CORE_ALWAYS_LOAD_TOOLS,
     DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD,
     DEFAULT_CONTEXT_BUDGET_RATIO,
     TOOL_SEARCH_DECISION_KEY,
@@ -22,6 +20,7 @@ from agenticx.runtime.tool_search import (
     ToolSearchStateV1,
     build_catalog,
     estimate_schema_tokens,
+    is_deferred_builtin,
     load_state_from_scratchpad,
     prune_state_to_catalog,
     resolve_effective_threshold,
@@ -30,8 +29,13 @@ from agenticx.runtime.tool_search import (
 
 
 def read_tool_search_config() -> ToolSearchConfig:
-    """Read ``runtime.tool_search`` from merged config; default mode=off."""
-    mode = "off"
+    """Read ``runtime.tool_search`` from merged config; default mode=auto.
+
+    默认从 ``off`` 改成 ``auto``：整套投影机制早就写好并有 46 个测试守着，却因为
+    这个默认值一直没生效——每个请求都在发全量 schema（实测 65 个工具 13504
+    token）。``auto`` 只在工具池超过自适应阈值时才收缩，池子小的部署不受影响。
+    """
+    mode = "auto"
     threshold = DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD
     strategy = "adaptive"
     ratio = DEFAULT_CONTEXT_BUDGET_RATIO
@@ -40,7 +44,7 @@ def read_tool_search_config() -> ToolSearchConfig:
 
         raw = ConfigManager.get_value("runtime.tool_search")
         if isinstance(raw, dict):
-            mode = str(raw.get("mode") or "off").strip().lower() or "off"
+            mode = str(raw.get("mode") or "auto").strip().lower() or "auto"
             try:
                 threshold = int(
                     raw.get("auto_schema_token_threshold")
@@ -90,7 +94,7 @@ def build_builtin_catalog(openai_tools: list[dict]) -> ToolCatalog:
             fn = {}
         desc = str(fn.get("description") or "")
         params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
-        always = name in CORE_ALWAYS_LOAD_TOOLS or name not in BUILTIN_DEFER_ALLOWLIST
+        always = not is_deferred_builtin(name)
         descriptors.append(
             ToolDescriptor(
                 stable_id=f"builtin:{name}",

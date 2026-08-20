@@ -312,13 +312,23 @@ def test_meta_prompt_mentions_tool_search():
     assert "tool_search" in prompt
 
 
-def test_show_widget_always_projected_when_in_pool(monkeypatch):
-    """AC-1: show_widget is not deferred; projection includes it without load."""
+def test_show_widget_deferred_but_announced_by_name(monkeypatch):
+    """show_widget 的 schema 延迟发送，但名字必须出现在延迟工具清单里。
+
+    这条用例原来叫 ``test_show_widget_always_projected_when_in_pool``，断言
+    show_widget 永远常驻。它当年是对的：那时没有延迟工具清单，模型只能从
+    tools[] 里知道有哪些工具，一旦把 show_widget 摘掉，模型就再也不会出图了。
+
+    现在闸门反过来了——只有 CORE_ALWAYS_LOAD_TOOLS 里的工具常驻，其余一律可延迟
+    ——补位的是 ``known_unloaded_names`` 渲染出的按名清单：模型照样知道
+    show_widget 存在，直接调用即可（``auto_load_deferred_tool`` 会加载并让它下一轮
+    重试），而它 486 token 的 schema 和搬进 description 的渲染细则只在真的要出图
+    时才进入请求。
+    """
     monkeypatch.setattr(
         "agenticx.runtime.tool_search_runtime.read_tool_search_config",
         lambda: ToolSearchConfig(mode="always"),
     )
-    assert "show_widget" not in BUILTIN_DEFER_ALLOWLIST
     pool = _make_pool()
     pool.append(
         {
@@ -334,8 +344,25 @@ def test_show_widget_always_projected_when_in_pool(monkeypatch):
     ctx = build_runtime_context(session=session, full_openai_tools=pool)
     out = project_tools_for_round(ctx, full_openai_tools=pool)
     names = _tool_names(out)
-    assert "show_widget" in names
+    # schema 不在这一轮的 tools[] 里……
+    assert "show_widget" not in names
     assert "web_fetch" not in names
+    # ……但模型看得见它的名字，也能直接调用触发自动加载。
+    from agenticx.runtime.prompts.session_context import build_deferred_tools_manifest
+    from agenticx.runtime.tool_search import (
+        auto_load_deferred_tool,
+        is_tool_pending_next_round,
+        known_unloaded_names,
+    )
+
+    unloaded = known_unloaded_names(ctx)
+    assert "show_widget" in unloaded
+    assert "show_widget" in build_deferred_tools_manifest(unloaded)
+    assert is_tool_pending_next_round(
+        ctx, "show_widget", allowed_tool_names=names, full_openai_tools=pool
+    )
+    auto_load_deferred_tool(session, ctx, "show_widget")
+    assert "show_widget" in _tool_names(project_tools_for_round(ctx, full_openai_tools=pool))
 
 
 def test_direct_deferred_call_auto_loads_for_next_round(monkeypatch):

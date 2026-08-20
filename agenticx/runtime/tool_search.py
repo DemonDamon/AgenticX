@@ -65,7 +65,18 @@ CORE_ALWAYS_LOAD_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-# Explicit defer allowlist: tools not listed here default to always-load.
+# 历史遗留的"可延迟工具"名单。**它已经不再是判定闸门**，只作为参考保留（并且
+# 仍被若干测试引用）。
+#
+# 原来的规则是「不在这张表里的内建工具一律常驻」——也就是默认常驻、按名单开洞。
+# 这种名单会腐烂：任何人新加一个工具，只要忘了往表里加一行，它就自动变成常驻，
+# 谁也不会发现。实测今天正好有 10 个工具从这条缝里漏成常驻，白占 1969 token：
+# analyze_image / feature_complete / feature_select / get_current_datetime /
+# progress_append / project_init / project_status / show_widget /
+# skill_market_install / verify_run。
+#
+# 现在反过来：唯一的常驻集合是 CORE_ALWAYS_LOAD_TOOLS，其余内建工具一律可延迟
+# （见 is_deferred_builtin）。新增工具默认省 token，要常驻必须显式写进 CORE。
 BUILTIN_DEFER_ALLOWLIST: frozenset[str] = frozenset(
     {
         "cancel_scheduled_task",
@@ -142,7 +153,7 @@ class ToolDescriptor:
 
 @dataclass(frozen=True)
 class ToolSearchConfig:
-    mode: str = "off"  # "off" | "auto" | "always"
+    mode: str = "auto"  # "off" | "auto" | "always"
     auto_schema_token_threshold: int = DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD
     threshold_strategy: str = "adaptive"
     context_budget_ratio: float = DEFAULT_CONTEXT_BUDGET_RATIO
@@ -424,7 +435,7 @@ def _estimate_core_schema_tokens(ctx: ToolSearchRuntimeContext) -> int:
         if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
             core_tools.append(_descriptor_to_openai_tool(d))
             continue
-        if d.kind == "builtin" and d.name not in BUILTIN_DEFER_ALLOWLIST:
+        if d.kind == "builtin" and not is_deferred_builtin(d.name):
             core_tools.append(_descriptor_to_openai_tool(d))
     return estimate_schema_tokens(core_tools)
 
@@ -495,7 +506,7 @@ def project_tools_for_round(
     for name, tool in pool.items():
         if name in CORE_ALWAYS_LOAD_TOOLS:
             continue
-        if name in BUILTIN_DEFER_ALLOWLIST:
+        if is_deferred_builtin(name):
             continue
         _add_name(name)
 
@@ -690,7 +701,12 @@ def apply_search(
 
 
 def is_deferred_builtin(name: str) -> bool:
-    return name in BUILTIN_DEFER_ALLOWLIST and name not in CORE_ALWAYS_LOAD_TOOLS
+    """判定闸门：内建工具只要不在 CORE_ALWAYS_LOAD_TOOLS 里就可以延迟加载。
+
+    这是全模块唯一的延迟判定，投影、预算估算、待加载检测和清单渲染都走它，
+    免得四处各写一遍 ``in BUILTIN_DEFER_ALLOWLIST`` 再慢慢漂移。
+    """
+    return name not in CORE_ALWAYS_LOAD_TOOLS
 
 
 def auto_load_deferred_tool(session: Any, ts_ctx: ToolSearchRuntimeContext, tool_name: str) -> str:
@@ -734,7 +750,7 @@ def known_unloaded_names(ctx: ToolSearchRuntimeContext) -> set[str]:
             continue
         if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
             continue
-        if d.kind == "mcp" or d.name in BUILTIN_DEFER_ALLOWLIST:
+        if d.kind == "mcp" or is_deferred_builtin(d.name):
             out.add(d.name)
     return out
 
@@ -761,5 +777,5 @@ def is_tool_pending_next_round(
             continue
         if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
             return False
-        return d.kind == "mcp" or d.name in BUILTIN_DEFER_ALLOWLIST
+        return d.kind == "mcp" or is_deferred_builtin(d.name)
     return False
