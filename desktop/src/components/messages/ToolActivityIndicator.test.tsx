@@ -4,6 +4,7 @@ import type { Message } from "../../store";
 import { useAppStore } from "../../store";
 import { groupConsecutiveToolMessages } from "./group-tool-messages";
 import { TurnToolGroupCard } from "./TurnToolGroupCard";
+import { buildToolCardTitle } from "./ToolCallCard";
 import {
   resolveToolActivityPresentation,
   resolveToolActivityLabel,
@@ -64,6 +65,62 @@ describe("customer-facing tool activity", () => {
       }),
     ).toBe(true);
     expect(shouldPreserveToolDetails(toolMessage("running"))).toBe(false);
+  });
+
+  it("keeps an answered clarification visible after its card metadata is gone", () => {
+    // 落盘的澄清行只剩 tool_name + tool_args + "用户选择：…"，clarificationPrompt 是前端
+    // 直播时从 tool_args 拼出来的，重开会话就没了。按工具名判定，答案才不会跟着一起消失。
+    expect(
+      shouldPreserveToolDetails({
+        ...toolMessage("done"),
+        toolName: "request_clarification",
+        clarificationPrompt: undefined,
+        content: "用户选择：你说的「清空磁盘」具体是指什么？：你能格式化我的磁盘吗？",
+      }),
+    ).toBe(true);
+    expect(
+      shouldPreserveToolDetails({
+        ...toolMessage("done"),
+        toolName: "request_action_confirmation",
+        actionConfirmation: undefined,
+        content: "用户选择：确认执行",
+      }),
+    ).toBe(true);
+  });
+
+  it("titles an answered clarification with the answer, not the tool name", () => {
+    // 收起状态下标题是用户唯一能看到的一行，写 "request_clarification" 等于把选择藏了。
+    expect(
+      buildToolCardTitle({
+        id: "clr",
+        role: "tool",
+        content: "用户选择：清理缓存和临时文件，释放磁盘空间",
+        toolName: "request_clarification",
+      } as Message),
+    ).toBe("用户选择：清理缓存和临时文件，释放磁盘空间");
+    expect(
+      buildToolCardTitle({
+        id: "clr2",
+        role: "tool",
+        content: "",
+        toolName: "request_clarification",
+      } as Message),
+    ).toBe("等待你补充信息");
+  });
+
+  it("does not fold a standalone clarification row into a tool group", () => {
+    const clarification: Message = {
+      id: "clr-1",
+      role: "tool",
+      content: "用户选择：清理缓存和临时文件",
+      toolCallId: "call-clr",
+      toolName: "request_clarification",
+      toolStatus: "done",
+    };
+    const rows = groupConsecutiveToolMessages([toolMessage("done"), clarification]);
+    const standalone = rows.filter((r) => r.kind === "message");
+    expect(standalone).toHaveLength(1);
+    expect(standalone[0].kind === "message" && standalone[0].message.id).toBe("clr-1");
   });
 
   it("shows expandable non-technical summaries for running, completed, and failed work", () => {

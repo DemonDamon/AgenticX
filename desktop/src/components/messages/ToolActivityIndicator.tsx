@@ -42,10 +42,21 @@ export function resolveToolActivityLabel(toolNameRaw: unknown): string {
   return "正在处理";
 }
 
+/** Tool rows that carry the user's own decision rather than tool output. */
+const USER_DECISION_TOOL_NAMES = new Set([
+  "request_clarification",
+  "request_action_confirmation",
+]);
+
 /** Interactive or user-facing outputs remain visible even when raw tool details are hidden. */
 export function shouldPreserveToolDetails(message: ToolActivityMessage): boolean {
   if (message.inlineConfirm || message.clarificationPrompt || message.actionConfirmation) return true;
   const toolName = String(message.toolName ?? "").trim();
+  // 澄清 / 确认卡里记的是**用户自己的选择**，不是工具输出。「不显示工具调用详情」承诺隐藏的是
+  // 工具名称、参数和返回内容，把用户自己的回答一起吞掉是另一回事。
+  // 这里按工具名判断而不是靠 clarificationPrompt：那个字段是前端在直播时从 tool_args 拼的，
+  // 落盘的行只剩 tool_name + tool_args，重开会话后字段就没了，答案会跟着一起消失。
+  if (USER_DECISION_TOOL_NAMES.has(toolName)) return true;
   if (toolName === "skill_manage") return true;
   if (toolName !== "bash_bg_start") return false;
   return (parseBashBgStart(String(message.content ?? ""))?.authUrls.length ?? 0) > 0;

@@ -83,6 +83,15 @@ export function buildToolCardTitle(message: Message): string {
     return cmd.length > 80 ? `${cmd.slice(0, 80)}…` : cmd;
   }
   if (name === "todo_write") return "todo_write";
+  // 澄清 / 确认行记的是用户自己的回答。标题直接给答案，而不是 "request_clarification"：
+  // 关掉工具详情时这张卡默认是收起的，标题就是用户唯一能看到的一行。
+  if (name === "request_clarification" || name === "request_action_confirmation") {
+    const answer = String(message.content ?? "").trim();
+    if (answer.startsWith("用户选择：")) {
+      return answer.length > 80 ? `${answer.slice(0, 80)}…` : answer;
+    }
+    return name === "request_action_confirmation" ? "等待你确认" : "等待你补充信息";
+  }
   if (name === "mcp_call") {
     const tn = String(args.tool_name ?? "").trim();
     return tn ? `mcp_call ${tn}` : "mcp_call";
