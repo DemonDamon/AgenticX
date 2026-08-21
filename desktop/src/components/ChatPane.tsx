@@ -5233,6 +5233,11 @@ export function ChatPane({
     token.setAttribute("data-quote-token", "1");
     token.setAttribute("data-quote-id", target.id);
     token.setAttribute("data-quote-message-id", target.message.id);
+    // Keep the exact body on the DOM token as a last-resort recovery path for
+    // send/draft races. The visible label is intentionally truncated, but the
+    // quote itself must never degrade to only that preview.
+    token.setAttribute("data-quote-body", target.body);
+    token.setAttribute("aria-label", `引用：${target.body}`);
     // Override shared chip max-width — quote preview must stay compact (Cursor-style).
     token.className = `${COMPOSER_INLINE_CHIP_CLASS} agx-composer-quote-chip`;
     token.title = `${sender}: ${target.body}`;
@@ -5355,21 +5360,37 @@ export function ChatPane({
     quotedMessageId?: string;
     quotedContent?: string;
   } => {
-    if (quoteTargets.length === 0) return {};
     // Preserve semantic order as chips appear in the composer (not append order).
     const byId = new Map(quoteTargets.map((q) => [q.id, q]));
-    const orderedIds = Array.from(
-      composerRef.current?.querySelectorAll('[data-quote-token="1"]') ?? []
-    ).map((node) => node.getAttribute("data-quote-id") || "");
+    const orderedNodes = Array.from(
+      composerRef.current?.querySelectorAll<HTMLElement>('[data-quote-token="1"]') ?? []
+    );
     const ordered: QuoteTarget[] = [];
-    for (const id of orderedIds) {
+    for (const node of orderedNodes) {
+      const id = node.getAttribute("data-quote-id") || "";
       const hit = byId.get(id);
       if (hit) {
         ordered.push(hit);
         byId.delete(id);
+        continue;
+      }
+      // The chip itself carries the exact body so a DOM/state reconciliation
+      // race cannot turn a visible quote into an empty request.
+      const body = String(node.getAttribute("data-quote-body") || "").trim();
+      if (body) {
+        ordered.push({
+          id: id || crypto.randomUUID(),
+          body,
+          message: {
+            id: String(node.getAttribute("data-quote-message-id") || id || "quote"),
+            role: "assistant",
+            content: body,
+          },
+        });
       }
     }
     for (const leftover of byId.values()) ordered.push(leftover);
+    if (ordered.length === 0) return {};
     const items: QuotePayloadItem[] = ordered.map((q) => ({
       label:
         q.message.avatarName ||
@@ -9430,9 +9451,14 @@ export function ChatPane({
     const isContinuation = !!continuation;
     const requestProvider = String(options?.provider ?? chatProvider ?? "").trim();
     const requestModel = String(options?.model ?? chatModel ?? "").trim();
+    // Freeze the quote payload before any async session materialization or
+    // composer cleanup. This keeps the exact selected sentence attached to
+    // the request even if React processes clearQuoteTargets meanwhile.
+    const quotePayloadAtSend = isContinuation ? {} : buildQuotedPayload();
     const composerDisplayText = buildComposerDisplayText();
     const text = userText.trim();
-    const hasQuotePayloadEarly = quoteTargetsRef.current.length > 0;
+    const hasQuotePayloadEarly =
+      quoteTargetsRef.current.length > 0 || Boolean(quotePayloadAtSend.quotedContent);
     // Quote-only turns: keep user_input empty (chips carry context); avoid "见附件" placeholder.
     const messageText = isContinuation
       ? " "
@@ -9476,7 +9502,7 @@ export function ChatPane({
       }
     }
     const hasReadyAttachments = userAttachments.length > 0;
-    const hasQuotePayload = quoteTargetsRef.current.length > 0;
+    const hasQuotePayload = Boolean(quotePayloadAtSend.quotedContent);
     if (!isContinuation && !text && !hasReadyAttachments && !hasQuotePayload) return;
     if (!apiBase) return;
 
@@ -9916,11 +9942,10 @@ export function ChatPane({
             ownerSessionId: requestSessionId,
             metadata: { client_turn_id: clientTurnId },
             ...(() => {
-              const payload = buildQuotedPayload();
-              if (!payload.quotedContent) return {};
+              if (!quotePayloadAtSend.quotedContent) return {};
               return {
-                quotedMessageId: payload.quotedMessageId,
-                quotedContent: payload.quotedContent,
+                quotedMessageId: quotePayloadAtSend.quotedMessageId,
+                quotedContent: quotePayloadAtSend.quotedContent,
               };
             })(),
           }
@@ -10266,10 +10291,9 @@ export function ChatPane({
       const ats = (pane.activeTaskspaceId || "").trim();
       if (ats) body.active_taskspace_id = ats;
       {
-        const quotePayload = buildQuotedPayload();
-        if (quotePayload.quotedContent) {
-          body.quoted_message_id = quotePayload.quotedMessageId;
-          body.quoted_content = quotePayload.quotedContent;
+        if (quotePayloadAtSend.quotedContent) {
+          body.quoted_message_id = quotePayloadAtSend.quotedMessageId;
+          body.quoted_content = quotePayloadAtSend.quotedContent;
           body.user_display_content = composerDisplayText;
         }
       }

@@ -326,6 +326,11 @@ export function ImBubble({
   const [menuHasSelection, setMenuHasSelection] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const msgContentRef = useRef<HTMLDivElement | null>(null);
+  // Clicking an action button can collapse the browser selection before the
+  // click handler runs. Keep the last selection from this bubble so quoting a
+  // sentence remains deterministic instead of silently falling back to the
+  // whole message.
+  const actionSelectionRef = useRef<string | null>(null);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
@@ -342,24 +347,32 @@ export function ImBubble({
   }, [isEditing]);
 
   const runFavorite = () => {
-    const picked = getContainedSelectionText(msgContentRef.current);
+    const picked = getContainedSelectionText(msgContentRef.current) ?? actionSelectionRef.current;
+    actionSelectionRef.current = null;
     onFavoriteMessage?.(message, picked ?? undefined);
   };
 
   const runQuote = () => {
-    const picked = getContainedSelectionText(msgContentRef.current);
+    const picked = getContainedSelectionText(msgContentRef.current) ?? actionSelectionRef.current;
+    actionSelectionRef.current = null;
     onQuoteMessage?.(message, picked ?? undefined);
   };
 
   const runWebSearch = () => {
-    const picked = getContainedSelectionText(msgContentRef.current);
+    const picked = getContainedSelectionText(msgContentRef.current) ?? actionSelectionRef.current;
+    actionSelectionRef.current = null;
     if (!picked) return;
     onWebSearchMessage?.(message, picked);
   };
 
   const runQuoteToNewPane = () => {
-    const picked = getContainedSelectionText(msgContentRef.current);
+    const picked = getContainedSelectionText(msgContentRef.current) ?? actionSelectionRef.current;
+    actionSelectionRef.current = null;
     onQuoteToNewPane?.(message, picked ?? undefined);
+  };
+
+  const preserveActionSelection = () => {
+    actionSelectionRef.current = getContainedSelectionText(msgContentRef.current);
   };
 
   const runSelectAll = () => {
@@ -464,7 +477,9 @@ export function ImBubble({
   const openContextMenu = (ev: ReactMouseEvent) => {
     ev.preventDefault();
     ev.stopPropagation();
-    setMenuHasSelection(Boolean(getContainedSelectionText(msgContentRef.current)));
+    const picked = getContainedSelectionText(msgContentRef.current);
+    actionSelectionRef.current = picked;
+    setMenuHasSelection(Boolean(picked));
     setMenuPos({ x: ev.clientX, y: ev.clientY });
     setMenuLayout(null);
     setMenuOpen(true);
@@ -535,7 +550,15 @@ export function ImBubble({
           </button>
         </HoverTip>
         <HoverTip label="引用">
-          <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
+          <button
+            type="button"
+            className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              preserveActionSelection();
+            }}
+            onClick={runQuote}
+          >
             <Quote size={13} />
           </button>
         </HoverTip>
@@ -833,7 +856,14 @@ export function ImBubble({
                     </button>
                   </HoverTip>
                   <HoverTip label="引用">
-                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        preserveActionSelection();
+                      }}
+                      onClick={runQuote}
+                    >
                       <Quote size={13} strokeWidth={1.5} />
                     </button>
                   </HoverTip>
