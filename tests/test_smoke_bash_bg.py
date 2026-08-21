@@ -42,16 +42,54 @@ def auto_confirm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_tools, "_confirm", _yes)
 
 
-@pytest.fixture(autouse=True)
-def clean_bg_jobs() -> None:
-    """Ensure no leaked background process between tests."""
-    for job in list(agent_tools._BASH_BG_JOBS.values()):
+async def _reap_bg_jobs() -> None:
+    """Kill leftover processes and **await** their drain tasks.
+
+    只 kill 进程是不够的：``drain_task`` 抓着子进程的 transport，不取消并等它结束，
+    任务就会活过事件循环的关闭，之后 ``BaseSubprocessTransport.__del__`` 往死循环里
+    投 callback，抛出无法捕获的 "Event loop is closed" —— 并被算在当时碰巧在跑的
+    那个用例头上。
+    """
+    jobs = list(agent_tools._BASH_BG_JOBS.values())
+    agent_tools._BASH_BG_JOBS.clear()
+    for job in jobs:
         try:
             if job.proc.returncode is None:
                 job.proc.kill()
         except Exception:
             pass
-    agent_tools._BASH_BG_JOBS.clear()
+    pending = [
+        job.drain_task
+        for job in jobs
+        if getattr(job, "drain_task", None) is not None and not job.drain_task.done()
+    ]
+    # 先给 drain 自己收尾的机会，别上来就 cancel：进程被 kill 之后 stream 会 EOF、
+    # `await job.proc.wait()` 会返回，drain 正常结束，子进程 transport 才会被关掉。
+    # 直接 cancel 会让 proc.wait() 永远等不到，transport 就留到循环关闭之后才析构。
+    if pending:
+        _, still_pending = await asyncio.wait(pending, timeout=2.0)
+        for task in still_pending:
+            task.cancel()
+        if still_pending:
+            await asyncio.gather(*still_pending, return_exceptions=True)
+    # 兜底：即使没有 drain_task，也要把 transport 收干净。
+    for job in jobs:
+        try:
+            await asyncio.wait_for(job.proc.wait(), timeout=1.0)
+        except Exception:
+            pass
+
+
+@pytest.fixture(autouse=True)
+async def clean_bg_jobs():
+    """Ensure no leaked background process or drain task between tests.
+
+    收尾必须有：原来只在**用例开始前**清理，最后一个用例起的 job 从来没人管，
+    它的 drain_task 就这么活到了循环关闭之后。
+    """
+    await _reap_bg_jobs()
+    yield
+    await _reap_bg_jobs()
 
 
 async def _poll_until_contains(

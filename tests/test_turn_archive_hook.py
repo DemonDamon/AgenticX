@@ -34,6 +34,9 @@ def test_turn_archive_hook_enabled_schedules_archive() -> None:
     with patch("agenticx.runtime.hooks.turn_archive_hook.asyncio.create_task") as create_task:
         asyncio.run(hook.on_agent_end("done", _FakeSession()))
         create_task.assert_called_once()
+        # MagicMock 不会 await 传进去的协程。不主动关掉，它会在之后随便哪次 GC 时抛
+        # "coroutine was never awaited"，并被记在当时碰巧在跑的那个用例头上。
+        create_task.call_args.args[0].close()
 
 
 def test_turn_archive_hook_on_compaction_sets_boost_flag() -> None:
