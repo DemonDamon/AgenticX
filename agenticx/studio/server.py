@@ -145,6 +145,19 @@ from agenticx.workspace.loader import (
 
 logger = logging.getLogger(__name__)
 
+#: 在飞的 fire-and-forget task。asyncio 只对运行中的 task 持弱引用 —— 不留住返回值，
+#: 活儿可能跑到一半被 GC 掉，而且不会有任何报错。跑完自己摘掉，不会攒成泄漏。
+_background_tasks: "set[asyncio.Task[Any]]" = set()
+
+
+def _spawn_background(coro: Any, *, name: str) -> "asyncio.Task[Any]":
+    """create_task + 强引用。所有 fire-and-forget 都要走这里。"""
+    task = asyncio.create_task(coro, name=name)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
 def _turn_lease_max_hold_seconds() -> float:
     """后台收尾等待的上界：超过它就强制放回并发位。见 _release_after_runtime。"""
     raw = str(os.environ.get("AGX_DESKTOP_TURN_LEASE_MAX_HOLD_SECONDS", "") or "").strip()
@@ -1020,7 +1033,7 @@ def create_studio_app() -> FastAPI:
             from agenticx.memory.graph.deps import ensure_graphiti_if_enabled
 
             if load_memory_graph_config().enabled:
-                asyncio.create_task(
+                _spawn_background(
                     ensure_graphiti_if_enabled(),
                     name="memory-graph-graphiti-bootstrap",
                 )
@@ -1113,6 +1126,14 @@ def create_studio_app() -> FastAPI:
                 await orch.stop()
             except Exception as exc:
                 logger.debug("LongRun orchestrator stop error: %s", exc)
+
+        # 记忆图谱 worker：正在 ingest 的那一轮要被取消并等干净，不能随循环一起丢下。
+        try:
+            from agenticx.memory.graph.writer import MemoryGraphWriter
+
+            await MemoryGraphWriter.singleton().aclose()
+        except Exception as exc:
+            logger.debug("memory graph writer close error: %s", exc)
 
         # Shutdown: close all MCP child processes via the global hub.
         try:
@@ -3548,8 +3569,9 @@ def create_studio_app() -> FastAPI:
                     saw_final = True
                     snap = str(getattr(managed, "session_name", None) or "").strip()
                     if manager.claim_llm_title_slot(payload.session_id, snap):
-                        asyncio.create_task(
-                            _llm_suggest_session_title_job(manager, payload.session_id)
+                        _spawn_background(
+                            _llm_suggest_session_title_job(manager, payload.session_id),
+                            name=f"llm-session-title-{payload.session_id[:8]}",
                         )
                 elif _runtime_error_counts_as_failure(event):
                     had_runtime_failure = True
@@ -3845,8 +3867,9 @@ def create_studio_app() -> FastAPI:
                                 saw_final = True
                                 snap = str(getattr(managed, "session_name", None) or "").strip()
                                 if manager.claim_llm_title_slot(payload.session_id, snap):
-                                    asyncio.create_task(
-                                        _llm_suggest_session_title_job(manager, payload.session_id)
+                                    _spawn_background(
+                                        _llm_suggest_session_title_job(manager, payload.session_id),
+                                        name=f"llm-session-title-{payload.session_id[:8]}",
                                     )
                             elif _runtime_error_counts_as_failure(event):
                                 had_runtime_failure = True
@@ -6627,13 +6650,14 @@ def create_studio_app() -> FastAPI:
 
                 avatar_id = getattr(managed, "avatar_id", None)
                 writer = MemoryGraphWriter.singleton()
-                asyncio.create_task(
+                _spawn_background(
                     writer.enqueue_favorite(
                         session_id=session_id,
                         avatar_id=avatar_id,
                         content=truncated,
                         role=role,
-                    )
+                    ),
+                    name=f"memory-graph-favorite-{session_id[:8]}",
                 )
             except Exception:
                 pass
