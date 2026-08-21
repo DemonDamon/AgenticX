@@ -137,10 +137,11 @@
         position: relative;
         z-index: 3;
         display: grid;
-        grid-template-columns: minmax(280px, 0.94fr) minmax(300px, 1.06fr);
+        grid-template-columns: minmax(0, 0.94fr) minmax(0, 1.06fr);
+        column-gap: 12px;
         width: 100%;
         height: 100%;
-        padding: 34px 52px 34px 44px;
+        padding: 28px 44px 28px 40px;
       }
 
       .logo-stage {
@@ -335,11 +336,12 @@
         display: flex;
         min-width: 0;
         align-items: center;
-        padding-left: 28px;
+        padding-left: 18px;
       }
 
       .content-stack {
         width: min(100%, 370px);
+        min-width: 0;
         opacity: 0;
         transform: translateY(12px);
         transition:
@@ -363,6 +365,7 @@
         font-weight: 600;
         letter-spacing: 0.2em;
         text-transform: uppercase;
+        white-space: nowrap;
       }
 
       .eyebrow::before {
@@ -379,6 +382,7 @@
         font-weight: 680;
         letter-spacing: 0.08em;
         line-height: 1.04;
+        white-space: nowrap;
         text-shadow: 0 8px 28px rgba(8, 101, 151, 0.12);
       }
 
@@ -388,6 +392,7 @@
         font-size: 15px;
         font-weight: 450;
         letter-spacing: 0.24em;
+        white-space: nowrap;
       }
 
       .divider {
@@ -597,6 +602,48 @@
 
         .escape {
           margin-top: 14px;
+        }
+      }
+
+      @media (max-width: 700px) {
+        .shell {
+          column-gap: 6px;
+          padding-right: 28px;
+          padding-left: 28px;
+        }
+
+        .logo-system {
+          width: 216px;
+          height: 216px;
+        }
+
+        .logo-tile {
+          width: 136px;
+          height: 136px;
+        }
+
+        .content {
+          padding-left: 10px;
+        }
+
+        .eyebrow {
+          gap: 7px;
+          font-size: 8px;
+          letter-spacing: 0.12em;
+        }
+
+        .eyebrow::before {
+          width: 20px;
+        }
+
+        h1 {
+          font-size: 34px;
+          letter-spacing: 0.05em;
+        }
+
+        .tagline {
+          font-size: 12px;
+          letter-spacing: 0.14em;
         }
       }
 

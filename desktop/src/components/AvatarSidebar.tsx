@@ -221,10 +221,11 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
 
         {/* Meta-Agent brand row */}
         <button
-          className={`group flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors ${
+          className={`group flex w-full items-center gap-2 px-4 py-2.5 text-left transition-colors ${
             metaPaneActive ? "" : "hover:bg-surface-hover"
           }`}
           aria-current={metaPaneActive ? "page" : undefined}
+          aria-label={`${APP_DISPLAY_NAME} ${APP_VERSION}`}
           onClick={() => openMetaOrAvatarPane(null, META_AGENT_DISPLAY_NAME)}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -236,11 +237,11 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
             alt={APP_DISPLAY_NAME}
             className="h-8 w-8 shrink-0 rounded-[7px] object-contain drop-shadow-[0_2px_6px_rgba(14,132,197,0.22)]"
           />
-          <div className="flex min-w-0 items-baseline gap-1.5">
-            <span className="truncate text-[20px] font-bold leading-none text-text-strong">
+          <div className="flex min-w-0 flex-1 items-baseline gap-1">
+            <span className="min-w-0 truncate text-[18px] font-bold leading-none text-text-strong">
               {ORG_DISPLAY_NAME}
             </span>
-            <span className="shrink-0 text-[11px] font-medium leading-none text-text-faint">
+            <span className="shrink-0 text-[10px] font-medium leading-none tabular-nums text-text-faint">
               {APP_VERSION}
             </span>
           </div>

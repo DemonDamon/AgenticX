@@ -86,9 +86,12 @@ function centerSplashBounds(): { x: number; y: number; width: number; height: nu
   const { workArea } = screen.getPrimaryDisplay();
   const availableWidth = Math.max(360, workArea.width - 48);
   const availableHeight = Math.max(280, workArea.height - 48);
-  const targetWidth = clamp(Math.round(workArea.width * 0.54), 660, 860);
+  // Keep the two-column composition readable on compact displays. The former
+  // 660px minimum was narrower than the HTML grid's own minimum width, which
+  // let the title/progress column be clipped by the BrowserWindow bounds.
+  const targetWidth = clamp(Math.round(workArea.width * 0.54), 700, 860);
   const width = Math.min(targetWidth, availableWidth);
-  const targetHeight = clamp(Math.round(width * 0.56), 360, 480);
+  const targetHeight = clamp(Math.round(width * 0.56), 390, 480);
   const height = Math.min(targetHeight, availableHeight);
   return {
     width,
