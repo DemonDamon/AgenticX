@@ -77,7 +77,18 @@ def test_team_manager_spawn_and_collect_summary() -> None:
         result = await manager.spawn_subagent(name="规划员", role="planner", task="生成计划")
         assert result["ok"] is True
         agent_id = result["agent_id"]
-        await _wait_until(lambda: manager.get_status(agent_id)["subagent"]["status"] in {"completed", "failed"})
+        # 等终结**事件**，不是等 status 字段。team_manager 先把 status 置成 completed，
+        # 之后还要走 _run_store_close、summary_sink，最后才 emit 这个事件 —— 中间隔着
+        # 好几个 await。盯 status 会在负载高时正好卡进那个窗口，看到 completed 但
+        # summaries 还是空的（全量测试里就是这么随机红的）。事件严格晚于 sink。
+        terminal_events = {
+            EventType.SUBAGENT_COMPLETED.value,
+            EventType.SUBAGENT_ERROR.value,
+        }
+        await _wait_until(
+            lambda: any(item.type in terminal_events for item in emitted),
+            timeout=5.0,
+        )
         status = manager.get_status(agent_id)["subagent"]
         assert status["status"] == "completed"
         assert summaries
