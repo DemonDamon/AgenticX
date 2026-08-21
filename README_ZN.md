@@ -34,10 +34,6 @@ AgenticX 旨在提供一套统一、可扩展、生产就绪的智能体技术�
 
 ## 系统架构
 
-<div align="center">
-<img src="assets/AgenticX 系统架构总览图.png" alt="AgenticX 系统架构总览图 — 涵盖 UI 层、Studio 运行时、核心框架、平台服务、领域扩展五大层级" width="900" />
-</div>
-
 整体架构由一个共享能力内核和两种产品形态构成：
 
 - **AgenticX Core / Runtime**：Python SDK、Studio Server 与 Agent Runtime，提供编排、工具、MCP、记忆、知识库、Skills、Hooks、模型适配、安全沙箱、可观测性与评估。
@@ -46,7 +42,9 @@ AgenticX 旨在提供一套统一、可扩展、生产就绪的智能体技术�
 
 Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路相互独立：Near 默认使用本机 Python Runtime；Enterprise 当前在线主链路使用 Go Gateway。Enterprise Edge Agent 已达 MVP 但未进入默认链路，Cluster Agent Runtime 仍是规划方向。
 
-> 架构图重绘提示词：[总架构（中文）](docs/prompt-for-pics/overall_cn.md) · [Near Desktop（中文）](docs/prompt-for-pics/desktop_cn.md) · [Enterprise（中文）](docs/prompt-for-pics/enterprise_cn.md)
+<div align="center">
+<img src="assets/AgenticX 产品与技术架构信息图.png" alt="AgenticX 产品与技术架构 — 产品入口、Studio / Agent / Core SDK Runtime、协议生态与平台支撑层" width="900" />
+</div>
 
 ## 核心功能
 
@@ -89,6 +87,11 @@ Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路�
 - **扩展协议**: A2A、MCP、AG-UI、OpenAPI 与远程工具
 
 ### Near Desktop
+
+<div align="center">
+<img src="desktop/assets/near-desktop-architecture-zh.png" alt="Near Desktop 架构 — 本机优先多智能体桌面工作台" width="900" />
+</div>
+
 - **本机优先**: Electron + React + Zustand + Vite；Electron 启动并管理本机 `agx serve / agx-server`，通过 REST API + SSE 通信
 - **多智能体工作台**: 多窗格对话、Meta-Agent、分身、群聊、子智能体状态、会话历史与独立模型选择
 - **工作区与执行**: 工作目录、文件引用、内嵌终端、Computer Use、MCP、Skills、Hooks、知识库与数据源
@@ -96,6 +99,11 @@ Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路�
 - **可选远程模式**: 已支持连接单一远程 `agx serve`；Cluster / HA 多副本运行时仍属规划
 
 ### AgenticX Enterprise
+
+<div align="center">
+<img src="enterprise/assets/enterprise-architecture-zh.png" alt="AgenticX Enterprise 架构 — 访问层、控制面、Portal BFF、Go AI Gateway 与数据基础设施" width="900" />
+</div>
+
 - **企业入口与控制面**: Web Portal、Portal BFF、Admin Console；支持身份权限、模型与通道、策略、配额、审计与运维配置
 - **Go AI Gateway**: JWT / PAT 鉴权、主体识别、缓存、限流、策略评估、模型与通道路由、流式响应治理、审计链与 Token 用量
 - **真实数据基础设施**: PostgreSQL 默认、MySQL 可选，Redis 用于缓存与分布式限流，JSONL 提供必须成功的追加式审计兜底

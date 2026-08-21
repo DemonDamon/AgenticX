@@ -36,10 +36,6 @@
 
 ## System Architecture
 
-<div align="center">
-<img src="assets/AgenticX System Architecture.png" alt="AgenticX System Architecture — 5-tier overview covering UI, Studio Runtime, Core Framework, Platform Services, and Domain Extensions" width="900" />
-</div>
-
 The architecture consists of one shared capability core and two product forms:
 
 - **AgenticX Core / Runtime**: Python SDK, Studio Server, and Agent Runtime for orchestration, tools, MCP, memory, knowledge bases, Skills, Hooks, model adapters, secure sandboxes, observability, and evaluation.
@@ -48,7 +44,9 @@ The architecture consists of one shared capability core and two product forms:
 
 Near and Enterprise share AgenticX abstractions and capabilities, but their current deployment paths are independent. Near defaults to the local Python Runtime; Enterprise uses the Go Gateway for its current online path. Enterprise Edge Agent is an MVP outside the default path, while Cluster Agent Runtime remains planned.
 
-> Architecture drawing prompts: [Overall (English)](docs/prompt-for-pics/overall_en.md) · [Near Desktop (English)](docs/prompt-for-pics/desktop_en.md) · [Enterprise (English)](docs/prompt-for-pics/enterprise_en.md)
+<div align="center">
+<img src="assets/AgenticX Product and Technology Architecture.png" alt="AgenticX Product and Technology Architecture — product entries, Studio / Agent / Core SDK Runtime, protocol ecosystem, and platform foundation" width="900" />
+</div>
 
 ## Core Features
 
@@ -91,6 +89,11 @@ Near and Enterprise share AgenticX abstractions and capabilities, but their curr
 - **Extension Protocols**: A2A, MCP, AG-UI, OpenAPI, and remote tools
 
 ### Near Desktop
+
+<div align="center">
+<img src="desktop/assets/near-desktop-architecture-en.png" alt="Near Desktop Architecture — local-first multi-agent desktop workspace" width="900" />
+</div>
+
 - **Local-first**: Electron + React + Zustand + Vite; Electron starts and manages local `agx serve / agx-server` over REST API + SSE
 - **Multi-agent Workspace**: Multi-pane chat, Meta-Agent, avatars, group chat, sub-agent status, session history, and per-pane model selection
 - **Workspace and Execution**: Working directories, file references, embedded terminal, Computer Use, MCP, Skills, Hooks, knowledge bases, and data sources
@@ -98,6 +101,11 @@ Near and Enterprise share AgenticX abstractions and capabilities, but their curr
 - **Optional Remote Mode**: A single remote `agx serve` backend is implemented; Cluster / HA multi-replica runtime remains planned
 
 ### AgenticX Enterprise
+
+<div align="center">
+<img src="enterprise/assets/enterprise-architecture-en.png" alt="AgenticX Enterprise Architecture — access, control plane, Portal BFF, Go AI Gateway, and data infrastructure" width="900" />
+</div>
+
 - **Enterprise Entry and Control Plane**: Web Portal, Portal BFF, and Admin Console for identity, models and channels, policy, quota, audit, and operations
 - **Go AI Gateway**: JWT / PAT authentication, subject identity, cache, rate limiting, policy evaluation, model and channel routing, streaming response governance, audit chain, and token usage
 - **Real Data Infrastructure**: PostgreSQL by default, optional MySQL, Redis for cache and distributed limits, and a must-succeed append-only JSONL audit fallback
