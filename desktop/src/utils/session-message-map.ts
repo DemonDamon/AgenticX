@@ -14,6 +14,7 @@ import {
   parseAssistantOutputForUi,
   sanitizeSuggestedQuestions,
 } from "./assistant-output";
+import { sanitizeLoadedBlocks } from "./content-blocks";
 
 function parseSubAgentClusterAnchor(meta: Record<string, unknown> | undefined): Message["subAgentCluster"] {
   const raw = meta?.subagent_cluster;
@@ -221,6 +222,7 @@ export type LoadedSessionMessage = {
   reasoning?: string;
   /** Persisted reasoning duration in seconds. */
   reasoning_seconds?: number;
+  blocks?: unknown;
 };
 
 export function mapLoadedSessionMessage(
@@ -313,6 +315,8 @@ export function mapLoadedSessionMessage(
     if (typeof item.reasoning_seconds === "number" && item.reasoning_seconds >= 1) {
       mapped.reasoningSeconds = Math.round(item.reasoning_seconds);
     }
+    const blocks = sanitizeLoadedBlocks(item.blocks);
+    if (blocks) mapped.blocks = blocks;
   }
   if (item.role === "tool") {
     const toolCallId = String(item.tool_call_id ?? "").trim();

@@ -2055,6 +2055,30 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "generate_image",
+            "description": (
+                "Generate an image from a text prompt and save it to the session workspace. "
+                "Use when the user asks to draw / generate / 画一张图. "
+                "Returns a local file path. Do not invent a URL."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Image prompt."},
+                    "size": {
+                        "type": "string",
+                        "enum": ["1024x1024", "1024x1792", "1792x1024"],
+                        "description": "Optional size. Default 1024x1024.",
+                    },
+                },
+                "required": ["prompt"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "analyze_image",
             "description": (
                 "Analyze an image with the configured vision-capable fallback model and return "
@@ -8237,6 +8261,17 @@ async def dispatch_tool_async(
             return await _tool_web_fetch(arguments, session)
         if name == "view_image":
             return await _tool_view_image(arguments, session)
+        if name == "generate_image":
+            from agenticx.tools.image_generation import generate_image
+
+            prompt = str(arguments.get("prompt") or "").strip()
+            size = str(arguments.get("size") or "1024x1024").strip() or "1024x1024"
+            return await asyncio.to_thread(
+                generate_image,
+                prompt,
+                size=size,
+                session=session,
+            )
         if name == "analyze_image":
             return await _tool_analyze_image(arguments, session)
         if name == "session_search":

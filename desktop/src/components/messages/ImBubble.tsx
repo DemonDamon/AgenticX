@@ -14,6 +14,8 @@ import { parseReasoningContent } from "./reasoning-parser";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
 import { HoverTip } from "../ds/HoverTip";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
+import { InlineImageBlock } from "./InlineImageBlock";
+import { hasImageBlock } from "../../utils/content-blocks";
 import { renderUserMessageInlineBody, UserQuoteRefChip, renderUserBubbleInlineContent } from "./user-message-inline";
 import {
   parseQuotedContentItems,
@@ -271,7 +273,9 @@ export function ImBubble({
   const displayAttachments = isUser
     ? (message.attachments ?? []).filter((attachment) => !isWorkspaceReferenceAttachment(attachment))
     : [];
-  const hasBody = !!bodyText?.trim() || displayQuotedItems.length > 0;
+  const hasBody =
+    !!bodyText?.trim() || displayQuotedItems.length > 0 || hasImageBlock(message.blocks);
+  const renderInlineBlocks = hasImageBlock(message.blocks);
   const bubbleStyle: CSSProperties = isUser
     ? {
         background: "var(--chat-im-user-bg)",
@@ -885,13 +889,53 @@ export function ImBubble({
                         className={showExpertLabel ? undefined : assistantTextClassName}
                         style={assistantTextStyle}
                       >
-                        <CitationMarkdownBody
-                          content={bodyText}
-                          references={citationReferences}
-                          isStreaming={isStreaming}
-                          onQuoteText={(text) => onQuoteMessage?.(message, text)}
-                          onRevealPath={onRevealPath}
-                        />
+                        {renderInlineBlocks ? (
+                          <>
+                            {(message.blocks ?? []).some((b) => b.type === "text")
+                              ? (message.blocks ?? []).map((block, idx) =>
+                                  block.type === "text" ? (
+                                    block.text.trim() ? (
+                                      <CitationMarkdownBody
+                                        key={`text-${idx}`}
+                                        content={block.text}
+                                        references={citationReferences}
+                                        isStreaming={isStreaming}
+                                        onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                                        onRevealPath={onRevealPath}
+                                      />
+                                    ) : null
+                                  ) : (
+                                    <InlineImageBlock key={block.id} block={block} />
+                                  ),
+                                )
+                              : (
+                                <>
+                                  {bodyText.trim() ? (
+                                    <CitationMarkdownBody
+                                      content={bodyText}
+                                      references={citationReferences}
+                                      isStreaming={isStreaming}
+                                      onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                                      onRevealPath={onRevealPath}
+                                    />
+                                  ) : null}
+                                  {(message.blocks ?? [])
+                                    .filter((b) => b.type === "image")
+                                    .map((block) => (
+                                      <InlineImageBlock key={block.id} block={block} />
+                                    ))}
+                                </>
+                              )}
+                          </>
+                        ) : (
+                          <CitationMarkdownBody
+                            content={bodyText}
+                            references={citationReferences}
+                            isStreaming={isStreaming}
+                            onQuoteText={(text) => onQuoteMessage?.(message, text)}
+                            onRevealPath={onRevealPath}
+                          />
+                        )}
                       </div>
                     ) : null}
                     {isStreaming && hasBody && (!hasThinkTag || reasoningClosed) ? (

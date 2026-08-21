@@ -38,6 +38,7 @@ import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseTodoMessage } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
+import { hasImageBlock, resolveAssistantBlocks } from "../../utils/content-blocks";
 import {
   appendMissingImageMarkdown,
   collectTurnPreviewImagePaths,
@@ -311,11 +312,17 @@ export function MessageRenderer({
   }, [message, allMessages]);
   const displayMessage = useMemo(() => {
     if (message.role !== "assistant") return message;
+    const resolvedBlocks = resolveAssistantBlocks(message, allMessages);
+    const withBlocks =
+      resolvedBlocks && resolvedBlocks !== message.blocks
+        ? { ...message, blocks: resolvedBlocks }
+        : message;
+    if (hasImageBlock(withBlocks.blocks)) return withBlocks;
     const images = collectTurnPreviewImagePaths(allMessages, message.id);
-    if (images.length === 0) return message;
-    const next = appendMissingImageMarkdown(message.content, images);
-    if (next === message.content) return message;
-    return { ...message, content: next };
+    if (images.length === 0) return withBlocks;
+    const next = appendMissingImageMarkdown(withBlocks.content, images);
+    if (next === withBlocks.content) return withBlocks;
+    return { ...withBlocks, content: next };
   }, [message, allMessages]);
   if (isViewImageInjectMessage(message)) {
     return <ViewImageInjectCard message={message} />;

@@ -31,6 +31,7 @@ import {
   useAppStore,
   type Avatar,
   type ChatPane as ChatPaneState,
+  type ContentBlock,
   type Message,
   type MessageAttachment,
   type PendingConfirm,
@@ -96,6 +97,11 @@ import {
   expandSelectionToCompleteTurns,
 } from "./messages/react-blocks";
 import { isSubAgentLiveStatus, shouldHideStreamOverlay, shouldShowMidTurnStreamActivity } from "../utils/stream-overlay-policy";
+import {
+  hasImageBlock,
+  markGeneratingBlocksCancelled,
+} from "../utils/content-blocks";
+import { applyContentBlockEvent, applyTokenDelta } from "../utils/content-block-sse";
 import { flushSubAgentLiveOutput } from "../utils/subagent-live-output";
 import { resolveSubAgentOutputPaths } from "../utils/subagent-output-files";
 import { TurnToolGroupCard } from "./messages/TurnToolGroupCard";
@@ -2890,6 +2896,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [voiceInputHint, setVoiceInputHint] = useState("");
   const dictationSessionRef = useRef<{ stop: () => void; cancel: () => void } | null>(null);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
+  const [streamedBlocks, setStreamedBlocks] = useState<ContentBlock[]>([]);
+  const streamedBlocksRef = useRef<ContentBlock[]>([]);
   const [streamReferences, setStreamReferences] = useState<SearchReference[]>([]);
   const [streamSearchedQueries, setStreamSearchedQueries] = useState<string[]>([]);
   const [streamingSessionId, setStreamingSessionId] = useState("");
@@ -3316,6 +3324,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       searchedQueries: streamSearchedQueries.length > 0 ? streamSearchedQueries : undefined,
       provider: streamingModel?.provider,
       model: streamingModel?.model,
+      blocks: streamedBlocks.length > 0 ? streamedBlocks : undefined,
     };
   }, [
     pane.sessionId,
@@ -3324,6 +3333,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     streamSearchedQueries,
     streamingModel?.provider,
     streamingModel?.model,
+    streamedBlocks,
   ]);
   /** Hide __stream__ when it duplicates committed text or is an empty mid-turn tool-gap placeholder. */
   const hideStreamOverlayAsDuplicate = useMemo(
@@ -3332,8 +3342,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         isStreamingCurrentSession,
         streamTextForCurrentSession,
         visibleMessages,
-      ),
-    [isStreamingCurrentSession, streamTextForCurrentSession, visibleMessages],
+      ) && !hasImageBlock(streamedBlocks),
+    [isStreamingCurrentSession, streamTextForCurrentSession, visibleMessages, streamedBlocks],
   );
   const midTurnStreamActivity = shouldShowMidTurnStreamActivity(
     isStreamingCurrentSession,
@@ -7140,10 +7150,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           partial = fallback;
         }
       }
+      const cancelledBlocks = markGeneratingBlocksCancelled(streamedBlocksRef.current);
+      const hasInlineImage = hasImageBlock(cancelledBlocks);
       if (
-        !partial ||
-        isThinkingPlaceholderText(partial) ||
-        isStreamToolLabelOnlyText(partial)
+        (!partial ||
+          isThinkingPlaceholderText(partial) ||
+          isStreamToolLabelOnlyText(partial)) &&
+        !hasInlineImage
       ) {
         return false;
       }
@@ -7156,7 +7169,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         commitExtras.reasoning = reasoningText.slice(0, 16384);
         commitContent = bodyContent;
       }
-      if (!commitContent.trim() || isStreamToolLabelOnlyText(commitContent)) {
+      if (hasInlineImage) {
+        commitExtras.blocks = cancelledBlocks;
+      }
+      if (
+        (!commitContent.trim() || isStreamToolLabelOnlyText(commitContent)) &&
+        !hasInlineImage
+      ) {
         return false;
       }
       addPaneMessage(
@@ -9322,6 +9341,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
+    streamedBlocksRef.current = [];
+    setStreamedBlocks([]);
     setStreamReferences([]);
     setStreamSearchedQueries([]);
     streamCommitRegistryRef.current.beginSession(requestSessionId);
@@ -9559,6 +9580,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         streamRafRef.current = null;
         if (!abortController.signal.aborted && isTargetSessionStillActive()) {
           setStreamedAssistantText(streamTextRef.current);
+          setStreamedBlocks(streamedBlocksRef.current);
         }
       });
     };
@@ -10411,6 +10433,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if (/<think>/i.test(full) && streamReasoningStartedAt === null) {
                   streamReasoningStartedAt = Date.now();
                 }
+                streamedBlocksRef.current = applyTokenDelta(streamedBlocksRef.current, tokenText);
                 scheduleStreamTextUpdate(full);
               } else {
                 const tok = String(payload.data?.text ?? "");
@@ -10422,6 +10445,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   updateSubAgent(eventAgentId, { liveOutput: next });
                 }
               }
+            }
+            if (payload.type === "content_block" && eventAgentId === "meta") {
+              streamedBlocksRef.current = applyContentBlockEvent(streamedBlocksRef.current, {
+                type: payload.type,
+                data: payload.data,
+              });
+              if (isTargetSessionStillActive()) {
+                setStreamedBlocks(streamedBlocksRef.current);
+              }
+              continue;
             }
             if (payload.type === "tool_call") {
               setStallWait(null);
@@ -11422,10 +11455,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         !streamCommitRegistryRef.current.isCommitted(requestSessionId)
       ) {
         const mid = streamCommitRegistryRef.current.getMidCommit(requestSessionId);
+        const streamBlockExtras = hasImageBlock(streamedBlocksRef.current)
+          ? { blocks: streamedBlocksRef.current }
+          : {};
         if (mid !== null && trimmedFull === mid) {
           streamCommitRegistryRef.current.markCommitted(requestSessionId);
           useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
             ...(turnExtras ?? {}),
+            ...streamBlockExtras,
             timestamp: completedAt,
           });
         } else {
@@ -11437,7 +11474,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             chatProvider,
             chatModel,
             undefined,
-            { ...(turnExtras ?? {}), timestamp: completedAt },
+            { ...(turnExtras ?? {}), ...streamBlockExtras, timestamp: completedAt },
           );
           streamCommitRegistryRef.current.markCommitted(requestSessionId);
         }
@@ -11454,11 +11491,33 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (committedPatch) {
           useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
             ...committedPatch,
+            ...(hasImageBlock(streamedBlocksRef.current)
+              ? { blocks: streamedBlocksRef.current }
+              : {}),
             timestamp: completedAt,
           });
         } else {
           stampLastAssistantCompletedAt();
         }
+      } else if (
+        hasImageBlock(streamedBlocksRef.current) &&
+        !streamCommitRegistryRef.current.isCommitted(requestSessionId)
+      ) {
+        addPaneMessageIfSessionActive(
+          pane.id,
+          "assistant",
+          full || "",
+          "meta",
+          chatProvider,
+          chatModel,
+          undefined,
+          {
+            ...(turnExtras ?? {}),
+            blocks: streamedBlocksRef.current,
+            timestamp: completedAt,
+          },
+        );
+        streamCommitRegistryRef.current.markCommitted(requestSessionId);
       } else if (
         shouldShowTurnInterruptedSyncToast({
           aborted: abortController.signal.aborted,
@@ -11546,6 +11605,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           setStreamReferences([]);
           setStreamSearchedQueries([]);
           streamTextRef.current = "";
+          streamedBlocksRef.current = [];
+          setStreamedBlocks([]);
         }
         setGroupTyping({});
         setGroupActivityHint({});

@@ -509,6 +509,59 @@ def classify_taskspace_file(path: Path) -> dict[str, Any]:
     }
 
 
+def _sanitize_content_blocks(raw_blocks: list[Any]) -> list[dict[str, Any]]:
+    """Whitelist assistant content blocks; drop data URLs and non-absolute paths."""
+    cleaned: list[dict[str, Any]] = []
+    for item in raw_blocks:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("type") or "").strip()
+        if kind == "text":
+            text = str(item.get("text") or "")
+            if text:
+                cleaned.append({"type": "text", "text": text})
+            continue
+        if kind != "image":
+            continue
+        block: dict[str, Any] = {"type": "image"}
+        bid = str(item.get("id") or "").strip()
+        if bid:
+            block["id"] = bid
+        status = str(item.get("status") or "").strip()
+        if status in {"generating", "ready", "error", "cancelled"}:
+            block["status"] = status
+        path = str(item.get("path") or "").strip()
+        if path.startswith("data:"):
+            path = ""
+        if path and not Path(path).is_absolute():
+            path = ""
+        if path:
+            block["path"] = path
+        url = str(item.get("url") or "").strip()
+        if url.startswith("data:") or len(url) > 2048:
+            url = ""
+        if url:
+            block["url"] = url
+        mime = str(item.get("mime") or "").strip()
+        if mime and not mime.startswith("data:"):
+            block["mime"] = mime
+        alt = str(item.get("alt") or "").strip()
+        if alt:
+            block["alt"] = alt[:240]
+        source = str(item.get("source") or "").strip()
+        if source:
+            block["source"] = source
+        error = str(item.get("error") or "").strip()
+        if error:
+            block["error"] = error[:240]
+        for key in ("width", "height"):
+            value = item.get(key)
+            if isinstance(value, int) and value > 0:
+                block[key] = value
+        cleaned.append(block)
+    return cleaned
+
+
 class SessionManager:
     _META_TASKSPACE_SCOPE = "meta"
 
@@ -2733,6 +2786,9 @@ class SessionManager:
                     reasoning_seconds = None
                 if reasoning_seconds is not None and reasoning_seconds >= 1:
                     row["reasoning_seconds"] = reasoning_seconds
+                raw_blocks = item.get("blocks")
+                if isinstance(raw_blocks, list) and raw_blocks:
+                    row["blocks"] = _sanitize_content_blocks(raw_blocks)
             normalized.append(row)
         return self._collapse_repeated_assistant_in_turn(normalized)
 

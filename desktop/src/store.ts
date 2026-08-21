@@ -15,6 +15,9 @@ import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch"
 import { matchesToolCallForSession } from "./utils/pending-tool-result";
 import type { PendingActionConfirmation } from "./utils/action-confirmation";
 import { shouldSuppressDuplicatePendingUserEcho } from "./utils/send-dedupe";
+import type { ContentBlock } from "./utils/content-blocks";
+
+export type { ContentBlock } from "./utils/content-blocks";
 
 export type {
   ActionConfirmationDecision,
@@ -278,6 +281,8 @@ export type Message = {
   metadata?: Record<string, unknown>;
   /** Sub-Plan E: persisted anchor for a historical sub-agent cluster card. */
   subAgentCluster?: SubAgentClusterAnchor;
+  /** Ordered text/image blocks for inline generated images. */
+  blocks?: ContentBlock[];
 };
 
 export type SubAgentClusterAnchor = {
@@ -650,6 +655,7 @@ type AppState = {
         | "searchedQueries"
         | "ownerSessionId"
         | "metadata"
+        | "blocks"
       >
     > &
       Partial<MessageToolExtras>
@@ -775,6 +781,7 @@ type AppState = {
         | "references"
         | "searchedQueries"
         | "metadata"
+        | "blocks"
       >
     > &
       Partial<MessageToolExtras>
