@@ -1,7 +1,7 @@
 # AgenticX
 
 <div align="center">
-<img src="assets/agenticx-banner.gif" alt="AgenticX — Unified Multi-Agent Platform" width="800" />
+<img src="assets/agenticx-logo.svg" alt="AgenticX — Unified Multi-Agent Platform" width="600" />
 
 <!-- [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/) -->
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
@@ -633,11 +633,11 @@ graph TD
 
 ## Contributing
 
-We welcome community contributions! Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** (中文：[CONTRIBUTING_ZN.md](CONTRIBUTING_ZN.md)) before opening a PR. In short:
+We welcome community contributions! Please refer to:
 
 1. Submit Issues to report bugs or request features
-2. Fork the project and create a scoped feature branch (`feat/` / `fix/` / …)
-3. Submit Pull Requests with Conventional Commits; run the relevant tests (and Desktop `npm run build` when UI changes)
+2. Fork the project and create feature branches
+3. Submit Pull Requests, ensuring all tests pass
 4. Participate in code reviews and discussions
 
 ## Acknowledgements / Upstream Credits
@@ -695,7 +695,6 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **AgentRun SDK** | [Serverless-Devs/agentrun-sdk-python](https://github.com/Serverless-Devs/agentrun-sdk-python) | Serverless agent runtime patterns |
 | **AgentScope** | [agentscope-ai/agentscope](https://github.com/agentscope-ai/agentscope) | Multi-agent communication & pipeline |
 | **Agno** | [agno-agi/agno](https://github.com/agno-agi/agno) | Lightweight agent framework design |
-| **Better Harness** | [QoderAI/better-harness](https://github.com/QoderAI/better-harness) | Evidence-graded session loop review (Present / Wired / Exercised / Outcome-supported) |
 | **Camel** | [camel-ai/camel](https://github.com/camel-ai/camel) | Role-playing agents & society simulation |
 | **Cherry Studio** | [CherryHQ/cherry-studio](https://github.com/CherryHQ/cherry-studio) | Desktop UX, MCP integration, skill system |
 | **Claude Code** | [anthropics/claude-code](https://github.com/anthropics/claude-code) | Agentic CLI UX & plugin architecture |
@@ -703,7 +702,6 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **ClawTeam** | [HKUDS/ClawTeam](https://github.com/HKUDS/ClawTeam) | Multi-agent team coordination |
 | **CodexMonitor** | [Dimillian/CodexMonitor](https://github.com/Dimillian/CodexMonitor) | Desktop monitoring & Tauri app patterns |
 | **CrewAI** | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | Crew orchestration, flow & memory system |
-| **DeepSeek Harness** | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | Long-run turn hardening: overflow retry, interrupted closers, fail-closed persist |
 | **DeepWiki Open** | [AsyncFuncAI/deepwiki-open](https://github.com/AsyncFuncAI/deepwiki-open) | Repository-level knowledge indexing |
 | **Deer Flow** | [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | Deep research workflow & skill harness |
 | **Eigent** | [eigent-ai/eigent](https://github.com/eigent-ai/eigent) | Multi-agent workforce & SSE event spec |
@@ -723,7 +721,6 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust-based secure agent shell |
 | **OpenSkills** | [numman-ali/openskills](https://github.com/numman-ali/openskills) | Skill registry & discovery |
 | **OWL** | [camel-ai/owl](https://github.com/camel-ai/owl) | Embodied multi-agent collaboration |
-| **PenguinHarness** | [Prism-Shadow/penguin-harness](https://github.com/Prism-Shadow/penguin-harness) | Execution timeline (Trajectory) UX & tool-span observability |
 | **Pydantic AI** | [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai) | Type-safe agent & eval framework |
 | **Refly** | [refly-ai/refly](https://github.com/refly-ai/refly) | AI-native knowledge canvas UX |
 | **Serverless Devs** | [Serverless-Devs/Serverless-Devs](https://github.com/Serverless-Devs/Serverless-Devs) | Serverless agent deployment toolchain |

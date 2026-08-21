@@ -1,7 +1,7 @@
 # AgenticX
 
 <div align="center">
-<img src="assets/agenticx-banner.gif" alt="AgenticX — Unified Multi-Agent Platform" width="800" />
+<img src="assets/agenticx-logo.svg" alt="AgenticX — Unified Multi-Agent Platform" width="600" />
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
@@ -629,11 +629,11 @@ graph TD
 
 ## 贡献指南
 
-我们欢迎社区贡献！提交 PR 前请阅读 **[CONTRIBUTING_ZN.md](CONTRIBUTING_ZN.md)**（English：[CONTRIBUTING.md](CONTRIBUTING.md)）。简要流程：
+我们欢迎社区贡献！请参考：
 
 1. 提交 Issue 报告 bug 或提出功能请求
-2. Fork 项目并创建范围明确的功能分支（`feat/` / `fix/` / …）
-3. 提交 Pull Request（Conventional Commits）；跑通相关测试（改 Desktop 时另需 `npm run build`）
+2. Fork 项目并创建功能分支
+3. 提交 Pull Request，确保通过所有测试
 4. 参与代码审查和讨论
 
 ## 致谢与来源说明
@@ -691,7 +691,6 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **AgentRun SDK** | [Serverless-Devs/agentrun-sdk-python](https://github.com/Serverless-Devs/agentrun-sdk-python) | Serverless 智能体运行时模式 |
 | **AgentScope** | [agentscope-ai/agentscope](https://github.com/agentscope-ai/agentscope) | 多智能体通信与流水线设计 |
 | **Agno** | [agno-agi/agno](https://github.com/agno-agi/agno) | 轻量级智能体框架设计 |
-| **Better Harness** | [QoderAI/better-harness](https://github.com/QoderAI/better-harness) | 会话回环体检的证据分级（Present / Wired / Exercised / Outcome-supported） |
 | **Camel** | [camel-ai/camel](https://github.com/camel-ai/camel) | 角色扮演智能体与社会模拟 |
 | **Cherry Studio** | [CherryHQ/cherry-studio](https://github.com/CherryHQ/cherry-studio) | 桌面端 UX、MCP 集成与 Skill 系统 |
 | **Claude Code** | [anthropics/claude-code](https://github.com/anthropics/claude-code) | 智能体 CLI UX 与插件架构 |
@@ -699,7 +698,6 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **ClawTeam** | [HKUDS/ClawTeam](https://github.com/HKUDS/ClawTeam) | 多智能体团队协作机制 |
 | **CodexMonitor** | [Dimillian/CodexMonitor](https://github.com/Dimillian/CodexMonitor) | 桌面监控面板与 Tauri 应用模式 |
 | **CrewAI** | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | Crew 编排、Flow 工作流与记忆系统 |
-| **DeepSeek Harness** | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | 长程回合加固：窗口溢出同轮重试、中断 closer、落盘失败即停 |
 | **DeepWiki Open** | [AsyncFuncAI/deepwiki-open](https://github.com/AsyncFuncAI/deepwiki-open) | 仓库级知识索引 |
 | **Deer Flow** | [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | 深度研究工作流与 Skill 测试框架 |
 | **Eigent** | [eigent-ai/eigent](https://github.com/eigent-ai/eigent) | 多智能体 Workforce 与 SSE 事件规范 |
@@ -719,7 +717,6 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust 高性能安全智能体 Shell |
 | **OpenSkills** | [numman-ali/openskills](https://github.com/numman-ali/openskills) | Skill 注册中心与发现机制 |
 | **OWL** | [camel-ai/owl](https://github.com/camel-ai/owl) | 具身多智能体协作 |
-| **PenguinHarness** | [Prism-Shadow/penguin-harness](https://github.com/Prism-Shadow/penguin-harness) | 执行时间线（Trajectory）UX 与工具调用 span 可观测性 |
 | **Pydantic AI** | [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai) | 类型安全智能体与评测框架 |
 | **Refly** | [refly-ai/refly](https://github.com/refly-ai/refly) | AI 原生知识画布 UX |
 | **Serverless Devs** | [Serverless-Devs/Serverless-Devs](https://github.com/Serverless-Devs/Serverless-Devs) | Serverless 智能体部署工具链 |
