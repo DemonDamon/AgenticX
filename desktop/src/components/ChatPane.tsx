@@ -183,6 +183,7 @@ import {
   TURN_INTERRUPTED_TOAST,
   isTurnInterruptionNoticeMessage,
   shouldAutoResumeTruncationInterruption,
+  shouldShowTurnInterruptedSyncToast,
 } from "../utils/turn-interruption-notice";
 import {
   CHANNEL_C_GRACE_MS,
@@ -9702,6 +9703,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       let full = "";
       let cumulativeFull = "";
       let receivedFinalEvent = false;
+      let receivedDoneEvent = false;
+      let receivedGroupTerminalEvent = false;
       let pendingSuggestedQuestions: string[] = [];
       let pendingFinalTurnTerminal = false;
       let pendingFinalTerminalReason: string | undefined;
@@ -9728,6 +9731,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             const sessionStillActive = isTargetSessionStillActive();
             recordSseActivity(requestSessionId);
             const eventAgentId = payload.data?.agent_id ?? "meta";
+            if (payload.type === "done") {
+              receivedDoneEvent = true;
+            }
+            if (
+              payload.type === "group_reply"
+              || payload.type === "group_skipped"
+              || payload.type === "group_clarification"
+              || payload.type === "group_nudge"
+              || payload.type === "group_blocked"
+            ) {
+              receivedGroupTerminalEvent = true;
+            }
             if (payload.type === "continuation_notice") {
               const noticeText = String(payload.data?.text ?? "").trim();
               const continuationRound = Number(payload.data?.continuation_round ?? 0);
@@ -11363,8 +11378,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         } else {
           stampLastAssistantCompletedAt();
         }
-      } else if (!abortController.signal.aborted && !receivedFinalEvent) {
+      } else if (
+        shouldShowTurnInterruptedSyncToast({
+          aborted: abortController.signal.aborted,
+          receivedFinalEvent,
+          isGroupPane,
+          receivedGroupDone: receivedDoneEvent,
+          receivedGroupTerminal: receivedGroupTerminalEvent,
+        })
+      ) {
         // Backend persists turn_interrupted to messages.json; toast is ephemeral.
+        // Group turns complete via `done` / `group_reply` and must not hit this path.
         setStallHintToast(TURN_INTERRUPTED_TOAST);
         await mergeTailFromDisk(requestSessionId);
       }
