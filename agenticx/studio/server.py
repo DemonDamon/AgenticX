@@ -3688,9 +3688,6 @@ def create_studio_app() -> FastAPI:
                         user_display_content = str(
                             getattr(payload, "user_display_content", "") or ""
                         ).strip()
-                        if quoted_content:
-                            # Inject quote only into model context; chat_history keeps clean text.
-                            effective_input = f"{effective_input}\n\n[用户引用内容]\n{quoted_content}"
                         # Per-session KB retrieval mode: bind the desktop's choice to
                         # this in-memory session so continue/loop prompt builds honor
                         # it too (the global retrieval.mode is only the default).
@@ -3707,6 +3704,11 @@ def create_studio_app() -> FastAPI:
                                 f"请直接给出可执行方案并自动推进。\n"
                                 f"原始请求：{payload.user_input}"
                             )
+                        if quoted_content:
+                            # Keep the quote in the current user turn, after any mode-specific
+                            # enrichment. Do not add it to the system prompt or prior history:
+                            # the stable prefix remains eligible for provider KV caching.
+                            effective_input = f"{effective_input}\n\n[用户引用内容]\n{quoted_content}"
                         if is_avatar_session:
                             if is_automation_session:
                                 sys_prompt = _build_automation_runner_system_prompt(
