@@ -159,10 +159,15 @@ def needs_portrait_refresh(
     url = str(avatar_url or "").strip()
     if not url or url.startswith("data:image/svg+xml"):
         return True
-    # Old AI/meta portraits were stored as unmarked PNG data URLs.  Refresh
-    # those once, while preserving explicit user uploads (marked custom).
+    # Old generated portraits were stored as unmarked PNG data URLs.  Refresh
+    # those once, while preserving explicit user uploads (marked custom).  The
+    # group-template avatars use a namespaced creator value, so check the
+    # prefix instead of only exact creator names.
     if url.startswith("data:image/png;base64,") and not str(portrait_style or "").strip():
-        return str(created_by or "").strip().lower() in {"ai", "meta", "session_fork"}
+        source = str(created_by or "").strip().lower()
+        return source in {"ai", "meta", "session_fork", "builtin"} or source.startswith(
+            "group_template:"
+        )
     return False
 
 
