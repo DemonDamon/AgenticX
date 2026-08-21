@@ -936,7 +936,7 @@ export default function ModelProvidersPage() {
                               </div>
                               <div className="truncate text-xs text-muted-foreground font-mono">{m.name}</div>
                             </div>
-                            <div className="space-y-1">
+                            <div className="space-y-1 md:self-start">
                               <Label className="text-[11px] text-muted-foreground">{t("inputPricePerM")}</Label>
                               <Input
                                 className="h-8 text-right font-mono text-xs"
@@ -950,7 +950,7 @@ export default function ModelProvidersPage() {
                                 }
                               />
                             </div>
-                            <div className="space-y-1">
+                            <div className="space-y-1 md:self-start">
                               <Label className="text-[11px] text-muted-foreground">{t("outputPricePerM")}</Label>
                               <Input
                                 className="h-8 text-right font-mono text-xs"
@@ -964,7 +964,7 @@ export default function ModelProvidersPage() {
                                 }
                               />
                             </div>
-                            <div className="space-y-1">
+                            <div className="space-y-1 md:self-start">
                               <Label className="text-[11px] text-muted-foreground">
                                 {t("contextWindowLabel")}
                               </Label>

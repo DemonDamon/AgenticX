@@ -387,18 +387,18 @@
           "selectTemplate": "请选择模板",
           "idAndBaseUrlRequired": "ID 与 baseUrl 必填",
           "providerAdded": "已添加",
-          "contextWindowSaved": "上下文窗口已保存",
+          "contextWindowSaved": "模型上限已保存",
           "contextWindowCleared": "已恢复为自动识别"
         },
         "confirm": {
           "deleteProvider": "确认删除厂商「{name}」？该操作不可撤销。",
           "removeModel": "从该厂商移除模型「{name}」？"
         },
-        "contextWindowLabel": "端点上限",
-        "contextWindowAuto": "自动 · {value}",
-        "contextWindowHint": "填该模型端点实际能接受的 token 数（自部署按 vLLM 的 --max-model-len）。留空则由客户端按模型名识别。实际驱动的窗口取上限的四分之一、不低于 128K；端点本身低于 128K 时以端点为准。",
-        "contextWindowInvalid": "上下文窗口需在 {min} 到 {max} 之间",
-        "contextWindowEffective": "实际驱动 {value}"
+        "contextWindowLabel": "模型上限",
+        "contextWindowAuto": "自动识别 · {value}",
+        "contextWindowHint": "填写该模型最多能接收的 Token 数。留空时按模型名称自动识别；系统会据此计算实际上下文窗口，通常为上限的 1/4，最低 128K，且不会超过模型上限。自部署模型可填写 vLLM 的 --max-model-len。",
+        "contextWindowInvalid": "模型上限需在 {min} 到 {max} 之间",
+        "contextWindowEffective": "实际上下文窗口 · {value}"
       },
       "webSearch": {
         "title": "联网搜索",

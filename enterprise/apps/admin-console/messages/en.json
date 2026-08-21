@@ -387,18 +387,18 @@
           "selectTemplate": "Select a template",
           "idAndBaseUrlRequired": "ID and baseUrl are required",
           "providerAdded": "Added",
-          "contextWindowSaved": "Context window saved",
+          "contextWindowSaved": "Model limit saved",
           "contextWindowCleared": "Reverted to auto-detection"
         },
         "confirm": {
           "deleteProvider": "Delete provider \"{name}\"? This cannot be undone.",
           "removeModel": "Remove model \"{name}\" from this provider?"
         },
-        "contextWindowLabel": "Endpoint limit",
-        "contextWindowAuto": "Auto · {value}",
-        "contextWindowHint": "Tokens this model endpoint actually accepts (for self-hosted, your vLLM --max-model-len). Leave empty to infer it from the model name. The driven window is a quarter of the limit with a 128K floor, capped by the endpoint itself.",
-        "contextWindowInvalid": "Context window must be between {min} and {max}",
-        "contextWindowEffective": "Drives {value}"
+        "contextWindowLabel": "Model limit",
+        "contextWindowAuto": "Auto-detected · {value}",
+        "contextWindowHint": "Enter the maximum number of tokens this model accepts. Leave empty to detect it from the model name. The actual context window is then set to one quarter of this limit, with a 128K minimum and never above the model limit. For self-hosted models, use vLLM --max-model-len.",
+        "contextWindowInvalid": "Model limit must be between {min} and {max}",
+        "contextWindowEffective": "Actual context window · {value}"
       },
       "webSearch": {
         "title": "Web Search",
