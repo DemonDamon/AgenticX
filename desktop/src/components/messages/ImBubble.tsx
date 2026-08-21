@@ -36,6 +36,7 @@ import {
 import { resolveMetaDisplayName } from "../../utils/display-name";
 import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
+import { isGroupStreamMessageId } from "../../utils/group-stream-text";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { Shimmer } from "../ds/Shimmer";
 
@@ -224,7 +225,7 @@ export function ImBubble({
   void userAvatarUrl;
   const isUser = message.role === "user";
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
-  const isStreaming = message.id === "__stream__";
+  const isStreaming = message.id === "__stream__" || isGroupStreamMessageId(message.id);
   const isMetaPendingWork = !isUser && message.id === "typing-meta";
   const isGroupTyping =
     !isUser &&

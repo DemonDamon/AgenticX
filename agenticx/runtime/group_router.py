@@ -735,9 +735,37 @@ class GroupChatRouter:
     @staticmethod
     def _should_forward_progress(reply: "GroupReply") -> bool:
         """Stream filter: keep HITL rows even if content was stripped."""
-        if str(getattr(reply, "event_type", "") or "") in {"group_blocked", "group_clarification"}:
+        evt = str(getattr(reply, "event_type", "") or "")
+        if evt in {"group_blocked", "group_clarification"}:
             return True
+        if evt == "group_token":
+            return bool(str(getattr(reply, "content", "") or ""))
         return bool(str(getattr(reply, "content", "") or "").strip())
+
+    @staticmethod
+    def _token_event_to_group_reply(
+        *,
+        agent_id: str,
+        avatar_name: str,
+        avatar_url: str,
+        data: Mapping[str, Any] | None,
+        graph_run_id: str = "",
+        graph_node_id: str = "",
+    ) -> GroupReply | None:
+        """Map a runtime TOKEN delta to a group_token row (never persist)."""
+        text = re.sub(r"⏳\s*", "", str((data or {}).get("text", "") or ""))
+        if not text:
+            return None
+        return GroupReply(
+            agent_id=agent_id,
+            avatar_name=avatar_name,
+            avatar_url=avatar_url,
+            content=text,
+            skipped=True,
+            event_type="group_token",
+            graph_run_id=str(graph_run_id or "").strip(),
+            graph_node_id=str(graph_node_id or "").strip(),
+        )
 
     @staticmethod
     def _runtime_event_to_tool_step(event_type: str, data: Dict[str, Any]) -> Dict[str, str]:
@@ -1622,6 +1650,17 @@ class GroupChatRouter:
                             clarify_allow_free_text=event.data.get("allow_free_text") is not False,
                         )
                     )
+            if event.type == EventType.TOKEN.value and progress_queue is not None:
+                token_reply = self._token_event_to_group_reply(
+                    agent_id=avatar_id,
+                    avatar_name=avatar_name,
+                    avatar_url=avatar_url,
+                    data=event.data if isinstance(event.data, Mapping) else {},
+                    graph_run_id=graph_run_id,
+                    graph_node_id=graph_node_id,
+                )
+                if token_reply is not None:
+                    progress_queue.put_nowait(token_reply)
             if event.type == EventType.TOOL_RESULT.value:
                 data = event.data if isinstance(event.data, Mapping) else {}
                 if _tool_result_succeeded(data):

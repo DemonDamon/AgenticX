@@ -109,6 +109,10 @@ import {
   sortGroupExpertActivities,
   type GroupExpertActivity,
 } from "../utils/group-expert-activity";
+import {
+  shouldResetGroupStreamOnProgress,
+  visibleGroupStreamBody,
+} from "../utils/group-stream-text";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
 import { GroupExpertActivityCard } from "./messages/GroupExpertActivityCard";
@@ -3012,6 +3016,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
   const clearGroupActivity = useCallback((agentId: string) => {
     setGroupExpertActivities((prev) => {
+      if (!(agentId in prev)) return prev;
+      const next = { ...prev };
+      delete next[agentId];
+      return next;
+    });
+  }, []);
+  const [groupStreamText, setGroupStreamText] = useState<Record<string, string>>({});
+  const groupStreamTextRef = useRef<Record<string, string>>({});
+  const groupStreamRafRef = useRef<number | null>(null);
+  const clearGroupStreamForAgent = useCallback((agentId: string) => {
+    if (agentId in groupStreamTextRef.current) {
+      delete groupStreamTextRef.current[agentId];
+    }
+    setGroupStreamText((prev) => {
       if (!(agentId in prev)) return prev;
       const next = { ...prev };
       delete next[agentId];
@@ -8308,13 +8326,47 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return (
     <>
       {mainRows}
-      {sortGroupExpertActivities(groupExpertActivities).map((activity) => (
+      {sortGroupExpertActivities(groupExpertActivities)
+        .filter((activity) => !visibleGroupStreamBody(groupStreamText[activity.agentId] ?? ""))
+        .map((activity) => (
         <GroupExpertActivityCard
           key={activity.agentId}
           activity={activity}
           now={activityClockNow}
         />
       ))}
+      {isGroupPane
+        ? Object.entries(groupStreamText).map(([agentId, raw]) => {
+            const body = visibleGroupStreamBody(raw);
+            if (!body) return null;
+            const activity = groupExpertActivities[agentId];
+            const sender = resolveGroupSender({
+              role: "assistant",
+              agentId,
+              avatarName: activity?.avatarName || groupTyping[agentId] || agentId,
+              avatarUrl: activity?.avatarUrl,
+            });
+            return (
+              <ImBubble
+                key={`group-stream:${agentId}`}
+                message={{
+                  id: `__group_stream__:${agentId}`,
+                  role: "assistant",
+                  content: body,
+                  agentId,
+                  avatarName: sender.name,
+                  avatarUrl: sender.url,
+                }}
+                assistantName={sender.name}
+                assistantAvatarUrl={sender.url}
+                showSenderIdentity
+                senderAvatarVariant="rounded-square"
+                senderAvatarId={sender.avatarId}
+                sessionBusy
+              />
+            );
+          })
+        : null}
       {((sessionWorkInProgress && !isStreamingCurrentSession) || midTurnStreamActivity) &&
       !isGroupPane ? (
         <div className={useReActImLayout ? "-mt-2" : undefined}>
@@ -8409,7 +8461,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -9690,6 +9742,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         }
       }
       lastGroupProgressRef.current = {};
+      if (groupStreamRafRef.current != null) {
+        window.cancelAnimationFrame(groupStreamRafRef.current);
+        groupStreamRafRef.current = null;
+      }
+      groupStreamTextRef.current = {};
+      setGroupStreamText({});
       const groupProgressRunId = crypto.randomUUID();
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
@@ -9797,6 +9855,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
               continue;
             }
+            if (payload.type === "group_token") {
+              const rawToken = String(payload.data?.content ?? payload.data?.text ?? "");
+              const tokenText = rawToken.replace(/⏳\s*/g, "");
+              if (tokenText) {
+                groupStreamTextRef.current[eventAgentId] =
+                  (groupStreamTextRef.current[eventAgentId] ?? "") + tokenText;
+                if (groupStreamRafRef.current == null) {
+                  groupStreamRafRef.current = window.requestAnimationFrame(() => {
+                    groupStreamRafRef.current = null;
+                    setGroupStreamText({ ...groupStreamTextRef.current });
+                  });
+                }
+              }
+              continue;
+            }
             if (payload.type === "group_typing") {
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
               const rawUrl = String(payload.data?.avatar_url ?? "").trim();
@@ -9876,9 +9949,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 toolDetail: String(payload.data?.tool_detail ?? "").trim(),
                 now: Date.now(),
               });
+              if (shouldResetGroupStreamOnProgress(phase)) {
+                clearGroupStreamForAgent(eventAgentId);
+              }
               continue;
             }
             if (payload.type === "group_blocked") {
+              clearGroupStreamForAgent(eventAgentId);
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const blockedText =
@@ -9962,6 +10039,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               continue;
             }
             if (payload.type === "group_clarification") {
+              clearGroupStreamForAgent(eventAgentId);
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const prompt =
@@ -10038,6 +10116,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               continue;
             }
             if (payload.type === "group_reply") {
+              clearGroupStreamForAgent(eventAgentId);
               const avatarName = String(payload.data?.avatar_name ?? eventAgentId);
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const content = String(payload.data?.content ?? "");
@@ -10094,6 +10173,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               continue;
             }
             if (payload.type === "group_nudge") {
+              clearGroupStreamForAgent(eventAgentId);
               const avatarName = String(payload.data?.avatar_name ?? metaLeaderDisplayName);
               const avatarUrl = String(payload.data?.avatar_url ?? "");
               const content = String(payload.data?.content ?? "");
@@ -10112,6 +10192,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               continue;
             }
             if (payload.type === "group_skipped") {
+              clearGroupStreamForAgent(eventAgentId);
               updatePaneToolMessageForSession(`${groupProgressRunId}:group-progress:${eventAgentId}`, {
                 toolStatus: "cancelled",
               });
