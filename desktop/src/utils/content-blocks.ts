@@ -70,6 +70,25 @@ export function hasImageBlock(blocks: ContentBlock[] | undefined): boolean {
 
 /** Listing-page thumbs such as `.thumb.400_0.jpeg` / `.thumb.100_100_c.jpg`. */
 const REMOTE_THUMB_SUFFIX = /\.thumb\.\d+_\d+(?:_[A-Za-z0-9]+)?\.(jpe?g|png|webp|gif)$/i;
+const TINY_THUMB = /\.thumb\.(\d+)_\d+/i;
+const JUNK_NAME = /(?:favicon|sprite|pixel|spacer|1x1|qrcode|qr[-_]code|app[-_]download)/i;
+const JUNK_PATH_MARKERS = [
+  "/uploads/ops/",
+  "/uploads/avatar/",
+  "/uploads/people/",
+  "/avatar/",
+  "/avatars/",
+  "/banner/",
+  "/banners/",
+  "/promo/",
+  "/advert",
+  "/ads/",
+  "/favicon",
+  "/sprite",
+  "/qrcode",
+  "/qr-code",
+  "/qr_code",
+];
 
 export function upgradeRemoteImageUrl(url: string): string {
   const text = String(url ?? "").trim();
@@ -78,11 +97,30 @@ export function upgradeRemoteImageUrl(url: string): string {
   return upgraded.length > 2048 ? text : upgraded;
 }
 
+export function isJunkRemoteImageUrl(url: string): boolean {
+  const text = String(url ?? "").trim();
+  if (!text) return true;
+  const lower = text.toLowerCase();
+  if (JUNK_PATH_MARKERS.some((marker) => lower.includes(marker))) return true;
+  if (JUNK_NAME.test(lower)) return true;
+  const tiny = TINY_THUMB.exec(lower);
+  if (tiny && Number(tiny[1]) <= 160) return true;
+  return false;
+}
+
 export function asHttpUrl(raw: unknown): string | undefined {
   const url = String(raw ?? "").trim();
   if (!url || url.length > 2048 || url.startsWith("data:")) return undefined;
   if (!url.startsWith("http://") && !url.startsWith("https://")) return undefined;
   return upgradeRemoteImageUrl(url);
+}
+
+export function asContentImageUrl(raw: unknown): string | undefined {
+  const original = String(raw ?? "").trim();
+  if (original && isJunkRemoteImageUrl(original)) return undefined;
+  const url = asHttpUrl(raw);
+  if (!url || isJunkRemoteImageUrl(url)) return undefined;
+  return url;
 }
 
 export function parseImageToolResultJson(raw: string): {
@@ -106,7 +144,7 @@ export function parseImageToolResultJson(raw: string): {
     return {
       type: "image",
       path: typeof parsed.path === "string" ? parsed.path : undefined,
-      url: asHttpUrl(parsed.url),
+      url: asContentImageUrl(parsed.url),
       source_url: asHttpUrl(parsed.source_url),
       mime: typeof parsed.mime === "string" ? parsed.mime : undefined,
       alt: typeof parsed.alt === "string" ? parsed.alt : undefined,
@@ -137,7 +175,7 @@ export function parseImageGalleryJson(raw: string): Array<{
     for (const item of parsed.images) {
       if (!item || typeof item !== "object") continue;
       const row = item as Record<string, unknown>;
-      const url = asHttpUrl(row.url);
+      const url = asContentImageUrl(row.url);
       if (!url) continue;
       const next: { type: "image"; url: string; alt?: string; source_url?: string } = {
         type: "image",
@@ -291,8 +329,9 @@ export function sanitizeLoadedBlocks(raw: unknown): ContentBlock[] | undefined {
       source: row.source === "tool" ? "tool" : undefined,
     };
     if (path) block.path = path;
-    const url = asHttpUrl(row.url);
+    const url = asContentImageUrl(row.url);
     if (url) block.url = url;
+    if (!path && !url && status === "ready") continue;
     const sourceUrl = asHttpUrl(row.source_url);
     if (sourceUrl) block.source_url = sourceUrl;
     const imageKind = String(row.kind ?? "").trim();

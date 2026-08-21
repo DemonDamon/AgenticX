@@ -12,3 +12,5 @@ def test_inline_photo_block_requires_show_images_not_link_tables() -> None:
     assert "无法在气泡内渲染图片" in block
     assert "generate_image" in block
     assert "discovered_images" in block
+    assert "/ops/" in block
+    assert "/avatar/" in block

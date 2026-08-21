@@ -40,7 +40,11 @@ describe("InlineImageBlock", () => {
     expect(html).toContain("<img");
     expect(html).toContain("https://example.com/a.jpg");
     expect(html).toContain("no-referrer");
-    expect(html).toContain("来源");
+    expect(html).toContain("max-h-[240px]");
+    expect(html).not.toContain("max-h-[70vh]");
+    expect(html).toContain("来源：");
+    expect(html).toContain("example.com");
+    expect(html.indexOf("西装")).toBeLessThan(html.indexOf("<img"));
   });
 
   it("renders img when ready", () => {

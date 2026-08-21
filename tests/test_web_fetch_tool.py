@@ -71,6 +71,38 @@ async def test_web_fetch_success(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_web_fetch_skips_ops_banner_in_discovered_images(monkeypatch) -> None:
+    html = (
+        b"<html><body>"
+        b"<img src='https://a-ssl.dtstatic.com/uploads/ops/202411/06/WXS7Bx1OfQDJYVX.jpeg'/>"
+        b"<img src='https://c-ssl.dtstatic.com/uploads/blog/202410/15/keep.jpeg'/>"
+        b"</body></html>"
+    )
+
+    class _Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str):
+            return _FakeResponse(content=html, url="https://www.duitang.com/blogs/tag/")
+
+    monkeypatch.setattr("httpx.AsyncClient", _Client)
+    result = await agent_tools._tool_web_fetch(
+        {"url": "https://www.duitang.com/blogs/tag/"},
+        StudioSession(),
+    )
+    assert "[discovered_images]" in result
+    assert "keep.jpeg" in result
+    assert "/uploads/ops/" not in result
+
+
+@pytest.mark.asyncio
 async def test_web_fetch_rejects_non_http_scheme() -> None:
     result = await agent_tools._tool_web_fetch({"url": "file:///etc/passwd"}, StudioSession())
     assert result == "ERROR: only http(s) URLs are supported"

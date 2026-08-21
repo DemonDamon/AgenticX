@@ -42,18 +42,26 @@ export function InlineImageLoadFailedNotice({ sourceUrl }: { sourceUrl?: string 
   );
 }
 
-function SourceLink({ href }: { href: string }) {
+function sourceHostLabel(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "") || "来源";
+  } catch {
+    return "来源";
+  }
+}
+
+function SourceLink({ href, children }: { href: string; children?: React.ReactNode }) {
   return (
     <a
       href={href}
-      className="text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
+      className="text-[rgb(var(--theme-color-rgb,59,130,246))] underline-offset-2 hover:underline hover:opacity-90"
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
         openExternalUrl(href);
       }}
     >
-      来源
+      {children ?? "来源"}
     </a>
   );
 }
@@ -78,7 +86,13 @@ export function InlineImageBlock({ block }: Props) {
 
   if (block.status === "generating") {
     return (
-      <div className="my-1 w-full min-w-0 overflow-hidden rounded-xl border border-border bg-surface-panel px-3 py-3">
+      <div
+        className={
+          remote
+            ? "my-2 w-[min(100%,280px)] overflow-hidden rounded-xl border border-border bg-surface-panel px-3 py-3"
+            : "my-1 w-full min-w-0 overflow-hidden rounded-xl border border-border bg-surface-panel px-3 py-3"
+        }
+      >
         <Shimmer
           variant="status"
           text={`${remote ? "加载图片中" : "生成图片中"}… ${elapsedLabel(block.startedAt, now)}`}
@@ -115,31 +129,55 @@ export function InlineImageBlock({ block }: Props) {
     return <InlineImageLoadFailedNotice sourceUrl={block.source_url} />;
   }
 
+  const caption = remote ? (
+    block.alt || block.source_url ? (
+      <p className="mb-1.5 max-w-[280px] text-[13px] leading-relaxed text-text-muted">
+        {block.alt ? <span>{block.alt}</span> : null}
+        {block.alt && block.source_url ? <span>，</span> : null}
+        {block.source_url ? (
+          <>
+            来源：
+            <SourceLink href={block.source_url}>{sourceHostLabel(block.source_url)}</SourceLink>
+          </>
+        ) : null}
+      </p>
+    ) : null
+  ) : block.alt || block.source_url ? (
+    <div className="mt-[-2px] mb-1 px-2 text-[11px] text-text-faint">
+      {block.alt ? <span>{block.alt}</span> : null}
+      {block.alt && block.source_url ? <span> · </span> : null}
+      {block.source_url ? <SourceLink href={block.source_url} /> : null}
+    </div>
+  ) : null;
+
   return (
-    <>
+    <div className={remote ? "my-3" : undefined}>
+      {remote ? caption : null}
       <button
         type="button"
-        className="group my-1 block w-full min-w-0 overflow-hidden rounded-xl border border-border bg-surface-panel text-left"
+        className={
+          remote
+            ? "group block max-w-[280px] overflow-hidden rounded-xl border border-border bg-surface-panel text-left"
+            : "group my-1 block w-full min-w-0 overflow-hidden rounded-xl border border-border bg-surface-panel text-left"
+        }
         title={block.alt || "点击查看原图"}
         onClick={() => setOpen(true)}
       >
         <img
           src={src}
           alt={block.alt || "image"}
-          className="max-h-[70vh] w-full object-contain transition-opacity duration-300"
+          className={
+            remote
+              ? "max-h-[240px] w-auto max-w-full object-contain transition-opacity duration-300"
+              : "max-h-[70vh] w-full object-contain transition-opacity duration-300"
+          }
           style={{ opacity: loaded ? 1 : 0 }}
           referrerPolicy="no-referrer"
           onLoad={() => setLoaded(true)}
           onError={() => setLoadError(true)}
         />
       </button>
-      {block.alt || block.source_url ? (
-        <div className="mt-[-2px] mb-1 px-2 text-[11px] text-text-faint">
-          {block.alt ? <span>{block.alt}</span> : null}
-          {block.alt && block.source_url ? <span> · </span> : null}
-          {block.source_url ? <SourceLink href={block.source_url} /> : null}
-        </div>
-      ) : null}
+      {remote ? null : caption}
       <Modal
         open={open}
         title={block.alt || "图片预览"}
@@ -148,6 +186,6 @@ export function InlineImageBlock({ block }: Props) {
       >
         <ZoomableImage src={src} alt={block.alt || "image"} maxHeight="70vh" />
       </Modal>
-    </>
+    </div>
   );
 }

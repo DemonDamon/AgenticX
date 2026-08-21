@@ -129,11 +129,13 @@ def parse_image_gallery_result(raw: Any) -> List[Dict[str, Any]]:
     images = parsed.get("images")
     if not isinstance(images, list):
         return []
+    from agenticx.tools.show_images import normalize_content_image_url
+
     out: List[Dict[str, Any]] = []
     for img in images:
         if not isinstance(img, dict):
             continue
-        url = _safe_http_url(img.get("url"))
+        url = normalize_content_image_url(img.get("url"))
         if not url:
             continue
         row: Dict[str, Any] = {"type": "image", "url": url}

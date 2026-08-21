@@ -6113,7 +6113,13 @@ async def _tool_web_fetch(arguments: Dict[str, Any], session: Optional[StudioSes
     lines = [f"Title: {title}", f"URL: {final_url}", "", text]
     if truncated:
         lines.append(f"...[truncated, total ~{total_chars} chars]")
-    images = list(extracted.get("images") or [])[:max_images]
+    from agenticx.tools.show_images import is_junk_remote_image_url
+
+    images = [
+        image_url
+        for image_url in list(extracted.get("images") or [])
+        if not is_junk_remote_image_url(str(image_url or ""))
+    ][:max_images]
     if images:
         lines.append("")
         lines.append("[discovered_images]")

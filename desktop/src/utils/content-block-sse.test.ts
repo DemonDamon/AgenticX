@@ -74,8 +74,7 @@ describe("applyContentBlockEvent", () => {
         },
       },
     });
-    expect(blocks[0]).toMatchObject({ type: "image", id: "img-data" });
-    expect((blocks[0] as { url?: string }).url).toBeUndefined();
+    expect(blocks).toEqual([]);
   });
 
   it("upgrades listing thumb url on end frame", () => {
@@ -95,5 +94,22 @@ describe("applyContentBlockEvent", () => {
     expect(blocks[0]).toMatchObject({
       url: "https://c-ssl.dtstatic.com/uploads/blog/x.jpeg",
     });
+  });
+
+  it("drops ops banner end frames", () => {
+    const blocks = applyContentBlockEvent([], {
+      type: "content_block",
+      data: {
+        mode: "end",
+        block: {
+          type: "image",
+          id: "img-ops-0",
+          status: "ready",
+          url: "https://a-ssl.dtstatic.com/uploads/ops/202411/06/WXS7Bx1OfQDJYVX.jpeg",
+          kind: "remote",
+        },
+      },
+    });
+    expect(blocks).toEqual([]);
   });
 });

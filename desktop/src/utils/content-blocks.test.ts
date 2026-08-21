@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  asContentImageUrl,
+  isJunkRemoteImageUrl,
   markGeneratingBlocksCancelled,
   projectContentFromBlocks,
   sanitizeLoadedBlocks,
@@ -182,5 +184,41 @@ describe("content-blocks", () => {
     expect(kept?.[0]).toMatchObject({
       url: "https://c-ssl.dtstatic.com/uploads/blog/x.jpeg",
     });
+  });
+
+  it("drops ops banners and avatar thumbs from remote image urls", () => {
+    expect(
+      isJunkRemoteImageUrl(
+        "https://a-ssl.dtstatic.com/uploads/ops/202411/06/WXS7Bx1OfQDJYVX.jpeg",
+      ),
+    ).toBe(true);
+    expect(
+      asContentImageUrl(
+        "https://a-ssl.dtstatic.com/uploads/ops/202411/06/WXS7Bx1OfQDJYVX.jpeg",
+      ),
+    ).toBeUndefined();
+    expect(
+      asContentImageUrl(
+        "https://c-ssl.dtstatic.com/uploads/blog/202410/15/gVS3yGBiQdnmeE.thumb.400_0.jpeg",
+      ),
+    ).toBe("https://c-ssl.dtstatic.com/uploads/blog/202410/15/gVS3yGBiQdnmeE.jpeg");
+    const sanitized = sanitizeLoadedBlocks([
+      {
+        type: "image",
+        id: "img-ops",
+        status: "ready",
+        url: "https://a-ssl.dtstatic.com/uploads/ops/202411/06/WXS7Bx1OfQDJYVX.jpeg",
+        kind: "remote",
+      },
+      {
+        type: "image",
+        id: "img-ok",
+        status: "ready",
+        url: "https://c-ssl.dtstatic.com/uploads/blog/x.jpeg",
+        kind: "remote",
+      },
+    ]);
+    expect(sanitized).toHaveLength(1);
+    expect(sanitized?.[0]).toMatchObject({ id: "img-ok" });
   });
 });
