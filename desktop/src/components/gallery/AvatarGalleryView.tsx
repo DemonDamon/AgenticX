@@ -1,11 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, MoreHorizontal, Plus, Sparkles, Star } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, MoreHorizontal, Plus, Sparkles, Star, GripVertical } from "lucide-react";
 import { MainViewShell } from "../ds/MainViewShell";
 import { useAppStore } from "../../store";
 import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import { AvatarCreateDialog } from "../AvatarCreateDialog";
 import { AvatarSettingsPanel } from "../AvatarSettingsPanel";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  rectSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 function avatarInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -51,9 +66,47 @@ export function AvatarGalleryView() {
   const sortedAvatars = useMemo(() => {
     return [...avatars].sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      const sa = a.sortOrder ?? 0;
+      const sb = b.sortOrder ?? 0;
+      if (sa !== sb) return sa - sb;
       return a.name.localeCompare(b.name);
     });
   }, [avatars]);
+
+  const [localOrder, setLocalOrder] = useState<string[] | null>(null);
+  const displayAvatars = useMemo(() => {
+    if (!localOrder) return sortedAvatars;
+    const map = new Map(sortedAvatars.map((a) => [a.id, a]));
+    const ordered = localOrder.map((id) => map.get(id)).filter(Boolean) as typeof sortedAvatars;
+    // append any avatars not in localOrder (e.g. newly created)
+    for (const a of sortedAvatars) {
+      if (!localOrder.includes(a.id)) ordered.push(a);
+    }
+    return ordered;
+  }, [sortedAvatars, localOrder]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const ids = displayAvatars.map((a) => a.id);
+    const oldIndex = ids.indexOf(String(active.id));
+    const newIndex = ids.indexOf(String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+    const newOrder = arrayMove(ids, oldIndex, newIndex);
+    setLocalOrder(newOrder);
+    // Persist sort_order to backend via IPC
+    const orders: Record<string, number> = {};
+    newOrder.forEach((id, idx) => { orders[id] = idx; });
+    try {
+      await window.agenticxDesktop.reorderAvatars(orders);
+    } catch {
+      // non-fatal: local order is already updated
+    }
+  }, [displayAvatars]);
 
   const refreshAvatars = async () => {
     window.dispatchEvent(
@@ -202,7 +255,7 @@ export function AvatarGalleryView() {
           <Loader2 className="h-4 w-4 animate-spin" />
           正在加载专家…
         </div>
-      ) : sortedAvatars.length === 0 ? (
+      ) : displayAvatars.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-card text-text-faint">
             <Sparkles className="h-5 w-5" />
@@ -219,108 +272,31 @@ export function AvatarGalleryView() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {sortedAvatars.map((avatar) => {
-            const hasPane = panes.some((p) => p.avatarId === avatar.id);
-            const isCardSelected = settingsAvatarId === avatar.id;
-            return (
-              <div
-                key={avatar.id}
-                role="button"
-                tabIndex={0}
-                className={`${GALLERY_CARD_BASE} ${isCardSelected ? GALLERY_CARD_SELECTED : GALLERY_CARD_IDLE}`}
-                onClick={() => setSettingsAvatarId(avatar.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setSettingsAvatarId(avatar.id);
-                  }
-                }}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={displayAvatars.map((a) => a.id)} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {displayAvatars.map((avatar) => (
+                <SortableAvatarCard
+                  key={avatar.id}
+                  avatar={avatar}
+                  hasPane={panes.some((p) => p.avatarId === avatar.id)}
+                  isCardSelected={settingsAvatarId === avatar.id}
+                  onOpenSettings={() => setSettingsAvatarId(avatar.id)}
+                  onOpenPane={() => openMetaOrAvatarPane(avatar.id, avatar.name)}
+                  onCardMenu={(rect) => setCardMenu({ avatarId: avatar.id, x: rect.right - 132, y: rect.bottom + 4 })}
+                />
+              ))}
+              <button
+                type="button"
+                className={`${GALLERY_CREATE_BASE} ${createOpen ? GALLERY_CREATE_ACTIVE : GALLERY_CREATE_IDLE}`}
+                onClick={() => setCreateOpen(true)}
               >
-                <div className="flex items-start gap-3">
-                  <div className="relative shrink-0">
-                    {avatar.avatarUrl ? (
-                      <img
-                        src={avatar.avatarUrl}
-                        alt={avatar.name}
-                        className="h-14 w-14 rounded-2xl object-cover"
-                      />
-                    ) : (
-                      <div
-                        className={`flex h-14 w-14 items-center justify-center rounded-2xl text-base font-bold ${avatarBgClass(avatar.color)} ${avatarFgClass(avatar.color)}`}
-                      >
-                        {avatarInitials(avatar.name)}
-                      </div>
-                    )}
-                    {hasPane && (
-                      <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-card bg-emerald-500" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1 pt-0.5">
-                    <div className="flex items-center gap-1">
-                      <span className="truncate text-[15px] font-semibold text-text-strong">
-                        {avatar.name}
-                      </span>
-                      {avatar.pinned && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />}
-                    </div>
-                    {avatar.role && (
-                      <p className="mt-0.5 truncate text-xs text-text-muted">{avatar.role}</p>
-                    )}
-                  </div>
-                </div>
-                {avatar.description ? (
-                  <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-text-muted">
-                    {avatar.description}
-                  </p>
-                ) : null}
-                {avatar.tags && avatar.tags.length > 0 ? (
-                  <div className="mt-2.5 flex flex-wrap gap-1.5">
-                    {avatar.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="rounded-md bg-surface-hover px-2 py-0.5 text-[11px] text-text-subtle"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
-                  <button
-                    type="button"
-                    className="flex-1 rounded-md border border-border bg-surface-panel px-3 py-2 text-xs font-medium text-text-strong transition hover:border-[rgb(var(--theme-color-rgb,59,130,246))] hover:text-[rgb(var(--theme-color-fg-rgb,59,130,246))] hover:ring-1 hover:ring-[rgba(var(--theme-color-rgb,59,130,246),0.25)]"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openMetaOrAvatarPane(avatar.id, avatar.name);
-                    }}
-                  >
-                    立即对话
-                  </button>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-md border border-border p-2 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
-                    aria-label="更多操作"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                      setCardMenu({ avatarId: avatar.id, x: rect.right - 132, y: rect.bottom + 4 });
-                    }}
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-          <button
-            type="button"
-            className={`${GALLERY_CREATE_BASE} ${createOpen ? GALLERY_CREATE_ACTIVE : GALLERY_CREATE_IDLE}`}
-            onClick={() => setCreateOpen(true)}
-          >
-            <Plus className="h-5 w-5" />
-            <span className="text-[13px] font-medium">创建专家</span>
-          </button>
-        </div>
+                <Plus className="h-5 w-5" />
+                <span className="text-[13px] font-medium">创建专家</span>
+              </button>
+            </div>
+          </SortableContext>
+        </DndContext>
       )}
 
       {cardMenu && (
@@ -360,13 +336,19 @@ export function AvatarGalleryView() {
               打开文件夹
             </button>
           ) : null}
-          <button
-            type="button"
-            className="w-full px-3 py-1.5 text-left text-[13px] text-rose-400 transition hover:bg-rose-500/10"
-            onClick={() => void handleDelete(cardMenu.avatarId)}
-          >
-            删除
-          </button>
+          {(() => {
+            const menuAvatar = avatars.find((a) => a.id === cardMenu.avatarId);
+            const isBuiltin = menuAvatar?.tags?.some((t) => t.startsWith("builtin:"));
+            return !isBuiltin;
+          })() ? (
+            <button
+              type="button"
+              className="w-full px-3 py-1.5 text-left text-[13px] text-rose-400 transition hover:bg-rose-500/10"
+              onClick={() => void handleDelete(cardMenu.avatarId)}
+            >
+              删除
+            </button>
+          ) : null}
         </div>
       )}
 
@@ -389,5 +371,132 @@ export function AvatarGalleryView() {
         />
       )}
     </MainViewShell>
+  );
+}
+
+function SortableAvatarCard({
+  avatar,
+  hasPane,
+  isCardSelected,
+  onOpenSettings,
+  onOpenPane,
+  onCardMenu,
+}: {
+  avatar: ReturnType<typeof useAppStore.getState>["avatars"][number];
+  hasPane: boolean;
+  isCardSelected: boolean;
+  onOpenSettings: () => void;
+  onOpenPane: () => void;
+  onCardMenu: (rect: DOMRect) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: avatar.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        zIndex: isDragging ? 50 : undefined,
+      }}
+      role="button"
+      tabIndex={0}
+      className={`${GALLERY_CARD_BASE} ${isCardSelected ? GALLERY_CARD_SELECTED : GALLERY_CARD_IDLE} ${isDragging ? "shadow-xl ring-2 ring-[rgb(var(--theme-color-rgb,59,130,246))]" : ""}`}
+      onClick={onOpenSettings}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenSettings();
+        }
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className="shrink-0 cursor-grab pt-0.5 text-text-faint opacity-40 transition hover:opacity-80 active:cursor-grabbing"
+          {...attributes}
+          {...listeners}
+          title="拖动排序"
+        >
+          <GripVertical className="h-4 w-4" />
+        </div>
+        <div className="relative shrink-0">
+          {avatar.avatarUrl ? (
+            <img
+              src={avatar.avatarUrl}
+              alt={avatar.name}
+              className="h-14 w-14 rounded-2xl object-cover"
+            />
+          ) : (
+            <div
+              className={`flex h-14 w-14 items-center justify-center rounded-2xl text-base font-bold ${avatarBgClass(avatar.color)} ${avatarFgClass(avatar.color)}`}
+            >
+              {avatarInitials(avatar.name)}
+            </div>
+          )}
+          {hasPane && (
+            <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-card bg-emerald-500" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <div className="flex items-center gap-1">
+            <span className="truncate text-[15px] font-semibold text-text-strong">
+              {avatar.name}
+            </span>
+            {avatar.pinned && <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />}
+          </div>
+          {avatar.role && (
+            <p className="mt-0.5 truncate text-xs text-text-muted">{avatar.role}</p>
+          )}
+        </div>
+      </div>
+      {avatar.description ? (
+        <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-text-muted">
+          {avatar.description}
+        </p>
+      ) : null}
+      {avatar.tags && avatar.tags.length > 0 ? (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {avatar.tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-md bg-surface-hover px-2 py-0.5 text-[11px] text-text-subtle"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+        <button
+          type="button"
+          className="flex-1 rounded-md border border-border bg-surface-panel px-3 py-2 text-xs font-medium text-text-strong transition hover:border-[rgb(var(--theme-color-rgb,59,130,246))] hover:text-[rgb(var(--theme-color-fg-rgb,59,130,246))] hover:ring-1 hover:ring-[rgba(var(--theme-color-rgb,59,130,246),0.25)]"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenPane();
+          }}
+        >
+          立即对话
+        </button>
+        <button
+          type="button"
+          className="shrink-0 rounded-md border border-border p-2 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
+          aria-label="更多操作"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCardMenu(e.currentTarget.getBoundingClientRect());
+          }}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
   );
 }

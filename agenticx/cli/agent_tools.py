@@ -89,6 +89,8 @@ SAFE_COMMANDS = {
     "wc",
     "python",
     "pip",
+    "npm",
+    "node",
     "git",
     "echo",
     "pwd",
@@ -3413,6 +3415,27 @@ def _collect_subcommand_risk_reasons(command_name: str, parts: List[str]) -> Lis
         )
         if git_subcommand and git_subcommand not in {"status", "log", "diff", "show", "branch"}:
             reasons.append(f"git {git_subcommand} is not in low-risk allowlist")
+
+    # npm install / yarn add / pnpm add change workspace or global deps
+    if command_name == "npm":
+        npm_sub = _first_non_option_token(parts)
+        if npm_sub in {"install", "i", "uninstall", "un", "update", "upgrade"}:
+            reasons.append(f"npm {npm_sub} changes dependencies")
+    if command_name in {"yarn", "pnpm"}:
+        sub = _first_non_option_token(parts)
+        if sub in {"add", "remove", "install", "update", "upgrade"}:
+            reasons.append(f"{command_name} {sub} changes dependencies")
+
+    # system package managers
+    if command_name in {"brew", "apt-get", "apt", "yum", "dnf", "choco", "snap"}:
+        sub = _first_non_option_token(parts)
+        if sub in {"install", "remove", "uninstall", "upgrade", "autoremove"}:
+            reasons.append(f"{command_name} {sub} changes system packages")
+
+    # node -e executes arbitrary code (like python -c)
+    if command_name == "node":
+        if any(token in {"-e", "--eval"} for token in parts[1:]):
+            reasons.append("node -e may execute arbitrary code")
 
     return reasons
 

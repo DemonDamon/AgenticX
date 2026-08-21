@@ -278,25 +278,54 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
     });
   }, []);
 
+  // Load cached statuses instantly (no CLI spawn), then refresh real statuses in background.
   useEffect(() => {
-    void refreshTmeetStatus();
+    let cancelled = false;
+    (async () => {
+      try {
+        const cached = await window.agenticxDesktop.nativeConnectorCachedStatus();
+        if (cancelled || !cached.ok) return;
+        const c = cached.connectors;
+        if (c["tencent-meeting"]) setTmeetStatus((prev) => ({ ...prev, connected: c["tencent-meeting"].connected }));
+        if (c["github"]) setGithubStatus((prev) => ({ ...prev, connected: c["github"].connected }));
+        if (c["feishu"]) setFeishuStatus((prev) => ({ ...prev, connected: c["feishu"].connected }));
+        if (c["wecom"]) setWecomStatus((prev) => ({ ...prev, connected: c["wecom"].connected }));
+        if (c["qqmail"]) setQqmailStatus((prev) => ({ ...prev, connected: c["qqmail"].connected }));
+      } catch {
+        // ignore — background refresh will fix it
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Background refresh: fetch real statuses (spawns CLI processes).
+  // Uses staggered delays so they don't all fight for CPU at once.
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    timers.push(setTimeout(() => void refreshTmeetStatus(), 100));
+    timers.push(setTimeout(() => void refreshGithubStatus(), 200));
+    timers.push(setTimeout(() => void refreshFeishuStatus(), 300));
+    timers.push(setTimeout(() => void refreshWecomStatus(), 400));
+    timers.push(setTimeout(() => void refreshQqmailStatus(), 500));
+    return () => timers.forEach(clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Progress event listeners (for live status during login/logout flows)
+  useEffect(() => {
     return window.agenticxDesktop.onNativeConnectorTmeetProgress(({
-      phase,
-      authorizationUrl,
-      browserOpenFailed,
+      phase, authorizationUrl, browserOpenFailed,
     }) => {
-      const labels = {
+      const labels: Record<string, string> = {
         installing: "首次使用，正在安全下载腾讯会议官方 CLI…",
         opening_browser: "正在打开腾讯会议授权页面…",
         waiting: "等待你在浏览器中扫码并授权…",
-        success: "授权成功",
-        disconnected: "已断开连接",
-        error: "授权未完成",
+        success: "授权成功", disconnected: "已断开连接", error: "授权未完成",
       };
-      setTmeetPhase(labels[phase]);
+      if (labels[phase]) setTmeetPhase(labels[phase]);
       if (phase === "success" || phase === "disconnected" || phase === "error") {
-        setTmeetAuthorizationUrl("");
-        setTmeetBrowserOpenFailed(false);
+        setTmeetAuthorizationUrl(""); setTmeetBrowserOpenFailed(false);
+        void refreshTmeetStatus();
       } else if (authorizationUrl) {
         setTmeetAuthorizationUrl(authorizationUrl);
         setTmeetBrowserOpenFailed(Boolean(browserOpenFailed));
@@ -305,16 +334,13 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   }, [refreshTmeetStatus]);
 
   useEffect(() => {
-    void refreshGithubStatus();
     return window.agenticxDesktop.onNativeConnectorGithubProgress(({ phase, oneTimeCode }) => {
       const labels: Record<string, string> = {
         installing: "首次使用，正在下载 GitHub CLI…",
         code_ready: "已生成一次性授权码，请在浏览器中粘贴",
         opening_browser: "正在打开 GitHub 授权页面…",
         waiting: "等待你在浏览器中完成授权…",
-        success: "授权成功",
-        disconnected: "已断开连接",
-        error: "授权未完成",
+        success: "授权成功", disconnected: "已断开连接", error: "授权未完成",
       };
       if (oneTimeCode) setGithubDeviceCode(oneTimeCode);
       if (labels[phase]) setGithubPhase(labels[phase]);
@@ -325,7 +351,6 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   }, [refreshGithubStatus]);
 
   useEffect(() => {
-    void refreshFeishuStatus();
     return window.agenticxDesktop.onNativeConnectorFeishuProgress(({ phase, verificationUrl }) => {
       const labels: Record<string, string> = {
         installing: "首次使用，正在下载飞书 CLI…",
@@ -333,9 +358,7 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
         config_done: "应用已就绪，正在发起用户授权…",
         auth_setup: "已打开授权页面，请在浏览器中确认授权…",
         waiting: "等待你在浏览器中完成授权…",
-        success: "授权成功",
-        disconnected: "已断开连接",
-        error: "连接未完成",
+        success: "授权成功", disconnected: "已断开连接", error: "连接未完成",
       };
       if (verificationUrl) setFeishuVerifyUrl(verificationUrl);
       if (labels[phase]) setFeishuPhase(labels[phase]);
@@ -346,15 +369,11 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   }, [refreshFeishuStatus]);
 
   useEffect(() => {
-    void refreshWecomStatus();
     return window.agenticxDesktop.onNativeConnectorWecomProgress(({ phase }) => {
       const labels: Record<string, string> = {
         installing: "首次使用，正在下载企业微信 CLI…",
-        initializing: "正在配置机器人凭据…",
-        probing: "正在校验凭据…",
-        success: "连接成功",
-        disconnected: "已断开连接",
-        error: "连接未完成",
+        initializing: "正在配置机器人凭据…", probing: "正在校验凭据…",
+        success: "连接成功", disconnected: "已断开连接", error: "连接未完成",
       };
       if (labels[phase]) setWecomPhase(labels[phase]);
       if (phase === "success" || phase === "disconnected" || phase === "error") {
@@ -364,15 +383,12 @@ export function ConnectorsTab({ sessionId, tapdConnected, onRefreshMcp }: Props)
   }, [refreshWecomStatus]);
 
   useEffect(() => {
-    void refreshQqmailStatus();
     return window.agenticxDesktop.onNativeConnectorQqmailProgress(({ phase, authUrl }) => {
       const labels: Record<string, string> = {
         installing: "首次使用，正在下载 Agent Mail CLI…",
         opening_browser: "请在浏览器中完成微信授权…",
         waiting: "等待授权完成…",
-        success: "授权成功",
-        disconnected: "已断开连接",
-        error: "授权未完成",
+        success: "授权成功", disconnected: "已断开连接", error: "授权未完成",
       };
       if (authUrl) setQqmailAuthUrl(authUrl);
       if (labels[phase]) setQqmailPhase(labels[phase]);

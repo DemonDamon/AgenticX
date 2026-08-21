@@ -214,6 +214,8 @@ type AvatarItem = {
   default_model?: string;
   /** Expert background color: blue | white | black. */
   color?: string;
+  /** User-defined display order (lower = earlier). 0 = unset. */
+  sort_order?: number;
   workspace_dir?: string;
   description?: string;
   tags?: string[];
@@ -659,6 +661,7 @@ declare global {
         color?: string;
       }) => Promise<{ ok: boolean; avatar?: AvatarItem; error?: string }>;
       deleteAvatar: (id: string) => Promise<{ ok: boolean; error?: string }>;
+      reorderAvatars: (orders: Record<string, number>) => Promise<{ ok: boolean; updated?: number; error?: string }>;
       getToolsStatus: () => Promise<{ ok: boolean; tools: ToolStatusItem[]; error?: string }>;
       getToolsRegistry: () => Promise<{ ok: boolean; tools: Array<{ name: string; description: string; category: string; is_meta: boolean }>; error?: string }>;
       getToolsPolicy: () => Promise<{
@@ -1201,6 +1204,10 @@ declare global {
         label: string;
         error?: string;
         account?: string;
+      }>;
+      nativeConnectorCachedStatus: () => Promise<{
+        ok: boolean;
+        connectors: Record<string, { connected: boolean; updated_at?: string }>;
       }>;
       nativeConnectorTmeetLogin: () => Promise<{
         ok: boolean;

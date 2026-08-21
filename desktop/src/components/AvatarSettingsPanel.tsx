@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Save, RotateCcw, Wrench, X } from "lucide-react";
+import { Save, RotateCcw, X } from "lucide-react";
 import type { Avatar } from "../store";
 import {
   avatarBgClass,
@@ -10,8 +10,6 @@ import {
   normalizeAvatarColor,
 } from "../utils/avatar-color";
 import type { AvatarPaletteKey } from "../utils/avatar-color";
-import { buildExpertEnvironmentSetupDraft } from "../utils/expert-environment-setup";
-import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { DefaultModelSelect } from "./DefaultModelSelect";
 import { LOCAL_KNOWLEDGE_ENABLED } from "../constants/desktop-feature-visibility";
 
@@ -84,7 +82,6 @@ type Props =
 export function AvatarSettingsPanel(props: Props) {
   const { mode, onClose, onSaved } = props;
   const avatar = mode === "avatar" ? (props as { avatar: Avatar }).avatar : null;
-  const { openMetaOrAvatarPane } = usePaneNavigation();
 
   const [tab, setTab] = useState<Tab>("general");
   const [saving, setSaving] = useState(false);
@@ -121,16 +118,6 @@ export function AvatarSettingsPanel(props: Props) {
   const [loadingSoul, setLoadingSoul] = useState(false);
 
   const title = mode === "avatar" ? `${avatar?.name ?? "分身"} · 设置` : "和创智派 · 设置";
-
-  const handleOpenEnvironmentSetup = useCallback(() => {
-    if (mode !== "avatar" || !avatar) return;
-    const draftText = buildExpertEnvironmentSetupDraft({
-      expertName: avatar.name,
-      workspaceDir: avatar.workspaceDir,
-    });
-    onClose();
-    openMetaOrAvatarPane(avatar.id, avatar.name, draftText);
-  }, [avatar, mode, onClose, openMetaOrAvatarPane]);
 
   const loadTools = useCallback(async () => {
     setLoadingTools(true);
@@ -733,28 +720,6 @@ export function AvatarSettingsPanel(props: Props) {
 
           {activeTab === "tools" && (
             <div className="space-y-3">
-              {mode === "avatar" ? (
-                <div className="rounded-lg border border-border bg-surface-card p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
-                        <Wrench className="h-4 w-4 shrink-0" aria-hidden />
-                        环境配置向导
-                      </div>
-                      <p className="mt-1 text-xs leading-relaxed text-text-faint">
-                        在该专家的新对话中检查工作区依赖，给出隔离环境方案，并在你确认后执行安装与验证。
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-md border border-border bg-surface-panel px-2.5 py-1.5 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
-                      onClick={handleOpenEnvironmentSetup}
-                    >
-                      开始配置
-                    </button>
-                  </div>
-                </div>
-              ) : null}
               <p className="text-xs text-text-faint">
                 {customizedCount > 0 ? `已自定义 ${customizedCount} 项` : "未自定义（使用默认）"} · {toolsModeHint}
               </p>

@@ -3566,6 +3566,28 @@ function tryPersistTmeetConnectorStatus(connected: boolean): void {
   }
 }
 
+/**
+ * Read cached connector statuses from disk (instant, no CLI spawn).
+ * Used to show immediate UI state while real status refreshes in background.
+ */
+function readCachedConnectorStatuses(): Record<string, { connected: boolean; updated_at?: string }> {
+  try {
+    const raw = fs.readFileSync(NATIVE_CONNECTOR_STATUS_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    const connectors = parsed?.connectors;
+    if (!connectors || typeof connectors !== "object" || Array.isArray(connectors)) return {};
+    const result: Record<string, { connected: boolean; updated_at?: string }> = {};
+    for (const [id, val] of Object.entries(connectors)) {
+      if (val && typeof val === "object" && typeof (val as any).connected === "boolean") {
+        result[id] = { connected: (val as any).connected, updated_at: (val as any).updated_at };
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
 function tmeetBinaryFileName(): string {
   const key = `${process.platform}-${process.arch}`;
   const fileNames: Record<string, string> = {
@@ -8335,6 +8357,11 @@ function registerIpc(): void {
     return { ok: true, available: false, connected: false, label: "暂不可用" };
   });
 
+  ipcMain.handle("native-connector-cached-status", async () => {
+    const cached = readCachedConnectorStatuses();
+    return { ok: true, connectors: cached };
+  });
+
   ipcMain.handle("native-connector-tmeet-login", async () => {
     try {
       return await startTmeetLogin();
@@ -9045,6 +9072,23 @@ function registerIpc(): void {
       const resp = await fetch(`${getStudioUrl()}/api/avatars/${encodeURIComponent(id)}`, {
         method: "DELETE",
         headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("reorder-avatars", async (_event, orders: Record<string, number>) => {
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/avatars/reorder`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-agx-desktop-token": getStudioToken(),
+        },
+        body: JSON.stringify({ orders }),
       });
       if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
       return await resp.json();

@@ -1105,6 +1105,58 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.debug("Session supervisor not started: %s", exc)
 
+        # Ensure the built-in "environment setup expert" avatar exists.
+        try:
+            _ENV_SETUP_AVATAR_TAG = "builtin:env-setup"
+            existing = avatar_registry.list_avatars()
+            env_avatar = next(
+                (a for a in existing if _ENV_SETUP_AVATAR_TAG in (a.tags or [])),
+                None,
+            )
+            if env_avatar is None:
+                _env_setup_prompt = "\n".join(
+                    [
+                        "你是「环境配置专家」，专门帮用户为新项目或工作区配置开发环境。",
+                        "",
+                        "## 核心职责",
+                        "- 诊断工作区的依赖清单（requirements.txt、pyproject.toml、package.json、uv.lock 等）",
+                        "- 检测当前机器缺失的外部依赖（LibreOffice、ImageMagick、LiteParse 等）",
+                        "- 给出隔离环境方案（Python .venv、Node node_modules 等）",
+                        "- 在用户确认后执行安装，并验证安装结果",
+                        "",
+                        "## 安装边界（严格遵守）",
+                        "- 只允许安装「工作区依赖清单中声明的包」和「已启用能力明确需要的外部依赖」",
+                        "- 如果用户要求的包不在工作区声明中，必须明确拒绝并说明原因",
+                        "- 不要因为用户随口要求就装任何东西",
+                        "",
+                        "## 安全规则",
+                        "- Python 项目默认使用工作区内的 .venv，绝不能修改 Conda base",
+                        "- 绝不能把项目依赖装进 ~/.agenticx/.venv，也不能修改桌面应用的内嵌 Python/后端",
+                        "- 所有安装操作都会触发桌面端确认弹窗，用户确认后才会执行",
+                        "- 不要用一句「已安装」代替真实命令结果",
+                        "",
+                        "## 工作流程",
+                        "1. 只读诊断：检查工作区清单和锁文件，检测已安装的依赖和缺失项",
+                        "2. 展示方案：列出诊断结论、拟执行命令和影响范围",
+                        "3. 确认安装：用户在桌面端确认后执行安装",
+                        "4. 验证结果：运行最小验证（解释器路径、版本、关键 import 等）",
+                        "5. 汇报结果：成功项、失败项、实际环境路径和可复现命令",
+                    ]
+                )
+                avatar_registry.create_avatar(
+                    name="环境配置专家",
+                    role="开发环境配置助手",
+                    system_prompt=_env_setup_prompt,
+                    description="诊断工作区依赖，给出隔离环境方案，确认后自动安装与验证。",
+                    tags=[_ENV_SETUP_AVATAR_TAG, "内置"],
+                    created_by="builtin",
+                    color="green",
+                    sort_order=-1,
+                )
+                logger.info("Created built-in environment setup expert avatar")
+        except Exception as exc:
+            logger.warning("Failed to ensure env-setup avatar: %s", exc)
+
         yield
 
         if longrun_bg is not None:
@@ -1480,21 +1532,22 @@ def create_studio_app() -> FastAPI:
         return load_non_high_risk_auto_install()
 
     def _tool_install_hint(tool_id: str) -> str:
-        platform = os.uname().sysname.lower() if hasattr(os, "uname") else ""
+        import sys as _sys
+
         if tool_id == "libreoffice":
-            if "darwin" in platform:
+            if _sys.platform == "darwin":
                 return "brew install --cask libreoffice"
-            if "linux" in platform:
+            if _sys.platform.startswith("linux"):
                 return "sudo apt install -y libreoffice"
-            if "windows" in platform:
+            if _sys.platform == "win32":
                 return "choco install libreoffice-fresh"
             return "Please install LibreOffice from official website."
         if tool_id == "imagemagick":
-            if "darwin" in platform:
+            if _sys.platform == "darwin":
                 return "brew install imagemagick"
-            if "linux" in platform:
+            if _sys.platform.startswith("linux"):
                 return "sudo apt install -y imagemagick"
-            if "windows" in platform:
+            if _sys.platform == "win32":
                 return "choco install imagemagick"
             return "Please install ImageMagick from official website."
         return ""
@@ -1545,7 +1598,7 @@ def create_studio_app() -> FastAPI:
                 "installed": installed,
                 "version": "",
                 "install_command": "pip install magic-pdf",
-                "auto_installable": False,
+                "auto_installable": True,
             }
         if tool_id == "libreoffice":
             installed = shutil.which("soffice") is not None
@@ -5606,29 +5659,229 @@ def create_studio_app() -> FastAPI:
         tool_id = str(payload.get("tool_id", "")).strip().lower()
         if not tool_id:
             raise HTTPException(status_code=400, detail="tool_id is required")
-        if tool_id not in {"liteparse", "libreoffice", "imagemagick"}:
+        if tool_id not in {"liteparse", "libreoffice", "imagemagick", "mineru"}:
             raise HTTPException(status_code=400, detail=f"unsupported tool_id: {tool_id}")
 
         async def _install_stream() -> AsyncGenerator[str, None]:
             if tool_id in {"libreoffice", "imagemagick"}:
-                hint = _tool_install_hint(tool_id)
+                import sys as _sys
+
+                # Build the real install command for this platform.
+                if _sys.platform == "darwin":
+                    brew = shutil.which("brew")
+                    if not brew:
+                        yield _sse_event(
+                            "progress",
+                            {
+                                "tool_id": tool_id,
+                                "phase": "error",
+                                "percent": 0,
+                                "message": "未检测到 Homebrew，请先安装：https://brew.sh",
+                            },
+                        )
+                        return
+                    if tool_id == "libreoffice":
+                        cmd = [brew, "install", "--cask", "libreoffice"]
+                    else:
+                        cmd = [brew, "install", "imagemagick"]
+                elif _sys.platform.startswith("linux"):
+                    apt = shutil.which("apt-get") or shutil.which("apt")
+                    if not apt:
+                        yield _sse_event(
+                            "progress",
+                            {
+                                "tool_id": tool_id,
+                                "phase": "error",
+                                "percent": 0,
+                                "message": "未检测到 apt-get，请手动安装。",
+                            },
+                        )
+                        return
+                    cmd = ["sudo", apt, "install", "-y", tool_id]
+                elif _sys.platform == "win32":
+                    choco = shutil.which("choco")
+                    if not choco:
+                        yield _sse_event(
+                            "progress",
+                            {
+                                "tool_id": tool_id,
+                                "phase": "error",
+                                "percent": 0,
+                                "message": "未检测到 Chocolatey，请先安装：https://chocolatey.org",
+                            },
+                        )
+                        return
+                    pkg = "libreoffice-fresh" if tool_id == "libreoffice" else "imagemagick"
+                    cmd = [choco, "install", pkg, "-y"]
+                else:
+                    yield _sse_event(
+                        "progress",
+                        {
+                            "tool_id": tool_id,
+                            "phase": "error",
+                            "percent": 0,
+                            "message": f"不支持的操作系统: {_sys.platform}",
+                        },
+                    )
+                    return
+
                 yield _sse_event(
                     "progress",
                     {
                         "tool_id": tool_id,
-                        "phase": "manual_required",
-                        "percent": 0,
-                        "message": "该工具需手动安装，请按提示命令执行。",
-                        "install_command": hint,
+                        "phase": "starting",
+                        "percent": 5,
+                        "message": f"正在安装 {tool_id}（可能耗时数分钟）…",
                     },
                 )
+
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                assert process.stdout is not None
+                percent = 10
+                try:
+                    while True:
+                        if await request.is_disconnected():
+                            process.terminate()
+                            break
+                        line = await process.stdout.readline()
+                        if not line:
+                            break
+                        text = line.decode("utf-8", errors="ignore").strip()
+                        if not text:
+                            continue
+                        percent = min(95, percent + 3)
+                        yield _sse_event(
+                            "progress",
+                            {
+                                "tool_id": tool_id,
+                                "phase": "installing",
+                                "percent": percent,
+                                "message": text[:500],
+                            },
+                        )
+                    code = await process.wait()
+                except Exception as exc:
+                    yield _sse_event(
+                        "progress",
+                        {
+                            "tool_id": tool_id,
+                            "phase": "error",
+                            "percent": percent,
+                            "message": f"安装失败: {exc}",
+                        },
+                    )
+                    return
+
+                if code != 0:
+                    yield _sse_event(
+                        "progress",
+                        {
+                            "tool_id": tool_id,
+                            "phase": "error",
+                            "percent": percent,
+                            "message": f"安装失败，退出码 {code}",
+                        },
+                    )
+                    return
+
                 yield _sse_event(
                     "progress",
                     {
                         "tool_id": tool_id,
                         "phase": "done",
                         "percent": 100,
-                        "message": "已返回安装指南。",
+                        "message": f"{tool_id} 安装完成",
+                    },
+                )
+                return
+
+            if tool_id == "mineru":
+                # Install MinerU (magic-pdf) via pip into the app's venv.
+                pip_executable = shutil.which("pip") or shutil.which("pip3")
+                if not pip_executable:
+                    yield _sse_event(
+                        "progress",
+                        {
+                            "tool_id": tool_id,
+                            "phase": "error",
+                            "percent": 0,
+                            "message": "未检测到 pip，请先安装 Python。",
+                        },
+                    )
+                    return
+                yield _sse_event(
+                    "progress",
+                    {
+                        "tool_id": tool_id,
+                        "phase": "starting",
+                        "percent": 5,
+                        "message": "正在安装 MinerU (magic-pdf)…",
+                    },
+                )
+                process = await asyncio.create_subprocess_exec(
+                    pip_executable,
+                    "install",
+                    "magic-pdf",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                assert process.stdout is not None
+                percent = 10
+                try:
+                    while True:
+                        if await request.is_disconnected():
+                            process.terminate()
+                            break
+                        line = await process.stdout.readline()
+                        if not line:
+                            break
+                        text = line.decode("utf-8", errors="ignore").strip()
+                        if not text:
+                            continue
+                        percent = min(95, percent + 3)
+                        yield _sse_event(
+                            "progress",
+                            {
+                                "tool_id": tool_id,
+                                "phase": "installing",
+                                "percent": percent,
+                                "message": text[:500],
+                            },
+                        )
+                    code = await process.wait()
+                except Exception as exc:
+                    yield _sse_event(
+                        "progress",
+                        {
+                            "tool_id": tool_id,
+                            "phase": "error",
+                            "percent": percent,
+                            "message": f"安装失败: {exc}",
+                        },
+                    )
+                    return
+                if code != 0:
+                    yield _sse_event(
+                        "progress",
+                        {
+                            "tool_id": tool_id,
+                            "phase": "error",
+                            "percent": percent,
+                            "message": f"安装失败，退出码 {code}",
+                        },
+                    )
+                    return
+                yield _sse_event(
+                    "progress",
+                    {
+                        "tool_id": tool_id,
+                        "phase": "done",
+                        "percent": 100,
+                        "message": "MinerU 安装完成",
                     },
                 )
                 return
@@ -5815,10 +6068,39 @@ def create_studio_app() -> FastAPI:
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
+        cfg = avatar_registry.get_avatar(avatar_id)
+        if cfg is not None and any(
+            str(t).startswith("builtin:") for t in (cfg.tags or [])
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="该数字专家为内置专家，不可删除。",
+            )
         ok = avatar_registry.delete_avatar(avatar_id)
         if not ok:
             raise HTTPException(status_code=404, detail="avatar not found")
         return {"ok": True}
+
+    @app.post("/api/avatars/reorder")
+    async def reorder_avatars(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Batch update sort_order for avatars. Expects {"orders": {"<id>": <int>, ...}}."""
+        _check_token(x_agx_desktop_token)
+        orders_raw = payload.get("orders")
+        if not isinstance(orders_raw, dict):
+            raise HTTPException(status_code=400, detail="orders must be an object")
+        updated = 0
+        for avatar_id, order_val in orders_raw.items():
+            try:
+                order_int = int(order_val)
+            except (TypeError, ValueError):
+                continue
+            cfg = avatar_registry.update_avatar(str(avatar_id), {"sort_order": order_int})
+            if cfg is not None:
+                updated += 1
+        return {"ok": True, "updated": updated}
 
     # --- Multi-session management ---
 

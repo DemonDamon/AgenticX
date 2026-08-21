@@ -1,6 +1,6 @@
 // Plan-Id: machi-kb-stage1-local-mvp
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BookOpen, Check, Eye, EyeOff, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, BookOpen, Check, Download, Eye, EyeOff, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import { SettingsSwitch } from "../SettingsSwitch";
@@ -53,20 +53,18 @@ export function KnowledgeConfigPanel({
   const [testMessage, setTestMessage] = useState<string>("");
   const [parserStatus, setParserStatus] = useState<ParserStatus | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const status = await api.getParserStatus();
-        if (!cancelled) setParserStatus(status);
-      } catch {
-        if (!cancelled) setParserStatus(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const refreshParserStatus = useCallback(async () => {
+    try {
+      const status = await api.getParserStatus();
+      setParserStatus(status);
+    } catch {
+      setParserStatus(null);
+    }
   }, [api]);
+
+  useEffect(() => {
+    void refreshParserStatus();
+  }, [refreshParserStatus]);
 
   // Reset the inline test badge whenever embedding-relevant fields change,
   // so users don't read a stale "有效 ✓" next to a key they just edited.
@@ -455,7 +453,7 @@ export function KnowledgeConfigPanel({
               </button>
             </div>
           </Field>
-          <ParserCapabilitySection parserStatus={parserStatus} />
+          <ParserCapabilitySection parserStatus={parserStatus} onRefresh={refreshParserStatus} />
           <Field label="单文件上限 MB">
             <input
               type="number"
@@ -664,11 +662,93 @@ function KbCapabilityTile({
   );
 }
 
-function ParserCapabilitySection({ parserStatus }: { parserStatus: ParserStatus | null }) {
+function ParserCapabilitySection({ parserStatus, onRefresh }: { parserStatus: ParserStatus | null; onRefresh?: () => void }) {
   const liteparseOk = parserStatus?.liteparse?.available === true;
   const liteparseLoading = parserStatus == null;
   const libreofficeOk = parserStatus?.libreoffice?.available === true;
   const showLibreoffice = parserStatus?.libreoffice != null;
+
+  type InstallState = "idle" | "installing" | "done" | "error";
+  const [liteparseInstall, setLiteparseInstall] = useState<InstallState>("idle");
+  const [libreofficeInstall, setLibreofficeInstall] = useState<InstallState>("idle");
+  const [installMsg, setInstallMsg] = useState<Record<string, string>>({});
+  const [installPct, setInstallPct] = useState<Record<string, number>>({});
+  const reqCounter = useRef(0);
+
+  const triggerInstall = useCallback(
+    async (toolId: "liteparse" | "libreoffice") => {
+      const label = toolId === "libreoffice" ? "LibreOffice" : "LiteParse";
+      const detail =
+        toolId === "libreoffice"
+          ? "解析旧版 Office 文档（.doc/.ppt/.xls/.xlsx）需要 LibreOffice 进行格式转换。安装可能耗时数分钟。"
+          : "解析旧版 Office、表格和图片需要 LiteParse。";
+      const r = await window.agenticxDesktop.confirmDialog({
+        title: `安装 ${label}`,
+        message: `是否现在安装 ${label}？`,
+        detail,
+        confirmText: "安装",
+        cancelText: "取消",
+      });
+      if (!r.confirmed) return;
+
+      const setter = toolId === "libreoffice" ? setLibreofficeInstall : setLiteparseInstall;
+      setter("installing");
+      const requestId = `kb-${toolId}-${++reqCounter.current}`;
+      const off = window.agenticxDesktop.onToolInstallProgress((p) => {
+        if (p.requestId !== requestId) return;
+        if (p.phase === "installing" || p.phase === "starting") {
+          setInstallPct((prev) => ({ ...prev, [toolId]: p.percent ?? 0 }));
+          setInstallMsg((prev) => ({ ...prev, [toolId]: String(p.message ?? "") }));
+        } else if (p.phase === "done") {
+          setter("done");
+          setInstallPct((prev) => ({ ...prev, [toolId]: 100 }));
+          off();
+          onRefresh?.();
+        } else if (p.phase === "error") {
+          setter("error");
+          setInstallMsg((prev) => ({ ...prev, [toolId]: String(p.message ?? "安装失败") }));
+          off();
+        }
+      });
+      await window.agenticxDesktop.installTool({ requestId, toolId });
+    },
+    [onRefresh],
+  );
+
+  const renderInstallAction = (toolId: "liteparse" | "libreoffice", state: InstallState) => {
+    if (state === "installing") {
+      const pct = installPct[toolId] ?? 0;
+      return (
+        <span className="flex items-center gap-1.5 text-[11px] text-text-muted">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          {pct > 0 ? `${pct}%` : "准备中…"}
+        </span>
+      );
+    }
+    if (state === "done") {
+      return (
+        <span className="flex items-center gap-1 text-[11px] text-emerald-500">
+          <Check className="h-3 w-3" /> 已安装
+        </span>
+      );
+    }
+    if (state === "error") {
+      return (
+        <span className="flex items-center gap-1 text-[11px] text-red-500">
+          <AlertTriangle className="h-3 w-3" /> 失败
+        </span>
+      );
+    }
+    return (
+      <button
+        type="button"
+        className="flex items-center gap-1 rounded-md bg-btnPrimary px-2.5 py-1 text-[11px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
+        onClick={() => void triggerInstall(toolId)}
+      >
+        <Download className="h-3 w-3" /> 安装
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-2">
@@ -683,26 +763,28 @@ function ParserCapabilitySection({ parserStatus }: { parserStatus: ParserStatus 
         <ParserCapabilityDivider />
         <ParserCapabilityRow
           title="LiteParse"
-          state={liteparseLoading ? "loading" : liteparseOk ? "ok" : "warn"}
+          state={liteparseLoading ? "loading" : liteparseOk || liteparseInstall === "done" ? "ok" : "warn"}
           statusLabel={
             liteparseLoading
               ? "检测中"
-              : liteparseOk
+              : liteparseOk || liteparseInstall === "done"
                 ? `已安装${parserStatus?.liteparse?.version ? ` v${parserStatus.liteparse.version}` : ""}`
-                : "未安装"
+                : liteparseInstall === "installing"
+                  ? "安装中"
+                  : "未安装"
           }
           detail={
             liteparseLoading ? (
               "正在检测本机是否已安装 LiteParse…"
-            ) : liteparseOk ? (
+            ) : liteparseOk || liteparseInstall === "done" ? (
               "覆盖 .doc / .ppt / .xls / .xlsx 与图片 OCR"
+            ) : liteparseInstall === "error" ? (
+              <span className="text-red-500">{installMsg.liteparse || "安装失败，请重试"}</span>
             ) : (
-              <>
-                旧版 Office、表格与图片暂不可解析。安装：
-                <code className="ml-1 rounded bg-surface-hover px-1 py-0.5 text-[11px] text-text-primary">
-                  {parserStatus?.install_hint || "npm i -g @llamaindex/liteparse"}
-                </code>
-              </>
+              <span className="flex items-center justify-between gap-2">
+                <span>旧版 Office、表格与图片暂不可解析</span>
+                {renderInstallAction("liteparse", liteparseInstall)}
+              </span>
             )
           }
         />
@@ -711,18 +793,24 @@ function ParserCapabilitySection({ parserStatus }: { parserStatus: ParserStatus 
             <ParserCapabilityDivider />
             <ParserCapabilityRow
               title="LibreOffice"
-              state={libreofficeOk ? "ok" : "warn"}
-              statusLabel={libreofficeOk ? "已安装" : "未安装"}
+              state={libreofficeOk || libreofficeInstall === "done" ? "ok" : libreofficeInstall === "installing" ? "loading" : "warn"}
+              statusLabel={
+                libreofficeOk || libreofficeInstall === "done"
+                  ? "已安装"
+                  : libreofficeInstall === "installing"
+                    ? "安装中"
+                    : "未安装"
+              }
               detail={
-                libreofficeOk ? (
+                libreofficeOk || libreofficeInstall === "done" ? (
                   "LiteParse 解析 .doc / .ppt / .xls / .xlsx 时用于格式转换"
+                ) : libreofficeInstall === "error" ? (
+                  <span className="text-red-500">{installMsg.libreoffice || "安装失败，请重试"}</span>
                 ) : (
-                  <>
-                    解析旧版 Office 与表格需要它。安装：
-                    <code className="ml-1 rounded bg-surface-hover px-1 py-0.5 text-[11px] text-text-primary">
-                      brew install --cask libreoffice
-                    </code>
-                  </>
+                  <span className="flex items-center justify-between gap-2">
+                    <span>解析旧版 Office 与表格需要它</span>
+                    {renderInstallAction("libreoffice", libreofficeInstall)}
+                  </span>
                 )
               }
             />

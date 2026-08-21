@@ -91,6 +91,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
             workspaceDir: a.workspace_dir ?? "",
             description: a.description ?? "",
             tags: Array.isArray(a.tags) ? a.tags.map(String) : [],
+            sortOrder: typeof a.sort_order === "number" ? a.sort_order : 0,
           }))
         );
         return true;

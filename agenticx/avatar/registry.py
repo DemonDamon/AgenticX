@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import shutil
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,13 @@ from typing import Any, Dict, List, Optional, Union
 
 import yaml
 from agenticx.utils.agx_home import agx_home, lazy_home_path
+from agenticx.avatar.portrait import (
+    collection_fetch_enabled,
+    fetch_collection_portrait_url,
+    generate_avatar_portrait_url,
+    needs_portrait_refresh,
+    PORTRAIT_STYLE,
+)
 
 def _avatars_root() -> Path:
     """``~/.agenticx/avatars``，按调用时的 HOME 解析。
@@ -92,6 +100,7 @@ class AvatarConfig:
     name: str
     role: str = ""
     avatar_url: str = ""
+    portrait_style: str = ""
     system_prompt: str = ""
     # Short blurb shown on the gallery card, distinct from system_prompt (behavior rules).
     description: str = ""
@@ -104,6 +113,8 @@ class AvatarConfig:
     pinned: bool = False
     # Expert background color from the monochrome AVATAR_PALETTE.
     color: str = "blue"
+    # User-defined display order (lower = earlier). 0 = unset/created order.
+    sort_order: int = 0
     tools_enabled: Dict[str, bool] = field(default_factory=dict)
     skills_enabled: Optional[Dict[str, bool]] = None
     # None = mount global brains only; "*" = all visible brains; list = explicit ids
@@ -180,8 +191,56 @@ class AvatarRegistry:
             cfg = self._read_config(child.name)
             if cfg is not None:
                 avatars.append(cfg)
-        avatars.sort(key=lambda a: (not a.pinned, a.created_at or ""), reverse=False)
+        missing = [
+            item
+            for item in avatars
+            if needs_portrait_refresh(
+                item.avatar_url,
+                portrait_style=getattr(item, "portrait_style", ""),
+                created_by=item.created_by,
+            )
+        ]
+        if missing and collection_fetch_enabled():
+            workers = min(6, len(missing))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(self._ensure_portrait, missing))
+        avatars.sort(
+            key=lambda a: (
+                not a.pinned,
+                getattr(a, "sort_order", 0),  # optional user-defined order
+                a.created_at or "",    # fallback: creation time
+            ),
+            reverse=False,
+        )
         return avatars
+
+    def _ensure_portrait(self, config: AvatarConfig) -> AvatarConfig:
+        """Fill an illustrated portrait once if the avatar has no image yet.
+
+        Existing avatars without a picture are only updated when the illustrated
+        collection is reachable. Offline / test runs leave them unchanged.
+        """
+        if not needs_portrait_refresh(
+            config.avatar_url,
+            portrait_style=getattr(config, "portrait_style", ""),
+            created_by=config.created_by,
+        ):
+            return config
+        if not collection_fetch_enabled():
+            return config
+        fetched = fetch_collection_portrait_url(
+            name=config.name,
+            role=config.role,
+            description=config.description,
+            tags=list(config.tags or []),
+            avatar_id=config.id,
+        )
+        if not fetched:
+            return config
+        config.avatar_url = fetched
+        config.portrait_style = PORTRAIT_STYLE
+        self._write_config(config)
+        return config
 
     def get_avatar(self, avatar_id: str) -> Optional[AvatarConfig]:
         return self._read_config(avatar_id)
@@ -203,6 +262,7 @@ class AvatarRegistry:
         brains_enabled: Optional[Any] = None,
         workspace_dir: str = "",
         color: str = "blue",
+        sort_order: int = 0,
     ) -> AvatarConfig:
         """Create a new avatar with isolated workspace.
 
@@ -220,11 +280,23 @@ class AvatarRegistry:
         se: Optional[Dict[str, bool]] = None
         if skills_enabled is not None and len(skills_enabled) > 0:
             se = {str(k): bool(v) for k, v in skills_enabled.items() if str(k).strip()}
+        resolved_avatar_url = str(avatar_url or "").strip()
+        portrait_style = "custom"
+        if not resolved_avatar_url:
+            resolved_avatar_url = generate_avatar_portrait_url(
+                name=name,
+                role=role,
+                description=str(description or "").strip(),
+                tags=normalize_avatar_tags(tags),
+                avatar_id=avatar_id,
+            )
+            portrait_style = PORTRAIT_STYLE
         config = AvatarConfig(
             id=avatar_id,
             name=name,
             role=role,
-            avatar_url=avatar_url,
+            avatar_url=resolved_avatar_url,
+            portrait_style=portrait_style,
             system_prompt=system_prompt,
             description=str(description or "").strip(),
             tags=normalize_avatar_tags(tags),
@@ -236,6 +308,7 @@ class AvatarRegistry:
             skills_enabled=se,
             brains_enabled=brains_enabled,
             color=normalize_avatar_color(color),
+            sort_order=sort_order,
             created_at=now,
             updated_at=now,
         )
@@ -275,6 +348,10 @@ class AvatarRegistry:
                 continue
             if key == "tags":
                 config.tags = normalize_avatar_tags(value)
+                continue
+            if key == "avatar_url":
+                config.avatar_url = str(value or "").strip()
+                config.portrait_style = "custom" if config.avatar_url else ""
                 continue
             if hasattr(config, key):
                 setattr(config, key, value)

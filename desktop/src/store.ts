@@ -92,6 +92,8 @@ export type Avatar = {
   description?: string;
   /** Skill tags shown as chips on the gallery card. */
   tags?: string[];
+  /** User-defined display order (lower = earlier). 0 = unset. */
+  sortOrder?: number;
 };
 
 export type SessionItem = {

@@ -229,6 +229,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   }) =>
     ipcRenderer.invoke("update-avatar", payload),
   deleteAvatar: async (id: string) => ipcRenderer.invoke("delete-avatar", id),
+  reorderAvatars: async (orders: Record<string, number>) =>
+    ipcRenderer.invoke("reorder-avatars", orders) as Promise<{ ok: boolean; updated?: number; error?: string }>,
   getToolsStatus: async () => ipcRenderer.invoke("get-tools-status"),
   getToolsRegistry: async () => ipcRenderer.invoke("get-tools-registry"),
   getToolsPolicy: async () => ipcRenderer.invoke("get-tools-policy"),
@@ -522,6 +524,11 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("mcp-marketplace-install", payload),
   nativeConnectorStatus: async (id: string) =>
     ipcRenderer.invoke("native-connector-status", { id }),
+  nativeConnectorCachedStatus: async () =>
+    ipcRenderer.invoke("native-connector-cached-status") as Promise<{
+      ok: boolean;
+      connectors: Record<string, { connected: boolean; updated_at?: string }>;
+    }>,
   nativeConnectorTmeetLogin: async () =>
     ipcRenderer.invoke("native-connector-tmeet-login"),
   nativeConnectorTmeetCancel: async () =>
