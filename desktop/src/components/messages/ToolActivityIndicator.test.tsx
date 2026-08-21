@@ -97,7 +97,9 @@ describe("customer-facing tool activity", () => {
         content: "用户选择：清理缓存和临时文件，释放磁盘空间",
         toolName: "request_clarification",
       } as Message),
-    ).toBe("用户选择：清理缓存和临时文件，释放磁盘空间");
+      // 标题要短：后端那句 "用户选择：" 压成 "已选："，剩下的留给内容本身。
+      // 完整的九种形态在 tool-call-card-title.test.ts 里逐条钉住。
+    ).toBe("已选：清理缓存和临时文件，释放磁盘空间");
     expect(
       buildToolCardTitle({
         id: "clr2",

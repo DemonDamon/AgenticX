@@ -64,6 +64,48 @@ function extractToolSummary(content: string): string {
   return content.slice(0, 60).replace(/\n/g, " ").trim();
 }
 
+const DECISION_TITLE_MAX = 48;
+
+/** 把用户在澄清 / 确认卡里的回答压成一行标题；还没回答返回 null。
+ *
+ * 这些串由后端的 ``build_clarification_tool_result`` 和
+ * ``build_action_confirmation_tool_result`` 生成（agenticx/cli/agent_tools.py）。
+ * 两边靠字符串前缀耦合——改后端的措辞必须同步改这里，
+ * tests/test_confirmation_result_shapes.py 钉住了这些前缀，改了会红。
+ *
+ * 之前这里只认 "用户选择：" 一种形态，后端实际会产出九种，
+ * 于是「已取消」「自定义补充」「超时」全都掉进 fallback，卡片一直显示
+ * "等待你确认" —— 用户明明已经答过了。
+ */
+export function summarizeUserDecision(toolName: string, raw: string): string | null {
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+
+  if (toolName === "request_action_confirmation") {
+    if (text.startsWith("[ACTION_CONFIRMED]")) return "已确认执行";
+    if (text.startsWith("[ACTION_REJECTED]")) {
+      return text.includes("已取消执行") ? "已取消" : "未明确确认，已取消";
+    }
+    if (text.startsWith("[ACTION_CONFIRMATION_EXPIRED]")) return "确认已失效";
+    if (text.startsWith("[ACTION_CONFIRMATION_SUSPENDED]")) return "无人值守，未确认";
+    return null;
+  }
+
+  if (text.startsWith("[CLARIFICATION_TIMEOUT]")) return "未在时限内答复";
+  if (text.startsWith("[CLARIFICATION_PENDING]")) return "无人值守，未答复";
+  if (text.startsWith("用户未提供具体内容")) return "未作选择";
+
+  // 正文形态：`用户选择：A；B` / `自定义补充：xxx` / 两者以 `；` 相连。
+  const body = text.replace(/。+$/, "");
+  if (body.startsWith("用户选择：")) return clipDecision(`已选：${body.slice(5)}`);
+  if (body.startsWith("自定义补充：")) return clipDecision(`已补充：${body.slice(6)}`);
+  return null;
+}
+
+function clipDecision(s: string): string {
+  return s.length > DECISION_TITLE_MAX ? `${s.slice(0, DECISION_TITLE_MAX)}…` : s;
+}
+
 export function buildToolCardTitle(message: Message): string {
   const name = (message.toolName ?? "").trim();
   const args = message.toolArgs ?? {};
@@ -86,10 +128,8 @@ export function buildToolCardTitle(message: Message): string {
   // 澄清 / 确认行记的是用户自己的回答。标题直接给答案，而不是 "request_clarification"：
   // 关掉工具详情时这张卡默认是收起的，标题就是用户唯一能看到的一行。
   if (name === "request_clarification" || name === "request_action_confirmation") {
-    const answer = String(message.content ?? "").trim();
-    if (answer.startsWith("用户选择：")) {
-      return answer.length > 80 ? `${answer.slice(0, 80)}…` : answer;
-    }
+    const decided = summarizeUserDecision(name, String(message.content ?? ""));
+    if (decided) return decided;
     return name === "request_action_confirmation" ? "等待你确认" : "等待你补充信息";
   }
   if (name === "mcp_call") {
