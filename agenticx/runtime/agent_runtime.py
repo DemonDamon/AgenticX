@@ -46,6 +46,7 @@ from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.llms.vision import is_vision_capable, strip_nonvision_multimodal_messages
 from agenticx.runtime.compactor import ContextCompactor, is_prune_only_result
+from agenticx.runtime.tool_result_status import tool_status_for_result
 from agenticx.runtime.context_file_budget import serialize_context_files
 from agenticx.runtime.tool_result_budget import (
     apply_tool_result_budget,
@@ -2723,7 +2724,7 @@ async def _eager_knowledge_search_events(
                 "tool_call_id": tool_call_id,
                 "tool_name": tool_name,
                 "tool_args": arguments,
-                "tool_status": "error" if str(result).startswith("ERROR:") else "done",
+                "tool_status": tool_status_for_result(result),
             }
         )
 
@@ -6377,7 +6378,7 @@ class AgentRuntime:
                             "tool_call_id": tool_call_id,
                             "tool_name": tool_name,
                             "tool_args": arguments,
-                            "tool_status": "error" if str(result).startswith("ERROR:") else "done",
+                            "tool_status": tool_status_for_result(result),
                         }
                     )
                     if _append_subagent_cluster_anchor_if_needed(
