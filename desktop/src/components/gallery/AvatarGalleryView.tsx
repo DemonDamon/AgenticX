@@ -98,9 +98,10 @@ export function AvatarGalleryView() {
     if (oldIndex < 0 || newIndex < 0) return;
     const newOrder = arrayMove(ids, oldIndex, newIndex);
     setLocalOrder(newOrder);
-    // Persist sort_order to backend via IPC
+    // Persist sort_order to backend via IPC.
+    // Use idx+1 so 0 remains "unset" and -1 remains "built-in default".
     const orders: Record<string, number> = {};
-    newOrder.forEach((id, idx) => { orders[id] = idx; });
+    newOrder.forEach((id, idx) => { orders[id] = idx + 1; });
     try {
       await window.agenticxDesktop.reorderAvatars(orders);
     } catch {

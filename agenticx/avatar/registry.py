@@ -123,7 +123,7 @@ class AvatarConfig:
     updated_at: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        d = {k: v for k, v in asdict(self).items() if v or k in {"id", "name", "pinned"}}
+        d = {k: v for k, v in asdict(self).items() if v or k in {"id", "name", "pinned", "sort_order"}}
         if self.brains_enabled is not None:
             d["brains_enabled"] = self.brains_enabled
         if self.skills_enabled is not None:

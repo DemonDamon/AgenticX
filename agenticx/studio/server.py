@@ -1154,6 +1154,10 @@ def create_studio_app() -> FastAPI:
                     sort_order=-1,
                 )
                 logger.info("Created built-in environment setup expert avatar")
+            elif env_avatar.sort_order != -1:
+                # Migration: existing env-setup avatar predates sort_order=-1.
+                avatar_registry.update_avatar(env_avatar.id, {"sort_order": -1})
+                logger.info("Migrated env-setup avatar sort_order to -1")
         except Exception as exc:
             logger.warning("Failed to ensure env-setup avatar: %s", exc)
 
