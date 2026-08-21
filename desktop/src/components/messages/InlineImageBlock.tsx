@@ -15,10 +15,55 @@ function elapsedLabel(startedAt?: number, now = Date.now()): string {
   return `${sec}s`;
 }
 
+function isRemoteImageBlock(block: ImageContentBlock): boolean {
+  return block.kind === "remote" || (!block.path && Boolean(String(block.url ?? "").trim()));
+}
+
+function openExternalUrl(url: string) {
+  const desktop = window.agenticxDesktop as { openExternal?: (href: string) => unknown } | undefined;
+  if (desktop?.openExternal) {
+    void desktop.openExternal(url);
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+export function InlineImageLoadFailedNotice({ sourceUrl }: { sourceUrl?: string }) {
+  return (
+    <p className="my-1 text-[13px] leading-relaxed text-text-faint">
+      图片无法加载
+      {sourceUrl ? (
+        <>
+          {" "}
+          <SourceLink href={sourceUrl} />
+        </>
+      ) : null}
+    </p>
+  );
+}
+
+function SourceLink({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      className="text-[rgb(var(--theme-color-rgb,59,130,246))] underline underline-offset-2 hover:opacity-90"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openExternalUrl(href);
+      }}
+    >
+      来源
+    </a>
+  );
+}
+
 export function InlineImageBlock({ block }: Props) {
   const [now, setNow] = useState(() => Date.now());
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [open, setOpen] = useState(false);
+  const remote = isRemoteImageBlock(block);
 
   useEffect(() => {
     if (block.status !== "generating") return undefined;
@@ -28,14 +73,15 @@ export function InlineImageBlock({ block }: Props) {
 
   useEffect(() => {
     setLoaded(false);
-  }, [block.path, block.id]);
+    setLoadError(false);
+  }, [block.path, block.url, block.id]);
 
   if (block.status === "generating") {
     return (
       <div className="my-1 w-full min-w-0 overflow-hidden rounded-xl border border-border bg-surface-panel px-3 py-3">
         <Shimmer
           variant="status"
-          text={`生成图片中… ${elapsedLabel(block.startedAt, now)}`}
+          text={`${remote ? "加载图片中" : "生成图片中"}… ${elapsedLabel(block.startedAt, now)}`}
           className="text-[13px]"
         />
       </div>
@@ -46,6 +92,12 @@ export function InlineImageBlock({ block }: Props) {
     return (
       <p className="my-1 text-[13px] leading-relaxed text-text-faint">
         {block.error?.trim() || "图片生成失败"}
+        {block.source_url ? (
+          <>
+            {" "}
+            <SourceLink href={block.source_url} />
+          </>
+        ) : null}
       </p>
     );
   }
@@ -57,6 +109,10 @@ export function InlineImageBlock({ block }: Props) {
   const src = block.path ? pathToFileUrl(block.path) : String(block.url ?? "").trim();
   if (!src) {
     return <p className="my-1 text-[13px] leading-relaxed text-text-faint">图片路径无效</p>;
+  }
+
+  if (loadError) {
+    return <InlineImageLoadFailedNotice sourceUrl={block.source_url} />;
   }
 
   return (
@@ -72,12 +128,18 @@ export function InlineImageBlock({ block }: Props) {
           alt={block.alt || "image"}
           className="max-h-[70vh] w-full object-contain transition-opacity duration-300"
           style={{ opacity: loaded ? 1 : 0 }}
+          referrerPolicy="no-referrer"
           onLoad={() => setLoaded(true)}
+          onError={() => setLoadError(true)}
         />
-        {block.alt ? (
-          <div className="px-2 py-1 text-[11px] text-text-faint">{block.alt}</div>
-        ) : null}
       </button>
+      {block.alt || block.source_url ? (
+        <div className="mt-[-2px] mb-1 px-2 text-[11px] text-text-faint">
+          {block.alt ? <span>{block.alt}</span> : null}
+          {block.alt && block.source_url ? <span> · </span> : null}
+          {block.source_url ? <SourceLink href={block.source_url} /> : null}
+        </div>
+      ) : null}
       <Modal
         open={open}
         title={block.alt || "图片预览"}

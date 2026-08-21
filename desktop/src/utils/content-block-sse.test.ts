@@ -37,4 +37,63 @@ describe("applyContentBlockEvent", () => {
       path: "/tmp/cat.png",
     });
   });
+
+  it("keeps https url and drops data url", () => {
+    let blocks: ContentBlock[] = [];
+    blocks = applyContentBlockEvent(blocks, {
+      type: "content_block",
+      data: {
+        mode: "end",
+        block: {
+          type: "image",
+          id: "img-remote-0",
+          status: "ready",
+          url: "https://example.com/a.jpg",
+          source_url: "https://example.com/page",
+          kind: "remote",
+        },
+      },
+    });
+    expect(blocks[0]).toMatchObject({
+      type: "image",
+      id: "img-remote-0",
+      url: "https://example.com/a.jpg",
+      source_url: "https://example.com/page",
+      kind: "remote",
+    });
+
+    blocks = applyContentBlockEvent([], {
+      type: "content_block",
+      data: {
+        mode: "end",
+        block: {
+          type: "image",
+          id: "img-data",
+          status: "ready",
+          url: "data:image/png;base64,AAAA",
+        },
+      },
+    });
+    expect(blocks[0]).toMatchObject({ type: "image", id: "img-data" });
+    expect((blocks[0] as { url?: string }).url).toBeUndefined();
+  });
+
+  it("upgrades listing thumb url on end frame", () => {
+    const blocks = applyContentBlockEvent([], {
+      type: "content_block",
+      data: {
+        mode: "end",
+        block: {
+          type: "image",
+          id: "img-thumb-0",
+          status: "ready",
+          url: "https://c-ssl.dtstatic.com/uploads/blog/x.thumb.400_0.jpeg",
+          kind: "remote",
+        },
+      },
+    });
+    expect(blocks[0]).toMatchObject({
+      url: "https://c-ssl.dtstatic.com/uploads/blog/x.jpeg",
+    });
+  });
 });

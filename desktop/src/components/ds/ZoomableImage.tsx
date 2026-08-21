@@ -197,6 +197,7 @@ export function ZoomableImage({ src, alt, maxHeight = "68vh" }: Props) {
           src={src}
           alt={alt ?? "image"}
           draggable={false}
+          referrerPolicy="no-referrer"
           onLoad={handleImageLoad}
           style={{
             position: "absolute",

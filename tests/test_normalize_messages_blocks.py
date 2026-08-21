@@ -60,6 +60,56 @@ def test_normalize_strips_data_url_from_image_block() -> None:
     assert rows[0]["blocks"][0]["path"] == "/tmp/ok.png"
 
 
+def test_normalize_keeps_https_url_and_source_url() -> None:
+    manager = SessionManager()
+    rows = manager._normalize_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "搜到了",
+                "blocks": [
+                    {
+                        "type": "image",
+                        "id": "img-call1-0",
+                        "status": "ready",
+                        "url": "https://cdn.example/a.jpg",
+                        "source_url": "https://example.com/gallery",
+                        "kind": "remote",
+                    }
+                ],
+            }
+        ]
+    )
+    block = rows[0]["blocks"][0]
+    assert block["url"] == "https://cdn.example/a.jpg"
+    assert block["source_url"] == "https://example.com/gallery"
+    assert block["kind"] == "remote"
+
+
+def test_normalize_drops_file_url_from_image_block() -> None:
+    manager = SessionManager()
+    rows = manager._normalize_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "图",
+                "blocks": [
+                    {
+                        "type": "image",
+                        "id": "img-x",
+                        "status": "ready",
+                        "path": "/tmp/ok.png",
+                        "url": "file:///tmp/x.png",
+                    }
+                ],
+            }
+        ]
+    )
+    block = rows[0]["blocks"][0]
+    assert "url" not in block
+    assert block["path"] == "/tmp/ok.png"
+
+
 def test_normalize_legacy_message_field_set_unchanged() -> None:
     manager = SessionManager()
     rows = manager._normalize_messages(

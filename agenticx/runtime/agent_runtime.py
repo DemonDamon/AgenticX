@@ -61,11 +61,9 @@ from agenticx.runtime.confirm import ConfirmGate
 from agenticx.runtime.events import (
     EventType,
     RuntimeEvent,
-    build_content_block_end_event,
-    build_content_block_start_event,
     collect_image_blocks_from_tool_rows,
-    is_image_producing_tool,
-    parse_image_tool_result,
+    iter_content_block_end_events,
+    iter_content_block_start_events,
 )
 from agenticx.runtime.hooks import HookRegistry
 from agenticx.runtime.loop_detector import LoopDetector
@@ -5774,12 +5772,10 @@ class AgentRuntime:
                     data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
                     agent_id=agent_id,
                 )
-                if is_image_producing_tool(tool_name):
-                    yield build_content_block_start_event(
-                        tool_call_id=tool_call_id,
-                        prompt=str(arguments.get("prompt") or ""),
-                        agent_id=agent_id,
-                    )
+                for ev in iter_content_block_start_events(
+                    tool_name, tool_call_id, arguments, agent_id=agent_id
+                ):
+                    yield ev
                 pending_events: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
 
                 async def _on_tool_event(event_payload: Dict[str, Any]) -> None:
@@ -5826,15 +5822,16 @@ class AgentRuntime:
                         data={"name": tool_name, "result": skip_text, "tool_call_id": tool_call_id},
                         agent_id=agent_id,
                     )
-                    if is_image_producing_tool(tool_name):
-                        yield build_content_block_end_event(
-                            tool_call_id=tool_call_id,
-                            result=skip_text,
-                            prompt=str(arguments.get("prompt") or ""),
-                            status="error",
-                            error="会话状态落盘失败，已跳过出图",
-                            agent_id=agent_id,
-                        )
+                    for ev in iter_content_block_end_events(
+                        tool_name,
+                        tool_call_id,
+                        arguments=arguments,
+                        result=skip_text,
+                        status="error",
+                        error="会话状态落盘失败，已跳过出图",
+                        agent_id=agent_id,
+                    ):
+                        yield ev
                     continue
                 effective_tm = self.team_manager or getattr(session, "_team_manager", None)
                 meta_only_names, meta_dispatch = _resolve_meta_tool_dispatchers()
@@ -5880,13 +5877,14 @@ class AgentRuntime:
                             await dispatch_task
                         except asyncio.CancelledError:
                             pass
-                        if is_image_producing_tool(tool_name):
-                            yield build_content_block_end_event(
-                                tool_call_id=tool_call_id,
-                                prompt=str(arguments.get("prompt") or ""),
-                                status="cancelled",
-                                agent_id=agent_id,
-                            )
+                        for ev in iter_content_block_end_events(
+                            tool_name,
+                            tool_call_id,
+                            arguments=arguments,
+                            status="cancelled",
+                            agent_id=agent_id,
+                        ):
+                            yield ev
                         yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
                         return
                     if dispatch_task.done() and pending_events.empty():
@@ -6150,13 +6148,14 @@ class AgentRuntime:
                     data=_tool_result_data,
                     agent_id=agent_id,
                 )
-                if is_image_producing_tool(tool_name) or parse_image_tool_result(raw_result):
-                    yield build_content_block_end_event(
-                        tool_call_id=tool_call_id,
-                        result=raw_result,
-                        prompt=str(arguments.get("prompt") or ""),
-                        agent_id=agent_id,
-                    )
+                for ev in iter_content_block_end_events(
+                    tool_name,
+                    tool_call_id,
+                    arguments=arguments,
+                    result=raw_result,
+                    agent_id=agent_id,
+                ):
+                    yield ev
 
                 if loop_halt and loop_issue is not None:
                     # Fill in filler tool results for any remaining unanswered

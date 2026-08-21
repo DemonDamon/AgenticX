@@ -707,6 +707,20 @@ def _build_url_vision_capability_block() -> str:
     )
 
 
+def _build_inline_photo_display_block() -> str:
+    """Discipline for showing searched photos inline (not vision, not generate_image)."""
+    return (
+        "## 聊天气泡内联出图（show_images）— 硬性纪律\n"
+        "- 用户要「看照片 / 搜照片看看 / 找几张图看看」时，必须把图嵌进气泡，禁止只用表格或超链接交差。\n"
+        "- 「模型能否看图」（view_image）和「气泡能否出图」是两件事。文本模型也可以出图。\n"
+        "- 禁止对用户说「当前模型不支持视觉所以无法在气泡内渲染图片」。\n"
+        "- 正确流程：web_search → web_fetch 图集/新闻页 → 从 [discovered_images] 挑直链 → show_images(items=[...])。\n"
+        "- items.url 必须是图片直链（jpg/png/webp 或 CDN 图），不要传图集 HTML 页。\n"
+        "- 不要用 generate_image 去「画」公众人物照片；那是文生图，不是搜索结果。\n"
+        "- 先写 1–2 句说明找到了什么，再调用 show_images；每张图用短 alt 说明造型/场景，source_url 填来源页。\n\n"
+    )
+
+
 def _build_widget_capability_block() -> str:
     """Describe built-in show_widget for inline Mermaid/SVG/HTML visualizations."""
     return (
@@ -1049,6 +1063,7 @@ def build_meta_agent_system_prompt(
         f"{kb_retrieval_block}"
         f"{_build_web_search_capability_block()}"
         f"{_build_url_vision_capability_block()}"
+        f"{_build_inline_photo_display_block()}"
         f"{_build_widget_capability_block()}"
         f"{_build_data_source_discipline()}"
         f"{_build_followup_questions_block()}"

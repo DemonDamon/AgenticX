@@ -6,6 +6,8 @@ export type ContentBlock =
       status: "generating" | "ready" | "error" | "cancelled";
       path?: string;
       url?: string;
+      source_url?: string;
+      kind?: "remote" | "generated";
       mime?: string;
       alt?: string;
       width?: number;
@@ -66,9 +68,28 @@ export function hasImageBlock(blocks: ContentBlock[] | undefined): boolean {
   return Boolean(blocks?.some((b) => b.type === "image"));
 }
 
+/** Listing-page thumbs such as `.thumb.400_0.jpeg` / `.thumb.100_100_c.jpg`. */
+const REMOTE_THUMB_SUFFIX = /\.thumb\.\d+_\d+(?:_[A-Za-z0-9]+)?\.(jpe?g|png|webp|gif)$/i;
+
+export function upgradeRemoteImageUrl(url: string): string {
+  const text = String(url ?? "").trim();
+  if (!text) return "";
+  const upgraded = text.replace(REMOTE_THUMB_SUFFIX, ".$1");
+  return upgraded.length > 2048 ? text : upgraded;
+}
+
+export function asHttpUrl(raw: unknown): string | undefined {
+  const url = String(raw ?? "").trim();
+  if (!url || url.length > 2048 || url.startsWith("data:")) return undefined;
+  if (!url.startsWith("http://") && !url.startsWith("https://")) return undefined;
+  return upgradeRemoteImageUrl(url);
+}
+
 export function parseImageToolResultJson(raw: string): {
   type?: string;
   path?: string;
+  url?: string;
+  source_url?: string;
   mime?: string;
   alt?: string;
   width?: number;
@@ -85,6 +106,8 @@ export function parseImageToolResultJson(raw: string): {
     return {
       type: "image",
       path: typeof parsed.path === "string" ? parsed.path : undefined,
+      url: asHttpUrl(parsed.url),
+      source_url: asHttpUrl(parsed.source_url),
       mime: typeof parsed.mime === "string" ? parsed.mime : undefined,
       alt: typeof parsed.alt === "string" ? parsed.alt : undefined,
       width: typeof parsed.width === "number" ? parsed.width : undefined,
@@ -94,6 +117,41 @@ export function parseImageToolResultJson(raw: string): {
     };
   } catch {
     return null;
+  }
+}
+
+export function parseImageGalleryJson(raw: string): Array<{
+  type: "image";
+  url: string;
+  alt?: string;
+  source_url?: string;
+}> {
+  const text = String(raw ?? "").trim();
+  if (!text || text.startsWith("ERROR:")) return [];
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return [];
+    if (String(parsed.type ?? "").trim() !== "image_gallery") return [];
+    if (!Array.isArray(parsed.images)) return [];
+    const out: Array<{ type: "image"; url: string; alt?: string; source_url?: string }> = [];
+    for (const item of parsed.images) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const url = asHttpUrl(row.url);
+      if (!url) continue;
+      const next: { type: "image"; url: string; alt?: string; source_url?: string } = {
+        type: "image",
+        url,
+      };
+      const alt = String(row.alt ?? "").trim();
+      if (alt) next.alt = alt;
+      const sourceUrl = asHttpUrl(row.source_url);
+      if (sourceUrl) next.source_url = sourceUrl;
+      out.push(next);
+    }
+    return out;
+  } catch {
+    return [];
   }
 }
 
@@ -110,6 +168,12 @@ export function synthesizeImageBlocksFromTurn<
 >(messages: T[], assistantId: string): ContentBlock[] {
   const idx = messages.findIndex((m) => m.id === assistantId);
   if (idx < 0) return [];
+  // Same rule as collectTurnPreviewImagePaths: only the last assistant in the
+  // turn inherits tool images, otherwise a mid-turn line repeats the gallery.
+  for (let i = idx + 1; i < messages.length; i += 1) {
+    if (messages[i]?.role === "user") break;
+    if (messages[i]?.role === "assistant") return [];
+  }
   let start = 0;
   for (let i = idx; i >= 0; i -= 1) {
     if (messages[i]?.role === "user") {
@@ -121,9 +185,39 @@ export function synthesizeImageBlocksFromTurn<
   for (let i = start; i < messages.length; i += 1) {
     const row = messages[i];
     if (!row || row.role === "user") break;
-    if (row.role !== "tool" || row.toolName !== "generate_image") continue;
-    const parsed = parseImageToolResultJson(String(row.content ?? ""));
+    if (row.role !== "tool") continue;
     const toolCallId = String(row.toolCallId ?? "").trim();
+    if (row.toolName === "show_images") {
+      const gallery = parseImageGalleryJson(String(row.content ?? ""));
+      if (gallery.length === 0) {
+        if (String(row.content ?? "").startsWith("ERROR:")) {
+          blocks.push({
+            type: "image",
+            id: `img-${toolCallId || i}`,
+            status: "error",
+            error: String(row.content ?? "").replace(/^ERROR:\s*/, ""),
+            kind: "remote",
+            source: "tool",
+          });
+        }
+        continue;
+      }
+      gallery.forEach((img, index) => {
+        blocks.push({
+          type: "image",
+          id: `img-${toolCallId || i}-${index}`,
+          status: "ready",
+          url: img.url,
+          alt: img.alt,
+          source_url: img.source_url,
+          kind: "remote",
+          source: "tool",
+        });
+      });
+      continue;
+    }
+    if (row.toolName !== "generate_image") continue;
+    const parsed = parseImageToolResultJson(String(row.content ?? ""));
     const id = `img-${toolCallId || i}`;
     const alt = String(row.toolArgs?.prompt ?? parsed?.alt ?? "").trim();
     if (parsed?.path) {
@@ -197,6 +291,12 @@ export function sanitizeLoadedBlocks(raw: unknown): ContentBlock[] | undefined {
       source: row.source === "tool" ? "tool" : undefined,
     };
     if (path) block.path = path;
+    const url = asHttpUrl(row.url);
+    if (url) block.url = url;
+    const sourceUrl = asHttpUrl(row.source_url);
+    if (sourceUrl) block.source_url = sourceUrl;
+    const imageKind = String(row.kind ?? "").trim();
+    if (imageKind === "remote" || imageKind === "generated") block.kind = imageKind;
     const mime = String(row.mime ?? "").trim();
     if (mime && !mime.startsWith("data:")) block.mime = mime;
     const alt = String(row.alt ?? "").trim();

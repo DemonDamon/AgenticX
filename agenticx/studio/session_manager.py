@@ -540,8 +540,20 @@ def _sanitize_content_blocks(raw_blocks: list[Any]) -> list[dict[str, Any]]:
         url = str(item.get("url") or "").strip()
         if url.startswith("data:") or len(url) > 2048:
             url = ""
+        if url and not (url.startswith("http://") or url.startswith("https://")):
+            url = ""
         if url:
             block["url"] = url
+        source_url = str(item.get("source_url") or "").strip()
+        if source_url.startswith("data:") or len(source_url) > 2048:
+            source_url = ""
+        if source_url and not (source_url.startswith("http://") or source_url.startswith("https://")):
+            source_url = ""
+        if source_url:
+            block["source_url"] = source_url
+        kind = str(item.get("kind") or "").strip()
+        if kind in {"remote", "generated"}:
+            block["kind"] = kind
         mime = str(item.get("mime") or "").strip()
         if mime and not mime.startswith("data:"):
             block["mime"] = mime

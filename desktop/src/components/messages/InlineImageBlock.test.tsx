@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { InlineImageBlock } from "./InlineImageBlock";
+import { InlineImageBlock, InlineImageLoadFailedNotice } from "./InlineImageBlock";
 import { appendMissingImageMarkdown } from "../../utils/session-artifacts";
 import { hasImageBlock, type ContentBlock } from "../../utils/content-blocks";
 
@@ -13,6 +13,36 @@ describe("InlineImageBlock", () => {
     expect(html).not.toContain("<img");
   });
 
+  it("shows remote generating copy", () => {
+    const html = renderToStaticMarkup(
+      <InlineImageBlock
+        block={{ type: "image", id: "img-1", status: "generating", kind: "remote", startedAt: Date.now() }}
+      />,
+    );
+    expect(html).toContain("加载图片中");
+    expect(html).not.toContain("生成图片中");
+  });
+
+  it("renders remote url img", () => {
+    const html = renderToStaticMarkup(
+      <InlineImageBlock
+        block={{
+          type: "image",
+          id: "img-1",
+          status: "ready",
+          url: "https://example.com/a.jpg",
+          kind: "remote",
+          alt: "西装",
+          source_url: "https://example.com/page",
+        }}
+      />,
+    );
+    expect(html).toContain("<img");
+    expect(html).toContain("https://example.com/a.jpg");
+    expect(html).toContain("no-referrer");
+    expect(html).toContain("来源");
+  });
+
   it("renders img when ready", () => {
     const html = renderToStaticMarkup(
       <InlineImageBlock
@@ -21,6 +51,12 @@ describe("InlineImageBlock", () => {
     );
     expect(html).toContain("<img");
     expect(html).toContain("file://");
+  });
+
+  it("shows load-error copy without img", () => {
+    const html = renderToStaticMarkup(<InlineImageLoadFailedNotice />);
+    expect(html).toContain("图片无法加载");
+    expect(html).not.toContain("<img");
   });
 
   it("error and cancelled have no img", () => {

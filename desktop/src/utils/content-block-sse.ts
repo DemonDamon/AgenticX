@@ -1,6 +1,7 @@
 import {
   type ContentBlock,
   appendTextDelta,
+  asHttpUrl,
   upsertImageBlock,
 } from "./content-blocks";
 
@@ -38,6 +39,12 @@ function asImageBlock(
   };
   const path = String(row.path ?? "").trim();
   if (path && !path.startsWith("data:")) block.path = path;
+  const url = asHttpUrl(row.url);
+  if (url) block.url = url;
+  const sourceUrl = asHttpUrl(row.source_url);
+  if (sourceUrl) block.source_url = sourceUrl;
+  const kind = String(row.kind ?? "").trim();
+  if (kind === "remote" || kind === "generated") block.kind = kind;
   const mime = String(row.mime ?? "").trim();
   if (mime) block.mime = mime;
   const alt = String(row.alt ?? "").trim();

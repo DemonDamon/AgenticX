@@ -13,6 +13,8 @@ from agenticx.runtime.events import (
     RuntimeEvent,
     build_content_block_end_event,
     build_content_block_start_event,
+    iter_content_block_end_events,
+    iter_content_block_start_events,
 )
 
 
@@ -97,3 +99,98 @@ def test_content_block_direct_runtime_event_roundtrip() -> None:
     assert payload["type"] == "content_block"
     assert payload["data"]["mode"] == "start"
     assert payload["data"]["block"]["id"] == "img-x"
+
+
+def test_show_images_start_and_end_emit_indexed_remote_urls() -> None:
+    from agenticx.studio import server as studio_server
+
+    arguments = {
+        "items": [
+            {
+                "url": "https://example.com/a.jpg",
+                "alt": "西装背头造型",
+                "source_url": "https://example.com/gallery",
+            },
+            {"url": "https://example.com/b.png", "alt": "舞台造型"},
+        ]
+    }
+    starts = list(
+        iter_content_block_start_events("show_images", "call_abc", arguments, agent_id="meta")
+    )
+    assert [ev.data["block"]["id"] for ev in starts] == ["img-call_abc-0", "img-call_abc-1"]
+    for ev in starts:
+        payload = _parse_sse_payload(studio_server._runtime_event_to_sse_lines(ev)[0])
+        block = payload["data"]["block"]
+        assert payload["type"] == "content_block"
+        assert "url" not in block
+        assert "path" not in block
+        assert block["kind"] == "remote"
+        assert "base64" not in json.dumps(payload).lower()
+
+    gallery = json.dumps(
+        {
+            "type": "image_gallery",
+            "images": [
+                {
+                    "type": "image",
+                    "url": "https://example.com/a.jpg",
+                    "alt": "西装背头造型",
+                    "source_url": "https://example.com/gallery",
+                },
+                {"type": "image", "url": "https://example.com/b.png", "alt": "舞台造型"},
+            ],
+        },
+        ensure_ascii=False,
+    )
+    ends = list(
+        iter_content_block_end_events(
+            "show_images",
+            "call_abc",
+            arguments=arguments,
+            result=gallery,
+            agent_id="meta",
+        )
+    )
+    assert len(ends) == 2
+    first = _parse_sse_payload(studio_server._runtime_event_to_sse_lines(ends[0])[0])
+    block = first["data"]["block"]
+    assert first["data"]["mode"] == "end"
+    assert block["id"] == "img-call_abc-0"
+    assert block["status"] == "ready"
+    assert block["url"] == "https://example.com/a.jpg"
+    assert block["source_url"] == "https://example.com/gallery"
+    assert "path" not in block
+    assert "base64" not in json.dumps(first).lower()
+
+
+def test_show_images_data_url_does_not_become_ready() -> None:
+    arguments = {
+        "items": [
+            {"url": "data:image/png;base64,AAAA"},
+            {"url": "https://example.com/ok.jpg"},
+        ]
+    }
+    starts = list(iter_content_block_start_events("show_images", "call_abc", arguments))
+    assert [ev.data["block"]["id"] for ev in starts] == ["img-call_abc-0"]
+    gallery = json.dumps(
+        {
+            "type": "image_gallery",
+            "images": [
+                {"type": "image", "url": "data:image/png;base64,AAAA"},
+                {"type": "image", "url": "https://example.com/ok.jpg"},
+            ]
+        }
+    )
+    ends = list(
+        iter_content_block_end_events(
+            "show_images",
+            "call_abc",
+            arguments=arguments,
+            result=gallery,
+        )
+    )
+    assert len(ends) == 1
+    assert ends[0].data["block"]["id"] == "img-call_abc-0"
+    assert ends[0].data["block"]["status"] == "ready"
+    assert ends[0].data["block"]["url"] == "https://example.com/ok.jpg"
+    assert "data:image" not in json.dumps(ends[0].data)

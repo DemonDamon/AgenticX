@@ -147,6 +147,7 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "get_current_datetime",
         "web_fetch",
         "view_image",
+        "show_images",
         "show_widget",
         "list_data_sources",
     }
@@ -2072,6 +2073,45 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["prompt"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "show_images",
+            "description": (
+                "Display 1-6 remote images inline in the chat bubble. "
+                "Use when the user wants to SEE photos / 搜照片看看 / 看看图. "
+                "Pass direct image http(s) URLs from web_fetch [discovered_images] "
+                "or obvious image CDN links. Do not pass HTML gallery pages. "
+                "This is display-only: the current model does not need vision. "
+                "Never tell the user the bubble cannot render images."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 6,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string", "description": "Direct http(s) image URL."},
+                                "alt": {"type": "string", "description": "Short caption."},
+                                "source_url": {
+                                    "type": "string",
+                                    "description": "Page URL for attribution.",
+                                },
+                            },
+                            "required": ["url"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["items"],
                 "additionalProperties": False,
             },
         },
@@ -8272,6 +8312,11 @@ async def dispatch_tool_async(
                 size=size,
                 session=session,
             )
+        if name == "show_images":
+            from agenticx.tools.show_images import show_images
+
+            items = arguments.get("items") or []
+            return await asyncio.to_thread(show_images, items)
         if name == "analyze_image":
             return await _tool_analyze_image(arguments, session)
         if name == "session_search":
