@@ -40,6 +40,7 @@ import {
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
+import { resolveProcessFoldRange } from "./messages/react-work-fold";
 import {
   buildClarificationMessageExtras,
   findRunningClarificationToolMessage,
@@ -2695,10 +2696,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   (acc, groupedRow, index) => (groupedRow.kind === "tool_group" ? index : acc),
                   -1,
                 );
-                // 过程段 = 到「最后一个 tool_group」为止的所有行（思考行 + 工具组）；
-                // tail = 其后的行（最终回答等），永不折叠。
-                const processRows =
-                  lastToolGroupIdxInWork >= 0 ? groupedWork.slice(0, lastToolGroupIdxInWork + 1) : [];
+                // 过程段：见 resolveProcessFoldRange —— 只折工具段，两头的正文不折。
+                const { start: processStart, end: processEnd } =
+                  resolveProcessFoldRange(groupedWork);
+                const beforeProcessRows = groupedWork.slice(0, processStart);
+                const processRows = groupedWork.slice(processStart, processEnd);
                 const tailRows = groupedWork.slice(lastToolGroupIdxInWork + 1);
                 const processToolCount = processRows.reduce(
                   (n, r) => n + (r.kind === "tool_group" ? r.messages.length : 0),
@@ -2709,12 +2711,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   <div key={blockKey} className="space-y-3">
                     <div className="flex min-w-0 items-start gap-2">
                       <div className="flex min-w-0 flex-1 flex-col gap-3">
+                        {beforeProcessRows.map((r) => renderGroupedChatRow(r, true, undefined))}
                         <ReactWorkCollapse toolCount={processToolCount} active={streaming && isLastBlock}>
                           {processRows.map((r, i) =>
                             renderGroupedChatRow(
                               r,
                               true,
-                              r.kind === "tool_group" && i === lastToolGroupIdxInWork ? workMessages : undefined,
+                              r.kind === "tool_group" && processStart + i === lastToolGroupIdxInWork
+                                ? workMessages
+                                : undefined,
                             ),
                           )}
                         </ReactWorkCollapse>

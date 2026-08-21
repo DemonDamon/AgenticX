@@ -92,6 +92,7 @@ import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRend
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
+import { resolveProcessFoldRange } from "./messages/react-work-fold";
 import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
@@ -8768,10 +8769,11 @@ export function ChatPane({
                       const tailRow =
                         rhythmEndIdx < groupedWork.length ? groupedWork[rhythmEndIdx] : null;
 
-                      // 过程折叠：到「最后一个 tool_group」为止的思考行 + 工具组折成一张过程卡；
-                      // 其后的行（含最终回答 / 流式行）不进折叠。轮数 ≥3 且非执行中时默认折叠。
-                      const processEnd = lastToolGroupIdxInWork >= 0 ? lastToolGroupIdxInWork + 1 : 0;
-                      const processHeadRows = headRows.slice(0, processEnd);
+                      // 过程折叠：见 resolveProcessFoldRange —— 只折工具段，两头的正文不折。
+                      const { start: processStart, end: processEnd } =
+                        resolveProcessFoldRange(groupedWork);
+                      const beforeProcessHeadRows = headRows.slice(0, processStart);
+                      const processHeadRows = headRows.slice(processStart, processEnd);
                       const afterProcessHeadRows = headRows.slice(processEnd);
                       const processToolCount = processHeadRows.reduce(
                         (n, r) => n + (r.kind === "tool_group" ? r.messages.length : 0),
@@ -8908,8 +8910,9 @@ export function ChatPane({
 
                       return (
                         <div className="min-w-0 flex-1 overflow-hidden">
+                          {beforeProcessHeadRows.map((r, i) => mapGroupedRow(r, i))}
                           <ReactWorkCollapse toolCount={processToolCount} active={collapseActive}>
-                            {processHeadRows.map((r, i) => mapGroupedRow(r, i))}
+                            {processHeadRows.map((r, i) => mapGroupedRow(r, processStart + i))}
                           </ReactWorkCollapse>
                           {afterProcessHeadRows.map((r, i) => mapGroupedRow(r, processEnd + i))}
                           {actionTailReady && tailRow ? (
