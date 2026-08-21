@@ -4,6 +4,33 @@
 Supports token-aware triggers, forced mid-turn compaction, micro-compaction of
 tool results, session-memory extraction, and consecutive-failure circuit breaker.
 
+Provider 无关是本模块的硬约束，不是待办
+==========================================
+
+compaction 必须在任何 provider 上都能跑——GLM、DeepSeek、Kimi、Qwen、Gemini，
+不是 Anthropic 一家。以下能力因此**有意不做**：
+
+- ``cache_edits``（Anthropic 私有 API）：在 provider 端删旧 tool result 而不改消息
+  字节。只走 Anthropic 的 harness 能用它；主栈用不上，塞进来等于为一个 provider
+  引入一层别的 provider 跑不了的路径。
+
+- server-side context management（Anthropic context-1beta）：让 provider 自己在
+  input_tokens 超阈值时清 thinking / tool uses。同样 Anthropic-only。
+
+prune 改原文（mutation）是**有意选择**
+---------------------------------------
+prune 把旧 tool result 文本物理改写成 ``PRUNE_MARKER``，本地丢失原文。这不是不知
+道"投影模式"（本地留 L0 原文、发 API 前投影成带 marker 的 L1 视图），而是因为：
+
+1. token 压力触发下被 prune 的东西确实不需要了——阈值 2000 chars，只在窗口到
+   0.8 时才动，丢掉本地副本的代价不大；
+2. mutation 零运行时开销，投影是每轮发请求都要做的 O(N) 复制；
+3. 投影的真正收益在"主动 prune"（不等压力就来投影）和"审计可回溯"两个场景，
+   这两个需求目前都没到。将来做 L0/L1 分离（trace + 审计 + compaction 一起）
+   时，prune 的投影规则只是 L1 上多一条规则，自然落地。
+
+在那之前不要为了"先进"引入 Anthropic-only 的路径。
+
 Author: Damon Li
 """
 

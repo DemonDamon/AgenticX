@@ -18,6 +18,19 @@ Capability resolution order, most trustworthy first:
 猜高会让 autocompact 触发得太晚、请求被上游直接拒绝；猜低只是提前压缩。
 代价不对称，所以这里的兜底值一律取保守的一侧。
 
+不做运行时自校正窗口
+====================
+不做"实测溢出就自动收紧窗口"的运行时自校正。三层兜底（admin declared → 名字后缀
+→ 前缀表）覆盖了绝大部分场景；剩下的 1% 是 admin 没配对自部署模型——一次性配置
+就能解决，不需要运行时逻辑。
+
+而且"只紧不松"意味着任何一次误收（上游临时限流、provider 返回了 misleading 的
+context-length-exceeded 错误）都是永久性的。如果要做，还需要"如何确认收紧是对的"
+这套验证，得不偿失。
+
+前缀表里 DeepSeek V4 = 1M 是**硬编码声明**，不是等 provider 上报——因为自部署
+端点经常不报或报错值。这是 floor，admin declared 能覆盖它。
+
 Author: Damon Li
 """
 
