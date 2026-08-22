@@ -570,7 +570,7 @@ export function AvatarSettingsPanel(props: Props) {
               <div className="rounded-md border border-border bg-surface-card p-3">
                 <div className="text-sm font-medium text-text-primary">挂载知识脑</div>
                 <p className="mt-1 text-xs text-text-faint">
-                  控制该分身对话时 knowledge_search / code_search 可检索的脑。默认仅全局脑。
+                  控制该分身对话时 knowledge_search 可检索的文档脑。默认仅全局脑。
                 </p>
                 <div className="mt-2 flex flex-wrap gap-3 text-xs">
                   <label className="flex items-center gap-1.5">

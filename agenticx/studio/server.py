@@ -79,7 +79,6 @@ from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import (
     META_TOOL_NAMES,
     STUDIO_TOOLS,
-    _code_search_tool_defs,
     merge_computer_use_tools_into,
 )
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
@@ -123,7 +122,6 @@ from agenticx.studio.session_manager import (
     managed_session_binding_matches_avatar_query,
 )
 from agenticx.tools.mcp_hub import MCPHub
-from agenticx.studio.code_index.routes import register_code_index_routes
 from agenticx.studio.voice_endpoints import register_voice_endpoints
 from agenticx.features import local_knowledge_enabled
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
@@ -1006,28 +1004,6 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.debug("LongRun orchestrator not started: %s", exc)
 
-        def _preload_code_index_model() -> None:
-            try:
-                from agenticx.code_index.config import load_code_index_config
-                from agenticx.code_index.manager import CodeIndexManager
-
-                cfg = load_code_index_config()
-                if cfg.enabled or cfg.preload_model:
-                    CodeIndexManager.instance().preload_model()
-            except ImportError:
-                logger.debug("code_index optional deps not installed; skip preload")
-            except Exception as exc:
-                logger.warning("code_index model preload failed: %s", exc)
-
-        try:
-            from agenticx.code_index.config import load_code_index_config
-
-            if load_code_index_config().preload_model:
-                loop = asyncio.get_running_loop()
-                loop.run_in_executor(None, _preload_code_index_model)
-        except ImportError:
-            pass
-
         try:
             from agenticx.memory.graph.config import load_memory_graph_config
             from agenticx.memory.graph.deps import ensure_graphiti_if_enabled
@@ -1742,38 +1718,6 @@ def create_studio_app() -> FastAPI:
         except Exception:
             return tools
         return [t for t in tools if str((t.get("function") or {}).get("name", "")).strip() != "web_search"]
-
-    def _maybe_inject_code_search_tools(
-        sess: Any,
-        tools: list[dict[str, Any]],
-        *,
-        avatar_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Inject code_search when the session has mounted code brains (avatar/Meta)."""
-        if not local_knowledge_enabled():
-            return tools
-        try:
-            from agenticx.brain.mount import session_has_mounted_code_brains
-
-            if not session_has_mounted_code_brains(sess, avatar_id=avatar_id):
-                return tools
-            extra = _code_search_tool_defs()
-            if not extra:
-                return tools
-            existing_names = {
-                str((t.get("function") or {}).get("name", "")).strip()
-                for t in tools
-                if isinstance(t, dict)
-            }
-            merged = list(tools)
-            for spec in extra:
-                name = str((spec.get("function") or {}).get("name", "")).strip()
-                if name and name not in existing_names:
-                    merged.append(spec)
-                    existing_names.add(name)
-            return merged
-        except Exception:
-            return tools
 
     def _sse_event(event: str, data: dict[str, Any]) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -3587,11 +3531,6 @@ def create_studio_app() -> FastAPI:
             effective_tools_source = list(META_AGENT_TOOLS)
         effective_tools_source = merge_computer_use_tools_into(effective_tools_source)
         effective_tools_source = _strip_disabled_web_search_tools(effective_tools_source)
-        effective_tools_source = _maybe_inject_code_search_tools(
-            session,
-            effective_tools_source,
-            avatar_id=active_avatar_id if is_avatar_session else None,
-        )
         effective_tools: list = _filter_tools_by_policy(
             effective_tools_source,
             avatar_tools_enabled=avatar_tools_enabled,
@@ -4543,11 +4482,6 @@ def create_studio_app() -> FastAPI:
         loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(META_AGENT_TOOLS)
         loop_tools_source = merge_computer_use_tools_into(loop_tools_source)
         loop_tools_source = _strip_disabled_web_search_tools(loop_tools_source)
-        loop_tools_source = _maybe_inject_code_search_tools(
-            session,
-            loop_tools_source,
-            avatar_id=loop_avatar_id if loop_is_avatar else None,
-        )
         loop_tools: list = _filter_tools_by_policy(
             loop_tools_source,
             avatar_tools_enabled=loop_avatar_tools_enabled,
@@ -8523,7 +8457,6 @@ def create_studio_app() -> FastAPI:
 
         register_kb_routes(app)
         register_brain_routes(app)
-    register_code_index_routes(app)
     from agenticx.studio.web_search.routes import register_web_search_routes
 
     register_web_search_routes(app)

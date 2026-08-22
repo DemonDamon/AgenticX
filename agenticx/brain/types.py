@@ -13,7 +13,6 @@ from agenticx.studio.kb.contracts import KBConfig
 
 class BrainType(str, Enum):
     DOCS = "docs"
-    CODE = "code"
 
 
 class BrainScope(str, Enum):
@@ -21,51 +20,7 @@ class BrainScope(str, Enum):
     PRIVATE = "private"
 
 
-@dataclass
-class CodeBrainConfig:
-    """Per-brain code index settings (1 brain ↔ 1 codebase)."""
-
-    codebase_path: str = ""
-    enabled: bool = True
-    backend: str = "semble"
-    preload_model: bool = False
-    max_index_memory_mb: int = 1024
-    search_mode: str = "hybrid"
-    default_top_k: int = 10
-    include_text_files: bool = False
-    model: str = "minishlab/potion-code-16M"
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "CodeBrainConfig":
-        if not isinstance(data, dict):
-            return cls()
-        top_k = data.get("default_top_k", 10)
-        try:
-            top_k_int = int(top_k)
-        except (TypeError, ValueError):
-            top_k_int = 10
-        mem = data.get("max_index_memory_mb", 1024)
-        try:
-            mem_int = int(mem)
-        except (TypeError, ValueError):
-            mem_int = 1024
-        return cls(
-            codebase_path=str(data.get("codebase_path") or ""),
-            enabled=bool(data.get("enabled", True)),
-            backend=str(data.get("backend") or "semble"),
-            preload_model=bool(data.get("preload_model", False)),
-            max_index_memory_mb=max(128, min(8192, mem_int)),
-            search_mode=str(data.get("search_mode") or "hybrid"),
-            default_top_k=max(1, min(50, top_k_int)),
-            include_text_files=bool(data.get("include_text_files", False)),
-            model=str(data.get("model") or "minishlab/potion-code-16M"),
-        )
-
-
-BrainConfigPayload = Union[KBConfig, CodeBrainConfig]
+BrainConfigPayload = KBConfig
 
 
 @dataclass
@@ -148,12 +103,6 @@ class Brain:
         if self.type != BrainType.DOCS:
             raise ValueError("not a docs brain")
         return KBConfig.from_dict(self.config)
-
-    def code_config(self) -> CodeBrainConfig:
-        if self.type != BrainType.CODE:
-            raise ValueError("not a code brain")
-        return CodeBrainConfig.from_dict(self.config)
-
 
 BrainsEnabledSpec = Optional[Union[Literal["*"], List[str]]]
 

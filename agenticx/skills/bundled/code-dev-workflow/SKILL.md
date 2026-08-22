@@ -15,7 +15,7 @@ Use when the session is in **code_dev** mode.
 
 ## Phases
 
-1. **Explore** — `code_outline`, `grep`, `lsp_*`, `code_search` (if enabled). Write `scratchpad_write(key="phase", value="explore")` and a file list to read.
+1. **Explore** — `code_outline`, `grep`, and `lsp_*`. Write `scratchpad_write(key="phase", value="explore")` and a file list to read.
 2. **Read** — `file_read` with `start_line`/`end_line` only. Summarize into scratchpad. Then `phase=read`.
 3. **Author** — `file_write` skeleton first, then section-by-section updates. `phase=author`.
 

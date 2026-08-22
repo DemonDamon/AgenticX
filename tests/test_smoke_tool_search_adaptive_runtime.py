@@ -64,7 +64,7 @@ def test_build_runtime_context_hysteresis_latch():
         _openai("tool_search"),
         _openai("web_search", props=fat_props),
         _openai("web_fetch", props=fat_props),
-        _openai("code_search", props=fat_props),
+        _openai("session_search", props=fat_props),
     ]
     pool_tokens = estimate_schema_tokens(large_pool)
     assert pool_tokens >= 6400
@@ -83,7 +83,7 @@ def test_build_runtime_context_hysteresis_latch():
             _openai("tool_search"),
             _openai("web_search", props=props),
             _openai("web_fetch", props=props),
-            _openai("code_search", props=props),
+            _openai("session_search", props=props),
         ]
         tokens = estimate_schema_tokens(candidate)
         if 5120 <= tokens < 6400:

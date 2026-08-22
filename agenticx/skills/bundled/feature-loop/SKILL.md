@@ -30,7 +30,7 @@ Use when `session_mode == feature_loop` and the project is past the Initializer 
    - If `status.active_feature_id` is already set, resume that one (the prompt block will tell you).
    - Otherwise call `feature_select` with no arguments to auto-pick the highest-priority pending feature with satisfied dependencies, or pass `feature_id` when the user names one.
 3. **Implement using code_dev phases** (Explore → Read → Author):
-   - Explore with `code_outline`, `grep`, optional `code_search`.
+   - Explore with `code_outline`, `grep`, and `lsp_*`.
    - Read with `file_read` slices (start/end line). Track files you have read in scratchpad.
    - Author with `file_write` skeletons first, then section-by-section appends.
 4. **Run the gate.** Call `verify_run feature_id=<id>`. If any step fails:

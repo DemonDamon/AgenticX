@@ -50,10 +50,10 @@ Near and Enterprise share AgenticX abstractions and capabilities, but their curr
 ### Core Framework
 - **Agent Core**: Agent execution engine based on 12-Factor Agents methodology, with Meta-Agent CEO dispatcher, agent team management, think-act loop, event-driven architecture, self-repair, and overflow recovery
 - **Embeddable ReActAgent (SDK primitive)**: Canonical async function-calling ReAct loop (`ainvoke`/`astream`) with a typed `AgentEvent` stream, multi-turn history in/out, parallel tool execution, and optional loop-detector / compactor / offloader injection — zero Studio/CLI coupling (legacy text-JSON `TextReActAgent` facade kept for compatibility)
-- **Unified Offload**: `Offloader` protocol + filesystem-backed `FileOffloader` keep large tool results / compressed context out of live history (inline reference placeholders, retrieved on demand); plus an in-workspace MCP gateway that runs MCP servers inside the sandbox
+- **Unified Offload**: `Offloader` protocol + filesystem-backed `FileOffloader` keep large tool results / compressed context out of live history (inline reference placeholders, retrieved on demand)
 - **Orchestration Engine**: Graph-based workflow engine + Flow system with decorators, execution plans, conditional routing, and parallel execution
-- **Tool System**: Unified tool interface with function decorators, MCP Hub (multi-server aggregation), remote tools v2, OpenAPI toolset, sandbox tools, skill bundles, and document routers
-- **Memory System**: Hierarchical memory (core / episodic / semantic), Mem0 deep integration, workspace memory, short-term memory, memory decay, hybrid search, compaction flush, MCP memory, and memory intelligence engine
+- **Tool System**: Unified tool interface with function decorators, MCP Hub (multi-server aggregation), remote tools v2, OpenAPI toolset, skill bundles, document routers, and OS-enforced workspace isolation for Studio shell commands
+- **Memory System**: Workspace memory, short-term memory, compaction flush, MCP memory, knowledge-base components, and persistent session scratchpads
 - **LLM Providers**: 15+ providers — OpenAI, Anthropic, Ollama, Gemini, Kimi/Moonshot, MiniMax, Ark/VolcEngine, Zhipu, Qianfan, Bailian/Dashscope — with response caching, transcript sanitizer, and failover routing
 - **Communication Protocols**: A2A inter-agent protocol (client / server / AgentCard / skill-as-tool), MCP resource access protocol
 - **Task Validation**: Pydantic-based output parsing, auto-repair, and guiderails
@@ -65,8 +65,7 @@ Near and Enterprise share AgenticX abstractions and capabilities, but their curr
 
 ### Knowledge & Retrieval
 - **Knowledge Base**: Document processing pipeline with chunkers, readers, extractors, and graph builders (GraphRAG)
-- **Multi-Brain Knowledge**: Isolatable, per-avatar/session mountable "doc brain + code brain" architecture with cross-brain aggregated search
-- **Code Semantic Index**: Hybrid (vector + BM25) retrieval across multiple codebases, wired into the "code brain"
+- **Document Brains**: Isolatable document knowledge bases mountable per avatar and session, with cross-brain aggregated search
 - **Retrieval System**: Vector retriever, BM25 retriever, graph retriever, hybrid retriever, auto-retriever, and reranker
 - **Embeddings**: OpenAI, Bailian, SiliconFlow, LiteLLM, with smart routing
 
@@ -108,9 +107,9 @@ Near and Enterprise share AgenticX abstractions and capabilities, but their curr
 - **Real Data Infrastructure**: PostgreSQL by default, optional MySQL, Redis for cache and distributed limits, and a must-succeed append-only JSONL audit fallback
 - **Runtime Boundary**: The Gateway is an enterprise compliance and model relay, not the Python Agent Runtime. Enterprise Edge Agent is a non-default MVP; Cluster Runtime has not started
 
-### Security and Sandbox
+### Security and Execution Isolation
 - **Safety Building Blocks**: Leak detection, sanitization, injection detection, policy engine, input validation, tool guardrails, approval, and audit. The Studio path combines hooks, permissions, and path protection; it does not yet route every operation through the complete `SafetyLayer`
-- **Sandbox**: Docker / Microsandbox / Subprocess / remote HTTP backends; Jupyter kernel manager, stateful code interpreter, sandbox templates, and JSONL execution audit
+- **Command Isolation**: Shell tools run with OS-enforced workspace-write isolation by default. Access outside the active workspace requires an explicit full-access approval
 - **Session Persistence**: Studio writes to the `~/.agenticx/sessions` file tree by default, with an optional Redis session backend. The database session service is a separate SDK module, not the default Studio path
 
 ### Observability & Evaluation
@@ -143,7 +142,7 @@ Near and Enterprise share AgenticX abstractions and capabilities, but their curr
 pip install agenticx
 
 # Install optional features as needed
-pip install "agenticx[memory]"      # Memory: mem0, chromadb, qdrant, redis, milvus
+pip install "agenticx[memory]"      # Optional vector stores: chromadb, qdrant, redis, milvus
 pip install "agenticx[document]"    # Document processing: PDF, Word, PPT parsing
 pip install "agenticx[graph]"       # Knowledge graph: networkx, neo4j, community detection
 pip install "agenticx[llm]"         # Extra LLMs: anthropic, ollama
@@ -337,14 +336,6 @@ python examples/memory_example.py
 - Long-term memory storage and retrieval
 - Context memory management
 
-**Healthcare Scenario**
-```bash
-# Healthcare memory scenario
-python examples/mem0_healthcare_example.py  
-```
-- Medical knowledge memory and application
-- Personalized patient information management
-
 ### Human-in-the-Loop
 
 **Human Intervention Flow**
@@ -517,7 +508,7 @@ graph TD
             Agent[Agent]
             Task[Task]
             Tool[Tool System & MCP Hub]
-            Memory["Memory (Mem0 / Short-term / Workspace)"]
+            Memory["Memory (Short-term / Workspace / MCP)"]
             LLM["LLM Providers (OpenAI / Anthropic / Ollama / 10+)"]
         end
         Collaboration["Collaboration & Delegation"]
@@ -535,7 +526,7 @@ graph TD
         end
         subgraph "Security"
             Safety["Safety Layer (Leak Detection / Sanitizer / Policy)"]
-            Sandbox["Execution Sandbox"]
+            Sandbox["Workspace-scoped Command Isolation"]
         end
         subgraph "Storage"
             KVStore["Key-Value (SQLite / Redis)"]
@@ -587,15 +578,15 @@ graph TD
 |---------|--------|-------------|
 | **M1** | ✅ | Core Abstraction Layer — Agent, Task, Tool, Workflow, Event Bus, Component, and Pydantic data contracts |
 | **M2** | ✅ | LLM Service Layer — 15+ providers (OpenAI / Anthropic / Ollama / Gemini / Kimi / MiniMax / Ark / Zhipu / Qianfan / Bailian), response caching, failover routing |
-| **M3** | ✅ | Tool System — Function decorators, MCP Hub, remote tools v2, OpenAPI toolset, sandbox tools, skill bundles, document routers |
-| **M4** | ✅ | Memory System — Hierarchical (core / episodic / semantic), Mem0, workspace, short-term, memory decay, hybrid search, memory intelligence engine |
+| **M3** | ✅ | Tool System — Function decorators, MCP Hub, remote tools v2, OpenAPI toolset, skill bundles, document routers, workspace-scoped shell execution |
+| **M4** | ✅ | Memory System — Workspace and short-term memory, compaction flush, MCP memory, knowledge-base components, persistent session scratchpads |
 | **M5** | ✅ | Agent Core — Meta-Agent CEO dispatcher, think-act loop, event-driven architecture, self-repair, overflow recovery, reflection |
 | **M6** | ✅ | Task Validation — Pydantic-based output parsing, auto-repair, guiderails |
 | **M7** | ✅ | Orchestration Engine — Graph-based workflow engine + Flow system with decorators, execution plans, conditional routing, parallel execution |
 | **M8** | ✅ | Communication Protocols — A2A (client / server / AgentCard / skill-as-tool), MCP resource access, AGUI protocol |
 | **M9** | ✅ | Observability — Callbacks, real-time monitoring, trajectory analysis, span tree, WebSocket streaming, Prometheus / OpenTelemetry integration |
 | **M10** | ✅ | Developer Experience — CLI (`agx` with 15+ commands), Studio Server (FastAPI REST + SSE), Near Desktop (Electron + React + Zustand, multi-pane) |
-| **M11** | ✅ | Safety building blocks — Leak detection, sanitization, injection detection, policy, guardrails, hooks, approval, and multi-backend sandbox; Studio does not yet use one complete `SafetyLayer` pipeline |
+| **M11** | ✅ | Safety building blocks — Leak detection, sanitization, injection detection, policy, guardrails, hooks, approval, and OS-enforced workspace command isolation; Studio does not yet use one complete `SafetyLayer` pipeline |
 | **M13** | ✅ | Knowledge & Retrieval — Knowledge base with document processing, chunkers, graphers (GraphRAG), readers; retrieval (vector / BM25 / graph / hybrid / auto); embeddings (OpenAI / Bailian / SiliconFlow / LiteLLM) |
 | **M14** | ✅ | Avatar & Collaboration — Avatar registry, group chat (user-directed / meta-routed / round-robin), delegation, role-playing, conversation patterns, team management |
 | **M15** | ✅ | Evaluation Framework — EvalSet, LLM judge, composite judge, span evaluator, trajectory matcher, trace converter |
@@ -614,13 +605,13 @@ graph TD
 | Capability | Status | Description |
 |------------|--------|-------------|
 | **Skill Self-Evolution** | ✅ | Runtime tool-call observation capture, auto-skill creation via session review, quality gate / usage stats / deprecation loop (`learning`) |
-| **Multi-Brain Knowledge** | ✅ | Isolatable/mountable "doc brain + code brain" with cross-brain search (`brain`) + multi-codebase hybrid semantic index (`code_index`) |
+| **Document-Brain Knowledge** | ✅ | Isolatable/mountable document brains with cross-brain search (`brain`) |
 | **Long-Horizon Coding** | ✅ | Long-run orchestration (multi-source / isolated workspaces / stall self-healing / continuation backoff, `longrun`) + disk-backed project state machine (`project_state`) |
 | **IM Channel Integration** | ✅ | Remote command gateway for Feishu / WeCom / DingTalk / personal WeChat (iLink) (`gateway`) |
 | **Claude Code Bridge** | ✅ | Token-protected local HTTP/NDJSON control plane, headless / visible TUI dual mode (`cc_bridge`) |
 | **Extension Ecosystem** | ✅ | AGX Bundle definitions, local install/uninstall, multi-source registry aggregated search (`extensions`) |
 | **Embeddable ReActAgent** | ✅ | Canonical async function-calling ReAct SDK primitive with typed event stream, multi-turn history, parallel tools, optional loop-detector / compactor / offloader, zero Studio/CLI coupling (`agents`) |
-| **Unified Offload & MCP Gateway** | ✅ | `Offloader` protocol + `FileOffloader` for out-of-history large payloads, plus in-workspace MCP gateway (AgentScope v2 P0 internalization, `core.offload` / `sandbox.mcp_gateway`) |
+| **Unified Offload** | ✅ | `Offloader` protocol + `FileOffloader` for keeping large payloads out of live history (`core.offload`) |
 
 ## Core Advantages
 
@@ -719,13 +710,11 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **Lobe Icons** | [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons) | AI provider icon design system |
 | **LoongSuite Python Agent** | [alibaba/loongsuite-python-agent](https://github.com/alibaba/loongsuite-python-agent) | OpenTelemetry GenAI instrumentation |
 | **MAI-UI** | [Tongyi-MAI/MAI-UI](https://github.com/Tongyi-MAI/MAI-UI) | Device-cloud collaboration & GUI grounding |
-| **Microsandbox** | [zerocore-ai/microsandbox](https://github.com/zerocore-ai/microsandbox) | Lightweight sandboxed code execution |
 | **MobiAgent** | [IPADS-SAI/MobiAgent](https://github.com/IPADS-SAI/MobiAgent) | Mobile multi-stage planning |
 | **MobileAgent** | [X-PLUG/MobileAgent](https://github.com/X-PLUG/MobileAgent) | Multi-agent mobile GUI automation |
 | **Model Context Protocol** | [modelcontextprotocol/modelcontextprotocol](https://github.com/modelcontextprotocol/modelcontextprotocol) | Standardized LLM tool/resource protocol |
 | **NVIDIA NemoClaw** | [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw) | GPU-accelerated agent plugin system |
 | **OpenClaw** | [openclaw/openclaw](https://github.com/openclaw/openclaw) | Open desktop agent platform & extensions |
-| **OpenSandbox** | [alibaba/OpenSandbox](https://github.com/alibaba/OpenSandbox) | Container-based code sandbox |
 | **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust-based secure agent shell |
 | **OpenSkills** | [numman-ali/openskills](https://github.com/numman-ali/openskills) | Skill registry & discovery |
 | **OWL** | [camel-ai/owl](https://github.com/camel-ai/owl) | Embodied multi-agent collaboration |

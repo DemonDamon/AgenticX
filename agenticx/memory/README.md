@@ -170,34 +170,28 @@ for op in history:
 
 ## MCP Integration
 
-The memory system is designed to work seamlessly with MCP servers like OpenMemory:
+The memory system can connect to an MCP-compatible memory server without coupling the core package to a specific backend.
 
-### Setting up OpenMemory
+### Starting an MCP memory server
 
-1. **Using Docker (Recommended)**:
 ```bash
-docker run --rm -p 8080:8080 -e OPENAI_API_KEY=your-key openmemory/server
-```
-
-2. **Using the quick setup script**:
-```bash
-curl -sL https://raw.githubusercontent.com/mem0ai/mem0/main/openmemory/run.sh | bash
+docker run --rm -p 8080:8080 your-mcp-memory-server
 ```
 
 ### MCP Configuration
 
 ```python
-# Local OpenMemory server
+# Local MCP memory server
 mcp_config = {
     "command": "docker",
-    "args": ["run", "--rm", "-p", "8080:8080", "openmemory/server"],
-    "env": {"OPENAI_API_KEY": "your-openai-key"}
+    "args": ["run", "--rm", "-p", "8080:8080", "your-mcp-memory-server"],
+    "env": {"MEMORY_API_KEY": "your-key"}
 }
 
-# Hosted OpenMemory service
+# Hosted MCP memory service
 mcp_config = {
-    "url": "https://api.openmemory.dev",
-    "headers": {"Authorization": "Bearer your-openmemory-token"}
+    "url": "https://memory.example.com/mcp",
+    "headers": {"Authorization": "Bearer your-token"}
 }
 ```
 
@@ -381,4 +375,4 @@ The memory system is designed to be extensible. To add new memory backends:
 3. Add comprehensive tests
 4. Update documentation
 
-See the existing implementations for reference patterns. 
+See the existing implementations for reference patterns.

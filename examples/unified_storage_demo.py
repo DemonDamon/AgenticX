@@ -266,7 +266,7 @@ def demo_storage_comparison():
     print()
     
     print("Camel (参考设计):")
-    print("├── key_value_storages (Redis, JSON, Mem0, InMemory)")
+    print("├── key_value_storages (Redis, SQLite, InMemory)")
     print("├── vectordb_storages (Milvus, Qdrant, FAISS, pgvector, Chroma, Weaviate)")
     print("├── graph_storages (Neo4j, Nebula Graph)")
     print("└── object_storages (S3, GCS, Azure)")
@@ -328,4 +328,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()

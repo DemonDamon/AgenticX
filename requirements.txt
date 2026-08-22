@@ -61,10 +61,10 @@ watchdog>=3.0.0,<5
 # ============================================================================
 #
 # pip install -e ".[llm]"              # anthropic, ollama
-# pip install -e ".[memory]"           # mem0ai, chromadb, qdrant, redis, pymilvus, numpy
+# pip install -e ".[memory]"           # chromadb, qdrant, redis, pymilvus, numpy
 # pip install -e ".[graphiti]"         # Near memory graph (Graphiti + Kuzu)
 # pip install -e ".[document]"         # PyMuPDF, pypdf, python-docx, python-pptx, OCR helpers
-# pip install -e ".[desktop-runtime]"  # document readers, code index, mcp, socksio (Desktop / PyInstaller)
+# pip install -e ".[desktop-runtime]"  # document readers, mcp, socksio (Desktop / PyInstaller)
 # pip install -e ".[mcp]"              # mcp SDK only
 # pip install -e ".[ocr]"              # easyocr (pulls torch ~2GB)
 # pip install -e ".[graph]"            # networkx, neo4j, cdlib, ...

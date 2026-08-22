@@ -27,7 +27,6 @@ TOOL_RESULT_CLASS: Dict[str, str] = {
     "file_read": "large",
     "bash_exec": "large",
     "liteparse": "large",
-    "code_search": "medium",
     "mcp_call": "medium",
     "web_search": "medium",
     "skill_import_repo": "medium",

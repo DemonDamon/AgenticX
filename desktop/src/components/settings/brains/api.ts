@@ -4,7 +4,7 @@ import { studioFetch } from "../../../utils/studio-fetch";
 export type BrainRecord = {
   id: string;
   name: string;
-  type: "docs" | "code";
+  type: "docs";
   scope: "global" | "private";
   storage_root: string;
   enabled: boolean;
@@ -44,7 +44,7 @@ export function createBrainsApi(apiToken: string, resolveApiBase: ResolveBase) {
 
     async create(payload: {
       name: string;
-      type: "docs" | "code";
+      type: "docs";
       scope: "global" | "private";
       owner_avatar_id?: string;
       config?: Record<string, unknown>;

@@ -24,21 +24,14 @@ uvicorn_hiddenimports = [
     "uvicorn.logging",
 ]
 
-# `desktop-runtime` extras 里声明的附件解析和代码索引依赖大多是方法体内
-# 延迟导入。PyInstaller 的 modulegraph 常会漏掉，需显式 collect_all。
+# `desktop-runtime` extras 里声明的附件解析依赖大多是方法体内延迟导入。
+# PyInstaller 的 modulegraph 常会漏掉，需显式 collect_all。
 _DESKTOP_RUNTIME_PACKAGES = (
     "fitz",         # PyMuPDF 顶层模块名
     "pypdf",
     "docx",         # python-docx
     "pptx",         # python-pptx
     "numpy",
-    # code_index / Semble（方法体内 import，须 collect_all）
-    "semble",
-    "model2vec",
-    "vicinity",
-    "bm25s",
-    "tree_sitter_language_pack",
-    "pathspec",
 )
 
 _CRITICAL_DESKTOP_RUNTIME_PACKAGES = (
@@ -53,7 +46,7 @@ for _pkg in _DESKTOP_RUNTIME_PACKAGES:
         _d, _b, _h = collect_all(_pkg)
     except Exception as exc:
         # Critical runtime dependencies must never be skipped; otherwise the
-        # shipped desktop bundle can boot but fail when code indexing is used.
+        # shipped desktop bundle can boot but fail when attachment parsing is used.
         if _pkg in _CRITICAL_DESKTOP_RUNTIME_PACKAGES:
             raise RuntimeError(
                 f"Missing critical desktop runtime dependency during PyInstaller collect_all: {_pkg}"
@@ -70,7 +63,6 @@ hiddenimports = (
     + desktop_runtime_hiddenimports
     + list(_CRITICAL_DESKTOP_RUNTIME_PACKAGES)
     + ["tiktoken_ext.openai_public", "tiktoken_ext"]
-    + ["pathspec"]
 )
 
 datas = list(agenticx_datas) + desktop_runtime_datas

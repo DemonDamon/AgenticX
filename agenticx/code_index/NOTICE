@@ -1,8 +1,0 @@
-Semble (MinishLab/semble) — MIT License
-https://github.com/MinishLab/semble
-
-AgenticX integrates Semble as an optional backend via adapter code in
-agenticx/code_index/backends/semble_backend.py. See semble package NOTICE
-for upstream attribution.
-
-Made-with: Damon Li

@@ -75,31 +75,6 @@ def resolve_mounted_brain_ids(
     return ids[:max_brains]
 
 
-def session_has_mounted_code_brains(
-    session: Any = None, *, avatar_id: Optional[str] = None
-) -> bool:
-    """True when this session would search at least one mounted code brain."""
-    resolved_avatar: Optional[str] = (
-        str(avatar_id).strip() if avatar_id is not None and str(avatar_id).strip() else None
-    )
-    if resolved_avatar is None and session is not None:
-        for attr in ("bound_avatar_id", "avatar_id"):
-            raw = str(getattr(session, attr, "") or "").strip()
-            if raw and not raw.startswith(("group:", "automation:")):
-                resolved_avatar = raw
-                break
-    try:
-        BrainRegistry.instance().bootstrap()
-        targets = resolve_mounted_brain_ids(
-            avatar_id=resolved_avatar,
-            brains_enabled=load_avatar_brains_enabled(resolved_avatar),
-            brain_type=BrainType.CODE,
-        )
-        return bool(targets)
-    except Exception:
-        return False
-
-
 def load_avatar_brains_enabled(avatar_id: Optional[str]) -> BrainsEnabledSpec:
     aid = _avatar_id_normalized(avatar_id)
     if not aid:

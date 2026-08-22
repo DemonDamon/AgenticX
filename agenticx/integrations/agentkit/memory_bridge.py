@@ -3,7 +3,7 @@
 
 Bridges AgenticX BaseMemory interface to AgentKit managed memory service.
 Uses the AgentKit SDK AgentkitMemory client for control-plane operations
-and mem0/veadk MemoryBase protocol for data-plane read/write.
+and the service's HTTP protocol for data-plane read/write.
 
 Author: Damon Li
 """
@@ -33,7 +33,7 @@ class AgentkitMemoryBridge(BaseMemory):
 
     The bridge uses a two-layer architecture:
     - Control plane: AgentkitMemory SDK client for collection management.
-    - Data plane: Direct mem0/HTTP protocol for actual read/write operations.
+    - Data plane: Direct service HTTP protocol for read/write operations.
 
     Args:
         collection_name: Name of the memory collection on AgentKit platform.

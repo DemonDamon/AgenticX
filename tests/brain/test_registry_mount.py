@@ -64,20 +64,62 @@ def test_bootstrap_repairs_missing_default_docs_metadata_without_guessing_other_
     assert repaired._read_registry_ids() == ["default_docs", "missing-brain"]
 
 
+def test_legacy_code_brain_metadata_is_ignored_without_rewriting_it(isolated_brains):
+    reg = BrainRegistry.instance()
+    legacy_root = isolated_brains / "brains" / "legacy-code"
+    legacy_root.mkdir(parents=True)
+    legacy_yaml = legacy_root / "brain.yaml"
+    legacy_yaml.write_text(
+        "\n".join(
+            [
+                "id: legacy-code",
+                "name: Legacy Code",
+                "type: code",
+                "scope: global",
+                f"storage_root: {legacy_root}",
+                "enabled: true",
+                "config:",
+                "  codebase_path: /tmp/legacy-repo",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    registry_path = isolated_brains / "brains" / "registry.json"
+    registry_path.write_text(
+        json.dumps({"brains": ["default_docs", "legacy-code"], "version": 1}),
+        encoding="utf-8",
+    )
+    yaml_before = legacy_yaml.read_bytes()
+    registry_before = registry_path.read_bytes()
+
+    assert [brain.id for brain in reg.list_brains()] == ["default_docs"]
+    assert legacy_yaml.read_bytes() == yaml_before
+    assert registry_path.read_bytes() == registry_before
+
+
 def test_create_global_and_private_brains(isolated_brains):
     reg = BrainRegistry.instance()
     reg.bootstrap()
     g = reg.create(name="Global Docs", brain_type=BrainType.DOCS)
     p = reg.create(
-        name="Private Code",
-        brain_type=BrainType.CODE,
+        name="Private Docs",
+        brain_type=BrainType.DOCS,
         scope=BrainScope.PRIVATE,
         owner_avatar_id="av1",
-        config={"codebase_path": str(isolated_brains / "repo")},
     )
     assert g.scope == BrainScope.GLOBAL
     assert p.owner_avatar_id == "av1"
     assert (isolated_brains / "avatars" / "av1" / "brains" / p.id).exists()
+
+
+def test_update_docs_brain_config_uses_the_remaining_config_contract(isolated_brains):
+    reg = BrainRegistry.instance()
+    brain = reg.create(name="Docs", brain_type=BrainType.DOCS)
+
+    updated = reg.update(brain.id, {"config": {"chunking": {"chunk_size": 321}}})
+
+    assert updated.docs_config().chunking.chunk_size == 321
 
 
 def test_mount_resolution_global_only_by_default(isolated_brains):
@@ -112,7 +154,7 @@ def test_relocate_global_to_private(isolated_brains):
     av = av_reg.create_avatar(name="Owner")
     reg = BrainRegistry.instance()
     reg.bootstrap()
-    b = reg.create(name="Movable", brain_type=BrainType.CODE, scope=BrainScope.GLOBAL)
+    b = reg.create(name="Movable", brain_type=BrainType.DOCS, scope=BrainScope.GLOBAL)
     global_path = isolated_brains / "brains" / b.id
     assert global_path.is_dir()
     updated = reg.relocate_visibility(b.id, scope=BrainScope.PRIVATE, owner_avatar_id=av.id)
@@ -133,7 +175,7 @@ def test_relocate_private_to_global(isolated_brains):
     reg.bootstrap()
     b = reg.create(
         name="Priv",
-        brain_type=BrainType.CODE,
+        brain_type=BrainType.DOCS,
         scope=BrainScope.PRIVATE,
         owner_avatar_id=av.id,
     )

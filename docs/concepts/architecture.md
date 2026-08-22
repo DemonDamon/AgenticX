@@ -76,11 +76,11 @@ Graph-based workflow with conditional routing and parallel execution. The Flow s
 - MCP Hub (multi-server aggregation)
 - Remote Tools v2
 - OpenAPI toolset
-- Sandbox tools
+- OS-enforced workspace isolation for Studio shell commands
 - Skill bundles
 
 ### Memory System
-Hierarchical: core → episodic → semantic. Integrates with Mem0 for long-term persistence. Supports memory decay, hybrid search, and compaction/flush.
+Workspace and short-term memory, persistent session scratchpads, MCP memory, and compaction/flush hooks.
 
 ### LLM Providers
 Unified provider interface for 15+ LLMs with response caching, failover routing, and transcript sanitization.
@@ -97,7 +97,7 @@ Callback system, real-time metrics, Prometheus/OpenTelemetry integration, trajec
 - **MCP**: Model Context Protocol for tool and resource access
 
 ### Security
-Leak detection, injection detector, policy engine, audit logging, sandbox (Docker / Microsandbox / Subprocess).
+Leak detection, injection detector, policy engine, audit logging, protected confirmation, and OS-enforced workspace command isolation.
 
 ### Storage
 - **KV**: SQLite, Redis, PostgreSQL, MongoDB, InMemory

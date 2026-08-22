@@ -24,7 +24,7 @@ function scopeLabel(scope: string): string {
 }
 
 function typeLabel(type: string): string {
-  return type === "code" ? "代码库" : "文档库";
+  return type === "docs" ? "文档库" : type;
 }
 
 export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function BrainScopePanel(

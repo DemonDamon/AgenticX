@@ -33,6 +33,7 @@ from agenticx.embodiment.learning.knowledge_evolution import (
 
 # Import core dependencies
 from agenticx.memory.component import MemoryComponent
+from agenticx.memory.base import MemoryRecord, SearchResult
 from agenticx.embodiment.core.models import GUITask, ScreenState, InteractionElement
 
 
@@ -135,21 +136,14 @@ class TestTaskSynthesizer:
     @pytest.mark.asyncio
     async def test_synthesize_patterns_from_memory(self):
         """Test pattern synthesis from memory."""
-        from agenticx.memory.core_memory import SearchResult, HierarchicalMemoryRecord
-        
-        # Create mock memory records
-        from agenticx.memory.hierarchical import MemoryType, MemoryImportance, MemorySensitivity
-        
-        mock_record = HierarchicalMemoryRecord(
+        # Create a mock memory record through the public base contract.
+        mock_record = MemoryRecord(
             id="test_record",
             content="user clicked button",
             metadata={"app_name": "TestApp", "timestamp": datetime.now()},
             tenant_id="test_tenant",
             created_at=datetime.now(),
             updated_at=datetime.now(),
-            memory_type=MemoryType.SEMANTIC,
-            importance=MemoryImportance.MEDIUM,
-            sensitivity=MemorySensitivity.INTERNAL
         )
         mock_search_result = SearchResult(record=mock_record, score=0.9)
         
@@ -181,12 +175,8 @@ class TestDeepUsageOptimizer:
     @pytest.mark.asyncio
     async def test_analyze_usage_patterns(self):
         """Test usage pattern analysis."""
-        from agenticx.memory.core_memory import SearchResult, HierarchicalMemoryRecord
-        
-        # Create mock memory records
-        from agenticx.memory.hierarchical import MemoryType, MemoryImportance, MemorySensitivity
-        
-        mock_record = HierarchicalMemoryRecord(
+        # Create a mock memory record through the public base contract.
+        mock_record = MemoryRecord(
             id="test_usage_record",
             content="task execution data",
             metadata={
@@ -199,9 +189,6 @@ class TestDeepUsageOptimizer:
             tenant_id="test_tenant",
             created_at=datetime.now(),
             updated_at=datetime.now(),
-            memory_type=MemoryType.SEMANTIC,
-            importance=MemoryImportance.MEDIUM,
-            sensitivity=MemorySensitivity.INTERNAL
         )
         mock_search_result = SearchResult(record=mock_record, score=0.9)
         
@@ -359,20 +346,15 @@ class TestLearningEngineIntegration:
         app_name = "TestApp"
         
         # 1. Build app context
-        from agenticx.memory.core_memory import SearchResult, HierarchicalMemoryRecord
-        from agenticx.memory.hierarchical import MemoryType, MemoryImportance, MemorySensitivity
         from datetime import datetime
         
-        mock_record = HierarchicalMemoryRecord(
+        mock_record = MemoryRecord(
             id="integration_record",
             content="test app behavior",
             metadata={'app_name': app_name, 'action': 'test'},
             tenant_id="test_tenant",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
-            memory_type=MemoryType.SEMANTIC,
-            importance=MemoryImportance.MEDIUM,
-            sensitivity=MemorySensitivity.INTERNAL
         )
         mock_search_result = SearchResult(record=mock_record, score=0.9)
         mock_memory.search_across_memories.return_value = [mock_search_result]

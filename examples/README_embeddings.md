@@ -136,24 +136,6 @@ python examples/embeddings_demo.py
 
 ## 集成到其他模块
 
-### 记忆系统集成
-
-```python
-from agenticx.memory import HybridSearchEngine
-from agenticx.embeddings import SiliconFlowEmbeddingProvider
-
-# 创建 embedding provider
-embedding_provider = SiliconFlowEmbeddingProvider(
-    api_key="your_key",
-    model="BAAI/bge-large-zh-v1.5"
-)
-
-# 集成到混合搜索引擎
-search_engine = HybridSearchEngine(
-    embedding_provider=embedding_provider
-)
-```
-
 ### 工具系统集成
 
 ```python
@@ -232,4 +214,4 @@ class CustomEmbeddingProvider(BaseEmbeddingProvider):
 
 - **v1.0.0**: 初始版本，支持 OpenAI、SiliconFlow、Bailian、LiteLLM
 - **v1.1.0**: 添加动态路由和 fallback 功能
-- **v1.2.0**: 完善错误处理和配置管理 
+- **v1.2.0**: 完善错误处理和配置管理

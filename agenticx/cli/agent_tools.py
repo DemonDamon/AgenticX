@@ -2262,87 +2262,9 @@ def merge_computer_use_tools_into(tool_list: List[Dict[str, Any]]) -> List[Dict[
     return out
 
 
-_CODE_SEARCH_TOOL: Dict[str, Any] = {
-    "type": "function",
-    "function": {
-        "name": "code_search",
-        "description": (
-            "Semantic/hybrid search over mounted code brains (设置 → 知识库 → 代码脑) "
-            "or a legacy global code_index codebase. Returns {hits, by_brain, brains}. "
-            "Prefer in Explore phase before reading whole files."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "codebase_path": {
-                    "type": "string",
-                    "description": "Legacy: root path indexed via global code_index (omit when using code brains).",
-                },
-                "query": {"type": "string", "description": "Natural language or keyword query."},
-                "top_k": {"type": "integer", "description": "Number of hits (default 10)."},
-                "brain_id": {
-                    "type": "string",
-                    "description": "Optional: search only this code brain id.",
-                },
-                "strategy": {
-                    "type": "string",
-                    "enum": ["hybrid", "semantic", "bm25"],
-                    "description": "Search strategy (default hybrid).",
-                },
-            },
-            "required": ["query"],
-            "additionalProperties": False,
-        },
-    },
-}
-
-
-def code_index_config_enabled() -> bool:
-    try:
-        return bool(ConfigManager.get_value("code_index.enabled"))
-    except Exception:
-        return False
-
-
-def _has_enabled_code_brains() -> bool:
-    try:
-        from agenticx.brain.registry import BrainRegistry
-        from agenticx.brain.types import BrainType
-
-        BrainRegistry.instance().bootstrap()
-        return any(
-            b.enabled and b.type == BrainType.CODE for b in BrainRegistry.instance().list_brains()
-        )
-    except Exception:
-        return False
-
-
-def _code_search_tool_defs() -> List[Dict[str, Any]]:
-    return _code_index_tool_defs()
-
-
 def studio_tools_for_session(session: Optional[StudioSession] = None) -> List[Dict[str, Any]]:
-    """Studio/Meta tool list with optional code_search when mounted code brains exist."""
-    tools = merge_computer_use_tools_into(list(STUDIO_TOOLS))
-    try:
-        from agenticx.brain.mount import session_has_mounted_code_brains
-
-        if session is not None and session_has_mounted_code_brains(session):
-            extra = _code_search_tool_defs()
-            if extra:
-                names = {
-                    str(t.get("function", {}).get("name", ""))
-                    for t in tools
-                    if isinstance(t, dict)
-                }
-                for spec in extra:
-                    n = str(spec.get("function", {}).get("name", ""))
-                    if n and n not in names:
-                        tools.append(spec)
-                        names.add(n)
-    except Exception:
-        pass
-    return tools
+    """Return the Studio tool list for a session."""
+    return merge_computer_use_tools_into(list(STUDIO_TOOLS))
 
 
 _MAX_DESKTOP_SCREENSHOT_BYTES_FOR_B64 = 950_000
@@ -4279,118 +4201,6 @@ def _max_read_chars_for_session(session: Optional[StudioSession]) -> int:
         return MAX_READ_CHARS_CODE_DEV if is_code_dev(session) else MAX_READ_CHARS
     except Exception:
         return MAX_READ_CHARS
-
-
-def _tool_code_search(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
-    try:
-        from agenticx.code_index.tools import dispatch_code_search  # type: ignore
-    except ImportError:
-        return (
-            "ERROR: code_index 依赖未安装。请执行: pip install 'agenticx[code_index]'"
-        )
-    return dispatch_code_search(arguments, session)
-
-
-def _tool_code_index_create(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
-    from agenticx.code_index.tools import dispatch_code_index_create
-
-    return dispatch_code_index_create(arguments, session)
-
-
-def _tool_code_index_status(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
-    from agenticx.code_index.tools import dispatch_code_index_status
-
-    return dispatch_code_index_status(arguments, session)
-
-
-def _tool_code_index_clear(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
-    from agenticx.code_index.tools import dispatch_code_index_clear
-
-    return dispatch_code_index_clear(arguments, session)
-
-
-def _tool_code_index_cancel(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
-    from agenticx.code_index.tools import dispatch_code_index_cancel
-
-    return dispatch_code_index_cancel(arguments, session)
-
-
-_CODE_INDEX_LIFECYCLE_TOOLS: List[Dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "code_index_create",
-            "description": "Start background indexing for a codebase (code_index.enabled).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "codebase_path": {"type": "string", "description": "Root path to index."},
-                },
-                "required": ["codebase_path"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "code_index_status",
-            "description": "Query code index build status for a codebase (or all tasks if path omitted).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "codebase_path": {"type": "string", "description": "Optional root path."},
-                },
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "code_index_clear",
-            "description": "Drop in-memory code index for a codebase and free memory.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "codebase_path": {"type": "string", "description": "Root path to clear."},
-                },
-                "required": ["codebase_path"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "code_index_cancel",
-            "description": "Cooperatively cancel an in-progress code index build by task_id.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "task_id": {"type": "string", "description": "Task id from code_index_create/status."},
-                },
-                "required": ["task_id"],
-                "additionalProperties": False,
-            },
-        },
-    },
-]
-
-
-def _code_index_tool_defs() -> List[Dict[str, Any]]:
-    if not code_index_config_enabled() and not _has_enabled_code_brains():
-        return []
-    try:
-        import importlib
-
-        importlib.import_module("agenticx.code_index")
-    except ImportError:
-        return []
-    tools: List[Dict[str, Any]] = [_CODE_SEARCH_TOOL]
-    if code_index_config_enabled():
-        tools.extend(_CODE_INDEX_LIFECYCLE_TOOLS)
-    return tools
 
 
 def _tool_code_outline(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
@@ -8521,16 +8331,6 @@ async def dispatch_tool_async(
             return await _tool_analyze_image(arguments, session)
         if name == "session_search":
             return _tool_session_search(arguments, session)
-        if name == "code_search":
-            return await asyncio.to_thread(_tool_code_search, arguments, session)
-        if name == "code_index_create":
-            return await asyncio.to_thread(_tool_code_index_create, arguments, session)
-        if name == "code_index_status":
-            return await asyncio.to_thread(_tool_code_index_status, arguments, session)
-        if name == "code_index_clear":
-            return await asyncio.to_thread(_tool_code_index_clear, arguments, session)
-        if name == "code_index_cancel":
-            return await asyncio.to_thread(_tool_code_index_cancel, arguments, session)
         if name == "ask_user":
             return _tool_ask_user(arguments, service_mode=gate.is_service_mode())
         if name == "request_clarification":

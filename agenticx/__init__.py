@@ -17,7 +17,7 @@ AgenticX是一个完整的多智能体应用开发框架，提供从核心抽象
 - memory: 记忆系统，提供短期和长期记忆
 - protocols: 智能体通信协议，支持A2A协作
 - observability: 可观测性系统，提供监控、分析和评估功能
-- integrations: 第三方集成，包含mem0等
+- integrations: 第三方服务与平台集成
 
 特性：
 - 统一的核心抽象
@@ -93,8 +93,8 @@ if not _IS_CLI_BOOTSTRAP:
 
     # 记忆模块导出
     from .memory import (
-        BaseMemory, ShortTermMemory, Mem0, KnowledgeBase,
-        MemoryComponent, MCPMemory, Mem0Wrapper
+        BaseMemory, ShortTermMemory, KnowledgeBase,
+        MemoryComponent, MCPMemory
     )
 
     # 协议模块导出
@@ -230,8 +230,8 @@ __all__ = [
     "CredentialStore", "RemoteTool", "MCPClient", "MCPServerConfig",
     
     # 记忆相关
-    "BaseMemory", "ShortTermMemory", "Mem0", "KnowledgeBase",
-    "MemoryComponent", "MCPMemory", "Mem0Wrapper",
+    "BaseMemory", "ShortTermMemory", "KnowledgeBase",
+    "MemoryComponent", "MCPMemory",
     
     # 协议相关
     "AgentProtocol", "TaskProtocol", "ToolProtocol",

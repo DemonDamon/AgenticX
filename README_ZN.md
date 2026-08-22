@@ -48,10 +48,10 @@ Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路�
 ### 核心框架
 - **智能体核心**: 基于 12-Factor Agents 方法论的执行引擎，内置 Meta-Agent CEO 调度器、智能体团队管理、think-act 循环、事件驱动架构、自修复与溢出恢复
 - **可嵌入 ReActAgent（SDK 原语）**: 规范的异步函数调用 ReAct 循环（`ainvoke`/`astream`），含类型化 `AgentEvent` 事件流、多轮历史进出、并行工具执行，以及可选的循环检测 / 上下文压缩 / Offloader 注入——零 Studio/CLI 耦合（保留 legacy 文本-JSON `TextReActAgent` 门面以向后兼容）
-- **统一卸载（Offload）**: `Offloader` 协议 + 文件后端 `FileOffloader`，把大体积工具结果 / 压缩上下文移出实时历史（仅留内联引用占位符、按需取回）；并提供在沙箱内运行 MCP server 的 in-workspace MCP 网关
+- **统一卸载（Offload）**: `Offloader` 协议 + 文件后端 `FileOffloader`，把大体积工具结果 / 压缩上下文移出实时历史（仅留内联引用占位符、按需取回）
 - **编排引擎**: 图式工作流引擎 + Flow 系统（装饰器、执行计划），支持条件路由与并行执行
-- **工具系统**: 统一工具接口，支持函数装饰器、MCP Hub（多服务聚合）、远程工具 v2、OpenAPI 工具集、沙箱工具、技能包、文档路由
-- **记忆系统**: 分层记忆（核心 / 情景 / 语义）、Mem0 深度集成、工作区记忆、短期记忆、记忆衰减、混合搜索、压缩刷写、MCP 记忆、记忆智能引擎
+- **工具系统**: 统一工具接口，支持函数装饰器、MCP Hub（多服务聚合）、远程工具 v2、OpenAPI 工具集、技能包、文档路由，以及 Studio shell 命令的操作系统级工作区隔离
+- **记忆系统**: 工作区记忆、短期记忆、压缩刷写、MCP 记忆、知识库组件和持久化会话草稿
 - **LLM 提供方**: 15+ 提供方 — OpenAI、Anthropic、Ollama、Gemini、Kimi/Moonshot、MiniMax、Ark/火山引擎、智谱、千帆、百炼/Dashscope — 支持响应缓存、转录清洗、故障转移路由
 - **通信协议**: A2A 智能体间协议（客户端 / 服务端 / AgentCard / 技能即工具）、MCP 资源访问协议
 - **任务验证**: 基于 Pydantic 的输出解析、自动修复与护栏机制
@@ -63,8 +63,7 @@ Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路�
 
 ### 知识与检索
 - **知识库**: 文档处理流水线，含分块器、读取器、抽取器、图构建器（GraphRAG）
-- **多脑知识库**: 可隔离、按分身 / 会话挂载的「文档脑 + 代码脑」架构，支持多脑聚合检索
-- **代码语义索引**: 多代码库 hybrid（向量 + BM25）检索，与「代码脑」衔接
+- **文档脑知识库**: 可隔离、按分身 / 会话挂载的文档知识库，支持多脑聚合检索
 - **检索系统**: 向量检索、BM25 检索、图检索、混合检索、自动检索、重排序器
 - **嵌入模型**: OpenAI、百炼、SiliconFlow、LiteLLM，支持智能路由
 
@@ -106,9 +105,9 @@ Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路�
 - **真实数据基础设施**: PostgreSQL 默认、MySQL 可选，Redis 用于缓存与分布式限流，JSONL 提供必须成功的追加式审计兜底
 - **运行时边界**: Gateway 是企业合规与模型请求中继，不等同于 Python Agent Runtime；Enterprise Edge Agent 为非默认 MVP，Cluster Runtime 尚未开始
 
-### 安全与沙箱
+### 安全与执行隔离
 - **安全基础组件**: 泄露检测、输入清洗、注入检测、策略引擎、输入验证、工具 Guardrails、权限确认与审计；Studio 主链路组合使用 Hooks、权限与路径防护，尚未统一经过完整 `SafetyLayer`
-- **沙箱**: Docker / Microsandbox / Subprocess / 远端 HTTP 后端；Jupyter 内核管理器、有状态代码解释器、沙箱模板、JSONL 执行审计
+- **命令隔离**: Shell 工具默认由操作系统强制限制为工作区可写；访问工作区之外的位置必须显式申请完全访问并经用户确认
 - **会话持久化**: Studio 默认写入 `~/.agenticx/sessions` 文件树，可选 Redis 会话后端；数据库会话服务属于独立 SDK 模块，并非 Studio 默认路径
 
 ### 可观测性与评估
@@ -141,7 +140,7 @@ Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路�
 pip install agenticx
 
 # 按需安装可选功能
-pip install "agenticx[memory]"      # 记忆系统: mem0, chromadb, qdrant, redis, milvus
+pip install "agenticx[memory]"      # 可选向量存储: chromadb, qdrant, redis, milvus
 pip install "agenticx[document]"    # 文档处理: PDF, Word, PPT 解析
 pip install "agenticx[graph]"       # 知识图谱: networkx, neo4j, 社区检测
 pip install "agenticx[llm]"         # 额外 LLM: anthropic, ollama
@@ -333,14 +332,6 @@ python examples/memory_example.py
 - 长期记忆的存储和检索
 - 上下文记忆管理
 
-**医疗场景应用**
-```bash
-# 医疗记忆场景
-python examples/mem0_healthcare_example.py  
-```
-- 医疗知识的记忆和应用
-- 个性化的患者信息管理
-
 ### 人机协作
 
 **人工干预流程**
@@ -513,7 +504,7 @@ graph TD
             Agent[智能体 Agent]
             Task[任务 Task]
             Tool["工具系统 & MCP Hub"]
-            Memory["记忆 (Mem0 / 短期 / 工作区)"]
+            Memory["记忆 (短期 / 工作区 / MCP)"]
             LLM["LLM 提供方 (OpenAI / Anthropic / Ollama / 10+)"]
         end
         Collaboration["协作 & 委派"]
@@ -531,7 +522,7 @@ graph TD
         end
         subgraph "安全治理"
             Safety["安全层 (泄露检测 / 清洗 / 策略)"]
-            Sandbox["执行沙箱"]
+            Sandbox["工作区命令隔离"]
         end
         subgraph "存储"
             KVStore["键值存储 (SQLite / Redis)"]
@@ -583,15 +574,15 @@ graph TD
 |------|------|----------|
 | **M1** | ✅ | 核心抽象层 — Agent、Task、Tool、Workflow、Event Bus、Component 及 Pydantic 数据契约 |
 | **M2** | ✅ | LLM 服务层 — 15+ 提供方（OpenAI / Anthropic / Ollama / Gemini / Kimi / MiniMax / Ark / 智谱 / 千帆 / 百炼），响应缓存、故障转移路由 |
-| **M3** | ✅ | 工具系统 — 函数装饰器、MCP Hub、远程工具 v2、OpenAPI 工具集、沙箱工具、技能包、文档路由 |
-| **M4** | ✅ | 记忆系统 — 分层记忆（核心 / 情景 / 语义）、Mem0、工作区记忆、短期记忆、记忆衰减、混合搜索、记忆智能引擎 |
+| **M3** | ✅ | 工具系统 — 函数装饰器、MCP Hub、远程工具 v2、OpenAPI 工具集、技能包、文档路由、工作区级 shell 隔离 |
+| **M4** | ✅ | 记忆系统 — 工作区与短期记忆、压缩刷写、MCP 记忆、知识库组件、持久化会话草稿 |
 | **M5** | ✅ | 智能体核心 — Meta-Agent CEO 调度器、think-act 循环、事件驱动架构、自修复、溢出恢复、反思 |
 | **M6** | ✅ | 任务验证 — 基于 Pydantic 的输出解析、自动修复、护栏机制 |
 | **M7** | ✅ | 编排引擎 — 图式工作流引擎 + Flow 系统（装饰器、执行计划），条件路由、并行执行 |
 | **M8** | ✅ | 通信协议 — A2A（客户端 / 服务端 / AgentCard / 技能即工具）、MCP 资源访问、AGUI 协议 |
 | **M9** | ✅ | 可观测性 — 回调系统、实时监控、轨迹分析、Span Tree、WebSocket 流式推送、Prometheus / OpenTelemetry 集成 |
 | **M10** | ✅ | 开发者体验 — CLI（`agx` 含 15+ 命令）、Studio Server（FastAPI REST + SSE）、Near Desktop（Electron + React + Zustand，多窗格） |
-| **M11** | ✅ | 安全基础组件 — 泄露检测、清洗、注入检测、策略、Guardrails、Hooks、权限确认与多后端沙箱；Studio 尚未统一接入完整 `SafetyLayer` 管线 |
+| **M11** | ✅ | 安全基础组件 — 泄露检测、清洗、注入检测、策略、Guardrails、Hooks、权限确认与操作系统级工作区命令隔离；Studio 尚未统一接入完整 `SafetyLayer` 管线 |
 | **M13** | ✅ | 知识与检索 — 知识库（文档处理、分块器、图构建器 GraphRAG、读取器）；检索（向量 / BM25 / 图 / 混合 / 自动）；嵌入（OpenAI / 百炼 / SiliconFlow / LiteLLM） |
 | **M14** | ✅ | 分身与协作 — 分身注册中心、群聊（用户指定 / 智能路由 / 轮流回复）、委派、角色扮演、会话模式、团队管理 |
 | **M15** | ✅ | 评估框架 — EvalSet、LLM 裁判、组合裁判、Span 评估器、轨迹匹配器、Trace 转换器 |
@@ -610,13 +601,13 @@ graph TD
 | 能力 | 状态 | 功能描述 |
 |------|------|----------|
 | **技能自进化** | ✅ | 运行时工具调用观察采集、会话复盘自动建技能、质量门禁 / 使用统计 / 低效淘汰闭环（`learning`） |
-| **多脑知识库** | ✅ | 可隔离 / 可挂载的「文档脑 + 代码脑」、多脑聚合检索（`brain`）+ 多代码库 hybrid 语义索引（`code_index`） |
+| **文档脑知识库** | ✅ | 可隔离 / 可挂载的文档脑与多脑聚合检索（`brain`） |
 | **长程自主编码** | ✅ | 长任务编排（多任务源 / 隔离工作区 / 停滞自愈 / 续跑退避，`longrun`）+ 磁盘级项目状态机（`project_state`） |
 | **IM 渠道接入** | ✅ | 飞书 / 企业微信 / 钉钉 / 个人微信(iLink) 远程指令网关（`gateway`） |
 | **Claude Code 桥接** | ✅ | 受 Token 保护的本机 HTTP/NDJSON 控制面，headless / 可见 TUI 双模（`cc_bridge`） |
 | **扩展生态** | ✅ | AGX Bundle 定义、本地安装卸载、多源注册表聚合搜索（`extensions`） |
 | **可嵌入 ReActAgent** | ✅ | 规范的异步函数调用 ReAct SDK 原语，含类型化事件流、多轮历史、并行工具、可选 循环检测 / 上下文压缩 / Offloader，零 Studio/CLI 耦合（`agents`） |
-| **统一卸载 & MCP 网关** | ✅ | `Offloader` 协议 + `FileOffloader` 将大载荷移出历史，并提供 in-workspace MCP 网关（内化自 AgentScope v2 P0，`core.offload` / `sandbox.mcp_gateway`） |
+| **统一卸载** | ✅ | `Offloader` 协议 + `FileOffloader` 将大载荷移出实时历史（`core.offload`） |
 
 ## 核心优势
 
@@ -715,13 +706,11 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **Lobe Icons** | [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons) | AI 提供商图标设计规范 |
 | **LoongSuite Python Agent** | [alibaba/loongsuite-python-agent](https://github.com/alibaba/loongsuite-python-agent) | OpenTelemetry GenAI 可观测性埋点 |
 | **MAI-UI** | [Tongyi-MAI/MAI-UI](https://github.com/Tongyi-MAI/MAI-UI) | 端云协同与 GUI Grounding |
-| **Microsandbox** | [zerocore-ai/microsandbox](https://github.com/zerocore-ai/microsandbox) | 轻量级沙箱代码执行 |
 | **MobiAgent** | [IPADS-SAI/MobiAgent](https://github.com/IPADS-SAI/MobiAgent) | 移动端多阶段规划 |
 | **MobileAgent** | [X-PLUG/MobileAgent](https://github.com/X-PLUG/MobileAgent) | 多智能体移动 GUI 自动化 |
 | **Model Context Protocol** | [modelcontextprotocol/modelcontextprotocol](https://github.com/modelcontextprotocol/modelcontextprotocol) | LLM 工具/资源标准化协议 |
 | **NVIDIA NemoClaw** | [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw) | GPU 加速智能体插件系统 |
 | **OpenClaw** | [openclaw/openclaw](https://github.com/openclaw/openclaw) | 开放式桌面智能体平台与扩展生态 |
-| **OpenSandbox** | [alibaba/OpenSandbox](https://github.com/alibaba/OpenSandbox) | 容器化代码沙箱 |
 | **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust 高性能安全智能体 Shell |
 | **OpenSkills** | [numman-ali/openskills](https://github.com/numman-ali/openskills) | Skill 注册中心与发现机制 |
 | **OWL** | [camel-ai/owl](https://github.com/camel-ai/owl) | 具身多智能体协作 |

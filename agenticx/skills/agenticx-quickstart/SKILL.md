@@ -24,7 +24,7 @@ Optional extras — install only what you need:
 
 | Extra | What it adds | Command |
 |-------|-------------|---------|
-| `memory` | Mem0, ChromaDB, Qdrant | `pip install "agenticx[memory]"` |
+| `memory` | Optional vector-store adapters | `pip install "agenticx[memory]"` |
 | `document` | PDF/PPT/Word parsing | `pip install "agenticx[document]"` |
 | `server` | API server (`agx serve`) | `pip install "agenticx[server]"` |
 | `volcengine` | Volcengine AgentKit | `pip install "agenticx[volcengine]"` |

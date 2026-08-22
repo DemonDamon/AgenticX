@@ -18,5 +18,5 @@ export function brainScopeBadge(scope: string): { label: string; className: stri
 }
 
 export function brainTypeShort(type: string): string {
-  return type === "code" ? "代码" : "文档";
+  return type === "docs" ? "文档" : type;
 }

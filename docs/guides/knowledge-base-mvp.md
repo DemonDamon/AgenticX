@@ -4,11 +4,10 @@
 > Plan-File: [`.cursor/plans/2026-04-14-machi-kb-stage1-local-mvp.plan.md`](../../.cursor/plans/2026-04-14-machi-kb-stage1-local-mvp.plan.md)
 > 产品规划：[`docs/plans/2026-04-14-machi-knowledge-base-product-plan.md`](../plans/2026-04-14-machi-knowledge-base-product-plan.md) (v2.1)
 
-Machi 桌面的「知识库」面板管理多个独立的 **知识脑（Brain）**：
-文档脑（docs）用于 `knowledge_search`，代码脑（code）用于 `code_search`。
-每个脑有独立配置、资料与索引目录；分身可在设置里挂载 0–N 个脑。
+Machi 桌面的「知识库」面板管理多个独立的 **文档脑（Brain）**，
+对话通过 `knowledge_search` 检索其中的资料。
+每个脑有独立配置、资料与索引目录；分身可在设置里挂载 0–N 个文档脑。
 升级用户会自动得到默认文档脑 `default_docs`（沿用原 KB 数据路径，零拷贝迁移）。
-架构说明见 [`docs/architecture/brains.md`](../architecture/brains.md)。
 
 ---
 

@@ -13,7 +13,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from agenticx.brain.manager import BrainManager
 from agenticx.brain.registry import BrainError, BrainRegistry
 from agenticx.brain.runtime_docs import DocsBrainRuntime
-from agenticx.brain.search import search_code_brains, search_docs_brains
+from agenticx.brain.search import search_docs_brains
 from agenticx.brain.types import BrainScope, BrainType
 from agenticx.brain.wiki_compiler import WikiCompiler
 from agenticx.brain.wiki_ops import (
@@ -80,7 +80,10 @@ def register_brain_routes(app: FastAPI) -> None:
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="expected JSON object")
         name = str(payload.get("name") or "新知识脑").strip()
-        btype = BrainType(str(payload.get("type") or "docs"))
+        requested_type = str(payload.get("type") or "docs")
+        if requested_type != BrainType.DOCS.value:
+            raise HTTPException(status_code=400, detail="only docs brains are supported")
+        btype = BrainType.DOCS
         scope_raw = str(payload.get("scope") or "global")
         scope = BrainScope(scope_raw)
         owner = payload.get("owner_avatar_id")
@@ -366,42 +369,20 @@ def register_brain_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=400, detail="query required")
         top_k = int(payload.get("top_k") or 5)
         top_k = max(1, min(20, top_k))
-        brain = BrainRegistry.instance().get(brain_id)
-        if brain is None:
-            raise HTTPException(status_code=404, detail="not found")
         retrieval_mode = str(payload.get("retrieval_mode") or "").strip() or None
-        if brain.type == BrainType.DOCS:
-            rt = _require_docs_brain(brain_id)
-            # Run the blocking search in a worker thread. Embedding providers
-            # (Bailian / SiliconFlow) call ``asyncio.run()`` inside their sync
-            # ``embed()``; invoking it directly from this async route would hit
-            # "asyncio.run() cannot be called from a running event loop" and the
-            # uncaught 500 would skip CORS headers, surfacing as a bare
-            # "Failed to fetch" in the desktop renderer.
-            try:
-                hits = await asyncio.to_thread(
-                    rt.search, query, top_k=top_k, retrieval_mode=retrieval_mode
-                )
-            except KBError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except Exception as exc:
-                logger.exception("brain search failed")
-                raise HTTPException(status_code=500, detail=f"search failed: {exc}") from exc
-            return {"ok": True, "hits": [h.to_dict() for h in hits], "used_top_k": len(hits)}
-        from agenticx.brain.runtime_code import CodeBrainRuntime
-
-        rt_code = BrainManager.instance().get_runtime(brain_id)
-        if not isinstance(rt_code, CodeBrainRuntime):
-            raise HTTPException(status_code=500, detail="runtime mismatch")
+        rt = _require_docs_brain(brain_id)
+        # Run the blocking search in a worker thread. Embedding providers may
+        # use their own event loop and must not run directly in this route.
         try:
-            hits = await asyncio.to_thread(rt_code.search, query, top_k=top_k)
+            hits = await asyncio.to_thread(
+                rt.search, query, top_k=top_k, retrieval_mode=retrieval_mode
+            )
+        except KBError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
-            logger.exception("code brain search failed")
+            logger.exception("brain search failed")
             raise HTTPException(status_code=500, detail=f"search failed: {exc}") from exc
-        from agenticx.code_index.format import format_hits_for_tool
-
-        formatted = format_hits_for_tool(hits)
-        return {"ok": True, "hits": formatted, "used_top_k": len(formatted)}
+        return {"ok": True, "hits": [h.to_dict() for h in hits], "used_top_k": len(hits)}
 
     @app.get("/api/brains/{brain_id}/wiki/pages")
     async def brain_wiki_pages(brain_id: str) -> Dict[str, Any]:
@@ -509,33 +490,6 @@ def register_brain_routes(app: FastAPI) -> None:
         report = await asyncio.to_thread(run_brain_maintenance, rt)
         return report
 
-    @app.post("/api/brains/{brain_id}/index")
-    async def index_code_brain(brain_id: str) -> Dict[str, Any]:
-        brain = BrainRegistry.instance().get(brain_id)
-        if brain is None or brain.type != BrainType.CODE:
-            raise HTTPException(status_code=400, detail="not a code brain")
-        from agenticx.brain.runtime_code import CodeBrainRuntime
-
-        rt = BrainManager.instance().get_runtime(brain_id)
-        if not isinstance(rt, CodeBrainRuntime):
-            raise HTTPException(status_code=500, detail="runtime mismatch")
-        try:
-            return {"ok": True, **rt.create_index()}
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.get("/api/brains/{brain_id}/index")
-    async def code_brain_index_status(brain_id: str) -> Dict[str, Any]:
-        brain = BrainRegistry.instance().get(brain_id)
-        if brain is None or brain.type != BrainType.CODE:
-            raise HTTPException(status_code=400, detail="not a code brain")
-        from agenticx.brain.runtime_code import CodeBrainRuntime
-
-        rt = BrainManager.instance().get_runtime(brain_id)
-        if not isinstance(rt, CodeBrainRuntime):
-            raise HTTPException(status_code=500, detail="runtime mismatch")
-        return {"ok": True, "status": rt.status()}
-
     @app.post("/api/search/knowledge")
     async def aggregate_knowledge_search(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(payload, dict):
@@ -550,21 +504,4 @@ def register_brain_routes(app: FastAPI) -> None:
             top_k=top_k,
             avatar_id=payload.get("avatar_id"),
             brain_id=payload.get("brain_id"),
-        )
-
-    @app.post("/api/search/code")
-    async def aggregate_code_search(payload: Dict[str, Any]) -> Dict[str, Any]:
-        if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="expected JSON object")
-        query = str(payload.get("query") or "").strip()
-        if not query:
-            raise HTTPException(status_code=400, detail="query required")
-        top_k = max(1, min(50, int(payload.get("top_k") or 10)))
-        return await asyncio.to_thread(
-            search_code_brains,
-            query=query,
-            top_k=top_k,
-            avatar_id=payload.get("avatar_id"),
-            brain_id=payload.get("brain_id"),
-            strategy=payload.get("strategy"),
         )

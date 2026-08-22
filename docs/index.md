@@ -40,10 +40,10 @@ Production-ready execution engine based on 12-Factor Agents methodology, with Me
 Graph-based workflow engine + Flow system with decorators, execution plans, conditional routing, and parallel execution.
 
 ### 🛠️ Tool System
-Unified tool interface with function decorators, MCP Hub (multi-server aggregation), remote tools v2, OpenAPI toolset, sandbox tools, skill bundles, and document routers.
+Unified tool interface with function decorators, MCP Hub (multi-server aggregation), remote tools v2, OpenAPI toolset, skill bundles, document routers, and OS-enforced workspace isolation for Studio shell commands.
 
 ### 🧠 Memory System
-Hierarchical memory (core / episodic / semantic), Mem0 deep integration, workspace memory, short-term memory, memory decay, hybrid search, compaction flush, MCP memory, and memory intelligence engine.
+Workspace memory, short-term memory, compaction flush, MCP memory, knowledge-base components, and persistent session scratchpads.
 
 ### 🔌 LLM Providers
 15+ providers — OpenAI, Anthropic, Ollama, Gemini, Kimi/Moonshot, MiniMax, Ark/VolcEngine, Zhipu, Qianfan, Bailian/Dashscope — with response caching, transcript sanitizer, and failover routing.
@@ -55,7 +55,7 @@ Avatar registry (CRUD), group chat with multiple routing strategies (user-direct
 Document processing pipeline with chunkers, readers, extractors, and graph builders (GraphRAG). Vector/BM25/graph/hybrid retrievers, auto-retriever, and reranker.
 
 ### 🔒 Enterprise Security
-Safety layer with leak detection, input sanitizer, injection detector, policy engine, sandbox (Docker / Microsandbox / Subprocess), audit logging.
+Safety layer with leak detection, input sanitizer, injection detector, policy engine, command approval, OS-enforced workspace-write isolation, and audit logging.
 
 ### 📊 Observability & Evaluation
 Complete callback system, real-time metrics, Prometheus/OpenTelemetry integration, EvalSet-based evaluation, LLM judge, and trace analysis.

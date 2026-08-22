@@ -20,7 +20,6 @@ import type { KBConfig, KBStats } from "../knowledge/types";
 import { defaultKBConfig, normalizeKbConfig } from "../knowledge/types";
 import { BrainScopePanel, type BrainScopePanelHandle } from "./BrainScopePanel";
 import { brainScopeBadge, brainTypeShort } from "./brainScopeUi";
-import { CodeIndexBrainPanel, type CodeIndexBrainPanelHandle } from "./CodeIndexBrainPanel";
 import { SettingsSwitch } from "../SettingsSwitch";
 import { BackendDepsPanel } from "../knowledge/BackendDepsPanel";
 import {
@@ -59,20 +58,16 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
   const [detailTab, setDetailTab] = useState<DetailTab>("config");
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
-  const [newType, setNewType] = useState<"docs" | "code">("docs");
   const [newScope, setNewScope] = useState<"global" | "private">("global");
   const [newOwner, setNewOwner] = useState("");
 
   const [kbConfig, setKbConfig] = useState<KBConfig>(defaultKBConfig());
   const [kbDraft, setKbDraft] = useState<KBConfig>(defaultKBConfig());
   const [kbStats, setKbStats] = useState<KBStats | null>(null);
-  const [codeEnabledDraft, setCodeEnabledDraft] = useState(true);
   const [scopeDirty, setScopeDirty] = useState(false);
-  const [codeDirty, setCodeDirty] = useState(false);
   const [brainSaving, setBrainSaving] = useState(false);
   const [brainSaveMsg, setBrainSaveMsg] = useState<string | null>(null);
   const scopePanelRef = useRef<BrainScopePanelHandle>(null);
-  const codePanelRef = useRef<CodeIndexBrainPanelHandle>(null);
   const globalKbRetrievalRef = useRef<KbGlobalChatRetrievalHandle>(null);
   const [globalKbRetrievalDirty, setGlobalKbRetrievalDirty] = useState(false);
   /** Guards against stale readKbConfig responses overwriting a just-saved draft. */
@@ -156,7 +151,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
   const kbDirty =
     selected?.type === "docs" && JSON.stringify(kbConfig) !== JSON.stringify(kbDraft);
-  const brainDirty = kbDirty || scopeDirty || codeDirty || globalKbRetrievalDirty;
+  const brainDirty = kbDirty || scopeDirty || globalKbRetrievalDirty;
 
   const saveSelectedBrain = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
     if (!brainDirty) return { ok: true };
@@ -184,13 +179,6 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
           setError(`保存知识脑配置失败：${msg}`);
           return { ok: false, error: msg };
         }
-      }
-    }
-
-    if (selected.type === "code") {
-      const codeRes = await codePanelRef.current?.flushIfDirty();
-      if (codeRes && !codeRes.ok) {
-        return { ok: false, error: codeRes.error ?? "代码库配置保存失败" };
       }
     }
 
@@ -235,24 +223,16 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
     if (selected?.type === "docs") {
       applyKbDraft(kbConfig);
     }
-    if (selected?.type === "code") {
-      codePanelRef.current?.discardChanges();
-      const cfg = (selected.config || {}) as Record<string, unknown>;
-      setCodeEnabledDraft(Boolean(cfg.enabled ?? true));
-    }
   };
 
   const handleCreate = async () => {
     try {
       const b = await brainsApi.create({
         name: newName.trim() || "新知识脑",
-        type: newType,
+        type: "docs",
         scope: newScope,
         owner_avatar_id: newScope === "private" ? newOwner.trim() : undefined,
-        config:
-          newType === "code"
-            ? { codebase_path: "", enabled: true }
-            : { enabled: true },
+        config: { enabled: true },
       });
       setShowCreate(false);
       setNewName("");
@@ -370,13 +350,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                       <span className="ml-2 text-xs font-normal text-text-muted">系统默认</span>
                     ) : null}
                   </h3>
-                  {selected.type === "code" ? (
-                    <SettingsSwitch
-                      checked={codeEnabledDraft}
-                      onChange={setCodeEnabledDraft}
-                      aria-label="启用此代码脑"
-                    />
-                  ) : selected.type === "docs" ? (
+                  {selected.type === "docs" ? (
                     <SettingsSwitch
                       checked={kbDraft.enabled}
                       onChange={(enabled) => applyKbDraft((prev) => ({ ...prev, enabled }))}
@@ -440,17 +414,6 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                   </>
                 ) : null}
 
-                {selected.type === "code" ? (
-                  <CodeIndexBrainPanel
-                    ref={codePanelRef}
-                    brain={selected}
-                    brainsApi={brainsApi}
-                    onUpdated={reloadBrains}
-                    enabled={codeEnabledDraft}
-                    onEnabledChange={setCodeEnabledDraft}
-                    onDirtyChange={setCodeDirty}
-                  />
-                ) : null}
               </div>
 
               <div className="shrink-0 border-t border-[var(--border-muted)] px-4 py-3">
@@ -532,17 +495,6 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="例如：产品文档库"
               />
-            </label>
-            <label className="mb-2 block text-xs text-text-subtle">
-              类型
-              <select
-                className="mt-1 w-full rounded border border-border bg-surface-panel px-2 py-1.5 text-sm"
-                value={newType}
-                onChange={(e) => setNewType(e.target.value as "docs" | "code")}
-              >
-                <option value="docs">文档库（PDF/Office 等）</option>
-                <option value="code">代码库（语义索引）</option>
-              </select>
             </label>
             <label className="mb-2 block text-xs text-text-subtle">
               范围

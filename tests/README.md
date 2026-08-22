@@ -225,7 +225,7 @@ python tests/run_llm_tests.py
 - ✅ **函数工具测试** - `FunctionTool` 和 `@tool` 装饰器
 - ✅ **工具执行器测试** - `ToolExecutor` 执行引擎
 - ✅ **凭据存储测试** - `CredentialStore` 加密存储
-- ✅ **内置工具测试** - `FileTool`, `CodeInterpreterTool` 等
+- ✅ **内置工具测试** - `FileTool`, `WebSearchTool` 等
 - ✅ **综合工作流测试** - 完整的工具使用流程
 
 **运行方式：**
@@ -499,20 +499,17 @@ python tests/test_vlm_bailian.py
 pytest tests/test_embeddings.py -v
 ```
 
-### 15. `test_memory.py` & `test_mem0_memory.py` - 记忆系统测试
-这些是 AgenticX 记忆系统的测试脚本，验证不同的记忆存储和检索机制。
+### 15. `test_memory.py` - 记忆系统测试
+这是 AgenticX 记忆系统的测试脚本，验证当前接线的存储和检索机制。
 
 **测试功能：**
 - ✅ 短期记忆管理
-- ✅ 长期记忆存储
 - ✅ 记忆检索和更新
-- ✅ Mem0 集成测试
 
 **运行方式：**
 ```bash
 # 运行记忆系统测试
 pytest tests/test_memory.py -v
-pytest tests/test_mem0_memory.py -v
 ```
 
 ### 16. 模块化测试套件 (M系列)
@@ -571,17 +568,11 @@ pytest tests/test_m15_retrieval.py -v
 - ✅ 审批流程
 - ✅ 交互式决策
 
-#### `test_hierarchical_memory.py` - 分层记忆测试
-- ✅ 多层次记忆结构
-- ✅ 记忆层级管理
-- ✅ 智能记忆检索
-
 **运行方式：**
 ```bash
 # 运行高级功能测试
 python tests/test_remote_tools_complete.py
 python tests/test_human_in_the_loop.py
-python tests/test_hierarchical_memory.py
 ```
 
 ## 测试验证的 PRD 需求
@@ -626,7 +617,7 @@ python tests/test_hierarchical_memory.py
 - Agent 生命周期管理
 - Agent 状态转换和持久化
 - Agent 间通信和协作
-- 记忆智能化集成
+- 会话记忆集成
 
 ### ✅ M6: 任务验证系统
 - 任务定义和验证
@@ -659,11 +650,9 @@ python tests/test_hierarchical_memory.py
 - 智能检索策略
 
 ### ✅ 记忆系统 (`agenticx.memory`)
-- 短期和长期记忆管理
-- 分层记忆结构
+- 短期记忆与会话持久化
 - 记忆检索和更新
-- Mem0 集成支持
-- 记忆智能化
+- MCP 记忆接口
 
 ### ✅ 嵌入向量系统 (`agenticx.embeddings`)
 - 多种嵌入模型支持
@@ -718,7 +707,7 @@ pytest tests/test_tools.py tests/test_tool_paradigms.py -v
 pytest tests/test_llms.py tests/test_provider_bailian.py -v
 
 # 测试记忆系统
-pytest tests/test_memory.py tests/test_mem0_memory.py -v
+pytest tests/test_memory.py -v
 ```
 
 #### 4. 交互式测试和演示

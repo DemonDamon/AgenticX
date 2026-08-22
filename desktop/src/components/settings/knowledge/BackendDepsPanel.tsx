@@ -28,7 +28,7 @@ const PHASE_LABEL: Record<RepairPhase, string> = {
 };
 
 /**
- * Diagnoses backend Python deps (document readers, code-index numpy, network proxy) and
+ * Diagnoses backend Python deps (document readers and network proxy) and
  * offers a one-click repair that installs agenticx[desktop-runtime] into
  * ~/.agenticx/.venv. Only renders a banner when there is a problem.
  */

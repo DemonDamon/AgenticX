@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import threading
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 from .registry import BrainRegistry
-from .runtime_code import CodeBrainRuntime
 from .runtime_docs import DocsBrainRuntime
-from .types import Brain, BrainType
+from .types import Brain
 
-BrainRuntime = Union[DocsBrainRuntime, CodeBrainRuntime]
+BrainRuntime = DocsBrainRuntime
 
 
 class BrainManager:
@@ -44,10 +43,7 @@ class BrainManager:
             brain = BrainRegistry.instance().get(brain_id)
             if brain is None:
                 raise KeyError(f"unknown brain_id: {brain_id}")
-            if brain.type == BrainType.DOCS:
-                rt: BrainRuntime = DocsBrainRuntime(brain)
-            else:
-                rt = CodeBrainRuntime(brain)
+            rt = DocsBrainRuntime(brain)
             self._runtimes[brain_id] = rt
             return rt
 

@@ -2,9 +2,9 @@
 
 ## Overview
 
-Agents need stable identity, recall of past work, and a bounded context window. AgenticX combines **file-backed workspace memory**, a **session scratchpad**, **automatic fact extraction** after each turn, **hybrid retrieval** into the Meta-Agent system prompt, optional **Mem0** backends, and **LLM-assisted context compaction** on long threads.
+Agents need stable identity, recall of past work, and a bounded context window. AgenticX combines **file-backed workspace memory**, a **session scratchpad**, **automatic fact extraction** after each turn, **workspace retrieval** into the Meta-Agent system prompt, and **LLM-assisted context compaction** on long threads.
 
-Together these mechanisms approximate a layered memory stack: what must always be true (identity), what happened recently (episodes), what generalizes (semantics), what the model sees this turn (working set), what survives across sessions (long-term files and stores), and what is scoped to the user’s workspace on disk.
+These are concrete runtime surfaces rather than a separate cognitive-layer framework. Each surface has an explicit persistence location and injection point.
 
 ```mermaid
 flowchart TB
@@ -16,27 +16,24 @@ flowchart TB
   subgraph persist["Durable stores"]
     WS[~/.agenticx/workspace markdown]
     IDX[~/.agenticx/memory/main.sqlite index]
-    MEM0[Optional Mem0 / vector DB]
+    SESSION[Session SQLite scratchpad]
   end
   WS --> IDX
   IDX --> SYS
-  MEM0 -.-> SYS
+  SESSION --> SYS
   HIST --> COMP
   COMP --> prompt
 ```
 
-## Memory hierarchy (six-layer model)
+## Connected memory surfaces
 
-The table maps a classic cognitive-style hierarchy to concrete AgenticX surfaces. Layers are **conceptual**; several features overlap in implementation.
-
-| Layer | Role | AgenticX realization |
-|-------|------|----------------------|
-| **Core memory** | Stable role, name, non-negotiable facts | `IDENTITY.md`, `SOUL.md`, avatar/session system prompts, Meta-Agent identity blocks |
-| **Episodic memory** | What was said and done in conversations | `chat_history` / persisted `messages.json`, tool traces in history |
-| **Semantic memory** | Reusable knowledge, not tied to one chat | Curated `MEMORY.md`, optional Mem0 / knowledge components, indexed chunks in `WorkspaceMemoryStore` |
-| **Short-term / working memory** | Scratch space for the current task | Per-session `scratchpad` dict, `scratchpad_write` / `scratchpad_read` tools, recent message window |
-| **Long-term memory** | Cross-session persistence | `MEMORY.md` (manual + auto-append), SQLite session store for scratchpad, optional Mem0 |
-| **Workspace memory** | Project- and user-scoped files under `~/.agenticx/workspace` | `USER.md`, daily `memory/<YYYY-MM-DD>.md`, directory layout per avatar/project |
+| Surface | Role | Persistence / injection |
+|---------|------|-------------------------|
+| **Workspace markdown** | Stable profile and curated notes | `IDENTITY.md`, `SOUL.md`, `USER.md`, and `MEMORY.md`, indexed by `WorkspaceMemoryStore` |
+| **Daily facts** | Deterministic facts extracted from recent turns | `memory/<YYYY-MM-DD>.md`, appended by `MemoryHook` |
+| **Session scratchpad** | Task-local notes and sub-agent results | SQLite-backed `StudioSession.scratchpad`, exposed through scratchpad tools |
+| **Live context** | Recent messages plus an optional compacted prefix | Built by `AgentRuntime` for each model request |
+| **Document knowledge** | User-managed reference documents | Mounted document brains queried through `knowledge_search` |
 
 !!! note "Indexing vs raw files"
     Hybrid search (`WorkspaceMemoryStore`) indexes `MEMORY.md`, `IDENTITY.md`, `USER.md`, `SOUL.md`, and all `memory/*.md` under the workspace directory. Keeping these files concise improves recall quality.
@@ -107,19 +104,6 @@ If there are no user messages or no hits, the section is omitted.
 
 !!! tip "Recall quality"
     Run or schedule `WorkspaceMemoryStore.index_workspace_sync(workspace_dir)` after large edits to markdown so FTS and hybrid ranking see fresh content.
-
-## Mem0 integration
-
-Mem0 is **optional**. Install with the extra that pulls memory dependencies, for example:
-
-```bash
-pip install "agenticx[memory]"
-```
-
-At runtime, `agenticx.memory` exposes `Mem0` / async variants when dependencies are present; the vendored integration under `agenticx/integrations/mem0/` supports multiple vector stores and configs. Use Mem0 when you want **managed long-term semantic memory** (add/search APIs, hosted or local) instead of or alongside file-based `MEMORY.md`.
-
-!!! note "Separation from MemoryHook"
-    `MemoryHook` writes markdown under the workspace. Mem0 is a separate data plane; wiring both is valid if you want file logs plus vector search.
 
 ## Session scratchpad
 

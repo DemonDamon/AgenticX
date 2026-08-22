@@ -19,7 +19,6 @@ from .types import (
     BrainScope,
     BrainStats,
     BrainType,
-    CodeBrainConfig,
     new_brain_id,
     utc_now_iso,
 )
@@ -298,16 +297,12 @@ class BrainRegistry:
         if storage.exists():
             raise BrainError(f"storage already exists: {storage}")
 
-        if brain_type == BrainType.DOCS:
-            cfg = KBConfig.from_dict(config)
-            vs_path = storage / "chroma"
-            vs_path.mkdir(parents=True, exist_ok=True)
-            cfg.vector_store.path = str(vs_path)
-            cfg_dict = cfg.to_dict()
-            (storage / "kb_data").mkdir(parents=True, exist_ok=True)
-        else:
-            cfg_obj = CodeBrainConfig.from_dict(config)
-            cfg_dict = cfg_obj.to_dict()
+        cfg = KBConfig.from_dict(config)
+        vs_path = storage / "chroma"
+        vs_path.mkdir(parents=True, exist_ok=True)
+        cfg.vector_store.path = str(vs_path)
+        cfg_dict = cfg.to_dict()
+        (storage / "kb_data").mkdir(parents=True, exist_ok=True)
 
         now = utc_now_iso()
         brain = Brain(
@@ -435,12 +430,8 @@ class BrainRegistry:
             elif key == "enabled":
                 brain.enabled = bool(value)
             elif key == "config" and isinstance(value, dict):
-                if brain.type == BrainType.DOCS:
-                    merged = {**brain.config, **value}
-                    brain.config = KBConfig.from_dict(merged).to_dict()
-                else:
-                    merged = {**brain.config, **value}
-                    brain.config = CodeBrainConfig.from_dict(merged).to_dict()
+                merged = {**brain.config, **value}
+                brain.config = KBConfig.from_dict(merged).to_dict()
             elif key == "stats" and isinstance(value, dict):
                 brain.stats = BrainStats.from_dict({**brain.stats.to_dict(), **value})
         brain.updated_at = utc_now_iso()

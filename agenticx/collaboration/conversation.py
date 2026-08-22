@@ -9,13 +9,12 @@ Conversation Manager（对话管理器）
 
 import time
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field  # type: ignore
 
 from ..core.event import EventLog
 from ..memory.short_term import ShortTermMemory
-from ..memory.episodic_memory import EpisodicMemory
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +39,14 @@ class ConversationManager:
     def __init__(
         self,
         event_log: Optional[EventLog] = None,
-        memory: Optional[Union[ShortTermMemory, EpisodicMemory]] = None,
+        memory: Optional[ShortTermMemory] = None,
         max_history_length: int = 100000,  # 最大历史字符数
         max_entries: int = 100,  # 最大条目数
     ):
         """
         Args:
             event_log: EventLog 实例（用于对话历史持久化）
-            memory: Memory 实例（ShortTermMemory 或 EpisodicMemory）
+            memory: ShortTermMemory 实例
             max_history_length: 最大历史字符数
             max_entries: 最大条目数
         """

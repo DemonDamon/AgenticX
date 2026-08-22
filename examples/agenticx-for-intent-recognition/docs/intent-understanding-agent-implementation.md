@@ -756,7 +756,6 @@ def setup_logging(config: Dict[str, Any]):
 ```python
 from agenticx.core.agent import Agent
 from agenticx.core.workflow import Workflow
-from agenticx.memory import HierarchicalMemoryManager
 from agenticx.tools import ToolExecutor
 from agenticx.observability import MonitoringCallbackHandler
 from typing import Dict, List, Any, Optional
@@ -772,10 +771,10 @@ class IntentUnderstandingAgent(Agent):
         super().__init__(name="IntentUnderstandingAgent", config=config)
         
         # 初始化AgenticX核心组件
-        self.memory_manager = HierarchicalMemoryManager(
-            tenant_id=config.get("tenant_id", "default"),
-            config=config.get("memory_config", {})
-        )
+        # 业务交互记忆由应用层注入；AgenticX 不再提供旧版分层记忆管理器。
+        self.memory_manager = config.get("memory_manager")
+        if self.memory_manager is None:
+            raise ValueError("memory_manager is required")
         
         self.tool_executor = ToolExecutor(
             config=config.get("tool_config", {})
@@ -1466,4 +1465,3 @@ class AgenticXEnhancementEngine(Agent):
 
 ```
 ```
-
