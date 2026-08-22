@@ -6,14 +6,20 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Optional, Tuple
+
+_log = logging.getLogger(__name__)
 
 FALLBACK_MODELS: list[dict[str, str]] = [
     {"provider": "deepseek", "model": "deepseek-chat", "label": "DeepSeek / deepseek-chat"},
     {"provider": "zhipu", "model": "glm-4-flash", "label": "智谱 / glm-4-flash"},
     {"provider": "openai", "model": "gpt-4o-mini", "label": "OpenAI / gpt-4o-mini"},
 ]
+
+#: Desktop 把企业下发的模型挂在这一个 provider 下，模型名是 ``<provider>/<model>``。
+ENTERPRISE_PROVIDER = "enterprise"
 
 SCRATCH_TIMEOUT_STREAK_KEY = "_llm_provider_timeout_streak"
 SCRATCH_FALLBACK_APPLIED_KEY = "_llm_fallback_applied"
@@ -56,12 +62,64 @@ def reset_provider_timeout_streak(session: Any) -> None:
     sp.pop(SCRATCH_TIMEOUT_STREAK_KEY, None)
 
 
+def fallback_forbidden_reason(session: Any) -> str:
+    """Why this session must never be silently moved to another provider.
+
+    ``FALLBACK_MODELS`` 里全是公网厂商。对两类会话来说，超时换家不是降级，
+    而是把对话搬出了它被要求待着的地方：
+
+    - 附件路由锁住的会话：文档正因为要留在私有部署才把模型钉住。
+    - 企业托管会话：走哪个模型是管理员的决定，不是超时兜底能改的。
+
+    探测本身出错时按「禁止兜底」处理：最坏结果只是把原始错误照实报上去。
+    """
+    try:
+        from agenticx.studio.attachment_routing import session_locked_target
+
+        if session_locked_target(session) is not None:
+            return "attachment-routing lock"
+    except Exception:
+        return "containment probe failed"
+    try:
+        if _enterprise_managed_in_global_config(getattr(session, "provider_name", None)):
+            return "enterprise-managed provider"
+    except Exception:
+        return "containment probe failed"
+    return ""
+
+
+def _enterprise_managed_in_global_config(provider_name: Any) -> bool:
+    """只读全局用户配置，**不走 ``ConfigManager.get_value()``**。"""
+    provider = str(provider_name or "").strip()
+    if not provider:
+        return False
+    if provider == ENTERPRISE_PROVIDER:
+        return True
+    from agenticx.cli.config_manager import ConfigManager
+
+    global_config = ConfigManager._load_yaml(ConfigManager.GLOBAL_CONFIG_PATH)
+    providers = (global_config or {}).get("providers")
+    if not isinstance(providers, dict):
+        return False
+    entry = providers.get(provider)
+    return isinstance(entry, dict) and entry.get("managed") is True
+
+
 def maybe_apply_provider_fallback(session: Any) -> Tuple[bool, str]:
     """After consecutive timeouts, switch session to a fast fallback model.
 
     Returns (applied, human_message).
     """
     if not llm_fallback_enabled():
+        return False, ""
+    forbidden = fallback_forbidden_reason(session)
+    if forbidden:
+        _log.warning(
+            "provider fallback refused (%s): keeping provider=%s model=%s",
+            forbidden,
+            getattr(session, "provider_name", ""),
+            getattr(session, "model_name", ""),
+        )
         return False, ""
     if bool(_scratchpad(session).get(SCRATCH_FALLBACK_APPLIED_KEY)):
         return False, ""

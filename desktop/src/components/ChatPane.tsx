@@ -89,6 +89,16 @@ import {
   isEphemeralStopErrorText,
   isInterruptedAssistantPlaceholder,
 } from "../utils/noisy-chat-messages";
+import {
+  ATTACHMENT_ROUTING_OFF,
+  addressForSession,
+  decideAttachmentRouting,
+  dismissRoutingNotice,
+  modelPickerLock,
+  routingLockReason,
+  routingNoticeDismissed,
+  type RoutingModelRef,
+} from "../utils/attachment-routing";
 import { isStreamToolLabelOnlyText, shouldSkipFormattedToolResultFallback } from "../utils/orphan-formatted-tool";
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import {
@@ -1198,6 +1208,7 @@ function clampFixedPopoverTop(top: number, height: number, margin = PANE_MODEL_P
 
 function PaneModelPicker({ paneId }: { paneId: string }) {
   const settings = useAppStore((s) => s.settings);
+  const pickerLock = modelPickerLock(useAppStore((s) => s.attachmentRoutingLock));
   const setPaneModel = useAppStore((s) => s.setPaneModel);
   const setPaneReasoningEffort = useAppStore((s) => s.setPaneReasoningEffort);
   const setPaneThinkingEnabled = useAppStore((s) => s.setPaneThinkingEnabled);
@@ -1456,10 +1467,18 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
       <button
         type="button"
         className={`group flex h-8 min-h-8 max-w-full min-w-0 items-center gap-2 rounded-lg px-1.5 text-[13px] font-medium leading-none transition-colors focus:outline-none focus-visible:bg-surface-hover ${
-          open ? "bg-surface-hover" : "hover:bg-surface-hover"
+          pickerLock.disabled
+            ? "cursor-not-allowed opacity-60"
+            : open
+              ? "bg-surface-hover"
+              : "hover:bg-surface-hover"
         }`}
-        onClick={() => setOpen((v) => !v)}
-        title={currentLabel}
+        onClick={() => {
+          if (pickerLock.disabled) return;
+          setOpen((v) => !v);
+        }}
+        disabled={pickerLock.disabled}
+        title={pickerLock.reason || currentLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
@@ -2832,6 +2851,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const chatStyle = useAppStore((s) => s.chatStyle);
   const userNickname = useAppStore((s) => s.userNickname);
   const userPreference = useAppStore((s) => s.userPreference);
+  const attachmentRoutingPolicy =
+    useAppStore((s) => s.attachmentRouting) ?? ATTACHMENT_ROUTING_OFF;
+  const attachmentRoutingLock = useAppStore((s) => s.attachmentRoutingLock);
+  const setAttachmentRoutingLock = useAppStore((s) => s.setAttachmentRoutingLock);
+  const [routingNotice, setRoutingNotice] = useState<RoutingModelRef | null>(null);
   const userBubbleLabel = useMemo(() => userNickname.trim() || "我", [userNickname]);
   const groupChatUserLabel = useMemo(() => userNickname.trim() || "用户", [userNickname]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
@@ -9650,6 +9674,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         body.meta_leader_display_name = metaLeaderDisplayName;
         body.user_display_name = groupChatUserLabel;
       }
+      const routedAttachmentNames: Record<string, string> = {};
       const outboundUserNickname = isGroupPane ? groupChatUserLabel : userBubbleLabel;
       if (outboundUserNickname && outboundUserNickname !== "我" && outboundUserNickname !== "用户") {
         body.user_nickname = outboundUserNickname;
@@ -9679,7 +9704,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (imageInputs.length > 0) {
           body.image_inputs = imageInputs;
         }
-        const contextFilePayload: Record<string, string> = {};
+        const contextFilePayload: Record<string, string> = routedAttachmentNames;
         for (const file of sendAttachments) {
           const key = buildContextFileKeyFromAttachment(file);
           if (!key) continue;
@@ -9712,6 +9737,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (Object.keys(contextFilePayload).length > 0) {
           body.context_files = contextFilePayload;
         }
+      }
+      try {
+        const routingDecision = decideAttachmentRouting({
+          policy: attachmentRoutingPolicy,
+          filenames: Object.keys(routedAttachmentNames),
+          lockedTarget: attachmentRoutingLock,
+        });
+        if (routingDecision.action === "lock") {
+          const addressed = addressForSession(
+            { provider: String(body.provider ?? "") },
+            routingDecision.target,
+          );
+          body.provider = addressed.provider;
+          body.model = addressed.model;
+          delete (body as Record<string, unknown>).context_window;
+          if (!attachmentRoutingLock) setAttachmentRoutingLock(routingDecision.target);
+          if (routingDecision.announce && !routingNoticeDismissed()) {
+            setRoutingNotice(routingDecision.target);
+          }
+        }
+      } catch (error) {
+        console.warn("[ChatPane] attachment routing skipped", error);
       }
       const sendChatRequest = (sessionId: string) => {
         if (isContinuation && continuation) {
@@ -12442,6 +12489,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       style={paneTint ? { backgroundColor: paneTint } : undefined}
       onMouseDown={onFocus}
     >
+      {routingNotice ? (
+        <div
+          role="status"
+          className="pointer-events-auto absolute inset-x-0 top-3 z-[70] mx-auto w-full max-w-md rounded-xl border border-border bg-surface-card px-4 py-3 shadow-lg"
+        >
+          <div className="text-sm font-medium text-text-primary">已切换到私有部署模型</div>
+          <p className="mt-1 text-xs leading-5 text-text-subtle">
+            {routingLockReason(routingNotice)}
+            本会话后续对话都会留在这个模型上。
+          </p>
+          <div className="mt-2.5 flex items-center justify-between gap-3">
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-faint">
+              <input
+                type="checkbox"
+                className="h-3 w-3 accent-[var(--settings-accent-fg)]"
+                onChange={(event) => {
+                  if (event.target.checked) dismissRoutingNotice();
+                }}
+              />
+              不再显示此提示
+            </label>
+            <button
+              type="button"
+              className="rounded-lg bg-surface-hover px-3 py-1 text-xs text-text-standard transition-colors hover:bg-surface-card-strong"
+              onClick={() => setRoutingNotice(null)}
+            >
+              知道了
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div
         className={
           workExpandedLayout
