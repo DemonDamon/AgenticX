@@ -55,10 +55,15 @@ class HookRegistry:
     def get_registered_handlers(self, event_key: str) -> List[HookHandler]:
         return self._handlers.get(event_key, []).copy()
 
-    async def trigger(self, event: HookEvent) -> bool:
+    async def trigger(self, event: HookEvent, *, stop_on_false: bool = False) -> bool:
         """Trigger both generic and specific handlers in order.
 
         Returns ``False`` if any handler explicitly returns False.
+
+        ``stop_on_false=True`` 表示"这是一道闸门"：第一个否决之后就不再往下跑。
+        通知类事件（session/agent 生命周期之类）保持默认，所有 handler 都要收到；
+        但 before_tool_call / before_llm_call 是拦截语义——已经被否掉的调用，后面的
+        钩子不该再记日志、改参数或者累计数。
         """
 
         event_type_handlers = self._handlers.get(event.type, [])
@@ -71,11 +76,13 @@ class HookRegistry:
                 result = await handler(event)
                 if result is False:
                     should_continue = False
+                    if stop_on_false:
+                        break
             except Exception as exc:  # pragma: no cover - defensive path
                 logger.warning("Hook handler failed for %s:%s: %s", event.type, event.action, exc)
         return should_continue
 
-    def trigger_sync(self, event: HookEvent) -> bool:
+    def trigger_sync(self, event: HookEvent, *, stop_on_false: bool = False) -> bool:
         """Sync wrapper for environments that are not async-first."""
 
         try:
@@ -85,7 +92,9 @@ class HookRegistry:
 
         if running_loop and running_loop.is_running():
             # Execute in a separate thread to preserve blocking semantics.
-            future = _SYNC_TRIGGER_EXECUTOR.submit(lambda: asyncio.run(self.trigger(event)))
+            future = _SYNC_TRIGGER_EXECUTOR.submit(
+                lambda: asyncio.run(self.trigger(event, stop_on_false=stop_on_false))
+            )
             try:
                 return bool(future.result(timeout=_SYNC_TRIGGER_TIMEOUT_SECONDS))
             except FuturesTimeoutError:
@@ -96,7 +105,7 @@ class HookRegistry:
                     _SYNC_TRIGGER_TIMEOUT_SECONDS,
                 )
                 return False
-        return asyncio.run(self.trigger(event))
+        return asyncio.run(self.trigger(event, stop_on_false=stop_on_false))
 
 
 _GLOBAL_REGISTRY = HookRegistry()

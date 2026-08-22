@@ -44,6 +44,10 @@ async def create_sse_stream(
     formatter = SSEFormatter()
     stop_event = asyncio.Event()
     action_queue = asyncio.Queue()
+    # 本轮 asyncio.wait 起的两个等待任务。必须挂在这里让下面的 finally 看得见：
+    # 生成器被中途丢弃（客户端断开 / 消费者提前 break）时，执行停在 `await asyncio.wait(...)`
+    # 上，循环体里的 cancel 一行都跑不到，两个任务就一直挂在 Queue.get() 里。
+    inflight: "set[asyncio.Task]" = set()
     
     try:
         # 从 TaskLock Queue 读取 ActionData
@@ -68,18 +72,26 @@ async def create_sse_stream(
         while not stop_event.is_set():
             try:
                 # 同时等待事件总线和 Action Queue
+                inflight = {
+                    asyncio.create_task(event_bus.get_next_event(timeout=timeout)),
+                    asyncio.create_task(action_queue.get()),
+                }
                 done, pending = await asyncio.wait(
-                    [
-                        asyncio.create_task(event_bus.get_next_event(timeout=timeout)),
-                        asyncio.create_task(action_queue.get()),
-                    ],
+                    inflight,
                     timeout=timeout,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 
-                # 取消未完成的任务
+                # 取消未完成的任务，并**等它们真的结束**。
+                # 只 cancel 不 await 等于只递了张申请：协程仍停在 Queue.get() 里，
+                # 等这个循环关掉之后被 GC 时，Queue.get 的收尾会对已关闭的循环调
+                # getter.cancel() → call_soon，抛出无法捕获的 "Event loop is closed"，
+                # 而且会被算在当时碰巧在跑的那个用例头上。
                 for task in pending:
                     task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+                inflight = set(done)
                 
                 # 处理完成的任务
                 if done:
@@ -119,6 +131,16 @@ async def create_sse_stream(
         
     finally:
         # 清理
+        # 先收掉本轮还挂着的等待任务 —— 生成器被中途丢弃时它们停在 Queue.get() 里，
+        # 不在这儿取消并 await，就会活过事件循环的关闭，之后 Queue.get 的收尾对死循环
+        # 调 call_soon，抛出无法捕获的 "Event loop is closed"。
+        stale = [task for task in inflight if not task.done()]
+        for task in stale:
+            task.cancel()
+        if stale:
+            await asyncio.gather(*stale, return_exceptions=True)
+        inflight = set()
+
         stop_event.set()
         
         # 等待队列任务完成

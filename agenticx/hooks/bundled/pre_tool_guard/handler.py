@@ -53,8 +53,30 @@ _DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     (re.compile(r"\bDROP\s+(TABLE|DATABASE)\b", re.IGNORECASE), "DROP TABLE/DATABASE"),
     (re.compile(r"\bformat\s+[a-zA-Z]:", re.IGNORECASE), "format drive"),
-    (re.compile(r">\s*/dev/sd[a-z]", re.IGNORECASE), "write to /dev/sd*"),
+    (
+        re.compile(r">\s*/dev/(?:sd[a-z]|r?disk\d)", re.IGNORECASE),
+        "write to raw disk device",
+    ),
     (re.compile(r"\bmkfs\b", re.IGNORECASE), "mkfs"),
+    # macOS 的擦除/建文件系统命令。上面那几条全是 Linux/Windows 的写法，在 darwin 上
+    # 一条都不命中 —— 而 `diskutil eraseDisk` 正是「格式化整块盘」在 mac 上的标准说法。
+    # 只拦破坏性子命令：`diskutil list` / `info` / `mount` 照常放行。
+    (
+        re.compile(
+            r"\bdiskutil\b[^\n]*\b(?:eraseDisk|eraseVolume|reformat|partitionDisk"
+            r"|zeroDisk|randomDisk|secureErase|resetFusion)\b",
+            re.IGNORECASE,
+        ),
+        "diskutil 擦除/重新分区",
+    ),
+    (
+        re.compile(
+            r"\bdiskutil\b[^\n]*\bapfs\b[^\n]*\b(?:delete|erase)\w*\b",
+            re.IGNORECASE,
+        ),
+        "diskutil apfs 删除容器/卷",
+    ),
+    (re.compile(r"\bnewfs_\w+\b", re.IGNORECASE), "newfs_*"),
     (re.compile(r"\bdd\s+.*\bof=/dev/", re.IGNORECASE), "dd to /dev"),
     # Download-and-execute via shell pipe (classic remote script execution).
     (

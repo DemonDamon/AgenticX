@@ -296,7 +296,8 @@ def execute_before_llm_call_hooks(context: LLMCallHookContext) -> bool:
         task_id=context.task_id,
         context={"llm_context": context},
     )
-    if not get_global_hook_registry().trigger_sync(event):
+    # before_llm_call 是闸门：第一个钩子否决之后，后面的钩子不该再跑。
+    if not get_global_hook_registry().trigger_sync(event, stop_on_false=True):
         return False
 
     return True
@@ -318,14 +319,15 @@ def execute_after_llm_call_hooks(context: LLMCallHookContext) -> str | None:
         task_id=context.task_id,
         context={"llm_context": context, "response": context.response},
     )
+    original_response = context.response
     get_global_hook_registry().trigger_sync(event)
     event_response = event.context.get("response")
-    if isinstance(event_response, str):
+    # 只有真的被改过才回传；context 里那份初值本来就是 str，"只要是 str 就回传"会让
+    # 这个函数永远返回非 None，调用方分不清"钩子改了"和"没人动过"。
+    if isinstance(event_response, str) and event_response != original_response:
         context.response = event_response
-        modified_response = event_response
-    else:
-        modified_response = None
-    return modified_response
+        return event_response
+    return None
 
 
 def _to_before_llm_hook_handler(hook: BeforeLLMCallHookType) -> HookHandler:
@@ -349,6 +351,8 @@ def _to_after_llm_hook_handler(hook: AfterLLMCallHookType) -> HookHandler:
         result = hook(ctx)
         if isinstance(result, str):
             event.context["response"] = result
+            # 同步回 ctx，后一个钩子才看得到前一个的产物（after 钩子是链式的）。
+            ctx.response = result
         return True
 
     return _handler
