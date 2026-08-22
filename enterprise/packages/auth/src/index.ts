@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./services/password";
 export * from "./services/jwt";
+export * from "./services/secret-from-env";
 export * from "./services/auth";
 export * from "./services/oidc-claims";
 export * from "./services/oidc-state";
