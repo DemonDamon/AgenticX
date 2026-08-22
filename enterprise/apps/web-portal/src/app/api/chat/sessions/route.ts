@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionFromCookies } from "../../../../lib/session";
+import { getSessionFromCookies, passwordChangeRequiredResponse } from "../../../../lib/session";
 import {
   chatHistoryServerError,
   chatHistoryUnauthorized,
@@ -10,6 +10,7 @@ import { createChatSession, listChatSessions } from "../../../../lib/chat-histor
 export async function GET() {
   const session = await getSessionFromCookies();
   if (!session) return chatHistoryUnauthorized();
+  if (session.mustChangePassword) return passwordChangeRequiredResponse();
   try {
     const ctx = toChatHistoryContext(session);
     const sessions = await listChatSessions(ctx);
@@ -26,6 +27,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const session = await getSessionFromCookies();
   if (!session) return chatHistoryUnauthorized();
+  if (session.mustChangePassword) return passwordChangeRequiredResponse();
   let body: { title?: unknown; active_model?: unknown };
   try {
     body = (await request.json()) as { title?: unknown; active_model?: unknown };

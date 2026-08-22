@@ -39,6 +39,7 @@ type ProvisionInput = {
   displayName: string;
   password: string;
   scopes?: string[];
+  mustChangePassword?: boolean;
 };
 
 type AuthRuntime = {
@@ -121,6 +122,7 @@ function createRuntime(): AuthRuntime {
       email: DEV_ADMIN_EMAIL,
       displayName: "Seed Admin",
       passwordHash,
+      mustChangePassword: false,
       status: "active",
       failedLoginCount: 0,
       lockedUntil: null,
@@ -196,6 +198,7 @@ export async function provisionUserFromAdmin(input: ProvisionInput): Promise<voi
     email: input.email.toLowerCase(),
     displayName: input.displayName,
     passwordHash,
+    mustChangePassword: input.mustChangePassword === true,
     status: "active",
     failedLoginCount: 0,
     lockedUntil: null,
@@ -284,6 +287,7 @@ async function issueTokensForUser(runtime: AuthRuntime, user: import("@agenticx/
     deptId: user.deptId ?? null,
     email: user.email,
     scopes: effectiveScopes,
+    mustChangePassword: user.mustChangePassword === true,
     sessionId: `${user.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
   };
   const access = await runtime.jwtService.signAccessToken(context);
@@ -295,6 +299,7 @@ async function issueTokensForUser(runtime: AuthRuntime, user: import("@agenticx/
     deptId: context.deptId ?? null,
     email: context.email,
     scopes: context.scopes,
+    mustChangePassword: context.mustChangePassword === true,
     expiresAt: Date.now() + refresh.expiresInSeconds * 1000,
   });
   return {
@@ -302,6 +307,7 @@ async function issueTokensForUser(runtime: AuthRuntime, user: import("@agenticx/
     refreshToken: refresh.token,
     tokenType: "Bearer",
     expiresInSeconds: access.expiresInSeconds,
+    mustChangePassword: context.mustChangePassword === true,
   };
 }
 
@@ -332,6 +338,7 @@ export async function loginWithOidcClaims(input: OidcLoginInput): Promise<OidcLo
       email: normalizedEmail,
       displayName: input.displayName.trim() || normalizedEmail,
       passwordHash,
+      mustChangePassword: false,
       status: "active",
       failedLoginCount: 0,
       lockedUntil: null,
@@ -444,6 +451,7 @@ export async function refreshTokens(refreshToken: string): Promise<AuthTokens> {
     ...refreshContext,
     scopes: user.scopes,
     deptId: user.deptId ?? null,
+    mustChangePassword: user.mustChangePassword === true,
   };
 
   const access = await runtime.jwtService.signAccessToken(nextContext);
@@ -453,6 +461,7 @@ export async function refreshTokens(refreshToken: string): Promise<AuthTokens> {
     ...stored,
     scopes: nextContext.scopes,
     deptId: nextContext.deptId ?? null,
+    mustChangePassword: nextContext.mustChangePassword === true,
     expiresAt: Date.now() + nextRefresh.expiresInSeconds * 1000,
   });
 
@@ -461,5 +470,26 @@ export async function refreshTokens(refreshToken: string): Promise<AuthTokens> {
     refreshToken: nextRefresh.token,
     tokenType: "Bearer",
     expiresInSeconds: access.expiresInSeconds,
+    mustChangePassword: nextContext.mustChangePassword === true,
   };
+}
+
+export async function completeRequiredPasswordChange(
+  context: AuthContext,
+  newPassword: string,
+): Promise<AuthTokens> {
+  const runtime = await getRuntime();
+  const tokens = await runtime.authService.completeRequiredPasswordChange({
+    context,
+    newPassword,
+  });
+  const user = await runtime.repo.findByEmail(context.email);
+  if (user) {
+    try {
+      await syncAuthUserToPostgres(user);
+    } catch (error) {
+      console.error("[web-portal] syncAuthUserToPostgres after password change failed:", error);
+    }
+  }
+  return tokens;
 }

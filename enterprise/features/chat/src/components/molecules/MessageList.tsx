@@ -9,7 +9,7 @@ import type {
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@agenticx/ui";
 import { ReasoningBlock } from "../atoms/ReasoningBlock";
 import { ToolCallCard } from "../atoms/ToolCallCard";
-import { parseAssistantContent } from "../../assistant-content";
+import { parseAssistantContent, toCopyableMessageText } from "../../assistant-content";
 import { isNearBottom, nextJumpToBottomFabVisible } from "../../utils/scroll-near-bottom";
 import { probeNote } from "../../debug/update-depth-probe";
 import {
@@ -1072,7 +1072,7 @@ export function MessageList({
                                 className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleCopy(message.content || "", message.id);
+                                  handleCopy(toCopyableMessageText(message), message.id);
                                 }}
                               >
                                 {copiedId === message.id ? (
@@ -1352,7 +1352,7 @@ export function MessageList({
                 onClick={() => {
                   const content = messages
                     .filter((m) => selectedMessages.has(m.id))
-                    .map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`)
+                    .map((m) => `${m.role === "user" ? "用户" : "助手"}: ${toCopyableMessageText(m)}`)
                     .join("\n\n");
                   navigator.clipboard.writeText(content);
                 }}

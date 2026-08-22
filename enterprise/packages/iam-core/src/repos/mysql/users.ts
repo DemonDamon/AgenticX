@@ -96,6 +96,7 @@ function buildNewUserFields(input: {
   employeeNo?: string | null;
   jobTitle?: string | null;
   passwordHash: string;
+  mustChangePassword?: boolean;
 }): Omit<typeof users.$inferInsert, "id" | "tenantId" | "email" | "createdAt"> & {
   updatedAt: Date;
 } {
@@ -105,6 +106,7 @@ function buildNewUserFields(input: {
     deptId: input.deptId ?? null,
     displayName: input.displayName.trim(),
     passwordHash: input.passwordHash,
+    mustChangePassword: input.mustChangePassword ?? false,
     status: rowStatus,
     phone: input.phone ?? null,
     employeeNo: input.employeeNo ?? null,
@@ -261,6 +263,7 @@ export const mysqlUsersRepository: UsersRepository = {
       email: row.email.toLowerCase(),
       displayName: row.displayName,
       passwordHash: row.passwordHash,
+      mustChangePassword: row.mustChangePassword === true,
       status: mapDbStatus(row),
       failedLoginCount: row.failedLoginCount ?? 0,
       lockedUntil,
@@ -333,6 +336,7 @@ export const mysqlUsersRepository: UsersRepository = {
       throw new Error("email already exists");
     }
 
+    const suppliedInitialPassword = Boolean(input.initialPassword?.trim());
     const initialPassword = input.initialPassword?.trim() || generateInitialPassword();
     const passwordHash = await hashPassword(initialPassword);
     const now = new Date();
@@ -344,6 +348,7 @@ export const mysqlUsersRepository: UsersRepository = {
       employeeNo: input.employeeNo,
       jobTitle: input.jobTitle,
       passwordHash,
+      mustChangePassword: !suppliedInitialPassword,
     });
 
     let id: string;
@@ -491,6 +496,7 @@ export const mysqlUsersRepository: UsersRepository = {
       .update(users)
       .set({
         passwordHash,
+        mustChangePassword: true,
         lockedUntil: null,
         failedLoginCount: 0,
         status: "active",
@@ -510,6 +516,21 @@ export const mysqlUsersRepository: UsersRepository = {
 
     return { initialPassword };
   },
+  async updatePasswordAndClearRequirement(tenantId, email, passwordHash) {
+    const db = await getMysqlRepositoryDb();
+    await db
+      .update(users)
+      .set({
+        passwordHash,
+        mustChangePassword: false,
+        failedLoginCount: 0,
+        lockedUntil: null,
+        status: "active",
+        updatedAt: new Date(),
+      })
+      .where(and(eq(users.tenantId, tenantId), eq(users.email, email.toLowerCase()), eq(users.isDeleted, false)));
+    return this.loadAuthUserByEmail(tenantId, email);
+  },
   async upsertUserRowFromAuthUser(user) {
     const db = await getMysqlRepositoryDb();
     const now = new Date();
@@ -522,6 +543,7 @@ export const mysqlUsersRepository: UsersRepository = {
         email: user.email.toLowerCase(),
         displayName: user.displayName,
         passwordHash: user.passwordHash,
+        mustChangePassword: user.mustChangePassword === true,
         status: user.status === "locked" ? "active" : user.status,
         failedLoginCount: user.failedLoginCount ?? 0,
         lockedUntil: user.lockedUntil ? new Date(user.lockedUntil) : null,
@@ -535,6 +557,7 @@ export const mysqlUsersRepository: UsersRepository = {
           email: user.email.toLowerCase(),
           displayName: user.displayName,
           passwordHash: user.passwordHash,
+          mustChangePassword: user.mustChangePassword === true,
           deptId: user.deptId ?? null,
           status: user.status === "locked" ? "active" : user.status,
           failedLoginCount: user.failedLoginCount ?? 0,

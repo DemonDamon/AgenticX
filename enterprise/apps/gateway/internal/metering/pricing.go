@@ -43,6 +43,8 @@ type ModelPricing struct {
 	ReasoningPerM   float64         `yaml:"reasoning_per_m,omitempty" json:"reasoningPerM,omitempty"`
 	Surcharges      []SurchargeRule `yaml:"surcharges,omitempty" json:"surcharges,omitempty"`
 	EffectiveDate   string          `yaml:"effective_date,omitempty" json:"effectiveDate,omitempty"`
+	// BillingMultiplier scales the computed cost. nil = unset (1.0); 0 = free.
+	BillingMultiplier *float64 `yaml:"billing_multiplier,omitempty" json:"billingMultiplier,omitempty"`
 }
 
 type pricingFile struct {
@@ -343,7 +345,19 @@ func (t *PricingTable) ComputeCost(model string, usage openai.Usage, ctx CostCon
 	if version == "" {
 		version = "local"
 	}
-	return CostResult{CostUSD: base + surcharge, PricingVersion: version}
+	return CostResult{CostUSD: billingMultiplier(p) * (base + surcharge), PricingVersion: version}
+}
+
+// billingMultiplier returns the configured scale factor, defaulting to 1.0 when
+// unset. Negative values are clamped to zero so a misconfig cannot credit back.
+func billingMultiplier(p ModelPricing) float64 {
+	if p.BillingMultiplier == nil {
+		return 1
+	}
+	if *p.BillingMultiplier < 0 {
+		return 0
+	}
+	return *p.BillingMultiplier
 }
 
 func applySurcharges(rules []SurchargeRule, n NormalizedUsage, ctx CostContext, inputCost, outputCost, reasoningCost, base float64) float64 {

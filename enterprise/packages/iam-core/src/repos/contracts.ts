@@ -45,6 +45,7 @@ export interface UsersRepository extends DialectRepository {
   ): Promise<AdminUserDto>;
   softDeleteUser(tenantId: string, id: string, actorUserId?: string | null): Promise<void>;
   resetUserPassword(input: { tenantId: string; userId: string; actorUserId?: string | null }): Promise<{ initialPassword: string }>;
+  updatePasswordAndClearRequirement(tenantId: string, email: string, passwordHash: string): Promise<AuthUser | null>;
   upsertUserRowFromAuthUser(user: AuthUser): Promise<void>;
   assignRolesIfNone(input: {
     tenantId: string; userId: string; roleCodes: string[];

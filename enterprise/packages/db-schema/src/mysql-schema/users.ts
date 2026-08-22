@@ -23,6 +23,7 @@ export const users = mysqlTable(
     email: varchar("email", { length: 320 }).notNull(),
     displayName: varchar("display_name", { length: 128 }).notNull(),
     passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+    mustChangePassword: boolean("must_change_password").notNull().default(false),
     status: varchar("status", { length: 32 }).notNull().default("active"),
     phone: varchar("phone", { length: 32 }),
     employeeNo: varchar("employee_no", { length: 64 }),
