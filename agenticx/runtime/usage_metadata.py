@@ -11,15 +11,18 @@ from __future__ import annotations
 from typing import Any
 
 
-def _extract_cached_reasoning_from_usage(usage: Any) -> tuple[int, int]:
+def extract_cached_reasoning(usage: Any) -> tuple[int, int]:
     """Extract cached_input and reasoning token counts from provider usage payload."""
     cached = 0
     reasoning = 0
     if usage is None:
         return 0, 0
+    cached = max(0, int(getattr(usage, "cached_tokens", 0) or 0)) if not isinstance(usage, dict) else max(
+        0, int(usage.get("cached_tokens") or 0)
+    )
     if isinstance(usage, dict):
         ptd = usage.get("prompt_tokens_details")
-        if isinstance(ptd, dict):
+        if isinstance(ptd, dict) and cached == 0:
             cached = int(ptd.get("cached_tokens") or 0)
         ctd = usage.get("completion_tokens_details")
         if isinstance(ctd, dict):
@@ -31,9 +34,10 @@ def _extract_cached_reasoning_from_usage(usage: Any) -> tuple[int, int]:
                     cached = int(v or 0)
                     break
         return max(0, cached), max(0, reasoning)
-    ptd = getattr(usage, "prompt_tokens_details", None)
-    if ptd is not None:
-        cached = int(getattr(ptd, "cached_tokens", 0) or 0)
+    if cached == 0:
+        ptd = getattr(usage, "prompt_tokens_details", None)
+        if ptd is not None:
+            cached = int(getattr(ptd, "cached_tokens", 0) or 0)
     ctd = getattr(usage, "completion_tokens_details", None)
     if ctd is not None:
         reasoning = int(getattr(ctd, "reasoning_tokens", 0) or 0)
@@ -43,6 +47,11 @@ def _extract_cached_reasoning_from_usage(usage: Any) -> tuple[int, int]:
                 cached = int(getattr(usage, attr, 0) or 0)
                 break
     return max(0, cached), max(0, reasoning)
+
+
+def _extract_cached_reasoning_from_usage(usage: Any) -> tuple[int, int]:
+    """Private alias kept for existing callers and tests."""
+    return extract_cached_reasoning(usage)
 
 
 def usage_metadata_from_llm_response(response: Any) -> dict[str, int] | None:
@@ -60,14 +69,30 @@ def usage_metadata_from_llm_response(response: Any) -> dict[str, int] | None:
             pt = int(getattr(tu, "prompt_tokens", 0) or 0)
             ct = int(getattr(tu, "completion_tokens", 0) or 0)
             tt = int(getattr(tu, "total_tokens", 0) or 0)
-            cached, reasoning = _extract_cached_reasoning_from_usage(tu)
+            cached, reasoning = extract_cached_reasoning(tu)
         elif isinstance(tu, dict):
             pt = int(tu.get("prompt_tokens") or tu.get("input_tokens") or 0)
             ct = int(tu.get("completion_tokens") or tu.get("output_tokens") or 0)
             tt = int(tu.get("total_tokens") or 0)
-            cached, reasoning = _extract_cached_reasoning_from_usage(tu)
+            cached, reasoning = extract_cached_reasoning(tu)
         else:
             return None
+        if cached == 0 or reasoning == 0:
+            extra_c, extra_r = extract_cached_reasoning(getattr(response, "usage", None))
+            if cached == 0:
+                cached = extra_c
+            if reasoning == 0:
+                reasoning = extra_r
+        if cached == 0 or reasoning == 0:
+            meta = getattr(response, "metadata", None)
+            raw = None
+            if isinstance(meta, dict):
+                raw = meta.get("usage") or meta.get("raw_usage")
+            extra_c, extra_r = extract_cached_reasoning(raw)
+            if cached == 0:
+                cached = extra_c
+            if reasoning == 0:
+                reasoning = extra_r
         if tt == 0 and (pt > 0 or ct > 0):
             tt = pt + ct
         if pt == 0 and ct == 0 and tt == 0 and cached == 0 and reasoning == 0:

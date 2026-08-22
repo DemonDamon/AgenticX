@@ -560,9 +560,9 @@ class LiteLLMProvider(BaseLLMProvider):
         # Some providers (e.g. MiniMax via openai-compat) put usage inside
         # _hidden_params or the raw response dict; fall back to those when the
         # primary usage fields are all zero.
+        raw_usage: dict = {}
         if prompt_tokens == 0 and completion_tokens == 0:
             hidden = getattr(response, "_hidden_params", None) or {}
-            raw_usage: dict = {}
             if isinstance(hidden, dict):
                 raw_usage = hidden.get("usage") or hidden.get("original_response_usage") or {}
             if not raw_usage:
@@ -585,10 +585,21 @@ class LiteLLMProvider(BaseLLMProvider):
         if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
             total_tokens = prompt_tokens + completion_tokens
 
+        from agenticx.runtime.usage_metadata import extract_cached_reasoning
+
+        cached_tokens, reasoning_tokens = extract_cached_reasoning(usage)
+        if cached_tokens == 0 and raw_usage:
+            extra_c, extra_r = extract_cached_reasoning(raw_usage)
+            cached_tokens = extra_c
+            if reasoning_tokens == 0:
+                reasoning_tokens = extra_r
+
         token_usage = TokenUsage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            cached_tokens=cached_tokens,
+            reasoning_tokens=reasoning_tokens,
         )
 
         choices = [

@@ -661,10 +661,15 @@ class BailianProvider(BaseLLMProvider):
     def _parse_response(self, response) -> LLMResponse:
         """Parse OpenAI response into AgenticX LLMResponse format."""
         usage = response.usage
+        from agenticx.runtime.usage_metadata import extract_cached_reasoning
+
+        cached_tokens, reasoning_tokens = extract_cached_reasoning(usage)
         token_usage = TokenUsage(
             prompt_tokens=usage.prompt_tokens if usage else 0,
             completion_tokens=usage.completion_tokens if usage else 0,
-            total_tokens=usage.total_tokens if usage else 0
+            total_tokens=usage.total_tokens if usage else 0,
+            cached_tokens=cached_tokens,
+            reasoning_tokens=reasoning_tokens,
         )
         
         choices = [

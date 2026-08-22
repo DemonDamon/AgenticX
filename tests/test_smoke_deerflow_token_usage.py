@@ -19,7 +19,13 @@ class _RespWithTokenUsage:
 
 def test_usage_metadata_from_llm_response_happy() -> None:
     um = usage_metadata_from_llm_response(_RespWithTokenUsage())
-    assert um == {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30}
+    assert um == {
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "total_tokens": 30,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
+    }
 
 
 def test_usage_metadata_from_llm_response_zeros_returns_none() -> None:
