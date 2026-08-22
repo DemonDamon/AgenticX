@@ -49,6 +49,10 @@ outputs/
 .env
 
 .coverage
+# pytest-cov 并行模式下每个 worker 自己写一份 .coverage.<host>.<pid>.<rand>，
+# 只有跑完 `coverage combine` 才会被吃掉。中途 Ctrl-C 或者用例把进程搞崩就会
+# 留在仓库根目录，git status 里一次刷出上百行。
+.coverage.*
 coverage.xml
 
 scan_structure.py
