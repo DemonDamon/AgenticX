@@ -57,6 +57,7 @@ import { HoverTip } from "./ds/HoverTip";
 import { ClampToFitText } from "./ds/ClampToFitText";
 import type { Avatar, ChatPane, ChatStyle, GroupChat, McpServer } from "../store";
 import { useAppStore } from "../store";
+import { UNRESTRICTED_CAPABILITY_LOCKS } from "../utils/enterprise-capability-policy";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import {
   RECOMMENDED_SKILLS,
@@ -6297,6 +6298,7 @@ export function SettingsPanel({
   const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
   const settingsOpenToTab = useAppStore((s) => s.settings.openToTab);
   const activePaneId = useAppStore((s) => s.activePaneId);
+  const capabilityLocks = useAppStore((s) => s.capabilityLocks) ?? UNRESTRICTED_CAPABILITY_LOCKS;
   const memoryContextPane = panes.find((p) => p.id === activePaneId) ?? panes[0];
   const updateSettingsSlice = useAppStore((s) => s.updateSettings);
   const initializedForOpenRef = useRef(false);
@@ -8362,13 +8364,13 @@ export function SettingsPanel({
 
   useEffect(() => {
     if (!open || tab !== "mcp") return;
-    if (mcpDiscoverHits.length === 0) {
+    if (capabilityLocks.allowMcpAutoDiscovery && mcpDiscoverHits.length === 0) {
       void refreshMcpDiscover();
     }
     if (mcpMarketplaceItems.length === 0) {
       void refreshMcpMarketplace();
     }
-  }, [open, tab, mcpDiscoverHits.length, mcpMarketplaceItems.length, refreshMcpDiscover, refreshMcpMarketplace]);
+  }, [open, tab, capabilityLocks.allowMcpAutoDiscovery, mcpDiscoverHits.length, mcpMarketplaceItems.length, refreshMcpDiscover, refreshMcpMarketplace]);
 
   useEffect(() => {
     if (!open || tab !== "mcp") return;
@@ -9792,6 +9794,7 @@ export function SettingsPanel({
                 {mcpMessage && <div className="text-xs text-text-subtle">{mcpMessage}</div>}
 
                 {/* —— 配置文件路径 —— */}
+                {capabilityLocks.allowLocalMcpInstall ? (
                 <div className="space-y-2">
                   <div className="text-xs text-text-faint">
                     配置文件路径（按顺序合并；同名服务以先出现的为准）。点右侧铅笔图标直接编辑 JSON。
@@ -9864,11 +9867,13 @@ export function SettingsPanel({
                     添加配置路径
                   </button>
                 </div>
+                ) : null}
 
                 {/* —— MCP 服务列表 —— */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-medium text-text-muted">MCP 服务</div>
+                    {capabilityLocks.allowMcpAutoDiscovery ? (
                     <button
                       type="button"
                       className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover disabled:opacity-40"
@@ -9883,6 +9888,7 @@ export function SettingsPanel({
                       />
                       {mcpDiscoverLoading ? "扫描中…" : "扫描发现"}
                     </button>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-text-faint">
                     <span className="text-text-faint">注：</span>
@@ -10117,6 +10123,7 @@ export function SettingsPanel({
                       );
                     })}
 
+                    {capabilityLocks.allowLocalMcpInstall ? (
                     <div className="grid gap-2 sm:grid-cols-2">
                       <button
                         type="button"
@@ -10149,6 +10156,7 @@ export function SettingsPanel({
                         </span>
                       </button>
                     </div>
+                    ) : null}
 
                     <McpGatewayImportPanel
                       configPath={MCP_PRIMARY_CONFIG_PATH}

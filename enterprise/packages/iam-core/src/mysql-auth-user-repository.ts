@@ -40,6 +40,7 @@ export class MysqlAuthUserRepository implements AuthUserRepository {
       email: row.email.toLowerCase(),
       displayName: row.displayName,
       passwordHash: row.passwordHash,
+      mustChangePassword: row.mustChangePassword === true,
       status: lockedUntil && lockedUntil > Date.now()
         ? "locked"
         : row.status === "disabled" ? "disabled" : "active",
@@ -74,6 +75,19 @@ export class MysqlAuthUserRepository implements AuthUserRepository {
     }).where(and(eq(users.tenantId, this.tenantId), eq(users.email, email.toLowerCase())));
   }
 
+  public async updatePasswordAndClearRequirement(email: string, passwordHash: string): Promise<AuthUser | null> {
+    const db = await getMysqlRepositoryDb();
+    await db.update(users).set({
+      passwordHash,
+      mustChangePassword: false,
+      failedLoginCount: 0,
+      lockedUntil: null,
+      status: "active",
+      updatedAt: new Date(),
+    }).where(and(eq(users.tenantId, this.tenantId), eq(users.email, email.toLowerCase())));
+    return this.findByEmail(email);
+  }
+
   public async upsertUser(user: AuthUser): Promise<void> {
     const db = await getMysqlRepositoryDb();
     const now = new Date();
@@ -84,6 +98,7 @@ export class MysqlAuthUserRepository implements AuthUserRepository {
       email: user.email.toLowerCase(),
       displayName: user.displayName,
       passwordHash: user.passwordHash,
+      mustChangePassword: user.mustChangePassword === true,
       status: user.status === "locked" ? "active" : user.status,
       failedLoginCount: user.failedLoginCount ?? 0,
       lockedUntil: user.lockedUntil ? new Date(user.lockedUntil) : null,
@@ -96,6 +111,7 @@ export class MysqlAuthUserRepository implements AuthUserRepository {
         email: user.email.toLowerCase(),
         displayName: user.displayName,
         passwordHash: user.passwordHash,
+        mustChangePassword: user.mustChangePassword === true,
         deptId: user.deptId ?? null,
         status: user.status === "locked" ? "active" : user.status,
         failedLoginCount: user.failedLoginCount ?? 0,

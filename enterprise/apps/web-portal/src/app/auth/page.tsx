@@ -85,15 +85,21 @@ function AuthPageInner() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email: signInEmail, password: signInPassword }),
       });
-      const data = await response.json();
+      const data = (await response.json()) as {
+        data?: { mustChangePassword?: boolean };
+        message?: string;
+      };
       if (!response.ok) {
         setStatus({ type: "error", message: data.message ?? t("loginFailed") });
         return;
       }
       setStatus({ type: "success", message: t("signInSuccess") });
       const returnTo = searchParams.get("returnTo");
-      const destination =
-        returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/workspace";
+      const destination = data.data?.mustChangePassword
+        ? "/auth/change-password"
+        : returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//")
+          ? returnTo
+          : "/workspace";
       window.location.assign(destination);
     } finally {
       setBusy(false);
