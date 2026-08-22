@@ -116,9 +116,6 @@ type EmailConfig = {
   default_to_email: string;
 };
 
-type ComputerUseConfig = {
-  enabled: boolean;
-};
 type TrinityConfig = {
   skill_protocol: boolean;
   session_summary: boolean;
@@ -1051,8 +1048,6 @@ declare global {
         avatarId: string;
         content: string;
       }) => Promise<{ ok: boolean; error?: string }>;
-      loadComputerUseConfig: () => Promise<{ ok: boolean; config?: ComputerUseConfig; error?: string }>;
-      saveComputerUseConfig: (payload: ComputerUseConfig) => Promise<{ ok: boolean; error?: string }>;
       loadTrinityConfig: () => Promise<{ ok: boolean; config?: TrinityConfig; error?: string }>;
       saveTrinityConfig: (payload: TrinityConfig) => Promise<{ ok: boolean; error?: string }>;
       loadTurnArchiveConfig: () => Promise<{ ok: boolean; config?: TurnArchiveConfig; error?: string }>;

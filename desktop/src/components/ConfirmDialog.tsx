@@ -131,19 +131,6 @@ export function buildConfirmRequestPresentation(
     };
   }
 
-  if (risk === "computer_use") {
-    const x = typeof context?.x === "number" ? context.x : null;
-    const y = typeof context?.y === "number" ? context.y : null;
-    return {
-      operationLabel: "操作本机桌面",
-      summary: "智能体准备读取或控制本机桌面。请展开原始请求确认具体动作。",
-      targetLabel: x !== null && y !== null ? "屏幕位置" : undefined,
-      target: x !== null && y !== null ? `(${x}, ${y})` : undefined,
-      allowlistScope: `本次运行内，其他由「${tool || "桌面操控"}」发起的同类操作`,
-      riskNotice: "此操作会读取或控制本机桌面。",
-    };
-  }
-
   return {
     operationLabel: "需要授权的操作",
     summary: tool

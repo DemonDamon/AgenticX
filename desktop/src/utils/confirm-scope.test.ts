@@ -34,7 +34,7 @@ describe("confirmation scope", () => {
     expect(normalizeConfirmRisk({ risk: " low " })).toBe("low");
     expect(isProtectedConfirmContext({ risk: "low" })).toBe(false);
 
-    for (const risk of ["high", "destructive", "computer_use", "policy", "unknown"]) {
+    for (const risk of ["high", "destructive", "permission_escalation", "policy", "unknown"]) {
       expect(isProtectedConfirmContext({ risk })).toBe(true);
     }
     expect(isProtectedConfirmContext({})).toBe(true);
@@ -60,7 +60,7 @@ describe("confirmation scope", () => {
     // 拿不到才回退本地镜像
     expect(protectedConfirmReason({ risk: "non_whitelisted" })).toContain("白名单");
     expect(protectedConfirmReason({ risk: "destructive" })).toContain("删除或覆盖");
-    expect(protectedConfirmReason({ risk: "computer_use" })).toContain("本机桌面");
+    expect(protectedConfirmReason({ risk: "permission_escalation" })).toContain("工作区写入隔离");
 
     // fail-closed 的那一档也必须有话说 —— 弹了框却不给理由，用户只会当成故障
     expect(protectedConfirmReason({})).not.toBe("");

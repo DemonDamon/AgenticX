@@ -79,7 +79,6 @@ from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import (
     META_TOOL_NAMES,
     STUDIO_TOOLS,
-    merge_computer_use_tools_into,
 )
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS, META_LEADER_LABEL_SCRATCH_KEY
 from agenticx.runtime.prompts.current_time import build_current_time_block
@@ -3529,7 +3528,6 @@ def create_studio_app() -> FastAPI:
             ]
         else:
             effective_tools_source = list(META_AGENT_TOOLS)
-        effective_tools_source = merge_computer_use_tools_into(effective_tools_source)
         effective_tools_source = _strip_disabled_web_search_tools(effective_tools_source)
         effective_tools: list = _filter_tools_by_policy(
             effective_tools_source,
@@ -3657,16 +3655,6 @@ def create_studio_app() -> FastAPI:
                                 )
                             else:
                                 sys_prompt = _build_avatar_direct_prompt()
-                                try:
-                                    from agenticx.runtime.prompts.meta_agent import (
-                                        _build_computer_use_capabilities_block,
-                                    )
-
-                                    _cu_ctx = _build_computer_use_capabilities_block()
-                                    if _cu_ctx:
-                                        sys_prompt += "\n\n" + _cu_ctx
-                                except Exception:
-                                    pass
                                 _ts_ctx = _build_taskspaces_context(
                                     list(getattr(managed, "taskspaces", None) or [])
                                 )
@@ -4480,7 +4468,6 @@ def create_studio_app() -> FastAPI:
             if loop_avatar_cfg is not None:
                 loop_avatar_tools_enabled = _sanitize_tools_enabled(loop_avatar_cfg.tools_enabled)
         loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(META_AGENT_TOOLS)
-        loop_tools_source = merge_computer_use_tools_into(loop_tools_source)
         loop_tools_source = _strip_disabled_web_search_tools(loop_tools_source)
         loop_tools: list = _filter_tools_by_policy(
             loop_tools_source,
@@ -5503,9 +5490,6 @@ def create_studio_app() -> FastAPI:
 
         _TOOL_CATEGORIES: dict[str, str] = {
             "bash_exec": "system",
-            "desktop_screenshot": "system",
-            "desktop_mouse_click": "system",
-            "desktop_keyboard_type": "system",
             "file_read": "filesystem", "file_write": "filesystem", "file_edit": "filesystem", "list_files": "filesystem",
             "codegen": "code",
             "lsp_goto_definition": "code", "lsp_find_references": "code", "lsp_hover": "code", "lsp_diagnostics": "code",
@@ -5536,7 +5520,6 @@ def create_studio_app() -> FastAPI:
                 "category": _TOOL_CATEGORIES.get(name, "other"),
                 "is_meta": name in META_TOOL_NAMES,
             })
-        from agenticx.cli.agent_tools import COMPUTER_USE_TOOLS, computer_use_config_enabled
         from agenticx.runtime.meta_tools import META_AGENT_TOOLS
         for tool in META_AGENT_TOOLS:
             fn = tool.get("function", {})
@@ -5550,19 +5533,6 @@ def create_studio_app() -> FastAPI:
                 "category": _TOOL_CATEGORIES.get(name, "meta"),
                 "is_meta": True,
             })
-        if computer_use_config_enabled():
-            for tool in COMPUTER_USE_TOOLS:
-                fn = tool.get("function", {})
-                name = fn.get("name", "")
-                if not name or name in seen:
-                    continue
-                seen.add(name)
-                items.append({
-                    "name": name,
-                    "description": fn.get("description", ""),
-                    "category": _TOOL_CATEGORIES.get(name, "system"),
-                    "is_meta": False,
-                })
         return {"ok": True, "tools": items}
 
     @app.get("/api/tools/policy")

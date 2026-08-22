@@ -90,7 +90,7 @@ Near 与 Enterprise 共享 AgenticX 的抽象与能力，但当前部署链路�
 
 - **本机优先**: Electron + React + Zustand + Vite；Electron 启动并管理本机 `agx serve / agx-server`，通过 REST API + SSE 通信
 - **多智能体工作台**: 多窗格对话、Meta-Agent、分身、群聊、子智能体状态、会话历史与独立模型选择
-- **工作区与执行**: 工作目录、文件引用、内嵌终端、Computer Use、MCP、Skills、Hooks、知识库与数据源
+- **工作区与执行**: 工作目录、文件引用、内嵌终端、MCP、Skills、Hooks、知识库与数据源
 - **扩展体验**: Automation、Voice Focus、Claude Code Bridge、飞书与个人微信 Sidecar
 - **可选远程模式**: 已支持连接单一远程 `agx serve`；Cluster / HA 多副本运行时仍属规划
 

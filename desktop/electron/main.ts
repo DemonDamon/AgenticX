@@ -460,7 +460,6 @@ type AgxConfig = {
       default_to_email?: string;
     };
   };
-  computer_use?: Record<string, unknown>;
   agent_harness_trinity?: {
     skill_protocol?: boolean;
     session_summary?: boolean;
@@ -2080,18 +2079,6 @@ function parseBooleanStrict(value: unknown, field: string): boolean {
 function loadEmailConfigFromAgx(cfg: AgxConfig): EmailConfig {
   const email = cfg.notifications?.email;
   return normalizeEmailConfig(email);
-}
-
-function loadComputerUseEnabled(cfg: AgxConfig): boolean {
-  const raw = cfg.computer_use;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
-  const e = (raw as { enabled?: unknown }).enabled;
-  if (typeof e === "boolean") return e;
-  if (typeof e === "string") {
-    const lowered = e.trim().toLowerCase();
-    if (["true", "1", "yes", "on"].includes(lowered)) return true;
-  }
-  return false;
 }
 
 function parseBooleanLoose(value: unknown, fallback: boolean): boolean {
@@ -9767,41 +9754,9 @@ function registerIpc(): void {
     return { ok: true, config: loadEmailConfigFromAgx(cfg) };
   });
 
-  ipcMain.handle("load-computer-use-config", async () => {
-    const cfg = loadAgxConfig();
-    return { ok: true, config: { enabled: loadComputerUseEnabled(cfg) } };
-  });
-
   ipcMain.handle("load-trinity-config", async () => {
     const cfg = loadAgxConfig();
     return { ok: true, config: loadTrinityConfig(cfg) };
-  });
-
-  ipcMain.handle("save-computer-use-config", async (_event, payload: unknown) => {
-    if (!payload || typeof payload !== "object") return { ok: false, error: "invalid payload: object required" };
-    const p = payload as { enabled?: unknown };
-    let enabled: boolean;
-    try {
-      enabled = parseBooleanStrict(p.enabled, "enabled");
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
-    try {
-      const cfg = loadAgxConfig();
-      const prevRaw = cfg.computer_use;
-      const prev =
-        prevRaw && typeof prevRaw === "object" && !Array.isArray(prevRaw)
-          ? { ...(prevRaw as Record<string, unknown>) }
-          : {};
-      prev.enabled = enabled;
-      cfg.computer_use = prev;
-      saveAgxConfig(cfg);
-      return { ok: true };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[save-computer-use-config]", err);
-      return { ok: false, error: msg || "config_write_failed" };
-    }
   });
 
   ipcMain.handle("save-trinity-config", async (_event, payload: unknown) => {

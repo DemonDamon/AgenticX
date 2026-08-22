@@ -92,7 +92,7 @@ Near and Enterprise share AgenticX abstractions and capabilities, but their curr
 
 - **Local-first**: Electron + React + Zustand + Vite; Electron starts and manages local `agx serve / agx-server` over REST API + SSE
 - **Multi-agent Workspace**: Multi-pane chat, Meta-Agent, avatars, group chat, sub-agent status, session history, and per-pane model selection
-- **Workspace and Execution**: Working directories, file references, embedded terminal, Computer Use, MCP, Skills, Hooks, knowledge bases, and data sources
+- **Workspace and Execution**: Working directories, file references, embedded terminal, MCP, Skills, Hooks, knowledge bases, and data sources
 - **Extended Experiences**: Automation, Voice Focus, Claude Code Bridge, and Feishu / personal WeChat sidecars
 - **Optional Remote Mode**: A single remote `agx serve` backend is implemented; Cluster / HA multi-replica runtime remains planned
 

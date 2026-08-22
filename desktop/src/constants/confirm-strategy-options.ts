@@ -19,7 +19,7 @@ export type ConfirmPolicyOption = {
  *
  * ``auto`` 原来叫「低风险自动执行」，配琥珀色 TriangleAlert。但这个模式是 fail-closed
  * 的：只有显式带 ``risk: "low"`` 的操作会被自动批准，缺省、未知、以及 high /
- * destructive / computer_use / non_whitelisted / policy 一律仍然逐次询问
+ * destructive / non_whitelisted / permission_escalation / policy 一律仍然逐次询问
  * （见 utils/confirm-scope.ts 的 normalizeConfirmRisk）。工作区边界、受保护路径、
  * 管理员禁用的工具也照常拦。
  *
@@ -40,7 +40,7 @@ export const CONFIRM_STRATEGY_OPTIONS: readonly ConfirmStrategyOption[] = [
   {
     value: "auto",
     label: "代我批准",
-    description: "低风险操作由我代你批准；高风险、破坏性、桌面操控和未知风险仍会问你",
+    description: "低风险操作由我代你批准；高风险及其他受保护操作仍会问你",
   },
 ] as const;
 
@@ -59,7 +59,7 @@ export const CONFIRM_POLICY_OPTIONS: readonly ConfirmPolicyOption[] = [
   {
     value: "run-everything",
     label: "以后代我批准",
-    description: "以后低风险操作由我代你批准；高风险、破坏性、桌面操控和未知风险仍会问你。",
+    description: "以后低风险操作由我代你批准；高风险及其他受保护操作仍会问你。",
   },
 ] as const;
 

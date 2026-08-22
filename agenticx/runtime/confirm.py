@@ -21,7 +21,6 @@ PROTECTED_CONFIRM_RISKS = frozenset(
     {
         "high",
         "destructive",
-        "computer_use",
         "non_whitelisted",
         "permission_escalation",
         "policy",
@@ -54,7 +53,6 @@ def is_protected_confirm(context: Optional[Dict[str, Any]] = None) -> bool:
 PROTECTED_CONFIRM_REASONS: Dict[str, str] = {
     "high": "这条操作被标记为高风险",
     "destructive": "这条操作会删除或覆盖已有内容",
-    "computer_use": "这条操作会读取或控制本机桌面",
     "non_whitelisted": "这条命令不在默认可直接执行的白名单里",
     "permission_escalation": "这条命令申请退出工作区写入隔离，可改动主机上的任意文件",
     "policy": "这条操作会改动技能或长期记忆等配置",

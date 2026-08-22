@@ -5268,93 +5268,6 @@ function SettingsSwitch({
   );
 }
 
-/** 桌面操控是会直接影响本机的能力许可，因此放在权限页常显。 */
-function ComputerUseGeneralPanel() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [enabled, setEnabled] = useState(false);
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    let disposed = false;
-    const load = async () => {
-      setLoading(true);
-      setMessage("");
-      try {
-        const result = await window.agenticxDesktop.loadComputerUseConfig();
-        if (!disposed && result?.ok && result.config) {
-          setEnabled(Boolean(result.config.enabled));
-        }
-      } catch {
-        if (!disposed) setMessage("读取桌面操控配置失败。");
-      } finally {
-        if (!disposed) setLoading(false);
-      }
-    };
-    void load();
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  const persist = async (next: boolean) => {
-    setSaving(true);
-    setMessage("");
-    try {
-      const result = await window.agenticxDesktop.saveComputerUseConfig({ enabled: next });
-      if (!result?.ok) {
-        const detail = result?.error ? String(result.error) : "保存失败。";
-        setMessage(detail);
-        setEnabled(!next);
-        return;
-      }
-      setEnabled(next);
-      setMessage(
-        "已保存到本机配置。请完全退出和创智派后重新打开（勿仅关闭窗口）；内置助手会随应用一起重启并加载新设置。若使用「设置 → 服务器连接」中的远程模式，请在服务器环境同步该配置并重启远端服务。"
-      );
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败。");
-      setEnabled(!next);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <Panel title="桌面操控">
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
-      </Panel>
-    );
-  }
-
-  return (
-    <Panel title="桌面操控">
-      <p className="mb-3 text-xs text-text-faint">
-        允许智能体使用已安装的桌面级截屏、键盘和鼠标能力。系统权限或依赖未就绪时，这些能力仍不会运行。
-      </p>
-      <div className="flex items-center justify-between gap-4">
-        <span className="text-sm text-text-subtle">
-          启用桌面操控（桌面级截屏 / 键鼠等，需权限与依赖）
-        </span>
-        <SettingsSwitch
-          checked={enabled}
-          disabled={saving}
-          onChange={(next) => void persist(next)}
-          aria-label="启用桌面操控"
-        />
-      </div>
-      {message ? (
-        <div
-          className={`mt-2 text-xs ${message.startsWith("已保存到本机配置") ? "text-text-muted" : "text-rose-400"}`}
-        >
-          {message}
-        </div>
-      ) : null}
-    </Panel>
-  );
-}
-
 const TRINITY_DEFAULTS: TrinityConfigForm = {
   skill_protocol: true,
   session_summary: false,
@@ -9644,12 +9557,11 @@ export function SettingsPanel({
                     <div className="mt-3 flex items-start gap-2 rounded-lg border border-border bg-surface-card px-3 py-2 text-xs leading-5 text-text-subtle">
                       <CircleCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--settings-accent-fg)]" />
                       <span>
-                        低风险操作由我代你批准。高风险、破坏性、桌面操控和未知风险操作仍会逐次询问。
+                        低风险操作由我代你批准。高风险及其他受保护操作仍会逐次询问。
                       </span>
                     </div>
                   ) : null}
                 </Panel>
-                <ComputerUseGeneralPanel />
                 <Panel title="始终保留的安全保护">
                   <div className="space-y-2 text-xs leading-5 text-text-muted">
                     <div className="flex items-start gap-2">

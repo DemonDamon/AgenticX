@@ -30,7 +30,6 @@ TOOL_RESULT_CLASS: Dict[str, str] = {
     "mcp_call": "medium",
     "web_search": "medium",
     "skill_import_repo": "medium",
-    "desktop_screenshot": "blob",
     "screencapture": "blob",
 }
 

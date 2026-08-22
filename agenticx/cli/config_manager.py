@@ -83,19 +83,6 @@ class CodegenConfig:
 
 
 @dataclass
-class ComputerUseSettings:
-    """Computer Use capability settings (inspired by Claude Computer Use)."""
-
-    enabled: bool = False
-    max_fallback_level: str = "computer_use"
-    desktop_backend: str = "pyautogui"
-    denied_categories: list = field(default_factory=lambda: ["financial", "credentials"])
-    require_first_access_approval: bool = True
-    scheduler_enabled: bool = True
-    scheduler_max_concurrent: int = 5
-
-
-@dataclass
 class ExtensionRegistryConfig:
     """Configuration for a single extension registry source."""
 
@@ -160,7 +147,6 @@ class AgxConfig:
     codegen: CodegenConfig = field(default_factory=CodegenConfig)
     workspace_dir: str = "~/.agenticx/workspace"
     extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
-    computer_use: ComputerUseSettings = field(default_factory=ComputerUseSettings)
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
     longrun: LongRunSettings = field(default_factory=LongRunSettings)
     # Built-in web search (duckduckgo + optional API providers); see studio web_search routes.
@@ -328,10 +314,6 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
         if isinstance(workspace_raw, str) and workspace_raw.strip():
             workspace_dir = workspace_raw.strip()
 
-        cu_raw = merged.get("computer_use", {}) or {}
-        if not isinstance(cu_raw, dict):
-            cu_raw = {}
-
         longrun_raw = merged.get("longrun", {}) or {}
         if not isinstance(longrun_raw, dict):
             longrun_raw = {}
@@ -350,15 +332,6 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
                 include_tests=bool(codegen_raw.get("include_tests", True)),
             ),
             workspace_dir=workspace_dir,
-            computer_use=ComputerUseSettings(
-                enabled=bool(cu_raw.get("enabled", False)),
-                max_fallback_level=str(cu_raw.get("max_fallback_level", "computer_use")),
-                desktop_backend=str(cu_raw.get("desktop_backend", "pyautogui")),
-                denied_categories=list(cu_raw.get("denied_categories", ["financial", "credentials"])),
-                require_first_access_approval=bool(cu_raw.get("require_first_access_approval", True)),
-                scheduler_enabled=bool(cu_raw.get("scheduler_enabled", True)),
-                scheduler_max_concurrent=int(cu_raw.get("scheduler_max_concurrent", 5)),
-            ),
             longrun=LongRunSettings(
                 enabled=bool(longrun_raw.get("enabled", False)),
                 workspace_root=str(longrun_raw.get("workspace_root", "~/.agenticx/task-workspaces") or "").strip()

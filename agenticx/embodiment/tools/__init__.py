@@ -21,7 +21,6 @@ Usage:
 from .base import GUIActionTool, ToolResult
 from .models import ClickArgs, TypeArgs, ScrollArgs, WaitArgs, DragArgs
 from .adapters import BasePlatformAdapter, WebPlatformAdapter, MockPlatformAdapter
-from .desktop_adapter import DesktopPlatformAdapter
 from .core_tools import (
     ClickTool,
     TypeTool, 
@@ -48,7 +47,6 @@ __all__ = [
     'BasePlatformAdapter',
     'WebPlatformAdapter',
     'MockPlatformAdapter',
-    'DesktopPlatformAdapter',
     
     # Core tools
     'ClickTool',

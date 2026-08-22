@@ -410,9 +410,6 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadAvatarSoul: async (payload: { avatarId: string }) => ipcRenderer.invoke("load-avatar-soul", payload),
   saveAvatarSoul: async (payload: { avatarId: string; content: string }) =>
     ipcRenderer.invoke("save-avatar-soul", payload),
-  loadComputerUseConfig: async () => ipcRenderer.invoke("load-computer-use-config"),
-  saveComputerUseConfig: async (payload: { enabled: boolean }) =>
-    ipcRenderer.invoke("save-computer-use-config", payload),
   loadTrinityConfig: async () => ipcRenderer.invoke("load-trinity-config"),
   saveTrinityConfig: async (payload: {
     skill_protocol: boolean;
