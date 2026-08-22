@@ -80,6 +80,7 @@ import {
 } from "../utils/session-artifacts";
 import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { WidgetFlowRewriteStatusLine } from "./messages/ContextNoticeLine";
 import type { SkillPatchPreviewPayload } from "./messages/skill-manage-preview";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
@@ -2896,6 +2897,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [voiceInputHint, setVoiceInputHint] = useState("");
   const dictationSessionRef = useRef<{ stop: () => void; cancel: () => void } | null>(null);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
+  const [widgetFlowRewriting, setWidgetFlowRewriting] = useState(false);
   const [streamedBlocks, setStreamedBlocks] = useState<ContentBlock[]>([]);
   const streamedBlocksRef = useRef<ContentBlock[]>([]);
   const [streamReferences, setStreamReferences] = useState<SearchReference[]>([]);
@@ -6963,6 +6965,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (st) st.active = false;
         if (isCurrent()) {
           setStreamedAssistantText("");
+          setWidgetFlowRewriting(false);
           syncStreamingUiForCurrentSession();
           setGroupExpertActivities({});
         }
@@ -8345,6 +8348,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     return (
     <>
       {mainRows}
+      {widgetFlowRewriting && !streamTextForCurrentSession.trim() ? (
+        <WidgetFlowRewriteStatusLine />
+      ) : null}
       {sortGroupExpertActivities(groupExpertActivities)
         .filter((activity) => !visibleGroupStreamBody(groupStreamText[activity.agentId] ?? ""))
         .map((activity) => (
@@ -8480,7 +8486,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel]);
+  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -9058,6 +9064,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
       if ((pane.sessionId || "").trim() === requestSessionId) {
         setStreamedAssistantText("");
+        setWidgetFlowRewriting(false);
       }
       setStallState("none");
 
@@ -9341,6 +9348,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
+    setWidgetFlowRewriting(false);
     streamedBlocksRef.current = [];
     setStreamedBlocks([]);
     setStreamReferences([]);
@@ -10434,6 +10442,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   streamReasoningStartedAt = Date.now();
                 }
                 streamedBlocksRef.current = applyTokenDelta(streamedBlocksRef.current, tokenText);
+                setWidgetFlowRewriting(false);
                 scheduleStreamTextUpdate(full);
               } else {
                 const tok = String(payload.data?.text ?? "");
@@ -10458,6 +10467,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "tool_call") {
               setStallWait(null);
+              setWidgetFlowRewriting(false);
               const toolNameStr = String(payload.data?.name ?? "tool");
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
@@ -11330,16 +11340,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 streamReasoningStartedAt = null;
                 cancelStreamRenderFrame();
                 scheduleStreamTextUpdate("");
-                addPaneMessageIfSessionActive(
-                  pane.id,
-                  "tool",
-                  errText || "正文按图示规范重写中，上一稿已撤回。",
-                  eventAgentId || "meta",
-                  undefined,
-                  undefined,
-                  undefined,
-                  { noticeKind: "widget_flow_retry" },
-                );
+                setWidgetFlowRewriting(true);
                 continue;
               }
               const budgetInfo = budgetExceededInfoFromPayload(
@@ -11604,6 +11605,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           }
           setStreamReferences([]);
           setStreamSearchedQueries([]);
+          setWidgetFlowRewriting(false);
           streamTextRef.current = "";
           streamedBlocksRef.current = [];
           setStreamedBlocks([]);

@@ -23,8 +23,26 @@ function detectKindFromText(text: string): ContextNoticeKind | null {
   if (text.includes("Token 接近上限，已自动压缩")) return "compaction_reactive";
   if (text.includes("已压缩") && text.includes("任务继续")) return "compaction_proactive";
   if (text.includes("已自动压缩") && text.includes("历史")) return "compaction_proactive";
-  if (text.includes("正文按图示规范重写中")) return "widget_flow_retry";
+  if (isWidgetFlowRetryNoticeText(text)) return "widget_flow_retry";
   return null;
+}
+
+/** Historical persisted copy. Hidden in UI; kept only to recognize old sessions. */
+export const WIDGET_FLOW_RETRY_NOTICE = "正文按图示规范重写中，上一稿已撤回。";
+
+/** Ephemeral in-stream status while the discarded draft is replaced. Not persisted. */
+export const WIDGET_FLOW_REWRITE_STATUS = "正在改用可视化流程图…";
+
+export function isWidgetFlowRetryNoticeText(text: string): boolean {
+  return String(text ?? "").includes("正文按图示规范重写中");
+}
+
+export function isWidgetFlowRetryNotice(
+  message: Pick<Message, "role" | "content" | "noticeKind">,
+): boolean {
+  if (message.role !== "tool") return false;
+  if (message.noticeKind === "widget_flow_retry") return true;
+  return isWidgetFlowRetryNoticeText(message.content);
 }
 
 /** keep in sync with agenticx/studio/compaction_notice.py build_compaction_notice_content */

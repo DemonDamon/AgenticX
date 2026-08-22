@@ -33,6 +33,7 @@ import {
   normalizeFinalAssistantPayload,
 } from "../utils/assistant-output";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
+import { WidgetFlowRewriteStatusLine } from "./messages/ContextNoticeLine";
 import { extractPartialShowWidgetArgs } from "./messages/show-widget-partial";
 import { groupConsecutiveToolMessages, shouldHoldToolGroupProgress, type GroupedChatRow } from "./messages/group-tool-messages";
 import {
@@ -439,6 +440,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   }, []);
   const [streaming, setStreaming] = useState(false);
   const [streamedAssistantText, setStreamedAssistantText] = useState("");
+  const [widgetFlowRewriting, setWidgetFlowRewriting] = useState(false);
   const [streamReferences, setStreamReferences] = useState<SearchReference[]>([]);
   const [streamSearchedQueries, setStreamSearchedQueries] = useState<string[]>([]);
   const [streamingModel, setStreamingModel] = useState<{ provider: string; model: string } | null>(null);
@@ -1160,6 +1162,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       streamTextRef.current = "";
       cancelStreamRenderFrame();
       setStreamedAssistantText("");
+      setWidgetFlowRewriting(false);
       setStreamReferences([]);
       setStreamSearchedQueries([]);
       setStreamingModel(null);
@@ -1283,6 +1286,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     recordProgressActivity();
     cancelStreamRenderFrame();
     setStreamedAssistantText("");
+    setWidgetFlowRewriting(false);
     setStreamReferences([]);
     setStreamSearchedQueries([]);
     setStreamingModel(reqModel ? { provider: reqProvider, model: reqModel } : null);
@@ -1478,10 +1482,12 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               full += tokenText;
               cumulativeFull += tokenText;
               setStallWait(null);
+              setWidgetFlowRewriting(false);
               scheduleStreamTextUpdate(full);
             }
             if (payload.type === "tool_call") {
               setStallWait(null);
+              setWidgetFlowRewriting(false);
               const toolNameStr = String(payload.data?.name ?? "tool");
               const toolArgs = (payload.data?.arguments ?? payload.data?.args ?? {}) as Record<string, unknown>;
               const toolCallId = String(payload.data?.tool_call_id ?? payload.data?.id ?? "").trim();
@@ -1990,15 +1996,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                 full = "";
                 cancelStreamRenderFrame();
                 scheduleStreamTextUpdate("");
-                addMessage(
-                  "tool",
-                  errText || "正文按图示规范重写中，上一稿已撤回。",
-                  "meta",
-                  undefined,
-                  undefined,
-                  undefined,
-                  { noticeKind: "widget_flow_retry" },
-                );
+                setWidgetFlowRewriting(true);
                 continue;
               }
               const isWarning = severity === "warning"
@@ -2134,6 +2132,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       cancelStreamRenderFrame();
       streamTextRef.current = "";
       setStreamedAssistantText("");
+      setWidgetFlowRewriting(false);
       setStreamReferences([]);
       setStreamSearchedQueries([]);
       setStreamingModel(null);
@@ -2722,6 +2721,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
               ),
             );
           })()}
+          {widgetFlowRewriting && !String(streamedAssistantText ?? "").trim() ? (
+            <WidgetFlowRewriteStatusLine />
+          ) : null}
           {streaming && !hideStreamOverlayAsDuplicate && (
             <div className={["!mt-1.5", isLite ? "text-[15px]" : "text-sm"].join(" ")}>
               {chatStyle === "terminal" ? (

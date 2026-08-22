@@ -21,6 +21,8 @@ _BOX_DRAWING = re.compile(r"[┌┐└┘├┤┬┴┼│─╔╗╚╝║═
 _PLUS_BOX = re.compile(r"\+[-=]{2,}\+")
 
 WIDGET_FLOW_MAX_RETRIES_PER_SESSION = 1
+# SSE payload only. Desktop treats discard as an ephemeral rewrite status and
+# does not persist this sentence in the transcript.
 WIDGET_FLOW_DISCARD_NOTICE = "正文按图示规范重写中，上一稿已撤回。"
 
 

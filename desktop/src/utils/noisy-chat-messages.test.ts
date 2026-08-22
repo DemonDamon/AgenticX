@@ -52,6 +52,24 @@ test("isNoisyToolStatusMessage hides ephemeral interruption meta rows", () => {
     true,
     "legacy todo snapshot prefix without toolName is hidden",
   );
+  assert.equal(
+    isNoisyToolStatusMessage({
+      role: "tool",
+      content: "正文按图示规范重写中，上一稿已撤回。",
+      toolName: "",
+    }),
+    true,
+    "legacy widget-flow rewrite notices stay hidden",
+  );
+  assert.equal(
+    isNoisyToolStatusMessage({
+      role: "tool",
+      content: "正在改用可视化流程图…",
+      noticeKind: "widget_flow_retry",
+    }),
+    true,
+    "widget-flow retry kind is hidden even with new copy",
+  );
 });
 
 test("isEphemeralStopErrorText matches runtime STOP_MESSAGE variants", () => {

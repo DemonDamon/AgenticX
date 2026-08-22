@@ -1,4 +1,5 @@
 import type { Message } from "../store";
+import { isWidgetFlowRetryNotice } from "./context-notice";
 import { isOrphanFormattedToolResultMessage } from "./orphan-formatted-tool";
 
 const NOISY_TOOL_STATUS_CONTENT = new Set([
@@ -31,9 +32,10 @@ export function isEphemeralStopErrorText(text: string): boolean {
 
 /** Ephemeral meta tool rows that duplicate TurnInterruptionNoticeLine or add wrench noise. */
 export function isNoisyToolStatusMessage(
-  message: Pick<Message, "role" | "content" | "toolName" | "toolCallId" | "toolGroupId">,
+  message: Pick<Message, "role" | "content" | "toolName" | "toolCallId" | "toolGroupId" | "noticeKind">,
 ): boolean {
   if (message.role !== "tool") return false;
+  if (isWidgetFlowRetryNotice(message)) return true;
   if (isOrphanFormattedToolResultMessage(message)) return true;
   const toolName = (message.toolName ?? "").trim();
   if (toolName === "check_resources") return true;
