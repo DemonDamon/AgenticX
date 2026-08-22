@@ -667,6 +667,7 @@ class ContextCompactor:
         *,
         force: bool = False,
         model: str = "",
+        session: Any = None,
     ) -> Tuple[List[Dict[str, Any]], bool, str, int, str]:
         """Compact old messages and return compacted messages.
 
@@ -697,9 +698,38 @@ class ContextCompactor:
             )
             return copied, False, "", 0, ""
 
+        from agenticx.runtime import compaction_journal as _journal
+
+        lock = _journal.begin(session, trigger=self.last_trigger_reason)
+        try:
+            return await self._maybe_compact_locked(
+                copied,
+                working,
+                compact_block,
+                lock=lock,
+                force=force,
+                model=model,
+            )
+        except Exception:
+            _journal.end(lock, outcome="failed")
+            raise
+
+    async def _maybe_compact_locked(
+        self,
+        copied: List[Dict[str, Any]],
+        working: List[Dict[str, Any]],
+        compact_block: Optional[Dict[str, Any]],
+        *,
+        lock: Any,
+        force: bool,
+        model: str,
+    ) -> Tuple[List[Dict[str, Any]], bool, str, int, str]:
+        from agenticx.runtime import compaction_journal as _journal
+
         to_compact, retained = self._split_for_compaction(working)
         if not to_compact:
             self.last_trigger_reason = ""
+            _journal.end(lock, outcome="nothing-to-compact")
             return copied, False, "", 0, ""
         compacted_count = len(to_compact)
         _log.info(
@@ -751,4 +781,11 @@ class ContextCompactor:
             "role": "system",
             "content": "\n\n".join(content_parts),
         }
+        from agenticx.runtime import compaction_journal as _journal
+
+        _journal.end(
+            lock,
+            outcome="summarized",
+            compacted_count=compacted_count,
+        )
         return [compacted_message, *retained], True, summary, compacted_count, pending_question

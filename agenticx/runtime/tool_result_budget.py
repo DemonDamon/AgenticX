@@ -58,6 +58,7 @@ class ToolResultBudgetConfig:
     enabled: bool = True
     keep_rounds: int = 8  # batch doc read + late summarize; 2 rounds caused re-parse loops
     large_threshold_tokens: int = 4000
+    archive_batch_tokens: int = 8000
     archive_subdir: str = "tool_archives"
 
 
@@ -109,6 +110,8 @@ def load_config() -> ToolResultBudgetConfig:
                 cfg.keep_rounds = max(0, int(section["keep_rounds"]))
             if section.get("large_threshold_tokens") is not None:
                 cfg.large_threshold_tokens = max(500, int(section["large_threshold_tokens"]))
+            if section.get("archive_batch_tokens") is not None:
+                cfg.archive_batch_tokens = max(0, int(section["archive_batch_tokens"]))
             sub = str(section.get("archive_subdir") or "").strip()
             if sub:
                 cfg.archive_subdir = sub
@@ -228,6 +231,27 @@ def apply_tool_result_budget(
     if not isinstance(meta_store, dict):
         meta_store = {}
 
+    eligible_tokens = 0
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        if str(msg.get("role", "")).lower() != "tool":
+            continue
+        content = str(msg.get("content", "") or "")
+        if "[tool-result-archived]" in content:
+            continue
+        tool_call_id = str(msg.get("tool_call_id") or msg.get("id") or "")
+        meta = meta_store.get(tool_call_id)
+        if meta is None:
+            continue
+        age = current_round - meta.round_idx
+        if meta.result_class in {"large", "blob"} and age > cfg.keep_rounds:
+            eligible_tokens += approx_tokens(content)
+    allow_new_archive = (
+        int(cfg.archive_batch_tokens or 0) <= 0
+        or eligible_tokens >= int(cfg.archive_batch_tokens)
+    )
+
     out: List[Dict[str, Any]] = []
     for msg in messages:
         if not isinstance(msg, dict):
@@ -247,7 +271,11 @@ def apply_tool_result_budget(
             continue
         age = current_round - meta.round_idx
         should_archive = meta.result_class in {"large", "blob"} and age > cfg.keep_rounds
-        if should_archive and "[tool-result-archived]" not in content:
+        if (
+            should_archive
+            and "[tool-result-archived]" not in content
+            and allow_new_archive
+        ):
             replaced = dict(msg)
             replaced["content"] = _build_archived_summary(meta)
             out.append(replaced)

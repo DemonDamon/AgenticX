@@ -59,10 +59,17 @@ def test_provider_breakdown_label_reads_config(monkeypatch) -> None:
     assert provider_breakdown_label("custom_openai_deleted") == "历史厂商"
 
 
-def test_build_provider_catalog_block_mentions_display_names() -> None:
+def test_build_provider_catalog_block_mentions_display_names(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agenticx.llms.provider_display.load_provider_configs",
+        lambda: {
+            "custom_openai_moma": {"display_name": "MOMA", "models": ["ZHIPU/GLM-5.2"]},
+        },
+    )
     block = build_provider_catalog_block(
         current_provider="custom_openai_moma",
         current_model="ZHIPU/GLM-5.2",
     )
     assert "MOMA/GLM-5.2" in block
     assert "custom_openai_*" in block
+    assert "当前会话模型" not in block

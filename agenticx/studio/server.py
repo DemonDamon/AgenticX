@@ -3638,6 +3638,7 @@ def create_studio_app() -> FastAPI:
                                 user_nickname=_u_nickname,
                                 user_preference=_u_preference,
                                 kb_retrieval_mode_override=_kb_mode_req or None,
+                                include_volatile=False,
                             )
                         user_message_content: Any | None = None
                         history_user_attachments: list[dict[str, Any]] | None = None
@@ -4352,6 +4353,7 @@ def create_studio_app() -> FastAPI:
             mode="interactive",
             taskspaces=managed.taskspaces,
             group_chat=_meta_group_chat_payload(managed),
+            include_volatile=False,
         )
 
         async def _loop_stream() -> AsyncGenerator[str, None]:

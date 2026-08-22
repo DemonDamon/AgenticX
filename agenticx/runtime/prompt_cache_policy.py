@@ -11,6 +11,13 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 from agenticx.cli.config_manager import ConfigManager
 
+IMPLICIT_PREFIX_CACHE_PROVIDERS = frozenset({"kimi", "moonshot"})
+
+
+def _is_implicit_prefix_provider(provider_name: str) -> bool:
+    provider = str(provider_name or "").strip().lower()
+    return any(token == provider or token in provider for token in IMPLICIT_PREFIX_CACHE_PROVIDERS)
+
 
 @dataclass
 class PromptCacheConfig:
@@ -95,6 +102,9 @@ def apply_prompt_cache_breakpoints(
     out = [m for m in messages if isinstance(m, dict)]
     _clear_cache_markers(out)
 
+    if _is_implicit_prefix_provider(provider_name):
+        telemetry["cache_mode"] = "implicit_prefix"
+        return out, telemetry
     if not cfg.enabled:
         return out, telemetry
     if not cfg.allows_provider(provider_name):

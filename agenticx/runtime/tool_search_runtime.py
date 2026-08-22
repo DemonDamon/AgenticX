@@ -27,8 +27,8 @@ from agenticx.runtime.tool_search import (
 
 
 def read_tool_search_config() -> ToolSearchConfig:
-    """Read ``runtime.tool_search`` from merged config; default mode=off."""
-    mode = "off"
+    """Read ``runtime.tool_search`` from merged config; default mode=auto."""
+    mode = "auto"
     threshold = DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD
     strategy = "adaptive"
     ratio = DEFAULT_CONTEXT_BUDGET_RATIO
@@ -37,7 +37,7 @@ def read_tool_search_config() -> ToolSearchConfig:
 
         raw = ConfigManager.get_value("runtime.tool_search")
         if isinstance(raw, dict):
-            mode = str(raw.get("mode") or "off").strip().lower() or "off"
+            mode = str(raw.get("mode") or "auto").strip().lower() or "auto"
             try:
                 threshold = int(
                     raw.get("auto_schema_token_threshold")

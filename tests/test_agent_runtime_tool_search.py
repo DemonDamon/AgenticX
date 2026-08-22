@@ -312,13 +312,12 @@ def test_meta_prompt_mentions_tool_search():
     assert "tool_search" in prompt
 
 
-def test_show_widget_always_projected_when_in_pool(monkeypatch):
-    """AC-1: show_widget is not deferred; projection includes it without load."""
+def test_show_widget_is_deferred_until_loaded(monkeypatch):
+    """show_widget is outside CORE, so ToolSearch withholds its schema until loaded."""
     monkeypatch.setattr(
         "agenticx.runtime.tool_search_runtime.read_tool_search_config",
         lambda: ToolSearchConfig(mode="always"),
     )
-    assert "show_widget" not in BUILTIN_DEFER_ALLOWLIST
     pool = _make_pool()
     pool.append(
         {
@@ -334,7 +333,7 @@ def test_show_widget_always_projected_when_in_pool(monkeypatch):
     ctx = build_runtime_context(session=session, full_openai_tools=pool)
     out = project_tools_for_round(ctx, full_openai_tools=pool)
     names = _tool_names(out)
-    assert "show_widget" in names
+    assert "show_widget" not in names
     assert "web_fetch" not in names
 
 
