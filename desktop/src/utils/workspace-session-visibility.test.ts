@@ -6,6 +6,7 @@ import {
   markPaneAwaitingFreshSession,
 } from "./pane-fresh-session.ts";
 import {
+  bootstrapMarkerForSessionBinding,
   isNewTaskNavActive,
   shouldKeepWorkspaceVisibleWhenSessionMissing,
 } from "./workspace-session-visibility.ts";
@@ -20,6 +21,12 @@ test("does not keep workspace when session already exists", () => {
 
 test("does not keep workspace when not awaiting fresh session", () => {
   assert.equal(shouldKeepWorkspaceVisibleWhenSessionMissing("", false), false);
+});
+
+test("skips history bootstrap only for the session freshly created by this pane", () => {
+  assert.equal(bootstrapMarkerForSessionBinding("sid-new", "sid-new"), "sid-new");
+  assert.equal(bootstrapMarkerForSessionBinding("sid-history", "sid-new"), "");
+  assert.equal(bootstrapMarkerForSessionBinding("", "sid-new"), "");
 });
 
 test("new task nav active only for meta pane awaiting first send", () => {

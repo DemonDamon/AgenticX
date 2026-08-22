@@ -584,7 +584,6 @@ export function SidebarSessionHistory() {
       bumpSessionCatalogRevision();
       window.setTimeout(() => bumpSessionCatalogRevision(), 450);
       await loadSessions();
-      await loadBindings();
       setSelectMode(false);
     } finally {
       setBatchDeleting(false);
@@ -825,7 +824,6 @@ export function SidebarSessionHistory() {
     bumpSessionCatalogRevision();
     window.setTimeout(() => bumpSessionCatalogRevision(), 450);
     await loadSessions();
-    await loadBindings();
   };
 
   const openMoreMenu = (row: SidebarSessionRow, anchor: HTMLElement) => {

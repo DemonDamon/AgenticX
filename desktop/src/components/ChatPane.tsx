@@ -384,6 +384,7 @@ import {
 import { absoluteTaskspacePath } from "../utils/workspace-file-path";
 import { formatTaskspaceAddError } from "../utils/taskspace-errors";
 import {
+  bootstrapMarkerForSessionBinding,
   ensureWorkspaceSessionBeforeFirstMessage,
   shouldKeepNewTopicWorkspaceControls,
 } from "../utils/workspace-session-visibility";
@@ -3119,6 +3120,7 @@ export function ChatPane({
   const programmaticScrollRef = useRef(0);
   const loadingOlderMessagesRef = useRef(false);
   const sessionBootstrapRef = useRef("");
+  const freshlyCreatedSessionRef = useRef("");
   const sessionBootstrapInflightRef = useRef("");
   const sessionBootstrapAttemptRef = useRef(0);
   const [sessionBootstrapRetryNonce, setSessionBootstrapRetryNonce] = useState(0);
@@ -6866,7 +6868,14 @@ export function ChatPane({
 
   useEffect(() => {
     loadingOlderMessagesRef.current = false;
-    sessionBootstrapRef.current = "";
+    const boundSessionId = String(pane.sessionId ?? "").trim();
+    sessionBootstrapRef.current = bootstrapMarkerForSessionBinding(
+      boundSessionId,
+      freshlyCreatedSessionRef.current,
+    );
+    if (sessionBootstrapRef.current) {
+      freshlyCreatedSessionRef.current = "";
+    }
     sessionBootstrapInflightRef.current = "";
     sessionBootstrapAttemptRef.current = 0;
     // 切换会话时收起落盘 drawer：其 runId 属于上一会话，跨会话残留会导致
@@ -9392,6 +9401,7 @@ export function ChatPane({
       if (created.inherited) {
         setPaneContextInherited(pane.id, true);
       }
+      freshlyCreatedSessionRef.current = newSessionId;
       setPaneSessionId(pane.id, newSessionId, {
         provider: chatProvider || undefined,
         model: chatModel || undefined,
@@ -9756,6 +9766,7 @@ export function ChatPane({
           useAppStore.getState().setPaneMessages(pane.id, []);
           lastPollCountRef.current = 0;
           pollSessionSidRef.current = requestSessionId;
+          freshlyCreatedSessionRef.current = requestSessionId;
           setPaneSessionId(pane.id, requestSessionId);
           addPaneMessage(pane.id, "tool", "⚠️ 检测到会话冲突，已自动切换到独立会话。", "meta");
         }
@@ -10464,6 +10475,7 @@ export function ChatPane({
         if (created.ok && created.session_id) {
           const oldSessionId = requestSessionId;
           requestSessionId = created.session_id;
+          freshlyCreatedSessionRef.current = requestSessionId;
           setPaneSessionId(pane.id, requestSessionId);
 
           try {
@@ -12375,6 +12387,7 @@ export function ChatPane({
       });
       if (result.ok && result.session_id) {
         migrateActiveComposerDraftToSession(result.session_id);
+        freshlyCreatedSessionRef.current = result.session_id;
         setPaneSessionId(pane.id, result.session_id, {
           provider: chatProvider || undefined,
           model: chatModel || undefined,

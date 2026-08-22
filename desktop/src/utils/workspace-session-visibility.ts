@@ -30,6 +30,20 @@ export function shouldKeepNewTopicWorkspaceControls(
   return !hasStartedChat && (!loadingMessages || workspaceLoading);
 }
 
+/**
+ * A session created by this pane is authoritatively empty. Treat it as already
+ * bootstrapped so the generic history loader does not flash its conversation
+ * skeleton between the new-topic empty state and the workspace menu.
+ */
+export function bootstrapMarkerForSessionBinding(
+  boundSessionId: string,
+  freshlyCreatedSessionId: string,
+): string {
+  const bound = boundSessionId.trim();
+  const fresh = freshlyCreatedSessionId.trim();
+  return bound && bound === fresh ? bound : "";
+}
+
 export type NewTaskNavPane = {
   id: string;
   avatarId: string | null;
