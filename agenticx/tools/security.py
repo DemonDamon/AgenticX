@@ -7,9 +7,7 @@ AgenticX M3 工具安全模块
 from functools import wraps
 from typing import Callable, Any, Optional
 
-from ..core.error_handler import ErrorHandler # 假设未来会用到
-from ..core.event import HumanRequestEvent
-from ..core.tool import FunctionTool
+from .function_tool import FunctionTool
 
 
 class ApprovalRequiredError(Exception):
@@ -69,5 +67,5 @@ def human_in_the_loop(
             # 如果不需要审批，则直接执行原始函数
             return func(*args, **kwargs)
         # 将包装后的函数转换为 FunctionTool
-        return FunctionTool.from_function(wrapper, name=func.__name__, description=func.__doc__)
-    return decorator 
+        return FunctionTool(func=wrapper, name=func.__name__, description=func.__doc__)
+    return decorator

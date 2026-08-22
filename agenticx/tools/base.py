@@ -12,8 +12,6 @@ from typing import Any, Dict, Optional, Type, Union
 
 from pydantic import BaseModel  # type: ignore
 
-from ..core.message import Message
-
 logger = logging.getLogger(__name__)
 
 
