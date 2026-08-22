@@ -44,6 +44,7 @@ from ..hooks.tool_hooks import (
 )
 from ..hooks import HookEvent, trigger_hook_event_sync
 from ..hooks import load_discovered_hooks
+from agenticx.utils.async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -625,7 +626,7 @@ class AgentExecutor:
                 # === Context Compilation Check ===
                 # 在每次 LLM 调用前检查是否需要压缩上下文
                 if self.context_compiler and self.enable_context_compilation:
-                    asyncio.get_event_loop().run_until_complete(
+                    run_sync(
                         self._maybe_compact_context(event_log)
                     )
                 
@@ -921,11 +922,25 @@ class AgentExecutor:
             
             if execution_result.success:
                 # === After Tool Call Hooks ===
-                hook_context.tool_result = str(execution_result.result) if execution_result.result else ""
-                
+                # 钩子只吃字符串，所以这里把结果转成文本喂给它们。注意用 `is None`
+                # 判空：原来写的是 `if execution_result.result else ""`，工具返回 0 /
+                # False / [] / "" 这些合法但为假的值时，钩子收到的是空串，最终结果也被
+                # 写成了空串。
+                result_text = (
+                    "" if execution_result.result is None else str(execution_result.result)
+                )
+                hook_context.tool_result = result_text
+                hook_modified = False
+
                 # 执行全局 after hooks
                 modified_result = execute_after_tool_call_hooks(hook_context)
-                
+                # execute_after_tool_call_hooks 不管钩子有没有改，都会把 tool_result
+                # 原样回传（见 agenticx/hooks/tool_hooks.py），所以"和喂进去的一样"
+                # 就等于没人动过。不这么判的话，工具返回的 int/dict/list 会被这里
+                # 无条件压成 str —— 单元测试里 math_tool 返回 6，事件里拿到的是 '6'。
+                if modified_result is not None and modified_result != result_text:
+                    hook_modified = True
+
                 # 执行 Agent 级别的 after hooks
                 if agent and agent.tool_hooks and agent.tool_hooks.get('after'):
                     for hook in agent.tool_hooks['after']:
@@ -934,11 +949,12 @@ class AgentExecutor:
                             if result is not None:
                                 modified_result = result
                                 hook_context.tool_result = result
+                                hook_modified = True
                         except Exception as e:
                             logger.warning(f"Agent Tool after hook error: {e}")
-                
-                # 使用可能被修改的结果
-                final_result = modified_result if modified_result is not None else execution_result.result
+
+                # 有人改过就用改后的；没人改就保留工具原样的返回值（连同类型）。
+                final_result = modified_result if hook_modified else execution_result.result
                 
                 tool_result_event = ToolResultEvent(
                     tool_name=tool_name,
@@ -1174,13 +1190,23 @@ class AgentExecutor:
                 if not tool:
                     raise ValueError(f"Tool '{tool_name}' not found")
                 
-                # 使用 ToolExecutor 执行工具
+                # 使用 ToolExecutor 执行工具。
+                #
+                # 两处要点：
+                # 1) event_log 签名上是 Optional 且默认 None，文档和 Example 里也都
+                #    不传它，但这里原来直接取 event_log.agent_id —— 不传就每个工具都
+                #    以 "'NoneType' object has no attribute 'agent_id'" 失败，而且错误
+                #    被包进 ParallelToolResult(success=False)，看起来像是工具自己挂了。
+                # 2) 原来调的是同步的 executor.execute()。它在协程里是阻塞的，
+                #    asyncio.gather 收到的每个任务都会一路跑完才交出控制权 —— 名字叫
+                #    并行执行，实际是串行。改用 aexecute()：同步工具的默认 _arun 会把
+                #    _run 丢进线程池（见 tools/base.py:201），这才真的并发起来。
                 from ..tools.executor import ToolExecutor
                 executor = ToolExecutor()
-                execution_result = executor.execute(
+                execution_result = await executor.aexecute(
                     tool,
-                    agent_id=event_log.agent_id,
-                    task_id=event_log.task_id,
+                    agent_id=getattr(event_log, "agent_id", None),
+                    task_id=getattr(event_log, "task_id", None),
                     **tool_args
                 )
                 
@@ -1286,13 +1312,11 @@ class AgentExecutor:
         """
         并行工具执行的同步版本（便于在非异步上下文中使用）。
         """
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        return loop.run_until_complete(
+        # 原来是 get_event_loop / except: new_event_loop + run_until_complete。它能
+        # 绕过 "asyncio.run 之后 get_event_loop 抛错"，但当前线程已经在跑事件循环时
+        # 会抛 "This event loop is already running"，而且每次走 except 分支都会留下
+        # 一个没人关的循环。run_sync 两种情况都盖住。
+        return run_sync(
             self.execute_parallel_tool_calls(
                 tool_calls=tool_calls,
                 event_log=event_log,

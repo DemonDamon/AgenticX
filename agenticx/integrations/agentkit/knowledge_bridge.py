@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from agenticx.knowledge.base import BaseKnowledge
 from agenticx.knowledge.document import Document, DocumentMetadata
+from agenticx.utils.async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class AgentkitKnowledgeBridge(BaseKnowledge):
             List of document IDs created.
         """
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.add_content_async(
                 content, source, name, metadata, reader, **kwargs
             )
@@ -202,7 +203,7 @@ class AgentkitKnowledgeBridge(BaseKnowledge):
             List of matching Documents.
         """
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.search_async(query, limit, filters, **kwargs)
         )
 
