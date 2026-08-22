@@ -142,7 +142,7 @@ class ToolDescriptor:
 
 @dataclass(frozen=True)
 class ToolSearchConfig:
-    mode: str = "off"  # "off" | "auto" | "always"
+    mode: str = "auto"  # "off" | "auto" | "always"
     auto_schema_token_threshold: int = DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD
     threshold_strategy: str = "adaptive"
     context_budget_ratio: float = DEFAULT_CONTEXT_BUDGET_RATIO
@@ -424,7 +424,7 @@ def _estimate_core_schema_tokens(ctx: ToolSearchRuntimeContext) -> int:
         if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
             core_tools.append(_descriptor_to_openai_tool(d))
             continue
-        if d.kind == "builtin" and d.name not in BUILTIN_DEFER_ALLOWLIST:
+        if d.kind == "builtin" and not is_deferred_builtin(d.name):
             core_tools.append(_descriptor_to_openai_tool(d))
     return estimate_schema_tokens(core_tools)
 
@@ -491,12 +491,10 @@ def project_tools_for_round(
         if name in pool:
             _add_name(name)
 
-    # Non-deferred builtins that are not in CORE: still always-load
-    for name, tool in pool.items():
-        if name in CORE_ALWAYS_LOAD_TOOLS:
-            continue
-        if name in BUILTIN_DEFER_ALLOWLIST:
-            continue
+    # Non-deferred names that are not in CORE: still always-load, sorted
+    for name in sorted(
+        n for n in pool if n not in CORE_ALWAYS_LOAD_TOOLS and not is_deferred_builtin(n)
+    ):
         _add_name(name)
 
     # Always include tool_search if present in pool
@@ -690,7 +688,8 @@ def apply_search(
 
 
 def is_deferred_builtin(name: str) -> bool:
-    return name in BUILTIN_DEFER_ALLOWLIST and name not in CORE_ALWAYS_LOAD_TOOLS
+    """Defer any builtin that is not in CORE_ALWAYS_LOAD_TOOLS."""
+    return name not in CORE_ALWAYS_LOAD_TOOLS
 
 
 def auto_load_deferred_tool(session: Any, ts_ctx: ToolSearchRuntimeContext, tool_name: str) -> str:
@@ -734,7 +733,7 @@ def known_unloaded_names(ctx: ToolSearchRuntimeContext) -> set[str]:
             continue
         if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
             continue
-        if d.kind == "mcp" or d.name in BUILTIN_DEFER_ALLOWLIST:
+        if d.kind == "mcp" or is_deferred_builtin(d.name):
             out.add(d.name)
     return out
 
@@ -761,5 +760,5 @@ def is_tool_pending_next_round(
             continue
         if d.always_load or d.name in CORE_ALWAYS_LOAD_TOOLS:
             return False
-        return d.kind == "mcp" or d.name in BUILTIN_DEFER_ALLOWLIST
+        return d.kind == "mcp" or is_deferred_builtin(d.name)
     return False

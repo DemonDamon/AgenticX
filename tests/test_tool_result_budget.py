@@ -66,7 +66,12 @@ def test_archive_and_record_meta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 def test_apply_budget_replaces_old_large_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     session = MockSession()
-    cfg = ToolResultBudgetConfig(enabled=True, keep_rounds=2, archive_subdir="tool_archives")
+    cfg = ToolResultBudgetConfig(
+        enabled=True,
+        keep_rounds=2,
+        archive_batch_tokens=0,
+        archive_subdir="tool_archives",
+    )
     content = "B" * 8000
     archive_path = archive_tool_result(
         session,

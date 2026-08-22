@@ -103,6 +103,11 @@ from agenticx.runtime.prompt_cache_policy import (
     build_context_management_kwargs,
     load_prompt_cache_config,
 )
+from agenticx.runtime.prompts.session_context import (
+    build_session_context_message,
+    pop_volatile_sections,
+    stash_volatile_sections,
+)
 
 if TYPE_CHECKING:
     from agenticx.cli.studio import StudioSession
@@ -270,6 +275,31 @@ def _env_int_runtime(key: str, default: int) -> int:
     return default
 
 
+def _goal_anchor_suppressed_for_model(session: Any) -> bool:
+    """Skip the per-round goal anchor for models with a 1M-class endpoint."""
+    provider = str(getattr(session, "provider_name", "") or "")
+    model = str(getattr(session, "model_name", "") or "")
+    key = (provider, model)
+    cached = getattr(session, "_goal_anchor_strong_model", None)
+    if isinstance(cached, tuple) and len(cached) == 2 and cached[0] == key:
+        return bool(cached[1])
+    try:
+        from agenticx.runtime.model_context_window import (
+            declared_window_for_session,
+            is_strong_context_model,
+        )
+
+        strong = is_strong_context_model(model, declared_window_for_session(session))
+    except Exception:
+        logger.debug("strong-model probe failed; keeping the goal anchor", exc_info=True)
+        strong = False
+    try:
+        setattr(session, "_goal_anchor_strong_model", (key, strong))
+    except Exception:
+        pass
+    return strong
+
+
 def _build_user_goal_anchor(
     session: "StudioSession",
     round_idx: int,
@@ -287,6 +317,17 @@ def _build_user_goal_anchor(
     if os.environ.get("AGX_GOAL_ANCHOR_DISABLE", "").strip() == "1":
         return None
 
+    if os.environ.get("AGX_GOAL_ANCHOR_FORCE", "").strip() != "1" and (
+        _goal_anchor_suppressed_for_model(session)
+    ):
+        logging.getLogger(__name__).info(
+            "goal_anchor_skipped=strong_model session=%s model=%s",
+            getattr(session, "session_id", "unknown"),
+            getattr(session, "model_name", ""),
+        )
+        return None
+
+    session._goal_anchor_placement = "tail"
     session._goal_anchor_prepend = False
 
     user_intent_raw = getattr(session, "current_user_intent", None)
@@ -314,7 +355,7 @@ def _build_user_goal_anchor(
         or agent_msg_count >= 8
         or force_prepend
     )
-    session._goal_anchor_prepend = bool(force_prepend and not is_first_round)
+    session._goal_anchor_prepend = False
 
     if is_first_round:
         # First round: minimal anchor (≤80 chars as per FR-3)
@@ -1292,7 +1333,30 @@ def _promote_user_image_attachments(
     return out
 
 
-def _build_agent_system_prompt(session: StudioSession) -> str:
+def _build_agent_volatile_sections(session: StudioSession) -> list[tuple[str, str]]:
+    """Volatile state omitted from the implement-agent system prompt."""
+    mcp_context = ""
+    if session.mcp_hub is not None:
+        try:
+            from agenticx.runtime.tool_search_runtime import read_tool_search_config
+
+            defer_schemas = read_tool_search_config().mode in {"auto", "always"}
+        except Exception:
+            defer_schemas = False
+        mcp_context = build_mcp_tools_context(session.mcp_hub, defer_schemas=defer_schemas)
+    return [
+        ("可用元 Skills 摘要", _serialize_skill_summaries(session)),
+        ("当前会话 artifacts", _serialize_artifacts(session)),
+        ("当前 Todo 列表", _serialize_todos(session)),
+        ("当前 Scratchpad 摘要", _serialize_scratchpad(session)),
+        ("当前 context_files", _serialize_context_files(session)),
+        ("当前 MCP 工具上下文", _truncate(mcp_context or "(no MCP tools connected)", 6000)),
+    ]
+
+
+def _build_agent_system_prompt(
+    session: StudioSession, *, include_volatile: bool = True
+) -> str:
     mcp_context = ""
     if session.mcp_hub is not None:
         # When ToolSearch mode != off, defer MCP schema dumping into the system
@@ -1331,26 +1395,33 @@ def _build_agent_system_prompt(session: StudioSession) -> str:
         widget_block = _build_widget_capability_block()
     except Exception:
         widget_block = ""
+    if include_volatile:
+        _volatile_block = (
+            "## 可用元 Skills 摘要\n"
+            f"{_serialize_skill_summaries(session)}\n\n"
+            "## 当前会话 artifacts\n"
+            f"{_serialize_artifacts(session)}\n\n"
+            "## 当前 Todo 列表\n"
+            f"{_serialize_todos(session)}\n\n"
+            "## 当前 Scratchpad 摘要\n"
+            f"{_serialize_scratchpad(session)}\n\n"
+            "## 当前 context_files\n"
+            f"{_serialize_context_files(session)}\n\n"
+            "## 当前 MCP 工具上下文\n"
+            f"{_truncate(mcp_context, 6000)}\n\n"
+        )
+    else:
+        _volatile_block = ""
+        stash_volatile_sections(session, _build_agent_volatile_sections(session))
     return (
         "你是 AgenticX Studio 的执行型 Agent（implement 角色）。\n"
         "核心目标：根据用户请求完成代码/命令操作，并在不确定或高风险动作前主动确认。\n\n"
         "## 回复语言\n"
         "- 必须使用中文回复。\n"
         "- 简洁、可执行、优先给出当前进度。\n\n"
-        "## 可用元 Skills 摘要\n"
-        f"{_serialize_skill_summaries(session)}\n\n"
-        "## 当前会话 artifacts\n"
-        f"{_serialize_artifacts(session)}\n\n"
-        "## 当前 Todo 列表\n"
-        f"{_serialize_todos(session)}\n\n"
-        "## 当前 Scratchpad 摘要\n"
-        f"{_serialize_scratchpad(session)}\n\n"
-        "## 当前 context_files\n"
-        f"{_serialize_context_files(session)}\n\n"
+        f"{_volatile_block}"
         f"{code_dev_block}"
         f"{project_state_block}"
-        "## 当前 MCP 工具上下文\n"
-        f"{_truncate(mcp_context, 6000)}\n\n"
         "## 浏览器自动化（browser-use 等 MCP）\n"
         "- MCP 工具**不会**自动变成单独的 function；须先用 `mcp_connect` 连接配置好的服务器（如 `browser-use`），再用 `mcp_call` 调用，"
         "`tool_name` / `arguments` 与上方「当前 MCP 工具上下文」中的名称和 schema 一致。\n"
@@ -3074,7 +3145,9 @@ class AgentRuntime:
         self._recent_exploratory_fps.clear()
         self._exploratory_error_streak = 0
 
-        current_system_prompt = system_prompt or _build_agent_system_prompt(session)
+        current_system_prompt = system_prompt or _build_agent_system_prompt(
+            session, include_volatile=False
+        )
         full_tool_pool: list[Dict[str, Any]] = list(
             studio_tools_for_session(session) if tools is None else tools
         )
@@ -3134,6 +3207,25 @@ class AgentRuntime:
                 if isinstance(tool, dict)
             }
             names.discard("")
+            ordered = [
+                str(tool.get("function", {}).get("name", "")).strip()
+                for tool in projected
+                if isinstance(tool, dict)
+            ]
+            fingerprint = hashlib.sha256("|".join(ordered).encode("utf-8")).hexdigest()
+            prev_fp = getattr(session, "_tools_prefix_fp", None)
+            if prev_fp is not None and prev_fp != fingerprint:
+                logger.info(
+                    "tools_prefix_changed session=%s from=%s to=%s count=%s",
+                    getattr(session, "session_id", ""),
+                    str(prev_fp)[:8],
+                    fingerprint[:8],
+                    len(ordered),
+                )
+            try:
+                setattr(session, "_tools_prefix_fp", fingerprint)
+            except Exception:
+                pass
             return list(projected), names
 
         active_tools, allowed_tool_names = _project_active_tools()
@@ -3158,6 +3250,7 @@ class AgentRuntime:
                 history,
                 force=True,
                 model=compact_model,
+                session=session,
             )
             if _phase_did:
                 session.agent_messages = list(history)
@@ -3170,6 +3263,7 @@ class AgentRuntime:
             compacted_history, did_compact, compact_summary, compacted_count, _pending_q = await self.compactor.maybe_compact(
                 history,
                 model=compact_model,
+                session=session,
             )
         except Exception as exc:
             logger.warning(
@@ -3306,6 +3400,25 @@ class AgentRuntime:
                     user_content = f"{user_content}{_omit_notice}"
                 elif isinstance(user_content, list):
                     user_content = list(user_content) + [{"type": "text", "text": _omit_notice}]
+        # <session-context> lives only on this request: after history, before the
+        # current user row. It is not written to session.agent_messages.
+        _volatile_sections = pop_volatile_sections(session)
+        try:
+            from agenticx.runtime.tool_search import known_unloaded_names
+
+            _deferred_names = (
+                sorted(known_unloaded_names(ts_ctx))
+                if project_tools_for_round(ts_ctx, full_openai_tools=full_tool_pool)
+                is not full_tool_pool
+                else []
+            )
+        except Exception:
+            _deferred_names = []
+        _session_ctx_msg = build_session_context_message(
+            _volatile_sections, deferred_tool_names=_deferred_names
+        )
+        if _session_ctx_msg is not None:
+            messages.append(_session_ctx_msg)
         messages.append({"role": "user", "content": user_content})
         if persist_user_message:
             # Store rich content (list with image_url blocks for vision uploads) + attachments
@@ -3637,18 +3750,7 @@ class AgentRuntime:
                     tool_result_tokens_session=budget_stats.tool_result_tokens_session,
                 )
                 if anchor_message:
-                    prepend = bool(getattr(session, "_goal_anchor_prepend", False))
-                    if prepend:
-                        insert_idx = 0
-                        for i, m in enumerate(messages):
-                            if isinstance(m, dict) and str(m.get("role", "")).lower() == "system":
-                                insert_idx = i + 1
-                            else:
-                                break
-                        messages_for_llm = list(messages)
-                        messages_for_llm.insert(insert_idx, anchor_message)
-                    else:
-                        messages_for_llm = list(messages) + [anchor_message]
+                    messages_for_llm = list(messages) + [anchor_message]
                 else:
                     messages_for_llm = messages
                 llm_call_kwargs: Dict[str, Any] = {}
@@ -4284,6 +4386,7 @@ class AgentRuntime:
                             hist_compact,
                             force=True,
                             model=model_name,
+                            session=session,
                         )
                         if did_react:
                             react_hist = _sanitize_context_messages(react_hist)
@@ -4637,6 +4740,7 @@ class AgentRuntime:
                             hist_before,
                             force=True,
                             model=model_name,
+                            session=session,
                         )
                         new_hist = _sanitize_context_messages(new_hist) if did else new_hist
                         made_progress = (
