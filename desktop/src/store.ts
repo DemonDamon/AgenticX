@@ -16,6 +16,15 @@ import { matchesToolCallForSession } from "./utils/pending-tool-result";
 import type { PendingActionConfirmation } from "./utils/action-confirmation";
 import { shouldSuppressDuplicatePendingUserEcho } from "./utils/send-dedupe";
 import type { ContentBlock } from "./utils/content-blocks";
+import {
+  ATTACHMENT_ROUTING_OFF,
+  type AttachmentRoutingPolicy,
+  type RoutingModelRef,
+} from "./utils/attachment-routing";
+import {
+  UNRESTRICTED_CAPABILITY_LOCKS,
+  type DesktopCapabilityLocks,
+} from "./utils/enterprise-capability-policy";
 
 export type { ContentBlock } from "./utils/content-blocks";
 
@@ -522,6 +531,15 @@ type AppState = {
   userAvatarUrl: string;
   /** Free-text user preference/style injected into every agent system prompt. Max 500 chars. */
   userPreference: string;
+  /** 附件路由策略。无企业下发时保持关闭；真正 containment 在 Studio 侧。 */
+  attachmentRouting: AttachmentRoutingPolicy;
+  /** 本客户端已锁定的私有部署目标；空表示尚未因文档锁模。 */
+  attachmentRoutingLock: RoutingModelRef | null;
+  setAttachmentRouting: (policy: AttachmentRoutingPolicy) => void;
+  setAttachmentRoutingLock: (target: RoutingModelRef | null) => void;
+  /** 企业下发的本机自助能力锁；无企业登录时保持全开。 */
+  capabilityLocks: DesktopCapabilityLocks;
+  setCapabilityLocks: (locks: DesktopCapabilityLocks) => void;
   /** Custom avatar for Meta-Agent (Near). */
   metaAvatarUrl: string;
   confirmStrategy: ConfirmStrategy;
@@ -1043,6 +1061,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   userNickname: loadUserNickname(),
   userAvatarUrl: loadUserAvatarUrl(),
   userPreference: loadUserPreference(),
+  attachmentRouting: ATTACHMENT_ROUTING_OFF,
+  attachmentRoutingLock: null,
+  capabilityLocks: UNRESTRICTED_CAPABILITY_LOCKS,
   metaAvatarUrl: loadMetaAvatarUrl(),
   confirmStrategy: "semi-auto",
   mcpServers: [],
@@ -1337,6 +1358,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { userPreference: next };
     }),
+  setAttachmentRouting: (attachmentRouting) => set({ attachmentRouting }),
+  setAttachmentRoutingLock: (attachmentRoutingLock) => set({ attachmentRoutingLock }),
+  setCapabilityLocks: (capabilityLocks) => set({ capabilityLocks }),
   setMetaAvatarUrl: (url) =>
     set(() => {
       const next = String(url ?? "");

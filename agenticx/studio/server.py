@@ -2787,6 +2787,51 @@ def create_studio_app() -> FastAPI:
             session.provider_name = payload.provider
         if payload.model:
             session.model_name = payload.model
+        # 附件自动路由：本轮带文档时把会话锁到私有部署的多模态模型。
+        #
+        # 必须在客户端选的 provider/model 落到 session 之后、ProviderResolver.resolve
+        # 之前。晚一步 LLM 就已经按公网模型建好了；Office 文档最终会被抽成文本，
+        # 先解析后决定的话文本已经发出去了。
+        #
+        # 前端也会拦一道（选择器变灰），但这里不能省：CLI、定时任务、子智能体、
+        # 分身委派都不经过那段 UI。读策略、应用、以及失败能不能放行都在
+        # attachment_routing.route_turn 里，这里只把失败翻译成 HTTP。
+        _routing_names = list(turn_context_files.keys())
+        try:
+            from agenticx.studio.attachment_routing import (
+                AttachmentRoutingUnavailable,
+                route_turn as _route_turn,
+            )
+
+            _routing_decision = _route_turn(session, filenames=_routing_names)
+        except AttachmentRoutingUnavailable:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "附件路由暂时不可用，本轮已停止。"
+                    "这条会话包含需要留在私有部署的附件，无法回退到公网模型。"
+                    "请稍后重试或联系管理员。"
+                ),
+            )
+        except ImportError:
+            logger.warning("attachment routing module unavailable", exc_info=True)
+            _routing_decision = None
+
+        if _routing_decision is not None:
+            # 锁到多模态模型之后就别再走抽文本那条有损通路了：PDF 直接渲染成页图。
+            # 渲染不了（没装 PyMuPDF、加密、损坏）就什么都不做，让抽文本接着跑——
+            # 此时会话已经锁在私有模型上，文本同样不出这台部署。
+            try:
+                from agenticx.studio.attachment_routing import read_policy as _read_routing
+                from agenticx.studio.document_pages import stage_pdf_pages
+
+                stage_pdf_pages(
+                    session,
+                    filenames=list(turn_context_files.keys()),
+                    max_pages=_read_routing().max_rendered_pages,
+                )
+            except Exception:
+                logger.warning("pdf page rendering skipped, falling back to text", exc_info=True)
         # Kimi K3 / DeepSeek V4 reasoning_effort; cleared when absent so stale
         # values from a previous turn do not leak onto other models.
         _effort = str(getattr(payload, "reasoning_effort", None) or "").strip().lower()
