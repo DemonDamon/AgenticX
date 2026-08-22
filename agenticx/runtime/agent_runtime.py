@@ -45,6 +45,7 @@ from agenticx.cli.agent_tools import (
 from agenticx.cli.studio_mcp import build_mcp_tools_context
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.llms.vision import is_vision_capable, strip_nonvision_multimodal_messages
+from agenticx.llms.usage import has_token_usage, normalize_token_usage, token_usage_dict
 from agenticx.runtime.compactor import ContextCompactor, is_prune_only_result
 from agenticx.runtime.tool_result_status import tool_status_for_result
 from agenticx.runtime.context_file_budget import serialize_context_files
@@ -3992,24 +3993,6 @@ class AgentRuntime:
                         stream_usage: Dict[str, int] = {}
                         stream_finish_reason = ""
 
-                        def _safe_int(value: Any) -> int:
-                            if isinstance(value, bool):
-                                return int(value)
-                            if isinstance(value, (int, float)):
-                                return int(value)
-                            if isinstance(value, str):
-                                raw = value.strip()
-                                if not raw:
-                                    return 0
-                                try:
-                                    return int(raw)
-                                except ValueError:
-                                    try:
-                                        return int(float(raw))
-                                    except ValueError:
-                                        return 0
-                            return 0
-
                         async for stream_chunk in _iter_sync_stream_with_watchdog(
                             loop=loop,
                             run_sync_stream=_run_sync_stream_with_tools,
@@ -4079,24 +4062,9 @@ class AgentRuntime:
                                         )
                             elif chunk_type == "usage":
                                 usage_raw = stream_chunk.get("usage", {})
-                                if isinstance(usage_raw, dict):
-                                    pt = _safe_int(
-                                        usage_raw.get("prompt_tokens") or usage_raw.get("input_tokens") or 0
-                                    )
-                                    ct = _safe_int(
-                                        usage_raw.get("completion_tokens")
-                                        or usage_raw.get("output_tokens")
-                                        or 0
-                                    )
-                                    tt = _safe_int(usage_raw.get("total_tokens") or 0)
-                                    if tt == 0 and (pt > 0 or ct > 0):
-                                        tt = pt + ct
-                                    if pt > 0 or ct > 0 or tt > 0:
-                                        stream_usage = {
-                                            "prompt_tokens": pt,
-                                            "completion_tokens": ct,
-                                            "total_tokens": tt,
-                                        }
+                                token_usage = normalize_token_usage(usage_raw)
+                                if has_token_usage(token_usage):
+                                    stream_usage = token_usage_dict(token_usage)
                             elif chunk_type == "done":
                                 raw_finish = stream_chunk.get("finish_reason", "")
                                 if isinstance(raw_finish, str) and raw_finish.strip():

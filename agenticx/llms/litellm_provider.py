@@ -10,7 +10,8 @@ litellm.suppress_debug_info = True
 from pydantic import Field  # type: ignore
 from .base import BaseLLMProvider, StreamChunk
 from .request_context import current_llm_turn_id
-from .response import LLMResponse, TokenUsage, LLMChoice
+from .response import LLMResponse, LLMChoice
+from .usage import has_token_usage, merge_token_usage, token_usage_dict
 
 
 TURN_ID_HEADER = "X-AgenticX-Turn-Id"
@@ -70,6 +71,31 @@ def _iter_reasoning_delta_texts(delta: Any) -> List[str]:
             if text:
                 out.append(text)
     return out
+
+
+def _litellm_usage_sources(response: Any) -> List[Any]:
+    """Return canonical and raw usage views exposed by a LiteLLM response."""
+    sources: List[Any] = []
+
+    def field(name: str) -> Any:
+        if isinstance(response, Mapping):
+            return response.get(name)
+        return getattr(response, name, None)
+
+    def add(source: Any) -> None:
+        if source is not None and not any(source is existing for existing in sources):
+            sources.append(source)
+
+    add(field("usage"))
+    hidden = field("_hidden_params")
+    if isinstance(hidden, Mapping):
+        add(hidden.get("usage"))
+        add(hidden.get("original_response_usage"))
+    for attribute in ("model_extra", "__dict__"):
+        raw_response = field(attribute)
+        if isinstance(raw_response, Mapping):
+            add(raw_response.get("usage"))
+    return sources
 
 
 def _resolve_litellm_api_key(api_key: Optional[str], base_url: Optional[str]) -> Optional[str]:
@@ -394,24 +420,6 @@ class LiteLLMProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> Generator[StreamChunk, None, None]:
         """Stream content/tool-call deltas in a normalized chunk format."""
-        def _safe_int(value: Any) -> int:
-            if isinstance(value, bool):
-                return int(value)
-            if isinstance(value, (int, float)):
-                return int(value)
-            if isinstance(value, str):
-                raw = value.strip()
-                if not raw:
-                    return 0
-                try:
-                    return int(raw)
-                except ValueError:
-                    try:
-                        return int(float(raw))
-                    except ValueError:
-                        return 0
-            return 0
-
         if isinstance(prompt, str):
             messages = [{"role": "user", "content": prompt}]
         elif isinstance(prompt, list):
@@ -467,30 +475,9 @@ class LiteLLMProvider(BaseLLMProvider):
             for chunk in response_stream:
                 chunk = cast(Any, chunk)
                 usage_chunk: Dict[str, int] | None = None
-                usage = getattr(chunk, "usage", None)
-                if usage:
-                    if isinstance(usage, dict):
-                        pt = _safe_int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-                        ct = _safe_int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
-                        tt = _safe_int(usage.get("total_tokens") or 0)
-                    else:
-                        pt = _safe_int(
-                            getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0
-                        )
-                        ct = _safe_int(
-                            getattr(usage, "completion_tokens", 0)
-                            or getattr(usage, "output_tokens", 0)
-                            or 0
-                        )
-                        tt = _safe_int(getattr(usage, "total_tokens", 0) or 0)
-                    if tt == 0 and (pt > 0 or ct > 0):
-                        tt = pt + ct
-                    if pt > 0 or ct > 0 or tt > 0:
-                        usage_chunk = {
-                            "prompt_tokens": pt,
-                            "completion_tokens": ct,
-                            "total_tokens": tt,
-                        }
+                token_usage = merge_token_usage(*_litellm_usage_sources(chunk))
+                if has_token_usage(token_usage):
+                    usage_chunk = token_usage_dict(token_usage)
                 choices = getattr(chunk, "choices", None)
                 if choices:
                     choice0 = choices[0]
@@ -617,51 +604,7 @@ class LiteLLMProvider(BaseLLMProvider):
             getattr(response, "usage", None),
             getattr(response, "_hidden_params", None),
         )
-        usage = response.usage or {}
-
-        # Handle usage as dict or object.
-        if isinstance(usage, dict):
-            prompt_tokens = int(usage.get("prompt_tokens") or 0)
-            completion_tokens = int(usage.get("completion_tokens") or 0)
-            total_tokens = int(usage.get("total_tokens") or 0)
-        else:
-            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-            completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-            total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
-
-        # Some providers (e.g. MiniMax via openai-compat) put usage inside
-        # _hidden_params or the raw response dict; fall back to those when the
-        # primary usage fields are all zero.
-        if prompt_tokens == 0 and completion_tokens == 0:
-            hidden = getattr(response, "_hidden_params", None) or {}
-            raw_usage: dict = {}
-            if isinstance(hidden, dict):
-                raw_usage = hidden.get("usage") or hidden.get("original_response_usage") or {}
-            if not raw_usage:
-                # Try model_extra or __dict__ path
-                for _attr in ("model_extra", "__dict__"):
-                    _d = getattr(response, _attr, None)
-                    if isinstance(_d, dict) and "usage" in _d:
-                        raw_usage = _d["usage"] or {}
-                        break
-            if raw_usage:
-                if isinstance(raw_usage, dict):
-                    prompt_tokens = int(raw_usage.get("prompt_tokens") or 0)
-                    completion_tokens = int(raw_usage.get("completion_tokens") or 0)
-                    total_tokens = int(raw_usage.get("total_tokens") or 0)
-                else:
-                    prompt_tokens = int(getattr(raw_usage, "prompt_tokens", 0) or 0)
-                    completion_tokens = int(getattr(raw_usage, "completion_tokens", 0) or 0)
-                    total_tokens = int(getattr(raw_usage, "total_tokens", 0) or 0)
-
-        if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
-            total_tokens = prompt_tokens + completion_tokens
-
-        token_usage = TokenUsage(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-        )
+        token_usage = merge_token_usage(*_litellm_usage_sources(response))
 
         choices = [
             LLMChoice(
