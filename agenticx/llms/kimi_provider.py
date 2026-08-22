@@ -473,10 +473,15 @@ class KimiProvider(BaseLLMProvider):
         """Parse OpenAI response into AgenticX LLMResponse format."""
         # 处理token使用情况
         usage = response.usage
+        from agenticx.runtime.usage_metadata import extract_cached_reasoning
+
+        cached_tokens, reasoning_tokens = extract_cached_reasoning(usage)
         token_usage = TokenUsage(
             prompt_tokens=usage.prompt_tokens if usage else 0,
             completion_tokens=usage.completion_tokens if usage else 0,
-            total_tokens=usage.total_tokens if usage else 0
+            total_tokens=usage.total_tokens if usage else 0,
+            cached_tokens=cached_tokens,
+            reasoning_tokens=reasoning_tokens,
         )
         
         # 处理选择

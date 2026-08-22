@@ -135,6 +135,53 @@ class UsageStore:
         except Exception as exc:
             _log.warning("usage_store.record_async failed: %s", exc)
 
+    def cache_stats(
+        self,
+        *,
+        since_ms: int | None = None,
+        provider: str | None = None,
+    ) -> dict[str, Any]:
+        """Read-only cache-hit summary for local verification (no schema change)."""
+        clauses = ["1=1"]
+        params: list[Any] = []
+        if since_ms is not None:
+            clauses.append("ts_ms >= ?")
+            params.append(int(since_ms))
+        prov = str(provider or "").strip().lower()
+        if prov:
+            clauses.append("provider = ?")
+            params.append(prov)
+        where = " AND ".join(clauses)
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    f"""
+                    SELECT
+                        COUNT(*),
+                        COALESCE(SUM(input_tokens), 0),
+                        COALESCE(SUM(cached_tokens), 0),
+                        COALESCE(SUM(CASE WHEN cached_tokens = 0 THEN 1 ELSE 0 END), 0)
+                    FROM usage_events
+                    WHERE {where}
+                    """,
+                    params,
+                ).fetchone()
+            finally:
+                conn.close()
+        requests = int(row[0] or 0) if row else 0
+        input_tokens = int(row[1] or 0) if row else 0
+        cached_tokens = int(row[2] or 0) if row else 0
+        zero_cache = int(row[3] or 0) if row else 0
+        ratio = (float(cached_tokens) / float(input_tokens)) if input_tokens > 0 else 0.0
+        return {
+            "requests": requests,
+            "input_tokens": input_tokens,
+            "cached_tokens": cached_tokens,
+            "cache_ratio": ratio,
+            "zero_cache_requests": zero_cache,
+        }
+
     def summary_sync(self, start_ms: int, end_ms: int) -> dict[str, Any]:
         with self._lock:
             conn = self._connect()
