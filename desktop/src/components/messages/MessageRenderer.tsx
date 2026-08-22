@@ -38,7 +38,12 @@ import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseTodoMessage } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
-import { hasImageBlock, resolveAssistantBlocks } from "../../utils/content-blocks";
+import {
+  collectTurnLightboxImages,
+  hasImageBlock,
+  readyLightboxImages,
+  resolveAssistantBlocks,
+} from "../../utils/content-blocks";
 import {
   appendMissingImageMarkdown,
   collectTurnPreviewImagePaths,
@@ -324,6 +329,14 @@ export function MessageRenderer({
     if (next === withBlocks.content) return withBlocks;
     return { ...withBlocks, content: next };
   }, [message, allMessages]);
+  const lightboxGallery = useMemo(() => {
+    if (displayMessage.role !== "assistant") return undefined;
+    const patched = allMessages.map((row) =>
+      row.id === displayMessage.id ? { ...row, blocks: displayMessage.blocks } : row,
+    );
+    const fromTurn = collectTurnLightboxImages(patched, displayMessage.id);
+    return fromTurn.length > 0 ? fromTurn : readyLightboxImages(displayMessage.blocks);
+  }, [displayMessage, allMessages]);
   if (isViewImageInjectMessage(message)) {
     return <ViewImageInjectCard message={message} />;
   }
@@ -407,6 +420,7 @@ export function MessageRenderer({
         isLastAssistantInPane={isLastAssistantInPane}
         streamStalled={streamStalled}
         streamStalledSeconds={streamStalledSeconds}
+        lightboxGallery={lightboxGallery}
       />
     );
   }

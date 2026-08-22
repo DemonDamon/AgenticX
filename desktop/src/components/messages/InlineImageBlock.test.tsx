@@ -63,6 +63,27 @@ describe("InlineImageBlock", () => {
     expect(html).not.toContain("<img");
   });
 
+  it("keeps lightbox arrows unmounted until opened", () => {
+    const html = renderToStaticMarkup(
+      <InlineImageBlock
+        block={{
+          type: "image",
+          id: "img-1",
+          status: "ready",
+          url: "https://example.com/a.jpg",
+          kind: "remote",
+        }}
+        gallery={[
+          { type: "image", id: "img-1", status: "ready", url: "https://example.com/a.jpg", kind: "remote" },
+          { type: "image", id: "img-2", status: "ready", url: "https://example.com/b.jpg", kind: "remote" },
+        ]}
+      />,
+    );
+    expect(html).toContain("<img");
+    expect(html).not.toContain("上一张");
+    expect(html).not.toContain("下一张");
+  });
+
   it("error and cancelled have no img", () => {
     const err = renderToStaticMarkup(
       <InlineImageBlock block={{ type: "image", id: "img-1", status: "error", error: "未配置" }} />,

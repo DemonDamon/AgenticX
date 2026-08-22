@@ -68,6 +68,49 @@ export function hasImageBlock(blocks: ContentBlock[] | undefined): boolean {
   return Boolean(blocks?.some((b) => b.type === "image"));
 }
 
+export function readyLightboxImages(blocks: ContentBlock[] | undefined): ImageContentBlock[] {
+  const out: ImageContentBlock[] = [];
+  const seen = new Set<string>();
+  for (const block of blocks ?? []) {
+    if (block.type !== "image" || block.status !== "ready" || !block.id) continue;
+    if (seen.has(block.id)) continue;
+    const path = String(block.path ?? "").trim();
+    const url = String(block.url ?? "").trim();
+    const hasUrl = url.startsWith("http://") || url.startsWith("https://");
+    if (!path && !hasUrl) continue;
+    seen.add(block.id);
+    out.push(block);
+  }
+  return out;
+}
+
+export function collectTurnLightboxImages<
+  T extends { id: string; role: string; blocks?: ContentBlock[] },
+>(messages: T[], assistantId: string): ImageContentBlock[] {
+  const idx = messages.findIndex((m) => m.id === assistantId);
+  if (idx < 0) return [];
+  let start = 0;
+  for (let i = idx; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      start = i + 1;
+      break;
+    }
+  }
+  const out: ImageContentBlock[] = [];
+  const seen = new Set<string>();
+  for (let i = start; i < messages.length; i += 1) {
+    const row = messages[i];
+    if (!row || row.role === "user") break;
+    if (row.role !== "assistant") continue;
+    for (const block of readyLightboxImages(row.blocks)) {
+      if (seen.has(block.id)) continue;
+      seen.add(block.id);
+      out.push(block);
+    }
+  }
+  return out;
+}
+
 /** Listing-page thumbs such as `.thumb.400_0.jpeg` / `.thumb.100_100_c.jpg`. */
 const REMOTE_THUMB_SUFFIX = /\.thumb\.\d+_\d+(?:_[A-Za-z0-9]+)?\.(jpe?g|png|webp|gif)$/i;
 const TINY_THUMB = /\.thumb\.(\d+)_\d+/i;

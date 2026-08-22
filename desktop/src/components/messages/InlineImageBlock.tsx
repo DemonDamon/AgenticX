@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { ImageContentBlock } from "../../utils/content-blocks";
+import { readyLightboxImages } from "../../utils/content-blocks";
 import { pathToFileUrl } from "../../utils/session-artifacts";
 import { Shimmer } from "../ds/Shimmer";
 import { Modal } from "../ds/Modal";
@@ -7,7 +9,14 @@ import { ZoomableImage } from "../ds/ZoomableImage";
 
 type Props = {
   block: ImageContentBlock;
+  gallery?: ImageContentBlock[];
 };
+
+function blockSrc(block: ImageContentBlock): string {
+  const path = String(block.path ?? "").trim();
+  if (path) return pathToFileUrl(path);
+  return String(block.url ?? "").trim();
+}
 
 function elapsedLabel(startedAt?: number, now = Date.now()): string {
   if (!startedAt || !Number.isFinite(startedAt)) return "0s";
@@ -50,6 +59,9 @@ function sourceHostLabel(url: string): string {
   }
 }
 
+const lightboxNavBtnClass =
+  "pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-black/15 bg-[var(--surface-popover)] text-text-strong shadow-[0_2px_10px_rgba(0,0,0,0.28)] hover:bg-[color-mix(in_srgb,var(--surface-popover)_82%,var(--text-strong)_18%)]";
+
 function SourceLink({ href, children }: { href: string; children?: React.ReactNode }) {
   return (
     <a
@@ -66,12 +78,25 @@ function SourceLink({ href, children }: { href: string; children?: React.ReactNo
   );
 }
 
-export function InlineImageBlock({ block }: Props) {
+export function InlineImageBlock({ block, gallery }: Props) {
   const [now, setNow] = useState(() => Date.now());
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [open, setOpen] = useState(false);
+  const [activeId, setActiveId] = useState(block.id);
   const remote = isRemoteImageBlock(block);
+  const lightboxItems = useMemo(() => {
+    const items = readyLightboxImages(gallery);
+    if (items.some((item) => item.id === block.id)) return items;
+    if (block.status === "ready" && blockSrc(block)) return [block, ...items];
+    return items;
+  }, [block, gallery]);
+  const active = lightboxItems.find((item) => item.id === activeId) ?? block;
+  const activeIndex = Math.max(
+    0,
+    lightboxItems.findIndex((item) => item.id === active.id),
+  );
+  const canNavigate = lightboxItems.length > 1;
 
   useEffect(() => {
     if (block.status !== "generating") return undefined;
@@ -83,6 +108,33 @@ export function InlineImageBlock({ block }: Props) {
     setLoaded(false);
     setLoadError(false);
   }, [block.path, block.url, block.id]);
+
+  useEffect(() => {
+    if (open) setActiveId(block.id);
+  }, [open, block.id]);
+
+  useEffect(() => {
+    if (!open || !canNavigate) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setActiveId((current) => {
+          const idx = lightboxItems.findIndex((item) => item.id === current);
+          const next = (idx - 1 + lightboxItems.length) % lightboxItems.length;
+          return lightboxItems[next]?.id ?? current;
+        });
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setActiveId((current) => {
+          const idx = lightboxItems.findIndex((item) => item.id === current);
+          const next = (idx + 1) % lightboxItems.length;
+          return lightboxItems[next]?.id ?? current;
+        });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, canNavigate, lightboxItems]);
 
   if (block.status === "generating") {
     return (
@@ -120,7 +172,8 @@ export function InlineImageBlock({ block }: Props) {
     return <p className="my-1 text-[13px] leading-relaxed text-text-faint">已取消</p>;
   }
 
-  const src = block.path ? pathToFileUrl(block.path) : String(block.url ?? "").trim();
+  const src = blockSrc(block);
+  const activeSrc = blockSrc(active);
   if (!src) {
     return <p className="my-1 text-[13px] leading-relaxed text-text-faint">图片路径无效</p>;
   }
@@ -180,11 +233,50 @@ export function InlineImageBlock({ block }: Props) {
       {remote ? null : caption}
       <Modal
         open={open}
-        title={block.alt || "图片预览"}
+        title={
+          canNavigate
+            ? `${active.alt || "图片预览"}  ${activeIndex + 1}/${lightboxItems.length}`
+            : active.alt || "图片预览"
+        }
         onClose={() => setOpen(false)}
         panelClassName="w-[90vw] max-w-4xl bg-surface-popover"
       >
-        <ZoomableImage src={src} alt={block.alt || "image"} maxHeight="70vh" />
+        <div className="relative">
+          <ZoomableImage
+            key={active.id}
+            src={activeSrc}
+            alt={active.alt || "image"}
+            maxHeight="70vh"
+          />
+          {canNavigate ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 top-8 z-10 flex items-center justify-between px-2">
+              <button
+                type="button"
+                aria-label="上一张"
+                className={lightboxNavBtnClass}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const next = (activeIndex - 1 + lightboxItems.length) % lightboxItems.length;
+                  setActiveId(lightboxItems[next]?.id ?? active.id);
+                }}
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <button
+                type="button"
+                aria-label="下一张"
+                className={lightboxNavBtnClass}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const next = (activeIndex + 1) % lightboxItems.length;
+                  setActiveId(lightboxItems[next]?.id ?? active.id);
+                }}
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          ) : null}
+        </div>
       </Modal>
     </div>
   );

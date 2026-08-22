@@ -15,7 +15,7 @@ import { getContainedSelectionText } from "../../utils/favorite-selection";
 import { HoverTip } from "../ds/HoverTip";
 import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { InlineImageBlock } from "./InlineImageBlock";
-import { hasImageBlock } from "../../utils/content-blocks";
+import { hasImageBlock, readyLightboxImages, type ImageContentBlock } from "../../utils/content-blocks";
 import { renderUserMessageInlineBody, UserQuoteRefChip, renderUserBubbleInlineContent } from "./user-message-inline";
 import {
   parseQuotedContentItems,
@@ -97,6 +97,8 @@ type Props = {
   /** Replace animated streaming dots with a stalled indicator on the __stream__ placeholder. */
   streamStalled?: boolean;
   streamStalledSeconds?: number;
+  /** Ready images in the current user turn; lightbox arrows switch within this set. */
+  lightboxGallery?: ImageContentBlock[];
 };
 
 function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
@@ -222,10 +224,12 @@ export function ImBubble({
   isLastAssistantInPane = false,
   streamStalled = false,
   streamStalledSeconds = 0,
+  lightboxGallery,
 }: Props) {
   void _senderAvatarVariant;
   void userAvatarUrl;
   const isUser = message.role === "user";
+  const imageGallery = lightboxGallery ?? readyLightboxImages(message.blocks);
   const displayName = isUser ? (userName || "我") : (assistantName || "AI");
   const isStreaming = message.id === "__stream__" || isGroupStreamMessageId(message.id);
   const isMetaPendingWork = !isUser && message.id === "typing-meta";
@@ -905,7 +909,7 @@ export function ImBubble({
                                       />
                                     ) : null
                                   ) : (
-                                    <InlineImageBlock key={block.id} block={block} />
+                                    <InlineImageBlock key={block.id} block={block} gallery={imageGallery} />
                                   ),
                                 )
                               : (
@@ -922,7 +926,7 @@ export function ImBubble({
                                   {(message.blocks ?? [])
                                     .filter((b) => b.type === "image")
                                     .map((block) => (
-                                      <InlineImageBlock key={block.id} block={block} />
+                                      <InlineImageBlock key={block.id} block={block} gallery={imageGallery} />
                                     ))}
                                 </>
                               )}

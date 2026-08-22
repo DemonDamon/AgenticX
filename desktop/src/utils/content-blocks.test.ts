@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   asContentImageUrl,
+  collectTurnLightboxImages,
   isJunkRemoteImageUrl,
   markGeneratingBlocksCancelled,
   projectContentFromBlocks,
+  readyLightboxImages,
   sanitizeLoadedBlocks,
   synthesizeImageBlocksFromTurn,
   upgradeRemoteImageUrl,
@@ -220,5 +222,37 @@ describe("content-blocks", () => {
     ]);
     expect(sanitized).toHaveLength(1);
     expect(sanitized?.[0]).toMatchObject({ id: "img-ok" });
+  });
+
+  it("collects ready images from the current turn only", () => {
+    const turn = [
+      { id: "u0", role: "user" },
+      {
+        id: "prev",
+        role: "assistant",
+        blocks: [
+          { type: "image" as const, id: "img-old", status: "ready" as const, url: "https://example.com/old.jpg" },
+        ],
+      },
+      { id: "u1", role: "user" },
+      {
+        id: "a1",
+        role: "assistant",
+        blocks: [
+          { type: "image" as const, id: "img-a", status: "ready" as const, url: "https://example.com/a.jpg" },
+          { type: "image" as const, id: "img-b", status: "generating" as const },
+        ],
+      },
+      {
+        id: "a2",
+        role: "assistant",
+        blocks: [
+          { type: "image" as const, id: "img-c", status: "ready" as const, path: "/tmp/c.png" },
+        ],
+      },
+    ];
+    expect(readyLightboxImages(turn[3]?.blocks).map((b) => b.id)).toEqual(["img-a"]);
+    expect(collectTurnLightboxImages(turn, "a2").map((b) => b.id)).toEqual(["img-a", "img-c"]);
+    expect(collectTurnLightboxImages(turn, "prev").map((b) => b.id)).toEqual(["img-old"]);
   });
 });
