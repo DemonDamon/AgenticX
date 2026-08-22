@@ -86,9 +86,9 @@ class ZhipuProvider(LiteLLMProvider):
             prompt, tools=tools, **self._with_zhipu_litellm_defaults(kwargs)
         )
 
-    async def astream(
+    def astream(
         self, prompt: Union[str, List[Dict]], **kwargs: Any
     ) -> AsyncGenerator[Union[str, Dict], None]:
-        return await super().astream(
+        return super().astream(
             prompt, **self._with_zhipu_litellm_defaults(kwargs)
         )

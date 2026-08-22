@@ -49,6 +49,7 @@ from .decorators import (
     RouterMethod,
     extract_all_methods,
 )
+from agenticx.utils.async_bridge import run_sync
 from .state import FlowState, FlowExecutionState
 from .types import (
     FlowCondition,
@@ -259,17 +260,13 @@ class Flow(Generic[T], metaclass=FlowMeta):
         Returns:
             最终执行结果
         """
-        try:
-            loop = asyncio.get_running_loop()
-            # 如果已在异步上下文中，使用 run_until_complete 会出错
-            # 创建任务并等待
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, self.kickoff_async(inputs))
-                return future.result()
-        except RuntimeError:
-            # 没有运行中的事件循环，可以直接使用 asyncio.run
-            return asyncio.run(self.kickoff_async(inputs))
+        # try 只能包住 get_running_loop()。原来它一路包到 future.result()：在异步
+        # 上下文里调 kickoff() 时，Flow 内部任何一步抛 RuntimeError 都会被 except
+        # 接住当成"没有运行中的循环"，接着走 asyncio.run —— 而那句在运行中的循环里
+        # 必定失败。结果是调用方看到的不是真正的错因，而是
+        # "asyncio.run() cannot be called from a running event loop"，外加一条
+        # "coroutine was never awaited" 的警告。run_sync 已经把两种情况分开处理。
+        return run_sync(self.kickoff_async(inputs))
     
     async def kickoff_async(self, inputs: Optional[Dict[str, Any]] = None) -> Any:
         """异步执行 Flow
@@ -346,16 +343,19 @@ class Flow(Generic[T], metaclass=FlowMeta):
             filtered_inputs = self._filter_method_args(method, inputs)
             
             # 准备参数
-            if filtered_inputs:
-                if inspect.iscoroutinefunction(method):
-                    result = await method(**filtered_inputs)
-                else:
-                    result = method(**filtered_inputs)
-            else:
-                if inspect.iscoroutinefunction(method):
-                    result = await method()
-                else:
-                    result = method()
+            result = method(**filtered_inputs) if filtered_inputs else method()
+            # 拿到什么就看什么，别去猜 method 是不是协程函数。
+            #
+            # @start()/@listen() 返回的是 FlowMethod 这种可调用对象，不是函数。
+            # 它构造时会试着调 inspect.markcoroutinefunction(self) 把自己标成协程
+            # 函数——但那是 Python 3.12 才有的 API，3.10/3.11 走的是 except 分支里的
+            # `self._is_coroutine = asyncio.coroutines._is_coroutine`，那个标记只有
+            # asyncio.iscoroutinefunction() 认，inspect.iscoroutinefunction() 不认。
+            # 于是在 3.11（本项目 requires-python >=3.10）上，async 的 Flow 方法会走进
+            # 同步分支：method() 返回一个协程对象，从没被 await 过，kickoff_async()
+            # 返回的就是 <coroutine object ...> 而不是结果，副作用也一个都没发生。
+            if inspect.isawaitable(result):
+                result = await result
             
             # 标记完成
             self._execution_state.mark_completed(method_name, result)

@@ -34,6 +34,7 @@ from .types import (
     CodeLanguage,
 )
 from .template import SandboxTemplate
+from agenticx.utils.async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +192,7 @@ class SandboxBase(ABC):
         
         异步方法的同步包装器。
         """
-        return asyncio.get_event_loop().run_until_complete(
+        return run_sync(
             self.execute(code, language, timeout, **kwargs)
         )
     
@@ -264,12 +265,12 @@ class SandboxBase(ABC):
     
     def __enter__(self: T) -> T:
         """同步上下文管理器入口"""
-        asyncio.get_event_loop().run_until_complete(self.__aenter__())
+        run_sync(self.__aenter__())
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """同步上下文管理器退出"""
-        asyncio.get_event_loop().run_until_complete(
+        run_sync(
             self.__aexit__(exc_type, exc_val, exc_tb)
         )
     
