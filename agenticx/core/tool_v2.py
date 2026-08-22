@@ -128,7 +128,6 @@ class ToolMetadata(BaseModel):
     # Security configuration
     requires_credentials: bool = Field(default=False, description="Requires credentials")
     allowed_roles: List[str] = Field(default_factory=list, description="Allowed roles")
-    sandbox_required: bool = Field(default=False, description="Requires sandbox execution")
     
     # Performance configuration
     rate_limit: Optional[int] = Field(default=None, description="Rate limit per minute")

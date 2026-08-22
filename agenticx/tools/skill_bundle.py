@@ -659,7 +659,6 @@ class SkillBundleLoader:
         self,
         search_paths: Optional[List[Path]] = None,
         discovery_bus: Optional["DiscoveryBus"] = None,
-        execution_backend: Optional[Any] = None,
         registry_url: Optional[str] = None,
         config_watcher: Optional["ConfigWatcher"] = None,
         preferred_sources: Optional[Dict[str, str]] = None,
@@ -670,13 +669,11 @@ class SkillBundleLoader:
         Args:
             search_paths: 自定义搜索路径列表（None 使用 :func:`build_skill_search_paths`）
             discovery_bus: DiscoveryBus 实例（用于发布技能发现事件）
-            execution_backend: SkillExecutionBackend 实例（可选，用于控制技能执行方式）
         """
         self.search_paths = (
             search_paths if search_paths is not None else build_skill_search_paths()
         )
         self.discovery_bus = discovery_bus
-        self.execution_backend = execution_backend
         self.registry_url = registry_url
         self.config_watcher = config_watcher
         self.preferred_sources = dict(preferred_sources or {})
@@ -1439,4 +1436,3 @@ class SkillTool(BaseTool):
             else:
                 llm_request.system_prompt = skill_block
             logger.debug(f"Injected skill instructions for: {active_skill}")
-

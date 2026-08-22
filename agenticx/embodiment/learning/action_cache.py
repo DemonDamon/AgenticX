@@ -41,7 +41,7 @@ class ActionCache(Component):
     - 继承 Component 基类，支持生命周期管理
     - 使用 MemoryComponent 作为持久化后端（可选）
     - 通过 Hooks 系统注入缓存查找/记录
-    - 与 EpisodicMemory 配合存储轨迹
+    - 通过 MemoryComponent 持久化轨迹
     
     工作流程：
     1. 在动作执行前，查询缓存是否有匹配的动作

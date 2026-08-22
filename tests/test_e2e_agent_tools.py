@@ -20,7 +20,7 @@ sys.path.insert(0, str(project_root))
 
 from agenticx.core import Agent, Task, Message
 from agenticx.llms import LiteLLMProvider
-from agenticx.tools import tool, ToolExecutor, FileTool, CodeInterpreterTool
+from agenticx.tools import tool, ToolExecutor, FileTool
 
 
 class AgentToolsE2ETester:
@@ -397,4 +397,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()

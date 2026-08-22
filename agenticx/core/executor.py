@@ -1,9 +1,8 @@
 """
 AgenticX Tool Execution Engine
 
-This module provides the execution engine for running tools with safety,
-performance, and reliability features including sandboxing, retry logic,
-and comprehensive error handling.
+This module provides the execution engine for running tools with retries,
+resource accounting, and comprehensive error handling.
 """
 
 import asyncio
@@ -15,18 +14,13 @@ import threading
 import time
 import traceback
 from typing import Any, Dict, List, Optional, Callable, Union, Type
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-import os
-import sys
-import subprocess
 
 try:
     import resource as _posix_resource
 except ImportError:  # Windows: no POSIX resource limits module
     _posix_resource = None
-import tempfile
-import json
 
 from .tool_v2 import BaseTool, ToolResult, ToolContext, ToolStatus
 from .registry import ToolRegistry
@@ -42,11 +36,6 @@ class TimeoutError(ExecutionError):
     pass
 
 
-class SandboxingError(ExecutionError):
-    """Sandboxing error."""
-    pass
-
-
 class ResourceLimitError(ExecutionError):
     """Resource limit exceeded error."""
     pass
@@ -58,13 +47,9 @@ class ExecutionConfig:
     timeout: int = 30  # seconds
     max_retries: int = 3
     retry_delay: float = 1.0
-    enable_sandbox: bool = True
     enable_resource_limits: bool = True
     max_memory_mb: int = 512  # MB
     max_cpu_time: float = 60.0  # seconds
-    enable_network_isolation: bool = False
-    allowed_imports: List[str] = field(default_factory=lambda: ['math', 'json', 'datetime'])
-    blocked_imports: List[str] = field(default_factory=lambda: ['os', 'sys', 'subprocess'])
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -72,13 +57,9 @@ class ExecutionConfig:
             'timeout': self.timeout,
             'max_retries': self.max_retries,
             'retry_delay': self.retry_delay,
-            'enable_sandbox': self.enable_sandbox,
             'enable_resource_limits': self.enable_resource_limits,
             'max_memory_mb': self.max_memory_mb,
             'max_cpu_time': self.max_cpu_time,
-            'enable_network_isolation': self.enable_network_isolation,
-            'allowed_imports': self.allowed_imports,
-            'blocked_imports': self.blocked_imports
         }
 
 
@@ -192,143 +173,6 @@ class ResourceMonitor:
             return 0
 
 
-class SandboxedEnvironment:
-    """Provides sandboxed execution environment."""
-    
-    def __init__(self, config: ExecutionConfig):
-        self.config = config
-        self._logger = logging.getLogger("agenticx.executor.sandbox")
-        self._temp_dir = None
-    
-    def __enter__(self):
-        """Enter sandbox context."""
-        if not self.config.enable_sandbox:
-            return self
-        
-        # Create temporary directory
-        self._temp_dir = tempfile.mkdtemp(prefix="agenticx_sandbox_")
-        
-        # Set up resource limits
-        if self.config.enable_resource_limits:
-            self._setup_resource_limits()
-        
-        self._logger.info(f"Entered sandbox environment: {self._temp_dir}")
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Exit sandbox context."""
-        if not self.config.enable_sandbox:
-            return
-        
-        # Clean up temporary directory
-        if self._temp_dir and os.path.exists(self._temp_dir):
-            import shutil
-            shutil.rmtree(self._temp_dir, ignore_errors=True)
-        
-        self._logger.info("Exited sandbox environment")
-    
-    def _setup_resource_limits(self):
-        """Set up resource limits."""
-        if _posix_resource is None:
-            self._logger.debug(
-                "POSIX setrlimit unavailable (e.g. Windows); "
-                "memory/CPU caps rely on ResourceMonitor only."
-            )
-            return
-        try:
-            # Memory limit
-            memory_bytes = self.config.max_memory_mb * 1024 * 1024
-            _posix_resource.setrlimit(
-                _posix_resource.RLIMIT_AS, (memory_bytes, memory_bytes)
-            )
-
-            # CPU time limit
-            _posix_resource.setrlimit(
-                _posix_resource.RLIMIT_CPU,
-                (int(self.config.max_cpu_time), int(self.config.max_cpu_time)),
-            )
-
-            # File descriptor limit
-            _posix_resource.setrlimit(
-                _posix_resource.RLIMIT_NOFILE, (1024, 1024)
-            )
-
-        except (_posix_resource.error, ValueError) as e:
-            self._logger.warning(f"Failed to set resource limits: {e}")
-    
-    def execute_code(self, code: str, globals_dict: Optional[Dict[str, Any]] = None) -> Any:
-        """Execute code in sandboxed environment."""
-        if not self.config.enable_sandbox:
-            # Execute directly without sandbox
-            exec_globals = globals_dict or {}
-            exec_locals = {}
-            exec(code, exec_globals, exec_locals)
-            return exec_locals
-        
-        # Create restricted globals
-        safe_globals = {
-            '__builtins__': self._get_safe_builtins(),
-            '__name__': '__sandbox__',
-            '__file__': '<sandbox>',
-            '__package__': None,
-        }
-        
-        if globals_dict:
-            safe_globals.update(globals_dict)
-        
-        safe_locals = {}
-        
-        try:
-            exec(code, safe_globals, safe_locals)
-            return safe_locals
-        except Exception as e:
-            raise SandboxingError(f"Sandboxed execution failed: {e}")
-    
-    def _get_safe_builtins(self) -> Dict[str, Any]:
-        """Get safe built-ins for sandboxed execution."""
-        safe_builtins = {
-            'len': len,
-            'range': range,
-            'enumerate': enumerate,
-            'zip': zip,
-            'map': map,
-            'filter': filter,
-            'sum': sum,
-            'min': min,
-            'max': max,
-            'abs': abs,
-            'round': round,
-            'pow': pow,
-            'bool': bool,
-            'int': int,
-            'float': float,
-            'str': str,
-            'list': list,
-            'dict': dict,
-            'tuple': tuple,
-            'set': set,
-            'type': type,
-            'isinstance': isinstance,
-            'issubclass': issubclass,
-            'print': print,
-            'repr': repr,
-            'sorted': sorted,
-            'reversed': reversed,
-            'all': all,
-            'any': any,
-            'next': next,
-            'iter': iter,
-            'Exception': Exception,
-            'ValueError': ValueError,
-            'TypeError': TypeError,
-            'KeyError': KeyError,
-            'IndexError': IndexError,
-            'AttributeError': AttributeError,
-        }
-        
-        return safe_builtins
-
-
 class ToolExecutor:
     """
     Tool execution engine with safety, performance, and reliability features.
@@ -343,7 +187,6 @@ class ToolExecutor:
             'successful_executions': 0,
             'failed_executions': 0,
             'timeout_executions': 0,
-            'sandbox_violations': 0,
             'resource_limit_violations': 0
         }
         self._stats_lock = threading.Lock()
@@ -490,11 +333,7 @@ class ToolExecutor:
         
         for attempt in range(config.max_retries + 1):
             try:
-                # Execute in sandbox if required
-                if config.enable_sandbox or tool.metadata.sandbox_required:
-                    result = self._execute_in_sandbox(tool, parameters, context, config)
-                else:
-                    result = self._execute_direct(tool, parameters, context, config)
+                result = self._execute_direct(tool, parameters, context, config)
                 
                 # Update retry count in result
                 if hasattr(result, 'metadata'):
@@ -502,7 +341,7 @@ class ToolExecutor:
                 
                 return result
                 
-            except (TimeoutError, ResourceLimitError, SandboxingError) as e:
+            except (TimeoutError, ResourceLimitError) as e:
                 # Don't retry on these errors
                 self._logger.warning(f"Non-retryable error on attempt {attempt + 1}: {e}")
                 return ToolResult(
@@ -543,7 +382,7 @@ class ToolExecutor:
                 
                 return result
                 
-            except (TimeoutError, ResourceLimitError, SandboxingError) as e:
+            except (TimeoutError, ResourceLimitError) as e:
                 # Don't retry on these errors
                 self._logger.warning(f"Non-retryable error on async attempt {attempt + 1}: {e}")
                 return ToolResult(
@@ -570,7 +409,7 @@ class ToolExecutor:
     
     def _execute_direct(self, tool: BaseTool, parameters: Dict[str, Any],
                        context: ToolContext, config: ExecutionConfig) -> ToolResult:
-        """Execute tool directly without sandbox."""
+        """Execute a tool in the current process."""
         monitor = ResourceMonitor(config)
         
         try:
@@ -611,14 +450,6 @@ class ToolExecutor:
                 error=f"Execution failed: {str(e)}",
                 metadata={"traceback": traceback.format_exc()}
             )
-    
-    def _execute_in_sandbox(self, tool: BaseTool, parameters: Dict[str, Any],
-                           context: ToolContext, config: ExecutionConfig) -> ToolResult:
-        """Execute tool in sandboxed environment."""
-        with SandboxedEnvironment(config) as sandbox:
-            # For now, delegate to direct execution
-            # In a full implementation, this would isolate the tool execution
-            return self._execute_direct(tool, parameters, context, config)
     
     async def _execute_async_direct(self, tool: BaseTool, parameters: Dict[str, Any],
                                    context: ToolContext, config: ExecutionConfig) -> ToolResult:

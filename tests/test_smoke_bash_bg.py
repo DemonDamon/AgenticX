@@ -7,10 +7,13 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shlex
 import sys
 import time
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -33,13 +36,24 @@ def _extract_job_id(text: str) -> str:
 
 
 @pytest.fixture(autouse=True)
-def auto_confirm(monkeypatch: pytest.MonkeyPatch) -> None:
+def auto_confirm(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Auto-approve confirm gate to keep tests deterministic."""
 
     async def _yes(*_a: object, **_k: object) -> bool:
         return True
 
     monkeypatch.setattr(agent_tools, "_confirm", _yes)
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(tmp_path))
+
+    def _passthrough_plan(argv, *, permissions, **_kwargs):
+        return SimpleNamespace(
+            argv=tuple(argv),
+            env=os.environ.copy(),
+            permissions=agent_tools.normalize_command_permissions(permissions),
+            backend="test-passthrough",
+        )
+
+    monkeypatch.setattr(agent_tools, "build_command_sandbox_plan", _passthrough_plan)
 
 
 async def _reap_bg_jobs() -> None:

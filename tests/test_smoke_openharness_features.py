@@ -607,7 +607,7 @@ class TestCuratedHooksBundled:
         from pathlib import Path
 
         bundled = Path(__file__).resolve().parent.parent / "agenticx" / "hooks" / "bundled"
-        expected = {"session_checkpoint", "pre_tool_guard", "compact_advisor", "session_evaluator"}
+        expected = {"session_checkpoint", "compact_advisor", "session_evaluator"}
         actual = {d.name for d in bundled.iterdir() if d.is_dir() and (d / "HOOK.yaml").exists()}
         assert expected.issubset(actual)
 
@@ -615,103 +615,10 @@ class TestCuratedHooksBundled:
         from pathlib import Path
 
         bundled = Path(__file__).resolve().parent.parent / "agenticx" / "hooks" / "bundled"
-        for name in ("session_checkpoint", "pre_tool_guard", "compact_advisor", "session_evaluator"):
+        for name in ("session_checkpoint", "compact_advisor", "session_evaluator"):
             hook_dir = bundled / name
             assert (hook_dir / "HOOK.yaml").exists()
             assert (hook_dir / "handler.py").exists()
-
-
-class TestPreToolGuardHook:
-    @pytest.mark.asyncio
-    async def test_blocks_rm_rf_at_line_start(self):
-        from agenticx.hooks.bundled.pre_tool_guard.handler import handle
-        from agenticx.hooks.types import HookEvent
-
-        ev = HookEvent(
-            type="tool",
-            action="before_call",
-            agent_id="meta",
-            context={"command": "rm -rf ~/agx-hook-e2e-test"},
-        )
-        assert await handle(ev) is False
-
-    @pytest.mark.asyncio
-    async def test_blocks_rm_rf_from_tool_input(self):
-        from agenticx.hooks.bundled.pre_tool_guard.handler import handle
-        from agenticx.hooks.types import HookEvent
-
-        ev = HookEvent(
-            type="tool",
-            action="before_call",
-            agent_id="meta",
-            context={
-                "tool_name": "bash_exec",
-                "tool_input": {"command": "rm -rf ~/agx-hook-e2e-test"},
-            },
-        )
-        assert await handle(ev) is False
-
-    @pytest.mark.asyncio
-    async def test_allows_git_commit_message_with_rm_rf_text(self):
-        from agenticx.hooks.bundled.pre_tool_guard.handler import handle
-        from agenticx.hooks.types import HookEvent
-
-        ev = HookEvent(
-            type="tool",
-            action="before_call",
-            agent_id="meta",
-            context={"command": 'git commit -m "rm -rf docs"'},
-        )
-        assert await handle(ev) is True
-
-    @pytest.mark.asyncio
-    async def test_rm_rf_block_sets_actionable_reason(self):
-        from agenticx.hooks.bundled.pre_tool_guard.handler import handle
-        from agenticx.hooks.types import HookEvent
-
-        ev = HookEvent(
-            type="tool",
-            action="before_call",
-            agent_id="meta",
-            context={"command": "rm -rf ~/agx-hook-e2e-test"},
-        )
-        assert await handle(ev) is False
-        reason = str(ev.context.get("block_reason") or "")
-        assert "rm -rf" in reason
-        assert "git clone" in reason
-
-
-class TestLegacyEventBridgeHookReason:
-    @pytest.mark.asyncio
-    async def test_bridge_passes_pre_tool_guard_block_reason(self):
-        from agenticx.hooks import get_global_hook_registry
-        from agenticx.hooks.bundled.pre_tool_guard.handler import handle as pre_tool_guard_handle
-        from agenticx.runtime.hooks.legacy_event_bridge_hook import LegacyEventBridgeHook
-
-        registry = get_global_hook_registry()
-        previous = registry.get_registered_handlers("tool:before_call")
-        registry.clear()
-        try:
-            registry.register("tool:before_call", pre_tool_guard_handle)
-            bridge = LegacyEventBridgeHook()
-            outcome = await bridge.before_tool_call(
-                "bash_exec",
-                {
-                    "command": (
-                        "cd /tmp/x && rm -rf graphify 2>/dev/null\n"
-                        "git clone --depth 1 https://github.com/example/graphify.git"
-                    )
-                },
-                session=type("S", (), {"_session_id": "test-session"})(),
-            )
-            assert outcome is not None
-            assert outcome.blocked is True
-            assert "rm -rf" in outcome.reason
-            assert "git clone" in outcome.reason
-        finally:
-            registry.clear()
-            for handler in previous:
-                registry.register("tool:before_call", handler)
 
 
 class TestParallelToolsEnabled:

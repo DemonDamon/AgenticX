@@ -7,7 +7,9 @@ Author: Damon Li
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -22,6 +24,16 @@ def auto_confirm(monkeypatch: pytest.MonkeyPatch) -> None:
         return True
 
     monkeypatch.setattr(agent_tools, "_confirm", _yes)
+
+    def _passthrough_plan(argv, *, permissions, **_kwargs):
+        return SimpleNamespace(
+            argv=tuple(argv),
+            env=os.environ.copy(),
+            permissions=agent_tools.normalize_command_permissions(permissions),
+            backend="test-passthrough",
+        )
+
+    monkeypatch.setattr(agent_tools, "build_command_sandbox_plan", _passthrough_plan)
 
 
 def test_cd_prefix_blocked_unit() -> None:

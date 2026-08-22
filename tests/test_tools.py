@@ -19,7 +19,7 @@ from agenticx.tools.base import BaseTool, ToolError, ToolValidationError
 from agenticx.tools.function_tool import FunctionTool, tool
 from agenticx.tools.executor import ToolExecutor, ExecutionResult
 from agenticx.tools.credentials import CredentialStore
-from agenticx.tools.builtin import FileTool, CodeInterpreterTool, WebSearchTool
+from agenticx.tools.builtin import FileTool, WebSearchTool
 
 from pydantic import BaseModel, Field
 
@@ -144,11 +144,6 @@ class TestToolsSystem:
             )
             assert read_result == content
         
-        # 测试代码解释器
-        code_tool = CodeInterpreterTool()
-        result = code_tool.run(code="result = 10 + 20")
-        assert "Result: 30" in result
-    
     def test_comprehensive_workflow(self):
         """测试综合工作流"""
         
@@ -223,4 +218,4 @@ if __name__ == "__main__":
         print("🎉 所有基础测试通过！")
     else:
         print("❌ 部分测试失败")
-        sys.exit(1) 
+        sys.exit(1)

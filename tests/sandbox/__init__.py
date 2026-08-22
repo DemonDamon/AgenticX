@@ -1,3 +1,0 @@
-"""
-AgenticX Sandbox Tests
-"""

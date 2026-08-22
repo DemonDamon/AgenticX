@@ -33,7 +33,6 @@ from .executor import (
     ExecutionConfig,
     ExecutionMetrics,
     ResourceMonitor,
-    SandboxedEnvironment,
     get_executor as get_tool_executor,
 )
 
@@ -69,7 +68,7 @@ from .adapters import (
     create_multi_protocol_adapter,
 )
 
-# Marketplace (lazy / best-effort import to avoid sandbox SSL issues)
+# Marketplace (lazy / best-effort import for optional dependencies)
 try:
     from .marketplace import (
         ToolMarketplace,
@@ -85,7 +84,7 @@ try:
         RemoteMarketplaceClient,
         get_marketplace,
     )
-except Exception:  # pragma: no cover - sandbox may block requests SSL
+except Exception:  # pragma: no cover - optional dependency chain
     ToolMarketplace = None  # type: ignore
     ToolManifest = None  # type: ignore
     ToolListing = None  # type: ignore
@@ -162,9 +161,6 @@ from .workflow_engine import (
     ExecutionContext, NodeExecution, WorkflowStatus, NodeStatus,
     WorkflowResult
 )
-
-# Code-as-Action executor (lightweight, sandboxed)
-from .code_action_executor import CodeActionExecutor, CodeActionResult
 
 # Slave Parallel Executor (task-level parallelism)
 from .slave_parallel_executor import SlaveParallelExecutor, ParallelTaskResult
@@ -287,7 +283,6 @@ __all__ = [
     "ExecutionConfig",
     "ExecutionMetrics", 
     "ResourceMonitor",
-    "SandboxedEnvironment",
     "get_tool_executor",
     
     # Tool System v2 - Security Management
@@ -438,10 +433,6 @@ __all__ = [
     "ExecutionContext",
     "WorkflowContext",  # 别名
     "WorkflowResult",
-
-    # Code-as-Action
-    "CodeActionExecutor",
-    "CodeActionResult",
 
     # Slave Parallelism
     "SlaveParallelExecutor",

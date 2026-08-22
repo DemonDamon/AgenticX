@@ -39,14 +39,12 @@ try:
     from .builtin import (
         WebSearchTool,
         FileTool,
-        CodeInterpreterTool,
         HttpRequestTool,
         JsonTool,
     )
-except Exception:  # pragma: no cover - sandbox may block requests SSL
+except Exception:  # pragma: no cover - optional dependency chain
     WebSearchTool = None  # type: ignore
     FileTool = None  # type: ignore
-    CodeInterpreterTool = None  # type: ignore
     HttpRequestTool = None  # type: ignore
     JsonTool = None  # type: ignore
 from .security import human_in_the_loop, ApprovalRequiredError
@@ -55,15 +53,6 @@ from .openapi_toolset import OpenAPIToolset, RestApiTool
 from .unified_document import UnifiedDocumentTool
 from .document_routers import DocumentRouter, create_default_router
 from .adapters.liteparse import LiteParseAdapter
-
-# Sandbox tools (OpenSandbox-inspired)
-from .sandbox_tools import (
-    SandboxFileTool,
-    SandboxCommandTool,
-    SandboxCodeInterpreterTool,
-    create_sandbox_tools,
-    register_sandbox_tools,
-)
 
 __all__ = [
     # Base classes
@@ -89,7 +78,6 @@ __all__ = [
     # Built-in tools
     "WebSearchTool",
     "FileTool", 
-    "CodeInterpreterTool",
     "HttpRequestTool",
     "JsonTool",
     # Remote/MCP tools (legacy)
@@ -125,10 +113,4 @@ __all__ = [
     "DocumentRouter",
     "create_default_router",
     "LiteParseAdapter",
-    # Sandbox tools (OpenSandbox-inspired)
-    "SandboxFileTool",
-    "SandboxCommandTool",
-    "SandboxCodeInterpreterTool",
-    "create_sandbox_tools",
-    "register_sandbox_tools",
-] 
+]

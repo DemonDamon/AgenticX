@@ -36,12 +36,6 @@ from agenticx.safety.input_validator import (
     InputRiskLevel,
     ToolInputPolicy,
 )
-from agenticx.safety.sandbox_policy import (
-    SandboxPolicy,
-    SandboxRecommendation,
-    ToolRiskProfile,
-    RiskLevel,
-)
 from agenticx.safety.advanced_detector import (
     AdvancedInjectionDetector,
     AdvancedDetectionResult,
@@ -71,10 +65,6 @@ __all__ = [
     "InputViolation",
     "InputRiskLevel",
     "ToolInputPolicy",
-    "SandboxPolicy",
-    "SandboxRecommendation",
-    "ToolRiskProfile",
-    "RiskLevel",
     "SafetyAuditLog",
     "SafetyEvent",
     "SafetyStage",

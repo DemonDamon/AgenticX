@@ -20,7 +20,7 @@ sys.path.insert(0, str(project_root))
 
 from agenticx.tools import (
     BaseTool, FunctionTool, tool, ToolExecutor,
-    FileTool, CodeInterpreterTool, WebSearchTool
+    FileTool, WebSearchTool
 )
 from agenticx.tools.credentials import CredentialStore
 
@@ -170,30 +170,14 @@ class ToolParadigmTester:
         测试 Tool Use 范式
         
         特点：
-        - 动态工具执行，支持沙箱环境
-        - 可以执行代码、操作文件、调用系统命令
+        - 动态工具执行与文件操作
         - 支持 ReAct 模式（推理-行动-观察）
         - 执行环境可以是本地或远程
         """
         print("\n🛠️ 测试 Tool Use 范式")
         print("=" * 50)
         
-        # 测试1：本地沙箱代码执行
-        try:
-            code_tool = CodeInterpreterTool()
-            
-            # 执行数学计算
-            math_code = """
-import math
-result = math.sqrt(16) + math.pow(2, 3)
-"""
-            result = code_tool.run(code=math_code)
-            success = "Result: 12" in result
-            self.log_test("tool_use", "本地沙箱执行", success, f"Math calculation: {result}")
-        except Exception as e:
-            self.log_test("tool_use", "本地沙箱执行", False, str(e))
-        
-        # 测试2：文件系统操作
+        # 测试：文件系统操作
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 file_tool = FileTool(allowed_paths=[temp_dir])
@@ -596,4 +580,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()

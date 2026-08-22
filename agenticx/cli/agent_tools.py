@@ -60,6 +60,13 @@ from agenticx.runtime.clarify import (
     AutoSuspendClarifyGate,
     ClarifyGate,
 )
+from agenticx.runtime.command_sandbox import (
+    DANGER_FULL_ACCESS,
+    WORKSPACE_WRITE,
+    CommandSandboxError,
+    build_command_sandbox_plan,
+    normalize_command_permissions,
+)
 from agenticx.runtime.token_budget import TOKEN_BUDGET_SCRATCHPAD_KEY
 from agenticx.workspace.loader import (
     append_daily_memory,
@@ -551,6 +558,15 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "command": {"type": "string", "description": "Command to execute."},
                     "cwd": {"type": "string", "description": "Working directory (preferred over cd in command)."},
                     "timeout_sec": {"type": "integer", "description": "Timeout seconds, default 30."},
+                    "sandbox_permissions": {
+                        "type": "string",
+                        "enum": ["workspace-write", "danger-full-access"],
+                        "description": (
+                            "OS filesystem permission level. Defaults to workspace-write. "
+                            "Use danger-full-access only when the command must write outside the session "
+                            "workspace; it always requires explicit user approval."
+                        ),
+                    },
                 },
                 "required": ["command"],
                 "additionalProperties": False,
@@ -574,6 +590,14 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "first_wait_sec": {
                         "type": "integer",
                         "description": "Collect initial output for this many seconds before returning (default 4, max 15).",
+                    },
+                    "sandbox_permissions": {
+                        "type": "string",
+                        "enum": ["workspace-write", "danger-full-access"],
+                        "description": (
+                            "OS filesystem permission level. Defaults to workspace-write. "
+                            "danger-full-access always requires explicit user approval."
+                        ),
                     },
                 },
                 "required": ["command"],
@@ -3563,6 +3587,9 @@ class _BashPrepared:
     use_shell: bool
     command: str
     command_name: str
+    env: Dict[str, str]
+    sandbox_permissions: str
+    sandbox_backend: str
 
 
 @dataclass
@@ -3580,6 +3607,8 @@ class _BashBgJob:
     log_path: Path
     drain_task: Optional[asyncio.Task[Any]]
     exit_code: Optional[int]
+    sandbox_permissions: str
+    sandbox_backend: str
 
 
 def _bash_bg_log_dir() -> Path:
@@ -3726,11 +3755,29 @@ async def _bash_exec_prepare(
     if perm_deny:
         return f"ERROR: {perm_deny}"
 
+    try:
+        sandbox_permissions = normalize_command_permissions(
+            arguments.get("sandbox_permissions")
+        )
+    except CommandSandboxError as exc:
+        return f"ERROR: {exc}"
+
+    _read_roots, write_roots = _session_workspace_root_sets(session)
+    default_cwd = write_roots[0] if write_roots else None
+
     cwd_arg = arguments.get("cwd")
     if cwd_arg:
         try:
-            cwd = _resolve_workspace_path(str(cwd_arg), session, for_write=True)
-        except ValueError as exc:
+            if sandbox_permissions == DANGER_FULL_ACCESS:
+                candidate = Path(str(cwd_arg)).expanduser()
+                if not candidate.is_absolute() and default_cwd is not None:
+                    candidate = default_cwd / candidate
+                cwd = candidate.resolve(strict=False)
+                if not cwd.is_dir():
+                    return f"ERROR: working directory not found: {cwd}"
+            else:
+                cwd = _resolve_workspace_path(str(cwd_arg), session, for_write=True)
+        except (OSError, RuntimeError, ValueError) as exc:
             return f"ERROR: {exc}"
     else:
         cwd = None
@@ -3774,8 +3821,14 @@ async def _bash_exec_prepare(
     if command_name == "cd" and len(parts) <= 2:
         target = str(parts[1]) if len(parts) > 1 else "~"
         try:
-            resolved = _resolve_workspace_path(target, session)
-        except ValueError as exc:
+            if sandbox_permissions == DANGER_FULL_ACCESS:
+                candidate = Path(target).expanduser()
+                if not candidate.is_absolute() and default_cwd is not None:
+                    candidate = default_cwd / candidate
+                resolved = candidate.resolve(strict=False)
+            else:
+                resolved = _resolve_workspace_path(target, session)
+        except (OSError, RuntimeError, ValueError) as exc:
             return f"ERROR: {exc}"
         if not resolved.exists() or not resolved.is_dir():
             return f"ERROR: target directory not found: {resolved}"
@@ -3785,22 +3838,11 @@ async def _bash_exec_prepare(
             "请在后续 bash_exec 调用里通过 `cwd` 参数指定工作目录。"
         )
 
-    # Before confirm gates: reject shell writes into reference mounts (no bash bypass).
-    write_guard_error = _ensure_bash_write_targets_allowed(command, session, cwd)
-    if write_guard_error:
-        return write_guard_error
-
-    if command_name not in SAFE_COMMANDS:
-        confirm_question = (
-            f"Command '{command_name}' is not in SAFE_COMMANDS. Execute anyway?"
-        )
-        if not await _confirm(
-            confirm_question,
-            confirm_gate=confirm_gate,
-            context={"tool": tool_name, "command": command, "risk": "non_whitelisted"},
-            emit_event=emit_event,
-        ):
-            return _cancelled("非白名单命令未执行", confirm_gate)
+    if sandbox_permissions == WORKSPACE_WRITE:
+        # Reference mounts remain read-only inside the broader writable-root set.
+        write_guard_error = _ensure_bash_write_targets_allowed(command, session, cwd)
+        if write_guard_error:
+            return write_guard_error
 
     if _command_touches_protected_config(command, parts):
         return (
@@ -3808,13 +3850,13 @@ async def _bash_exec_prepare(
             "Use update_email_config for notifications.email.* changes."
         )
 
-    if command_name in PATH_GUARDED_READ_COMMANDS:
+    if sandbox_permissions == WORKSPACE_WRITE and command_name in PATH_GUARDED_READ_COMMANDS:
         guarded_paths = _extract_guarded_paths(command_name, parts)
         validation_error = _ensure_paths_within_workspace(guarded_paths, session)
         if validation_error:
             return validation_error
 
-    if command_name == "python":
+    if sandbox_permissions == WORKSPACE_WRITE and command_name == "python":
         python_script = _extract_python_script_arg(parts)
         if python_script and python_script != "-":
             try:
@@ -3822,38 +3864,67 @@ async def _bash_exec_prepare(
             except ValueError as exc:
                 return f"ERROR: {exc}"
 
-    risk_reasons: List[str] = []
-    risk_reasons.extend(_collect_subcommand_risk_reasons(command_name, parts))
-    if command_name == "python" and _extract_python_script_arg(parts):
-        risk_reasons.append("python script execution requires confirmation")
-    if re.search(r"(;|&&|\|\||\||`|\$\(|>|<|\n)", command):
-        risk_reasons.append("suspicious shell metacharacters")
-    if command_name == "rm" and any(flag in {"-rf", "-fr", "-r", "-R", "-f", "--no-preserve-root"} for flag in parts[1:]):
-        risk_reasons.append("destructive rm flags")
-    if command_name == "git":
-        if len(parts) >= 3 and parts[1] == "reset" and parts[2] == "--hard":
-            risk_reasons.append("destructive git reset --hard")
-        if len(parts) >= 2 and parts[1] == "clean" and any(flag.startswith("-f") for flag in parts[2:]):
-            risk_reasons.append("destructive git clean")
-        if len(parts) >= 2 and parts[1] == "push" and any("--force" in flag for flag in parts[2:]):
-            risk_reasons.append("force push")
-    if command_name in {"dd", "mkfs", "shutdown", "reboot", "poweroff"}:
-        risk_reasons.append("high-risk system command")
-
-    if risk_reasons:
-        joined_reasons = ", ".join(risk_reasons)
+    if sandbox_permissions == DANGER_FULL_ACCESS:
         if not await _confirm(
-            f"High-risk command detected ({joined_reasons}). Execute anyway?",
+            "This command requests danger-full-access and may write anywhere on the host. Execute anyway?",
             confirm_gate=confirm_gate,
             context={
                 "tool": tool_name,
                 "command": command,
-                "risk": "high",
-                "reasons": risk_reasons,
+                "risk": "permission_escalation",
+                "sandbox_permissions": DANGER_FULL_ACCESS,
             },
             emit_event=emit_event,
         ):
-            return _cancelled("高风险命令未执行", confirm_gate)
+            return _cancelled("未批准 danger-full-access，命令未执行", confirm_gate)
+    else:
+        if command_name not in SAFE_COMMANDS:
+            confirm_question = (
+                f"Command '{command_name}' is not in SAFE_COMMANDS. Execute anyway?"
+            )
+            if not await _confirm(
+                confirm_question,
+                confirm_gate=confirm_gate,
+                context={"tool": tool_name, "command": command, "risk": "non_whitelisted"},
+                emit_event=emit_event,
+            ):
+                return _cancelled("非白名单命令未执行", confirm_gate)
+
+        risk_reasons: List[str] = []
+        risk_reasons.extend(_collect_subcommand_risk_reasons(command_name, parts))
+        if command_name == "python" and _extract_python_script_arg(parts):
+            risk_reasons.append("python script execution requires confirmation")
+        if re.search(r"(;|&&|\|\||\||`|\$\(|>|<|\n)", command):
+            risk_reasons.append("suspicious shell metacharacters")
+        if command_name == "rm" and any(
+            flag in {"-rf", "-fr", "-r", "-R", "-f", "--no-preserve-root"}
+            for flag in parts[1:]
+        ):
+            risk_reasons.append("destructive rm flags")
+        if command_name == "git":
+            if len(parts) >= 3 and parts[1] == "reset" and parts[2] == "--hard":
+                risk_reasons.append("destructive git reset --hard")
+            if len(parts) >= 2 and parts[1] == "clean" and any(flag.startswith("-f") for flag in parts[2:]):
+                risk_reasons.append("destructive git clean")
+            if len(parts) >= 2 and parts[1] == "push" and any("--force" in flag for flag in parts[2:]):
+                risk_reasons.append("force push")
+        if command_name in {"dd", "mkfs", "shutdown", "reboot", "poweroff"}:
+            risk_reasons.append("high-risk system command")
+
+        if risk_reasons:
+            joined_reasons = ", ".join(risk_reasons)
+            if not await _confirm(
+                f"High-risk command detected ({joined_reasons}). Execute anyway?",
+                confirm_gate=confirm_gate,
+                context={
+                    "tool": tool_name,
+                    "command": command,
+                    "risk": "high",
+                    "reasons": risk_reasons,
+                },
+                emit_event=emit_event,
+            ):
+                return _cancelled("高风险命令未执行", confirm_gate)
 
     use_shell = bool(re.search(r"(;|&&|\|\||\||`|\$\(|>|<|\n)", command))
     if not use_shell:
@@ -3868,12 +3939,33 @@ async def _bash_exec_prepare(
         if resolved0:
             parts = [resolved0] + list(parts[1:])
     argv = _bash_exec_shell_argv(command) if use_shell else parts
+    if cwd is None:
+        cwd = default_cwd
+    scope_id = f"{_bash_bg_session_id(session)}|{'|'.join(str(root) for root in write_roots)}"
+    try:
+        sandbox_plan = build_command_sandbox_plan(
+            argv,
+            permissions=sandbox_permissions,
+            writable_roots=write_roots,
+            scope_id=scope_id,
+            cwd=cwd,
+            platform_name=sys.platform,
+        )
+    except CommandSandboxError as exc:
+        return (
+            f"ERROR: command sandbox unavailable: {exc}. "
+            "The command was not run. If unrestricted host access is necessary, retry with "
+            "sandbox_permissions='danger-full-access'; that request always requires user approval."
+        )
     return _BashPrepared(
-        argv=argv,
+        argv=list(sandbox_plan.argv),
         cwd=cwd,
         use_shell=use_shell,
         command=command,
         command_name=command_name,
+        env=dict(sandbox_plan.env),
+        sandbox_permissions=sandbox_plan.permissions,
+        sandbox_backend=sandbox_plan.backend,
     )
 
 
@@ -3930,6 +4022,7 @@ async def _tool_bash_bg_start(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(prepared.cwd) if prepared.cwd else None,
+            env=prepared.env,
         )
     except Exception as exc:
         return f"ERROR: command failed to start: {exc}"
@@ -3946,6 +4039,8 @@ async def _tool_bash_bg_start(
         log_path=log_path,
         drain_task=None,
         exit_code=None,
+        sandbox_permissions=prepared.sandbox_permissions,
+        sandbox_backend=prepared.sandbox_backend,
     )
     _BASH_BG_JOBS[job_id] = job
     job.drain_task = asyncio.create_task(_bash_bg_drain(job))
@@ -3969,6 +4064,8 @@ async def _tool_bash_bg_start(
         f"exit_code={exit_code}\n"
         f"cwd={cwd_text}\n"
         f"command={job.command}\n"
+        f"sandbox_permissions={job.sandbox_permissions}\n"
+        f"sandbox_backend={job.sandbox_backend}\n"
         f"captured_output:\n{captured_output or '(empty)'}\n"
         f"auth_urls:\n{_bash_bg_render_urls(auth_urls)}\n"
         "NOTE: Process is running in background and is not timeout-killed.\n"
@@ -3996,6 +4093,8 @@ async def _tool_bash_bg_poll(
         f"job_id={job.job_id}\n"
         f"status={status}\n"
         f"exit_code={exit_code}\n"
+        f"sandbox_permissions={job.sandbox_permissions}\n"
+        f"sandbox_backend={job.sandbox_backend}\n"
         f"new_output:\n{new_output or '(none)'}\n"
         f"auth_urls:\n{_bash_bg_render_urls(auth_urls)}"
     )
@@ -4096,6 +4195,7 @@ async def _tool_bash_exec(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(prepared.cwd) if prepared.cwd else None,
+            env=prepared.env,
         )
     except Exception as exc:
         return f"ERROR: command failed to start: {exc}"
@@ -4149,6 +4249,8 @@ async def _tool_bash_exec(
     stdout = "\n".join(stdout_lines).strip()
     stderr = "\n".join(stderr_lines).strip()
     out = (
+        f"sandbox_permissions={prepared.sandbox_permissions}\n"
+        f"sandbox_backend={prepared.sandbox_backend}\n"
         f"exit_code={proc.returncode}\n"
         f"stdout:\n{stdout or '(empty)'}\n"
         f"stderr:\n{stderr or '(empty)'}"

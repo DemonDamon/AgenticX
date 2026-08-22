@@ -115,15 +115,15 @@ Implemented in `agenticx.tools.builtin`. Convenience factory: `get_builtin_tools
 |-------|---------|
 | `FileTool` | Read/write files via `action` dispatch (`read` / `write`) with `FileReadArgs` / `FileWriteArgs`. |
 | `WebSearchTool` | Search: tries **Google Custom Search** when credentials exist (`web_search` / `api_key` + `search_engine_id`), else **DuckDuckGo** HTTP API. |
-| `CodeInterpreterTool` | Runs Python in `SandboxEnvironment` (restricted `exec` sandbox). |
 | `HttpRequestTool` | Generic `requests` wrapper; response body truncated for safety. |
 | `JsonTool` | `parse` / `format` / `validate` actions on string payloads. |
 
-### Safety: `allowed_paths` and `SandboxEnvironment`
+### Safety: `allowed_paths`
 
 - **`FileTool`**: Constructor accepts `allowed_paths: Optional[List[str]]`. If non-empty, paths must resolve under an allowed prefix; also enforces `max_file_size` (default 10 MiB).
 - **`WindowedFileTool`**: Same idea with resolved `allowed_paths` (see below).
-- **`SandboxEnvironment`** (`agenticx.tools.executor`): Used by `CodeInterpreterTool` for in-process sandboxing—allowlisted imports, keyword blocklist, no arbitrary OS/subprocess access. For stronger isolation, use **`ToolExecutor`** with **`SandboxConfig`** and `execute_code_in_sandbox` (process/container backends).
+
+Studio's `bash_exec` and `bash_bg_start` are defined in `agenticx.cli.agent_tools`, not in this built-in class set. Their default `workspace-write` permission is enforced by the host OS; `danger-full-access` is a separate request that always goes through protected user confirmation.
 
 ---
 
@@ -138,8 +138,6 @@ Defined in `agenticx.tools.executor`.
 | `max_retries` | Retry count for transient failures (default `3`). |
 | `retry_delay` | Delay between retries in seconds. |
 | `default_timeout` | Fallback timeout if the tool has none. |
-| `enable_sandbox` | If `True`, attaches a simple `SandboxEnvironment` on the executor (legacy path). |
-| `sandbox_config` | Optional `SandboxConfig` for advanced sandbox (`subprocess` / `microsandbox` / `docker` / `auto`). |
 | `policy_stack` | Optional declarative policy; `check(tool.name)` before run. |
 | `safety_layer` | Optional `SafetyLayer` (`agenticx.safety.layer`) for input validation and output sanitization. |
 
@@ -195,14 +193,6 @@ records = executor.get_tool_calling_history(
 ```
 
 Returns the **last** `limit` matching records from in-memory history.
-
-### SandboxConfig
-
-| Field | Description |
-|-------|-------------|
-| `backend` | `"auto"`, `"subprocess"`, `"microsandbox"`, or `"docker"`. |
-| `template_name`, `timeout_seconds`, `cpu`, `memory_mb` | Resource and timeout hints for sandbox template. |
-| `network_enabled`, `auto_cleanup` | Network policy and lifecycle. |
 
 ### ExecutionResult
 
@@ -361,4 +351,4 @@ tool = UnifiedDocumentTool(router=router, cache_dir="./cache")
 
 - [Source tree: `agenticx/tools`](https://github.com/DemonDamon/AgenticX/tree/main/agenticx/tools)
 - Safety layer: `agenticx.safety.layer.SafetyLayer`
-- Advanced sandbox: `agenticx.sandbox` (used by `SandboxConfig` / `ToolExecutor.execute_code_in_sandbox`)
+- Studio command isolation: `agenticx.runtime.command_sandbox`

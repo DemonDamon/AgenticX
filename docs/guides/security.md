@@ -200,18 +200,11 @@ This allows tests and deployments to swap implementations without forking the pi
 | Shannon entropy | Sliding window (**64** chars, step **half-window**); flag when per-character entropy **> 4.5** bits (configurable). |
 | `normalize()` | Drop zero-width; map confusables to Latin. |
 
-## Sandbox policy
+## Studio command isolation
 
-`SandboxPolicy` maps **inferred or declared** tool risk to a **recommended** backend and timeout. It does **not** spawn containers by itself; it pairs with your executor / sandbox implementation.
+`bash_exec` and `bash_bg_start` default to `sandbox_permissions="workspace-write"`. The runtime launches the child under an operating-system sandbox that permits writes only below the session's writable workspace roots and a private temporary directory. If the host cannot enforce that boundary, execution fails closed.
 
-| Risk | Backend | Network | `max_timeout` (s) |
-|------|---------|---------|-------------------|
-| CRITICAL | `docker` | disabled | 60 |
-| HIGH | `docker` | disabled | 120 |
-| MEDIUM | `subprocess` | enabled | 300 |
-| LOW | `None` | enabled | 600 |
-
-**Per-tool profiles**: `ToolRiskProfile(tool_name, risk_level, force_backend?, network_enabled, max_timeout)` in `SandboxPolicy(tool_profiles=[...])`. If no profile exists, risk is inferred from tool name keywords (`shell`, `curl`, `file`, …).
+A command that genuinely needs to write elsewhere must explicitly request `sandbox_permissions="danger-full-access"`. That escalation is a protected confirmation and cannot be silently approved by the “approve for me” mode. The existing safe-command allowlist and high-risk detector remain additional approval gates for workspace-scoped commands.
 
 ## Audit logging
 
@@ -252,20 +245,6 @@ safety = SafetyLayer(
 executor = ToolExecutor(safety_layer=safety)
 
 # result = executor.execute(my_tool, **args)
-```
-
-### SandboxPolicy standalone
-
-```python
-from agenticx.safety import SandboxPolicy, ToolRiskProfile, RiskLevel
-
-policy = SandboxPolicy(
-    tool_profiles=[
-        ToolRiskProfile("run_shell", risk_level=RiskLevel.CRITICAL, network_enabled=False),
-    ],
-)
-rec = policy.recommend("run_shell")
-# rec.backend, rec.network_enabled, rec.max_timeout
 ```
 
 ## Dynamic rule management

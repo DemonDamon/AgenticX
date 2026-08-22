@@ -12,7 +12,7 @@ Tools are the contract between language models and your environment. In AgenticX
 | Spec-driven HTTP APIs | `OpenAPIToolset` |
 | Skill packages | `SkillBundleLoader`, `SkillTool` |
 | Execution | `ToolExecutor` (`agenticx.tools.executor`) |
-| Isolation hints | `SandboxPolicy`, `SandboxConfig` |
+| Studio command isolation | `workspace-write`, `danger-full-access` |
 
 !!! note "Naming"
     The public Python API lives under `agenticx.tools` and `agenticx.safety`. Some older or adapter layers also reference `agenticx.core.executor.ToolExecutor`; prefer `agenticx.tools.executor.ToolExecutor` for sandbox, safety layer, and audit features described below.
@@ -145,7 +145,6 @@ Skills follow the Anthropic-style `SKILL.md` layout with YAML front matter. **`S
 **Session-level injection**
 
 - In Studio, `skill_use` / `skill_list` tie into the loader so activated skills affect the current session context.
-- `SkillBundleLoader` accepts `execution_backend` for sandboxed or alternate execution paths when running skill payloads.
 
 !!! note "“SkillBundle” vs loader"
     The codebase centers on `SkillBundleLoader` and `SkillMetadata`; there is no separate `SkillBundle` class. Conceptually a “bundle” is the loaded set of skills from configured search paths.
@@ -212,7 +211,6 @@ Retries skip obvious non-retriable cases (e.g. `ToolTimeoutError`).
 **Related**
 
 - `ApprovalRequiredError` bubbles out without being treated as a generic failure.
-- `sandbox_config: SandboxConfig` enables advanced backends (`subprocess`, `microsandbox`, `docker`) for code execution helpers on the same class.
 
 ## Credential management
 
@@ -223,26 +221,13 @@ Retries skip obvious non-retriable cases (e.g. `ToolTimeoutError`).
 !!! warning "Filesystem permissions"
     Encryption keys live beside the store (`encryption.key`). Ensure user-only permissions on `~/.agenticx` on shared machines.
 
-## Sandbox integration
+## Studio command isolation
 
-**`SandboxConfig`** (`agenticx.tools.executor`) selects a backend for advanced runs:
+Studio shell tools accept one of two explicit filesystem permission levels:
 
-| Backend | Isolation |
-|---------|-----------|
-| `subprocess` | Separate OS process |
-| `microsandbox` | Sandboxed runtime (when available) |
-| `docker` | Container isolation |
-| `auto` | Resolver picks a implementation |
+| Permission | Behavior |
+|------------|----------|
+| `workspace-write` | Default. The child process runs inside an OS-enforced sandbox and may write only to the session's writable workspace roots and a private temporary directory. |
+| `danger-full-access` | Runs without filesystem isolation and always requires protected user confirmation, including in “approve for me” mode. |
 
-**`SandboxPolicy`** (`agenticx.safety.sandbox_policy`) recommends backends from **risk level** or **tool name heuristics**:
-
-| Inferred / assigned risk | Suggested backend |
-|--------------------------|-------------------|
-| `LOW` | No forced backend (`None`) |
-| `MEDIUM` | `subprocess` |
-| `HIGH` / `CRITICAL` | `docker` |
-
-Optional **`ToolRiskProfile`** entries override inference per `tool_name` (`force_backend`, `network_enabled`, `max_timeout`).
-
-!!! tip "Align policy with executor"
-    Use `SandboxPolicy.recommend()` to build or tune a `SandboxConfig` for `ToolExecutor`; keep high-risk tools on stronger isolation even if default Studio tools run in the workspace process.
+The confirmation UI is not the isolation boundary. On macOS the runtime uses `sandbox-exec`; on Linux it requires Bubblewrap and fails closed if no backend is available. Existing command allowlists and high-risk detection still decide whether a `workspace-write` invocation also needs confirmation.

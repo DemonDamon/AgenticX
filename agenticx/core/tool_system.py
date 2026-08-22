@@ -16,7 +16,7 @@ from .security import SecurityManager, get_security_manager
 from .adapters import ProtocolAdapter, create_multi_protocol_adapter
 try:
     from .marketplace import ToolMarketplace, get_marketplace
-except Exception:  # pragma: no cover - sandbox may block SSL for requests
+except Exception:  # pragma: no cover - optional dependency chain
     ToolMarketplace = None  # type: ignore
     get_marketplace = None  # type: ignore
 
@@ -27,7 +27,6 @@ class ToolSystemConfig:
     enable_security: bool = True
     enable_marketplace: bool = True
     enable_protocol_adapters: bool = True
-    enable_sandbox: bool = True
     max_concurrent_executions: int = 10
     execution_timeout: float = 30.0
     security_level: str = "medium"

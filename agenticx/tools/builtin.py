@@ -1,7 +1,7 @@
 """
 内置工具集
 
-提供开箱即用的基础工具，包括文件操作、网络搜索、代码执行等。
+提供开箱即用的基础工具，包括文件操作和网络请求。
 """
 
 import json
@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field  # type: ignore
 
 from .base import BaseTool
 from .credentials import get_credential
-from .executor import SandboxEnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +41,6 @@ class WebSearchArgs(BaseModel):
     query: str = Field(description="搜索查询")
     num_results: int = Field(default=5, description="返回结果数量")
     language: str = Field(default="zh", description="搜索语言")
-
-
-class CodeExecuteArgs(BaseModel):
-    """代码执行参数"""
-    code: str = Field(description="要执行的 Python 代码")
-    timeout: int = Field(default=30, description="执行超时时间（秒）")
-    allow_network: bool = Field(default=False, description="是否允许网络访问")
 
 
 # 内置工具实现
@@ -281,39 +273,6 @@ class WebSearchTool(BaseTool):
         return "\n".join(formatted_results)
 
 
-class CodeInterpreterTool(BaseTool):
-    """代码解释器工具"""
-    
-    def __init__(self, **kwargs):
-        super().__init__(
-            name="code_interpreter",
-            description="在安全的沙箱环境中执行 Python 代码",
-            args_schema=CodeExecuteArgs,
-            **kwargs
-        )
-        self.sandbox = SandboxEnvironment()
-    
-    def _run(self, **kwargs) -> str:
-        """执行 Python 代码"""
-        args = CodeExecuteArgs(**kwargs)
-        
-        try:
-            # 在沙箱中执行代码
-            result = self.sandbox.execute_code(args.code)
-            
-            if result is None:
-                return "Code executed successfully (no return value)"
-            else:
-                return f"Code executed successfully. Result: {result}"
-                
-        except ValueError as e:
-            # 安全检查失败
-            return f"Security check failed: {e}"
-        except Exception as e:
-            # 代码执行错误
-            return f"Code execution failed: {e}"
-
-
 class HttpRequestTool(BaseTool):
     """HTTP 请求工具"""
     
@@ -424,7 +383,6 @@ def get_builtin_tools(
             organization_id=organization_id
         ),
         WebSearchTool(organization_id=organization_id),
-        CodeInterpreterTool(organization_id=organization_id),
         HttpRequestTool(organization_id=organization_id),
         JsonTool(organization_id=organization_id),
-    ] 
+    ]

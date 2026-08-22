@@ -6,7 +6,9 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,11 +17,22 @@ from agenticx.cli.studio import StudioSession
 
 
 @pytest.fixture
-def auto_confirm(monkeypatch: pytest.MonkeyPatch) -> None:
+def auto_confirm(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     async def _yes(*_a: object, **_k: object) -> bool:
         return True
 
     monkeypatch.setattr(agent_tools, "_confirm", _yes)
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(tmp_path))
+
+    def _passthrough_plan(argv, *, permissions, **_kwargs):
+        return SimpleNamespace(
+            argv=tuple(argv),
+            env=os.environ.copy(),
+            permissions=agent_tools.normalize_command_permissions(permissions),
+            backend="test-passthrough",
+        )
+
+    monkeypatch.setattr(agent_tools, "build_command_sandbox_plan", _passthrough_plan)
 
 
 def test_hint_appended_for_long_stdout(auto_confirm: None) -> None:

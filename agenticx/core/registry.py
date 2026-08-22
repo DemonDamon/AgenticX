@@ -57,7 +57,6 @@ class ToolInfo:
             "last_used": self.last_used.isoformat() if self.last_used else None,
             "tags": self.tags,
             "requires_credentials": self.metadata.requires_credentials,
-            "sandbox_required": self.metadata.sandbox_required,
             "rate_limit": self.metadata.rate_limit,
             "timeout": self.metadata.timeout
         }

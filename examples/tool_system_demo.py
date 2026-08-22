@@ -183,7 +183,6 @@ async def demo_basic_usage():
         enable_security=True,
         enable_marketplace=False,  # 演示时不启用市场
         enable_protocol_adapters=True,
-        enable_sandbox=True,
         max_concurrent_executions=5,
         execution_timeout=30.0,
         security_level="medium"

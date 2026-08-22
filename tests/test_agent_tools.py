@@ -98,6 +98,16 @@ def _capture_subprocess_exec(
 
     monkeypatch.setattr(agent_tools.asyncio, "create_subprocess_exec", _fake_exec)
     monkeypatch.setattr(agent_tools.asyncio, "create_subprocess_shell", _fake_shell)
+
+    def _passthrough_plan(argv, *, permissions, **_kwargs):
+        return SimpleNamespace(
+            argv=tuple(argv),
+            env={},
+            permissions=agent_tools.normalize_command_permissions(permissions),
+            backend="test-passthrough",
+        )
+
+    monkeypatch.setattr(agent_tools, "build_command_sandbox_plan", _passthrough_plan)
     return captured
 
 

@@ -83,15 +83,6 @@ class CodegenConfig:
 
 
 @dataclass
-class SandboxSettings:
-    """Sandbox execution mode (Local / Docker / remote K8s)."""
-
-    mode: str = "auto"
-    remote_url: str = ""
-    audit_log_dir: str = ""
-
-
-@dataclass
 class ComputerUseSettings:
     """Computer Use capability settings (inspired by Claude Computer Use)."""
 
@@ -167,7 +158,6 @@ class AgxConfig:
     default_provider: str = "openai"
     providers: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     codegen: CodegenConfig = field(default_factory=CodegenConfig)
-    sandbox: SandboxSettings = field(default_factory=SandboxSettings)
     workspace_dir: str = "~/.agenticx/workspace"
     extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
     computer_use: ComputerUseSettings = field(default_factory=ComputerUseSettings)
@@ -338,10 +328,6 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
         if isinstance(workspace_raw, str) and workspace_raw.strip():
             workspace_dir = workspace_raw.strip()
 
-        sandbox_raw = merged.get("sandbox", {}) or {}
-        if not isinstance(sandbox_raw, dict):
-            sandbox_raw = {}
-
         cu_raw = merged.get("computer_use", {}) or {}
         if not isinstance(cu_raw, dict):
             cu_raw = {}
@@ -362,11 +348,6 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
                 language=str(codegen_raw.get("language", "zh")),
                 style=str(codegen_raw.get("style", "functional")),
                 include_tests=bool(codegen_raw.get("include_tests", True)),
-            ),
-            sandbox=SandboxSettings(
-                mode=str(sandbox_raw.get("mode", "auto")).lower(),
-                remote_url=str(sandbox_raw.get("remote_url", "") or ""),
-                audit_log_dir=str(sandbox_raw.get("audit_log_dir", "") or ""),
             ),
             workspace_dir=workspace_dir,
             computer_use=ComputerUseSettings(
