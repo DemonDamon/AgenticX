@@ -35,19 +35,26 @@ export function parseContinuationNotice(message: NoticePick): ContinuationNotice
   const roundFromMeta = Number(meta.continuation_round);
   const source = String(meta.source ?? "").trim();
 
+  // 轮次以 metadata 为准，文本只是兜底。metadata 里的 continuation_round 来自后端那个
+  // 真正的计数器（studio/continuation.py），文案是渲染出来的字符串——两者不一致时信
+  // 前者。同一条通知经 SSE 回显和从磁盘重载两条路进来时，也只有认 metadata 才能算出
+  // 同一个 key，dedupe 才不会漏。
+  const metaRound =
+    Number.isFinite(roundFromMeta) && roundFromMeta > 0 ? Math.floor(roundFromMeta) : undefined;
+
   const supervisor = text.match(SUPERVISOR_RE);
   if (supervisor) {
     return {
       variant: "supervisor",
       title: "无人值守续跑",
       reason: supervisor[1]!.trim(),
-      round: Math.max(1, parseInt(supervisor[2]!, 10)),
+      round: metaRound ?? Math.max(1, parseInt(supervisor[2]!, 10)),
     };
   }
 
   const auto = text.match(AUTO_RE);
   if (auto) {
-    const round = auto[1] ? Math.max(1, parseInt(auto[1], 10)) : undefined;
+    const round = metaRound ?? (auto[1] ? Math.max(1, parseInt(auto[1], 10)) : undefined);
     const maxRounds = auto[2] ? Math.max(1, parseInt(auto[2], 10)) : undefined;
     return {
       variant: "auto_nudge",

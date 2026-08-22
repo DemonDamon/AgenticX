@@ -98,6 +98,7 @@ type AvatarApiRow = {
   default_provider?: string;
   default_model?: string;
   color?: string;
+  sort_order?: number;
   workspace_dir?: string;
   description?: string;
   tags?: string[];
@@ -130,6 +131,7 @@ export function mapAvatarsFromApi(rows: unknown[]): Avatar[] {
       defaultProvider: a.default_provider ?? "",
       defaultModel: a.default_model ?? "",
       color: typeof a.color === "string" ? a.color : "",
+      sortOrder: typeof a.sort_order === "number" ? a.sort_order : 0,
       workspaceDir: a.workspace_dir ?? "",
       description: a.description ?? "",
       tags: Array.isArray(a.tags) ? a.tags.map(String) : [],
