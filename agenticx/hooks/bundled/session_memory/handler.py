@@ -9,13 +9,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agenticx.hooks.types import HookEvent
+from agenticx.utils.workspace_dir import resolve_workspace_dir
 
 
 async def handle(event: HookEvent) -> bool | None:
     if event.type != "command" or event.action not in {"new", "reset"}:
         return True
 
-    workspace_dir = Path(event.context.get("workspace_dir", Path.cwd()))
+    # 兜底不再直接用 cwd：调用方没给工作区时，落点也该由 AGENTICX_WORKSPACE_DIR
+    # 决定，而不是"谁启动的进程就写到谁那儿"。
+    workspace_dir = resolve_workspace_dir(event.context.get("workspace_dir"))
     memory_dir = workspace_dir / "memory"
     memory_dir.mkdir(parents=True, exist_ok=True)
 

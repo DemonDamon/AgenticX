@@ -13,8 +13,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from agenticx.utils.agx_home import agx_home, lazy_home_path
 
-GROUPS_ROOT = Path.home() / ".agenticx" / "groups"
+def _groups_root() -> Path:
+    """``~/.agenticx/groups``，按调用时的 HOME 解析。
+
+    原来是模块级常量，import 时就被 Path.home() 定死；测试的 HOME 重定向拦不住，
+    数据会写进开发者真实的 ~/.agenticx。见 agenticx/utils/agx_home.py。
+    """
+    return lazy_home_path(__name__, "GROUPS_ROOT", 'groups')
+
+
+def __getattr__(name: str):
+    # PEP 562：给外部读取用；模块内部一律调 _groups_root()。
+    if name == "GROUPS_ROOT":
+        return agx_home().joinpath('groups')
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 GROUP_CONFIG_FILE = "group.yaml"
 
 
@@ -43,7 +57,7 @@ class GroupChatRegistry:
     """CRUD operations for group chats with YAML persistence."""
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = Path(root) if root else GROUPS_ROOT
+        self.root = Path(root) if root else _groups_root()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _group_dir(self, group_id: str) -> Path:

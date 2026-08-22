@@ -15,8 +15,22 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import unquote_to_bytes
+from agenticx.utils.agx_home import agx_home, lazy_home_path
 
-_SESSIONS_ROOT = Path(os.path.expanduser("~")) / ".agenticx" / "sessions"
+def _sessions_root() -> Path:
+    """``~/.agenticx/sessions``，按调用时的 HOME 解析。
+
+    原来是模块级常量，import 时就被 Path.home() 定死；测试的 HOME 重定向拦不住，
+    数据会写进开发者真实的 ~/.agenticx。见 agenticx/utils/agx_home.py。
+    """
+    return lazy_home_path(__name__, "_SESSIONS_ROOT", 'sessions')
+
+
+def __getattr__(name: str):
+    # PEP 562：给外部读取用；模块内部一律调 _sessions_root()。
+    if name == "_SESSIONS_ROOT":
+        return agx_home().joinpath('sessions')
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 _MIME_EXT = {
     "image/png": ".png",
@@ -79,7 +93,7 @@ def _clean_image_attachment_rows(atts: Sequence[Any]) -> list[dict[str, Any]]:
 
 
 def session_uploads_dir(session_id: str) -> Path:
-    return _SESSIONS_ROOT / str(session_id or "").strip() / "uploads"
+    return _sessions_root() / str(session_id or "").strip() / "uploads"
 
 
 def _display_name_from_context_key(key: str) -> str:
