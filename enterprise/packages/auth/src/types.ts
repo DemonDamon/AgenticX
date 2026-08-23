@@ -18,7 +18,7 @@ export type AuthContext = {
   deptId?: string | null;
   email: string;
   scopes: string[];
-  mustChangePassword?: boolean;
+  mustChangePassword: boolean;
   sessionId: string;
 };
 
