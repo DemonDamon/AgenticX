@@ -133,6 +133,20 @@ describe("platform feature capability-pack authorization", () => {
     await expect(isPlatformFeatureAllowedForUser("deep_research", "user-1")).resolves.toBe(false);
   });
 
+  it("allows a feature when the user only matches through a group assignment key", async () => {
+    mocks.resolveAssignmentKeysForUser.mockResolvedValue(["group:g_rd"]);
+    mocks.queryResults = [
+      [{ packId: "01JQMZ8K3N4P5Q6R7S8T9VWXP1" }],
+      [{ id: "01JQMZ8K3N4P5Q6R7S8T9VWXP1" }],
+      [{ capabilityId: DEEP_RESEARCH_ID }],
+    ];
+
+    const { isPlatformFeatureAllowedForUser } = await import("../capability-packs-reader");
+
+    await expect(isPlatformFeatureAllowedForUser("deep_research", "user-1")).resolves.toBe(true);
+    expect(mocks.resolveAssignmentKeysForUser).toHaveBeenCalled();
+  });
+
   it("keeps platform features out of what gets pushed to Desktop", async () => {
     // 平台功能只做服务端授权。混进 assigned 就会被 capabilityStatesFromView 当成
     // 一条 Skill/MCP 下发，Desktop 侧会多出一个连不上的能力条目。
