@@ -52,7 +52,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
 export type PageContent = {
   url: string;
-  /** 提取后的纯文本正文，已截断到 MAX_PAGE_CHARS。 */
+  /** 提取后的纯文本正文，默认截断到 MAX_PAGE_CHARS。 */
   text: string;
   /** 提取字符数（截断前），用于可观测性。 */
   rawChars: number;
@@ -63,6 +63,13 @@ export type PageContent = {
 export type PageFetchDeps = {
   fetchImpl?: DirectFetch;
   timeoutMs?: number;
+  /** Optional larger bound for explicit-document reads; clamped to 240k. */
+  maxChars?: number;
+  /**
+   * Reserved for a later DNS-admission skip on adapter-built URLs.
+   * Wave-a has no SSRF resolver; the flag is accepted and ignored.
+   */
+  canonicalPublicUrl?: boolean;
   signal?: AbortSignal;
   /** 依次尝试，首个成功即返回；缺省用 DEFAULT_BACKEND_CHAIN。 */
   backends?: PageFetchBackendName[];
@@ -146,6 +153,7 @@ async function fetchPageContentWithReason(
       const result = await backend(url, {
         fetchImpl,
         timeoutMs,
+        maxChars: deps?.maxChars,
         signal: deps?.signal,
         apiKey: deps?.apiKeys?.[name],
       });
