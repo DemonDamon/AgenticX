@@ -1,0 +1,27 @@
+-- 用户组提成一等主体。不写 DEFAULT CHARSET/COLLATE，避免与 tenants.id collation 不一致。
+
+CREATE TABLE IF NOT EXISTS `enterprise_user_groups` (
+  `id` varchar(26) NOT NULL,
+  `tenant_id` varchar(26) NOT NULL,
+  `name` varchar(64) NOT NULL,
+  `description` text,
+  `created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+  `updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+  CONSTRAINT `enterprise_user_groups_id` PRIMARY KEY (`id`),
+  CONSTRAINT `enterprise_user_groups_tenant_name_uq` UNIQUE (`tenant_id`, `name`),
+  CONSTRAINT `enterprise_user_groups_tenant_fk` FOREIGN KEY (`tenant_id`)
+    REFERENCES `tenants` (`id`) ON DELETE CASCADE
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `enterprise_user_group_members` (
+  `group_id` varchar(26) NOT NULL,
+  `user_id` varchar(26) NOT NULL,
+  `created_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+  `updated_at` datetime(6) NOT NULL DEFAULT (UTC_TIMESTAMP(6)),
+  CONSTRAINT `enterprise_user_group_members_pk` PRIMARY KEY (`group_id`, `user_id`),
+  CONSTRAINT `enterprise_user_group_members_group_fk` FOREIGN KEY (`group_id`)
+    REFERENCES `enterprise_user_groups` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `enterprise_user_group_members_user_fk` FOREIGN KEY (`user_id`)
+    REFERENCES `users` (`id`) ON DELETE CASCADE,
+  INDEX `enterprise_user_group_members_user_idx` (`user_id`)
+);

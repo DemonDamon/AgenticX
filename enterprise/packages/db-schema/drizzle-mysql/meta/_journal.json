@@ -141,6 +141,27 @@
       "when": 1786400000001,
       "tag": "0019_portal_request_logs_session_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1786500000001,
+      "tag": "0020_enterprise_capability_packs",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1786600000001,
+      "tag": "0021_enterprise_user_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1786700000001,
+      "tag": "0022_enterprise_user_opt_outs",
+      "breakpoints": true
     }
   ]
 }
