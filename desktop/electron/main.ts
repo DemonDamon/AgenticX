@@ -55,6 +55,16 @@ import {
   type SystemSearchCategory,
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
+import { normalizeEnterpriseCapabilities } from "./enterprise-capabilities";
+import {
+  applyEnterpriseCapabilitiesToDisk,
+  digestSkillBundle,
+  hasEnterprisePat,
+  readMcpDocumentViaStudio,
+  removeManagedSkill,
+  writeManagedSkill,
+  writeMcpDocumentViaStudio,
+} from "./enterprise-capabilities-sync";
 import { fetchFaviconDataUrl } from "./fetch-favicon";
 import { classifyModelHealthFailure } from "./model-health";
 import { isRealpathUnder, safeRealpath } from "./path-guard";
@@ -304,6 +314,14 @@ type AgxConfig = {
   skills?: { non_high_risk_auto_install?: boolean };
   /** Meta-agent default workspace root (supports ~); mirrors config.yaml workspace_dir */
   workspace_dir?: string;
+  enterprise?: {
+    enabled?: boolean;
+    base_url?: string;
+    token?: string;
+    capabilities?: unknown;
+    managed_mcp_servers?: string[];
+    managed_skills?: string[];
+  };
   /** Near 官网 / Supabase 账号（桌面端轮询写入，勿在日志中打印 token） */
   agx_account?: {
     user_email?: string;
@@ -1936,6 +1954,9 @@ function notifyRendererConnectionModeChanged(): void {
 function notifyRendererStudioReady(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send("agx-studio-ready");
+  void scheduleEnterpriseCapabilitySync().catch((error) => {
+    console.warn(`[enterprise] capability sync failed: ${String(error)}`);
+  });
 }
 
 async function pingRemoteServer(config: ResolvedRemoteConfig, timeoutMs = 10000): Promise<boolean> {
@@ -1974,6 +1995,51 @@ function getStudioUrl(): string {
 
 function getStudioToken(): string {
   return remoteConfig ? remoteConfig.token : apiToken;
+}
+
+async function scheduleEnterpriseCapabilitySync(): Promise<{ ok: boolean; skipped?: boolean }> {
+  const cfg = loadAgxConfig();
+  if (!hasEnterprisePat(cfg)) return { ok: true, skipped: true };
+  const token = String(cfg.enterprise?.token ?? "").trim();
+  const portal = String(cfg.enterprise?.base_url ?? "").trim().replace(/\/+$/, "");
+  let capabilities = cfg.enterprise?.capabilities;
+  if (portal) {
+    try {
+      const resp = await proxyAwareFetch(`${portal}/api/desktop/bootstrap`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (resp.ok) {
+        const json = (await resp.json()) as { data?: { capabilities?: unknown } };
+        capabilities = json.data?.capabilities ?? capabilities;
+      }
+    } catch (error) {
+      console.warn(`[enterprise] bootstrap capabilities failed: ${String(error)}`);
+    }
+  }
+  const studioUrl = getStudioUrl();
+  const studioToken = getStudioToken();
+  const result = await applyEnterpriseCapabilitiesToDisk({
+    cfg,
+    token,
+    capabilities,
+    readMcpDocument: () => readMcpDocumentViaStudio(studioUrl, studioToken),
+    writeMcpDocument: (document) => writeMcpDocumentViaStudio(studioUrl, studioToken, document),
+    fetchSkillBundle: async (uri, digest) => {
+      const resp = await proxyAwareFetch(uri, { signal: AbortSignal.timeout(15_000) });
+      if (!resp.ok) return null;
+      return digestSkillBundle(await resp.text(), digest);
+    },
+    writeSkill: writeManagedSkill,
+    removeSkill: removeManagedSkill,
+  });
+  if (cfg.enterprise) {
+    cfg.enterprise.capabilities = normalizeEnterpriseCapabilities(capabilities);
+    cfg.enterprise.managed_mcp_servers = result.managedMcp;
+    cfg.enterprise.managed_skills = result.managedSkills;
+    saveAgxConfig(cfg);
+  }
+  return { ok: true, skipped: result.skipped };
 }
 
 function isRemoteMode(): boolean {
@@ -6738,6 +6804,7 @@ function registerEarlyIpc(): void {
     const ok = await waitForStudio(ms);
     return { ok };
   });
+  ipcMain.handle("enterprise-sync-capabilities", async () => scheduleEnterpriseCapabilitySync());
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
   ipcMain.handle("get-connection-mode", async () => getInjectedConnectionMode());

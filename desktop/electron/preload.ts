@@ -64,6 +64,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   getApiBase: async (): Promise<string> => ipcRenderer.invoke("get-api-base"),
   waitForStudio: async (timeoutMs?: number): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke("wait-for-studio", timeoutMs),
+  enterpriseSyncCapabilities: async (): Promise<{ ok: boolean; skipped?: boolean }> =>
+    ipcRenderer.invoke("enterprise-sync-capabilities"),
   getApiAuthToken: async (): Promise<string> => ipcRenderer.invoke("get-api-auth-token"),
   platform: async (): Promise<string> => ipcRenderer.invoke("get-platform"),
   syncTitleBarOverlay: async (theme: "dark" | "light" | "dim") =>

@@ -486,6 +486,7 @@ declare global {
       version: string;
       getApiBase: () => Promise<string>;
       waitForStudio: (timeoutMs?: number) => Promise<{ ok: boolean }>;
+      enterpriseSyncCapabilities: () => Promise<{ ok: boolean; skipped?: boolean }>;
       getApiAuthToken: () => Promise<string>;
       platform: () => Promise<string>;
       syncTitleBarOverlay: (theme: "dark" | "light" | "dim") => Promise<{ ok: boolean; skipped?: boolean; error?: string }>;
