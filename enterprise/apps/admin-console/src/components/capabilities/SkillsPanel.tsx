@@ -131,9 +131,33 @@ export function SkillsPanel() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <Badge
+                  variant={
+                    skill.scanVerdict === "dangerous"
+                      ? "destructive"
+                      : skill.scanVerdict === "caution"
+                        ? "warning"
+                        : skill.scanVerdict === "safe"
+                          ? "success"
+                          : "secondary"
+                  }
+                >
+                  {skill.scanVerdict === "safe" ||
+                  skill.scanVerdict === "caution" ||
+                  skill.scanVerdict === "dangerous"
+                    ? t(`skills.verdict.${skill.scanVerdict}`)
+                    : t("skills.scanNever")}
+                </Badge>
                 <Badge variant={skill.status === "active" ? "default" : "secondary"}>
                   {skill.status === "active" ? t("status.active") : t("status.disabled")}
                 </Badge>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void catalog.send(`/api/admin/skills/${skill.id}/scan`, "POST")}
+                >
+                  {t("skills.scan")}
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => openEditor(skill)}>
                   {t("actions.edit")}
                 </Button>

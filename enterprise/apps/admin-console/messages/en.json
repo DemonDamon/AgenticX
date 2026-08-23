@@ -199,7 +199,14 @@
           "requiresCount": "{count} dependencies",
           "empty": "No skills registered yet",
           "confirmDelete": "Delete this skill? Packs that reference it will keep a dangling member.",
-          "editTitle": "Edit skill {name}"
+          "editTitle": "Edit skill {name}",
+          "scan": "Scan",
+          "scanNever": "Not scanned",
+          "verdict": {
+            "safe": "Safe",
+            "caution": "Caution",
+            "dangerous": "Dangerous"
+          }
         },
         "member": {
           "title": "Pack members",

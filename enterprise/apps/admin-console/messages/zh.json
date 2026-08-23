@@ -199,7 +199,14 @@
           "requiresCount": "依赖 {count} 项",
           "empty": "还没有登记 Skill",
           "confirmDelete": "确认删除该 Skill？引用它的能力包会留下失效成员。",
-          "editTitle": "编辑 Skill {name}"
+          "editTitle": "编辑 Skill {name}",
+          "scan": "扫描",
+          "scanNever": "未扫描",
+          "verdict": {
+            "safe": "安全",
+            "caution": "需注意",
+            "dangerous": "高危"
+          }
         },
         "member": {
           "title": "包内成员",
