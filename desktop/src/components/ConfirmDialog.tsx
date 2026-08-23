@@ -1,24 +1,50 @@
 import { useEffect, useState } from "react";
 import { Button } from "./ds/Button";
 import { Modal } from "./ds/Modal";
-
-type ConfirmPolicy = "ask-every-time" | "use-allowlist" | "run-everything";
+import {
+  isProtectedConfirmContext,
+  protectedConfirmReason,
+  type ConfirmPolicy,
+} from "../utils/confirm-scope";
 
 type Props = {
   open: boolean;
   question: string;
   sourceLabel?: string;
   diff?: string;
+  context?: Record<string, unknown>;
+  defaultPolicy?: ConfirmPolicy;
   onApprove: (policy: ConfirmPolicy) => void;
   onReject: (policy: ConfirmPolicy) => void;
 };
 
-export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, onReject }: Props) {
+const POLICY_OPTIONS: Array<{ value: ConfirmPolicy; label: string }> = [
+  { value: "ask-every-time", label: "每次询问（仅本次允许）" },
+  { value: "use-allowlist", label: "白名单放行（本会话允许同类）" },
+  { value: "run-everything", label: "低风险自动执行（仅自动放行低风险）" },
+];
+
+export function ConfirmDialog({
+  open,
+  question,
+  sourceLabel,
+  diff,
+  context,
+  defaultPolicy = "ask-every-time",
+  onApprove,
+  onReject,
+}: Props) {
   const [policy, setPolicy] = useState<ConfirmPolicy>("ask-every-time");
+  const protectedRequest = isProtectedConfirmContext(context);
+  const protectedReason = protectedConfirmReason(context);
+  const autoModeInterrupted = protectedRequest && defaultPolicy === "run-everything";
+  const policyOptions = protectedRequest
+    ? POLICY_OPTIONS.filter((option) => option.value === "ask-every-time")
+    : POLICY_OPTIONS;
 
   useEffect(() => {
-    if (open) setPolicy("ask-every-time");
-  }, [open, question]);
+    if (open) setPolicy(protectedRequest ? "ask-every-time" : defaultPolicy);
+  }, [defaultPolicy, open, protectedRequest, question]);
 
   return (
     <Modal
@@ -45,36 +71,26 @@ export function ConfirmDialog({ open, question, sourceLabel, diff, onApprove, on
 
         <div className="mb-3 rounded-md border border-border bg-surface-card p-3 text-xs text-text-muted">
           <div className="mb-2 font-medium text-text-primary">本次确认策略</div>
-          <label className="mb-1 flex cursor-pointer items-center gap-2">
-            <input
-              type="radio"
-              name="confirm-policy"
-              checked={policy === "ask-every-time"}
-              onChange={() => setPolicy("ask-every-time")}
-              className="h-4 w-4 border-border bg-surface-panel accent-emerald-500"
-            />
-            每次询问（仅本次允许）
-          </label>
-          <label className="mb-1 flex cursor-pointer items-center gap-2">
-            <input
-              type="radio"
-              name="confirm-policy"
-              checked={policy === "use-allowlist"}
-              onChange={() => setPolicy("use-allowlist")}
-              className="h-4 w-4 border-border bg-surface-panel accent-emerald-500"
-            />
-            白名单放行（本会话允许同类）
-          </label>
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="radio"
-              name="confirm-policy"
-              checked={policy === "run-everything"}
-              onChange={() => setPolicy("run-everything")}
-              className="h-4 w-4 border-border bg-surface-panel accent-amber-500"
-            />
-            全部自动执行（本会话不再询问）
-          </label>
+          {protectedRequest ? (
+            <p className="mb-2 rounded bg-amber-500/10 px-2 py-1.5 leading-5 text-[var(--status-warning)]">
+              {autoModeInterrupted ? "自动执行已开启，但这一步不在自动范围内：" : "这是受保护操作："}
+              {protectedReason}。只能逐次确认，不能加入同类允许或自动执行。
+            </p>
+          ) : null}
+          {policyOptions.map((option) => (
+            <label key={option.value} className="mb-1 flex cursor-pointer items-center gap-2 last:mb-0">
+              <input
+                type="radio"
+                name="confirm-policy"
+                checked={policy === option.value}
+                onChange={() => setPolicy(option.value)}
+                className={`h-4 w-4 border-border bg-surface-panel ${
+                  option.value === "run-everything" ? "accent-amber-500" : "accent-emerald-500"
+                }`}
+              />
+              {option.label}
+            </label>
+          ))}
         </div>
     </Modal>
   );

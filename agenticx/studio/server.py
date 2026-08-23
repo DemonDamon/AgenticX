@@ -66,7 +66,7 @@ from agenticx.cli.studio_mcp import (
 )
 from agenticx.llms.provider_resolver import ProviderResolver, effective_session_llm_names
 from agenticx.llms.sampling_params import provider_raw_enabled_for_fallback
-from agenticx.runtime import AgentRuntime, AutoApproveConfirmGate, AutoSuspendClarifyGate
+from agenticx.runtime import AgentRuntime, AutoSuspendClarifyGate, RiskAwareAutoConfirmGate
 from agenticx.runtime.auto_solve import AutoSolveMode
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
 from agenticx.runtime.loop_controller import LoopController
@@ -999,6 +999,7 @@ def create_studio_app() -> FastAPI:
                 session_id=sid,
                 user_input=prompt,
                 skip_user_history=True,
+                unattended_run=source == "supervisor",
                 provider=managed.studio_session.provider_name,
                 model=managed.studio_session.model_name,
             )
@@ -1267,10 +1268,18 @@ def create_studio_app() -> FastAPI:
             mode = ""
         return mode in {"auto", "full_auto"}
 
-    def _resolve_confirm_gate(managed: Any, agent_id: str = "meta") -> Any:
+    def _resolve_confirm_gate(
+        managed: Any,
+        agent_id: str = "meta",
+        *,
+        unattended: bool = False,
+    ) -> Any:
+        if unattended:
+            return RiskAwareAutoConfirmGate(unattended=True)
+        managed_gate = managed.get_confirm_gate(agent_id)
         if _global_auto_confirm_enabled():
-            return AutoApproveConfirmGate()
-        return managed.get_confirm_gate(agent_id)
+            return RiskAwareAutoConfirmGate(delegate=managed_gate)
+        return managed_gate
 
     def _resolve_clarify_gate(managed: Any, agent_id: str = "meta", *, is_automation: bool = False) -> Any:
         # Clarification must NEVER be auto-approved (that would drop the user's
@@ -2645,6 +2654,9 @@ def create_studio_app() -> FastAPI:
             manager.auto_title_session(payload.session_id, payload.user_input)
 
         session = managed.studio_session
+        active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
+        is_automation_session = active_avatar_id.startswith("automation:")
+        turn_is_unattended = bool(getattr(payload, "unattended_run", False)) or is_automation_session
         try:
             from agenticx.runtime.prompts.code_mode import ensure_code_dev_workflow_skill
 
@@ -2943,7 +2955,14 @@ def create_studio_app() -> FastAPI:
                 team_manager = managed.team_manager or getattr(session, "_team_manager", None)
                 if team_manager is None:
                     try:
-                        team_manager = managed.get_or_create_team(llm_factory=_resolve_llm)
+                        team_manager = managed.get_or_create_team(
+                            llm_factory=_resolve_llm,
+                            confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(
+                                managed,
+                                agent_id,
+                                unattended=turn_is_unattended,
+                            ),
+                        )
                         setattr(session, "_team_manager", team_manager)
                     except Exception as exc:
                         err = SseEvent(type="error", data={"agent_id": target_agent_id, "text": f"子智能体团队尚未初始化: {exc}"})
@@ -3077,8 +3096,16 @@ def create_studio_app() -> FastAPI:
                         llm_factory=llm_factory,
                         max_tool_rounds=_resolve_max_tool_rounds(),
                         meta_leader_display_name=meta_leader_label,
-                        confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(managed, agent_id),
-                        clarify_gate_factory=lambda agent_id: _resolve_clarify_gate(managed, agent_id),
+                        confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(
+                            managed,
+                            agent_id,
+                            unattended=turn_is_unattended,
+                        ),
+                        clarify_gate_factory=lambda agent_id: _resolve_clarify_gate(
+                            managed,
+                            agent_id,
+                            is_automation=turn_is_unattended,
+                        ),
                     )
                     quoted_content = str(payload.quoted_content or "")
                     quoted_message_id = str(payload.quoted_message_id or "")
@@ -3153,6 +3180,7 @@ def create_studio_app() -> FastAPI:
                                 "skipped": reply.skipped,
                                 "error": reply.error,
                                 "confirm_request_id": str(getattr(reply, "confirm_request_id", "") or ""),
+                                "confirm_context": dict(getattr(reply, "confirm_context", None) or {}),
                                 "graph_run_id": str(getattr(reply, "graph_run_id", "") or ""),
                                 "graph_node_id": str(getattr(reply, "graph_node_id", "") or ""),
                                 "tool_name": str(getattr(reply, "tool_name", "") or ""),
@@ -3363,6 +3391,11 @@ def create_studio_app() -> FastAPI:
             llm_factory=_resolve_llm,
             event_emitter=_on_team_event,
             summary_sink=_on_subagent_summary,
+            confirm_gate_factory=lambda agent_id: _resolve_confirm_gate(
+                managed,
+                agent_id,
+                unattended=turn_is_unattended,
+            ),
         )
         setattr(session, "_team_manager", team_manager)
         setattr(session, "_session_manager", manager)
@@ -3374,18 +3407,22 @@ def create_studio_app() -> FastAPI:
             list(team_manager._agents.keys()) if team_manager else [],
         )
         setattr(session, "_session_id", payload.session_id)
-        active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
-        is_automation_session = active_avatar_id.startswith("automation:")
         try:
             load_discovered_hooks()
         except Exception as exc:
             logger.debug("Skipping discovered hooks loading for chat: %s", exc)
-        # Desktop 定时/立即执行由主进程拉 SSE，无法像 ChatPane 那样响应 confirm_required；
-        # 无人值守会话必须自动放行 bash_exec 等工具确认，否则会永久卡住。
-        meta_confirm_gate = (
-            AutoApproveConfirmGate() if is_automation_session else _resolve_confirm_gate(managed, "meta")
+        # No human is available during automation/supervisor turns. Explicit
+        # low-risk requests may proceed, while protected requests fail closed.
+        meta_confirm_gate = _resolve_confirm_gate(
+            managed,
+            "meta",
+            unattended=turn_is_unattended,
         )
-        meta_clarify_gate = _resolve_clarify_gate(managed, "meta", is_automation=is_automation_session)
+        meta_clarify_gate = _resolve_clarify_gate(
+            managed,
+            "meta",
+            is_automation=turn_is_unattended,
+        )
         from agenticx.studio.turn_interruption import clear_stale_unattended_failure
 
         clear_stale_unattended_failure(session)
@@ -3401,7 +3438,7 @@ def create_studio_app() -> FastAPI:
                 max_tool_rounds=_resolve_max_tool_rounds(),
                 mid_turn_persist=_mid_turn_persist_cb,
                 clarify_gate=meta_clarify_gate,
-                is_unattended=is_automation_session,
+                is_unattended=turn_is_unattended,
                 llm_factory=_resolve_llm,
             )
         except TypeError:
@@ -4112,6 +4149,7 @@ def create_studio_app() -> FastAPI:
                     provider=managed.studio_session.provider_name,
                     model=managed.studio_session.model_name,
                     keep_runtime_after_disconnect=True,
+                    unattended_run=source in {"desktop_auto_nudge", "supervisor"},
                 )
                 inner = await chat(chat_payload, request, x_agx_desktop_token)
                 if inner.body_iterator is not None:
@@ -4351,20 +4389,27 @@ def create_studio_app() -> FastAPI:
                 pass
 
         loop_is_automation = str(getattr(managed, "avatar_id", "") or "").startswith("automation:")
+        loop_is_unattended = loop_is_automation or bool(payload.get("unattended_run", False))
+        if loop_tm is not None:
+            loop_tm.confirm_gate_factory = lambda agent_id: _resolve_confirm_gate(
+                managed,
+                agent_id,
+                unattended=loop_is_unattended,
+            )
         try:
             runtime = AgentRuntime(
                 llm,
-                _resolve_confirm_gate(managed, "meta"),
+                _resolve_confirm_gate(managed, "meta", unattended=loop_is_unattended),
                 team_manager=loop_tm,
                 max_tool_rounds=_resolve_max_tool_rounds(),
                 mid_turn_persist=_loop_persist_cb,
-                clarify_gate=_resolve_clarify_gate(managed, "meta", is_automation=loop_is_automation),
-                is_unattended=loop_is_automation,
+                clarify_gate=_resolve_clarify_gate(managed, "meta", is_automation=loop_is_unattended),
+                is_unattended=loop_is_unattended,
             )
         except TypeError:
             runtime = AgentRuntime(
                 llm,
-                _resolve_confirm_gate(managed, "meta"),
+                _resolve_confirm_gate(managed, "meta", unattended=loop_is_unattended),
             )
         controller = LoopController(max_iterations=max_iterations, completion_promise=completion_promise)
 

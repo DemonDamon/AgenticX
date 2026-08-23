@@ -1,7 +1,19 @@
 """Runtime core exports."""
 
 from agenticx.runtime.clarify import AsyncClarifyGate, AutoSuspendClarifyGate, ClarifyGate
-from agenticx.runtime.confirm import AutoApproveConfirmGate, AsyncConfirmGate, ConfirmGate, SyncConfirmGate
+from agenticx.runtime.confirm import (
+    CONFIRM_RISK_LOW,
+    PROTECTED_CONFIRM_RISKS,
+    AutoApproveConfirmGate,
+    AsyncConfirmGate,
+    ConfirmGate,
+    RiskAwareAutoConfirmGate,
+    SyncConfirmGate,
+    confirm_denial_note,
+    is_protected_confirm,
+    normalize_confirm_risk,
+    protected_confirm_reason,
+)
 from agenticx.runtime.events import EventType, RuntimeEvent
 from agenticx.runtime.scratchpad import Scratchpad
 from agenticx.runtime.todo_manager import TodoManager
@@ -56,6 +68,13 @@ __all__ = [
     "SyncConfirmGate",
     "AsyncConfirmGate",
     "AutoApproveConfirmGate",
+    "RiskAwareAutoConfirmGate",
+    "CONFIRM_RISK_LOW",
+    "PROTECTED_CONFIRM_RISKS",
+    "normalize_confirm_risk",
+    "is_protected_confirm",
+    "protected_confirm_reason",
+    "confirm_denial_note",
     "ClarifyGate",
     "AsyncClarifyGate",
     "AutoSuspendClarifyGate",
