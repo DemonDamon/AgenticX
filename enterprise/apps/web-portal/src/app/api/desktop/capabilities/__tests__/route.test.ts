@@ -56,6 +56,9 @@ describe("/api/desktop/capabilities", () => {
     loadUserCapabilityView.mockReset();
     setUserCapabilityPreference.mockReset();
     resolveDesktopIdentity.mockResolvedValue(identity());
+    vi.unstubAllEnvs();
+    vi.stubEnv("NEXT_PUBLIC_GATEWAY_PUBLIC_BASE_URL", "https://gateway.example.invalid");
+    vi.stubEnv("NODE_ENV", "test");
   });
 
   it("lists capabilities the user turned off, so they can be turned back on", async () => {
@@ -80,6 +83,7 @@ describe("/api/desktop/capabilities", () => {
         requires: [],
         surfaces: ["web", "desktop"],
         state: "on",
+        endpointUrl: "https://gateway.example.invalid/mcp/m/streamable-http",
       },
       {
         id: SKILL_ID,

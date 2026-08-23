@@ -5,6 +5,7 @@ import {
   loadUserCapabilityView,
 } from "../../../../lib/capability-packs-reader";
 import { setUserCapabilityPreference } from "../../../../lib/capability-opt-outs-store";
+import { withGatewayMcpEndpoints } from "../../../../lib/desktop-capability-endpoints";
 import { resolveDesktopIdentity } from "../../../../lib/desktop-auth";
 
 /**
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       code: "00000",
       message: "ok",
-      data: { capabilities: capabilityStatesFromView(view) },
+      data: { capabilities: withGatewayMcpEndpoints(capabilityStatesFromView(view)) },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed to load capabilities";
@@ -66,7 +67,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({
       code: "00000",
       message: "ok",
-      data: { capabilities: result.capabilities },
+      data: { capabilities: withGatewayMcpEndpoints(result.capabilities) },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "failed to update capability";
