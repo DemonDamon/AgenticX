@@ -53,6 +53,7 @@
         "cache": "AI 缓存",
         "apiTokens": "API 令牌",
         "mcpServers": "MCP 托管",
+        "capabilities": "能力包",
         "plugins": "Wasm 插件",
         "errors": "错误聚类",
         "perf": "性能分析"
@@ -128,6 +129,120 @@
         "empty": "暂无错误记录",
         "toast": {
           "loadFailed": "加载失败"
+        }
+      },
+      "capabilities": {
+        "title": "能力包",
+        "description": "登记 Skill 与 MCP，打成能力包后分配给全员、部门、用户组或指定人。",
+        "tabs": {
+          "packs": "能力包",
+          "skills": "Skill",
+          "mcp": "MCP"
+        },
+        "mcp": {
+          "title": "已托管的 MCP",
+          "description": "这里列出可被能力包引用的服务器。新增与凭据仍在 MCP 托管页配置。",
+          "empty": "还没有托管 MCP",
+          "active": "已启用",
+          "disabled": "已停用",
+          "manage": "前往 MCP 托管",
+          "loadFailed": "加载失败"
+        }
+      },
+      "capabilityPacks": {
+        "title": "企业能力包",
+        "description": "把 MCP 与 Skill 打成一组，由管理员分配给全员、部门或指定人。",
+        "tabs": {
+          "packs": "能力包",
+          "skills": "Skill 注册表"
+        },
+        "status": {
+          "active": "已启用",
+          "disabled": "已停用"
+        },
+        "actions": {
+          "enable": "启用",
+          "disable": "停用",
+          "edit": "编辑"
+        },
+        "toast": {
+          "loadFailed": "加载失败",
+          "saved": "已保存"
+        },
+        "packs": {
+          "createTitle": "新建能力包",
+          "createDescription": "先建包，再在编辑里挑成员和分配范围。",
+          "slug": "标识",
+          "slugRequired": "请填写标识",
+          "displayName": "名称",
+          "displayNamePlaceholder": "研究资料包",
+          "description": "说明",
+          "empty": "还没有能力包",
+          "memberCount": "{count} 项能力",
+          "assignedCount": "{count} 个分配范围",
+          "confirmDelete": "确认删除该能力包？包内成员与分配范围会一并删除。",
+          "editTitle": "编辑能力包 {name}"
+        },
+        "skills": {
+          "createTitle": "登记 Skill",
+          "createDescription": "Skill 自身不存凭据，只声明依赖的 MCP。",
+          "slug": "标识",
+          "slugRequired": "请填写标识",
+          "displayName": "名称",
+          "description": "说明",
+          "version": "版本",
+          "bundleUri": "Bundle 地址",
+          "bundleDigest": "Bundle 摘要",
+          "bundleDigestHint": "SKILL.md 正文的 sha256（十六进制）。Desktop 下载后按它校验；对不上就不安装，留空则整条跳过。",
+          "requires": "依赖的 MCP",
+          "requiresHint": "依赖没随同一个包下发时，员工装了也调不通。",
+          "requiresCount": "依赖 {count} 项",
+          "empty": "还没有登记 Skill",
+          "confirmDelete": "确认删除该 Skill？引用它的能力包会留下失效成员。",
+          "editTitle": "编辑 Skill {name}"
+        },
+        "member": {
+          "title": "包内成员",
+          "hint": "停用的成员不会下发给员工；这里勾上也一样。",
+          "features": "平台功能",
+          "mcp": "MCP",
+          "skill": "Skill",
+          "disabled": "已停用",
+          "noFeature": "没有可选的平台功能",
+          "noMcp": "还没有可选的 MCP Server",
+          "noSkill": "还没有登记 Skill",
+          "config": "配置",
+          "configTitle": "打开这项能力自己的配置",
+          "disabledWarning": "以下成员已停用，员工收不到：{names}",
+          "danglingWarning": "以下成员指向的记录已不存在，建议取消勾选：{ids}"
+        },
+        "features": {
+          "web_search": {
+            "name": "联网搜索",
+            "description": "对话中检索公网信息。搜索服务商和密钥在对应设置页配置，这里管的是谁能用。"
+          },
+          "deep_research": {
+            "name": "深度研究",
+            "description": "多轮检索加汇总成文的长任务，比单次搜索更费额度。"
+          },
+          "attachment_routing": {
+            "name": "附件自动路由",
+            "description": "检测到文档就把会话锁到指定多模态模型；图片走视觉兜底，不切模型。"
+          }
+        },
+        "assignment": {
+          "title": "分配范围",
+          "allMembers": "全员",
+          "allMembersHint": "勾了全员就只发全员，不再叠加部门与个人。",
+          "departments": "部门",
+          "deptHint": "分给上级部门，下级成员同样拿得到。",
+          "users": "指定人员",
+          "noDept": "还没有部门",
+          "noUser": "还没有用户",
+          "groups": "用户组",
+          "noGroup": "还没有用户组",
+          "groupMemberCount": "{count} 人",
+          "groupHint": "用户组是授予：属于多个组的人取并集。"
         }
       },
       "plugins": {
