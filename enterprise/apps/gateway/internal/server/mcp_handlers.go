@@ -102,6 +102,15 @@ func (s *Server) serveMCP(w http.ResponseWriter, r *http.Request, fn func(http.R
 		return
 	}
 	mcpID := toMCPIdentity(identity, r)
+	scopes, err := s.mcpHost.EffectiveScopes(r.Context(), mcpID, rec)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"code":    "40301",
+			"message": "mcp:capability_revoked",
+		})
+		return
+	}
+	mcpID.Scopes = scopes
 	if err := fn(w, r, s.mcpHost, rec, mcpID); err != nil {
 		s.logger.Warn("mcp transport error", "server", serverName, "error", err)
 	}
