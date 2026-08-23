@@ -1,4 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@agenticx/iam-core", () => ({
+  createMysqlDb: vi.fn(),
+  getIamDb: vi.fn(),
+  resolveDatabaseConfig: vi.fn(() => ({ driver: "memory" })),
+}));
 import {
   CHAT_CLARIFY_ANSWER_KEY,
   DEEP_RESEARCH_SEARCH_FAILED,
@@ -270,6 +276,78 @@ describe("runDeepResearchTurn", () => {
     const fetchedUrls = fetchPagesFn.mock.calls.flatMap((call) => call[0] as string[]);
     expect(fetchedUrls.some((url) => url.includes("2606.19348"))).toBe(false);
     expect(events.some((e) => e.type === "narrative")).toBe(true);
+  });
+
+  it("audits the whole report once before linkify when budget remains", async () => {
+    const store = createMemoryArtifactStore();
+    const auditBodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        stream?: boolean;
+        messages?: unknown;
+      };
+      const isAudit = JSON.stringify(body.messages ?? []).includes("事实核查员");
+      if (isAudit) {
+        auditBodies.push(body);
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content:
+                    '{"findings":[{"claim_id":"c1","verdict":"partial","replacement":"营收有所增长 [1]。"}]}',
+                },
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: "营收增长 40% [1]。" } }],
+          }),
+        } as Response;
+      }
+      return synthUpstream("营收增长 40% [1]。");
+    });
+
+    const response = await runDeepResearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "营收调研" }],
+        agenticx_deep_research: true,
+      },
+      {
+        ...baseDeps({
+          artifactStore: store,
+          runId: "run-verify",
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          buildPlan: async () => ({
+            topic: "营收调研",
+            complexity: "simple" as const,
+            subQuestions: ["q1"],
+          }),
+          executeSearch: async () => [
+            { title: "财报", url: "https://ex.com/ir", snippet: "营收数据" },
+          ],
+        }),
+      },
+    );
+    const { events } = await readSsePayload(response);
+    expect(auditBodies).toHaveLength(1);
+    expect(auditBodies[0]).toMatchObject({ temperature: 0, max_tokens: 4096 });
+    expect(
+      events.some(
+        (event) => event.type === "phase" && event.message === "正在复核引用与关键断言…",
+      ),
+    ).toBe(true);
+    const artifacts = await store.listByRun("t1", "u1", "run-verify");
+    const report = artifacts.find((a) => a.path.endsWith("final-report.md"));
+    expect(report?.content).toContain("营收有所增长 [1]");
+    expect(report?.content).not.toMatch(/置信度|claim_id|verdict/u);
   });
 
   it("refreshes gateway bearer before synthesize so section writes use the new token", async () => {

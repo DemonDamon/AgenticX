@@ -38,6 +38,10 @@ import { CitationRegistry, type Citation } from "./registry";
 import { formatDeepResearchEventSse } from "./events";
 import { stripThinkBlocks } from "./content-clean";
 import {
+  CITATION_VERIFY_PHASE_MESSAGE,
+  verifyReportCitations,
+} from "./citation-verifier";
+import {
   defaultOpenEndedClarification,
   proposeClarification,
   type ClarifierResult,
@@ -2336,10 +2340,34 @@ export async function runDeepResearchTurn(
 
         const citations = registry.list();
         const validIndexes = new Set(citations.map((c) => c.index));
-        const finalReport = linkifyCitations(
-          stripThinkBlocks(reportContentParts.join("")),
-          validIndexes,
-        );
+        let verifiedReport = stripThinkBlocks(reportContentParts.join(""));
+        try {
+          const verification = await verifyReportCitations({
+            markdown: verifiedReport,
+            citations,
+            topic: plan.topic || userQuery,
+            callJson: (body) => callGatewayJson(toolDeps, body, "dr.citation-verify"),
+            baseBody,
+            remainingMs: budgetLeft(),
+            // wave-a has no model-call ledger; keep the time-budget gate only.
+            modelCallsRemaining: 1,
+            onVerifyStart: () => {
+              enqueueEvent({
+                type: "phase",
+                phase: "synthesize",
+                message: CITATION_VERIFY_PHASE_MESSAGE,
+              });
+            },
+          });
+          verifiedReport = verification.markdown;
+        } catch (error) {
+          if (error instanceof DeepResearchPolicyError) throw error;
+          console.warn(
+            "[deep-research] citation verification skipped:",
+            error instanceof Error ? error.message : error,
+          );
+        }
+        const finalReport = linkifyCitations(verifiedReport, validIndexes);
         // Once the markdown body exists, later wrap-up failures must not look like
         // a search failure — the user already has a usable report artifact.
         const summaryInput = {
