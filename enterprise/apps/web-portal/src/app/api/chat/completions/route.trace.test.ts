@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isTraceId } from "@agenticx/sdk-ts";
 
+vi.mock("@agenticx/iam-core", () => ({
+  loadAuthUserByEmail: vi.fn(),
+  listUserOptOuts: vi.fn(async () => []),
+  resolveAssignmentKeysForUser: vi.fn(async () => ["all"]),
+}));
+
+vi.mock("../../../../lib/capability-packs-reader", () => ({
+  isPlatformFeatureAllowedForUser: vi.fn(async () => true),
+}));
+
 vi.mock("../../../../lib/session", () => ({
   ACCESS_COOKIE: "access",
   REFRESH_COOKIE: "refresh",

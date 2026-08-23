@@ -19,6 +19,8 @@ import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator"
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
 import { log } from "../../../../lib/observability/logger";
 import { withRequestLog } from "../../../../lib/observability/with-request-log";
+import { isPlatformFeatureAllowedForUser } from "../../../../lib/capability-packs-reader";
+import type { PlatformFeature } from "@agenticx/config";
 
 function withSanitizedMessages(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.messages)) return body;
@@ -42,6 +44,34 @@ const GATEWAY_COMPLETIONS_URL =
  */
 export const maxDuration = 1500;
 export const runtime = "nodejs";
+
+const FEATURE_DENIED_MESSAGE: Record<"web_search" | "deep_research", string> = {
+  web_search: "当前账号未开通联网搜索",
+  deep_research: "当前账号未开通深度研究",
+};
+
+/**
+ * 能力包已开始管这项功能、且这个人拿不到时拒绝。
+ *
+ * 查不动时放行：最可能的原因是租户还没跑迁移。没有任何包引用时
+ * isPlatformFeatureAllowedForUser 本身就是全员可用。查询出错也放行，
+ * 避免一次数据库抖动把全公司的搜索停掉。
+ */
+async function firstDeniedPlatformFeature(
+  userId: string,
+  email: string | undefined,
+  deptId: string | null | undefined,
+  feature: Extract<PlatformFeature, "web_search" | "deep_research">,
+): Promise<Response | null> {
+  const allowed = await isPlatformFeatureAllowedForUser(feature, userId, email, deptId).catch(
+    () => true,
+  );
+  if (allowed) return null;
+  return NextResponse.json(
+    { error: { code: "40303", message: FEATURE_DENIED_MESSAGE[feature] } },
+    { status: 403 },
+  );
+}
 
 export async function POST(request: Request) {
   return withRequestLog("chat.completions", async (logCtx) => {
@@ -152,6 +182,16 @@ export async function POST(request: Request) {
   logCtx.setMode(
     enableDeepResearch ? "deep_research" : enableWebSearch ? "web_search" : "chat",
   );
+
+  if (enableDeepResearch || enableWebSearch) {
+    const denied = await firstDeniedPlatformFeature(
+      session.userId,
+      session.email,
+      session.deptId,
+      enableDeepResearch ? "deep_research" : "web_search",
+    );
+    if (denied) return denied;
+  }
 
   const gatewayHeaders: Record<string, string> = {
     "content-type": "application/json",

@@ -48,4 +48,42 @@ describe("admin capability-packs route", () => {
     const body = (await response.json()) as { data?: { packs?: unknown[] } };
     expect(body.data?.packs).toBeUndefined();
   });
+
+  it("GET seeds the baseline pack only when the tenant has none", async () => {
+    listCapabilityPacksMock.mockResolvedValueOnce([]);
+    createCapabilityPackMock.mockResolvedValue({ id: "p1" });
+    listCapabilityPacksMock.mockResolvedValueOnce([
+      { id: "p1", slug: "baseline-capabilities", capabilityIds: ["feature:web_search"] },
+    ]);
+
+    const { GET } = await import("../route");
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect(createCapabilityPackMock).toHaveBeenCalledTimes(1);
+    const input = createCapabilityPackMock.mock.calls[0]?.[0] as { capabilityIds: string[]; assignmentKeys: string[] };
+    expect(input.capabilityIds).toEqual(["feature:web_search", "feature:deep_research"]);
+    expect(input.assignmentKeys).toEqual(["all"]);
+    const body = (await response.json()) as { data?: { packs?: Array<{ slug: string }> } };
+    expect(body.data?.packs?.[0]?.slug).toBe("baseline-capabilities");
+  });
+
+  it("GET does not reseed when a pack already exists", async () => {
+    listCapabilityPacksMock.mockResolvedValue([{ id: "p_existing", slug: "research" }]);
+
+    const { GET } = await import("../route");
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect(createCapabilityPackMock).not.toHaveBeenCalled();
+  });
+
+  it("GET still lists an empty result when seeding the baseline pack fails", async () => {
+    listCapabilityPacksMock.mockResolvedValueOnce([]);
+    createCapabilityPackMock.mockRejectedValue(new Error("unique slug"));
+
+    const { GET } = await import("../route");
+    const response = await GET();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data?: { packs?: unknown[] } };
+    expect(body.data?.packs).toEqual([]);
+  });
 });
