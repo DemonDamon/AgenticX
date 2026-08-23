@@ -1,3 +1,8 @@
+import {
+  DEFAULT_DESKTOP_CAPABILITY_POLICY,
+  normalizeDesktopCapabilityPolicy,
+  type DesktopCapabilityPolicy,
+} from "@agenticx/config";
 import { enterpriseRuntimeBudgets as pgBudgetTable } from "@agenticx/db-schema";
 import { enterpriseRuntimeBudgets as mysqlBudgetTable } from "@agenticx/db-schema/mysql";
 import {
@@ -7,26 +12,17 @@ import {
 } from "@agenticx/iam-core";
 import { eq } from "drizzle-orm";
 
+export type { DesktopCapabilityPolicy };
+export { DEFAULT_DESKTOP_CAPABILITY_POLICY, normalizeDesktopCapabilityPolicy };
+
 export type SessionTokenLimits = {
   warningTokensPerSession: number;
   maxTokensPerSession: number;
 };
 
-export type DesktopCapabilityPolicy = {
-  allowLocalSkillInstall: boolean;
-  allowLocalMcpInstall: boolean;
-  allowMcpAutoDiscovery: boolean;
-};
-
 export const DEFAULT_SESSION_TOKEN_LIMITS: SessionTokenLimits = {
   warningTokensPerSession: 500_000,
   maxTokensPerSession: 1_000_000,
-};
-
-export const DEFAULT_DESKTOP_CAPABILITY_POLICY: DesktopCapabilityPolicy = {
-  allowLocalSkillInstall: true,
-  allowLocalMcpInstall: true,
-  allowMcpAutoDiscovery: true,
 };
 
 const MIN_SESSION_WARNING_TOKENS = 50_000;
@@ -57,23 +53,6 @@ export function normalizeSessionTokenLimits(value: unknown): SessionTokenLimits 
   return {
     warningTokensPerSession: row.warningTokensPerSession,
     maxTokensPerSession: row.maxTokensPerSession,
-  };
-}
-
-function readFlag(source: Record<string, unknown>, key: keyof DesktopCapabilityPolicy): boolean {
-  const value = source[key];
-  return value === false ? false : DEFAULT_DESKTOP_CAPABILITY_POLICY[key];
-}
-
-export function normalizeDesktopCapabilityPolicy(raw: unknown): DesktopCapabilityPolicy {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { ...DEFAULT_DESKTOP_CAPABILITY_POLICY };
-  }
-  const source = raw as Record<string, unknown>;
-  return {
-    allowLocalSkillInstall: readFlag(source, "allowLocalSkillInstall"),
-    allowLocalMcpInstall: readFlag(source, "allowLocalMcpInstall"),
-    allowMcpAutoDiscovery: readFlag(source, "allowMcpAutoDiscovery"),
   };
 }
 

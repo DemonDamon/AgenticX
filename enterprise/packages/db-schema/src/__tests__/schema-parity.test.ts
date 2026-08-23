@@ -54,9 +54,25 @@ describe("postgresql/mysql schema parity", () => {
   const pgTables = collectTables(postgresSchema);
   const mysqlTables = collectTables(mysqlSchema);
 
-  it("mirrors all 49 PostgreSQL tables in MySQL", () => {
-    expect(pgTables.size).toBe(49);
+  it("mirrors all 56 PostgreSQL tables in MySQL", () => {
+    expect(pgTables.size).toBe(56);
     expect([...mysqlTables.keys()].sort()).toEqual([...pgTables.keys()].sort());
+  });
+
+  it("creates enterprise_skills with scan columns in both dialects", () => {
+    for (const dialect of [pgTables, mysqlTables]) {
+      const skills = dialect.get("enterprise_skills");
+      expect(skills, "enterprise_skills missing").toBeTruthy();
+      for (const column of [
+        "scan_verdict",
+        "scan_source",
+        "scanned_at",
+        "scanned_by",
+        "scan_findings",
+      ]) {
+        expect(skills?.columns.has(column), column).toBe(true);
+      }
+    }
   });
 
   it("keeps logical columns, nullability, and data types aligned", () => {
@@ -120,6 +136,9 @@ describe("mysql baseline migration inventory", () => {
       "0017_deep_research_runs_trace_id.sql",
       "0018_portal_request_logs_mode.sql",
       "0019_portal_request_logs_session_idx.sql",
+      "0020_enterprise_capability_packs.sql",
+      "0021_enterprise_user_groups.sql",
+      "0022_enterprise_user_opt_outs.sql",
     ]);
 
     const sql = readFileSync(baselinePath, "utf8");
@@ -157,10 +176,69 @@ describe("mysql baseline migration inventory", () => {
       expect.objectContaining({ idx: 17, tag: "0017_deep_research_runs_trace_id" }),
       expect.objectContaining({ idx: 18, tag: "0018_portal_request_logs_mode" }),
       expect.objectContaining({ idx: 19, tag: "0019_portal_request_logs_session_idx" }),
+      expect.objectContaining({ idx: 20, tag: "0020_enterprise_capability_packs" }),
+      expect.objectContaining({ idx: 21, tag: "0021_enterprise_user_groups" }),
+      expect.objectContaining({ idx: 22, tag: "0022_enterprise_user_opt_outs" }),
     ]);
     expect(readdirSync(migrationDir)).not.toContain("0016_mcp_hosting.sql");
     expect(readdirSync(migrationDir)).not.toContain(
       "0025_enterprise_runtime_mcp_servers.sql",
     );
   });
+
+  it("separates every Phase 1+ statement with --> statement-breakpoint", () => {
+    // drizzle 只按 `--> statement-breakpoint` 切分迁移文件。mysql2 默认
+    // multipleStatements:false，多语句手写迁移没有标记就会整文件发不出去。
+    const failures: string[] = [];
+    for (const name of readdirSync(migrationDir).filter((f) => f.endsWith(".sql"))) {
+      const match = name.match(/^(\d{4})_/);
+      if (!match || Number(match[1]) < 20) continue;
+      const sql = readFileSync(join(migrationDir, name), "utf8");
+      const breakpoints = sql.split("--> statement-breakpoint").length - 1;
+      const statements = countTopLevelStatements(sql);
+      if (statements > 1 && breakpoints !== statements - 1) {
+        failures.push(`${name}: ${statements} statements but ${breakpoints} breakpoints`);
+      }
+    }
+    expect(failures, failures.join("\n")).toEqual([]);
+  });
+
+  it("never declares an explicit charset or collation on a table", () => {
+    const offenders = readdirSync(migrationDir)
+      .filter((name) => name.endsWith(".sql"))
+      .filter((name) =>
+        /\b(CHARSET|COLLATE)\b/i.test(stripSqlComments(readFileSync(join(migrationDir, name), "utf8"))),
+      );
+
+    expect(offenders, offenders.join(", ")).toEqual([]);
+  });
 });
+
+function stripSqlComments(sql: string): string {
+  return sql
+    .split("\n")
+    .map((line) => {
+      const idx = line.indexOf("--");
+      return idx === -1 ? line : line.slice(0, idx);
+    })
+    .join("\n");
+}
+
+function countTopLevelStatements(sql: string): number {
+  const withoutComments = stripSqlComments(sql);
+
+  let count = 0;
+  let depth = 0;
+  let inString = false;
+  for (const ch of withoutComments) {
+    if (inString) {
+      if (ch === "'") inString = false;
+      continue;
+    }
+    if (ch === "'") inString = true;
+    else if (ch === "(") depth += 1;
+    else if (ch === ")") depth -= 1;
+    else if (ch === ";" && depth === 0) count += 1;
+  }
+  return count;
+}

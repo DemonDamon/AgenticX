@@ -316,6 +316,27 @@
       "when": 1786400000000,
       "tag": "0045_portal_request_logs_session_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786500000000,
+      "tag": "0046_enterprise_capability_packs",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786600000000,
+      "tag": "0047_enterprise_user_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786700000000,
+      "tag": "0048_enterprise_user_opt_outs",
+      "breakpoints": true
     }
   ]
 }
