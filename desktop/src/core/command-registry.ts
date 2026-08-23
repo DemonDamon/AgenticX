@@ -71,7 +71,7 @@ export type Phase1CommandContext = {
 function confirmStrategyLabel(strategy: "manual" | "semi-auto" | "auto"): string {
   if (strategy === "manual") return "每次询问";
   if (strategy === "semi-auto") return "白名单放行";
-  return "全部自动执行";
+  return "低风险自动执行";
 }
 
 export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry {
@@ -145,7 +145,7 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
   registry.register({
     id: "confirm",
     name: "/confirm",
-    description: "循环切换确认策略（每次询问 / 白名单放行 / 全部自动执行）",
+    description: "循环切换确认策略（每次询问 / 白名单放行 / 低风险自动执行）",
     category: "settings",
     mode: "both",
     icon: "A",

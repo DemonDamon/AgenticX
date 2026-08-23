@@ -356,7 +356,7 @@ type ConfirmMode = "manual" | "semi-auto" | "auto";
 const CONFIRM_MODE_OPTIONS = [
   { value: "manual" as const, label: "每次询问" },
   { value: "semi-auto" as const, label: "白名单放行" },
-  { value: "auto" as const, label: "全部自动执行" },
+  { value: "auto" as const, label: "低风险自动执行" },
 ] as const;
 
 /** Compact settings dropdown using the shared popover behavior. */
@@ -8922,7 +8922,7 @@ export function SettingsPanel({
                   {confirmStrategy === "auto" ? (
                     <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-text-subtle">
                       <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" />
-                      <span>所有工具将直接执行。建议仅在你信任的工作区中使用。</span>
+                      <span>此模式仅自动执行明确标记为低风险的操作。高风险、破坏性、桌面操控和未知风险操作仍会逐次询问。</span>
                     </div>
                   ) : null}
                   <div className="mt-4 border-t border-[var(--border-muted)] pt-3">

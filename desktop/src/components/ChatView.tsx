@@ -138,7 +138,7 @@ const statusDot: Record<string, string> = {
 const confirmModeLabel: Record<string, string> = {
   manual: "每次询问",
   "semi-auto": "白名单放行",
-  auto: "全部自动执行",
+  auto: "低风险自动执行",
 };
 
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {

@@ -31,6 +31,12 @@ import {
   openGlobalSearch,
   type GlobalSearchAddToWorkspaceDetail,
 } from "./components/global-search/global-search-events";
+import {
+  buildConfirmScope,
+  defaultConfirmPolicyForStrategy,
+  isProtectedConfirmContext,
+  shouldAutoApproveConfirm,
+} from "./utils/confirm-scope";
 import { Toast } from "./components/ds/Toast";
 import { KbDocumentOpenOverlay } from "./components/kb/KbDocumentOpenOverlay";
 import { resolveSubAgentOutputPaths } from "./utils/subagent-output-files";
@@ -496,26 +502,6 @@ export function App() {
       console.warn("[App init] MCP startup auto-connect failed:", error);
     }
   }, [refreshMcpStatus]);
-
-  const buildConfirmScope = (
-    question: string,
-    context?: Record<string, unknown>
-  ): string => {
-    const tool = String(context?.tool ?? "");
-    if (tool === "bash_exec") {
-      const command = String(context?.command ?? "").trim();
-      const cmdName = command.split(/\s+/)[0] || "unknown";
-      return `bash_exec:${cmdName}`;
-    }
-    if (tool === "file_write" || tool === "file_edit") {
-      const path = String(context?.path ?? "");
-      const slash = path.lastIndexOf("/");
-      const folder = slash > 0 ? path.slice(0, slash) : path;
-      return `${tool}:${folder || "/"}`;
-    }
-    if (tool) return `tool:${tool}`;
-    return `question:${question}`;
-  };
 
   useEffect(() => {
     if (sessionInitDoneRef.current) return;
@@ -1832,16 +1818,18 @@ export function App() {
     context?: Record<string, unknown>
   ): Promise<boolean> =>
     await new Promise<boolean>((resolve) => {
-      if (useAppStore.getState().confirmStrategy === "auto") {
-        resolve(true);
-        return;
-      }
       const scope = buildConfirmScope(question, context);
       if (denyScopesRef.current.has(scope)) {
         resolve(false);
         return;
       }
-      if (autoApproveScopesRef.current.has(scope)) {
+      if (
+        shouldAutoApproveConfirm(
+          useAppStore.getState().confirmStrategy,
+          autoApproveScopesRef.current.has(scope),
+          context,
+        )
+      ) {
         resolve(true);
         return;
       }
@@ -2418,15 +2406,18 @@ export function App() {
         question={confirm.question}
         sourceLabel={confirm.agentId === "meta" ? "主智能体" : `子智能体 ${confirm.agentId}`}
         diff={confirm.diff}
+        context={confirm.context}
+        defaultPolicy={defaultConfirmPolicyForStrategy(confirmStrategy)}
         onApprove={(policy) => {
+          const protectedRequest = isProtectedConfirmContext(confirm.context);
           const scope = confirmScopeRef.current;
-          if (scope) {
+          if (!protectedRequest && scope) {
             if (policy === "use-allowlist") {
               autoApproveScopesRef.current.add(scope);
               denyScopesRef.current.delete(scope);
             }
           }
-          if (policy === "run-everything") {
+          if (!protectedRequest && policy === "run-everything") {
             setConfirmStrategy("auto");
             void window.agenticxDesktop.saveConfirmStrategy("auto");
           }

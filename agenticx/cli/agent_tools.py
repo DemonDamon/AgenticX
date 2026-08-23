@@ -48,10 +48,11 @@ from agenticx.skills.guard import scan_skill, should_allow
 from agenticx.tools.skill_bundle import SkillBundleLoader
 from agenticx.tools.adapters.video_frames import VideoFrameExtractor
 from agenticx.runtime.confirm import (
-    AsyncConfirmGate,
-    AutoApproveConfirmGate,
     ConfirmGate,
     SyncConfirmGate,
+    confirm_denial_note,
+    is_protected_confirm,
+    protected_confirm_reason,
 )
 from agenticx.runtime.clarify import (
     AsyncClarifyGate,
@@ -2581,7 +2582,7 @@ async def _tool_desktop_screenshot(
         context={"tool": "desktop_screenshot", "risk": "computer_use"},
         emit_event=emit_event,
     ):
-        return "CANCELLED: user denied desktop screenshot"
+        return _cancelled("桌面截屏未执行", confirm_gate)
     include_b64 = arguments.get("include_base64")
     if include_b64 is None:
         include_b64 = True
@@ -2643,7 +2644,7 @@ async def _tool_desktop_mouse_click(
         context={"tool": "desktop_mouse_click", "risk": "computer_use", "x": x, "y": y},
         emit_event=emit_event,
     ):
-        return "CANCELLED: user denied desktop mouse click"
+        return _cancelled("桌面点击未执行", confirm_gate)
 
     def _run() -> str:
         import pyautogui  # type: ignore import-not-found
@@ -2694,7 +2695,7 @@ async def _tool_desktop_keyboard_type(
         context={"tool": "desktop_keyboard_type", "risk": "computer_use"},
         emit_event=emit_event,
     ):
-        return "CANCELLED: user denied desktop keyboard typing"
+        return _cancelled("桌面键入未执行", confirm_gate)
 
     def _run() -> None:
         import pyautogui  # type: ignore import-not-found
@@ -2736,6 +2737,19 @@ META_TOOL_NAMES = {
 }
 
 
+def _cancelled(what: str, confirm_gate: ConfirmGate) -> str:
+    """CANCELLED 文案，带上「为什么没通过」。
+
+    以前一律写 user denied。无人值守跑批时根本没人在场，用户回头看日志会去找一个
+    不存在的点击；等待超时同理。原因由 _confirm 在拒绝时挂到 gate 上。
+    """
+
+    note = getattr(confirm_gate, "last_denial_note", "")
+    if not isinstance(note, str) or not note.strip():
+        note = "用户拒绝"
+    return f"CANCELLED: {what}（{note.strip()}）"
+
+
 async def _confirm(
     question: str,
     *,
@@ -2746,6 +2760,10 @@ async def _confirm(
     payload_context = dict(context or {})
     request_id = str(payload_context.get("request_id") or uuid.uuid4())
     payload_context["request_id"] = request_id
+    # 受保护的请求带上「为什么问你」。界面自己也能按 risk 推，但理由由后端给出才有
+    # 唯一出处——risk 取值将来加一个，不用记得同步改两处文案。
+    if is_protected_confirm(payload_context):
+        payload_context["protected_reason"] = protected_confirm_reason(payload_context)
     _log.info(
         "[confirm] requested id=%s question=%s risk=%s tool=%s",
         request_id,
@@ -2753,23 +2771,40 @@ async def _confirm(
         payload_context.get("risk"),
         payload_context.get("tool"),
     )
-    # IMPORTANT: do not emit confirm_required when the gate auto-approves.
-    # Otherwise IM adapters (Feishu/WeChat) will still prompt /approve even though
-    # request_confirm() returns immediately (e.g. AutoApproveConfirmGate).
-    emit_prompt = emit_event is not None and isinstance(confirm_gate, AsyncConfirmGate)
+    # Gate capability, rather than concrete type, decides whether an event is
+    # needed. A risk-aware auto gate emits only for protected interactive work;
+    # low-risk and unattended requests must not create phantom UI prompts.
+    emit_prompt = emit_event is not None and confirm_gate.should_emit_prompt(payload_context)
     if emit_prompt:
-        await emit_event(
-            {
-                "type": "confirm_required",
-                "data": {
-                    "id": request_id,
-                    "question": question,
-                    "context": payload_context,
-                },
-            }
+        # Register the pending request before publishing its ID. Otherwise a
+        # fast UI callback can arrive before AsyncConfirmGate.resolve() has a
+        # future to resolve and the turn hangs until timeout.
+        confirm_task = asyncio.create_task(
+            confirm_gate.request_confirm(question, payload_context)
         )
-    approved = await confirm_gate.request_confirm(question, payload_context)
+        await asyncio.sleep(0)
+        try:
+            await emit_event(
+                {
+                    "type": "confirm_required",
+                    "data": {
+                        "id": request_id,
+                        "question": question,
+                        "context": payload_context,
+                    },
+                }
+            )
+            approved = await confirm_task
+        except BaseException:
+            confirm_task.cancel()
+            await asyncio.gather(confirm_task, return_exceptions=True)
+            raise
+    else:
+        approved = await confirm_gate.request_confirm(question, payload_context)
     _log.info("[confirm] resolved id=%s approved=%s", request_id, approved)
+    if not approved:
+        # 调用方拼 CANCELLED 文案时读这一条：是人按的拒绝，还是无人值守直接拦下的。
+        setattr(confirm_gate, "last_denial_note", confirm_denial_note(confirm_gate, request_id))
     if emit_prompt:
         await emit_event(
             {
@@ -3953,7 +3988,7 @@ async def _bash_exec_prepare(
             context={"tool": tool_name, "command": command, "risk": "non_whitelisted"},
             emit_event=emit_event,
         ):
-            return "CANCELLED: user denied non-whitelisted command"
+            return _cancelled("非白名单命令未执行", confirm_gate)
 
     if _command_touches_protected_config(command, parts):
         return (
@@ -4006,7 +4041,7 @@ async def _bash_exec_prepare(
             },
             emit_event=emit_event,
         ):
-            return "CANCELLED: user denied high-risk command"
+            return _cancelled("高风险命令未执行", confirm_gate)
 
     use_shell = bool(re.search(r"(;|&&|\|\||\||`|\$\(|>|<|\n)", command))
     if not use_shell:
@@ -4661,10 +4696,10 @@ async def _tool_file_write(
     if not await _confirm(
         f"Write changes to {path}?",
         confirm_gate=confirm_gate,
-        context={"tool": "file_write", "path": str(path), "diff": diff},
+        context={"tool": "file_write", "path": str(path), "diff": diff, "risk": "low"},
         emit_event=emit_event,
     ):
-        return "CANCELLED: user denied file write"
+        return _cancelled("文件未写入", confirm_gate)
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -4742,10 +4777,10 @@ async def _tool_file_edit(
     if not await _confirm(
         f"Apply edit to {path}?",
         confirm_gate=confirm_gate,
-        context={"tool": "file_edit", "path": str(path), "diff": diff},
+        context={"tool": "file_edit", "path": str(path), "diff": diff, "risk": "low"},
         emit_event=emit_event,
     ):
-        return "CANCELLED: user denied file edit"
+        return _cancelled("文件未修改", confirm_gate)
 
     try:
         path.write_text(updated_text, encoding="utf-8")
@@ -4797,19 +4832,19 @@ async def _tool_codegen(
             output_path = _resolve_workspace_path(str(inferred), session)
         except ValueError as exc:
             return f"ERROR: inferred output path invalid: {exc}"
-        should_confirm = isinstance(confirm_gate, AsyncConfirmGate) or sys.stdin.isatty()
+        should_confirm = confirm_gate.is_service_mode() or sys.stdin.isatty()
         if should_confirm and not await _confirm(
             (
                 "未检测到你显式指定落盘目录。"
                 f"建议写入：{output_path}。是否确认按该路径生成？"
             ),
             confirm_gate=confirm_gate,
-            context={"tool": "codegen", "path": str(output_path), "target": target},
+            context={"tool": "codegen", "path": str(output_path), "target": target, "risk": "low"},
             emit_event=emit_event,
         ):
             return (
-                "CANCELLED: user denied inferred codegen path. "
-                "Please provide output_path explicitly, e.g. "
+                _cancelled("推断的落盘路径未获批准", confirm_gate)
+                + " Please provide output_path explicitly, e.g. "
                 '{"target":"agent","description":"...","output_path":"./docs/xxx.md"}'
             )
     try:
@@ -5824,10 +5859,10 @@ async def _tool_memory_append(
         if not await _confirm(
             "Append preference to global USER.md (all subjects)?",
             confirm_gate=confirm_gate,
-            context={"tool": "memory_append", "scope": scope, "preview": content[:200]},
+            context={"tool": "memory_append", "scope": scope, "preview": content[:200], "risk": "policy"},
             emit_event=emit_event,
         ):
-            return "CANCELLED: user denied memory append"
+            return _cancelled("记忆未写入", confirm_gate)
         append_user_global_preference(content)
         workspace_dir = resolve_workspace_dir()
     else:
@@ -5837,10 +5872,10 @@ async def _tool_memory_append(
             if not await _confirm(
                 "Append note into this subject's long-term MEMORY.md?",
                 confirm_gate=confirm_gate,
-                context={"tool": "memory_append", "target": target, "preview": content[:200]},
+                context={"tool": "memory_append", "target": target, "preview": content[:200], "risk": "policy"},
                 emit_event=emit_event,
             ):
-                return "CANCELLED: user denied memory append"
+                return _cancelled("记忆未写入", confirm_gate)
             append_long_term_memory(workspace_dir, content)
         else:
             memory_dir = workspace_dir / "memory"
@@ -7215,7 +7250,11 @@ async def _tool_skill_manage(
         )
     # Interactive mode: user approves/rejects inline in the chat.
     # Non-interactive (e.g. session_review_hook): falls back to pending queue.
-    _interactive = emit_event is not None and isinstance(confirm_gate, AsyncConfirmGate)
+    _interactive = (
+        emit_event is not None
+        and confirm_gate is not None
+        and confirm_gate.is_service_mode()
+    )
     action = str(arguments.get("action", "") or "").strip().lower()
     if not action:
         return (
@@ -7261,7 +7300,7 @@ async def _tool_skill_manage(
             approved = await _confirm(
                 f"skill_manage 请求**创建**新技能「{name}」\n\n内容预览：\n\n```\n{preview}\n```\n\n确认写入 `~/.agenticx/skills/{name}/SKILL.md`？",
                 confirm_gate=confirm_gate,  # type: ignore[arg-type]
-                context={"tool": "skill_manage", "action": "create", "skill": name},
+                context={"tool": "skill_manage", "action": "create", "skill": name, "risk": "policy"},
                 emit_event=emit_event,
             )
             if not approved:
@@ -7440,7 +7479,7 @@ async def _tool_skill_manage(
                 f"**新内容：**\n```\n{new_preview}\n```\n\n"
                 f"确认应用补丁？",
                 confirm_gate=confirm_gate,  # type: ignore[arg-type]
-                context={"tool": "skill_manage", "action": "patch", "skill": name},
+                context={"tool": "skill_manage", "action": "patch", "skill": name, "risk": "policy"},
                 emit_event=emit_event,
             )
             if not approved:
@@ -8454,7 +8493,7 @@ async def dispatch_tool_async(
         if name == "code_index_cancel":
             return await asyncio.to_thread(_tool_code_index_cancel, arguments, session)
         if name == "ask_user":
-            return _tool_ask_user(arguments, service_mode=isinstance(gate, AsyncConfirmGate))
+            return _tool_ask_user(arguments, service_mode=gate.is_service_mode())
         if name == "request_clarification":
             prompt = str(arguments.get("prompt", "") or "").strip()
             if not prompt:
