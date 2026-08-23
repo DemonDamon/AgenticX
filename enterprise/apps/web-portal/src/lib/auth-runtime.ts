@@ -238,6 +238,37 @@ export async function loginWithPassword(email: string, password: string): Promis
   return tokens;
 }
 
+/** Desktop device login: verify password then return identity fields (JWT discarded by caller). */
+export async function loginAndGetIdentity(email: string, password: string): Promise<{
+  userId: string;
+  tenantId: string;
+  deptId: string | null;
+  email: string;
+  displayName: string;
+}> {
+  const runtime = await getRuntime();
+  const tokens = await runtime.authService.loginWithPassword({ email, password });
+  if (tokens.mustChangePassword) {
+    throw new Error("password_change_required");
+  }
+  const user = await runtime.repo.findByEmail(email.toLowerCase());
+  if (!user || user.status === "disabled") {
+    throw new Error("user_unavailable");
+  }
+  try {
+    await syncAuthUserToPostgres(user);
+  } catch (err) {
+    console.error("[web-portal] syncAuthUserToPostgres after desktop login failed:", err);
+  }
+  return {
+    userId: user.id,
+    tenantId: user.tenantId,
+    deptId: user.deptId ?? null,
+    email: user.email,
+    displayName: user.displayName ?? "",
+  };
+}
+
 type OidcLoginInput = {
   providerId: string;
   issuer: string;
