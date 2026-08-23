@@ -12,6 +12,7 @@ import {
   withSearchContext,
 } from "../tool-loop";
 import type { WebSearchHit } from "../providers";
+import type { DirectPageView } from "../direct-page";
 
 function sseResponse(text: string): Response {
   return new Response(text, {
@@ -192,6 +193,158 @@ describe("web search tool loop", () => {
     expect(text).toContain("https://news.example/opus");
     expect(text.includes("**来源**")).toBe(false);
     expect(text.includes("minimax:tool_call")).toBe(false);
+  });
+
+  it("reads a glued arXiv URL directly without spending a provider call", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return sseResponse('data: {"choices":[{"delta":{"content":"可以读懂 [1]"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const executeSearch = vi.fn(async () => []);
+    const readPage = vi.fn(async (reference): Promise<DirectPageView> => ({
+      reference,
+      title: "Paper title",
+      text: "Paper title\n\nAbstract evidence\n\nIntroduction evidence\n\nLate appendix",
+      rawChars: 80,
+      coverage: "full_html",
+      backend: "native",
+    }));
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "你好" },
+          { role: "assistant", content: "你好" },
+          {
+            role: "user",
+            content: "https://arxiv.org/pdf/2606.19348你能读懂这篇文章嘛?",
+          },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+        readPage,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(readPage.mock.calls[0]?.[0]).toMatchObject({
+      readUrl: "https://arxiv.org/html/2606.19348",
+      question: "你能读懂这篇文章嘛?",
+    });
+    expect(bodies).toHaveLength(1);
+    expect(JSON.stringify(bodies[0])).toContain("网页直读状态");
+    expect(JSON.stringify(bodies[0])).toContain("Abstract evidence");
+    const text = await response.text();
+    expect(text).toContain("agenticx_web_search_sources");
+  });
+
+  it("reuses one historical document for a follow-up without another provider call", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return sseResponse('data: {"choices":[{"delta":{"content":"80% [1]"}}]}\n\ndata: [DONE]\n\n');
+    });
+    const executeSearch = vi.fn(async () => []);
+    const readPage = vi.fn(async (reference): Promise<DirectPageView> => ({
+      reference,
+      title: "Paper title",
+      text: [
+        "Paper title and abstract.",
+        "Introduction and background.",
+        "Method details.",
+        "Table 8 Pass Rate Internal Engineers 80 percent.",
+      ].join("\n\n"),
+      rawChars: 140,
+      coverage: "full_html",
+      backend: "native",
+    }));
+
+    await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [
+          { role: "user", content: "https://arxiv.org/pdf/2606.19348 读一下" },
+          { role: "assistant", content: "已阅读摘要" },
+          { role: "user", content: "Table 8 的通过率是什么？" },
+        ],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+        readPage,
+      },
+    );
+
+    expect(executeSearch).not.toHaveBeenCalled();
+    expect(readPage).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(bodies[0])).toContain("Table 8 Pass Rate Internal Engineers 80 percent");
+  });
+
+  it("filters arXiv fallback search to the same document when direct read fails", async () => {
+    const executeSearch = vi.fn(async () => [
+      { title: "Noise", url: "https://arxiv.org/abs/2606.19349", snippet: "wrong" },
+      {
+        title: "Exact paper",
+        url: "https://arxiv.org/abs/2606.19348v1",
+        snippet: "exact abstract",
+      },
+    ]);
+    const fetchImpl = vi.fn(async () =>
+      sseResponse('data: {"choices":[{"delta":{"content":"fallback [1]"}}]}\n\ndata: [DONE]\n\n'),
+    );
+
+    const response = await runWebSearchTurn(
+      {
+        model: "m",
+        messages: [{ role: "user", content: "https://arxiv.org/pdf/2606.19348 帮我读" }],
+        agenticx_web_search: true,
+      },
+      {
+        url: "http://gateway.test/v1/chat/completions",
+        headers: {},
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        loadTenantConfig: async () => ({
+          enabled: true,
+          provider: "duckduckgo",
+          apiKey: "",
+          maxResults: 50,
+        }),
+        executeSearch,
+        readPage: vi.fn(async () => null),
+      },
+    );
+
+    expect(executeSearch).toHaveBeenCalledWith(
+      "arXiv 2606.19348",
+      undefined,
+      expect.any(Object),
+    );
+    const text = await response.text();
+    expect(text).toContain("https://arxiv.org/abs/2606.19348v1");
+    expect(text).not.toContain("2606.19349");
   });
 
   it("skips web search for pure current-date questions and grounds on local clock", async () => {

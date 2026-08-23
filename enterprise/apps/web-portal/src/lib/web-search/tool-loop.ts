@@ -26,6 +26,15 @@ import { executeWebSearch, formatHits, type WebSearchHit, type WebSearchRuntimeC
 import { resolveWebSearchConfig, type TenantWebSearchRow } from "./config";
 import { rerankHits } from "./rerank";
 import { classifyWebSearchNeed } from "./search-necessity";
+import {
+  DIRECT_PAGE_CONTEXT_CHARS,
+  directPageSource,
+  matchesDirectPage,
+  readDirectPage,
+  resolveDirectPageReference,
+  selectDirectPageEvidence,
+  withDirectPageContext,
+} from "./direct-page";
 
 export const WEB_SEARCH_TOOL = {
   type: "function",
@@ -102,6 +111,8 @@ export type GatewayFetchDeps = {
   signal?: AbortSignal;
   loadTenantConfig?: () => Promise<TenantWebSearchRow>;
   executeSearch?: typeof executeWebSearch;
+  /** Test seam; production reuses page-fetch through readDirectPage. */
+  readPage?: typeof readDirectPage;
 };
 
 function sseDataFrame(payload: unknown): string {
@@ -615,6 +626,8 @@ export async function runWebSearchTurn(
     }
   }
 
+  const directReference = resolveDirectPageReference(originalMessages);
+
   // Skip classification uses the bare last-user turn (greetings must not inherit prior intent).
   const queryForSkip = extractLastUserQuery(originalMessages);
   // Referential follow-ups resolve entity from prior assistant reply; else slot-fill / raw last.
@@ -638,7 +651,7 @@ export async function runWebSearchTurn(
   // After: any self-contained turn (greeting / assistant meta / attachment-only /
   // arithmetic / datetime) answers directly — matching Doubao / Kimi behavior where
   // the toggle stays on but trivial turns do not pay an外网 round-trip.
-  const skip = webSearchAlwaysOn()
+  const skip = webSearchAlwaysOn() || directReference?.explicitInCurrentTurn
     ? null
     : classifyWebSearchNeed({
         query: queryForSkip,
@@ -648,15 +661,68 @@ export async function runWebSearchTurn(
     return respondWithoutSearch(skip.reason);
   }
 
+  const modelName = typeof rest.model === "string" ? rest.model : undefined;
   const searchFn = deps.executeSearch ?? executeWebSearch;
   let hits: WebSearchHit[] = [];
   let searchFailed = false;
+  let searchQuery = query;
+
+  if (directReference) {
+    const view = await (deps.readPage ?? readDirectPage)(directReference, {
+      signal: deps.signal,
+    }).catch((error) => {
+      console.warn(
+        "[web-search] direct page read failed:",
+        error instanceof Error ? error.message : error,
+      );
+      return null;
+    });
+    if (view) {
+      const evidenceQueries = [directReference.question, query]
+        .map((value) => value.trim())
+        .filter((value, index, all) => value && all.indexOf(value) === index);
+      const evidence = selectDirectPageEvidence(
+        view,
+        evidenceQueries,
+        Math.min(DIRECT_PAGE_CONTEXT_CHARS, resolveInjectionBudgetChars(modelName)),
+      );
+      if (directReference.explicitInCurrentTurn || evidence.matched) {
+        const source = directPageSource(evidence);
+        try {
+          const upstream = await callGatewayStream(
+            deps,
+            {
+              ...rest,
+              stream: true,
+              messages: withCurrentTimeContext(
+                withDirectPageContext(originalMessages, evidence),
+              ),
+            },
+            nextTraceStep,
+            "websearch.answer",
+          );
+          return pipeWithSourcesAppendix(upstream, [source]);
+        } catch (error) {
+          return gatewayUnavailableResponse(
+            error instanceof Error ? error.message : "gateway unreachable",
+          );
+        }
+      }
+    }
+    if (directReference.explicitInCurrentTurn && directReference.arxivId) {
+      searchQuery = `arXiv ${directReference.arxivId}`;
+    }
+  }
 
   try {
-    if (!query) {
+    if (!searchQuery) {
       throw new Error("missing user query for web search");
     }
-    hits = await searchFn(query, undefined, cfg);
+    const fetched = await searchFn(searchQuery, undefined, cfg);
+    hits =
+      directReference?.explicitInCurrentTurn && directReference.arxivId
+        ? fetched.filter((hit) => matchesDirectPage(directReference, hit.url))
+        : fetched;
     if (hits.length === 0) {
       throw new Error("search returned no hits");
     }
@@ -665,8 +731,7 @@ export async function runWebSearchTurn(
     console.warn("[web-search] search failed, degrading:", error instanceof Error ? error.message : error);
   }
 
-  const modelName = typeof rest.model === "string" ? rest.model : undefined;
-  const ranked = searchFailed ? [] : rerankHits(query, hits);
+  const ranked = searchFailed ? [] : rerankHits(searchQuery, hits);
   const { selected, remainder } = searchFailed
     ? { selected: [] as WebSearchHit[], remainder: [] as WebSearchHit[] }
     : selectHitsWithinBudget(ranked, modelName);

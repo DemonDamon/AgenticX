@@ -84,6 +84,22 @@ function bm25Scores(queryTokens: string[], docs: string[][]): number[] {
   });
 }
 
+export type RankedTextPassage = {
+  index: number;
+  text: string;
+  score: number;
+};
+
+/** Generic lexical passage ranking shared by search hits and direct page reads. */
+export function rankTextPassages(query: string, passages: string[]): RankedTextPassage[] {
+  const queryTokens = tokenize(query);
+  const docs = passages.map(tokenize);
+  const scores = queryTokens.length > 0 ? bm25Scores(queryTokens, docs) : passages.map(() => 0);
+  return passages
+    .map((text, index) => ({ index, text, score: scores[index] ?? 0 }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+}
+
 /**
  * BM25(k1=1.5, b=0.75) 打分后与 provider 原始排序做加权 RRF 融合：
  *   score = 2/(60 + bm25Rank) + 1/(60 + providerRank)

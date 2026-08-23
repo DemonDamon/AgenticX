@@ -205,6 +205,73 @@ describe("runDeepResearchTurn", () => {
     expect(lastUser?.content).toContain("[1]");
   });
 
+  it("reads an explicit page once and keeps that URL out of later lane fetches", async () => {
+    const plan: ResearchPlan = {
+      topic: "指定页面",
+      complexity: "simple",
+      subQuestions: ["这篇讲了什么"],
+    };
+    const readPage = vi.fn(async (reference) => ({
+      reference,
+      title: "Paper title",
+      text: "Paper title\n\nAbstract evidence that is long enough to keep.\n\nMethod details.",
+      rawChars: 80,
+      coverage: "full_html" as const,
+      backend: "native" as const,
+    }));
+    const fetchPagesFn = vi.fn(async (urls: string[]) => ({
+      pages: urls.map(() => null),
+      stats: emptyFetchStats(),
+    }));
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { stream?: boolean };
+      if (body.stream === false) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: "车道备忘摘要" } }],
+          }),
+        } as Response;
+      }
+      return synthUpstream("核心结论正文");
+    });
+
+    const response = await runDeepResearchTurn(
+      {
+        model: "m",
+        messages: [
+          {
+            role: "user",
+            content: "https://arxiv.org/pdf/2606.19348 你能读懂这篇文章吗",
+          },
+        ],
+        agenticx_deep_research: true,
+      },
+      {
+        ...baseDeps({
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          buildPlan: async () => plan,
+          executeSearch: async () => [
+            {
+              title: "Same paper",
+              url: "https://arxiv.org/abs/2606.19348",
+              snippet: "should be dropped",
+            },
+            { title: "Other", url: "https://ex.com/other", snippet: "ok" },
+          ],
+          readPage,
+          fetchPagesFn,
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(readPage).toHaveBeenCalledTimes(1);
+    const fetchedUrls = fetchPagesFn.mock.calls.flatMap((call) => call[0] as string[]);
+    expect(fetchedUrls.some((url) => url.includes("2606.19348"))).toBe(false);
+    expect(events.some((e) => e.type === "narrative")).toBe(true);
+  });
+
   it("refreshes gateway bearer before synthesize so section writes use the new token", async () => {
     const plan: ResearchPlan = {
       topic: "主题",
