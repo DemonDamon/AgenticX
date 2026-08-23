@@ -53,6 +53,7 @@
         "cache": "AI Cache",
         "apiTokens": "API Tokens",
         "mcpServers": "MCP Hosting",
+        "capabilities": "Capability Packs",
         "plugins": "Wasm Plugins",
         "errors": "Error Clustering",
         "perf": "Performance Profiling"
@@ -128,6 +129,120 @@
         "empty": "No error records",
         "toast": {
           "loadFailed": "Failed to load"
+        }
+      },
+      "capabilities": {
+        "title": "Capability Packs",
+        "description": "Register skills and MCP servers, then assign packs to everyone, a department, a group, or specific people.",
+        "tabs": {
+          "packs": "Packs",
+          "skills": "Skills",
+          "mcp": "MCP"
+        },
+        "mcp": {
+          "title": "Hosted MCP servers",
+          "description": "These servers can be referenced by a pack. Create and credential them on the MCP hosting page.",
+          "empty": "No hosted MCP servers yet",
+          "active": "Active",
+          "disabled": "Disabled",
+          "manage": "Open MCP hosting",
+          "loadFailed": "Failed to load"
+        }
+      },
+      "capabilityPacks": {
+        "title": "Capability packs",
+        "description": "Group MCP servers and skills, then assign them to everyone, a department, or specific people.",
+        "tabs": {
+          "packs": "Packs",
+          "skills": "Skill registry"
+        },
+        "status": {
+          "active": "Active",
+          "disabled": "Disabled"
+        },
+        "actions": {
+          "enable": "Enable",
+          "disable": "Disable",
+          "edit": "Edit"
+        },
+        "toast": {
+          "loadFailed": "Failed to load",
+          "saved": "Saved"
+        },
+        "packs": {
+          "createTitle": "New pack",
+          "createDescription": "Create the pack first, then pick members and assignment scope.",
+          "slug": "Slug",
+          "slugRequired": "Slug is required",
+          "displayName": "Name",
+          "displayNamePlaceholder": "Research pack",
+          "description": "Description",
+          "empty": "No packs yet",
+          "memberCount": "{count} capabilities",
+          "assignedCount": "{count} assignment scopes",
+          "confirmDelete": "Delete this pack? Members and assignments will be removed.",
+          "editTitle": "Edit pack {name}"
+        },
+        "skills": {
+          "createTitle": "Register a skill",
+          "createDescription": "Skills do not store credentials; they only declare MCP dependencies.",
+          "slug": "Slug",
+          "slugRequired": "Slug is required",
+          "displayName": "Name",
+          "description": "Description",
+          "version": "Version",
+          "bundleUri": "Bundle URL",
+          "bundleDigest": "Bundle digest",
+          "bundleDigestHint": "SHA-256 of the SKILL.md body in hex. Desktop verifies the download against it.",
+          "requires": "Required MCP",
+          "requiresHint": "If a dependency is not delivered in the same pack, the skill will not work.",
+          "requiresCount": "{count} dependencies",
+          "empty": "No skills registered yet",
+          "confirmDelete": "Delete this skill? Packs that reference it will keep a dangling member.",
+          "editTitle": "Edit skill {name}"
+        },
+        "member": {
+          "title": "Pack members",
+          "hint": "Disabled members are not delivered even if they stay checked.",
+          "features": "Platform features",
+          "mcp": "MCP",
+          "skill": "Skill",
+          "disabled": "Disabled",
+          "noFeature": "No platform features available",
+          "noMcp": "No MCP servers available",
+          "noSkill": "No skills registered",
+          "config": "Configure",
+          "configTitle": "Open this capability's own settings",
+          "disabledWarning": "These members are disabled and will not be delivered: {names}",
+          "danglingWarning": "These members point at missing records. Uncheck them: {ids}"
+        },
+        "features": {
+          "web_search": {
+            "name": "Web search",
+            "description": "Look up public web results in chat. Provider keys live on the search settings page; this pack only decides who can use it."
+          },
+          "deep_research": {
+            "name": "Deep research",
+            "description": "A longer multi-step research task that costs more quota than a single search."
+          },
+          "attachment_routing": {
+            "name": "Attachment routing",
+            "description": "Lock a session to the designated multimodal model when a document is attached. Images keep the vision fallback."
+          }
+        },
+        "assignment": {
+          "title": "Assignment scope",
+          "allMembers": "Everyone",
+          "allMembersHint": "Choosing everyone sends only the all-members key.",
+          "departments": "Departments",
+          "deptHint": "A parent department assignment also covers its descendants.",
+          "users": "People",
+          "noDept": "No departments yet",
+          "noUser": "No users yet",
+          "groups": "Groups",
+          "noGroup": "No groups yet",
+          "groupMemberCount": "{count} people",
+          "groupHint": "Groups grant access. Membership in multiple groups is a union."
         }
       },
       "plugins": {
