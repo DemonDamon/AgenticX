@@ -35,6 +35,12 @@ import {
   selectDirectPageEvidence,
   withDirectPageContext,
 } from "./direct-page";
+import {
+  containsToolCallMarkup,
+  isMinimaxModel,
+  isMostlyToolCallLeak,
+  stripLeakedToolCallMarkup,
+} from "./tool-call-leak";
 
 export const WEB_SEARCH_TOOL = {
   type: "function",
@@ -83,6 +89,14 @@ export const TRIVIAL_TURN_SYSTEM_HINT =
   "思考过程与回复中都不要提及工具、功能调用、联网搜索、function call、tool_call。\n";
 
 const TRIVIAL_TURN_MARKER = "## 本轮说明";
+
+export const WEB_SEARCH_NO_TOOL_XML_RETRY_HINT =
+  "## 本轮强制要求\n" +
+  "联网搜索已经完成，结果已在系统提示中。请立刻根据这些结果作答。\n" +
+  "严禁输出任何工具调用 XML/标签（包括 minimax:tool_call、<invoke>、tool_call）。\n" +
+  "禁止只写「我来搜索」「让我搜索」而不给出可核验事实。\n";
+
+const RETRY_HINT_MARKER = "## 本轮强制要求";
 
 /** @deprecated Kept for tests / compatibility; search-first path does not probe tools. */
 export const WEB_SEARCH_TOOL_CHOICE = {
@@ -295,6 +309,28 @@ export function withSearchContext(messages: ChatMessage[], hits: WebSearchHit[])
     return next;
   }
   return [{ role: "system", content: resultsBlock }, ...next];
+}
+
+/** Prepend a hard "answer now, no tool XML" hint after a leaked MiniMax tool call. */
+export function withNoToolXmlRetryHint(messages: ChatMessage[]): ChatMessage[] {
+  const next = messages.map((m) => ({ ...m }));
+  if (
+    next[0]?.role === "system" &&
+    typeof next[0].content === "string" &&
+    next[0].content.includes(RETRY_HINT_MARKER)
+  ) {
+    return next;
+  }
+  const block = WEB_SEARCH_NO_TOOL_XML_RETRY_HINT.trimEnd();
+  if (next[0]?.role === "system") {
+    const existing = typeof next[0].content === "string" ? next[0].content : "";
+    next[0] = {
+      ...next[0],
+      content: existing ? `${block}\n\n${existing}` : block,
+    };
+    return next;
+  }
+  return [{ role: "system", content: block }, ...next];
 }
 
 /** Prepend the trivial-turn hint so skip-path reasoning stays Kimi-clean. */
@@ -568,6 +604,87 @@ async function pipeWithSourcesAppendix(
   return pipeUpstreamSse(upstream, { sourcesFrame });
 }
 
+function sseReplayResponse(raw: string): Response {
+  return new Response(raw, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+async function collectSseContent(upstream: Response): Promise<{ raw: string; content: string }> {
+  const raw = await upstream.text();
+  let content = "";
+  for (const block of raw.split("\n\n")) {
+    const dataLine = block
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.startsWith("data:"));
+    if (!dataLine) continue;
+    const data = dataLine.replace(/^data:\s*/, "");
+    if (!data || data === "[DONE]") continue;
+    try {
+      const parsed = JSON.parse(data) as {
+        choices?: Array<{
+          delta?: { content?: unknown };
+          message?: { content?: unknown };
+        }>;
+      };
+      const delta = parsed.choices?.[0]?.delta?.content;
+      const message = parsed.choices?.[0]?.message?.content;
+      if (typeof delta === "string") content += delta;
+      if (typeof message === "string") content += message;
+    } catch {
+      // keep scanning
+    }
+  }
+  return { raw, content };
+}
+
+async function pipeGuardingToolLeak(
+  upstream: Response,
+  options: {
+    sourcesFrame?: string;
+    retry?: () => Promise<Response>;
+  },
+): Promise<Response> {
+  if (!upstream.ok || !upstream.body) {
+    return pipeUpstreamSse(upstream, { sourcesFrame: options.sourcesFrame });
+  }
+
+  const first = await collectSseContent(upstream);
+  const replayOrStrip = (raw: string, content: string): Promise<Response> => {
+    if (containsToolCallMarkup(content)) {
+      return pipeUpstreamSse(sseReplayResponse(synthesizeTextSse(stripLeakedToolCallMarkup(content))), {
+        sourcesFrame: options.sourcesFrame,
+      });
+    }
+    return pipeUpstreamSse(sseReplayResponse(raw), { sourcesFrame: options.sourcesFrame });
+  };
+
+  if (!isMostlyToolCallLeak(first.content)) {
+    return replayOrStrip(first.raw, first.content);
+  }
+  if (!options.retry) {
+    return replayOrStrip(first.raw, first.content);
+  }
+
+  console.warn("[web-search] leaked tool-call markup; retrying grounded answer once");
+  try {
+    const retryUpstream = await options.retry();
+    if (!retryUpstream.ok || !retryUpstream.body) {
+      return pipeUpstreamSse(retryUpstream, { sourcesFrame: options.sourcesFrame });
+    }
+    const retry = await collectSseContent(retryUpstream);
+    return replayOrStrip(retry.raw, retry.content);
+  } catch (error) {
+    console.warn(
+      "[web-search] tool-call leak retry failed:",
+      error instanceof Error ? error.message : error,
+    );
+    return replayOrStrip(first.raw, first.content);
+  }
+}
+
 export async function runWebSearchTurn(
   parsedBody: Record<string, unknown>,
   deps: GatewayFetchDeps,
@@ -631,12 +748,12 @@ export async function runWebSearchTurn(
   // Skip classification uses the bare last-user turn (greetings must not inherit prior intent).
   const queryForSkip = extractLastUserQuery(originalMessages);
   // Referential follow-ups resolve entity from prior assistant reply; else slot-fill / raw last.
-  const resolved = resolveFollowUpQuery(originalMessages);
+  let resolved = resolveFollowUpQuery(originalMessages);
 
-  // 指代追问但历史里消解不出实体 → 本轮不搜（搜代词只会得到跑题 SERP），
-  // 直接基于对话上下文作答。
+  // 指代追问但助手历史抽不出实体时，不再跳过检索（否则 MiniMax 会再吐工具 XML）。
+  // 交给 buildWebSearchQuery：短追问会拼上上一轮用户原话（如「王虹的新闻」）。
   if (!webSearchAlwaysOn() && resolved && !resolved.entity) {
-    return respondWithoutSearch("referential_no_entity");
+    resolved = null;
   }
   if (resolved?.entity) {
     console.info(`[web-search] follow-up resolved entity=${resolved.entity}`);
@@ -764,6 +881,22 @@ export async function runWebSearchTurn(
 
   if (searchFailed) {
     return pipeWithPrefix(upstream, UNAVAILABLE_HINT);
+  }
+  if (isMinimaxModel(modelName)) {
+    return pipeGuardingToolLeak(upstream, {
+      sourcesFrame: formatWebSearchSourcesSse(selected, remainder),
+      retry: () =>
+        callGatewayStream(
+          deps,
+          {
+            ...rest,
+            stream: true,
+            messages: withNoToolXmlRetryHint(messages),
+          },
+          nextTraceStep,
+          "websearch.answer_retry",
+        ),
+    });
   }
   return pipeWithSourcesAppendix(upstream, selected, remainder);
 }

@@ -61,4 +61,26 @@ describe("parseAssistantContent", () => {
     expect(parsed.displayContent).toBe("摘要\n附件说明");
     expect(parsed.displayContent).not.toContain("<citations>");
   });
+
+  it("strips leaked MiniMax tool-call XML from visible assistant content", () => {
+    const thinkOpen = "<" + "think" + ">";
+    const thinkClose = "<" + "/" + "think" + ">";
+    const parsed = parseAssistantContent({
+      id: "m3",
+      session_id: "s1",
+      tenant_id: "t1",
+      user_id: "u1",
+      role: "assistant",
+      content:
+        `${thinkOpen}需要联网搜索${thinkClose}\n\n我来帮您搜索关于王虹的最新新闻。\n` +
+        `<minimax:tool_call>\n<invoke name="web_search">\n` +
+        `<parameter name="query">王虹 新闻 2026年8月</parameter>\n` +
+        `</invoke>\n</minimax:tool_call>`,
+      created_at: "2026-08-11T08:38:34.000Z",
+    });
+    expect(parsed.displayContent).toBe("我来帮您搜索关于王虹的最新新闻。");
+    expect(parsed.displayContent).not.toContain("minimax:tool_call");
+    expect(parsed.displayContent).not.toContain("invoke");
+    expect(parsed.displayContent).not.toContain("web_search");
+  });
 });

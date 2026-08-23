@@ -60,4 +60,18 @@ describe("sanitizeHistoryForUpstream", () => {
     ]);
     expect(out[0]?.content).toBe("见与，保留[abc]和[]。");
   });
+
+  it("strips leaked MiniMax tool-call markup from assistant history", () => {
+    const out = sanitizeHistoryForUpstream([
+      {
+        role: "assistant",
+        content:
+          "我来帮您搜索关于王虹的最新新闻。\n" +
+          `<minimax:tool_call>\n<invoke name="web_search">\n` +
+          `<parameter name="query">王虹 新闻</parameter>\n` +
+          `</invoke>\n</minimax:tool_call>`,
+      },
+    ]);
+    expect(out).toEqual([{ role: "assistant", content: "我来帮您搜索关于王虹的最新新闻。" }]);
+  });
 });

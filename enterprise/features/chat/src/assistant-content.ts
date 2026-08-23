@@ -92,6 +92,24 @@ export function stripModelCitationTags(raw: string): string {
     .trim();
 }
 
+/**
+ * MiniMax-class models often emit vendor tool XML as visible content
+ * (`minimax:tool_call` / `<invoke>`) instead of structured tool_calls.
+ * Historical bubbles and copy actions must not show that markup.
+ */
+export function stripLeakedToolCallMarkup(raw: string): string {
+  if (!raw) return raw;
+  let text = raw
+    .replace(/<\s*minimax:tool_call\b[^>]*>[\s\S]*?<\/\s*minimax:tool_call\s*>/gi, "")
+    .replace(/<\s*tool_call\b[^>]*>[\s\S]*?<\/\s*tool_call\s*>/gi, "")
+    .replace(/<\s*invoke\b[^>]*>[\s\S]*?<\/\s*invoke\s*>/gi, "");
+  text = text
+    .replace(/<\s*minimax:tool_call\b[\s\S]*$/gi, "")
+    .replace(/<\s*tool_call\b[\s\S]*$/gi, "")
+    .replace(/<\s*invoke\b[\s\S]*$/gi, "");
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 /** 模型占位 `[N]`（非数字引用）与附件说明行前缀，避免像渲染失败。 */
 export function stripPlaceholderCitationMarkers(raw: string): string {
   if (!raw) return raw;
@@ -103,7 +121,7 @@ export function stripPlaceholderCitationMarkers(raw: string): string {
 }
 
 function finalizeAssistantDisplayContent(raw: string): string {
-  return stripPlaceholderCitationMarkers(stripModelCitationTags(raw));
+  return stripPlaceholderCitationMarkers(stripModelCitationTags(stripLeakedToolCallMarkup(raw)));
 }
 
 /** MiniMax 等模型常在推理段写好代码，可见正文却在 ``` 处提前 stop；从推理段补全未闭合代码块。 */

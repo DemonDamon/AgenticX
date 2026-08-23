@@ -8,6 +8,8 @@
  * DB persistence and the sources panel are unchanged — only the upstream copy is cleaned.
  */
 
+import { stripLeakedToolCallMarkup } from "./tool-call-leak";
+
 type ChatMessage = {
   role: string;
   content?: string | null;
@@ -49,6 +51,7 @@ function stripThinkBlocks(text: string): string {
 
 function sanitizeAssistantContent(content: string): string {
   let text = stripThinkBlocks(content);
+  text = stripLeakedToolCallMarkup(text);
   text = text.replace(/\[(\d{1,3})\]/g, "");
   text = text.replace(/[ \t]{2,}/g, " ");
   // Collapse space runs created inside a line; keep newlines for structure.
