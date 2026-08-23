@@ -71,6 +71,22 @@ Near（`agx serve` + Desktop）从 **Phase 1+2** 起支持在 `~/.agenticx/mcp.j
 }
 ```
 
+### 示例（可选）：Parallel Search MCP
+
+仅在用户明确选择使用时，将 `parallel-search` 条目**合并**到现有 `mcpServers` 中；不要替换整个 `mcpServers`，也不要覆盖任何已有的服务器条目、Provider、用户默认值或安全设置。
+
+```json
+{
+  "mcpServers": {
+    "parallel-search": {
+      "url": "https://search.parallel.ai/mcp"
+    }
+  }
+}
+```
+
+该端点无需账户或 API key，`headers` 可省略。原生 `/mcp` URL 会按上述规则选择 `streamable_http`。仅在用户显式调用其工具时使用；用户提供的搜索目标、搜索查询和请求的 URL 会发送给 Parallel。详见 [Parallel Search MCP 文档](https://docs.parallel.ai/integrations/mcp/search-mcp)。
+
 ### 示例：Enterprise Gateway 托管 MCP
 
 将 [方式 A](#方式-a注册中心一键发现) 或 [方式 B](#方式-b手动添加-streamable-http) 得到的 `streamable-http` URL 写入 `url`，PAT 写入 `headers`：
