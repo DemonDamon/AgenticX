@@ -37,6 +37,7 @@
         "dashboard": "仪表盘",
         "users": "用户",
         "departments": "部门",
+        "userGroups": "用户组",
         "roles": "角色",
         "bulkImport": "批量导入",
         "audit": "审计日志",
@@ -695,6 +696,35 @@
       }
     },
     "iam": {
+      "userGroups": {
+        "title": "用户组",
+        "description": "把一批人放进一组，再给组绑定能力包。属于多个组的人取并集。",
+        "create": "新建用户组",
+        "createTitle": "新建用户组",
+        "editTitle": "编辑用户组",
+        "edit": "编辑",
+        "name": "名称",
+        "nameRequired": "请填写名称",
+        "description": "说明",
+        "noDescription": "没有说明",
+        "members": "成员",
+        "noUsers": "还没有用户",
+        "packs": "能力包",
+        "packsHint": "勾选后，组里的人会拿到这些包。绑定写在包的分配范围上。",
+        "noPacks": "还没有能力包",
+        "empty": "还没有用户组",
+        "memberCount": "{count} 人",
+        "packCount": "{count} 个能力包",
+        "confirmDelete": "确认删除该用户组？成员不会被删，绑定的能力包会解除。",
+        "toast": {
+          "loadFailed": "加载失败",
+          "saved": "已保存",
+          "saveFailed": "保存失败",
+          "deleted": "已删除",
+          "deleteFailed": "删除失败",
+          "packFailed": "能力包未更新：{names}"
+        }
+      },
       "users": {
         "breadcrumbIam": "身份与权限",
         "breadcrumbUsers": "用户",

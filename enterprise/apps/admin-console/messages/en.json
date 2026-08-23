@@ -37,6 +37,7 @@
         "dashboard": "Dashboard",
         "users": "Users",
         "departments": "Departments",
+        "userGroups": "User groups",
         "roles": "Roles",
         "bulkImport": "Bulk Import",
         "audit": "Audit Logs",
@@ -695,6 +696,35 @@
       }
     },
     "iam": {
+      "userGroups": {
+        "title": "User groups",
+        "description": "Put people in a group, then bind capability packs. Membership in multiple groups is a union.",
+        "create": "New group",
+        "createTitle": "New group",
+        "editTitle": "Edit group",
+        "edit": "Edit",
+        "name": "Name",
+        "nameRequired": "Name is required",
+        "description": "Description",
+        "noDescription": "No description",
+        "members": "Members",
+        "noUsers": "No users yet",
+        "packs": "Capability packs",
+        "packsHint": "People in this group receive the checked packs. The binding is stored on the pack.",
+        "noPacks": "No packs yet",
+        "empty": "No groups yet",
+        "memberCount": "{count} people",
+        "packCount": "{count} packs",
+        "confirmDelete": "Delete this group? People stay; pack bindings for this group are removed.",
+        "toast": {
+          "loadFailed": "Failed to load",
+          "saved": "Saved",
+          "saveFailed": "Failed to save",
+          "deleted": "Deleted",
+          "deleteFailed": "Failed to delete",
+          "packFailed": "Packs not updated: {names}"
+        }
+      },
       "users": {
         "breadcrumbIam": "IAM",
         "breadcrumbUsers": "Users",

@@ -60,6 +60,7 @@ import {
   Sun,
   UserCog,
   Users,
+  UsersRound,
   Wand2,
   Database,
   Plug,
@@ -93,6 +94,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/iam/users", labelKey: "users", icon: Users },
       { href: "/iam/departments", labelKey: "departments", icon: Building2 },
+      { href: "/iam/user-groups", labelKey: "userGroups", icon: UsersRound },
       { href: "/iam/roles", labelKey: "roles", icon: UserCog },
       { href: "/iam/bulk-import", labelKey: "bulkImport", icon: Wand2 },
     ],
