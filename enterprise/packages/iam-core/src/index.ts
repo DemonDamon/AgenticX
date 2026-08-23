@@ -10,6 +10,7 @@ export * from "./repos/roles";
 export * from "./repos/sso-providers";
 export * from "./repos/users";
 export * from "./pat-service";
+export * from "./desktop-device-auth-service";
 export * from "./pat-revocation-store";
 export * from "./session-grant-service";
 export * from "./compliance-service";
