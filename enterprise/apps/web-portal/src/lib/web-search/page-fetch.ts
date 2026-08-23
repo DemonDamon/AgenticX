@@ -13,6 +13,7 @@ import {
   type PageFetchFailure,
 } from "./page-fetch-backends";
 export {
+  extractDocumentTitle,
   extractMainText,
   MAX_PAGE_CHARS,
   MIN_USABLE_PAGE_CHARS,
