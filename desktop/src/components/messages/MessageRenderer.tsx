@@ -1,5 +1,5 @@
 import type { Message } from "../../store";
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Wrench } from "lucide-react";
 import { useAppStore } from "../../store";
 import { ImBubble } from "./ImBubble";
@@ -43,6 +43,24 @@ import {
 } from "../../utils/session-artifacts";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
+
+function GenerationTaskCard({ message }: { message: Message }) {
+  const [expanded, setExpanded] = useState(false);
+  const task = (message.metadata?.generation_task ?? {}) as Record<string, unknown>;
+  const status = String(task.status ?? "submitted").toLowerCase();
+  const videoUrl = String(task.result_url ?? "").trim();
+  const content = Array.isArray((task.params as Record<string, unknown> | undefined)?.content) ? (task.params as { content: Array<Record<string, unknown>> }).content : [];
+  const coverUrl = content.find((item) => item.type === "image_url")?.image_url as { url?: string } | undefined;
+  const failed = ["failed", "cancelled", "canceled", "expired"].includes(status);
+  return <>
+    <div className="my-2 max-w-[560px] rounded-xl border border-border bg-surface-card p-3 shadow-sm">
+      <div className="flex items-center gap-2 text-sm font-medium text-text-strong"><span className={status === "succeeded" ? "text-emerald-400" : failed ? "text-rose-400" : "text-violet-400"}>●</span>视频生成{status === "succeeded" ? "已完成" : failed ? "失败" : "生成中…"}</div>
+      {coverUrl?.url ? <button type="button" className="relative mt-3 block w-full overflow-hidden rounded-lg bg-black text-left disabled:cursor-default" disabled={!videoUrl} onClick={() => setExpanded(true)}><img className="max-h-72 w-full object-cover" src={coverUrl.url} alt="视频参考图" />{videoUrl ? <span className="absolute inset-0 flex items-center justify-center bg-black/25 text-4xl text-white">▶</span> : <span className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-xs text-white">生成中…</span>}</button> : <p className="mt-2 text-xs text-text-faint">任务 ID：{String(task.task_id ?? "")}</p>}
+      {failed && task.error ? <p className="mt-2 text-xs text-rose-400">{String(task.error)}</p> : null}
+    </div>
+    {expanded && videoUrl ? <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/75 p-8" onClick={() => setExpanded(false)}><div className="max-h-full w-full max-w-5xl" onClick={(e) => e.stopPropagation()}><video className="max-h-[80vh] w-full rounded-xl bg-black" src={videoUrl} controls autoPlay /><button type="button" className="mt-3 rounded-md bg-surface-panel px-3 py-1.5 text-sm text-text-strong" onClick={() => setExpanded(false)}>关闭</button></div></div> : null}
+  </>;
+}
 import { HistoricalSubAgentClusterCard } from "../subagent";
 import type {
   ActionConfirmationDecision,
@@ -285,6 +303,9 @@ export function MessageRenderer({
     if (next === message.content) return message;
     return { ...message, content: next };
   }, [message, allMessages]);
+  if (message.role === "assistant" && message.metadata?.kind === "generation_task") {
+    return <GenerationTaskCard message={message} />;
+  }
   if (isViewImageInjectMessage(message)) {
     return <ViewImageInjectCard message={message} />;
   }

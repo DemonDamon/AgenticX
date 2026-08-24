@@ -19,6 +19,7 @@ import {
   SquarePen,
   Plus,
   Wrench,
+  Video,
   PhoneCall,
   History,
   Settings,
@@ -752,33 +753,99 @@ function ComposerMoreActionsButton({
 }
 
 type GenerationPluginItem = { id: string; name: string; capability: string; model: string };
+const BUILTIN_VIDEO_GENERATION_PLUGIN: GenerationPluginItem = {
+  id: "video-generation",
+  name: "生成视频",
+  capability: "video",
+  model: "",
+};
 
 function GenerationPluginPickerButton({ apiBase, apiToken, onSelect }: {
   apiBase: string; apiToken: string; onSelect: (plugin: GenerationPluginItem) => void;
 }) {
   const [items, setItems] = useState<GenerationPluginItem[]>([]);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
+
   const load = useCallback(async () => {
-    if (!apiBase) return;
+    setLoading(true);
     try {
-      const response = await fetch(`${apiBase}/api/generation/plugins`, { headers: { "x-agx-desktop-token": apiToken } });
+      // Cold start may render the composer before Zustand receives apiBase. Avoid
+      // falling back to Vite's origin, which turns an otherwise valid API into 404.
+      const base = String(apiBase || (await window.agenticxDesktop.getApiBase()) || "").trim().replace(/\/+$/, "");
+      if (!base) throw new Error("本地服务尚未就绪");
+      const response = await fetch(`${base}/api/generation/plugins`, { headers: { "x-agx-desktop-token": apiToken } });
       const data = await response.json() as { items?: GenerationPluginItem[] };
       setItems(response.ok && Array.isArray(data.items) ? data.items : []);
-    } catch { setItems([]); }
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   }, [apiBase, apiToken]);
-  const toggle = async () => { if (!open) await load(); setOpen((value) => !value); };
-  if (items.length === 0 && !open) {
-    return <button type="button" role="menuitem" className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-faint" onClick={toggle}>插件调用</button>;
-  }
+
+  const toggle = async (event: ReactMouseEvent<HTMLButtonElement>) => {
+    // 选择输入能力只能更新 composer 状态，不能透传为聊天提交。
+    event.preventDefault();
+    event.stopPropagation();
+    if (!open) {
+      setOpen(true);
+      await load();
+      return;
+    }
+    setOpen(false);
+  };
+
   const position = open && buttonRef.current ? positionEmbeddedComposerFlyout(buttonRef.current, 220) : null;
+  // 首期始终提供视频生成入口；已配置时以服务端返回的模型信息为准。
+  const visibleItems = items.length > 0 ? items : [BUILTIN_VIDEO_GENERATION_PLUGIN];
   return <>
-    <button ref={buttonRef} type="button" role="menuitem" className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover" onClick={toggle}>
-      <span className="flex-1">插件调用</span><span className="text-text-faint">›</span>
+    <button
+      ref={buttonRef}
+      type="button"
+      role="menuitem"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+      onClick={toggle}
+    >
+      <Video className="h-[15px] w-[15px] shrink-0 text-text-muted" strokeWidth={1.8} aria-hidden />
+      <span className="flex-1">插件调用</span>
+      <ChevronRight className="h-3.5 w-3.5 text-text-faint" aria-hidden />
     </button>
-    {open && position ? createPortal(<div id="agx-generation-plugin-menu" className="fixed z-[9999] overflow-hidden rounded-xl border border-border bg-surface-panel p-1 shadow-xl" style={{ left: position.left, top: position.top, width: 220 }}>
-      {items.length ? items.map((item) => <button key={item.id} type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-text-standard hover:bg-surface-hover" onClick={() => { onSelect(item); setOpen(false); }}><span>{item.name}</span><span className="ml-2 text-[11px] text-text-faint">{item.model}</span></button>) : <p className="px-3 py-2 text-[12px] text-text-faint">没有已配置的插件</p>}
-    </div>, document.body) : null}
+    {open && position ? createPortal(
+      <div
+        id="agx-generation-plugin-menu"
+        role="menu"
+        aria-label="插件调用"
+        className="fixed z-[9999] overflow-hidden rounded-xl border border-border bg-surface-panel p-1 shadow-xl backdrop-blur-md"
+        style={{ left: position.left, top: position.top, width: 220, maxHeight: position.maxHeight }}
+      >
+        {loading ? (
+          <p className="px-3 py-3 text-center text-[12px] text-text-faint">加载中…</p>
+        ) : visibleItems.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
+            onClick={(event) => {
+              // 实际提交必须由输入区的发送动作触发。
+              event.preventDefault();
+              event.stopPropagation();
+              onSelect(item);
+              setOpen(false);
+            }}
+          >
+            <Video className="h-[15px] w-[15px] shrink-0 text-violet-400" strokeWidth={1.8} aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{item.name || "生成视频"}</span>
+            <span className="max-w-20 truncate text-[11px] text-text-faint">{item.model}</span>
+          </button>
+        ))}
+      </div>,
+      document.body,
+    ) : null}
   </>;
 }
 
@@ -2734,6 +2801,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const setActiveTaskspace = useAppStore((s) => s.setActiveTaskspace);
   const addPaneMessage = useAppStore((s) => s.addPaneMessage);
+  const mergeLastPaneMessageByRole = useAppStore((s) => s.mergeLastPaneMessageByRole);
   const updatePaneMessageByToolCallId = useAppStore((s) => s.updatePaneMessageByToolCallId);
   const clearPaneMessages = useAppStore((s) => s.clearPaneMessages);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
@@ -7284,6 +7352,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           return;
         }
         setPaneMessages(pane.id, msgs.slice(0, idx + 1));
+        const generationTask = msgs.slice(idx + 1).find((row) => row.metadata?.kind === "generation_task")?.metadata?.generation_task as Record<string, unknown> | undefined;
+        if (generationTask) {
+          await submitGenerationTask({
+            plugin: { id: String(generationTask.plugin_id), name: String(generationTask.plugin_name || "生成视频"), capability: "video", model: "" },
+            prompt: msg.content,
+            attachments: msg.attachments ?? [],
+          });
+          return;
+        }
         await sendChatRef.current(msg.content, {
           lockedSessionId: sid,
           retryAttachments: msg.attachments ?? [],
@@ -8717,26 +8794,70 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
   };
 
-  const submitGenerationTask = async () => {
-    const plugin = activeGenerationPlugin;
-    const prompt = extractComposerSendText().trim();
+  const pollGenerationTask = async (sessionId: string, taskId: string) => {
+    const generationApiBase = String(apiBase || (await window.agenticxDesktop.getApiBase()) || "")
+      .trim()
+      .replace(/\/+$/, "");
+    if (!generationApiBase) return;
+    // The relay usually completes in minutes. Polling stops on a terminal state
+    // and server-side history retains the latest task metadata for restart recovery.
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 4_000));
+      try {
+        const response = await fetch(
+          `${generationApiBase}/api/generation/tasks/${encodeURIComponent(taskId)}?session_id=${encodeURIComponent(sessionId)}`,
+          { headers: { "x-agx-desktop-token": apiToken } },
+        );
+        const data = await response.json() as { task?: { status?: string; result_url?: string | null; error?: string | null } };
+        if (!response.ok || !data.task) return;
+        const status = String(data.task.status || "").toLowerCase();
+        if (status === "succeeded") {
+          mergeLastPaneMessageByRole(pane.id, "assistant", {
+            content: "视频生成任务已完成",
+            metadata: { kind: "generation_task", generation_task: data.task },
+          });
+          return;
+        }
+        if (["failed", "cancelled", "canceled", "expired"].includes(status)) {
+          mergeLastPaneMessageByRole(pane.id, "assistant", {
+            content: "视频生成任务失败",
+            metadata: { kind: "generation_task", generation_task: data.task },
+          });
+          return;
+        }
+      } catch {
+        return;
+      }
+    }
+  };
+
+  const submitGenerationTask = async (retry?: { plugin: GenerationPluginItem; prompt: string; attachments: MessageAttachment[] }) => {
+    const plugin = retry?.plugin ?? activeGenerationPlugin;
+    const prompt = (retry?.prompt ?? extractComposerSendText()).trim();
     if (!plugin || !prompt || generationSubmitting) return;
     const sessionId = await materializeLazySession();
     if (!sessionId) return;
     setGenerationSubmitting(true);
     try {
-      const image_inputs = readyAttachments
+      const generationApiBase = String(apiBase || (await window.agenticxDesktop.getApiBase()) || "")
+        .trim()
+        .replace(/\/+$/, "");
+      if (!generationApiBase) throw new Error("本地视频生成服务尚未就绪");
+      const inputAttachments = retry?.attachments ?? readyAttachments;
+      const image_inputs = inputAttachments
         .filter((file) => file.mimeType.startsWith("image/") && !!file.dataUrl)
         .map((file) => ({ name: file.name, data_url: file.dataUrl, mime_type: file.mimeType, size: file.size }));
-      const response = await fetch(`${apiBase}/api/generation/tasks`, {
+      const response = await fetch(`${generationApiBase}/api/generation/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
         body: JSON.stringify({ session_id: sessionId, plugin_id: plugin.id, prompt, image_inputs }),
       });
       const data = await response.json() as { task?: Record<string, unknown>; detail?: string };
       if (!response.ok || !data.task) throw new Error(data.detail || "视频任务提交失败");
-      addPaneMessage(pane.id, "user", prompt, "meta", undefined, undefined, readyAttachments.map((file) => ({ name: file.name, mimeType: file.mimeType, size: file.size, dataUrl: file.dataUrl })));
+      if (!retry) addPaneMessage(pane.id, "user", prompt, "meta", undefined, undefined, readyAttachments.map((file) => ({ name: file.name, mimeType: file.mimeType, size: file.size, dataUrl: file.dataUrl })));
       addPaneMessage(pane.id, "assistant", "视频生成任务已提交", "meta", undefined, undefined, undefined, { metadata: { kind: "generation_task", generation_task: data.task } });
+      const taskId = String(data.task.task_id || "").trim();
+      if (taskId) void pollGenerationTask(sessionId, taskId);
       setComposerText("");
       setContextFiles({});
     } catch (err) {
@@ -12991,6 +13112,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   }
                   e.preventDefault();
                   const composerText = extractComposerSendText();
+                  // 已选插件时，Enter 的语义是用户明确提交生成任务；绝不回落到 /api/chat。
+                  // 仅点击菜单不会走到这里，因此不会产生隐式请求。
+                  if (activeGenerationPlugin) {
+                    lastComposerEnterAtRef.current = 0;
+                    void submitGenerationTask();
+                    return;
+                  }
                   const trimmedComposer = composerText.trim();
                   const hasComposerPayload =
                     !!trimmedComposer || readyAttachments.length > 0 || quoteTargets.length > 0;

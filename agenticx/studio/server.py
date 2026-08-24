@@ -108,6 +108,8 @@ from agenticx.studio.generation_plugins import (
     load_generation_plugins,
     mapped_task_response,
     resolve_video_payload,
+    sync_generation_task_agent_messages,
+    sync_generation_tasks_from_history,
 )
 from agenticx.studio.continuation import (
     ContinuationReason,
@@ -2685,6 +2687,11 @@ def create_studio_app() -> FastAPI:
             "params": request_body,
         }
         session = managed.studio_session
+        # A generation call is not an AgentRuntime stream. Reset residue left by
+        # an older interrupted chat turn so the session sidebar does not label a
+        # successfully submitted generation task as interrupted.
+        manager.clear_interrupt(payload.session_id)
+        manager.set_execution_state(payload.session_id, "idle")
         session.chat_history.append({"id": uuid.uuid4().hex, "role": "user", "content": payload.prompt})
         session.chat_history.append({
             "id": uuid.uuid4().hex,
@@ -2692,6 +2699,10 @@ def create_studio_app() -> FastAPI:
             "content": "视频生成任务已提交",
             "metadata": {"kind": "generation_task", "generation_task": task},
         })
+        # Chat runtime reads agent_messages rather than the UI transcript. Keep a
+        # compact counterpart here so a later normal chat turn can use the prompt
+        # and eventual video URL as real conversation context.
+        sync_generation_task_agent_messages(session.agent_messages, task, prompt=payload.prompt)
         await manager.persist_async(payload.session_id)
         return {"ok": True, "task": task}
 
@@ -2710,10 +2721,11 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="generation task not found")
         meta = row["metadata"]["generation_task"]
         plugin, provider = _generation_plugin_for_id(str(meta.get("plugin_id") or ""))
-        if not plugin.status_url_template:
-            return {"ok": True, "task": meta}
+        # The task endpoint convention used by the configured relay appends
+        # the task id to the submission URL. An explicit template still wins.
+        status_url_template = plugin.status_url_template or f"{plugin.submit_url.rstrip('/')}/{{task_id}}"
         headers = {"Authorization": f"Bearer {provider.api_key.strip()}"} if str(provider.api_key or "").strip() else {}
-        url = plugin.status_url_template.replace("{task_id}", task_id)
+        url = status_url_template.replace("{task_id}", task_id)
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, headers=headers)
@@ -2724,6 +2736,23 @@ def create_studio_app() -> FastAPI:
             for key in ("status", "progress", "result_url", "error"):
                 if parsed.get(key) is not None:
                     meta[key] = parsed[key]
+            prompt = ""
+            for history_row in reversed(getattr(managed.studio_session, "chat_history", []) or []):
+                if history_row is row:
+                    continue
+                if isinstance(history_row, dict) and str(history_row.get("role") or "") == "user":
+                    prompt = str(history_row.get("content") or "")
+                    break
+            sync_generation_task_agent_messages(
+                managed.studio_session.agent_messages,
+                meta,
+                prompt=prompt,
+            )
+            if str(meta.get("status") or "").strip().lower() in {
+                "succeeded", "failed", "cancelled", "canceled", "expired",
+            }:
+                manager.clear_interrupt(session_id)
+                manager.set_execution_state(session_id, "idle")
             await manager.persist_async(session_id)
         except HTTPException:
             raise
@@ -2785,6 +2814,10 @@ def create_studio_app() -> FastAPI:
             manager.auto_title_session(payload.session_id, payload.user_input)
 
         session = managed.studio_session
+        # Older sessions created before generation tasks were mirrored into
+        # agent_messages still need their task prompt and video URL on the next
+        # ordinary chat turn.
+        sync_generation_tasks_from_history(session.agent_messages, session.chat_history)
         try:
             from agenticx.runtime.prompts.code_mode import ensure_code_dev_workflow_skill
 
@@ -7539,6 +7572,58 @@ def create_studio_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     # --- Provider config (Desktop remote-mode source of truth) ---
+
+    @app.get("/api/config/generation-plugins/video-generation")
+    async def get_video_generation_plugin_config(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return non-secret video-generation adapter settings for Desktop."""
+        _check_token(x_agx_desktop_token)
+        raw = ConfigManager.get_value("generation_plugins.video-generation") or {}
+        if not isinstance(raw, dict):
+            raw = {}
+        return {
+            "ok": True,
+            "enabled": bool(raw.get("enabled", False)),
+            "provider": str(raw.get("provider") or ""),
+            "model": str(raw.get("model") or ""),
+            "submit_url": str(raw.get("submit_url") or ""),
+            "status_url_template": str(raw.get("status_url_template") or ""),
+            "cancel_url_template": str(raw.get("cancel_url_template") or ""),
+        }
+
+    @app.put("/api/config/generation-plugins/video-generation")
+    async def put_video_generation_plugin_config(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Persist the adapter only; provider credentials remain in providers.<name>."""
+        _check_token(x_agx_desktop_token)
+        enabled = bool(payload.get("enabled", False))
+        provider = str(payload.get("provider") or "").strip()
+        model = str(payload.get("model") or "").strip()
+        submit_url = str(payload.get("submit_url") or "").strip()
+        status_url_template = str(payload.get("status_url_template") or "").strip()
+        cancel_url_template = str(payload.get("cancel_url_template") or "").strip()
+        if enabled:
+            if not provider or not model or not submit_url:
+                raise HTTPException(status_code=400, detail="启用视频生成需要选择服务商、模型和生成接口地址")
+            provider_raw = ConfigManager.get_value(f"providers.{provider}") or {}
+            if not isinstance(provider_raw, dict) or not (
+                str(provider_raw.get("api_key") or "").strip()
+                or str(provider_raw.get("base_url") or "").strip()
+            ):
+                raise HTTPException(status_code=400, detail="所选服务商尚未配置 API Key 或自定义 API 地址")
+        ConfigManager.set_value("generation_plugins.video-generation", {
+            "enabled": enabled,
+            "display_name": "生成视频",
+            "provider": provider,
+            "model": model,
+            "submit_url": submit_url,
+            "status_url_template": status_url_template,
+            "cancel_url_template": cancel_url_template,
+        })
+        return {"ok": True}
 
     @app.get("/api/config/providers")
     async def get_config_providers(

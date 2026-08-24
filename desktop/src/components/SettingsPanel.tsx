@@ -228,6 +228,88 @@ function providerEffectiveOn(e: ProviderEntry | undefined): boolean {
   return e.enabled !== false && providerCredentialed(e);
 }
 
+type VideoGenerationConfig = {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  submit_url: string;
+  status_url_template: string;
+  cancel_url_template: string;
+};
+
+const EMPTY_VIDEO_GENERATION_CONFIG: VideoGenerationConfig = {
+  enabled: false, provider: "", model: "", submit_url: "", status_url_template: "", cancel_url_template: "",
+};
+
+function VideoGenerationSettings({ apiBase, apiToken, providers }: {
+  apiBase: string; apiToken: string; providers: Record<string, ProviderEntry>;
+}) {
+  const [draft, setDraft] = useState<VideoGenerationConfig>(EMPTY_VIDEO_GENERATION_CONFIG);
+  const [saved, setSaved] = useState<VideoGenerationConfig>(EMPTY_VIDEO_GENERATION_CONFIG);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const availableProviders = Object.entries(providers).filter(([, entry]) => providerCredentialed(entry));
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const response = await studioFetch("/api/config/generation-plugins/video-generation", {
+          apiToken, storeBase: apiBase,
+        });
+        const data = await response.json() as Partial<VideoGenerationConfig>;
+        if (!response.ok) throw new Error("读取视频生成配置失败");
+        const next = { ...EMPTY_VIDEO_GENERATION_CONFIG, ...data };
+        if (!cancelled) { setDraft(next); setSaved(next); }
+      } catch (error) {
+        if (!cancelled) setMessage(`读取失败：${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiBase, apiToken]);
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
+  const update = (key: keyof VideoGenerationConfig, value: string | boolean) => {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+    setMessage("");
+  };
+  const save = async () => {
+    if (!dirty || saving) return;
+    setSaving(true); setMessage("");
+    try {
+      const response = await studioFetch("/api/config/generation-plugins/video-generation", {
+        method: "PUT", apiToken, storeBase: apiBase,
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft),
+      });
+      const data = await response.json() as { detail?: string };
+      if (!response.ok) throw new Error(data.detail || "保存失败");
+      setSaved(draft); setMessage("已保存，插件菜单将立即刷新可用状态。");
+    } catch (error) {
+      setMessage(`保存失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally { setSaving(false); }
+  };
+  const fieldClass = "mt-1 w-full rounded-md border border-border bg-surface-panel px-2.5 py-1.5 text-sm text-text-strong outline-none focus:border-[var(--settings-accent-solid)]";
+
+  return <section className="rounded-xl border border-border bg-surface-card p-4">
+    <div className="flex items-start justify-between gap-4">
+      <div><h3 className="text-sm font-medium text-text-strong">视频生成插件</h3><p className="mt-1 text-xs text-text-faint">复用已有模型服务凭据；此处仅配置任务适配器，不会保存 API Key。</p></div>
+      <label className="flex items-center gap-2 text-xs text-text-muted"><input type="checkbox" checked={draft.enabled} onChange={(e) => update("enabled", e.target.checked)} />启用</label>
+    </div>
+    {loading ? <p className="py-4 text-xs text-text-faint">加载中…</p> : <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <label className="text-xs text-text-muted">服务商<select className={fieldClass} value={draft.provider} onChange={(e) => update("provider", e.target.value)}><option value="">请选择已配置服务商</option>{availableProviders.map(([id]) => <option key={id} value={id}>{getProviderDisplayName(id, providers[id])}</option>)}</select></label>
+      <label className="text-xs text-text-muted">视频模型<input className={fieldClass} value={draft.model} onChange={(e) => update("model", e.target.value)} placeholder="例如 doubao-seedance-2-0-260128" /></label>
+      <label className="text-xs text-text-muted md:col-span-2">生成接口地址<input className={fieldClass} value={draft.submit_url} onChange={(e) => update("submit_url", e.target.value)} placeholder="https://…/video/generations" /></label>
+      <label className="text-xs text-text-muted">查询地址模板（可选）<input className={fieldClass} value={draft.status_url_template} onChange={(e) => update("status_url_template", e.target.value)} placeholder="https://…/tasks/{task_id}" /></label>
+      <label className="text-xs text-text-muted">取消地址模板（可选）<input className={fieldClass} value={draft.cancel_url_template} onChange={(e) => update("cancel_url_template", e.target.value)} placeholder="https://…/tasks/{task_id}/cancel" /></label>
+    </div>}
+    <div className="mt-4 flex items-center gap-3"><button type="button" className="rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text hover:bg-btnPrimary-hover disabled:opacity-40" disabled={!dirty || saving || loading} onClick={() => void save()}>{saving ? "保存中…" : "保存视频生成配置"}</button>{message ? <span className={message.startsWith("保存失败") || message.startsWith("读取失败") ? "text-xs text-rose-400" : "text-xs text-emerald-400"}>{message}</span> : null}</div>
+  </section>;
+}
+
 function isLikelyLocalImagePath(raw: string): boolean {
   const value = String(raw || "").trim();
   if (!value) return false;
@@ -9008,6 +9090,7 @@ export function SettingsPanel({
             {tab === "provider" && (
               <div className="flex min-h-0 flex-1 flex-col gap-3">
                 <RemoteBackendHintBanner kind="synced" />
+                <VideoGenerationSettings apiBase={apiBase} apiToken={apiToken} providers={draft} />
               <div className="flex min-h-0 flex-1 gap-4">
                 {/* Provider sub-list */}
                 <div className="flex w-[176px] shrink-0 flex-col self-stretch rounded-xl border border-border bg-surface-card">
