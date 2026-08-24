@@ -63,36 +63,70 @@ function formatK(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
 }
 
-/** Pie wedge from 12 o'clock clockwise; scales with context usage percent. */
-function pieWedgePath(cx: number, cy: number, r: number, percent: number): string | null {
-  const p = Math.min(100, Math.max(0, Number.isFinite(percent) ? percent : 0));
-  if (p <= 0.05) return null;
-  if (p >= 99.5) {
-    // Full disk (two semicircle arcs)
-    return `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx} ${cy + r} A ${r} ${r} 0 1 1 ${cx} ${cy - r} Z`;
-  }
-  const angle = (p / 100) * 2 * Math.PI;
-  const startX = cx;
-  const startY = cy - r;
-  const endX = cx + r * Math.sin(angle);
-  const endY = cy - r * Math.cos(angle);
-  const largeArc = p > 50 ? 1 : 0;
-  return `M ${cx} ${cy} L ${startX} ${startY} A ${r} ${r} 0 ${largeArc} 1 ${endX} ${endY} Z`;
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(100, Math.max(0, value));
 }
 
-function UsagePieIcon({ percent }: { percent: number }) {
-  const wedge = pieWedgePath(12, 12, 8.0, percent);
+/** Stroke-dasharray for a ring that starts at 12 o'clock. */
+function ringDash(radius: number, percent: number): string {
+  const c = 2 * Math.PI * radius;
+  const filled = (clampPercent(percent) / 100) * c;
+  return `${filled} ${Math.max(0, c - filled)}`;
+}
+
+function UsageDualRingIcon({
+  occupancy,
+  hit,
+}: {
+  occupancy: number;
+  hit: number | null;
+}) {
+  const outerR = 9;
+  const innerR = 5.35;
+  const showOuter = occupancy > 0.05;
+  const showInner = hit !== null && hit > 0.05;
   return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-[17px] w-[17px] shrink-0" aria-hidden>
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px] shrink-0" aria-hidden>
       <circle
         cx="12"
         cy="12"
-        r="8.0"
+        r={outerR}
         stroke="currentColor"
-        strokeWidth="1.7"
+        strokeWidth="1.45"
+        opacity={0.22}
       />
-      {wedge ? (
-        <path d={wedge} fill="currentColor" opacity={0.82} />
+      {showOuter ? (
+        <circle
+          cx="12"
+          cy="12"
+          r={outerR}
+          stroke="currentColor"
+          strokeWidth="1.65"
+          strokeLinecap="round"
+          strokeDasharray={ringDash(outerR, occupancy)}
+          transform="rotate(-90 12 12)"
+        />
+      ) : null}
+      <circle
+        cx="12"
+        cy="12"
+        r={innerR}
+        className="stroke-emerald-400 [html[data-theme=light]_&]:stroke-emerald-500"
+        strokeWidth="2.35"
+        opacity={0.22}
+      />
+      {showInner ? (
+        <circle
+          cx="12"
+          cy="12"
+          r={innerR}
+          className="stroke-emerald-400 [html[data-theme=light]_&]:stroke-emerald-500"
+          strokeWidth="2.35"
+          strokeLinecap="round"
+          strokeDasharray={ringDash(innerR, hit ?? 0)}
+          transform="rotate(-90 12 12)"
+        />
       ) : null}
     </svg>
   );
@@ -232,6 +266,16 @@ export function ContextUsageButton({
     (usage?.cache?.session_input_tokens ?? 0) > 0
       ? usage?.cache?.session_cached_tokens ?? 0
       : sessionTokens?.cached ?? 0;
+  const sessionHit = formatHitPercent(sessionCached, sessionInput);
+  const cardHit = sessionHit !== null ? sessionHit : lastHit;
+  const cardCached =
+    sessionHit !== null
+      ? sessionCached
+      : (sessionTokens?.lastCached ?? usage?.cache?.last_cached_tokens ?? 0);
+  const cardInput =
+    sessionHit !== null
+      ? sessionInput
+      : (sessionTokens?.lastInput ?? usage?.cache?.last_input_tokens ?? 0);
 
   const percent = usage?.percent ?? 0;
   const hoverLabel = useMemo(() => {
@@ -250,10 +294,10 @@ export function ContextUsageButton({
   }, [lastHit, sessionId, usage]);
 
   const hitColor =
-    lastHit === null
+    cardHit === null
       ? "text-text-faint"
-      : lastHit > 0
-        ? "text-emerald-500"
+      : cardHit > 0
+        ? "text-emerald-400 [html[data-theme=light]_&]:text-emerald-600"
         : "text-text-muted";
 
   const trigger = (
@@ -269,7 +313,7 @@ export function ContextUsageButton({
       aria-expanded={open}
       onClick={toggleOpen}
     >
-      <UsagePieIcon percent={percent} />
+      <UsageDualRingIcon occupancy={percent} hit={cardHit} />
     </button>
   );
 
@@ -303,28 +347,31 @@ export function ContextUsageButton({
               ) : (
                 <>
                   <div className="mb-3 grid grid-cols-2 gap-2">
-                    <div className="min-w-0">
+                    <div className="min-w-0 rounded-xl bg-[var(--surface-card-strong)] px-2.5 py-2 [html[data-theme=light]_&]:bg-zinc-100">
                       <div className="text-[11px] text-text-faint">上下文占用</div>
-                      <div className="text-2xl font-semibold text-text-strong">{usage.percent}%</div>
-                      <div className="text-[11px] text-text-faint">
+                      <div className="mt-0.5 text-2xl font-semibold tabular-nums leading-none text-text-strong">
+                        {usage.percent}%
+                      </div>
+                      <div className="mt-1.5 text-[11px] leading-snug text-text-faint">
                         {formatK(usage.used_tokens)} / {formatK(usage.max_tokens)}
                       </div>
                     </div>
-                    <div className="min-w-0">
-                      <div className="text-[11px] text-text-faint">缓存命中率</div>
-                      <div className={`text-2xl font-semibold ${hitColor}`}>
-                        {lastHit === null ? "—" : `${lastHit}%`}
+                    <div className="min-w-0 rounded-xl bg-emerald-500/15 px-2.5 py-2 [html[data-theme=light]_&]:bg-emerald-50">
+                      <div className="text-[11px] text-emerald-400 [html[data-theme=light]_&]:text-emerald-600">
+                        缓存命中率
                       </div>
-                      {lastHit === null ? (
-                        <div className="text-[11px] text-text-faint">本轮尚未返回用量</div>
+                      <div className={`mt-0.5 text-2xl font-semibold tabular-nums leading-none ${hitColor}`}>
+                        {cardHit === null ? "—" : `${cardHit}%`}
+                      </div>
+                      {cardHit === null ? (
+                        <div className="mt-1.5 text-[11px] leading-snug text-text-faint">本轮尚未返回用量</div>
                       ) : (
-                        <div className="text-[11px] text-text-faint">本轮</div>
-                      )}
-                      {sessionInput > 0 ? (
-                        <div className="text-[11px] text-text-faint">
-                          累计 {formatK(sessionCached)} / {formatK(sessionInput)}
+                        <div className="mt-1.5 text-[11px] leading-snug text-emerald-400/75 [html[data-theme=light]_&]:text-emerald-700/70">
+                          {formatK(cardCached)} cached
+                          <br />
+                          / {formatK(cardInput)} input
                         </div>
-                      ) : null}
+                      )}
                     </div>
                   </div>
                   <div className="mb-3 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
