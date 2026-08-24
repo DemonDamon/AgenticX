@@ -52,6 +52,12 @@
 - `deepseek-harness_deepwiki.md`
 - `deepseek-harness_agenticx_gap_analysis.md`
 - `deepseek-harness_proposal.md`
+- `deepseek-harness_delta_2026-08-24.md` — 锁定日后增量（对照 `b150a551b8` / 0.1.1-rc.2）；**未重锁** `upstream/`
+
+## Follow-up (2026-08-24)
+- Trigger: 微信推文与 rc.7→0.1.1 发版。
+- Result: 原 SELECTIVE_ADOPT 不改；新增增量 P1 **D-001**（取消流前缀写入模型可见历史）。见 `deepseek-harness_delta_2026-08-24.md`。
+- Local clone: `upstream/` 仍为 `47f943859b`；增量源码按 GitHub `b150a551b8` 核对。
 
 ## S8 gate checklist
 - [x] upstream/ exists; SHA locked in this file
