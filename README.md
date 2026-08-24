@@ -709,10 +709,12 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **ClawTeam** | [HKUDS/ClawTeam](https://github.com/HKUDS/ClawTeam) | Multi-agent team coordination |
 | **CodexMonitor** | [Dimillian/CodexMonitor](https://github.com/Dimillian/CodexMonitor) | Desktop monitoring & Tauri app patterns |
 | **CrewAI** | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | Crew orchestration, flow & memory system |
+| **Cumora** | [yetone/cumora](https://github.com/yetone/cumora) | Team chat where agents are first-class teammates, plus human-agent group coordination |
 | **DeepSeek Harness** | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | Long-run turn hardening: overflow retry, interrupted closers, fail-closed persist |
 | **DeepWiki Open** | [AsyncFuncAI/deepwiki-open](https://github.com/AsyncFuncAI/deepwiki-open) | Repository-level knowledge indexing |
 | **Deer Flow** | [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | Deep research workflow & skill harness |
 | **Eigent** | [eigent-ai/eigent](https://github.com/eigent-ai/eigent) | Multi-agent workforce & SSE event spec |
+| **Grok Bot** | [docs.x.ai/grok-bot](https://docs.x.ai/grok-bot/overview) | Persistent named teammates, shared computer, independent coordination, and learn-from-demo workflows |
 | **Iron Claw** | [nearai/ironclaw](https://github.com/nearai/ironclaw) | Agent evaluation & benchmark harness |
 | **JoyAgent / JD Genie** | [jd-opensource/joyagent-jdgenie](https://github.com/jd-opensource/joyagent-jdgenie) | Enterprise agent orchestration |
 | **Khazix Skills** | [KKKKhazix/Khazix-Skills](https://github.com/KKKKhazix/Khazix-Skills) | Skill module structure & packaging |
