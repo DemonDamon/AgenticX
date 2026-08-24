@@ -710,7 +710,7 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **CodexMonitor** | [Dimillian/CodexMonitor](https://github.com/Dimillian/CodexMonitor) | Desktop monitoring & Tauri app patterns |
 | **CrewAI** | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | Crew orchestration, flow & memory system |
 | **Cumora** | [yetone/cumora](https://github.com/yetone/cumora) | Team chat where agents are first-class teammates, plus human-agent group coordination |
-| **DeepSeek Harness** | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | Long-run turn hardening: overflow retry, interrupted closers, fail-closed persist |
+| **DeepSeek Harness** | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | Long-run turn hardening: overflow retry, interrupted closers, fail-closed persist, context reset with bounded handoff |
 | **DeepWiki Open** | [AsyncFuncAI/deepwiki-open](https://github.com/AsyncFuncAI/deepwiki-open) | Repository-level knowledge indexing |
 | **Deer Flow** | [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | Deep research workflow & skill harness |
 | **Eigent** | [eigent-ai/eigent](https://github.com/eigent-ai/eigent) | Multi-agent workforce & SSE event spec |

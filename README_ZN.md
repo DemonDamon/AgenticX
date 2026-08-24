@@ -706,7 +706,7 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **CodexMonitor** | [Dimillian/CodexMonitor](https://github.com/Dimillian/CodexMonitor) | 桌面监控面板与 Tauri 应用模式 |
 | **CrewAI** | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | Crew 编排、Flow 工作流与记忆系统 |
 | **Cumora** | [yetone/cumora](https://github.com/yetone/cumora) | 智能体作为一等成员的团队聊天、人机同群与跨智能体协作 |
-| **DeepSeek Harness** | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | 长程回合加固：窗口溢出同轮重试、中断 closer、落盘失败即停 |
+| **DeepSeek Harness** | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | 长程回合加固：窗口溢出同轮重试、中断 closer、落盘失败即停、上下文复位与有界 handoff |
 | **DeepWiki Open** | [AsyncFuncAI/deepwiki-open](https://github.com/AsyncFuncAI/deepwiki-open) | 仓库级知识索引 |
 | **Deer Flow** | [bytedance/deer-flow](https://github.com/bytedance/deer-flow) | 深度研究工作流与 Skill 测试框架 |
 | **Eigent** | [eigent-ai/eigent](https://github.com/eigent-ai/eigent) | 多智能体 Workforce 与 SSE 事件规范 |
