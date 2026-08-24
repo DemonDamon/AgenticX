@@ -5,22 +5,42 @@ Author: Damon Li
 """
 
 import json
+import threading
+import time
 from typing import Any
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.model_context_window import resolve_context_window
+from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.prompts.meta_agent import (
     _build_active_subagents_context,
+    _build_avatars_context,
+    _build_computer_use_capabilities_block,
     _build_context_files_block,
+    _build_kb_retrieval_policy_block,
     _build_mcps_context,
-    _build_memory_recall_context,
+    _build_native_connectors_context,
+    _build_session_summary_context,
     _build_skills_context,
-    build_meta_agent_system_prompt,
+    _build_taskspaces_context,
+    _build_todo_context,
+    _build_workspace_context_block,
 )
 
 _CHARS_PER_TOKEN = 4
+_SKILL_SUMMARY_TTL_SECONDS = 45.0
+_OCCUPANCY_CACHE_MAX = 48
+# Instruction-body chars from meta_agent.py (duties / scheduling / MCP loop).
+# Measured independently of session I/O so occupancy stays in the same band
+# without concatenating the live system prompt on every session switch.
+_STATIC_DUTY_CHARS = 18_000
+
+_SKILL_LOCK = threading.Lock()
+_SKILL_CACHE: dict[str, tuple[float, list]] = {}
+_OCCUPANCY_LOCK = threading.Lock()
+_OCCUPANCY_CACHE: dict[str, tuple[tuple[Any, ...], dict[str, int]]] = {}
 
 
 def _chars_to_tokens(chars: int) -> int:
@@ -29,11 +49,90 @@ def _chars_to_tokens(chars: int) -> int:
     return max(1, chars // _CHARS_PER_TOKEN)
 
 
-def _safe_block(fn: Any, *args: Any) -> str:
+def _safe_block(fn: Any, *args: Any, **kwargs: Any) -> str:
     try:
-        return fn(*args)
+        return fn(*args, **kwargs)
     except Exception:
         return ""
+
+
+def _reset_usage_caches() -> None:
+    """Test helper: drop in-process occupancy / skill caches."""
+    with _SKILL_LOCK:
+        _SKILL_CACHE.clear()
+    with _OCCUPANCY_LOCK:
+        _OCCUPANCY_CACHE.clear()
+
+
+def _skill_summaries(bound_avatar_id: str | None) -> list:
+    key = str(bound_avatar_id or "")
+    now = time.monotonic()
+    with _SKILL_LOCK:
+        hit = _SKILL_CACHE.get(key)
+        if hit is not None and now - hit[0] < _SKILL_SUMMARY_TTL_SECONDS:
+            return hit[1]
+    try:
+        rows = get_all_skill_summaries(bound_avatar_id=bound_avatar_id)
+    except Exception:
+        rows = []
+    with _SKILL_LOCK:
+        _SKILL_CACHE[key] = (now, rows)
+    return rows
+
+
+def _occupancy_fingerprint(
+    managed: Any,
+    *,
+    avatar_context: dict[str, str] | None,
+    group_chat: dict[str, Any] | None,
+) -> tuple[Any, ...]:
+    session = managed.studio_session
+    msgs = getattr(session, "agent_messages", None) or []
+    last = ""
+    if msgs:
+        try:
+            last = json.dumps(msgs[-1], ensure_ascii=False, default=str)[:160]
+        except Exception:
+            last = str(msgs[-1])[:160]
+    hub = getattr(session, "mcp_hub", None)
+    n_mcp = len(getattr(hub, "tools", None) or []) if hub is not None else 0
+    group_ids = ""
+    if isinstance(group_chat, dict):
+        raw_ids = group_chat.get("avatar_ids")
+        if isinstance(raw_ids, list):
+            group_ids = ",".join(sorted(str(x).strip() for x in raw_ids if str(x).strip()))
+    avatar_key = ""
+    if isinstance(avatar_context, dict):
+        avatar_key = str(avatar_context.get("name", "") or "")
+    return (
+        len(msgs),
+        last,
+        str(getattr(session, "bound_avatar_id", "") or ""),
+        len(getattr(managed, "taskspaces", None) or []),
+        n_mcp,
+        avatar_key,
+        group_ids,
+        str(getattr(session, "kb_retrieval_mode", "") or ""),
+    )
+
+
+def _payload_from_categories(
+    categories: dict[str, int],
+    *,
+    session_model: str,
+    override_model: str,
+) -> dict:
+    used_tokens = sum(categories.values())
+    max_tokens = resolve_usage_window(
+        session_model=session_model,
+        override_model=override_model,
+    )
+    return {
+        "used_tokens": used_tokens,
+        "max_tokens": max_tokens,
+        "percent": round(min(100.0, (used_tokens / max_tokens) * 100), 1) if max_tokens > 0 else 0.0,
+        "categories": categories,
+    }
 
 
 def resolve_usage_window(*, session_model: str = "", override_model: str = "") -> int:
@@ -55,13 +154,14 @@ def estimate_session_context_usage(
     user_nickname: str = "",
     user_preference: str = "",
     model_name: str = "",
+    session_id: str = "",
 ) -> dict:
     """Read-only estimate of context usage broken down into 5 categories.
 
-    This never mutates session state and never affects the hot chat-send
-    path; it independently re-invokes the same read-only prompt-building
-    helper functions used when constructing the real system prompt, purely
-    for estimation when the Desktop context-usage popup is opened.
+    Session switches must stay cheap: do not rebuild the live system prompt
+    (that path scans skills and runs hybrid memory recall). Categories come
+    from the same block helpers, with skill summaries and occupancy rows
+    cached in-process.
     """
     session = managed.studio_session
     bound_avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
@@ -69,43 +169,74 @@ def estimate_session_context_usage(
         avatar_context = None
     if not isinstance(group_chat, dict):
         group_chat = None
-    user_nickname = str(user_nickname or "").strip()
-    user_preference = str(user_preference or "").strip()
-    kb_mode_override = str(getattr(session, "kb_retrieval_mode", "") or "").strip() or None
+    sid = str(session_id or getattr(session, "session_id", "") or "").strip()
+    session_model = str(getattr(session, "model_name", "") or "")
+    fingerprint = _occupancy_fingerprint(
+        managed,
+        avatar_context=avatar_context,
+        group_chat=group_chat,
+    )
+    if sid:
+        with _OCCUPANCY_LOCK:
+            cached = _OCCUPANCY_CACHE.get(sid)
+        if cached is not None and cached[0] == fingerprint:
+            return _payload_from_categories(
+                cached[1],
+                session_model=session_model,
+                override_model=model_name,
+            )
 
-    try:
-        skill_summaries = get_all_skill_summaries(bound_avatar_id=bound_avatar_id)
-    except Exception:
-        skill_summaries = []
-
-    try:
-        full_system_prompt = build_meta_agent_system_prompt(
-            session,
-            mode="interactive",
-            taskspaces=getattr(managed, "taskspaces", None) or [],
-            avatar_context=avatar_context,
-            group_chat=group_chat,
-            user_nickname=user_nickname,
-            user_preference=user_preference,
-            kb_retrieval_mode_override=kb_mode_override,
-        )
-    except Exception:
-        full_system_prompt = ""
-
+    skill_summaries = _skill_summaries(bound_avatar_id)
     skills_chars = len(_safe_block(_build_skills_context, skill_summaries))
     mcp_chars = len(_safe_block(_build_mcps_context, session))
     subagents_chars = len(_safe_block(_build_active_subagents_context, session))
-    memory_chars = len(_safe_block(_build_memory_recall_context, session))
     context_files_chars = len(_safe_block(_build_context_files_block, session))
-
-    base_system_chars = max(
-        0,
-        len(full_system_prompt)
-        - skills_chars
-        - mcp_chars
-        - subagents_chars
-        - memory_chars
-        - context_files_chars,
+    todo_chars = len(_safe_block(_build_todo_context, session))
+    summary_chars = len(_safe_block(_build_session_summary_context, session))
+    taskspaces = getattr(managed, "taskspaces", None) or []
+    taskspace_chars = len(_safe_block(_build_taskspaces_context, taskspaces))
+    connector_chars = len(_safe_block(_build_native_connectors_context))
+    group_allowed: set[str] | None = None
+    group_name = ""
+    if group_chat:
+        raw_ids = group_chat.get("avatar_ids")
+        if isinstance(raw_ids, list):
+            group_allowed = {str(x).strip() for x in raw_ids if str(x).strip()}
+        group_name = str(group_chat.get("name", "") or "").strip()
+    avatars_chars = len(_safe_block(_build_avatars_context, allowed_avatar_ids=group_allowed))
+    subject_label = (
+        (group_name if group_allowed is not None else "")
+        or str((avatar_context or {}).get("name", "") or "").strip()
+        or "元智能体"
+    )
+    workspace_chars = len(
+        _safe_block(
+            _build_workspace_context_block,
+            bound_avatar_id,
+            session=session,
+            subject_label=subject_label,
+        )
+    )
+    kb_mode = str(getattr(session, "kb_retrieval_mode", "") or "").strip() or None
+    identity = (
+        f"你是 AgenticX Desktop 的分身智能体「{str((avatar_context or {}).get('name', '')).strip()}」。\n"
+        if avatar_context and str(avatar_context.get("name", "") or "").strip()
+        else "你是 AgenticX Desktop 的首席 Meta-Agent（CEO）。\n"
+    )
+    system_chars = (
+        _STATIC_DUTY_CHARS
+        + workspace_chars
+        + todo_chars
+        + summary_chars
+        + taskspace_chars
+        + connector_chars
+        + avatars_chars
+        + len(identity)
+        + len(_safe_block(build_current_time_block))
+        + len(_safe_block(_build_computer_use_capabilities_block))
+        + len(_safe_block(_build_kb_retrieval_policy_block, kb_mode))
+        + len(str(user_nickname or ""))
+        + len(str(user_preference or ""))
     )
 
     is_avatar = bound_avatar_id is not None
@@ -151,25 +282,22 @@ def estimate_session_context_usage(
             mcp_tool_chars = 0
 
     categories = {
-        "system_prompt": _chars_to_tokens(base_system_chars),
+        "system_prompt": _chars_to_tokens(system_chars),
         "tools_and_subagents": _chars_to_tokens(tools_chars + subagents_chars),
-        "messages": _chars_to_tokens(messages_chars + memory_chars + context_files_chars),
+        "messages": _chars_to_tokens(messages_chars + context_files_chars),
         "connectors_and_mcp": _chars_to_tokens(mcp_chars + mcp_tool_chars),
         "skills": _chars_to_tokens(skills_chars),
     }
-    used_tokens = sum(categories.values())
-    session_model = str(getattr(session, "model_name", "") or "")
-    max_tokens = resolve_usage_window(
+    if sid:
+        with _OCCUPANCY_LOCK:
+            _OCCUPANCY_CACHE[sid] = (fingerprint, categories)
+            while len(_OCCUPANCY_CACHE) > _OCCUPANCY_CACHE_MAX:
+                _OCCUPANCY_CACHE.pop(next(iter(_OCCUPANCY_CACHE)))
+    return _payload_from_categories(
+        categories,
         session_model=session_model,
         override_model=model_name,
     )
-
-    return {
-        "used_tokens": used_tokens,
-        "max_tokens": max_tokens,
-        "percent": round(min(100.0, (used_tokens / max_tokens) * 100), 1) if max_tokens > 0 else 0.0,
-        "categories": categories,
-    }
 
 
 def _empty_session_cache_payload() -> dict[str, int | float]:

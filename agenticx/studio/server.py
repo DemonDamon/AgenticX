@@ -2110,21 +2110,27 @@ def create_studio_app() -> FastAPI:
 
         try:
             # 丢到线程里跑：这是纯同步的只读估算，放在 async def 里会把事件循环
-            # 整个占住——正在流式输出的那一轮会跟着卡。
-            usage = await asyncio.to_thread(
-                estimate_session_context_usage,
-                managed,
-                avatar_context=avatar_context,
-                group_chat=group_chat,
-                model_name=model or "",
+            # 整个占住——正在流式输出的那一轮会跟着卡。账本读取和占用估算互不依赖。
+            usage, cache = await asyncio.gather(
+                asyncio.to_thread(
+                    estimate_session_context_usage,
+                    managed,
+                    avatar_context=avatar_context,
+                    group_chat=group_chat,
+                    model_name=model or "",
+                    session_id=session_id,
+                ),
+                asyncio.to_thread(load_session_cache_payload, session_id),
+                return_exceptions=True,
             )
         except Exception as exc:
             logger.warning("context usage estimate failed for %s: %s", session_id, exc)
             raise HTTPException(status_code=500, detail="failed to estimate context usage")
-        try:
-            cache = await asyncio.to_thread(load_session_cache_payload, session_id)
-        except Exception as exc:
-            logger.warning("session cache payload failed for %s: %s", session_id, exc)
+        if isinstance(usage, Exception):
+            logger.warning("context usage estimate failed for %s: %s", session_id, usage)
+            raise HTTPException(status_code=500, detail="failed to estimate context usage")
+        if isinstance(cache, Exception):
+            logger.warning("session cache payload failed for %s: %s", session_id, cache)
             cache = {
                 "session_input_tokens": 0,
                 "session_cached_tokens": 0,

@@ -59,6 +59,30 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const CONTEXT_PANEL_WIDTH = 300;
 const CONTEXT_PANEL_GUTTER = 12;
+const USAGE_CACHE_MAX = 24;
+const usageBySession = new Map<string, ContextUsage>();
+
+function usageCacheKey(sessionId: string, model: string): string {
+  return `${sessionId}\0${model}`;
+}
+
+function readUsageCache(sessionId: string, model: string): ContextUsage | null {
+  const exact = usageBySession.get(usageCacheKey(sessionId, model));
+  if (exact) return exact;
+  for (const row of usageBySession.values()) {
+    if (row.fetchedForSessionId === sessionId) return row;
+  }
+  return null;
+}
+
+function writeUsageCache(row: ContextUsage): void {
+  usageBySession.set(usageCacheKey(row.fetchedForSessionId, row.fetchedForModel), row);
+  while (usageBySession.size > USAGE_CACHE_MAX) {
+    const first = usageBySession.keys().next().value;
+    if (!first) break;
+    usageBySession.delete(first);
+  }
+}
 
 function formatK(n: number): string {
   if (!Number.isFinite(n)) return "0";
@@ -196,7 +220,7 @@ export function ContextUsageButton({
       if (requestSeq !== requestSeqRef.current) return;
       const returnedSessionId = String(data.session_id ?? requestedSessionId).trim();
       if (returnedSessionId !== requestedSessionId) return;
-      setUsage({
+      const next: ContextUsage = {
         used_tokens: Number(data.used_tokens ?? 0),
         max_tokens: Number(data.max_tokens ?? 0),
         percent: Number(data.percent ?? 0),
@@ -204,11 +228,15 @@ export function ContextUsageButton({
         cache: parseCache(data.cache),
         fetchedForSessionId: returnedSessionId,
         fetchedForModel: requestedModel,
-      });
+      };
+      writeUsageCache(next);
+      setUsage(next);
     } catch {
       if (requestSeq !== requestSeqRef.current) return;
-      setUsage(null);
-      setLoadFailed(true);
+      if (!readUsageCache(requestedSessionId, requestedModel)) {
+        setUsage(null);
+        setLoadFailed(true);
+      }
     }
   }, [apiBase, apiToken, paneModel, sessionId]);
 
@@ -246,31 +274,26 @@ export function ContextUsageButton({
     };
   }, [open, refreshPanelPosition]);
 
-  // Drop residual occupancy/cache the moment the pane binds a different
-  // session or model. Otherwise the previous payload stays on screen until
-  // the next fetch lands — two panes then look identical.
+  // Restore this session's last payload instantly on switch. Never keep
+  // another session's numbers on screen; never blank to "加载中" when we
+  // already have a row for the new session.
   useEffect(() => {
-    setUsage(null);
     setLoadFailed(false);
-    requestSeqRef.current += 1;
-    if (!sessionId) return;
+    if (!sessionId) {
+      setUsage(null);
+      return;
+    }
+    const cached = readUsageCache(sessionId, paneModel);
+    setUsage(cached);
     void fetchUsage();
   }, [fetchUsage, paneModel, sessionId]);
 
   useEffect(() => {
-    if (open && sessionId) {
-      refreshPanelPosition();
-      void fetchUsage();
-    }
-  }, [fetchUsage, open, refreshPanelPosition, sessionId]);
+    if (open && sessionId) refreshPanelPosition();
+  }, [open, refreshPanelPosition, sessionId]);
 
   const sessionTokens = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.sessionTokens);
-  const visibleUsage =
-    usage &&
-    usage.fetchedForSessionId === sessionId &&
-    usage.fetchedForModel === paneModel
-      ? usage
-      : null;
+  const visibleUsage = usage && usage.fetchedForSessionId === sessionId ? usage : null;
   const liveHit = formatHitPercent(sessionTokens?.lastCached ?? 0, sessionTokens?.lastInput ?? 0);
   const apiHit = formatHitPercent(
     visibleUsage?.cache?.last_cached_tokens ?? 0,

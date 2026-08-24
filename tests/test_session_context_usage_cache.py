@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from agenticx.runtime.usage_store import UsageStore
 from agenticx.studio.context_usage import (
+    _reset_usage_caches,
     estimate_session_context_usage,
     load_session_cache_payload,
 )
@@ -51,34 +52,102 @@ def test_load_session_cache_payload_unknown_session_is_zeros(tmp_path, monkeypat
     assert payload["zero_cache_requests"] == 0
 
 
-def test_estimate_uses_override_model_for_window(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "agenticx.studio.context_usage.get_all_skill_summaries",
-        lambda bound_avatar_id=None: [],
-    )
-    monkeypatch.setattr(
-        "agenticx.studio.context_usage.build_meta_agent_system_prompt",
-        lambda *args, **kwargs: "",
-    )
+def _empty_managed(session_id: str = "sid-test"):
     session = SimpleNamespace(
+        session_id=session_id,
         model_name="",
         bound_avatar_id=None,
         kb_retrieval_mode="",
         agent_messages=[],
         mcp_hub=None,
+        mcp_configs={},
+        connected_servers=set(),
+        chat_history=[],
+        scratchpad={},
+        todo_manager=None,
     )
-    managed = SimpleNamespace(studio_session=session, taskspaces=[])
-    assert estimate_session_context_usage(managed)["max_tokens"] == 128_000
+    return SimpleNamespace(studio_session=session, taskspaces=[])
+
+
+def test_estimate_uses_override_model_for_window(monkeypatch) -> None:
+    _reset_usage_caches()
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage.get_all_skill_summaries",
+        lambda bound_avatar_id=None: [],
+    )
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage._build_workspace_context_block",
+        lambda *args, **kwargs: "",
+    )
+    managed = _empty_managed()
+    assert estimate_session_context_usage(managed, session_id="sid-test")["max_tokens"] == 128_000
     assert (
-        estimate_session_context_usage(managed, model_name="MiniMax-M2.7")["max_tokens"]
+        estimate_session_context_usage(managed, session_id="sid-test", model_name="MiniMax-M2.7")[
+            "max_tokens"
+        ]
         == 192_000
     )
-    assert estimate_session_context_usage(managed, model_name="glm-5.2")["max_tokens"] == 1_000_000
-    session.model_name = "glm-5.2"
     assert (
-        estimate_session_context_usage(managed, model_name="MiniMax-M2.7")["max_tokens"]
+        estimate_session_context_usage(managed, session_id="sid-test", model_name="glm-5.2")[
+            "max_tokens"
+        ]
+        == 1_000_000
+    )
+    managed.studio_session.model_name = "glm-5.2"
+    assert (
+        estimate_session_context_usage(managed, session_id="sid-test", model_name="MiniMax-M2.7")[
+            "max_tokens"
+        ]
         == 192_000
     )
+
+
+def test_estimate_reuses_occupancy_cache_without_rescan(monkeypatch) -> None:
+    _reset_usage_caches()
+    calls = {"skills": 0}
+
+    def _skills(**_kwargs):
+        calls["skills"] += 1
+        return []
+
+    monkeypatch.setattr("agenticx.studio.context_usage.get_all_skill_summaries", _skills)
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage._build_workspace_context_block",
+        lambda *args, **kwargs: "",
+    )
+    managed = _empty_managed("sid-cache")
+    first = estimate_session_context_usage(managed, session_id="sid-cache")
+    second = estimate_session_context_usage(
+        managed, session_id="sid-cache", model_name="glm-5.2"
+    )
+    assert calls["skills"] == 1
+    assert first["categories"] == second["categories"]
+    assert second["max_tokens"] == 1_000_000
+
+
+def test_estimate_does_not_rebuild_live_system_prompt(monkeypatch) -> None:
+    _reset_usage_caches()
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage.get_all_skill_summaries",
+        lambda bound_avatar_id=None: [],
+    )
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage._build_workspace_context_block",
+        lambda *args, **kwargs: "",
+    )
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("must not rebuild the live system prompt")
+
+    monkeypatch.setattr(
+        "agenticx.runtime.prompts.meta_agent.build_meta_agent_system_prompt",
+        _boom,
+    )
+    monkeypatch.setattr(
+        "agenticx.runtime.prompts.meta_agent._build_memory_recall_context",
+        _boom,
+    )
+    estimate_session_context_usage(_empty_managed("sid-fast"), session_id="sid-fast")
 
 
 def test_context_usage_api_uses_model_query_for_window(monkeypatch) -> None:
