@@ -689,7 +689,7 @@ This project is licensed under the Apache License, Version 2.0 — see the [LICE
 
 ## Acknowledgments
 
-AgenticX would not exist in its current form without the inspiration, architectural ideas, and engineering wisdom we drew from the open-source community. We have studied the following projects in depth, and we are genuinely grateful to every author, contributor, and community behind them.
+AgenticX would not exist in its current form without the inspiration, architectural ideas, and engineering wisdom we drew from the open-source community. We have studied the following projects in depth — a few entries are external products rather than open-source repositories, where we studied their public documentation and design instead of their source. We are genuinely grateful to every author, contributor, and community behind them.
 
 | Project | Repository | What we learned |
 |---------|-----------|-----------------|
