@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from agenticx.runtime.model_context_window import resolve_context_window
-from agenticx.studio.context_usage import resolve_context_window as resolve_from_context_usage
+from agenticx.studio.context_usage import (
+    resolve_context_window as resolve_from_context_usage,
+    resolve_usage_window,
+)
 
 
 def test_resolve_context_window_known_models():
@@ -28,3 +31,11 @@ def test_resolve_context_window_known_models():
 def test_resolve_context_window_none_and_empty():
     assert resolve_context_window(None) == 128_000
     assert resolve_context_window("") == 128_000
+
+
+def test_resolve_usage_window_prefers_override_over_empty_session_model():
+    assert resolve_usage_window(session_model="", override_model="") == 128_000
+    assert resolve_usage_window(session_model="", override_model="MiniMax-M2.7") == 192_000
+    assert resolve_usage_window(session_model="", override_model="glm-5.2") == 1_000_000
+    assert resolve_usage_window(session_model="glm-5.2", override_model="MiniMax-M2.7") == 192_000
+    assert resolve_usage_window(session_model="glm-5.2", override_model="") == 1_000_000

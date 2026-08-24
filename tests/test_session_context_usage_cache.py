@@ -6,8 +6,13 @@ Author: Damon Li
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from agenticx.runtime.usage_store import UsageStore
-from agenticx.studio.context_usage import load_session_cache_payload
+from agenticx.studio.context_usage import (
+    estimate_session_context_usage,
+    load_session_cache_payload,
+)
 
 
 def test_load_session_cache_payload_reads_session_totals(tmp_path, monkeypatch) -> None:
@@ -44,3 +49,71 @@ def test_load_session_cache_payload_unknown_session_is_zeros(tmp_path, monkeypat
     assert payload["last_cached_tokens"] == 0
     assert payload["requests"] == 0
     assert payload["zero_cache_requests"] == 0
+
+
+def test_estimate_uses_override_model_for_window(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage.get_all_skill_summaries",
+        lambda bound_avatar_id=None: [],
+    )
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage.build_meta_agent_system_prompt",
+        lambda *args, **kwargs: "",
+    )
+    session = SimpleNamespace(
+        model_name="",
+        bound_avatar_id=None,
+        kb_retrieval_mode="",
+        agent_messages=[],
+        mcp_hub=None,
+    )
+    managed = SimpleNamespace(studio_session=session, taskspaces=[])
+    assert estimate_session_context_usage(managed)["max_tokens"] == 128_000
+    assert (
+        estimate_session_context_usage(managed, model_name="MiniMax-M2.7")["max_tokens"]
+        == 192_000
+    )
+    assert estimate_session_context_usage(managed, model_name="glm-5.2")["max_tokens"] == 1_000_000
+    session.model_name = "glm-5.2"
+    assert (
+        estimate_session_context_usage(managed, model_name="MiniMax-M2.7")["max_tokens"]
+        == 192_000
+    )
+
+
+def test_context_usage_api_uses_model_query_for_window(monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from agenticx.studio.server import create_studio_app
+
+    monkeypatch.delenv("AGX_DESKTOP_TOKEN", raising=False)
+    app = create_studio_app()
+    client = TestClient(app)
+    created = client.get("/api/session")
+    assert created.status_code == 200
+    sid = created.json()["session_id"]
+    assert client.get("/api/avatars").status_code == 200
+    assert client.get("/api/sessions").status_code == 200
+
+    empty = client.get("/api/session/context_usage", params={"session_id": sid})
+    assert empty.status_code == 200
+    assert empty.json()["session_id"] == sid
+    assert empty.json()["max_tokens"] == 128_000
+
+    glm = client.get(
+        "/api/session/context_usage",
+        params={"session_id": sid, "model": "glm-5.2"},
+    )
+    assert glm.status_code == 200
+    assert glm.json()["session_id"] == sid
+    assert glm.json()["model"] == "glm-5.2"
+    assert glm.json()["max_tokens"] == 1_000_000
+
+    mm = client.get(
+        "/api/session/context_usage",
+        params={"session_id": sid, "model": "MiniMax-M2.7"},
+    )
+    assert mm.status_code == 200
+    assert mm.json()["session_id"] == sid
+    assert mm.json()["model"] == "MiniMax-M2.7"
+    assert mm.json()["max_tokens"] == 192_000

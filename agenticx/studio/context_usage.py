@@ -36,6 +36,17 @@ def _safe_block(fn: Any, *args: Any) -> str:
         return ""
 
 
+def resolve_usage_window(*, session_model: str = "", override_model: str = "") -> int:
+    """Pane-selected model wins over a blank/stale session.model_name.
+
+    Occupancy percent is window / used. If the Desktop pane has already
+    switched models but the session row still has an empty model_name, the
+    lookup must not pin the default 128K window.
+    """
+    name = str(override_model or "").strip() or str(session_model or "").strip()
+    return resolve_context_window(name)
+
+
 def estimate_session_context_usage(
     managed: Any,
     *,
@@ -43,6 +54,7 @@ def estimate_session_context_usage(
     group_chat: dict[str, Any] | None = None,
     user_nickname: str = "",
     user_preference: str = "",
+    model_name: str = "",
 ) -> dict:
     """Read-only estimate of context usage broken down into 5 categories.
 
@@ -146,8 +158,11 @@ def estimate_session_context_usage(
         "skills": _chars_to_tokens(skills_chars),
     }
     used_tokens = sum(categories.values())
-    model_name = str(getattr(session, "model_name", "") or "")
-    max_tokens = resolve_context_window(model_name)
+    session_model = str(getattr(session, "model_name", "") or "")
+    max_tokens = resolve_usage_window(
+        session_model=session_model,
+        override_model=model_name,
+    )
 
     return {
         "used_tokens": used_tokens,

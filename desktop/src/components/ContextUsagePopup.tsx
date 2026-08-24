@@ -18,6 +18,8 @@ interface ContextUsage {
   percent: number;
   categories: Record<string, number>;
   cache?: SessionCacheUsage;
+  fetchedForSessionId: string;
+  fetchedForModel: string;
 }
 
 function parseCache(raw: unknown): SessionCacheUsage | undefined {
@@ -154,6 +156,10 @@ export function ContextUsageButton({
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const requestSeqRef = useRef(0);
+  const paneModel = useAppStore((s) => {
+    const pane = s.panes.find((item) => item.id === paneId);
+    return String(pane?.modelName ?? "").trim();
+  });
 
   const refreshPanelPosition = useCallback(() => {
     const rect = buttonRef.current?.getBoundingClientRect();
@@ -176,28 +182,35 @@ export function ContextUsageButton({
   const fetchUsage = useCallback(async () => {
     if (!sessionId) return;
     const requestSeq = ++requestSeqRef.current;
+    const requestedSessionId = sessionId;
+    const requestedModel = paneModel;
     setLoadFailed(false);
     try {
-      const res = await fetch(
-        `${apiBase}/api/session/context_usage?session_id=${encodeURIComponent(sessionId)}`,
-        { headers: { "X-Agx-Desktop-Token": apiToken } }
-      );
+      const params = new URLSearchParams({ session_id: requestedSessionId });
+      if (requestedModel) params.set("model", requestedModel);
+      const res = await fetch(`${apiBase}/api/session/context_usage?${params.toString()}`, {
+        headers: { "X-Agx-Desktop-Token": apiToken },
+      });
       if (!res.ok) throw new Error(`http ${res.status}`);
       const data = await res.json();
       if (requestSeq !== requestSeqRef.current) return;
+      const returnedSessionId = String(data.session_id ?? requestedSessionId).trim();
+      if (returnedSessionId !== requestedSessionId) return;
       setUsage({
         used_tokens: Number(data.used_tokens ?? 0),
         max_tokens: Number(data.max_tokens ?? 0),
         percent: Number(data.percent ?? 0),
         categories: data.categories ?? {},
         cache: parseCache(data.cache),
+        fetchedForSessionId: returnedSessionId,
+        fetchedForModel: requestedModel,
       });
     } catch {
       if (requestSeq !== requestSeqRef.current) return;
       setUsage(null);
       setLoadFailed(true);
     }
-  }, [apiBase, apiToken, sessionId]);
+  }, [apiBase, apiToken, paneModel, sessionId]);
 
   const toggleOpen = useCallback(() => {
     if (!sessionId) return;
@@ -233,16 +246,16 @@ export function ContextUsageButton({
     };
   }, [open, refreshPanelPosition]);
 
-  // Warm pie fill when the bound session changes.
+  // Drop residual occupancy/cache the moment the pane binds a different
+  // session or model. Otherwise the previous payload stays on screen until
+  // the next fetch lands — two panes then look identical.
   useEffect(() => {
+    setUsage(null);
     setLoadFailed(false);
     requestSeqRef.current += 1;
-    if (!sessionId) {
-      setUsage(null);
-      return;
-    }
+    if (!sessionId) return;
     void fetchUsage();
-  }, [fetchUsage, sessionId]);
+  }, [fetchUsage, paneModel, sessionId]);
 
   useEffect(() => {
     if (open && sessionId) {
@@ -252,46 +265,52 @@ export function ContextUsageButton({
   }, [fetchUsage, open, refreshPanelPosition, sessionId]);
 
   const sessionTokens = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.sessionTokens);
+  const visibleUsage =
+    usage &&
+    usage.fetchedForSessionId === sessionId &&
+    usage.fetchedForModel === paneModel
+      ? usage
+      : null;
   const liveHit = formatHitPercent(sessionTokens?.lastCached ?? 0, sessionTokens?.lastInput ?? 0);
   const apiHit = formatHitPercent(
-    usage?.cache?.last_cached_tokens ?? 0,
-    usage?.cache?.last_input_tokens ?? 0
+    visibleUsage?.cache?.last_cached_tokens ?? 0,
+    visibleUsage?.cache?.last_input_tokens ?? 0
   );
   const lastHit = liveHit !== null ? liveHit : apiHit;
   const sessionInput =
-    (usage?.cache?.session_input_tokens ?? 0) > 0
-      ? usage?.cache?.session_input_tokens ?? 0
+    (visibleUsage?.cache?.session_input_tokens ?? 0) > 0
+      ? visibleUsage?.cache?.session_input_tokens ?? 0
       : sessionTokens?.input ?? 0;
   const sessionCached =
-    (usage?.cache?.session_input_tokens ?? 0) > 0
-      ? usage?.cache?.session_cached_tokens ?? 0
+    (visibleUsage?.cache?.session_input_tokens ?? 0) > 0
+      ? visibleUsage?.cache?.session_cached_tokens ?? 0
       : sessionTokens?.cached ?? 0;
   const sessionHit = formatHitPercent(sessionCached, sessionInput);
   const cardHit = sessionHit !== null ? sessionHit : lastHit;
   const cardCached =
     sessionHit !== null
       ? sessionCached
-      : (sessionTokens?.lastCached ?? usage?.cache?.last_cached_tokens ?? 0);
+      : (sessionTokens?.lastCached ?? visibleUsage?.cache?.last_cached_tokens ?? 0);
   const cardInput =
     sessionHit !== null
       ? sessionInput
-      : (sessionTokens?.lastInput ?? usage?.cache?.last_input_tokens ?? 0);
+      : (sessionTokens?.lastInput ?? visibleUsage?.cache?.last_input_tokens ?? 0);
 
-  const percent = usage?.percent ?? 0;
+  const percent = visibleUsage?.percent ?? 0;
   const hoverLabel = useMemo(() => {
     if (open) return "";
     if (!sessionId) return "上下文用量（会话未就绪）";
-    if (!usage) return "上下文用量";
-    const occupancy = `${usage.percent}% · ${formatK(usage.used_tokens)} / ${formatK(usage.max_tokens)} 上下文已使用`;
+    if (!visibleUsage) return "上下文用量";
+    const occupancy = `${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)} 上下文已使用`;
     return lastHit !== null ? `${occupancy} · 本轮命中 ${lastHit}%` : occupancy;
-  }, [lastHit, open, sessionId, usage]);
+  }, [lastHit, open, sessionId, visibleUsage]);
 
   const ariaLabel = useMemo(() => {
     if (!sessionId) return "上下文用量（会话未就绪）";
-    if (!usage) return "上下文用量";
-    const occupancy = `上下文用量 ${usage.percent}% · ${formatK(usage.used_tokens)} / ${formatK(usage.max_tokens)}`;
+    if (!visibleUsage) return "上下文用量";
+    const occupancy = `上下文用量 ${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)}`;
     return lastHit !== null ? `${occupancy} · 本轮命中 ${lastHit}%` : occupancy;
-  }, [lastHit, sessionId, usage]);
+  }, [lastHit, sessionId, visibleUsage]);
 
   const hitColor =
     cardHit === null
@@ -342,7 +361,7 @@ export function ContextUsageButton({
 
               {loadFailed ? (
                 <div className="py-2 text-[12px] text-text-faint">加载失败，请稍后重试</div>
-              ) : !usage ? (
+              ) : !visibleUsage ? (
                 <div className="py-2 text-[12px] text-text-faint">加载中…</div>
               ) : (
                 <>
@@ -350,10 +369,10 @@ export function ContextUsageButton({
                     <div className="min-w-0 rounded-xl bg-[var(--surface-card-strong)] px-2.5 py-2 [html[data-theme=light]_&]:bg-zinc-100">
                       <div className="text-[11px] text-text-faint">上下文占用</div>
                       <div className="mt-0.5 text-2xl font-semibold tabular-nums leading-none text-text-strong">
-                        {usage.percent}%
+                        {visibleUsage.percent}%
                       </div>
                       <div className="mt-1.5 text-[11px] leading-snug text-text-faint">
-                        {formatK(usage.used_tokens)} / {formatK(usage.max_tokens)}
+                        {formatK(visibleUsage.used_tokens)} / {formatK(visibleUsage.max_tokens)}
                       </div>
                     </div>
                     <div className="min-w-0 rounded-xl bg-emerald-500/15 px-2.5 py-2 [html[data-theme=light]_&]:bg-emerald-50">
@@ -375,11 +394,11 @@ export function ContextUsageButton({
                     </div>
                   </div>
                   <div className="mb-3 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
-                    {usage.max_tokens > 0
+                    {visibleUsage.max_tokens > 0
                       ? CATEGORY_ORDER.map((key) => {
-                          const value = usage.categories[key] ?? 0;
+                          const value = visibleUsage.categories[key] ?? 0;
                           if (value <= 0) return null;
-                          const widthPct = (value / usage.max_tokens) * 100;
+                          const widthPct = (value / visibleUsage.max_tokens) * 100;
                           return (
                             <div
                               key={key}
@@ -397,7 +416,7 @@ export function ContextUsageButton({
                           <span className={`h-2 w-2 shrink-0 rounded-full ${CATEGORY_COLORS[key]}`} />
                           <span className="text-text-muted">{CATEGORY_LABELS[key]}</span>
                         </div>
-                        <span className="text-text-faint">~{formatK(usage.categories[key] ?? 0)}</span>
+                        <span className="text-text-faint">~{formatK(visibleUsage.categories[key] ?? 0)}</span>
                       </div>
                     ))}
                   </div>

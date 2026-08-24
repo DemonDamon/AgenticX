@@ -2082,6 +2082,7 @@ def create_studio_app() -> FastAPI:
     @app.get("/api/session/context_usage")
     async def get_session_context_usage(
         session_id: str = Query(...),
+        model: str | None = Query(default=None),
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
@@ -2115,6 +2116,7 @@ def create_studio_app() -> FastAPI:
                 managed,
                 avatar_context=avatar_context,
                 group_chat=group_chat,
+                model_name=model or "",
             )
         except Exception as exc:
             logger.warning("context usage estimate failed for %s: %s", session_id, exc)
@@ -2133,7 +2135,13 @@ def create_studio_app() -> FastAPI:
                 "requests": 0,
                 "zero_cache_requests": 0,
             }
-        return {"ok": True, "session_id": session_id, **usage, "cache": cache}
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "model": str(model or "").strip(),
+            **usage,
+            "cache": cache,
+        }
 
     # -------------------------------------------------------------------
     # Project state harness — read-only views over .agx/project/
