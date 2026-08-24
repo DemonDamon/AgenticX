@@ -155,3 +155,42 @@ def estimate_session_context_usage(
         "percent": round(min(100.0, (used_tokens / max_tokens) * 100), 1) if max_tokens > 0 else 0.0,
         "categories": categories,
     }
+
+
+def _empty_session_cache_payload() -> dict[str, int | float]:
+    return {
+        "session_input_tokens": 0,
+        "session_cached_tokens": 0,
+        "session_cache_ratio": 0.0,
+        "last_input_tokens": 0,
+        "last_cached_tokens": 0,
+        "last_cache_ratio": 0.0,
+        "requests": 0,
+        "zero_cache_requests": 0,
+    }
+
+
+def load_session_cache_payload(session_id: str) -> dict[str, int | float]:
+    """Read-only per-session cache-hit payload for the context-usage API.
+
+    Ledger failures return zeros so occupancy estimates can still succeed.
+    """
+    sid = str(session_id or "").strip()
+    if not sid:
+        return _empty_session_cache_payload()
+    try:
+        from agenticx.runtime.usage_store import get_usage_store
+
+        raw = get_usage_store().cache_stats(session_id=sid)
+    except Exception:
+        return _empty_session_cache_payload()
+    return {
+        "session_input_tokens": int(raw.get("input_tokens") or 0),
+        "session_cached_tokens": int(raw.get("cached_tokens") or 0),
+        "session_cache_ratio": float(raw.get("cache_ratio") or 0.0),
+        "last_input_tokens": int(raw.get("last_input_tokens") or 0),
+        "last_cached_tokens": int(raw.get("last_cached_tokens") or 0),
+        "last_cache_ratio": float(raw.get("last_cache_ratio") or 0.0),
+        "requests": int(raw.get("requests") or 0),
+        "zero_cache_requests": int(raw.get("zero_cache_requests") or 0),
+    }

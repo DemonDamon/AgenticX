@@ -7,6 +7,7 @@ from pydantic import Field  # type: ignore
 from loguru import logger  # type: ignore
 from .base import BaseLLMProvider, StreamChunk
 from .response import LLMResponse, TokenUsage, LLMChoice
+from agenticx.runtime.usage_metadata import normalize_stream_usage
 
 class BailianProvider(BaseLLMProvider):
     """
@@ -364,24 +365,6 @@ class BailianProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> Generator[StreamChunk, None, None]:
         """Stream content/tool-call deltas in a normalized chunk format."""
-        def _safe_int(value: Any) -> int:
-            if isinstance(value, bool):
-                return int(value)
-            if isinstance(value, (int, float)):
-                return int(value)
-            if isinstance(value, str):
-                raw = value.strip()
-                if not raw:
-                    return 0
-                try:
-                    return int(raw)
-                except ValueError:
-                    try:
-                        return int(float(raw))
-                    except ValueError:
-                        return 0
-            return 0
-
         try:
             if isinstance(prompt, str):
                 messages = [{"role": "user", "content": prompt}]
@@ -422,31 +405,7 @@ class BailianProvider(BaseLLMProvider):
             response_stream = self.client.chat.completions.create(**final_params)
             last_finish_reason = ""
             for chunk in response_stream:
-                usage_chunk: Dict[str, int] | None = None
-                usage = getattr(chunk, "usage", None)
-                if usage:
-                    if isinstance(usage, dict):
-                        pt = _safe_int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-                        ct = _safe_int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
-                        tt = _safe_int(usage.get("total_tokens") or 0)
-                    else:
-                        pt = _safe_int(
-                            getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0
-                        )
-                        ct = _safe_int(
-                            getattr(usage, "completion_tokens", 0)
-                            or getattr(usage, "output_tokens", 0)
-                            or 0
-                        )
-                        tt = _safe_int(getattr(usage, "total_tokens", 0) or 0)
-                    if tt == 0 and (pt > 0 or ct > 0):
-                        tt = pt + ct
-                    if pt > 0 or ct > 0 or tt > 0:
-                        usage_chunk = {
-                            "prompt_tokens": pt,
-                            "completion_tokens": ct,
-                            "total_tokens": tt,
-                        }
+                usage_chunk = normalize_stream_usage(getattr(chunk, "usage", None))
                 if getattr(chunk, "choices", None):
                     choice = chunk.choices[0]
                     finish_reason = getattr(choice, "finish_reason", None)
@@ -498,24 +457,6 @@ class BailianProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> Generator[StreamChunk, None, None]:
         """Stream with native HTTP for models needing Bailian-specific params."""
-        def _safe_int(value: Any) -> int:
-            if isinstance(value, bool):
-                return int(value)
-            if isinstance(value, (int, float)):
-                return int(value)
-            if isinstance(value, str):
-                raw = value.strip()
-                if not raw:
-                    return 0
-                try:
-                    return int(raw)
-                except ValueError:
-                    try:
-                        return int(float(raw))
-                    except ValueError:
-                        return 0
-            return 0
-
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -565,31 +506,9 @@ class BailianProvider(BaseLLMProvider):
                 except Exception:
                     continue
                 choices = payload.get("choices") if isinstance(payload, dict) else None
-                usage_chunk: Dict[str, int] | None = None
-                usage = payload.get("usage") if isinstance(payload, dict) else None
-                if usage:
-                    if isinstance(usage, dict):
-                        pt = _safe_int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-                        ct = _safe_int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
-                        tt = _safe_int(usage.get("total_tokens") or 0)
-                    else:
-                        pt = _safe_int(
-                            getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0
-                        )
-                        ct = _safe_int(
-                            getattr(usage, "completion_tokens", 0)
-                            or getattr(usage, "output_tokens", 0)
-                            or 0
-                        )
-                        tt = _safe_int(getattr(usage, "total_tokens", 0) or 0)
-                    if tt == 0 and (pt > 0 or ct > 0):
-                        tt = pt + ct
-                    if pt > 0 or ct > 0 or tt > 0:
-                        usage_chunk = {
-                            "prompt_tokens": pt,
-                            "completion_tokens": ct,
-                            "total_tokens": tt,
-                        }
+                usage_chunk = normalize_stream_usage(
+                    payload.get("usage") if isinstance(payload, dict) else None
+                )
                 if choices:
                     choice = choices[0] if isinstance(choices[0], dict) else {}
                     finish_reason = choice.get("finish_reason")

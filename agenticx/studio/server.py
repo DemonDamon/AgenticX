@@ -2090,7 +2090,10 @@ def create_studio_app() -> FastAPI:
         managed = manager.get(session_id, touch=False)
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
-        from agenticx.studio.context_usage import estimate_session_context_usage
+        from agenticx.studio.context_usage import (
+            estimate_session_context_usage,
+            load_session_cache_payload,
+        )
 
         active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         avatar_context: dict[str, str] | None = None
@@ -2116,7 +2119,21 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.warning("context usage estimate failed for %s: %s", session_id, exc)
             raise HTTPException(status_code=500, detail="failed to estimate context usage")
-        return {"ok": True, "session_id": session_id, **usage}
+        try:
+            cache = await asyncio.to_thread(load_session_cache_payload, session_id)
+        except Exception as exc:
+            logger.warning("session cache payload failed for %s: %s", session_id, exc)
+            cache = {
+                "session_input_tokens": 0,
+                "session_cached_tokens": 0,
+                "session_cache_ratio": 0.0,
+                "last_input_tokens": 0,
+                "last_cached_tokens": 0,
+                "last_cache_ratio": 0.0,
+                "requests": 0,
+                "zero_cache_requests": 0,
+            }
+        return {"ok": True, "session_id": session_id, **usage, "cache": cache}
 
     # -------------------------------------------------------------------
     # Project state harness — read-only views over .agx/project/

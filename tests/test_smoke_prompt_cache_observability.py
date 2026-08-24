@@ -66,12 +66,49 @@ def test_usage_store_cache_stats(tmp_path) -> None:
         reasoning_tokens=0,
         total_tokens=2020,
     )
-    stats = store.cache_stats()
-    assert stats["cached_tokens"] == 768
-    assert stats["input_tokens"] == 2000
-    assert stats["requests"] == 1
-    assert stats["zero_cache_requests"] == 0
-    assert abs(stats["cache_ratio"] - 768 / 2000) < 1e-9
+    store.record_sync(
+        session_id="s2",
+        avatar_id="",
+        provider="kimi",
+        model="kimi-k2.6",
+        input_tokens=4000,
+        output_tokens=10,
+        cached_tokens=0,
+        reasoning_tokens=0,
+        total_tokens=4010,
+    )
+    s1 = store.cache_stats(session_id="s1")
+    assert s1["input_tokens"] == 2000
+    assert s1["cached_tokens"] == 768
+    assert s1["requests"] == 1
+    assert s1["last_input_tokens"] == 2000
+    assert s1["last_cached_tokens"] == 768
+    assert abs(s1["last_cache_ratio"] - 768 / 2000) < 1e-9
+    s2 = store.cache_stats(session_id="s2")
+    assert s2["cached_tokens"] == 0
+    assert s2["last_cache_ratio"] == 0.0
+    assert s2["zero_cache_requests"] == 1
+    all_stats = store.cache_stats()
+    assert all_stats["input_tokens"] == 6000
+    assert all_stats["cached_tokens"] == 768
+    assert all_stats["requests"] == 2
+    assert all_stats["last_input_tokens"] == 0
+    assert all_stats["last_cached_tokens"] == 0
+    store.record_sync(
+        session_id="s1",
+        avatar_id="",
+        provider="kimi",
+        model="kimi-k2.6",
+        input_tokens=3000,
+        output_tokens=20,
+        cached_tokens=512,
+        reasoning_tokens=0,
+        total_tokens=3020,
+    )
+    s1_next = store.cache_stats(session_id="s1")
+    assert s1_next["cached_tokens"] == 768 + 512
+    assert s1_next["last_input_tokens"] == 3000
+    assert s1_next["last_cached_tokens"] == 512
 
 
 def test_litellm_parse_response_keeps_cached_tokens() -> None:

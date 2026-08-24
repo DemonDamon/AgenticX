@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import {
   useAppStore,
+  EMPTY_SESSION_TOKENS,
   type Avatar,
   type ChatPane as ChatPaneState,
   type ContentBlock,
@@ -601,7 +602,7 @@ const FALLBACK_PANE: ChatPaneState = {
   spawnsColumnBaselineIds: [],
   terminalTabs: [],
   activeTerminalTabId: null,
-  sessionTokens: { input: 0, output: 0 },
+  sessionTokens: { ...EMPTY_SESSION_TOKENS },
   historySearchTerms: [],
   historyJumpMessageId: null,
   loadingMessages: false,
@@ -11363,8 +11364,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             if (payload.type === "token_usage") {
               const inp = Number(payload.data?.input_tokens ?? 0);
               const out = Number(payload.data?.output_tokens ?? 0);
-              if (inp > 0 || out > 0) {
-                useAppStore.getState().accumulatePaneTokens(pane.id, inp, out);
+              const cached = Number(payload.data?.cached_tokens ?? 0);
+              if (inp > 0 || out > 0 || cached > 0) {
+                useAppStore.getState().accumulatePaneTokens(pane.id, inp, out, cached);
               }
             }
             if (payload.type === "compaction") {

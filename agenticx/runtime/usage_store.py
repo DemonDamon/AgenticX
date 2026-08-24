@@ -140,6 +140,7 @@ class UsageStore:
         *,
         since_ms: int | None = None,
         provider: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """Read-only cache-hit summary for local verification (no schema change)."""
         clauses = ["1=1"]
@@ -151,7 +152,13 @@ class UsageStore:
         if prov:
             clauses.append("provider = ?")
             params.append(prov)
+        sid = str(session_id or "").strip()
+        if sid:
+            clauses.append("session_id = ?")
+            params.append(sid)
         where = " AND ".join(clauses)
+        last_input = 0
+        last_cached = 0
         with self._lock:
             conn = self._connect()
             try:
@@ -167,6 +174,20 @@ class UsageStore:
                     """,
                     params,
                 ).fetchone()
+                if sid:
+                    last = conn.execute(
+                        """
+                        SELECT input_tokens, cached_tokens
+                        FROM usage_events
+                        WHERE session_id = ?
+                        ORDER BY ts_ms DESC, id DESC
+                        LIMIT 1
+                        """,
+                        (sid,),
+                    ).fetchone()
+                    if last:
+                        last_input = int(last[0] or 0)
+                        last_cached = int(last[1] or 0)
             finally:
                 conn.close()
         requests = int(row[0] or 0) if row else 0
@@ -174,12 +195,16 @@ class UsageStore:
         cached_tokens = int(row[2] or 0) if row else 0
         zero_cache = int(row[3] or 0) if row else 0
         ratio = (float(cached_tokens) / float(input_tokens)) if input_tokens > 0 else 0.0
+        last_ratio = (float(last_cached) / float(last_input)) if last_input > 0 else 0.0
         return {
             "requests": requests,
             "input_tokens": input_tokens,
             "cached_tokens": cached_tokens,
             "cache_ratio": ratio,
             "zero_cache_requests": zero_cache,
+            "last_input_tokens": last_input,
+            "last_cached_tokens": last_cached,
+            "last_cache_ratio": last_ratio,
         }
 
     def summary_sync(self, start_ms: int, end_ms: int) -> dict[str, Any]:

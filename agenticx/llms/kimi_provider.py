@@ -6,6 +6,7 @@ from pydantic import Field  # type: ignore
 
 from agenticx.llms.base import BaseLLMProvider, StreamChunk
 from agenticx.llms.response import LLMResponse, TokenUsage, LLMChoice
+from agenticx.runtime.usage_metadata import normalize_stream_usage
 
 _REDACTED_THINKING_BLOCK = re.compile(
     r"<think>\s*(.*?)\s*</think>",
@@ -370,6 +371,11 @@ class KimiProvider(BaseLLMProvider):
         }
         if tools:
             request_params["tools"] = tools
+        stream_options = request_params.get("stream_options")
+        if not isinstance(stream_options, dict):
+            stream_options = {}
+        stream_options["include_usage"] = True
+        request_params["stream_options"] = stream_options
 
         response_stream = self.client.chat.completions.create(**request_params)
         reasoning_started = False
@@ -377,22 +383,9 @@ class KimiProvider(BaseLLMProvider):
         last_finish_reason = ""
 
         for chunk in response_stream:
-            usage = getattr(chunk, "usage", None)
-            if usage:
-                prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-                completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-                total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
-                if total_tokens == 0 and (prompt_tokens > 0 or completion_tokens > 0):
-                    total_tokens = prompt_tokens + completion_tokens
-                if prompt_tokens > 0 or completion_tokens > 0 or total_tokens > 0:
-                    yield {
-                        "type": "usage",
-                        "usage": {
-                            "prompt_tokens": prompt_tokens,
-                            "completion_tokens": completion_tokens,
-                            "total_tokens": total_tokens,
-                        },
-                    }
+            usage_chunk = normalize_stream_usage(getattr(chunk, "usage", None))
+            if usage_chunk:
+                yield {"type": "usage", "usage": usage_chunk}
 
             choices = getattr(chunk, "choices", None)
             if not choices:

@@ -18,7 +18,7 @@ import { resolveForwardTarget } from "./utils/resolve-forward-target";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
 import type { Message, ProviderEntry } from "./store";
-import { useAppStore } from "./store";
+import { normalizeSessionTokens, useAppStore } from "./store";
 import { stopSpeak } from "./voice/tts";
 import { VOICE_FOCUS_ENTRY_ENABLED } from "./voice/focus-mode-ui";
 import { matchKeybinding } from "./core/keybinding-manager";
@@ -77,7 +77,13 @@ type PersistedPaneState = {
   spawnsColumnBaselineIds?: string[];
   runDrawerOpen?: boolean;
   runDrawerRunId?: string | null;
-  sessionTokens?: { input: number; output: number };
+  sessionTokens?: {
+    input: number;
+    output: number;
+    cached?: number;
+    lastInput?: number;
+    lastCached?: number;
+  };
 };
 
 type PersistedWorkspaceState = {
@@ -159,6 +165,9 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
           : null;
       const tokInput = Number(sessionTokensRaw?.input ?? 0);
       const tokOutput = Number(sessionTokensRaw?.output ?? 0);
+      const tokCached = Number(sessionTokensRaw?.cached ?? 0);
+      const tokLastInput = Number(sessionTokensRaw?.lastInput ?? 0);
+      const tokLastCached = Number(sessionTokensRaw?.lastCached ?? 0);
       return {
         id,
         avatarId: row.avatarId == null ? null : String(row.avatarId),
@@ -200,6 +209,9 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         sessionTokens: {
           input: Number.isFinite(tokInput) && tokInput > 0 ? Math.floor(tokInput) : 0,
           output: Number.isFinite(tokOutput) && tokOutput > 0 ? Math.floor(tokOutput) : 0,
+          cached: Number.isFinite(tokCached) && tokCached > 0 ? Math.floor(tokCached) : 0,
+          lastInput: Number.isFinite(tokLastInput) && tokLastInput > 0 ? Math.floor(tokLastInput) : 0,
+          lastCached: Number.isFinite(tokLastCached) && tokLastCached > 0 ? Math.floor(tokLastCached) : 0,
         },
       };
     })
@@ -826,7 +838,7 @@ export function App() {
               panes: hydratedPanes.map((pane) => ({
                 ...pane,
                 messages: [],
-                sessionTokens: pane.sessionTokens ?? { input: 0, output: 0 },
+                sessionTokens: normalizeSessionTokens(pane.sessionTokens),
                 historySearchTerms: [],
                 historyJumpMessageId: null,
                 loadingMessages: false,

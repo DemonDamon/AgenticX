@@ -191,7 +191,7 @@ export type ChatPane = {
   terminalTabs: PaneTerminalTab[];
   activeTerminalTabId: string | null;
   /** Cumulative token usage for the current session (resets on new session). */
-  sessionTokens: { input: number; output: number };
+  sessionTokens: SessionTokens;
   /** Temporary highlight terms from session-history search navigation. */
   historySearchTerms: string[];
   /** One-shot scroll target: user query message id inside the current session. */
@@ -775,7 +775,7 @@ type AppState = {
   ) => void;
   removePaneTerminalTab: (paneId: string, tabId: string) => void;
   setActivePaneTerminalTab: (paneId: string, tabId: string | null) => void;
-  accumulatePaneTokens: (paneId: string, input: number, output: number) => void;
+  accumulatePaneTokens: (paneId: string, input: number, output: number, cached?: number) => void;
   addMessage: (
     role: MsgRole,
     content: string,
@@ -879,7 +879,7 @@ function makeDefaultPane(): ChatPane {
     runDrawerRunId: null,
     terminalTabs: [],
     activeTerminalTabId: null,
-    sessionTokens: { input: 0, output: 0 },
+    sessionTokens: { ...EMPTY_SESSION_TOKENS },
     historySearchTerms: [],
     historyJumpMessageId: null,
     loadingMessages: false,
@@ -976,7 +976,35 @@ function loadMetaAvatarUrl(): string {
   return "";
 }
 
-type SessionTokenCache = Record<string, { input: number; output: number; updatedAt: number }>;
+export type SessionTokens = {
+  input: number;
+  output: number;
+  cached: number;
+  lastInput: number;
+  lastCached: number;
+};
+
+export const EMPTY_SESSION_TOKENS: SessionTokens = {
+  input: 0,
+  output: 0,
+  cached: 0,
+  lastInput: 0,
+  lastCached: 0,
+};
+
+type SessionTokenCache = Record<string, SessionTokens & { updatedAt: number }>;
+
+export function normalizeSessionTokens(raw: unknown): SessionTokens {
+  if (!raw || typeof raw !== "object") return { ...EMPTY_SESSION_TOKENS };
+  const row = raw as Record<string, unknown>;
+  return {
+    input: toNonNegativeInt(row.input),
+    output: toNonNegativeInt(row.output),
+    cached: toNonNegativeInt(row.cached),
+    lastInput: toNonNegativeInt(row.lastInput),
+    lastCached: toNonNegativeInt(row.lastCached),
+  };
+}
 
 function toNonNegativeInt(raw: unknown): number {
   const n = typeof raw === "number" ? raw : Number(raw);
@@ -994,8 +1022,7 @@ function readSessionTokenCache(): SessionTokenCache {
       if (!sid || !value || typeof value !== "object") continue;
       const row = value as Record<string, unknown>;
       out[sid] = {
-        input: toNonNegativeInt(row.input),
-        output: toNonNegativeInt(row.output),
+        ...normalizeSessionTokens(row),
         updatedAt: toNonNegativeInt(row.updatedAt) || Date.now(),
       };
     }
@@ -1017,21 +1044,20 @@ function writeSessionTokenCache(cache: SessionTokenCache): void {
   }
 }
 
-function getSessionTokensFromCache(sessionId: string): { input: number; output: number } | null {
+function getSessionTokensFromCache(sessionId: string): SessionTokens | null {
   const sid = String(sessionId ?? "").trim();
   if (!sid) return null;
   const row = readSessionTokenCache()[sid];
   if (!row) return null;
-  return { input: toNonNegativeInt(row.input), output: toNonNegativeInt(row.output) };
+  return normalizeSessionTokens(row);
 }
 
-function upsertSessionTokenCache(sessionId: string, input: number, output: number): void {
+function upsertSessionTokenCache(sessionId: string, tokens: SessionTokens): void {
   const sid = String(sessionId ?? "").trim();
   if (!sid) return;
   const cache = readSessionTokenCache();
   cache[sid] = {
-    input: toNonNegativeInt(input),
-    output: toNonNegativeInt(output),
+    ...normalizeSessionTokens(tokens),
     updatedAt: Date.now(),
   };
   writeSessionTokenCache(cache);
@@ -1632,7 +1658,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           runDrawerRunId: null,
           terminalTabs: [],
           activeTerminalTabId: null,
-          sessionTokens: { input: 0, output: 0 },
+          sessionTokens: { ...EMPTY_SESSION_TOKENS },
           historySearchTerms: [],
           historyJumpMessageId: null,
         },
@@ -1913,27 +1939,32 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearPaneMessages: (paneId) =>
     set((state) => ({
       panes: state.panes.map((pane) =>
-        pane.id === paneId ? { ...pane, messages: [], sessionTokens: { input: 0, output: 0 } } : pane
+        pane.id === paneId ? { ...pane, messages: [], sessionTokens: { ...EMPTY_SESSION_TOKENS } } : pane
       ),
     })),
-  accumulatePaneTokens: (paneId, input, output) =>
+  accumulatePaneTokens: (paneId, input, output, cached = 0) =>
     set((state) => {
       let targetSessionId = "";
-      let nextInput = 0;
-      let nextOutput = 0;
+      let nextTokens: SessionTokens = { ...EMPTY_SESSION_TOKENS };
+      const addInput = toNonNegativeInt(input);
+      const addOutput = toNonNegativeInt(output);
+      const addCached = toNonNegativeInt(cached);
       const nextPanes = state.panes.map((pane) => {
         if (pane.id !== paneId) return pane;
-        const merged = {
-          input: (pane.sessionTokens?.input ?? 0) + input,
-          output: (pane.sessionTokens?.output ?? 0) + output,
+        const prev = normalizeSessionTokens(pane.sessionTokens);
+        const merged: SessionTokens = {
+          input: prev.input + addInput,
+          output: prev.output + addOutput,
+          cached: prev.cached + addCached,
+          lastInput: addInput,
+          lastCached: addCached,
         };
         targetSessionId = String(pane.sessionId ?? "").trim();
-        nextInput = merged.input;
-        nextOutput = merged.output;
+        nextTokens = merged;
         return { ...pane, sessionTokens: merged };
       });
       if (targetSessionId) {
-        upsertSessionTokenCache(targetSessionId, nextInput, nextOutput);
+        upsertSessionTokenCache(targetSessionId, nextTokens);
       }
       return { panes: nextPanes };
     }),
@@ -1992,8 +2023,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           cached
             ? cached
             : prevTrimmed === nextTrimmed
-              ? p.sessionTokens ?? { input: 0, output: 0 }
-              : { input: 0, output: 0 };
+              ? normalizeSessionTokens(p.sessionTokens)
+              : { ...EMPTY_SESSION_TOKENS };
         return {
           ...p,
           sessionId,

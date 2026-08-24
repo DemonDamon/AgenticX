@@ -1,13 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { useAppStore } from "../store";
+import { formatHitPercent } from "../utils/cache-hit";
 import { HoverTip } from "./ds/HoverTip";
+
+interface SessionCacheUsage {
+  session_input_tokens: number;
+  session_cached_tokens: number;
+  last_input_tokens: number;
+  last_cached_tokens: number;
+}
 
 interface ContextUsage {
   used_tokens: number;
   max_tokens: number;
   percent: number;
   categories: Record<string, number>;
+  cache?: SessionCacheUsage;
+}
+
+function parseCache(raw: unknown): SessionCacheUsage | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as Record<string, unknown>;
+  return {
+    session_input_tokens: Number(row.session_input_tokens ?? 0),
+    session_cached_tokens: Number(row.session_cached_tokens ?? 0),
+    last_input_tokens: Number(row.last_input_tokens ?? 0),
+    last_cached_tokens: Number(row.last_cached_tokens ?? 0),
+  };
 }
 
 const CATEGORY_ORDER = [
@@ -135,6 +156,7 @@ export function ContextUsageButton({
         max_tokens: Number(data.max_tokens ?? 0),
         percent: Number(data.percent ?? 0),
         categories: data.categories ?? {},
+        cache: parseCache(data.cache),
       });
     } catch {
       if (requestSeq !== requestSeqRef.current) return;
@@ -195,19 +217,44 @@ export function ContextUsageButton({
     }
   }, [fetchUsage, open, refreshPanelPosition, sessionId]);
 
+  const sessionTokens = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.sessionTokens);
+  const liveHit = formatHitPercent(sessionTokens?.lastCached ?? 0, sessionTokens?.lastInput ?? 0);
+  const apiHit = formatHitPercent(
+    usage?.cache?.last_cached_tokens ?? 0,
+    usage?.cache?.last_input_tokens ?? 0
+  );
+  const lastHit = liveHit !== null ? liveHit : apiHit;
+  const sessionInput =
+    (usage?.cache?.session_input_tokens ?? 0) > 0
+      ? usage?.cache?.session_input_tokens ?? 0
+      : sessionTokens?.input ?? 0;
+  const sessionCached =
+    (usage?.cache?.session_input_tokens ?? 0) > 0
+      ? usage?.cache?.session_cached_tokens ?? 0
+      : sessionTokens?.cached ?? 0;
+
   const percent = usage?.percent ?? 0;
   const hoverLabel = useMemo(() => {
     if (open) return "";
     if (!sessionId) return "上下文用量（会话未就绪）";
     if (!usage) return "上下文用量";
-    return `${usage.percent}% · ${formatK(usage.used_tokens)} / ${formatK(usage.max_tokens)} 上下文已使用`;
-  }, [open, sessionId, usage]);
+    const occupancy = `${usage.percent}% · ${formatK(usage.used_tokens)} / ${formatK(usage.max_tokens)} 上下文已使用`;
+    return lastHit !== null ? `${occupancy} · 本轮命中 ${lastHit}%` : occupancy;
+  }, [lastHit, open, sessionId, usage]);
 
   const ariaLabel = useMemo(() => {
     if (!sessionId) return "上下文用量（会话未就绪）";
     if (!usage) return "上下文用量";
-    return `上下文用量 ${usage.percent}% · ${formatK(usage.used_tokens)} / ${formatK(usage.max_tokens)}`;
-  }, [sessionId, usage]);
+    const occupancy = `上下文用量 ${usage.percent}% · ${formatK(usage.used_tokens)} / ${formatK(usage.max_tokens)}`;
+    return lastHit !== null ? `${occupancy} · 本轮命中 ${lastHit}%` : occupancy;
+  }, [lastHit, sessionId, usage]);
+
+  const hitColor =
+    lastHit === null
+      ? "text-text-faint"
+      : lastHit > 0
+        ? "text-emerald-500"
+        : "text-text-muted";
 
   const trigger = (
     <button
@@ -255,11 +302,30 @@ export function ContextUsageButton({
                 <div className="py-2 text-[12px] text-text-faint">加载中…</div>
               ) : (
                 <>
-                  <div className="mb-1 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className="shrink-0 text-2xl font-semibold text-text-strong">{usage.percent}%</span>
-                    <span className="min-w-0 whitespace-normal text-[11px] text-text-faint">
-                      已使用 {formatK(usage.used_tokens)} / {formatK(usage.max_tokens)}
-                    </span>
+                  <div className="mb-3 grid grid-cols-2 gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[11px] text-text-faint">上下文占用</div>
+                      <div className="text-2xl font-semibold text-text-strong">{usage.percent}%</div>
+                      <div className="text-[11px] text-text-faint">
+                        {formatK(usage.used_tokens)} / {formatK(usage.max_tokens)}
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[11px] text-text-faint">缓存命中率</div>
+                      <div className={`text-2xl font-semibold ${hitColor}`}>
+                        {lastHit === null ? "—" : `${lastHit}%`}
+                      </div>
+                      {lastHit === null ? (
+                        <div className="text-[11px] text-text-faint">本轮尚未返回用量</div>
+                      ) : (
+                        <div className="text-[11px] text-text-faint">本轮</div>
+                      )}
+                      {sessionInput > 0 ? (
+                        <div className="text-[11px] text-text-faint">
+                          累计 {formatK(sessionCached)} / {formatK(sessionInput)}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="mb-3 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
                     {usage.max_tokens > 0

@@ -6,7 +6,11 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
 
 from agenticx.cli.config_manager import ConfigManager
@@ -140,6 +144,61 @@ def apply_prompt_cache_breakpoints(
     telemetry["cache_breakpoints"] = len(candidates)
     telemetry["cache_eligible_chars"] = eligible
     return out, telemetry
+
+
+def _fingerprint(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def build_prefix_fingerprints(
+    messages: Sequence[Dict[str, Any]],
+    tools: Sequence[Dict[str, Any]] | None,
+) -> Dict[str, Any]:
+    """Fingerprint the exact request prefix so cache misses are explainable.
+
+    Vendor prefix caches key on ``tools`` → system → messages. A single byte of
+    per-turn churn anywhere in that order voids every hit downstream, and the
+    ledger can only report the resulting 0%. Recording per-row hashes lets a
+    later turn be diffed against an earlier one to find the row that moved.
+    """
+    tools_json = json.dumps(list(tools or []), ensure_ascii=False, sort_keys=True)
+    rows: List[Dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        text = content if isinstance(content, str) else json.dumps(
+            content, ensure_ascii=False, sort_keys=True, default=str
+        )
+        rows.append(
+            {
+                "role": str(msg.get("role", "")),
+                "chars": len(text),
+                "fp": _fingerprint(text),
+            }
+        )
+    return {
+        "tools_count": len(list(tools or [])),
+        "tools_chars": len(tools_json),
+        "tools_fp": _fingerprint(tools_json),
+        "messages": rows,
+    }
+
+
+def persist_prefix_fingerprints(session: Any, payload: Dict[str, Any]) -> None:
+    """Append one prefix-fingerprint line to the session directory."""
+    sid = getattr(session, "_session_id", None) or getattr(session, "session_id", None)
+    text = str(sid or "").strip()
+    if not text:
+        return
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_") or text
+    out_path = Path.home() / ".agenticx" / "sessions" / safe / "cache_prefix.jsonl"
+    try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def build_context_management_kwargs(

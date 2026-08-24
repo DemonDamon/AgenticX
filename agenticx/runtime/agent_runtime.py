@@ -24,6 +24,7 @@ from typing import (
     AsyncGenerator,
     Awaitable,
     Callable,
+    Coroutine,
     Dict,
     List,
     Literal,
@@ -71,7 +72,10 @@ from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
 from agenticx.runtime.truncated_final import detect_suspected_truncated_final
-from agenticx.runtime.usage_metadata import usage_metadata_from_llm_response
+from agenticx.runtime.usage_metadata import (
+    normalize_stream_usage,
+    usage_metadata_from_llm_response,
+)
 from agenticx.runtime.assistant_output import (
     ParsedAssistantOutput,
     parse_assistant_output,
@@ -101,7 +105,9 @@ from agenticx.runtime.provider_fallback import (
 from agenticx.runtime.prompt_cache_policy import (
     apply_prompt_cache_breakpoints,
     build_context_management_kwargs,
+    build_prefix_fingerprints,
     load_prompt_cache_config,
+    persist_prefix_fingerprints,
 )
 from agenticx.runtime.prompts.session_context import (
     build_session_context_message,
@@ -483,6 +489,21 @@ DEFAULT_LLM_STALL_PATIENCE_MAX_ATTEMPTS = 3
 DEFAULT_LLM_STALL_PATIENCE_BUDGET_SECONDS = 900.0
 DEFAULT_LLM_STALL_PATIENCE_BASE_SECONDS = 15.0
 logger = logging.getLogger(__name__)
+
+# Usage rows are written from a detached task so the turn is not blocked on
+# SQLite. asyncio only keeps a weak reference to such a task, so without a
+# strong reference here the row can be garbage collected before it lands —
+# losing whole turns from the ledger and skewing the cache hit rate the UI
+# derives from it.
+_USAGE_PERSIST_TASKS: set["asyncio.Task[None]"] = set()
+
+
+def _spawn_usage_persist_task(coro: "Coroutine[Any, Any, None]") -> "asyncio.Task[None]":
+    """Schedule a usage-row write that survives until it completes."""
+    task = asyncio.create_task(coro)
+    _USAGE_PERSIST_TASKS.add(task)
+    task.add_done_callback(_USAGE_PERSIST_TASKS.discard)
+    return task
 
 
 def _truncate(text: str, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -3870,6 +3891,14 @@ class AgentRuntime:
                 )
                 if provider_name.strip().lower() == "minimax":
                     messages_for_llm = _merge_consecutive_simple_roles_for_minimax(messages_for_llm)
+                try:
+                    _prefix_fp = build_prefix_fingerprints(messages_for_llm, active_tools)
+                    _prefix_fp["round"] = round_idx
+                    _prefix_fp["provider"] = provider_name
+                    _prefix_fp["model"] = model_name
+                    persist_prefix_fingerprints(session, _prefix_fp)
+                except Exception:
+                    pass
                 ok, detail = self._persist_or_abort("llm_request")
                 if not ok:
                     yield RuntimeEvent(
@@ -4026,25 +4055,9 @@ class AgentRuntime:
                                             agent_id=agent_id,
                                         )
                             elif chunk_type == "usage":
-                                usage_raw = stream_chunk.get("usage", {})
-                                if isinstance(usage_raw, dict):
-                                    pt = _safe_int(
-                                        usage_raw.get("prompt_tokens") or usage_raw.get("input_tokens") or 0
-                                    )
-                                    ct = _safe_int(
-                                        usage_raw.get("completion_tokens")
-                                        or usage_raw.get("output_tokens")
-                                        or 0
-                                    )
-                                    tt = _safe_int(usage_raw.get("total_tokens") or 0)
-                                    if tt == 0 and (pt > 0 or ct > 0):
-                                        tt = pt + ct
-                                    if pt > 0 or ct > 0 or tt > 0:
-                                        stream_usage = {
-                                            "prompt_tokens": pt,
-                                            "completion_tokens": ct,
-                                            "total_tokens": tt,
-                                        }
+                                normalized = normalize_stream_usage(stream_chunk.get("usage"))
+                                if normalized:
+                                    stream_usage = normalized
                             elif chunk_type == "done":
                                 raw_finish = stream_chunk.get("finish_reason", "")
                                 if isinstance(raw_finish, str) and raw_finish.strip():
@@ -4345,7 +4358,7 @@ class AgentRuntime:
                         except Exception as exc:
                             logger.debug("usage persist skipped: %s", exc)
 
-                    asyncio.create_task(_persist_usage_row())
+                    _spawn_usage_persist_task(_persist_usage_row())
                 budget_level, budget_source, budget_current, budget_max = self.token_budget.check_with_source()
                 if budget_level == BudgetLevel.EXCEEDED:
                     yield RuntimeEvent(
