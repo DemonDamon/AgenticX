@@ -7509,6 +7509,14 @@ def create_studio_app() -> FastAPI:
             denied_commands = ConfigManager.get_value("permissions.denied_commands") or []
             denied_tools = ConfigManager.get_value("permissions.denied_tools") or []
             allowed_tools = ConfigManager.get_value("permissions.allowed_tools") or []
+            command_permissions = (
+                ConfigManager.get_value("permissions.command_permissions")
+                or "workspace-write"
+            )
+            from agenticx.runtime.command_sandbox import (
+                path_deny_enforcement_for_host,
+                shell_read_isolation_for_host,
+            )
             return {
                 "ok": True,
                 "mode": mode,
@@ -7516,6 +7524,9 @@ def create_studio_app() -> FastAPI:
                 "denied_commands": denied_commands if isinstance(denied_commands, list) else [],
                 "denied_tools": denied_tools if isinstance(denied_tools, list) else [],
                 "allowed_tools": allowed_tools if isinstance(allowed_tools, list) else [],
+                "command_permissions": command_permissions,
+                "shell_read_isolation": shell_read_isolation_for_host(),
+                "path_deny_enforcement": path_deny_enforcement_for_host(),
             }
         except Exception as exc:
             logger.warning("get_permissions error: %s", exc)
@@ -7531,7 +7542,14 @@ def create_studio_app() -> FastAPI:
         try:
             from agenticx.cli.config_manager import ConfigManager
 
-            for key in ("mode", "path_rules", "denied_commands", "denied_tools", "allowed_tools"):
+            for key in (
+                "mode",
+                "path_rules",
+                "denied_commands",
+                "denied_tools",
+                "allowed_tools",
+                "command_permissions",
+            ):
                 if key in payload:
                     ConfigManager.set_value(f"permissions.{key}", payload[key])
 
@@ -7540,6 +7558,14 @@ def create_studio_app() -> FastAPI:
             denied_commands = ConfigManager.get_value("permissions.denied_commands") or []
             denied_tools = ConfigManager.get_value("permissions.denied_tools") or []
             allowed_tools = ConfigManager.get_value("permissions.allowed_tools") or []
+            command_permissions = (
+                ConfigManager.get_value("permissions.command_permissions")
+                or "workspace-write"
+            )
+            from agenticx.runtime.command_sandbox import (
+                path_deny_enforcement_for_host,
+                shell_read_isolation_for_host,
+            )
             return {
                 "ok": True,
                 "mode": mode,
@@ -7547,6 +7573,9 @@ def create_studio_app() -> FastAPI:
                 "denied_commands": denied_commands if isinstance(denied_commands, list) else [],
                 "denied_tools": denied_tools if isinstance(denied_tools, list) else [],
                 "allowed_tools": allowed_tools if isinstance(allowed_tools, list) else [],
+                "command_permissions": command_permissions,
+                "shell_read_isolation": shell_read_isolation_for_host(),
+                "path_deny_enforcement": path_deny_enforcement_for_host(),
             }
         except Exception as exc:
             logger.warning("put_permissions error: %s", exc)
