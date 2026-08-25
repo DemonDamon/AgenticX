@@ -388,11 +388,21 @@ def verify_run_tool(arguments: Dict[str, Any], session: Any) -> str:
     workspace_root = _resolve_workspace_root(session)
 
     try:
+        from agenticx.cli.agent_tools import (
+            _configured_command_permissions,
+            _session_workspace_root_sets,
+            denied_path_patterns_for_sandbox,
+        )
+
+        read_roots, _write_roots = _session_workspace_root_sets(session)
         result = run_verify(
             store,
             workspace_root=workspace_root,
             feature_id=feature_id,
             only_step=only_step,
+            readable_roots=read_roots,
+            denied_path_patterns=denied_path_patterns_for_sandbox(session),
+            command_permissions=_configured_command_permissions(session),
         )
     except ProjectStateError as exc:
         return _err(str(exc))

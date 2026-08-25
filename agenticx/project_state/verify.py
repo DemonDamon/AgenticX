@@ -11,9 +11,15 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from agenticx.project_state.store import ProjectStateError, ProjectStore
+from agenticx.runtime.command_sandbox import (
+    CommandSandboxError,
+    WORKSPACE_WRITE,
+    build_command_sandbox_plan,
+    normalize_command_permissions,
+)
 
 VERIFY_SCHEMA_VERSION = 1
 ALLOWED_STEP_TYPES = {"shell", "pytest", "npm", "lint"}
@@ -106,8 +112,18 @@ def run_verify(
     workspace_root: Path,
     feature_id: Optional[str] = None,
     only_step: Optional[str] = None,
+    readable_roots: Sequence[Path] = (),
+    denied_path_patterns: Iterable[str] = (),
+    command_permissions: Optional[str] = None,
+    scope_id: str = "verify",
 ) -> VerifyResult:
-    """Run all (or one) steps from verify.yaml under ``workspace_root``."""
+    """Run all (or one) steps from verify.yaml under ``workspace_root``.
+
+    Each step is wrapped by the same OS sandbox as ``bash_exec``. A missing
+    backend fails the step (exit 126) instead of falling back to a bare
+    ``subprocess.run`` -- verify.yaml is repository content, not a privilege
+    channel.
+    """
     config = _load_yaml(store.verify_yaml_path)
     steps_raw = config.get("steps") or []
     if not isinstance(steps_raw, list) or not steps_raw:
@@ -116,6 +132,12 @@ def run_verify(
     workspace_root = Path(workspace_root).expanduser().resolve()
     if not workspace_root.is_dir():
         raise ProjectStateError(f"workspace_root is not a directory: {workspace_root}")
+
+    permissions = normalize_command_permissions(
+        command_permissions if command_permissions is not None else WORKSPACE_WRITE
+    )
+    denied = list(denied_path_patterns)
+    extra_reads = list(readable_roots)
 
     log_lines: List[str] = []
     step_results: List[StepResult] = []
@@ -137,9 +159,35 @@ def run_verify(
         exit_code = -1
         stdout_text = ""
         try:
-            proc = subprocess.run(
+            plan = build_command_sandbox_plan(
                 cmd,
+                permissions=permissions,
+                writable_roots=[workspace_root],
+                readable_roots=extra_reads,
+                denied_path_patterns=denied,
+                scope_id=f"{scope_id}|{name}",
+                cwd=workspace_root,
+            )
+        except CommandSandboxError as exc:
+            log_lines.append(f"[step {name}] sandbox unavailable: {exc}")
+            step_results.append(
+                StepResult(
+                    name=name,
+                    type=step_type,
+                    passed=False,
+                    exit_code=126,
+                    duration_sec=time.monotonic() - start,
+                    timeout=False,
+                    log_excerpt=f"command sandbox unavailable: {exc}",
+                )
+            )
+            overall_passed = False
+            break
+        try:
+            proc = subprocess.run(
+                list(plan.argv),
                 cwd=str(workspace_root),
+                env=dict(plan.env),
                 capture_output=True,
                 text=True,
                 timeout=timeout_sec,
