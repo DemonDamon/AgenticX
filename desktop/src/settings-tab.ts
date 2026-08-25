@@ -2,6 +2,7 @@
 export const SETTINGS_TAB_IDS = [
   "account",
   "general",
+  "security",
   "provider",
   "mcp",
   "connectors",
