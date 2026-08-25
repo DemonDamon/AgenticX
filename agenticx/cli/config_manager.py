@@ -149,7 +149,9 @@ class PermissionsConfig:
         path_rules: List of ``{pattern, allow}`` dicts for file-path-level rules.
         denied_commands: fnmatch patterns for blocked shell commands.
         denied_tools: Explicit tool deny list.
-        allowed_tools: Explicit tool allow list.
+        allowed_tools: Explicit tool allow list (skip confirmation; sandbox stays).
+        command_permissions: OS sandbox tier -- ``read-only``,
+            ``workspace-write`` (default), or ``danger-full-access``.
     """
 
     mode: str = "default"
@@ -157,6 +159,7 @@ class PermissionsConfig:
     denied_commands: list = field(default_factory=list)
     denied_tools: list = field(default_factory=list)
     allowed_tools: list = field(default_factory=list)
+    command_permissions: str = "workspace-write"
 
 
 @dataclass
