@@ -25,6 +25,7 @@ import {
   UNRESTRICTED_CAPABILITY_LOCKS,
   type DesktopCapabilityLocks,
 } from "./utils/enterprise-capability-policy";
+import type { RunMode } from "./constants/confirm-strategy-options";
 
 export type { ContentBlock } from "./utils/content-blocks";
 
@@ -46,7 +47,7 @@ export type SubAgentStatus =
   | "completed"
   | "failed"
   | "cancelled";
-export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
+export type { RunMode } from "./constants/confirm-strategy-options";
 export type ThemeMode = "dark" | "light" | "dim";
 export type ThemeColor = "blue" | "green" | "pink" | "yellow" | "white";
 export type ChatStyle = "im" | "terminal" | "clean";
@@ -542,7 +543,10 @@ type AppState = {
   setCapabilityLocks: (locks: DesktopCapabilityLocks) => void;
   /** Custom avatar for Meta-Agent (Near). */
   metaAvatarUrl: string;
-  confirmStrategy: ConfirmStrategy;
+  runMode: RunMode;
+  /** Per-session task-run id used to isolate confirmation allowlists. */
+  confirmRunsBySession: Record<string, { runId: string; workspace: string }>;
+  startConfirmRun: (sessionId: string, workspace: string) => string;
   mcpServers: McpServer[];
   avatars: Avatar[];
   activeAvatarId: string | null;
@@ -628,7 +632,7 @@ type AppState = {
   setUserAvatarUrl: (url: string) => void;
   setUserPreference: (pref: string) => void;
   setMetaAvatarUrl: (url: string) => void;
-  setConfirmStrategy: (v: ConfirmStrategy) => void;
+  setRunMode: (v: RunMode) => void;
   setMcpServers: (servers: McpServer[]) => void;
   setAvatars: (avatars: Avatar[]) => void;
   applyCorePreloadBundle: (payload: {
@@ -1091,7 +1095,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   attachmentRoutingLock: null,
   capabilityLocks: UNRESTRICTED_CAPABILITY_LOCKS,
   metaAvatarUrl: loadMetaAvatarUrl(),
-  confirmStrategy: "semi-auto",
+  runMode: "ask",
+  confirmRunsBySession: {},
   mcpServers: [],
   avatars: [],
   activeAvatarId: null,
@@ -1398,7 +1403,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { metaAvatarUrl: next };
     }),
-  setConfirmStrategy: (confirmStrategy) => set({ confirmStrategy }),
+  setRunMode: (runMode) => set({ runMode }),
+  startConfirmRun: (sessionId, workspace) => {
+    const sid = String(sessionId ?? "").trim();
+    const runId = crypto.randomUUID();
+    if (sid) {
+      set((state) => ({
+        confirmRunsBySession: {
+          ...state.confirmRunsBySession,
+          [sid]: { runId, workspace: String(workspace ?? "") },
+        },
+      }));
+    }
+    return runId;
+  },
   setMcpServers: (mcpServers) => set({ mcpServers }),
   setAvatars: (avatars) => set({ avatars }),
   applyCorePreloadBundle: (payload) =>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildConfirmApprovalKey,
   buildConfirmScope,
   isProtectedConfirmContext,
   normalizeConfirmRisk,
@@ -43,12 +44,12 @@ describe("confirmation scope", () => {
 
   it("does not let global auto or an existing scope bypass protected risk", () => {
     expect(shouldAutoApproveConfirm("auto", false, { risk: "high" })).toBe(false);
-    expect(shouldAutoApproveConfirm("semi-auto", true, { risk: "destructive" })).toBe(false);
+    expect(shouldAutoApproveConfirm("allowlist", true, { risk: "destructive" })).toBe(false);
     expect(shouldAutoApproveConfirm("auto", true)).toBe(false);
 
     expect(shouldAutoApproveConfirm("auto", false, { risk: "low" })).toBe(true);
-    expect(shouldAutoApproveConfirm("semi-auto", true, { risk: "low" })).toBe(true);
-    expect(shouldAutoApproveConfirm("manual", false, { risk: "low" })).toBe(false);
+    expect(shouldAutoApproveConfirm("allowlist", true, { risk: "low" })).toBe(true);
+    expect(shouldAutoApproveConfirm("ask", false, { risk: "low" })).toBe(false);
   });
 
   it("每个受保护请求都说得出为什么，包括没标 risk 的", () => {
@@ -64,5 +65,27 @@ describe("confirmation scope", () => {
     expect(protectedConfirmReason({ risk: "某个将来才有的档" })).not.toBe("");
 
     expect(protectedConfirmReason({ risk: "low" })).toBe("");
+  });
+});
+
+describe("confirm approval keys", () => {
+  it("reuses the same key inside one run and workspace", () => {
+    const first = buildConfirmApprovalKey("run-1", "/tmp/ws-a", "bash_exec:rm");
+    const second = buildConfirmApprovalKey("run-1", "/tmp/ws-a", "bash_exec:rm");
+    expect(first).toBe(second);
+    const allowed = new Set([first]);
+    expect(allowed.has(second)).toBe(true);
+  });
+
+  it("does not reuse an approval after a new run starts", () => {
+    const previous = buildConfirmApprovalKey("run-1", "/tmp/ws-a", "bash_exec:rm");
+    const next = buildConfirmApprovalKey("run-2", "/tmp/ws-a", "bash_exec:rm");
+    expect(previous).not.toBe(next);
+  });
+
+  it("does not reuse an approval after the workspace changes", () => {
+    const testing = buildConfirmApprovalKey("run-1", "/tmp/ws-a", "bash_exec:rm");
+    const production = buildConfirmApprovalKey("run-1", "/tmp/ws-b", "bash_exec:rm");
+    expect(testing).not.toBe(production);
   });
 });

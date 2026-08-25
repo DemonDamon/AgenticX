@@ -153,10 +153,10 @@ import {
   readScopedLocalStorage,
   writeScopedLocalStorage,
 } from "../utils/backend-scope";
+import type { RunMode } from "../constants/confirm-strategy-options";
 import {
   SecurityCenterTab,
   type SecurityCenterTabHandle,
-  type ConfirmMode,
 } from "./settings/security/SecurityCenterTab";
 import { useTrinityConfig } from "./settings/trinity-config";
 export type { SettingsTab } from "../settings-tab";
@@ -873,12 +873,12 @@ type Props = {
   apiToken: string;
   mcpServers: McpServer[];
   onRefreshMcp: (sessionId?: string) => Promise<void>;
-  confirmStrategy: ConfirmMode;
+  runMode: RunMode;
   theme: "dark" | "light" | "dim";
   chatStyle: ChatStyle;
   onThemeChange: (theme: "dark" | "light" | "dim") => void;
   onChatStyleChange: (style: ChatStyle) => void;
-  onConfirmStrategyChange: (strategy: ConfirmMode) => Promise<void> | void;
+  onRunModeChange: (mode: RunMode) => Promise<void> | void;
   onClose: () => void;
   onSave: (result: {
     defaultProvider: string;
@@ -4603,12 +4603,12 @@ export function SettingsPanel({
   apiToken,
   mcpServers,
   onRefreshMcp,
-  confirmStrategy,
+  runMode,
   theme,
   chatStyle,
   onThemeChange,
   onChatStyleChange,
-  onConfirmStrategyChange,
+  onRunModeChange,
   onClose,
   onSave,
   panes,
@@ -8549,8 +8549,8 @@ export function SettingsPanel({
             <div className={tab === "security" ? "space-y-4" : "hidden"}>
               <SecurityCenterTab
                 ref={securityTabRef}
-                confirmStrategy={confirmStrategy}
-                onConfirmStrategyChange={onConfirmStrategyChange}
+                runMode={runMode}
+                onRunModeChange={onRunModeChange}
               />
             </div>
 

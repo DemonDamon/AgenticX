@@ -44,7 +44,7 @@ type LoadConfigResult = {
   providers: Record<string, ProviderConfig>;
   userMode?: "pro" | "lite";
   onboardingCompleted?: boolean;
-  confirmStrategy?: "manual" | "semi-auto" | "auto";
+  runMode?: "ask" | "allowlist" | "auto";
   activeProvider?: string;
   activeModel?: string;
   agxAccount?: {
@@ -1236,7 +1236,7 @@ declare global {
       disconnectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;
       saveOnboardingCompleted: (completed: boolean) => Promise<{ ok: boolean }>;
-      saveConfirmStrategy: (strategy: "manual" | "semi-auto" | "auto") => Promise<{ ok: boolean }>;
+      saveRunMode: (mode: "ask" | "allowlist" | "auto") => Promise<{ ok: boolean }>;
       saveEmailConfig: (payload: EmailConfig) => Promise<{ ok: boolean; error?: string }>;
       testEmailConfig: (payload: {
         config: EmailConfig;

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "./ds/Button";
 import { Modal } from "./ds/Modal";
+import { CONFIRM_DIALOG_POLICY_OPTIONS } from "../constants/confirm-strategy-options";
 import {
   isProtectedConfirmContext,
   protectedConfirmReason,
@@ -19,9 +20,7 @@ type Props = {
 };
 
 const POLICY_OPTIONS: Array<{ value: ConfirmPolicy; label: string }> = [
-  { value: "ask-every-time", label: "每次询问（仅本次允许）" },
-  { value: "use-allowlist", label: "白名单放行（本会话允许同类）" },
-  { value: "run-everything", label: "低风险自动执行（仅自动放行低风险）" },
+  ...CONFIRM_DIALOG_POLICY_OPTIONS,
 ];
 
 export function ConfirmDialog({

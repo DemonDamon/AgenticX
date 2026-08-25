@@ -39,4 +39,23 @@ describe("ConfirmDialog", () => {
     expect(html).not.toContain("白名单放行（本会话允许同类）");
     expect(html).not.toContain("低风险自动执行（仅自动放行低风险）");
   });
+
+  it("does not offer allowlist or auto-execute policies when risk is missing", () => {
+    const html = renderToStaticMarkup(
+      <ConfirmDialog
+        open
+        question="Run unknown command?"
+        context={{ tool: "bash_exec", command: "mystery" }}
+        defaultPolicy="run-everything"
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("只能逐次确认");
+    expect(html).toContain("每次询问（仅本次允许）");
+    expect(html).not.toContain("白名单放行（本会话允许同类）");
+    expect(html).not.toContain("同类自动允许");
+    expect(html).not.toContain("低风险自动执行（仅自动放行低风险）");
+  });
 });
