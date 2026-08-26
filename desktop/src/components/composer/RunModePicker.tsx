@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Check, ChevronDown, ChevronUp, Hand, ShieldCheck, Zap } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Hand,
+  ShieldCheck,
+  SlidersHorizontal,
+  TriangleAlert,
+} from "lucide-react";
 import { createPortal } from "react-dom";
 import {
   RUN_MODE_OPTIONS,
@@ -8,11 +16,12 @@ import {
   type RunMode,
 } from "../../constants/confirm-strategy-options";
 import { useAppStore } from "../../store";
+import { AllowAllConfirmDialog } from "./AllowAllConfirmDialog";
 
 const RUN_MODE_ICON: Record<RunMode, typeof Hand> = {
   ask: Hand,
   allowlist: ShieldCheck,
-  auto: Zap,
+  auto: TriangleAlert,
 };
 
 export type RunModePanelPlacement = "up" | "down";
@@ -51,6 +60,7 @@ export type ApplyRunModeArgs = {
   next: RunMode;
   mode: RunMode;
   setRunMode: (v: RunMode) => void;
+  persistRunMode?: (v: RunMode) => void | Promise<void>;
   confirmDialog?: (payload: {
     title?: string;
     message: string;
@@ -64,30 +74,38 @@ export async function applyRunMode({
   next,
   mode,
   setRunMode,
+  persistRunMode,
   confirmDialog,
 }: ApplyRunModeArgs): Promise<void> {
   if (next === mode) return;
   if (next !== "auto") {
     setRunMode(next);
+    await persistRunMode?.(next);
     return;
   }
   if (typeof confirmDialog !== "function") return;
   const dlg = await confirmDialog({
     title: `切换到${runModeLabel("auto")}？`,
-    message: "低风险操作将不再逐条询问，直接在当前工作目录内执行。",
-    detail: "高风险操作（删除、覆盖、外发数据等）仍会请求你确认。",
+    message: "之后将不再逐条询问，智能体可自行执行命令、改文件和访问网络。",
+    detail: "工作区隔离仍然生效。可随时切回始终询问或按需确认。",
     confirmText: "切换",
     cancelText: "取消",
   });
-  if (dlg.confirmed) setRunMode("auto");
+  if (dlg.confirmed) {
+    setRunMode("auto");
+    await persistRunMode?.("auto");
+  }
 }
 
 export function RunModeMenu({
   mode,
   onSelect,
+  onCustomize,
 }: {
   mode: RunMode;
   onSelect: (next: RunMode) => void;
+  /** 传入时在菜单底部追加「自定义」入口；它不是第四个运行模式，只是跳转到安全中心。 */
+  onCustomize?: () => void;
 }) {
   return (
     <>
@@ -117,6 +135,26 @@ export function RunModeMenu({
           </button>
         );
       })}
+      {onCustomize ? (
+        <>
+          <div className="my-1 border-t border-border" />
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-surface-hover"
+            onClick={onCustomize}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.8} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] leading-tight text-text-primary">
+                自定义…
+              </span>
+              <span className="mt-0.5 block truncate text-[11px] leading-tight text-text-faint">
+                路径、命令和工具的放行规则
+              </span>
+            </span>
+          </button>
+        </>
+      ) : null}
     </>
   );
 }
@@ -124,11 +162,14 @@ export function RunModeMenu({
 export function RunModePicker() {
   const mode = useAppStore((s) => s.runMode);
   const setRunMode = useAppStore((s) => s.setRunMode);
+  const openSettings = useAppStore((s) => s.openSettings);
   const [open, setOpen] = useState(false);
+  const [allowAllOpen, setAllowAllOpen] = useState(false);
   const [style, setStyle] = useState<CSSProperties>({});
   const [placement, setPlacement] = useState<RunModePanelPlacement>("down");
   const anchorRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const allowAllResolverRef = useRef<((value: { confirmed: boolean }) => void) | null>(null);
   const currentOption = RUN_MODE_OPTIONS.find((option) => option.value === mode) ?? RUN_MODE_OPTIONS[0]!;
   const Icon = RUN_MODE_ICON[currentOption.value];
 
@@ -170,13 +211,24 @@ export function RunModePicker() {
     };
   }, [open]);
 
+  const closeAllowAll = (confirmed: boolean) => {
+    setAllowAllOpen(false);
+    allowAllResolverRef.current?.({ confirmed });
+    allowAllResolverRef.current = null;
+  };
+
   const applyMode = async (next: RunMode) => {
     setOpen(false);
     await applyRunMode({
       next,
       mode,
       setRunMode,
-      confirmDialog: window.agenticxDesktop?.confirmDialog,
+      persistRunMode: (value) => window.agenticxDesktop?.saveRunMode(value),
+      confirmDialog: () =>
+        new Promise<{ confirmed: boolean }>((resolve) => {
+          allowAllResolverRef.current = resolve;
+          setAllowAllOpen(true);
+        }),
     });
   };
 
@@ -209,8 +261,25 @@ export function RunModePicker() {
               style={style}
               role="listbox"
             >
-              <RunModeMenu mode={mode} onSelect={(next) => void applyMode(next)} />
+              <RunModeMenu
+                mode={mode}
+                onSelect={(next) => void applyMode(next)}
+                onCustomize={() => {
+                  setOpen(false);
+                  openSettings("security");
+                }}
+              />
             </div>,
+            document.body,
+          )
+        : null}
+      {allowAllOpen && typeof document !== "undefined"
+        ? createPortal(
+            <AllowAllConfirmDialog
+              open
+              onCancel={() => closeAllowAll(false)}
+              onConfirm={() => closeAllowAll(true)}
+            />,
             document.body,
           )
         : null}

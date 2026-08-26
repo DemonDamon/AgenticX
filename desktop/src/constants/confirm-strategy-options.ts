@@ -15,18 +15,19 @@ export type RunModeOption = {
 export const RUN_MODE_OPTIONS: ReadonlyArray<RunModeOption> = [
   {
     value: "ask",
-    label: "每次询问",
-    description: "每一步都问",
+    label: "始终询问",
+    description: "编辑文件、执行命令和使用网络时都先问你",
   },
   {
     value: "allowlist",
-    label: "白名单放行",
-    description: "名单内免问，名单外仍问",
+    label: "按需确认",
+    description: "只对有风险的操作询问",
   },
   {
     value: "auto",
-    label: "低风险自动执行",
-    description: "自动放行低风险操作，高风险仍会询问",
+    label: "全部允许",
+    // 只承诺「不再询问」：后端沙箱与路径拒绝独立于审批，仍然生效。
+    description: "不再询问，工作区隔离仍生效",
   },
 ];
 
@@ -60,9 +61,9 @@ export function migrateRunModeFromUnknown(raw: {
   );
 }
 
-/** 确认卡里「这次许可管多久」的选项文案，与运行模式共用「低风险自动执行」用词。 */
+/** 确认卡里「这次许可管多久」的选项文案，与运行模式共用同一套用词。 */
 export const CONFIRM_DIALOG_POLICY_OPTIONS = [
-  { value: "ask-every-time" as const, label: "每次询问（仅本次允许）" },
-  { value: "use-allowlist" as const, label: "白名单放行（本会话允许同类）" },
-  { value: "run-everything" as const, label: "低风险自动执行（仅自动放行低风险）" },
+  { value: "ask-every-time" as const, label: "始终询问（仅本次允许）" },
+  { value: "use-allowlist" as const, label: "按需确认（只问有风险的操作）" },
+  { value: "run-everything" as const, label: "全部允许（之后不再询问）" },
 ] as const;

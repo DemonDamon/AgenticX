@@ -3,7 +3,7 @@ import { Button } from "./ds/Button";
 import { Modal } from "./ds/Modal";
 import { CONFIRM_DIALOG_POLICY_OPTIONS } from "../constants/confirm-strategy-options";
 import {
-  hasNeverReusableCategory,
+  canReuseConfirmPolicy,
   isProtectedConfirmContext,
   protectedConfirmReason,
   type ConfirmPolicy,
@@ -36,8 +36,7 @@ export function ConfirmDialog({
 }: Props) {
   const [policy, setPolicy] = useState<ConfirmPolicy>("ask-every-time");
   const protectedRequest = isProtectedConfirmContext(context);
-  const neverReusable = hasNeverReusableCategory(context);
-  const lockToOnce = protectedRequest || neverReusable;
+  const lockToOnce = !canReuseConfirmPolicy(context);
   const protectedReason = protectedConfirmReason(context);
   const autoModeInterrupted = lockToOnce && defaultPolicy === "run-everything";
   const policyOptions = lockToOnce
@@ -73,9 +72,9 @@ export function ConfirmDialog({
 
         <div className="mb-3 rounded-md border border-border bg-surface-card p-3 text-xs text-text-muted">
           <div className="mb-2 font-medium text-text-primary">本次确认策略</div>
-          {protectedRequest ? (
+          {lockToOnce && protectedRequest ? (
             <p className="mb-2 rounded bg-amber-500/10 px-2 py-1.5 leading-5 text-[var(--status-warning)]">
-              {autoModeInterrupted ? "自动执行已开启，但这一步不在自动范围内：" : "这是受保护操作："}
+              {autoModeInterrupted ? "已选全部允许，但这一步仍需确认：" : "这是受保护操作："}
               {protectedReason}。只能逐次确认，不能加入同类允许或自动执行。
             </p>
           ) : null}

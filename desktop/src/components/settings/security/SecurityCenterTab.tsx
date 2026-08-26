@@ -89,7 +89,7 @@ export const SecurityCenterTab = forwardRef<SecurityCenterTabHandle, Props>(func
         {runMode === "auto" ? (
           <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-text-subtle">
             <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning" />
-            <span>此模式仅自动执行明确标记为低风险的操作。高风险、破坏性、桌面操控和未知风险操作仍会逐次询问。</span>
+            <span>此模式不再逐条询问，智能体可自行执行操作。下方的工作区隔离与放行规则仍然生效，请确认你信任当前任务。</span>
           </div>
         ) : null}
         <div className="mt-4 border-t border-[var(--border-muted)] pt-3">

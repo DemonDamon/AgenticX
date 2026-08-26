@@ -35,8 +35,8 @@ import { migrateRunModeFromUnknown, type RunMode } from "./constants/confirm-str
 import {
   buildConfirmApprovalKey,
   buildConfirmScope,
+  canReuseConfirmPolicy,
   defaultConfirmPolicyForStrategy,
-  isProtectedConfirmContext,
   shouldAutoApproveConfirm,
   workspaceFromConfirmContext,
 } from "./utils/confirm-scope";
@@ -1837,7 +1837,7 @@ export function App() {
       const sessionId = typeof context?.session_id === "string" ? context.session_id.trim() : "";
       const run = sessionId ? store.confirmRunsBySession[sessionId] : undefined;
       const workspace = workspaceFromConfirmContext(context, run?.workspace ?? "");
-      const approvalKey = buildConfirmApprovalKey(run?.runId ?? "", workspace, scope);
+      const approvalKey = buildConfirmApprovalKey(sessionId, workspace, scope);
       if (denyScopesRef.current.has(approvalKey)) {
         resolve(false);
         return;
@@ -2428,15 +2428,17 @@ export function App() {
         context={confirm.context}
         defaultPolicy={defaultConfirmPolicyForStrategy(runMode)}
         onApprove={(policy) => {
-          const protectedRequest = isProtectedConfirmContext(confirm.context);
+          const reusable = canReuseConfirmPolicy(confirm.context);
           const scope = confirmScopeRef.current;
-          if (!protectedRequest && scope) {
-            if (policy === "use-allowlist") {
-              autoApproveScopesRef.current.add(scope);
-              denyScopesRef.current.delete(scope);
-            }
+          if (reusable && scope && policy === "use-allowlist") {
+            autoApproveScopesRef.current.add(scope);
+            denyScopesRef.current.delete(scope);
           }
-          if (!protectedRequest && policy === "run-everything") {
+          if (policy === "use-allowlist") {
+            setRunMode("allowlist");
+            void window.agenticxDesktop.saveRunMode("allowlist");
+          }
+          if (policy === "run-everything") {
             setRunMode("auto");
             void window.agenticxDesktop.saveRunMode("auto");
           }

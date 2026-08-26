@@ -46,6 +46,18 @@ export function isProtectedConfirmContext(
 }
 
 /**
+ * 确认卡能否选「按需确认 / 全部允许」。
+ * 仅 `low` 与 `non_whitelisted` 可复用；高危、缺 risk、永不可复用类别仍锁「仅本次」。
+ */
+export function canReuseConfirmPolicy(
+  context?: Record<string, unknown>,
+): boolean {
+  if (hasNeverReusableCategory(context)) return false;
+  const risk = text(context?.risk).toLowerCase();
+  return risk === "low" || risk === "non_whitelisted";
+}
+
+/**
  * 后端在受保护请求的 context 里带 `protected_reason`。这里优先用它，取不到才回退到
  * 本地镜像的一张表——理由的唯一出处在后端，risk 将来加一档不用记得同步改两处文案。
  */
@@ -67,14 +79,19 @@ export function protectedConfirmReason(
   return LOCAL_PROTECTED_REASONS[text(context?.risk).toLowerCase()] ?? UNKNOWN_PROTECTED_REASON;
 }
 
+/**
+ * 以「此刻的运行模式」为准：同一会话里改档后，重试和下一轮都按新档走。
+ * 始终询问一律问；按需确认只放行常规操作；全部允许不再弹确认。
+ */
 export function shouldAutoApproveConfirm(
   strategy: RunMode | string,
-  scopeAlreadyAllowed: boolean,
+  _scopeAlreadyAllowed: boolean,
   context?: Record<string, unknown>,
 ): boolean {
-  if (isProtectedConfirmContext(context)) return false;
   const mode = normalizeRunMode(strategy);
-  return mode === "auto" || scopeAlreadyAllowed;
+  if (mode === "ask") return false;
+  if (mode === "auto") return true;
+  return canReuseConfirmPolicy(context);
 }
 
 export function defaultConfirmPolicyForStrategy(
@@ -101,13 +118,13 @@ export function workspaceFromConfirmContext(
   return normalizeConfirmWorkspace(context?.workspace_root ?? context?.cwd ?? fallback);
 }
 
-/** 审批记录的 key：task run + 工作区 + 既有 scope。跨 run / 跨工作区不复用。 */
+/** 审批记录的 key：会话 + 工作区 + 既有 scope。跨会话 / 跨工作区不复用。 */
 export function buildConfirmApprovalKey(
-  runId: string,
+  ownerId: string,
   workspace: string,
   scope: string,
 ): string {
-  return JSON.stringify([text(runId), normalizeConfirmWorkspace(workspace), scope]);
+  return JSON.stringify([text(ownerId), normalizeConfirmWorkspace(workspace), scope]);
 }
 
 export function parentPathForConfirmScope(pathValue: unknown): string {

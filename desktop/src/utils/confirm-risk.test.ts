@@ -45,9 +45,20 @@ describe("RUN_MODE_OPTIONS", () => {
     }
   });
 
-  it("says high-risk operations still ask in auto mode", () => {
+  it("describes auto as no-more-prompts without claiming isolation is off", () => {
     const auto = RUN_MODE_OPTIONS.find((option) => option.value === "auto");
-    expect(auto?.description).toContain("高风险");
+    expect(auto?.label).toBe("全部允许");
+    expect(auto?.description).toContain("不再询问");
+    // 后端沙箱与路径拒绝仍然生效，文案不得暗示「直接在本机裸跑」。
+    expect(auto?.description).toContain("隔离仍生效");
+  });
+
+  it("names the three modes 始终询问 / 按需确认 / 全部允许", () => {
+    expect(RUN_MODE_OPTIONS.map((option) => option.label)).toEqual([
+      "始终询问",
+      "按需确认",
+      "全部允许",
+    ]);
   });
 
   it("migrates old stored values without dropping the mode", () => {

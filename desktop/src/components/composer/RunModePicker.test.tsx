@@ -5,12 +5,23 @@ import { applyRunMode, RunModeMenu, RunModePicker, runModePanelStyle } from "./R
 
 const mocks = vi.hoisted(() => ({
   setRunMode: vi.fn(),
+  openSettings: vi.fn(),
   runMode: "ask" as const,
 }));
 
 vi.mock("../../store", () => ({
-  useAppStore: (selector: (s: { runMode: typeof mocks.runMode; setRunMode: typeof mocks.setRunMode }) => unknown) =>
-    selector({ runMode: mocks.runMode, setRunMode: mocks.setRunMode }),
+  useAppStore: (
+    selector: (s: {
+      runMode: typeof mocks.runMode;
+      setRunMode: typeof mocks.setRunMode;
+      openSettings: typeof mocks.openSettings;
+    }) => unknown,
+  ) =>
+    selector({
+      runMode: mocks.runMode,
+      setRunMode: mocks.setRunMode,
+      openSettings: mocks.openSettings,
+    }),
 }));
 
 describe("RunModePicker", () => {
@@ -28,6 +39,22 @@ describe("RunModePicker", () => {
     }
   });
 
+  it("offers a custom entry that opens the in-app security settings", () => {
+    const onCustomize = vi.fn();
+    const html = renderToStaticMarkup(
+      <RunModeMenu mode="ask" onSelect={() => {}} onCustomize={onCustomize} />,
+    );
+    expect(html).toContain("自定义");
+    expect(html).toContain("路径、命令和工具的放行规则");
+    // 自定义不是第四个运行模式，只是入口，不能混进可选中的档位里。
+    expect((html.match(/role="option"/g) ?? []).length).toBe(3);
+  });
+
+  it("does not render the custom entry when no handler is provided", () => {
+    const html = renderToStaticMarkup(<RunModeMenu mode="ask" onSelect={() => {}} />);
+    expect(html).not.toContain("路径、命令和工具的放行规则");
+  });
+
   it("applies a non-auto mode without asking", async () => {
     const setRunMode = vi.fn();
     const confirmDialog = vi.fn();
@@ -42,7 +69,34 @@ describe("RunModePicker", () => {
     expect(setRunMode).toHaveBeenCalledWith("allowlist");
   });
 
-  it("asks before switching to auto and requires 高风险 in the detail", async () => {
+  it("persists the chosen mode so a restart keeps it", async () => {
+    const setRunMode = vi.fn();
+    const persistRunMode = vi.fn();
+    await applyRunMode({
+      next: "allowlist",
+      mode: "ask",
+      setRunMode,
+      persistRunMode,
+    });
+    expect(persistRunMode).toHaveBeenCalledTimes(1);
+    expect(persistRunMode).toHaveBeenCalledWith("allowlist");
+  });
+
+  it("persists auto only after the user confirms the switch", async () => {
+    const setRunMode = vi.fn();
+    const persistRunMode = vi.fn();
+    const confirmDialog = vi.fn().mockResolvedValue({ confirmed: true });
+    await applyRunMode({
+      next: "auto",
+      mode: "ask",
+      setRunMode,
+      persistRunMode,
+      confirmDialog,
+    });
+    expect(persistRunMode).toHaveBeenCalledWith("auto");
+  });
+
+  it("asks before switching to allow-all and warns it will not prompt again", async () => {
     const setRunMode = vi.fn();
     const confirmDialog = vi.fn().mockResolvedValue({ confirmed: true });
     await applyRunMode({
@@ -52,22 +106,27 @@ describe("RunModePicker", () => {
       confirmDialog,
     });
     expect(confirmDialog).toHaveBeenCalledTimes(1);
-    const payload = confirmDialog.mock.calls[0]?.[0] as { detail?: string };
-    expect(payload.detail).toContain("高风险");
+    const payload = confirmDialog.mock.calls[0]?.[0] as { message?: string; detail?: string };
+    const copy = `${payload.message ?? ""} ${payload.detail ?? ""}`;
+    expect(copy).toMatch(/不再逐条询问|不再询问/);
+    expect(copy).toContain("工作区隔离仍然生效");
     expect(setRunMode).toHaveBeenCalledWith("auto");
   });
 
   it("does not change mode when the auto confirm is cancelled", async () => {
     const setRunMode = vi.fn();
+    const persistRunMode = vi.fn();
     const confirmDialog = vi.fn().mockResolvedValue({ confirmed: false });
     await applyRunMode({
       next: "auto",
       mode: "ask",
       setRunMode,
+      persistRunMode,
       confirmDialog,
     });
     expect(confirmDialog).toHaveBeenCalledTimes(1);
     expect(setRunMode).not.toHaveBeenCalled();
+    expect(persistRunMode).not.toHaveBeenCalled();
   });
 
   function withWindow<T>(size: { innerWidth: number; innerHeight: number }, run: () => T): T {

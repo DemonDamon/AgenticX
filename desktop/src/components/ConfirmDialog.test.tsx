@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 describe("ConfirmDialog", () => {
-  it("offers allowlist and low-risk auto policies for explicit low-risk requests", () => {
+  it("offers on-demand and allow-all policies for explicit low-risk requests", () => {
     const html = renderToStaticMarkup(
       <ConfirmDialog
         open
@@ -15,14 +15,12 @@ describe("ConfirmDialog", () => {
       />,
     );
 
-    expect(html).toContain("每次询问（仅本次允许）");
-    expect(html).toContain("白名单放行（本会话允许同类）");
-    expect(html).toContain("低风险自动执行");
-    expect(html).not.toContain("全部自动执行");
-    expect(html).not.toContain("本会话不再询问");
+    expect(html).toContain("始终询问（仅本次允许）");
+    expect(html).toContain("按需确认（只问有风险的操作）");
+    expect(html).toContain("全部允许（之后不再询问）");
   });
 
-  it("does not offer allowlist or auto-execute policies for protected requests", () => {
+  it("does not offer reusable policies for protected requests", () => {
     const html = renderToStaticMarkup(
       <ConfirmDialog
         open
@@ -35,9 +33,9 @@ describe("ConfirmDialog", () => {
     );
 
     expect(html).toContain("只能逐次确认");
-    expect(html).toContain("每次询问（仅本次允许）");
-    expect(html).not.toContain("白名单放行（本会话允许同类）");
-    expect(html).not.toContain("低风险自动执行（仅自动放行低风险）");
+    expect(html).toContain("始终询问（仅本次允许）");
+    expect(html).not.toContain("按需确认（只问有风险的操作）");
+    expect(html).not.toContain("全部允许（之后不再询问）");
   });
 
   it("does not offer reusable policies when risk_categories includes destructive_filesystem", () => {
@@ -57,12 +55,12 @@ describe("ConfirmDialog", () => {
       />,
     );
 
-    expect(html).toContain("每次询问（仅本次允许）");
-    expect(html).not.toContain("白名单放行（本会话允许同类）");
-    expect(html).not.toContain("低风险自动执行（仅自动放行低风险）");
+    expect(html).toContain("始终询问（仅本次允许）");
+    expect(html).not.toContain("按需确认（只问有风险的操作）");
+    expect(html).not.toContain("全部允许（之后不再询问）");
   });
 
-  it("does not offer allowlist or auto-execute policies when risk is missing", () => {
+  it("does not offer reusable policies when risk is missing", () => {
     const html = renderToStaticMarkup(
       <ConfirmDialog
         open
@@ -75,9 +73,26 @@ describe("ConfirmDialog", () => {
     );
 
     expect(html).toContain("只能逐次确认");
-    expect(html).toContain("每次询问（仅本次允许）");
-    expect(html).not.toContain("白名单放行（本会话允许同类）");
-    expect(html).not.toContain("同类自动允许");
-    expect(html).not.toContain("低风险自动执行（仅自动放行低风险）");
+    expect(html).toContain("始终询问（仅本次允许）");
+    expect(html).not.toContain("按需确认（只问有风险的操作）");
+    expect(html).not.toContain("全部允许（之后不再询问）");
+  });
+
+  it("offers on-demand and allow-all when risk is non_whitelisted", () => {
+    const html = renderToStaticMarkup(
+      <ConfirmDialog
+        open
+        question="Command 'open' is not a contained read-only command. Execute anyway?"
+        context={{ tool: "bash_exec", command: "open .", risk: "non_whitelisted" }}
+        defaultPolicy="use-allowlist"
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("始终询问（仅本次允许）");
+    expect(html).toContain("按需确认（只问有风险的操作）");
+    expect(html).toContain("全部允许（之后不再询问）");
+    expect(html).not.toContain("只能逐次确认");
   });
 });
