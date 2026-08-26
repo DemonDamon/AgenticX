@@ -271,7 +271,8 @@ type AgxConfig = {
   providers?: Record<string, ProviderConfig>;
   user_mode?: "pro" | "lite";
   onboarding_completed?: boolean;
-  confirm_strategy?: "manual" | "semi-auto" | "auto";
+  confirm_strategy?: "manual" | "semi-auto" | "auto" | "ask" | "allowlist";
+  run_mode?: "ask" | "allowlist" | "auto";
   active_provider?: string;
   active_model?: string;
   remote_server?: RemoteServerConfig;
@@ -373,6 +374,14 @@ const CONFIG_DIR = path.join(os.homedir(), ".agenticx");
 const SESSIONS_DIR = path.join(CONFIG_DIR, "sessions");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.yaml");
 const DEFAULT_META_WORKSPACE_DIR = path.join(CONFIG_DIR, "workspace");
+
+function normalizeDesktopRunMode(raw: unknown): "ask" | "allowlist" | "auto" {
+  const text = String(raw ?? "").trim().toLowerCase();
+  if (text === "auto") return "auto";
+  if (text === "allowlist" || text === "semi-auto") return "allowlist";
+  if (text === "ask" || text === "manual") return "ask";
+  return "ask";
+}
 
 function expandDesktopLocalPath(input: string): string {
   const raw = String(input || "").trim();
@@ -7042,7 +7051,7 @@ function registerEarlyIpc(): void {
       providers,
       userMode: cfg.user_mode ?? "pro",
       onboardingCompleted: true,
-      confirmStrategy: cfg.confirm_strategy ?? "semi-auto",
+      runMode: normalizeDesktopRunMode(cfg.run_mode ?? cfg.confirm_strategy),
       activeProvider,
       activeModel,
       agxAccount: {
@@ -10360,9 +10369,11 @@ function registerIpc(): void {
     return { ok: true };
   });
 
-  ipcMain.handle("save-confirm-strategy", async (_event, strategy: "manual" | "semi-auto" | "auto") => {
+  ipcMain.handle("save-run-mode", async (_event, mode: "ask" | "allowlist" | "auto") => {
     const cfg = loadAgxConfig();
-    cfg.confirm_strategy = strategy;
+    const next = normalizeDesktopRunMode(mode);
+    cfg.run_mode = next;
+    delete cfg.confirm_strategy;
     saveAgxConfig(cfg);
     return { ok: true };
   });

@@ -1,3 +1,9 @@
+import {
+  RUN_MODE_CYCLE,
+  runModeLabel,
+  type RunMode,
+} from "../constants/confirm-strategy-options";
+
 export type CommandCategory = "model" | "session" | "tools" | "view" | "settings" | "help";
 export type UserMode = "pro" | "lite";
 
@@ -64,15 +70,9 @@ export type Phase1CommandContext = {
   clearMessages: () => void;
   togglePlanMode: () => boolean;
   toggleUserMode: () => Promise<void>;
-  cycleConfirmStrategy: () => Promise<"manual" | "semi-auto" | "auto">;
+  cycleRunMode: () => Promise<RunMode>;
   addAssistantMessage: (content: string) => void;
 };
-
-function confirmStrategyLabel(strategy: "manual" | "semi-auto" | "auto"): string {
-  if (strategy === "manual") return "每次询问";
-  if (strategy === "semi-auto") return "白名单放行";
-  return "低风险自动执行";
-}
 
 export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry {
   const registry = new CommandRegistry();
@@ -123,7 +123,7 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
           "- /settings：打开设置",
           "- /clear：清空对话",
           "- /plan：切换计划模式（Pro）",
-          "- /confirm：切换确认策略",
+          "- /confirm：切换运行模式",
           "- /keybindings：查看快捷键",
           "- /help：查看帮助",
         ].join("\n")
@@ -145,13 +145,13 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
   registry.register({
     id: "confirm",
     name: "/confirm",
-    description: "循环切换确认策略（每次询问 / 白名单放行 / 低风险自动执行）",
+    description: `循环切换运行模式（${RUN_MODE_CYCLE.map((mode) => runModeLabel(mode)).join(" / ")}）`,
     category: "settings",
     mode: "both",
     icon: "A",
     handler: async () => {
-      const strategy = await ctx.cycleConfirmStrategy();
-      ctx.addAssistantMessage(`已切换确认策略为: ${confirmStrategyLabel(strategy)}`);
+      const mode = await ctx.cycleRunMode();
+      ctx.addAssistantMessage(`已切换运行模式为: ${runModeLabel(mode)}`);
     },
   });
   registry.register({

@@ -17,6 +17,7 @@ import { CommandPalette } from "./CommandPalette";
 import { QuickActions } from "./QuickActions";
 import { ShortcutHints } from "./ShortcutHints";
 import { createPhase1Registry } from "../core/command-registry";
+import { RUN_MODE_CYCLE, runModeLabel } from "../constants/confirm-strategy-options";
 import {
   ccBridgeSendToolProgressLabel,
   parseCcBridgeModeFromPayload,
@@ -135,11 +136,6 @@ const statusDot: Record<string, string> = {
   processing: "bg-amber-400 animate-spin"
 };
 
-const confirmModeLabel: Record<string, string> = {
-  manual: "每次询问",
-  "semi-auto": "白名单放行",
-  auto: "低风险自动执行",
-};
 
 function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { content: string; silent: boolean } {
   const toolName = String(toolNameRaw ?? "").trim() || "tool";
@@ -408,8 +404,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
   const keybindingsPanelOpen = useAppStore((s) => s.keybindingsPanelOpen);
   const setKeybindingsPanelOpen = useAppStore((s) => s.setKeybindingsPanelOpen);
-  const confirmStrategy = useAppStore((s) => s.confirmStrategy);
-  const setConfirmStrategy = useAppStore((s) => s.setConfirmStrategy);
+  const runMode = useAppStore((s) => s.runMode);
+  const setRunMode = useAppStore((s) => s.setRunMode);
   const clearMessages = useAppStore((s) => s.clearMessages);
   const subAgents = useAppStore((s) => s.subAgents);
   const selectedSubAgent = useAppStore((s) => s.selectedSubAgent);
@@ -494,15 +490,15 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
   const applyUserMode = useCallback(
     async (nextMode: "pro" | "lite") => {
       setUserMode(nextMode);
-      const nextStrategy = nextMode === "lite" ? "manual" : "semi-auto";
-      setConfirmStrategy(nextStrategy);
+      const nextModeValue = nextMode === "lite" ? "ask" : "allowlist";
+      setRunMode(nextModeValue);
       if (nextMode === "lite") setPlanMode(false);
       setCommandPaletteOpen(false);
       setKeybindingsPanelOpen(false);
       await window.agenticxDesktop.saveUserMode(nextMode);
-      await window.agenticxDesktop.saveConfirmStrategy(nextStrategy);
+      await window.agenticxDesktop.saveRunMode(nextModeValue);
     },
-    [setUserMode, setConfirmStrategy, setPlanMode, setCommandPaletteOpen, setKeybindingsPanelOpen]
+    [setUserMode, setRunMode, setPlanMode, setCommandPaletteOpen, setKeybindingsPanelOpen]
   );
 
   const deferredCommandQuery = useDeferredValue(commandQuery);
@@ -522,12 +518,11 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
           const nextMode = userMode === "pro" ? "lite" : "pro";
           await applyUserMode(nextMode);
         },
-        cycleConfirmStrategy: async () => {
-          const order: Array<"manual" | "semi-auto" | "auto"> = ["manual", "semi-auto", "auto"];
-          const idx = order.indexOf(confirmStrategy);
-          const next = order[(idx + 1) % order.length];
-          setConfirmStrategy(next);
-          await window.agenticxDesktop.saveConfirmStrategy(next);
+        cycleRunMode: async () => {
+          const idx = RUN_MODE_CYCLE.indexOf(runMode);
+          const next = RUN_MODE_CYCLE[(idx + 1) % RUN_MODE_CYCLE.length] ?? "ask";
+          setRunMode(next);
+          await window.agenticxDesktop.saveRunMode(next);
           return next;
         },
         addAssistantMessage: (content) => addMessage("assistant", content, "meta"),
@@ -539,8 +534,8 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       addMessage,
       planMode,
       setPlanMode,
-      confirmStrategy,
-      setConfirmStrategy,
+      runMode,
+      setRunMode,
       applyUserMode,
     ]
   );
@@ -1365,6 +1360,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       if (reqProvider) body.provider = reqProvider;
       if (reqModel) body.model = reqModel;
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
+      if (!isContinuation) {
+        useAppStore.getState().startConfirmRun(String(sessionId ?? ""), "");
+      }
       const resp = isContinuation && opts?.continuation
         ? await fetch(continueSessionUrl(apiBase, sessionId), {
             method: "POST",
@@ -1699,12 +1697,16 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
                   content: payload.data?.question ?? "等待确认",
                 });
               }
+              const rawConfirmContext =
+                payload.data?.context && typeof payload.data.context === "object"
+                  ? (payload.data.context as Record<string, unknown>)
+                  : {};
               const ok = await onOpenConfirm(
                 payload.data?.id ?? "",
                 payload.data?.question ?? "是否确认执行？",
                 payload.data?.context?.diff,
                 eventAgentId,
-                payload.data?.context
+                { ...rawConfirmContext, session_id: sessionId },
               );
               if (!isCurrentRequest()) continue;
               await fetch(`${apiBase}/api/confirm`, {
@@ -2514,7 +2516,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
           )}
           {!isLite && (
             <span className="rounded bg-surface-hover px-2 py-0.5 text-[11px] text-text-muted">
-              审批: {confirmModeLabel[confirmStrategy] ?? confirmStrategy}
+              审批: {runModeLabel(runMode)}
             </span>
           )}
         </div>

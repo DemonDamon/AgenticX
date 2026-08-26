@@ -26,7 +26,7 @@ import uuid
 from dataclasses import dataclass
 from urllib.parse import urlparse
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.codegen_engine import CodeGenEngine, infer_output_path, write_generated_file
@@ -76,24 +76,6 @@ _CC_BRIDGE_IDLE_TASK: Optional[asyncio.Task[Any]] = None
 _CC_BRIDGE_LAST_ACTIVE_MONO: float = 0.0
 
 
-SAFE_COMMANDS = {
-    "cd",
-    "ls",
-    "cat",
-    "head",
-    "tail",
-    "grep",
-    "find",
-    "wc",
-    "python",
-    "pip",
-    "git",
-    "echo",
-    "pwd",
-    "which",
-    "tree",
-}
-
 MAX_READ_CHARS = 20_000
 MAX_READ_CHARS_CODE_DEV = 8_000
 # Cap bash_exec command string size (defense in depth; matches audit remediation).
@@ -119,6 +101,73 @@ def tool_denied_by_session_permissions(tool_name: str) -> Optional[str]:
             continue
         if fnmatch.fnmatch(name, pat) or fnmatch.fnmatch(name.lower(), pat.lower()):
             return f"工具「{name}」已被会话权限策略拒绝（匹配规则: {pat}）。"
+    return None
+
+
+def tool_allowed_without_confirm(
+    tool_name: str,
+    risk_codes: Iterable[str] = (),
+) -> bool:
+    """Whether ``permissions.allowed_tools`` says this tool needs no prompt.
+
+    This is skip-confirmation, not "only these tools exist". Deny still
+    wins earlier. Categories in ``NEVER_AUTO_APPROVED_CATEGORIES`` are
+    never waived.
+    """
+    from agenticx.runtime.command_safety import NEVER_AUTO_APPROVED_CATEGORIES
+
+    codes = {str(code).strip() for code in risk_codes}
+    if codes & NEVER_AUTO_APPROVED_CATEGORIES:
+        return False
+    try:
+        raw = ConfigManager.get_value("permissions.allowed_tools")
+    except Exception:
+        return False
+    if not isinstance(raw, list):
+        return False
+    name = str(tool_name or "").strip()
+    if not name:
+        return False
+    for entry in raw:
+        pattern = str(entry or "").strip()
+        if not pattern:
+            continue
+        if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(name.lower(), pattern.lower()):
+            return True
+    return False
+
+
+def _configured_command_permissions(session: Optional[StudioSession] = None) -> str:
+    from agenticx.runtime.command_sandbox import normalize_command_permissions
+
+    raw = getattr(session, "command_permissions", None) if session is not None else None
+    if raw is None:
+        try:
+            raw = ConfigManager.get_value("permissions.command_permissions")
+        except Exception:
+            raw = None
+    return normalize_command_permissions(raw)
+
+
+def _dispatch_path_rule_denial(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession],
+) -> Optional[str]:
+    """Reject path-like arguments that hit a deny rule, before confirm."""
+    for key in ("path", "from_path"):
+        raw = arguments.get(key)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        try:
+            resolved = _resolve_workspace_path(raw, session)
+        except ValueError as exc:
+            message = str(exc)
+            if "blocked by permissions.path_rules" in message:
+                return message
+            continue
+        deny = _path_denied_by_rules(resolved, session)
+        if deny:
+            return deny
     return None
 
 
@@ -156,24 +205,51 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
 
 
 def _bash_exec_is_read_only(arguments: Dict[str, Any]) -> bool:
-    """Heuristic: treat obvious mutating shell patterns as non-read-only."""
-    cmd = str(arguments.get("command", "") or "")
-    if not cmd.strip():
-        return True
-    if ">>" in cmd:
-        return False
-    # Single `>` redirect (not `>=` etc.)
-    for i, ch in enumerate(cmd):
-        if ch == ">" and (i == 0 or cmd[i - 1] not in ">="):
-            return False
-    lowered = " " + cmd.lower() + " "
-    for needle in (" rm ", " mv ", " mkdir ", " touch ", " tee ", "git push", "git commit"):
-        if needle in lowered:
-            return False
-    stripped = cmd.strip().lower()
-    if stripped.startswith(("rm ", "mv ", "mkdir ", "touch ")):
-        return False
-    return True
+    """True when every segment is already contained by the workspace sandbox."""
+    from agenticx.runtime.command_safety import assess_command
+
+    verdict = assess_command(str(arguments.get("command") or ""))
+    return verdict.is_contained
+
+
+def _bash_exec_safety_confirm(
+    command: str,
+) -> Optional[Tuple[str, str, List[str], List[str]]]:
+    """Return ``(risk, cancel_what, reasons, codes)`` when confirmation is required.
+
+    Contained commands with no absolute redirect skip the confirm gate.
+    Opaque / unrecognized names use ``non_whitelisted``; writes, publishes,
+    and absolute redirects use ``high``.
+    """
+    from agenticx.runtime.command_safety import (
+        absolute_redirect_targets,
+        assess_command,
+    )
+
+    verdict = assess_command(command)
+    abs_targets = absolute_redirect_targets(command)
+    if verdict.is_contained and not abs_targets:
+        return None
+
+    reasons = [item.evidence for item in verdict.findings]
+    codes = [item.code for item in verdict.findings]
+    if abs_targets:
+        reasons.append("absolute redirect: " + ", ".join(abs_targets))
+        codes.append("absolute_redirect")
+
+    high_codes = {
+        "destructive_filesystem",
+        "arbitrary_code_execution",
+        "version_control_change",
+        "dependency_change",
+        "absolute_redirect",
+        "external_publish",
+        "system_disruption",
+        "host_full_access",
+    }
+    if any(code in high_codes for code in codes):
+        return ("high", "高风险命令未执行", reasons, codes)
+    return ("non_whitelisted", "非白名单命令未执行", reasons, codes)
 
 
 def studio_tool_is_concurrency_safe(tool_name: str, arguments: Dict[str, Any]) -> bool:
@@ -2750,16 +2826,225 @@ def _cancelled(what: str, confirm_gate: ConfirmGate) -> str:
     return f"CANCELLED: {what}（{note.strip()}）"
 
 
+def _peel_to_inner_command(parts: List[str]) -> List[str]:
+    """Strip env assignments and delegating wrappers (timeout/env/xargs/…)."""
+    from agenticx.runtime.command_safety import DELEGATING_COMMANDS, _strip_env_assignments
+
+    current = list(_strip_env_assignments(parts))
+    for _ in range(8):
+        if not current:
+            return current
+        name = Path(current[0]).name
+        if name not in DELEGATING_COMMANDS:
+            return current
+        index = 1
+        if name == "timeout":
+            while index < len(current) and current[index].startswith("-"):
+                index += 1
+            index += 1
+        elif name == "env":
+            while index < len(current) and (
+                current[index].startswith("-") or "=" in current[index]
+            ):
+                index += 1
+        elif name == "xargs":
+            while index < len(current) and current[index].startswith("-"):
+                if current[index] in {"-I", "-n", "-P", "-L", "-d", "-s", "-E", "-a"}:
+                    index += 1
+                index += 1
+        else:
+            while index < len(current) and current[index].startswith("-"):
+                index += 1
+        current = list(current[index:])
+    return current
+
+
+def _extract_node_script_arg(parts: List[str]) -> Optional[str]:
+    if any(token in {"-e", "-p", "-c"} for token in parts[1:]):
+        return None
+    idx = 1
+    while idx < len(parts):
+        token = parts[idx]
+        if token == "--":
+            return parts[idx + 1] if idx + 1 < len(parts) else None
+        if token in {"-r", "--require"}:
+            idx += 2
+            continue
+        if token.startswith("-"):
+            idx += 1
+            continue
+        return token
+    return None
+
+
+def _workspace_script_paths(parts: List[str]) -> Optional[List[str]]:
+    """Executable + script args that must already exist in writable roots.
+
+    Returns None when the segment is not a workspace-script shape
+    (``python -c``, ``node -e``, empty inner command).
+    """
+    if not parts:
+        return None
+    name = Path(parts[0]).name
+    if name in {"python", "python3"}:
+        script = _extract_python_script_arg(parts)
+        if not script:
+            return None
+        return [parts[0], script]
+    if name in {"node", "npx"}:
+        script = _extract_node_script_arg(parts)
+        if not script:
+            return None
+        return [parts[0], script]
+    return [parts[0]]
+
+
+def _existing_writable_workspace_path(
+    path_arg: str,
+    session: Optional[StudioSession],
+) -> bool:
+    if session is None:
+        return False
+    try:
+        resolved = _resolve_workspace_path(path_arg, session)
+    except ValueError:
+        return False
+    try:
+        if not resolved.exists():
+            return False
+    except OSError:
+        return False
+    _read_roots, write_roots = _session_workspace_root_sets(session)
+    return any(_is_path_under_root(resolved, root) for root in write_roots)
+
+
+def _existing_writable_workspace_path_lexical(
+    path_arg: str,
+    session: Optional[StudioSession],
+) -> bool:
+    """Containment check that does not follow symlinks.
+
+    A venv interpreter is always ``.venv/bin/python -> <system python>``, so
+    resolving symlinks would report every venv as escaping the workspace. The
+    risk boundary is the script being run, not where the interpreter binary
+    physically lives; writes are still bounded by the OS sandbox. ``..`` cannot
+    be used to escape because ``normpath`` collapses it before the check.
+    """
+    if session is None:
+        return False
+    raw = str(path_arg or "").strip()
+    if not raw:
+        return False
+    _read_roots, write_roots = _session_workspace_root_sets(session)
+    if not write_roots:
+        return False
+    expanded = Path(raw).expanduser()
+    candidates: List[Path] = []
+    if expanded.is_absolute():
+        candidates.append(Path(os.path.normpath(str(expanded))))
+    else:
+        for root in write_roots:
+            candidates.append(Path(os.path.normpath(str(root / expanded))))
+    for candidate in candidates:
+        if _is_protected_path(candidate) or _path_denied_by_rules(candidate, session):
+            continue
+        try:
+            if not candidate.exists():
+                continue
+        except OSError:
+            continue
+        if any(
+            str(candidate) == str(root) or str(candidate).startswith(f"{root}{os.sep}")
+            for root in write_roots
+        ):
+            return True
+    return False
+
+
+def _unattended_workspace_script_allowed(
+    context: Dict[str, Any],
+    risk_codes: Iterable[str],
+    session: Optional[StudioSession],
+) -> bool:
+    """Narrow unattended allow: existing workspace scripts only, never-categories excluded."""
+    if session is None:
+        return False
+    try:
+        flag = ConfigManager.get_value("permissions.unattended_allow_workspace_scripts")
+    except Exception:
+        flag = False
+    if flag is not True:
+        return False
+    from agenticx.runtime.command_safety import (
+        NEVER_AUTO_APPROVED_CATEGORIES,
+        absolute_redirect_targets,
+        split_simple_commands,
+    )
+
+    if set(str(code) for code in risk_codes) & NEVER_AUTO_APPROVED_CATEGORIES:
+        return False
+    tool = str(context.get("tool") or "")
+    if tool not in {"bash_exec", "bash_bg_start"}:
+        return False
+    command = str(context.get("command") or "")
+    if not command.strip():
+        return False
+    if absolute_redirect_targets(command):
+        return False
+    segments = split_simple_commands(command)
+    if not segments:
+        return False
+    for parts in segments:
+        required = _workspace_script_paths(_peel_to_inner_command(list(parts)))
+        if not required:
+            return False
+        executable, script_args = required[0], required[1:]
+        # 解释器按字面路径判定（venv 里它必然是指向系统 Python 的符号链接）；
+        # 被执行的脚本仍按解析后的真实路径判定。
+        if not _existing_writable_workspace_path_lexical(executable, session):
+            return False
+        for arg in script_args:
+            if not _existing_writable_workspace_path(arg, session):
+                return False
+    return True
+
+
 async def _confirm(
     question: str,
     *,
     confirm_gate: ConfirmGate,
     context: Optional[Dict[str, Any]] = None,
     emit_event: Optional[Any] = None,
+    session: Optional[StudioSession] = None,
 ) -> bool:
     payload_context = dict(context or {})
     request_id = str(payload_context.get("request_id") or uuid.uuid4())
     payload_context["request_id"] = request_id
+    from agenticx.runtime.command_safety import NEVER_AUTO_APPROVED_CATEGORIES
+
+    risk_codes = [
+        str(item.get("code") or "")
+        for item in (payload_context.get("risk_categories") or [])
+        if isinstance(item, dict)
+    ]
+    path_raw = payload_context.get("path")
+    path_allow = bool(path_raw) and _path_allowed_without_confirm(Path(str(path_raw)))
+    if set(risk_codes) & NEVER_AUTO_APPROVED_CATEGORIES:
+        path_allow = False
+    if tool_allowed_without_confirm(str(payload_context.get("tool") or ""), risk_codes) or path_allow:
+        _log.info(
+            "[confirm] auto-approved id=%s tool=%s by permissions allow rule",
+            request_id,
+            payload_context.get("tool"),
+        )
+        return True
+    if _unattended_workspace_script_allowed(payload_context, risk_codes, session):
+        _log.info(
+            "[confirm] auto-approved id=%s tool=%s by unattended workspace-script rule",
+            request_id,
+            payload_context.get("tool"),
+        )
+        return True
     # 受保护的请求带上「为什么问你」。界面自己也能按 risk 推，但理由由后端给出才有
     # 唯一出处——risk 取值将来加一个，不用记得同步改两处文案。
     if is_protected_confirm(payload_context):
@@ -3216,6 +3501,78 @@ def _is_protected_path(path: Path) -> bool:
     return False
 
 
+def denied_path_patterns_for_sandbox(session: Optional[StudioSession] = None) -> List[str]:
+    """Deny globs from ``permissions.path_rules`` for the OS sandbox.
+
+    First-party file tools go through :func:`_path_denied_by_rules`.
+    Shell writes such as ``rm -f secrets/key`` do not. Pushing deny
+    patterns into the sandbox is the process-level boundary that does
+    not depend on parsing the command.
+
+    Allow rules are not pushed down: they skip confirmation, they do
+    not open the sandbox. Session ``path_rules`` (delegated inherit)
+    win over the global config.
+    """
+    from agenticx.runtime.path_policy import normalize_path_rules
+
+    raw = _path_rules_source(session)
+    return [pattern for pattern, allow in normalize_path_rules(raw) if not allow]
+
+
+def _path_rules_source(session: Optional[StudioSession] = None) -> Any:
+    """Session ``path_rules`` (delegated inherit) win over the global config."""
+    raw = getattr(session, "path_rules", None) if session is not None else None
+    if raw is not None:
+        return raw
+    try:
+        return ConfigManager.get_value("permissions.path_rules")
+    except Exception:
+        return None
+
+
+def _path_denied_by_rules(
+    path: Path, session: Optional[StudioSession] = None
+) -> Optional[str]:
+    """Denial text when ``permissions.path_rules`` rejects ``path``.
+
+    Deny is absolute and short-circuits before the confirm gate. Allow
+    rules have no effect here -- they only skip confirmation via
+    :func:`_path_allowed_without_confirm`. Reads and writes are both
+    refused.
+    """
+    from agenticx.runtime.path_policy import path_rule_decision
+
+    decision, pattern = path_rule_decision(path, _path_rules_source(session))
+    if decision is False:
+        return (
+            f"path blocked by permissions.path_rules "
+            f"(pattern {pattern!r} matched {path})"
+        )
+    return None
+
+
+def _path_allowed_without_confirm(
+    path: Path, session: Optional[StudioSession] = None
+) -> bool:
+    """True when a user allow rule says this path needs no per-write prompt.
+
+    Does not open the sandbox. Workspace bounds stay with
+    :func:`_resolve_workspace_path` and the OS sandbox.
+    """
+    from agenticx.runtime.path_policy import path_rule_decision
+
+    decision, _pattern = path_rule_decision(path, _path_rules_source(session))
+    return decision is True
+
+
+def _raise_if_path_denied(
+    path: Path, session: Optional[StudioSession] = None
+) -> None:
+    rule_deny = _path_denied_by_rules(path, session)
+    if rule_deny:
+        raise ValueError(rule_deny)
+
+
 _TOOL_METADATA_LINE_RE = re.compile(r"^\s*(call_[A-Za-z0-9]+|sa-[a-z0-9]+)\s*$")
 
 
@@ -3267,6 +3624,7 @@ def _resolve_workspace_path(
             resolved = _safe_resolve_path(_workspace_root() / raw_path)
         if _is_protected_path(resolved):
             raise ValueError(f"path is protected: {resolved}")
+        _raise_if_path_denied(resolved, session)
         return resolved
 
     read_roots, write_roots = _session_workspace_root_sets(session)
@@ -3307,7 +3665,9 @@ def _resolve_workspace_path(
                 if _under_any_root(mapped_path, read_roots):
                     raise ValueError(_format_readonly_reference(mapped_path))
                 raise ValueError(_format_escape(mapped_path))
+            _raise_if_path_denied(mapped_path, session)
             return mapped_path
+        _raise_if_path_denied(resolved, session)
         for root in roots:
             if _is_path_under_root(resolved, root):
                 return resolved
@@ -3333,6 +3693,7 @@ def _resolve_workspace_path(
                 if _under_any_root(resolved, read_roots):
                     raise ValueError(_format_readonly_reference(resolved))
                 raise ValueError(_format_escape(resolved))
+            _raise_if_path_denied(resolved, session)
             return resolved
 
     if pick_existing:
@@ -3340,7 +3701,7 @@ def _resolve_workspace_path(
             candidate = _safe_resolve_path(root / raw_path)
             if not _is_path_under_root(candidate, root):
                 continue
-            if _is_protected_path(candidate):
+            if _is_protected_path(candidate) or _path_denied_by_rules(candidate, session):
                 continue
             if candidate.exists():
                 return candidate
@@ -3349,6 +3710,7 @@ def _resolve_workspace_path(
     resolved = _safe_resolve_path(primary / raw_path)
     if _is_protected_path(resolved):
         raise ValueError(f"path is protected: {resolved}")
+    _raise_if_path_denied(resolved, session)
     if not _is_path_under_root(resolved, primary):
         if for_write and _under_any_root(resolved, read_roots):
             raise ValueError(_format_readonly_reference(resolved))
@@ -3518,10 +3880,9 @@ def _ensure_bash_write_targets_allowed(
 
     ``file_edit`` already enforces write roots; without this, models bypass via shell.
     """
-    if _bash_exec_is_read_only({"command": command}):
-        return None
-
     targets = _extract_bash_write_target_paths(command)
+    if not targets and _bash_exec_is_read_only({"command": command}):
+        return None
     cd_bases = _bash_cd_bases_in_command(command)
 
     def _candidates_for(raw: str) -> List[str]:
@@ -3606,26 +3967,12 @@ def _first_non_option_token(
 
 
 def _collect_subcommand_risk_reasons(command_name: str, parts: List[str]) -> List[str]:
-    """Return confirmation reasons for high-risk subcommands/flags."""
-    reasons: List[str] = []
-    if command_name == "python":
-        if any(token in {"-c", "-m"} for token in parts[1:]):
-            reasons.append("python -c/-m may execute arbitrary code")
+    """Return confirmation reasons; knowledge lives in ``command_safety``."""
+    del command_name
+    from agenticx.runtime.command_safety import classify_simple_command
 
-    if command_name == "pip":
-        pip_subcommand = _first_non_option_token(parts)
-        if pip_subcommand in {"install", "uninstall", "download", "wheel"}:
-            reasons.append(f"pip {pip_subcommand} changes environment or artifacts")
-
-    if command_name == "git":
-        git_subcommand = _first_non_option_token(
-            parts,
-            options_with_value={"-c", "-C", "--git-dir", "--work-tree"},
-        )
-        if git_subcommand and git_subcommand not in {"status", "log", "diff", "show", "branch"}:
-            reasons.append(f"git {git_subcommand} is not in low-risk allowlist")
-
-    return reasons
+    verdict = classify_simple_command(parts)
+    return [item.evidence for item in verdict.findings]
 
 
 def _extract_python_script_arg(parts: List[str]) -> Optional[str]:
@@ -3751,6 +4098,8 @@ class _BashPrepared:
     use_shell: bool
     command: str
     command_name: str
+    env: Optional[Dict[str, str]] = None
+    sandbox_backend: str = "none"
 
 
 @dataclass
@@ -3894,6 +4243,80 @@ async def _bash_bg_drain(job: _BashBgJob) -> None:
                 job.exit_code = -1
 
 
+async def _apply_command_sandbox(
+    argv: List[str],
+    session: Optional[StudioSession],
+    cwd: Optional[Path],
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any],
+    tool_name: str,
+    command: str,
+) -> Union[Tuple[List[str], Optional[Dict[str, str]], str], str]:
+    """Wrap argv with the OS sandbox. Unavailable backends require confirm."""
+    from agenticx.runtime.command_sandbox import (
+        CommandSandboxError,
+        CommandSandboxUnavailable,
+        DANGER_FULL_ACCESS,
+        build_command_sandbox_plan,
+    )
+
+    permissions = _configured_command_permissions(session)
+    if permissions == DANGER_FULL_ACCESS:
+        if not await _confirm(
+            "This command would run without OS file isolation. Continue?",
+            confirm_gate=confirm_gate,
+            context={
+                "tool": tool_name,
+                "command": command,
+                "risk": "high",
+                "risk_categories": [
+                    {
+                        "code": "host_full_access",
+                        "evidence": "command_permissions=danger-full-access",
+                    }
+                ],
+            },
+            emit_event=emit_event,
+            session=session,
+        ):
+            return _cancelled("未授权脱离工作区隔离", confirm_gate)
+
+    read_roots, write_roots = _session_workspace_root_sets(session)
+    scope_id = f"{_bash_bg_session_id(session)}|{'|'.join(str(root) for root in write_roots)}"
+    try:
+        plan = build_command_sandbox_plan(
+            argv,
+            denied_path_patterns=denied_path_patterns_for_sandbox(session),
+            permissions=permissions,
+            writable_roots=write_roots,
+            readable_roots=read_roots,
+            scope_id=scope_id,
+            cwd=cwd,
+            platform_name=sys.platform,
+        )
+    except CommandSandboxUnavailable as exc:
+        if not await _confirm(
+            f"Command sandbox unavailable ({exc}). Run without OS isolation?",
+            confirm_gate=confirm_gate,
+            context={
+                "tool": tool_name,
+                "command": command,
+                "risk": "high",
+                "risk_categories": [
+                    {"code": "host_full_access", "evidence": str(exc)}
+                ],
+            },
+            emit_event=emit_event,
+            session=session,
+        ):
+            return _cancelled("沙箱不可用，命令未执行", confirm_gate)
+        return argv, None, "none"
+    except CommandSandboxError as exc:
+        return f"ERROR: command sandbox: {exc}"
+    return list(plan.argv), dict(plan.env), plan.backend
+
+
 async def _bash_exec_prepare(
     command: str,
     arguments: Dict[str, Any],
@@ -3978,18 +4401,6 @@ async def _bash_exec_prepare(
     if write_guard_error:
         return write_guard_error
 
-    if command_name not in SAFE_COMMANDS:
-        confirm_question = (
-            f"Command '{command_name}' is not in SAFE_COMMANDS. Execute anyway?"
-        )
-        if not await _confirm(
-            confirm_question,
-            confirm_gate=confirm_gate,
-            context={"tool": tool_name, "command": command, "risk": "non_whitelisted"},
-            emit_event=emit_event,
-        ):
-            return _cancelled("非白名单命令未执行", confirm_gate)
-
     if _command_touches_protected_config(command, parts):
         return (
             "ERROR: direct access to ~/.agenticx/config.yaml is blocked for safety. "
@@ -4010,38 +4421,36 @@ async def _bash_exec_prepare(
             except ValueError as exc:
                 return f"ERROR: {exc}"
 
-    risk_reasons: List[str] = []
-    risk_reasons.extend(_collect_subcommand_risk_reasons(command_name, parts))
-    if command_name == "python" and _extract_python_script_arg(parts):
-        risk_reasons.append("python script execution requires confirmation")
-    if re.search(r"(;|&&|\|\||\||`|\$\(|>|<|\n)", command):
-        risk_reasons.append("suspicious shell metacharacters")
-    if command_name == "rm" and any(flag in {"-rf", "-fr", "-r", "-R", "-f", "--no-preserve-root"} for flag in parts[1:]):
-        risk_reasons.append("destructive rm flags")
-    if command_name == "git":
-        if len(parts) >= 3 and parts[1] == "reset" and parts[2] == "--hard":
-            risk_reasons.append("destructive git reset --hard")
-        if len(parts) >= 2 and parts[1] == "clean" and any(flag.startswith("-f") for flag in parts[2:]):
-            risk_reasons.append("destructive git clean")
-        if len(parts) >= 2 and parts[1] == "push" and any("--force" in flag for flag in parts[2:]):
-            risk_reasons.append("force push")
-    if command_name in {"dd", "mkfs", "shutdown", "reboot", "poweroff"}:
-        risk_reasons.append("high-risk system command")
-
-    if risk_reasons:
-        joined_reasons = ", ".join(risk_reasons)
+    safety_confirm = _bash_exec_safety_confirm(command)
+    if safety_confirm:
+        risk, cancel_what, risk_reasons, risk_codes = safety_confirm
+        joined_reasons = ", ".join(risk_reasons) if risk_reasons else command_name
+        if risk == "non_whitelisted":
+            confirm_question = (
+                f"Command '{command_name}' is not a contained read-only command. "
+                f"Execute anyway? ({joined_reasons})"
+            )
+        else:
+            confirm_question = (
+                f"High-risk command detected ({joined_reasons}). Execute anyway?"
+            )
         if not await _confirm(
-            f"High-risk command detected ({joined_reasons}). Execute anyway?",
+            confirm_question,
             confirm_gate=confirm_gate,
             context={
                 "tool": tool_name,
                 "command": command,
-                "risk": "high",
+                "risk": risk,
                 "reasons": risk_reasons,
+                "risk_categories": [
+                    {"code": code, "evidence": evidence}
+                    for code, evidence in zip(risk_codes, risk_reasons)
+                ],
             },
             emit_event=emit_event,
+            session=session,
         ):
-            return _cancelled("高风险命令未执行", confirm_gate)
+            return _cancelled(cancel_what, confirm_gate)
 
     use_shell = bool(re.search(r"(;|&&|\|\||\||`|\$\(|>|<|\n)", command))
     if not use_shell:
@@ -4056,12 +4465,26 @@ async def _bash_exec_prepare(
         if resolved0:
             parts = [resolved0] + list(parts[1:])
     argv = _bash_exec_shell_argv(command) if use_shell else parts
+    wrapped = await _apply_command_sandbox(
+        argv,
+        session,
+        cwd,
+        confirm_gate=confirm_gate,
+        emit_event=emit_event,
+        tool_name=tool_name,
+        command=command,
+    )
+    if isinstance(wrapped, str):
+        return wrapped
+    argv, env, backend = wrapped
     return _BashPrepared(
         argv=argv,
         cwd=cwd,
         use_shell=use_shell,
         command=command,
         command_name=command_name,
+        env=env,
+        sandbox_backend=backend,
     )
 
 
@@ -4118,6 +4541,7 @@ async def _tool_bash_bg_start(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(prepared.cwd) if prepared.cwd else None,
+            env=prepared.env,
         )
     except Exception as exc:
         return f"ERROR: command failed to start: {exc}"
@@ -4284,6 +4708,7 @@ async def _tool_bash_exec(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(prepared.cwd) if prepared.cwd else None,
+            env=prepared.env,
         )
     except Exception as exc:
         return f"ERROR: command failed to start: {exc}"
@@ -5737,11 +6162,15 @@ def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
     except Exception:
         pass
     if meta is None:
-        return f"OK: activated skill '{name}' into context_files key 'skill:{name}'"
+        return (
+            f"OK: activated skill '{name}'. 正文已注入本轮上下文（context_files 键 skill:{name}），"
+            "请直接使用，不要再用 file_read/bash_exec 读取该技能目录——工作区之外不可读。"
+        )
     return (
-        f"OK: activated skill '{name}' into context_files key 'skill:{name}'. "
-        f"source={meta.source}, location={meta.location}, "
-        f"base_dir={meta.base_dir}, skill_md={meta.skill_md_path}"
+        f"OK: activated skill '{name}'. 正文已注入本轮上下文（context_files 键 skill:{name}），"
+        "请直接使用，不要再用 file_read/bash_exec 读取该技能目录——工作区之外不可读。"
+        f" source={meta.source}, location={meta.location}, "
+        f"base_dir={meta.base_dir}（该目录在工作区之外，不可读）。"
     )
 
 
@@ -8308,6 +8737,12 @@ async def dispatch_tool_async(
     runtime_tool_context: Optional[Any] = None,
 ) -> str:
     """Dispatch one tool call asynchronously and return result text."""
+    policy_denial = tool_denied_by_session_permissions(name)
+    if policy_denial:
+        return f"ERROR: {policy_denial}"
+    path_denial = _dispatch_path_rule_denial(arguments, session)
+    if path_denial:
+        return f"ERROR: {path_denial}"
     arguments = _repair_malformed_file_tool_arguments(name, arguments)
     required = _TOOL_REQUIRED_PARAMS.get(name)
     if required and not arguments:

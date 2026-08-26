@@ -1,10 +1,33 @@
+import { normalizeRunMode, type RunMode } from "../constants/confirm-strategy-options";
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
 export type NormalizedConfirmRisk = "low" | "protected";
-export type ConfirmStrategy = "manual" | "semi-auto" | "auto";
 export type ConfirmPolicy = "ask-every-time" | "use-allowlist" | "run-everything";
+
+/** 与后端 NEVER_AUTO_APPROVED_CATEGORIES 保持一致（agenticx/runtime/command_safety.py）。 */
+export const NEVER_REUSABLE_CATEGORIES: ReadonlySet<string> = new Set([
+  "destructive_filesystem",
+  "external_publish",
+  "host_full_access",
+  "system_disruption",
+]);
+
+export function hasNeverReusableCategory(
+  context?: Record<string, unknown>,
+): boolean {
+  const raw = context?.risk_categories;
+  if (!Array.isArray(raw)) return false;
+  return raw.some((item) => {
+    if (typeof item === "string") return NEVER_REUSABLE_CATEGORIES.has(item);
+    if (item && typeof item === "object" && "code" in item) {
+      return NEVER_REUSABLE_CATEGORIES.has(String((item as { code?: unknown }).code ?? ""));
+    }
+    return false;
+  });
+}
 
 /**
  * Mirror the backend's fail-closed confirmation policy. Only an explicit
@@ -45,20 +68,46 @@ export function protectedConfirmReason(
 }
 
 export function shouldAutoApproveConfirm(
-  strategy: ConfirmStrategy,
+  strategy: RunMode | string,
   scopeAlreadyAllowed: boolean,
   context?: Record<string, unknown>,
 ): boolean {
   if (isProtectedConfirmContext(context)) return false;
-  return strategy === "auto" || scopeAlreadyAllowed;
+  const mode = normalizeRunMode(strategy);
+  return mode === "auto" || scopeAlreadyAllowed;
 }
 
 export function defaultConfirmPolicyForStrategy(
-  strategy: ConfirmStrategy,
+  strategy: RunMode | string,
 ): ConfirmPolicy {
-  if (strategy === "auto") return "run-everything";
-  if (strategy === "semi-auto") return "use-allowlist";
+  const mode = normalizeRunMode(strategy);
+  if (mode === "auto") return "run-everything";
+  if (mode === "allowlist") return "use-allowlist";
   return "ask-every-time";
+}
+
+export function normalizeConfirmWorkspace(value: unknown): string {
+  return text(value).replace(/\\/gu, "/").replace(/\/+$/u, "");
+}
+
+export function workspaceFromConfirmContext(
+  context?: Record<string, unknown>,
+  fallback = "",
+): string {
+  const roots = context?.workspace_roots;
+  if (Array.isArray(roots) && roots.length > 0) {
+    return roots.map(normalizeConfirmWorkspace).filter(Boolean).sort().join("|");
+  }
+  return normalizeConfirmWorkspace(context?.workspace_root ?? context?.cwd ?? fallback);
+}
+
+/** 审批记录的 key：task run + 工作区 + 既有 scope。跨 run / 跨工作区不复用。 */
+export function buildConfirmApprovalKey(
+  runId: string,
+  workspace: string,
+  scope: string,
+): string {
+  return JSON.stringify([text(runId), normalizeConfirmWorkspace(workspace), scope]);
 }
 
 export function parentPathForConfirmScope(pathValue: unknown): string {

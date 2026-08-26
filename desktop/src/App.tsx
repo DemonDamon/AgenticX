@@ -31,11 +31,14 @@ import {
   openGlobalSearch,
   type GlobalSearchAddToWorkspaceDetail,
 } from "./components/global-search/global-search-events";
+import { migrateRunModeFromUnknown, type RunMode } from "./constants/confirm-strategy-options";
 import {
+  buildConfirmApprovalKey,
   buildConfirmScope,
   defaultConfirmPolicyForStrategy,
   isProtectedConfirmContext,
   shouldAutoApproveConfirm,
+  workspaceFromConfirmContext,
 } from "./utils/confirm-scope";
 import { Toast } from "./components/ds/Toast";
 import { KbDocumentOpenOverlay } from "./components/kb/KbDocumentOpenOverlay";
@@ -301,8 +304,8 @@ export function App() {
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const clearMessages = useAppStore((s) => s.clearMessages);
-  const confirmStrategy = useAppStore((s) => s.confirmStrategy);
-  const setConfirmStrategy = useAppStore((s) => s.setConfirmStrategy);
+  const runMode = useAppStore((s) => s.runMode);
+  const setRunMode = useAppStore((s) => s.setRunMode);
   const mcpServers = useAppStore((s) => s.mcpServers);
   const setMcpServers = useAppStore((s) => s.setMcpServers);
   const planMode = useAppStore((s) => s.planMode);
@@ -542,8 +545,7 @@ export function App() {
         // Pro/Lite 欢迎页已移除；主进程 load-config 始终返回 onboardingCompleted: true，
         // 并与旧配置中 onboarding_completed: false 做一次写回迁移。
         setOnboardingCompleted(true);
-        const loadedConfirmStrategy = cfgEarly.confirmStrategy ?? "semi-auto";
-        setConfirmStrategy(loadedConfirmStrategy);
+        setRunMode(migrateRunModeFromUnknown(cfgEarly));
         const entries = toProviderEntries(cfgEarly.providers ?? {});
         const defP = cfgEarly.defaultProvider ?? "";
         const defEntry = entries[defP];
@@ -1816,7 +1818,7 @@ export function App() {
     openSettings,
     clearMessages,
     setUserMode,
-    setConfirmStrategy,
+    setRunMode,
     planMode,
     setPlanMode,
     toggleFocusMode,
@@ -1831,21 +1833,26 @@ export function App() {
   ): Promise<boolean> =>
     await new Promise<boolean>((resolve) => {
       const scope = buildConfirmScope(question, context);
-      if (denyScopesRef.current.has(scope)) {
+      const store = useAppStore.getState();
+      const sessionId = typeof context?.session_id === "string" ? context.session_id.trim() : "";
+      const run = sessionId ? store.confirmRunsBySession[sessionId] : undefined;
+      const workspace = workspaceFromConfirmContext(context, run?.workspace ?? "");
+      const approvalKey = buildConfirmApprovalKey(run?.runId ?? "", workspace, scope);
+      if (denyScopesRef.current.has(approvalKey)) {
         resolve(false);
         return;
       }
       if (
         shouldAutoApproveConfirm(
-          useAppStore.getState().confirmStrategy,
-          autoApproveScopesRef.current.has(scope),
+          store.runMode,
+          autoApproveScopesRef.current.has(approvalKey),
           context,
         )
       ) {
         resolve(true);
         return;
       }
-      confirmScopeRef.current = scope;
+      confirmScopeRef.current = approvalKey;
       confirmResolverRef.current = resolve;
       openConfirm(requestId, question, diff, agentId, context);
     });
@@ -2019,9 +2026,9 @@ export function App() {
     stopSpeak();
   };
 
-  const handleConfirmStrategyChange = async (strategy: "manual" | "semi-auto" | "auto") => {
-    setConfirmStrategy(strategy);
-    await window.agenticxDesktop.saveConfirmStrategy(strategy);
+  const handleRunModeChange = async (mode: RunMode) => {
+    setRunMode(mode);
+    await window.agenticxDesktop.saveRunMode(mode);
   };
 
   const avatars = useAppStore((s) => s.avatars);
@@ -2419,7 +2426,7 @@ export function App() {
         sourceLabel={confirm.agentId === "meta" ? "主智能体" : `子智能体 ${confirm.agentId}`}
         diff={confirm.diff}
         context={confirm.context}
-        defaultPolicy={defaultConfirmPolicyForStrategy(confirmStrategy)}
+        defaultPolicy={defaultConfirmPolicyForStrategy(runMode)}
         onApprove={(policy) => {
           const protectedRequest = isProtectedConfirmContext(confirm.context);
           const scope = confirmScopeRef.current;
@@ -2430,8 +2437,8 @@ export function App() {
             }
           }
           if (!protectedRequest && policy === "run-everything") {
-            setConfirmStrategy("auto");
-            void window.agenticxDesktop.saveConfirmStrategy("auto");
+            setRunMode("auto");
+            void window.agenticxDesktop.saveRunMode("auto");
           }
           confirmScopeRef.current = null;
           closeConfirm();
@@ -2487,12 +2494,12 @@ export function App() {
         apiToken={apiToken}
         mcpServers={mcpServers}
         onRefreshMcp={refreshMcpStatus}
-        confirmStrategy={confirmStrategy}
+        runMode={runMode}
         theme={theme}
         chatStyle={chatStyle}
         onThemeChange={setTheme}
         onChatStyleChange={setChatStyle}
-        onConfirmStrategyChange={handleConfirmStrategyChange}
+        onRunModeChange={handleRunModeChange}
         onClose={() => closeSettings()}
         onSave={handleSettingsSave}
         panes={panes}

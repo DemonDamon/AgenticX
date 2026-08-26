@@ -667,8 +667,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   saveUserMode: async (mode: "pro" | "lite") => ipcRenderer.invoke("save-user-mode", mode),
   saveOnboardingCompleted: async (completed: boolean) =>
     ipcRenderer.invoke("save-onboarding-completed", completed),
-  saveConfirmStrategy: async (strategy: "manual" | "semi-auto" | "auto") =>
-    ipcRenderer.invoke("save-confirm-strategy", strategy),
+  saveRunMode: async (mode: "ask" | "allowlist" | "auto") =>
+    ipcRenderer.invoke("save-run-mode", mode),
   saveEmailConfig: async (payload: {
     enabled: boolean;
     smtp_host: string;

@@ -11,6 +11,35 @@ Suggested-Impl-Model: `cursor-grok-4.6-xhigh-fast`
 
 ---
 
+## 0.0 与「安全中心 Tab」plan 的边界（2026-08-25 追加）
+
+新增了 `2026-08-25-desktop-security-center-tab.plan.md`：它把散在六个 Tab 的安全设置
+（执行确认、路径/命令/工具拒绝、桌面操控、技能安全扫描、钩子管理）整体迁进新的
+**安全中心 Tab**，并补上后端已有、界面没有入口的沙箱档位。
+
+**冲突区：** 本 plan 的 Task 2 要改**通用偏好的权限区** JSX（`SettingsPanel.tsx` L8909–L8942），
+而那一整块正是安全中心 plan 要搬走的。两份同时改同一块 JSX 必然冲突。
+
+**执行顺序：安全中心 plan 先整份做完，本 plan 再整份做。不要交错、不要并行。**
+
+1. **安全中心 plan 全部 Task**——纯搬家（行为不变）+ 新增沙箱档位区块。
+2. **本 plan 全部 Task**——在安全中心的新位置上做词表统一、文案与审批作用域。
+
+定这个顺序的依据：搬位置与改语义的爆炸半径差一个量级。执行确认下拉只有设置页在用（搬它零行为风险），
+而本 plan 要统一的 `confirmStrategy` 取值散在 `store.ts` L545/L1094、`core/command-registry.ts` L71、
+`ChatView.tsx` L2517、`App.tsx` L545/L2490，还要迁移旧 localStorage 取值。
+**同一个 commit 里既搬位置又改语义，review 时分不清哪个改动导致的回归。**
+
+**本 plan 因此有两处落点变更：**
+
+- **Task 2 的落点改为** `desktop/src/components/settings/security/`（安全中心 Tab 内），不再改通用偏好，也**不要**把控件搬回通用偏好。
+- **Task 2 的 §2.3（平台两字段展示）删除**：由安全中心 plan 的 `desktop/src/utils/sandbox-status.ts` 承担。本 plan 只负责模式词表与文案——**两处各写一份平台能力判定必然分叉**。
+
+另外，安全中心 plan 会把 `CONFIRM_MODE_OPTIONS`（`manual` / `semi-auto` / `auto`）**原样**搬到新位置。
+把它换成 `RUN_MODE_OPTIONS` 的 `ask` / `allowlist` / `auto`、并同步上述五处映射与 localStorage 迁移，是**本 plan Task 2 的核心工作**。
+
+---
+
 ## 0. 基线（不要依赖对话记忆）
 
 | 项 | 值（2026-08-25 实测） |
@@ -52,7 +81,7 @@ git show origin/hc-0818:desktop/src/utils/confirm-scope.ts              > /tmp/r
 
 - **禁止**重写 main 的 `agenticx/runtime/confirm.py` 与 `desktop/src/utils/confirm-scope.ts` 的既有语义（低风险自动 + fail-closed 已在 main 落地，本 plan 只统一它的**表达**）
 - **禁止**碰后端沙箱/权限强制层（那是姊妹 plan）
-- **禁止**做设置页其他 Tab 的视觉重塑
+- **禁止**做设置页其他 Tab 的视觉重塑。**例外**：安全设置的跨 Tab 收敛（新增安全中心 Tab、迁移权限/桌面操控/技能扫描/钩子）属 `2026-08-25-desktop-security-center-tab.plan.md`，由那份 plan 执行，本 plan 不做也不阻止
 - **禁止**碰 `enterprise/`
 - **禁止**删除任何 Desktop 组件文件。Task 4（删 Pro/Lite 双入口）**已于 2026-08-25 被否决**，本 plan 全程是纯增量修改，`git diff` 里不该出现任何文件删除
 - **禁止**改缓存命中率弹窗（`ContextUsagePopup.tsx`）——main 刚落，别顺手动
@@ -126,6 +155,11 @@ main 已有的 `confirm-scope.test.ts` 必须仍全绿。
 
 ## Task 2：一个权威字段，一个控件
 
+> **落点已变更（2026-08-25，见 §0.0）：** 权限区若已被安全中心 plan 搬到
+> `desktop/src/components/settings/security/`，本 Task 就在**那里**落地，不要改通用偏好。
+> §2.3 的平台两字段展示改由安全中心 plan 的 `desktop/src/utils/sandbox-status.ts` 承担，
+> 本 Task 只负责**模式词表与文案**，不再自己实现一份平台能力判定。
+
 **修改：**
 - `desktop/src/store.ts`（模式字段）
 - `desktop/src/components/SettingsPanel.tsx`（权限区控件与文案）
@@ -156,7 +190,14 @@ store 里的持久化要兼容旧 localStorage：读到旧字段名时迁移一�
 - 面向终端用户的长段策略说明文案**删掉**，用户会自行感知
 - 开关控件与设置内其他开关视觉一致，不要同屏多种控件语义混用
 
-### 2.3 如实展示平台差异（依赖姊妹 plan Task 5）
+### 2.3 如实展示平台差异 —— **本 plan 不做（2026-08-25 已移交）**
+
+> **实施者请跳过本节。** 平台能力两字段的判定与展示改由
+> `2026-08-25-desktop-security-center-tab.plan.md` 的 Task 2
+> （`desktop/src/utils/sandbox-status.ts` + `WorkspaceIsolationPanel`）承担。
+> 两处各写一份判定必然分叉。本节保留为语义记录，**不是待办**。
+
+以下为移交前的要求原文，供对照该 plan 的实现是否达标：
 
 消费 `/api/permissions` 的 `shell_read_isolation`（`full` / `none`）与 `path_deny_enforcement`（`full` / `partial` / `none`）：
 
@@ -175,8 +216,10 @@ store 里的持久化要兼容旧 localStorage：读到旧字段名时迁移一�
 1. `cd desktop && grep -rn -E "confirmStrategy|confirm_strategy" src/` → 除迁移代码外零命中。
 2. `RUN_MODE_OPTIONS` 是设置页模式选项的唯一数据源（`grep -rn "低风险自动执行" src/` 只应命中常量文件）。
 3. 扩 `ConfirmDialog.test.tsx`：`risk` 缺失时确认卡按受保护渲染（不出现「同类自动允许」这类可放行入口）。
-4. 手测：把 mock 的 `shell_read_isolation` 设为 `none`，设置页出现「工作区之外仍可读」的提示；设为 `full` 则不出现。
-5. 旧 localStorage（只有旧字段名）启动后模式不丢、不崩。
+4. 旧 localStorage（旧取值 `manual` / `semi-auto` / `auto`）启动后模式不丢、不崩，且被迁移到新取值。
+5. `grep -rn "semi-auto" src/` 除迁移代码外零命中（证明五处映射都改完了：`store.ts`、`core/command-registry.ts` L71、`ChatView.tsx` L2517、`ChatPane.tsx`、`App.tsx`）。
+
+（原第 4 条的平台字段手测已随 §2.3 移交给安全中心 plan。）
 
 ```bash
 cd desktop && npx vitest run src/components/ConfirmDialog.test.tsx src/utils/confirm-scope.test.ts src/utils/confirm-risk.test.ts && npx tsc --noEmit
@@ -299,8 +342,9 @@ subject/body 禁止客户名、第三方产品名与对标措辞。
 | AC-G1 | 前端只有一套模式词表，设置页只有一个模式控件 |
 | AC-G2 | `auto` 模式的界面文案明确说出高风险仍会询问 |
 | AC-G3 | `risk` 缺失时前端按受保护渲染（与后端 fail-closed 一致） |
-| AC-G4 | Windows（`shell_read_isolation === "none"`）时界面明说工作区外仍可读 |
-| AC-G5 | `path_deny_enforcement === "partial"` 时界面说出原因 |
+| AC-G4 | ~~Windows 时界面明说工作区外仍可读~~ —— 已移交安全中心 plan（§2.3） |
+| AC-G5 | ~~`path_deny_enforcement === "partial"` 时界面说出原因~~ —— 已移交安全中心 plan（§2.3） |
+| AC-G5b | 模式取值统一后 `grep -rn "semi-auto" src/` 除迁移代码外零命中 |
 | AC-G6 | 新 task run 不继承上一轮批准；跨工作区不继承 |
 | AC-G7 | main 已有 `confirm-scope.test.ts` / `ConfirmDialog.test.tsx` 断言未被删改且全绿 |
 | AC-G8 | `npx tsc --noEmit` 与 `npm run build` 通过 |

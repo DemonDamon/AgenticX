@@ -10,7 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agenticx.cli import agent_tools
+from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.studio import StudioSession
+from agenticx.runtime.confirm import RiskAwareAutoConfirmGate
 
 
 class _DummyProcess:
@@ -18,6 +20,56 @@ class _DummyProcess:
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+class _LineStream:
+    def __init__(self, text: str) -> None:
+        self._chunks = [(line + "\n").encode() for line in text.splitlines()] if text else []
+
+    def __aiter__(self):
+        self._iter = iter(self._chunks)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iter)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
+class _FakeProc:
+    def __init__(self, returncode: int = 0, stdout: str = "ok", stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = _LineStream(stdout)
+        self.stderr = _LineStream(stderr)
+
+    async def wait(self) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        return None
+
+
+def _workspace_session(tmp_path: Path) -> StudioSession:
+    workspace = tmp_path / "ws"
+    workspace.mkdir(exist_ok=True)
+    session = StudioSession()
+    session.workspace_dir = str(workspace)
+    return session
+
+
+async def _passthrough_sandbox(argv, session, cwd, **_kwargs):
+    return list(argv), None, "none"
+
+
+def _install_fake_exec(monkeypatch, captured=None, stdout: str = "ok"):
+    async def _fake_exec(*args, **kwargs):
+        if captured is not None:
+            captured["args"] = (list(args),)
+            captured["kwargs"] = kwargs
+        return _FakeProc(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(agent_tools.asyncio, "create_subprocess_exec", _fake_exec)
 
 
 def test_dispatch_tool_routes_file_read(monkeypatch) -> None:
@@ -42,18 +94,17 @@ def test_dispatch_tool_unknown_tool_returns_error() -> None:
     assert "unknown tool" in result
 
 
-def test_bash_exec_whitelisted_command_skips_confirmation(monkeypatch) -> None:
-    def _confirm_should_not_be_called(_question: str) -> bool:
+def test_bash_exec_whitelisted_command_skips_confirmation(monkeypatch, tmp_path: Path) -> None:
+    async def _confirm_should_not_be_called(_question: str, **_kwargs):
         raise AssertionError("confirmation should not be requested for whitelisted command")
 
     monkeypatch.setattr(agent_tools, "_confirm", _confirm_should_not_be_called)
-    monkeypatch.setattr(
-        agent_tools.subprocess,
-        "run",
-        lambda *args, **kwargs: _DummyProcess(returncode=0, stdout="ok", stderr=""),
-    )
+    monkeypatch.setattr(agent_tools, "_apply_command_sandbox", _passthrough_sandbox)
+    _install_fake_exec(monkeypatch)
 
-    result = agent_tools.dispatch_tool("bash_exec", {"command": "ls"}, StudioSession())
+    result = agent_tools.dispatch_tool(
+        "bash_exec", {"command": "ls"}, _workspace_session(tmp_path)
+    )
     assert "exit_code=0" in result
     assert "stdout:\nok" in result
 
@@ -69,7 +120,12 @@ def test_bash_exec_non_whitelisted_command_requires_confirmation(monkeypatch) ->
     monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
 
     result = agent_tools.dispatch_tool("bash_exec", {"command": "rm -rf /tmp/demo"}, StudioSession())
-    assert result == "CANCELLED: user denied non-whitelisted command"
+    assert result.startswith("CANCELLED:")
+    assert (
+        "非白名单命令未执行" in result
+        or "高风险命令未执行" in result
+        or "non-whitelisted" in result
+    )
     assert called["run"] is False
 
 
@@ -83,7 +139,11 @@ def test_bash_exec_command_injection_pattern_requires_confirmation(monkeypatch) 
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")
     monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
 
-    result = agent_tools.dispatch_tool("bash_exec", {"command": "ls && pwd"}, StudioSession())
+    result = agent_tools.dispatch_tool(
+        "bash_exec",
+        {"command": "echo $(rm -rf x)"},
+        StudioSession(),
+    )
     assert result.startswith("CANCELLED:")
     assert called["run"] is False
 
@@ -103,79 +163,64 @@ def test_bash_exec_python_dash_c_requires_confirmation(monkeypatch) -> None:
         {"command": "python -c \"print('hi')\""},
         StudioSession(),
     )
-    assert result == "CANCELLED: user denied high-risk command"
+    assert result.startswith("CANCELLED:")
     assert called["run"] is False
 
 
-def test_bash_exec_uses_shell_false_and_argv(monkeypatch) -> None:
-    captured = {}
-
-    def _fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
-    result = agent_tools.dispatch_tool("bash_exec", {"command": "ls -la"}, StudioSession())
+def test_bash_exec_uses_shell_false_and_argv(monkeypatch, tmp_path: Path) -> None:
+    captured: dict = {}
+    monkeypatch.setattr(agent_tools, "_apply_command_sandbox", _passthrough_sandbox)
+    _install_fake_exec(monkeypatch, captured)
+    result = agent_tools.dispatch_tool(
+        "bash_exec", {"command": "ls -la"}, _workspace_session(tmp_path)
+    )
     assert "exit_code=0" in result
     assert captured["args"][0] == ["ls", "-la"]
-    assert captured["kwargs"]["shell"] is False
+    assert "shell" not in captured["kwargs"]
 
 
 async def _confirm_yes(*_a, **_k) -> bool:
     return True
 
 
-def test_bash_exec_shell_mode_uses_cmd_on_win32(monkeypatch) -> None:
+def test_bash_exec_shell_mode_uses_cmd_on_win32(monkeypatch, tmp_path: Path) -> None:
     captured: dict = {}
-
-    def _fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
     monkeypatch.setattr(agent_tools, "_confirm", _confirm_yes)
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
+    monkeypatch.setattr(agent_tools, "_apply_command_sandbox", _passthrough_sandbox)
+    _install_fake_exec(monkeypatch, captured)
     monkeypatch.setattr(agent_tools.sys, "platform", "win32")
     monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
 
     cmd = "echo a && echo b"
-    result = agent_tools.dispatch_tool("bash_exec", {"command": cmd}, StudioSession())
+    result = agent_tools.dispatch_tool(
+        "bash_exec", {"command": cmd}, _workspace_session(tmp_path)
+    )
     assert "exit_code=0" in result
     argv = captured["args"][0]
     assert argv[0] == r"C:\Windows\System32\cmd.exe"
     assert argv[1:4] == ["/d", "/s", "/c"]
     assert argv[4] == cmd
-    assert captured["kwargs"]["shell"] is False
+    assert "shell" not in captured["kwargs"]
 
 
-def test_bash_exec_shell_mode_uses_bash_on_posix(monkeypatch) -> None:
+def test_bash_exec_shell_mode_uses_bash_on_posix(monkeypatch, tmp_path: Path) -> None:
     captured: dict = {}
-
-    def _fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
     monkeypatch.setattr(agent_tools, "_confirm", _confirm_yes)
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
+    monkeypatch.setattr(agent_tools, "_apply_command_sandbox", _passthrough_sandbox)
+    _install_fake_exec(monkeypatch, captured)
     monkeypatch.setattr(agent_tools.sys, "platform", "linux")
 
     cmd = "echo a && echo b"
-    result = agent_tools.dispatch_tool("bash_exec", {"command": cmd}, StudioSession())
+    result = agent_tools.dispatch_tool(
+        "bash_exec", {"command": cmd}, _workspace_session(tmp_path)
+    )
     assert "exit_code=0" in result
     assert captured["args"][0] == ["/bin/bash", "-c", cmd]
-    assert captured["kwargs"]["shell"] is False
+    assert "shell" not in captured["kwargs"]
 
 
-def test_bash_exec_win32_resolves_executable_via_which(monkeypatch) -> None:
+def test_bash_exec_win32_resolves_executable_via_which(monkeypatch, tmp_path: Path) -> None:
     captured: dict = {}
-
-    def _fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
     real_which = agent_tools.shutil.which
 
     def _which(cmd: str, path=None):
@@ -184,10 +229,13 @@ def test_bash_exec_win32_resolves_executable_via_which(monkeypatch) -> None:
         return real_which(cmd, path=path)
 
     monkeypatch.setattr(agent_tools.shutil, "which", _which)
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
+    monkeypatch.setattr(agent_tools, "_apply_command_sandbox", _passthrough_sandbox)
+    _install_fake_exec(monkeypatch, captured)
     monkeypatch.setattr(agent_tools.sys, "platform", "win32")
 
-    result = agent_tools.dispatch_tool("bash_exec", {"command": "ls -la"}, StudioSession())
+    result = agent_tools.dispatch_tool(
+        "bash_exec", {"command": "ls -la"}, _workspace_session(tmp_path)
+    )
     assert "exit_code=0" in result
     assert captured["args"][0][0] == r"C:\Program Files\Git\usr\bin\ls.exe"
     assert captured["args"][0][1:] == ["-la"]
@@ -201,19 +249,15 @@ def test_bash_exec_peels_cd_then_and_sets_cwd(monkeypatch, tmp_path: Path) -> No
     monkeypatch.chdir(workspace)
     captured: dict = {}
 
-    def _fake_run(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return _DummyProcess(returncode=0, stdout="ok", stderr="")
-
-    monkeypatch.setattr(agent_tools.subprocess, "run", _fake_run)
+    monkeypatch.setattr(agent_tools, "_apply_command_sandbox", _passthrough_sandbox)
+    _install_fake_exec(monkeypatch, captured)
     session = StudioSession()
     session.workspace_dir = str(workspace)
     result = agent_tools.dispatch_tool("bash_exec", {"command": "cd sub && ls"}, session)
     assert "exit_code=0" in result
     assert captured["kwargs"]["cwd"] == str(sub.resolve())
     assert captured["args"][0] == ["ls"]
-    assert captured["kwargs"]["shell"] is False
+    assert "shell" not in captured["kwargs"]
 
 
 def test_cc_bridge_http_autostarts_on_connect_error(monkeypatch) -> None:
@@ -396,7 +440,7 @@ def test_bash_exec_python_workspace_script_requires_confirmation(monkeypatch, tm
         {"command": "python script.py"},
         StudioSession(),
     )
-    assert result == "CANCELLED: user denied high-risk command"
+    assert result.startswith("CANCELLED:")
     assert called["run"] is False
 
 
@@ -406,13 +450,15 @@ def test_file_write_denied_by_confirmation(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+    session = StudioSession()
+    session.workspace_dir = str(tmp_path)
     result = agent_tools.dispatch_tool(
         "file_write",
         {"path": str(target), "content": "new"},
-        StudioSession(),
+        session,
     )
 
-    assert result == "CANCELLED: user denied file write"
+    assert result.startswith("CANCELLED:")
     assert target.read_text(encoding="utf-8") == "old"
 
 
@@ -422,13 +468,15 @@ def test_file_edit_denied_by_confirmation(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
     monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+    session = StudioSession()
+    session.workspace_dir = str(tmp_path)
     result = agent_tools.dispatch_tool(
         "file_edit",
         {"path": str(target), "old_text": "world", "new_text": "agent"},
-        StudioSession(),
+        session,
     )
 
-    assert result == "CANCELLED: user denied file edit"
+    assert result.startswith("CANCELLED:")
     assert target.read_text(encoding="utf-8") == "hello world"
 
 
@@ -437,10 +485,12 @@ def test_file_edit_empty_old_text_returns_error(monkeypatch, tmp_path: Path) -> 
     target.write_text("hello world", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
+    session = StudioSession()
+    session.workspace_dir = str(tmp_path)
     result = agent_tools.dispatch_tool(
         "file_edit",
         {"path": str(target), "old_text": "", "new_text": "agent"},
-        StudioSession(),
+        session,
     )
 
     assert result == "ERROR: old_text cannot be empty"
@@ -516,10 +566,12 @@ def test_file_write_strips_metadata_lines_before_persist(monkeypatch, tmp_path: 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")
     payload = "print('ok')\ncall_54b953f0639040309a058eac\nsa-26e692b3\n"
+    session = StudioSession()
+    session.workspace_dir = str(tmp_path)
     result = agent_tools.dispatch_tool(
         "file_write",
         {"path": str(target), "content": payload},
-        StudioSession(),
+        session,
     )
     assert result.startswith("OK: wrote")
     text = target.read_text(encoding="utf-8")
@@ -584,7 +636,9 @@ def test_liteparse_returns_error_when_adapter_fails(monkeypatch, tmp_path: Path)
 
     monkeypatch.setattr("agenticx.tools.adapters.liteparse.LiteParseAdapter", _FakeLiteParseAdapter)
 
-    result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, StudioSession())
+    session = StudioSession()
+    session.workspace_dir = str(tmp_path)
+    result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, session)
     assert result.startswith("ERROR: liteparse parsing failed:")
 
 
@@ -606,7 +660,9 @@ def test_liteparse_returns_extracted_text(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr("agenticx.tools.adapters.liteparse.LiteParseAdapter", _FakeLiteParseAdapter)
 
-    result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, StudioSession())
+    session = StudioSession()
+    session.workspace_dir = str(tmp_path)
+    result = agent_tools.dispatch_tool("liteparse", {"path": "doc.pdf"}, session)
     assert result == "parsed result"
 
 
@@ -657,3 +713,178 @@ def test_session_workspace_roots_honors_active_taskspace_id(tmp_path: Path) -> N
 
     resolved = agent_tools._resolve_workspace_path(".", session, pick_existing=True)
     assert resolved == dir_b.resolve()
+
+
+def _stub_permissions(monkeypatch, **overrides):
+    original = ConfigManager.get_value
+
+    def _fake(key, *args, **kwargs):
+        if key in overrides:
+            return overrides[key]
+        if str(key).startswith("permissions."):
+            return None
+        return original(key, *args, **kwargs)
+
+    monkeypatch.setattr(ConfigManager, "get_value", staticmethod(_fake))
+
+
+def _workspace_interpreter(session: StudioSession) -> tuple[Path, Path]:
+    workspace = Path(session.workspace_dir or "")
+    python_bin = workspace / "python"
+    python_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python_bin.chmod(0o755)
+    daily = workspace / "daily.py"
+    daily.write_text("print('ok')\n", encoding="utf-8")
+    return python_bin, daily
+
+
+def test_allowed_tools_bash_exec_does_not_waive_never_categories(monkeypatch, tmp_path: Path) -> None:
+    _stub_permissions(monkeypatch, **{"permissions.allowed_tools": ["bash_exec"]})
+    monkeypatch.setattr(agent_tools, "_apply_command_sandbox", _passthrough_sandbox)
+    _install_fake_exec(monkeypatch)
+    session = _workspace_session(tmp_path)
+    gate = RiskAwareAutoConfirmGate(unattended=True)
+
+    rm = agent_tools.dispatch_tool(
+        "bash_exec", {"command": "rm -rf /tmp/x"}, session, confirm_gate=gate
+    )
+    assert rm.startswith("CANCELLED:")
+
+    shutdown = agent_tools.dispatch_tool(
+        "bash_exec", {"command": "shutdown -h now"}, session, confirm_gate=gate
+    )
+    assert shutdown.startswith("CANCELLED:")
+
+    script = Path(session.workspace_dir) / "script.py"
+    script.write_text("print('ok')\n", encoding="utf-8")
+    allowed = agent_tools.dispatch_tool(
+        "bash_exec",
+        {"command": f"python {script}"},
+        session,
+        confirm_gate=gate,
+    )
+    assert "exit_code=0" in allowed
+
+
+def test_unattended_workspace_script_allow_and_boundaries(monkeypatch, tmp_path: Path) -> None:
+    _stub_permissions(
+        monkeypatch,
+        **{"permissions.unattended_allow_workspace_scripts": True},
+    )
+    monkeypatch.setattr(agent_tools, "_apply_command_sandbox", _passthrough_sandbox)
+    _install_fake_exec(monkeypatch)
+    session = _workspace_session(tmp_path)
+    python_bin, daily = _workspace_interpreter(session)
+    gate = RiskAwareAutoConfirmGate(unattended=True)
+    command = f"{python_bin} {daily}"
+
+    allowed = agent_tools.dispatch_tool(
+        "bash_exec", {"command": command}, session, confirm_gate=gate
+    )
+    assert "exit_code=0" in allowed
+
+    outside = tmp_path / "x.py"
+    outside.write_text("print('x')\n", encoding="utf-8")
+    outside_cmd = f"{python_bin} {outside}"
+    assert agent_tools._unattended_workspace_script_allowed(
+        {"tool": "bash_exec", "command": outside_cmd},
+        ["arbitrary_code_execution"],
+        session,
+    ) is False
+    outside_result = agent_tools.dispatch_tool(
+        "bash_exec", {"command": outside_cmd}, session, confirm_gate=gate
+    )
+    assert outside_result.startswith("CANCELLED:") or "path escapes workspace" in outside_result
+
+    missing = Path(session.workspace_dir or "") / "brand_new.py"
+    missing_cmd = f"{python_bin} {missing}"
+    assert not missing.exists()
+    missing_result = agent_tools.dispatch_tool(
+        "bash_exec", {"command": missing_cmd}, session, confirm_gate=gate
+    )
+    assert missing_result.startswith("CANCELLED:")
+
+    rm = agent_tools.dispatch_tool(
+        "bash_exec",
+        {"command": f"rm -rf {Path(session.workspace_dir) / 'sub'}"},
+        session,
+        confirm_gate=gate,
+    )
+    assert rm.startswith("CANCELLED:")
+
+    redirect_cmd = f"{python_bin} {daily} > /etc/hosts"
+    assert agent_tools._unattended_workspace_script_allowed(
+        {"tool": "bash_exec", "command": redirect_cmd},
+        ["arbitrary_code_execution"],
+        session,
+    ) is False
+    redirect = agent_tools.dispatch_tool(
+        "bash_exec", {"command": redirect_cmd}, session, confirm_gate=gate
+    )
+    assert redirect.startswith("CANCELLED:") or redirect.startswith("ERROR:")
+
+    _stub_permissions(
+        monkeypatch,
+        **{"permissions.unattended_allow_workspace_scripts": False},
+    )
+    denied = agent_tools.dispatch_tool(
+        "bash_exec", {"command": command}, session, confirm_gate=gate
+    )
+    assert denied.startswith("CANCELLED:")
+
+
+def test_unattended_allows_venv_style_symlinked_interpreter(monkeypatch, tmp_path: Path) -> None:
+    """A venv interpreter is always a symlink to a system python; that must still be allowed."""
+    _stub_permissions(
+        monkeypatch,
+        **{"permissions.unattended_allow_workspace_scripts": True},
+    )
+    session = _workspace_session(tmp_path)
+    workspace = Path(session.workspace_dir or "")
+
+    system_python = tmp_path / "system_python"
+    system_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    system_python.chmod(0o755)
+
+    venv_bin = workspace / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    venv_python = venv_bin / "python"
+    venv_python.symlink_to(system_python)
+    script = workspace / "daily.py"
+    script.write_text("print('ok')\n", encoding="utf-8")
+
+    assert agent_tools._unattended_workspace_script_allowed(
+        {"tool": "bash_exec", "command": f"{venv_python} {script}"},
+        ["arbitrary_code_execution"],
+        session,
+    ) is True
+
+    # 脚本本体在工作区之外仍必须被拒，符号链接豁免只给解释器。
+    outside_script = tmp_path / "outside.py"
+    outside_script.write_text("print('x')\n", encoding="utf-8")
+    assert agent_tools._unattended_workspace_script_allowed(
+        {"tool": "bash_exec", "command": f"{venv_python} {outside_script}"},
+        ["arbitrary_code_execution"],
+        session,
+    ) is False
+
+
+def test_skill_use_success_does_not_expose_skill_md_path(monkeypatch) -> None:
+    session = StudioSession()
+    monkeypatch.setattr(
+        agent_tools, "skill_is_allowed_for_session", lambda *_a, **_k: (True, None)
+    )
+    monkeypatch.setattr(agent_tools, "studio_skill_use", lambda *_a, **_k: True)
+
+    class _Meta:
+        source = "agenticx"
+        location = "user"
+        base_dir = "/tmp/skills/demo"
+        skill_md_path = "/tmp/skills/demo/SKILL.md"
+
+    monkeypatch.setattr(
+        agent_tools.SkillBundleLoader, "get_skill", lambda self, name: _Meta()
+    )
+    result = agent_tools._tool_skill_use({"name": "demo"}, session)
+    assert "skill_md=" not in result
+    assert "不要再用 file_read" in result

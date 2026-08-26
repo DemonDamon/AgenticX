@@ -75,6 +75,38 @@ def _meta_display_name_for_delegation(session: Any, scratchpad: Dict[str, Any]) 
     return _DEFAULT_META_PRODUCT_LABEL
 
 
+def inherit_session_sandbox_policy(source_session: Any, avatar_session: Any) -> None:
+    """Copy command sandbox tier and path_rules onto a delegated session.
+
+    The child must not fall back to a wider default than the parent. Session
+    attributes win; if the parent has neither, the process-wide config is
+    snapshotted so a later global change cannot silently widen the child.
+    """
+    from agenticx.runtime.command_sandbox import normalize_command_permissions
+
+    parent_perm = (
+        getattr(source_session, "command_permissions", None) if source_session is not None else None
+    )
+    if parent_perm is None:
+        try:
+            parent_perm = ConfigManager.get_value("permissions.command_permissions")
+        except Exception:
+            parent_perm = None
+    setattr(avatar_session, "command_permissions", normalize_command_permissions(parent_perm))
+
+    parent_rules = (
+        getattr(source_session, "path_rules", None) if source_session is not None else None
+    )
+    if parent_rules is None:
+        try:
+            parent_rules = ConfigManager.get_value("permissions.path_rules") or []
+        except Exception:
+            parent_rules = []
+    if not isinstance(parent_rules, list):
+        parent_rules = []
+    setattr(avatar_session, "path_rules", list(parent_rules))
+
+
 def _clone_taskspaces(session: Any) -> list[dict[str, Any]]:
     taskspaces = getattr(session, "taskspaces", None)
     if not isinstance(taskspaces, list):
@@ -1946,6 +1978,7 @@ async def _run_delegation_in_avatar_session(
     parent_context_files = getattr(source_session, "context_files", None)
     if isinstance(parent_context_files, dict) and parent_context_files:
         avatar_session.context_files.update(dict(parent_context_files))
+    inherit_session_sandbox_policy(source_session, avatar_session)
 
     provider_name = (
         str(getattr(avatar_config, "default_provider", "") or "").strip()

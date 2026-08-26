@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Button } from "./ds/Button";
 import { Modal } from "./ds/Modal";
+import { CONFIRM_DIALOG_POLICY_OPTIONS } from "../constants/confirm-strategy-options";
 import {
+  hasNeverReusableCategory,
   isProtectedConfirmContext,
   protectedConfirmReason,
   type ConfirmPolicy,
@@ -19,9 +21,7 @@ type Props = {
 };
 
 const POLICY_OPTIONS: Array<{ value: ConfirmPolicy; label: string }> = [
-  { value: "ask-every-time", label: "每次询问（仅本次允许）" },
-  { value: "use-allowlist", label: "白名单放行（本会话允许同类）" },
-  { value: "run-everything", label: "低风险自动执行（仅自动放行低风险）" },
+  ...CONFIRM_DIALOG_POLICY_OPTIONS,
 ];
 
 export function ConfirmDialog({
@@ -36,15 +36,17 @@ export function ConfirmDialog({
 }: Props) {
   const [policy, setPolicy] = useState<ConfirmPolicy>("ask-every-time");
   const protectedRequest = isProtectedConfirmContext(context);
+  const neverReusable = hasNeverReusableCategory(context);
+  const lockToOnce = protectedRequest || neverReusable;
   const protectedReason = protectedConfirmReason(context);
-  const autoModeInterrupted = protectedRequest && defaultPolicy === "run-everything";
-  const policyOptions = protectedRequest
+  const autoModeInterrupted = lockToOnce && defaultPolicy === "run-everything";
+  const policyOptions = lockToOnce
     ? POLICY_OPTIONS.filter((option) => option.value === "ask-every-time")
     : POLICY_OPTIONS;
 
   useEffect(() => {
-    if (open) setPolicy(protectedRequest ? "ask-every-time" : defaultPolicy);
-  }, [defaultPolicy, open, protectedRequest, question]);
+    if (open) setPolicy(lockToOnce ? "ask-every-time" : defaultPolicy);
+  }, [defaultPolicy, open, lockToOnce, question]);
 
   return (
     <Modal

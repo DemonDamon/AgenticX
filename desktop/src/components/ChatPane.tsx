@@ -9776,6 +9776,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           });
         }
         body.session_id = sessionId;
+        if (!isContinuation) {
+          const state = useAppStore.getState();
+          const avatar = pane.avatarId
+            ? state.avatars.find((item) => item.id === pane.avatarId)
+            : undefined;
+          state.startConfirmRun(sessionId, avatar?.workspaceDir ?? "");
+        }
         return fetch(`${apiBase}/api/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
@@ -10080,7 +10087,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const prevText = lastGroupProgressRef.current[eventAgentId] ?? "";
               if (prevText === blockedText) continue;
               lastGroupProgressRef.current[eventAgentId] = blockedText;
-              const strategy = useAppStore.getState().confirmStrategy;
+              const strategy = useAppStore.getState().runMode;
               if (requestId && shouldAutoApproveConfirm(strategy, false, confirmContext)) {
                 addPaneMessageIfSessionActive(
                   pane.id,
@@ -10887,12 +10894,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   content: payload.data?.question ?? "等待确认",
                 });
               }
+              const rawConfirmContext =
+                payload.data?.context && typeof payload.data.context === "object"
+                  ? (payload.data.context as Record<string, unknown>)
+                  : {};
               const ok = await onOpenConfirm(
                 payload.data?.id ?? "",
                 payload.data?.question ?? "是否确认执行？",
                 payload.data?.context?.diff,
                 eventAgentId,
-                payload.data?.context
+                { ...rawConfirmContext, session_id: requestSessionId },
               );
               await fetch(`${apiBase}/api/confirm`, {
                 method: "POST",
