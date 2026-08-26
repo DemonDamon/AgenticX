@@ -12742,7 +12742,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
         {!workExpandedLayout ? (
         <>
-        <div className={`relative min-h-0 min-w-0 transition-[flex-grow] duration-300 ease-out ${liftComposer ? "min-h-[22rem] flex-[4]" : "flex-1"}`}>
+        <div className={`relative min-h-0 min-w-0 transition-[flex-grow] duration-300 ease-out ${liftComposer ? "pointer-events-none absolute inset-0" : "flex-1"}`}>
           <div
             ref={listRef}
             className="agx-pane-message-list relative h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 py-3"
@@ -12772,30 +12772,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 ))}
               </div>
             </div>
-          ) : isBrandEmptyState ? (
-            <div className="flex h-full min-h-0 flex-col items-center justify-end gap-5 px-4 pb-3 text-center text-xs">
-              <img
-                src={machiEmptyState}
-                alt={`${APP_DISPLAY_NAME} Empty State`}
-                className="w-[13.2rem] max-w-[42vw] select-none opacity-[0.85] theme-invert-logo"
-                draggable={false}
-              />
-              <div className="space-y-2 select-none">
-                <div className="text-[22px] font-semibold text-text-primary tracking-[0.24em]">
-                  {APP_DISPLAY_NAME.toUpperCase()}
-                </div>
-                <div className="text-text-faint tracking-[0.22em] uppercase text-[12px]">
-                  {APP_TAGLINE}
-                </div>
-              </div>
-              {isAutomationTaskPane && automationTaskErrorHint ? (
-                <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
-                  <div className="mb-1 font-medium text-rose-300">上次定时执行失败</div>
-                  {automationTaskErrorHint}
-                </div>
-              ) : null}
-            </div>
-          ) : (
+          ) : !isBrandEmptyState ? (
             <div className="mx-auto flex min-w-0 w-full max-w-4xl flex-col gap-3">
               {pane.loadingOlderMessages || (pane.hasOlderMessages && (pane.oldestLoadedIndex ?? 0) > 0) ? (
                 <div className="flex justify-center py-2">
@@ -12814,7 +12791,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ) : null}
               {renderedMessages}
             </div>
-          )}
+          ) : null}
           {debateNudgeText ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center px-4">
               <div className="pointer-events-auto flex max-w-md items-center gap-2 rounded-lg border border-amber-500/35 bg-surface-card-strong/95 px-3 py-2 text-[11px] text-amber-700 shadow-lg backdrop-blur-sm dark:text-amber-200">
@@ -12884,8 +12861,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         </>
         ) : null}
 
-        {/* 外层 px 与列表 agx-pane-message-list 一致，内层 max-w-4xl 单独一层，避免「padding 吃进 max-width」导致输入框比气泡窄一截 */}
-        <div className={`shrink-0 ${workExpandedLayout ? "px-3 pt-2.5 pb-3" : liftComposer ? "px-4 pt-5 pb-4" : "px-4 pt-2.5 pb-4"}`}>
+        {/* 有消息时 max-w-4xl 对齐气泡。空态整块（字标+输入）视区居中，宽度仍用阅读栏，只加高输入区短边。 */}
+        <div className={
+          workExpandedLayout
+            ? "shrink-0 px-3 pt-2.5 pb-3"
+            : liftComposer
+              ? "flex min-h-0 w-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10"
+              : "shrink-0 px-4 pt-2.5 pb-4"
+        }>
+          {liftComposer ? (
+            <div className="mb-8 flex flex-col items-center gap-3 text-center text-xs">
+              <img
+                src={machiEmptyState}
+                alt={`${APP_DISPLAY_NAME} Empty State`}
+                className="w-[13.2rem] max-w-[42vw] select-none opacity-[0.85] theme-invert-logo"
+                draggable={false}
+              />
+              <div className="space-y-2 select-none">
+                <div className="text-[22px] font-semibold text-text-primary tracking-[0.24em]">
+                  {APP_DISPLAY_NAME.toUpperCase()}
+                </div>
+                <div className="text-text-faint tracking-[0.22em] uppercase text-[12px]">
+                  {APP_TAGLINE}
+                </div>
+              </div>
+              {isAutomationTaskPane && automationTaskErrorHint ? (
+                <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
+                  <div className="mb-1 font-medium text-rose-300">上次定时执行失败</div>
+                  {automationTaskErrorHint}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <div
             className={`agx-pane-composer-shell mx-auto min-w-0 w-full ${
               workExpandedLayout ? "max-w-none" : "max-w-4xl"
@@ -13381,7 +13388,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }}
               className={`agx-pane-composer-input block w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 pb-0 pt-4 text-[15px] leading-relaxed text-text-primary outline-none ${
                 // 收起时右侧留白需覆盖「展开输入」角标（absolute right-3 + w-8），pr-4 会导致首行末字与按钮重叠
-                composerExpanded ? "max-h-[62vh] min-h-[260px] pr-40" : "max-h-[220px] min-h-[72px] pr-14"
+                composerExpanded
+                  ? "max-h-[62vh] min-h-[260px] pr-40"
+                  : liftComposer
+                    ? "max-h-[264px] min-h-[86px] pr-14"
+                    : "max-h-[220px] min-h-[72px] pr-14"
               }`}
             />
             {!composerHasText && quoteTargets.length === 0 ? (
@@ -13550,12 +13561,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             : null}
           </div>
         </div>
-        {!workExpandedLayout ? (
+        {!workExpandedLayout && !liftComposer ? (
           <div
             aria-hidden
-            className={`agx-composer-lift-spacer min-h-0 shrink transition-[flex-grow] duration-300 ease-out ${
-              liftComposer ? "grow-[2]" : "grow-0"
-            }`}
+            className="agx-composer-lift-spacer min-h-0 shrink grow-0"
           />
         ) : null}
         </div>
