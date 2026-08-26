@@ -6,6 +6,7 @@ import { useAppStore } from "../../../store";
 import { buildGuardFixPrompt, type GuardFixScanItem } from "../../../utils/guard-fix-prompt";
 import { META_AGENT_DISPLAY_NAME } from "../../../constants/branding";
 import { useTrinityConfig } from "../trinity-config";
+import { SETTINGS_HINT_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
 
 type GuardScanItem = {
   skill_name: string;
@@ -493,8 +494,8 @@ function SettingsToggleCard(props: {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3.5">
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-semibold text-text-strong">{title}</div>
-        <p className="mt-1 text-xs leading-relaxed text-text-muted">{description}</p>
+        <div className={SETTINGS_LABEL_CLASS}>{title}</div>
+        <p className={`mt-1 ${SETTINGS_HINT_CLASS}`}>{description}</p>
       </div>
       <SettingsSwitch
         checked={checked}
@@ -617,8 +618,8 @@ export function SkillGuardPanel() {
           onChange={(next) => void updatePolicy(next)}
         />
         <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
-          <div className="text-xs font-semibold text-text-strong">技能安全扫描</div>
-          <div className="mt-1 space-y-1 text-xs leading-relaxed text-text-muted">
+          <div className={SETTINGS_LABEL_CLASS}>技能安全扫描</div>
+          <div className={`mt-1 space-y-1 ${SETTINGS_HINT_CLASS}`}>
             <p>
               从技能市场、Bundle 或扩展安装前会<strong className="font-medium text-text-subtle">自动扫描</strong>
               ，命中高危须你确认后才可安装。已安装的技能可用下方「扫描已安装技能」复查，逐个列出问题并给出处置选项。本页配置写入{" "}

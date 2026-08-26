@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Panel } from "../../ds/Panel";
+import { SETTINGS_HINT_CLASS, SETTINGS_INTRO_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
 import { META_AGENT_DISPLAY_NAME } from "../../../constants/branding";
 import { studioFetch } from "../../../utils/studio-fetch";
 import {
@@ -340,7 +341,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
 
   return (
     <Panel title="语音">
-      <p className="mb-4 text-[11px] leading-relaxed text-text-faint">
+      <p className={`mb-4 ${SETTINGS_INTRO_CLASS}`}>
         灵巧模式胶囊走 Meta-Agent（Near）：对话轮次归档到当前元智能体会话，`metadata.source = voice-focus`。
         实时链路按使用量计费——OpenAI Realtime 与豆包/火山均需自备账号与密钥。国内调用 OpenAI 需自行配置可访问代理的{" "}
         <code className="text-text-subtle">base_url</code>。请使用窗口<strong>底部</strong>的「退出」将本页写入{" "}
@@ -353,7 +354,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
 
       <div className="space-y-3 text-sm text-text-muted">
         <fieldset className="space-y-2">
-          <legend className="text-text-subtle">服务供应商</legend>
+          <legend className={SETTINGS_LABEL_CLASS}>服务供应商</legend>
           <label className="flex cursor-pointer items-center gap-2">
             <input
               type="radio"
@@ -392,13 +393,13 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
             />
             在电话模式中启用写盘 / 执行 / 委派类工具（不推荐）
           </label>
-          <p className="text-[11px] text-text-faint">
+          <p className={SETTINGS_HINT_CLASS}>
             默认仅开放只读与检索类工具；开启后会注入全量工具 schema，但涉及确认的高风险工具在电话模式仍会被自动拒绝。
           </p>
         </fieldset>
 
         <div>
-          <div className="mb-1 text-text-subtle">麦克风</div>
+          <div className={`mb-1 ${SETTINGS_LABEL_CLASS}`}>麦克风</div>
           <select
             className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
             value={draft.input_device_id || "default"}
@@ -426,8 +427,8 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
         </div>
 
         <fieldset className="space-y-2 rounded-md border border-border p-3">
-          <legend className="px-1 text-xs text-text-subtle">聊天输入 · 按住说话</legend>
-          <label className="block text-sm text-text-primary">
+          <legend className={`px-1 ${SETTINGS_LABEL_CLASS}`}>聊天输入 · 按住说话</legend>
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
             快捷键
             <select
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
@@ -445,7 +446,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               ))}
             </select>
           </label>
-          <p className="text-[11px] leading-relaxed text-text-faint">
+          <p className={SETTINGS_HINT_CLASS}>
             按住快捷键开始说话，松开后把识别文字写入输入框草稿（不自动发送）。默认{" "}
             <span className="text-text-muted">{formatPttShortcutLabel("ctrl+space")}</span>
             。macOS 的 Fn 键无法在应用内捕获，请改用组合键。
@@ -454,7 +455,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
 
         {draft.provider === "openai_realtime" ? (
           <div className="space-y-2 border-t border-border pt-3">
-            <div className="text-text-subtle text-xs uppercase tracking-wide">OpenAI Realtime</div>
+            <div className={SETTINGS_LABEL_CLASS}>OpenAI Realtime</div>
             <label className="block">
               API 密钥
               <SecretInput
@@ -504,7 +505,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
           </div>
         ) : (
           <div className="space-y-2 border-t border-border pt-3">
-            <div className="text-text-subtle text-xs uppercase tracking-wide">豆包 / 火山</div>
+            <div className={SETTINGS_LABEL_CLASS}>豆包 / 火山</div>
             <p className="text-xs text-amber-500">
               豆包模式下，语音采集走实时链路，工具执行（含 MCP/CLI）由本地 Meta 运行时桥接处理；若系统语音不可用，将仅返回文本结果。
             </p>
@@ -588,7 +589,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
                 <option value="1.2.1.1">O2.0（1.2.1.1）— 精品音色 + bot_name/system_role/speaking_style</option>
                 <option value="2.2.0.0">SC2.0（2.2.0.0）— 克隆音色（saturn_/S_）+ 角色扮演</option>
               </select>
-              <span className="mt-1 block text-[11px] text-text-faint">
+              <span className={`mt-1 block ${SETTINGS_HINT_CLASS}`}>
                 文档 §1.1：必传 dialog.extra.model；O 系列适配精品音色，SC 系列适配克隆音色，请勿混用。
               </span>
             </label>

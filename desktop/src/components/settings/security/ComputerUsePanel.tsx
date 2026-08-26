@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Panel } from "../../ds/Panel";
+import { SETTINGS_INTRO_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
 import { SettingsSwitch } from "../SettingsSwitch";
 
 /** 桌面操控开关。 */
@@ -64,12 +65,12 @@ export function ComputerUsePanel() {
 
   return (
     <Panel title="桌面操控">
-      <p className="mb-3 text-xs text-text-faint">
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
         写入本机 <code className="text-text-subtle">~/.agenticx/config.yaml</code> 中的{" "}
         <code className="text-text-subtle">computer_use.enabled</code>。开启后由 Near 随应用启动的内置助手读取该开关并尝试加载桌面级能力。若对话里仍看不到相关工具，请确认已安装包含该能力的 Near 版本；修改后需完全退出并重新打开 Near（远程模式见保存成功后的说明）。
       </p>
       <div className="flex items-center justify-between gap-4">
-        <span className="text-sm text-text-subtle">
+        <span className={SETTINGS_LABEL_CLASS}>
           启用桌面操控（桌面级截屏 / 键鼠等，需权限与依赖）
         </span>
         <SettingsSwitch

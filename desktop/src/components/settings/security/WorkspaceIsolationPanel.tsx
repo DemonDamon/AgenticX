@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Panel } from "../../ds/Panel";
+import { SETTINGS_HINT_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
 import { SettingsDropdown } from "../../ds/SettingsDropdown";
 import { useAppStore } from "../../../store";
 import {
@@ -122,8 +123,8 @@ export function WorkspaceIsolationPanel() {
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-6">
             <div className="min-w-0">
-              <div className="text-sm font-medium text-text-primary">命令沙箱档位</div>
-              <p className="mt-0.5 text-xs leading-5 text-text-faint">{current.description}</p>
+              <div className={SETTINGS_LABEL_CLASS}>命令沙箱档位</div>
+              <p className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>{current.description}</p>
             </div>
             <SettingsDropdown
               value={tier}

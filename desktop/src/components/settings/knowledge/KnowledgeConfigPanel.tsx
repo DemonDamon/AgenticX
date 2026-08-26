@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BookOpen, Check, Eye, EyeOff, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Panel } from "../../ds/Panel";
+import { SETTINGS_INTRO_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
 import { SettingsSwitch } from "../SettingsSwitch";
 import type { KBApi, ParserStatus } from "./api";
 import {
@@ -474,7 +475,7 @@ export function KnowledgeConfigPanel({
       </Panel>
 
       <Panel title="检索">
-        <p className="text-[11px] leading-relaxed text-text-muted">
+        <p className={SETTINGS_INTRO_CLASS}>
           对话侧的「智能 / 始终检索」在页面上方<strong className="font-medium text-text-primary">对话检索</strong>
           中统一配置；此处仅配置本知识脑的索引与检索通道参数。
         </p>
@@ -672,7 +673,7 @@ function ParserCapabilitySection({ parserStatus }: { parserStatus: ParserStatus 
 
   return (
     <div className="space-y-2">
-      <div className="text-xs font-medium text-text-subtle">解析能力</div>
+      <div className={SETTINGS_LABEL_CLASS}>解析能力</div>
       <div className="overflow-hidden rounded-lg border border-border bg-surface-panel/60">
         <ParserCapabilityRow
           title="内置解析器"
@@ -792,7 +793,7 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="block text-xs text-text-subtle">
+    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
       <span className="mb-1 inline-block">{label}</span>
       {hint ? (
         <p className="mb-1.5 text-[11px] leading-relaxed text-text-muted">{hint}</p>

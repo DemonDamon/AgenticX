@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Panel } from "../../ds/Panel";
+import { SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
 import type { KBApi } from "./api";
 import type { KBConfig, PreviewChunk, RetrievalHit } from "./types";
 import { KB_FIELD_BASE } from "./kb-field-classes";
@@ -24,8 +25,8 @@ const BTN_PRIMARY =
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <label className="block text-xs text-text-subtle">
-      <span className="mb-1 inline-block font-medium text-text-muted">{label}</span>
+    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
+      <span className="mb-1 inline-block">{label}</span>
       {children}
       {hint ? <p className="mt-1 text-[11px] leading-snug text-text-faint">{hint}</p> : null}
     </label>

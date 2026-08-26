@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Panel } from "../ds/Panel";
+import { SETTINGS_INTRO_CLASS, SETTINGS_LABEL_CLASS } from "../ds/settings-typography";
 
 type TurnArchiveForm = {
   enabled: boolean;
@@ -65,7 +66,7 @@ function TaField({
   children: ReactNode;
 }) {
   return (
-    <label className="block text-xs text-text-subtle">
+    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
       <span className="mb-1 inline-block">{label}</span>
       {hint ? <p className="mb-1.5 text-[11px] leading-relaxed text-text-faint">{hint}</p> : null}
       {children}
@@ -159,7 +160,7 @@ export function TurnArchiveSettingsPanel() {
 
   return (
     <Panel title="对话轮次记忆" collapsible defaultCollapsed>
-      <p className="mb-3 text-[11px] leading-relaxed text-text-faint">
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
         每轮对话结束后将 user/assistant 语义块写入本地记忆库，并在后续对话中按「相关度 × 新近度 × 访问强化」复合排序召回。
         与 MEMORY.md 长期记忆、记忆图谱并行，不互相替换。写入{" "}
         <code className="text-text-subtle">~/.agenticx/config.yaml</code> 的{" "}
@@ -169,7 +170,7 @@ export function TurnArchiveSettingsPanel() {
         {/* Enable row — no trailing divider for a lighter look */}
         <div className="flex items-center justify-between gap-4 py-2">
           <div className="min-w-0 flex-1">
-            <div>启用对话轮次归档</div>
+            <div className={SETTINGS_LABEL_CLASS}>启用对话轮次归档</div>
             <div className="mt-0.5 text-[11px] leading-relaxed text-text-faint">
               默认关闭；开启后每轮结束异步写入 turns 索引
             </div>

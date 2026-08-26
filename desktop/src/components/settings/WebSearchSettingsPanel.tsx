@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../../store";
 import { Panel } from "../ds/Panel";
+import { SETTINGS_INTRO_CLASS, SETTINGS_LABEL_CLASS } from "../ds/settings-typography";
 
 type WebSearchConfig = {
   enabled: boolean;
@@ -185,13 +186,13 @@ export function WebSearchSettingsPanel() {
 
   return (
     <Panel title="联网搜索">
-      <p className="mb-3 text-xs text-text-faint">
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
         内置 <code className="text-text-subtle">web_search</code> 工具默认开启（DuckDuckGo 免密钥）。切换为 Bocha / Tavily
         等时需填写 API Key；配置由本机 Studio 写入{" "}
         <code className="text-text-subtle">~/.agenticx/config.yaml</code>。
       </p>
       <div className="flex items-center justify-between gap-4">
-        <span className="text-sm text-text-subtle">默认开启联网搜索能力</span>
+        <span className={SETTINGS_LABEL_CLASS}>默认开启联网搜索能力</span>
         <button
           type="button"
           role="switch"
@@ -211,7 +212,7 @@ export function WebSearchSettingsPanel() {
           />
         </button>
       </div>
-      <label className="mt-3 block text-sm text-text-muted">
+      <label className={`mt-3 block ${SETTINGS_LABEL_CLASS}`}>
         默认搜索引擎
         <select
           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
@@ -228,7 +229,7 @@ export function WebSearchSettingsPanel() {
           ))}
         </select>
       </label>
-      <label className="mt-3 block text-sm text-text-muted">
+      <label className={`mt-3 block ${SETTINGS_LABEL_CLASS}`}>
         单次最大返回结果数
         <input
           type="number"
@@ -249,7 +250,7 @@ export function WebSearchSettingsPanel() {
         />
       </label>
       {needsKey ? (
-        <label className="mt-3 block text-sm text-text-muted">
+        <label className={`mt-3 block ${SETTINGS_LABEL_CLASS}`}>
           API Key
           <input
             type="password"
@@ -265,7 +266,7 @@ export function WebSearchSettingsPanel() {
         </label>
       ) : null}
       {needsCx ? (
-        <label className="mt-3 block text-sm text-text-muted">
+        <label className={`mt-3 block ${SETTINGS_LABEL_CLASS}`}>
           Search Engine ID (cx)
           <input
             type="text"
@@ -371,11 +372,11 @@ export function SuggestedQuestionsSettingsPanel() {
 
   return (
     <Panel title="推荐追问">
-      <p className="mb-3 text-xs text-text-faint">
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
         关闭后模型不再输出推荐追问块；历史消息已保存的推荐仍可点击。
       </p>
       <div className="flex items-center justify-between gap-4">
-        <span className="text-sm text-text-subtle">在助手回复下方显示推荐问题</span>
+        <span className={SETTINGS_LABEL_CLASS}>在助手回复下方显示推荐问题</span>
         <button
           type="button"
           role="switch"

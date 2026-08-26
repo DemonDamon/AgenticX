@@ -51,6 +51,14 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { Panel } from "./ds/Panel";
+import {
+  SETTINGS_HINT_CLASS,
+  SETTINGS_INTRO_CLASS,
+  SETTINGS_LABEL_CLASS,
+  SETTINGS_NAV_ITEM_CLASS,
+  SETTINGS_PAGE_TITLE_CLASS,
+  SETTINGS_PANEL_TITLE_CLASS,
+} from "./ds/settings-typography";
 import { SettingsDropdown } from "./ds/SettingsDropdown";
 import { Modal } from "./ds/Modal";
 import { HoverTip } from "./ds/HoverTip";
@@ -504,10 +512,9 @@ function getSkillCategory(skill: SkillItem): "third-party" | "custom" | "builtin
   return "custom";
 }
 
-const SKILLS_SECTION_PANEL_TITLE_CLASS =
-  "text-xs font-bold normal-case tracking-normal text-text-strong";
+const SKILLS_SECTION_PANEL_TITLE_CLASS = SETTINGS_PANEL_TITLE_CLASS;
 
-const SKILLS_GROUP_TITLE_CLASS = "text-xs font-semibold text-text-strong";
+const SKILLS_GROUP_TITLE_CLASS = SETTINGS_PANEL_TITLE_CLASS;
 
 function SkillRowButton({
   skill,
@@ -1399,13 +1406,13 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
 
   return (
     <Panel title="Claude Code 本机 Bridge">
-      <div className="mb-2 space-y-1 text-xs text-text-subtle">
+      <div className={`mb-2 space-y-1 ${SETTINGS_INTRO_CLASS}`}>
         <p>
           与终端中运行的 <code className="rounded bg-surface-panel px-0.5">agx cc-bridge serve</code>{" "}
           通信。首次使用会在本机配置中自动生成 token（与 Near 工具 <code className="rounded bg-surface-panel px-0.5">cc_bridge_*</code>{" "}
           一致）。
         </p>
-        <p className="text-text-faint">
+        <p>
           方式 B：先 <code className="rounded bg-surface-panel px-0.5">cc_bridge_start</code>，再{" "}
           <code className="rounded bg-surface-panel px-0.5">cc_bridge_send</code>；完成后用{" "}
           <code className="rounded bg-surface-panel px-0.5">test -f</code> / file_read 验收落盘。
@@ -1413,7 +1420,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
       </div>
       <div className="space-y-2">
         <div>
-          <span className="mb-0.5 block text-[11px] font-medium text-text-muted">运行模式</span>
+          <span className={`mb-0.5 block ${SETTINGS_LABEL_CLASS}`}>运行模式</span>
           <div className="flex flex-wrap gap-3 text-xs text-text-subtle">
             <label className="inline-flex cursor-pointer items-center gap-1.5">
               <input
@@ -1438,7 +1445,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
           </div>
         </div>
         <div>
-          <label className="mb-0.5 block text-[11px] font-medium text-text-muted" htmlFor="cc-bridge-url">
+          <label className={`mb-0.5 block ${SETTINGS_LABEL_CLASS}`} htmlFor="cc-bridge-url">
             Bridge URL
           </label>
           <input
@@ -1453,7 +1460,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
         </div>
         <div>
           <div className="mb-0.5 flex items-center justify-between gap-2">
-            <label className="text-[11px] font-medium text-text-muted" htmlFor="cc-bridge-token">
+            <label className={SETTINGS_LABEL_CLASS} htmlFor="cc-bridge-token">
               Bearer token
             </label>
             <button
@@ -1475,7 +1482,7 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
           />
         </div>
         <div>
-          <label className="mb-0.5 block text-[11px] font-medium text-text-muted" htmlFor="cc-bridge-idle-seconds">
+          <label className={`mb-0.5 block ${SETTINGS_LABEL_CLASS}`} htmlFor="cc-bridge-idle-seconds">
             空闲自动停止（秒，0=关闭）
           </label>
           <input
@@ -3676,7 +3683,7 @@ function EmailSettingsTab() {
         </div>
 
         <div className="space-y-3">
-          <label className="block text-sm text-text-muted">
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
             SMTP 预设
             <select
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -3691,7 +3698,7 @@ function EmailSettingsTab() {
             </select>
           </label>
 
-          <label className="block text-sm text-text-muted">
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
             SMTP Host
             <input
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -3702,7 +3709,7 @@ function EmailSettingsTab() {
           </label>
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="block text-sm text-text-muted">
+            <label className={`block ${SETTINGS_LABEL_CLASS}`}>
               SMTP Port
               <input
                 type="number"
@@ -3711,7 +3718,7 @@ function EmailSettingsTab() {
                 onChange={(e) => updateField("smtp_port", Number(e.target.value) || 0)}
               />
             </label>
-            <label className="block text-sm text-text-muted">
+            <label className={`block ${SETTINGS_LABEL_CLASS}`}>
               TLS
               <select
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -3724,7 +3731,7 @@ function EmailSettingsTab() {
             </label>
           </div>
 
-          <label className="block text-sm text-text-muted">
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
             SMTP 用户名
             <input
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -3734,7 +3741,7 @@ function EmailSettingsTab() {
             />
           </label>
 
-          <label className="block text-sm text-text-muted">
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
             SMTP 授权码 / 密码
             <input
               type="password"
@@ -3745,7 +3752,7 @@ function EmailSettingsTab() {
             />
           </label>
 
-          <label className="block text-sm text-text-muted">
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
             发件邮箱
             <input
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -3755,7 +3762,7 @@ function EmailSettingsTab() {
             />
           </label>
 
-          <label className="block text-sm text-text-muted">
+          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
             默认收件邮箱
             <input
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -4225,7 +4232,7 @@ function SkillAdvancedPanel() {
       defaultCollapsed={false}
       titleClassName={SKILLS_SECTION_PANEL_TITLE_CLASS}
     >
-      <p className="mb-3 text-xs text-text-faint">
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
         写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
       </p>
       <div className="space-y-3">
@@ -4246,7 +4253,7 @@ function SkillAdvancedPanel() {
         <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-semibold text-text-strong">启用技能自进化</div>
+              <div className={SETTINGS_LABEL_CLASS}>启用技能自进化</div>
               <p className="mt-1 text-xs leading-relaxed text-text-muted">
                 自动记录工具调用过程，会话结束后评估是否值得提炼为新技能。
               </p>
@@ -4276,7 +4283,7 @@ function SkillAdvancedPanel() {
             </button>
             {reviewAdvancedOpen ? (
               <div className="mt-2 space-y-3">
-                <label className="block text-sm text-text-muted">
+                <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                   复盘触发间隔
                   <input
                     type="number"
@@ -4294,7 +4301,7 @@ function SkillAdvancedPanel() {
                     }}
                   />
                 </label>
-                <label className="block text-sm text-text-muted">
+                <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                   最小工具调用数
                   <input
                     type="number"
@@ -4341,14 +4348,14 @@ function SessionMemoryPanel() {
 
   return (
     <Panel title="会话与记忆">
-      <p className="mb-3 text-xs text-text-faint">
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
         写入 <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
       </p>
       <div className="space-y-3 text-sm text-text-subtle">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div>启用会话摘要延续</div>
-            <div className="mt-0.5 text-[11px] text-text-faint">新会话可继承前次摘要上下文</div>
+            <div className={SETTINGS_LABEL_CLASS}>启用会话摘要延续</div>
+            <div className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>新会话可继承前次摘要上下文</div>
           </div>
           <SettingsSwitch
             checked={form.session_summary}
@@ -4580,8 +4587,8 @@ function SettingsToggleCard(props: {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-card px-4 py-3.5">
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-semibold text-text-strong">{title}</div>
-        <p className="mt-1 text-xs leading-relaxed text-text-muted">{description}</p>
+        <div className={SETTINGS_LABEL_CLASS}>{title}</div>
+        <p className={`mt-1 ${SETTINGS_HINT_CLASS}`}>{description}</p>
       </div>
       <SettingsSwitch
         checked={checked}
@@ -6744,10 +6751,10 @@ export function SettingsPanel({
               return (
                 <button
                   key={t.id}
-                  className={`flex w-full min-w-0 items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left text-[13px] font-semibold transition-all ${
+                  className={`flex w-full min-w-0 items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left ${SETTINGS_NAV_ITEM_CLASS} transition-all ${
                     isActive
                       ? "border-transparent bg-btnPrimary text-btnPrimary-text"
-                      : "border-transparent text-text-subtle hover:border-border-strong hover:bg-surface-card hover:text-text-strong"
+                      : "border-transparent text-text-primary hover:bg-surface-card hover:text-text-strong"
                   }`}
                   onClick={() => setTab(t.id)}
                   title={t.label}
@@ -6777,7 +6784,7 @@ export function SettingsPanel({
         {/* Right: content */}
         <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
           <div className="relative z-20 flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-panel pl-5 pr-5 py-3">
-            <h3 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-text-strong">
+            <h3 className={`min-w-0 flex-1 truncate ${SETTINGS_PAGE_TITLE_CLASS}`}>
               {TABS.find((t) => t.id === tab)?.label ?? "设置"}
             </h3>
             <button
@@ -6807,8 +6814,8 @@ export function SettingsPanel({
                   <div className="flex flex-col">
                     <div className="flex min-h-14 items-center justify-between gap-6 py-1">
                       <div>
-                        <div className="text-sm font-medium text-text-primary">外观</div>
-                        <div className="mt-0.5 text-[11px] text-text-faint">选择界面的明暗层级</div>
+                        <div className={SETTINGS_LABEL_CLASS}>外观</div>
+                        <div className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>选择界面的明暗层级</div>
                       </div>
                       {(() => {
                         const options = [
@@ -6834,8 +6841,8 @@ export function SettingsPanel({
 
                     <div className="flex min-h-14 items-center justify-between gap-6 py-1">
                       <div>
-                        <div className="text-sm font-medium text-text-primary">消息布局</div>
-                        <div className="mt-0.5 text-[11px] text-text-faint">决定聊天内容的呈现方式</div>
+                        <div className={SETTINGS_LABEL_CLASS}>消息布局</div>
+                        <div className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>决定聊天内容的呈现方式</div>
                       </div>
                       {(() => {
                         const options = [
@@ -6861,8 +6868,8 @@ export function SettingsPanel({
 
                     <div className="flex min-h-14 items-center justify-between gap-6 py-1">
                       <div>
-                        <div className="text-sm font-medium text-text-primary">强调色</div>
-                        <div className="mt-0.5 text-[11px] text-text-faint">用于按钮、选中状态与焦点提示</div>
+                        <div className={SETTINGS_LABEL_CLASS}>强调色</div>
+                        <div className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>用于按钮、选中状态与焦点提示</div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         {[
@@ -6916,10 +6923,10 @@ export function SettingsPanel({
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-text-primary">
+                      <div className={`truncate ${SETTINGS_LABEL_CLASS}`}>
                         {userNicknameDraft.trim() || "我"}
                       </div>
-                      <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-text-faint">
+                      <p className={`mt-0.5 line-clamp-2 ${SETTINGS_HINT_CLASS}`}>
                         {userPreferenceDraft.trim() || "尚未设置回答偏好与沟通风格"}
                       </p>
                     </div>
@@ -7038,7 +7045,7 @@ export function SettingsPanel({
                   ) : null}
                 </Panel>
                 <Panel title="元智能体">
-                  <p className="text-[11px] leading-4 text-text-faint">
+                  <p className={SETTINGS_INTRO_CLASS}>
                     管理元智能体的身份与行为原则
                   </p>
 
@@ -7084,8 +7091,8 @@ export function SettingsPanel({
                               )}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <div className="text-xs font-medium text-text-primary">{item.title}</div>
-                              <div className="mt-0.5 truncate text-[11px] text-text-faint" title={preview}>
+                              <div className={SETTINGS_LABEL_CLASS}>{item.title}</div>
+                              <div className={`mt-0.5 truncate ${SETTINGS_HINT_CLASS}`} title={preview}>
                                 {item.description}
                               </div>
                             </div>
@@ -7242,7 +7249,7 @@ export function SettingsPanel({
                 <SuggestedQuestionsSettingsPanel />
                 <SessionMemoryPanel />
                 <Panel title="工作目录">
-                  <label className="block text-sm text-text-muted">
+                  <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                     默认工作区目录（元智能体）
                     <div className="mt-1 flex gap-2">
                       <input
@@ -7501,7 +7508,7 @@ export function SettingsPanel({
                   {(providerEnableHint || defaultProvHint) && (
                     <div className="text-xs text-rose-400">{providerEnableHint || defaultProvHint}</div>
                   )}
-                      <label className="block text-sm text-text-muted">
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                         API 密钥
                         <div className="mt-1 flex gap-2">
                           <div className="relative min-w-0 flex-1">
@@ -7548,7 +7555,7 @@ export function SettingsPanel({
                           <div className="mt-1 text-xs text-text-faint">内网 OpenAI 兼容网关可不填密钥；若输入框仍是 sk-... 占位符请清空后再检测。</div>
                         )}
                       </label>
-                      <label className="block text-sm text-text-muted">
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                         API 地址 <span className="text-xs text-text-faint">(留空使用默认)</span>
                         <input
                           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -7879,7 +7886,7 @@ export function SettingsPanel({
                               {(addVendorFormName.trim().charAt(0) || "P").toUpperCase()}
                             </div>
                           </div>
-                          <label className="block text-sm text-text-muted">
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                             服务厂商名称
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-card-strong px-2 py-1.5 text-sm"
@@ -7892,7 +7899,7 @@ export function SettingsPanel({
                               }}
                             />
                           </label>
-                          <label className="block text-sm text-text-muted">
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                             服务厂商类型
                             <select
                               className="mt-1 w-full rounded-md border border-border bg-surface-card-strong px-2 py-1.5 text-sm"
@@ -7936,7 +7943,7 @@ export function SettingsPanel({
                         )}
                       >
                         <div className="space-y-3">
-                          <label className="block text-sm text-text-muted">
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                             <span className="text-rose-400">*</span> 模型 ID
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -7949,7 +7956,7 @@ export function SettingsPanel({
                               }}
                             />
                           </label>
-                          <label className="block text-sm text-text-muted">
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                             模型名称
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -7988,7 +7995,7 @@ export function SettingsPanel({
                         )}
                       >
                         <div className="space-y-3">
-                          <label className="block text-sm text-text-muted">
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                             <span className="text-rose-400">*</span> 模型 ID
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm"
@@ -8609,7 +8616,7 @@ export function SettingsPanel({
 
                 <Panel title="远程服务器配置">
                   <fieldset disabled={serverMode === "local"} className={serverMode === "local" ? "opacity-50" : ""}>
-                    <label className="block text-sm text-text-muted">
+                    <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                       服务器 URL
                       <input
                         className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
@@ -8618,7 +8625,7 @@ export function SettingsPanel({
                         onChange={(e) => setServerUrl(e.target.value)}
                       />
                     </label>
-                    <label className="mt-3 block text-sm text-text-muted">
+                    <label className={`mt-3 block ${SETTINGS_LABEL_CLASS}`}>
                       认证 Token
                       <div className="relative mt-1">
                         <input
@@ -8705,7 +8712,7 @@ export function SettingsPanel({
                       </div>
                       {feishuEnabled && (
                         <>
-                          <label className="block text-sm text-text-muted">
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                             App ID
                             <input
                               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
@@ -8714,7 +8721,7 @@ export function SettingsPanel({
                               onChange={(e) => setFeishuAppId(e.target.value)}
                             />
                           </label>
-                          <label className="block text-sm text-text-muted">
+                          <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                             App Secret
                             <div className="relative mt-1">
                               <input
@@ -8748,7 +8755,7 @@ export function SettingsPanel({
                       <p className="text-xs text-text-faint">
                         需要公网可访问的服务器部署云端 Gateway，再通过扫码与 Near 绑定。
                       </p>
-                      <label className="block text-sm text-text-muted">
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                         网关地址
                         <input
                           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
@@ -8757,7 +8764,7 @@ export function SettingsPanel({
                           onChange={(e) => setGwUrl(e.target.value)}
                         />
                       </label>
-                      <label className="block text-sm text-text-muted">
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                         设备 ID
                         <input
                           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"
@@ -8766,7 +8773,7 @@ export function SettingsPanel({
                           onChange={(e) => setGwDeviceId(e.target.value)}
                         />
                       </label>
-                      <label className="block text-sm text-text-muted">
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                         设备 Token
                         <div className="relative mt-1">
                           <input
@@ -8869,7 +8876,7 @@ export function SettingsPanel({
                           aria-label="启用网关客户端"
                         />
                       </div>
-                      <label className="block text-sm text-text-muted">
+                      <label className={`block ${SETTINGS_LABEL_CLASS}`}>
                         本机 Studio 基址（留空则使用 http://127.0.0.1:当前端口）
                         <input
                           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-subtle"

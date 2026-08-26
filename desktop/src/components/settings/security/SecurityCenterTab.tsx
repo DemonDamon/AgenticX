@@ -1,6 +1,7 @@
 import { forwardRef, useImperativeHandle, useRef } from "react";
 import { TriangleAlert } from "lucide-react";
 import { Panel } from "../../ds/Panel";
+import { SETTINGS_HINT_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
 import { SettingsDropdown } from "../../ds/SettingsDropdown";
 import {
   RUN_MODE_OPTIONS,
@@ -75,8 +76,8 @@ export const SecurityCenterTab = forwardRef<SecurityCenterTabHandle, Props>(func
       <Panel title="权限">
         <div className="flex items-center justify-between gap-6">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-text-primary">运行模式</div>
-            <p className="mt-0.5 text-xs leading-5 text-text-faint">
+            <div className={SETTINGS_LABEL_CLASS}>运行模式</div>
+            <p className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>
               {current.description}
             </p>
           </div>
@@ -94,8 +95,8 @@ export const SecurityCenterTab = forwardRef<SecurityCenterTabHandle, Props>(func
         <div className="mt-4 border-t border-[var(--border-muted)] pt-3">
           <div className="flex items-start gap-2">
             <div className="min-w-0">
-              <div className="text-xs font-medium text-text-muted">凭据安全</div>
-              <p className="mt-1 text-[11px] leading-5 text-text-faint">
+              <div className={SETTINGS_LABEL_CLASS}>凭据安全</div>
+              <p className={`mt-1 ${SETTINGS_HINT_CLASS}`}>
                 请勿在对话中发送 API Key、Token 或密码；请前往对应服务设置中配置。
               </p>
             </div>
