@@ -1,0 +1,26 @@
+{
+  "task_id": "t-DATA-L-01",
+  "office_type": "data",
+  "task_type": "low_coupling",
+  "mode": "team",
+  "model": "deepseek-v4-flash",
+  "seed": 1,
+  "Q": 0.37,
+  "TMS": false,
+  "prompt_tokens": 5129,
+  "completion_tokens": 2372,
+  "total_tokens": 7501,
+  "elapsed": 18.9,
+  "llm_calls": 2,
+  "error": "",
+  "detail": {
+    "L1_total": 0.5,
+    "L2_total_qty": 0.0,
+    "L2_total_revenue": 0.0,
+    "L2_total": 0.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.37
+  },
+  "output": "- 总销量：3,345件  \n- 总销售额：351,040元  \n\nTop3 SKU（按销售额）  \n1. SKU017：销量206件，销售额21,630元  \n2. SKU016：销量195件，销售额20,280元  \n3. SKU030：销量169件，销售额19,942元",
+  "ts": "2026-08-22T21:25:41"
+}

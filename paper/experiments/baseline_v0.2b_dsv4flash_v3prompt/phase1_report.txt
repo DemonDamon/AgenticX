@@ -1,0 +1,35 @@
+# Phase 1 基线实验报告 - baseline_v0.2b_dsv4flash_v3prompt
+总 run 数: 60
+
+## 1. 按任务耦合度汇总
+- low_coupling: n=10  avg_CTR=0.921  avg_token_ratio=1.85x  TMS_s_rate=70%  TMS_t_rate=40%   团队次优<0.95=4/10  团队涌现>1.05=1/10
+- medium_coupling: n=10  avg_CTR=0.956  avg_token_ratio=1.78x  TMS_s_rate=100%  TMS_t_rate=80%   团队次优<0.95=6/10  团队涌现>1.05=2/10
+- high_coupling: n=10  avg_CTR=0.990  avg_token_ratio=3.48x  TMS_s_rate=100%  TMS_t_rate=90%   团队次优<0.95=2/10  团队涌现>1.05=2/10
+
+## 2. 按办公场景汇总
+- content: n=6  avg_CTR=0.945  avg_token_ratio=2.22x
+- cross_dept: n=6  avg_CTR=0.878  avg_token_ratio=2.31x
+- data: n=6  avg_CTR=0.948  avg_token_ratio=2.11x
+- document: n=6  avg_CTR=0.963  avg_token_ratio=3.79x
+- project: n=6  avg_CTR=1.044  avg_token_ratio=1.41x
+
+## 3. 团队协作现象假设验证
+- 耦合度 CTR 单调递增(低→中→高): ✅ YES  (low=0.921, medium=0.956, high=0.990)
+- 低耦合团队次优(CTR<0.95): ✅ YES
+- 高耦合团队涌现(CTR>1.05): ❌ NO (CTR=0.99)
+
+## 4. 异常样本(CTR 极端值)
+### 最低 CTR 前 5 (团队严重次优)
+- t-CROSS-L-01 s1: Q_s=0.92→Q_t=0.56 CTR=0.61 tokens 4923→5466(1.11x)
+- t-DATA-L-01 s1: Q_s=0.84→Q_t=0.62 CTR=0.74 tokens 12583→20056(1.59x)
+- t-CONTENT-H-03 s0: Q_s=0.92→Q_t=0.72 CTR=0.78 tokens 7150→26738(3.74x)
+- t-DATA-L-01 s0: Q_s=0.75→Q_t=0.62 CTR=0.82 tokens 10810→8075(0.75x)
+- t-DOC-M-02 s0: Q_s=0.86→Q_t=0.73 CTR=0.85 tokens 5986→14854(2.48x)
+### 最高 CTR 前 5 (团队严重涌现)
+- t-PROJ-H-03 s0: Q_s=0.71→Q_t=0.88 CTR=1.24 tokens 30455→27338(0.9x)
+- t-CONTENT-M-02 s1: Q_s=0.72→Q_t=0.82 CTR=1.14 tokens 9583→11265(1.18x)
+- t-DATA-M-02 s1: Q_s=0.81→Q_t=0.91 CTR=1.12 tokens 3820→6141(1.61x)
+- t-PROJ-L-01 s1: Q_s=0.56→Q_t=0.62 CTR=1.11 tokens 5775→8804(1.52x)
+- t-DOC-H-03 s0: Q_s=0.86→Q_t=0.92 CTR=1.07 tokens 6781→26850(3.96x)
+
+📄 已写出全量 pairs 报告: paper/experiments/baseline_v0.2b_dsv4flash_v3prompt/pairs_report.csv

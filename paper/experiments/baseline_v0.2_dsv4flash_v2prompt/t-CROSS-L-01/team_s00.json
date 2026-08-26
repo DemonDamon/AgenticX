@@ -1,0 +1,25 @@
+{
+  "task_id": "t-CROSS-L-01",
+  "office_type": "cross_dept",
+  "task_type": "low_coupling",
+  "mode": "team",
+  "model": "deepseek-v4-flash",
+  "seed": 0,
+  "Q": 0.495,
+  "TMS": false,
+  "prompt_tokens": 1634,
+  "completion_tokens": 486,
+  "total_tokens": 2120,
+  "elapsed": 4.71,
+  "llm_calls": 3,
+  "error": "",
+  "detail": {
+    "L1_total": 0.75,
+    "L2_total_items": 0.0,
+    "L2_total": 0.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.495
+  },
+  "output": "【Admin清单核对结果】\n\n1. 工位分配 — ✅ 已完成  \n2. 门禁卡制作 — ❌ 未完成  \n3. 办公用品领取 — ❌ 未完成  \n4. 入职礼包发放 — ❌ 未完成  \n\n结论：Admin类4项中已完成1项，未完成3项。需跟进：门禁卡制作、办公用品领取、入职礼包发放。",
+  "ts": "2026-08-22T21:19:37"
+}

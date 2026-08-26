@@ -1,0 +1,2 @@
+task_id,office_type,task_type,model,seed,Q_single,Q_team,CTR,TR,team_token_overhead
+t-PROJ-H-03,project,high_coupling,kimi-k3,0,0.9137,0.8658,0.9476,2.3860,15182

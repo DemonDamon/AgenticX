@@ -1,0 +1,5 @@
+task_id,office_type,task_type,mode,model,seed,Q,TMS,prompt_tokens,completion_tokens,total_tokens,cached_tokens,elapsed,llm_calls,error
+t-PROJ-H-03,project,high_coupling,single,glm-5.3,0,0.92,True,1044,18154,19198,0,268.31,1,""
+t-PROJ-H-03,project,high_coupling,single,glm-5.3,1,0.9137,True,1044,23517,24561,0,205.3,1,""
+t-PROJ-H-03,project,high_coupling,team,glm-5.3,0,0.92,True,11481,29111,40592,64,305.32,4,""
+t-PROJ-H-03,project,high_coupling,team,glm-5.3,1,0.92,True,12724,28672,41396,0,470.3,4,""

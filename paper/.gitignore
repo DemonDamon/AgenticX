@@ -1,0 +1,4 @@
+# paper 分支临时忽略:实验产物不进 git(可由脚本重算)
+experiments/**/*.log
+experiments/**/nohup*.log
+**/__pycache__/

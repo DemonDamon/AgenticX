@@ -1,0 +1,3 @@
+task_id,office_type,task_type,mode,model,seed,Q,TMS,prompt_tokens,completion_tokens,total_tokens,elapsed,llm_calls,error
+t-DOC-L-01,document,low_coupling,single,deepseek-v4-flash,2,0.92,True,914,2537,3451,17.75,1,""
+t-DOC-L-01,document,low_coupling,team,deepseek-v4-flash,2,0.92,True,3437,7238,10675,55.37,3,""

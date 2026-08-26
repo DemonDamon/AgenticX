@@ -1,0 +1,24 @@
+{
+  "task_id": "t-DOC-L-01",
+  "office_type": "document",
+  "task_type": "low_coupling",
+  "mode": "single",
+  "model": "deepseek-v4-flash",
+  "seed": 1,
+  "Q": 0.42,
+  "TMS": false,
+  "prompt_tokens": 914,
+  "completion_tokens": 4097,
+  "total_tokens": 5011,
+  "elapsed": 31.4,
+  "llm_calls": 1,
+  "error": "",
+  "detail": {
+    "L1_total": 0.0,
+    "L2_total": 1.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.42
+  },
+  "output": "",
+  "ts": "2026-08-22T15:03:43"
+}

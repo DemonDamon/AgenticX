@@ -1,0 +1,27 @@
+{
+  "task_id": "t-PROJ-H-03",
+  "office_type": "project",
+  "task_type": "high_coupling",
+  "mode": "team",
+  "model": "kimi-k2.6",
+  "seed": 1,
+  "Q": 0.42,
+  "TMS": false,
+  "prompt_tokens": 7838,
+  "completion_tokens": 16010,
+  "total_tokens": 23848,
+  "cached_tokens": 1964,
+  "elapsed": 2831.41,
+  "llm_calls": 4,
+  "error": "排期冲突消解员: Request timed out.",
+  "detail": {
+    "L1_min_conflicts_identified": 0.0,
+    "L1_min_rescheduling_actions": 0.0,
+    "L1_total": 0.0,
+    "L2_total": 1.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.42
+  },
+  "output": "",
+  "ts": "2026-08-25T12:51:59"
+}

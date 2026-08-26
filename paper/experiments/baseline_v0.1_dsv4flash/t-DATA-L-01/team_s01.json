@@ -1,0 +1,26 @@
+{
+  "task_id": "t-DATA-L-01",
+  "office_type": "data",
+  "task_type": "low_coupling",
+  "mode": "team",
+  "model": "deepseek-v4-flash",
+  "seed": 1,
+  "Q": 0.5367,
+  "TMS": false,
+  "prompt_tokens": 5056,
+  "completion_tokens": 3156,
+  "total_tokens": 8212,
+  "elapsed": 22.62,
+  "llm_calls": 2,
+  "error": "",
+  "detail": {
+    "L1_total": 0.833,
+    "L2_total_qty": 0.0,
+    "L2_total_revenue": 0.0,
+    "L2_total": 0.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.537
+  },
+  "output": "渠道B汇总结果（2026年8月）：\n\n- 总销量：3,345\n- 总销售额：351,040\n\nTop3 SKU（按销售额排序）：\n\n| 排名 | SKU | 销量 | 销售额 |\n|------|------|------|--------|\n| 1 | SKU017 | 206 | 21,630 |\n| 2 | SKU016 | 195 | 20,280 |\n| 3 | SKU030 | 169 | 19,942 |",
+  "ts": "2026-08-22T15:36:01"
+}

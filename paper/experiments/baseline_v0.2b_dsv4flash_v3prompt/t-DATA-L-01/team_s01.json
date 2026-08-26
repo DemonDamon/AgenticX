@@ -1,0 +1,26 @@
+{
+  "task_id": "t-DATA-L-01",
+  "office_type": "data",
+  "task_type": "low_coupling",
+  "mode": "team",
+  "model": "deepseek-v4-flash",
+  "seed": 1,
+  "Q": 0.62,
+  "TMS": false,
+  "prompt_tokens": 5358,
+  "completion_tokens": 14698,
+  "total_tokens": 20056,
+  "elapsed": 108.76,
+  "llm_calls": 2,
+  "error": "",
+  "detail": {
+    "L1_total": 1.0,
+    "L2_total_qty": 0.0,
+    "L2_total_revenue": 0.0,
+    "L2_total": 0.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.62
+  },
+  "output": "## 渠道B汇总员交付物\n\n期间：2026年8月\n\n### 汇总口径\n- 数据范围：channel_b 全部 30 条记录\n- 销量口径：qty 字段累加\n- 销售额口径：revenue 字段累加\n- Top3 SKU 口径：按 revenue 降序取前 3\n\n### 渠道B整体指标\n- SKU 数量：30 个\n- 总销量：3,345 件\n- 总销售额：351,040 元\n\n### Top3 SKU（按销售额降序）\n\n| 排名 | SKU | 销量（件） | 销售额（元） | 占渠道B销售额 |\n|---|---:|---:|---:|---:|\n| 1 | SKU017 | 206 | 21,630 | 6.16% |\n| 2 | SKU016 | 195 | 20,280 | 5.78% |\n| 3 | SKU030 | 169 | 19,942 | 5.68% |\n\n### Top3 汇总\n- Top3 销量合计：570 件，占渠道B总销量 17.04%\n- Top3 销售额合计：61,852 元，占渠道B总销售额 17.62%\n\n### 备注\n- 第3名 SKU030 销售额为 19,942 元，第4名 SKU015 销售额为 18,952 元，Top3 边界清晰。\n- 其余 27 个 SKU 销售额均低于 19,942 元，未进入 Top3。",
+  "ts": "2026-08-23T02:50:06"
+}

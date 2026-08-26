@@ -1,0 +1,24 @@
+{
+  "task_id": "t-DOC-L-01",
+  "office_type": "document",
+  "task_type": "low_coupling",
+  "mode": "single",
+  "model": "deepseek-v4-flash",
+  "seed": 0,
+  "Q": 0.44,
+  "TMS": false,
+  "prompt_tokens": 268,
+  "completion_tokens": 324,
+  "total_tokens": 592,
+  "elapsed": 3.69,
+  "llm_calls": 1,
+  "error": "",
+  "detail": {
+    "L1_total": 0.0,
+    "L2_total": 1.0,
+    "L3_total": 0.7,
+    "weighted_Q": 0.44
+  },
+  "output": "# 团队周报\n\n**报告周期**：本周  \n**数据来源**：5名团队成员工作记录（输入为空）\n\n## 一、工作汇总\n\n无。\n\n## 二、主题归类\n\n无。\n\n## 三、关键进展\n\n无。\n\n## 四、跨成员依赖与协作事项\n\n无。\n\n## 五、风险与待办\n\n无。",
+  "ts": "2026-08-22T14:59:26"
+}

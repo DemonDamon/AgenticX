@@ -1,0 +1,26 @@
+{
+  "task_id": "t-PROJ-H-03",
+  "office_type": "project",
+  "task_type": "high_coupling",
+  "mode": "single",
+  "model": "deepseek-v4-flash",
+  "seed": 0,
+  "Q": 0.42,
+  "TMS": false,
+  "prompt_tokens": 1100,
+  "completion_tokens": 16384,
+  "total_tokens": 17484,
+  "elapsed": 129.51,
+  "llm_calls": 1,
+  "error": "content空，疑似被max_tokens截断（completion_tokens=16384 / max=16384）",
+  "detail": {
+    "L1_min_conflicts_identified": 0.0,
+    "L1_min_rescheduling_actions": 0.0,
+    "L1_total": 0.0,
+    "L2_total": 1.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.42
+  },
+  "output": "",
+  "ts": "2026-08-22T20:28:04"
+}

@@ -1,0 +1,26 @@
+{
+  "task_id": "t-DATA-L-01",
+  "office_type": "data",
+  "task_type": "low_coupling",
+  "mode": "team",
+  "model": "deepseek-v4-flash",
+  "seed": 0,
+  "Q": 0.5367,
+  "TMS": false,
+  "prompt_tokens": 5045,
+  "completion_tokens": 4597,
+  "total_tokens": 9642,
+  "elapsed": 30.6,
+  "llm_calls": 2,
+  "error": "",
+  "detail": {
+    "L1_total": 0.833,
+    "L2_total_qty": 0.0,
+    "L2_total_revenue": 0.0,
+    "L2_total": 0.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.537
+  },
+  "output": "渠道B月度汇总（2026年8月）\n\n- 总销量：3,345 件\n- 总销售额：351,040 元\n- Top3 SKU（按销售额）：\n  1. SKU017：销量 206，销售额 21,630 元\n  2. SKU016：销量 195，销售额 20,280 元\n  3. SKU030：销量 169，销售额 19,942 元",
+  "ts": "2026-08-22T15:35:07"
+}

@@ -1,0 +1,3 @@
+task_id,office_type,task_type,mode,model,seed,Q,TMS,prompt_tokens,completion_tokens,total_tokens,cached_tokens,elapsed,llm_calls,error
+t-PROJ-H-03,project,high_coupling,single,kimi-k3,0,0.9137,True,1130,9824,10954,0,219.22,1,""
+t-PROJ-H-03,project,high_coupling,team,kimi-k3,0,0.8658,True,11233,14903,26136,3072,376.05,4,""

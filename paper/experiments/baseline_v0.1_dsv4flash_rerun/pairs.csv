@@ -1,0 +1,3 @@
+task_id,office_type,task_type,model,seed,Q_single,Q_team,CTR,TR,team_token_overhead
+t-CROSS-H-03,cross_dept,high_coupling,deepseek-v4-flash,0,0.92,0.92,1.0000,4.6281,17600
+t-CROSS-H-03,cross_dept,high_coupling,deepseek-v4-flash,1,0.92,0.92,1.0000,3.3094,16362

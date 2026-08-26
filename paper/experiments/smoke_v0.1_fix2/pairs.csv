@@ -1,0 +1,2 @@
+task_id,office_type,task_type,model,seed,Q_single,Q_team,CTR,TR,team_token_overhead
+t-DOC-L-01,document,low_coupling,deepseek-v4-flash,2,0.92,0.92,1.0000,3.0933,7224

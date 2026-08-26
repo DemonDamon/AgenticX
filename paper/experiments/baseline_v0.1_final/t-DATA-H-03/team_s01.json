@@ -1,0 +1,27 @@
+{
+  "task_id": "t-DATA-H-03",
+  "office_type": "data",
+  "task_type": "high_coupling",
+  "mode": "team",
+  "model": "deepseek-v4-flash",
+  "seed": 1,
+  "Q": 0.92,
+  "TMS": true,
+  "prompt_tokens": 11217,
+  "completion_tokens": 10325,
+  "total_tokens": 21542,
+  "elapsed": 70.32,
+  "llm_calls": 3,
+  "error": "",
+  "detail": {
+    "L1_total": 1.0,
+    "L2_a_only": 1.0,
+    "L2_b_only": 1.0,
+    "L2_qty_mismatches": 1.0,
+    "L2_total": 1.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.92
+  },
+  "output": "## 合并核对报告（已去重）\n\n### 核对口径\n- 关联键：SKU\n- 比较字段：qty、date\n\n### 一、A有B无（4条）\n\n| SKU | A.qty | A.date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n### 二、B有A无（2条）\n\n| SKU | B.qty | B.date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n### 三、共有但数值不一致（2条）\n\n| SKU | A.qty | B.qty | 差异（B-A） | 说明 |\n|---|---|---|---|---|\n| SKU006 | 80 | 85 | +5 | B比A多5 |\n| SKU022 | 105 | 100 | -5 | B比A少5 |\n\n### 四、一致性汇总\n\n- A总条数：52\n- B总条数：50\n- 共有SKU：48\n- A有B无：4\n- B有A无：2\n- 数值不一致：2\n- 共有SKU中，date字段全部一致，未发现日期差异\n- 共有48个SKU中，qty一致46个，qty不一致2个\n\n去重说明：SKU006、SKU022的数值不一致在核对来源中重复出现，已合并为同一条差异；合并后差异总数为 4 + 2 + 2 = 8 条。",
+  "ts": "2026-08-22T15:33:56"
+}

@@ -1,0 +1,26 @@
+{
+  "task_id": "t-DATA-L-01",
+  "office_type": "data",
+  "task_type": "low_coupling",
+  "mode": "single",
+  "model": "deepseek-v4-flash",
+  "seed": 1,
+  "Q": 0.92,
+  "TMS": true,
+  "prompt_tokens": 2577,
+  "completion_tokens": 5895,
+  "total_tokens": 8472,
+  "elapsed": 45.99,
+  "llm_calls": 1,
+  "error": "",
+  "detail": {
+    "L1_total": 1.0,
+    "L2_total_qty": 1.0,
+    "L2_total_revenue": 1.0,
+    "L2_total": 1.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.92
+  },
+  "output": "## 2026年8月渠道A/B合并月度销售汇总表\n\n| 渠道 | 总销量（件） | 总销售额（元） | Top3 SKU（按销售额降序） |\n| --- | ---: | ---: | --- |\n| 渠道A | 4,345 | 505,990 | SKU029（31,242）、SKU028（30,114）、SKU027（29,000） |\n| 渠道B | 3,345 | 351,040 | SKU017（21,630）、SKU030（19,942）、SKU029（18,486） |\n| 合计 | 7,690 | 857,030 | — |\n\n注：Top3 SKU 括号内为该 SKU 在对应渠道的销售额（元）。",
+  "ts": "2026-08-22T21:25:22"
+}

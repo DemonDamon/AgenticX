@@ -1,0 +1,27 @@
+{
+  "task_id": "t-DATA-L-01",
+  "office_type": "data",
+  "task_type": "low_coupling",
+  "mode": "team",
+  "model": "kimi-k3",
+  "seed": 0,
+  "Q": 0.62,
+  "TMS": false,
+  "prompt_tokens": 4932,
+  "completion_tokens": 2753,
+  "total_tokens": 7685,
+  "cached_tokens": 2304,
+  "elapsed": 71.56,
+  "llm_calls": 2,
+  "error": "",
+  "detail": {
+    "L1_total": 1.0,
+    "L2_total_qty": 0.0,
+    "L2_total_revenue": 0.0,
+    "L2_total": 0.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.62
+  },
+  "output": "## 渠道B月度汇总（2026年8月）\n\n- 统计SKU数：30个\n- 总销量：3,345\n- 总销售额：351,040\n\n### Top3 SKU（按销售额排序）\n\n| 排名 | SKU | 销量 | 销售额 |\n|---:|:---:|---:|---:|\n| 1 | SKU017 | 206 | 21,630 |\n| 2 | SKU016 | 195 | 20,280 |\n| 3 | SKU030 | 169 | 19,942 |\n\n- Top3合计销量：570\n- Top3合计销售额：61,852",
+  "ts": "2026-08-25T02:49:53"
+}

@@ -1,0 +1,3 @@
+task_id,office_type,task_type,model,seed,Q_single,Q_team,CTR,TR,team_token_overhead
+t-PROJ-H-03,project,high_coupling,deepseek-v4-flash,0,0.42,0.42,1.0000,1.9919,17343
+t-PROJ-H-03,project,high_coupling,deepseek-v4-flash,1,0.42,0.42,1.0000,1.8315,14538

@@ -1,0 +1,27 @@
+{
+  "task_id": "t-DATA-H-03",
+  "office_type": "data",
+  "task_type": "high_coupling",
+  "mode": "team",
+  "model": "deepseek-v4-flash",
+  "seed": 0,
+  "Q": 0.92,
+  "TMS": true,
+  "prompt_tokens": 11466,
+  "completion_tokens": 1878,
+  "total_tokens": 13344,
+  "elapsed": 17.66,
+  "llm_calls": 3,
+  "error": "",
+  "detail": {
+    "L1_total": 1.0,
+    "L2_a_only": 1.0,
+    "L2_b_only": 1.0,
+    "L2_qty_mismatches": 1.0,
+    "L2_total": 1.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.92
+  },
+  "output": "## 合并核对报告\n\n### 1. 差异合并与去重\n- 两源核对员对差异的识别完全一致，无重复冲突项，直接合并。\n\n### 2. A有B无（仅A存在，4条）\n| SKU | A.qty | A.date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n### 3. B有A无（仅B存在，2条）\n| SKU | B.qty | B.date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n### 4. 数值不一致（2处）\n| SKU | A.qty | B.qty | 差值（A-B） |\n|---|---|---|---|\n| SKU006 | 80 | 85 | -5 |\n| SKU022 | 105 | 100 | +5 |\n\n### 5. 一致确认\n- 除上述差异外，两表共有SKU的qty均一致。\n- A表共52条，B表共50条；去重后共有SKU 46条（52-4=48，再减去B独有的2？更正：共有 = A∩B = 52-4=48，且B=50-2=48，核对无误）。\n- 日期字段在所有重叠SKU上均一致，无日期差异。\n\n### 6. 结论\n- 需关注的SKU共8个（4个A独有，2个B独有，2个数值不一致）。\n- 建议业务方核实SKU049-052的库存缺失原因，SKU053/054的销售缺失原因，以及SKU006/SKU022的数量差异来源。",
+  "ts": "2026-08-22T21:22:16"
+}

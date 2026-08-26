@@ -1,0 +1,27 @@
+{
+  "task_id": "t-DATA-H-03",
+  "office_type": "data",
+  "task_type": "high_coupling",
+  "mode": "team",
+  "model": "deepseek-v4-flash",
+  "seed": 0,
+  "Q": 0.92,
+  "TMS": true,
+  "prompt_tokens": 11306,
+  "completion_tokens": 5666,
+  "total_tokens": 16972,
+  "elapsed": 42.44,
+  "llm_calls": 3,
+  "error": "",
+  "detail": {
+    "L1_total": 1.0,
+    "L2_a_only": 1.0,
+    "L2_b_only": 1.0,
+    "L2_qty_mismatches": 1.0,
+    "L2_total": 1.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.92
+  },
+  "output": "# 合并核对报告（去重后）\n\n## 一、A有B无（仅存在于表A）\n\n| SKU | 表A qty | date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n## 二、B有A无（仅存在于表B）\n\n| SKU | 表B qty | date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n## 三、数值不一致（双方均存在但字段不同）\n\n| SKU | 表A qty | 表B qty | date |\n|---|---|---|---|\n| SKU006 | 80 | 85 | 2026-08-03 |\n| SKU022 | 105 | 100 | 2026-08-11 |\n\n## 去重说明\n\n- SKU006、SKU022 的数值不一致由两位核对员重复报告，已合并去重为一条。\n- 合并去重后，共涉及差异 SKU 8 个：\n  - A有B无：4 个\n  - B有A无：2 个\n  - 数值不一致：2 个\n\n其余共同存在的 SKU，qty 与 date 均一致。",
+  "ts": "2026-08-22T15:32:23"
+}

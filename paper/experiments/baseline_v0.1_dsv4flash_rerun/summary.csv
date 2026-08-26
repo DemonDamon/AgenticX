@@ -1,0 +1,5 @@
+task_id,office_type,task_type,mode,model,seed,Q,TMS,prompt_tokens,completion_tokens,total_tokens,elapsed,llm_calls,error
+t-CROSS-H-03,cross_dept,high_coupling,single,deepseek-v4-flash,0,0.92,True,716,4135,4851,31.77,1,""
+t-CROSS-H-03,cross_dept,high_coupling,team,deepseek-v4-flash,0,0.92,True,5042,17409,22451,159.59,4,""
+t-CROSS-H-03,cross_dept,high_coupling,single,deepseek-v4-flash,1,0.92,True,716,6369,7085,50.37,1,""
+t-CROSS-H-03,cross_dept,high_coupling,team,deepseek-v4-flash,1,0.92,True,7219,16228,23447,137.38,4,""

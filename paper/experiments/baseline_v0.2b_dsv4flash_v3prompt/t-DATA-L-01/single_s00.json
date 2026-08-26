@@ -1,0 +1,26 @@
+{
+  "task_id": "t-DATA-L-01",
+  "office_type": "data",
+  "task_type": "low_coupling",
+  "mode": "single",
+  "model": "deepseek-v4-flash",
+  "seed": 0,
+  "Q": 0.7533,
+  "TMS": true,
+  "prompt_tokens": 2574,
+  "completion_tokens": 8236,
+  "total_tokens": 10810,
+  "elapsed": 58.55,
+  "llm_calls": 1,
+  "error": "",
+  "detail": {
+    "L1_total": 0.667,
+    "L2_total_qty": 1.0,
+    "L2_total_revenue": 1.0,
+    "L2_total": 1.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.753
+  },
+  "output": "# 合并月度销售汇总表（2026年8月）\n\n| 渠道 | 销量（件） | 销售额（元） | Top3 SKU（按销售额） | Top3 SKU（按销量） |\n|---|---:|---:|---|---|\n| 渠道A | 4,345 | 505,990 | SKU029、SKU028、SKU027 | SKU029、SKU028、SKU027 |\n| 渠道B | 3,345 | 351,040 | SKU017、SKU016、SKU030 | SKU017、SKU016、SKU015 |\n| 合计 | 7,690 | 857,030 | SKU029、SKU028、SKU027 | SKU029、SKU028、SKU027 |",
+  "ts": "2026-08-23T02:47:05"
+}

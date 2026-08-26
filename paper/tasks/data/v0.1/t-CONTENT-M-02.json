@@ -1,0 +1,50 @@
+{
+  "task_id": "t-CONTENT-M-02",
+  "office_type": "content",
+  "task_type": "medium_coupling",
+  "team_size": 3,
+  "description": "产品宣发文案及双平台适配：主文案→抖音版→公众号版",
+  "roles": [
+    {
+      "name": "主文案撰写员",
+      "role": "main",
+      "responsibility": "写出3个核心卖点+主传播slogan"
+    },
+    {
+      "name": "抖音适配员",
+      "role": "douyin",
+      "responsibility": "适配抖音短视频口播脚本（前3秒钩子+15秒卖点+结尾动作）"
+    },
+    {
+      "name": "公众号适配员",
+      "role": "wechat",
+      "responsibility": "适配公众号深度图文（长文案+小标题分层）"
+    }
+  ],
+  "shared_initial": {
+    "product": {
+      "name": "SmartDesk 2.0 智能升降桌",
+      "campaign_theme": "告别久坐，30天重塑健康工作习惯",
+      "core_benefits": [
+        "健康",
+        "效率",
+        "品质"
+      ]
+    }
+  },
+  "verification": {
+    "required_sections": [
+      "主文案+Slogan",
+      "抖音脚本",
+      "公众号图文稿"
+    ],
+    "min_usps": 3,
+    "douyin_hook_first_3s": true,
+    "douyin_cta_end": true,
+    "wechat_subheadings_min": 3
+  },
+  "params": {
+    "usps": "t-int(3,5)",
+    "douyin_sec": "t-int(15,60)"
+  }
+}

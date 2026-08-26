@@ -1,0 +1,25 @@
+{
+  "task_id": "t-CROSS-L-01",
+  "office_type": "cross_dept",
+  "task_type": "low_coupling",
+  "mode": "single",
+  "model": "deepseek-v4-flash",
+  "seed": 1,
+  "Q": 0.62,
+  "TMS": false,
+  "prompt_tokens": 477,
+  "completion_tokens": 560,
+  "total_tokens": 1037,
+  "elapsed": 3.71,
+  "llm_calls": 1,
+  "error": "",
+  "detail": {
+    "L1_total": 1.0,
+    "L2_total_items": 0.0,
+    "L2_total": 0.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.62
+  },
+  "output": "## 新员工入职三部门清单核查结果\n\n### 新员工：周晓彤\n\n| 部门 | 项目 | 状态 |\n|------|------|------|\n| HR | 合同签署 | ✅ 已完成 |\n| HR | 社保公积金开户 | ⬜ 未完成 |\n| HR | 员工手册发放 | ⬜ 未完成 |\n| HR | 背景调查确认 | ✅ 已完成 |\n| HR | 门禁开通申请 | ⬜ 未完成 |\n| IT | 企业邮箱开通 | ✅ 已完成 |\n| IT | 电脑分配 | ⬜ 未完成 |\n| IT | VPN配置 | ⬜ 未完成 |\n| IT | 办公软件授权 | ✅ 已完成 |\n| IT | 代码仓库权限 | ⬜ 未完成 |\n| Admin | 工位分配 | ✅ 已完成 |\n| Admin | 门禁卡制作 | ⬜ 未完成 |\n| Admin | 办公用品领取 | ⬜ 未完成 |\n| Admin | 入职礼包发放 | ⬜ 未完成 |\n\n### 未完成事项汇总\n\n- **HR（3项）**：社保公积金开户、员工手册发放、门禁开通申请\n- **IT（3项）**：电脑分配、VPN配置、代码仓库权限\n- **Admin（3项）**：门禁卡制作、办公用品领取、入职礼包发放\n\n### 最终Checklist（待办）\n\n- [ ] 社保公积金开户\n- [ ] 员工手册发放\n- [ ] 门禁开通申请\n- [ ] 电脑分配\n- [ ] VPN配置\n- [ ] 代码仓库权限\n- [ ] 门禁卡制作\n- [ ] 办公用品领取\n- [ ] 入职礼包发放",
+  "ts": "2026-08-22T15:27:18"
+}

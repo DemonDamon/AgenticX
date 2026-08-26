@@ -1,0 +1,5 @@
+task_id,office_type,task_type,mode,model,seed,Q,TMS,prompt_tokens,completion_tokens,total_tokens,elapsed,llm_calls,error
+t-PROJ-H-03,project,high_coupling,single,deepseek-v4-flash,0,0.42,False,1100,16384,17484,129.51,1,"content空，疑似被max_tokens截断（completion_tokens=16384 / max=16384）"
+t-PROJ-H-03,project,high_coupling,team,deepseek-v4-flash,0,0.42,False,7137,27690,34827,224.32,4,"排期冲突消解员: content空，疑似被max_tokens截断（completion_tokens=16387 / max=16384）"
+t-PROJ-H-03,project,high_coupling,single,deepseek-v4-flash,1,0.42,False,1100,16384,17484,134.66,1,"content空，疑似被max_tokens截断（completion_tokens=16384 / max=16384）"
+t-PROJ-H-03,project,high_coupling,team,deepseek-v4-flash,1,0.42,False,8633,23389,32022,191.88,4,"排期冲突消解员: content空，疑似被max_tokens截断（completion_tokens=16384 / max=16384）"

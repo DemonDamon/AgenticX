@@ -1,0 +1,27 @@
+{
+  "task_id": "t-DATA-H-03",
+  "office_type": "data",
+  "task_type": "high_coupling",
+  "mode": "single",
+  "model": "deepseek-v4-flash",
+  "seed": 0,
+  "Q": 0.92,
+  "TMS": true,
+  "prompt_tokens": 3719,
+  "completion_tokens": 1091,
+  "total_tokens": 4810,
+  "elapsed": 8.08,
+  "llm_calls": 1,
+  "error": "",
+  "detail": {
+    "L1_total": 1.0,
+    "L2_a_only": 1.0,
+    "L2_b_only": 1.0,
+    "L2_qty_mismatches": 1.0,
+    "L2_total": 1.0,
+    "L3_total": 0.6,
+    "weighted_Q": 0.92
+  },
+  "output": "# 销售表A与库存表B交叉核对报告\n\n## 一、差异汇总\n\n| 差异类型 | 数量 | 涉及SKU |\n|---|---|---|\n| A有B无 | 4 | SKU049、SKU050、SKU051、SKU052 |\n| B有A无 | 2 | SKU053、SKU054 |\n| 数值不一致 | 2 | SKU006、SKU022 |\n\n## 二、A有B无明细\n\n| SKU | qty | date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n## 三、B有A无明细\n\n| SKU | qty | date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n## 四、数值不一致明细\n\n| SKU | A表qty | B表qty | 差异（B-A） |\n|---|---|---|---|\n| SKU006 | 80 | 85 | +5 |\n| SKU022 | 105 | 100 | -5 |",
+  "ts": "2026-08-22T15:31:40"
+}
