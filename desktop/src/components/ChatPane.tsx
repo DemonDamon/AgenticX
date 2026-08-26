@@ -51,6 +51,7 @@ import { useVoicePushToTalk } from "../hooks/useVoicePushToTalk";
 import { VOICE_FOCUS_ENTRY_ENABLED } from "../voice/focus-mode-ui";
 import { VoicePttOverlay } from "./VoicePttOverlay";
 import { RunLocationPicker } from "./composer/RunLocationPicker";
+import { RunModePicker } from "./composer/RunModePicker";
 import {
   useComposerWorkspaceFolders,
   WorkspaceFolderPicker,
@@ -13434,6 +13435,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     <ConnectorsMenuButton sessionId={pane.sessionId} embedded />
                   )}
                 />
+                <RunModePicker />
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
               <div className="flex min-w-0 shrink-0 items-center gap-1.5">
