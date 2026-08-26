@@ -8,6 +8,7 @@ import {
   protectedConfirmReason,
   type ConfirmPolicy,
 } from "../utils/confirm-scope";
+import { renderInlineBold } from "../utils/inline-bold";
 
 type Props = {
   open: boolean;
@@ -63,7 +64,7 @@ export function ConfirmDialog({
       )}
     >
         {sourceLabel ? <p className="mb-1 text-xs text-text-subtle">来源：{sourceLabel}</p> : null}
-        <p className="mb-3 break-words text-sm text-text-primary">{question}</p>
+        <p className="mb-3 break-words text-sm text-text-primary">{renderInlineBold(question)}</p>
         {diff ? (
           <pre className="mb-4 max-h-48 overflow-auto rounded-md border border-border bg-surface-panel p-3 text-xs text-text-strong">
             {diff}

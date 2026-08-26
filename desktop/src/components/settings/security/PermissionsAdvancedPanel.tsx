@@ -1,8 +1,10 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import { SettingsSwitch } from "../SettingsSwitch";
+import { SECURITY_RULES_ANCHOR_ID } from "../../../settings-tab";
 import { useAppStore } from "../../../store";
+import { SecurityRulesGuide } from "./SecurityRulesGuide";
 
 type PathRule = { pattern: string; allow: boolean };
 
@@ -13,7 +15,20 @@ export type PermissionsAdvancedPanelHandle = {
   flushPermissions: () => Promise<{ ok: boolean; error?: string }>;
 };
 
-export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandle>(function PermissionsAdvancedPanel(_props, ref) {
+export type PermissionsAdvancedPanelProps = {
+  /** 从运行模式「自定义」进入时，在规则区展示用法说明。 */
+  showRulesGuide?: boolean;
+  /** 每次带着 focus 打开时变化，用于重复进入仍滚动并重新展示说明。 */
+  highlightKey?: number;
+};
+
+export const PermissionsAdvancedPanel = forwardRef<
+  PermissionsAdvancedPanelHandle,
+  PermissionsAdvancedPanelProps
+>(function PermissionsAdvancedPanel(
+  { showRulesGuide = false, highlightKey = 0 },
+  ref,
+) {
   const [pathRules, setPathRules] = useState<PathRule[]>([]);
   const [deniedCommands, setDeniedCommands] = useState<string[]>([]);
   const [deniedTools, setDeniedTools] = useState<string[]>([]);
@@ -23,8 +38,12 @@ export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandl
   const [unattendedAllowWorkspaceScripts, setUnattendedAllowWorkspaceScripts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [guideDismissedKey, setGuideDismissedKey] = useState<number | null>(null);
+  const [rulesHighlighted, setRulesHighlighted] = useState(false);
+  const rulesAnchorRef = useRef<HTMLDivElement>(null);
   const apiToken = useAppStore((s) => s.apiToken);
   const backendUrl = useAppStore((s) => s.backendUrl);
+  const showGuide = showRulesGuide && guideDismissedKey !== highlightKey;
 
   /** 与 CC Bridge / Hooks 等面板一致：未配置远程 URL 时用本机内置 Studio 的 API 根地址，避免请求落到 `/api/...` 相对路径导致 HTTP 404。 */
   const resolveApiBase = useCallback(async () => {
@@ -91,6 +110,14 @@ export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandl
   }, [apiToken, resolveApiBase]);
 
   useEffect(() => { void fetchPerms(); }, [fetchPerms]);
+
+  useEffect(() => {
+    if (!showRulesGuide || loading) return;
+    rulesAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setRulesHighlighted(true);
+    const timer = window.setTimeout(() => setRulesHighlighted(false), 2400);
+    return () => window.clearTimeout(timer);
+  }, [showRulesGuide, highlightKey, loading]);
 
   const persist = useCallback(
     async (patch: Record<string, unknown>) => {
@@ -198,9 +225,21 @@ export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandl
         </div>
       </Panel>
 
+      <div
+        id={SECURITY_RULES_ANCHOR_ID}
+        ref={rulesAnchorRef}
+        className={`scroll-mt-3 space-y-4 rounded-xl p-0.5 transition-[box-shadow] duration-500 ${
+          rulesHighlighted ? "shadow-[0_0_0_2px_var(--ui-btn-primary-bg)]" : ""
+        }`}
+      >
+      {showGuide ? (
+        <SecurityRulesGuide onDismiss={() => setGuideDismissedKey(highlightKey)} />
+      ) : null}
       <Panel title="文件访问">
-        <div className="text-xs text-text-faint mb-2">
-          按 glob 模式匹配文件路径。
+        <div className="text-xs leading-5 text-text-faint mb-2">
+          限制智能体读写哪些路径，支持 glob。例如拒绝 <code className="text-text-subtle">/etc/*</code>
+          ，或允许 <code className="text-text-subtle">~/Downloads/*.pdf</code>
+          。空着表示不额外限制，仍受上方工作区隔离约束。
         </div>
         <div className="space-y-1.5">
           {pathRules.map((rule, idx) => (
@@ -258,8 +297,9 @@ export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandl
       </Panel>
 
       <Panel title="命令执行">
-        <div className="text-xs text-text-faint mb-2">
-          命中的 shell 命令将被阻止执行。
+        <div className="text-xs leading-5 text-text-faint mb-2">
+          按模式拦截 shell 命令，例如 <code className="text-text-subtle">rm -rf *</code>
+          。命中后直接拒绝，不再询问。不能用来把某条命令改成自动放行。
         </div>
         <div className="space-y-1.5">
           {deniedCommands.map((cmd, idx) => (
@@ -302,11 +342,11 @@ export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandl
       </Panel>
 
       <Panel title="工具权限">
-        <div className="text-xs text-text-faint mb-2">
-          按 Studio 工具名做 fnmatch（例如 <code className="text-text-subtle">bash_exec</code>、
+        <div className="text-xs leading-5 text-text-faint mb-2">
+          拦截指定工具，不是加入自动执行。按工具名做匹配（例如 <code className="text-text-subtle">bash_exec</code>、
           <code className="text-text-subtle">mcp_call</code>、<code className="text-text-subtle">file_*</code>
-          ）。命中后<strong className="text-text-primary">直接拒绝</strong>该工具调用，且<strong className="text-text-primary">不会</strong>再弹出执行确认（策略优先于询问）。
-          工具名与<strong className="text-text-primary">设置 → 工具</strong>页预授权列表一致；亦可到该页查看说明。
+          ）。命中后<strong className="text-text-primary">直接拒绝</strong>该工具调用，且<strong className="text-text-primary">不会</strong>再弹出执行确认。
+          工具名与<strong className="text-text-primary">设置 → 工具</strong>页预授权列表一致。
         </div>
         {registryTools.length > 0 ? (
           <details className="mb-3 rounded-md border border-border bg-surface-panel px-2 py-1.5">
@@ -400,6 +440,7 @@ export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandl
           </button>
         </div>
       </Panel>
+      </div>
     </>
   );
 });

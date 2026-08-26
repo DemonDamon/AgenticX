@@ -69,6 +69,37 @@ def protected_confirm_reason(context: Optional[Dict[str, Any]] = None) -> str:
     return PROTECTED_CONFIRM_REASONS.get(key, UNKNOWN_PROTECTED_CONFIRM_REASON)
 
 
+_EXPLICIT_RUN_MODES = frozenset(
+    {"ask", "allowlist", "auto", "manual", "semi-auto"}
+)
+
+
+def is_global_auto_confirm_mode(
+    run_mode: object = "",
+    confirm_strategy: object = "",
+    permissions_mode: object = "",
+) -> bool:
+    """Whether low-risk tools should skip ``confirm_required``.
+
+    An explicit ``run_mode`` / ``confirm_strategy`` wins. Legacy
+    ``permissions.mode`` is only a fallback when those keys are absent —
+    otherwise leftover ``permissions.mode: auto`` would keep auto-approving
+    ``file_write`` after the user switched to 始终询问.
+    """
+
+    for raw in (run_mode, confirm_strategy):
+        strategy = str(raw or "").strip().lower()
+        if not strategy:
+            continue
+        if strategy == "auto":
+            return True
+        if strategy in _EXPLICIT_RUN_MODES:
+            return False
+        return False
+    mode = str(permissions_mode or "").strip().lower()
+    return mode in {"auto", "full_auto"}
+
+
 def confirm_denial_note(gate: Any, request_id: str) -> str:
     """Why a confirmation came back denied.
 

@@ -1252,28 +1252,33 @@ def create_studio_app() -> FastAPI:
     def _global_auto_confirm_enabled() -> bool:
         """Whether global settings require bypassing confirm_required.
 
-        Keep compatibility with all three:
-        - Desktop `run_mode: auto`
-        - Pre-rename Desktop `confirm_strategy: auto` (configs written before
-          the run-mode rename still carry only the old key)
-        - Legacy permissions mode values (`auto` / `full_auto`)
+        Explicit ``run_mode`` / ``confirm_strategy`` wins. Legacy
+        ``permissions.mode`` (``auto`` / ``full_auto``) is only a fallback
+        when those keys are absent.
         """
+        from agenticx.runtime.confirm import is_global_auto_confirm_mode
+
         strategy = ""
+        confirm_strategy = ""
         for key in ("run_mode", "confirm_strategy"):
             try:
                 raw = ConfigManager.get_value(key)
             except Exception:
                 raw = None
-            strategy = str(raw or "").strip().lower()
-            if strategy:
-                break
-        if strategy == "auto":
-            return True
+            value = str(raw or "").strip().lower()
+            if key == "run_mode":
+                strategy = value
+            else:
+                confirm_strategy = value
         try:
             mode = str(ConfigManager.get_value("permissions.mode") or "").strip().lower()
         except Exception:
             mode = ""
-        return mode in {"auto", "full_auto"}
+        return is_global_auto_confirm_mode(
+            run_mode=strategy,
+            confirm_strategy=confirm_strategy,
+            permissions_mode=mode,
+        )
 
     def _resolve_confirm_gate(
         managed: Any,

@@ -10,9 +10,32 @@ from agenticx.runtime.confirm import (
     PROTECTED_CONFIRM_RISKS,
     AsyncConfirmGate,
     RiskAwareAutoConfirmGate,
+    is_global_auto_confirm_mode,
     is_protected_confirm,
     normalize_confirm_risk,
 )
+
+
+def test_explicit_ask_run_mode_beats_legacy_permissions_auto() -> None:
+    """User-visible 始终询问 must not be overridden by leftover permissions.mode."""
+    assert (
+        is_global_auto_confirm_mode(
+            run_mode="ask",
+            permissions_mode="auto",
+        )
+        is False
+    )
+    assert (
+        is_global_auto_confirm_mode(
+            run_mode="allowlist",
+            permissions_mode="full_auto",
+        )
+        is False
+    )
+    assert is_global_auto_confirm_mode(run_mode="auto", permissions_mode="default") is True
+    assert is_global_auto_confirm_mode(run_mode="manual") is False
+    assert is_global_auto_confirm_mode(permissions_mode="auto") is True
+    assert is_global_auto_confirm_mode() is False
 
 
 def test_only_explicit_low_risk_is_auto_approvable() -> None:

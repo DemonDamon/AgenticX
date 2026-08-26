@@ -8,6 +8,7 @@ import {
   runModeLabel,
   type RunMode,
 } from "../../../constants/confirm-strategy-options";
+import type { SettingsFocus } from "../../../settings-tab";
 import {
   PermissionsAdvancedPanel,
   type PermissionsAdvancedPanelHandle,
@@ -48,10 +49,13 @@ export type SecurityCenterTabHandle = {
 type Props = {
   runMode: RunMode;
   onRunModeChange: (mode: RunMode) => Promise<void> | void;
+  /** 从运行模式「自定义」进入时，滚到路径/命令/工具规则并展示用法说明。 */
+  focus?: SettingsFocus;
+  focusSeq?: number;
 };
 
 export const SecurityCenterTab = forwardRef<SecurityCenterTabHandle, Props>(function SecurityCenterTab(
-  { runMode, onRunModeChange },
+  { runMode, onRunModeChange, focus, focusSeq = 0 },
   ref,
 ) {
   const permissionsRef = useRef<PermissionsAdvancedPanelHandle>(null);
@@ -103,7 +107,11 @@ export const SecurityCenterTab = forwardRef<SecurityCenterTabHandle, Props>(func
           </div>
         </div>
       </Panel>
-      <PermissionsAdvancedPanel ref={permissionsRef} />
+      <PermissionsAdvancedPanel
+        ref={permissionsRef}
+        showRulesGuide={focus === "security-rules"}
+        highlightKey={focusSeq}
+      />
       <ComputerUsePanel />
       <SkillGuardPanel />
       <Panel title="钩子守卫" collapsible defaultCollapsed>

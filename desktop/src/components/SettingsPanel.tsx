@@ -162,6 +162,7 @@ import {
   writeScopedLocalStorage,
 } from "../utils/backend-scope";
 import type { RunMode } from "../constants/confirm-strategy-options";
+import type { SettingsFocus } from "../settings-tab";
 import {
   SecurityCenterTab,
   type SecurityCenterTabHandle,
@@ -4634,6 +4635,8 @@ export function SettingsPanel({
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const effectiveMetaAvatarUrl = metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL;
   const settingsOpenToTab = useAppStore((s) => s.settings.openToTab);
+  const settingsOpenToFocus = useAppStore((s) => s.settings.openToFocus);
+  const settingsFocusSeq = useAppStore((s) => s.settings.focusSeq ?? 0);
   const activePaneId = useAppStore((s) => s.activePaneId);
   const capabilityLocks = useAppStore((s) => s.capabilityLocks) ?? UNRESTRICTED_CAPABILITY_LOCKS;
   const memoryContextPane = panes.find((p) => p.id === activePaneId) ?? panes[0];
@@ -4650,6 +4653,8 @@ export function SettingsPanel({
   const voiceSettingsRef = useRef<VoiceSettingsPanelHandle>(null);
   const securityTabRef = useRef<SecurityCenterTabHandle>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
+  const [securityFocus, setSecurityFocus] = useState<SettingsFocus | undefined>();
+  const [securityFocusSeq, setSecurityFocusSeq] = useState(0);
   const [userProfileEditing, setUserProfileEditing] = useState(false);
   const [metaEditorKind, setMetaEditorKind] = useState<"identity" | "soul" | null>(null);
   const [panelSize, setPanelSize] = useState<SettingsPanelSize>(() => loadSettingsPanelSize());
@@ -4657,12 +4662,22 @@ export function SettingsPanel({
     loadSettingsNavWidth(loadSettingsPanelSize().width),
   );
   useEffect(() => {
-    if (!open || !settingsOpenToTab) return;
+    if (!open) {
+      setSecurityFocus(undefined);
+      return;
+    }
+    if (!settingsOpenToTab && !settingsOpenToFocus) return;
     // 钩子管理已并入安全中心；旧 deep-link 仍要能打开到正确分区。
-    const TAB_ALIASES: Partial<Record<SettingsTab, SettingsTab>> = { hooks: "security" };
-    setTab(TAB_ALIASES[settingsOpenToTab] ?? settingsOpenToTab);
-    updateSettingsSlice({ openToTab: undefined });
-  }, [open, settingsOpenToTab, updateSettingsSlice]);
+    if (settingsOpenToTab) {
+      const TAB_ALIASES: Partial<Record<SettingsTab, SettingsTab>> = { hooks: "security" };
+      setTab(TAB_ALIASES[settingsOpenToTab] ?? settingsOpenToTab);
+    }
+    if (settingsOpenToFocus) {
+      setSecurityFocus(settingsOpenToFocus);
+      setSecurityFocusSeq(settingsFocusSeq);
+    }
+    updateSettingsSlice({ openToTab: undefined, openToFocus: undefined });
+  }, [open, settingsOpenToTab, settingsOpenToFocus, settingsFocusSeq, updateSettingsSlice]);
   useEffect(() => {
     if (!open) return;
     const size = loadSettingsPanelSize();
@@ -8558,6 +8573,8 @@ export function SettingsPanel({
                 ref={securityTabRef}
                 runMode={runMode}
                 onRunModeChange={onRunModeChange}
+                focus={securityFocus}
+                focusSeq={securityFocusSeq}
               />
             </div>
 

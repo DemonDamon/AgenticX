@@ -1,7 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { RUN_MODE_OPTIONS, runModeLabel } from "../../constants/confirm-strategy-options";
-import { applyRunMode, RunModeMenu, RunModePicker, runModePanelStyle } from "./RunModePicker";
+import {
+  applyRunMode,
+  openRunModeCustomizeSettings,
+  RunModeMenu,
+  RunModePicker,
+  runModePanelStyle,
+} from "./RunModePicker";
+import { SECURITY_RULES_FOCUS } from "../../settings-tab";
 
 const mocks = vi.hoisted(() => ({
   setRunMode: vi.fn(),
@@ -39,20 +46,26 @@ describe("RunModePicker", () => {
     }
   });
 
+  it("deep-links 自定义 to the security rules section, not just the tab", () => {
+    const openSettings = vi.fn();
+    openRunModeCustomizeSettings(openSettings);
+    expect(openSettings).toHaveBeenCalledWith("security", SECURITY_RULES_FOCUS);
+  });
+
   it("offers a custom entry that opens the in-app security settings", () => {
     const onCustomize = vi.fn();
     const html = renderToStaticMarkup(
       <RunModeMenu mode="ask" onSelect={() => {}} onCustomize={onCustomize} />,
     );
     expect(html).toContain("自定义");
-    expect(html).toContain("路径、命令和工具的放行规则");
+    expect(html).toContain("拦截指定路径、命令或工具");
     // 自定义不是第四个运行模式，只是入口，不能混进可选中的档位里。
     expect((html.match(/role="option"/g) ?? []).length).toBe(3);
   });
 
   it("does not render the custom entry when no handler is provided", () => {
     const html = renderToStaticMarkup(<RunModeMenu mode="ask" onSelect={() => {}} />);
-    expect(html).not.toContain("路径、命令和工具的放行规则");
+    expect(html).not.toContain("拦截指定路径、命令或工具");
   });
 
   it("applies a non-auto mode without asking", async () => {

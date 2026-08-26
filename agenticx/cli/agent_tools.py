@@ -252,6 +252,19 @@ def _bash_exec_safety_confirm(
     return ("non_whitelisted", "非白名单命令未执行", reasons, codes)
 
 
+def _bash_exec_confirm_question(
+    command_name: str, risk: str, reasons: List[str]
+) -> str:
+    """User-facing confirm copy for bash_exec gates (Chinese, matches Desktop UI)."""
+    joined_reasons = "；".join(reasons) if reasons else command_name
+    if risk == "non_whitelisted":
+        return (
+            f"命令 **{command_name}** 不在已知只读集合中，仍要执行吗？"
+            f"（{joined_reasons}）"
+        )
+    return f"检测到高风险命令（{joined_reasons}），仍要执行吗？"
+
+
 def studio_tool_is_concurrency_safe(tool_name: str, arguments: Dict[str, Any]) -> bool:
     """Return True if this invocation may run in parallel with other safe tools."""
     name = str(tool_name or "").strip().lower()
@@ -4264,7 +4277,7 @@ async def _apply_command_sandbox(
     permissions = _configured_command_permissions(session)
     if permissions == DANGER_FULL_ACCESS:
         if not await _confirm(
-            "This command would run without OS file isolation. Continue?",
+            "这条命令将在没有操作系统文件隔离的情况下运行，仍要继续吗？",
             confirm_gate=confirm_gate,
             context={
                 "tool": tool_name,
@@ -4297,7 +4310,7 @@ async def _apply_command_sandbox(
         )
     except CommandSandboxUnavailable as exc:
         if not await _confirm(
-            f"Command sandbox unavailable ({exc}). Run without OS isolation?",
+            f"命令沙箱不可用（{exc}）。要在没有操作系统隔离的情况下运行吗？",
             confirm_gate=confirm_gate,
             context={
                 "tool": tool_name,
@@ -4424,16 +4437,9 @@ async def _bash_exec_prepare(
     safety_confirm = _bash_exec_safety_confirm(command)
     if safety_confirm:
         risk, cancel_what, risk_reasons, risk_codes = safety_confirm
-        joined_reasons = ", ".join(risk_reasons) if risk_reasons else command_name
-        if risk == "non_whitelisted":
-            confirm_question = (
-                f"Command '{command_name}' is not a contained read-only command. "
-                f"Execute anyway? ({joined_reasons})"
-            )
-        else:
-            confirm_question = (
-                f"High-risk command detected ({joined_reasons}). Execute anyway?"
-            )
+        confirm_question = _bash_exec_confirm_question(
+            command_name, risk, risk_reasons
+        )
         if not await _confirm(
             confirm_question,
             confirm_gate=confirm_gate,
@@ -5119,7 +5125,7 @@ async def _tool_file_write(
 
     diff = _format_diff(path, old_text, new_text)
     if not await _confirm(
-        f"Write changes to {path}?",
+        f"要将更改写入 {path} 吗？",
         confirm_gate=confirm_gate,
         context={"tool": "file_write", "path": str(path), "diff": diff, "risk": "low"},
         emit_event=emit_event,
@@ -5200,7 +5206,7 @@ async def _tool_file_edit(
 
     diff = _format_diff(path, old_text, updated_text)
     if not await _confirm(
-        f"Apply edit to {path}?",
+        f"要修改 {path} 吗？",
         confirm_gate=confirm_gate,
         context={"tool": "file_edit", "path": str(path), "diff": diff, "risk": "low"},
         emit_event=emit_event,
@@ -6286,7 +6292,7 @@ async def _tool_memory_append(
         if target != "long_term":
             return "ERROR: user_global scope only supports target=long_term"
         if not await _confirm(
-            "Append preference to global USER.md (all subjects)?",
+            "要将偏好写入全局 USER.md（所有主体）吗？",
             confirm_gate=confirm_gate,
             context={"tool": "memory_append", "scope": scope, "preview": content[:200], "risk": "policy"},
             emit_event=emit_event,
@@ -6299,7 +6305,7 @@ async def _tool_memory_append(
         workspace_dir.mkdir(parents=True, exist_ok=True)
         if target == "long_term":
             if not await _confirm(
-                "Append note into this subject's long-term MEMORY.md?",
+                "要将笔记写入当前主体的长期 MEMORY.md 吗？",
                 confirm_gate=confirm_gate,
                 context={"tool": "memory_append", "target": target, "preview": content[:200], "risk": "policy"},
                 emit_event=emit_event,

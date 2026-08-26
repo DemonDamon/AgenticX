@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from agenticx.cli.agent_tools import _bash_exec_safety_confirm
+from agenticx.cli.agent_tools import (
+    _bash_exec_confirm_question,
+    _bash_exec_safety_confirm,
+)
 from agenticx.runtime.confirm import is_protected_confirm, normalize_confirm_risk
 
 
@@ -91,3 +94,24 @@ def test_leaky_find_actions_now_prompt() -> None:
         risk = _classify(command)
         assert risk != "", f"{command!r} 仍被直接放行"
         assert is_protected_confirm({"risk": risk})
+
+
+def test_bash_exec_confirm_question_is_chinese() -> None:
+    off_list = _bash_exec_confirm_question(
+        "open",
+        "non_whitelisted",
+        ["open 不在已知只读命令集合中"],
+    )
+    assert "命令 **open** 不在已知只读集合中" in off_list
+    assert "「open」" not in off_list
+    assert "仍要执行吗" in off_list
+    assert "Execute anyway" not in off_list
+
+    high = _bash_exec_confirm_question(
+        "python3",
+        "high",
+        ["python3 会执行任意代码 (可写盘、可开网络)"],
+    )
+    assert "检测到高风险命令" in high
+    assert "仍要执行吗" in high
+    assert "High-risk command" not in high

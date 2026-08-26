@@ -78,6 +78,23 @@ describe("ConfirmDialog", () => {
     expect(html).not.toContain("全部允许（之后不再询问）");
   });
 
+  it("bolds the command name instead of wrapping it in corner quotes", () => {
+    const html = renderToStaticMarkup(
+      <ConfirmDialog
+        open
+        question="命令 **open** 不在已知只读集合中，仍要执行吗？"
+        context={{ tool: "bash_exec", command: "open .", risk: "non_whitelisted" }}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("<strong");
+    expect(html).toContain("open");
+    expect(html).not.toContain("**open**");
+    expect(html).not.toContain("「open」");
+  });
+
   it("offers on-demand and allow-all when risk is non_whitelisted", () => {
     const html = renderToStaticMarkup(
       <ConfirmDialog

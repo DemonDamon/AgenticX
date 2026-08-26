@@ -1,7 +1,7 @@
 import { arrayMove } from "@dnd-kit/sortable";
 import { create } from "zustand";
-import { isSettingsTab } from "./settings-tab";
-import type { SettingsTab } from "./settings-tab";
+import { isSettingsFocus, isSettingsTab } from "./settings-tab";
+import type { SettingsFocus, SettingsTab } from "./settings-tab";
 import { clearPaneAwaitingFreshSession } from "./utils/pane-fresh-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
@@ -460,6 +460,10 @@ type SettingsState = {
   open: boolean;
   /** 打开设置时若指定，则 SettingsPanel 会切换到对应分区并随后清空。 */
   openToTab?: SettingsTab;
+  /** 打开后滚到 Tab 内某个区块（如安全中心的路径/命令/工具规则）。 */
+  openToFocus?: SettingsFocus;
+  /** 每次带着 focus 打开时递增，便于已打开时再次点「自定义」仍会滚一次。 */
+  focusSeq?: number;
   defaultProvider: string;
   providers: Record<string, ProviderEntry>;
   /** legacy compat */
@@ -835,13 +839,13 @@ type AppState = {
     context?: Record<string, unknown>
   ) => void;
   closeClarification: () => void;
-  openSettings: (tab?: SettingsTab) => void;
+  openSettings: (tab?: SettingsTab, focus?: SettingsFocus) => void;
   closeSettings: () => void;
   updateSettings: (
     patch: Partial<
       Pick<
         SettingsState,
-        "provider" | "model" | "apiKey" | "defaultProvider" | "providers" | "openToTab"
+        "provider" | "model" | "apiKey" | "defaultProvider" | "providers" | "openToTab" | "openToFocus"
       >
     >
   ) => void;
@@ -1176,7 +1180,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     options: [],
     allowFreeText: true,
   },
-  settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {} },
+  settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {}, focusSeq: 0 },
   tokenDashboard: { open: false, range: "month", customFrom: "", customTo: "" },
   deliveryPanel: { open: false, selectedTaskId: null },
   setApiBase: (apiBase) => set({ apiBase }),
@@ -2518,21 +2522,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   closeClarification: () =>
     set((state) => ({ clarification: { ...state.clarification, open: false, requestId: "" } })),
-  openSettings: (tab) =>
+  openSettings: (tab, focus) =>
     set((state) => {
       const openToTab =
         tab !== undefined && isSettingsTab(tab) ? tab : undefined;
+      const openToFocus =
+        focus !== undefined && isSettingsFocus(focus) ? focus : undefined;
       return {
         settings: {
           ...state.settings,
           open: true,
           openToTab,
+          openToFocus,
+          focusSeq: openToFocus
+            ? (state.settings.focusSeq ?? 0) + 1
+            : state.settings.focusSeq,
         },
       };
     }),
   closeSettings: () =>
     set((state) => ({
-      settings: { ...state.settings, open: false, openToTab: undefined },
+      settings: {
+        ...state.settings,
+        open: false,
+        openToTab: undefined,
+        openToFocus: undefined,
+      },
     })),
   updateSettings: (patch) =>
     set((state) => ({ settings: { ...state.settings, ...patch } })),

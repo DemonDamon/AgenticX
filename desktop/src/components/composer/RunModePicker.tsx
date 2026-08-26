@@ -15,6 +15,7 @@ import {
   runModeLabel,
   type RunMode,
 } from "../../constants/confirm-strategy-options";
+import { SECURITY_RULES_FOCUS, type SettingsFocus, type SettingsTab } from "../../settings-tab";
 import { useAppStore } from "../../store";
 import { AllowAllConfirmDialog } from "./AllowAllConfirmDialog";
 
@@ -104,7 +105,7 @@ export function RunModeMenu({
 }: {
   mode: RunMode;
   onSelect: (next: RunMode) => void;
-  /** 传入时在菜单底部追加「自定义」入口；它不是第四个运行模式，只是跳转到安全中心。 */
+  /** 传入时在菜单底部追加「自定义」入口；它不是第四个运行模式，只是跳到安全中心的规则区。 */
   onCustomize?: () => void;
 }) {
   return (
@@ -149,7 +150,7 @@ export function RunModeMenu({
                 自定义…
               </span>
               <span className="mt-0.5 block truncate text-[11px] leading-tight text-text-faint">
-                路径、命令和工具的放行规则
+                拦截指定路径、命令或工具
               </span>
             </span>
           </button>
@@ -157,6 +158,13 @@ export function RunModeMenu({
       ) : null}
     </>
   );
+}
+
+/** 自定义不是第四档，而是打开安全中心并落到路径/命令/工具规则。 */
+export function openRunModeCustomizeSettings(
+  openSettings: (tab?: SettingsTab, focus?: SettingsFocus) => void,
+) {
+  openSettings("security", SECURITY_RULES_FOCUS);
 }
 
 export function RunModePicker() {
@@ -266,7 +274,7 @@ export function RunModePicker() {
                 onSelect={(next) => void applyMode(next)}
                 onCustomize={() => {
                   setOpen(false);
-                  openSettings("security");
+                  openRunModeCustomizeSettings(openSettings);
                 }}
               />
             </div>,
