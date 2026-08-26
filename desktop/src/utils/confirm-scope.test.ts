@@ -1,13 +1,37 @@
 import { describe, expect, it } from "vitest";
 import {
+  NEVER_REUSABLE_CATEGORIES,
   buildConfirmApprovalKey,
   buildConfirmScope,
+  hasNeverReusableCategory,
   isProtectedConfirmContext,
   normalizeConfirmRisk,
   parentPathForConfirmScope,
   protectedConfirmReason,
   shouldAutoApproveConfirm,
 } from "./confirm-scope";
+
+describe("never-reusable categories", () => {
+  it("matches the backend never-auto-approved set exactly", () => {
+    expect([...NEVER_REUSABLE_CATEGORIES].sort()).toEqual([
+      "destructive_filesystem",
+      "external_publish",
+      "host_full_access",
+      "system_disruption",
+    ].sort());
+  });
+
+  it("detects never-reusable codes on confirm context", () => {
+    expect(
+      hasNeverReusableCategory({
+        risk_categories: [{ code: "destructive_filesystem" }],
+      }),
+    ).toBe(true);
+    expect(hasNeverReusableCategory({ risk_categories: [{ code: "arbitrary_code_execution" }] })).toBe(
+      false,
+    );
+  });
+});
 
 describe("confirmation scope", () => {
   it("groups Windows file changes by their parent directory", () => {

@@ -7,6 +7,8 @@ Author: Damon Li
 from __future__ import annotations
 
 from agenticx.runtime.command_safety import (
+    COMMAND_RISK_CATEGORIES,
+    NEVER_AUTO_APPROVED_CATEGORIES,
     absolute_redirect_targets,
     assess_command,
 )
@@ -64,3 +66,28 @@ def test_absolute_redirect_requires_approval_and_lists_target() -> None:
 def test_xargs_rm_requires_approval() -> None:
     verdict = assess_command("xargs rm < list.txt")
     assert not verdict.is_contained
+
+
+def test_known_dangerous_commands_emit_precise_categories() -> None:
+    rm = assess_command("rm -rf /tmp/x")
+    assert any(item.code == "destructive_filesystem" for item in rm.findings)
+
+    shutdown = assess_command("shutdown -h now")
+    assert any(item.code == "system_disruption" for item in shutdown.findings)
+
+    curl = assess_command("curl -X POST https://example.com")
+    assert any(item.code == "external_publish" for item in curl.findings)
+
+    sudo = assess_command("sudo ls")
+    assert any(item.code == "host_full_access" for item in sudo.findings)
+
+    wrapped = assess_command("timeout 5 rm -rf /tmp/x")
+    assert any(item.code == "destructive_filesystem" for item in wrapped.findings)
+
+    copy = assess_command("cp a.txt b.txt")
+    assert not {item.code for item in copy.findings} & NEVER_AUTO_APPROVED_CATEGORIES
+
+
+def test_command_risk_categories_cover_never_auto_approved() -> None:
+    emitted = set(COMMAND_RISK_CATEGORIES.values())
+    assert emitted >= NEVER_AUTO_APPROVED_CATEGORIES

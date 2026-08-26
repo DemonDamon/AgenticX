@@ -74,6 +74,52 @@ KNOWN_NON_READONLY_COMMANDS: frozenset[str] = frozenset({
     "curl", "wget", "ssh", "scp", "rsync", "sudo", "su",
 })
 
+#: 命令名 → 风险类别。归入 NEVER_AUTO_APPROVED_CATEGORIES 的名字必须在此列出，
+#: 否则「永不放行」只是文案：分类器发不出该类别，集合就永远匹配不上。
+#:
+#: ``cp`` / ``ln`` / ``mkdir`` / ``touch`` 故意不列入。它们的写入边界由 OS
+#: 沙箱的 writable roots 保证，落在 unrecognized_command 即可；列入
+#: destructive_filesystem 会让工作区内的正常拷贝永远无法自动放行。
+COMMAND_RISK_CATEGORIES: dict[str, str] = {
+    # 删除 / 覆盖：不可逆
+    "rm": "destructive_filesystem",
+    "rmdir": "destructive_filesystem",
+    "mv": "destructive_filesystem",
+    "dd": "destructive_filesystem",
+    "mkfs": "destructive_filesystem",
+    # 主机 / 系统级
+    "shutdown": "system_disruption",
+    "reboot": "system_disruption",
+    "poweroff": "system_disruption",
+    "kill": "system_disruption",
+    "pkill": "system_disruption",
+    "chmod": "system_disruption",
+    "chown": "system_disruption",
+    "sudo": "host_full_access",
+    "su": "host_full_access",
+    # 效果离开本机
+    "curl": "external_publish",
+    "wget": "external_publish",
+    "ssh": "external_publish",
+    "scp": "external_publish",
+    "rsync": "external_publish",
+    # 装依赖：磁盘写 + 取远端代码
+    "pip": "dependency_change",
+    "pip3": "dependency_change",
+    "npm": "dependency_change",
+    "yarn": "dependency_change",
+    "pnpm": "dependency_change",
+    "brew": "dependency_change",
+    "apt": "dependency_change",
+    "apt-get": "dependency_change",
+    "cargo": "dependency_change",
+    # 解释器：可开 socket、可写盘
+    "python": "arbitrary_code_execution",
+    "python3": "arbitrary_code_execution",
+    "node": "arbitrary_code_execution",
+    "npx": "arbitrary_code_execution",
+}
+
 #: Wrappers that run the rest as another command. Must look inside, otherwise
 #: ``timeout 5 rm -rf /`` would be allowed because ``timeout`` looks harmless.
 DELEGATING_COMMANDS: frozenset[str] = frozenset({
@@ -278,6 +324,27 @@ def _first_positional(parts: Sequence[str], *, start: int = 1) -> Optional[str]:
     return None
 
 
+def _risk_evidence(name: str, category: str, parts: Sequence[str]) -> str:
+    """Human-readable reason for a named risk category. Never empty."""
+    del parts  # argv is reserved for future per-flag evidence
+    special = {
+        "rm": "rm 会删除文件，删除不可撤销",
+        "curl": "curl 会把数据发往本机之外",
+    }
+    if name in special:
+        return special[name]
+    by_category = {
+        "destructive_filesystem": f"{name} 会删除或覆盖文件，删除不可撤销",
+        "system_disruption": f"{name} 会中断或改变本机系统状态",
+        "host_full_access": f"{name} 会突破当前隔离，拿到主机级权限",
+        "external_publish": f"{name} 会把数据发往本机之外",
+        "dependency_change": f"{name} 会安装或改动依赖",
+        "arbitrary_code_execution": f"{name} 会执行任意代码（可写盘、可开网络）",
+    }
+    text = by_category.get(category, f"{name} 属于风险类别 {category}")
+    return text or f"{name} 需要你判断这次的用途"
+
+
 def classify_simple_command(parts: Sequence[str]) -> SafetyVerdict:
     """Classify one simple command (no pipes, no redirects)."""
     parts = _strip_env_assignments(parts)
@@ -291,11 +358,14 @@ def classify_simple_command(parts: Sequence[str]) -> SafetyVerdict:
         return _classify_guarded(name, parts)
     if name in READ_ONLY_COMMANDS:
         return SafetyVerdict(contained=True)
+    category = COMMAND_RISK_CATEGORIES.get(name)
+    if category is not None:
+        return SafetyVerdict(
+            contained=False,
+            findings=[RiskFinding(category, _risk_evidence(name, category, parts))],
+        )
     if name in KNOWN_NON_READONLY_COMMANDS:
-        # Recognized, but not read-only. Still return a reason -- callers pick
-        # a more specific rule when they have one. An empty reason must not
-        # mean "someone else will explain it": if that rule is missing
-        # (chmod / ssh / sudo), empty becomes a silent allow.
+        # 仍在识别集合里但没有专门规则：保持泛化理由，不要静默放行。
         return SafetyVerdict(
             contained=False,
             findings=[

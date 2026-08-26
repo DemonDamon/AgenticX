@@ -40,6 +40,28 @@ describe("ConfirmDialog", () => {
     expect(html).not.toContain("低风险自动执行（仅自动放行低风险）");
   });
 
+  it("does not offer reusable policies when risk_categories includes destructive_filesystem", () => {
+    const html = renderToStaticMarkup(
+      <ConfirmDialog
+        open
+        question="Delete files?"
+        context={{
+          tool: "bash_exec",
+          command: "rm -rf build",
+          risk: "low",
+          risk_categories: [{ code: "destructive_filesystem" }],
+        }}
+        defaultPolicy="run-everything"
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain("每次询问（仅本次允许）");
+    expect(html).not.toContain("白名单放行（本会话允许同类）");
+    expect(html).not.toContain("低风险自动执行（仅自动放行低风险）");
+  });
+
   it("does not offer allowlist or auto-execute policies when risk is missing", () => {
     const html = renderToStaticMarkup(
       <ConfirmDialog

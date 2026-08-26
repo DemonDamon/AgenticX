@@ -2826,12 +2826,196 @@ def _cancelled(what: str, confirm_gate: ConfirmGate) -> str:
     return f"CANCELLED: {what}（{note.strip()}）"
 
 
+def _peel_to_inner_command(parts: List[str]) -> List[str]:
+    """Strip env assignments and delegating wrappers (timeout/env/xargs/…)."""
+    from agenticx.runtime.command_safety import DELEGATING_COMMANDS, _strip_env_assignments
+
+    current = list(_strip_env_assignments(parts))
+    for _ in range(8):
+        if not current:
+            return current
+        name = Path(current[0]).name
+        if name not in DELEGATING_COMMANDS:
+            return current
+        index = 1
+        if name == "timeout":
+            while index < len(current) and current[index].startswith("-"):
+                index += 1
+            index += 1
+        elif name == "env":
+            while index < len(current) and (
+                current[index].startswith("-") or "=" in current[index]
+            ):
+                index += 1
+        elif name == "xargs":
+            while index < len(current) and current[index].startswith("-"):
+                if current[index] in {"-I", "-n", "-P", "-L", "-d", "-s", "-E", "-a"}:
+                    index += 1
+                index += 1
+        else:
+            while index < len(current) and current[index].startswith("-"):
+                index += 1
+        current = list(current[index:])
+    return current
+
+
+def _extract_node_script_arg(parts: List[str]) -> Optional[str]:
+    if any(token in {"-e", "-p", "-c"} for token in parts[1:]):
+        return None
+    idx = 1
+    while idx < len(parts):
+        token = parts[idx]
+        if token == "--":
+            return parts[idx + 1] if idx + 1 < len(parts) else None
+        if token in {"-r", "--require"}:
+            idx += 2
+            continue
+        if token.startswith("-"):
+            idx += 1
+            continue
+        return token
+    return None
+
+
+def _workspace_script_paths(parts: List[str]) -> Optional[List[str]]:
+    """Executable + script args that must already exist in writable roots.
+
+    Returns None when the segment is not a workspace-script shape
+    (``python -c``, ``node -e``, empty inner command).
+    """
+    if not parts:
+        return None
+    name = Path(parts[0]).name
+    if name in {"python", "python3"}:
+        script = _extract_python_script_arg(parts)
+        if not script:
+            return None
+        return [parts[0], script]
+    if name in {"node", "npx"}:
+        script = _extract_node_script_arg(parts)
+        if not script:
+            return None
+        return [parts[0], script]
+    return [parts[0]]
+
+
+def _existing_writable_workspace_path(
+    path_arg: str,
+    session: Optional[StudioSession],
+) -> bool:
+    if session is None:
+        return False
+    try:
+        resolved = _resolve_workspace_path(path_arg, session)
+    except ValueError:
+        return False
+    try:
+        if not resolved.exists():
+            return False
+    except OSError:
+        return False
+    _read_roots, write_roots = _session_workspace_root_sets(session)
+    return any(_is_path_under_root(resolved, root) for root in write_roots)
+
+
+def _existing_writable_workspace_path_lexical(
+    path_arg: str,
+    session: Optional[StudioSession],
+) -> bool:
+    """Containment check that does not follow symlinks.
+
+    A venv interpreter is always ``.venv/bin/python -> <system python>``, so
+    resolving symlinks would report every venv as escaping the workspace. The
+    risk boundary is the script being run, not where the interpreter binary
+    physically lives; writes are still bounded by the OS sandbox. ``..`` cannot
+    be used to escape because ``normpath`` collapses it before the check.
+    """
+    if session is None:
+        return False
+    raw = str(path_arg or "").strip()
+    if not raw:
+        return False
+    _read_roots, write_roots = _session_workspace_root_sets(session)
+    if not write_roots:
+        return False
+    expanded = Path(raw).expanduser()
+    candidates: List[Path] = []
+    if expanded.is_absolute():
+        candidates.append(Path(os.path.normpath(str(expanded))))
+    else:
+        for root in write_roots:
+            candidates.append(Path(os.path.normpath(str(root / expanded))))
+    for candidate in candidates:
+        if _is_protected_path(candidate) or _path_denied_by_rules(candidate, session):
+            continue
+        try:
+            if not candidate.exists():
+                continue
+        except OSError:
+            continue
+        if any(
+            str(candidate) == str(root) or str(candidate).startswith(f"{root}{os.sep}")
+            for root in write_roots
+        ):
+            return True
+    return False
+
+
+def _unattended_workspace_script_allowed(
+    context: Dict[str, Any],
+    risk_codes: Iterable[str],
+    session: Optional[StudioSession],
+) -> bool:
+    """Narrow unattended allow: existing workspace scripts only, never-categories excluded."""
+    if session is None:
+        return False
+    try:
+        flag = ConfigManager.get_value("permissions.unattended_allow_workspace_scripts")
+    except Exception:
+        flag = False
+    if flag is not True:
+        return False
+    from agenticx.runtime.command_safety import (
+        NEVER_AUTO_APPROVED_CATEGORIES,
+        absolute_redirect_targets,
+        split_simple_commands,
+    )
+
+    if set(str(code) for code in risk_codes) & NEVER_AUTO_APPROVED_CATEGORIES:
+        return False
+    tool = str(context.get("tool") or "")
+    if tool not in {"bash_exec", "bash_bg_start"}:
+        return False
+    command = str(context.get("command") or "")
+    if not command.strip():
+        return False
+    if absolute_redirect_targets(command):
+        return False
+    segments = split_simple_commands(command)
+    if not segments:
+        return False
+    for parts in segments:
+        required = _workspace_script_paths(_peel_to_inner_command(list(parts)))
+        if not required:
+            return False
+        executable, script_args = required[0], required[1:]
+        # 解释器按字面路径判定（venv 里它必然是指向系统 Python 的符号链接）；
+        # 被执行的脚本仍按解析后的真实路径判定。
+        if not _existing_writable_workspace_path_lexical(executable, session):
+            return False
+        for arg in script_args:
+            if not _existing_writable_workspace_path(arg, session):
+                return False
+    return True
+
+
 async def _confirm(
     question: str,
     *,
     confirm_gate: ConfirmGate,
     context: Optional[Dict[str, Any]] = None,
     emit_event: Optional[Any] = None,
+    session: Optional[StudioSession] = None,
 ) -> bool:
     payload_context = dict(context or {})
     request_id = str(payload_context.get("request_id") or uuid.uuid4())
@@ -2850,6 +3034,13 @@ async def _confirm(
     if tool_allowed_without_confirm(str(payload_context.get("tool") or ""), risk_codes) or path_allow:
         _log.info(
             "[confirm] auto-approved id=%s tool=%s by permissions allow rule",
+            request_id,
+            payload_context.get("tool"),
+        )
+        return True
+    if _unattended_workspace_script_allowed(payload_context, risk_codes, session):
+        _log.info(
+            "[confirm] auto-approved id=%s tool=%s by unattended workspace-script rule",
             request_id,
             payload_context.get("tool"),
         )
@@ -4087,6 +4278,7 @@ async def _apply_command_sandbox(
                 ],
             },
             emit_event=emit_event,
+            session=session,
         ):
             return _cancelled("未授权脱离工作区隔离", confirm_gate)
 
@@ -4116,6 +4308,7 @@ async def _apply_command_sandbox(
                 ],
             },
             emit_event=emit_event,
+            session=session,
         ):
             return _cancelled("沙箱不可用，命令未执行", confirm_gate)
         return argv, None, "none"
@@ -4255,6 +4448,7 @@ async def _bash_exec_prepare(
                 ],
             },
             emit_event=emit_event,
+            session=session,
         ):
             return _cancelled(cancel_what, confirm_gate)
 
@@ -5968,11 +6162,15 @@ def _tool_skill_use(arguments: Dict[str, Any], session: StudioSession) -> str:
     except Exception:
         pass
     if meta is None:
-        return f"OK: activated skill '{name}' into context_files key 'skill:{name}'"
+        return (
+            f"OK: activated skill '{name}'. 正文已注入本轮上下文（context_files 键 skill:{name}），"
+            "请直接使用，不要再用 file_read/bash_exec 读取该技能目录——工作区之外不可读。"
+        )
     return (
-        f"OK: activated skill '{name}' into context_files key 'skill:{name}'. "
-        f"source={meta.source}, location={meta.location}, "
-        f"base_dir={meta.base_dir}, skill_md={meta.skill_md_path}"
+        f"OK: activated skill '{name}'. 正文已注入本轮上下文（context_files 键 skill:{name}），"
+        "请直接使用，不要再用 file_read/bash_exec 读取该技能目录——工作区之外不可读。"
+        f" source={meta.source}, location={meta.location}, "
+        f"base_dir={meta.base_dir}（该目录在工作区之外，不可读）。"
     )
 
 

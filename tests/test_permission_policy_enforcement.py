@@ -141,7 +141,7 @@ def test_allowed_tools_skips_confirm_but_keeps_sandbox(
     result = asyncio.run(
         agent_tools.dispatch_tool_async(
             "bash_exec",
-            {"command": "rm -rf build"},
+            {"command": "mkdir build"},
             session,
             confirm_gate=gate,
         )

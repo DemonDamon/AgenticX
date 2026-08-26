@@ -152,6 +152,10 @@ class PermissionsConfig:
         allowed_tools: Explicit tool allow list (skip confirmation; sandbox stays).
         command_permissions: OS sandbox tier -- ``read-only``,
             ``workspace-write`` (default), or ``danger-full-access``.
+        unattended_allow_workspace_scripts: 无人值守（含 automation:* 定时任务）
+            是否可执行工作区内已存在的脚本。仅对满足全部条件的调用生效：非 never
+            类别、可执行文件位于会话 writable roots 之内、且该文件在调用前已存在。
+            默认关闭。
     """
 
     mode: str = "default"
@@ -160,6 +164,7 @@ class PermissionsConfig:
     denied_tools: list = field(default_factory=list)
     allowed_tools: list = field(default_factory=list)
     command_permissions: str = "workspace-write"
+    unattended_allow_workspace_scripts: bool = False
 
 
 @dataclass

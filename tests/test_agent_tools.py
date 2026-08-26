@@ -10,7 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agenticx.cli import agent_tools
+from agenticx.cli.config_manager import ConfigManager
 from agenticx.cli.studio import StudioSession
+from agenticx.runtime.confirm import RiskAwareAutoConfirmGate
 
 
 class _DummyProcess:
@@ -119,7 +121,11 @@ def test_bash_exec_non_whitelisted_command_requires_confirmation(monkeypatch) ->
 
     result = agent_tools.dispatch_tool("bash_exec", {"command": "rm -rf /tmp/demo"}, StudioSession())
     assert result.startswith("CANCELLED:")
-    assert "非白名单命令未执行" in result or "non-whitelisted" in result
+    assert (
+        "非白名单命令未执行" in result
+        or "高风险命令未执行" in result
+        or "non-whitelisted" in result
+    )
     assert called["run"] is False
 
 
@@ -707,3 +713,178 @@ def test_session_workspace_roots_honors_active_taskspace_id(tmp_path: Path) -> N
 
     resolved = agent_tools._resolve_workspace_path(".", session, pick_existing=True)
     assert resolved == dir_b.resolve()
+
+
+def _stub_permissions(monkeypatch, **overrides):
+    original = ConfigManager.get_value
+
+    def _fake(key, *args, **kwargs):
+        if key in overrides:
+            return overrides[key]
+        if str(key).startswith("permissions."):
+            return None
+        return original(key, *args, **kwargs)
+
+    monkeypatch.setattr(ConfigManager, "get_value", staticmethod(_fake))
+
+
+def _workspace_interpreter(session: StudioSession) -> tuple[Path, Path]:
+    workspace = Path(session.workspace_dir or "")
+    python_bin = workspace / "python"
+    python_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python_bin.chmod(0o755)
+    daily = workspace / "daily.py"
+    daily.write_text("print('ok')\n", encoding="utf-8")
+    return python_bin, daily
+
+
+def test_allowed_tools_bash_exec_does_not_waive_never_categories(monkeypatch, tmp_path: Path) -> None:
+    _stub_permissions(monkeypatch, **{"permissions.allowed_tools": ["bash_exec"]})
+    monkeypatch.setattr(agent_tools, "_apply_command_sandbox", _passthrough_sandbox)
+    _install_fake_exec(monkeypatch)
+    session = _workspace_session(tmp_path)
+    gate = RiskAwareAutoConfirmGate(unattended=True)
+
+    rm = agent_tools.dispatch_tool(
+        "bash_exec", {"command": "rm -rf /tmp/x"}, session, confirm_gate=gate
+    )
+    assert rm.startswith("CANCELLED:")
+
+    shutdown = agent_tools.dispatch_tool(
+        "bash_exec", {"command": "shutdown -h now"}, session, confirm_gate=gate
+    )
+    assert shutdown.startswith("CANCELLED:")
+
+    script = Path(session.workspace_dir) / "script.py"
+    script.write_text("print('ok')\n", encoding="utf-8")
+    allowed = agent_tools.dispatch_tool(
+        "bash_exec",
+        {"command": f"python {script}"},
+        session,
+        confirm_gate=gate,
+    )
+    assert "exit_code=0" in allowed
+
+
+def test_unattended_workspace_script_allow_and_boundaries(monkeypatch, tmp_path: Path) -> None:
+    _stub_permissions(
+        monkeypatch,
+        **{"permissions.unattended_allow_workspace_scripts": True},
+    )
+    monkeypatch.setattr(agent_tools, "_apply_command_sandbox", _passthrough_sandbox)
+    _install_fake_exec(monkeypatch)
+    session = _workspace_session(tmp_path)
+    python_bin, daily = _workspace_interpreter(session)
+    gate = RiskAwareAutoConfirmGate(unattended=True)
+    command = f"{python_bin} {daily}"
+
+    allowed = agent_tools.dispatch_tool(
+        "bash_exec", {"command": command}, session, confirm_gate=gate
+    )
+    assert "exit_code=0" in allowed
+
+    outside = tmp_path / "x.py"
+    outside.write_text("print('x')\n", encoding="utf-8")
+    outside_cmd = f"{python_bin} {outside}"
+    assert agent_tools._unattended_workspace_script_allowed(
+        {"tool": "bash_exec", "command": outside_cmd},
+        ["arbitrary_code_execution"],
+        session,
+    ) is False
+    outside_result = agent_tools.dispatch_tool(
+        "bash_exec", {"command": outside_cmd}, session, confirm_gate=gate
+    )
+    assert outside_result.startswith("CANCELLED:") or "path escapes workspace" in outside_result
+
+    missing = Path(session.workspace_dir or "") / "brand_new.py"
+    missing_cmd = f"{python_bin} {missing}"
+    assert not missing.exists()
+    missing_result = agent_tools.dispatch_tool(
+        "bash_exec", {"command": missing_cmd}, session, confirm_gate=gate
+    )
+    assert missing_result.startswith("CANCELLED:")
+
+    rm = agent_tools.dispatch_tool(
+        "bash_exec",
+        {"command": f"rm -rf {Path(session.workspace_dir) / 'sub'}"},
+        session,
+        confirm_gate=gate,
+    )
+    assert rm.startswith("CANCELLED:")
+
+    redirect_cmd = f"{python_bin} {daily} > /etc/hosts"
+    assert agent_tools._unattended_workspace_script_allowed(
+        {"tool": "bash_exec", "command": redirect_cmd},
+        ["arbitrary_code_execution"],
+        session,
+    ) is False
+    redirect = agent_tools.dispatch_tool(
+        "bash_exec", {"command": redirect_cmd}, session, confirm_gate=gate
+    )
+    assert redirect.startswith("CANCELLED:") or redirect.startswith("ERROR:")
+
+    _stub_permissions(
+        monkeypatch,
+        **{"permissions.unattended_allow_workspace_scripts": False},
+    )
+    denied = agent_tools.dispatch_tool(
+        "bash_exec", {"command": command}, session, confirm_gate=gate
+    )
+    assert denied.startswith("CANCELLED:")
+
+
+def test_unattended_allows_venv_style_symlinked_interpreter(monkeypatch, tmp_path: Path) -> None:
+    """A venv interpreter is always a symlink to a system python; that must still be allowed."""
+    _stub_permissions(
+        monkeypatch,
+        **{"permissions.unattended_allow_workspace_scripts": True},
+    )
+    session = _workspace_session(tmp_path)
+    workspace = Path(session.workspace_dir or "")
+
+    system_python = tmp_path / "system_python"
+    system_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    system_python.chmod(0o755)
+
+    venv_bin = workspace / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    venv_python = venv_bin / "python"
+    venv_python.symlink_to(system_python)
+    script = workspace / "daily.py"
+    script.write_text("print('ok')\n", encoding="utf-8")
+
+    assert agent_tools._unattended_workspace_script_allowed(
+        {"tool": "bash_exec", "command": f"{venv_python} {script}"},
+        ["arbitrary_code_execution"],
+        session,
+    ) is True
+
+    # 脚本本体在工作区之外仍必须被拒，符号链接豁免只给解释器。
+    outside_script = tmp_path / "outside.py"
+    outside_script.write_text("print('x')\n", encoding="utf-8")
+    assert agent_tools._unattended_workspace_script_allowed(
+        {"tool": "bash_exec", "command": f"{venv_python} {outside_script}"},
+        ["arbitrary_code_execution"],
+        session,
+    ) is False
+
+
+def test_skill_use_success_does_not_expose_skill_md_path(monkeypatch) -> None:
+    session = StudioSession()
+    monkeypatch.setattr(
+        agent_tools, "skill_is_allowed_for_session", lambda *_a, **_k: (True, None)
+    )
+    monkeypatch.setattr(agent_tools, "studio_skill_use", lambda *_a, **_k: True)
+
+    class _Meta:
+        source = "agenticx"
+        location = "user"
+        base_dir = "/tmp/skills/demo"
+        skill_md_path = "/tmp/skills/demo/SKILL.md"
+
+    monkeypatch.setattr(
+        agent_tools.SkillBundleLoader, "get_skill", lambda self, name: _Meta()
+    )
+    result = agent_tools._tool_skill_use({"name": "demo"}, session)
+    assert "skill_md=" not in result
+    assert "不要再用 file_read" in result

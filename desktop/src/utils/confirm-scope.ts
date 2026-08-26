@@ -7,6 +7,28 @@ function text(value: unknown): string {
 export type NormalizedConfirmRisk = "low" | "protected";
 export type ConfirmPolicy = "ask-every-time" | "use-allowlist" | "run-everything";
 
+/** 与后端 NEVER_AUTO_APPROVED_CATEGORIES 保持一致（agenticx/runtime/command_safety.py）。 */
+export const NEVER_REUSABLE_CATEGORIES: ReadonlySet<string> = new Set([
+  "destructive_filesystem",
+  "external_publish",
+  "host_full_access",
+  "system_disruption",
+]);
+
+export function hasNeverReusableCategory(
+  context?: Record<string, unknown>,
+): boolean {
+  const raw = context?.risk_categories;
+  if (!Array.isArray(raw)) return false;
+  return raw.some((item) => {
+    if (typeof item === "string") return NEVER_REUSABLE_CATEGORIES.has(item);
+    if (item && typeof item === "object" && "code" in item) {
+      return NEVER_REUSABLE_CATEGORIES.has(String((item as { code?: unknown }).code ?? ""));
+    }
+    return false;
+  });
+}
+
 /**
  * Mirror the backend's fail-closed confirmation policy. Only an explicit
  * `risk: "low"` may be auto-approved; missing and future values stay protected.

@@ -3,6 +3,7 @@ import { Button } from "./ds/Button";
 import { Modal } from "./ds/Modal";
 import { CONFIRM_DIALOG_POLICY_OPTIONS } from "../constants/confirm-strategy-options";
 import {
+  hasNeverReusableCategory,
   isProtectedConfirmContext,
   protectedConfirmReason,
   type ConfirmPolicy,
@@ -35,15 +36,17 @@ export function ConfirmDialog({
 }: Props) {
   const [policy, setPolicy] = useState<ConfirmPolicy>("ask-every-time");
   const protectedRequest = isProtectedConfirmContext(context);
+  const neverReusable = hasNeverReusableCategory(context);
+  const lockToOnce = protectedRequest || neverReusable;
   const protectedReason = protectedConfirmReason(context);
-  const autoModeInterrupted = protectedRequest && defaultPolicy === "run-everything";
-  const policyOptions = protectedRequest
+  const autoModeInterrupted = lockToOnce && defaultPolicy === "run-everything";
+  const policyOptions = lockToOnce
     ? POLICY_OPTIONS.filter((option) => option.value === "ask-every-time")
     : POLICY_OPTIONS;
 
   useEffect(() => {
-    if (open) setPolicy(protectedRequest ? "ask-every-time" : defaultPolicy);
-  }, [defaultPolicy, open, protectedRequest, question]);
+    if (open) setPolicy(lockToOnce ? "ask-every-time" : defaultPolicy);
+  }, [defaultPolicy, open, lockToOnce, question]);
 
   return (
     <Modal

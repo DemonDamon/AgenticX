@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Panel } from "../../ds/Panel";
+import { SettingsSwitch } from "../SettingsSwitch";
 import { useAppStore } from "../../../store";
 
 type PathRule = { pattern: string; allow: boolean };
@@ -19,6 +20,7 @@ export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandl
   const [registryTools, setRegistryTools] = useState<RegistryToolRow[]>([]);
   const [toolInsertFilter, setToolInsertFilter] = useState("");
   const [permMode, setPermMode] = useState("default");
+  const [unattendedAllowWorkspaceScripts, setUnattendedAllowWorkspaceScripts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const apiToken = useAppStore((s) => s.apiToken);
@@ -62,6 +64,7 @@ export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandl
         );
         setDeniedCommands(data.denied_commands ?? []);
         setDeniedTools(data.denied_tools ?? []);
+        setUnattendedAllowWorkspaceScripts(data.unattended_allow_workspace_scripts === true);
       }
       try {
         const reg = await regRes.json();
@@ -143,6 +146,7 @@ export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandl
               path_rules: pathRulesPayload,
               denied_commands: deniedCommandsPayload,
               denied_tools: deniedToolsPayload,
+              unattended_allow_workspace_scripts: unattendedAllowWorkspaceScripts,
             }),
           });
           let detail = "";
@@ -167,13 +171,33 @@ export const PermissionsAdvancedPanel = forwardRef<PermissionsAdvancedPanelHandl
         }
       },
     }),
-    [apiToken, resolveApiBase, pathRules, deniedCommands, deniedTools, fetchPerms],
+    [apiToken, resolveApiBase, pathRules, deniedCommands, deniedTools, unattendedAllowWorkspaceScripts, fetchPerms],
   );
 
   if (loading) return null;
 
   return (
     <>
+      <Panel title="定时任务 / 无人值守">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-sm text-text-subtle">允许执行工作区内已存在的脚本</div>
+            <p className="mt-1 text-xs leading-relaxed text-text-faint">
+              仅放行工作区内已存在的脚本；删除、关机、外发类操作仍会被拒绝。
+            </p>
+          </div>
+          <SettingsSwitch
+            checked={unattendedAllowWorkspaceScripts}
+            disabled={busy}
+            onChange={(next) => {
+              setUnattendedAllowWorkspaceScripts(next);
+              void persist({ unattended_allow_workspace_scripts: next });
+            }}
+            aria-label="允许执行工作区内已存在的脚本"
+          />
+        </div>
+      </Panel>
+
       <Panel title="文件访问">
         <div className="text-xs text-text-faint mb-2">
           按 glob 模式匹配文件路径。

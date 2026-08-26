@@ -21,6 +21,8 @@ def test_permissions_round_trip_allowed_tools_and_command_permissions() -> None:
     assert body.get("ok") is True
     assert "allowed_tools" in body
     assert "command_permissions" in body
+    assert "unattended_allow_workspace_scripts" in body
+    assert body.get("unattended_allow_workspace_scripts") is False
     assert body.get("shell_read_isolation") in {"full", "none"}
     assert body.get("path_deny_enforcement") in {"full", "partial", "none"}
 
@@ -29,6 +31,7 @@ def test_permissions_round_trip_allowed_tools_and_command_permissions() -> None:
         json={
             "allowed_tools": ["bash_exec", "file_write"],
             "command_permissions": "read-only",
+            "unattended_allow_workspace_scripts": True,
             "unknown_future_key": {"should": "be ignored"},
         },
     )
@@ -37,6 +40,7 @@ def test_permissions_round_trip_allowed_tools_and_command_permissions() -> None:
     assert saved.get("ok") is True
     assert saved.get("allowed_tools") == ["bash_exec", "file_write"]
     assert saved.get("command_permissions") == "read-only"
+    assert saved.get("unattended_allow_workspace_scripts") is True
     assert saved.get("shell_read_isolation") in {"full", "none"}
     assert saved.get("path_deny_enforcement") in {"full", "partial", "none"}
     assert "unknown_future_key" not in saved
@@ -45,3 +49,4 @@ def test_permissions_round_trip_allowed_tools_and_command_permissions() -> None:
     assert again.status_code == 200
     assert again.json().get("allowed_tools") == ["bash_exec", "file_write"]
     assert again.json().get("command_permissions") == "read-only"
+    assert again.json().get("unattended_allow_workspace_scripts") is True
