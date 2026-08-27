@@ -71,7 +71,10 @@
     "submitHintFlat": "将提交你勾选的选项",
     "skipDefault": "跳过（按默认推进）",
     "submitting": "提交中…",
-    "submitDecision": "提交决定"
+    "submitDecision": "提交决定",
+    "openAnswer": "你的回复",
+    "openAnswerPlaceholder": "请输入你的回复…",
+    "submitHintOpenEnded": "输入回复后提交 · 智能体将在同一回合继续"
   },
   "share": {
     "rasterNotReady": "栅格化失败：卡片未就绪",

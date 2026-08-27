@@ -71,7 +71,10 @@
     "submitHintFlat": "Your selected options will be submitted",
     "skipDefault": "Skip (continue with defaults)",
     "submitting": "Submitting…",
-    "submitDecision": "Submit decision"
+    "submitDecision": "Submit decision",
+    "openAnswer": "Your reply",
+    "openAnswerPlaceholder": "Type your reply…",
+    "submitHintOpenEnded": "Submit after typing · The agent continues in the same turn"
   },
   "share": {
     "rasterNotReady": "Rasterize failed: card is not ready",

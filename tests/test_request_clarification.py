@@ -218,6 +218,10 @@ def test_request_clarification_auto_suspend_gate_returns_sentinel() -> None:
 
     result = asyncio.run(_main())
     assert result.startswith("[CLARIFICATION_PENDING]")
+    suspended = next(e for e in events if e["type"] == "clarification_suspended")
+    assert suspended["data"]["options"] == []
+    assert suspended["data"]["decisions"] == []
+    assert suspended["data"]["allow_free_text"] is True
 
 
 def test_request_clarification_normal_round_trip() -> None:
