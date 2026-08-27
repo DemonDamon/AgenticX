@@ -4168,7 +4168,7 @@ function SettingsSwitch({
         if (!disabled) onChange(!checked);
       }}
       className={`relative ${trackClass} shrink-0 rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(var(--theme-color-rgb,16,185,129),0.55)] disabled:opacity-40 ${
-        checked ? "bg-[rgb(var(--theme-color-rgb,16,185,129))]" : "bg-surface-hover"
+        checked ? "bg-[rgb(var(--theme-color-rgb,16,185,129))]" : "bg-[var(--ui-switch-track-off)]"
       }`}
     >
       <span
@@ -7448,7 +7448,7 @@ export function SettingsPanel({
                           aria-checked={currentEffectiveOn}
                           aria-label={currentEffectiveOn ? `关闭 ${getProviderDisplayName(active, current)}` : `启用 ${getProviderDisplayName(active, current)}`}
                           className={`relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-badge-bg)] focus-visible:ring-offset-2 ${
-                            currentEffectiveOn ? "bg-btnPrimary" : "bg-surface-card-strong"
+                            currentEffectiveOn ? "bg-btnPrimary" : "bg-[var(--ui-switch-track-off)]"
                           }`}
                           onClick={() => {
                             if (currentEffectiveOn) {
@@ -7477,7 +7477,7 @@ export function SettingsPanel({
                           aria-checked={defProv === active}
                           aria-label={defProv === active ? `取消默认 ${getProviderDisplayName(active, current)}` : `设为默认 ${getProviderDisplayName(active, current)}`}
                           className={`relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--settings-accent-badge-bg)] focus-visible:ring-offset-2 ${
-                            defProv === active ? "bg-btnPrimary" : "bg-surface-card-strong"
+                            defProv === active ? "bg-btnPrimary" : "bg-[var(--ui-switch-track-off)]"
                           }`}
                           onClick={() => {
                             if (defProv === active) {
