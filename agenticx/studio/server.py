@@ -476,6 +476,17 @@ def _finalize_partial_assistant_if_needed(
     """Append interrupted partial assistant to chat_history when FINAL never arrived."""
     if saw_final:
         return False
+    history = getattr(session, "chat_history", None) or []
+    for row in reversed(history):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("role", "")).strip() != "assistant":
+            continue
+        meta = row.get("metadata")
+        # Runtime already committed this turn's cancelled prefix.
+        if isinstance(meta, dict) and meta.get("interrupted") is True:
+            return False
+        break
     body = _visible_assistant_body(partial_meta_text)
     if not body:
         return False

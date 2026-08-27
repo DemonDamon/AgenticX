@@ -1566,6 +1566,8 @@ def _sanitize_context_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[
     - Keep tool messages only when their tool_call_id is declared by some assistant tool_calls.
     - Keep assistant tool_calls only when each call id has a corresponding tool response in history.
       Unmatched calls are removed from that assistant message.
+    - Interrupted assistant prefix rows are real model output and must be kept;
+      they are the opposite of UI-only notices such as ``turn_interrupted``.
     """
     sanitized: List[Dict[str, Any]] = []
     idx = 0
@@ -2902,6 +2904,41 @@ class AgentRuntime:
         if not is_system_trigger:
             _chat_history_append_deduped(session.chat_history, dict(message))
 
+    def _finalize_cancelled_prefix(
+        self,
+        session: StudioSession,
+        raw_prefix: str,
+        *,
+        agent_id: str,
+        is_system_trigger: bool,
+    ) -> bool:
+        """Commit the prefix the user already saw into model-facing history."""
+        from agenticx.runtime.harden_flags import cancelled_prefix_finalize_enabled
+
+        if not cancelled_prefix_finalize_enabled():
+            return False
+        parsed = parse_assistant_output(str(raw_prefix or ""))
+        body = parsed.visible_body.strip()
+        if not body:
+            return False
+        # agent_messages must stay provider-safe: plain text, no runtime metadata,
+        # and never a half-streamed tool_calls payload.
+        session.agent_messages.append({"role": "assistant", "content": body})
+        if not is_system_trigger:
+            _chat_history_append_deduped(
+                session.chat_history,
+                {
+                    "role": "assistant",
+                    "content": body,
+                    "metadata": {
+                        "source": "interrupted-partial",
+                        "interrupted": True,
+                        "turn_terminal": False,
+                    },
+                },
+            )
+        return True
+
     async def _finish_terminal_reply(
         self,
         session: StudioSession,
@@ -4204,6 +4241,12 @@ class AgentRuntime:
                         )()
                         used_stream_path = True
                     except _StreamWatchdogUserStop:
+                        self._finalize_cancelled_prefix(
+                            session,
+                            str(followup_emitter.raw or response_text or ""),
+                            agent_id=agent_id,
+                            is_system_trigger=_is_system_trigger,
+                        )
                         yield RuntimeEvent(
                             type=EventType.ERROR.value,
                             data={"text": STOP_MESSAGE},
@@ -5212,6 +5255,12 @@ class AgentRuntime:
                                     agent_id=agent_id,
                                 )
                     except _StreamWatchdogUserStop:
+                        self._finalize_cancelled_prefix(
+                            session,
+                            streamed_text,
+                            agent_id=agent_id,
+                            is_system_trigger=_is_system_trigger,
+                        )
                         yield RuntimeEvent(
                             type=EventType.ERROR.value,
                             data={"text": STOP_MESSAGE},

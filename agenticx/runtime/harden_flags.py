@@ -100,6 +100,13 @@ def fresh_round_loop_enabled() -> bool:
     return _resolve_bool("AGX_FRESH_ROUND_LOOP", "runtime.fresh_round_loop", False)
 
 
+def cancelled_prefix_finalize_enabled() -> bool:
+    """``AGX_CANCELLED_PREFIX_FINALIZE`` / ``runtime.cancelled_prefix_finalize``. Default True."""
+    return _resolve_bool(
+        "AGX_CANCELLED_PREFIX_FINALIZE", "runtime.cancelled_prefix_finalize", True
+    )
+
+
 def group_meta_direct_tools_enabled() -> bool:
     """``AGX_GROUP_META_DIRECT_TOOLS`` / ``group.meta_direct_tools``. Default False."""
     return _resolve_bool("AGX_GROUP_META_DIRECT_TOOLS", "group.meta_direct_tools", False)
