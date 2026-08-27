@@ -19,7 +19,6 @@ import {
   Cpu,
   Plug,
   Link2,
-  Mail,
   Bookmark,
   Sparkles,
   Globe,
@@ -1014,7 +1013,6 @@ function ModelCapabilityBadges({
 const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "account", label: "用户账号", icon: User },
   { id: "general", label: "通用偏好", icon: Settings2 },
-  { id: "security", label: "安全中心", icon: ShieldCheck },
   { id: "provider", label: "模型服务", icon: Cpu },
   { id: "mcp", label: "MCP", icon: Plug },
   { id: "connectors", label: "连接器", icon: Link2 },
@@ -1026,9 +1024,9 @@ const TABS: { id: SettingsTab; label: string; icon: typeof Settings2 }[] = [
   { id: "memory", label: "记忆管理", icon: Network },
   { id: "automation", label: "定时任务", icon: AutomationTaskIcon },
   { id: "voice", label: "语音服务", icon: Mic },
-  { id: "email", label: "邮件通知", icon: Mail },
   { id: "favorites", label: "内容收藏", icon: Bookmark },
   { id: "server", label: "远程连接", icon: Globe },
+  { id: "security", label: "安全中心", icon: ShieldCheck },
 ];
 
 const EMAIL_PRESETS: Array<{
