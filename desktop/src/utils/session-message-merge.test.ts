@@ -339,6 +339,72 @@ describe("mergeSessionMessagesTail", () => {
     expect(out.map((m) => m.content)).toEqual(["old q", "old a", "latest q", "latest a"]);
   });
 
+  it("keeps transient group workflow narration in its live causal position", () => {
+    const workflow = (id: string, content: string): Message => ({
+      id,
+      role: "assistant",
+      content,
+      agentId: "__meta__",
+      ownerSessionId: sid,
+      metadata: { kind: "group_workflow_event" },
+    });
+    const existing: Message[] = [
+      uidMsg("user", "我们来头脑风暴", "uid-u"),
+      workflow("uid-start", "这轮是讨论，我先组织大家发言。"),
+      workflow("uid-assign", "我把第一个视角交给产品专家。"),
+      uidMsg("assistant", "产品专家的意见", "uid-member"),
+      workflow("uid-next", "接下来请工程专家补充。"),
+      uidMsg("assistant", "工程专家的意见", "uid-engineer"),
+      uidMsg("assistant", "Near 的最终汇总", "uid-final"),
+    ];
+
+    const out = mergeSessionMessagesTail(
+      existing,
+      [
+        diskRow("user", "我们来头脑风暴"),
+        diskRow("assistant", "产品专家的意见"),
+        diskRow("assistant", "工程专家的意见"),
+        diskRow("assistant", "Near 的最终汇总"),
+      ],
+      sid,
+    );
+
+    expect(out.map((message) => message.content)).toEqual([
+      "我们来头脑风暴",
+      "这轮是讨论，我先组织大家发言。",
+      "我把第一个视角交给产品专家。",
+      "产品专家的意见",
+      "接下来请工程专家补充。",
+      "工程专家的意见",
+      "Near 的最终汇总",
+    ]);
+  });
+
+  it("keeps workflow narration before a member reply that is not on disk yet", () => {
+    const user = uidMsg("user", "请大家继续讨论", "uid-u");
+    const workflow: Message = {
+      id: "uid-next",
+      role: "assistant",
+      content: "接下来请工程专家补充。",
+      agentId: "__meta__",
+      ownerSessionId: sid,
+      metadata: { kind: "group_workflow_event" },
+    };
+    const liveMember = uidMsg("assistant", "工程专家仍在流式回复", "uid-engineer");
+
+    const out = mergeSessionMessagesTail(
+      [user, workflow, liveMember],
+      [diskRow("user", "请大家继续讨论")],
+      sid,
+    );
+
+    expect(out.map((message) => message.content)).toEqual([
+      "请大家继续讨论",
+      "接下来请工程专家补充。",
+      "工程专家仍在流式回复",
+    ]);
+  });
+
   it("matches live args-only tool rows to disk results by toolCallId (no trailing running card)", () => {
     const callId = "call_web_search_1";
     const existing: Message[] = [
