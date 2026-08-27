@@ -21,6 +21,8 @@ import yaml
 from agenticx.utils.agx_home import agx_home, lazy_home_path
 
 from agenticx.avatar.portrait import (
+    PORTRAIT_STYLE,
+    PORTRAIT_STYLE_CUSTOM,
     collection_fetch_enabled,
     fetch_collection_portrait_url,
     generate_avatar_portrait_url,
@@ -105,6 +107,8 @@ class AvatarConfig:
     name: str
     role: str = ""
     avatar_url: str = ""
+    # notionists-v1 = generated line art; custom = user upload; empty = legacy unmarked.
+    portrait_style: str = ""
     system_prompt: str = ""
     # Short blurb shown on the gallery card, distinct from system_prompt (behavior rules).
     description: str = ""
@@ -193,7 +197,11 @@ class AvatarRegistry:
             cfg = self._read_config(child.name)
             if cfg is not None:
                 avatars.append(cfg)
-        missing = [item for item in avatars if needs_portrait_refresh(item.avatar_url)]
+        missing = [
+            item
+            for item in avatars
+            if needs_portrait_refresh(item.avatar_url, portrait_style=item.portrait_style)
+        ]
         if missing and collection_fetch_enabled():
             workers = min(6, len(missing))
             with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -202,12 +210,10 @@ class AvatarRegistry:
         return avatars
 
     def _ensure_portrait(self, config: AvatarConfig) -> AvatarConfig:
-        """Fill an illustrated portrait once if the avatar has no image yet.
-
-        Existing avatars without a picture are only updated when the illustrated
-        collection is reachable. Offline / test runs leave them unchanged.
-        """
-        if not needs_portrait_refresh(config.avatar_url):
+        """Fill or migrate an illustrated portrait when the collection is reachable."""
+        if not needs_portrait_refresh(
+            config.avatar_url, portrait_style=config.portrait_style
+        ):
             return config
         if not collection_fetch_enabled():
             return config
@@ -221,6 +227,7 @@ class AvatarRegistry:
         if not fetched:
             return config
         config.avatar_url = fetched
+        config.portrait_style = PORTRAIT_STYLE
         self._write_config(config)
         return config
 
@@ -262,7 +269,9 @@ class AvatarRegistry:
         if skills_enabled is not None and len(skills_enabled) > 0:
             se = {str(k): bool(v) for k, v in skills_enabled.items() if str(k).strip()}
         resolved_avatar_url = str(avatar_url or "").strip()
-        if not resolved_avatar_url:
+        if resolved_avatar_url:
+            resolved_style = PORTRAIT_STYLE_CUSTOM
+        else:
             resolved_avatar_url = generate_avatar_portrait_url(
                 name=name,
                 role=role,
@@ -270,11 +279,13 @@ class AvatarRegistry:
                 tags=normalize_avatar_tags(tags),
                 avatar_id=avatar_id,
             )
+            resolved_style = PORTRAIT_STYLE
         config = AvatarConfig(
             id=avatar_id,
             name=name,
             role=role,
             avatar_url=resolved_avatar_url,
+            portrait_style=resolved_style,
             system_prompt=system_prompt,
             description=str(description or "").strip(),
             tags=normalize_avatar_tags(tags),
@@ -298,6 +309,7 @@ class AvatarRegistry:
         config = self._read_config(avatar_id)
         if config is None:
             return None
+        original_url = str(config.avatar_url or "").strip()
         immutable = {"id", "created_at", "workspace_dir"}
         for key, value in patch.items():
             if key in immutable:
@@ -328,6 +340,19 @@ class AvatarRegistry:
                 continue
             if hasattr(config, key):
                 setattr(config, key, value)
+        if "avatar_url" in patch:
+            new_url = str(config.avatar_url or "").strip()
+            if not new_url:
+                config.avatar_url = generate_avatar_portrait_url(
+                    name=config.name,
+                    role=config.role,
+                    description=str(config.description or "").strip(),
+                    tags=list(config.tags or []),
+                    avatar_id=config.id,
+                )
+                config.portrait_style = PORTRAIT_STYLE
+            elif new_url != original_url:
+                config.portrait_style = PORTRAIT_STYLE_CUSTOM
         config.updated_at = datetime.now(timezone.utc).isoformat()
         self._write_config(config)
         return config
