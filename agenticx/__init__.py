@@ -5,6 +5,14 @@ _SAVED_CLI_ARGV = _sys.argv[:]
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+import os as _os
+# litellm 在 import 时会同步请求 https://raw.githubusercontent.com/BerriAI/litellm/main/
+# model_prices_and_context_window.json（timeout=5s）。在受限网络（如未开 VPN 的国内环境）
+# 下该请求会挂到超时，叠加 PyInstaller onefile 首次解压与杀毒扫描，容易耗尽桌面端
+# "agx serve startup timeout" 的就绪窗口。默认改用 litellm 自带的本地备份价格表（零网络）；
+# 已显式设置 LITELLM_LOCAL_MODEL_COST_MAP 的用户不受影响。
+_os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
+
 """
 AgenticX: 一个统一的多智能体框架
 

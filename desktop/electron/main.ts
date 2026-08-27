@@ -2874,7 +2874,10 @@ async function startStudioServe(): Promise<void> {
   }
 }
 
-async function waitServeReady(timeoutMs = 45000): Promise<void> {
+// 120s: PyInstaller onefile 首次启动需解压数百 MB 到临时目录并接受杀毒扫描，
+// 叠加受限网络下的 import 阻塞，45s 曾导致初次启动误报 "agx serve startup timeout"。
+// 就绪探测仍每 500ms 一次，正常启动不会等满超时。
+async function waitServeReady(timeoutMs = 120000): Promise<void> {
   if (!serveProcess || !serveProcess.stdout || !serveProcess.stderr) {
     throw new Error("agx serve process not started");
   }
