@@ -679,9 +679,16 @@ OpeniLink Hub 的 [OpenClaw App](https://github.com/openilink/openilink-hub) 也
 
 本项目采用 Apache License 2.0（Apache-2.0）许可，详见 [LICENSE](LICENSE) 文件。
 
-## Star History
+## 在 GitHub 上给我们 Star
 
-[![Star History Chart](https://api.star-history.com/svg?repos=DemonDamon/AgenticX&type=Date)](https://star-history.com/#DemonDamon/AgenticX&Date)
+如果 AgenticX 对你有用或有启发，请滚到本页顶部，点击右上角的 `Star`。Star 会把仓库往 GitHub 搜索和 Trending 上推，这是大多数人第一次看到我们的方式。
+
+<a href="https://github.com/DemonDamon/AgenticX">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/star-history-dark.svg" />
+    <img alt="DemonDamon/AgenticX 的 Star 增长，目前 219 stars" src="assets/star-history-light.svg" width="100%" />
+  </picture>
+</a>
 
 ## 致谢
 

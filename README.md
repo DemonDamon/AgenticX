@@ -683,9 +683,16 @@ If you use AgenticX in your research, please cite:
 
 This project is licensed under the Apache License, Version 2.0 — see the [LICENSE](LICENSE) file for details.
 
-## Star History
+## Star us on GitHub
 
-[![Star History Chart](https://api.star-history.com/svg?repos=DemonDamon/AgenticX&type=Date)](https://star-history.com/#DemonDamon/AgenticX&Date)
+If AgenticX is interesting/useful to you, please scroll up and give the repo a star (scroll to the top of this page -> click `Star` in top right). Stars are how most users hear about AgenticX because they move us up GitHub's search and trending pages.
+
+<a href="https://github.com/DemonDamon/AgenticX">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/star-history-dark.svg" />
+    <img alt="Star history for DemonDamon/AgenticX, from launch to 219 stars" src="assets/star-history-light.svg" width="100%" />
+  </picture>
+</a>
 
 ## Acknowledgments
 
