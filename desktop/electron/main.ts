@@ -69,6 +69,11 @@ import { fetchFaviconDataUrl } from "./fetch-favicon";
 import { classifyModelHealthFailure } from "./model-health";
 import { isRealpathUnder, safeRealpath } from "./path-guard";
 import {
+  getServeStartupTimeoutMs,
+  LOCAL_BACKEND_STARTUP_ENV,
+  SERVE_READY_PROBE_TIMEOUT_MS,
+} from "./local-backend-startup";
+import {
   readSessionMessagesFromDisk,
   readSessionMessagesTailFromDisk,
 } from "./session-messages-disk";
@@ -2831,6 +2836,7 @@ async function startStudioServe(): Promise<void> {
   const devPort = process.env.AGX_DEV_PORT || "5713";
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    ...LOCAL_BACKEND_STARTUP_ENV,
     PATH: augmentedPath,
     AGX_DEV_PORT: devPort,
     AGX_DESKTOP_TOKEN: apiToken,
@@ -2874,10 +2880,10 @@ async function startStudioServe(): Promise<void> {
   }
 }
 
-// 120s: PyInstaller onefile 首次启动需解压数百 MB 到临时目录并接受杀毒扫描，
-// 叠加受限网络下的 import 阻塞，45s 曾导致初次启动误报 "agx serve startup timeout"。
+// 超时窗口按平台区分（见 local-backend-startup.ts）：Windows 首次启动需把数百 MB
+// onefile 解压到临时目录并接受杀毒扫描，45s 曾导致误报 "agx serve startup timeout"。
 // 就绪探测仍每 500ms 一次，正常启动不会等满超时。
-async function waitServeReady(timeoutMs = 120000): Promise<void> {
+async function waitServeReady(timeoutMs = getServeStartupTimeoutMs()): Promise<void> {
   if (!serveProcess || !serveProcess.stdout || !serveProcess.stderr) {
     throw new Error("agx serve process not started");
   }
@@ -2885,17 +2891,26 @@ async function waitServeReady(timeoutMs = 120000): Promise<void> {
   const currentStdout = currentProcess.stdout!;
   const currentStderr = currentProcess.stderr!;
   const pingReady = async (): Promise<boolean> => {
+    const controller = new AbortController();
+    const probeTimeout = setTimeout(
+      () => controller.abort(),
+      SERVE_READY_PROBE_TIMEOUT_MS,
+    );
     try {
       const resp = await fetch(`${getStudioUrl()}/api/session`, {
         headers: { "x-agx-desktop-token": getStudioToken() },
+        signal: controller.signal,
       });
       return resp.ok;
     } catch {
       return false;
+    } finally {
+      clearTimeout(probeTimeout);
     }
   };
   await new Promise<void>((resolve, reject) => {
     let settled = false;
+    let probeInFlight = false;
     const fail = (message: string) => {
       if (settled) return;
       settled = true;
@@ -2920,17 +2935,21 @@ async function waitServeReady(timeoutMs = 120000): Promise<void> {
           markReady();
           return;
         }
-        fail("agx serve startup timeout");
+        fail(`agx serve startup timeout after ${Math.ceil(timeoutMs / 1000)}s`);
       })();
     }, timeoutMs);
-    const probeTimer = setInterval(() => {
-      void (async () => {
-        if (settled) return;
+    const probeOnce = async () => {
+      if (settled || probeInFlight) return;
+      probeInFlight = true;
+      try {
         if (await pingReady()) {
           markReady();
         }
-      })();
-    }, 500);
+      } finally {
+        probeInFlight = false;
+      }
+    };
+    const probeTimer = setInterval(() => void probeOnce(), 500);
     const onData = (chunk: Buffer) => {
       const text = chunk.toString("utf-8");
       if (text.includes("Uvicorn running") || text.includes("AgenticX Studio Server")) {
@@ -2961,6 +2980,7 @@ async function waitServeReady(timeoutMs = 120000): Promise<void> {
     currentStderr.on("data", onErrData);
     currentProcess.on("exit", onExit);
     currentProcess.on("error", onError);
+    void probeOnce();
   });
 }
 
