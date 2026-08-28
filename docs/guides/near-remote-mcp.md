@@ -85,7 +85,9 @@ Near（`agx serve` + Desktop）从 **Phase 1+2** 起支持在 `~/.agenticx/mcp.j
 }
 ```
 
-该端点无需账户或 API key，`headers` 可省略。原生 `/mcp` URL 会按上述规则选择 `streamable_http`。仅在用户显式调用其工具时使用；用户提供的搜索目标、搜索查询和请求的 URL 会发送给 Parallel。详见 [Parallel Search MCP 文档](https://docs.parallel.ai/integrations/mcp/search-mcp)。
+该端点支持匿名免费访问，无需账户或 API key，`headers` 可省略，但匿名免费层的速率限制较低。若需更高的速率限制，可在 `parallel-search` 条目的 `headers` 中添加 `"Authorization": "Bearer YOUR_PARALLEL_API_KEY"`，将占位符替换为自己的 Parallel API key。原生 `/mcp` URL 会按上述规则选择 `streamable_http`。
+
+连接后，模型可能根据任务需要调用已启用的 `web_search` 或 `web_fetch`；调用时，工具参数（包括搜索目标、搜索查询和请求的 URL）会发送给 Parallel。详见 [Parallel Search MCP 文档](https://docs.parallel.ai/integrations/mcp/search-mcp)。
 
 ### 示例：Enterprise Gateway 托管 MCP
 
