@@ -3,7 +3,7 @@
 Planned-with: claude-opus-5
 Suggested-Impl-Model: 强推理档（如 GPT-5.x）
 
-**父规划：** `.cursor/plans/pending/2026-08-29-collab-room-c3-master.plan.md`
+**父规划：** `.cursor/plans/2026-08-29-collab-room-c3-master.plan.md`
 **前置：** 子 plan 01 已实施（portal 侧 `/api/desktop/rooms/*` 可用）。
 
 **Goal:** 渲染进程能读写云房间，但一次出网请求都不由渲染进程直接发。主进程持 PAT、走 `proxyAwareFetch`、消费 SSE，把解析好的事件推给渲染进程。

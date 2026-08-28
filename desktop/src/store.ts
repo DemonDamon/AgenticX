@@ -481,6 +481,10 @@ type TokenDashboardState = {
   customTo: string;
 };
 
+type CollabRoomsState = {
+  open: boolean;
+};
+
 type DeliveryPanelState = {
   open: boolean;
   selectedTaskId: string | null;
@@ -499,6 +503,7 @@ type AppState = {
   clarification: ClarificationState;
   settings: SettingsState;
   tokenDashboard: TokenDashboardState;
+  collabRooms: CollabRoomsState;
   deliveryPanel: DeliveryPanelState;
   activeProvider: string;
   activeModel: string;
@@ -851,6 +856,8 @@ type AppState = {
   ) => void;
   openTokenDashboard: () => void;
   closeTokenDashboard: () => void;
+  openCollabRooms: () => void;
+  closeCollabRooms: () => void;
   setTokenDashboardRange: (range: TokenDashboardRange) => void;
   setTokenDashboardCustomRange: (from: string, to: string) => void;
   openDeliveryPanel: (taskId?: string | null) => void;
@@ -1182,6 +1189,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   settings: { open: false, provider: "", model: "", apiKey: "", defaultProvider: "", providers: {}, focusSeq: 0 },
   tokenDashboard: { open: false, range: "month", customFrom: "", customTo: "" },
+  collabRooms: { open: false },
   deliveryPanel: { open: false, selectedTaskId: null },
   setApiBase: (apiBase) => set({ apiBase }),
   setApiToken: (apiToken) => set({ apiToken }),
@@ -2558,6 +2566,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeTokenDashboard: () =>
     set((state) => ({
       tokenDashboard: { ...state.tokenDashboard, open: false },
+    })),
+  openCollabRooms: () =>
+    set((state) => ({
+      collabRooms: { ...state.collabRooms, open: true },
+    })),
+  closeCollabRooms: () =>
+    set((state) => ({
+      collabRooms: { ...state.collabRooms, open: false },
     })),
   setTokenDashboardRange: (range) =>
     set((state) => ({

@@ -66,6 +66,19 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.invoke("wait-for-studio", timeoutMs),
   enterpriseSyncCapabilities: async (): Promise<{ ok: boolean; skipped?: boolean }> =>
     ipcRenderer.invoke("enterprise-sync-capabilities"),
+  collabRoomList: async () => ipcRenderer.invoke("collab-room-list"),
+  collabRoomGet: async (roomId: string) => ipcRenderer.invoke("collab-room-get", roomId),
+  collabRoomMessages: async (roomId: string, opts?: { afterSeq?: number; limit?: number }) =>
+    ipcRenderer.invoke("collab-room-messages", roomId, opts),
+  collabRoomSend: async (roomId: string, content: string) =>
+    ipcRenderer.invoke("collab-room-send", roomId, content),
+  collabRoomWatch: async (roomId: string) => ipcRenderer.invoke("collab-room-watch", roomId),
+  collabRoomUnwatch: async (roomId: string) => ipcRenderer.invoke("collab-room-unwatch", roomId),
+  onCollabRoomEvent: (cb: (payload: { roomId: string; event: { type: string; [k: string]: unknown } }) => void) => {
+    const listener = (_e: unknown, payload: never) => cb(payload);
+    ipcRenderer.on("collab-room-event", listener as never);
+    return () => ipcRenderer.removeListener("collab-room-event", listener as never);
+  },
   getApiAuthToken: async (): Promise<string> => ipcRenderer.invoke("get-api-auth-token"),
   platform: async (): Promise<string> => ipcRenderer.invoke("get-platform"),
   syncTitleBarOverlay: async (theme: "dark" | "light" | "dim") =>
@@ -941,6 +954,46 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     const handler = () => cb();
     ipcRenderer.on("agx-account-login-timeout", handler);
     return () => ipcRenderer.removeListener("agx-account-login-timeout", handler);
+  },
+
+  loadEnterpriseAccount: async () =>
+    ipcRenderer.invoke("load-enterprise-account") as Promise<{
+      ok: boolean;
+      loggedIn?: boolean;
+      email?: string;
+      displayName?: string;
+      portalUrl?: string;
+    }>,
+  enterpriseLoginStart: async (payload: { portalUrl?: string }) =>
+    ipcRenderer.invoke("enterprise-login-start", payload) as Promise<{
+      ok: boolean;
+      verification_url?: string;
+      error?: string;
+    }>,
+  enterpriseLoginCancel: async () =>
+    ipcRenderer.invoke("enterprise-login-cancel") as Promise<{ ok: boolean }>,
+  enterpriseLogout: async () => ipcRenderer.invoke("enterprise-logout") as Promise<{ ok: boolean }>,
+  onEnterpriseAccountChanged: (
+    cb: (payload: {
+      loggedIn: boolean;
+      email: string;
+      displayName: string;
+      portalUrl: string;
+    }) => void,
+  ): (() => void) => {
+    const handler = (_e: unknown, payload: never) => cb(payload);
+    ipcRenderer.on("enterprise-account-changed", handler as never);
+    return () => ipcRenderer.removeListener("enterprise-account-changed", handler as never);
+  },
+  onEnterpriseLoginFailed: (cb: (payload: { error: string }) => void): (() => void) => {
+    const handler = (_e: unknown, payload: never) => cb(payload);
+    ipcRenderer.on("enterprise-login-failed", handler as never);
+    return () => ipcRenderer.removeListener("enterprise-login-failed", handler as never);
+  },
+  onEnterpriseLoginTimeout: (cb: () => void): (() => void) => {
+    const handler = () => cb();
+    ipcRenderer.on("enterprise-login-timeout", handler);
+    return () => ipcRenderer.removeListener("enterprise-login-timeout", handler);
   },
   updateSplashStage: async (stage: string) =>
     ipcRenderer.invoke("update-splash-stage", stage) as Promise<{ ok: boolean }>,

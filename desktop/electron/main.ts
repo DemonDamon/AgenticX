@@ -55,6 +55,19 @@ import {
   type SystemSearchCategory,
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
+import {
+  getRoom as fetchCollabRoom,
+  listMessages as fetchCollabRoomMessages,
+  listRooms as fetchCollabRooms,
+  normalizePortalBase,
+  sendMessage as sendCollabRoomMessage,
+  streamRoomEvents,
+} from "./collab-room-client";
+import {
+  cancelEnterpriseDeviceAuth,
+  pollEnterpriseDeviceAuth,
+  startEnterpriseDeviceAuth,
+} from "./enterprise-device-login";
 import { normalizeEnterpriseCapabilities } from "./enterprise-capabilities";
 import {
   applyEnterpriseCapabilitiesToDisk,
@@ -327,6 +340,11 @@ type AgxConfig = {
     capabilities?: unknown;
     managed_mcp_servers?: string[];
     managed_skills?: string[];
+    /** 上次使用/预置的门户地址；登出后保留，用于下次登录预填。 */
+    default_portal_url?: string;
+    /** 仅用于设置页展示当前登录者，非鉴权依据。 */
+    user_email?: string;
+    user_display_name?: string;
   };
   /** Near 官网 / Supabase 账号（桌面端轮询写入，勿在日志中打印 token） */
   agx_account?: {
@@ -1909,6 +1927,21 @@ let skillsChangedDebounceTimer: NodeJS.Timeout | null = null;
 let agxAccountLoginPollTimer: NodeJS.Timeout | null = null;
 let agxAccountLoginDeviceId: string | null = null;
 let agxAccountLoginPollTicks = 0;
+/** 企业门户设备授权：deviceSecret 只驻留主进程内存，禁止写盘或回传渲染进程。 */
+let enterpriseLoginPollTimer: NodeJS.Timeout | null = null;
+let enterpriseLoginCtx: { deviceId: string; deviceSecret: string; baseUrl: string } | null = null;
+let enterpriseLoginPollTicks = 0;
+let enterpriseLoginFailStreak = 0;
+
+function clearEnterpriseLoginPoll(): void {
+  if (enterpriseLoginPollTimer) {
+    clearInterval(enterpriseLoginPollTimer);
+    enterpriseLoginPollTimer = null;
+  }
+  enterpriseLoginCtx = null;
+  enterpriseLoginPollTicks = 0;
+  enterpriseLoginFailStreak = 0;
+}
 
 const AGX_ACCOUNT_WEB_BASE_DEFAULT = "https://www.agxbuilder.com";
 
@@ -6837,6 +6870,135 @@ function registerEarlyIpc(): void {
     return { ok };
   });
   ipcMain.handle("enterprise-sync-capabilities", async () => scheduleEnterpriseCapabilitySync());
+  const collabRoomWatchers = new Map<string, AbortController>();
+  const collabRoomWatchSeq = new Map<string, number>();
+  const abortCollabRoomWatch = (roomId: string) => {
+    const ac = collabRoomWatchers.get(roomId);
+    if (ac) {
+      ac.abort();
+      collabRoomWatchers.delete(roomId);
+    }
+  };
+  const abortAllCollabRoomWatches = () => {
+    for (const ac of collabRoomWatchers.values()) ac.abort();
+    collabRoomWatchers.clear();
+  };
+  const resolveCollabRoomDeps = (): { baseUrl: string; token: string } | null => {
+    const cfg = loadAgxConfig();
+    if (!hasEnterprisePat(cfg)) return null;
+    const baseUrl = normalizePortalBase(cfg.enterprise?.base_url);
+    const token = String(cfg.enterprise?.token ?? "").trim();
+    if (!baseUrl || !token) return null;
+    return { baseUrl, token };
+  };
+  const toCollabRoomRendererEvent = (evt: { type: string; data: unknown }): { type: string; [k: string]: unknown } => {
+    if (evt.data && typeof evt.data === "object" && !Array.isArray(evt.data)) {
+      return { ...(evt.data as Record<string, unknown>), type: evt.type };
+    }
+    return { type: evt.type, data: evt.data };
+  };
+  const trackCollabRoomSeq = (roomId: string, event: { type: string; [k: string]: unknown }) => {
+    let seq: number | undefined;
+    if (event.type === "room_cursor" && typeof event.last_seq === "number") {
+      seq = event.last_seq;
+    } else if (event.type === "room_message") {
+      const message = event.message as { seq?: unknown } | undefined;
+      if (typeof message?.seq === "number") seq = message.seq;
+    }
+    if (typeof seq !== "number") return;
+    collabRoomWatchSeq.set(roomId, Math.max(collabRoomWatchSeq.get(roomId) ?? 0, seq));
+  };
+  ipcMain.handle("collab-room-list", async () => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    return fetchCollabRooms({ ...deps, fetchImpl: proxyAwareFetch });
+  });
+  ipcMain.handle("collab-room-get", async (_event, roomIdRaw: unknown) => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (!roomId) return { ok: false, error: "房间不存在" };
+    return fetchCollabRoom({ ...deps, fetchImpl: proxyAwareFetch }, roomId);
+  });
+  ipcMain.handle("collab-room-messages", async (_event, roomIdRaw: unknown, optsRaw?: unknown) => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (!roomId) return { ok: false, error: "房间不存在" };
+    const opts = optsRaw && typeof optsRaw === "object" ? (optsRaw as { afterSeq?: number; limit?: number }) : {};
+    return fetchCollabRoomMessages({ ...deps, fetchImpl: proxyAwareFetch }, roomId, opts);
+  });
+  ipcMain.handle("collab-room-send", async (_event, roomIdRaw: unknown, contentRaw: unknown) => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (!roomId) return { ok: false, error: "房间不存在" };
+    const content = typeof contentRaw === "string" ? contentRaw : "";
+    return sendCollabRoomMessage({ ...deps, fetchImpl: proxyAwareFetch }, roomId, content);
+  });
+  ipcMain.handle("collab-room-watch", async (event, roomIdRaw: unknown) => {
+    const deps = resolveCollabRoomDeps();
+    if (!deps) return { ok: false, error: "未登录企业账号，无法加载云房间" };
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (!roomId) return { ok: false, error: "房间不存在" };
+    abortCollabRoomWatch(roomId);
+    const ac = new AbortController();
+    collabRoomWatchers.set(roomId, ac);
+    const sender = event.sender;
+    const onDestroyed = () => abortCollabRoomWatch(roomId);
+    sender.once("destroyed", onDestroyed);
+    const run = async () => {
+      const backoff = [1000, 2000, 5000];
+      let retries = 0;
+      while (!ac.signal.aborted) {
+        let gone = false;
+        try {
+          await streamRoomEvents(
+            { ...deps, fetchImpl: proxyAwareFetch },
+            roomId,
+            {
+              onEvent: (evt) => {
+                const payload = toCollabRoomRendererEvent(evt);
+                trackCollabRoomSeq(roomId, payload);
+                if (payload.type === "room_closed" && payload.reason === "gone") gone = true;
+                if (!sender.isDestroyed()) {
+                  sender.send("collab-room-event", { roomId, event: payload });
+                }
+              },
+              onClosed: () => undefined,
+            },
+            ac.signal,
+            collabRoomWatchSeq.get(roomId) ?? 0,
+          );
+        } catch {
+          /* streamRoomEvents maps errors to onClosed */
+        }
+        if (ac.signal.aborted) break;
+        if (gone) {
+          abortCollabRoomWatch(roomId);
+          break;
+        }
+        if (retries >= 5) break;
+        if (!sender.isDestroyed()) {
+          sender.send("collab-room-event", { roomId, event: { type: "room_closed", reason: "retry" } });
+        }
+        const delay = backoff[Math.min(retries, backoff.length - 1)];
+        retries += 1;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      sender.removeListener("destroyed", onDestroyed);
+    };
+    void run();
+    return { ok: true };
+  });
+  ipcMain.handle("collab-room-unwatch", async (_event, roomIdRaw: unknown) => {
+    const roomId = typeof roomIdRaw === "string" ? roomIdRaw.trim() : "";
+    if (roomId) abortCollabRoomWatch(roomId);
+    return { ok: true };
+  });
+  app.on("before-quit", () => {
+    abortAllCollabRoomWatches();
+  });
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
   ipcMain.handle("get-connection-mode", async () => getInjectedConnectionMode());
@@ -7331,6 +7493,141 @@ function registerIpc(): void {
       email: a?.user_email ?? "",
       displayName: a?.user_display_name ?? "",
     };
+  });
+
+  ipcMain.handle("load-enterprise-account", async () => {
+    const cfg = loadAgxConfig();
+    const ent = cfg.enterprise;
+    return {
+      ok: true,
+      loggedIn: hasEnterprisePat(cfg),
+      email: ent?.user_email ?? "",
+      displayName: ent?.user_display_name ?? "",
+      portalUrl: normalizePortalBase(ent?.base_url || ent?.default_portal_url || ""),
+    };
+  });
+
+  ipcMain.handle("enterprise-login-start", async (_event, payload?: { portalUrl?: string }) => {
+    clearEnterpriseLoginPoll();
+    const cfg = loadAgxConfig();
+    const baseUrl =
+      normalizePortalBase(payload?.portalUrl) ||
+      normalizePortalBase(cfg.enterprise?.default_portal_url);
+    if (!baseUrl) return { ok: false, error: "请先填写企业门户地址" };
+
+    const started = await startEnterpriseDeviceAuth(
+      { baseUrl, fetchImpl: proxyAwareFetch },
+      os.hostname(),
+    );
+    if (!started.ok) return { ok: false, error: started.error };
+
+    // 先记住地址：即使这次没批准，下次也不用重填。
+    const withPortal = loadAgxConfig();
+    withPortal.enterprise = { ...(withPortal.enterprise ?? {}), default_portal_url: baseUrl };
+    saveAgxConfig(withPortal);
+
+    void shell.openExternal(started.data.verificationUrl);
+
+    const interval = Math.max(started.data.pollIntervalMs, 1500);
+    const maxTicks = Math.ceil((started.data.expiresIn * 1000) / interval) + 4;
+    enterpriseLoginCtx = {
+      deviceId: started.data.deviceId,
+      deviceSecret: started.data.deviceSecret,
+      baseUrl,
+    };
+    enterpriseLoginPollTicks = 0;
+    enterpriseLoginFailStreak = 0;
+
+    enterpriseLoginPollTimer = setInterval(() => {
+      void (async () => {
+        const ctx = enterpriseLoginCtx;
+        if (!ctx) return;
+        enterpriseLoginPollTicks += 1;
+        if (enterpriseLoginPollTicks > maxTicks) {
+          clearEnterpriseLoginPoll();
+          mainWindow?.webContents.send("enterprise-login-timeout", {});
+          return;
+        }
+        const polled = await pollEnterpriseDeviceAuth(
+          { baseUrl: ctx.baseUrl, fetchImpl: proxyAwareFetch },
+          { deviceId: ctx.deviceId, deviceSecret: ctx.deviceSecret },
+        );
+        if (!polled.ok) {
+          // 单拍抖动不算失败；连续失败才放弃。
+          enterpriseLoginFailStreak += 1;
+          if (enterpriseLoginFailStreak >= 10) {
+            const error = polled.error;
+            clearEnterpriseLoginPoll();
+            mainWindow?.webContents.send("enterprise-login-failed", { error });
+          }
+          return;
+        }
+        enterpriseLoginFailStreak = 0;
+
+        if (polled.data.status === "pending") return;
+        if (polled.data.status === "gone") {
+          const error = polled.data.error;
+          clearEnterpriseLoginPoll();
+          mainWindow?.webContents.send("enterprise-login-failed", { error });
+          return;
+        }
+
+        const next = loadAgxConfig();
+        // 展开既有对象：capabilities / managed_* 是能力同步的地盘，不能被登录覆盖掉。
+        next.enterprise = {
+          ...(next.enterprise ?? {}),
+          enabled: true,
+          base_url: ctx.baseUrl,
+          token: polled.data.token,
+          default_portal_url: ctx.baseUrl,
+          user_email: polled.data.user.email,
+          user_display_name: polled.data.user.displayName,
+        };
+        saveAgxConfig(next);
+        clearEnterpriseLoginPoll();
+        mainWindow?.webContents.send("enterprise-account-changed", {
+          loggedIn: true,
+          email: polled.data.user.email,
+          displayName: polled.data.user.displayName,
+          portalUrl: ctx.baseUrl,
+        });
+        void scheduleEnterpriseCapabilitySync().catch(() => null);
+      })();
+    }, interval);
+
+    return { ok: true, verification_url: started.data.verificationUrl };
+  });
+
+  ipcMain.handle("enterprise-login-cancel", async () => {
+    const ctx = enterpriseLoginCtx;
+    if (ctx) {
+      await cancelEnterpriseDeviceAuth(
+        { baseUrl: ctx.baseUrl, fetchImpl: proxyAwareFetch },
+        { deviceId: ctx.deviceId, deviceSecret: ctx.deviceSecret },
+      );
+    }
+    clearEnterpriseLoginPoll();
+    return { ok: true };
+  });
+
+  ipcMain.handle("enterprise-logout", async () => {
+    clearEnterpriseLoginPoll();
+    const cfg = loadAgxConfig();
+    if (cfg.enterprise) {
+      // 只清登录相关字段；default_portal_url 留着预填，托管能力清单不归这里管。
+      delete cfg.enterprise.enabled;
+      delete cfg.enterprise.token;
+      delete cfg.enterprise.user_email;
+      delete cfg.enterprise.user_display_name;
+      saveAgxConfig(cfg);
+    }
+    mainWindow?.webContents.send("enterprise-account-changed", {
+      loggedIn: false,
+      email: "",
+      displayName: "",
+      portalUrl: normalizePortalBase(cfg.enterprise?.default_portal_url ?? ""),
+    });
+    return { ok: true };
   });
 
   ipcMain.handle("load-gateway-im", async () => {

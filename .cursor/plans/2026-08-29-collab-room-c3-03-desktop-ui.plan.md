@@ -3,7 +3,7 @@
 Planned-with: claude-opus-5
 Suggested-Impl-Model: Composer 2.5 / Fast 档
 
-**父规划：** `.cursor/plans/pending/2026-08-29-collab-room-c3-master.plan.md`
+**父规划：** `.cursor/plans/2026-08-29-collab-room-c3-master.plan.md`
 **前置：** 子 plan 01（portal PAT 接口）与 02（主进程 IPC 桥）已实施。
 
 **Goal:** 桌面端多一个「云房间」入口，点开就是 portal 里那间房：同一份历史、同一条 `seq`、发言两边互见。

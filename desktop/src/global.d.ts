@@ -487,6 +487,27 @@ declare global {
       getApiBase: () => Promise<string>;
       waitForStudio: (timeoutMs?: number) => Promise<{ ok: boolean }>;
       enterpriseSyncCapabilities: () => Promise<{ ok: boolean; skipped?: boolean }>;
+      collabRoomList: () => Promise<{ ok: boolean; data?: { rooms: unknown[] }; error?: string }>;
+      collabRoomGet: (
+        roomId: string,
+      ) => Promise<{
+        ok: boolean;
+        data?: { room: unknown; members: unknown[]; viewer_user_id?: string };
+        error?: string;
+      }>;
+      collabRoomMessages: (
+        roomId: string,
+        opts?: { afterSeq?: number; limit?: number },
+      ) => Promise<{ ok: boolean; data?: { messages: unknown[] }; error?: string }>;
+      collabRoomSend: (
+        roomId: string,
+        content: string,
+      ) => Promise<{ ok: boolean; data?: { message: unknown }; error?: string }>;
+      collabRoomWatch: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
+      collabRoomUnwatch: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
+      onCollabRoomEvent: (
+        cb: (payload: { roomId: string; event: { type: string; [k: string]: unknown } }) => void,
+      ) => () => void;
       getApiAuthToken: () => Promise<string>;
       platform: () => Promise<string>;
       syncTitleBarOverlay: (theme: "dark" | "light" | "dim") => Promise<{ ok: boolean; skipped?: boolean; error?: string }>;
@@ -860,6 +881,30 @@ declare global {
       }>;
       onAgxAccountChanged: (cb: (payload: { email: string; displayName: string }) => void) => () => void;
       onAgxAccountLoginTimeout: (cb: () => void) => () => void;
+      loadEnterpriseAccount: () => Promise<{
+        ok: boolean;
+        loggedIn?: boolean;
+        email?: string;
+        displayName?: string;
+        portalUrl?: string;
+      }>;
+      enterpriseLoginStart: (payload: { portalUrl?: string }) => Promise<{
+        ok: boolean;
+        verification_url?: string;
+        error?: string;
+      }>;
+      enterpriseLoginCancel: () => Promise<{ ok: boolean }>;
+      enterpriseLogout: () => Promise<{ ok: boolean }>;
+      onEnterpriseAccountChanged: (
+        cb: (payload: {
+          loggedIn: boolean;
+          email: string;
+          displayName: string;
+          portalUrl: string;
+        }) => void,
+      ) => () => void;
+      onEnterpriseLoginFailed: (cb: (payload: { error: string }) => void) => () => void;
+      onEnterpriseLoginTimeout: (cb: () => void) => () => void;
       updateSplashStage: (
         stage:
           | "initializing"

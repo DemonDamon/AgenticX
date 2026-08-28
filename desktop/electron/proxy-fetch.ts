@@ -60,6 +60,16 @@ function isHttpProxy(url: string): boolean {
   return /^https?:\/\//i.test(url);
 }
 
+/**
+ * 回环地址永远直连：本机 agx serve / 企业门户 dev 都跑在 127.0.0.1，
+ * 开发机常 export 了 HTTPS_PROXY 却没把 localhost 写进 NO_PROXY，
+ * 那样连本机服务都会被塞进代理隧道而失败。
+ */
+function isLoopbackHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h.endsWith(".localhost");
+}
+
 export async function proxyAwareFetch(input: string, init?: RequestInit): Promise<Response> {
   const proxyUrl = getProxyUrl();
   if (!proxyUrl) return fetch(input, init);
@@ -73,6 +83,8 @@ export async function proxyAwareFetch(input: string, init?: RequestInit): Promis
   } catch {
     return fetch(input, init);
   }
+
+  if (isLoopbackHost(host)) return fetch(input, init);
 
   if (hostMatchesNoProxy(host, getNoProxyList())) {
     return fetch(input, init);

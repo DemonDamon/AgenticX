@@ -5,6 +5,7 @@ import { ClarificationDialog, type ClarificationAnswer } from "./components/Clar
 import { SettingsPanel } from "./components/SettingsPanel";
 import { DeliveryPanel } from "./components/delivery/DeliveryPanel";
 import { TokenDashboardPanel } from "./components/TokenDashboardPanel";
+import { CollabRoomPanel } from "./components/CollabRoomPanel";
 import { LiteChatView } from "./components/LiteChatView";
 import { PaneManager } from "./components/PaneManager";
 import { AvatarGalleryView } from "./components/gallery/AvatarGalleryView";
@@ -332,6 +333,8 @@ export function App() {
   const closeSettings = useAppStore((s) => s.closeSettings);
   const tokenDashboardOpen = useAppStore((s) => s.tokenDashboard.open);
   const closeTokenDashboard = useAppStore((s) => s.closeTokenDashboard);
+  const collabRoomsOpen = useAppStore((s) => s.collabRooms.open);
+  const closeCollabRooms = useAppStore((s) => s.closeCollabRooms);
   const deliveryPanelOpen = useAppStore((s) => s.deliveryPanel.open);
   const closeDeliveryPanel = useAppStore((s) => s.closeDeliveryPanel);
   const updateSettings = useAppStore((s) => s.updateSettings);
@@ -2510,6 +2513,7 @@ export function App() {
         onForwardFavorite={handleForwardFavorite}
       />
       <TokenDashboardPanel open={tokenDashboardOpen} onClose={() => closeTokenDashboard()} />
+      <CollabRoomPanel open={collabRoomsOpen} onClose={() => closeCollabRooms()} />
       <DeliveryPanel
         open={deliveryPanelOpen}
         apiBase={apiBase}
