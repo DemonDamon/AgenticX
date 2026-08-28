@@ -2032,16 +2032,19 @@ _PUBLIC_COMPLETION_SIGNAL_RE = re.compile(
     r"|(?:修复|修改|更新|处理|创建|删除|调整|添加|写入|保存)(?:方案)?(?:已经)?完成"
     r"|(?:问题|任务).{0,16}已(?:经)?(?:修复|解决|完成)"
     r"|(?:结果如下|以下是(?:结果|说明|汇总)|最终(?:结果|说明))"
-    r"|\b(?:done|completed|complete|fixed|updated|created|deleted|saved|written|resolved|finished)\b)",
+    r"|\b(?:done|completed|fixed|updated|created|deleted|saved|written|resolved|finished)\b)",
     re.IGNORECASE | re.DOTALL,
 )
 _INTERNAL_REASONING_HEAD_RE = re.compile(
     r"^(?:我(?:需要|得|应该|将|先)|让我|先(?:分析|检查|读取|查看|思考)"
-    r"|(?:接下来|下一步)(?:需要|应该|先)|用户(?:要求|想要|提到)"
+    r"|(?:接下来|下一步)(?:需要|应该|先)|用户(?:要求|想要|提到|的(?:原始)?问题是)"
     r"|系统(?:提示|要求)|根据(?:用户|系统)(?:要求|提示)"
     r"|(?:需要|应该)(?:调用|使用)(?:工具|\s*file_)"
     r"|(?:调用|使用)(?:工具|\s*file_)|tool[_ -]?call"
     r"|(?:i(?:'m| am)?\s+(?:going to|need to|should|will)|let me)"
+    r"|the user's original"
+    r"|i(?:'ve| have) already (?:answered|given|provided)"
+    r"|todo_write"
     r"|first\s+(?:analyze|check|read|inspect|think)|next\s+(?:step|i\s+need)|tool\s+call)",
     re.IGNORECASE,
 )
