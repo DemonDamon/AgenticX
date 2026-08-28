@@ -99,6 +99,10 @@ export function RunGraphPanel({
   const [preferAgentView, setPreferAgentView] = useState(true);
   const [forceBody, setForceBody] = useState<InterveneRequest | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const groupId = useMemo(() => {
+    const avatarId = String(pane.avatarId || "").trim();
+    return avatarId.startsWith("group:") ? avatarId.slice("group:".length).trim() : "";
+  }, [pane.avatarId]);
 
   const runId = pane.activeGraphRunId || graphState.runId;
 
@@ -114,22 +118,45 @@ export function RunGraphPanel({
   );
 
   const refresh = useCallback(async () => {
-    if (!apiBase || !apiToken) return;
+    if (!apiBase || !apiToken || !pane.sessionId) return;
     try {
-      let rid = runId;
-      if (!rid && pane.sessionId) {
-        const runs = await listGraphRunsForSession(apiBase, apiToken, pane.sessionId);
-        rid = runs[0]?.run_id || null;
-        if (rid) setActiveGraphRunId(rid);
+      const runs = await listGraphRunsForSession(
+        apiBase,
+        apiToken,
+        pane.sessionId,
+        groupId,
+      );
+      const authorizedIds = new Set(runs.map((row) => row.run_id));
+      const rid = runId && authorizedIds.has(runId) ? runId : runs[0]?.run_id || null;
+      if (rid !== (pane.activeGraphRunId || null)) setActiveGraphRunId(rid);
+      if (!rid) {
+        useGraphRunStore.getState().resetPane(pane.id);
+        setBanner(null);
+        return;
       }
-      if (!rid) return;
-      const { run, projection } = await fetchGraphRun(apiBase, apiToken, rid);
+      const { run, projection } = await fetchGraphRun(
+        apiBase,
+        apiToken,
+        rid,
+        pane.sessionId,
+        groupId,
+      );
       applySnapshot(pane.id, run, projection);
       setBanner(null);
     } catch (err) {
       setBanner(err instanceof Error ? err.message : i18n.t("graph.loadFailed", { ns: "workspace" }));
     }
-  }, [apiBase, apiToken, applySnapshot, pane.id, pane.sessionId, runId, setActiveGraphRunId]);
+  }, [
+    apiBase,
+    apiToken,
+    applySnapshot,
+    groupId,
+    pane.activeGraphRunId,
+    pane.id,
+    pane.sessionId,
+    runId,
+    setActiveGraphRunId,
+  ]);
 
   useEffect(() => {
     void refresh();
@@ -151,7 +178,14 @@ export function RunGraphPanel({
       if (!apiBase || !apiToken || !runId) return { ok: false, warnings: [] };
       setBusy(true);
       try {
-        const res = await postGraphIntervene(apiBase, apiToken, runId, body);
+        const res = await postGraphIntervene(
+          apiBase,
+          apiToken,
+          runId,
+          body,
+          pane.sessionId,
+          groupId,
+        );
         if (res.status === 409) {
           await refresh();
           setBanner(i18n.t("graph.versionConflict", { ns: "workspace" }));
@@ -169,7 +203,7 @@ export function RunGraphPanel({
         setBusy(false);
       }
     },
-    [apiBase, apiToken, refresh, runId],
+    [apiBase, apiToken, groupId, pane.sessionId, refresh, runId],
   );
 
   const runningToolByAgent = useMemo(
