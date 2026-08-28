@@ -32,6 +32,8 @@ from agenticx.runtime.prompts.meta_agent import (
 _CHARS_PER_TOKEN = 4
 _SKILL_SUMMARY_TTL_SECONDS = 45.0
 _OCCUPANCY_CACHE_MAX = 48
+_OMITTED_INLINE_DATA = "[omitted-inline-data]"
+_INLINE_DATA_PREFIXES = ("data:", "data:image/")
 # Instruction-body chars from meta_agent.py (duties / scheduling / MCP loop).
 # Measured independently of session I/O so occupancy stays in the same band
 # without concatenating the live system prompt on every session switch.
@@ -47,6 +49,45 @@ def _chars_to_tokens(chars: int) -> int:
     if chars <= 0:
         return 0
     return max(1, chars // _CHARS_PER_TOKEN)
+
+
+def _is_inline_data_payload(value: str) -> bool:
+    text = str(value or "")
+    return text.startswith(_INLINE_DATA_PREFIXES) and len(text) > 256
+
+
+def _redact_inline_data_for_occupancy(value: Any) -> Any:
+    """Drop persisted data URLs so occupancy tracks model-facing text."""
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            if (
+                key in {"data_url", "data", "url"}
+                and isinstance(item, str)
+                and _is_inline_data_payload(item)
+            ):
+                out[key] = _OMITTED_INLINE_DATA
+            else:
+                out[key] = _redact_inline_data_for_occupancy(item)
+        return out
+    if isinstance(value, list):
+        return [_redact_inline_data_for_occupancy(item) for item in value]
+    if isinstance(value, str) and _is_inline_data_payload(value):
+        return _OMITTED_INLINE_DATA
+    return value
+
+
+def _message_chars_for_occupancy(item: Any) -> int:
+    try:
+        return len(
+            json.dumps(
+                _redact_inline_data_for_occupancy(item),
+                ensure_ascii=False,
+                default=str,
+            )
+        )
+    except Exception:
+        return len(str(item))
 
 
 def _safe_block(fn: Any, *args: Any, **kwargs: Any) -> str:
@@ -267,10 +308,7 @@ def estimate_session_context_usage(
     agent_messages = getattr(session, "agent_messages", None) or []
     messages_chars = 0
     for item in agent_messages:
-        try:
-            messages_chars += len(json.dumps(item, ensure_ascii=False, default=str))
-        except Exception:
-            messages_chars += len(str(item))
+        messages_chars += _message_chars_for_occupancy(item)
 
     hub = getattr(session, "mcp_hub", None)
     mcp_tool_chars = 0

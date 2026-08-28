@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { useAppStore } from "../store";
-import { formatHitPercent } from "../utils/cache-hit";
+import { formatHitPercent, pickUsageHit } from "../utils/cache-hit";
 import { HoverTip } from "./ds/HoverTip";
 
 interface SessionCacheUsage {
@@ -294,12 +294,16 @@ export function ContextUsageButton({
 
   const sessionTokens = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.sessionTokens);
   const visibleUsage = usage && usage.fetchedForSessionId === sessionId ? usage : null;
-  const liveHit = formatHitPercent(sessionTokens?.lastCached ?? 0, sessionTokens?.lastInput ?? 0);
-  const apiHit = formatHitPercent(
-    visibleUsage?.cache?.last_cached_tokens ?? 0,
-    visibleUsage?.cache?.last_input_tokens ?? 0
-  );
-  const lastHit = liveHit !== null ? liveHit : apiHit;
+  const liveLastInput = sessionTokens?.lastInput ?? 0;
+  const lastCached =
+    liveLastInput > 0
+      ? sessionTokens?.lastCached ?? 0
+      : visibleUsage?.cache?.last_cached_tokens ?? 0;
+  const lastInput =
+    liveLastInput > 0
+      ? liveLastInput
+      : visibleUsage?.cache?.last_input_tokens ?? 0;
+  const lastHit = formatHitPercent(lastCached, lastInput);
   const sessionInput =
     (visibleUsage?.cache?.session_input_tokens ?? 0) > 0
       ? visibleUsage?.cache?.session_input_tokens ?? 0
@@ -308,16 +312,15 @@ export function ContextUsageButton({
     (visibleUsage?.cache?.session_input_tokens ?? 0) > 0
       ? visibleUsage?.cache?.session_cached_tokens ?? 0
       : sessionTokens?.cached ?? 0;
-  const sessionHit = formatHitPercent(sessionCached, sessionInput);
-  const cardHit = sessionHit !== null ? sessionHit : lastHit;
-  const cardCached =
-    sessionHit !== null
-      ? sessionCached
-      : (sessionTokens?.lastCached ?? visibleUsage?.cache?.last_cached_tokens ?? 0);
-  const cardInput =
-    sessionHit !== null
-      ? sessionInput
-      : (sessionTokens?.lastInput ?? visibleUsage?.cache?.last_input_tokens ?? 0);
+  const pickedHit = pickUsageHit({
+    lastCached,
+    lastInput,
+    sessionCached,
+    sessionInput,
+  });
+  const cardHit = pickedHit.hit;
+  const cardCached = pickedHit.cached;
+  const cardInput = pickedHit.input;
 
   const percent = visibleUsage?.percent ?? 0;
   const hoverLabel = useMemo(() => {
@@ -400,7 +403,7 @@ export function ContextUsageButton({
                     </div>
                     <div className="min-w-0 rounded-xl bg-emerald-500/15 px-2.5 py-2 [html[data-theme=light]_&]:bg-emerald-50">
                       <div className="text-[11px] text-emerald-400 [html[data-theme=light]_&]:text-emerald-600">
-                        缓存命中率
+                        本轮缓存命中
                       </div>
                       <div className={`mt-0.5 text-2xl font-semibold tabular-nums leading-none ${hitColor}`}>
                         {cardHit === null ? "—" : `${cardHit}%`}

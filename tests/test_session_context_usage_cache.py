@@ -125,6 +125,38 @@ def test_estimate_reuses_occupancy_cache_without_rescan(monkeypatch) -> None:
     assert second["max_tokens"] == 1_000_000
 
 
+def test_estimate_ignores_inline_attachment_data_urls(monkeypatch) -> None:
+    """Occupancy must track model-facing text, not persisted image payloads."""
+    _reset_usage_caches()
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage.get_all_skill_summaries",
+        lambda bound_avatar_id=None: [],
+    )
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage._build_workspace_context_block",
+        lambda *args, **kwargs: "",
+    )
+    huge_data_url = "data:image/png;base64," + ("A" * 400_000)
+    managed = _empty_managed("sid-image")
+    managed.studio_session.agent_messages = [
+        {
+            "role": "user",
+            "content": "我加入了这个计划有什么帮助吗？",
+            "attachments": [
+                {
+                    "name": "image.png",
+                    "mime_type": "image/png",
+                    "size": 338366,
+                    "data_url": huge_data_url,
+                }
+            ],
+        }
+    ]
+    usage = estimate_session_context_usage(managed, session_id="sid-image")
+    assert usage["categories"]["messages"] < 2_000
+    assert usage["used_tokens"] < 40_000
+
+
 def test_estimate_does_not_rebuild_live_system_prompt(monkeypatch) -> None:
     _reset_usage_caches()
     monkeypatch.setattr(
