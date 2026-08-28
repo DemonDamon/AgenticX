@@ -13,26 +13,26 @@ const KNOWN_ORPHANS = [
 ] as const;
 
 describe("postgresql migration inventory", () => {
-  it("journal has exactly 48 entries and must not be renumbered", () => {
+  it("journal has exactly 49 entries and must not be renumbered", () => {
     const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
       dialect: string;
       entries: Array<{ tag: string; idx: number }>;
     };
     expect(journal.dialect).toBe("postgresql");
-    expect(journal.entries).toHaveLength(48);
-    expect(journal.entries.map((e) => e.idx)).toEqual([...Array(48).keys()]);
+    expect(journal.entries).toHaveLength(49);
+    expect(journal.entries.map((e) => e.idx)).toEqual([...Array(49).keys()]);
     expect(journal.entries.slice(-3).map((e) => e.tag)).toEqual([
-      "0046_enterprise_capability_packs",
       "0047_enterprise_user_groups",
       "0048_enterprise_user_opt_outs",
+      "0049_enterprise_collab_rooms",
     ]);
   });
 
-  it("disk has 50 SQL files including two known orphans", () => {
+  it("disk has 51 SQL files including two known orphans", () => {
     const sqlFiles = readdirSync(drizzleDir)
       .filter((f) => f.endsWith(".sql"))
       .sort();
-    expect(sqlFiles).toHaveLength(50);
+    expect(sqlFiles).toHaveLength(51);
 
     const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;

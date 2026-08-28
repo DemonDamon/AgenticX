@@ -45,6 +45,7 @@ import {
   Sun,
   Trash2,
   Languages,
+  Users,
 } from "lucide-react";
 import {
   createPortalChatHistoryClient,
@@ -386,6 +387,16 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
                 {!collapsed && t("deepResearch")}
               </Button>
             ) : null}
+            <Button
+              variant="outline"
+              onClick={() => router.push("/rooms")}
+              className={collapsed ? "" : "w-full justify-start"}
+              size={collapsed ? "icon" : "default"}
+              aria-label="协作房间"
+            >
+              <Users />
+              {!collapsed && "协作房间"}
+            </Button>
           </div>
 
           <QuotaCard collapsed={collapsed} />

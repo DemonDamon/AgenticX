@@ -337,6 +337,13 @@
       "when": 1786700000000,
       "tag": "0048_enterprise_user_opt_outs",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1786800000000,
+      "tag": "0049_enterprise_collab_rooms",
+      "breakpoints": true
     }
   ]
 }
