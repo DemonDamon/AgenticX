@@ -36,7 +36,9 @@ export function RoomMembersPanel({ roomId, currentUserId, members, onChanged }: 
         body: JSON.stringify({ user_id: target }),
       });
       const body = (await res.json()) as { error?: { message?: string } };
-      if (!res.ok) throw new Error("添加失败，请检查用户 ID 后重试");
+      if (!res.ok) {
+        throw new Error("找不到这个用户。请填写对方的登录邮箱，例如 alice2@agenticx.local");
+      }
       setUserId("");
       onChanged();
     } catch (err) {
@@ -109,7 +111,7 @@ export function RoomMembersPanel({ roomId, currentUserId, members, onChanged }: 
         <Input
           value={userId}
           onChange={(event) => setUserId(event.target.value)}
-          placeholder="输入用户 ID 添加"
+          placeholder="输入对方登录邮箱"
         />
         <Button variant="outline" className="w-full" onClick={() => void addMember()} disabled={adding}>
           {adding ? "添加中…" : "添加成员"}

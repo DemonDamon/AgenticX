@@ -39,7 +39,7 @@ export async function POST(request: Request, segmentData: { params: Params }) {
     return collabRoomBadRequest("invalid json body");
   }
   const targetId = typeof body.user_id === "string" ? body.user_id.trim() : "";
-  if (!isValidUlid(targetId)) return collabRoomBadRequest("invalid user_id");
+  if (!targetId) return collabRoomBadRequest("user_id required");
   const displayName =
     typeof body.display_name === "string" && body.display_name.trim()
       ? body.display_name.trim()

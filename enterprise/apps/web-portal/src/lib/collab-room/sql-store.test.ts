@@ -294,6 +294,58 @@ describe("SqlCollabRoomStore", () => {
     ).rejects.toBeInstanceOf(CollabRoomBadRequestError);
   });
 
+  it("addHumanMember resolves a tenant email to the real user id", async () => {
+    const inserted: unknown[][] = [];
+    const client = createFakeClient((sql, params) =>
+      authThen(sql, (inner) => {
+        if (inner.includes("from users")) {
+          return {
+            rows: [
+              {
+                id: OTHER,
+                tenant_id: TENANT,
+                email: "alice2@agenticx.local",
+                display_name: "alice2",
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        if (inner.includes("from enterprise_collab_room_members") && inner.includes("member_id")) {
+          return { rows: [], rowCount: 0 };
+        }
+        if (inner.startsWith("insert into enterprise_collab_room_members")) {
+          inserted.push(params);
+          return { rows: [], rowCount: 1 };
+        }
+        throw new Error(`unhandled sql: ${inner}`);
+      }),
+    );
+    const store = new SqlCollabRoomStore("postgresql", client);
+    const member = await store.addHumanMember(ctx, ROOM, {
+      userId: "alice2@agenticx.local",
+      displayName: "alice2@agenticx.local",
+    });
+    expect(member.member_id).toBe(OTHER);
+    expect(member.display_name).toBe("alice2");
+    expect(inserted[0]?.[4]).toBe(OTHER);
+  });
+
+  it("addHumanMember rejects an unknown email", async () => {
+    const client = createFakeClient((sql) =>
+      authThen(sql, (inner) => {
+        if (inner.includes("from users")) {
+          return { rows: [], rowCount: 0 };
+        }
+        throw new Error(`unhandled sql: ${inner}`);
+      }),
+    );
+    const store = new SqlCollabRoomStore("postgresql", client);
+    await expect(
+      store.addHumanMember(ctx, ROOM, { userId: "nobody@agenticx.local", displayName: "x" }),
+    ).rejects.toBeInstanceOf(CollabRoomBadRequestError);
+  });
+
   it("createRoom inserts owner and meta members", async () => {
     const memberTypes: string[] = [];
     const client = createFakeClient((sql, params) => {

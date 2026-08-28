@@ -252,21 +252,31 @@ export class SqlCollabRoomStore implements CollabRoomStore {
     input: { userId: string; displayName: string; role?: CollabRoomRole },
   ): Promise<CollabRoomMember> {
     await this.requireActiveMember(this.client, ctx, roomId);
-    const targetId = input.userId.trim();
-    const displayName = input.displayName.trim();
-    if (!targetId) throw new CollabRoomBadRequestError("member required");
-    if (!displayName) throw new CollabRoomBadRequestError("displayName required");
+    const target = input.userId.trim();
+    if (!target) throw new CollabRoomBadRequestError("member required");
     const role: CollabRoomRole = input.role ?? "member";
 
     const person = await this.client.query(
-      `select id, tenant_id from users
-        where id = ${this.p ? "$1" : "?"} limit 1`,
-      [targetId],
+      `select id, tenant_id, email, display_name from users
+        where tenant_id = ${this.p ? "$1" : "?"}
+          and is_deleted = ${this.p ? "$2" : "?"}
+          and deleted_at is null
+          and (id = ${this.p ? "$3" : "?"} or lower(email) = lower(${this.p ? "$4" : "?"}))
+        limit 1`,
+      [ctx.tenantId, false, target, target],
     );
     const personRow = person.rows[0];
     if (!personRow || String(personRow.tenant_id) !== ctx.tenantId) {
       throw new CollabRoomBadRequestError("member is not in this tenant");
     }
+    const resolvedId = String(personRow.id);
+    const fromDb =
+      String(personRow.display_name ?? "").trim() ||
+      String(personRow.email ?? "").trim() ||
+      resolvedId;
+    const requestedName = input.displayName.trim();
+    const displayName = requestedName && requestedName !== target ? requestedName : fromDb;
+    if (!displayName) throw new CollabRoomBadRequestError("displayName required");
 
     const existing = await this.client.query(
       `select * from enterprise_collab_room_members
@@ -274,7 +284,7 @@ export class SqlCollabRoomStore implements CollabRoomStore {
           and member_type = 'human'
           and member_id = ${this.p ? "$2" : "?"}
         limit 1`,
-      [roomId, targetId],
+      [roomId, resolvedId],
     );
     const existingRow = existing.rows[0];
     if (existingRow && existingRow.left_at == null) {
@@ -292,7 +302,7 @@ export class SqlCollabRoomStore implements CollabRoomStore {
           where room_id = ${this.p ? "$4" : "?"}
             and member_type = 'human'
             and member_id = ${this.p ? "$5" : "?"}`,
-        [displayName, role, now, roomId, targetId],
+        [displayName, role, now, roomId, resolvedId],
       );
       const refreshed = await this.client.query(
         `select * from enterprise_collab_room_members
@@ -300,7 +310,7 @@ export class SqlCollabRoomStore implements CollabRoomStore {
             and member_type = 'human'
             and member_id = ${this.p ? "$2" : "?"}
           limit 1`,
-        [roomId, targetId],
+        [roomId, resolvedId],
       );
       if (!refreshed.rows[0]) throw new CollabRoomNotFoundError();
       return mapMember(refreshed.rows[0]);
@@ -312,13 +322,13 @@ export class SqlCollabRoomStore implements CollabRoomStore {
         (id, room_id, tenant_id, member_type, member_id, display_name, room_role,
          joined_at, left_at, created_at, updated_at)
        values (${this.placeholders(11)})`,
-      [id, roomId, ctx.tenantId, "human", targetId, displayName, role, now, null, now, now],
+      [id, roomId, ctx.tenantId, "human", resolvedId, displayName, role, now, null, now, now],
     );
     return {
       id,
       room_id: roomId,
       member_type: "human",
-      member_id: targetId,
+      member_id: resolvedId,
       display_name: displayName,
       room_role: role,
       joined_at: now.toISOString(),
