@@ -1,5 +1,10 @@
 import { isValidUlid } from "../../../../../lib/chat-history";
-import { getRoom, listMessages } from "../../../../../lib/collab-room";
+import {
+  CollabRoomForbiddenError,
+  CollabRoomNotFoundError,
+  getRoom,
+  listMessages,
+} from "../../../../../lib/collab-room";
 import { formatCollabRoomEventSse } from "../../../../../lib/collab-room/events";
 import {
   collabRoomBadRequest,
@@ -81,8 +86,15 @@ export async function GET(request: Request, segmentData: { params: Params }) {
               );
               lastPingAt = Date.now();
             }
-          } catch {
-            safeEnqueue(formatCollabRoomEventSse({ type: "room_closed", reason: "gone" }));
+          } catch (error) {
+            // 只有「确实不再是成员」才播 gone；其它故障（连接抖动等）静默收流，
+            // 让客户端按连接中断退回轮询，而不是误报「你已被移出该房间」。
+            if (
+              error instanceof CollabRoomForbiddenError ||
+              error instanceof CollabRoomNotFoundError
+            ) {
+              safeEnqueue(formatCollabRoomEventSse({ type: "room_closed", reason: "gone" }));
+            }
             break;
           }
 

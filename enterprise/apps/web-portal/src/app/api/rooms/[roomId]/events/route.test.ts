@@ -167,6 +167,25 @@ describe("GET /api/rooms/:id/events", () => {
     expect(frames).toContain('"reason":"gone"');
   });
 
+  it("does not claim revocation when the store fails for other reasons", async () => {
+    vi.mocked(getSessionFromCookies).mockResolvedValueOnce(session);
+    vi.mocked(getRoom).mockResolvedValueOnce({
+      id: ROOM,
+      tenant_id: session.tenantId,
+      title: "房",
+      created_by: session.userId,
+      member_count: 1,
+      last_seq: 0,
+      created_at: "2026-08-28T00:00:00.000Z",
+      updated_at: "2026-08-28T00:00:00.000Z",
+    });
+    vi.mocked(listMessages).mockRejectedValue(new Error("connection reset"));
+    const res = await GET(new Request(`http://localhost/api/rooms/${ROOM}/events`), params());
+    const frames = await readFrames(res, 2);
+    expect(frames).toContain("event: room_cursor");
+    expect(frames).not.toContain('"reason":"gone"');
+  });
+
   it("stops polling after client abort", async () => {
     vi.mocked(getSessionFromCookies).mockResolvedValueOnce(session);
     vi.mocked(getRoom).mockResolvedValueOnce({
