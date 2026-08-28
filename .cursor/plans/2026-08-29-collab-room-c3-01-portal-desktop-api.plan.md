@@ -3,7 +3,7 @@
 Planned-with: claude-opus-5
 Suggested-Impl-Model: 代码专精中档（如 Codex 系列）
 
-**父规划：** `.cursor/plans/pending/2026-08-29-collab-room-c3-master.plan.md`
+**父规划：** `.cursor/plans/2026-08-29-collab-room-c3-master.plan.md`
 
 **Goal:** 给 Near 桌面端一套用企业 PAT 鉴权的房间接口，读写的是 C1 那张表、那一份 store。桌面端与浏览器的差别只在「怎么证明你是谁」，不在「房间数据在哪」。
 
