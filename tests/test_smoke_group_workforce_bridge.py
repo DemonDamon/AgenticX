@@ -431,7 +431,8 @@ class TestRoutingDispatch:
         """Broadcast questions like '群里谁能…' should be answered by Machi, not single-routed to a member."""
         router = _make_router()
         analyze_called = False
-        meta_called = False
+        runtime_called = False
+        pm_called = False
 
         async def stub_analyze_intent(**kwargs):
             nonlocal analyze_called
@@ -440,14 +441,28 @@ class TestRoutingDispatch:
             return IntentDecision(action="route_to", target_ids=["av1"], reason="stub")
 
         async def stub_meta_pm(**kwargs):
-            nonlocal meta_called
-            meta_called = True
+            nonlocal pm_called
+            pm_called = True
             return GroupReply(
-                "__meta__", "Machi", "", "Machi 答", False, event_type="group_reply"
+                "__meta__", "Machi", "", "text-pm", False, event_type="group_reply"
+            )
+
+        async def stub_one_target_stream(**kwargs):
+            nonlocal runtime_called
+            if kwargs.get("avatar_id") == "__meta__":
+                runtime_called = True
+            yield GroupReply(
+                kwargs.get("avatar_id", "__meta__"),
+                "Machi",
+                "",
+                "Machi 答",
+                False,
+                event_type="group_reply",
             )
 
         router._analyze_intent = stub_analyze_intent  # type: ignore[assignment]
         router._run_meta_project_manager_reply = stub_meta_pm  # type: ignore[assignment]
+        router._run_one_target_stream = stub_one_target_stream  # type: ignore[assignment]
 
         session = _make_session()
         replies = []
@@ -464,7 +479,8 @@ class TestRoutingDispatch:
         ):
             replies.append(r)
 
-        assert meta_called, "Open-call question should route to Machi (meta PM)"
+        assert runtime_called, "Open-call question should route to Near runtime"
+        assert not pm_called, "Open-call Near reply must not use text-only PM"
         assert not analyze_called, (
             "Open-call detector must run BEFORE _analyze_intent; "
             "otherwise we'd silently single-target a member."

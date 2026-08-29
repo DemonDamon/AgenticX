@@ -36,7 +36,6 @@ from agenticx.runtime.group_facts import (
 )
 from agenticx.runtime.harden_flags import (
     group_intent_max_tokens,
-    group_meta_direct_tools_enabled,
     group_meta_reply_max_tokens,
     group_open_floor_enabled,
     group_open_floor_max_speakers,
@@ -1910,20 +1909,29 @@ class GroupChatRouter:
             yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
             if await self._should_stop(should_stop):
                 return
-            pm = await self._run_meta_project_manager_reply(
+            pm = None
+            async for pm_evt in self._run_one_target_stream(
                 base_session=base_session,
                 context=context,
+                group_id=group_id,
                 group_name=group_name,
+                avatar_id=META_LEADER_AGENT_ID,
                 user_input=user_input,
                 quoted_content=quoted_content,
+                should_stop=should_stop,
+                force_reply=True,
+                user_display_name=user_display_name,
                 extra_instruction=(
                     "用户在群里发起的是开放性提问（『群里谁能…』『哪位…』），请你以项目经理身份"
                     "**直接给出一句到三句话的核心答案**；如确实存在某位成员更适合补充细节，"
                     "可在结尾追加一行『需要 XX 的细节可以问 @某某』，不要把主答交给成员。"
                 ),
-                user_display_name=user_display_name,
-            )
-            yield pm
+            ):
+                yield pm_evt
+                if pm_evt.event_type in {"group_reply", "group_skipped"}:
+                    pm = pm_evt
+            if pm is None:
+                return
             self._record_turn_response(responded_this_turn, pm)
             async for fu in self._emit_mention_follow_ups(
                 reply=pm,
@@ -2025,48 +2033,36 @@ class GroupChatRouter:
                     + extra_instruction
                 )
             must_execute = bool(decision.requires_execution)
-            use_runtime = must_execute or group_meta_direct_tools_enabled()
-            if use_runtime:
-                pm = None
-                async for pm_evt in self._run_one_target_stream(
-                    base_session=base_session,
-                    context=context,
-                    group_id=group_id,
-                    group_name=group_name,
-                    avatar_id=META_LEADER_AGENT_ID,
-                    user_input=user_input,
-                    quoted_content=quoted_content,
-                    should_stop=should_stop,
-                    force_reply=True,
-                    user_display_name=user_display_name,
-                    extra_instruction=(
-                        _EXECUTION_TURN_INSTRUCTION if must_execute else ""
-                    ),
-                ):
-                    if (
-                        zero_exec_progress
-                        and pm_evt.event_type in {"group_reply", "group_skipped"}
-                    ):
-                        pm_evt = _append_zero_exec_fallback(pm_evt, facts)
-                    yield pm_evt
-                    if pm_evt.event_type in {"group_reply", "group_skipped"}:
-                        pm = pm_evt
-                if pm is None:
-                    return
-            else:
-                pm = await self._run_meta_project_manager_reply(
-                    base_session=base_session,
-                    context=context,
-                    group_name=group_name,
-                    user_input=user_input,
-                    quoted_content=quoted_content,
-                    extra_instruction=extra_instruction,
-                    user_display_name=user_display_name,
-                    facts=facts,
+            if must_execute:
+                extra_instruction = (
+                    f"{extra_instruction}\n{_EXECUTION_TURN_INSTRUCTION}"
+                    if extra_instruction.strip()
+                    else _EXECUTION_TURN_INSTRUCTION
                 )
-                if zero_exec_progress:
-                    pm = _append_zero_exec_fallback(pm, facts)
-                yield pm
+            pm = None
+            async for pm_evt in self._run_one_target_stream(
+                base_session=base_session,
+                context=context,
+                group_id=group_id,
+                group_name=group_name,
+                avatar_id=META_LEADER_AGENT_ID,
+                user_input=user_input,
+                quoted_content=quoted_content,
+                should_stop=should_stop,
+                force_reply=True,
+                user_display_name=user_display_name,
+                extra_instruction=extra_instruction,
+            ):
+                if (
+                    zero_exec_progress
+                    and pm_evt.event_type in {"group_reply", "group_skipped"}
+                ):
+                    pm_evt = _append_zero_exec_fallback(pm_evt, facts)
+                yield pm_evt
+                if pm_evt.event_type in {"group_reply", "group_skipped"}:
+                    pm = pm_evt
+            if pm is None:
+                return
             self._record_turn_response(responded_this_turn, pm)
             async for fu in self._emit_mention_follow_ups(
                 reply=pm,

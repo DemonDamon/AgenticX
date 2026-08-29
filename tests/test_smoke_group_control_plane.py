@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Smoke tests: group-chat floor control, short-reply contract, evidence gate.
 
-钉住控制室发言权：单人专业答、执行型 Near 走 runtime、静默 skip、
+钉住控制室发言权：单人专业答、未 @ / 执行型 Near 主答走 runtime、静默 skip、
 无公开催人、无证据不得声称完成。
 
 Author: Damon Li
@@ -303,13 +303,7 @@ async def test_open_floor_still_allows_two_candidates() -> None:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_execution_meta_direct_uses_runtime_when_flag_off(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "agenticx.runtime.group_router.group_meta_direct_tools_enabled",
-        lambda: False,
-    )
+async def test_execution_meta_direct_uses_runtime() -> None:
     router = _make_router_with_spies(["a1", "a2"])
     stream_order: list[str] = []
     extra_instructions: list[str] = []
@@ -339,51 +333,28 @@ async def test_execution_meta_direct_uses_runtime_when_flag_off(
 
 
 @pytest.mark.asyncio
-async def test_casual_meta_direct_still_uses_pm_when_flag_off(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "agenticx.runtime.group_router.group_meta_direct_tools_enabled",
-        lambda: False,
-    )
+async def test_casual_meta_direct_uses_runtime() -> None:
     router = _make_router_with_spies(["a1", "a2"])
     stream_order: list[str] = []
     extra_instructions: list[str] = []
-    _install_turn_stubs(
-        router,
-        decision=IntentDecision("meta_direct", [], "pm"),
-        stream_by_id={},
-        meta_reply=_reply(META_LEADER_AGENT_ID, "这是概念解释。"),
-        stream_order=stream_order,
-        extra_instructions=extra_instructions,
-    )
-    events = await _collect_turn(router, avatar_ids=["a1", "a2"])
-    assert stream_order == []
-    assert extra_instructions
-    replies = [e for e in events if e.event_type == "group_reply"]
-    assert replies[-1].content == "这是概念解释。"
-
-
-@pytest.mark.asyncio
-async def test_meta_direct_tools_flag_still_uses_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "agenticx.runtime.group_router.group_meta_direct_tools_enabled",
-        lambda: True,
-    )
-    router = _make_router_with_spies(["a1", "a2"])
-    stream_order: list[str] = []
+    stream_kwargs: list[dict] = []
     _install_turn_stubs(
         router,
         decision=IntentDecision("meta_direct", [], "pm"),
         stream_by_id={
-            META_LEADER_AGENT_ID: _reply(META_LEADER_AGENT_ID, "我来答。"),
+            META_LEADER_AGENT_ID: _reply(META_LEADER_AGENT_ID, "这是概念解释。"),
         },
         stream_order=stream_order,
+        extra_instructions=extra_instructions,
+        stream_kwargs=stream_kwargs,
     )
-    await _collect_turn(router, avatar_ids=["a1", "a2"])
+    events = await _collect_turn(router, avatar_ids=["a1", "a2"])
     assert stream_order == [META_LEADER_AGENT_ID]
+    assert extra_instructions == []
+    assert stream_kwargs
+    assert "项目经理" in str(stream_kwargs[0].get("extra_instruction") or "")
+    replies = [e for e in events if e.event_type == "group_reply"]
+    assert replies[-1].content == "这是概念解释。"
 
 
 # ---------------------------------------------------------------------------
