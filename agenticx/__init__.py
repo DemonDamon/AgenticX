@@ -41,7 +41,11 @@ from ._version import __version__
 __author__ = "Ziran Li"
 __email__ = "bingzhenli@hotmail.com"
 
-_IS_CLI_BOOTSTRAP = _Path(_sys.argv[0]).name in {"agx", "agenticx"}
+# Bundled Desktop entry is `agx-server` / `agx-server.exe`, not `agx`.
+# Treating it as a library import pulls GraphRAG / Neo4j / observability into
+# every cold start and is what surfaces "pip install neo4j" in the splash dialog.
+CLI_BOOTSTRAP_NAMES = frozenset({"agx", "agenticx", "agx-server", "agx-server.exe"})
+_IS_CLI_BOOTSTRAP = _Path(_sys.argv[0]).name in CLI_BOOTSTRAP_NAMES
 
 if not _IS_CLI_BOOTSTRAP:
     # 核心模块导出
@@ -188,7 +192,7 @@ if not _IS_CLI_BOOTSTRAP:
 # 主要类列表
 __all__ = [
     # 版本信息
-    "__version__", "__author__", "__email__",
+    "__version__", "__author__", "__email__", "CLI_BOOTSTRAP_NAMES",
     
     # 核心类
     "Agent", "Task", "BaseTool", "tool", "Workflow", "WorkflowNode", "WorkflowEdge",

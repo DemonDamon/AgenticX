@@ -54,19 +54,21 @@ class GroupChatContext:
         sender_name: str = "我",
         quoted_message_id: str = "",
         quoted_content: str = "",
+        attachments: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         label = str(sender_name or "").strip() or "我"
-        self._history().append(
-            {
-                "role": "user",
-                "content": str(text or ""),
-                "sender_id": "user",
-                "sender_name": label,
-                "agent_id": "user",
-                "quoted_message_id": str(quoted_message_id or ""),
-                "quoted_content": str(quoted_content or ""),
-            }
-        )
+        row: dict[str, Any] = {
+            "role": "user",
+            "content": str(text or ""),
+            "sender_id": "user",
+            "sender_name": label,
+            "agent_id": "user",
+            "quoted_message_id": str(quoted_message_id or ""),
+            "quoted_content": str(quoted_content or ""),
+        }
+        if attachments:
+            row["attachments"] = [dict(item) for item in attachments]
+        self._history().append(row)
 
     def append_agent(
         self,

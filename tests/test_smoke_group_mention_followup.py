@@ -142,7 +142,8 @@ async def test_near_meta_direct_at_member_starts_followup() -> None:
     async def _stub_stream(**kwargs):
         aid = str(kwargs.get("avatar_id") or "")
         stream_order.append(aid)
-        yield _reply(aid, "相关行已贴出。")
+        content = NEAR_ASSIGNMENT if aid == META_LEADER_AGENT_ID else "相关行已贴出。"
+        yield _reply(aid, content)
 
     async def _stub_meta(**kwargs):
         return GroupReply(

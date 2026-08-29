@@ -23,23 +23,54 @@ echo "=== Building Machi ($ARCH) ==="
 
 copy_arm64() {
   mkdir -p "$DESKTOP_DIR/bundled-backend/arm64"
-  cp "$SCRIPT_DIR/dist/arm64/agx-server" "$DESKTOP_DIR/bundled-backend/arm64/agx-server"
+  # onedir: 可执行 + _internal/ 一起平铺
+  cp -R "$SCRIPT_DIR/dist/arm64/agx-server/." "$DESKTOP_DIR/bundled-backend/arm64/"
   chmod +x "$DESKTOP_DIR/bundled-backend/arm64/agx-server"
 }
 
 copy_x64() {
   mkdir -p "$DESKTOP_DIR/bundled-backend/x64"
-  cp "$SCRIPT_DIR/dist/x64/agx-server" "$DESKTOP_DIR/bundled-backend/x64/agx-server"
+  cp -R "$SCRIPT_DIR/dist/x64/agx-server/." "$DESKTOP_DIR/bundled-backend/x64/"
   chmod +x "$DESKTOP_DIR/bundled-backend/x64/agx-server"
 }
 
+# 合并双侧 Mach-O（_internal 里的 .dylib/.so 分架构），非 Mach-O 保留基底侧。
+_merge_universal_file() {
+  local base="$1" other="$2"
+  local archs_base archs_other
+  archs_base="$(lipo -archs "$base" 2>/dev/null || true)"
+  archs_other="$(lipo -archs "$other" 2>/dev/null || true)"
+  [[ -z "$archs_base" || -z "$archs_other" ]] && return 2  # 非 Mach-O，保留 base
+  for arch in $archs_other; do
+    [[ " $archs_base " == *" $arch "* ]] && return 2  # 架构已包含，跳过
+  done
+  lipo -create "$base" "$other" -output "$base.universal" 2>/dev/null \
+    && mv "$base.universal" "$base" \
+    || rm -f "$base.universal"
+}
+
 copy_universal() {
-  mkdir -p "$DESKTOP_DIR/bundled-backend/universal"
+  local dst="$DESKTOP_DIR/bundled-backend/universal"
+  local a_int="$SCRIPT_DIR/dist/arm64/agx-server/_internal"
+  local x_int="$SCRIPT_DIR/dist/x64/agx-server/_internal"
+  mkdir -p "$dst"
   lipo -create \
-    "$SCRIPT_DIR/dist/arm64/agx-server" \
-    "$SCRIPT_DIR/dist/x64/agx-server" \
-    -output "$DESKTOP_DIR/bundled-backend/universal/agx-server"
-  chmod +x "$DESKTOP_DIR/bundled-backend/universal/agx-server"
+    "$SCRIPT_DIR/dist/arm64/agx-server/agx-server" \
+    "$SCRIPT_DIR/dist/x64/agx-server/agx-server" \
+    -output "$dst/agx-server"
+  chmod +x "$dst/agx-server"
+  # _internal 基底用 arm64 侧，再从 x64 侧补齐/合并
+  cp -R "$a_int/." "$dst/_internal/"
+  while IFS= read -r -d '' rel; do
+    local base="$dst/_internal/$rel"
+    local other="$x_int/$rel"
+    if [[ ! -f "$base" ]]; then
+      mkdir -p "$(dirname "$base")"
+      cp "$other" "$base"
+    else
+      _merge_universal_file "$base" "$other"
+    fi
+  done < <(cd "$x_int" && find . -type f ! -name '.DS_Store' -print0)
 }
 
 if [[ -z "$SKIP_BACKEND" ]]; then
@@ -62,20 +93,20 @@ if [[ -z "$SKIP_BACKEND" ]]; then
 else
   echo "--- Step 1: Skipping backend build (SKIP_BACKEND=1) ---"
   if [[ "$ARCH" == "universal" ]]; then
-    if [[ ! -f "$SCRIPT_DIR/dist/arm64/agx-server" || ! -f "$SCRIPT_DIR/dist/x64/agx-server" ]]; then
-      echo "✗ Need packaging/dist/arm64 and x64/agx-server when using SKIP_BACKEND with universal"
+    if [[ ! -f "$SCRIPT_DIR/dist/arm64/agx-server/agx-server" || ! -f "$SCRIPT_DIR/dist/x64/agx-server/agx-server" ]]; then
+      echo "✗ Need packaging/dist/{arm64,x64}/agx-server/agx-server when using SKIP_BACKEND with universal"
       exit 1
     fi
     copy_universal
   elif [[ "$ARCH" == "arm64" ]]; then
-    if [[ ! -f "$SCRIPT_DIR/dist/arm64/agx-server" ]]; then
-      echo "✗ Missing packaging/dist/arm64/agx-server"
+    if [[ ! -f "$SCRIPT_DIR/dist/arm64/agx-server/agx-server" ]]; then
+      echo "✗ Missing packaging/dist/arm64/agx-server/agx-server"
       exit 1
     fi
     copy_arm64
   else
-    if [[ ! -f "$SCRIPT_DIR/dist/x64/agx-server" ]]; then
-      echo "✗ Missing packaging/dist/x64/agx-server"
+    if [[ ! -f "$SCRIPT_DIR/dist/x64/agx-server/agx-server" ]]; then
+      echo "✗ Missing packaging/dist/x64/agx-server/agx-server"
       exit 1
     fi
     copy_x64

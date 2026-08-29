@@ -38,13 +38,6 @@ from .optimizer import GraphOptimizer
 # 构建器
 from .builder import KnowledgeGraphBuilder
 
-# Neo4j导出器
-try:
-    from .neo4j_exporter import Neo4jExporter, Neo4jExporterContext
-    NEO4J_AVAILABLE = True
-except ImportError:
-    NEO4J_AVAILABLE = False
-
 __all__ = [
     # 数据模型
     'EntityType',
@@ -73,11 +66,23 @@ __all__ = [
     
     # 构建器
     'KnowledgeGraphBuilder',
-    
-    # Neo4j支持
-    'NEO4J_AVAILABLE'
+
+    # Neo4j is optional and must not be imported during package init.
+    'NEO4J_AVAILABLE',
+    'Neo4jExporter',
+    'Neo4jExporterContext',
 ]
 
-# 条件导出Neo4j功能
-if NEO4J_AVAILABLE:
-    __all__.extend(['Neo4jExporter', 'Neo4jExporterContext'])
+
+def __getattr__(name: str):
+    if name == "NEO4J_AVAILABLE":
+        try:
+            from . import neo4j_exporter
+        except ImportError:
+            return False
+        return bool(getattr(neo4j_exporter, "NEO4J_AVAILABLE", False))
+    if name in {"Neo4jExporter", "Neo4jExporterContext"}:
+        from .neo4j_exporter import Neo4jExporter, Neo4jExporterContext
+
+        return Neo4jExporter if name == "Neo4jExporter" else Neo4jExporterContext
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

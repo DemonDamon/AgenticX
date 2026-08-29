@@ -28,6 +28,15 @@ def test_zhipu_text_only_glm_skus_are_not_vision_capable() -> None:
     assert is_vision_capable("zhipu", "glm-4.6") is False
     assert is_vision_capable("zhipu", "glm-4-plus") is False
     assert is_vision_capable("zhipu", "glm-5") is False
+    assert is_vision_capable("zhipu", "glm-5.2") is False
+
+
+def test_zhipu_glm53_flash_is_vision_capable() -> None:
+    assert is_vision_capable("zhipu", "glm-5.3-flash") is True
+    assert is_vision_capable("zhipu", "GLM-5.3-Flash") is True
+    assert is_vision_capable("zhipu", "openai/glm-5.3-flash") is True
+    assert is_vision_capable("custom_openai_x", "glm-5.3-flash") is True
+    assert is_vision_capable("zhipu", "glm-5.3") is True
 
 
 def test_known_text_only_skus_are_not_vision_capable_across_providers() -> None:

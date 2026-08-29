@@ -158,7 +158,9 @@ print("desktop-runtime dependency import check passed")
     }
 }
 
-$ExePath = Join-Path $DistArchDir 'agx-server.exe'
+# onedir 产物：dist\win-amd64\agx-server\agx-server.exe + agx-server\_internal\
+$OnedirDir = Join-Path $DistArchDir 'agx-server'
+$ExePath = Join-Path $OnedirDir 'agx-server.exe'
 $HaveCachedBackend = Test-Path $ExePath
 
 if (-not $SkipPyInstaller) {
@@ -175,6 +177,9 @@ if (-not $SkipPyInstaller) {
 
     New-Item -ItemType Directory -Force -Path $DistArchDir | Out-Null
     New-Item -ItemType Directory -Force -Path $WorkArchDir | Out-Null
+    # 清理旧产物：onefile 时代的单文件 agx-server.exe 与 onedir 目录同名冲突
+    if (Test-Path $OnedirDir) { Remove-Item -Recurse -Force $OnedirDir }
+    if (Test-Path (Join-Path $DistArchDir 'agx-server.exe')) { Remove-Item -Force (Join-Path $DistArchDir 'agx-server.exe') }
 
     Push-Location $PyDir
     try {
@@ -189,6 +194,9 @@ if (-not $SkipPyInstaller) {
 
     if (-not (Test-Path $ExePath)) {
         Write-Error "Expected agx-server.exe not found: $ExePath"
+    }
+    if (-not (Test-Path (Join-Path $OnedirDir '_internal'))) {
+        Write-Error "Expected onedir _internal\ not found: $(Join-Path $OnedirDir '_internal')"
     }
 }
 else {
@@ -252,7 +260,11 @@ if (-not (Test-Path $SidecarExe)) {
 
 Write-Host '--- Step 3: Stage desktop/bundled-backend/win-amd64 ---'
 New-Item -ItemType Directory -Force -Path $BundledDir | Out-Null
-Copy-Item -Path $ExePath -Destination (Join-Path $BundledDir 'agx-server.exe') -Force
+# onedir staging: 把 agx-server.exe + _internal\ 平铺进 bundled-backend\win-amd64\
+Copy-Item -Path (Join-Path $OnedirDir '*') -Destination $BundledDir -Recurse -Force
+if (-not (Test-Path (Join-Path $BundledDir '_internal'))) {
+    Write-Error "Staging incomplete: $BundledDir\_internal missing after Copy-Item"
+}
 Copy-Item -Path $SidecarExe -Destination (Join-Path $BundledDir 'agx-wechat-sidecar.exe') -Force
 
 Write-Host '--- Step 4: npm ci + desktop build ---'

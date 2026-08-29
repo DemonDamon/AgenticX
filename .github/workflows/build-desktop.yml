@@ -76,7 +76,8 @@ jobs:
       - name: Stage bundled backend (arm64 / x64)
         run: |
           mkdir -p "desktop/bundled-backend/${{ matrix.arch }}"
-          cp "packaging/dist/${{ matrix.arch }}/agx-server" "desktop/bundled-backend/${{ matrix.arch }}/agx-server"
+          # onedir: 复制整个目录内容（agx-server 可执行 + _internal/）
+          cp -R "packaging/dist/${{ matrix.arch }}/agx-server/." "desktop/bundled-backend/${{ matrix.arch }}/"
           chmod +x "desktop/bundled-backend/${{ matrix.arch }}/agx-server"
           cp "packaging/wechat-sidecar/agx-wechat-sidecar" "desktop/bundled-backend/${{ matrix.arch }}/agx-wechat-sidecar"
           chmod +x "desktop/bundled-backend/${{ matrix.arch }}/agx-wechat-sidecar"
@@ -111,6 +112,7 @@ jobs:
           APP_DIR="release/mac-${{ matrix.arch }}/Near.app/Contents/Resources/backend"
           test -x "${APP_DIR}/agx-server"
           test -x "${APP_DIR}/agx-wechat-sidecar"
+          test -d "${APP_DIR}/_internal"
           echo "Verified backend binaries in ${APP_DIR}:"
           ls -l "${APP_DIR}"
 
@@ -163,8 +165,10 @@ jobs:
         run: |
           $be = "desktop/release/win-unpacked/resources/backend/agx-server.exe"
           $wx = "desktop/release/win-unpacked/resources/backend/agx-wechat-sidecar.exe"
+          $it = "desktop/release/win-unpacked/resources/backend/_internal"
           if (-not (Test-Path $be)) { throw "missing $be" }
           if (-not (Test-Path $wx)) { throw "missing $wx" }
+          if (-not (Test-Path $it)) { throw "missing $it" }
           Get-ChildItem "desktop/release/win-unpacked/resources/backend"
 
       - name: Upload artifacts
@@ -212,7 +216,8 @@ jobs:
       - name: Stage bundled backend
         run: |
           mkdir -p "desktop/bundled-backend/${{ env.ARCH }}"
-          cp "packaging/dist/${{ env.ARCH }}/agx-server" "desktop/bundled-backend/${{ env.ARCH }}/agx-server"
+          # onedir: 复制整个目录内容（agx-server 可执行 + _internal/）
+          cp -R "packaging/dist/${{ env.ARCH }}/agx-server/." "desktop/bundled-backend/${{ env.ARCH }}/"
           chmod +x "desktop/bundled-backend/${{ env.ARCH }}/agx-server"
           cp "packaging/wechat-sidecar/agx-wechat-sidecar" "desktop/bundled-backend/${{ env.ARCH }}/agx-wechat-sidecar"
           chmod +x "desktop/bundled-backend/${{ env.ARCH }}/agx-wechat-sidecar"
@@ -258,6 +263,7 @@ jobs:
           APP_DIR="release/mac-${{ env.ARCH }}/Near.app/Contents/Resources/backend"
           test -x "${APP_DIR}/agx-server"
           test -x "${APP_DIR}/agx-wechat-sidecar"
+          test -d "${APP_DIR}/_internal"
           echo "Verified backend binaries in ${APP_DIR}:"
           ls -l "${APP_DIR}"
 
@@ -310,8 +316,10 @@ jobs:
         run: |
           $be = "desktop/release/win-unpacked/resources/backend/agx-server.exe"
           $wx = "desktop/release/win-unpacked/resources/backend/agx-wechat-sidecar.exe"
+          $it = "desktop/release/win-unpacked/resources/backend/_internal"
           if (-not (Test-Path $be)) { throw "missing $be" }
           if (-not (Test-Path $wx)) { throw "missing $wx" }
+          if (-not (Test-Path $it)) { throw "missing $it" }
           Get-ChildItem "desktop/release/win-unpacked/resources/backend"
 
       - name: Upload artifacts
