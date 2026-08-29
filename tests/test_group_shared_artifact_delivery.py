@@ -32,6 +32,11 @@ from agenticx.runtime.group_router import (
 from agenticx.studio.session_manager import ManagedSession, SessionManager
 from agenticx.workspace.loader import ensure_group_workspace
 
+TINY_PNG = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
 
 def _patch_agenticx_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     home = tmp_path / ".agenticx"
@@ -362,6 +367,26 @@ def test_append_agent_attachments_match_session_schema() -> None:
     assert "attachments" not in session.chat_history[-1]
 
 
+def test_append_user_persists_image_attachments() -> None:
+    session = SimpleNamespace(chat_history=[], scratchpad={})
+    context = GroupChatContext(session)
+    context.append_user(
+        "看这张图",
+        attachments=[
+            {
+                "name": "image.png",
+                "mime_type": "image/png",
+                "size": 12,
+                "data_url": TINY_PNG,
+            }
+        ],
+    )
+    assert session.chat_history[-1]["attachments"][0]["data_url"].startswith("data:image/")
+    assert session.chat_history[-1]["attachments"][0]["name"] == "image.png"
+    context.append_user("纯文字")
+    assert "attachments" not in session.chat_history[-1]
+
+
 def test_sse_payload_includes_artifacts() -> None:
     reply = GroupReply(
         agent_id="a1",
@@ -427,6 +452,157 @@ async def test_member_prompt_mentions_shared_workspace(
     assert "群共享工作区" in captured[0]
     assert str(root) in captured[0]
     assert "不要伪造路径" in captured[0]
+
+
+@pytest.mark.asyncio
+async def test_run_one_target_forwards_vision_blocks_and_attachments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _CapturingRuntime:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def run_turn(self, *args, **kwargs):
+            captured.update(kwargs)
+            yield SimpleNamespace(type=EventType.FINAL.value, data={"text": "看到图了。"})
+
+    monkeypatch.setattr("agenticx.runtime.group_router.AgentRuntime", _CapturingRuntime)
+    router = _make_router()
+    root = tmp_path / "ws"
+    root.mkdir()
+    session = _session_with_workspace(root)
+    session.provider_name = "openai"
+    session.model_name = "gpt-4o"
+    session.scratchpad = {
+        "__group_turn_image_inputs__": [
+            {"name": "image.png", "data_url": TINY_PNG, "mime_type": "image/png", "size": 70}
+        ],
+        "__group_turn_history_attachments__": [
+            {"name": "image.png", "mime_type": "image/png", "size": 70, "data_url": TINY_PNG}
+        ],
+    }
+    await router._run_one_target(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_id="g1",
+        group_name="Room",
+        avatar_id="a1",
+        user_input="看图",
+        quoted_content="",
+        should_stop=lambda: False,
+        force_reply=True,
+    )
+    content = captured.get("user_message_content")
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text"
+    assert content[0]["text"] == "看图"
+    image_blocks = [block for block in content if block.get("type") == "image_url"]
+    assert image_blocks
+    assert image_blocks[0]["image_url"]["url"] == TINY_PNG
+    history = captured.get("history_user_attachments")
+    assert isinstance(history, list)
+    assert history[0]["data_url"] == TINY_PNG
+
+
+@pytest.mark.asyncio
+async def test_run_one_target_non_vision_member_skips_image_blocks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _CapturingRuntime:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def run_turn(self, *args, **kwargs):
+            captured.update(kwargs)
+            yield SimpleNamespace(type=EventType.FINAL.value, data={"text": "纯文本。"})
+
+    monkeypatch.setattr("agenticx.runtime.group_router.AgentRuntime", _CapturingRuntime)
+    router = _make_router()
+    router.avatar_registry.get_avatar.return_value.default_model = "glm-5"
+    root = tmp_path / "ws"
+    root.mkdir()
+    session = _session_with_workspace(root)
+    session.scratchpad = {
+        "__group_turn_image_inputs__": [
+            {"name": "image.png", "data_url": TINY_PNG, "mime_type": "image/png", "size": 70}
+        ],
+        "__group_turn_history_attachments__": [
+            {"name": "image.png", "mime_type": "image/png", "size": 70, "data_url": TINY_PNG}
+        ],
+    }
+    await router._run_one_target(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_id="g1",
+        group_name="Room",
+        avatar_id="a1",
+        user_input="看图",
+        quoted_content="",
+        should_stop=lambda: False,
+        force_reply=True,
+    )
+    assert captured.get("user_message_content") is None
+    history = captured.get("history_user_attachments")
+    assert isinstance(history, list)
+    assert history[0]["data_url"] == TINY_PNG
+
+
+@pytest.mark.asyncio
+async def test_run_group_turn_persists_user_image_attachments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _CapturingRuntime:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def run_turn(self, *args, **kwargs):
+            yield SimpleNamespace(type=EventType.FINAL.value, data={"text": "看到图了。"})
+
+    monkeypatch.setattr("agenticx.runtime.group_router.AgentRuntime", _CapturingRuntime)
+    router = _make_router()
+    root = tmp_path / "ws"
+    root.mkdir()
+    session = _session_with_workspace(root)
+    session.provider_name = "openai"
+    session.model_name = "gpt-4o"
+    image = {
+        "name": "image.png",
+        "data_url": TINY_PNG,
+        "mime_type": "image/png",
+        "size": 70,
+    }
+    history = {
+        "name": "image.png",
+        "mime_type": "image/png",
+        "size": 70,
+        "data_url": TINY_PNG,
+    }
+    async for _ in router.run_group_turn(
+        base_session=session,
+        group_id="g1",
+        group_name="Room",
+        routing="user-directed",
+        group_avatar_ids=["a1"],
+        mentioned_avatar_ids=["a1"],
+        user_input="看图",
+        quoted_content="",
+        should_stop=lambda: False,
+        image_inputs=[image],
+        history_image_attachments=[history],
+    ):
+        pass
+    user_rows = [row for row in session.chat_history if row.get("role") == "user"]
+    assert user_rows
+    assert user_rows[0]["attachments"][0]["data_url"] == TINY_PNG
+    assert "__group_turn_image_inputs__" not in session.scratchpad
+    assert "__group_turn_history_attachments__" not in session.scratchpad
 
 
 def test_ensure_group_workspace_is_stable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

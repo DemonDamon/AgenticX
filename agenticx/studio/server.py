@@ -3220,6 +3220,8 @@ def create_studio_app() -> FastAPI:
                         quoted_message_id=quoted_message_id,
                         should_stop=lambda: manager.should_interrupt(payload.session_id),
                         user_display_name=u_display,
+                        image_inputs=image_inputs,
+                        history_image_attachments=history_image_attachments,
                     ):
                         evt_type = str(getattr(reply, "event_type", "") or "")
                         if not evt_type:

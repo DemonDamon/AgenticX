@@ -21,6 +21,7 @@ _log = logging.getLogger(__name__)
 from agenticx.avatar.registry import AvatarRegistry
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio import StudioSession
+from agenticx.llms.vision import is_vision_capable
 from agenticx.runtime import AgentRuntime
 from agenticx.runtime import AsyncClarifyGate, AsyncConfirmGate, ConfirmGate
 from agenticx.runtime.events import EventType
@@ -60,6 +61,58 @@ _GROUP_CONTROL_PLANE_CONTRACT = (
     "- 长代码、长报告、详细表格优先写入群工作区，最终只给摘要和产物；用户明确要求全文贴群时例外。\n"
     "- FINAL 表示本轮结束，禁止以“稍等 / 等我回复 / 我去处理”作为 FINAL。\n"
 )
+
+
+def _attachments_from_image_inputs(
+    items: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for im in items or []:
+        if not isinstance(im, Mapping):
+            continue
+        data_url = str(im.get("data_url") or "").strip()
+        if not data_url.startswith("data:image/"):
+            continue
+        try:
+            size_val = int(im.get("size") or 0)
+        except (TypeError, ValueError):
+            size_val = 0
+        out.append(
+            {
+                "name": str(im.get("name") or "image").strip() or "image",
+                "mime_type": str(im.get("mime_type") or "image/png").strip() or "image/png",
+                "size": size_val,
+                "data_url": data_url,
+            }
+        )
+    return out
+
+
+def _group_turn_image_blocks(
+    user_input: str,
+    image_inputs: Sequence[Any],
+    history_attachments: Sequence[Any],
+) -> list[dict[str, Any]] | None:
+    sources: list[Mapping[str, Any]] = [
+        item for item in image_inputs if isinstance(item, Mapping)
+    ]
+    if not sources:
+        for item in history_attachments:
+            if not isinstance(item, Mapping):
+                continue
+            data_url = str(item.get("data_url") or "").strip()
+            if data_url.startswith("data:image/"):
+                sources.append(item)
+    blocks: list[dict[str, Any]] = [{"type": "text", "text": str(user_input or "")}]
+    for im in sources:
+        data_url = str(im.get("data_url") or "").strip()
+        if data_url.startswith("data:image/"):
+            blocks.append({"type": "image_url", "image_url": {"url": data_url}})
+    if len(blocks) <= 1:
+        return None
+    return blocks
+
+
 _EXECUTION_TURN_INSTRUCTION = (
     "这是执行请求。你必须在本轮使用必要工具实际推进；FINAL 只能汇报本轮已经发生的事实。\n"
     "禁止以“我去处理 / 稍等 / 等我回复 / 后续给你”结束本轮。"
@@ -1603,6 +1656,16 @@ class GroupChatRouter:
         final_text = ""
         error_text = ""
         successful_tool_results = 0
+        _sp = getattr(base_session, "scratchpad", None)
+        if not isinstance(_sp, dict):
+            _sp = {}
+        _turn_images = list(_sp.get("__group_turn_image_inputs__") or [])
+        _turn_hist = list(_sp.get("__group_turn_history_attachments__") or [])
+        _user_message_content = None
+        if is_vision_capable(str(provider or ""), str(model or "")):
+            _user_message_content = _group_turn_image_blocks(
+                local_user_input, _turn_images, _turn_hist
+            )
         async for event in runtime.run_turn(
             local_user_input,
             local_session,
@@ -1612,6 +1675,8 @@ class GroupChatRouter:
             system_prompt=system_prompt,
             usage_session_id=str(getattr(base_session, "_usage_owner_session_id", "") or ""),
             usage_avatar_id=str(avatar_id or ""),
+            user_message_content=_user_message_content,
+            history_user_attachments=_turn_hist or None,
         ):
             if progress_queue is not None:
                 progress_text = self._runtime_event_to_progress_text(event.type, event.data)
@@ -2667,11 +2732,59 @@ class GroupChatRouter:
         quoted_message_id: str = "",
         should_stop: Callable[[], Any],
         user_display_name: str | None = None,
+        image_inputs: Sequence[Mapping[str, Any]] | None = None,
+        history_image_attachments: Sequence[Mapping[str, Any]] | None = None,
     ) -> AsyncGenerator[GroupReply, None]:
         scratchpad = getattr(base_session, "scratchpad", None)
         if not isinstance(scratchpad, dict):
             scratchpad = {}
             setattr(base_session, "scratchpad", scratchpad)
+        turn_images = [dict(item) for item in (image_inputs or []) if isinstance(item, Mapping)]
+        turn_history = [
+            dict(item) for item in (history_image_attachments or []) if isinstance(item, Mapping)
+        ]
+        if not turn_history and turn_images:
+            turn_history = _attachments_from_image_inputs(turn_images)
+        scratchpad["__group_turn_image_inputs__"] = turn_images
+        scratchpad["__group_turn_history_attachments__"] = turn_history
+        try:
+            async for reply in self._iter_group_turn(
+                base_session=base_session,
+                scratchpad=scratchpad,
+                group_id=group_id,
+                group_name=group_name,
+                routing=routing,
+                group_avatar_ids=group_avatar_ids,
+                mentioned_avatar_ids=mentioned_avatar_ids,
+                user_input=user_input,
+                quoted_content=quoted_content,
+                quoted_message_id=quoted_message_id,
+                should_stop=should_stop,
+                user_display_name=user_display_name,
+                turn_history=turn_history,
+            ):
+                yield reply
+        finally:
+            scratchpad.pop("__group_turn_image_inputs__", None)
+            scratchpad.pop("__group_turn_history_attachments__", None)
+
+    async def _iter_group_turn(
+        self,
+        *,
+        base_session: StudioSession,
+        scratchpad: dict[str, Any],
+        group_id: str,
+        group_name: str,
+        routing: str,
+        group_avatar_ids: Sequence[str],
+        mentioned_avatar_ids: Sequence[str],
+        user_input: str,
+        quoted_content: str,
+        quoted_message_id: str,
+        should_stop: Callable[[], Any],
+        user_display_name: str | None,
+        turn_history: list[dict[str, Any]],
+    ) -> AsyncGenerator[GroupReply, None]:
         setattr(base_session, "__group_avatar_ids", list(group_avatar_ids))
         context = GroupChatContext(base_session, max_items=24)
         udn = str(user_display_name or "").strip() or "我"
@@ -2680,6 +2793,7 @@ class GroupChatRouter:
             sender_name=udn,
             quoted_message_id=quoted_message_id,
             quoted_content=quoted_content,
+            attachments=turn_history or None,
         )
         resolved_mentions = expand_mentions_with_meta_leader(
             user_input,

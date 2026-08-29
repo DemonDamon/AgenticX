@@ -1062,6 +1062,73 @@ def test_group_chat_hydrates_document_before_router_turn(monkeypatch, tmp_path) 
     assert seen_context.get(str(pdf)) == "GROUP_HYDRATED"
 
 
+def test_group_chat_forwards_image_inputs_to_router(monkeypatch) -> None:
+    from agenticx.runtime.group_router import GroupReply
+    from agenticx.studio import server as server_module
+
+    tiny_png = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    monkeypatch.setattr(server_module.ProviderResolver, "resolve", lambda **_kwargs: _TextLLM())
+    seen: Dict[str, Any] = {}
+
+    class _FakeGroupRouter:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def pick_targets(self, **_kwargs):
+            return ["meta"]
+
+        def _plain_targets_in_text(self, *_args, **_kwargs):
+            return []
+
+        async def run_group_turn(self, **kwargs):
+            seen["image_inputs"] = kwargs.get("image_inputs")
+            seen["history_image_attachments"] = kwargs.get("history_image_attachments")
+            yield GroupReply(
+                agent_id="meta",
+                avatar_name="Machi",
+                avatar_url="",
+                content="group done",
+                skipped=False,
+                event_type="group_reply",
+            )
+
+    monkeypatch.setattr(server_module, "GroupChatRouter", _FakeGroupRouter)
+
+    app = create_studio_app()
+    client = TestClient(app)
+    avatar_registry = app.state.avatar_registry
+    group_registry = app.state.group_registry
+    session_id = client.get("/api/session").json()["session_id"]
+    avatar = avatar_registry.create_avatar(name="测试成员", role="Engineer")
+    group = group_registry.create_group(name="测试群", avatar_ids=[avatar.id], routing="intelligent")
+
+    resp = client.post(
+        "/api/chat",
+        json={
+            "session_id": session_id,
+            "group_id": group.id,
+            "user_input": "看这张图",
+            "image_inputs": [
+                {
+                    "name": "image.png",
+                    "data_url": tiny_png,
+                    "mime_type": "image/png",
+                    "size": 70,
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    _ = _extract_events(resp.text.splitlines())
+    assert "image_inputs" in seen
+    assert "history_image_attachments" in seen
+    assert seen["history_image_attachments"]
+    assert str(seen["history_image_attachments"][0]["data_url"]).startswith("data:image/")
+
+
 def test_chat_does_not_hydrate_plain_context_twice(monkeypatch, tmp_path) -> None:
     from agenticx.studio import server as server_module
 
