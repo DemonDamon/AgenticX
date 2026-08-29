@@ -16,7 +16,6 @@ try:  # sandbox may block SSL when importing litellm/requests
     from .minimax_provider import MiniMaxProvider
     from .deepseek_provider import DeepSeekProvider
     from .provider_resolver import ProviderResolver
-    from .llm_factory import LlmFactory
 except Exception:  # pragma: no cover
     LiteLLMProvider = None  # type: ignore
     KimiProvider = None  # type: ignore
@@ -27,7 +26,6 @@ except Exception:  # pragma: no cover
     MiniMaxProvider = None  # type: ignore
     DeepSeekProvider = None  # type: ignore
     ProviderResolver = None  # type: ignore
-    LlmFactory = None  # type: ignore
 
 from agenticx.llms.failover import FailoverProvider
 from agenticx.llms.response_cache import ResponseCache
@@ -81,6 +79,16 @@ class QianFanProvider(QianfanProvider if QianfanProvider else object):  # type: 
 class MinimaxProvider(MiniMaxProvider if MiniMaxProvider else object):  # type: ignore
     """Provider for MiniMax models."""
     pass
+
+
+def __getattr__(name: str):
+    # GraphRAG's LlmFactory imports knowledge.graphers. Keep it off the
+    # Desktop / `agx serve` cold-start path (Neo4j is optional).
+    if name == "LlmFactory":
+        from .llm_factory import LlmFactory
+
+        return LlmFactory
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [

@@ -134,17 +134,30 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# NOTE: onedir（COLLECT）而非 onefile。onefile 模式下 bootloader 每次
+# 启动都要把整个 ~400MB bundle 解压到 /tmp 临时目录再运行——桌面端
+# "agx serve startup timeout after 45s" 的主因就是用户机器上首次
+# 启动叠加 Gatekeeper 扫描 + onefile 解压远超 45 秒（CI 自己的 smoke
+# test 都要等 60s）。onedir 直接从磁盘 mmap 运行，冷启动时间大幅缩短。
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="agx-server",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     console=True,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="agx-server",
 )

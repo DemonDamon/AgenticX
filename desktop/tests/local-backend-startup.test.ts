@@ -13,10 +13,10 @@ describe("local backend startup stopgap", () => {
     });
   });
 
-  it("allows a slower Windows cold start without changing other platforms", () => {
+  it("allows a slower cold start on every platform (Gatekeeper / antivirus first-launch scans)", () => {
     expect(getServeStartupTimeoutMs("win32")).toBe(120_000);
-    expect(getServeStartupTimeoutMs("darwin")).toBe(45_000);
-    expect(getServeStartupTimeoutMs("linux")).toBe(45_000);
+    expect(getServeStartupTimeoutMs("darwin")).toBe(120_000);
+    expect(getServeStartupTimeoutMs("linux")).toBe(120_000);
   });
 
   it("bounds each readiness request so probes cannot hang indefinitely", () => {

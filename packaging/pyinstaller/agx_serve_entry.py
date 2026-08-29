@@ -11,11 +11,27 @@ import ctypes
 import importlib
 import os
 import sys
+import time
 
 # LiteLLM otherwise tries to refresh optional model-pricing metadata from
 # GitHub during import. The bundled Desktop must boot from the packaged backup
 # even when public-network access is slow, filtered, or completely unavailable.
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
+
+
+def _log_stage(msg: str) -> None:
+    """Emit a startup timeline marker to stderr.
+
+    The Electron launcher buffers stderr and prints the tail when the backend
+    fails to become ready in time — stage markers pinpoint which step hung
+    instead of showing only the last library warning.
+    """
+    elapsed = time.monotonic() - _START_T0
+    print(f"[agx-server {elapsed:7.1f}s] {msg}", file=sys.stderr, flush=True)
+
+
+_START_T0 = time.monotonic()
+_log_stage(f"bootloader handoff complete (argv={' '.join(sys.argv[1:])})")
 
 
 def _suppress_macos_dock_icon() -> None:
@@ -119,10 +135,20 @@ def main() -> None:
 
     _suppress_macos_dock_icon()
 
+    # `agx-server` is a CLI bootstrap name so agenticx/__init__ does not dump
+    # GraphRAG / Neo4j / observability into every cold start. Core must be
+    # imported first, otherwise studio → tools.base → core/__init__ hits a
+    # circular import with agent_executor.
+    _log_stage("importing agenticx.core")
+    import agenticx.core  # noqa: F401
+    _log_stage("importing agenticx.studio.server (heavy import chain)")
     from agenticx.studio.server import create_studio_app
     import uvicorn
+    _log_stage("studio server module imported")
 
     app = create_studio_app()
+    _log_stage("create_studio_app() done, starting uvicorn")
+
     uvicorn.run(app, host=args.host, port=args.port)
 
 

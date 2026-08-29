@@ -11,8 +11,8 @@ try:
     from neo4j import GraphDatabase  # type: ignore
     NEO4J_AVAILABLE = True
 except ImportError:
+    GraphDatabase = None  # type: ignore
     NEO4J_AVAILABLE = False
-    logger.warning("Neo4j driver not available. Install with: pip install neo4j")
 
 from .models import KnowledgeGraph, Entity, Relationship, EntityType, RelationType
 
