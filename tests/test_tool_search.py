@@ -210,6 +210,11 @@ def test_fail_open_when_tool_search_disallowed():
     )
 
 
+def test_web_search_is_core_always_load():
+    assert "web_search" in CORE_ALWAYS_LOAD_TOOLS
+    assert "web_search" not in BUILTIN_DEFER_ALLOWLIST
+
+
 def test_project_omits_deferred_until_loaded():
     assert "web_fetch" in BUILTIN_DEFER_ALLOWLIST
     assert "bash_exec" in CORE_ALWAYS_LOAD_TOOLS

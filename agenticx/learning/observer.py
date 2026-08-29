@@ -81,7 +81,11 @@ def extract_error_signal(result: str) -> str | None:
 def _resolve_session_dir(session: Any) -> Path | None:
     """Resolve the session's on-disk directory."""
     session_id = str(
-        getattr(session, "session_id", "") or getattr(session, "id", "") or ""
+        getattr(session, "_session_id", "")
+        or getattr(session, "_usage_owner_session_id", "")
+        or getattr(session, "session_id", "")
+        or getattr(session, "id", "")
+        or ""
     ).strip()
     if not session_id:
         return None

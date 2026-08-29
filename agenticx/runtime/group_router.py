@@ -41,6 +41,7 @@ from agenticx.runtime.harden_flags import (
     group_open_floor_max_speakers,
 )
 from agenticx.runtime.prompts.current_time import build_current_time_block
+from agenticx.runtime.prompts.meta_agent import _build_web_search_capability_block
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
 
 META_LEADER_AGENT_ID = "__meta__"
@@ -57,6 +58,7 @@ _GROUP_CONTROL_PLANE_CONTRACT = (
     "- 默认 1–3 句：先结论，再给产物或下一步；不要复述其他成员。\n"
     "- 没有独特增量且未被用户点名时，内部输出 __SKIP__。\n"
     "- 工具过程由系统状态卡展示，正文不要写“正在调用工具 / 已回答 / 等待追问”。\n"
+    "- 未实际调用 web_search 时，禁止声称已经上网检索或「查了一圈 / 搜了多个来源」。\n"
     "- 长代码、长报告、详细表格优先写入群工作区，最终只给摘要和产物；用户明确要求全文贴群时例外。\n"
     "- FINAL 表示本轮结束，禁止以“稍等 / 等我回复 / 我去处理”作为 FINAL。\n"
 )
@@ -121,6 +123,9 @@ _DEFERRED_PROMISE_REPLACEMENT = (
 )
 _UNVERIFIED_COMPLETION_NOTE = (
     "\n\n（系统核验：本轮没有成功工具结果或产物记录，以上完成状态未被确认。）"
+)
+_UNVERIFIED_SEARCH_NOTE = (
+    "\n\n（系统核验：本轮没有成功的 web_search 结果，以上检索陈述未被确认。）"
 )
 _ROUTE_SKIP_FALLBACK_INSTRUCTION = (
     "被路由的成员没有提供有效回复。请只根据现有上下文给 1–2 句诚实兜底："
@@ -381,15 +386,37 @@ def _looks_like_completion_claim(text: str) -> bool:
     return any(marker in normalized for marker in markers)
 
 
+def _looks_like_search_claim(text: str) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
+    markers = (
+        "搜了",
+        "搜索了",
+        "检索了",
+        "查了一圈",
+        "搜了一圈",
+        "网上搜",
+        "上网搜",
+        "查了网上",
+        "多个来源",
+        "中英文多个",
+    )
+    return any(marker in normalized for marker in markers)
+
+
 def _apply_execution_evidence_gate(reply: "GroupReply") -> "GroupReply":
     if reply.skipped or str(reply.error or "").strip():
+        return reply
+    text = str(reply.content or "")
+    searched_web = bool(getattr(reply, "successful_web_search", False))
+    if _looks_like_search_claim(text) and not searched_web:
+        if "检索陈述未被确认" not in text:
+            reply.content = text.rstrip() + _UNVERIFIED_SEARCH_NOTE
         return reply
     has_evidence = int(getattr(reply, "successful_tool_results", 0) or 0) > 0 or bool(
         getattr(reply, "artifacts", None)
     )
     if has_evidence:
         return reply
-    text = str(reply.content or "")
     if _looks_like_deferred_promise(text):
         reply.content = _DEFERRED_PROMISE_REPLACEMENT
         return reply
@@ -473,13 +500,36 @@ def expand_mentions_with_meta_leader(
     return out
 
 
+def _strip_disabled_web_search_tools(tools: Sequence[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    kept = [tool for tool in tools if isinstance(tool, dict)]
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        raw = ConfigManager.get_value("web_search") or {}
+        if not isinstance(raw, dict):
+            return kept
+        enabled = raw.get("enabled", True)
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() in ("1", "true", "yes", "on")
+        if bool(enabled):
+            return kept
+    except Exception:
+        return kept
+    return [
+        tool
+        for tool in kept
+        if str((tool.get("function") or {}).get("name", "")).strip() != "web_search"
+    ]
+
+
 def _group_chat_tools() -> Sequence[Dict[str, Any]]:
     blocked = {"delegate_to_avatar"}
-    return [
+    tools = [
         tool
         for tool in STUDIO_TOOLS
         if tool.get("function", {}).get("name") not in blocked
     ]
+    return _strip_disabled_web_search_tools(tools)
 
 
 _GROUP_MEMBER_RUNTIME_FLAG_ATTRS = (
@@ -494,6 +544,16 @@ def _copy_group_member_runtime_flags(base_session: Any, local_session: Any) -> N
     for attr in _GROUP_MEMBER_RUNTIME_FLAG_ATTRS:
         if hasattr(base_session, attr):
             setattr(local_session, attr, getattr(base_session, attr))
+
+
+def _bind_group_local_session(base_session: Any, local_session: Any) -> None:
+    """Attach owner session ids so tool traces can persist without sharing chat_history."""
+    owner_id = resolve_studio_session_id(base_session)
+    if not owner_id:
+        return
+    setattr(local_session, "_session_id", owner_id)
+    setattr(local_session, "_usage_owner_session_id", owner_id)
+    setattr(local_session, "_owner_session_id", owner_id)
 
 
 @dataclass
@@ -517,6 +577,7 @@ class GroupReply:
     clarify_options: List[str] = field(default_factory=list)
     clarify_allow_free_text: bool = True
     successful_tool_results: int = 0
+    successful_web_search: bool = False
     artifacts: list["GroupArtifact"] = field(default_factory=list)
 
 
@@ -1524,7 +1585,9 @@ class GroupChatRouter:
             avatar_prompt = (
                 "你是群聊组长兼项目经理。优先用工具（搜索、查文档）研究问题后给出有信号量的短答复；"
                 "仅在真正需要专业成员动手执行时才 @ 委派。"
-                "默认微信群短聊风格；仅用户明确要报告/清单/长文时才展开。不要输出工具调用细节。"
+                "默认微信群短聊风格；仅用户明确要报告/清单/长文时才展开。"
+                "工具过程由系统状态卡展示，正文不要倒原始 JSON；"
+                "时效事实必须先真正调用 web_search，禁止空口说「搜了」。"
             )
             avatar_url = ""
             provider = getattr(base_session, "provider_name", None)
@@ -1558,6 +1621,7 @@ class GroupChatRouter:
         setattr(local_session, "_session_manager", getattr(base_session, "_session_manager", None))
         setattr(local_session, "__group_chat_mode", True)
         _copy_group_member_runtime_flags(base_session, local_session)
+        _bind_group_local_session(base_session, local_session)
 
         dialogue_context = context.render_recent_dialogue()
         force_rule = (
@@ -1573,6 +1637,7 @@ class GroupChatRouter:
             f"群聊ID：{group_id}\n\n"
             f"{addressing}\n"
             f"{build_current_time_block()}"
+            f"{_build_web_search_capability_block()}"
             "## 行为要求\n"
             "- 你是微信群聊中的一个成员，遵循自然对话风格。\n"
             f"{force_rule}"
@@ -1655,6 +1720,7 @@ class GroupChatRouter:
         final_text = ""
         error_text = ""
         successful_tool_results = 0
+        successful_web_search = False
         _sp = getattr(base_session, "scratchpad", None)
         if not isinstance(_sp, dict):
             _sp = {}
@@ -1739,6 +1805,9 @@ class GroupChatRouter:
                 data = event.data if isinstance(event.data, Mapping) else {}
                 if _tool_result_succeeded(data):
                     successful_tool_results += 1
+                    tool_name = str(data.get("name") or data.get("tool_name") or "").strip()
+                    if tool_name == "web_search":
+                        successful_web_search = True
             if event.type == EventType.FINAL.value:
                 final_text = str(event.data.get("text", "") or "").strip()
             elif event.type == EventType.ERROR.value:
@@ -1775,6 +1844,7 @@ class GroupChatRouter:
             skipped=False,
             event_type="group_reply",
             successful_tool_results=successful_tool_results,
+            successful_web_search=successful_web_search,
             artifacts=artifacts,
         )
         reply = _apply_execution_evidence_gate(reply)

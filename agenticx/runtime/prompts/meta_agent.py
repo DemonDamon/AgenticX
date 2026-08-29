@@ -687,7 +687,8 @@ def _build_web_search_capability_block() -> str:
         "- 多来源并列：`[1][2]`。\n"
         "- 不要造 `【1】`、`(来源 1)`、`[来源1]` 等变体；不要在角标前后加多余空格。\n"
         "- 模型自身常识不需要角标。\n"
-        "- **本轮未实际调用 `web_search`/`knowledge_search`（无新的 references）时，禁止输出 `[N]` 角标**；不要凭上一轮记忆复用编号，否则角标无法溯源会被前端剥除。\n\n"
+        "- **本轮未实际调用 `web_search`/`knowledge_search`（无新的 references）时，禁止输出 `[N]` 角标**；不要凭上一轮记忆复用编号，否则角标无法溯源会被前端剥除。\n"
+        "- **禁止假装检索**：本轮未实际调用 `web_search` 时，禁止写「搜了 / 查了一圈 / 多个来源」等检索陈述；必须先 function-call `web_search`，再依据结果作答。\n\n"
     )
 
 

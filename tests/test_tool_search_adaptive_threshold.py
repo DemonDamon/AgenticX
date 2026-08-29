@@ -71,8 +71,8 @@ def test_decide_apply_with_hysteresis_band():
 
 
 def test_resolved_applied_single_source_for_project_and_pending():
-    catalog = build_catalog([_builtin("bash_exec"), _builtin("web_search"), _builtin("tool_search")])
-    full = [_openai("bash_exec"), _openai("web_search"), _openai("tool_search")]
+    catalog = build_catalog([_builtin("bash_exec"), _builtin("web_fetch"), _builtin("tool_search")])
+    full = [_openai("bash_exec"), _openai("web_fetch"), _openai("tool_search")]
     ctx_off = ToolSearchRuntimeContext(
         config=ToolSearchConfig(mode="always"),
         catalog=catalog,
@@ -85,7 +85,7 @@ def test_resolved_applied_single_source_for_project_and_pending():
     assert (
         is_tool_pending_next_round(
             ctx_off,
-            "web_search",
+            "web_fetch",
             allowed_tool_names={"bash_exec", "tool_search"},
             full_openai_tools=full,
         )
@@ -105,11 +105,11 @@ def test_resolved_applied_single_source_for_project_and_pending():
         for t in projected
         if isinstance(t, dict)
     }
-    assert "web_search" not in names
+    assert "web_fetch" not in names
     assert (
         is_tool_pending_next_round(
             ctx_on,
-            "web_search",
+            "web_fetch",
             allowed_tool_names=names,
             full_openai_tools=full,
         )

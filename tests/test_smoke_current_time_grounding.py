@@ -65,6 +65,8 @@ def test_ac4_web_search_capability_block_has_hard_exception() -> None:
     assert "禁止" in block
     assert "get_current_datetime" in block
     assert "[N]" in block
+    assert "搜了" in block
+    assert "查了一圈" in block
 
 
 def test_ac5_studio_tools_schema_for_datetime_and_web_search() -> None:

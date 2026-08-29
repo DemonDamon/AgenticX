@@ -62,6 +62,7 @@ CORE_ALWAYS_LOAD_TOOLS: frozenset[str] = frozenset(
         "retry_subagent",
         "set_taskspace",
         "tool_search",
+        "web_search",
     }
 )
 
@@ -119,7 +120,6 @@ BUILTIN_DEFER_ALLOWLIST: frozenset[str] = frozenset(
         "video_understand",
         "view_image",
         "web_fetch",
-        "web_search",
     }
 )
 

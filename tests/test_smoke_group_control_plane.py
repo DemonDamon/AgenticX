@@ -21,9 +21,11 @@ from agenticx.runtime.group_router import (
     GroupChatRouter,
     GroupReply,
     IntentDecision,
+    _group_chat_tools,
     _looks_like_completion_claim,
     _looks_like_deferred_promise,
     _looks_like_execution_request,
+    _looks_like_search_claim,
     _tool_result_succeeded,
 )
 
@@ -379,6 +381,9 @@ def test_deferred_and_completion_markers() -> None:
     assert _looks_like_completion_claim("done") is True
     assert _looks_like_completion_claim("completed") is True
     assert _looks_like_completion_claim("这是概念解释。") is False
+    assert _looks_like_search_claim("我搜了中英文多个来源，目前只是传闻") is True
+    assert _looks_like_search_claim("查了一圈没有官方公告") is True
+    assert _looks_like_search_claim("这是概念解释。") is False
 
 
 @pytest.mark.asyncio
@@ -505,6 +510,171 @@ async def test_plain_knowledge_answer_without_tools_is_kept(
     assert reply.content == "MCP 是模型调用外部工具的协议。"
 
 
+@pytest.mark.asyncio
+async def test_search_claim_without_web_search_is_marked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRuntime:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def run_turn(self, *args, **kwargs):
+            yield SimpleNamespace(
+                type=EventType.FINAL.value,
+                data={"text": "我搜了中英文多个来源，目前只是传闻。"},
+            )
+
+    monkeypatch.setattr("agenticx.runtime.group_router.AgentRuntime", _FakeRuntime)
+    router = _make_router_with_spies(["a1"])
+    session = _make_session(["a1"])
+    reply = await router._run_one_target(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_id="g-control-plane",
+        group_name="Control Room",
+        avatar_id="a1",
+        user_input="帮我看图判断这条收购是不是真的",
+        quoted_content="",
+        should_stop=lambda: False,
+        force_reply=True,
+    )
+    assert "搜了中英文多个来源" in reply.content
+    assert "检索陈述未被确认" in reply.content
+    assert reply.successful_web_search is False
+
+
+@pytest.mark.asyncio
+async def test_search_claim_with_unrelated_tool_is_still_marked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRuntime:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def run_turn(self, *args, **kwargs):
+            yield SimpleNamespace(
+                type=EventType.TOOL_RESULT.value,
+                data={"name": "file_read", "success": True},
+            )
+            yield SimpleNamespace(
+                type=EventType.FINAL.value,
+                data={"text": "查了一圈没有官方公告。"},
+            )
+
+    monkeypatch.setattr("agenticx.runtime.group_router.AgentRuntime", _FakeRuntime)
+    router = _make_router_with_spies(["a1"])
+    session = _make_session(["a1"])
+    reply = await router._run_one_target(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_id="g-control-plane",
+        group_name="Control Room",
+        avatar_id="a1",
+        user_input="帮我看图判断这条收购是不是真的",
+        quoted_content="",
+        should_stop=lambda: False,
+        force_reply=True,
+    )
+    assert "查了一圈" in reply.content
+    assert "检索陈述未被确认" in reply.content
+    assert reply.successful_tool_results == 1
+    assert reply.successful_web_search is False
+
+
+@pytest.mark.asyncio
+async def test_search_claim_with_web_search_is_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRuntime:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def run_turn(self, *args, **kwargs):
+            yield SimpleNamespace(
+                type=EventType.TOOL_RESULT.value,
+                data={"name": "web_search", "success": True},
+            )
+            yield SimpleNamespace(
+                type=EventType.FINAL.value,
+                data={"text": "我搜了中英文多个来源，交割已经完成。"},
+            )
+
+    monkeypatch.setattr("agenticx.runtime.group_router.AgentRuntime", _FakeRuntime)
+    router = _make_router_with_spies(["a1"])
+    session = _make_session(["a1"])
+    reply = await router._run_one_target(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_id="g-control-plane",
+        group_name="Control Room",
+        avatar_id="a1",
+        user_input="帮我看图判断这条收购是不是真的",
+        quoted_content="",
+        should_stop=lambda: False,
+        force_reply=True,
+    )
+    assert reply.content == "我搜了中英文多个来源，交割已经完成。"
+    assert "检索陈述未被确认" not in reply.content
+    assert reply.successful_web_search is True
+
+
+def test_group_chat_tools_keep_web_search_and_tool_search() -> None:
+    names = {
+        str((tool.get("function") or {}).get("name") or "").strip()
+        for tool in _group_chat_tools()
+        if isinstance(tool, dict)
+    }
+    assert "web_search" in names
+    assert "tool_search" in names
+    assert "delegate_to_avatar" not in names
+
+
+@pytest.mark.asyncio
+async def test_group_target_binds_owner_session_and_web_search_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _CapturingRuntime:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def run_turn(self, user_input, session, *args, **kwargs):
+            captured["session_id"] = getattr(session, "_session_id", None)
+            captured["usage_owner"] = getattr(session, "_usage_owner_session_id", None)
+            captured["system_prompt"] = str(kwargs.get("system_prompt") or "")
+            tool_names = {
+                str((tool.get("function") or {}).get("name") or "").strip()
+                for tool in (kwargs.get("tools") or [])
+                if isinstance(tool, dict)
+            }
+            captured["tool_names"] = tool_names
+            yield SimpleNamespace(type=EventType.FINAL.value, data={"text": "短结论。"})
+
+    monkeypatch.setattr("agenticx.runtime.group_router.AgentRuntime", _CapturingRuntime)
+    router = _make_router_with_spies(["a1"])
+    session = _make_session(["a1"])
+    await router._run_one_target(
+        base_session=session,
+        context=GroupChatContext(session),
+        group_id="g-control-plane",
+        group_name="Control Room",
+        avatar_id="a1",
+        user_input="musk 收购 cursor 是真的吗",
+        quoted_content="",
+        should_stop=lambda: False,
+        force_reply=True,
+    )
+    assert captured["session_id"] == "control-plane-session"
+    assert captured["usage_owner"] == "control-plane-session"
+    prompt = str(captured["system_prompt"])
+    assert "## 联网搜索" in prompt
+    assert "web_search" in prompt
+    assert "禁止假装检索" in prompt or "禁止声称" in prompt
+    assert "web_search" in captured["tool_names"]
+    assert "tool_search" in captured["tool_names"]
+
+
 # ---------------------------------------------------------------------------
 # FR-5: silent skip, no public nudge
 # ---------------------------------------------------------------------------
@@ -589,3 +759,5 @@ async def test_member_and_meta_prompts_share_control_plane_contract(
         assert "默认 1–3 句" in prompt
         assert "禁止以“稍等 / 等我回复 / 我去处理”作为 FINAL" in prompt
         assert "正在调用工具 / 已回答 / 等待追问" in prompt
+        assert "web_search" in prompt
+        assert "查了一圈" in prompt
