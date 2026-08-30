@@ -333,8 +333,6 @@ export function App() {
   const closeSettings = useAppStore((s) => s.closeSettings);
   const tokenDashboardOpen = useAppStore((s) => s.tokenDashboard.open);
   const closeTokenDashboard = useAppStore((s) => s.closeTokenDashboard);
-  const collabRoomsOpen = useAppStore((s) => s.collabRooms.open);
-  const closeCollabRooms = useAppStore((s) => s.closeCollabRooms);
   const deliveryPanelOpen = useAppStore((s) => s.deliveryPanel.open);
   const closeDeliveryPanel = useAppStore((s) => s.closeDeliveryPanel);
   const updateSettings = useAppStore((s) => s.updateSettings);
@@ -2406,6 +2404,8 @@ export function App() {
                   <AvatarGalleryView />
                 ) : mainView === "groups" ? (
                   <ProjectsView />
+                ) : mainView === "collab" ? (
+                  <CollabRoomPanel variant="page" />
                 ) : mainView === "automation" ? (
                   <AutomationView />
                 ) : (
@@ -2513,7 +2513,6 @@ export function App() {
         onForwardFavorite={handleForwardFavorite}
       />
       <TokenDashboardPanel open={tokenDashboardOpen} onClose={() => closeTokenDashboard()} />
-      <CollabRoomPanel open={collabRoomsOpen} onClose={() => closeCollabRooms()} />
       <DeliveryPanel
         open={deliveryPanelOpen}
         apiBase={apiBase}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { AlarmClock, MessageSquarePlus, UserRound, Waypoints } from "lucide-react";
+import { AlarmClock, Bot, MessageSquarePlus, Users, Waypoints } from "lucide-react";
 import { useAppStore, type MainView } from "../store";
 import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
@@ -33,8 +33,9 @@ type NavEntry =
 
 const NAV_ENTRIES: NavEntry[] = [
   { kind: "action", id: "new-task", label: "新建任务", icon: MessageSquarePlus },
-  { kind: "view", id: "avatars", label: "数字专家", icon: UserRound },
-  { kind: "view", id: "groups", label: "项目群聊", icon: Waypoints },
+  { kind: "view", id: "avatars", label: "数字专家", icon: Bot },
+  { kind: "view", id: "groups", label: "专家群聊", icon: Waypoints },
+  { kind: "view", id: "collab", label: "多人协作", icon: Users },
   { kind: "view", id: "automation", label: "定时任务", icon: AlarmClock },
 ];
 

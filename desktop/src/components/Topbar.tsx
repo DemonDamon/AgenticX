@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Gauge, LogIn, LogOut, Moon, Settings, Sun, User, Users } from "lucide-react";
+import { ArrowLeft, Gauge, LogIn, LogOut, Moon, Settings, Sun, User } from "lucide-react";
 import { useAppStore } from "../store";
 import { TopbarLeftControls } from "./TopbarLeftControls";
 import { BackendModeChip } from "./BackendModeChip";
@@ -14,7 +14,6 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
   const setTheme = useAppStore((s) => s.setTheme);
   const openSettings = useAppStore((s) => s.openSettings);
   const openTokenDashboard = useAppStore((s) => s.openTokenDashboard);
-  const openCollabRooms = useAppStore((s) => s.openCollabRooms);
   const agxAccount = useAppStore((s) => s.agxAccount);
   const setAgxAccount = useAppStore((s) => s.setAgxAccount);
   const mainView = useAppStore((s) => s.mainView);
@@ -126,15 +125,6 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
           aria-label="Token 消耗看板"
         >
           <Gauge className="h-[18px] w-[18px]" strokeWidth={1.8} />
-        </button>
-        <button
-          className="agx-topbar-btn agx-topbar-btn--icon-only"
-          type="button"
-          onClick={() => openCollabRooms()}
-          title="云房间"
-          aria-label="云房间"
-        >
-          <Users className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>
         <button
           className="agx-topbar-btn agx-topbar-btn--icon-only"

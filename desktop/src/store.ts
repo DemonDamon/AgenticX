@@ -135,7 +135,7 @@ export type GroupChat = {
 };
 
 /** Main-area view router state for button-style sidebar navigation. */
-export type MainView = "chat" | "avatars" | "groups" | "automation";
+export type MainView = "chat" | "avatars" | "groups" | "collab" | "automation";
 
 export type SidePanelTab = "workspace" | "members" | "graph";
 
@@ -574,7 +574,7 @@ type AppState = {
   setMainView: (view: MainView) => void;
   /**
    * Snapshot of the active chat pane when leaving `mainView: "chat"` for a landing
-   * page (avatars / groups / automation). Used by MainViewShell's back button.
+   * page (avatars / groups / collab / automation). Used by MainViewShell's back button.
    */
   chatReturnSnapshot: { paneId: string; sessionId?: string } | null;
   /** Restore the snapshotted chat pane and switch mainView back to chat. */
@@ -2567,14 +2567,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       tokenDashboard: { ...state.tokenDashboard, open: false },
     })),
-  openCollabRooms: () =>
+  openCollabRooms: () => {
+    get().setMainView("collab");
     set((state) => ({
       collabRooms: { ...state.collabRooms, open: true },
-    })),
-  closeCollabRooms: () =>
+    }));
+  },
+  closeCollabRooms: () => {
     set((state) => ({
       collabRooms: { ...state.collabRooms, open: false },
-    })),
+    }));
+    get().returnToPreviousChat();
+  },
   setTokenDashboardRange: (range) =>
     set((state) => ({
       tokenDashboard: { ...state.tokenDashboard, range },

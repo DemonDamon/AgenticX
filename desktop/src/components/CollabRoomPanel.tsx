@@ -16,8 +16,9 @@ import {
 const MEMBER_POLL_MS = 3000;
 
 type Props = {
-  open: boolean;
-  onClose: () => void;
+  open?: boolean;
+  onClose?: () => void;
+  variant?: "dialog" | "page";
 };
 
 const NOT_LOGGED_IN = "未登录企业账号，无法加载云房间";
@@ -63,7 +64,7 @@ function asMessage(raw: unknown): RoomMessage | null {
   };
 }
 
-export function CollabRoomPanel({ open, onClose }: Props) {
+export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Props) {
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [listBusy, setListBusy] = useState(false);
@@ -233,13 +234,13 @@ export function CollabRoomPanel({ open, onClose }: Props) {
   }, [open, activeRoomId, status, refreshSnapshot]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || variant === "page" || !onClose) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, variant]);
 
   useEffect(() => {
     if (open) return;
@@ -312,33 +313,49 @@ export function CollabRoomPanel({ open, onClose }: Props) {
   const notLoggedIn = listError === NOT_LOGGED_IN;
   const memberNames = members.map((item) => item.display_name).filter(Boolean);
   const revoked = status === "revoked";
+  const isPage = variant === "page";
+  const title = isPage ? "多人协作" : "云房间";
 
-  return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/88 px-3 py-6 backdrop-blur-md">
-      <div
-        className="relative flex h-[min(85vh,720px)] w-full max-w-[960px] flex-col overflow-hidden rounded-xl border border-border bg-surface-base shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="agx-collab-rooms-title"
-      >
-        <div className="flex items-center justify-between border-b border-border bg-surface-base px-5 py-4">
-          <div className="flex items-center gap-2">
+  const header = (
+    <div
+      className={
+        isPage
+          ? "flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-5"
+          : "flex items-center justify-between border-b border-border bg-surface-base px-5 py-4"
+      }
+    >
+      <div className={isPage ? "min-w-0" : "flex items-center gap-2"}>
+        {isPage ? (
+          <>
+            <h2 id="agx-collab-rooms-title" className="text-lg font-semibold tracking-tight text-text-strong">
+              {title}
+            </h2>
+            <p className="mt-1 text-sm text-text-muted">与同事在同一间云房间里实时对话。</p>
+          </>
+        ) : (
+          <>
             <Users className="h-4 w-4 text-text-faint" strokeWidth={1.8} />
             <h2 id="agx-collab-rooms-title" className="text-lg font-semibold tracking-tight text-text-strong">
-              云房间
+              {title}
             </h2>
-          </div>
-          <button
-            type="button"
-            className="agx-topbar-btn !h-10 !w-10"
-            onClick={onClose}
-            aria-label="关闭"
-            title="关闭"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+          </>
+        )}
+      </div>
+      {!isPage && onClose ? (
+        <button
+          type="button"
+          className="agx-topbar-btn !h-10 !w-10"
+          onClick={onClose}
+          aria-label="关闭"
+          title="关闭"
+        >
+          <X className="h-5 w-5" />
+        </button>
+      ) : null}
+    </div>
+  );
 
+  const body = (
         <div className="flex min-h-0 min-w-0 flex-1">
           <aside className="flex w-[240px] shrink-0 flex-col border-r border-border bg-surface-base">
             <div className="border-b border-border px-3 py-2 text-xs text-text-faint">房间列表</div>
@@ -487,6 +504,30 @@ export function CollabRoomPanel({ open, onClose }: Props) {
             )}
           </section>
         </div>
+  );
+
+  if (isPage) {
+    return (
+      <div
+        className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-surface-base"
+        aria-labelledby="agx-collab-rooms-title"
+      >
+        {header}
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/88 px-3 py-6 backdrop-blur-md">
+      <div
+        className="relative flex h-[min(85vh,720px)] w-full max-w-[960px] flex-col overflow-hidden rounded-xl border border-border bg-surface-base shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="agx-collab-rooms-title"
+      >
+        {header}
+        {body}
       </div>
     </div>
   );

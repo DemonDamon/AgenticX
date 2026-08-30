@@ -152,9 +152,9 @@ export function ProjectsView() {
     <MainViewShell>
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-text-strong">项目群聊</h2>
+          <h2 className="text-lg font-semibold text-text-strong">专家群聊</h2>
           <p className="mt-1 text-sm text-text-muted">
-            把多个数字分身编成一个团队，协同完成复杂任务。
+            把多个数字专家编成一个团队，协同完成复杂任务。
           </p>
         </div>
         <button
@@ -177,7 +177,7 @@ export function ProjectsView() {
         </div>
         {groups.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-text-muted">
-            还没有项目群聊，从下方模板或点「新建群聊」开始组建团队。
+            还没有专家群聊，从下方模板或点「新建群聊」开始组建团队。
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
