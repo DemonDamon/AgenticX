@@ -208,8 +208,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
   return (
     <>
       <aside className="flex h-full w-full flex-col bg-surface-sidebar">
-        {/* macOS traffic-light row: toggle + search aligned to the right edge,
-            adjacent to the main-area divider (where 本地 sits on the Topbar). */}
+        {/* macOS traffic-light row: toggle + search aligned to the right edge. */}
         <div className="drag-region agx-sidebar-topbar">
           <TopbarLeftControls
             onToggleSidebar={onToggleSidebar}

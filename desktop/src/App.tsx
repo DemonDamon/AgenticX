@@ -303,6 +303,7 @@ export function App() {
   const setOnboardingCompleted = useAppStore((s) => s.setOnboardingCompleted);
   const setKeybindingsPanelOpen = useAppStore((s) => s.setKeybindingsPanelOpen);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const chatReturnSnapshot = useAppStore((s) => s.chatReturnSnapshot);
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const clearMessages = useAppStore((s) => s.clearMessages);
   const runMode = useAppStore((s) => s.runMode);
@@ -2352,6 +2353,8 @@ export function App() {
     !focusMode &&
     responsiveStage === 2 &&
     !sidebarCollapsed;
+  const showMainTopbar =
+    userMode === "pro" && !focusMode && (sidebarCollapsed || Boolean(chatReturnSnapshot));
 
   return (
     <div
@@ -2385,8 +2388,8 @@ export function App() {
               aria-hidden
             />
           ) : null}
-          <div className="agx-main-shell">
-            {userMode === "pro" && !focusMode ? (
+          <div className={`agx-main-shell${showMainTopbar ? "" : " agx-main-shell--no-topbar"}`}>
+            {showMainTopbar ? (
               <Topbar
                 sidebarCollapsed={sidebarCollapsed}
                 onToggleSidebar={() => setSidebarCollapsed((v) => !v)}

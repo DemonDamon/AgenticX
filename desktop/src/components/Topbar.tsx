@@ -2,7 +2,6 @@ import { ArrowLeft, Gauge, Settings } from "lucide-react";
 import { useAppStore } from "../store";
 import { AccountIdentityControl } from "./AccountIdentityControl";
 import { TopbarLeftControls } from "./TopbarLeftControls";
-import { BackendModeChip } from "./BackendModeChip";
 
 type Props = {
   sidebarCollapsed: boolean;
@@ -15,8 +14,11 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
   const mainView = useAppStore((s) => s.mainView);
   const chatReturnSnapshot = useAppStore((s) => s.chatReturnSnapshot);
   const returnToPreviousChat = useAppStore((s) => s.returnToPreviousChat);
-  /** Landing pages: hide topbar bottom border so 「本地」下不出现横线。 */
   const hideTopbarBorder = mainView !== "chat";
+
+  if (!sidebarCollapsed && !chatReturnSnapshot) {
+    return null;
+  }
 
   return (
     <div className={`agx-topbar${hideTopbarBorder ? " agx-topbar--no-border" : ""}`}>
@@ -28,7 +30,6 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
             className="agx-topbar-left-controls agx-topbar-left-controls--collapsed"
           />
         ) : null}
-        <BackendModeChip />
         {chatReturnSnapshot ? (
           <button
             type="button"

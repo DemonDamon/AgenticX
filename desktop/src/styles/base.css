@@ -124,6 +124,10 @@ body,
   grid-template-rows: var(--topbar-height, 44px) 1fr;
 }
 
+.agx-main-shell--no-topbar {
+  grid-template-rows: 1fr;
+}
+
 .agx-topbar {
   display: flex;
   align-items: center;
@@ -139,7 +143,7 @@ body,
   user-select: none;
 }
 
-/* Landing views (avatars / groups / automation): no divider under 「本地」. */
+/* Landing views (avatars / groups / automation): no divider under the topbar. */
 .agx-topbar--no-border {
   border-bottom: none;
 }
@@ -176,7 +180,7 @@ html[data-platform="win32"] .agx-topbar {
 }
 
 /* Expanded sidebar: toggle + search sit in the traffic-light row, right-aligned
-   against the divider so they visually meet 本地 on the main Topbar. */
+   against the divider with the main content. */
 .agx-sidebar-topbar {
   display: flex;
   align-items: center;

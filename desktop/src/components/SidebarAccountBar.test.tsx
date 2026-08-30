@@ -49,10 +49,11 @@ describe("sidebar account chrome", () => {
     expect(collapsed).toContain("aria-label=\"设置\"");
     expect(collapsed).toContain("账号菜单");
 
+    expect(collapsed).not.toContain("本地");
+
     const expanded = renderToStaticMarkup(
       <Topbar sidebarCollapsed={false} onToggleSidebar={() => {}} />,
     );
-    expect(expanded).not.toContain("Token 消耗看板");
-    expect(expanded).not.toContain("账号菜单");
+    expect(expanded).toBe("");
   });
 });
