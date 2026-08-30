@@ -1,7 +1,7 @@
 import { ArrowLeft, Gauge, Settings } from "lucide-react";
 import { useAppStore } from "../store";
 import { AccountIdentityControl } from "./AccountIdentityControl";
-import { TopbarLeftControls } from "./TopbarLeftControls";
+import { ThemeToggleButton, TopbarLeftControls } from "./TopbarLeftControls";
 
 type Props = {
   sidebarCollapsed: boolean;
@@ -44,6 +44,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
       </div>
       {sidebarCollapsed ? (
         <div className="agx-topbar-right">
+          <ThemeToggleButton />
           <button
             className="agx-topbar-btn agx-topbar-btn--icon-only"
             type="button"

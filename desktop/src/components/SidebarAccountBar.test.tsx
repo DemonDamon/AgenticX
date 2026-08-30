@@ -23,22 +23,25 @@ vi.mock("../store", () => ({
 }));
 
 describe("sidebar account chrome", () => {
-  it("docks token and settings next to the identity pill", () => {
+  it("docks theme, token, and settings next to the identity pill", () => {
     const html = renderToStaticMarkup(<SidebarAccountBar />);
     expect(html).toContain("Damon");
+    expect(html).toContain("切换到亮色");
     expect(html).toContain("Token 消耗看板");
     expect(html).toContain("设置");
-    expect(html.indexOf("Damon")).toBeLessThan(html.indexOf("Token 消耗看板"));
+    expect(html.indexOf("Damon")).toBeLessThan(html.indexOf("切换到亮色"));
+    expect(html.indexOf("切换到亮色")).toBeLessThan(html.indexOf("Token 消耗看板"));
     expect(html.indexOf("Token 消耗看板")).toBeLessThan(html.indexOf("aria-label=\"设置\""));
   });
 
-  it("places theme toggle to the left of search in the nav header cluster", () => {
+  it("keeps only search and sidebar toggle in the nav header cluster", () => {
     const html = renderToStaticMarkup(
       <TopbarLeftControls onToggleSidebar={() => {}} toggleTitle="收起侧栏" />,
     );
-    expect(html).toContain("切换到亮色");
     expect(html).toContain("搜索文件与历史对话");
-    expect(html.indexOf("切换到亮色")).toBeLessThan(html.indexOf("搜索文件与历史对话"));
+    expect(html).toContain("收起侧栏");
+    expect(html).not.toContain("切换到亮色");
+    expect(html).not.toContain("切换到暗色");
     expect(html.indexOf("搜索文件与历史对话")).toBeLessThan(html.indexOf("收起侧栏"));
   });
 
@@ -46,9 +49,11 @@ describe("sidebar account chrome", () => {
     const collapsed = renderToStaticMarkup(
       <Topbar sidebarCollapsed onToggleSidebar={() => {}} />,
     );
+    expect(collapsed).toContain("切换到亮色");
     expect(collapsed).toContain("Token 消耗看板");
     expect(collapsed).toContain("aria-label=\"设置\"");
     expect(collapsed).toContain("账号菜单");
+    expect(collapsed.indexOf("切换到亮色")).toBeLessThan(collapsed.indexOf("Token 消耗看板"));
 
     expect(collapsed).not.toContain("本地");
 
