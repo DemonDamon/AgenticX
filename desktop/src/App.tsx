@@ -17,6 +17,7 @@ import { VoiceFocusMode } from "./components/VoiceFocusMode";
 import type { ForwardConfirmPayload } from "./components/ForwardPicker";
 import { resolveForwardTarget } from "./utils/resolve-forward-target";
 import { rememberSessionForAvatar } from "./utils/avatar-last-session";
+import { filterDurablePanes, persistActivePaneId } from "./utils/compose-preview";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
 import type { Message, ProviderEntry } from "./store";
 import { normalizeSessionTokens, useAppStore } from "./store";
@@ -27,6 +28,7 @@ import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 import { resolveMetaDisplayName } from "./utils/display-name";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
 import { GlobalSearchHost } from "./components/global-search/GlobalSearchPanel";
+import { QuickComposeOverlay } from "./components/quick-compose/QuickComposeOverlay";
 import {
   GLOBAL_SEARCH_ADD_TO_WORKSPACE,
   openGlobalSearch,
@@ -1051,8 +1053,8 @@ export function App() {
     if (!workspaceHydratedRef.current) return;
     const snapshot: PersistedWorkspaceState = {
       sessionId,
-      activePaneId,
-      panes: panes.map((pane) => ({
+      activePaneId: persistActivePaneId(activePaneId, panes),
+      panes: filterDurablePanes(panes).map((pane) => ({
         id: pane.id,
         avatarId: pane.avatarId,
         avatarName: pane.avatarName,
@@ -2397,27 +2399,32 @@ export function App() {
             ) : null}
             <div className="agx-content">
               <div className="agx-main-content">
-                {userMode === "lite" ? (
-                  <LiteChatView
-                    onOpenConfirm={onOpenConfirm}
-                    onOpenClarification={onOpenClarification}
-                    onSubmitClarification={onSubmitClarification}
-                  />
-                ) : mainView === "avatars" ? (
-                  <AvatarGalleryView />
-                ) : mainView === "groups" ? (
-                  <ProjectsView />
-                ) : mainView === "collab" ? (
-                  <CollabRoomPanel variant="page" />
-                ) : mainView === "automation" ? (
-                  <AutomationView />
-                ) : (
-                  <PaneManager
-                    onOpenConfirm={onOpenConfirm}
-                    onOpenClarification={onOpenClarification}
-                    onSubmitClarification={onSubmitClarification}
-                  />
-                )}
+                <div className="flex h-full min-h-0 flex-col">
+                  {userMode === "pro" ? <QuickComposeOverlay /> : null}
+                  <div className="min-h-0 flex-1 overflow-hidden">
+                    {userMode === "lite" ? (
+                      <LiteChatView
+                        onOpenConfirm={onOpenConfirm}
+                        onOpenClarification={onOpenClarification}
+                        onSubmitClarification={onSubmitClarification}
+                      />
+                    ) : mainView === "avatars" ? (
+                      <AvatarGalleryView />
+                    ) : mainView === "groups" ? (
+                      <ProjectsView />
+                    ) : mainView === "collab" ? (
+                      <CollabRoomPanel variant="page" />
+                    ) : mainView === "automation" ? (
+                      <AutomationView />
+                    ) : (
+                      <PaneManager
+                        onOpenConfirm={onOpenConfirm}
+                        onOpenClarification={onOpenClarification}
+                        onSubmitClarification={onSubmitClarification}
+                      />
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

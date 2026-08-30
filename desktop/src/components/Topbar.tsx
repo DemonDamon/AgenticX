@@ -2,6 +2,7 @@ import { ArrowLeft, Gauge, Settings } from "lucide-react";
 import { useAppStore } from "../store";
 import { AccountIdentityControl } from "./AccountIdentityControl";
 import { ThemeToggleButton, TopbarLeftControls } from "./TopbarLeftControls";
+import { SidebarCreateButton } from "./quick-compose/SidebarCreateButton";
 
 type Props = {
   sidebarCollapsed: boolean;
@@ -24,11 +25,14 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
     <div className={`agx-topbar${hideTopbarBorder ? " agx-topbar--no-border" : ""}`}>
       <div className="agx-topbar-left">
         {sidebarCollapsed ? (
-          <TopbarLeftControls
-            onToggleSidebar={onToggleSidebar}
-            toggleTitle="展开侧栏"
-            className="agx-topbar-left-controls agx-topbar-left-controls--collapsed"
-          />
+          <>
+            <TopbarLeftControls
+              onToggleSidebar={onToggleSidebar}
+              toggleTitle="展开侧栏"
+              className="agx-topbar-left-controls agx-topbar-left-controls--collapsed"
+            />
+            <SidebarCreateButton />
+          </>
         ) : null}
         {chatReturnSnapshot ? (
           <button

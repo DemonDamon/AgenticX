@@ -41,7 +41,7 @@ export function usePaneNavigation() {
   const openMetaOrAvatarPane = useCallback(
     (avatarId: string | null, avatarName: string) => {
       setMainView("chat");
-      const existing = panes.find((item) => item.avatarId === avatarId);
+      const existing = panes.find((item) => item.avatarId === avatarId && !item.composePreview);
       if (existing) {
         setActivePaneId(existing.id);
         setActiveAvatarId(avatarId);
@@ -155,7 +155,7 @@ export function usePaneNavigation() {
     (group: { id: string; name: string }) => {
       setMainView("chat");
       const groupAvatarId = `group:${group.id}`;
-      const existing = panes.find((item) => item.avatarId === groupAvatarId);
+      const existing = panes.find((item) => item.avatarId === groupAvatarId && !item.composePreview);
 
       const bindGroupPaneSession = async (paneId: string) => {
         const rememberedSid = getRememberedSessionForAvatar(groupAvatarId);

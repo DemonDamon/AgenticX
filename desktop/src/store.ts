@@ -5,6 +5,7 @@ import type { SettingsFocus, SettingsTab } from "./settings-tab";
 import { clearPaneAwaitingFreshSession } from "./utils/pane-fresh-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
+import { COMPOSE_PREVIEW_PANE_ID, isComposePreviewPane } from "./utils/compose-preview";
 import {
   coerceSelectableModel,
   reconcilePaneModelsWithSettings as reconcilePaneModelsPure,
@@ -137,6 +138,9 @@ export type GroupChat = {
 /** Main-area view router state for button-style sidebar navigation. */
 export type MainView = "chat" | "avatars" | "groups" | "collab" | "automation";
 
+/** Sidebar「+」快捷创建：收件人栏意图。不落盘。 */
+export type QuickComposeIntent = "expert" | "group";
+
 export type SidePanelTab = "workspace" | "members" | "graph";
 
 export type PaneTerminalTab = {
@@ -209,6 +213,11 @@ export type ChatPane = {
   hasOlderMessages?: boolean;
   /** True while fetching an older page on scroll-up. */
   loadingOlderMessages?: boolean;
+  /**
+   * Transient compose-picker preview. Not a tab, not persisted.
+   * Switching experts rebinds this pane; cancel removes it.
+   */
+  composePreview?: boolean;
   /** Sub-Plan D: right column drawer showing one sub-agent run's activity log + artifacts. */
   runDrawerOpen?: boolean;
   /** Run id currently shown in the drawer (persists across restarts so the drawer can restore). */
@@ -510,6 +519,10 @@ type AppState = {
   userMode: "pro" | "lite";
   onboardingCompleted: boolean;
   commandPaletteOpen: boolean;
+  /** Sidebar「+」快捷创建；关闭为 null。 */
+  quickComposeIntent: QuickComposeIntent | null;
+  openQuickCompose: (intent: QuickComposeIntent) => void;
+  closeQuickCompose: () => void;
   keybindingsPanelOpen: boolean;
   planMode: boolean;
   sidebarCollapsed: boolean;
@@ -656,6 +669,16 @@ type AppState = {
   setActivePaneId: (id: string) => void;
   hydratePanes: (panes: ChatPane[], activePaneId: string) => void;
   addPane: (avatarId: string | null, avatarName: string, sessionId: string) => string;
+  /**
+   * Show one expert/group in the compose picker without creating a durable tab.
+   * Reuses an already-open pane when one exists; otherwise rebinds a single preview pane.
+   */
+  upsertComposePreviewPane: (
+    avatarId: string | null,
+    avatarName: string,
+  ) => { paneId: string; reusedDurable: boolean };
+  clearComposePreview: (restorePaneId?: string) => void;
+  promoteComposePreview: () => string | null;
   removePane: (paneId: string) => void;
   /** 删除定时任务后移除所有绑定该任务的窗格（avatarId 为 automation:<taskId>）。 */
   removePanesForAutomationTaskId: (taskId: string) => void;
@@ -1089,6 +1112,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   userMode: "pro",
   onboardingCompleted: true,
   commandPaletteOpen: false,
+  quickComposeIntent: null,
   keybindingsPanelOpen: false,
   planMode: false,
   sidebarCollapsed: false,
@@ -1283,6 +1307,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setUserMode: (userMode) => set({ userMode }),
   setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
+  openQuickCompose: (intent) => set({ quickComposeIntent: intent, commandPaletteOpen: false }),
+  closeQuickCompose: () => set({ quickComposeIntent: null }),
   setKeybindingsPanelOpen: (keybindingsPanelOpen) => set({ keybindingsPanelOpen }),
   setPlanMode: (planMode) => set({ planMode }),
   setSidebarCollapsed: (next) =>
@@ -1544,7 +1570,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   hydratePanes: (panes, activePaneId) =>
     set((state) => {
       if (!Array.isArray(panes) || panes.length === 0) return state;
-      const nextPanes = panes.map((p) => ({ ...makeDefaultPane(), ...p }));
+      const nextPanes = panes
+        .filter((p) => !isComposePreviewPane(p))
+        .map((p) => ({ ...makeDefaultPane(), ...p }));
+      if (nextPanes.length === 0) return state;
       const hasActive = nextPanes.some((p) => p.id === activePaneId);
       const nextActiveId = hasActive ? activePaneId : nextPanes[0]?.id ?? state.activePaneId;
       const active = nextPanes.find((p) => p.id === nextActiveId) ?? nextPanes[0];
@@ -1696,6 +1725,85 @@ export const useAppStore = create<AppState>((set, get) => ({
       activePaneId: paneId,
     };
     });
+    return paneId;
+  },
+  upsertComposePreviewPane: (avatarId, avatarName) => {
+    const state = get();
+    const durable = state.panes.find(
+      (pane) => !isComposePreviewPane(pane) && pane.avatarId === avatarId,
+    );
+    if (durable) {
+      set({
+        panes: state.panes.filter((pane) => !isComposePreviewPane(pane)),
+        activePaneId: durable.id,
+      });
+      return { paneId: durable.id, reusedDurable: true };
+    }
+
+    const av = avatarId ? state.avatars.find((item) => item.id === avatarId) : null;
+    const defaultProvider = (state.settings.defaultProvider || "").trim();
+    const coerced = resolveSessionBindingModel({
+      providers: state.settings.providers,
+      sessionModelKnown: false,
+      avatarProvider: av?.defaultProvider,
+      avatarModel: av?.defaultModel,
+      defaultProvider,
+      defaultModel: state.settings.providers[defaultProvider]?.model,
+      activeProvider: state.activeProvider,
+      activeModel: state.activeModel,
+    });
+    const existingPreview = state.panes.find((pane) => isComposePreviewPane(pane));
+    const previewId = existingPreview?.id ?? COMPOSE_PREVIEW_PANE_ID;
+    const sameTarget = existingPreview && existingPreview.avatarId === avatarId;
+    const nextPreview: ChatPane = sameTarget
+      ? existingPreview
+      : {
+          ...(existingPreview ?? makeDefaultPane()),
+          id: previewId,
+          avatarId,
+          avatarName,
+          sessionId: "",
+          messages: [],
+          composePreview: true,
+          sessionTokens: { ...EMPTY_SESSION_TOKENS },
+          modelProvider: coerced?.provider ?? "",
+          modelName: coerced?.model ?? "",
+          historySearchTerms: [],
+          historyJumpMessageId: null,
+          loadingMessages: false,
+        };
+    set({
+      panes: [...state.panes.filter((pane) => !isComposePreviewPane(pane)), nextPreview],
+      activePaneId: previewId,
+    });
+    return { paneId: previewId, reusedDurable: false };
+  },
+  clearComposePreview: (restorePaneId) =>
+    set((state) => {
+      const next = state.panes.filter((pane) => !isComposePreviewPane(pane));
+      if (next.length === state.panes.length) {
+        if (restorePaneId && next.some((pane) => pane.id === restorePaneId)) {
+          return { activePaneId: restorePaneId };
+        }
+        return state;
+      }
+      if (next.length === 0) return state;
+      const restore =
+        (restorePaneId && next.some((pane) => pane.id === restorePaneId) && restorePaneId) ||
+        (next.some((pane) => pane.id === state.activePaneId) && state.activePaneId) ||
+        next[0].id;
+      return { panes: next, activePaneId: restore };
+    }),
+  promoteComposePreview: () => {
+    const preview = get().panes.find((pane) => isComposePreviewPane(pane));
+    if (!preview) return null;
+    const paneId = uid();
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === preview.id ? { ...pane, id: paneId, composePreview: false } : pane,
+      ),
+      activePaneId: state.activePaneId === preview.id ? paneId : state.activePaneId,
+    }));
     return paneId;
   },
   removePane: (paneId) =>

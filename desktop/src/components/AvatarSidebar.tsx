@@ -9,6 +9,7 @@ import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
 import { SidebarAccountBar } from "./SidebarAccountBar";
 import { SidebarSessionHistory } from "./sidebar/SidebarSessionHistory";
 import { TopbarLeftControls } from "./TopbarLeftControls";
+import { SidebarCreateButton } from "./quick-compose/SidebarCreateButton";
 
 type Props = {
   onToggleSidebar: () => void;
@@ -210,11 +211,14 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
       <aside className="flex h-full w-full flex-col bg-surface-sidebar">
         {/* macOS traffic-light row: toggle + search aligned to the right edge. */}
         <div className="drag-region agx-sidebar-topbar">
-          <TopbarLeftControls
-            onToggleSidebar={onToggleSidebar}
-            toggleTitle="收起侧栏"
-            className="agx-topbar-left-controls no-drag"
-          />
+          <div className="no-drag flex items-center gap-[var(--agx-topbar-icon-gap,8px)]">
+            <TopbarLeftControls
+              onToggleSidebar={onToggleSidebar}
+              toggleTitle="收起侧栏"
+              className="agx-topbar-left-controls"
+            />
+            <SidebarCreateButton />
+          </div>
         </div>
 
         {/* Meta-Agent brand row — text-only product name + version (no character logo) */}

@@ -118,8 +118,10 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
   const activePaneId = useAppStore((s) => s.activePaneId);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const reorderPanes = useAppStore((s) => s.reorderPanes);
+  const durablePanes = panes.filter((pane) => !pane.composePreview);
+  const previewPane = panes.find((pane) => pane.composePreview && pane.id === activePaneId);
 
-  const paneCount = panes.length;
+  const paneCount = durablePanes.length;
   const rows = Math.ceil(paneCount / COLUMNS);
 
   const [colSizes, setColSizes] = useState<number[][]>(() =>
@@ -211,8 +213,8 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
     clearDrag();
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const fromIndex = panes.findIndex((p) => p.id === active.id);
-    const toIndex = panes.findIndex((p) => p.id === over.id);
+    const fromIndex = durablePanes.findIndex((p) => p.id === active.id);
+    const toIndex = durablePanes.findIndex((p) => p.id === over.id);
     if (fromIndex < 0 || toIndex < 0) return;
     reorderPanes(fromIndex, toIndex);
     resetLayoutSizes(paneCount);
@@ -220,8 +222,8 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
 
   const isMulti = paneCount >= 2;
   const paneTabMode = shouldUsePaneTabs(containerWidth, paneCount);
-  const paneIds = panes.map((p) => p.id);
-  const activeDragPane = activeDragId ? panes.find((p) => p.id === activeDragId) : undefined;
+  const paneIds = durablePanes.map((p) => p.id);
+  const activeDragPane = activeDragId ? durablePanes.find((p) => p.id === activeDragId) : undefined;
 
   const renderChatPane = (pane: ChatPaneState, isFocused: boolean) => (
     <ChatPane
@@ -234,6 +236,23 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
     />
   );
 
+  if (previewPane) {
+    return (
+      <div ref={containerRef} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+        {durablePanes.length >= 2 ? (
+          <PaneTabStrip
+            panes={durablePanes}
+            activePaneId={activePaneId}
+            onSelect={setActivePaneId}
+          />
+        ) : null}
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+          {renderChatPane(previewPane, true)}
+        </div>
+      </div>
+    );
+  }
+
   const multiPaneMinWidth = isMulti
     ? clamp(Math.floor((containerWidth || 680) / paneCount) - 8, 240, 320)
     : undefined;
@@ -241,12 +260,12 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
   const tabBody = paneTabMode ? (
     <>
       <PaneTabStrip
-        panes={panes}
+        panes={durablePanes}
         activePaneId={activePaneId}
         onSelect={setActivePaneId}
       />
       <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-        {panes.map((pane) => {
+        {durablePanes.map((pane) => {
           const isFocused = activePaneId === pane.id;
           return (
             <div
@@ -268,10 +287,10 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
 
   const layoutTwoOrFewer = (
     <div className="flex h-full min-w-0 flex-1 overflow-hidden">
-      {panes.map((pane, index) => {
+      {durablePanes.map((pane, index) => {
         const widthPct =
           paneCount === 1 ? 100 : colSizes[0]?.[index] ?? 100 / paneCount;
-        const isLast = index === panes.length - 1;
+        const isLast = index === durablePanes.length - 1;
         const isFocused = activePaneId === pane.id;
         const outerStyle = {
           width: `${widthPct}%`,
@@ -322,7 +341,7 @@ export function PaneManager({ onOpenConfirm, onOpenClarification, onSubmitClarif
   const layoutMultiRow = (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {Array.from({ length: rows }, (_, rowIndex) => {
-        const rowPanes = panes.slice(rowIndex * COLUMNS, rowIndex * COLUMNS + COLUMNS);
+        const rowPanes = durablePanes.slice(rowIndex * COLUMNS, rowIndex * COLUMNS + COLUMNS);
         const rowHeightPct = rowSizes[rowIndex] ?? 100 / rows;
         const isLastRow = rowIndex === rows - 1;
 
