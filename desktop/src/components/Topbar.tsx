@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Gauge, LogIn, LogOut, Moon, Settings, Sun, User } from "lucide-react";
+import { ArrowLeft, Gauge, Settings } from "lucide-react";
 import { useAppStore } from "../store";
+import { AccountIdentityControl } from "./AccountIdentityControl";
 import { TopbarLeftControls } from "./TopbarLeftControls";
 import { BackendModeChip } from "./BackendModeChip";
 
@@ -10,88 +10,13 @@ type Props = {
 };
 
 export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
-  const theme = useAppStore((s) => s.theme);
-  const setTheme = useAppStore((s) => s.setTheme);
   const openSettings = useAppStore((s) => s.openSettings);
   const openTokenDashboard = useAppStore((s) => s.openTokenDashboard);
-  const agxAccount = useAppStore((s) => s.agxAccount);
-  const setAgxAccount = useAppStore((s) => s.setAgxAccount);
   const mainView = useAppStore((s) => s.mainView);
   const chatReturnSnapshot = useAppStore((s) => s.chatReturnSnapshot);
   const returnToPreviousChat = useAppStore((s) => s.returnToPreviousChat);
   /** Landing pages: hide topbar bottom border so 「本地」下不出现横线。 */
   const hideTopbarBorder = mainView !== "chat";
-
-  const [loginBusy, setLoginBusy] = useState(false);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement>(null);
-
-  const isDarkLike = theme === "dark" || theme === "dim";
-
-  const onThemeToggle = () => {
-    // Topbar 快速切换仅在 dark/light 之间切换，dim 仍保留在「设置」里可选
-    setTheme(isDarkLike ? "light" : "dark");
-  };
-
-  const onLoginClick = async () => {
-    if (loginBusy) return;
-    setLoginBusy(true);
-    try {
-      const r = await window.agenticxDesktop.agxAccountLoginStart();
-      if (!r.ok) {
-        await window.agenticxDesktop.confirmDialog({
-          title: "无法开始登录",
-          message: "未能开始官网账号登录，请稍后再试。",
-          detail: typeof r.error === "string" && r.error ? `错误：${r.error}` : undefined,
-          confirmText: "确定",
-        });
-      }
-    } catch (err) {
-      await window.agenticxDesktop.confirmDialog({
-        title: "无法开始登录",
-        message: String(err),
-        confirmText: "确定",
-      });
-    } finally {
-      setLoginBusy(false);
-    }
-  };
-
-  const onLogoutClick = async () => {
-    setUserMenuOpen(false);
-    const r = await window.agenticxDesktop.confirmDialog({
-      title: "退出官网账号",
-      message: "确定要清除本机已保存的 Near 官网登录状态吗？",
-      confirmText: "退出",
-      destructive: true,
-    });
-    if (!r.confirmed) return;
-    await window.agenticxDesktop.agxAccountLogout();
-    setAgxAccount({ loggedIn: false, email: "", displayName: "" });
-  };
-
-  const onViewAccount = () => {
-    setUserMenuOpen(false);
-    openSettings("account");
-  };
-
-  // 点击外部关闭用户菜单
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!userMenuRef.current) return;
-      if (!userMenuRef.current.contains(e.target as Node)) {
-        setUserMenuOpen(false);
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [userMenuOpen]);
-
-  const userInitial = (agxAccount.displayName || agxAccount.email || "?")
-    .trim()
-    .charAt(0)
-    .toUpperCase();
 
   return (
     <div className={`agx-topbar${hideTopbarBorder ? " agx-topbar--no-border" : ""}`}>
@@ -116,88 +41,31 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
           </button>
         ) : null}
       </div>
-      <div className="agx-topbar-right">
-        <button
-          className="agx-topbar-btn agx-topbar-btn--icon-only"
-          type="button"
-          onClick={() => openTokenDashboard()}
-          title="Token 消耗看板"
-          aria-label="Token 消耗看板"
-        >
-          <Gauge className="h-[18px] w-[18px]" strokeWidth={1.8} />
-        </button>
-        <button
-          className="agx-topbar-btn agx-topbar-btn--icon-only"
-          onClick={onThemeToggle}
-          title={isDarkLike ? "切换到亮色" : "切换到暗色"}
-          aria-label={isDarkLike ? "切换到亮色" : "切换到暗色"}
-        >
-          {isDarkLike ? (
-            <Sun className="h-[18px] w-[18px]" strokeWidth={1.8} />
-          ) : (
-            <Moon className="h-[18px] w-[18px]" strokeWidth={1.8} />
-          )}
-        </button>
-        <button
-          className="agx-topbar-btn agx-topbar-btn--icon-only"
-          onClick={() => openSettings()}
-          title="设置"
-          aria-label="设置"
-        >
-          <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
-        </button>
-        {agxAccount.loggedIn ? (
-          <div ref={userMenuRef} className="relative">
-            <button
-              className="agx-topbar-btn"
-              onClick={() => setUserMenuOpen((v) => !v)}
-              title={agxAccount.displayName || agxAccount.email || "已登录"}
-              aria-label="账号菜单"
-            >
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-[10px] font-semibold text-[var(--theme-color-text)]">
-                {userInitial}
-              </span>
-              <span className="max-w-[120px] truncate text-[12px]">
-                {agxAccount.displayName || agxAccount.email}
-              </span>
-            </button>
-            {userMenuOpen ? (
-              <div className="absolute right-0 top-[34px] z-50 min-w-[200px] overflow-hidden rounded-xl bg-surface-base p-1.5 shadow-xl">
-                <button
-                  type="button"
-                  className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
-                  onClick={onViewAccount}
-                >
-                  <User
-                    className="h-[15px] w-[15px] shrink-0 text-text-muted group-hover:text-text-strong"
-                    strokeWidth={2}
-                  />
-                  <span className="flex-1 text-[13px] font-medium leading-none text-text-strong">查看账号</span>
-                </button>
-                <button
-                  type="button"
-                  className="group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-rose-500/10"
-                  onClick={() => void onLogoutClick()}
-                >
-                  <LogOut className="h-[15px] w-[15px] shrink-0 text-rose-400" strokeWidth={2} />
-                  <span className="flex-1 text-[13px] font-medium leading-none text-rose-400">退出登录</span>
-                </button>
-              </div>
-            ) : null}
-          </div>
-        ) : (
+      {sidebarCollapsed ? (
+        <div className="agx-topbar-right">
           <button
-            className="agx-topbar-btn"
-            onClick={() => void onLoginClick()}
-            disabled={loginBusy}
-            title="登录 Near 官网账号"
-            aria-label="登录"
+            className="agx-topbar-btn agx-topbar-btn--icon-only"
+            type="button"
+            onClick={() => openTokenDashboard()}
+            title="Token 消耗看板"
+            aria-label="Token 消耗看板"
           >
-            <LogIn className="h-[18px] w-[18px]" strokeWidth={1.8} />
-            <span className="text-[12px]">{loginBusy ? "登录中..." : "登录"}</span>
+            <Gauge className="h-[18px] w-[18px]" strokeWidth={1.8} />
           </button>
-        )}
-      </div>
+          <button
+            className="agx-topbar-btn agx-topbar-btn--icon-only"
+            type="button"
+            onClick={() => openSettings()}
+            title="设置"
+            aria-label="设置"
+          >
+            <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          </button>
+          <AccountIdentityControl variant="topbar" menuPlacement="down" />
+        </div>
+      ) : (
+        <div className="agx-topbar-right" />
+      )}
     </div>
   );
 }

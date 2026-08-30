@@ -6,6 +6,7 @@ import { APP_DISPLAY_NAME, APP_VERSION, META_AGENT_DISPLAY_NAME } from "../const
 import { usePaneNavigation } from "../hooks/usePaneNavigation";
 import { isNewTaskNavActive } from "../utils/workspace-session-visibility";
 import { AvatarSettingsPanel } from "./AvatarSettingsPanel";
+import { SidebarAccountBar } from "./SidebarAccountBar";
 import { SidebarSessionHistory } from "./sidebar/SidebarSessionHistory";
 import { TopbarLeftControls } from "./TopbarLeftControls";
 
@@ -265,6 +266,7 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
         </nav>
 
         <SidebarSessionHistory />
+        <SidebarAccountBar />
       </aside>
 
       {machiContextMenu && (
