@@ -13,6 +13,7 @@ import {
   type GroupOpenSessionRow,
 } from "../utils/group-pane-open";
 import { schedulePrefetchSessionTail } from "../utils/session-tail-cache";
+import { resolveGroupTitle } from "../utils/quick-compose";
 
 /**
  * Shared pane-navigation logic used by the nav sidebar, the avatar gallery
@@ -152,9 +153,13 @@ export function usePaneNavigation() {
 
   /** Open or focus a group-chat pane. */
   const openGroupPane = useCallback(
-    (group: { id: string; name: string }) => {
+    (group: { id: string; name: string; avatarIds?: string[] }) => {
       setMainView("chat");
       const groupAvatarId = `group:${group.id}`;
+      const memberNames = (group.avatarIds ?? []).map(
+        (id) => useAppStore.getState().avatars.find((item) => item.id === id)?.name ?? "",
+      );
+      const title = resolveGroupTitle(group.name, memberNames);
       const existing = panes.find((item) => item.avatarId === groupAvatarId && !item.composePreview);
 
       const bindGroupPaneSession = async (paneId: string) => {
@@ -206,6 +211,14 @@ export function usePaneNavigation() {
       };
 
       if (existing) {
+        const nextTitle = `群聊 · ${title}`;
+        if (existing.avatarName !== nextTitle) {
+          useAppStore.setState((state) => ({
+            panes: state.panes.map((pane) =>
+              pane.id === existing.id ? { ...pane, avatarName: nextTitle } : pane,
+            ),
+          }));
+        }
         setActivePaneId(existing.id);
         setActiveAvatarId(null);
         if (!existingGroupPaneNeedsBind(existing.sessionId)) return;
@@ -218,7 +231,7 @@ export function usePaneNavigation() {
 
       const rememberedSid = getRememberedSessionForAvatar(groupAvatarId);
       const optimisticSid = pickOptimisticGroupSessionId(rememberedSid) ?? "";
-      const paneId = addPane(groupAvatarId, `群聊 · ${group.name}`, optimisticSid);
+      const paneId = addPane(groupAvatarId, `群聊 · ${title}`, optimisticSid);
       setActivePaneId(paneId);
       setActiveAvatarId(null);
       if (optimisticSid) {

@@ -8,6 +8,9 @@ import {
   composePlaceholder,
   consumeCommaInput,
   formatGroupDisplayName,
+  formatGroupDisplayNameFromFullNames,
+  resolveGroupTitle,
+  shortExpertDisplayName,
   hasExactAvatarName,
   previewTarget,
   resolveEnterCommit,
@@ -49,6 +52,20 @@ test("group title uses顿号 and 和", () => {
   assert.equal(formatGroupDisplayName(["del"]), "del");
   assert.equal(formatGroupDisplayName(["del", "kk"]), "del和kk");
   assert.equal(formatGroupDisplayName(["del", "kk", "Near", "Bob"]), "del、kk、Near和Bob");
+});
+
+test("role·name experts use the given name in group titles", () => {
+  assert.equal(shortExpertDisplayName("架构师·阿析"), "阿析");
+  assert.equal(shortExpertDisplayName("程基岩"), "程基岩");
+  assert.equal(shortExpertDisplayName("环境配置专家"), "环境配置专家");
+  assert.equal(formatGroupDisplayName(["架构师·阿析", "程基岩"]), "阿析和程基岩");
+  assert.equal(formatGroupDisplayName(["后端·北辰", "前端·晴空", "安全·司南"]), "北辰、晴空和司南");
+  assert.equal(
+    formatGroupDisplayNameFromFullNames(["架构师·阿析", "程基岩"]),
+    "架构师·阿析和程基岩",
+  );
+  assert.equal(resolveGroupTitle("架构师·阿析和程基岩", ["架构师·阿析", "程基岩"]), "阿析和程基岩");
+  assert.equal(resolveGroupTitle("项目攻坚", ["架构师·阿析", "程基岩"]), "项目攻坚");
 });
 
 test("comma split accepts ASCII and Chinese commas", () => {
@@ -195,6 +212,24 @@ test("empty query commits the chip row", () => {
       query: "",
     }),
     { action: "open-avatar", id: "a-del", name: "del" },
+  );
+});
+
+test("empty query does not add the highlighted leftover expert into the group", () => {
+  assert.deepEqual(
+    resolveEnterCommit({
+      chips: [
+        { kind: "avatar", id: "a-del", name: "del" },
+        { kind: "avatar", id: "a-kk", name: "kk" },
+      ],
+      suggestion: { kind: "avatar", id: "a-near", name: "Near" },
+      query: "",
+    }),
+    {
+      action: "create-group",
+      avatarIds: ["a-del", "a-kk"],
+      pendingNames: [],
+    },
   );
 });
 

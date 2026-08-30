@@ -92,13 +92,39 @@ export function composeEnterHint(kind: ComposeSuggestion["kind"] | undefined, ch
   return "打开";
 }
 
-/** "del、kk、Near和Bob" — Chinese list used as the default group title. */
+/** "架构师·阿析" → "阿析"; names without · stay as-is. */
+export function shortExpertDisplayName(name: string): string {
+  const cleaned = normalizeComposeQuery(name);
+  if (!cleaned.includes("·")) return cleaned;
+  const parts = cleaned.split("·").map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) return parts[parts.length - 1] ?? cleaned;
+  return cleaned;
+}
+
+function joinChineseNameList(names: string[]): string {
+  if (names.length === 0) return "";
+  if (names.length === 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]}和${names[1]}`;
+  return `${names.slice(0, -1).join("、")}和${names[names.length - 1]}`;
+}
+
+/** "阿析和程基岩" — Chinese list used as the default group title. */
 export function formatGroupDisplayName(names: string[]): string {
-  const cleaned = names.map((name) => normalizeComposeQuery(name)).filter(Boolean);
-  if (cleaned.length === 0) return "";
-  if (cleaned.length === 1) return cleaned[0];
-  if (cleaned.length === 2) return `${cleaned[0]}和${cleaned[1]}`;
-  return `${cleaned.slice(0, -1).join("、")}和${cleaned[cleaned.length - 1]}`;
+  return joinChineseNameList(names.map(shortExpertDisplayName).filter(Boolean));
+}
+
+/** Same join without stripping 角色·, used to recognize already-persisted auto titles. */
+export function formatGroupDisplayNameFromFullNames(names: string[]): string {
+  return joinChineseNameList(names.map((name) => normalizeComposeQuery(name)).filter(Boolean));
+}
+
+/** Prefer the stored custom name; rewrite leftover auto titles that mashed 角色·名字. */
+export function resolveGroupTitle(storedName: string, memberFullNames: string[]): string {
+  const stored = storedName.trim();
+  const shortTitle = formatGroupDisplayName(memberFullNames);
+  if (!stored) return shortTitle;
+  if (stored === formatGroupDisplayNameFromFullNames(memberFullNames)) return shortTitle;
+  return stored;
 }
 
 export function previewTarget(suggestion: ComposeSuggestion | null): PreviewTarget | null {

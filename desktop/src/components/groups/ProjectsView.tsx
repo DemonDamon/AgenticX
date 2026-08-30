@@ -24,6 +24,7 @@ import {
 import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
 import { mapAvatarsFromApi, mapGroupsFromApi } from "../../utils/splash-preload-core";
+import { resolveGroupTitle } from "../../utils/quick-compose";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   ClipboardList,
@@ -186,9 +187,11 @@ export function ProjectsView() {
               const { iconBg } = groupColorByIndex(groupIndex);
               const isGroupSelected =
                 editorState?.mode === "edit" && editorState.group.id === group.id;
-              const memberNames = group.avatarIds
-                .map((id) => avatars.find((a) => a.id === id)?.name || id.slice(0, 4))
-                .join("、");
+              const memberNameList = group.avatarIds.map(
+                (id) => avatars.find((a) => a.id === id)?.name || id.slice(0, 4),
+              );
+              const memberNames = memberNameList.join("、");
+              const groupTitle = resolveGroupTitle(group.name, memberNameList);
               return (
                 <div
                   key={group.id}
@@ -209,7 +212,7 @@ export function ProjectsView() {
                         className="flex h-11 w-11 items-center justify-center rounded-[10px] text-sm font-bold text-white"
                         style={{ backgroundColor: iconBg }}
                       >
-                        {group.name.slice(0, 1).toUpperCase()}
+                        {groupTitle.slice(0, 1).toUpperCase()}
                       </div>
                       {hasPane && (
                         <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-surface-card bg-emerald-500" />
@@ -217,7 +220,7 @@ export function ProjectsView() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[15px] font-semibold text-text-strong">
-                        {group.name}
+                        {groupTitle}
                       </div>
                       <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-text-muted">
                         {group.avatarIds.length} 个成员 · {memberNames}

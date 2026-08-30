@@ -311,7 +311,7 @@ export function QuickComposeOverlay() {
   );
 
   const persistGroup = useCallback(
-    async (avatarIds: string[], pendingNames: string[], titleNames: string[]) => {
+    async (avatarIds: string[], pendingNames: string[]) => {
       const createdIds: string[] = [];
       for (const name of pendingNames) {
         const created = await persistCreatedAvatar(name);
@@ -325,7 +325,7 @@ export function QuickComposeOverlay() {
       if (normalized.avatarIds.length === 0) {
         throw new Error("请至少添加 1 位专家后再创建群聊。");
       }
-      const name = formatGroupDisplayName(titleNames) || formatGroupDisplayName(
+      const name = formatGroupDisplayName(
         normalized.avatarIds.map((id) => useAppStore.getState().avatars.find((item) => item.id === id)?.name ?? id),
       );
       const result = await window.agenticxDesktop.createGroup({
@@ -397,11 +397,7 @@ export function QuickComposeOverlay() {
         return;
       }
       clearComposePreview();
-      const titleNames = [
-        ...chips.map((chip) => chip.name),
-        ...(suggestion && suggestion.kind !== "group" ? [suggestion.name] : []),
-      ];
-      const group = await persistGroup(commit.avatarIds, commit.pendingNames, titleNames);
+      const group = await persistGroup(commit.avatarIds, commit.pendingNames);
       openGroupPane(group);
       closeQuickCompose();
     } catch (err) {
