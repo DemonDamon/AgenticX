@@ -258,6 +258,74 @@ def _is_open_call_question(user_input: str) -> bool:
     return False
 
 
+# Explicit "everyone must speak" — not open_floor chitchat (default 2 speakers).
+_BROADCAST_ALL_ASK_THRESHOLD = 8
+_BROADCAST_ALL_PENDING_PREFIX = "group_broadcast_pending::"
+_BROADCAST_ALL_INSTRUCTION = (
+    "用户明确要求群里每位成员亲自回答。请用你自己的身份作答，"
+    "禁止输出 __SKIP__，不要替其他成员发言。"
+)
+_BROADCAST_ALL_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"各自.{0,8}(介绍|自我介绍|说|回答|发言)"),
+    re.compile(r"(每个人|每位).{0,8}(介绍|回答|说说|说一下|发言)"),
+    re.compile(r"(所有人|全员).{0,8}(介绍|回答|说说|说一下|发言|都)"),
+    re.compile(r"都(回答|说说|介绍|说一下|发言)"),
+    re.compile(r"(逐个|依次|轮流).{0,8}(介绍|说|回答|发言)"),
+)
+_BROADCAST_ALL_AFFIRMATIONS = frozenset(
+    {
+        "是",
+        "好",
+        "行",
+        "要",
+        "可以",
+        "确认",
+        "继续",
+        "全员",
+        "好的",
+        "是的",
+        "继续吧",
+        "全员发言",
+        "都介绍",
+        "开始",
+        "ok",
+        "yes",
+    }
+)
+
+
+def _is_broadcast_all_request(user_input: str) -> bool:
+    """True when the user explicitly asked every member to speak."""
+    text = (user_input or "").strip()
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in _BROADCAST_ALL_PATTERNS)
+
+
+def _is_broadcast_all_affirmation(user_input: str) -> bool:
+    """True for a short confirm after a large-group broadcast ask."""
+    text = re.sub(r"[\s，,。！!？?、；;：:]+$", "", (user_input or "").strip())
+    if not text:
+        return False
+    return text.casefold() in _BROADCAST_ALL_AFFIRMATIONS
+
+
+def _broadcast_all_pending_key(group_id: str) -> str:
+    return f"{_BROADCAST_ALL_PENDING_PREFIX}{group_id}"
+
+
+def _ensure_session_scratchpad(base_session: Any) -> dict[str, Any]:
+    pad = getattr(base_session, "scratchpad", None)
+    if isinstance(pad, dict):
+        return pad
+    pad = {}
+    try:
+        setattr(base_session, "scratchpad", pad)
+    except Exception:
+        pass
+    return pad
+
+
 _PROGRESS_QUERY_MARKERS_CN = (
     "干活了吗",
     "干了吗",
@@ -1412,6 +1480,8 @@ class GroupChatRouter:
             "- 明显在追问上一位成员 => continue_thread。\n"
             "- 闲聊、寒暄、开玩笑、随口问「你们平时都聊啥」这类没有明确职责归属的话 => open_floor，"
             "并在 target_ids 里按相关性给出 1–2 个最可能想搭话的成员（可以为空）。\n"
+            "- 用户明确要求各自 / 每个人 / 所有人 / 全员 / 都回答 / 依次发言 => 不要判 open_floor"
+            "（系统会走全员分支）。\n"
             "- open_floor 表示「把话丢进群里，谁想接谁接」，成员有权不接；"
             "不要为了有人回答而硬选一个不相关的成员。\n"
             "- 有明确专业问题或可执行诉求、但没点名时，仍然 route_to 最可能成员。\n"
@@ -1914,6 +1984,122 @@ class GroupChatRouter:
                 yield progress
         yield await task
 
+    async def _emit_broadcast_all_confirm(
+        self,
+        *,
+        base_session: StudioSession,
+        context: GroupChatContext,
+        group_id: str,
+        group_avatar_ids: Sequence[str],
+        member_count: int,
+        user_input: str,
+        quoted_content: str,
+    ) -> AsyncGenerator[GroupReply, None]:
+        pad = _ensure_session_scratchpad(base_session)
+        pad[_broadcast_all_pending_key(group_id)] = {
+            "user_input": user_input,
+            "quoted_content": quoted_content,
+        }
+        confirm_text = (
+            f"这轮是全员回答。当前群有 {member_count} 位成员，一次全部开口会比较长。"
+            "确认的话回复「继续」或「全员」，我再按顺序请每位成员发言。"
+        )
+        context.clear_active_thread()
+        for ge in self._project_h2a_fanout(
+            base_session=base_session,
+            group_id=group_id,
+            group_avatar_ids=group_avatar_ids,
+            target_agent_ids=[META_LEADER_AGENT_ID],
+        ):
+            yield ge
+        yield self._typing_event(META_LEADER_AGENT_ID, self._meta_leader_label)
+        context.append_agent(
+            agent_id=META_LEADER_AGENT_ID,
+            agent_name=self._meta_leader_label,
+            text=confirm_text,
+        )
+        yield GroupReply(
+            agent_id=META_LEADER_AGENT_ID,
+            avatar_name=self._meta_leader_label,
+            avatar_url="",
+            content=confirm_text,
+            skipped=False,
+            event_type="group_reply",
+        )
+
+    async def _run_broadcast_all_members(
+        self,
+        *,
+        base_session: StudioSession,
+        context: GroupChatContext,
+        group_id: str,
+        group_name: str,
+        group_avatar_ids: Sequence[str],
+        valid_members: Sequence[str],
+        user_input: str,
+        quoted_content: str,
+        should_stop: Callable[[], Any],
+        user_display_name: str,
+        responded_this_turn: set[str],
+    ) -> AsyncGenerator[GroupReply, None]:
+        candidates = [str(x).strip() for x in valid_members if str(x).strip()]
+        context.clear_active_thread()
+        if candidates:
+            for ge in self._project_h2a_fanout(
+                base_session=base_session,
+                group_id=group_id,
+                group_avatar_ids=group_avatar_ids,
+                target_agent_ids=candidates,
+            ):
+                yield ge
+        for target in candidates:
+            if await self._should_stop(should_stop):
+                return
+            av = self.avatar_registry.get_avatar(target)
+            ty_name = str(getattr(av, "name", "") or target) if av else target
+            yield self._typing_event(target, ty_name)
+            if await self._should_stop(should_stop):
+                return
+            reply: GroupReply | None = None
+            async for target_evt in self._run_one_target_stream(
+                base_session=base_session,
+                context=context,
+                group_id=group_id,
+                group_name=group_name,
+                avatar_id=target,
+                user_input=user_input,
+                quoted_content=quoted_content,
+                should_stop=should_stop,
+                force_reply=True,
+                user_display_name=user_display_name,
+                extra_instruction=_BROADCAST_ALL_INSTRUCTION,
+            ):
+                yield target_evt
+                if target_evt.event_type in {"group_reply", "group_skipped"}:
+                    reply = target_evt
+            if reply is None:
+                continue
+            self._record_turn_response(responded_this_turn, reply)
+            if not reply.skipped and reply.content.strip():
+                context.bump_active_thread(
+                    partner_id=reply.agent_id,
+                    partner_name=reply.avatar_name,
+                    last_topic=user_input[:120],
+                )
+            async for fu in self._emit_mention_follow_ups(
+                reply=reply,
+                group_avatar_ids=group_avatar_ids,
+                base_session=base_session,
+                context=context,
+                group_id=group_id,
+                group_name=group_name,
+                should_stop=should_stop,
+                user_display_name=user_display_name,
+                hops=_get_mention_hops(),
+                responded_this_turn=responded_this_turn,
+            ):
+                yield fu
+
     async def _run_intelligent_turn(
         self,
         *,
@@ -1956,6 +2142,64 @@ class GroupChatRouter:
             ):
                 yield reply
             return
+        # ── Explicit all-member speak ("各自介绍") before open_floor / intent ─
+        pad = _ensure_session_scratchpad(base_session)
+        pending_key = _broadcast_all_pending_key(group_id)
+        pending_raw = pad.get(pending_key)
+        pending = pending_raw if isinstance(pending_raw, dict) else None
+        if not explicit_member_mentions:
+            hit_request = _is_broadcast_all_request(user_input)
+            hit_affirm = _is_broadcast_all_affirmation(user_input)
+            if pending is not None and (hit_affirm or hit_request):
+                pad.pop(pending_key, None)
+                stored_input = str(pending.get("user_input") or "").strip()
+                stored_quoted = str(pending.get("quoted_content") or "")
+                use_stored = bool(hit_affirm and not hit_request and stored_input)
+                async for reply in self._run_broadcast_all_members(
+                    base_session=base_session,
+                    context=context,
+                    group_id=group_id,
+                    group_name=group_name,
+                    group_avatar_ids=group_avatar_ids,
+                    valid_members=valid_members,
+                    user_input=stored_input if use_stored else user_input,
+                    quoted_content=stored_quoted if use_stored else quoted_content,
+                    should_stop=should_stop,
+                    user_display_name=user_display_name,
+                    responded_this_turn=responded_this_turn,
+                ):
+                    yield reply
+                return
+            if pending is not None:
+                pad.pop(pending_key, None)
+            if hit_request:
+                if len(valid_members) > _BROADCAST_ALL_ASK_THRESHOLD:
+                    async for reply in self._emit_broadcast_all_confirm(
+                        base_session=base_session,
+                        context=context,
+                        group_id=group_id,
+                        group_avatar_ids=group_avatar_ids,
+                        member_count=len(valid_members),
+                        user_input=user_input,
+                        quoted_content=quoted_content,
+                    ):
+                        yield reply
+                    return
+                async for reply in self._run_broadcast_all_members(
+                    base_session=base_session,
+                    context=context,
+                    group_id=group_id,
+                    group_name=group_name,
+                    group_avatar_ids=group_avatar_ids,
+                    valid_members=valid_members,
+                    user_input=user_input,
+                    quoted_content=quoted_content,
+                    should_stop=should_stop,
+                    user_display_name=user_display_name,
+                    responded_this_turn=responded_this_turn,
+                ):
+                    yield reply
+                return
         # ── Open-call broadcast questions go to Near first ─────────────────
         # When the user is broadcasting to the group ("群里谁能…", "哪位…")
         # without naming anyone, prefer the meta leader (Near) as the
