@@ -165,6 +165,12 @@ html[data-platform="win32"] .agx-topbar {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  transition: padding-left var(--ds-dur-slow) var(--ds-ease-out);
+}
+
+.agx-topbar-left--collapsed {
+  /* 侧栏收起后整排左侧图标（含加号）都要让过 macOS 红绿灯 */
+  padding-left: 68px;
 }
 
 .agx-topbar-left-controls {
@@ -172,11 +178,6 @@ html[data-platform="win32"] .agx-topbar {
   align-items: center;
   gap: var(--agx-topbar-icon-gap, 8px);
   min-width: 0;
-  transition: padding-left var(--ds-dur-slow) var(--ds-ease-out);
-}
-
-.agx-topbar-left-controls--collapsed {
-  padding-left: 68px;
 }
 
 /* Expanded sidebar: toggle + search sit in the traffic-light row, right-aligned

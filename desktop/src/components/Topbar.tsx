@@ -23,15 +23,15 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
 
   return (
     <div className={`agx-topbar${hideTopbarBorder ? " agx-topbar--no-border" : ""}`}>
-      <div className="agx-topbar-left">
+      <div className={`agx-topbar-left${sidebarCollapsed ? " agx-topbar-left--collapsed" : ""}`}>
         {sidebarCollapsed ? (
           <>
+            <SidebarCreateButton />
             <TopbarLeftControls
               onToggleSidebar={onToggleSidebar}
               toggleTitle="展开侧栏"
-              className="agx-topbar-left-controls agx-topbar-left-controls--collapsed"
+              className="agx-topbar-left-controls"
             />
-            <SidebarCreateButton />
           </>
         ) : null}
         {chatReturnSnapshot ? (

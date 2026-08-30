@@ -212,12 +212,12 @@ export function AvatarSidebar({ onToggleSidebar }: Props) {
         {/* macOS traffic-light row: toggle + search aligned to the right edge. */}
         <div className="drag-region agx-sidebar-topbar">
           <div className="no-drag flex items-center gap-[var(--agx-topbar-icon-gap,8px)]">
+            <SidebarCreateButton />
             <TopbarLeftControls
               onToggleSidebar={onToggleSidebar}
               toggleTitle="收起侧栏"
               className="agx-topbar-left-controls"
             />
-            <SidebarCreateButton />
           </div>
         </div>
 
