@@ -1,0 +1,68 @@
+{
+ "task_id": "t-DOC-M-02",
+ "office_type": "document",
+ "task_type": "medium_coupling",
+ "team_size": 3,
+ "description": "根据产品需求初稿，产出一份PRD评审文档：需求撰写 + 可行性评估 + 风险识别",
+ "roles": [
+  {
+   "name": "需求撰写员",
+   "role": "writer",
+   "responsibility": "整理需求背景、用户画像、核心功能列表"
+  },
+  {
+   "name": "可行性评估员",
+   "role": "evaluator",
+   "responsibility": "评估技术可行性、工期估算、资源需求"
+  },
+  {
+   "name": "风险识别员",
+   "role": "risk",
+   "responsibility": "识别技术风险、业务风险、合规风险并给出缓解建议"
+  }
+ ],
+ "shared_initial": {
+  "product_name": "智能客服系统3.0",
+  "draft_requirement": "1) 会话质量抽检 2) 权限分级管理 3) 知识库自动更新 6) 日承载32万次调用",
+  "tech_stack": "Python + FastAPI + LLM + Redis + PostgreSQL",
+  "team_headcount": 5,
+  "deadline": "Q4上线"
+ },
+ "verification": {
+  "required_sections": [
+   "需求描述",
+   "可行性评估",
+   "风险识别"
+  ],
+  "required_elements": [
+   "用户画像",
+   "核心功能",
+   "工期估算",
+   "技术风险",
+   "缓解建议"
+  ],
+  "expected_sections_count": 3,
+  "answer_block_schema": {
+   "sections_covered": "list",
+   "sections_count": "number"
+  },
+  "expected_sets": {
+   "sections_covered": [
+    "需求描述",
+    "可行性评估",
+    "风险识别"
+   ]
+  },
+  "expected_values": {
+   "sections_count": 3
+  },
+  "expected_counts": {}
+ },
+ "params": {
+  "feature_count": "t-int(3,7)",
+  "headcount": "t-int(3,8)",
+  "product_names": "t-choice(PRODUCT_POOL)"
+ },
+ "variant_id": "t-DOC-M-02__v04",
+ "variant_seed": 42004
+}

@@ -1,0 +1,34 @@
+{
+  "model": "kimi-k3",
+  "base_url": "https://api.moonshot.cn/v1",
+  "temperature": 1.0,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "assembly": "integrator",
+  "char_budget": 4000,
+  "scorer": "v2",
+  "single_baseline": "single_bon_k",
+  "llm_judge": false,
+  "upstream_ctx_limit": 16000,
+  "tasks": [
+    "t-CONTENT-H-03",
+    "t-CONTENT-L-01",
+    "t-CONTENT-M-02",
+    "t-CROSS-H-03",
+    "t-CROSS-L-01",
+    "t-CROSS-M-02",
+    "t-DATA-H-03",
+    "t-DATA-L-01",
+    "t-DATA-M-02",
+    "t-DOC-H-03",
+    "t-DOC-L-01",
+    "t-DOC-M-02",
+    "t-PROJ-H-03",
+    "t-PROJ-L-01",
+    "t-PROJ-M-02"
+  ],
+  "ts": "2026-08-30T15:19:04"
+}

@@ -1,130 +1,140 @@
 {
-  "task_id": "t-PROJ-L-01",
-  "office_type": "project",
-  "task_type": "low_coupling",
-  "team_size": 3,
-  "description": "基于3个迭代的任务数据产出迭代回顾总结：提取完成项、提取问题、撰写报告",
-  "roles": [
-    {
-      "name": "完成项提取员",
-      "role": "collect_done",
-      "responsibility": "汇总所有已完成任务，按迭代分组"
-    },
-    {
-      "name": "问题提取员",
-      "role": "collect_issue",
-      "responsibility": "识别未完成/延期任务，分类问题类型"
-    },
-    {
-      "name": "报告撰写员",
-      "role": "writer",
-      "responsibility": "整合为迭代回顾报告"
-    }
-  ],
-  "shared_initial": {
-    "sprints": [
-      "S1",
-      "S2",
-      "S3"
-    ],
-    "tasks": [
-      {
-        "id": "S1-T1",
-        "sprint": "S1",
-        "name": "S1迭代子任务1",
-        "owner": "朱琳",
-        "status": "done"
-      },
-      {
-        "id": "S1-T2",
-        "sprint": "S1",
-        "name": "S1迭代子任务2",
-        "owner": "朱琳",
-        "status": "in_progress"
-      },
-      {
-        "id": "S1-T3",
-        "sprint": "S1",
-        "name": "S1迭代子任务3",
-        "owner": "朱琳",
-        "status": "done"
-      },
-      {
-        "id": "S1-T4",
-        "sprint": "S1",
-        "name": "S1迭代子任务4",
-        "owner": "朱琳",
-        "status": "in_progress"
-      },
-      {
-        "id": "S2-T1",
-        "sprint": "S2",
-        "name": "S2迭代子任务1",
-        "owner": "朱琳",
-        "status": "done"
-      },
-      {
-        "id": "S2-T2",
-        "sprint": "S2",
-        "name": "S2迭代子任务2",
-        "owner": "朱琳",
-        "status": "in_progress"
-      },
-      {
-        "id": "S2-T3",
-        "sprint": "S2",
-        "name": "S2迭代子任务3",
-        "owner": "朱琳",
-        "status": "done"
-      },
-      {
-        "id": "S2-T4",
-        "sprint": "S2",
-        "name": "S2迭代子任务4",
-        "owner": "朱琳",
-        "status": "in_progress"
-      },
-      {
-        "id": "S3-T1",
-        "sprint": "S3",
-        "name": "S3迭代子任务1",
-        "owner": "朱琳",
-        "status": "done"
-      },
-      {
-        "id": "S3-T2",
-        "sprint": "S3",
-        "name": "S3迭代子任务2",
-        "owner": "朱琳",
-        "status": "in_progress"
-      },
-      {
-        "id": "S3-T3",
-        "sprint": "S3",
-        "name": "S3迭代子任务3",
-        "owner": "朱琳",
-        "status": "done"
-      },
-      {
-        "id": "S3-T4",
-        "sprint": "S3",
-        "name": "S3迭代子任务4",
-        "owner": "朱琳",
-        "status": "in_progress"
-      }
-    ]
+ "task_id": "t-PROJ-L-01",
+ "office_type": "project",
+ "task_type": "low_coupling",
+ "team_size": 3,
+ "description": "基于3个迭代的任务数据产出迭代回顾总结：提取完成项、提取问题、撰写报告",
+ "roles": [
+  {
+   "name": "完成项提取员",
+   "role": "collect_done",
+   "responsibility": "汇总所有已完成任务，按迭代分组"
   },
-  "verification": {
-    "required_sections": [
-      "本次完成",
-      "遗留问题",
-      "改进建议"
-    ],
-    "min_completed_tasks": 6,
-    "min_sprints_mentioned": 3
+  {
+   "name": "问题提取员",
+   "role": "collect_issue",
+   "responsibility": "识别未完成/延期任务，分类问题类型"
   },
-  "params": {
-    "sprint_count": "t-int(2,5)",
-    "tasks_per_sprint": "t-int(3,7)"
+  {
+   "name": "报告撰写员",
+   "role": "writer",
+   "responsibility": "整合为迭代回顾报告"
   }
+ ],
+ "shared_initial": {
+  "sprints": [
+   "S1",
+   "S2",
+   "S3"
+  ],
+  "tasks": [
+   {
+    "id": "S1-T1",
+    "sprint": "S1",
+    "name": "S1迭代子任务1",
+    "owner": "朱琳",
+    "status": "done"
+   },
+   {
+    "id": "S1-T2",
+    "sprint": "S1",
+    "name": "S1迭代子任务2",
+    "owner": "朱琳",
+    "status": "in_progress"
+   },
+   {
+    "id": "S1-T3",
+    "sprint": "S1",
+    "name": "S1迭代子任务3",
+    "owner": "朱琳",
+    "status": "done"
+   },
+   {
+    "id": "S1-T4",
+    "sprint": "S1",
+    "name": "S1迭代子任务4",
+    "owner": "朱琳",
+    "status": "in_progress"
+   },
+   {
+    "id": "S2-T1",
+    "sprint": "S2",
+    "name": "S2迭代子任务1",
+    "owner": "朱琳",
+    "status": "done"
+   },
+   {
+    "id": "S2-T2",
+    "sprint": "S2",
+    "name": "S2迭代子任务2",
+    "owner": "朱琳",
+    "status": "in_progress"
+   },
+   {
+    "id": "S2-T3",
+    "sprint": "S2",
+    "name": "S2迭代子任务3",
+    "owner": "朱琳",
+    "status": "done"
+   },
+   {
+    "id": "S2-T4",
+    "sprint": "S2",
+    "name": "S2迭代子任务4",
+    "owner": "朱琳",
+    "status": "in_progress"
+   },
+   {
+    "id": "S3-T1",
+    "sprint": "S3",
+    "name": "S3迭代子任务1",
+    "owner": "朱琳",
+    "status": "done"
+   },
+   {
+    "id": "S3-T2",
+    "sprint": "S3",
+    "name": "S3迭代子任务2",
+    "owner": "朱琳",
+    "status": "in_progress"
+   },
+   {
+    "id": "S3-T3",
+    "sprint": "S3",
+    "name": "S3迭代子任务3",
+    "owner": "朱琳",
+    "status": "done"
+   },
+   {
+    "id": "S3-T4",
+    "sprint": "S3",
+    "name": "S3迭代子任务4",
+    "owner": "朱琳",
+    "status": "in_progress"
+   }
+  ]
+ },
+ "verification": {
+  "required_sections": [
+   "本次完成",
+   "遗留问题",
+   "改进建议"
+  ],
+  "min_completed_tasks": 6,
+  "min_sprints_mentioned": 3,
+  "answer_block_schema": {
+   "min_completed_tasks": "list (min_length)",
+   "min_sprints_mentioned": "list (min_length)"
+  },
+  "expected_sets": {},
+  "expected_values": {},
+  "expected_counts": {
+   "min_completed_tasks": 6,
+   "min_sprints_mentioned": 3
+  }
+ },
+ "params": {
+  "sprint_count": "t-int(2,5)",
+  "tasks_per_sprint": "t-int(3,7)"
+ }
 }

@@ -1,183 +1,206 @@
 {
-  "task_id": "t-PROJ-M-02",
-  "task_type": "medium_coupling",
-  "description": "基于项目看板（含8任务、3里程碑、2延期记录），产出风险预警报告：识别延期/阻塞风险、分析根因、给出3条可执行缓解建议",
-  "team_size": 3,
-  "board": {
-    "tasks": [
-      {
-        "id": "T1",
-        "name": "API网关搭建",
-        "status": "done",
-        "owner": "后端组",
-        "milestone": "M1",
-        "planned_end": "2026-08-05",
-        "actual_end": "2026-08-04"
-      },
-      {
-        "id": "T2",
-        "name": "用户认证集成",
-        "status": "done",
-        "owner": "后端组",
-        "milestone": "M1",
-        "planned_end": "2026-08-08",
-        "actual_end": "2026-08-09",
-        "delay_days": 1
-      },
-      {
-        "id": "T3",
-        "name": "前端登录页",
-        "status": "done",
-        "owner": "前端组",
-        "milestone": "M1",
-        "planned_end": "2026-08-10",
-        "actual_end": "2026-08-10"
-      },
-      {
-        "id": "T4",
-        "name": "订单服务重构",
-        "status": "in_progress",
-        "owner": "后端组",
-        "milestone": "M2",
-        "planned_end": "2026-08-20",
-        "progress": 65,
-        "actual_delay_days": 2,
-        "blocker": "支付网关接口变更导致返工"
-      },
-      {
-        "id": "T5",
-        "name": "支付服务开发",
-        "status": "in_progress",
-        "owner": "后端组",
-        "milestone": "M2",
-        "planned_end": "2026-08-22",
-        "progress": 40,
-        "actual_delay_days": 5,
-        "blocker": "第三方支付SDK文档过期，接口签名逻辑不符"
-      },
-      {
-        "id": "T6",
-        "name": "支付页面UI",
-        "status": "in_progress",
-        "owner": "前端组",
-        "milestone": "M2",
-        "planned_end": "2026-08-18",
-        "progress": 80
-      },
-      {
-        "id": "T7",
-        "name": "全链路压测脚本",
-        "status": "pending",
-        "owner": "测试组",
-        "milestone": "M3",
-        "planned_end": "2026-08-28",
-        "progress": 0,
-        "blocker": "依赖T4T5完成"
-      },
-      {
-        "id": "T8",
-        "name": "上线灰度方案",
-        "status": "pending",
-        "owner": "运维组",
-        "milestone": "M3",
-        "planned_end": "2026-08-30",
-        "progress": 0,
-        "blocker": "依赖T7压测结果"
-      }
-    ],
-    "milestones": [
-      {
-        "id": "M1",
-        "name": "认证模块上线",
-        "planned_date": "2026-08-10",
-        "status": "done"
-      },
-      {
-        "id": "M2",
-        "name": "支付能力交付",
-        "planned_date": "2026-08-22",
-        "status": "at_risk"
-      },
-      {
-        "id": "M3",
-        "name": "全链路验收",
-        "planned_date": "2026-08-30",
-        "status": "at_risk"
-      }
-    ],
-    "history": [
-      {
-        "task": "T2",
-        "event": "延期1天",
-        "reason": "OAuth2库版本兼容问题",
-        "date": "2026-08-09"
-      },
-      {
-        "task": "T4",
-        "event": "延期2天",
-        "reason": "支付网关8/15变更接口签名算法",
-        "date": "2026-08-17"
-      },
-      {
-        "task": "T5",
-        "event": "延期5天",
-        "reason": "第三方SDK文档v2.1与实际API不符",
-        "date": "2026-08-20"
-      }
-    ]
-  },
-  "report_template": {
-    "sections": [
-      "风险清单",
-      "根因分析",
-      "缓解建议"
-    ],
-    "format": "markdown"
-  },
-  "verification": {
-    "required_sections": [
-      "风险清单",
-      "根因分析",
-      "缓解建议"
-    ],
-    "min_risks_identified_ratio": 0.8,
-    "min_root_cause_hit_ratio": 0.6,
-    "min_suggestion_executability_score": 3.0,
-    "suggestion_count": 3,
-    "actual_risk_tasks": [
-      "T4",
-      "T5",
-      "T7",
-      "T8"
-    ],
-    "actual_root_causes": [
-      "T4: 支付网关接口签名算法变更导致返工",
-      "T5: 第三方支付SDK文档过期，接口不符",
-      "T7: 依赖T4T5完成，上游阻塞传导",
-      "T8: 依赖T7压测结果，上游阻塞传导"
-    ]
-  },
-  "office_type": "project",
-  "roles": [
-    {
-      "name": "进度收集员",
-      "role": "tracker",
-      "responsibility": "读取看板提取延期/阻塞风险任务"
-    },
-    {
-      "name": "根因分析师",
-      "role": "diagnoser",
-      "responsibility": "分析每个风险任务的延期根因"
-    },
-    {
-      "name": "建议员",
-      "role": "advisor",
-      "responsibility": "给出3条可执行缓解建议"
-    }
+ "task_id": "t-PROJ-M-02",
+ "task_type": "medium_coupling",
+ "description": "基于项目看板（含8任务、3里程碑、2延期记录），产出风险预警报告：识别延期/阻塞风险、分析根因、给出3条可执行缓解建议",
+ "team_size": 3,
+ "board": {
+  "tasks": [
+   {
+    "id": "T1",
+    "name": "API网关搭建",
+    "status": "done",
+    "owner": "后端组",
+    "milestone": "M1",
+    "planned_end": "2026-08-05",
+    "actual_end": "2026-08-04"
+   },
+   {
+    "id": "T2",
+    "name": "用户认证集成",
+    "status": "done",
+    "owner": "后端组",
+    "milestone": "M1",
+    "planned_end": "2026-08-08",
+    "actual_end": "2026-08-09",
+    "delay_days": 1
+   },
+   {
+    "id": "T3",
+    "name": "前端登录页",
+    "status": "done",
+    "owner": "前端组",
+    "milestone": "M1",
+    "planned_end": "2026-08-10",
+    "actual_end": "2026-08-10"
+   },
+   {
+    "id": "T4",
+    "name": "订单服务重构",
+    "status": "in_progress",
+    "owner": "后端组",
+    "milestone": "M2",
+    "planned_end": "2026-08-20",
+    "progress": 65,
+    "actual_delay_days": 2,
+    "blocker": "支付网关接口变更导致返工"
+   },
+   {
+    "id": "T5",
+    "name": "支付服务开发",
+    "status": "in_progress",
+    "owner": "后端组",
+    "milestone": "M2",
+    "planned_end": "2026-08-22",
+    "progress": 40,
+    "actual_delay_days": 5,
+    "blocker": "第三方支付SDK文档过期，接口签名逻辑不符"
+   },
+   {
+    "id": "T6",
+    "name": "支付页面UI",
+    "status": "in_progress",
+    "owner": "前端组",
+    "milestone": "M2",
+    "planned_end": "2026-08-18",
+    "progress": 80
+   },
+   {
+    "id": "T7",
+    "name": "全链路压测脚本",
+    "status": "pending",
+    "owner": "测试组",
+    "milestone": "M3",
+    "planned_end": "2026-08-28",
+    "progress": 0,
+    "blocker": "依赖T4T5完成"
+   },
+   {
+    "id": "T8",
+    "name": "上线灰度方案",
+    "status": "pending",
+    "owner": "运维组",
+    "milestone": "M3",
+    "planned_end": "2026-08-30",
+    "progress": 0,
+    "blocker": "依赖T7压测结果"
+   }
   ],
-  "params": {
-    "task_count": "t-int(6,12)",
-    "milestone_count": "t-int(2,5)",
-    "delay_prob": "t-float(0.1,0.4,2)"
+  "milestones": [
+   {
+    "id": "M1",
+    "name": "认证模块上线",
+    "planned_date": "2026-08-10",
+    "status": "done"
+   },
+   {
+    "id": "M2",
+    "name": "支付能力交付",
+    "planned_date": "2026-08-22",
+    "status": "at_risk"
+   },
+   {
+    "id": "M3",
+    "name": "全链路验收",
+    "planned_date": "2026-08-30",
+    "status": "at_risk"
+   }
+  ],
+  "history": [
+   {
+    "task": "T2",
+    "event": "延期1天",
+    "reason": "OAuth2库版本兼容问题",
+    "date": "2026-08-09"
+   },
+   {
+    "task": "T4",
+    "event": "延期2天",
+    "reason": "支付网关8/15变更接口签名算法",
+    "date": "2026-08-17"
+   },
+   {
+    "task": "T5",
+    "event": "延期5天",
+    "reason": "第三方SDK文档v2.1与实际API不符",
+    "date": "2026-08-20"
+   }
+  ]
+ },
+ "report_template": {
+  "sections": [
+   "风险清单",
+   "根因分析",
+   "缓解建议"
+  ],
+  "format": "markdown"
+ },
+ "verification": {
+  "required_sections": [
+   "风险清单",
+   "根因分析",
+   "缓解建议"
+  ],
+  "min_risks_identified_ratio": 0.8,
+  "min_root_cause_hit_ratio": 0.6,
+  "min_suggestion_executability_score": 3.0,
+  "suggestion_count": 3,
+  "actual_risk_tasks": [
+   "T4",
+   "T5",
+   "T7",
+   "T8"
+  ],
+  "actual_root_causes": [
+   "T4: 支付网关接口签名算法变更导致返工",
+   "T5: 第三方支付SDK文档过期，接口不符",
+   "T7: 依赖T4T5完成，上游阻塞传导",
+   "T8: 依赖T7压测结果，上游阻塞传导"
+  ],
+  "answer_block_schema": {
+   "risk_tasks": "list",
+   "root_causes": "list",
+   "suggestion_count": "list (min_length)"
+  },
+  "expected_sets": {
+   "risk_tasks": [
+    "T4",
+    "T5",
+    "T7",
+    "T8"
+   ],
+   "root_causes": [
+    "T4: 支付网关接口签名算法变更导致返工",
+    "T5: 第三方支付SDK文档过期，接口不符",
+    "T7: 依赖T4T5完成，上游阻塞传导",
+    "T8: 依赖T7压测结果，上游阻塞传导"
+   ]
+  },
+  "expected_values": {},
+  "expected_counts": {
+   "suggestion_count": 3
   }
+ },
+ "office_type": "project",
+ "roles": [
+  {
+   "name": "进度收集员",
+   "role": "tracker",
+   "responsibility": "读取看板提取延期/阻塞风险任务"
+  },
+  {
+   "name": "根因分析师",
+   "role": "diagnoser",
+   "responsibility": "分析每个风险任务的延期根因"
+  },
+  {
+   "name": "建议员",
+   "role": "advisor",
+   "responsibility": "给出3条可执行缓解建议"
+  }
+ ],
+ "params": {
+  "task_count": "t-int(6,12)",
+  "milestone_count": "t-int(2,5)",
+  "delay_prob": "t-float(0.1,0.4,2)"
+ }
 }

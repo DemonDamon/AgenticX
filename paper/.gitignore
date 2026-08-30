@@ -1,4 +1,14 @@
 # paper 分支临时忽略:实验产物不进 git(可由脚本重算)
 experiments/**/*.log
 experiments/**/nohup*.log
+# 原始 run 产物体积大(26MB),只保留 summary/pairs/report 等可复现所需文件
+experiments/v2/pilot_*/
+experiments/v2/smoke_*/
+experiments/v2/ac*/
+!experiments/v2/pilot_*/summary.jsonl
+!experiments/v2/pilot_*/summary.csv
+!experiments/v2/pilot_*/pairs.csv
+!experiments/v2/pilot_*/meta.json
+!experiments/v2/pilot_*/pairs_report.csv
+!experiments/v2/pilot_*/*.md
 **/__pycache__/

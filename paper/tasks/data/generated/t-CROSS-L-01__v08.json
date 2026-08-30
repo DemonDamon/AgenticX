@@ -1,0 +1,90 @@
+{
+ "task_id": "t-CROSS-L-01",
+ "office_type": "cross_dept",
+ "task_type": "low_coupling",
+ "team_size": 3,
+ "description": "核查新员工入职的三部门（HR/IT/Admin）清单完整性，产出最终checklist",
+ "roles": [
+  {
+   "name": "HR清单核对员",
+   "role": "hr",
+   "responsibility": "检查人力资源类5项是否完成"
+  },
+  {
+   "name": "IT清单核对员",
+   "role": "it",
+   "responsibility": "检查IT配置类5项是否完成"
+  },
+  {
+   "name": "Admin清单核对员",
+   "role": "admin",
+   "responsibility": "检查行政类6项是否完成"
+  }
+ ],
+ "shared_initial": {
+  "new_hire": "程雨桐",
+  "hr_checklist": [
+   "社保公积金开户",
+   "员工手册发放",
+   "薪酬账户开通",
+   "试用期目标确认",
+   "入职培训报名"
+  ],
+  "it_checklist": [
+   "内网账号开通",
+   "代码仓库权限",
+   "共享盘权限申请",
+   "打印机驱动安装",
+   "办公软件授权"
+  ],
+  "admin_checklist": [
+   "门禁卡制作",
+   "入职礼包发放",
+   "办公用品领取",
+   "工位分配",
+   "行政制度签署",
+   "车位申请"
+  ],
+  "hr_completed": [
+   "社保公积金开户",
+   "试用期目标确认"
+  ],
+  "it_completed": [
+   "共享盘权限申请",
+   "代码仓库权限"
+  ],
+  "admin_completed": [
+   "办公用品领取",
+   "门禁卡制作"
+  ]
+ },
+ "verification": {
+  "required_sections": [
+   "HR清单",
+   "IT清单",
+   "Admin清单"
+  ],
+  "min_total_items": 16,
+  "min_completed_report_correct": 6,
+  "min_pending_report_correct": 10,
+  "answer_block_schema": {
+   "min_total_items": "list (min_length)",
+   "min_completed_report_correct": "list (min_length)",
+   "min_pending_report_correct": "list (min_length)"
+  },
+  "expected_sets": {},
+  "expected_values": {},
+  "expected_counts": {
+   "min_total_items": 16,
+   "min_completed_report_correct": 6,
+   "min_pending_report_correct": 10
+  }
+ },
+ "params": {
+  "hr_item_count": "t-int(4,7)",
+  "it_item_count": "t-int(4,7)",
+  "admin_item_count": "t-int(3,6)"
+ },
+ "variant_id": "t-CROSS-L-01__v08",
+ "variant_seed": 42008
+}
