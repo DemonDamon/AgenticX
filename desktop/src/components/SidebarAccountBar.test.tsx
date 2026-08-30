@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { SidebarAccountBar } from "./SidebarAccountBar";
 import { Topbar } from "./Topbar";
 import { TopbarLeftControls } from "./TopbarLeftControls";
@@ -55,5 +56,29 @@ describe("sidebar account chrome", () => {
       <Topbar sidebarCollapsed={false} onToggleSidebar={() => {}} />,
     );
     expect(expanded).toBe("");
+  });
+
+  it("keeps the identity pill as local profile when official account is signed out", () => {
+    mocks.agxAccount = { loggedIn: false, email: "", displayName: "" };
+    mocks.userNickname = "";
+    try {
+      const html = renderToStaticMarkup(<SidebarAccountBar />);
+      expect(html).toContain("我");
+      expect(html).toContain(DEFAULT_META_AVATAR_URL);
+      expect(html).toContain("账号菜单");
+      expect(html).not.toContain("登录 Near 官网账号");
+      expect(html).not.toContain("登录");
+
+      const collapsed = renderToStaticMarkup(
+        <Topbar sidebarCollapsed onToggleSidebar={() => {}} />,
+      );
+      expect(collapsed).toContain("我");
+      expect(collapsed).toContain(DEFAULT_META_AVATAR_URL);
+      expect(collapsed).toContain("账号菜单");
+      expect(collapsed).not.toContain("登录");
+    } finally {
+      mocks.agxAccount = { loggedIn: true, email: "damon@example.com", displayName: "Damon" };
+      mocks.userNickname = "Damon";
+    }
   });
 });

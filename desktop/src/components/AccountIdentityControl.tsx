@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { LogIn, LogOut, User } from "lucide-react";
+import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { useAppStore } from "../store";
 
 type Props = {
@@ -13,15 +14,12 @@ function resolveIdentityLabel(opts: {
   userNickname: string;
   displayName: string;
   email: string;
-  loggedIn: boolean;
-  loginBusy: boolean;
 }): string {
-  if (opts.loginBusy) return "登录中...";
   const nickname = opts.userNickname.trim();
   if (nickname) return nickname;
   const account = (opts.displayName || opts.email).trim();
   if (account) return account;
-  return opts.loggedIn ? "账号" : "登录";
+  return "我";
 }
 
 export function AccountIdentityControl({ variant, menuPlacement, className = "" }: Props) {
@@ -43,13 +41,10 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
     userNickname,
     displayName: agxAccount.displayName,
     email: agxAccount.email,
-    loggedIn: agxAccount.loggedIn,
-    loginBusy,
   });
-  const initial = (label === "登录中..." || label === "登录" ? "?" : label).charAt(0).toUpperCase();
-
   const onLoginClick = async () => {
     if (loginBusy) return;
+    setUserMenuOpen(false);
     setLoginBusy(true);
     try {
       const r = await window.agenticxDesktop.agxAccountLoginStart();
@@ -141,19 +136,16 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
   }, [userMenuOpen, updateMenuPos]);
 
   const onTriggerClick = () => {
-    if (!agxAccount.loggedIn) {
-      void onLoginClick();
-      return;
-    }
+    if (loginBusy) return;
     setUserMenuOpen((v) => !v);
   };
 
-  const avatar = userAvatarUrl.trim() ? (
-    <img src={userAvatarUrl} alt="" className="h-5 w-5 shrink-0 rounded-full object-cover" />
-  ) : (
-    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[rgba(var(--theme-color-rgb),0.9)] text-[10px] font-semibold text-[var(--theme-color-text)]">
-      {initial}
-    </span>
+  const avatar = (
+    <img
+      src={userAvatarUrl.trim() || DEFAULT_META_AVATAR_URL}
+      alt=""
+      className="h-5 w-5 shrink-0 rounded-full object-cover"
+    />
   );
 
   const triggerClass =
@@ -175,9 +167,25 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
               minWidth: menuPos.width,
             }}
           >
+            {!agxAccount.loggedIn ? (
+              <button
+                type="button"
+                className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
+                onClick={() => void onLoginClick()}
+                disabled={loginBusy}
+              >
+                <LogIn
+                  className="h-[15px] w-[15px] shrink-0 text-text-muted group-hover:text-text-strong"
+                  strokeWidth={2}
+                />
+                <span className="flex-1 text-[13px] font-medium leading-none text-text-strong">
+                  {loginBusy ? "登录中..." : "登录官网账号"}
+                </span>
+              </button>
+            ) : null}
             <button
               type="button"
-              className="group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
+              className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover${agxAccount.loggedIn ? "" : " mt-0.5"}`}
               onClick={onViewAccount}
             >
               <User
@@ -186,14 +194,16 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
               />
               <span className="flex-1 text-[13px] font-medium leading-none text-text-strong">查看账号</span>
             </button>
-            <button
-              type="button"
-              className="group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-rose-500/10"
-              onClick={() => void onLogoutClick()}
-            >
-              <LogOut className="h-[15px] w-[15px] shrink-0 text-rose-400" strokeWidth={2} />
-              <span className="flex-1 text-[13px] font-medium leading-none text-rose-400">退出登录</span>
-            </button>
+            {agxAccount.loggedIn ? (
+              <button
+                type="button"
+                className="group mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-rose-500/10"
+                onClick={() => void onLogoutClick()}
+              >
+                <LogOut className="h-[15px] w-[15px] shrink-0 text-rose-400" strokeWidth={2} />
+                <span className="flex-1 text-[13px] font-medium leading-none text-rose-400">退出登录</span>
+              </button>
+            ) : null}
           </div>,
           document.body
         )
@@ -207,15 +217,10 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
         className={triggerClass}
         onClick={onTriggerClick}
         disabled={loginBusy}
-        title={agxAccount.loggedIn ? label : "登录 Near 官网账号"}
-        aria-label={agxAccount.loggedIn ? "账号菜单" : "登录"}
-        aria-expanded={agxAccount.loggedIn ? userMenuOpen : undefined}
+        aria-label="账号菜单"
+        aria-expanded={userMenuOpen}
       >
-        {variant === "topbar" && !agxAccount.loggedIn ? (
-          <LogIn className="h-[18px] w-[18px]" strokeWidth={1.8} />
-        ) : (
-          avatar
-        )}
+        {avatar}
         <span
           className={
             variant === "pill"
@@ -223,7 +228,7 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
               : "max-w-[120px] truncate text-[12px]"
           }
         >
-          {variant === "topbar" && !agxAccount.loggedIn ? (loginBusy ? "登录中..." : "登录") : label}
+          {label}
         </span>
       </button>
       {menu}
