@@ -337,6 +337,11 @@ export function MessageRenderer({
     const fromTurn = collectTurnLightboxImages(patched, displayMessage.id);
     return fromTurn.length > 0 ? fromTurn : readyLightboxImages(displayMessage.blocks);
   }, [displayMessage, allMessages]);
+  if (message.systemNotice) {
+    const text = String(message.content ?? "").trim();
+    if (!text) return null;
+    return <div className="py-1 text-center text-[12px] text-text-muted">{text}</div>;
+  }
   if (isViewImageInjectMessage(message)) {
     return <ViewImageInjectCard message={message} />;
   }

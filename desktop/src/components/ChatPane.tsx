@@ -102,6 +102,7 @@ import {
   type RoutingModelRef,
 } from "../utils/attachment-routing";
 import { isStreamToolLabelOnlyText, shouldSkipFormattedToolResultFallback } from "../utils/orphan-formatted-tool";
+import { mapAvatarsFromApi } from "../utils/splash-preload-core";
 import { HOOK_BLOCK_RE } from "../utils/hook-block-message";
 import {
   collectTurnLinkedIds,
@@ -2398,6 +2399,22 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown, provi
       if (message) {
         return { content: `⚠️ 创建分身失败：${message}`, silent: false };
       }
+    } catch {
+      // Fall through to generic formatter.
+    }
+  }
+  if (toolName === "update_self_identity") {
+    try {
+      const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      const name = String(parsed.name ?? "").trim();
+      if (parsed.ok && parsed.renamed) {
+        return { content: `已重命名为 ${name}`, silent: false };
+      }
+      if (parsed.ok && !parsed.renamed) {
+        return { content: "", silent: true };
+      }
+      const message = String(parsed.message ?? parsed.error ?? "").trim();
+      return { content: `⚠️ ${message || "更新身份失败"}`, silent: false };
     } catch {
       // Fall through to generic formatter.
     }
@@ -6611,7 +6628,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const lastAssistantMessageId = useMemo(() => {
     for (let i = visibleMessages.length - 1; i >= 0; i--) {
-      if (visibleMessages[i].role === "assistant") return visibleMessages[i].id;
+      const row = visibleMessages[i];
+      if (row.role === "assistant" && !row.systemNotice) return row.id;
     }
     return null;
   }, [visibleMessages]);
@@ -10709,6 +10727,46 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                         },
                       })
                     );
+                  }
+                } catch {
+                  // Ignore parse errors; tool card still renders via formatter.
+                }
+              }
+              if (toolName === "update_self_identity") {
+                try {
+                  const rawResult = payload.data?.result;
+                  const parsed =
+                    typeof rawResult === "string"
+                      ? (JSON.parse(rawResult) as Record<string, unknown>)
+                      : (rawResult as Record<string, unknown> | null | undefined);
+                  const avatarId = String(parsed?.avatar_id ?? "").trim();
+                  const nextName = String(parsed?.name ?? "").trim();
+                  if (parsed && parsed.ok && avatarId) {
+                    useAppStore.getState().renameAvatarInPanes(avatarId, nextName);
+                    window.dispatchEvent(
+                      new CustomEvent("agenticx:avatars:changed", {
+                        detail: { avatarId, name: nextName, openPane: false },
+                      }),
+                    );
+                    void window.agenticxDesktop.listAvatars().then((result) => {
+                      if (result.ok && Array.isArray(result.avatars)) {
+                        useAppStore.getState().setAvatars(mapAvatarsFromApi(result.avatars));
+                      }
+                    }).catch(() => {
+                      // Sidebar event already requested a refresh.
+                    });
+                    if (parsed.renamed && nextName) {
+                      addPaneMessageIfSessionActive(
+                        pane.id,
+                        "assistant",
+                        `已重命名为 ${nextName}`,
+                        "meta",
+                        undefined,
+                        undefined,
+                        undefined,
+                        { systemNotice: true },
+                      );
+                    }
                   }
                 } catch {
                   // Ignore parse errors; tool card still renders via formatter.

@@ -681,6 +681,43 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "update_self_identity",
+            "description": (
+                "Rename the CURRENT avatar and/or update its role and persona, then "
+                "persist to the avatar registry so the desktop sidebar, pane title and "
+                "header update immediately. Use this whenever the user redefines who "
+                "you are (e.g. 'you are now an AI pre-sales expert') or renames you "
+                "(e.g. 'call yourself kimi'). Only valid inside a dedicated avatar "
+                "pane; it fails in the meta/group/automation panes. Do NOT call "
+                "create_avatar for this — that would create a duplicate."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "New display name. Omit to keep current.",
+                    },
+                    "role": {
+                        "type": "string",
+                        "description": "New short role line. Omit to keep current.",
+                    },
+                    "system_prompt": {
+                        "type": "string",
+                        "description": "New persona/system prompt. Omit to keep current.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "New gallery blurb. Omit to keep current.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_avatar_workspace",
             "description": "Read files from avatar workspace without spawning sub-agent.",
             "parameters": {
@@ -3138,6 +3175,83 @@ async def dispatch_meta_tool_async(
         except Exception as exc:
             return json.dumps({"ok": False, "error": f"memory forget failed: {exc}"}, ensure_ascii=False)
         return json.dumps(result, ensure_ascii=False)
+
+    if name == "update_self_identity":
+        from agenticx.avatar.registry import AvatarRegistry
+
+        avatar_id = (
+            str(getattr(session, "bound_avatar_id", "") or "").strip()
+            if session is not None
+            else ""
+        )
+        if not avatar_id or avatar_id.startswith(("group:", "automation:")):
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "not_an_avatar_pane",
+                    "message": "当前会话不是分身会话，无法修改身份。",
+                },
+                ensure_ascii=False,
+            )
+        registry = AvatarRegistry()
+        current = registry.get_avatar(avatar_id)
+        if current is None:
+            return json.dumps(
+                {"ok": False, "error": "avatar_not_found", "message": "分身不存在。"},
+                ensure_ascii=False,
+            )
+
+        patch: Dict[str, Any] = {}
+        new_name = str(arguments.get("name", "")).strip()
+        if new_name and new_name != current.name:
+            for other in registry.list_avatars():
+                if other.id != avatar_id and new_name.lower() == (other.name or "").lower():
+                    return json.dumps(
+                        {
+                            "ok": False,
+                            "error": "name_taken",
+                            "message": f"已有分身叫「{new_name}」，请换一个名字。",
+                        },
+                        ensure_ascii=False,
+                    )
+            patch["name"] = new_name
+        for key in ("role", "system_prompt", "description"):
+            val = str(arguments.get(key, "")).strip()
+            if val:
+                patch[key] = val
+        if not patch:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "empty_patch",
+                    "message": "没有可更新的身份字段。",
+                },
+                ensure_ascii=False,
+            )
+
+        updated = registry.update_avatar(avatar_id, patch)
+        if updated is None:
+            return json.dumps(
+                {"ok": False, "error": "avatar_not_found", "message": "分身不存在。"},
+                ensure_ascii=False,
+            )
+        renamed = "name" in patch
+        if renamed:
+            message = f"已重命名为 {updated.name}"
+        else:
+            message = f"已更新角色为 {updated.role or current.role}"
+        return json.dumps(
+            {
+                "ok": True,
+                "avatar_id": updated.id,
+                "renamed": renamed,
+                "previous_name": current.name,
+                "name": updated.name,
+                "role": updated.role,
+                "message": message,
+            },
+            ensure_ascii=False,
+        )
 
     if name == "create_avatar":
         from agenticx.avatar.registry import AvatarRegistry

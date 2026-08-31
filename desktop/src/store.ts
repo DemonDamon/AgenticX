@@ -249,6 +249,8 @@ export type Message = {
   agentId?: string;
   avatarName?: string;
   avatarUrl?: string;
+  /** Centered muted system line (rename confirmation, etc.). */
+  systemNotice?: boolean;
   provider?: string;
   model?: string;
   quotedMessageId?: string;
@@ -657,6 +659,8 @@ type AppState = {
   setRunMode: (v: RunMode) => void;
   setMcpServers: (servers: McpServer[]) => void;
   setAvatars: (avatars: Avatar[]) => void;
+  /** Update an avatar's display name in the gallery list and every open pane. */
+  renameAvatarInPanes: (avatarId: string, name: string) => void;
   applyCorePreloadBundle: (payload: {
     sessionsKey: string;
     sessions: unknown[];
@@ -696,6 +700,7 @@ type AppState = {
         Message,
         | "avatarName"
         | "avatarUrl"
+        | "systemNotice"
         | "quotedMessageId"
         | "quotedContent"
         | "timestamp"
@@ -1457,6 +1462,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setMcpServers: (mcpServers) => set({ mcpServers }),
   setAvatars: (avatars) => set({ avatars }),
+  renameAvatarInPanes: (avatarId, name) =>
+    set((state) => {
+      const id = String(avatarId ?? "").trim();
+      const nextName = String(name ?? "").trim();
+      if (!id || !nextName) return state;
+      return {
+        avatars: state.avatars.map((avatar) =>
+          avatar.id === id ? { ...avatar, name: nextName } : avatar,
+        ),
+        panes: state.panes.map((pane) =>
+          pane.avatarId === id ? { ...pane, avatarName: nextName } : pane,
+        ),
+      };
+    }),
   applyCorePreloadBundle: (payload) =>
     set((state) => {
       const sessionsKey = String(payload.sessionsKey ?? "");
@@ -2063,7 +2082,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (pane.id !== paneId) return pane;
         const msgs = [...pane.messages];
         for (let i = msgs.length - 1; i >= 0; i--) {
-          if (msgs[i].role === role) {
+          if (msgs[i].role === role && !msgs[i].systemNotice) {
             msgs[i] = { ...msgs[i], ...patch };
             found = true;
             break;

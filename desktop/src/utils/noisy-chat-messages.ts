@@ -60,6 +60,11 @@ export function isNoisyToolStatusMessage(
   if (isEphemeralConfirmReceiptMessage(message)) return true;
   const toolName = (message.toolName ?? "").trim();
   if (toolName === "check_resources") return true;
+  // Identity updates surface as a centered system notice, not a tool card.
+  if (toolName === "update_self_identity") {
+    const raw = String(message.content ?? "").trim();
+    return !raw.startsWith("⚠️");
+  }
   // StickyTaskBar (输入框上方「任务进度」) is the sole surface for todo_write snapshots.
   // Keep the message in the store for progress parsing; hide the inline duplicate card.
   if (toolName === "todo_write") return true;

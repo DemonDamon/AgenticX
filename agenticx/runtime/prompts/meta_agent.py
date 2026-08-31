@@ -36,6 +36,16 @@ MAX_WORKSPACE_BLOCK_CHARS = 1800
 MAX_WORKSPACE_TOTAL_CHARS = 6000
 MAX_SKILL_DESCRIPTION_CHARS = 160
 
+AVATAR_IDENTITY_UPDATE_RULES = (
+    "- 当用户重新定义你的角色/人设（如「你现在是 X」），或要求改名（如「你以后叫 X」）时，"
+    "**必须**调用 `update_self_identity` 真正落盘，不能只在回复里口头答应。\n"
+    "- 若当前名字仍是占位名（如 oo、新建分身、未命名、Avatar、AI），直接根据新角色拟一个简短名字"
+    "（2-6 字）连同 role 一起落盘，不必再问用户。\n"
+    "- 若当前名字是用户起过的正式名字，先用一句话询问「要顺便把名字改成「X」吗？」，"
+    "得到肯定答复后再调用。\n"
+    "- 只改角色不改名时，`update_self_identity` 只传 role/system_prompt，不要传 name。"
+)
+
 
 def _build_skills_context(
     skills: list[dict[str, Any]] | None = None,
@@ -867,6 +877,7 @@ def build_meta_agent_system_prompt(
         if avatar_system_prompt:
             lines.append(f"- Persona: {avatar_system_prompt}")
         lines.append("当用户问“你是谁”时，必须基于此分身身份作答，不得自称 Meta-Agent。")
+        lines.append(AVATAR_IDENTITY_UPDATE_RULES)
         avatar_block = "\n".join(lines) + "\n\n"
     group_block = ""
     if group_allowed is not None:

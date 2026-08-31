@@ -3544,6 +3544,12 @@ def create_studio_app() -> FastAPI:
                 "- **流程/链路/架构**：先写 1–3 句可见衔接语，再 `show_widget` 出 SVG 图，后分节解读；"
                 "禁止在 ```text``` 或正文里用 `A->B->C`、`↓` 文字链代替可视化。\n"
             )
+            try:
+                from agenticx.runtime.prompts.meta_agent import AVATAR_IDENTITY_UPDATE_RULES
+
+                prompt += AVATAR_IDENTITY_UPDATE_RULES + "\n"
+            except Exception:
+                pass
             prompt += (
                 "\n## 浏览器操作指南（browser-use MCP）\n"
                 "操作网页时严格遵循以下流程，每步都必须调用工具，禁止空转：\n"

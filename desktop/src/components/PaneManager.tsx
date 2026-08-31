@@ -10,10 +10,18 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAppStore, type ChatPane as ChatPaneState } from "../store";
+import { useAppStore, type Avatar, type ChatPane as ChatPaneState } from "../store";
 import { ChatPane } from "./ChatPane";
 import { PaneDivider } from "./PaneDivider";
 import { SortablePaneWrapper } from "./SortablePaneWrapper";
+
+function resolvePaneTabName(pane: ChatPaneState, avatars: Avatar[]): string {
+  const aid = pane.avatarId;
+  if (!aid || aid.startsWith("group:")) {
+    return pane.avatarName;
+  }
+  return avatars.find((avatar) => avatar.id === aid)?.name || pane.avatarName;
+}
 
 type Props = {
   onOpenConfirm: (
@@ -72,6 +80,7 @@ function PaneTabStrip({
   activePaneId: string;
   onSelect: (paneId: string) => void;
 }) {
+  const avatars = useAppStore((s) => s.avatars);
   return (
     <div
       className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-surface-base/80 px-2 backdrop-blur-sm"
@@ -80,6 +89,7 @@ function PaneTabStrip({
     >
       {panes.map((pane) => {
         const active = pane.id === activePaneId;
+        const label = resolvePaneTabName(pane, avatars);
         return (
           <button
             key={pane.id}
@@ -91,10 +101,10 @@ function PaneTabStrip({
                 ? "bg-surface-hover font-medium text-text-strong"
                 : "text-text-muted hover:bg-surface-hover/60 hover:text-text-strong"
             }`}
-            title={pane.avatarName}
+            title={label}
             onClick={() => onSelect(pane.id)}
           >
-            {pane.avatarName}
+            {label}
           </button>
         );
       })}
@@ -103,12 +113,14 @@ function PaneTabStrip({
 }
 
 function PaneDragOverlayPreview({ pane }: { pane: ChatPaneState }) {
+  const avatars = useAppStore((s) => s.avatars);
+  const label = resolvePaneTabName(pane, avatars);
   return (
     <div
       className="flex min-h-[40px] min-w-[200px] max-w-md cursor-grabbing flex-col justify-center rounded-lg border border-border bg-surface-card/95 px-4 py-2 shadow-lg shadow-black/40 backdrop-blur-sm"
       style={{ width: "min(100%, 360px)" }}
     >
-      <div className="truncate text-sm font-medium text-text-strong">{pane.avatarName}</div>
+      <div className="truncate text-sm font-medium text-text-strong">{label}</div>
     </div>
   );
 }
