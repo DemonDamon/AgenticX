@@ -355,3 +355,38 @@ jobs:
         with:
           name: near-${{ steps.desktop_version.outputs.version }}-windows-x64
           path: desktop/release/Near-*-win-x64.exe
+
+  # Attach whatever DMG/EXE succeeded to the pushed tag. Intel may fail
+  # independently; this job still publishes arm64 + Windows.
+  publish-github-release:
+    if: github.event_name == 'push' && always() && !cancelled()
+    needs: [build-tag, build-tag-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: release-assets
+          pattern: near-*
+          merge-multiple: true
+
+      - name: Attach installers to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s globstar nullglob
+          files=(release-assets/**/*.dmg release-assets/**/*.exe)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No DMG/EXE artifacts to attach"
+            exit 0
+          fi
+          tag="${{ github.ref_name }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" \
+              --title "$tag" \
+              --notes "Desktop installers for \`${tag}\`. Edit this release to add notes."
+          fi

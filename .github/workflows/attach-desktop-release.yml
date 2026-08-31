@@ -1,0 +1,50 @@
+# Attach already-built Near installers (Actions artifacts) to a GitHub Release.
+# Use this when a tag build finished but you do not want to re-download
+# hundreds of MB locally just to drag them onto the Release page.
+#
+# workflow_dispatch inputs:
+#   run_id — Actions run that uploaded near-* artifacts
+#   tag    — existing git tag / Release (create the Release notes first if needed)
+
+name: Attach Desktop Artifacts to Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Actions run ID that already uploaded near-* artifacts
+        required: true
+        type: string
+      tag:
+        description: Existing git tag / GitHub Release to attach installers to
+        required: true
+        type: string
+        default: v0.6.0
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts from the build run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh run download "${{ inputs.run_id }}" --repo "${{ github.repository }}" --dir release-assets
+
+      - name: Upload installers to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s globstar nullglob
+          files=(release-assets/**/*.dmg release-assets/**/*.exe)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No DMG/EXE found in run ${{ inputs.run_id }}"
+            exit 1
+          fi
+          ls -lh "${files[@]}"
+          gh release upload "${{ inputs.tag }}" "${files[@]}" --repo "${{ github.repository }}" --clobber
