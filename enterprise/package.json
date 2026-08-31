@@ -1,6 +1,6 @@
 {
   "name": "@agenticx/enterprise",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "description": "AgenticX Enterprise \u2014 \u4f01\u4e1a\u7ea7\u5927\u6a21\u578b\u5e94\u7528\u4e00\u4f53\u5316\u5e73\u53f0\uff08\u524d\u53f0 + \u540e\u53f0 + AI \u7f51\u5173\uff09",
   "scripts": {
