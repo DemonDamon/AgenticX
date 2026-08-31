@@ -497,6 +497,42 @@ def _session_workspace_root_sets(
     return read_roots, write_roots
 
 
+def _context_files_read_allowlist(session: Optional[StudioSession]) -> List[Path]:
+    """Exact files the user attached / @-referenced this session (read-only)."""
+    if session is None:
+        return []
+    raw = getattr(session, "context_files", None)
+    if not isinstance(raw, dict) or not raw:
+        return []
+    from agenticx.studio.context_file_keys import disk_path_from_context_file_key
+
+    out: List[Path] = []
+    seen: set[str] = set()
+    for key in raw.keys():
+        disk = disk_path_from_context_file_key(str(key))
+        if not disk:
+            continue
+        path = Path(disk)
+        try:
+            if path.exists() and not path.is_file():
+                continue
+        except OSError:
+            continue
+        if disk in seen:
+            continue
+        seen.add(disk)
+        out.append(path)
+    return out
+
+
+def _is_context_file_read_allowed(resolved: Path, session: Optional[StudioSession]) -> bool:
+    want = str(_safe_resolve_path(resolved))
+    for allowed in _context_files_read_allowlist(session):
+        if str(_safe_resolve_path(allowed)) == want:
+            return True
+    return False
+
+
 def _session_workspace_roots(session: Optional[StudioSession]) -> List[Path]:
     """Ordered filesystem roots for this session (read-capable)."""
     read_roots, _write_roots = _session_workspace_root_sets(session)
@@ -3684,9 +3720,15 @@ def _resolve_workspace_path(
         for root in roots:
             if _is_path_under_root(resolved, root):
                 return resolved
-        # Readable via reference/copy metadata, but not in write roots.
+        if (not for_write) and _is_context_file_read_allowed(resolved, session):
+            return resolved
         if for_write and _under_any_root(resolved, read_roots):
             raise ValueError(_format_readonly_reference(resolved))
+        if for_write and _is_context_file_read_allowed(resolved, session):
+            raise ValueError(
+                f"path is read-only (context_files attachment): {resolved}. "
+                "Do not retry file_edit/file_write/bash_exec on this path."
+            )
         raise ValueError(_format_escape(resolved))
 
     parts = raw_path.parts

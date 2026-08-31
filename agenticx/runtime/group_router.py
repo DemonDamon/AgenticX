@@ -41,7 +41,10 @@ from agenticx.runtime.harden_flags import (
     group_open_floor_max_speakers,
 )
 from agenticx.runtime.prompts.current_time import build_current_time_block
-from agenticx.runtime.prompts.meta_agent import _build_web_search_capability_block
+from agenticx.runtime.prompts.meta_agent import (
+    _build_context_files_block,
+    _build_web_search_capability_block,
+)
 from agenticx.branding import DEFAULT_META_PRODUCT_LABEL, LEGACY_META_LABELS
 
 META_LEADER_AGENT_ID = "__meta__"
@@ -62,6 +65,17 @@ _GROUP_CONTROL_PLANE_CONTRACT = (
     "- 长代码、长报告、详细表格优先写入群工作区，最终只给摘要和产物；用户明确要求全文贴群时例外。\n"
     "- FINAL 表示本轮结束，禁止以“稍等 / 等我回复 / 我去处理”作为 FINAL。\n"
 )
+
+
+def _append_context_files_block(prompt: str, session: Any) -> str:
+    """Append hydrated context_files to a group prompt. Skip empty/(none)."""
+    try:
+        block = _build_context_files_block(session)
+    except Exception:
+        return prompt
+    if not block or "context_files: (none)" in block:
+        return prompt
+    return f"{prompt.rstrip()}\n\n{block}"
 
 
 def _attachments_from_image_inputs(
@@ -1604,6 +1618,7 @@ class GroupChatRouter:
             f"用户问题:\n{local_user_input}\n\n"
             f"{extra_instruction.strip()}\n"
         )
+        prompt = _append_context_files_block(prompt, base_session)
         text = await self._call_llm_text(
             provider=provider,
             model=model,
@@ -1737,6 +1752,7 @@ class GroupChatRouter:
             f"## 你的长期指令\n{avatar_prompt or '(无)'}\n\n"
             f"## 最近群聊上下文\n{dialogue_context}\n"
         )
+        system_prompt = _append_context_files_block(system_prompt, local_session)
         # Graph Runtime interventions queued on the owner session scratchpad.
         try:
             from agenticx.runtime.graph.intervene import consume_graph_directives
