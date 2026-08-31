@@ -10,6 +10,26 @@ const NOISY_TOOL_STATUS_CONTENT = new Set([
   "已中断上一轮生成，开始处理新消息",
 ]);
 
+const CONFIRM_RECEIPT_SUFFIXES = [
+  "确认通过，继续执行",
+  "确认拒绝，执行终止",
+  "确认拒绝，已取消",
+] as const;
+
+/** Auto-approve / inline-confirm receipts — activity card owns the flash, not chat history. */
+export function isEphemeralConfirmReceiptMessage(
+  message: Pick<Message, "role" | "content" | "toolName" | "toolCallId" | "inlineConfirm">,
+): boolean {
+  if (message.role !== "tool") return false;
+  if (message.inlineConfirm) return false;
+  if ((message.toolName ?? "").trim()) return false;
+  if ((message.toolCallId ?? "").trim()) return false;
+  const normalized = normalizeNoisyToolStatusContent(String(message.content ?? ""));
+  return CONFIRM_RECEIPT_SUFFIXES.some(
+    (suffix) => normalized === suffix || normalized.endsWith(`：${suffix}`),
+  );
+}
+
 const INTERRUPTED_ASSISTANT_PLACEHOLDERS = new Set(["（已中断）", "(已中断)"]);
 
 /** Strip leading status emoji so SSE rows like `❌ 已中断当前生成` match noisy filters. */
@@ -32,11 +52,12 @@ export function isEphemeralStopErrorText(text: string): boolean {
 
 /** Ephemeral meta tool rows that duplicate TurnInterruptionNoticeLine or add wrench noise. */
 export function isNoisyToolStatusMessage(
-  message: Pick<Message, "role" | "content" | "toolName" | "toolCallId" | "toolGroupId" | "noticeKind">,
+  message: Pick<Message, "role" | "content" | "toolName" | "toolCallId" | "toolGroupId" | "noticeKind" | "inlineConfirm">,
 ): boolean {
   if (message.role !== "tool") return false;
   if (isWidgetFlowRetryNotice(message)) return true;
   if (isOrphanFormattedToolResultMessage(message)) return true;
+  if (isEphemeralConfirmReceiptMessage(message)) return true;
   const toolName = (message.toolName ?? "").trim();
   if (toolName === "check_resources") return true;
   // StickyTaskBar (输入框上方「任务进度」) is the sole surface for todo_write snapshots.

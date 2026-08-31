@@ -85,3 +85,22 @@ test("actionConfirmation tool rows stay ungrouped", () => {
     assert.equal(rows[1].message.id, "confirm-1");
   }
 });
+
+test("auto-approve confirm receipts are dropped from grouped chat rows", () => {
+  const receipt: Message = {
+    id: "receipt-1",
+    role: "tool",
+    content: "程基岩：确认通过，继续执行",
+    agentId: "cheng",
+  };
+  const rows = groupConsecutiveToolMessages([
+    { id: "u1", role: "user", content: "继续" },
+    receipt,
+    { id: "a1", role: "assistant", content: "FINAL" },
+  ]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.kind, "message");
+  assert.equal(rows[1]?.kind, "message");
+  if (rows[0]?.kind === "message") assert.equal(rows[0].message.id, "u1");
+  if (rows[1]?.kind === "message") assert.equal(rows[1].message.id, "a1");
+});

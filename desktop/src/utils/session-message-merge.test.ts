@@ -407,4 +407,31 @@ describe("mergeSessionMessagesTail", () => {
     expect(out).toHaveLength(1);
     expect(out[0].toolStatus).toBe("done");
   });
+
+  it("does not append unmatched auto-approve confirm receipts after the disk tail", () => {
+    const existing: Message[] = [
+      uidMsg("user", "继续", "uid-u"),
+      uidMsg("assistant", "FINAL", "uid-a"),
+      {
+        id: "uid-receipt-1",
+        role: "tool",
+        content: "程基岩：确认通过，继续执行",
+        agentId: "cheng",
+      } as Message,
+      {
+        id: "uid-receipt-2",
+        role: "tool",
+        content: "架构师·阿析：确认通过，继续执行",
+        agentId: "axi",
+      } as Message,
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [diskRow("user", "继续"), diskRow("assistant", "FINAL")],
+      sid,
+    );
+
+    expect(out.map((m) => m.content)).toEqual(["继续", "FINAL"]);
+    expect(out.some((m) => String(m.content).includes("确认通过"))).toBe(false);
+  });
 });

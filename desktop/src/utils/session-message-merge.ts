@@ -1,5 +1,6 @@
 import type { Message } from "../store";
 import { isOrphanFormattedToolResultMessage } from "./orphan-formatted-tool";
+import { isEphemeralConfirmReceiptMessage } from "./noisy-chat-messages";
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./session-message-map";
 import { assistantVisibleBodyForUi } from "./assistant-output";
 import {
@@ -187,6 +188,7 @@ export function mergeSessionMessagesTail(
   for (const memory of existing) {
     if (consumedMemory.has(memory)) continue;
     if (isOrphanFormattedToolResultMessage(memory)) continue;
+    if (isEphemeralConfirmReceiptMessage(memory)) continue;
     if (memory.role === "assistant") {
       const body = assistantBodyKey(memory.content);
       if (body && placedAssistantBodies.has(body)) continue;

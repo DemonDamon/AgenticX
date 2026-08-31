@@ -10090,16 +10090,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               lastGroupProgressRef.current[eventAgentId] = blockedText;
               const strategy = useAppStore.getState().runMode;
               if (requestId && shouldAutoApproveConfirm(strategy, false, confirmContext)) {
-                addPaneMessageIfSessionActive(
-                  pane.id,
-                  "tool",
-                  `${avatarName}：确认通过，继续执行`,
-                  eventAgentId,
-                  chatProvider,
-                  chatModel,
-                  undefined,
-                  { avatarName, avatarUrl: avatarUrl || undefined }
-                );
+                resumeGroupActivityThinking(eventAgentId);
+                setGroupMemberPhase((prev) => {
+                  if (!(eventAgentId in prev)) return prev;
+                  const next = { ...prev };
+                  delete next[eventAgentId];
+                  return next;
+                });
                 fetch(`${apiBase}/api/confirm`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json", "x-agx-desktop-token": apiToken },
@@ -12189,14 +12186,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (msg.inlineConfirm?.requestId !== confirm.requestId) return msg;
         return { ...msg, inlineConfirm: undefined };
       })
-    );
-    addPaneMessage(
-      pane.id,
-      "tool",
-      `${confirm.agentId}：${approved ? "确认通过，继续执行" : "确认拒绝，执行终止"}`,
-      confirm.agentId,
-      chatProvider,
-      chatModel
     );
     if (approved) resumeGroupActivityThinking(confirm.agentId);
     else clearGroupActivity(confirm.agentId);
