@@ -3,7 +3,7 @@ name: agenticx-agent-builder
 description: Guide for creating persistent Near desktop digital avatars (数字分身) via natural-language interview and the create_avatar tool. Use when the user wants to create an avatar, digital twin, specialist agent persona, or add someone to the avatar sidebar.
 metadata:
   author: AgenticX
-  version: "0.5.0"
+  version: "0.6.0"
 ---
 
 # Near Digital Avatar Builder
