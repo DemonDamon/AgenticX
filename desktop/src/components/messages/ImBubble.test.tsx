@@ -283,6 +283,7 @@ describe("ImBubble assistant protocol boundary", () => {
     );
 
     expect(html).toContain("agx-artifact-action-row");
+    expect(html).toContain("flex-1");
     expect(html).toContain("hello.txt-card");
     const rowIdx = html.indexOf("agx-artifact-action-row");
     const cardIdx = html.indexOf("hello.txt-card");

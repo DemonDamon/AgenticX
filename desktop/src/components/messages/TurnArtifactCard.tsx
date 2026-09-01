@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, CloudDownload, Copy, FolderOpen } from "lucide-react";
+import { Check, ChevronRight, CloudDownload, Copy, FolderOpen } from "lucide-react";
 import { HoverTip } from "../ds/HoverTip";
 import { artifactGlyph, FileTypeMark } from "./artifact-glyph";
 import {
@@ -23,6 +23,9 @@ const GRID_LIMIT = 4;
 type Props = {
   paths: string[];
   onOpenPath?: (path: string) => void;
+  onOpenAllArtifacts?: () => void;
+  onOpenAllChanges?: () => void;
+  changeCount?: number;
 };
 
 function TileAction({
@@ -48,7 +51,13 @@ function TileAction({
   );
 }
 
-export function TurnArtifactCard({ paths, onOpenPath }: Props) {
+export function TurnArtifactCard({
+  paths,
+  onOpenPath,
+  onOpenAllArtifacts,
+  onOpenAllChanges,
+  changeCount,
+}: Props) {
   const ordered = orderTurnArtifactsForCard(paths);
   const [expanded, setExpanded] = useState(false);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
@@ -116,11 +125,9 @@ export function TurnArtifactCard({ paths, onOpenPath }: Props) {
   };
 
   return (
-    <div className="w-full min-w-0">
+    <div className="agx-artifact-cq w-full min-w-0">
       <div
-        className={`grid gap-2 ${
-          ordered.length > 1 ? "sm:grid-cols-2" : "w-fit max-w-full grid-cols-1"
-        }`}
+        className={`agx-artifact-grid${ordered.length > 1 ? " agx-artifact-grid--multi" : ""}`}
       >
         {visible.map((path) => {
           const name = artifactBaseName(path);
@@ -131,11 +138,11 @@ export function TurnArtifactCard({ paths, onOpenPath }: Props) {
           return (
             <div
               key={path}
-              className="flex min-w-0 items-center gap-2 rounded-xl bg-[color-mix(in_srgb,var(--text-primary)_10%,transparent)] py-2 pl-2.5 pr-1.5 transition-[background-color] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-[color-mix(in_srgb,var(--text-primary)_14%,transparent)]"
+              className="flex w-full min-w-0 items-center justify-between gap-2 rounded-xl bg-[color-mix(in_srgb,var(--text-primary)_10%,transparent)] py-2 pl-2.5 pr-1.5 transition-[background-color] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-[color-mix(in_srgb,var(--text-primary)_14%,transparent)]"
             >
               <button
                 type="button"
-                className="flex min-w-0 items-center gap-2.5 text-left outline-none transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] focus-visible:ring-1 focus-visible:ring-border active:scale-[0.99]"
+                className="flex min-w-0 flex-1 items-center gap-2.5 text-left outline-none transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] focus-visible:ring-1 focus-visible:ring-border active:scale-[0.99]"
                 title={path}
                 onClick={() => (onOpenPath ? onOpenPath(path) : undefined)}
                 aria-label={`预览 ${name}`}
@@ -177,7 +184,30 @@ export function TurnArtifactCard({ paths, onOpenPath }: Props) {
           );
         })}
       </div>
-      {extraCount > 0 ? (
+      {onOpenAllArtifacts || onOpenAllChanges ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+          {onOpenAllArtifacts ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-0.5 rounded-md py-0.5 text-[12px] text-text-muted transition-[color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-text-primary active:scale-[0.98]"
+              onClick={onOpenAllArtifacts}
+            >
+              查看所有产物 ({ordered.length})
+              <ChevronRight className="h-3 w-3" strokeWidth={2} />
+            </button>
+          ) : null}
+          {onOpenAllChanges ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-0.5 rounded-md py-0.5 text-[12px] text-text-muted transition-[color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-text-primary active:scale-[0.98]"
+              onClick={onOpenAllChanges}
+            >
+              查看所有变更 ({changeCount ?? ordered.length})
+              <ChevronRight className="h-3 w-3" strokeWidth={2} />
+            </button>
+          ) : null}
+        </div>
+      ) : extraCount > 0 ? (
         <button
           type="button"
           className="mt-1.5 rounded-md px-0.5 py-0.5 text-left text-[11.5px] text-text-muted transition-[color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-text-primary active:scale-[0.98]"

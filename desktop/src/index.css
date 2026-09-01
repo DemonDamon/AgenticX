@@ -277,6 +277,29 @@ body {
   min-height: 1.25rem; /* h-5 */
 }
 
+/* Turn deliverable chips: track the chat column, not a content-hug width. */
+.agx-artifact-cq {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
+}
+.agx-artifact-grid {
+  display: grid;
+  width: 100%;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+@container (min-width: 22rem) {
+  .agx-artifact-grid--multi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (min-width: 40rem) {
+  .agx-artifact-grid--multi {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 /* 历史会话列表：当前会话「豆包式」圆角胶囊底，浅色下避免与 hover 灰阶黏连 */
 .agx-session-history-row.agx-session-history-row--active {
   background-color: rgba(0, 0, 0, 0.1);

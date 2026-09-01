@@ -10,6 +10,8 @@ import {
   collectSessionArtifactPaths,
   parseSessionMessageFilePayload,
   collectTurnArtifactPaths,
+  collectTurnFileChanges,
+  collectSessionFileChanges,
   collectTurnPreviewImagePaths,
   matchesHandoffPath,
   collectWorkspaceListingArtifactPaths,
@@ -758,6 +760,86 @@ describe("turn artifacts + primary pick", () => {
     expect(matchesHandoffPath("/tmp/hello.txt/", ["/tmp/hello.txt"])).toBe(true);
     expect(matchesHandoffPath("/tmp/other.txt", ["/tmp/hello.txt"])).toBe(false);
     expect(matchesHandoffPath("/tmp/hello.txt", [])).toBe(false);
+  });
+
+  it("collects relative file_write paths from OK: wrote (no chars suffix)", () => {
+    const root =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default";
+    const messages: Message[] = [
+      { id: "u3", role: "user", content: "三个 txt", timestamp: 1 },
+      toolMsg({
+        id: "t-a",
+        toolName: "file_write",
+        toolArgs: { path: "a.txt", content: 'fmt.Println("Hello World")\n' },
+        content: `OK: wrote ${root}/a.txt`,
+      }),
+      toolMsg({
+        id: "t-b",
+        toolName: "file_write",
+        toolArgs: { path: "b.txt", content: 'console.log("Hello World");\n' },
+        content: `OK: wrote ${root}/b.txt`,
+      }),
+      toolMsg({
+        id: "t-c",
+        toolName: "file_write",
+        toolArgs: { path: "c.txt", content: 'println!("Hello World");\n' },
+        content: `OK: wrote ${root}/c.txt`,
+      }),
+      assistantMsg({
+        id: "final-abc",
+        content: "已创建 3 个文件",
+      }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "final-abc")).toEqual([
+      `${root}/a.txt`,
+      `${root}/b.txt`,
+      `${root}/c.txt`,
+    ]);
+    expect(collectTurnFileChanges(messages, "final-abc")).toEqual([
+      { path: `${root}/a.txt`, added: 1, removed: 0 },
+      { path: `${root}/b.txt`, added: 1, removed: 0 },
+      { path: `${root}/c.txt`, added: 1, removed: 0 },
+    ]);
+  });
+
+  it("reads OK: wrote from snake_case chat-history rows with relative path", () => {
+    const abs =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/a.txt";
+    expect(
+      collectArtifactPathsFromChatMessages([
+        {
+          role: "tool",
+          content: `OK: wrote ${abs}`,
+          tool_name: "file_write",
+          tool_args: { path: "a.txt", content: "package main\n" },
+          tool_status: "done",
+        },
+      ]),
+    ).toEqual([abs]);
+  });
+});
+
+describe("collectSessionFileChanges", () => {
+  it("sums write line counts and ignores failed edits", () => {
+    const ok = "/tmp/ok.txt";
+    const bad = "/tmp/bad.txt";
+    expect(
+      collectSessionFileChanges([
+        toolMsg({
+          id: "w1",
+          toolName: "file_write",
+          toolArgs: { path: ok, content: "a\nb\n" },
+          content: `OK: wrote ${ok}`,
+        }),
+        toolMsg({
+          id: "w2",
+          toolName: "file_edit",
+          toolStatus: "error",
+          toolArgs: { path: bad, old_string: "x", new_string: "y" },
+          content: "ERROR: denied",
+        }),
+      ]),
+    ).toEqual([{ path: ok, added: 2, removed: 0 }]);
   });
 });
 

@@ -15,7 +15,8 @@
 import type { Message, SubAgent } from "../store";
 import { absoluteTaskspacePath, isAbsoluteFilePath } from "./workspace-file-path";
 
-const OK_WRITE_RE = /OK:\s*(?:wrote|edited)\s+(.+?)(?:\s+\(\d+\s+chars\))?/gi;
+// `\S+` (not `.+?`) so a missing `(N chars)` suffix cannot collapse the path to `/`.
+const OK_WRITE_RE = /OK:\s*(?:wrote|edited)\s+(\S+)/gi;
 
 const ABS_PATH_BODY =
   "(\\/(?:Users|home|tmp|var|opt|private|Volumes)[^\\s`<>\\[\\]()]+|[a-zA-Z]:[\\\\/][^\\s`<>\\[\\]()]+|~\\/[^\\s`<>\\[\\]()]+)";
@@ -564,6 +565,8 @@ export function collectSessionArtifactPaths(
         if (!isFailedWriteToolMessage(message)) {
           const argPath = String(message.toolArgs?.path ?? "").trim();
           if (argPath) addPath(paths, seen, argPath);
+          extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
+          extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
         }
         extractOkWritePaths(String(message.content || ""), paths, seen);
         extractOkWritePaths(String(message.toolResultPreview || ""), paths, seen);
@@ -759,6 +762,79 @@ export function collectTurnArtifactPaths(
   const turnMsgs = turnWindowForAssistant(messages, assistantMessageId);
   if (!turnMsgs || turnMsgs.length === 0) return [];
   return collectSessionArtifactPaths(turnMsgs);
+}
+
+export type ArtifactChangeRow = {
+  path: string;
+  added: number;
+  removed: number;
+};
+
+function countArtifactLines(text: string): number {
+  const body = String(text || "").replace(/\r\n/g, "\n");
+  if (!body) return 0;
+  const parts = body.split("\n");
+  if (parts.length > 0 && parts[parts.length - 1] === "") return parts.length - 1;
+  return parts.length;
+}
+
+function firstWritePathFromToolMessage(message: Message): string | null {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  extractOkWritePaths(String(message.content || ""), paths, seen);
+  extractOkWritePaths(String(message.toolResultPreview || ""), paths, seen);
+  extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
+  extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
+  const argPath = String(message.toolArgs?.path ?? "").trim();
+  if (argPath) addPath(paths, seen, argPath);
+  return paths[0] ?? null;
+}
+
+/** file_write / file_edit rows as a change list (session-wide). */
+export function collectSessionFileChanges(
+  messages: Message[] | undefined | null,
+): ArtifactChangeRow[] {
+  const byPath = new Map<string, ArtifactChangeRow>();
+  for (const message of messages ?? []) {
+    if (message.role !== "tool") continue;
+    const toolName = String(message.toolName || "").trim();
+    if (toolName !== "file_write" && toolName !== "file_edit") continue;
+    if (isFailedWriteToolMessage(message)) continue;
+    const path = firstWritePathFromToolMessage(message);
+    if (!path) continue;
+    const args = message.toolArgs ?? {};
+    let added = 0;
+    let removed = 0;
+    if (toolName === "file_write") {
+      added = countArtifactLines(String(args.content ?? ""));
+    } else {
+      const oldLines = countArtifactLines(String(args.old_string ?? args.oldString ?? ""));
+      const newLines = countArtifactLines(String(args.new_string ?? args.newString ?? args.content ?? ""));
+      added = Math.max(0, newLines - oldLines);
+      removed = Math.max(0, oldLines - newLines);
+    }
+    const prev = byPath.get(path);
+    if (prev) {
+      byPath.set(path, {
+        path,
+        added: prev.added + added,
+        removed: prev.removed + removed,
+      });
+    } else {
+      byPath.set(path, { path, added, removed });
+    }
+  }
+  return [...byPath.values()];
+}
+
+/** Same window as collectTurnArtifactPaths. */
+export function collectTurnFileChanges(
+  messages: Message[] | undefined | null,
+  assistantMessageId: string,
+): ArtifactChangeRow[] {
+  const turnMsgs = turnWindowForAssistant(messages, assistantMessageId);
+  if (!turnMsgs || turnMsgs.length === 0) return [];
+  return collectSessionFileChanges(turnMsgs);
 }
 
 export function pickPrimaryTurnArtifact(paths: string[]): string | null {

@@ -16,6 +16,9 @@ describe("TurnArtifactCard deliverable grid", () => {
     expect(html).toContain('aria-label="复制路径 hello.txt"');
     expect(html).toContain('aria-label="在访达中显示 hello.txt"');
     expect(html).toContain("h-8 w-8");
+    expect(html).toContain("agx-artifact-cq");
+    expect(html).toContain("justify-between");
+    expect(html).not.toContain("w-fit");
     expect(html).toContain("color-mix(in_srgb,var(--text-primary)_10%,transparent)");
     expect(html).not.toContain("更多操作");
     expect(html).not.toContain("border-border/50");
@@ -36,6 +39,7 @@ describe("TurnArtifactCard deliverable grid", () => {
     expect(html).not.toContain("查看全部");
     expect(html).toContain('data-file-mark="md"');
     expect(html).toContain('data-file-mark="sheet"');
+    expect(html).toContain("agx-artifact-grid--multi");
     expect(html).toContain("--theme-color-rgb");
   });
 
@@ -55,5 +59,22 @@ describe("TurnArtifactCard deliverable grid", () => {
 
     expect(html).toContain("查看全部 5 个产物");
     expect(html).not.toContain("e.txt");
+  });
+
+  it("opens the workbench via 查看所有产物 / 变更 instead of an in-place expander", () => {
+    const html = renderToStaticMarkup(
+      <TurnArtifactCard
+        paths={["/tmp/a.txt", "/tmp/b.txt", "/tmp/c.txt"]}
+        onOpenPath={() => undefined}
+        onOpenAllArtifacts={() => undefined}
+        onOpenAllChanges={() => undefined}
+        changeCount={3}
+      />,
+    );
+    expect(html).toContain("查看所有产物 (3)");
+    expect(html).toContain("查看所有变更 (3)");
+    expect(html).toContain("flex-wrap items-center");
+    expect(html).not.toContain("flex-col items-start");
+    expect(html).not.toContain("查看全部");
   });
 });

@@ -47,6 +47,7 @@ import {
 import {
   appendMissingImageMarkdown,
   collectTurnArtifactPaths,
+  collectTurnFileChanges,
   collectTurnPreviewImagePaths,
 } from "../../utils/session-artifacts";
 import { isGroupStreamMessageId } from "../../utils/group-stream-text";
@@ -134,6 +135,10 @@ type Props = {
     confirmation: PendingActionConfirmation,
     decision: ActionConfirmationDecision,
   ) => Promise<void> | void;
+  /** Open WorkPanel「任务产物」for this turn's files. */
+  onOpenAllArtifacts?: () => void;
+  /** Open WorkPanel「变更」for this turn's writes/edits. */
+  onOpenAllChanges?: () => void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -228,14 +233,28 @@ function assistantHandoff(
   message: Message,
   allMessages: Message[],
   onRevealPath: ((path: string) => void) | undefined,
+  browse?: {
+    onOpenAllArtifacts?: () => void;
+    onOpenAllChanges?: () => void;
+  },
 ): { paths: string[]; card: ReactNode } {
   if (message.role !== "assistant" || isStreamingAssistantId(message.id)) {
     return { paths: [], card: null };
   }
   const paths = collectTurnArtifactPaths(allMessages, message.id);
+  const changeCount = collectTurnFileChanges(allMessages, message.id).length;
   return {
     paths,
-    card: paths.length > 0 ? <TurnArtifactCard paths={paths} onOpenPath={onRevealPath} /> : null,
+    card:
+      paths.length > 0 ? (
+        <TurnArtifactCard
+          paths={paths}
+          onOpenPath={onRevealPath}
+          onOpenAllArtifacts={browse?.onOpenAllArtifacts}
+          onOpenAllChanges={browse?.onOpenAllChanges}
+          changeCount={changeCount || paths.length}
+        />
+      ) : null,
   };
 }
 
@@ -345,6 +364,8 @@ export function MessageRenderer({
   onOpenClarification,
   onSubmitClarification,
   onResolveActionConfirmation,
+  onOpenAllArtifacts,
+  onOpenAllChanges,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const resolvedReferences = useMemo(() => {
@@ -403,7 +424,10 @@ export function MessageRenderer({
       return <HookBlockNoticeLine text={buildHookBlockFriendlyNotice(toolCtx)} />;
     }
     if (chatStyle === "terminal") {
-      const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath);
+      const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
+        onOpenAllArtifacts,
+        onOpenAllChanges,
+      });
       return withHandoffContext(
         handoff.paths,
         onRevealPath,
@@ -417,7 +441,10 @@ export function MessageRenderer({
       );
     }
     if (chatStyle === "clean") {
-      const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath);
+      const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
+        onOpenAllArtifacts,
+        onOpenAllChanges,
+      });
       return withHandoffContext(
         handoff.paths,
         onRevealPath,
@@ -443,7 +470,10 @@ export function MessageRenderer({
     const mergedAssistAvatarUrl = metaLeaderRow
       ? assistantAvatarUrl || message.avatarUrl
       : message.avatarUrl || assistantAvatarUrl;
-    const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath);
+    const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath, {
+        onOpenAllArtifacts,
+        onOpenAllChanges,
+      });
     return withHandoffContext(
       handoff.paths,
       onRevealPath,

@@ -997,8 +997,8 @@ export function ImBubble({
               </div>
             </div>
             {afterBody ? (
-              <div className="agx-artifact-action-row mt-2 flex min-w-0 items-center gap-1.5 px-3">
-                <div className="min-w-0">{afterBody}</div>
+              <div className="agx-artifact-action-row mt-2 flex w-full min-w-0 items-center gap-1.5 px-3">
+                <div className="min-w-0 flex-1">{afterBody}</div>
                 {assistantIconButtons && !showAssistantFollowups ? (
                   <div className={`${ASSISTANT_ACTION_ICON_ROW_CLASS} shrink-0 self-center`}>
                     {assistantIconButtons}

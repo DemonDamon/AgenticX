@@ -58,6 +58,7 @@ import { loadPreparedHtmlSrcDoc } from "../../utils/html-preview-assets";
 import {
   artifactBaseName,
   collectSessionArtifactPaths,
+  collectSessionFileChanges,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
   looksLikeDirectoryPath,
@@ -70,6 +71,7 @@ import {
   type HtmlPreviewViewport,
 } from "../workspace/html-preview-device";
 import { SessionArtifactList } from "./SessionArtifactList";
+import { SessionChangeList } from "./SessionChangeList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { SessionTodoList } from "./SessionTodoList";
 import { collectSessionReferences } from "../../utils/session-references";
@@ -398,7 +400,7 @@ export type WorkPanelTabKind =
   | "graph"
   | "timeline";
 
-export type SummarySectionId = "todo" | "artifacts" | "spawns" | "refs" | "members";
+export type SummarySectionId = "todo" | "artifacts" | "changes" | "spawns" | "refs" | "members";
 
 export type WorkPanelFocus =
   | { kind: "summary"; section?: SummarySectionId; highlightPath?: string }
@@ -766,6 +768,7 @@ export function WorkPanel({
   const [openSections, setOpenSections] = useState<Record<SummarySectionId, boolean>>({
     todo: false,
     artifacts: false,
+    changes: false,
     spawns: false,
     refs: false,
     members: false,
@@ -809,6 +812,11 @@ export function WorkPanel({
         sessionId,
       ),
     [paneMessages, subAgents, extraArtifactPaths, diskArtifactPaths, sessionId],
+  );
+
+  const changeRows = useMemo(
+    () => collectSessionFileChanges(paneMessages),
+    [paneMessages],
   );
 
   /** Content-stable key so effect does not re-fire on new array identity. */
@@ -1239,6 +1247,14 @@ export function WorkPanel({
       setOpenSections((prev) => (!prev.artifacts ? prev : { ...prev, artifacts: false }));
     }
   }, [presentArtifactPaths.length]);
+
+  useEffect(() => {
+    if (changeRows.length > 0) {
+      setOpenSections((prev) => (prev.changes ? prev : { ...prev, changes: true }));
+    } else {
+      setOpenSections((prev) => (!prev.changes ? prev : { ...prev, changes: false }));
+    }
+  }, [changeRows.length]);
 
   useEffect(() => {
     if (!referenceBundle.isEmpty) {
@@ -1997,6 +2013,41 @@ export function WorkPanel({
                     }
                     if (isInAppArtifactPreviewPath(path)) {
                       // Trae-style: open preview tab in this WorkPanel — never 工作区 / left popup.
+                      openLocalFilePreview(path);
+                      return;
+                    }
+                    void window.agenticxDesktop?.shellOpenPath?.(path);
+                  }}
+                />
+              )}
+            </Section>
+
+            <Section
+              id="changes"
+              title="变更"
+              count={changeRows.length}
+              open={openSections.changes}
+              onToggle={toggleSection}
+            >
+              {changeRows.length === 0 ? (
+                <EmptyBlock
+                  icon={<FileText className="h-9 w-9" strokeWidth={1.3} />}
+                  title="暂无变更"
+                  subtitle="本会话写入或编辑的文件会显示在这里"
+                />
+              ) : (
+                <SessionChangeList
+                  rows={changeRows}
+                  onOpenPath={(path) => {
+                    if (isInAppHtmlPreviewPath(path)) {
+                      openLocalHtmlPreview(path);
+                      return;
+                    }
+                    if (looksLikeDirectoryPath(path)) {
+                      void window.agenticxDesktop?.shellOpenPath?.(path);
+                      return;
+                    }
+                    if (isInAppArtifactPreviewPath(path)) {
                       openLocalFilePreview(path);
                       return;
                     }

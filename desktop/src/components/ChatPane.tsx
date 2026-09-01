@@ -5710,6 +5710,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
   }, [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel, openWorkspaceFilePreview]);
 
+  const openWorkPanelSummary = useCallback(
+    (section: "artifacts" | "changes") => {
+      if (!pane.taskspacePanelOpen) {
+        openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
+      }
+      setWorkPanelFocus({ kind: "summary", section });
+    },
+    [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel],
+  );
+
   const copyMessage = useCallback(async (message: Message) => {
     const raw = messagePlainTextForClipboard(message);
     const textToCopy =
@@ -8055,6 +8065,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               noBubbleBorder={reactFlat}
               toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
               onRevealPath={(path) => void revealFileInTaskspace(path)}
+              onOpenAllArtifacts={() => openWorkPanelSummary("artifacts")}
+              onOpenAllChanges={() => openWorkPanelSummary("changes")}
               onOpenFileReference={(request) => openFileReferencePreview(request)}
               onOpenSubAgentRun={openSubAgentDetailFromCluster}
               assistantName={imAssistantName}
@@ -8574,7 +8586,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
+  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {

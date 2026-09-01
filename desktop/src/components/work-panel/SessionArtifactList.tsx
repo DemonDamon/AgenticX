@@ -5,7 +5,8 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Eye, FileText, FolderOpen, ExternalLink } from "lucide-react";
+import { Eye, FolderOpen, ExternalLink } from "lucide-react";
+import { artifactGlyph, FileTypeMark } from "../messages/artifact-glyph";
 import {
   artifactBaseName,
   isInAppArtifactPreviewPath,
@@ -128,6 +129,7 @@ export function SessionArtifactList({
           isInAppHtmlPreviewPath(path) || isInAppArtifactPreviewPath(path);
         const size = sizeByPath[path];
         const sizeLabel = size != null ? formatPreviewBytes(size) : "—";
+        const { kind, tint, fg } = artifactGlyph(path);
         return (
           <div
             key={path}
@@ -137,7 +139,12 @@ export function SessionArtifactList({
             className="overflow-hidden rounded-lg border border-border bg-surface-card transition"
           >
             <div className="flex items-center gap-2 px-2.5 py-2">
-              <FileText className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.5} />
+              <span
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+                style={{ backgroundColor: tint, color: fg }}
+              >
+                <FileTypeMark kind={kind} />
+              </span>
               <button
                 type="button"
                 className="min-w-0 flex-1 truncate text-left text-[12px] text-text-strong hover:underline"
