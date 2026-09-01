@@ -715,6 +715,46 @@ def test_session_workspace_roots_honors_active_taskspace_id(tmp_path: Path) -> N
     assert resolved == dir_b.resolve()
 
 
+def test_default_bash_cwd_follows_writable_root_order(tmp_path: Path) -> None:
+    default_dir = tmp_path / "avatar_workspace"
+    user_dir = tmp_path / "user_bound"
+    ref_dir = tmp_path / "reference"
+    default_dir.mkdir()
+    user_dir.mkdir()
+    ref_dir.mkdir()
+
+    session = StudioSession()
+    session.workspace_dir = str(default_dir)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(default_dir)},
+        {"id": "ts-abc12345", "label": "绑定", "path": str(user_dir)},
+        {
+            "id": "ts-ref",
+            "label": "只读引用",
+            "path": str(ref_dir),
+            "mount_mode": "reference",
+            "source_path": str(ref_dir),
+        },
+    ]
+
+    assert agent_tools._default_bash_cwd(session) == user_dir.resolve()
+
+    session.active_taskspace_id = "ts-abc12345"
+    assert agent_tools._default_bash_cwd(session) == user_dir.resolve()
+
+
+def test_default_bash_cwd_none_without_session_or_writable_root(tmp_path: Path) -> None:
+    assert agent_tools._default_bash_cwd(None) is None
+
+    missing = tmp_path / "does-not-exist"
+    session = StudioSession()
+    session.workspace_dir = str(missing)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(missing)},
+    ]
+    assert agent_tools._default_bash_cwd(session) is None
+
+
 def _stub_permissions(monkeypatch, **overrides):
     original = ConfigManager.get_value
 

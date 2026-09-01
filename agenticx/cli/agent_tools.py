@@ -497,6 +497,25 @@ def _session_workspace_root_sets(
     return read_roots, write_roots
 
 
+def _default_bash_cwd(session: Optional[StudioSession]) -> Optional[Path]:
+    """Writable root used when bash_exec/bash_bg omit cwd.
+
+    Must use write_roots, not read_roots: a reference mount is readable
+    but cannot be the launch directory. Order already prefers the
+    user-bound folder and active_taskspace_id.
+    """
+    if session is None:
+        return None
+    _read_roots, write_roots = _session_workspace_root_sets(session)
+    for root in write_roots:
+        try:
+            if root.is_dir():
+                return root
+        except OSError:
+            continue
+    return None
+
+
 def _context_files_read_allowlist(session: Optional[StudioSession]) -> List[Path]:
     """Exact files the user attached / @-referenced this session (read-only)."""
     if session is None:
@@ -4417,6 +4436,9 @@ async def _bash_exec_prepare(
         if peeled:
             cwd, parts = peeled
             command = shlex.join(parts)
+
+    if cwd is None:
+        cwd = _default_bash_cwd(session)
 
     command_name = Path(parts[0]).name
     if command_name.startswith("firecrawl_"):
