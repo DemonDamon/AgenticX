@@ -1,5 +1,6 @@
 import type { Taskspace } from "../store";
 import { stripLineRangeFromAbsPath } from "./chat-file-mention";
+import { decodePercentEncodedLocalPath } from "./local-fs-path";
 
 function normalizePath(p: string): string {
   return String(p || "")
@@ -53,7 +54,7 @@ export function parentDirectory(absPath: string): string {
 
 /** Resolve markdown/image relative refs (e.g. `images/foo.svg`) against the hosting file path. */
 export function resolveRelativeAssetPath(fileAbsolutePath: string, src: string): string {
-  const value = String(src ?? "").trim();
+  const value = decodePercentEncodedLocalPath(String(src ?? "").trim());
   if (!value) return "";
   if (/^(https?:|data:|blob:|file:)/i.test(value)) return value;
   if (value.startsWith("/assets/")) return value;

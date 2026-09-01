@@ -19,6 +19,7 @@ import type { SearchReference } from "../../types/search-references";
 export { normalizeChatMarkdownContent, normalizeLenientEmphasisInText } from "./markdown-normalize";
 import { openExternalUrl } from "../../utils/open-external";
 import { isAbsoluteFilePath, resolveRelativeAssetPath } from "../../utils/workspace-file-path";
+import { decodePercentEncodedLocalPath } from "../../utils/local-fs-path";
 import { parseLocalArtifactPath } from "../../utils/sandbox-artifact-link";
 import { ArtifactFileLink } from "./ArtifactFileLink";
 import { buildSvgCharsetDataUrl } from "../../utils/svg-markup";
@@ -169,12 +170,12 @@ function localPathFromMarkdownImageSrc(raw?: string): string {
   if (!value) return "";
   if (value.startsWith("file://")) {
     try {
-      return decodeURIComponent(value.replace(/^file:\/\//i, ""));
+      return decodePercentEncodedLocalPath(decodeURIComponent(value.replace(/^file:\/\//i, "")));
     } catch {
-      return value.replace(/^file:\/\//i, "");
+      return decodePercentEncodedLocalPath(value.replace(/^file:\/\//i, ""));
     }
   }
-  return value;
+  return decodePercentEncodedLocalPath(value);
 }
 
 /**
@@ -210,10 +211,8 @@ function MarkdownImage({
   const effectiveSrc = useMemo(() => {
     const raw = String(src ?? "").trim();
     if (!raw) return "";
-    if (markdownFilePath) {
-      return resolveRelativeAssetPath(markdownFilePath, raw);
-    }
-    return raw;
+    const resolved = markdownFilePath ? resolveRelativeAssetPath(markdownFilePath, raw) : raw;
+    return decodePercentEncodedLocalPath(resolved);
   }, [markdownFilePath, src]);
   const normalizedSrc = useMemo(() => normalizeMarkdownImageSrc(effectiveSrc), [effectiveSrc]);
   const isLocalAsset = isLocalMarkdownImageSrc(effectiveSrc);

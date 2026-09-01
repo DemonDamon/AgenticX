@@ -55,6 +55,7 @@ import {
   type SystemSearchCategory,
 } from "./system-search";
 import { proxyAwareFetch, logProxyConfig } from "./proxy-fetch";
+import { pickLocalFsPathCandidate } from "./local-fs-path";
 import {
   getRoom as fetchCollabRoom,
   listMessages as fetchCollabRoomMessages,
@@ -1509,15 +1510,18 @@ function saveSoulFile(pathName: string, content: string): void {
 function normalizeLocalFsPath(raw: string): string {
   const trimmed = String(raw || "").trim();
   if (!trimmed) return "";
+  let expanded = "";
   if (trimmed.startsWith("file://")) {
     try {
-      return fileURLToPath(trimmed);
+      expanded = fileURLToPath(trimmed);
     } catch {
-      return decodeURIComponent(trimmed.replace(/^file:\/\//, ""));
+      expanded = decodeURIComponent(trimmed.replace(/^file:\/\//, ""));
     }
+  } else {
+    // Expand ~/… so renderer callers (e.g. WorkPanel agent_messages.json) resolve.
+    expanded = expandDesktopLocalPath(trimmed);
   }
-  // Expand ~/… so renderer callers (e.g. WorkPanel agent_messages.json) resolve.
-  return expandDesktopLocalPath(trimmed);
+  return pickLocalFsPathCandidate(expanded, (candidate) => fs.existsSync(candidate));
 }
 
 function decodeLocalTextBuffer(buf: Buffer): { content: string; encodingError?: string } {
