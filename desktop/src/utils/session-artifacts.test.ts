@@ -9,8 +9,11 @@ import {
   collectArtifactPathsFromPersistedSessionFiles,
   collectSessionArtifactPaths,
   parseSessionMessageFilePayload,
+  collectTurnArtifactPaths,
   collectTurnPreviewImagePaths,
   collectWorkspaceListingArtifactPaths,
+  orderTurnArtifactsForCard,
+  pickPrimaryTurnArtifact,
   expandArtifactHomePath,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
@@ -696,6 +699,57 @@ describe("turn preview images", () => {
     ];
     expect(collectTurnPreviewImagePaths(messages, "mid")).toEqual([]);
     expect(collectTurnPreviewImagePaths(messages, "final")).toEqual([gif]);
+  });
+});
+
+describe("turn artifacts + primary pick", () => {
+  it("collects html + py and picks html as primary", () => {
+    const html = "/Users/damon/out/report.html";
+    const py = "/Users/damon/out/notes.py";
+    const messages: Message[] = [
+      {
+        id: "u1",
+        role: "user",
+        content: "写一份报告",
+        timestamp: 1,
+      },
+      toolMsg({
+        id: "t-html",
+        toolName: "file_write",
+        toolArgs: { path: html },
+        content: `OK: wrote ${html}`,
+      }),
+      toolMsg({
+        id: "t-py",
+        toolName: "file_write",
+        toolArgs: { path: py },
+        content: `OK: wrote ${py}`,
+      }),
+      assistantMsg({ id: "final", content: `路径：\`${html}\`` }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "final")).toEqual([html, py]);
+    expect(pickPrimaryTurnArtifact(collectTurnArtifactPaths(messages, "final"))).toBe(html);
+    expect(orderTurnArtifactsForCard([py, html])).toEqual([html, py]);
+  });
+
+  it("returns empty paths for an earlier assistant in the same turn", () => {
+    const html = "/Users/damon/out/report.html";
+    const messages: Message[] = [
+      assistantMsg({ id: "mid", content: "写着" }),
+      toolMsg({
+        id: "t-html",
+        toolName: "file_write",
+        toolArgs: { path: html },
+        content: `OK: wrote ${html}`,
+      }),
+      assistantMsg({ id: "final", content: "完成" }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "mid")).toEqual([]);
+    expect(collectTurnArtifactPaths(messages, "final")).toEqual([html]);
+  });
+
+  it("picks null when the turn only has source/config files", () => {
+    expect(pickPrimaryTurnArtifact(["/tmp/notes.py", "/tmp/meta.json"])).toBeNull();
   });
 });
 

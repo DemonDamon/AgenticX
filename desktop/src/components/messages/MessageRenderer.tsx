@@ -46,8 +46,11 @@ import {
 } from "../../utils/content-blocks";
 import {
   appendMissingImageMarkdown,
+  collectTurnArtifactPaths,
   collectTurnPreviewImagePaths,
 } from "../../utils/session-artifacts";
+import { isGroupStreamMessageId } from "../../utils/group-stream-text";
+import { TurnArtifactCard } from "./TurnArtifactCard";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
 import { HistoricalSubAgentClusterCard } from "../subagent";
@@ -216,6 +219,30 @@ export function isTodoUpdateToolMessage(content: string): boolean {
 
 export { isNoisyToolStatusMessage } from "../../utils/noisy-chat-messages";
 
+function isStreamingAssistantId(id: string | undefined): boolean {
+  return id === "__stream__" || isGroupStreamMessageId(id);
+}
+
+function renderAssistantWithArtifacts(
+  message: Message,
+  allMessages: Message[],
+  onRevealPath: ((path: string) => void) | undefined,
+  bubble: ReactNode,
+): ReactNode {
+  if (message.role !== "assistant" || isStreamingAssistantId(message.id)) {
+    return bubble;
+  }
+  return (
+    <>
+      {bubble}
+      <TurnArtifactCard
+        paths={collectTurnArtifactPaths(allMessages, message.id)}
+        onOpenPath={onRevealPath}
+      />
+    </>
+  );
+}
+
 /** Shared extras row under tool cards (inline confirm + workspace reveal). */
 export function renderToolMessageExtras(
   message: Message,
@@ -367,10 +394,20 @@ export function MessageRenderer({
       return <HookBlockNoticeLine text={buildHookBlockFriendlyNotice(toolCtx)} />;
     }
     if (chatStyle === "terminal") {
-      return <TerminalLine message={displayMessage} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
+      return renderAssistantWithArtifacts(
+        displayMessage,
+        allMessages,
+        onRevealPath,
+        <TerminalLine message={displayMessage} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />,
+      );
     }
     if (chatStyle === "clean") {
-      return <CleanBlock message={displayMessage} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />;
+      return renderAssistantWithArtifacts(
+        displayMessage,
+        allMessages,
+        onRevealPath,
+        <CleanBlock message={displayMessage} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />,
+      );
     }
     const rawAssist = (message.avatarName ?? "").trim();
     const metaLeaderRow = message.role === "assistant" && isMetaLeaderIdentity(message.agentId, rawAssist);
@@ -385,7 +422,10 @@ export function MessageRenderer({
     const mergedAssistAvatarUrl = metaLeaderRow
       ? assistantAvatarUrl || message.avatarUrl
       : message.avatarUrl || assistantAvatarUrl;
-    return (
+    return renderAssistantWithArtifacts(
+      displayMessage,
+      allMessages,
+      onRevealPath,
       <ImBubble
         message={displayMessage}
         resolvedReferences={resolvedReferences}

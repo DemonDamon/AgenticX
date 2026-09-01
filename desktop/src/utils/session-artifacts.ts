@@ -680,6 +680,119 @@ export function collectTurnPreviewImagePaths(
   return preferAnimatedPreviewImages(collectSessionArtifactPaths(list.slice(start, idx + 1)));
 }
 
+/** Lowercase file extension without the dot (`html`, `py`). Empty when none. */
+export function artifactExt(path: string): string {
+  const base = artifactBaseName(path).toLowerCase();
+  return base.match(/\.([a-z0-9]{1,12})$/)?.[1] ?? "";
+}
+
+const PRIMARY_ARTIFACT_RANK: Record<string, number> = {
+  html: 0,
+  htm: 0,
+  pdf: 1,
+  docx: 2,
+  doc: 2,
+  xlsx: 3,
+  xls: 3,
+  csv: 3,
+  pptx: 4,
+  ppt: 4,
+  md: 5,
+  markdown: 5,
+  txt: 6,
+  png: 8,
+  jpg: 8,
+  jpeg: 8,
+  gif: 8,
+  webp: 8,
+  svg: 8,
+  bmp: 8,
+};
+
+const PRIMARY_ARTIFACT_EXCLUDE = new Set([
+  "py",
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "json",
+  "yaml",
+  "yml",
+  "toml",
+  "lock",
+  "log",
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+]);
+
+function turnWindowForAssistant(
+  messages: Message[] | undefined | null,
+  assistantMessageId: string,
+): Message[] | null {
+  const list = messages ?? [];
+  const idx = list.findIndex((row) => row.id === assistantMessageId);
+  if (idx < 0) return null;
+  // Only the last assistant in the turn owns the card / auto-open (avoid duplicates).
+  for (let i = idx + 1; i < list.length; i += 1) {
+    if (list[i]?.role === "user") break;
+    if (list[i]?.role === "assistant") return [];
+  }
+  let start = 0;
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    if (list[i]?.role === "user") {
+      start = i + 1;
+      break;
+    }
+  }
+  return list.slice(start, idx + 1);
+}
+
+/** Deliverable files produced in the same user turn as this assistant message. */
+export function collectTurnArtifactPaths(
+  messages: Message[] | undefined | null,
+  assistantMessageId: string,
+): string[] {
+  const turnMsgs = turnWindowForAssistant(messages, assistantMessageId);
+  if (!turnMsgs || turnMsgs.length === 0) return [];
+  return collectSessionArtifactPaths(turnMsgs);
+}
+
+export function pickPrimaryTurnArtifact(paths: string[]): string | null {
+  let best: string | null = null;
+  let bestRank = Number.POSITIVE_INFINITY;
+  for (const raw of paths) {
+    const path = String(raw || "").trim();
+    if (!path) continue;
+    const ext = artifactExt(path);
+    if (!ext || PRIMARY_ARTIFACT_EXCLUDE.has(ext)) continue;
+    const rank = PRIMARY_ARTIFACT_RANK[ext] ?? 50;
+    if (rank < bestRank) {
+      best = path;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
+/** Primary artifact first; remaining paths keep collection order. */
+export function orderTurnArtifactsForCard(paths: string[]): string[] {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of paths) {
+    const path = String(raw || "").trim();
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    unique.push(path);
+  }
+  const primary = pickPrimaryTurnArtifact(unique);
+  if (!primary) return unique;
+  return [primary, ...unique.filter((path) => path !== primary)];
+}
+
 export function artifactBaseName(path: string): string {
   const normalized = String(path || "").replace(/\\/g, "/");
   const trimmed = normalized.replace(/\/+$/, "");

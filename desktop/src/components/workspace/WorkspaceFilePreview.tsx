@@ -13,6 +13,7 @@ import {
   Check,
   Code2,
   Copy,
+  Download,
   Eye,
   FileText,
   FolderOpen,
@@ -1535,6 +1536,18 @@ export function WorkspaceFilePreview({
                 <div className="h-4 w-px bg-border opacity-50" />
               </>
             ) : null}
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
+              onClick={() => {
+                const source = String(preview.absolutePath || "").trim();
+                if (!source) return;
+                void window.agenticxDesktop?.copyLocalFileAs?.({ sourcePath: source });
+              }}
+              title="另存为"
+            >
+              <Download className="h-4 w-4" strokeWidth={1.5} />
+            </button>
             <button
               type="button"
               className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"

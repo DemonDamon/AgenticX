@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 import { useContext, useRef, useState } from "react";
-import { Copy, Check, Download } from "lucide-react";
+import { Copy, Check, Download, FileText } from "lucide-react";
 import { HoverTip } from "../ds/HoverTip";
 import { MarkdownContext } from "./markdown-components";
 import {
   extractTableRows,
   rowsToCsv,
   rowsToMarkdown,
+  rowsToTsv,
   triggerBlobDownload,
 } from "../../utils/markdown-table-export";
 
@@ -18,23 +19,33 @@ type Props = {
 export function TableBlock({ children, className, ...rest }: Props & Record<string, unknown>) {
   const { isStreaming } = useContext(MarkdownContext);
   const tableRef = useRef<HTMLTableElement>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"tsv" | "md" | null>(null);
 
   const readRows = () => {
     if (!tableRef.current) return [] as string[][];
     return extractTableRows(tableRef.current);
   };
 
-  const handleCopy = async () => {
-    const rows = readRows();
-    if (rows.length === 0) return;
+  const copyText = async (kind: "tsv" | "md", text: string) => {
     try {
-      await navigator.clipboard.writeText(rowsToMarkdown(rows));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(text);
+      setCopied(kind);
+      setTimeout(() => setCopied(null), 2000);
     } catch {
       // Clipboard may be unavailable in some Electron contexts.
     }
+  };
+
+  const handleCopyTsv = async () => {
+    const rows = readRows();
+    if (rows.length === 0) return;
+    await copyText("tsv", rowsToTsv(rows));
+  };
+
+  const handleCopyMarkdown = async () => {
+    const rows = readRows();
+    if (rows.length === 0) return;
+    await copyText("md", rowsToMarkdown(rows));
   };
 
   const handleDownload = () => {
@@ -52,13 +63,22 @@ export function TableBlock({ children, className, ...rest }: Props & Record<stri
         <span className="text-[11px] font-medium tracking-wide text-text-muted">表格</span>
         {!isStreaming && (
           <div className="flex items-center gap-1 text-text-faint">
+            <HoverTip label="复制表格">
+              <button
+                type="button"
+                onClick={() => void handleCopyTsv()}
+                className="flex items-center justify-center rounded p-1 hover:bg-surface-hover hover:text-text-strong"
+              >
+                {copied === "tsv" ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+              </button>
+            </HoverTip>
             <HoverTip label="复制 Markdown">
               <button
                 type="button"
-                onClick={() => void handleCopy()}
+                onClick={() => void handleCopyMarkdown()}
                 className="flex items-center justify-center rounded p-1 hover:bg-surface-hover hover:text-text-strong"
               >
-                {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+                {copied === "md" ? <Check size={12} className="text-green-500" /> : <FileText size={12} />}
               </button>
             </HoverTip>
             <HoverTip label="下载 CSV">

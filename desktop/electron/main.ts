@@ -10446,6 +10446,33 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("copy-local-file-as", async (_event, payload: unknown) => {
+    const body =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const source = expandDesktopLocalPath(String(body.sourcePath ?? ""));
+    if (!source) return { ok: false, error: "source is required" };
+    try {
+      if (!fs.existsSync(source)) return { ok: false, error: "source is not a file" };
+      const stat = await fs.promises.stat(source);
+      if (!stat.isFile()) return { ok: false, error: "source is not a file" };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+
+    const focused = BrowserWindow.getFocusedWindow() ?? mainWindow ?? null;
+    const defaultPath = path.join(app.getPath("downloads"), path.basename(source));
+    const saveRes = focused
+      ? await dialog.showSaveDialog(focused, { defaultPath })
+      : await dialog.showSaveDialog({ defaultPath });
+    if (saveRes.canceled || !saveRes.filePath) return { ok: true, canceled: true };
+    try {
+      await fs.promises.copyFile(source, saveRes.filePath);
+      return { ok: true, canceled: false, path: saveRes.filePath };
+    } catch (err) {
+      return { ok: false, canceled: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("get-skill-settings", async () => {
     try {
       const resp = await fetchStudioBackend("/api/skills/settings");

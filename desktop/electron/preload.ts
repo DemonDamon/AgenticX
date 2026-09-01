@@ -673,6 +673,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   resolveLocalPath: async (path: string) => ipcRenderer.invoke("resolve-local-path", path),
   shellOpenPath: async (path: string) => ipcRenderer.invoke("shell-open-path", path),
   shellShowItemInFolder: async (path: string) => ipcRenderer.invoke("shell-show-item-in-folder", path),
+  copyLocalFileAs: async (payload: { sourcePath: string }) =>
+    ipcRenderer.invoke("copy-local-file-as", payload),
   connectMcp: async (payload: { sessionId: string; name: string }) =>
     ipcRenderer.invoke("connect-mcp", payload),
   disconnectMcp: async (payload: { sessionId: string; name: string }) =>

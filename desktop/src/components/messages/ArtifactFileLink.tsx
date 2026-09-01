@@ -4,14 +4,16 @@ type Props = {
   /** Absolute local filesystem path parsed from a sandbox:/file: link. */
   path: string;
   children: ReactNode;
+  /** In-app preview; when omitted, falls back to the system handler. */
+  onRevealPath?: (path: string) => void;
 };
 
 /**
- * Chat link for local artifact paths (sandbox:/file:). Opens the file via the
- * system handler; when the file does not exist (a likely model-hallucinated
- * link), flags the failure inline for a few seconds instead of dying silently.
+ * Chat link for local artifact paths (sandbox:/file:). Prefers in-app preview
+ * via onRevealPath; falls back to the system handler. Missing files (likely
+ * model-hallucinated links) are flagged inline.
  */
-export function ArtifactFileLink({ path, children }: Props) {
+export function ArtifactFileLink({ path, children, onRevealPath }: Props) {
   const [state, setState] = useState<"idle" | "opening" | "failed">("idle");
   const resetTimerRef = useRef<number | null>(null);
 
@@ -24,21 +26,36 @@ export function ArtifactFileLink({ path, children }: Props) {
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     if (state === "opening") return;
-    const api = window.agenticxDesktop?.shellOpenPath;
-    if (typeof api !== "function") {
-      setState("failed");
-      return;
-    }
     setState("opening");
-    void api(path)
-      .then((result) => {
+    void (async () => {
+      try {
+        const resolve = window.agenticxDesktop?.resolveLocalPath;
+        if (typeof resolve === "function") {
+          const info = await resolve(path);
+          if (!info.ok || info.isDirectory) {
+            setState("failed");
+            return;
+          }
+        }
+        if (typeof onRevealPath === "function") {
+          onRevealPath(path);
+          setState("idle");
+          return;
+        }
+        const api = window.agenticxDesktop?.shellOpenPath;
+        if (typeof api !== "function") {
+          setState("failed");
+          return;
+        }
+        const result = await api(path);
         setState(result?.ok ? "idle" : "failed");
-      })
-      .catch(() => setState("failed"))
-      .finally(() => {
+      } catch {
+        setState("failed");
+      } finally {
         if (resetTimerRef.current != null) window.clearTimeout(resetTimerRef.current);
         resetTimerRef.current = window.setTimeout(() => setState("idle"), 4000);
-      });
+      }
+    })();
   };
 
   return (

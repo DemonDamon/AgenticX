@@ -75,10 +75,12 @@ import { loadPreparedHtmlSrcDoc } from "../utils/html-preview-assets";
 import { buildHtmlElementContextSnippet } from "../utils/html-preview-inspect";
 import {
   artifactBaseName,
+  collectTurnArtifactPaths,
   isInAppArtifactPreviewPath,
   isInAppHtmlPreviewPath,
   looksLikeDirectoryPath,
   pathToFileUrl,
+  pickPrimaryTurnArtifact,
 } from "../utils/session-artifacts";
 import { SubAgentRunDrawer } from "./subagent";
 import { MessageRenderer, renderToolMessageExtras } from "./messages/MessageRenderer";
@@ -131,6 +133,7 @@ import {
   type GroupExpertActivity,
 } from "../utils/group-expert-activity";
 import {
+  isGroupStreamMessageId,
   shouldResetGroupStreamOnProgress,
   visibleGroupStreamBody,
 } from "../utils/group-stream-text";
@@ -6633,6 +6636,43 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     }
     return null;
   }, [visibleMessages]);
+
+  const artifactAutoOpenKeyRef = useRef("");
+  const artifactTurnBusyRef = useRef(false);
+  const artifactPendingOpenRef = useRef(false);
+
+  useEffect(() => {
+    artifactTurnBusyRef.current = false;
+    artifactAutoOpenKeyRef.current = "";
+    artifactPendingOpenRef.current = false;
+  }, [pane.sessionId]);
+
+  useEffect(() => {
+    const busy = sessionBusy || isStreamingCurrentSession;
+    if (artifactTurnBusyRef.current && !busy) {
+      artifactPendingOpenRef.current = true;
+    }
+    artifactTurnBusyRef.current = busy;
+    if (busy || !artifactPendingOpenRef.current) return;
+    const lastId = lastAssistantMessageId;
+    if (!lastId || lastId === "__stream__" || isGroupStreamMessageId(lastId)) return;
+    const primary = pickPrimaryTurnArtifact(
+      collectTurnArtifactPaths(pane.messages ?? [], lastId),
+    );
+    artifactPendingOpenRef.current = false;
+    if (!primary) return;
+    const key = `${pane.sessionId}:${lastId}:${primary}`;
+    if (artifactAutoOpenKeyRef.current === key) return;
+    artifactAutoOpenKeyRef.current = key;
+    openWorkspaceFilePreview(primary);
+  }, [
+    sessionBusy,
+    isStreamingCurrentSession,
+    lastAssistantMessageId,
+    pane.sessionId,
+    pane.messages,
+    openWorkspaceFilePreview,
+  ]);
 
   // Whether the latest interrupted turn is already complete — used to hide
   // the 恢复执行 button on a turn_interrupted row (futile-resume guard).

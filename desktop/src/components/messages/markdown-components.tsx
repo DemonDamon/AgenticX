@@ -195,6 +195,21 @@ export function chatUrlTransform(raw?: string): string {
   return "";
 }
 
+function MarkdownArtifactLink({
+  path,
+  children,
+}: {
+  path: string;
+  children: ReactNode;
+}) {
+  const { onRevealPath } = useContext(MarkdownContext);
+  return (
+    <ArtifactFileLink path={path} onRevealPath={onRevealPath}>
+      {children}
+    </ArtifactFileLink>
+  );
+}
+
 function MarkdownImage({
   src,
   alt,
@@ -561,7 +576,9 @@ export const chatMarkdownComponents: Partial<Components> = {
     const external = /^https?:\/\//i.test(url);
     const localArtifactPath = external ? null : parseLocalArtifactPath(url);
     if (localArtifactPath) {
-      return <ArtifactFileLink path={localArtifactPath}>{children}</ArtifactFileLink>;
+      return (
+        <MarkdownArtifactLink path={localArtifactPath}>{children}</MarkdownArtifactLink>
+      );
     }
     return (
       <a

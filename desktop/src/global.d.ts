@@ -1277,6 +1277,12 @@ declare global {
       }>;
       shellOpenPath: (path: string) => Promise<{ ok: boolean; error?: string }>;
       shellShowItemInFolder: (path: string) => Promise<{ ok: boolean; error?: string }>;
+      copyLocalFileAs: (payload: { sourcePath: string }) => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        path?: string;
+        error?: string;
+      }>;
       connectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       disconnectMcp: (payload: { sessionId: string; name: string }) => Promise<{ ok: boolean; error?: string }>;
       saveUserMode: (mode: "pro" | "lite") => Promise<{ ok: boolean }>;

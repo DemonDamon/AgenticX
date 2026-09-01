@@ -4,6 +4,7 @@ import {
   Code2,
   Compass,
   Copy,
+  Download,
   Ellipsis,
   FolderOpen,
   Link2,
@@ -220,6 +221,18 @@ export function HtmlPreviewChrome({
               >
                 <FolderOpen className="h-3.5 w-3.5" />
                 在文件管理器中显示
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-text-primary hover:bg-surface-hover"
+                disabled={!absPath}
+                onClick={() => {
+                  void window.agenticxDesktop?.copyLocalFileAs?.({ sourcePath: absPath });
+                  setShareOpen(false);
+                }}
+              >
+                <Download className="h-3.5 w-3.5" />
+                另存为…
               </button>
             </div>
           ) : null}
