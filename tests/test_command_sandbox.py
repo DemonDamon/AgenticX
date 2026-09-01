@@ -15,6 +15,8 @@ from agenticx.runtime.command_sandbox import (
     READ_ONLY,
     WORKSPACE_WRITE,
     CommandSandboxUnavailable,
+    _bubblewrap_argv,
+    _macos_profile,
     build_command_sandbox_plan,
     normalize_command_permissions,
 )
@@ -81,3 +83,33 @@ def test_same_scope_id_gets_distinct_temp_dirs(tmp_path: Path) -> None:
     assert first.temp_dir is not None
     assert second.temp_dir is not None
     assert first.temp_dir != second.temp_dir
+
+
+def test_linux_bubblewrap_unshares_pid_ipc_uts(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    argv = _bubblewrap_argv(
+        "/usr/bin/bwrap",
+        ("/bin/echo", "ok"),
+        [workspace],
+        cwd=workspace,
+    )
+    text = list(argv)
+    for flag in ("--unshare-pid", "--unshare-ipc", "--unshare-uts"):
+        assert flag in text
+    assert "--unshare-net" not in text
+    assert text.index("--unshare-pid") < text.index("--proc")
+    assert "--" in text
+
+
+def test_macos_profile_denies_proxy_binaries_after_allows(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    profile = _macos_profile([workspace], deny_patterns=("**/.env",))
+    assert "(allow default)" in profile
+    assert "(deny default)" not in profile
+    deny_exec = '(regex #"/(osascript|osacompile|launchctl|crontab)$")'
+    assert deny_exec in profile
+    assert profile.rfind(deny_exec) > profile.rfind("(allow file-")
+    assert "osascript" in profile
+    assert "/open$" not in profile

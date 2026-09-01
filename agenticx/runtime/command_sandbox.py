@@ -816,6 +816,13 @@ def _macos_profile(
         f"(regex #{_scheme_regex_literal(_glob_to_posix_regex(pattern))}))"
         for pattern in deny_patterns
     )
+    # Later rules win. These binaries hand work to an unsandboxed host
+    # process (AppleEvents / launchd). File allows above must not reopen
+    # process-exec. Do not switch the profile to (deny default).
+    lines.append(
+        "(deny process-exec process-exec-interpreter "
+        '(regex #"/(osascript|osacompile|launchctl|crontab)$"))'
+    )
     return "\n".join(lines)
 
 
@@ -845,10 +852,16 @@ def _bubblewrap_argv(
     - Writable binds after read-only. Later binds win; reverse that and
       the workspace becomes read-only.
     - Deny overlays last, for the same reason.
+
+    PID namespace isolation makes ``/proc`` show only processes inside
+    the sandbox. This function is still not a network sandbox.
     """
     wrapped: list[str] = [
         executable,
         "--die-with-parent",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--unshare-uts",
         "--new-session",
         "--proc",
         "/proc",
