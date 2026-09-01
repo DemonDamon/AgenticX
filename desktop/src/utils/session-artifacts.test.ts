@@ -14,6 +14,8 @@ import {
   collectSessionFileChanges,
   collectTurnPreviewImagePaths,
   matchesHandoffPath,
+  matchesHandoffAncestor,
+  displayChatLocalPath,
   collectWorkspaceListingArtifactPaths,
   orderTurnArtifactsForCard,
   pickPrimaryTurnArtifact,
@@ -760,6 +762,39 @@ describe("turn artifacts + primary pick", () => {
     expect(matchesHandoffPath("/tmp/hello.txt/", ["/tmp/hello.txt"])).toBe(true);
     expect(matchesHandoffPath("/tmp/other.txt", ["/tmp/hello.txt"])).toBe(false);
     expect(matchesHandoffPath("/tmp/hello.txt", [])).toBe(false);
+  });
+
+  it("matches a parent directory of a handoff file", () => {
+    const file =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/a.txt";
+    const root =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/";
+    expect(matchesHandoffAncestor(root, [file])).toBe(true);
+    expect(matchesHandoffAncestor("/tmp/other", [file])).toBe(false);
+  });
+
+  it("does not dump taskspace UUID roots in chat", () => {
+    const root =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/";
+    const nested = `${root}archscribe-login/login-swimlane.gif`;
+    expect(displayChatLocalPath(root, [nested])).toBe("当前工作区");
+    expect(displayChatLocalPath(root.replace(/\/$/, ""), [])).toBe("当前工作区");
+    expect(displayChatLocalPath(`${root}archscribe-login/`, [nested])).toBe("archscribe-login");
+    expect(displayChatLocalPath(nested, [nested])).toBe("login-swimlane.gif");
+    expect(
+      displayChatLocalPath(
+        "~/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/",
+        [],
+      ),
+    ).toBe("当前工作区");
+    expect(
+      displayChatLocalPath(
+        "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/notes/draft.md",
+        [],
+      ),
+    ).toBe("notes/draft.md");
+    expect(displayChatLocalPath("/tmp/notes.txt", ["/tmp/other.txt"])).toBeNull();
+    expect(displayChatLocalPath("/tmp/project/", ["/tmp/project/a.txt"])).toBe("project/");
   });
 
   it("collects relative file_write paths from OK: wrote (no chars suffix)", () => {

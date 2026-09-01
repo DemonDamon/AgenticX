@@ -23,7 +23,7 @@ import { decodePercentEncodedLocalPath } from "../../utils/local-fs-path";
 import { parseLocalArtifactPath } from "../../utils/sandbox-artifact-link";
 import { ArtifactFileLink } from "./ArtifactFileLink";
 import { buildSvgCharsetDataUrl } from "../../utils/svg-markup";
-import { artifactBaseName, matchesHandoffPath } from "../../utils/session-artifacts";
+import { displayChatLocalPath } from "../../utils/session-artifacts";
 
 export const MarkdownContext = createContext<{
   isStreaming?: boolean;
@@ -207,12 +207,13 @@ function MarkdownArtifactLink({
 }) {
   const { onRevealPath, handoffPaths } = useContext(MarkdownContext);
   const childText = reactNodeToPlainText(children).trim();
+  const label = displayChatLocalPath(path, handoffPaths);
   const collapseToName =
-    matchesHandoffPath(path, handoffPaths) &&
+    label != null &&
     (childText === path || isAbsoluteFilePath(childText) || !childText);
   return (
     <ArtifactFileLink path={path} onRevealPath={onRevealPath}>
-      {collapseToName ? artifactBaseName(path) : children}
+      {collapseToName ? label : children}
     </ArtifactFileLink>
   );
 }
@@ -484,12 +485,12 @@ function ChatInlineCode({
   const text = reactNodeToPlainText(children).trim();
   const isBlock = Boolean(className?.includes("language-"));
   if (!isBlock && onRevealPath && isAbsoluteFilePath(text)) {
-    const handoff = matchesHandoffPath(text, handoffPaths);
+    const label = displayChatLocalPath(text, handoffPaths);
     return (
       <button
         type="button"
         className={
-          handoff
+          label != null
             ? "cursor-pointer font-medium text-text-strong underline-offset-2 transition-colors duration-150 hover:underline"
             : "cursor-pointer rounded bg-surface-card px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--ui-btn-primary-bg,#38bdf8)] underline-offset-2 transition-colors duration-150 hover:underline"
         }
@@ -500,7 +501,7 @@ function ChatInlineCode({
           onRevealPath(text);
         }}
       >
-        {handoff ? artifactBaseName(text) : children}
+        {label ?? children}
       </button>
     );
   }

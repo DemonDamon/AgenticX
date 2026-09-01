@@ -33,4 +33,15 @@ describe("handoff inline path collapse", () => {
     expect(html).toContain("/tmp/notes.txt");
     expect(html).toContain("bg-surface-card");
   });
+
+  it("collapses the session default workspace root instead of the UUID path", () => {
+    const root =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/";
+    const html = renderPathCode(root, [`${root}a.txt`]);
+    expect(html).toContain(">当前工作区<");
+    expect(html).not.toMatch(/>[^<]*c0683c71-0460-48cc-b681-a3b6509ec18d[^<]*</);
+    expect(html).toContain('title="/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/"');
+    expect(html).toContain("font-medium text-text-strong");
+    expect(html).not.toContain("bg-surface-card");
+  });
 });

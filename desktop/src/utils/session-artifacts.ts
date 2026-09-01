@@ -887,6 +887,58 @@ export function matchesHandoffPath(path: string, handoffPaths?: string[] | null)
   return handoffPaths.some((candidate) => normalizeArtifactPathKey(candidate) === key);
 }
 
+/** True when `path` is a parent directory of a turn handoff file. */
+export function matchesHandoffAncestor(path: string, handoffPaths?: string[] | null): boolean {
+  const key = normalizeArtifactPathKey(path);
+  if (!key || !handoffPaths?.length) return false;
+  return handoffPaths.some((candidate) => {
+    const child = normalizeArtifactPathKey(candidate);
+    return child === key || child.startsWith(`${key}/`);
+  });
+}
+
+/**
+ * Session default / extra taskspace: `~/.agenticx/taskspaces/<sid>/<name>[/rel]`.
+ * The session UUID is never useful in chat copy.
+ */
+const TASKSPACE_CHAT_PATH_RE =
+  /(?:^|\/)\.agenticx\/taskspaces\/[^/]+\/([^/]+)(?:\/(.*))?$/;
+
+function displayTaskspaceChatPath(normalized: string): string | null {
+  const homeRel = artifactHomeRelativeKey(normalized) ?? normalized;
+  const match = homeRel.match(TASKSPACE_CHAT_PATH_RE);
+  if (!match) return null;
+  const space = String(match[1] || "").trim();
+  const rel = String(match[2] || "").replace(/\/+$/, "");
+  if (!space) return null;
+  if (space === "default" && !rel) return "当前工作区";
+  if (space === "default") return rel;
+  return rel ? `${space}/${rel}` : space;
+}
+
+/**
+ * Chat-visible label for an inline local path. Collapses handoff files to the
+ * basename and never dumps `~/.agenticx/taskspaces/<uuid>/…`.
+ * Returns null when the original markdown children should stay as-is.
+ */
+export function displayChatLocalPath(
+  path: string,
+  handoffPaths?: string[] | null,
+): string | null {
+  const key = normalizeArtifactPathKey(path);
+  if (!key) return null;
+  if (matchesHandoffPath(path, handoffPaths)) {
+    return artifactBaseName(key);
+  }
+  const taskspaceLabel = displayTaskspaceChatPath(key);
+  if (taskspaceLabel != null) return taskspaceLabel;
+  if (matchesHandoffAncestor(key, handoffPaths)) {
+    const base = artifactBaseName(key);
+    return looksLikeDirectoryPath(path) ? `${base}/` : base;
+  }
+  return null;
+}
+
 /** True when path looks like a directory (trailing slash or no file extension segment). */
 export function looksLikeDirectoryPath(path: string): boolean {
   const value = String(path || "").trim().replace(/\\/g, "/");
