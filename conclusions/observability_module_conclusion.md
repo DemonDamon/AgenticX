@@ -1,8 +1,8 @@
 # AgenticX Observability模块完整结构分析
 
-> 结论更新时间：2026-05-29（覆盖 2025-12-30 之后的变更）
+> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
 >
-> 本轮重大变更：新增 **OpenTelemetry 原生集成**子模块 `otel/`（config/handler/hooks/span_exporter）、**GenAI 语义约定属性** `ai_attributes.py`，`monitoring.py` 的 `PrometheusExporter` 支持 OTel 命名（向后兼容）；另收录既有 **MinerU 监控子模块** `mineru/`（错误分类/重试/限流/健康检查）。
+> 本轮重大变更：修复 `logging.py` 中 `StructuredLogger.log()` **每次调用必抛 `KeyError`** 的缺陷——`extra` 载荷恒定携带 `message` 键，与 `LogRecord` 内建字段撞名；新增 `_RESERVED_LOGRECORD_ATTRS` 常量与 `_log_extra()` 过滤辅助函数，五个级别分支统一改传过滤后的 `extra`。
 
 ## 目录路径
 `d:\myWorks\AgenticX\agenticx\observability`
@@ -16,7 +16,7 @@
 ├── analysis.py (8,234 bytes)
 ├── callbacks.py (7,892 bytes)
 ├── evaluation.py (6,543 bytes)
-├── logging.py (5,678 bytes)
+├── logging.py (20,771 bytes)       # 修复 extra 覆盖 LogRecord 内建字段导致 log() 必抛 KeyError
 ├── monitoring.py (7,123 bytes)         # PrometheusExporter 支持 OTel 命名（向后兼容）
 ├── span_tree.py (NEW) ← 层级化 Span 管理（内化自 Pydantic AI）
 ├── ai_attributes.py (NEW) ← GenAI 语义约定属性常量（内化自 Spring AI）
@@ -75,10 +75,10 @@
 
 **依赖关系**：被其他所有可观测性组件依赖，作为事件系统的核心基础
 
-#### 3. `logging.py` (5,678 bytes)
+#### 3. `logging.py` (20,771 bytes)
 **文件功能**：实现结构化日志系统，提供多格式日志输出和回调集成功能
 
-**技术实现**：基于Python标准logging模块扩展，支持彩色控制台输出、JSON格式、结构化格式和XML格式，集成回调系统实现事件驱动日志
+**技术实现**：基于Python标准logging模块扩展，支持彩色控制台输出、JSON格式、结构化格式和XML格式，集成回调系统实现事件驱动日志；`StructuredLogger.log()` 在传递 `extra` 前统一经 `_log_extra()` 过滤，剔除与 `LogRecord` 内建字段撞名的键（修复前 `log_data` 恒定携带 `message` 键，每次调用都会在 `makeRecord` 抛 `KeyError("Attempt to overwrite 'message' in LogRecord")`，并经 `on_task_start`/`on_error` 等回调抛回调用方；被剔除字段格式化器本就从 `record` 自取，无信息损失）
 
 **关键组件**：
 - `get_logger`：日志获取函数，提供统一的日志器配置
@@ -86,6 +86,7 @@
 - `LogLevel`：日志级别枚举，定义标准日志等级
 - `LogFormat`：日志格式枚举，支持多种输出格式
 - `StructuredLogger`：结构化日志器，支持复杂数据结构记录
+- `_RESERVED_LOGRECORD_ATTRS` / `_log_extra()`：`extra` 载荷过滤机制，基于 `LogRecord` 内建字段集合（含 `message`/`asctime`）剔除撞名键
 - `LoggingCallbackHandler`：日志回调处理器，集成事件系统
 
 **业务逻辑**：为AI代理系统提供全面的日志记录能力，支持工作流执行、任务处理、工具调用、LLM交互等各环节的详细日志

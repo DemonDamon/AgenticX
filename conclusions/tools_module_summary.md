@@ -1,6 +1,6 @@
 # AgenticX Tools 模块完整结构分析
 
-> 结论更新时间：2026-05-29（覆盖 2026-03-07 之后的变更）
+> 结论更新时间：2026-09-01（覆盖 f3ba65001c29 之后的变更）
 
 ## 目录路径
 `/Users/damon/myWork/AgenticX/agenticx/tools`
@@ -21,14 +21,17 @@ agenticx/tools/
 ├── function_tool.py
 ├── hashline.py              [(NEW) 行稳定编辑引用的 hashline 工具]
 ├── html_extractor.py        [(NEW) stdlib HTML 正文 + 图片 URL 抽取，服务 web_fetch]
+├── image_generation.py      [(NEW) 文生图工具：本地落盘 PNG + 结构化 JSON 返回，provider 可注入]
 ├── lsp_manager.py           [(NEW) JSON-RPC over stdio LSP 客户端：定义/引用/hover/诊断]
 ├── mineru.py
 ├── openapi_toolset.py
 ├── policy.py                [(NEW) 声明式多层工具访问控制 + 路径/计划模式/命令拒绝/类目策略]
 ├── remote.py
 ├── remote_v2.py
+├── sandbox_tools.py         [沙箱文件/命令/状态化代码执行工具封装（OpenSandbox 风格）]
 ├── security.py
 ├── shell_bundle.py
+├── show_images.py           [(NEW) 展示型远程图片工具：image_gallery JSON + 缩略图还原/垃圾图过滤]
 ├── skill_bundle.py
 ├── skill_execution_backend.py
 ├── tool_context.py
@@ -236,6 +239,31 @@ agenticx/tools/
 **依赖关系**：继承 `BaseTool`，依赖 `document_routers.py` 的 `DocumentRouter`
 **设计来源**：内化自 OWL 的 DocumentProcessingToolkit，适配 AgenticX 工具系统
 
+#### agenticx/tools/sandbox_tools.py
+**文件功能**：沙箱能力工具封装（OpenSandbox 风格），为 Agent 提供沙箱内的文件操作、命令执行与状态化代码执行。
+**技术实现**：三个工具类均继承 `BaseTool`，以 Pydantic 参数模型（`FileOperationArgs`/`CommandExecutionArgs`/`CodeExecutionArgs`）校验入参；异步 `_arun` 为主路径，同步 `_run` 通过 `agenticx.utils.async_bridge.run_sync()` 桥接（2026-09 起替代原先 `asyncio.get_event_loop().run_until_complete()` 的写法，避免在已有事件循环场景下的兼容性问题）。
+**关键组件**：
+- `SandboxFileTool`：沙箱文件操作（read/write/list/delete/mkdir）
+- `SandboxCommandTool`：沙箱 Shell 命令执行（支持 timeout/background/cwd）
+- `SandboxCodeInterpreterTool`：状态化代码执行，内部经 `StatefulCodeInterpreter`（Jupyter kernel 或 execd 后端）实现变量跨执行持久化，启动失败时降级到普通沙箱执行
+- `create_sandbox_tools()` / `register_sandbox_tools()`：批量创建与注册入口（经 `__init__.py` 导出）
+**业务逻辑**：将沙箱环境（`SandboxBase`/`CodeInterpreterSandbox`）包装为标准工具，使 Agent 能在隔离环境内安全地进行文件与代码操作。
+**依赖关系**：继承 `BaseTool`，依赖 `agenticx.utils.async_bridge.run_sync`、`..sandbox.jupyter_kernel.StatefulCodeInterpreter`（延迟导入）。
+
+#### agenticx/tools/image_generation.py (新增)
+**文件功能**：文生图工具：根据文本提示在本地生成 PNG 并返回结构化 JSON 结果（`type=="image"`）。
+**技术实现**：定义厂商无关的 `ImageGenProvider` Protocol（`generate(prompt, size, dest_path)`，运行时可注入）；`generate_image()` 读取 `ConfigManager.get_value("image_generation")`（provider/api_key/api_base/model）判断配置，P0 阶段未锁定云厂商 SDK——未配置且未注入 provider 时失败关闭，返回 `ERROR: image_generation is not configured`；尺寸限定白名单 `ALLOWED_SIZES = ("1024x1024", "1024x1792", "1792x1024")`；产物写入会话 workspace 的 `generated/` 子目录（无 workspace 时回落 `~/.agenticx/tmp-image-gen`），返回含 `path/mime/alt/width/height` 的 JSON 字符串。
+**关键组件**：`generate_image()`（核心入口）、`ImageGenProvider`（Protocol）、`FakeImageGenProvider`（测试用，写 1x1 PNG）、`load_image_generation_config()` / `is_image_generation_configured()`。
+**业务逻辑**：为对话侧提供「画一张图」能力；以可注入 provider 契约解耦具体云厂商，测试与生产路径分离。
+**依赖关系**：依赖 `agenticx.cli.config_manager.ConfigManager`；经 `agenticx/cli/agent_tools.py` 注册为 STUDIO 工具 `generate_image`（不经 `tools/__init__.py` 导出）。
+
+#### agenticx/tools/show_images.py (新增)
+**文件功能**：展示型远程图片工具：将 http(s) 图片 URL 列表清洗后包装为 `image_gallery` JSON，供聊天气泡内联展示（纯展示，不要求模型具备视觉能力）。
+**技术实现**：`show_images(items)` 返回 `{"type": "image_gallery", "images": [...]}` JSON，无有效 URL 时返回 ERROR 文本；`preview_show_images_items()` 提供同样的清洗逻辑但不包 JSON；URL 卫生管线包括：`upgrade_remote_image_url()` 将列表页缩略图（如 `.thumb.400_0.jpeg`）还原为原图文件名，`is_junk_remote_image_url()` 过滤站点装饰/广告/头像/二维码及 ≤160px 的小缩略图；上限约束：最多展示 6 张、扫描前 24 条、URL 最长 2048 字符、alt 最长 80 字符。
+**关键组件**：`show_images()`、`preview_show_images_items()`、`normalize_content_image_url()`、`upgrade_remote_image_url()`、`is_junk_remote_image_url()`。
+**业务逻辑**：配合 `web_fetch` 的 `[discovered_images]` 输出（该处亦复用 `is_junk_remote_image_url` 过滤），让 Agent 能把搜到的图片直接以图集形式展示给用户。
+**依赖关系**：纯 stdlib（json/re）；经 `agenticx/cli/agent_tools.py` 注册为 STUDIO 工具 `show_images`（不经 `tools/__init__.py` 导出）。
+
 #### agenticx/tools/README.md
 **文件功能**：工具模块的使用说明与设计指南。
 **技术实现**：Markdown 格式文档，包含模块架构图、核心类说明及扩展示例。
@@ -252,6 +280,8 @@ AgenticX Tools 模块在保留原有强类型校验和 MCP 灵活性的基础上
 新增的统一文档处理工具（UnifiedDocumentTool）和文档路由器（DocumentRouter）提供了多格式文档的统一处理接口，支持图片、Excel、PDF、网页等多种格式的自动路由和处理，内化自 OWL 的 DocumentProcessingToolkit 设计思想，简化了 Agent 对文档处理的复杂度。
 
 新增的工具调用历史追踪功能（ToolCallingRecord）提供了完整的工具调用记录能力，支持按 Agent、Task、工具名称等维度查询历史记录，为可观测性和调试提供支持，内化自 CAMEL-AI 的 ToolCallingRecord 机制。
+
+新增的图片能力工具对：`image_generation.py` 以可注入的 `ImageGenProvider` 契约提供文生图（本地落盘 PNG + 结构化 JSON，未配置时失败关闭），`show_images.py` 提供纯展示型远程图片图集（缩略图还原与垃圾图过滤），两者均经 `agenticx/cli/agent_tools.py` 注册为 STUDIO 工具；`sandbox_tools.py` 的同步入口统一改走 `agenticx.utils.async_bridge.run_sync()` 桥接。
 
 **VeADK 内化**：
 - **SkillExecutionBackend 抽象与实现（P2-1）**：新增 `skill_execution_backend.py` 定义技能执行后端的抽象接口，支持 `LocalSkillBackend`（本地执行）和 `SandboxSkillBackend`（沙箱隔离执行），通过与 AgenticX 现有 Sandbox 模块的集成，实现灵活的技能执行策略选择

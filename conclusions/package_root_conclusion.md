@@ -1,19 +1,22 @@
 # Package Root 模块结论
 
+> 结论更新时间：2026-09-01（覆盖上一基线 `f3ba65001c29` 之后的变更）
+
 ## Responsibility
 - 作为 `agenticx` 顶层 Python 包的**门面与胶水层**：版本号、可选依赖导入辅助、产品品牌常量、Agent 预设模板，以及在非 CLI 启动时聚合导出 core/llms/tools/memory 等子包公共 API。
 - 与 `pyproject.toml`、`requirements.txt` 共同定义包元数据、Python 版本下限（>=3.10）与核心/可选 extras 依赖契约（`requirements.txt` 为 `pyproject.toml [project.dependencies]` 的镜像，注释要求先改 pyproject）。
 - Explicit non-responsibilities: 不实现各子包业务逻辑；子目录（`core/`、`studio/`、`runtime/` 等）由对应 module conclusion 覆盖；本结论不含 `agenticx/**/*.py` 除根目录五个文件外的任何代码。
 
 ## Entry points and public interfaces
-- `agenticx/__init__.py`：`__version__`（来自 `_version`）、`__author__` / `__email__`；非 CLI 时 re-export 大量符号（Agent、Task、Workflow、LLM providers、memory、protocols、hooks、flow、delegation、observability 等），见模块末尾 `__all__`。
-- `agenticx._version.__version__`：当前 `"0.4.2"`，与 `pyproject.toml` `project.version` 一致；`agx` CLI（`agenticx/cli/main.py`）直接导入以加速 `--version`。
+- `agenticx/__init__.py`：`__version__`（来自 `_version`）、`__author__` / `__email__`、`CLI_BOOTSTRAP_NAMES`（CLI 启动名白名单 frozenset）；非 CLI 时 re-export 大量符号（Agent、Task、Workflow、LLM providers、memory、protocols、hooks、flow、delegation、observability 等），见模块末尾 `__all__`。
+- `agenticx._version.__version__`：当前 `"0.6.0"`，与 `pyproject.toml` `project.version` 一致；`agx` CLI（`agenticx/cli/main.py`）直接导入以加速 `--version`。
 - `agenticx._optional.import_optional` / `is_module_available`：按 extras 组名生成友好 `ImportError` 提示（`pip install "agenticx[{extras_group}]"`）。
 - `agenticx.branding`：`APP_DISPLAY_NAME`、`DEFAULT_META_PRODUCT_LABEL`（均为 `"Near"`）、`LEGACY_META_LABELS`（`Machi` / `machi` 兼容）。
 - `agenticx.presets`：`AgentPreset` dataclass；`load_preset_from_dict` / `load_preset_from_yaml`；`create_agent_from_preset` → `agenticx.core.agent.Agent` 实例。
 
 ## Core execution path
-- **库导入**：`import agenticx` 且 `sys.argv[0]` 基名**不是** `agx`/`agenticx` 时，执行重量级子模块导入并填充 namespace；否则（CLI bootstrap）跳过子模块导入以降低冷启动成本（`_IS_CLI_BOOTSTRAP`）。
+- **库导入**：`import agenticx` 且 `sys.argv[0]` 基名**不在** `CLI_BOOTSTRAP_NAMES`（`agx` / `agenticx` / `agx-server` / `agx-server.exe`）时，执行重量级子模块导入并填充 namespace；否则（CLI bootstrap）跳过子模块导入以降低冷启动成本（`_IS_CLI_BOOTSTRAP`）。打包桌面端入口 `agx-server(.exe)` 被显式纳入白名单——若按库导入处理，每次冷启动都会拉入 GraphRAG / Neo4j / observability，并在 splash 对话框中表现为 "pip install neo4j"。
+- **litellm 成本表本地化**：模块顶部 `_os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")`——litellm 在 import 时会同步请求 GitHub 上的 `model_prices_and_context_window.json`（timeout=5s），受限网络下叠加 PyInstaller onefile 首次解压易耗尽桌面端 "agx serve startup timeout" 就绪窗口；默认改用 litellm 自带本地备份价格表（零网络），已显式设置该环境变量的用户不受影响。
 - **CLI 版本**：`agx` → `from agenticx._version import __version__` → Typer/Rich 输出，无需加载 core 导出链。
 - **预设建 Agent**：YAML/frontmatter → `load_preset_from_yaml` → `AgentPreset` → `create_agent_from_preset` 合并 `settings` 与 overrides → `_filter_agent_kwargs` 仅保留 `Agent.model_fields` 键 → `Agent(**kwargs)`。
 
@@ -21,7 +24,7 @@
 - `AgentPreset` / `load_preset_from_dict` / `load_preset_from_yaml` / `create_agent_from_preset`（`presets.py`）。
 - `import_optional` / `is_module_available`（`_optional.py`）。
 - `APP_DISPLAY_NAME`、`DEFAULT_META_PRODUCT_LABEL`、`LEGACY_META_LABELS`（`branding.py`）。
-- `__version__`（`_version.py`）；`__init__.py` 内 `_SAVED_CLI_ARGV` 保存导入前 argv 快照。
+- `__version__`（`_version.py`）；`__init__.py` 内 `_SAVED_CLI_ARGV` 保存导入前 argv 快照；`CLI_BOOTSTRAP_NAMES` 为 CLI 启动名白名单（含打包桌面端 `agx-server` / `agx-server.exe`），已加入 `__all__`。
 
 ## Data and configuration
 - 版本与作者：`pyproject.toml` `[project]`（name `agenticx`、version、authors、classifiers、keywords）。
@@ -36,8 +39,9 @@
 ## Tests and operations
 - `tests/test_smoke_cherry_studio_preset.py`：`AgentPreset` 加载与 `create_agent_from_preset` 校验。
 - `tests/test_smoke_ark_provider.py` 等通过 `from agenticx import ArkLLMProvider` 验证根导出。
-- 发布：版本 bump 需同步 `agenticx/_version.py` 与 `pyproject.toml`；`pip install -e .` 为本地开发标准入口。
-- CLI 性能：打包/冒烟时确认 `agx --version` 不触发全量 `__init__` 导入链。
+- pytest 配置（`pyproject.toml [tool.pytest.ini_options]`）：`addopts` 含 `--import-mode=importlib`——`tests/` 与 `tests/cli/` 下存在同名文件（如 `test_mcp_schema.py`），默认 prepend 导入模式按 basename 建模块名必然撞车并中断整轮收集；importlib 模式按路径导入，无需给 `tests/` 铺 `__init__.py`。
+- 发布：版本 bump 需同步 `agenticx/_version.py` 与 `pyproject.toml`（当前均为 `0.6.0`）；`pip install -e .` 为本地开发标准入口。
+- CLI 性能：打包/冒烟时确认 `agx --version` 与打包入口 `agx-server` 均不触发全量 `__init__` 导入链。
 
 ## Unverified or ambiguous
 - `__all__` 列出 `AgentProtocol`、`TaskProtocol`、`ToolProtocol`，但 `__init__.py` 可见导入段未绑定这三者；`from agenticx import AgentProtocol` 在非 CLI 路径下可能失败，属导出列表与实现不一致。

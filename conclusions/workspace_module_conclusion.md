@@ -1,5 +1,7 @@
 # Workspace 模块结论
 
+> 结论更新时间：2026-09-01（覆盖上一基线 `f3ba65001c29` 之后的变更）
+
 ## Responsibility
 - 管理用户级与主体级（meta / avatar / group）**文件系统工作区**：路径解析、首次 bootstrap、Markdown 人格/记忆文件读写、收藏夹 JSON、结构化 `MEMORY.md` 条目 CRUD。
 - 为 Meta-Agent 系统提示、Studio API、运行时 memory 工具与记忆召回提供统一的磁盘上下文来源（默认 `~/.agenticx/workspace`，群聊 `~/.agenticx/groups/<id>/workspace`，分身可配独立目录）。
@@ -24,6 +26,7 @@
 - `_sanitize_memory_note`：长度上限、噪声正则（含 `<think>`、文件列表等）过滤。
 - `_locate_entry_block` / `read_memory_entries`：按 `## section` 与顶层 bullet 索引解析/定位 MEMORY 条目（支持 nested children）。
 - `resolve_subject_workspace_dir`：与 `agenticx.memory.graph.group_id.classify_subject` / `parse_group_id_from_avatar` 及 `AvatarRegistry` 协作。
+- 默认根路径惰性解析：`DEFAULT_WORKSPACE_DIR` / `DEFAULT_AGENTICX_HOME` 不再是 import 时定死的模块常量，模块内部改调 `_default_workspace_dir()` / `_default_agenticx_home()`（经 `agenticx/utils/agx_home.py` 的 `lazy_home_path` 按调用时 `HOME` 解析，并允许 `monkeypatch.setattr` 模块属性覆盖）；模块级 `__getattr__`（PEP 562）保留外部对两个 `DEFAULT_*` 名的读取兼容。动机：测试在用例开始时才把 `$HOME` 重定向到沙箱，import 期常量早已冻结，群/分身 workspace 会误建到开发者真实的 `~/.agenticx` 下。
 
 ## Data and configuration
 - 全局 workspace：`config.yaml` 的 `workspace_dir`（经 `ConfigManager`）；环境变量 `AGX_WORKSPACE_ROOT` 覆盖 session 默认根（在 avatar 未指定时）。
@@ -31,7 +34,7 @@
 - MCP：`ensure_workspace` 可 seed `~/.agenticx/mcp.json`（空 `{}` 或从 Cursor 导入）。
 
 ## Dependencies
-- Upstream: `agenticx.cli.config_manager.ConfigManager`；`agenticx.memory.graph.group_id`；`agenticx.avatar.registry.AvatarRegistry`（lazy）；`agenticx.cli.studio_mcp.import_mcp_config`（bootstrap 时）；`agenticx.memory.workspace_memory.WorkspaceMemoryStore`（可选索引）。
+- Upstream: `agenticx.cli.config_manager.ConfigManager`；`agenticx.memory.graph.group_id`；`agenticx.utils.agx_home`（`agx_home` / `lazy_home_path`，惰性解析 `~/.agenticx`）；`agenticx.avatar.registry.AvatarRegistry`（lazy）；`agenticx.cli.studio_mcp.import_mcp_config`（bootstrap 时）；`agenticx.memory.workspace_memory.WorkspaceMemoryStore`（可选索引）。
 - Downstream: `agenticx/studio/server.py`（workspace API、favorites、memory CRUD）；`agenticx/runtime/prompts/meta_agent.py`（`load_subject_workspace_context`）；`agenticx/runtime/meta_tools.py`、`agenticx/cli/agent_tools.py`（memory 工具）；`agenticx/memory/recall.py`、`agenticx/memory/graph/forget.py`；`agenticx/avatar/group_chat.py`（群 workspace bootstrap）；`agenticx/cli/studio.py`。
 
 ## Tests and operations

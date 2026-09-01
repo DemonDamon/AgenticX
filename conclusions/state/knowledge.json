@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "knowledge",
-  "generation": "0d0f566652bc4d85b76f757eea050579",
+  "generation": "df3d6164300d401c9ba8484187da6098",
   "mapping_revision": 1,
-  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
-  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
-  "source_fingerprint": "sha256:8d9148997e99f321ef6dc95b91b0ff1a47fa74d768a50960bef7d6c1f7a3f478",
+  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
+  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "source_fingerprint": "sha256:7c0b8120602d2ec40f8cb85089c2739f0fa1d02a2b8b4ba5caac6ede44597ad3",
   "summary_path": "conclusions/knowledge_module_conclusion.md",
-  "summary_sha256": "sha256:ed30981f4497d76b48820e1780dc90389c0773d5c9116d427a4d49197644271d",
-  "updated_at": "2026-08-08T01:39:55.961169+00:00"
+  "summary_sha256": "sha256:0de7fd22ff10d13fef4b14d8bf254980d2321b7976de49bd142049fefc4e0d54",
+  "updated_at": "2026-09-01T06:08:44.087783+00:00"
 }

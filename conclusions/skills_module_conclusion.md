@@ -1,6 +1,6 @@
 # AgenticX Skills 模块总结
 
-> 结论生成时间：2026-05-29（首次创建，覆盖当前代码）
+> 结论更新时间：2026-09-01（覆盖基线 f3ba65001c29 之后的变更；首次创建于 2026-05-29）
 
 ## 模块概述
 
@@ -17,6 +17,7 @@ agenticx/skills/
 ├── versioning.py          # .changelog 变更日志追加/读取/计数
 ├── import_repo.py         # 从 GitHub 仓库批量导入技能（带 guard 校验）
 ├── meta_skill.py          # Skill-First 协议系统提示注入
+├── pending_queue.py       # 待批准技能提案队列（list / approve / reject / 过期清理）
 ├── bundled/               # 内置工作流技能（code-dev-workflow / feature-loop / project-initializer）
 └── agenticx-*/            # 内置开箱即用 SKILL.md（quickstart、agent-builder、tool-creator 等）
 ```
@@ -45,6 +46,8 @@ agenticx/skills/
 - `_check_structure`：结构性检查（文件数 ≤50、总大小 ≤1MB、单文件 ≤256KB、二进制文件、符号链接越界）
 - 信任分级矩阵 `TRUST_POLICY`：`builtin` / `trusted` / `community` / `agent-created` 四级，对 (safe/caution/dangerous) 三种裁决分别给出 allow/block 策略
 - `should_allow(result, source)`：依据信任级 + 裁决判定是否放行，返回原因字符串
+- 用户可读拦截文案：`format_guard_rejection_message`（面向 skill_manage 等工具的中文拦截说明，含命中类别与改写建议）与 `format_guard_block_for_user`（面向 Desktop 批准弹层的中文文案，无内部工具术语，按 `_TRUST_LABELS` 翻译信任级）；类别中文标签 `_CATEGORY_LABELS` 覆盖 exfiltration/credential/injection/destructive/code_execution
+- 威胁模式清单维护在 `guard_patterns.yaml`；其中 `shell_eval`（TH-CE-009）正则已收窄为 `eval\s+(?:["'`]|\$)`，避免误拦「eval set / 评测」类普通用语
 - 序列化与合并辅助：`scan_result_to_payload`、`finding_to_dict`、`merge_verdicts`、`resolve_trust_level`
 
 ### 模糊补丁引擎 (fuzzy_patch.py)
@@ -80,6 +83,14 @@ agenticx/skills/
 ### Skill-First 协议注入 (meta_skill.py)
 
 **文件功能**：提供 `USING_AGENTICX_SKILL` 等系统提示片段，向智能体注入「1% 规则」「技能优先级」「红旗信号」等 Skill-First 行为协议。
+
+**核心组件**：`MetaSkillInjector.inject(base_prompt, skill_summaries, *, include_catalog=True)`——默认在协议后追加「## Available Skills」目录块；`include_catalog=False` 时只注入协议本身（可用 `AGX_SKILL_PROTOCOL` 环境变量整体关闭注入）。
+
+### 待批准提案队列 (pending_queue.py)
+
+**文件功能**：管理「待批准技能提案」目录（`.proposals`），提供 `list_pending` / `approve` / `reject` / `cleanup_stale`（默认清理 30 天前仍未处理的提案）。
+
+**核心要点**：`approve` 合并提案前依次做大小限制校验、frontmatter 规范化、路径越界校验，写入后强制 `scan_skill` + `should_allow("agent-created")` 安全门禁；被拦截时回滚已写入文件，并返回 `format_guard_block_for_user` 生成的 Desktop 端中文拦截说明（而非原始 reason 字符串）；通过后追加 changelog 并清理提案目录。
 
 ### 内置技能 (bundled/ 与 agenticx-*)
 

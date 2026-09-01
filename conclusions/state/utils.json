@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "utils",
-  "generation": "521e5bde337c4ccc8e56802e6eca5f3c",
+  "generation": "0b6361585bf94ef9acb4d83c1ba8c00b",
   "mapping_revision": 1,
-  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
-  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
-  "source_fingerprint": "sha256:bc566ce5dfa28e2b6811109392bafdabc33e3d87213c1e83e5fda4be06651cda",
+  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
+  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "source_fingerprint": "sha256:2b50cbecedd18da55b14900f75ea48389e21f602a284808bae2f7beccf732743",
   "summary_path": "conclusions/utils_module_conclusion.md",
-  "summary_sha256": "sha256:d1d176e514a6427f423862919240d85006b86c5f8bdadeb42108307219f669f0",
-  "updated_at": "2026-08-08T01:39:56.840548+00:00"
+  "summary_sha256": "sha256:2de50618aece0e988b17441e65e10d164df89c8d9f59a7cebceafecd1011179b",
+  "updated_at": "2026-09-01T06:08:44.506040+00:00"
 }

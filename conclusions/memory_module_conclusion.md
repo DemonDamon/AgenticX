@@ -1,6 +1,6 @@
 # agenticx.memory 目录完整结构分析
 
-> 结论更新时间：2026-05-29（覆盖 2026-03-18 之后的变更）
+> 结论更新时间：2026-09-01（覆盖上一基线 `f3ba65001c29` 之后的变更）
 
 ## 目录路径
 `d:/myWorks/AgenticX/agenticx/memory`
@@ -12,10 +12,11 @@
 - __init__.py  
 - base.py  
 - component.py  
-- core_memory.py  
+- core_memory.py  *(本轮更新：时间戳 aware 化)*  
 - episodic_memory.py  
-- hierarchical.py  
-- hybrid_search.py  
+- graph/  *(本轮更新：writer.py 事件循环安全)*  
+- hierarchical.py  *(本轮更新：新增 `ensure_aware`)*  
+- hybrid_search.py  *(本轮更新：时间衰减读取侧兜底)*  
 - intelligence/  
 - knowledge_base.py  
 - mcp_memory.py  
@@ -56,8 +57,9 @@
 **文件功能**：实现仿生六层分层记忆核心抽象 `BaseHierarchicalMemory` 及多枚举常量。  
 **技术实现**：扩展 `BaseMemory`，新增 `MemoryType/Importance/Sensitivity` 枚举、`HierarchicalMemoryRecord`（带访问计数、衰减因子）、事件日志 `MemoryEvent`；提供关联管理、层次搜索钩子函数。  
 **关键组件**：`BaseHierarchicalMemory._store_record/_hierarchical_search` 抽象钩子、`add/search_hierarchical/get_associations` 等。  
+**本轮变更（2026-09-01）**：新增模块级工具函数 `ensure_aware(value: datetime)`——给 naive 时间戳补**本地**时区（`value.astimezone()`），使其能与 aware 的 `datetime.now(UTC)` 相减。历史记录曾用 naive `datetime.now()` 创建，读取侧算相关度/时间衰减/max_age 过滤时会抛 `TypeError`；创建点已改 aware，此函数兜底已落盘的老记录。补本地时区而非 UTC，避免 UTC+8 老记录被凭空算老 8 小时。  
 **业务逻辑**：为后续各层 (Core/Episodic/Semantic …) 提供统一增强能力（重要度、安全级、事件日志）。  
-**依赖关系**：被 core/episodic/semantic 等子类继承。  
+**依赖关系**：被 core/episodic/semantic 等子类继承；`ensure_aware` 被 `core_memory.py` 与 `hybrid_search.py` 引用。  
 
 ### component.py (616 行)
 **文件功能**：高阶 `MemoryComponent`，封装多后端协同、智能更新流水线、操作历史。  
@@ -70,8 +72,9 @@
 **文件功能**：核心层记忆，持久化代理身份、人格与长期上下文。  
 **技术实现**：继承 `BaseHierarchicalMemory`；维护 _core_records 内存字典与关键字索引；提供 `set_agent_identity/get_agent_identity`、`set_persistent_context/get_*`、`update_agent_state` 等高阶接口；自动初始化默认 profile。  
 **关键组件**：`_ensure_initialized`、`_index` 简单倒排索引。  
+**本轮变更（2026-09-01）**：所有记录创建点（默认 profile、`set_persistent_context` 新建分支、`add`）由 naive `datetime.now()` 改为 aware `datetime.now(UTC)`；相关度评分的 recency 计算改用 `ensure_aware(record.created_at)` 兜底历史 naive 记录，消除 naive/aware 相减的 `TypeError`。  
 **业务逻辑**：保证代理基础身份信息在所有会话中保持一致，支撑长周期行为一致性。  
-**依赖关系**：使用 `uuid`, `datetime`, `asyncio`。  
+**依赖关系**：使用 `uuid`, `datetime`, `asyncio`；自 `hierarchical` 导入 `ensure_aware`。  
 
 ### episodic_memory.py (653 行)
 **文件功能**：时序化经历记忆层，实现事件—情节（Episode）模型。  
@@ -88,11 +91,12 @@
 **依赖关系**：继承 `BaseHierarchicalMemory`；与 NLP 抽取算法解耦。  
 
 ### hybrid_search.py
-**文件功能**：混合检索策略实现，组合关键词、向量和布尔过滤。  
-**技术实现**：提供 `HybridSearch` 类或函数集合，内部可能调用向量库 & 内存索引。  
-**关键组件**：未展开阅读，依据命名推断包含 `search(query, ...)`。  
+**文件功能**：混合检索引擎，组合 BM25 全文检索与向量语义检索。  
+**技术实现**：`HybridSearchEngine` 编排 `BM25SearchBackend` + `VectorSearchBackend` + `HybridRanker`；`SearchQuery`/`SearchCandidate` dataclass 承载多路得分与解释；`HybridRanker._calculate_hybrid_score` 按权重融合后叠加时间衰减、重要度与字段 boost。  
+**关键组件**：`HybridSearchEngine.search`、`HybridRanker._calculate_time_decay/_calculate_importance_boost/_calculate_field_boost`。  
+**本轮变更（2026-09-01）**：`_calculate_time_decay` 计算记录年龄时改用 `ensure_aware(record.created_at)`，与 core_memory 同步兜底 naive 历史时间戳。  
 **业务逻辑**：提升跨层记忆召回率。  
-**依赖关系**：依赖 hierarchical 记录结构。  
+**依赖关系**：依赖 hierarchical 记录结构与 `ensure_aware`。  
 
 ### knowledge_base.py
 **文件功能**：知识库适配层，统一外部 KB 访问并映射为 memory 记录。  
@@ -117,7 +121,10 @@
 
 ### session_store.py（(NEW) 本轮重点更新：FTS5 检索 + 标题/分组修复）
 **文件功能**：会话摘要与元数据的 SQLite 持久化层，并承载跨会话全文检索（默认库 `~/.agenticx/memory/sessions.sqlite`）。  
-**本轮变更（2026-03-18 之后）**：
+**本轮变更（2026-09-01，基线 `f3ba65001c29` 之后）**：
+- **库路径惰性解析（commit `cc45657d`）**：`DEFAULT_SESSION_DB_PATH` 由模块级常量改为 `default_session_db_path()` 函数 + PEP 562 `__getattr__`，按**调用时**的 HOME 解析。原常量在 import 时被 `Path.home()` 定死，测试的 HOME 沙箱重定向拦不住，会话元数据会写进开发者真实的 `~/.agenticx/memory/sessions.sqlite`（症状：sqlite 里有记录、磁盘无会话目录，桌面端历史出现点不开的空白对话）。`SessionStore.__init__` 经模块属性读取回退值，`monkeypatch.setattr(module, "DEFAULT_SESSION_DB_PATH", ...)` 旧写法仍生效。
+- **列表按 avatar 过滤（commit `42230d1b`）**：`_list_latest_sessions_sync` 新增可选 `avatar_id` 参数，SQL 层用 `json_extract(s.metadata, '$.avatar_id') = ?` 过滤；新增 `_list_all_session_ids_sync()` 返回 DISTINCT session_id 集合，供过滤列表跳过仅有 sqlite 记录的目录。
+**历史变更（2026-03-18 之后）**：
 - **跨会话 FTS5 检索（commit `cc0ba170`）**：新增 `session_messages` + `session_messages_fts` 外部内容表（FTS5 + 触发器）；方法 `index_session_messages` / `search_session_messages` / `backfill_from_sessions_root`；`_sanitize_fts5_query` 清洗用户查询；`AGX_SESSION_FTS` 开关默认 `1`。`SessionManager` 在 `_persist_session_state` 挂钩自动索引，并在启动时 fire-and-forget 增量回填历史 `messages.json`。该层是 `session_search` 工具的底座。
 - **消息正文检索（commit `c79212c6`）**：补充对 session 消息（含助手回复）的 FTS 检索 + LIKE 回退，供 Desktop 历史面板「Search Sessions」命中后展示消息摘要。
 - **标题持久化修复（commit `582aa908`）**：`cleanup_expired` 过期淘汰前先 `_persist_session_state` 写全量元数据，避免 `session_name` 被写成 null；最新元数据加载时从更早的历史行恢复标题；新建时若仍缺失则从 `chat_history` 派生。
@@ -126,8 +133,20 @@
 ### workspace_memory.py（(NEW) 本轮重点更新：标题感知切分 + 收藏召回）
 **文件功能**：基于 SQLite + FTS + 语义排序的 workspace markdown 记忆索引（`WorkspaceMemoryStore`，默认库 `~/.agenticx/memory/main.sqlite`）。  
 **技术实现**：`MemoryChunk` dataclass 记录 chunk 元数据与 embedding；`_chunk_text` 按 markdown ATX 标题（`#`..`######`）切分，单段超 `_MAX_SECTION_LINES`（60 行）在空行处再切分，无标题时回落 `_FALLBACK_CHUNK_LINES`（40 行）。  
-**本轮变更（commit `1b873108`，2026-03-23）**：新增标题感知切分（章节在 60 行以内保持单 chunk）；打通「收藏 → 长期记忆」管线——`POST /api/memory/save` 向 `MEMORY.md` 追加 `[用户收藏]` 备注并 `index_workspace_sync` 重建索引（best-effort，失败不阻断）；空文件内容产出 0 chunk，不写空占位。  
-**依赖关系**：由 Studio `/api/memory/*` 与 Meta-Agent 记忆召回调用。
+**本轮变更（2026-09-01，commit `cc45657d`）**：`DEFAULT_WORKSPACE_MEMORY_DB` 由模块级常量改为 `_default_ws_db()` 惰性解析 + PEP 562 `__getattr__`，底层走 `agenticx/utils/agx_home.py` 的 `agx_home()`/`lazy_home_path()`——按调用时 HOME 解析，且优先读模块 `__dict__` 里的 monkeypatch 覆盖值；`WorkspaceMemoryStore.__init__` 改调 `_default_ws_db()`。与 session_store 同源修复测试 HOME 重定向失效问题。  
+**历史变更（commit `1b873108`，2026-03-23）**：新增标题感知切分（章节在 60 行以内保持单 chunk）；打通「收藏 → 长期记忆」管线——`POST /api/memory/save` 向 `MEMORY.md` 追加 `[用户收藏]` 备注并 `index_workspace_sync` 重建索引（best-effort，失败不阻断）；空文件内容产出 0 chunk，不写空占位。  
+**依赖关系**：由 Studio `/api/memory/*` 与 Meta-Agent 记忆召回调用；路径解析依赖 `agenticx/utils/agx_home.py`。
+
+### graph/ 子目录（本轮更新：writer.py 事件循环安全）
+记忆图谱（Graphiti）子系统目录，含 `store.py`/`config.py`/`status.py`/`group_id.py`/`routes.py` 等；本轮仅 `writer.py` 有变更。
+
+**graph/writer.py**：`MemoryGraphWriter`——Graphiti 摄取的后台 worker，单例 + `asyncio.PriorityQueue`（`_IngestJob` 按 priority/seq 排序）；`enqueue_turn`/`enqueue_favorite` 入队，`schedule_turn_ingest_from_session` 供同步 server 代码 fire-and-forget 调度（按会话归属路由 group_id：群聊→`group:<gid>`、分身→`avatar:<aid>`、Meta→`meta:default`）。
+
+**本轮变更（2026-09-01，commit `f2e78393`）**——围绕「单例被多个事件循环复用」与「task 被 GC」两类泄漏/崩溃：
+- `_ensure_worker` 记录 `_worker_loop`；检测到运行循环变更时调 `_drop_stale_worker()` 重建 worker **连同队列**（`asyncio.Queue` 内部 `_finished` Event 一旦被 `join()` await 过就绑定旧循环，跨循环复用直接抛「bound to a different event loop」）；待处理 job 为纯数据，搬入新队列，旧循环存活时 `call_soon_threadsafe` 取消旧 task。
+- `_run_worker` 改用 `get_nowait()` 排空队列后即退出，不再悬挂在 `await queue.get()`——悬挂协程会在队列内留下绑定当前循环的 future，循环关闭后 GC 收尾时抛无法捕获的 `RuntimeError: Event loop is closed`；下次 `enqueue_turn` 会重新拉起 worker（`put_nowait` 与 `_ensure_worker` 间无 await，无竞态）。
+- 新增 `aclose()` 供 shutdown 时取消并 await worker。
+- `schedule_turn_ingest_from_session` 把 dispatch task 存入模块级 `_pending_dispatches` 集合并以 `add_done_callback` 自摘——asyncio 对运行中 task 只持弱引用，不留强引用 ingest 可能跑到一半被 GC，静默丢一轮图谱写入。
 
 ### sop_registry.py (新增，参考 JoyAgent)
 **文件功能**：实现轻量级的标准作业程序（SOP）注册与召回

@@ -28,6 +28,8 @@
     "mkdocs.yml",
     "README.md",
     "README_ZN.md",
+    "CONTRIBUTING.md",
+    "CONTRIBUTING_ZN.md",
     "requirements.lock",
     "setup.py"
   ],

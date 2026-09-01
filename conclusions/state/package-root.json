@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "package-root",
-  "generation": "0082680155c34cb4ac536b6334481178",
+  "generation": "ae45073d5e434199b3453703f867a09e",
   "mapping_revision": 1,
-  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
-  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
-  "source_fingerprint": "sha256:1a3cd7e9582775c1c51e5a1eb9caa21c6d054c74a2d531ccbfcc8d11392c448f",
+  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
+  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "source_fingerprint": "sha256:9133dd953d122f62168b52221352ce62a1908dcb2ef937b709d18eaa74d3fee5",
   "summary_path": "conclusions/package_root_conclusion.md",
-  "summary_sha256": "sha256:e7a1abb1aea53052013e603550ee739cce5dfee6288916619767996c159a2897",
-  "updated_at": "2026-08-08T01:39:57.780932+00:00"
+  "summary_sha256": "sha256:1cd35edf4c201b5e438c2c8de80e7b49701621280e2a7fc7a9f8965b96c4f098",
+  "updated_at": "2026-09-01T06:08:45.585515+00:00"
 }

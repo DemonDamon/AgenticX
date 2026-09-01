@@ -1,6 +1,6 @@
 # AgenticX Project State 模块总结
 
-> 结论生成时间：2026-05-29（首次创建，覆盖当前代码）
+> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更：verify 执行器接入命令沙箱）
 
 ## 模块概述
 
@@ -61,11 +61,15 @@ agenticx/project_state/
 
 ### 验证执行器（verify.py）
 
-`run_verify` 读取并校验 `verify.yaml`（schema_version=1，步骤类型限 `shell`/`pytest`/`npm`/`lint`），逐步以 `subprocess.run` 在 workspace 下执行（带 timeout，默认 600s），首个失败即停止；产出 `VerifyResult`（passed、各 StepResult、summary），并把完整日志写入 archive。`StepResult` 记录退出码、耗时、是否超时与日志末尾摘要。
+`run_verify` 读取并校验 `verify.yaml`（schema_version=1，步骤类型限 `shell`/`pytest`/`npm`/`lint`），逐步在 workspace 下执行（带 timeout，默认 600s），首个失败即停止；产出 `VerifyResult`（passed、各 StepResult、summary），并把完整日志写入 archive。`StepResult` 记录退出码、耗时、是否超时与日志末尾摘要。
+
+每个验证步骤不再直接 `subprocess.run`，而是经 `agenticx/runtime/command_sandbox.py` 的 `build_command_sandbox_plan` 包装为与 `bash_exec` 一致的 OS 级沙箱命令（`plan.argv`/`plan.env`）：默认权限 `WORKSPACE_WRITE`（可由 `command_permissions` 覆盖，经 `normalize_command_permissions` 归一化），可写根限定为 workspace，另支持 `readable_roots` 额外只读根、`denied_path_patterns` 拒绝路径与 `scope_id`（按 `verify|<step>` 维度隔离临时目录）。沙箱后端不可用（`CommandSandboxError`）时该步骤直接判失败（exit 126）并中止，**不回退**到裸 `subprocess.run`——verify.yaml 属于仓库内容，不能成为提权通道。
 
 ### 工具层（tools.py）
 
 `PROJECT_STATE_TOOL_NAMES` 暴露 6 个 STUDIO_TOOLS 兼容工具：`project_init`、`project_status`、`feature_select`、`feature_complete`、`progress_append`、`verify_run`；每个返回 `{"ok": ...}` 形态的 JSON 字符串（`_ok`/`_err` 包装），供 LLM 工具结果直接消费。
+
+其中 `verify_run` 会从当前会话派生沙箱上下文传入 `run_verify`：经 `agenticx/cli/agent_tools.py` 的 `_session_workspace_root_sets` 取会话可读根集合、`denied_path_patterns_for_sandbox` 取拒绝路径模式、`_configured_command_permissions` 取配置的命令权限档位，使 verify 步骤的读写边界与对话内 `bash_exec` 保持一致。
 
 ## 设计模式
 
@@ -82,7 +86,7 @@ agenticx/project_state/
 3. **严格状态机**：特性转移、commit 前置 verified、commit_sha 必填、归档不可覆盖，杜绝状态错乱。
 4. **跨平台并发安全**：POSIX flock 与 Windows 哨兵文件双实现，叠加原子写，适配多端运行。
 5. **路径越界保护**：`safe_relative` 强制所有写入落在项目 root 内，防止状态机被诱导写出目录。
-6. **可审计的验证门**：verify.yaml 步骤化执行 + 完整日志归档，使每次「verified」可追溯。
+6. **可审计的验证门**：verify.yaml 步骤化执行 + 完整日志归档，使每次「verified」可追溯；且验证步骤与 `bash_exec` 共用同一 OS 命令沙箱（沙箱不可用时判失败而非裸跑），仓库内的 verify.yaml 无法绕过会话权限边界。
 
 ## 应用场景
 

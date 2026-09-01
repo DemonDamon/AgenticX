@@ -1,5 +1,7 @@
 # Delivery 模块结论
 
+> 结论更新时间：2026-09-01（覆盖前一基线 `f3ba65001c29` 之后的变更）
+
 ## Responsibility
 
 `agenticx/delivery` 实现 Near Desktop「交付闭环」的 POC/MVP 编排：从客户输入材料出发，在隔离 git worktree 中按固定五阶段流水线（需求 → 设计 → 前端 POC → 测试 → 审计）生成可验收产物，并用 `plan.mdc` 与 `~/.agenticx/delivery/tasks.json` 追踪任务状态。启动前通过 `ensure_delivery_bundle()` 安装 `agenticx-delivery-kit` bundle、物化交付分身 preset，并可把 Figma token 写入 `~/.agenticx/mcp.json`。当前阶段执行为文件系统 stub（`materialize_stage_artifacts`），并非真实委派各 `delivery-*` 分身跑 Agent 会话。
@@ -32,17 +34,20 @@
 | `ensure_delivery_bundle` | bundle 安装 + 分身 YAML 物化 + Figma MCP env 补丁 |
 | `create_worktree` / `resolve_repo_root` / `WorktreeError` | git worktree 沙箱 |
 | `get_delivery_config` / `save_delivery_config` | 读取/合并 `delivery.*` 配置 |
+| `defaults()` / `_default_worktree_root()` | 惰性求值默认配置：`worktree_root` 按调用时 HOME 解析，不再 import 时定死 |
+| `_store_root()`（store.py） | 惰性解析 `~/.agenticx/delivery`，PEP 562 `__getattr__` 保留 `_STORE_ROOT` 外部可读 |
 
 ## Data and configuration
 
-- **全局配置**（`~/.agenticx/config.yaml` 的 `delivery` 节，经 `get_delivery_config()` 合并默认值）：`enabled`、`worktree_root`（默认 `~/.agenticx/deliveries`）、`bundle_source`（默认可解析到 `examples/agenticx-for-delivery`）、`figma_token`、`playwright_browsers`、`max_stage_retries`、`repo_root`；环境变量 `AGX_DELIVERY_ENABLED`、`AGX_DELIVERY_DRY_RUN`、`FIGMA_API_KEY` / `FIGMA_TOKEN` 可覆盖。
-- **任务索引**：`~/.agenticx/delivery/tasks.json`，键为 `task_id` → `DeliveryTaskRecord` 字典。
+- **全局配置**（`~/.agenticx/config.yaml` 的 `delivery` 节，经 `get_delivery_config()` 合并默认值）：`enabled`、`worktree_root`（生效默认仍为 `~/.agenticx/deliveries`，但 `DEFAULTS["worktree_root"]` 已改为占位空串，真实值由 `defaults()` → `_default_worktree_root()` 在每次调用时经 `agx_home()` 按当前 HOME 重算，避免 import 期 `Path.home()` 定死导致测试 HOME 重定向失效、交付产物写入开发者真实目录）、`bundle_source`（默认可解析到 `examples/agenticx-for-delivery`）、`figma_token`、`playwright_browsers`、`max_stage_retries`、`repo_root`；环境变量 `AGX_DELIVERY_ENABLED`、`AGX_DELIVERY_DRY_RUN`、`FIGMA_API_KEY` / `FIGMA_TOKEN` 可覆盖。
+- **任务索引**：`~/.agenticx/delivery/tasks.json`，键为 `task_id` → `DeliveryTaskRecord` 字典。存储根目录改由 `_store_root()` 惰性解析（`lazy_home_path(__name__, "_STORE_ROOT", "delivery")`，支持既有测试对模块属性 `_STORE_ROOT` 的 monkeypatch 覆盖）；模块级 `_TASKS_JSON` 仍在 import 时由 `_store_root()` 算出。
 - **每任务工件**：worktree 内 `plan.mdc`（JSON frontmatter + Markdown 阶段块）、`output/{task_id}/` 下各阶段文件（如 `requirement-breakdown.md`、`design/`、`frontend/`、`qa/playwright-report/`、`delivery-summary.md`）。
 - **Bundle/分身**：`examples/agenticx-for-delivery`（含 `agx-bundle.yaml` 与 `avatars/*.yaml`）；物化到 `~/.agenticx/avatars/delivery-{analyst,designer,frontend,qa}/`。
 
 ## Dependencies
 
 - **`agenticx.extensions.installer`**：`install_bundle` / `list_installed_bundles` 安装 delivery kit。
+- **`agenticx.utils.agx_home`**：`agx_home()` / `lazy_home_path()` 提供 `~/.agenticx` 路径的惰性解析，config 与 store 的默认目录均改走它。
 - **`agenticx.avatar.registry`**：`AvatarRegistry`、`AvatarConfig`、`AVATARS_ROOT` 物化 preset 分身。
 - **Git CLI**：worktree 创建与 dirty 检查（`subprocess` 调用 `git`）。
 - **Studio 层**：`delivery_api.register_delivery_routes` 挂 REST；Desktop 侧消费这些端点（本模块不内含 UI）。

@@ -1,6 +1,6 @@
 # AgenticX Core 模块完整结构分析
 
-> 结论更新时间：2026-05-29（覆盖 2026-04-14 之后的变更）（新增 offload/ 统一卸载子系统，内化自 AgentScope v2 P0）
+> 结论更新时间：2026-09-01（覆盖基线 f3ba65001c29 之后的变更）（工具调用链健壮性修复：`run`/`arun` 别名对齐、并行工具执行真并发、after-hook 保留原始返回值类型、统一 `run_sync` 桥接）
 
 ## 目录路径
 `D:\myWorks\AgenticX\agenticx\core`
@@ -199,8 +199,13 @@ D:\myWorks\AgenticX\agenticx\core/
   - **工具调用追踪**：在 `_execute_tool_call()` 中传递 `agent_id` 和 `task_id` 给 ToolExecutor，支持工具调用历史追踪
   - **Auth Profile 轮换（新增，参考 OpenClaw）**：`auth_profile_manager` 参数接收 `AuthProfileManager` 实例；新增 `_invoke_llm_with_auth_rotation()` 方法，在 LLM 调用失败时自动切换到下一个可用 Profile，根据错误类型（rate_limit / billing / auth）设置不同冷却策略
   - **Transcript 卫生管线（新增，参考 OpenClaw）**：`transcript_sanitizer` 参数接收 `TranscriptSanitizer` 实例（默认自动创建）；在 `_get_next_action()` 中，LLM 调用前自动对 messages 执行 `sanitize()`，按 provider 策略处理 turn 交替、连续用户消息合并、拒绝触发词剥离等
+  - **工具执行健壮性修复（2026-09）**：
+    - `run()` 上报的 hook `workspace_dir` 改用 `agenticx.utils.workspace_dir.resolve_workspace_dir()`（支持 `AGENTICX_WORKSPACE_DIR` 环境变量覆盖，默认仍为 cwd），取代硬编码 `Path.cwd()`
+    - `_execute_loop()` 的上下文压缩检查与 `execute_parallel_tool_calls_sync()` 统一改用 `agenticx.utils.async_bridge.run_sync()` 桥接协程，取代 `asyncio.get_event_loop().run_until_complete(...)` 与手动 `new_event_loop` 写法——前者在 `asyncio.run()` 跑过之后抛 "There is no current event loop"，后者在线程已有循环运行时抛 "already running" 且每次走 except 分支都泄漏一个未关闭的循环
+    - `_execute_tool_call()` 的 after-hook 链：改用 `is None` 判空（工具返回 `0`/`False`/`[]`/`""` 等合法假值时不再被吞成空串），并新增 `hook_modified` 标志——无钩子修改时保留工具原始返回值（连同类型），不再把 int/dict/list 压成 str
+    - `execute_parallel_tool_calls()`：`event_log` 改为 `getattr(event_log, "agent_id", None)` 安全取值（签名本为 `Optional` 且默认 `None`，此前不传时每个工具都以 `'NoneType' object has no attribute 'agent_id'` 失败并被包装成工具自身失败）；同步 `executor.execute()` 改为 `await executor.aexecute()`，同步工具经默认 `_arun` 落入线程池，`asyncio.gather` 才真正并发（此前名为并行、实为串行）
 **业务逻辑**：实现智能体的完整执行循环，**支持长周期任务的 Token 成本优化、通过 Hooks 实现执行流程的定制化、通过 GuideRails 确保输出质量、通过 StreamContentAccumulator 管理流式响应内容、通过 Auth Profile 轮换提升多 Key 场景下的可用性、通过 Transcript 卫生管线确保不同 Provider 的消息格式合规性**
-**依赖关系**：依赖 `agent.py`、`tool.py`、`prompt.py`、`error_handler.py`、`communication.py`、**`context_compiler.py`**、**`hooks/llm_hooks.py` 和 `hooks/tool_hooks.py`**、**`guiderails.py`**、**`stream_accumulator.py`**、**`agenticx.llms.auth_profile` (新增)**、**`agenticx.llms.transcript_sanitizer` (新增)**，为工作流引擎提供执行能力
+**依赖关系**：依赖 `agent.py`、`tool.py`、`prompt.py`、`error_handler.py`、`communication.py`、**`context_compiler.py`**、**`hooks/llm_hooks.py` 和 `hooks/tool_hooks.py`**、**`guiderails.py`**、**`stream_accumulator.py`**、**`agenticx.llms.auth_profile` (新增)**、**`agenticx.llms.transcript_sanitizer` (新增)**、**`agenticx.utils.async_bridge` 与 `agenticx.utils.workspace_dir` (2026-09 新增)**，为工作流引擎提供执行能力
 
 #### communication.py (4,567 bytes)
 **文件功能**：实现智能体间的通信系统，支持消息传递和协作机制
@@ -524,7 +529,9 @@ D:\myWorks\AgenticX\agenticx\core/
 - `ValidationFeedback` 类：结构化校验反馈，封装 Pydantic 错误详情与原始参数
 - `ValidationErrorHandler` 类：拦截 Pydantic `ValidationError` 并转换为结构化反馈
 - `ValidationErrorTranslator` 类：将结构化错误翻译为 LLM 可理解的自然语言 Prompt
-**业务逻辑**：通过“检测 -> 翻译 -> 反馈 -> 修正”闭环，显著提升智能体调用工具的稳健性，降低因微小参数错误导致的任务中断
+- **`run()` / `arun()` 别名（2026-09 新增）**：`BaseTool` 增加 `run()`/`arun()` 作为 `execute()`/`aexecute()` 的别名，对齐 `agenticx.tools.base.BaseTool` 的命名——框架中两套工具基类并存（`agenticx/__init__.py` 末尾的便捷导入把 `tool`/`BaseTool` 覆盖回本模块版本），而 `ToolExecutor` 只认 `run`/`arun`，此前 `@tool()` 装饰器产出的 `FunctionTool` 被 `ToolExecutor` 调用会直接报 `'FunctionTool' object has no attribute 'run'` 并按重试策略连试 4 次才放弃
+- **`FunctionTool.aexecute()` 事件循环修复（2026-09）**：协程内取循环由 `asyncio.get_event_loop()` 改为 `asyncio.get_running_loop()`，避免 `asyncio.run()` 跑过之后抛 "There is no current event loop"
+**业务逻辑**：通过“检测 -> 翻译 -> 反馈 -> 修正”闭环，显著提升智能体调用工具的稳健性，降低因微小参数错误导致的任务中断；两套工具基类在调用侧命名一致，`@tool()` 产物可直接被 `ToolExecutor` 执行
 **依赖关系**：被 `agent_executor.py` 和 `mining_graph.py` 使用
 
 #### workflow.py (2,678 bytes)
@@ -626,5 +633,6 @@ AgenticX Core 模块是一个设计精良、功能完整的多智能体框架核
 - **Transcript 卫生管线（参考 OpenClaw）**：`agent_executor.py` 集成 `agenticx.llms.transcript_sanitizer.TranscriptSanitizer`，在 LLM 调用前按 provider 策略执行 turn 交替、连续消息合并、拒绝触发词剥离等清洗操作
 - **executor 跨平台资源模块（Windows）**：`executor.py` 将标准库 `resource` 改为可选导入；无 POSIX 时跳过 `setrlimit`，`ResourceMonitor` 在无 `psutil` 且无 `resource` 时安全返回 `0`，保证 `import agenticx.core.executor` 在 Windows 上可用（commit `96b5e4c`）
 - **统一卸载子系统（内化自 AgentScope v2 P0）**：`core/offload/` 新增 `Offloader` 协议、结构化 `Reference` 句柄与默认文件后端 `FileOffloader`（落盘 `~/.agenticx/offload/<session>/<handle>.json`），将大体积工具结果/压缩上下文移出实时历史、仅保留内联占位符按需取回；`should_offload(threshold=4096)` 控制触发，被规范 `ReActAgent` 集成（commit `f8234a92`）
+- **工具调用链健壮性修复（2026-09）**：`tool.py` 为 `BaseTool` 补齐 `run()`/`arun()` 别名（对齐 `agenticx.tools.base.BaseTool`，修复 `@tool()` 产物被 `ToolExecutor` 调用时报缺 `run` 属性），`FunctionTool.aexecute()` 改用 `get_running_loop()`；`agent_executor.py` 的 after-hook 链改用 `is None` 判空并以 `hook_modified` 标志保留工具原始返回值类型；`execute_parallel_tool_calls()` 修复 Optional `event_log` 解引用并改用 `aexecute()` 实现真并发；同步桥统一切换为 `agenticx.utils.async_bridge.run_sync()`；hook 上报的 `workspace_dir` 改用 `resolve_workspace_dir()`（支持 `AGENTICX_WORKSPACE_DIR` 覆盖）
 
 该模块的设计充分体现了现代软件架构的最佳实践，**同时参考了 Google ADK 在上下文工程、crewAI 在 Hooks 和 Flow 编排、AIGNE Framework 在输出验证和记忆管理、CAMEL-AI 在流式响应累积、VeADK 在自反思和声明式构建、OpenClaw 在溢出恢复/Auth 轮换/Transcript 卫生/PromptMode 分级/Subagent 限制/Generation Counter 方面的先进理念**，为构建大规模、高可靠性、低成本、可定制的多智能体系统提供了坚实的基础。

@@ -1,6 +1,6 @@
 # AgenticX Server 模块总结
 
-> 结论更新时间：2026-05-29（覆盖 2026-03-04 之后的变更）
+> 结论更新时间：2026-09-01（覆盖 f3ba65001c29 之后的变更）
 
 ## 目录路径
 `/Users/damon/myWork/AgenticX/agenticx/server`
@@ -22,7 +22,7 @@ agenticx/server/
 ├── api_routes.py        # 生产级 API 路由（/tasks/*, /health/*, /api/*）
 ├── event_hooks.py       # 事件钩子
 ├── webhook.py           # Webhook 触发端点（/hooks/wake、/hooks/agent，token 校验）
-├── sse_adapter.py       # WorkforceEventBus → SSE 流转换
+├── sse_adapter.py       # WorkforceEventBus → SSE 流转换（inflight 任务取消即 await，防协程泄漏）
 ├── sse_formatter.py     # SSE 事件格式化
 ├── redis_backend.py     # Redis 共享状态后端（连接池、限流、断路器、任务持久化）
 ├── middleware.py        # 生产级中间件（RequestId/Timeout/RateLimit/CircuitBreaker）
@@ -31,7 +31,7 @@ agenticx/server/
 ├── task_queue.py        # 异步任务队列（Redis 持久化）
 ├── health.py            # 深度健康检查与自愈（含 Redis 探针）
 ├── resilience.py        # 重试/幂等/降级（IdempotencyStore + RedisIdempotencyStore）
-└── user_manager.py      # 用户管理与 JWT 生成（SQLite 存储）
+└── user_manager.py      # 用户管理与 JWT 生成（SQLite，默认落盘经 default_user_db_path 解析）
 ```
 
 ---
@@ -109,6 +109,20 @@ agenticx/server/
 - **安全性**：去重已发现的 hook 注册，异步运行时下保持触发行为安全
 
 > 关联 plan：`agenticx_hooks_evolution_cdc21916`
+
+### sse_adapter.py - SSE 流适配
+
+`create_sse_stream()` 将 `TaskLock` 的 Action Queue 与 `WorkforceEventBus` 事件合并为 SSE 流：
+
+- **inflight 任务全生命周期管理**：`asyncio.wait` 的两路等待任务（事件总线 / Action Queue）挂在生成器级 `inflight` 集合上；每轮对 pending 任务先 `cancel()` 再 `await asyncio.gather(*pending, return_exceptions=True)`，确保真正结束而非只递取消申请
+- **生成器被中途丢弃时的清理**：`finally` 中取消并 await 仍挂起的 inflight 任务——客户端断开或消费者提前 break 时执行停在 `await asyncio.wait(...)`，不清理会让协程滞留 `Queue.get()`，在事件循环关闭后触发无法捕获的 "Event loop is closed"
+
+### user_manager.py - 用户管理
+
+`UserManager`（SQLite 存储）与 `get_user_manager()` 单例的默认库路径解析：
+
+- **`default_user_db_path()`**：`db_path` 缺省（`None`）时按优先级解析——`AGENTICX_USER_DB` 环境变量 > cwd 已存在的历史 `users.db`（沿用并打 warning 建议迁移）> `~/.agenticx/users.db`；不再默认写到进程 cwd，避免换目录启动后「用户凭空消失」或测试在仓库根目录残留 `users.db`
+- 密码 PBKDF2-HMAC-SHA256 加盐哈希；JWT 生成/验证走 HS256（需 PyJWT，密钥取 `AGENTICX_JWT_SECRET`）
 
 ---
 

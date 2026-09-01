@@ -1,5 +1,7 @@
 # agenticx.knowledge 模块结论
 
+> 结论更新时间：2026-09-01（覆盖基线 `f3ba65001c29` 之后的变更）
+>
 > Maintainer-facing summary for `agenticx/knowledge` (~35 tracked files).
 
 ## Responsibility
@@ -81,7 +83,7 @@ flowchart LR
 ```
 
 - `KnowledgeGraphBuilder` 经 `LlmFactory.create_llm(LLMConfig)` 获取 LLM；默认 `extraction_method='spo'`（传统分离抽取已移除）。
-- `networkx` 为可选依赖（`agenticx[graph]`）；Neo4j 导出在 import 失败时 `NEO4J_AVAILABLE=False`。
+- `networkx` 为可选依赖（`agenticx[graph]`）；Neo4j 导出为惰性加载：`graphers/__init__.py` 通过模块级 `__getattr__`（PEP 562）在首次访问 `Neo4jExporter` / `Neo4jExporterContext` / `NEO4J_AVAILABLE` 时才 import `neo4j_exporter`，包初始化阶段不再触发 neo4j 驱动导入；驱动缺失时 `NEO4J_AVAILABLE=False`（`GraphDatabase` 置 `None`），且 import 期不再打印 warning，仅在实例化 `Neo4jExporter` 时抛 `ImportError`。
 
 **路径 E — 检索编排（`KnowledgeSearchOrchestrator`）**
 

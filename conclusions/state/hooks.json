@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "module_id": "hooks",
-  "generation": "fc9d8ca35a3c4cd0914b881b64e5ea4a",
+  "generation": "ab2de6f8286044ba8901f306c4d190f7",
   "mapping_revision": 1,
-  "baseline_commit": "f3ba65001c29bbbf146b97c4247b112c912fd4e1",
-  "baseline_tree": "c9e03baae37a048c006a4074ace9e41711a4090f",
-  "source_fingerprint": "sha256:710e4ed0a378b5e3e550da1c9580e08d95dc257efe225b9ba1e7acda091a5cfc",
+  "baseline_commit": "e932742c3c44c2c1a704c8e57f1749fabee4d1f1",
+  "baseline_tree": "5458922bb0a7a90290fd786400d5a782156659ab",
+  "source_fingerprint": "sha256:a7c3041ce0b1d16b937c274bfb4dddd0310bd1219eeb1e234fcc4e7227d034c4",
   "summary_path": "conclusions/hooks_module_conclusion.md",
-  "summary_sha256": "sha256:db55ce4b5b7ee3f0aceff91497b4a1e67dd1f8ec4bc8c9ddb3a9871b3a63c94f",
-  "updated_at": "2026-08-08T01:39:55.123382+00:00"
+  "summary_sha256": "sha256:8cf9241887ebea468013b3573db3159cfef87cdb4ecf9b20656180b031aabdba",
+  "updated_at": "2026-09-01T06:08:43.250605+00:00"
 }
