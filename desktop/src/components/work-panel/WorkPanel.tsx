@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -43,6 +44,13 @@ import {
   type WorkspacePreviewQuotePayload,
 } from "../workspace/workspace-preview-types";
 import { WorkspaceFilePreview } from "../workspace/WorkspaceFilePreview";
+import {
+  PREVIEW_LIVE_RELOAD_MS,
+  isLiveReloadablePreview,
+  previewKnownMtimeMs,
+  shouldReloadPreviewFromStat,
+  textualPreviewUnchanged,
+} from "./preview-live-reload";
 import { TerminalEmbed } from "../TerminalEmbed";
 import { SubAgentCard } from "../SubAgentCard";
 import { HoverTip } from "../ds/HoverTip";
@@ -748,8 +756,12 @@ export function WorkPanel({
   const activeBrowserIdRef = useRef(activeBrowserId);
   const previewDirtyRef = useRef(false);
   const previewRequestLeaveRef = useRef<((proceed: () => void) => void) | null>(null);
+  const previewTabsRef = useRef(previewTabs);
+  const activePreviewIdRef = useRef(activePreviewId);
   activeKindRef.current = activeKind;
   activeBrowserIdRef.current = activeBrowserId;
+  previewTabsRef.current = previewTabs;
+  activePreviewIdRef.current = activePreviewId;
   // Empty zones stay collapsed by default; content arrival auto-expands (Trae-style).
   const [openSections, setOpenSections] = useState<Record<SummarySectionId, boolean>>({
     todo: false,
@@ -938,6 +950,19 @@ export function WorkPanel({
     return null;
   };
 
+  const silentReloadPreviewTab = useCallback(async (tabId: string, path: string) => {
+    if (previewDirtyRef.current && activePreviewIdRef.current === tabId) return;
+    const loaded = await loadAbsoluteFilePreview(path);
+    if (!loaded.ok) return;
+    setPreviewTabs((prev) =>
+      prev.map((t) => {
+        if (t.id !== tabId) return t;
+        if (textualPreviewUnchanged(t.preview, loaded.preview)) return t;
+        return { ...t, preview: loaded.preview, error: null, loading: false };
+      }),
+    );
+  }, []);
+
   const openLocalFilePreview = (
     absPathRaw: string,
     titleHint?: string,
@@ -955,6 +980,7 @@ export function WorkPanel({
       }
       setActivePreviewId(existing.id);
       setActiveKind("preview");
+      void silentReloadPreviewTab(existing.id, path);
       return;
     }
     const nextId = uid();
@@ -1027,6 +1053,62 @@ export function WorkPanel({
     setActivePreviewId(tabId);
     setActiveKind("preview");
   };
+
+  // Agent / external writes do not reopen the tab — poll mtime and refresh in place.
+  useEffect(() => {
+    if (activeKind !== "preview") return;
+    const tabId = activePreviewId;
+    const path = String(activePreview?.absolutePath || "").trim();
+    if (!tabId || !path) return;
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const tick = async () => {
+      if (cancelled || inFlight) return;
+      if (previewDirtyRef.current && activePreviewIdRef.current === tabId) return;
+      const tab = previewTabsRef.current.find((t) => t.id === tabId);
+      if (!tab || tab.loading) return;
+      const stat = window.agenticxDesktop?.statLocalPath;
+      if (!stat) return;
+      inFlight = true;
+      try {
+        const result = await stat(path);
+        if (cancelled || !result.ok) return;
+        const latest = previewTabsRef.current.find((t) => t.id === tabId);
+        if (
+          !latest ||
+          !isLiveReloadablePreview(latest.preview) ||
+          !shouldReloadPreviewFromStat({
+            dirty: previewDirtyRef.current && activePreviewIdRef.current === tabId,
+            loading: latest.loading,
+            knownMtimeMs: previewKnownMtimeMs(latest.preview),
+            diskMtimeMs: result.mtimeMs,
+          })
+        ) {
+          return;
+        }
+        await silentReloadPreviewTab(tabId, path);
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void tick();
+    const timer = window.setInterval(() => {
+      void tick();
+    }, PREVIEW_LIVE_RELOAD_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    activeKind,
+    activePreviewId,
+    activePreview?.absolutePath,
+    activePreview?.loading,
+    silentReloadPreviewTab,
+  ]);
 
   // iframe target=_blank / window.open → main denies + IPC; stay in Near browser tab.
   useEffect(() => {

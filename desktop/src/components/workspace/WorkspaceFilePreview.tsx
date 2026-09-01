@@ -996,8 +996,9 @@ export function WorkspaceFilePreview({
   const isEditableText = textualPreview != null && editBlockReason === null;
 
   const editorInitialContent = textualPreview ? toEditorLf(textualPreview.content) : "";
+  // Path + content only: a live mtime refresh of the same bytes must not wipe undo.
   const editResetKey = textualPreview
-    ? `${textualPreview.absolutePath}:${textualPreview.content.length}:${textualPreview.mtimeMs ?? ""}`
+    ? `${textualPreview.absolutePath}\n${textualPreview.content}`
     : "";
 
   const {
@@ -1051,8 +1052,16 @@ export function WorkspaceFilePreview({
   );
 
   useEffect(() => {
-    if (!textualPreview) return;
     setViewMode("preview");
+    setFindBarOpen(false);
+    setFindText("");
+    setReplaceText("");
+    setFindStatus(null);
+    setDirtyConfirmOpen(false);
+  }, [textualPreview?.path, textualPreview?.absolutePath]);
+
+  useEffect(() => {
+    if (!textualPreview) return;
     const lf = toEditorLf(textualPreview.content);
     setSavedBaseline(lf);
     setFileEol(detectTextEol(textualPreview.content));
@@ -1060,11 +1069,6 @@ export function WorkspaceFilePreview({
       typeof textualPreview.mtimeMs === "number" ? textualPreview.mtimeMs : undefined,
     );
     setSaveError(null);
-    setFindBarOpen(false);
-    setFindText("");
-    setReplaceText("");
-    setFindStatus(null);
-    setDirtyConfirmOpen(false);
   }, [textualPreview?.path, textualPreview?.absolutePath, textualPreview?.content, textualPreview?.mtimeMs]);
 
   const isDirty = textualPreview != null && editContent !== savedBaseline;
