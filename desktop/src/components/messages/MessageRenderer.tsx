@@ -46,8 +46,9 @@ import {
 } from "../../utils/content-blocks";
 import {
   appendMissingImageMarkdown,
+  collectSessionArtifactPaths,
+  collectSessionFileChanges,
   collectTurnArtifactPaths,
-  collectTurnFileChanges,
   collectTurnPreviewImagePaths,
 } from "../../utils/session-artifacts";
 import { isGroupStreamMessageId } from "../../utils/group-stream-text";
@@ -135,9 +136,9 @@ type Props = {
     confirmation: PendingActionConfirmation,
     decision: ActionConfirmationDecision,
   ) => Promise<void> | void;
-  /** Open WorkPanel「任务产物」for this turn's files. */
+  /** Open WorkPanel「任务产物」for the session file list. */
   onOpenAllArtifacts?: () => void;
-  /** Open WorkPanel「变更」for this turn's writes/edits. */
+  /** Open WorkPanel「变更」for the session write/edit list. */
   onOpenAllChanges?: () => void;
 };
 
@@ -242,7 +243,8 @@ function assistantHandoff(
     return { paths: [], card: null };
   }
   const paths = collectTurnArtifactPaths(allMessages, message.id);
-  const changeCount = collectTurnFileChanges(allMessages, message.id).length;
+  const artifactCount = collectSessionArtifactPaths(allMessages).length;
+  const changeCount = collectSessionFileChanges(allMessages).length;
   return {
     paths,
     card:
@@ -252,6 +254,7 @@ function assistantHandoff(
           onOpenPath={onRevealPath}
           onOpenAllArtifacts={browse?.onOpenAllArtifacts}
           onOpenAllChanges={browse?.onOpenAllChanges}
+          artifactCount={artifactCount || paths.length}
           changeCount={changeCount || paths.length}
         />
       ) : null,

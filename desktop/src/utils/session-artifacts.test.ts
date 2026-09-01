@@ -753,6 +753,40 @@ describe("turn artifacts + primary pick", () => {
     expect(collectTurnArtifactPaths(messages, "final")).toEqual([html]);
   });
 
+  it("session browse counts accumulate across turns while the latest card stays turn-local", () => {
+    const a = "/tmp/a.txt";
+    const b = "/tmp/b.txt";
+    const c = "/tmp/c.txt";
+    const messages: Message[] = [
+      { id: "u1", role: "user", content: "先写两个", timestamp: 1 },
+      toolMsg({
+        id: "t-a",
+        toolName: "file_write",
+        toolArgs: { path: a, content: "a\n" },
+        content: `OK: wrote ${a}`,
+      }),
+      toolMsg({
+        id: "t-b",
+        toolName: "file_write",
+        toolArgs: { path: b, content: "b\n" },
+        content: `OK: wrote ${b}`,
+      }),
+      assistantMsg({ id: "a1", content: "写了两个" }),
+      { id: "u2", role: "user", content: "再写一个", timestamp: 2 },
+      toolMsg({
+        id: "t-c",
+        toolName: "file_write",
+        toolArgs: { path: c, content: "c\n" },
+        content: `OK: wrote ${c}`,
+      }),
+      assistantMsg({ id: "a2", content: "又写了一个" }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "a2")).toEqual([c]);
+    expect(collectTurnFileChanges(messages, "a2")).toHaveLength(1);
+    expect(collectSessionArtifactPaths(messages)).toEqual([a, b, c]);
+    expect(collectSessionFileChanges(messages)).toHaveLength(3);
+  });
+
   it("picks null when the turn only has source/config files", () => {
     expect(pickPrimaryTurnArtifact(["/tmp/notes.py", "/tmp/meta.json"])).toBeNull();
   });

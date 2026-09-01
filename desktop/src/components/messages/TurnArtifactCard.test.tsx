@@ -77,4 +77,23 @@ describe("TurnArtifactCard deliverable grid", () => {
     expect(html).not.toContain("flex-col items-start");
     expect(html).not.toContain("查看全部");
   });
+
+  it("shows session-wide 查看所有 counts even when this turn only has one file", () => {
+    const html = renderToStaticMarkup(
+      <TurnArtifactCard
+        paths={["/tmp/c.txt"]}
+        onOpenPath={() => undefined}
+        onOpenAllArtifacts={() => undefined}
+        onOpenAllChanges={() => undefined}
+        artifactCount={3}
+        changeCount={3}
+      />,
+    );
+    expect(html).toContain("c.txt");
+    expect(html).not.toContain("a.txt");
+    expect(html).toContain("查看所有产物 (3)");
+    expect(html).toContain("查看所有变更 (3)");
+    expect(html).not.toContain("查看所有产物 (1)");
+    expect(html).not.toContain("查看所有变更 (1)");
+  });
 });

@@ -25,6 +25,9 @@ type Props = {
   onOpenPath?: (path: string) => void;
   onOpenAllArtifacts?: () => void;
   onOpenAllChanges?: () => void;
+  /** Session-wide artifact total for「查看所有产物」; chips still use `paths`. */
+  artifactCount?: number;
+  /** Session-wide change total for「查看所有变更」. */
   changeCount?: number;
 };
 
@@ -56,6 +59,7 @@ export function TurnArtifactCard({
   onOpenPath,
   onOpenAllArtifacts,
   onOpenAllChanges,
+  artifactCount,
   changeCount,
 }: Props) {
   const ordered = orderTurnArtifactsForCard(paths);
@@ -192,7 +196,7 @@ export function TurnArtifactCard({
               className="inline-flex items-center gap-0.5 rounded-md py-0.5 text-[12px] text-text-muted transition-[color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-text-primary active:scale-[0.98]"
               onClick={onOpenAllArtifacts}
             >
-              查看所有产物 ({ordered.length})
+              查看所有产物 ({artifactCount ?? ordered.length})
               <ChevronRight className="h-3 w-3" strokeWidth={2} />
             </button>
           ) : null}
