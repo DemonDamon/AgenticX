@@ -17,6 +17,7 @@ import {
   CheckSquare,
   ChevronDown,
   FileCode2,
+  FileDiff,
   FileText,
   FolderOpen,
   Globe,
@@ -74,6 +75,12 @@ import { SessionArtifactList } from "./SessionArtifactList";
 import { SessionChangeList } from "./SessionChangeList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { SessionTodoList } from "./SessionTodoList";
+import {
+  applyPinnedAutoExpand,
+  contentDrivenOpenSections,
+  exclusiveOpenSections,
+  type SummarySectionId,
+} from "./summary-sections";
 import { collectSessionReferences } from "../../utils/session-references";
 import { resolveWorkPanelTodoFromMessages } from "../../utils/task-stall-policy";
 import {
@@ -400,7 +407,7 @@ export type WorkPanelTabKind =
   | "graph"
   | "timeline";
 
-export type SummarySectionId = "todo" | "artifacts" | "changes" | "spawns" | "refs" | "members";
+export type { SummarySectionId } from "./summary-sections";
 
 export type WorkPanelFocus =
   | { kind: "summary"; section?: SummarySectionId; highlightPath?: string }
@@ -780,6 +787,18 @@ export function WorkPanel({
    */
   const [diskArtifactPaths, setDiskArtifactPaths] = useState<string[]>([]);
   const [artifactHighlightPath, setArtifactHighlightPath] = useState<string | null>(null);
+  /**
+   * User-focused summary section (产物 / 变更). Ref is written synchronously so
+   * same-tick auto-expand effects do not reopen 待办 / 参考 / 子智能体.
+   */
+  const [pinnedSummarySection, setPinnedSummarySectionState] = useState<SummarySectionId | null>(
+    null,
+  );
+  const pinnedSummarySectionRef = useRef<SummarySectionId | null>(null);
+  const setPinnedSummarySection = (section: SummarySectionId | null) => {
+    pinnedSummarySectionRef.current = section;
+    setPinnedSummarySectionState(section);
+  };
 
   // Tail-loaded panes only hold the last 3 rounds / 40 messages. Re-scan the
   // full `messages.json` so older file_write / bash artifacts stay listed.
@@ -910,6 +929,16 @@ export function WorkPanel({
     () => resolveWorkPanelTodoFromMessages(paneMessages, todoLiveness, todoExecutionState),
     [paneMessages, todoLiveness, todoExecutionState],
   );
+  const hasSessionTodo = !!sessionTodo;
+  const overviewOpenSections = () =>
+    contentDrivenOpenSections({
+      todo: hasSessionTodo,
+      artifacts: presentArtifactPaths.length > 0,
+      changes: changeRows.length > 0,
+      spawns: subAgents.length > 0,
+      refs: !referenceBundle.isEmpty,
+      members: isGroupPane,
+    });
 
   const activeBrowser = useMemo(
     () => browserTabs.find((t) => t.id === activeBrowserId) ?? null,
@@ -1147,7 +1176,11 @@ export function WorkPanel({
       setSummaryTabOpen(true);
       setActiveKind("summary");
       if (focusRequest.section) {
-        setOpenSections((prev) => ({ ...prev, [focusRequest.section!]: true }));
+        setPinnedSummarySection(focusRequest.section);
+        setOpenSections(exclusiveOpenSections(focusRequest.section));
+      } else {
+        setPinnedSummarySection(null);
+        setOpenSections(overviewOpenSections());
       }
       const highlight = String(focusRequest.highlightPath || "").trim();
       if (highlight) {
@@ -1224,58 +1257,51 @@ export function WorkPanel({
   }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab]);
 
   useEffect(() => {
-    if (subAgents.length > 0) {
-      setOpenSections((prev) => (prev.spawns ? prev : { ...prev, spawns: true }));
-    } else {
-      setOpenSections((prev) => (!prev.spawns ? prev : { ...prev, spawns: false }));
-    }
-  }, [subAgents.length]);
+    setOpenSections((prev) =>
+      applyPinnedAutoExpand(prev, "spawns", subAgents.length > 0, pinnedSummarySectionRef.current),
+    );
+  }, [subAgents.length, pinnedSummarySection]);
 
   // Group panes always have Meta + members; keep the summary section expanded by default.
   useEffect(() => {
-    if (!isGroupPane) {
-      setOpenSections((prev) => (!prev.members ? prev : { ...prev, members: false }));
-      return;
-    }
-    setOpenSections((prev) => (prev.members ? prev : { ...prev, members: true }));
-  }, [isGroupPane]);
+    setOpenSections((prev) =>
+      applyPinnedAutoExpand(prev, "members", isGroupPane, pinnedSummarySectionRef.current),
+    );
+  }, [isGroupPane, pinnedSummarySection]);
 
   useEffect(() => {
-    if (presentArtifactPaths.length > 0) {
-      setOpenSections((prev) => (prev.artifacts ? prev : { ...prev, artifacts: true }));
-    } else {
-      setOpenSections((prev) => (!prev.artifacts ? prev : { ...prev, artifacts: false }));
-    }
-  }, [presentArtifactPaths.length]);
+    setOpenSections((prev) =>
+      applyPinnedAutoExpand(
+        prev,
+        "artifacts",
+        presentArtifactPaths.length > 0,
+        pinnedSummarySectionRef.current,
+      ),
+    );
+  }, [presentArtifactPaths.length, pinnedSummarySection]);
 
   useEffect(() => {
-    if (changeRows.length > 0) {
-      setOpenSections((prev) => (prev.changes ? prev : { ...prev, changes: true }));
-    } else {
-      setOpenSections((prev) => (!prev.changes ? prev : { ...prev, changes: false }));
-    }
-  }, [changeRows.length]);
+    setOpenSections((prev) =>
+      applyPinnedAutoExpand(prev, "changes", changeRows.length > 0, pinnedSummarySectionRef.current),
+    );
+  }, [changeRows.length, pinnedSummarySection]);
 
   useEffect(() => {
-    if (!referenceBundle.isEmpty) {
-      setOpenSections((prev) => (prev.refs ? prev : { ...prev, refs: true }));
-    } else {
-      setOpenSections((prev) => (!prev.refs ? prev : { ...prev, refs: false }));
-    }
-  }, [referenceBundle.isEmpty]);
+    setOpenSections((prev) =>
+      applyPinnedAutoExpand(prev, "refs", !referenceBundle.isEmpty, pinnedSummarySectionRef.current),
+    );
+  }, [referenceBundle.isEmpty, pinnedSummarySection]);
 
-  const hasSessionTodo = !!sessionTodo;
   useEffect(() => {
-    if (hasSessionTodo) {
-      setOpenSections((prev) => (prev.todo ? prev : { ...prev, todo: true }));
-    } else {
-      setOpenSections((prev) => (!prev.todo ? prev : { ...prev, todo: false }));
-    }
-  }, [hasSessionTodo]);
+    setOpenSections((prev) =>
+      applyPinnedAutoExpand(prev, "todo", hasSessionTodo, pinnedSummarySectionRef.current),
+    );
+  }, [hasSessionTodo, pinnedSummarySection]);
 
   useEffect(() => {
     setExtraArtifactPaths([]);
     setArtifactHighlightPath(null);
+    setPinnedSummarySection(null);
   }, [sessionId]);
 
   const toggleSection = (id: SummarySectionId) => {
@@ -1297,12 +1323,23 @@ export function WorkPanel({
   };
 
   const openSummaryTab = () => {
+    setPinnedSummarySection(null);
+    setOpenSections(overviewOpenSections());
+    setSummaryTabOpen(true);
+    setActiveKind("summary");
+    closePlus();
+  };
+
+  const openChangesTab = () => {
+    setPinnedSummarySection("changes");
+    setOpenSections(exclusiveOpenSections("changes"));
     setSummaryTabOpen(true);
     setActiveKind("summary");
     closePlus();
   };
 
   const closeSummaryTab = () => {
+    setPinnedSummarySection(null);
     setSummaryTabOpen(false);
     if (activeKind === "summary") {
       setActiveKind(resolveFallbackKind({ excludeSummary: true }));
@@ -1548,6 +1585,14 @@ export function WorkPanel({
             <button
               type="button"
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
+              onClick={openChangesTab}
+            >
+              <FileDiff className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
+              变更
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
               onClick={openBrowserTab}
             >
               <Globe className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
@@ -1599,6 +1644,13 @@ export function WorkPanel({
       onClick: openSummaryTab,
     },
     {
+      key: "changes",
+      icon: <FileDiff className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      title: "变更",
+      subtitle: "查看本会话写入或编辑的文件",
+      onClick: openChangesTab,
+    },
+    {
       key: "browser",
       icon: <Globe className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
       title: "浏览器",
@@ -1628,6 +1680,13 @@ export function WorkPanel({
     },
   ];
 
+  const summaryPillLabel =
+    pinnedSummarySection === "changes"
+      ? "变更"
+      : pinnedSummarySection === "artifacts"
+        ? "任务产物"
+        : "任务摘要";
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-panel">
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-1.5">
@@ -1641,7 +1700,7 @@ export function WorkPanel({
             }`}
             onClick={() => setActiveKind("summary")}
           >
-            <HoverTip label="关闭任务摘要">
+            <HoverTip label={`关闭${summaryPillLabel}`}>
               <span
                 role="button"
                 tabIndex={0}
@@ -1657,12 +1716,12 @@ export function WorkPanel({
                     closeSummaryTab();
                   }
                 }}
-                aria-label="关闭任务摘要"
+                aria-label={`关闭${summaryPillLabel}`}
               >
                 <X className="h-3 w-3 stroke-[2] group-hover/close:stroke-[3]" />
               </span>
             </HoverTip>
-            <span className="truncate">任务摘要</span>
+            <span className="truncate">{summaryPillLabel}</span>
           </button>
         ) : null}
 
@@ -1896,7 +1955,7 @@ export function WorkPanel({
           ref={plusBtnRef}
           type="button"
           className="agx-topbar-btn !px-[5px]"
-          title="打开任务摘要 / 浏览器 / 运行图 / 执行时间线 / 终端 / 工作区"
+          title="打开任务摘要 / 变更 / 浏览器 / 运行图 / 执行时间线 / 终端 / 工作区"
           aria-label="新建工作台标签"
           onClick={openPlusMenu}
         >
