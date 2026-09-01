@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -67,6 +68,7 @@ class LLMClient:
             self.temperature = 1.0
         else:
             self.temperature = temperature
+        self.base_url = base_url
 
     def call(self, system: str, user: str, max_tokens: int = 32768,
              seed: Optional[int] = None, label: str = "") -> Dict[str, Any]:
@@ -443,17 +445,104 @@ class LightweightTeamRunner:
 
     assembly ∈ {last, concat, integrator, blackboard}，见 paper/infra/assembly/protocols.py。
     'last' 复现 v0.1 行为，仅用于对照臂。
+
+    指定 role_cache_dir 时，同一模型、任务和 seed 的角色产出只生成一次，后续
+    assembly 复用该产出。缓存同时保存角色阶段用量，保证各 assembly 的成本口径
+    仍包含完整角色执行成本。
     """
 
+    ROLE_CACHE_VERSION = 1
+
     def __init__(self, llm: LLMClient, assembly: str = "integrator",
-                 char_budget: int = 4000):
+                 char_budget: int = 4000,
+                 role_cache_dir: Optional[Path] = None):
         self.llm = llm
         if assembly not in ASSEMBLY_PROTOCOLS:
             raise ValueError(f"unknown assembly: {assembly}")
         self.assembly = assembly
         self.char_budget = char_budget
+        self.role_cache_dir = Path(role_cache_dir) if role_cache_dir is not None else None
 
-    def run(self, task: Dict, seed: int) -> RunResult:
+    def _role_cache_fingerprint(self, task: Dict) -> str:
+        payload = {
+            "version": self.ROLE_CACHE_VERSION,
+            "model": self.llm.model,
+            "base_url": getattr(self.llm, "base_url", ""),
+            "temperature": getattr(self.llm, "temperature", None),
+            "task": task,
+            "char_budget": self.char_budget,
+            "upstream_ctx_limit": UPSTREAM_CTX_LIMIT,
+        }
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(raw).hexdigest()
+
+    def _role_cache_path(self, task: Dict, seed: int) -> Optional[Path]:
+        if self.role_cache_dir is None:
+            return None
+        safe_model = re.sub(r"[^A-Za-z0-9._-]+", "_", self.llm.model)
+        safe_task = re.sub(r"[^A-Za-z0-9._-]+", "_", task["task_id"])
+        return self.role_cache_dir / safe_model / f"{safe_task}_s{seed:02d}.json"
+
+    def _load_role_cache(self, task: Dict, seed: int) -> Optional[Dict[str, Any]]:
+        path = self._role_cache_path(task, seed)
+        if path is None or not path.exists():
+            return None
+        try:
+            cached = json.loads(path.read_text(encoding="utf-8"))
+            if cached.get("fingerprint") != self._role_cache_fingerprint(task):
+                return None
+            outputs = cached["role_outputs"]
+            usage = cached["usage"]
+            if not isinstance(outputs, list) or len(outputs) != len(task.get("roles", [])):
+                return None
+            role_outputs = [(str(item[0]), str(item[1])) for item in outputs]
+            print(f"  [ROLE CACHE] {task['task_id']} s{seed} 复用 {len(role_outputs)} 个角色产出")
+            return {
+                "role_outputs": role_outputs,
+                "prompt_tokens": int(usage.get("prompt_tokens", 0)),
+                "completion_tokens": int(usage.get("completion_tokens", 0)),
+                "cached_tokens": int(usage.get("cached_tokens", 0)),
+                "llm_calls": int(usage.get("llm_calls", 0)),
+                "elapsed": float(usage.get("elapsed", 0.0)),
+                "error": str(usage.get("error", "")),
+            }
+        except (OSError, ValueError, TypeError, KeyError, IndexError) as e:
+            print(f"  [ROLE CACHE WARN] {task['task_id']} s{seed} 缓存无效，将重新生成：{e}")
+            return None
+
+    def _save_role_cache(self, task: Dict, seed: int,
+                         role_run: Dict[str, Any]) -> None:
+        # 失败或部分失败的角色链不能固化，否则后续 assembly 会永久复用坏结果。
+        if role_run.get("error"):
+            return
+        path = self._role_cache_path(task, seed)
+        if path is None:
+            return
+        payload = {
+            "version": self.ROLE_CACHE_VERSION,
+            "fingerprint": self._role_cache_fingerprint(task),
+            "model": self.llm.model,
+            "task_id": task["task_id"],
+            "seed": seed,
+            "role_outputs": role_run["role_outputs"],
+            "usage": {
+                "prompt_tokens": role_run["prompt_tokens"],
+                "completion_tokens": role_run["completion_tokens"],
+                "cached_tokens": role_run["cached_tokens"],
+                "llm_calls": role_run["llm_calls"],
+                "elapsed": role_run["elapsed"],
+                "error": role_run["error"],
+            },
+            "ts": datetime.now().isoformat(timespec="seconds"),
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                            encoding="utf-8")
+        tmp_path.replace(path)
+
+    def _generate_role_outputs(self, task: Dict, seed: int) -> Dict[str, Any]:
         t0 = time.time()
         roles = task.get("roles", [])
         prior: List[Tuple[str, str]] = []
@@ -468,7 +557,24 @@ class LightweightTeamRunner:
             calls += r.get("rounds", 1)
             if r.get("error"): errors.append(f"{rname}: {r['error']}")
             prior.append((rname, r["content"]))
+        return {
+            "role_outputs": prior,
+            "prompt_tokens": total_p,
+            "completion_tokens": total_c,
+            "cached_tokens": total_cached,
+            "llm_calls": calls,
+            "elapsed": time.time() - t0,
+            "error": "; ".join(errors),
+        }
 
+    def run(self, task: Dict, seed: int) -> RunResult:
+        role_run = self._load_role_cache(task, seed)
+        if role_run is None:
+            role_run = self._generate_role_outputs(task, seed)
+            self._save_role_cache(task, seed, role_run)
+        prior = role_run["role_outputs"]
+
+        assembly_t0 = time.time()
         final_output, extra = assemble(
             self.assembly, prior, task,
             llm_call=self.llm.call,
@@ -476,9 +582,9 @@ class LightweightTeamRunner:
             char_budget=self.char_budget,
         )
         # 装配阶段的开销必须计入协调开销，否则 integrator 会白嫖 token
-        total_p += extra["prompt_tokens"]
-        total_c += extra["completion_tokens"]
-        calls += extra["llm_calls"]
+        total_p = role_run["prompt_tokens"] + extra["prompt_tokens"]
+        total_c = role_run["completion_tokens"] + extra["completion_tokens"]
+        calls = role_run["llm_calls"] + extra["llm_calls"]
 
         return RunResult(
             task_id=task["task_id"],
@@ -491,10 +597,10 @@ class LightweightTeamRunner:
             prompt_tokens=total_p,
             completion_tokens=total_c,
             total_tokens=total_p + total_c,
-            cached_tokens=total_cached,
-            elapsed=time.time() - t0,
+            cached_tokens=role_run["cached_tokens"],
+            elapsed=role_run["elapsed"] + (time.time() - assembly_t0),
             llm_calls=calls,
-            error="; ".join(errors),
+            error=role_run["error"],
             role_outputs=prior,
         )
 
@@ -787,8 +893,11 @@ def run_experiment(args) -> None:
     print(f"  assembly protocol: {args.assembly}  char_budget: {args.char_budget}  scorer: {args.scorer}  single-baseline: {args.single_baseline}")
     llm = LLMClient(api_key=api_key, base_url=base_url, model=args.model)
     single_runner = LightweightSingleRunner(llm, char_budget=args.char_budget)
+    # 角色阶段按模型/任务/seed 缓存，供不同 assembly 运行复用；外部 CLI 与结果格式不变。
+    role_cache_dir = Path(args.out) / "_role_outputs"
     team_runner = LightweightTeamRunner(llm, assembly=args.assembly,
-                                        char_budget=args.char_budget)
+                                        char_budget=args.char_budget,
+                                        role_cache_dir=role_cache_dir)
 
     # LLM-judge：被测 model 如果是 flash，judge 用 pro（强模型判弱模型符合实践）
     # 交叉 judge：若 judge-base-url / judge-api-key-env 指定了不同端点，用外部模型判（避免同家族偏见）
