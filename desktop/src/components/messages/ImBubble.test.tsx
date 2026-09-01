@@ -273,4 +273,22 @@ describe("ImBubble assistant protocol boundary", () => {
     expect(html).not.toContain("思考了");
     expect(html).not.toContain("Thought");
   });
+
+  it("sits copy/quote actions to the right of a deliverable card", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{ id: "with-artifact", role: "assistant", content: "已写入 hello.txt" }}
+        afterBody={<span>hello.txt-card</span>}
+      />,
+    );
+
+    expect(html).toContain("agx-artifact-action-row");
+    expect(html).toContain("hello.txt-card");
+    const rowIdx = html.indexOf("agx-artifact-action-row");
+    const cardIdx = html.indexOf("hello.txt-card");
+    const iconsIdx = html.indexOf("agx-assistant-action-icons");
+    expect(rowIdx).toBeGreaterThan(-1);
+    expect(cardIdx).toBeGreaterThan(rowIdx);
+    expect(iconsIdx).toBeGreaterThan(cardIdx);
+  });
 });

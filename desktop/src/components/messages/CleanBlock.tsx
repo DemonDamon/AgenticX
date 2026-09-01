@@ -13,9 +13,10 @@ type Props = {
   badge?: ReactNode;
   onRevealPath?: (path: string) => void;
   onOpenFileReference?: (request: FileReferenceOpenRequest) => void;
+  afterBody?: ReactNode;
 };
 
-export function CleanBlock({ message, badge, onRevealPath, onOpenFileReference }: Props) {
+export function CleanBlock({ message, badge, onRevealPath, onOpenFileReference, afterBody }: Props) {
   const isUser = message.role === "user";
   const isStreaming = message.id === "__stream__";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
@@ -63,6 +64,7 @@ export function CleanBlock({ message, badge, onRevealPath, onOpenFileReference }
             </div>
           )
         ) : null}
+        {afterBody}
       </div>
     </div>
   );

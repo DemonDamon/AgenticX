@@ -1,4 +1,4 @@
-import { Fragment, useMemo, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useContext, useMemo, type CSSProperties, type ReactNode } from "react";
 import { isValidElement } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -298,6 +298,7 @@ export function CitationMarkdownBody({
   className,
   style,
 }: Props) {
+  const parentMarkdown = useContext(MarkdownContext);
   const refMap = useMemo(() => {
     const map = new Map<number, SearchReference>();
     for (const ref of references ?? []) map.set(ref.id, ref);
@@ -328,7 +329,15 @@ export function CitationMarkdownBody({
 
   return (
     <div className={className} style={style}>
-      <MarkdownContext.Provider value={{ isStreaming, onQuoteText, onRevealPath, references }}>
+      <MarkdownContext.Provider
+        value={{
+          ...parentMarkdown,
+          isStreaming,
+          onQuoteText: onQuoteText ?? parentMarkdown.onQuoteText,
+          onRevealPath: onRevealPath ?? parentMarkdown.onRevealPath,
+          references: references ?? parentMarkdown.references,
+        }}
+      >
         {blocks.map((block, blockIndex) => (
           <div key={`cite-block-${blockIndex}`} className={blockIndex < blocks.length - 1 ? "mb-2" : undefined}>
             {hasReferences ? (

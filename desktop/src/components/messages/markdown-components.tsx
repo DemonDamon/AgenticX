@@ -23,6 +23,7 @@ import { decodePercentEncodedLocalPath } from "../../utils/local-fs-path";
 import { parseLocalArtifactPath } from "../../utils/sandbox-artifact-link";
 import { ArtifactFileLink } from "./ArtifactFileLink";
 import { buildSvgCharsetDataUrl } from "../../utils/svg-markup";
+import { artifactBaseName, matchesHandoffPath } from "../../utils/session-artifacts";
 
 export const MarkdownContext = createContext<{
   isStreaming?: boolean;
@@ -33,6 +34,8 @@ export const MarkdownContext = createContext<{
   markdownFilePath?: string;
   /** Wider image layout for document preview (vs chat bubbles). */
   documentImage?: boolean;
+  /** Turn deliverables already shown as a handoff chip; collapse matching path pills. */
+  handoffPaths?: string[];
 }>({});
 
 const MERMAID_LANG = new Set(["mermaid", "mmd"]);
@@ -202,10 +205,14 @@ function MarkdownArtifactLink({
   path: string;
   children: ReactNode;
 }) {
-  const { onRevealPath } = useContext(MarkdownContext);
+  const { onRevealPath, handoffPaths } = useContext(MarkdownContext);
+  const childText = reactNodeToPlainText(children).trim();
+  const collapseToName =
+    matchesHandoffPath(path, handoffPaths) &&
+    (childText === path || isAbsoluteFilePath(childText) || !childText);
   return (
     <ArtifactFileLink path={path} onRevealPath={onRevealPath}>
-      {children}
+      {collapseToName ? artifactBaseName(path) : children}
     </ArtifactFileLink>
   );
 }
@@ -473,22 +480,27 @@ function ChatInlineCode({
   children,
   ...rest
 }: HTMLAttributes<HTMLElement> & { className?: string; children?: ReactNode }) {
-  const { onRevealPath } = useContext(MarkdownContext);
+  const { onRevealPath, handoffPaths } = useContext(MarkdownContext);
   const text = reactNodeToPlainText(children).trim();
   const isBlock = Boolean(className?.includes("language-"));
   if (!isBlock && onRevealPath && isAbsoluteFilePath(text)) {
+    const handoff = matchesHandoffPath(text, handoffPaths);
     return (
       <button
         type="button"
-        className="cursor-pointer rounded bg-surface-card px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--ui-btn-primary-bg,#38bdf8)] underline-offset-2 transition hover:underline"
-        title="打开此路径（HTML 在工作台内预览；目录打开文件管理器；其它文件定位到任务产物）"
+        className={
+          handoff
+            ? "cursor-pointer font-medium text-text-strong underline-offset-2 transition-colors duration-150 hover:underline"
+            : "cursor-pointer rounded bg-surface-card px-1.5 py-0.5 font-mono text-[0.85em] text-[var(--ui-btn-primary-bg,#38bdf8)] underline-offset-2 transition-colors duration-150 hover:underline"
+        }
+        title={text}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
           onRevealPath(text);
         }}
       >
-        {children}
+        {handoff ? artifactBaseName(text) : children}
       </button>
     );
   }

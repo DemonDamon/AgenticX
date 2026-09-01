@@ -13,9 +13,10 @@ type Props = {
   badge?: ReactNode;
   onRevealPath?: (path: string) => void;
   onOpenFileReference?: (request: FileReferenceOpenRequest) => void;
+  afterBody?: ReactNode;
 };
 
-export function TerminalLine({ message, badge, onRevealPath, onOpenFileReference }: Props) {
+export function TerminalLine({ message, badge, onRevealPath, onOpenFileReference, afterBody }: Props) {
   const isUser = message.role === "user";
   const isStreaming = message.id === "__stream__";
   const parsed = !isUser ? parseReasoningContent(message.content) : null;
@@ -58,6 +59,7 @@ export function TerminalLine({ message, badge, onRevealPath, onOpenFileReference
               <CitationMarkdownBody content={bodyText} references={message.references} isStreaming={isStreaming} onRevealPath={onRevealPath} />
             )
           ) : null}
+          {afterBody}
         </div>
       </div>
     </div>

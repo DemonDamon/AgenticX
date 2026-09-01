@@ -99,6 +99,8 @@ type Props = {
   streamStalledSeconds?: number;
   /** Ready images in the current user turn; lightbox arrows switch within this set. */
   lightboxGallery?: ImageContentBlock[];
+  /** Deliverable cards after the body; copy/quote sit to the right of the cards. */
+  afterBody?: ReactNode;
 };
 
 function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
@@ -227,6 +229,7 @@ export function ImBubble({
   streamStalled = false,
   streamStalledSeconds = 0,
   lightboxGallery,
+  afterBody,
 }: Props) {
   void _senderAvatarVariant;
   void userAvatarUrl;
@@ -993,6 +996,17 @@ export function ImBubble({
                 )}
               </div>
             </div>
+            {afterBody ? (
+              <div className="agx-artifact-action-row mt-2 flex min-w-0 items-center gap-1.5 px-3">
+                <div className="min-w-0">{afterBody}</div>
+                {assistantIconButtons && !showAssistantFollowups ? (
+                  <div className={`${ASSISTANT_ACTION_ICON_ROW_CLASS} shrink-0 self-center`}>
+                    {assistantIconButtons}
+                    <MessageTimestamp ts={message.timestamp} align="left" />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {budgetIncompleteHint ? (
               <p className="-mt-0.5 mb-1 px-3 text-[11px] leading-relaxed text-text-faint">
                 此回复因会话预算上限被截停，未完成
@@ -1013,7 +1027,7 @@ export function ImBubble({
                 {assistantFollowupChipButtons}
               </div>
             ) : null}
-            {hideActions || showAssistantFollowups || !assistantIconButtons ? null : (
+            {hideActions || showAssistantFollowups || !assistantIconButtons || afterBody ? null : (
               <div className={actionOnlyClass}>
                 <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
                   {assistantIconButtons}

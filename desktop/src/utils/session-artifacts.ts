@@ -800,6 +800,17 @@ export function artifactBaseName(path: string): string {
   return idx >= 0 ? trimmed.slice(idx + 1) || trimmed : trimmed;
 }
 
+export function normalizeArtifactPathKey(path: string): string {
+  return String(path || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+/** True when `path` is the same deliverable already shown on the turn handoff chip. */
+export function matchesHandoffPath(path: string, handoffPaths?: string[] | null): boolean {
+  const key = normalizeArtifactPathKey(path);
+  if (!key || !handoffPaths?.length) return false;
+  return handoffPaths.some((candidate) => normalizeArtifactPathKey(candidate) === key);
+}
+
 /** True when path looks like a directory (trailing slash or no file extension segment). */
 export function looksLikeDirectoryPath(path: string): boolean {
   const value = String(path || "").trim().replace(/\\/g, "/");

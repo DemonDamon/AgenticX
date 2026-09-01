@@ -51,6 +51,7 @@ import {
 } from "../../utils/session-artifacts";
 import { isGroupStreamMessageId } from "../../utils/group-stream-text";
 import { TurnArtifactCard } from "./TurnArtifactCard";
+import { MarkdownContext } from "./markdown-components";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
 import { HistoricalSubAgentClusterCard } from "../subagent";
@@ -223,23 +224,31 @@ function isStreamingAssistantId(id: string | undefined): boolean {
   return id === "__stream__" || isGroupStreamMessageId(id);
 }
 
-function renderAssistantWithArtifacts(
+function assistantHandoff(
   message: Message,
   allMessages: Message[],
   onRevealPath: ((path: string) => void) | undefined,
-  bubble: ReactNode,
-): ReactNode {
+): { paths: string[]; card: ReactNode } {
   if (message.role !== "assistant" || isStreamingAssistantId(message.id)) {
-    return bubble;
+    return { paths: [], card: null };
   }
+  const paths = collectTurnArtifactPaths(allMessages, message.id);
+  return {
+    paths,
+    card: paths.length > 0 ? <TurnArtifactCard paths={paths} onOpenPath={onRevealPath} /> : null,
+  };
+}
+
+function withHandoffContext(
+  paths: string[],
+  onRevealPath: ((path: string) => void) | undefined,
+  node: ReactNode,
+): ReactNode {
+  if (paths.length === 0) return node;
   return (
-    <>
-      {bubble}
-      <TurnArtifactCard
-        paths={collectTurnArtifactPaths(allMessages, message.id)}
-        onOpenPath={onRevealPath}
-      />
-    </>
+    <MarkdownContext.Provider value={{ handoffPaths: paths, onRevealPath }}>
+      {node}
+    </MarkdownContext.Provider>
   );
 }
 
@@ -394,19 +403,31 @@ export function MessageRenderer({
       return <HookBlockNoticeLine text={buildHookBlockFriendlyNotice(toolCtx)} />;
     }
     if (chatStyle === "terminal") {
-      return renderAssistantWithArtifacts(
-        displayMessage,
-        allMessages,
+      const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath);
+      return withHandoffContext(
+        handoff.paths,
         onRevealPath,
-        <TerminalLine message={displayMessage} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />,
+        <TerminalLine
+          message={displayMessage}
+          badge={assistantBadge}
+          onRevealPath={onRevealPath}
+          onOpenFileReference={onOpenFileReference}
+          afterBody={handoff.card}
+        />,
       );
     }
     if (chatStyle === "clean") {
-      return renderAssistantWithArtifacts(
-        displayMessage,
-        allMessages,
+      const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath);
+      return withHandoffContext(
+        handoff.paths,
         onRevealPath,
-        <CleanBlock message={displayMessage} badge={assistantBadge} onRevealPath={onRevealPath} onOpenFileReference={onOpenFileReference} />,
+        <CleanBlock
+          message={displayMessage}
+          badge={assistantBadge}
+          onRevealPath={onRevealPath}
+          onOpenFileReference={onOpenFileReference}
+          afterBody={handoff.card}
+        />,
       );
     }
     const rawAssist = (message.avatarName ?? "").trim();
@@ -422,9 +443,9 @@ export function MessageRenderer({
     const mergedAssistAvatarUrl = metaLeaderRow
       ? assistantAvatarUrl || message.avatarUrl
       : message.avatarUrl || assistantAvatarUrl;
-    return renderAssistantWithArtifacts(
-      displayMessage,
-      allMessages,
+    const handoff = assistantHandoff(displayMessage, allMessages, onRevealPath);
+    return withHandoffContext(
+      handoff.paths,
       onRevealPath,
       <ImBubble
         message={displayMessage}
@@ -466,7 +487,8 @@ export function MessageRenderer({
         streamStalled={streamStalled}
         streamStalledSeconds={streamStalledSeconds}
         lightboxGallery={lightboxGallery}
-      />
+        afterBody={handoff.card}
+      />,
     );
   }
   if (message.role === "tool") {

@@ -11,6 +11,7 @@ import {
   parseSessionMessageFilePayload,
   collectTurnArtifactPaths,
   collectTurnPreviewImagePaths,
+  matchesHandoffPath,
   collectWorkspaceListingArtifactPaths,
   orderTurnArtifactsForCard,
   pickPrimaryTurnArtifact,
@@ -750,6 +751,13 @@ describe("turn artifacts + primary pick", () => {
 
   it("picks null when the turn only has source/config files", () => {
     expect(pickPrimaryTurnArtifact(["/tmp/notes.py", "/tmp/meta.json"])).toBeNull();
+  });
+
+  it("matches handoff paths after slash normalization", () => {
+    expect(matchesHandoffPath("/tmp/hello.txt", ["/tmp/hello.txt"])).toBe(true);
+    expect(matchesHandoffPath("/tmp/hello.txt/", ["/tmp/hello.txt"])).toBe(true);
+    expect(matchesHandoffPath("/tmp/other.txt", ["/tmp/hello.txt"])).toBe(false);
+    expect(matchesHandoffPath("/tmp/hello.txt", [])).toBe(false);
   });
 });
 
