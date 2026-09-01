@@ -88,6 +88,25 @@ def test_known_dangerous_commands_emit_precise_categories() -> None:
     assert not {item.code for item in copy.findings} & NEVER_AUTO_APPROVED_CATEGORIES
 
 
+def test_proxy_execution_is_host_full_access() -> None:
+    for command in (
+        "osascript -e 'return 1'",
+        "osacompile -o /tmp/x.scpt /tmp/x.applescript",
+        "launchctl list",
+        "crontab -l",
+        "at now",
+        "defaults read com.apple.finder",
+        "open -a Finder",
+        "open README.md",
+        "systemd-run --user echo hi",
+        "schtasks /query",
+        "timeout 5 osascript -e 'return 1'",
+    ):
+        verdict = assess_command(command)
+        assert not verdict.is_contained, command
+        assert any(item.code == "host_full_access" for item in verdict.findings), command
+
+
 def test_command_risk_categories_cover_never_auto_approved() -> None:
     emitted = set(COMMAND_RISK_CATEGORIES.values())
     assert emitted >= NEVER_AUTO_APPROVED_CATEGORIES
