@@ -68,6 +68,7 @@ export function TurnArtifactCard({
   const [sizeByPath, setSizeByPath] = useState<Record<string, number>>({});
   const extraCount = Math.max(0, ordered.length - GRID_LIMIT);
   const visible = extraCount === 0 || expanded ? ordered : ordered.slice(0, GRID_LIMIT);
+  const singleTile = ordered.length === 1;
 
   useEffect(() => {
     const stat = window.agenticxDesktop?.statLocalPath;
@@ -131,7 +132,7 @@ export function TurnArtifactCard({
   return (
     <div className="agx-artifact-cq w-full min-w-0">
       <div
-        className={`agx-artifact-grid${ordered.length > 1 ? " agx-artifact-grid--multi" : ""}`}
+        className={`agx-artifact-grid${ordered.length > 1 ? " agx-artifact-grid--multi" : " agx-artifact-grid--single"}`}
       >
         {visible.map((path) => {
           const name = artifactBaseName(path);
@@ -142,11 +143,15 @@ export function TurnArtifactCard({
           return (
             <div
               key={path}
-              className="flex w-full min-w-0 items-center justify-between gap-2 rounded-xl bg-[color-mix(in_srgb,var(--text-primary)_10%,transparent)] py-2 pl-2.5 pr-1.5 transition-[background-color] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-[color-mix(in_srgb,var(--text-primary)_14%,transparent)]"
+              className={`flex min-w-0 items-center gap-1.5 rounded-xl bg-[color-mix(in_srgb,var(--text-primary)_10%,transparent)] py-2 pl-2.5 pr-1.5 transition-[background-color] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-[color-mix(in_srgb,var(--text-primary)_14%,transparent)] ${
+                singleTile ? "w-max max-w-full" : "w-full justify-between gap-2"
+              }`}
             >
               <button
                 type="button"
-                className="flex min-w-0 flex-1 items-center gap-2.5 text-left outline-none transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] focus-visible:ring-1 focus-visible:ring-border active:scale-[0.99]"
+                className={`flex min-w-0 items-center gap-2.5 text-left outline-none transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] focus-visible:ring-1 focus-visible:ring-border active:scale-[0.99] ${
+                  singleTile ? "" : "flex-1"
+                }`}
                 title={path}
                 onClick={() => (onOpenPath ? onOpenPath(path) : undefined)}
                 aria-label={`预览 ${name}`}

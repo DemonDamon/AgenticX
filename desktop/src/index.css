@@ -277,7 +277,7 @@ body {
   min-height: 1.25rem; /* h-5 */
 }
 
-/* Turn deliverable chips: track the chat column, not a content-hug width. */
+/* Turn deliverable chips: one file stays a compact tile; many files fill the column. */
 .agx-artifact-cq {
   container-type: inline-size;
   width: 100%;
@@ -288,6 +288,11 @@ body {
   width: 100%;
   gap: 0.5rem;
   grid-template-columns: minmax(0, 1fr);
+}
+.agx-artifact-grid--single {
+  width: max-content;
+  max-width: min(100%, 14.4rem);
+  grid-template-columns: max-content;
 }
 @container (min-width: 22rem) {
   .agx-artifact-grid--multi {
