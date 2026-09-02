@@ -62,6 +62,8 @@ import { resolveMarkdownHostPath } from "../../utils/workspace-file-path";
 import { Modal } from "../ds/Modal";
 import { Button } from "../ds/Button";
 import { getEditBlockReason } from "./workspace-edit-guard";
+import { detectFoldRanges } from "./code-source-fold";
+import { previewLanguageFromPath } from "./preview-code-language";
 import {
   detectTextEol,
   toEditorLf,
@@ -651,6 +653,7 @@ function TextualPreviewBody({
   onViewHtmlSource,
   allowEdit,
   changeHighlight,
+  foldAll,
 }: {
   preview: TextualPreview;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
@@ -666,6 +669,7 @@ function TextualPreviewBody({
   /** When true, viewMode=edit renders a writable textarea. */
   allowEdit?: boolean;
   changeHighlight?: FileChangeHighlight | null;
+  foldAll?: boolean;
 }) {
   const showHtmlRender = !!renderHtml && viewMode === "preview" && !initialLineRange;
 
@@ -891,6 +895,7 @@ function TextualPreviewBody({
         content={editContent}
         path={preview.path}
         addedLines={changeHighlight?.addedLines}
+        foldAll={foldAll}
         codeRef={codeBlockRef}
       />
     </div>
@@ -966,6 +971,15 @@ export function WorkspaceFilePreview({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [sourceCollapsed, setSourceCollapsed] = useState(false);
+  const canFoldAllSource = useMemo(() => {
+    if (!textualPreview) return false;
+    if (initialLineRange) return false;
+    if (viewMode === "edit") return false;
+    if (isHtmlFile) return false;
+    if (preview.kind === "markdown") return false;
+    if (preview.kind !== "code" && preview.kind !== "text") return false;
+    return detectFoldRanges(textualPreview.content, previewLanguageFromPath(textualPreview.path)).length > 0;
+  }, [initialLineRange, isHtmlFile, preview.kind, textualPreview, viewMode]);
   const [findBarOpen, setFindBarOpen] = useState(false);
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
@@ -1383,7 +1397,7 @@ export function WorkspaceFilePreview({
             </div>
           ) : null}
           <div className="ml-2 flex shrink-0 items-center gap-1">
-            {textualPreview != null ? (
+            {canFoldAllSource ? (
               <button
                 type="button"
                 className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
@@ -1631,11 +1645,9 @@ export function WorkspaceFilePreview({
         ) : null}
         <div
           className={`preview-scrollbar min-h-0 flex-1 bg-surface-base ${
-            sourceCollapsed
-              ? "hidden"
-              : isHtmlFile && viewMode === "preview"
-                ? "overflow-hidden"
-                : "overflow-auto"
+            isHtmlFile && viewMode === "preview"
+              ? "overflow-hidden"
+              : "overflow-auto"
           }`}
         >
           {preview.kind === "image" ? (
@@ -1683,6 +1695,7 @@ export function WorkspaceFilePreview({
               onViewHtmlSource={isHtmlFile ? () => setViewMode("edit") : undefined}
               allowEdit={isEditableText}
               changeHighlight={changeHighlight}
+              foldAll={sourceCollapsed}
             />
           )}
         </div>

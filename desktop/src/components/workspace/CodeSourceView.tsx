@@ -36,6 +36,8 @@ type Props = {
   addedLines?: ReadonlySet<number> | readonly number[];
   focusRange?: CodeSourceFocusRange;
   codeRef?: MutableRefObject<HTMLPreElement | null>;
+  /** Fold every detectable block (header「折叠源码」). Source stays visible. */
+  foldAll?: boolean;
 };
 
 function escapeHtml(value: string): string {
@@ -95,12 +97,17 @@ export function previewLineFromNode(node: Node, root: Element): number | null {
   return null;
 }
 
+function allFoldStarts(content: string, language: string): Set<number> {
+  return new Set(detectFoldRanges(content, language).map((range) => range.start));
+}
+
 export function CodeSourceView({
   content,
   path,
   addedLines,
   focusRange,
   codeRef,
+  foldAll = false,
 }: Props) {
   const language = previewLanguageFromPath(path);
   const rootRef = useRef<HTMLPreElement | null>(null);
@@ -125,7 +132,18 @@ export function CodeSourceView({
     return map;
   }, [lines, ranges]);
 
-  const [folded, setFolded] = useState<Set<number>>(new Set());
+  const [folded, setFolded] = useState<Set<number>>(() =>
+    foldAll ? allFoldStarts(content, language) : new Set(),
+  );
+  const foldAllRef = useRef(foldAll);
+  useEffect(() => {
+    if (foldAll) {
+      setFolded(allFoldStarts(content, language));
+    } else if (foldAllRef.current) {
+      setFolded(new Set());
+    }
+    foldAllRef.current = foldAll;
+  }, [content, foldAll, language]);
   useEffect(() => {
     setFolded((prev) => {
       const next = new Set<number>();

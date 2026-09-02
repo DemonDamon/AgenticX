@@ -22,6 +22,17 @@ describe("CodeSourceView", () => {
     expect(html).toContain("agx-code-line--added");
   });
 
+  it("folds every block when foldAll is set, without dropping the source pane", () => {
+    const html = renderToStaticMarkup(
+      <CodeSourceView content={GO} path="/tmp/main.go" foldAll />,
+    );
+    expect(html).toContain("agx-code-source");
+    expect(html).toContain('data-preview-line="3"');
+    expect(html).toContain("agx-code-ellipsis");
+    expect(html).not.toContain('data-preview-line="4"');
+    expect(html).toContain("展开此范围");
+  });
+
   it("does not draw an indent guide on the closing brace line", () => {
     const html = renderToStaticMarkup(
       <CodeSourceView content={GO} path="/tmp/main.go" />,
