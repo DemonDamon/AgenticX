@@ -66,6 +66,11 @@ import {
   pathToFileUrl,
 } from "../../utils/session-artifacts";
 import { collectFileChangeHighlight } from "../../utils/session-change-highlights";
+import {
+  nextPreviewHighlightMode,
+  resolveActiveChangeHighlight,
+  type PreviewHighlightMode,
+} from "../../utils/preview-highlight-mode";
 import { HtmlPreviewChrome } from "../workspace/HtmlPreviewChrome";
 import { HtmlPreviewShell } from "../workspace/HtmlPreviewShell";
 import {
@@ -429,6 +434,7 @@ export type WorkPanelFocus =
       absolutePath: string;
       title?: string;
       lineRange?: WorkspacePreviewLineRange;
+      highlightMode?: PreviewHighlightMode;
     }
   /** Run Graph God-View tab (same shell as browser / summary). */
   | { kind: "graph" }
@@ -535,6 +541,7 @@ type PreviewTab = {
   error: string | null;
   copied: boolean;
   lineRange?: WorkspacePreviewLineRange;
+  highlightMode: PreviewHighlightMode;
 };
 
 type Props = {
@@ -958,7 +965,12 @@ export function WorkPanel({
       preview && (preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code")
         ? preview.content
         : undefined;
-    return collectFileChangeHighlight(paneMessages, activePreview.absolutePath, content);
+    const collected = collectFileChangeHighlight(
+      paneMessages,
+      activePreview.absolutePath,
+      content,
+    );
+    return resolveActiveChangeHighlight(activePreview.highlightMode, collected);
   }, [activePreview, paneMessages]);
 
   const hasAnyTab =
@@ -1015,17 +1027,21 @@ export function WorkPanel({
     absPathRaw: string,
     titleHint?: string,
     lineRange?: WorkspacePreviewLineRange,
+    highlightMode?: PreviewHighlightMode,
   ) => {
     const path = String(absPathRaw || "").trim();
     if (!path) return;
+    const mode = nextPreviewHighlightMode(highlightMode);
     const title = String(titleHint || "").trim() || artifactBaseName(path) || "预览";
     const existing = previewTabs.find((t) => t.absolutePath === path);
     if (existing) {
-      if (lineRange) {
-        setPreviewTabs((prev) =>
-          prev.map((t) => (t.id === existing.id ? { ...t, lineRange } : t)),
-        );
-      }
+      setPreviewTabs((prev) =>
+        prev.map((t) =>
+          t.id === existing.id
+            ? { ...t, highlightMode: mode, ...(lineRange ? { lineRange } : {}) }
+            : t,
+        ),
+      );
       setActivePreviewId(existing.id);
       setActiveKind("preview");
       void silentReloadPreviewTab(existing.id, path);
@@ -1042,6 +1058,7 @@ export function WorkPanel({
         loading: true,
         error: null,
         copied: false,
+        highlightMode: mode,
         ...(lineRange ? { lineRange } : {}),
       },
     ]);
@@ -1256,7 +1273,12 @@ export function WorkPanel({
       }
       setActiveKind("browser");
     } else if (focusRequest.kind === "preview") {
-      openLocalFilePreview(focusRequest.absolutePath, focusRequest.title, focusRequest.lineRange);
+      openLocalFilePreview(
+        focusRequest.absolutePath,
+        focusRequest.title,
+        focusRequest.lineRange,
+        focusRequest.highlightMode,
+      );
     } else if (focusRequest.kind === "graph") {
       setGraphTabOpen(true);
       setActiveKind("graph");
@@ -2118,7 +2140,7 @@ export function WorkPanel({
                       return;
                     }
                     if (isInAppArtifactPreviewPath(path)) {
-                      openLocalFilePreview(path);
+                      openLocalFilePreview(path, undefined, undefined, "changes");
                       return;
                     }
                     void window.agenticxDesktop?.shellOpenPath?.(path);
