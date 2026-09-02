@@ -129,7 +129,7 @@ export function SessionArtifactList({
           isInAppHtmlPreviewPath(path) || isInAppArtifactPreviewPath(path);
         const size = sizeByPath[path];
         const sizeLabel = size != null ? formatPreviewBytes(size) : "—";
-        const { kind, tint, fg } = artifactGlyph(path);
+        const { kind } = artifactGlyph(path);
         return (
           <div
             key={path}
@@ -139,10 +139,7 @@ export function SessionArtifactList({
             className="overflow-hidden rounded-lg border border-border bg-surface-card transition"
           >
             <div className="flex items-center gap-2 px-2.5 py-2">
-              <span
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
-                style={{ backgroundColor: tint, color: fg }}
-              >
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center">
                 <FileTypeMark kind={kind} />
               </span>
               <button

@@ -10,12 +10,11 @@ describe("TurnArtifactCard deliverable grid", () => {
 
     expect(html).toContain("hello.txt");
     expect(html).toContain('data-file-mark="txt"');
-    expect(html).toContain("--theme-color-rgb");
     expect(html).toContain('aria-label="预览 hello.txt"');
     expect(html).toContain('aria-label="另存为 hello.txt"');
     expect(html).toContain('aria-label="复制路径 hello.txt"');
     expect(html).toContain('aria-label="在访达中显示 hello.txt"');
-    expect(html).toContain("h-8 w-8");
+    expect(html).toContain("h-5 w-5");
     expect(html).toContain("agx-artifact-cq");
     expect(html).toContain("agx-artifact-grid--single");
     expect(html).not.toContain("agx-artifact-grid--multi");
@@ -27,7 +26,7 @@ describe("TurnArtifactCard deliverable grid", () => {
     expect(html).not.toContain("本轮产物");
   });
 
-  it("keeps md and sheet marks distinct while sharing the accent swatch", () => {
+  it("keeps md and sheet marks distinct", () => {
     const html = renderToStaticMarkup(
       <TurnArtifactCard
         paths={["/tmp/report.md", "/tmp/data.csv"]}
@@ -43,7 +42,6 @@ describe("TurnArtifactCard deliverable grid", () => {
     expect(html).toContain('data-file-mark="sheet"');
     expect(html).toContain("agx-artifact-grid--multi");
     expect(html).toContain("justify-between");
-    expect(html).toContain("--theme-color-rgb");
   });
 
   it("collapses past four files behind one expander", () => {

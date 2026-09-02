@@ -26,7 +26,7 @@ export function SessionChangeList({ rows, onOpenPath }: Props) {
         <span className="text-rose-400">-{removed}</span>
       </div>
       {rows.map((row) => {
-        const { kind, tint, fg } = artifactGlyph(row.path);
+        const { kind } = artifactGlyph(row.path);
         return (
           <button
             key={row.path}
@@ -35,10 +35,7 @@ export function SessionChangeList({ rows, onOpenPath }: Props) {
             title={row.path}
             onClick={() => onOpenPath?.(row.path)}
           >
-            <span
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
-              style={{ backgroundColor: tint, color: fg }}
-            >
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center">
               <FileTypeMark kind={kind} />
             </span>
             <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-text-strong">

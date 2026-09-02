@@ -138,7 +138,7 @@ export function TurnArtifactCard({
           const name = artifactBaseName(path);
           const size = sizeByPath[path] != null ? formatPreviewBytes(sizeByPath[path]) : "";
           const meta = size || artifactExt(path).toUpperCase();
-          const { kind, tint, fg } = artifactGlyph(path);
+          const { kind } = artifactGlyph(path);
           const copied = copiedPath === path;
           return (
             <div
@@ -156,10 +156,7 @@ export function TurnArtifactCard({
                 onClick={() => (onOpenPath ? onOpenPath(path) : undefined)}
                 aria-label={`预览 ${name}`}
               >
-                <span
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                  style={{ backgroundColor: tint, color: fg }}
-                >
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center">
                   <FileTypeMark kind={kind} />
                 </span>
                 <span className="flex min-w-0 flex-col gap-1 pr-2">
