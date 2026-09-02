@@ -800,7 +800,7 @@ body.agx-settings-nav-resizing {
   margin-top: 0.35rem;
   overflow: visible;
   line-height: 1;
-  color: var(--text-faint);
+  color: var(--text-muted);
 }
 
 .agx-im-user-actions-icons {
@@ -820,13 +820,21 @@ body.agx-settings-nav-resizing {
 
 .agx-im-user-actions-icons button {
   display: inline-flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
   align-items: center;
   justify-content: center;
   border-radius: 0.35rem;
-  /* 四边对称 padding，避免末枚悬停底「右半被挤扁」 */
-  padding: 0.28rem;
-  opacity: 0.72;
-  transition: opacity 120ms ease-out, color 120ms ease-out, background-color 120ms ease-out;
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.agx-im-user-actions-icons button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  stroke-width: 2;
 }
 
 .agx-im-user-actions-icons > :last-child {
@@ -834,7 +842,6 @@ body.agx-settings-nav-resizing {
 }
 
 .agx-im-user-actions-icons button:hover {
-  opacity: 1;
   color: var(--text-strong);
   background: var(--surface-hover);
 }

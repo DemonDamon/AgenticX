@@ -767,22 +767,22 @@ export function ImBubble({
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => onCopyMessage?.(message)}
                     >
-                      <Copy size={13} strokeWidth={1.5} />
+                      <Copy size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
                   <HoverTip label="引用">
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
-                      <Quote size={13} strokeWidth={1.5} />
+                      <Quote size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
                   <HoverTip label="收藏">
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
-                      <Bookmark size={13} strokeWidth={1.5} />
+                      <Bookmark size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
                   <HoverTip label="转发">
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
-                      <Forward size={13} strokeWidth={1.5} />
+                      <Forward size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
                   {onEditMessage ? (
@@ -795,7 +795,7 @@ export function ImBubble({
                           setIsEditing(true);
                         }}
                       >
-                        <Pencil size={13} strokeWidth={1.5} />
+                        <Pencil size={14} strokeWidth={2} />
                       </button>
                     </HoverTip>
                   ) : null}
@@ -806,7 +806,7 @@ export function ImBubble({
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => onRetryMessage(message)}
                       >
-                        <RotateCcw size={13} strokeWidth={1.5} />
+                        <RotateCcw size={14} strokeWidth={2} />
                       </button>
                     </HoverTip>
                   ) : null}
@@ -821,7 +821,7 @@ export function ImBubble({
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => onToggleSelectMessage?.(message)}
                     >
-                      <LayoutList size={13} strokeWidth={1.5} />
+                      <LayoutList size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
                 </div>
