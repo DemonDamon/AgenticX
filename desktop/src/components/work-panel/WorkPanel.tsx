@@ -65,6 +65,7 @@ import {
   looksLikeDirectoryPath,
   pathToFileUrl,
 } from "../../utils/session-artifacts";
+import { collectFileChangeHighlight } from "../../utils/session-change-highlights";
 import { HtmlPreviewChrome } from "../workspace/HtmlPreviewChrome";
 import { HtmlPreviewShell } from "../workspace/HtmlPreviewShell";
 import {
@@ -949,6 +950,16 @@ export function WorkPanel({
     () => previewTabs.find((t) => t.id === activePreviewId) ?? null,
     [previewTabs, activePreviewId],
   );
+
+  const activeChangeHighlight = useMemo(() => {
+    if (!activePreview) return null;
+    const preview = activePreview.preview;
+    const content =
+      preview && (preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code")
+        ? preview.content
+        : undefined;
+    return collectFileChangeHighlight(paneMessages, activePreview.absolutePath, content);
+  }, [activePreview, paneMessages]);
 
   const hasAnyTab =
     summaryTabOpen ||
@@ -2224,6 +2235,7 @@ export function WorkPanel({
                 preview={activePreview.preview}
                 copied={activePreview.copied}
                 initialLineRange={activePreview.lineRange}
+                changeHighlight={activeChangeHighlight}
                 onCopy={(text) => {
                   const value =
                     text ??

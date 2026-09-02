@@ -15,7 +15,6 @@ import {
   Copy,
   Download,
   Eye,
-  FileText,
   FolderOpen,
   ImageIcon,
   Minus,
@@ -23,19 +22,15 @@ import {
   Plus,
   Redo2,
   Search,
+  SquareMinus,
+  SquarePlus,
   Undo2,
   X,
 } from "lucide-react";
-import Prism from "prismjs";
-import "prismjs/components/prism-bash";
-import "prismjs/components/prism-json";
-import "prismjs/components/prism-markdown";
-import "prismjs/components/prism-markup";
-import "prismjs/components/prism-python";
-import "prismjs/components/prism-rust";
-import "prismjs/components/prism-typescript";
-import "prismjs/themes/prism-tomorrow.css";
 import ReactMarkdown from "react-markdown";
+import { artifactGlyph, FileTypeMark } from "../messages/artifact-glyph";
+import { CodeSourceView, previewLineFromNode } from "./CodeSourceView";
+import type { FileChangeHighlight } from "../../utils/session-change-highlights";
 import {
   chatMarkdownComponents,
   chatRehypePlugins,
@@ -111,6 +106,8 @@ export type WorkspaceFilePreviewProps = {
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
   initialLineRange?: WorkspacePreviewLineRange;
+  /** Session write/edit decorations for this path (WorkPanel「变更」). */
+  changeHighlight?: FileChangeHighlight | null;
   /** Taskspace root for resolving relative absolutePath / image assets. */
   taskspaceRoot?: string;
   /** Notify parent when dirty state changes (for tab-close / tab-switch guards). */
@@ -123,20 +120,6 @@ export type WorkspaceFilePreviewProps = {
     requestLeave: ((proceed: () => void) => void) | null,
   ) => void;
 };
-
-function detectLanguage(path: string): string {
-  const lower = path.toLowerCase();
-  if (lower.endsWith(".py")) return "python";
-  if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "typescript";
-  if (lower.endsWith(".js") || lower.endsWith(".jsx")) return "javascript";
-  if (lower.endsWith(".json") || lower.endsWith(".jsonl") || lower.endsWith(".ndjson")) return "json";
-  if (lower.endsWith(".md")) return "markdown";
-  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "markup";
-  if (lower.endsWith(".sh") || lower.endsWith(".bash")) return "bash";
-  if (lower.endsWith(".rs")) return "rust";
-  if (lower.endsWith(".log") || lower.endsWith(".txt")) return "plain";
-  return "clike";
-}
 
 function previewKindLabel(kind: WorkspacePreview["kind"]): string {
   switch (kind) {
@@ -479,66 +462,22 @@ function ImagePreviewBody({
 
 function LineFocusedSourceView({
   content,
+  path,
   lineRange,
+  addedLines,
 }: {
   content: string;
+  path: string;
   lineRange: WorkspacePreviewLineRange;
+  addedLines?: readonly number[];
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const lines = useMemo(() => content.split("\n"), [content]);
-  const start = Math.max(1, Math.floor(lineRange.start));
-  const end = Math.max(start, Math.floor(lineRange.end));
-
-  useEffect(() => {
-    let cancelled = false;
-    const scrollToLine = (): boolean => {
-      const scrollEl = containerRef.current?.closest(".preview-scrollbar") as HTMLElement | null;
-      const lineEl = containerRef.current?.querySelector(`[data-preview-line="${start}"]`);
-      if (!scrollEl || !lineEl) return false;
-      const scrollRect = scrollEl.getBoundingClientRect();
-      const lineRect = lineEl.getBoundingClientRect();
-      const delta = lineRect.top - scrollRect.top - scrollEl.clientHeight * 0.35;
-      scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + delta);
-      return true;
-    };
-    let attempts = 0;
-    const tick = () => {
-      if (cancelled) return;
-      if (scrollToLine() || attempts >= 10) return;
-      attempts += 1;
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-    return () => {
-      cancelled = true;
-    };
-  }, [content, start]);
-
   return (
-    <div ref={containerRef} className="px-6 py-5 font-mono text-[13px] leading-[1.65] text-text-primary">
-      {lines.map((line, index) => {
-        const lineNo = index + 1;
-        const highlighted = lineNo >= start && lineNo <= end;
-        return (
-          <div
-            key={lineNo}
-            data-preview-line={lineNo}
-            className={`flex min-w-0 rounded-sm ${
-              highlighted ? "bg-yellow-400/30 ring-1 ring-inset ring-yellow-400/50" : ""
-            }`}
-          >
-            <span
-              className={`w-11 shrink-0 select-none pr-3 text-right tabular-nums ${
-                highlighted ? "font-semibold text-yellow-200" : "text-text-faint"
-              }`}
-            >
-              {lineNo}
-            </span>
-            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{line || " "}</span>
-          </div>
-        );
-      })}
-    </div>
+    <CodeSourceView
+      content={content}
+      path={path}
+      focusRange={lineRange}
+      addedLines={addedLines}
+    />
   );
 }
 
@@ -711,6 +650,7 @@ function TextualPreviewBody({
   renderHtml,
   onViewHtmlSource,
   allowEdit,
+  changeHighlight,
 }: {
   preview: TextualPreview;
   onQuoteSnippet?: (payload: WorkspacePreviewQuotePayload) => void;
@@ -725,15 +665,9 @@ function TextualPreviewBody({
   onViewHtmlSource?: () => void;
   /** When true, viewMode=edit renders a writable textarea. */
   allowEdit?: boolean;
+  changeHighlight?: FileChangeHighlight | null;
 }) {
   const showHtmlRender = !!renderHtml && viewMode === "preview" && !initialLineRange;
-
-  const highlightedCode = useMemo(() => {
-    if (preview.kind === "markdown" || showHtmlRender) return "";
-    const language = detectLanguage(preview.path);
-    const grammar = Prism.languages[language] ?? Prism.languages.clike;
-    return Prism.highlight(editContent, grammar, language);
-  }, [preview.kind, preview.path, editContent, showHtmlRender]);
 
   const markdownContent = useMemo(() => {
     if (preview.kind !== "markdown") return "";
@@ -819,8 +753,10 @@ function TextualPreviewBody({
       setSelectionRange({ snippet: selectedText, anchor });
       return;
     }
-    const startLine = toLineNumber(preview.content, startOffset);
-    const endLine = Math.max(startLine, toLineNumber(preview.content, endOffset));
+    const markedStart = previewLineFromNode(range.startContainer, container);
+    const markedEnd = previewLineFromNode(range.endContainer, container);
+    const startLine = markedStart ?? toLineNumber(preview.content, startOffset);
+    const endLine = Math.max(startLine, markedEnd ?? toLineNumber(preview.content, endOffset));
     const lines = preview.content.split("\n");
     const snippet = lines.slice(startLine - 1, endLine).join("\n").trimEnd();
     if (!snippet.trim()) {
@@ -851,7 +787,14 @@ function TextualPreviewBody({
   );
 
   if (initialLineRange) {
-    return <LineFocusedSourceView content={preview.content} lineRange={initialLineRange} />;
+    return (
+      <LineFocusedSourceView
+        content={preview.content}
+        path={preview.path}
+        lineRange={initialLineRange}
+        addedLines={changeHighlight?.addedLines}
+      />
+    );
   }
 
   if (showHtmlRender) {
@@ -944,12 +887,12 @@ function TextualPreviewBody({
           }
         />
       ) : null}
-      <pre ref={codeBlockRef} className="m-0 min-h-0 border-none bg-transparent px-6 py-5 text-[13px] leading-[1.65]">
-        <code
-          className={`language-${detectLanguage(preview.path)}`}
-          dangerouslySetInnerHTML={{ __html: highlightedCode }}
-        />
-      </pre>
+      <CodeSourceView
+        content={editContent}
+        path={preview.path}
+        addedLines={changeHighlight?.addedLines}
+        codeRef={codeBlockRef}
+      />
     </div>
   );
 }
@@ -965,6 +908,7 @@ export function WorkspaceFilePreview({
   onRevealInFileManager,
   revealInFileManagerLabel,
   initialLineRange,
+  changeHighlight,
   taskspaceRoot,
   onDirtyChange,
   onProvideRequestLeave,
@@ -1021,6 +965,7 @@ export function WorkspaceFilePreview({
   );
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [sourceCollapsed, setSourceCollapsed] = useState(false);
   const [findBarOpen, setFindBarOpen] = useState(false);
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
@@ -1054,6 +999,7 @@ export function WorkspaceFilePreview({
 
   useEffect(() => {
     setViewMode("preview");
+    setSourceCollapsed(false);
     setFindBarOpen(false);
     setFindText("");
     setReplaceText("");
@@ -1378,14 +1324,22 @@ export function WorkspaceFilePreview({
           }`}
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-surface-base shadow-sm">
-            <FileText className="h-4 w-4 text-text-muted" strokeWidth={1.5} />
+            <FileTypeMark kind={artifactGlyph(preview.path).kind} />
           </div>
           <div className="min-w-0 flex-1">
-            <div
-              className="truncate text-[14px] font-semibold tracking-tight text-text-strong"
-              title={preview.path}
-            >
-              {previewBaseName(preview.path)}
+            <div className="flex min-w-0 items-center gap-2">
+              <div
+                className="truncate text-[14px] font-semibold tracking-tight text-text-strong"
+                title={preview.path}
+              >
+                {previewBaseName(preview.path)}
+              </div>
+              {changeHighlight && changeHighlight.added > 0 ? (
+                <span className="shrink-0 font-mono text-[12px] text-emerald-400">+{changeHighlight.added}</span>
+              ) : null}
+              {changeHighlight && changeHighlight.removed > 0 ? (
+                <span className="shrink-0 font-mono text-[12px] text-rose-400">-{changeHighlight.removed}</span>
+              ) : null}
             </div>
             <div
               className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] font-mono text-text-faint"
@@ -1429,6 +1383,21 @@ export function WorkspaceFilePreview({
             </div>
           ) : null}
           <div className="ml-2 flex shrink-0 items-center gap-1">
+            {textualPreview != null ? (
+              <button
+                type="button"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
+                onClick={() => setSourceCollapsed((prev) => !prev)}
+                title={sourceCollapsed ? "展开源码" : "折叠源码"}
+                aria-expanded={!sourceCollapsed}
+              >
+                {sourceCollapsed ? (
+                  <SquarePlus className="h-4 w-4" strokeWidth={1.6} />
+                ) : (
+                  <SquareMinus className="h-4 w-4" strokeWidth={1.6} />
+                )}
+              </button>
+            ) : null}
             {isHtmlFile && !isEditableText ? (
               <>
                 <button
@@ -1662,7 +1631,11 @@ export function WorkspaceFilePreview({
         ) : null}
         <div
           className={`preview-scrollbar min-h-0 flex-1 bg-surface-base ${
-            isHtmlFile && viewMode === "preview" ? "overflow-hidden" : "overflow-auto"
+            sourceCollapsed
+              ? "hidden"
+              : isHtmlFile && viewMode === "preview"
+                ? "overflow-hidden"
+                : "overflow-auto"
           }`}
         >
           {preview.kind === "image" ? (
@@ -1709,6 +1682,7 @@ export function WorkspaceFilePreview({
               renderHtml={isHtmlFile}
               onViewHtmlSource={isHtmlFile ? () => setViewMode("edit") : undefined}
               allowEdit={isEditableText}
+              changeHighlight={changeHighlight}
             />
           )}
         </div>

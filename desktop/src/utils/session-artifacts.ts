@@ -780,7 +780,7 @@ function countArtifactLines(text: string): number {
   return parts.length;
 }
 
-function firstWritePathFromToolMessage(message: Message): string | null {
+export function firstWritePathFromToolMessage(message: Message): string | null {
   const paths: string[] = [];
   const seen = new Set<string>();
   extractOkWritePaths(String(message.content || ""), paths, seen);
