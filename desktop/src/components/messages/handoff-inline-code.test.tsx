@@ -34,6 +34,16 @@ describe("handoff inline path collapse", () => {
     expect(html).toContain("bg-surface-card");
   });
 
+  it("makes a backtick path with spaces a clickable filename", () => {
+    const path =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/Hello World第三方技能点.txt";
+    const html = renderPathCode(path, [path]);
+    expect(html).toContain("<button");
+    expect(html).toContain(">Hello World第三方技能点.txt<");
+    expect(html).toContain(`title="${path}"`);
+    expect(html).not.toMatch(/<code[^>]*>Hello World第三方技能点\.txt<\/code>/);
+  });
+
   it("collapses the session default workspace root instead of the UUID path", () => {
     const root =
       "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/";

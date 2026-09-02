@@ -871,6 +871,45 @@ describe("turn artifacts + primary pick", () => {
     ]);
   });
 
+  it("keeps spaced filenames from OK: wrote (session c0683c71 last turn)", () => {
+    const abs =
+      "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/Hello World第三方技能点.txt";
+    const messages: Message[] = [
+      { id: "u-space", role: "user", content: "写 Hello World第三方技能点.TXT", timestamp: 1 },
+      toolMsg({
+        id: "t-space",
+        toolName: "file_write",
+        toolArgs: { path: "Hello World第三方技能点.txt", content: "#include <stdio.h>\n" },
+        content: `OK: wrote ${abs}`,
+      }),
+      assistantMsg({
+        id: "final-space",
+        content: `已创建 \`Hello World第三方技能点.txt\`\n\n路径：\`${abs}\``,
+      }),
+    ];
+    expect(collectTurnArtifactPaths(messages, "final-space")).toEqual([abs]);
+    expect(collectSessionArtifactPaths(messages)).toEqual([abs]);
+    expect(collectTurnFileChanges(messages, "final-space")).toEqual([
+      { path: abs, added: 1, removed: 0 },
+    ]);
+    expect(artifactBaseName(abs)).toBe("Hello World第三方技能点.txt");
+    expect(collectTurnArtifactPaths(messages, "final-space")[0]).not.toMatch(/\/Hello$/);
+  });
+
+  it("keeps spaced OK: wrote paths when a (N chars) suffix is present", () => {
+    const abs = "/tmp/Hello World第三方技能点.txt";
+    expect(
+      collectSessionArtifactPaths([
+        toolMsg({
+          id: "t-chars",
+          toolName: "file_write",
+          toolArgs: { path: abs },
+          content: `OK: wrote ${abs} (82 chars)`,
+        }),
+      ]),
+    ).toEqual([abs]);
+  });
+
   it("reads OK: wrote from snake_case chat-history rows with relative path", () => {
     const abs =
       "/Users/damon/.agenticx/taskspaces/c0683c71-0460-48cc-b681-a3b6509ec18d/default/a.txt";

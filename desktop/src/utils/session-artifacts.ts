@@ -15,8 +15,10 @@
 import type { Message, SubAgent } from "../store";
 import { absoluteTaskspacePath, isAbsoluteFilePath } from "./workspace-file-path";
 
-// `\S+` (not `.+?`) so a missing `(N chars)` suffix cannot collapse the path to `/`.
-const OK_WRITE_RE = /OK:\s*(?:wrote|edited)\s+(\S+)/gi;
+// Start with `\S` so a missing `(N chars)` suffix cannot collapse the path to `/`.
+// `.*?` then allows spaces in the filename until the optional size suffix or EOL.
+const OK_WRITE_RE =
+  /OK:\s*(?:wrote|edited)\s+(\S.*?)(?:\s+\(\d+\s+chars?\))?(?=\s*(?:\n|$))/gi;
 
 const ABS_PATH_BODY =
   "(\\/(?:Users|home|tmp|var|opt|private|Volumes)[^\\s`<>\\[\\]()]+|[a-zA-Z]:[\\\\/][^\\s`<>\\[\\]()]+|~\\/[^\\s`<>\\[\\]()]+)";
@@ -179,7 +181,7 @@ function normalizeArtifactPath(raw: string): string | null {
     value = value.slice(1, -1).trim();
   }
   value = value.replace(/[，。；：！？,.]+$/u, "").trim();
-  if (!value || /\s/.test(value)) return null;
+  if (!value || /[\n\r]/.test(value)) return null;
   // Docs / templates like `~/.codewiki/<project>/` are not real artifacts.
   if (/[<>]/.test(value)) return null;
   if (!isAbsoluteFilePath(value) && !value.startsWith("/") && !/^[a-zA-Z]:[\\/]/.test(value) && !value.startsWith("~/")) {

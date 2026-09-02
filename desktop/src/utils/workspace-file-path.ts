@@ -24,7 +24,7 @@ export function absoluteTaskspacePath(root: string, relPath: string): string {
 /** Detect absolute local file paths suitable for workspace preview. */
 export function isAbsoluteFilePath(text: string): boolean {
   const t = String(text || "").trim();
-  if (!t || /\s/.test(t)) return false;
+  if (!t || /[\n\r]/.test(t)) return false;
   if (/^https?:\/\//i.test(t) || /^file:\/\//i.test(t)) return false;
   if (t.startsWith("/")) {
     return /\/[^/]+\.[a-zA-Z0-9]{1,12}$/.test(t) || /^\/(?:Users|home|tmp|var|opt|private|Volumes)\//.test(t);
