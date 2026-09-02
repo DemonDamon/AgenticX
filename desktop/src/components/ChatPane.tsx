@@ -12658,20 +12658,20 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           }
         >
         {!workExpandedLayout ? (
-        <div className="agx-pane-toolbar flex h-10 shrink-0 items-center justify-between px-4">
-          <div
-            className={`flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden ${
-              paneSortableListeners ? "cursor-grab touch-none active:cursor-grabbing" : ""
-            }`}
-            {...(paneSortableListeners ?? {})}
-            title={paneSortableListeners ? "拖拽以调整窗格顺序" : undefined}
-          >
+        <div className="agx-pane-toolbar drag-region flex h-10 shrink-0 items-center justify-between px-4">
+          <div className="no-drag flex min-w-0 items-center gap-1.5 overflow-hidden">
             {paneSortableListeners ? (
-              <GripVertical
-                className="h-4 w-4 shrink-0 text-text-faint opacity-50 hover:opacity-90"
-                strokeWidth={1.8}
-                aria-hidden
-              />
+              <span
+                className="inline-flex cursor-grab touch-none items-center active:cursor-grabbing"
+                {...paneSortableListeners}
+                title="拖拽以调整窗格顺序"
+              >
+                <GripVertical
+                  className="h-4 w-4 shrink-0 text-text-faint opacity-50 hover:opacity-90"
+                  strokeWidth={1.8}
+                  aria-hidden
+                />
+              </span>
             ) : null}
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm font-medium text-text-strong">

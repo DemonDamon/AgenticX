@@ -160,6 +160,20 @@ html[data-platform="win32"] .agx-topbar {
   -webkit-app-region: no-drag;
 }
 
+/* Chat pane chrome sits in the traffic-light row when the main Topbar is hidden. */
+.agx-pane-toolbar {
+  -webkit-app-region: drag;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.agx-pane-toolbar button,
+.agx-pane-toolbar select,
+.agx-pane-toolbar input,
+.agx-pane-toolbar .no-drag {
+  -webkit-app-region: no-drag;
+}
+
 .agx-topbar-left {
   display: inline-flex;
   align-items: center;
