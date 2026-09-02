@@ -168,7 +168,9 @@ class UsageStore:
                         COUNT(*),
                         COALESCE(SUM(input_tokens), 0),
                         COALESCE(SUM(cached_tokens), 0),
-                        COALESCE(SUM(CASE WHEN cached_tokens = 0 THEN 1 ELSE 0 END), 0)
+                        COALESCE(SUM(CASE WHEN cached_tokens = 0 THEN 1 ELSE 0 END), 0),
+                        COALESCE(SUM(output_tokens), 0),
+                        COALESCE(SUM(total_tokens), 0)
                     FROM usage_events
                     WHERE {where}
                     """,
@@ -194,11 +196,17 @@ class UsageStore:
         input_tokens = int(row[1] or 0) if row else 0
         cached_tokens = int(row[2] or 0) if row else 0
         zero_cache = int(row[3] or 0) if row else 0
+        output_tokens = int(row[4] or 0) if row else 0
+        total_tokens = int(row[5] or 0) if row else 0
+        if total_tokens <= 0:
+            total_tokens = input_tokens + output_tokens
         ratio = (float(cached_tokens) / float(input_tokens)) if input_tokens > 0 else 0.0
         last_ratio = (float(last_cached) / float(last_input)) if last_input > 0 else 0.0
         return {
             "requests": requests,
             "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
             "cached_tokens": cached_tokens,
             "cache_ratio": ratio,
             "zero_cache_requests": zero_cache,

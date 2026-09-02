@@ -2608,6 +2608,29 @@ class SessionManager:
                 "timestamp": parsed_timestamp,
                 "forwarded_history": item.get("forwarded_history"),
             }
+            raw_sel = str(item.get("model_selection", "") or "").strip().lower()
+            if raw_sel in {"manual", "auto"}:
+                row["model_selection"] = raw_sel
+            raw_usage = item.get("usage")
+            if isinstance(raw_usage, dict):
+                usage_out: dict[str, int] = {}
+                for usage_key in (
+                    "input_tokens",
+                    "output_tokens",
+                    "cached_tokens",
+                    "reasoning_tokens",
+                    "total_tokens",
+                ):
+                    try:
+                        usage_out[usage_key] = max(0, int(raw_usage.get(usage_key, 0) or 0))
+                    except (TypeError, ValueError):
+                        usage_out[usage_key] = 0
+                if usage_out["total_tokens"] == 0:
+                    usage_out["total_tokens"] = (
+                        usage_out["input_tokens"] + usage_out["output_tokens"]
+                    )
+                if any(usage_out.values()):
+                    row["usage"] = usage_out
             raw_meta = item.get("metadata")
             if isinstance(raw_meta, dict) and raw_meta:
                 row["metadata"] = dict(raw_meta)

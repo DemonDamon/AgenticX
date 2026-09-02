@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { useAppStore } from "../store";
-import { formatHitPercent, pickUsageHit } from "../utils/cache-hit";
+import { formatHitPercent } from "../utils/cache-hit";
 import { HoverTip } from "./ds/HoverTip";
 
 interface SessionCacheUsage {
   session_input_tokens: number;
+  session_output_tokens: number;
+  session_total_tokens: number;
   session_cached_tokens: number;
   last_input_tokens: number;
   last_cached_tokens: number;
@@ -27,6 +29,8 @@ function parseCache(raw: unknown): SessionCacheUsage | undefined {
   const row = raw as Record<string, unknown>;
   return {
     session_input_tokens: Number(row.session_input_tokens ?? 0),
+    session_output_tokens: Number(row.session_output_tokens ?? 0),
+    session_total_tokens: Number(row.session_total_tokens ?? 0),
     session_cached_tokens: Number(row.session_cached_tokens ?? 0),
     last_input_tokens: Number(row.last_input_tokens ?? 0),
     last_cached_tokens: Number(row.last_cached_tokens ?? 0),
@@ -294,49 +298,37 @@ export function ContextUsageButton({
 
   const sessionTokens = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.sessionTokens);
   const visibleUsage = usage && usage.fetchedForSessionId === sessionId ? usage : null;
-  const liveLastInput = sessionTokens?.lastInput ?? 0;
-  const lastCached =
-    liveLastInput > 0
-      ? sessionTokens?.lastCached ?? 0
-      : visibleUsage?.cache?.last_cached_tokens ?? 0;
-  const lastInput =
-    liveLastInput > 0
-      ? liveLastInput
-      : visibleUsage?.cache?.last_input_tokens ?? 0;
-  const lastHit = formatHitPercent(lastCached, lastInput);
-  const sessionInput =
-    (visibleUsage?.cache?.session_input_tokens ?? 0) > 0
-      ? visibleUsage?.cache?.session_input_tokens ?? 0
-      : sessionTokens?.input ?? 0;
-  const sessionCached =
-    (visibleUsage?.cache?.session_input_tokens ?? 0) > 0
-      ? visibleUsage?.cache?.session_cached_tokens ?? 0
-      : sessionTokens?.cached ?? 0;
-  const pickedHit = pickUsageHit({
-    lastCached,
-    lastInput,
-    sessionCached,
-    sessionInput,
-  });
-  const cardHit = pickedHit.hit;
-  const cardCached = pickedHit.cached;
-  const cardInput = pickedHit.input;
+  // The panel reports the whole session; the per-turn number lives on the
+  // message bubble. The ledger (sqlite) wins when it has rows, since it also
+  // covers turns produced before this pane was mounted.
+  const ledgerInput = visibleUsage?.cache?.session_input_tokens ?? 0;
+  const useLedger = ledgerInput > 0;
+  const sessionInput = useLedger ? ledgerInput : sessionTokens?.input ?? 0;
+  const sessionOutput = useLedger
+    ? visibleUsage?.cache?.session_output_tokens ?? 0
+    : sessionTokens?.output ?? 0;
+  const sessionCached = useLedger
+    ? visibleUsage?.cache?.session_cached_tokens ?? 0
+    : sessionTokens?.cached ?? 0;
+  const ledgerTotal = useLedger ? visibleUsage?.cache?.session_total_tokens ?? 0 : 0;
+  const sessionTotal = ledgerTotal > 0 ? ledgerTotal : sessionInput + sessionOutput;
+  const cardHit = formatHitPercent(sessionCached, sessionInput);
 
   const percent = visibleUsage?.percent ?? 0;
   const hoverLabel = useMemo(() => {
     if (open) return "";
-    if (!sessionId) return "上下文用量（会话未就绪）";
-    if (!visibleUsage) return "上下文用量";
-    const occupancy = `${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)} 上下文已使用`;
-    return lastHit !== null ? `${occupancy} · 本轮命中 ${lastHit}%` : occupancy;
-  }, [lastHit, open, sessionId, visibleUsage]);
+    if (!sessionId) return "当前上下文（会话未就绪）";
+    if (!visibleUsage) return "当前上下文";
+    const occupancy = `${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)} 当前上下文已占用`;
+    return cardHit !== null ? `${occupancy} · 会话命中 ${cardHit}%` : occupancy;
+  }, [cardHit, open, sessionId, visibleUsage]);
 
   const ariaLabel = useMemo(() => {
-    if (!sessionId) return "上下文用量（会话未就绪）";
-    if (!visibleUsage) return "上下文用量";
-    const occupancy = `上下文用量 ${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)}`;
-    return lastHit !== null ? `${occupancy} · 本轮命中 ${lastHit}%` : occupancy;
-  }, [lastHit, sessionId, visibleUsage]);
+    if (!sessionId) return "当前上下文（会话未就绪）";
+    if (!visibleUsage) return "当前上下文";
+    const occupancy = `当前上下文 ${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)}`;
+    return cardHit !== null ? `${occupancy} · 会话命中 ${cardHit}%` : occupancy;
+  }, [cardHit, sessionId, visibleUsage]);
 
   const hitColor =
     cardHit === null
@@ -373,7 +365,7 @@ export function ContextUsageButton({
               style={{ left: panelPos.left, bottom: panelPos.bottom, width: panelPos.width }}
             >
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-[13px] font-medium text-text-strong">上下文用量</span>
+                <span className="text-[13px] font-medium text-text-strong">会话用量</span>
                 <button
                   type="button"
                   className="flex h-5 w-5 items-center justify-center rounded text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
@@ -393,31 +385,39 @@ export function ContextUsageButton({
                 <>
                   <div className="mb-3 grid grid-cols-2 gap-2">
                     <div className="min-w-0 rounded-xl bg-[var(--surface-card-strong)] px-2.5 py-2 [html[data-theme=light]_&]:bg-zinc-100">
-                      <div className="text-[11px] text-text-faint">上下文占用</div>
+                      <div className="text-[11px] text-text-faint">会话累计</div>
                       <div className="mt-0.5 text-2xl font-semibold tabular-nums leading-none text-text-strong">
-                        {visibleUsage.percent}%
+                        {formatK(sessionTotal)}
                       </div>
                       <div className="mt-1.5 text-[11px] leading-snug text-text-faint">
-                        {formatK(visibleUsage.used_tokens)} / {formatK(visibleUsage.max_tokens)}
+                        ↑ {formatK(sessionInput)}
+                        <br />↓ {formatK(sessionOutput)}
                       </div>
                     </div>
                     <div className="min-w-0 rounded-xl bg-emerald-500/15 px-2.5 py-2 [html[data-theme=light]_&]:bg-emerald-50">
                       <div className="text-[11px] text-emerald-400 [html[data-theme=light]_&]:text-emerald-600">
-                        本轮缓存命中
+                        会话缓存命中
                       </div>
                       <div className={`mt-0.5 text-2xl font-semibold tabular-nums leading-none ${hitColor}`}>
                         {cardHit === null ? "—" : `${cardHit}%`}
                       </div>
                       {cardHit === null ? (
-                        <div className="mt-1.5 text-[11px] leading-snug text-text-faint">本轮尚未返回用量</div>
+                        <div className="mt-1.5 text-[11px] leading-snug text-text-faint">尚未返回用量</div>
                       ) : (
                         <div className="mt-1.5 text-[11px] leading-snug text-emerald-400/75 [html[data-theme=light]_&]:text-emerald-700/70">
-                          {formatK(cardCached)} cached
+                          {formatK(sessionCached)} cached
                           <br />
-                          / {formatK(cardInput)} input
+                          / {formatK(sessionInput)} input
                         </div>
                       )}
                     </div>
+                  </div>
+                  <div className="mb-1.5 flex items-baseline justify-between">
+                    <span className="text-[12px] text-text-muted">当前上下文</span>
+                    <span className="text-[11px] tabular-nums text-text-faint">
+                      {visibleUsage.percent}% · {formatK(visibleUsage.used_tokens)} /{" "}
+                      {formatK(visibleUsage.max_tokens)}
+                    </span>
                   </div>
                   <div className="mb-3 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
                     {visibleUsage.max_tokens > 0

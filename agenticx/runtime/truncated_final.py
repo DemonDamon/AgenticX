@@ -27,6 +27,16 @@ _LENGTH_FINISH_REASONS = frozenset(
 
 SUSPECT_BODY_MAX_CHARS = 80
 
+# Vendors always close a healthy stream with a finish_reason. An empty one means
+# the SSE ended without a closing chunk — for litellm a mid-stream disconnect is
+# a clean EOF, so nothing raises and the half-written reply looks final.
+_MISSING_FINISH_REASONS = frozenset({"", "unknown", "none", "null"})
+
+# Ending on a continuation mark means the sentence was still going. Paired with
+# a missing finish_reason this is an aborted stream, not a terse answer; a
+# missing finish_reason alone is deliberately not enough (see tests).
+_CONTINUATION_END_RE = re.compile(r"[，,、；;：:]$")
+
 # Ends mid-token after a path separator, e.g. "补 T4/T" cut before "T5".
 _MID_PATH_CUT_RE = re.compile(r"[A-Za-z0-9_\u4e00-\u9fff]/[A-Za-z0-9_\u4e00-\u9fff]{0,3}$")
 
@@ -55,8 +65,9 @@ def detect_suspected_truncated_final(
 
     Priority:
     1. Explicit length / max_tokens finish reasons (any body length).
-    2. Unbalanced markdown fences / bold markers (any body length, no tools).
-    3. Legacy short-body + action-intent heuristic (≤80 chars).
+    2. Missing finish_reason + body left on a continuation mark (aborted stream).
+    3. Unbalanced markdown fences / bold markers (any body length, no tools).
+    4. Legacy short-body + action-intent heuristic (≤80 chars).
     """
     normalized_finish = str(finish_reason or "").strip().lower()
     if normalized_finish in _LENGTH_FINISH_REASONS:
@@ -68,6 +79,12 @@ def detect_suspected_truncated_final(
     body = str(visible_body or "").strip()
     if not body:
         return ""
+
+    if (
+        normalized_finish in _MISSING_FINISH_REASONS
+        and _CONTINUATION_END_RE.search(body)
+    ):
+        return "aborted_stream_no_finish_reason"
 
     if _has_unbalanced_markdown(body):
         return "unbalanced_markdown"

@@ -73,7 +73,10 @@ from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
 from agenticx.runtime.truncated_final import detect_suspected_truncated_final
 from agenticx.runtime.usage_metadata import (
+    add_usage_dicts,
+    empty_usage_dict,
     normalize_stream_usage,
+    usage_dict_has_counts,
     usage_metadata_from_llm_response,
 )
 from agenticx.runtime.assistant_output import (
@@ -3029,6 +3032,27 @@ class AgentRuntime:
             image_blocks = collect_image_blocks_from_tool_rows(turn_tool_rows)
             if image_blocks:
                 hist["blocks"] = image_blocks
+            prov = str(getattr(session, "provider_name", "") or "").strip()
+            mdl = str(getattr(session, "model_name", "") or "").strip()
+            if prov:
+                hist["provider"] = prov
+            if mdl:
+                hist["model"] = mdl
+            hist["model_selection"] = "manual"
+            if usage_metadata:
+                hist_usage = {
+                    "input_tokens": int(usage_metadata.get("input_tokens", 0) or 0),
+                    "output_tokens": int(usage_metadata.get("output_tokens", 0) or 0),
+                    "cached_tokens": int(usage_metadata.get("cached_tokens", 0) or 0),
+                    "reasoning_tokens": int(usage_metadata.get("reasoning_tokens", 0) or 0),
+                    "total_tokens": int(usage_metadata.get("total_tokens", 0) or 0),
+                }
+                if hist_usage["total_tokens"] == 0:
+                    hist_usage["total_tokens"] = (
+                        hist_usage["input_tokens"] + hist_usage["output_tokens"]
+                    )
+                if usage_dict_has_counts(hist_usage):
+                    hist["usage"] = hist_usage
             _chat_history_append_deduped(session.chat_history, hist)
 
         await self.hooks.run_on_agent_end(body, session)
@@ -3673,6 +3697,7 @@ class AgentRuntime:
                 agent_id=agent_id,
             )
 
+        turn_usage = empty_usage_dict()
         for round_idx in range(max(1, int(resume_start_round)), self.max_tool_rounds + 1):
             if await _check_should_stop():
                 yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
@@ -4378,6 +4403,7 @@ class AgentRuntime:
                 self._overflow_retries_this_turn = 0
 
                 _round_usage = usage_metadata_from_llm_response(response)
+                turn_usage = add_usage_dicts(turn_usage, _round_usage)
                 self.token_budget.record(_round_usage)
                 if _round_usage:
                     usage_snapshot = dict(_round_usage)
@@ -5407,11 +5433,24 @@ class AgentRuntime:
                 except Exception:
                     pass
 
-                _um = usage_metadata_from_llm_response(response)
+                _um = (
+                    dict(turn_usage)
+                    if usage_dict_has_counts(turn_usage)
+                    else usage_metadata_from_llm_response(response)
+                )
                 _usage_payload: dict[str, Any] | None = None
-                if _um:
+                if _um and usage_dict_has_counts(_um):
                     _usage_payload = {
-                        **_um,
+                        **{
+                            key: int(_um.get(key, 0) or 0)
+                            for key in (
+                                "input_tokens",
+                                "output_tokens",
+                                "cached_tokens",
+                                "reasoning_tokens",
+                                "total_tokens",
+                            )
+                        },
                         "model": model_name,
                         "provider": provider_name,
                         "cache_mode": latest_cache_telemetry.get("cache_mode", "disabled"),
@@ -5788,6 +5827,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
+                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
                                 terminal_reason="status_query_budget",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -5835,6 +5875,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
+                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
                                 terminal_reason="status_query_cooldown",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -5878,6 +5919,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
+                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
                                 terminal_reason="status_query_repeat",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -5941,6 +5983,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
+                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
                                 terminal_reason="status_query_throttled",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -6426,6 +6469,7 @@ class AgentRuntime:
                     yield await self._finish_terminal_reply(
                         session,
                         clean_body=summary_text,
+                        usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
                         terminal_reason="loop_halt",
                         agent_id=agent_id,
                         is_system_trigger=_is_system_trigger,

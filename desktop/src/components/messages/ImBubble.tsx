@@ -40,6 +40,7 @@ import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
 import { isGroupStreamMessageId } from "../../utils/group-stream-text";
 import { MessageTimestamp } from "./MessageTimestamp";
+import { MessageTurnMeta } from "./MessageTurnMeta";
 import { Shimmer } from "../ds/Shimmer";
 
 type Props = {
@@ -512,22 +513,22 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onCopyMessage?.(message)}
           >
-            <Copy size={13} />
+            <Copy size={14} strokeWidth={2} />
           </button>
         </HoverTip>
         <HoverTip label="引用">
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
-            <Quote size={13} />
+            <Quote size={14} strokeWidth={2} />
           </button>
         </HoverTip>
         <HoverTip label="收藏">
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
-            <Bookmark size={13} />
+            <Bookmark size={14} strokeWidth={2} />
           </button>
         </HoverTip>
         <HoverTip label="转发">
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
-            <Forward size={13} />
+            <Forward size={14} strokeWidth={2} />
           </button>
         </HoverTip>
         {onRetryMessage ? (
@@ -538,7 +539,7 @@ export function ImBubble({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onRetryMessage(message)}
             >
-              <RotateCcw size={13} />
+              <RotateCcw size={14} strokeWidth={2} />
             </button>
           </HoverTip>
         ) : null}
@@ -553,11 +554,22 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onToggleSelectMessage?.(message)}
           >
-            <LayoutList size={13} />
+            <LayoutList size={14} strokeWidth={2} />
           </button>
         </HoverTip>
       </>
     ) : null;
+
+  const assistantTurnMeta = (
+    <>
+      <MessageTurnMeta
+        usage={message.usage}
+        model={message.model}
+        modelSelection={message.modelSelection}
+      />
+      <MessageTimestamp ts={message.timestamp} align="left" />
+    </>
+  );
 
   const assistantFollowupChipButtons =
     showAssistantFollowups && message.suggestedQuestions ? (
@@ -1002,7 +1014,7 @@ export function ImBubble({
                 {assistantIconButtons && !showAssistantFollowups ? (
                   <div className={`${ASSISTANT_ACTION_ICON_ROW_CLASS} shrink-0 self-center`}>
                     {assistantIconButtons}
-                    <MessageTimestamp ts={message.timestamp} align="left" />
+                    {assistantTurnMeta}
                   </div>
                 ) : null}
               </div>
@@ -1016,7 +1028,7 @@ export function ImBubble({
               <>
                 <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
                   {assistantIconButtons}
-                  <MessageTimestamp ts={message.timestamp} align="left" />
+                  {assistantTurnMeta}
                 </div>
                 <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={assistantActionStyle}>
                   {assistantFollowupChipButtons}
@@ -1031,7 +1043,7 @@ export function ImBubble({
               <div className={actionOnlyClass}>
                 <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
                   {assistantIconButtons}
-                  <MessageTimestamp ts={message.timestamp} align="left" />
+                  {assistantTurnMeta}
                 </div>
               </div>
             )}

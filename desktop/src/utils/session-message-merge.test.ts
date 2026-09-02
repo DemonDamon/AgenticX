@@ -434,4 +434,70 @@ describe("mergeSessionMessagesTail", () => {
     expect(out.map((m) => m.content)).toEqual(["继续", "FINAL"]);
     expect(out.some((m) => String(m.content).includes("确认通过"))).toBe(false);
   });
+
+  it("keeps memory usage when disk assistant row has none yet", () => {
+    const existing: Message[] = [
+      uidMsg("user", "q", "uid-u"),
+      {
+        id: "uid-a",
+        role: "assistant",
+        content: "answer",
+        agentId: "meta",
+        provider: "moonshot",
+        model: "kimi-k2.6",
+        modelSelection: "manual",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 4,
+          cachedTokens: 0,
+          reasoningTokens: 0,
+          totalTokens: 14,
+        },
+      },
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [diskRow("user", "q"), diskRow("assistant", "answer")],
+      sid,
+    );
+    expect(out[1].usage?.totalTokens).toBe(14);
+    expect(out[1].model).toBe("kimi-k2.6");
+    expect(out[1].provider).toBe("moonshot");
+  });
+
+  it("prefers disk usage after persist", () => {
+    const existing: Message[] = [
+      uidMsg("user", "q", "uid-u"),
+      {
+        id: "uid-a",
+        role: "assistant",
+        content: "answer",
+        agentId: "meta",
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cachedTokens: 0,
+          reasoningTokens: 0,
+          totalTokens: 2,
+        },
+      },
+    ];
+    const out = mergeSessionMessagesTail(
+      existing,
+      [
+        diskRow("user", "q"),
+        {
+          role: "assistant",
+          content: "answer",
+          provider: "zhipu",
+          model: "glm-5",
+          usage: { input_tokens: 9, output_tokens: 3, total_tokens: 12 },
+        },
+      ],
+      sid,
+    );
+    expect(out[1].usage?.totalTokens).toBe(12);
+    expect(out[1].model).toBe("glm-5");
+    expect(out[1].provider).toBe("zhipu");
+  });
 });

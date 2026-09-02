@@ -237,6 +237,16 @@ export type ContextNoticeKind =
   | "budget_exceeded"
   | "widget_flow_retry";
 
+export type MessageUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+};
+
+export type ModelSelection = "manual" | "auto";
+
 export type Message = {
   id: string;
   role: MsgRole;
@@ -253,6 +263,10 @@ export type Message = {
   systemNotice?: boolean;
   provider?: string;
   model?: string;
+  /** Per-turn token ledger persisted on the assistant row. */
+  usage?: MessageUsage;
+  /** How this turn's model was chosen. Default / omitted is manual. */
+  modelSelection?: ModelSelection;
   quotedMessageId?: string;
   quotedContent?: string;
   forwardedHistory?: ForwardedHistoryCard;
@@ -715,6 +729,8 @@ type AppState = {
         | "ownerSessionId"
         | "metadata"
         | "blocks"
+        | "usage"
+        | "modelSelection"
       >
     > &
       Partial<MessageToolExtras>

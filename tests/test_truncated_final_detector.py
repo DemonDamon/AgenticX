@@ -33,6 +33,22 @@ def test_missing_finish_reason_does_not_trigger_without_action_intent() -> None:
     assert _detect(body="我来继续核实这个信息") == ""
 
 
+def test_aborted_stream_leaves_body_on_a_continuation_mark() -> None:
+    # Observed live: the gateway closed the SSE mid-reply, so no chunk carried a
+    # finish_reason and the answer was persisted ending on a comma.
+    assert _detect(
+        body="你好，团长。我在。\n\n有什么任务需要处理——分析、开发、调研还是调度分身，",
+    ) == "aborted_stream_no_finish_reason"
+
+
+def test_aborted_stream_signal_needs_a_missing_finish_reason() -> None:
+    assert _detect(body="先说结论，", finish_reason="stop") == ""
+
+
+def test_aborted_stream_signal_ignores_properly_closed_bodies() -> None:
+    assert _detect(body="你好，团长。我在。") == ""
+
+
 def test_ignores_long_body_even_without_terminal_punctuation() -> None:
     assert _detect(body="这是正常的说明文本" * 20) == ""
 

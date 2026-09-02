@@ -113,7 +113,7 @@ export const ASSISTANT_ACTION_BLOCK_CLASS = `flex min-w-0 flex-col ${ASSISTANT_A
 
 /** Block-level copy/quote row (fixed height so gaps measure consistently). */
 export const ASSISTANT_ACTION_ICON_ROW_CLASS =
-  "agx-assistant-action-icons group flex h-5 w-fit max-w-full flex-wrap items-center gap-0.5 text-text-faint";
+  "agx-assistant-action-icons group flex h-5 w-fit max-w-full flex-wrap items-center gap-0.5 text-text-muted";
 
 /**
  * ReAct block tail: last body row + icon row + follow-up chips share one flex column

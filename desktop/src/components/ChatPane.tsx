@@ -35,6 +35,7 @@ import {
   type ContentBlock,
   type Message,
   type MessageAttachment,
+  type MessageUsage,
   type PendingConfirm,
   type QueuedMessage,
   type SidePanelTab,
@@ -141,6 +142,7 @@ import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
 import { GroupExpertActivityCard } from "./messages/GroupExpertActivityCard";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
+import { MessageTurnMeta } from "./messages/MessageTurnMeta";
 import {
   ASSISTANT_ACTION_ICON_ROW_CLASS,
   ASSISTANT_ACTION_RHYTHM_END_CLASS,
@@ -278,6 +280,7 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
+import { parseMessageUsage } from "../utils/message-turn-meta";
 import {
   assistantVisibleBodyForUi,
   buildCommittedAssistantPatch,
@@ -8276,7 +8279,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={() => void copyReActBlock(workMessages)}
                             >
-                              <Copy size={13} />
+                              <Copy size={14} strokeWidth={2} />
                             </button>
                           </HoverTip>
                           {lastAssistantInBlock ? (
@@ -8293,7 +8296,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                                     )
                                   }
                                 >
-                                  <Quote size={13} />
+                                  <Quote size={14} strokeWidth={2} />
                                 </button>
                               </HoverTip>
                               <HoverTip label="收藏">
@@ -8303,7 +8306,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={() => void favoriteMessage(lastAssistantInBlock, undefined)}
                                 >
-                                  <Bookmark size={13} />
+                                  <Bookmark size={14} strokeWidth={2} />
                                 </button>
                               </HoverTip>
                               <HoverTip label="转发">
@@ -8313,7 +8316,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                                   onMouseDown={(e) => e.preventDefault()}
                                   onClick={() => forwardOneMessage(lastAssistantInBlock, undefined)}
                                 >
-                                  <Forward size={13} />
+                                  <Forward size={14} strokeWidth={2} />
                                 </button>
                               </HoverTip>
                             </>
@@ -8329,9 +8332,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={() => toggleSelectBlock(workMessages)}
                             >
-                              <LayoutList size={13} />
+                              <LayoutList size={14} strokeWidth={2} />
                             </button>
                           </HoverTip>
+                          <MessageTurnMeta
+                            usage={lastAssistantInBlock?.usage}
+                            model={lastAssistantInBlock?.model}
+                            modelSelection={lastAssistantInBlock?.modelSelection}
+                          />
                           <MessageTimestamp ts={lastAssistantInBlock?.timestamp} align="left" />
                         </div>
                       );
@@ -9930,6 +9938,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       let pendingSearchedQueries: string[] = [];
       let pendingReasoning: string | undefined = undefined;
       let pendingReasoningSeconds: number | undefined = undefined;
+      let pendingTurnUsage: MessageUsage | undefined;
+      let pendingTurnModel = { provider: chatProvider, model: chatModel };
       const syncTurnRefsSnapshot = () => {
         turnRefsSnapshot.references = pendingReferences;
         turnRefsSnapshot.queries = pendingSearchedQueries;
@@ -11481,11 +11491,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
             }
             if (payload.type === "token_usage") {
-              const inp = Number(payload.data?.input_tokens ?? 0);
-              const out = Number(payload.data?.output_tokens ?? 0);
-              const cached = Number(payload.data?.cached_tokens ?? 0);
+              const parsed = parseMessageUsage(payload.data);
+              const inp = parsed?.inputTokens ?? 0;
+              const out = parsed?.outputTokens ?? 0;
+              const cached = parsed?.cachedTokens ?? 0;
               if (inp > 0 || out > 0 || cached > 0) {
                 useAppStore.getState().accumulatePaneTokens(pane.id, inp, out, cached);
+              }
+              if (parsed) {
+                pendingTurnUsage = parsed;
+                const p = String(payload.data?.provider ?? "").trim() || chatProvider;
+                const m = String(payload.data?.model ?? "").trim() || chatModel;
+                pendingTurnModel = { provider: p, model: m };
+                useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
+                  usage: parsed,
+                  provider: p || undefined,
+                  model: m || undefined,
+                  modelSelection: "manual",
+                });
               }
             }
             if (payload.type === "compaction") {
@@ -11620,10 +11643,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             },
           }
         : { metadata: { turn_terminal: false } };
-      const turnExtras =
-        refExtras || sugExtras || Object.keys(reasoningExtras).length > 0 || receivedFinalEvent
+      const turnUsageExtras = {
+        ...(pendingTurnUsage ? { usage: pendingTurnUsage } : {}),
+        modelSelection: "manual" as const,
+      };
+      const turnExtras = {
+        ...(refExtras || sugExtras || Object.keys(reasoningExtras).length > 0 || receivedFinalEvent
           ? { ...refExtras, ...sugExtras, ...reasoningExtras, ...terminalMetaExtras }
-          : undefined;
+          : {}),
+        ...turnUsageExtras,
+      };
       const completedAt = Date.now();
       const stampLastAssistantCompletedAt = () => {
         useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
@@ -11642,7 +11671,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (mid !== null && trimmedFull === mid) {
           streamCommitRegistryRef.current.markCommitted(requestSessionId);
           useAppStore.getState().mergeLastPaneMessageByRole(pane.id, "assistant", {
-            ...(turnExtras ?? {}),
+            ...turnExtras,
             ...streamBlockExtras,
             timestamp: completedAt,
           });
@@ -11652,10 +11681,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             "assistant",
             full,
             "meta",
-            chatProvider,
-            chatModel,
+            pendingTurnModel.provider,
+            pendingTurnModel.model,
             undefined,
-            { ...(turnExtras ?? {}), ...streamBlockExtras, timestamp: completedAt },
+            { ...turnExtras, ...streamBlockExtras, timestamp: completedAt },
           );
           streamCommitRegistryRef.current.markCommitted(requestSessionId);
         }
@@ -11689,11 +11718,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           "assistant",
           full || "",
           "meta",
-          chatProvider,
-          chatModel,
+          pendingTurnModel.provider,
+          pendingTurnModel.model,
           undefined,
           {
-            ...(turnExtras ?? {}),
+            ...turnExtras,
             blocks: streamedBlocksRef.current,
             timestamp: completedAt,
           },

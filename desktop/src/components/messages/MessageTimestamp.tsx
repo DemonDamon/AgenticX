@@ -20,7 +20,7 @@ export function MessageTimestamp({ ts, align }: { ts?: number; align: "left" | "
     );
   }
   return (
-    <span className="pointer-events-none ml-1 select-none whitespace-nowrap text-[11px] leading-none text-text-faint opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+    <span className="pointer-events-none ml-3 select-none whitespace-nowrap text-[13px] leading-none text-text-faint opacity-0 transition-opacity duration-150 group-hover:opacity-100">
       {label}
     </span>
   );

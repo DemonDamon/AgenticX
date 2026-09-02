@@ -196,3 +196,40 @@ def usage_metadata_from_llm_response(response: Any) -> dict[str, int] | None:
         "cached_tokens": cached,
         "reasoning_tokens": reasoning,
     }
+
+
+_USAGE_KEYS = (
+    "input_tokens",
+    "output_tokens",
+    "cached_tokens",
+    "reasoning_tokens",
+    "total_tokens",
+)
+
+
+def empty_usage_dict() -> dict[str, int]:
+    """Return a zeroed usage dict for one chat turn."""
+    return {key: 0 for key in _USAGE_KEYS}
+
+
+def add_usage_dicts(
+    acc: dict[str, int] | None,
+    delta: dict[str, int] | None,
+) -> dict[str, int]:
+    """Sum two usage dicts; backfill total_tokens from input+output when needed."""
+    out = empty_usage_dict()
+    for src in (acc, delta):
+        if not src:
+            continue
+        for key in _USAGE_KEYS:
+            out[key] += max(0, int(src.get(key, 0) or 0))
+    if out["total_tokens"] == 0 and (out["input_tokens"] or out["output_tokens"]):
+        out["total_tokens"] = out["input_tokens"] + out["output_tokens"]
+    return out
+
+
+def usage_dict_has_counts(usage: dict[str, int] | None) -> bool:
+    """True when any ledger field is a positive count."""
+    if not usage:
+        return False
+    return any(int(usage.get(key, 0) or 0) > 0 for key in _USAGE_KEYS)

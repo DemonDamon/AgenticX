@@ -1,4 +1,5 @@
 import type { Message, MessageAttachment, MsgRole } from "../store";
+import { parseMessageUsage, parseModelSelection } from "./message-turn-meta";
 import { isMisclassifiedUploadReference } from "./composer-upload-key";
 import { normalizeReferenceAttachments } from "./reference-attachment";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
@@ -179,6 +180,8 @@ export type LoadedSessionMessage = {
   avatar_url?: string;
   provider?: string;
   model?: string;
+  model_selection?: string;
+  usage?: unknown;
   quoted_message_id?: string;
   quoted_content?: string;
   timestamp?: number;
@@ -270,6 +273,8 @@ export function mapLoadedSessionMessage(
     avatarUrl: item.avatar_url,
     provider: item.provider,
     model: item.model,
+    usage: parseMessageUsage(item.usage),
+    modelSelection: parseModelSelection(item.model_selection),
     quotedMessageId: item.quoted_message_id,
     quotedContent: item.quoted_content,
     timestamp: typeof item.timestamp === "number" ? item.timestamp : undefined,

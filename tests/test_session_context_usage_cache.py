@@ -11,9 +11,28 @@ from types import SimpleNamespace
 from agenticx.runtime.usage_store import UsageStore
 from agenticx.studio.context_usage import (
     _reset_usage_caches,
+    _text_tokens,
     estimate_session_context_usage,
     load_session_cache_payload,
 )
+
+
+def test_text_tokens_counts_cjk_denser_than_latin() -> None:
+    """A flat chars/4 ratio undercounts Chinese by ~40%; CJK is ~1 char/token."""
+    assert _text_tokens("") == 0
+    # 100 CJK chars must land far above the old 100 // 4 == 25.
+    assert 70 <= _text_tokens("你" * 100) <= 90
+    # Latin stays in the historical band.
+    assert 25 <= _text_tokens("a" * 100) <= 35
+    # Mixed text sits between the two pure cases.
+    mixed = "你" * 50 + "a" * 50
+    assert _text_tokens("a" * 100) < _text_tokens(mixed) < _text_tokens("你" * 100)
+
+
+def test_text_tokens_is_monotonic_and_never_zero_for_content() -> None:
+    assert _text_tokens("x") >= 1
+    assert _text_tokens("你好") >= 1
+    assert _text_tokens("你" * 200) > _text_tokens("你" * 100)
 
 
 def test_load_session_cache_payload_reads_session_totals(tmp_path, monkeypatch) -> None:

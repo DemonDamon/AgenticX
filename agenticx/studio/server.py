@@ -2156,6 +2156,8 @@ def create_studio_app() -> FastAPI:
             logger.warning("session cache payload failed for %s: %s", session_id, cache)
             cache = {
                 "session_input_tokens": 0,
+                "session_output_tokens": 0,
+                "session_total_tokens": 0,
                 "session_cached_tokens": 0,
                 "session_cache_ratio": 0.0,
                 "last_input_tokens": 0,
