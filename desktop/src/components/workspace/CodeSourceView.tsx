@@ -16,6 +16,7 @@ import Prism from "prismjs";
 import "./preview-prism-setup";
 import {
   detectFoldRanges,
+  guideCoversLine,
   hiddenLinesForFolds,
   visualIndentCols,
   type CodeFoldRange,
@@ -68,11 +69,12 @@ function coveringGuides(
   lineNo: number,
   ranges: CodeFoldRange[],
   indentByStart: Map<number, number>,
+  lineText: string,
 ): { col: number; color: string }[] {
   const guides: { col: number; color: string }[] = [];
   let depth = 0;
   for (const range of ranges) {
-    if (lineNo <= range.start || lineNo > range.end) continue;
+    if (!guideCoversLine(range, lineNo, lineText)) continue;
     const col = indentByStart.get(range.start) ?? 0;
     guides.push({ col, color: GUIDE_COLORS[depth % GUIDE_COLORS.length]! });
     depth += 1;
@@ -185,7 +187,7 @@ export function CodeSourceView({
         const isFolded = Boolean(range && folded.has(lineNo));
         const isAdded = added.has(lineNo);
         const isFocus = focusStart > 0 && lineNo >= focusStart && lineNo <= focusEnd;
-        const guides = coveringGuides(lineNo, ranges, indentByStart);
+        const guides = coveringGuides(lineNo, ranges, indentByStart, lines[index] ?? "");
         return (
           <div
             key={lineNo}

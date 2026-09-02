@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectFoldRanges, hiddenLinesForFolds } from "./code-source-fold";
+import { detectFoldRanges, guideCoversLine, hiddenLinesForFolds } from "./code-source-fold";
 
 const GO = `package main
 
@@ -52,5 +52,26 @@ describe("detectFoldRanges", () => {
     expect(hidden.has(9)).toBe(true);
     expect(hidden.has(16)).toBe(true);
     expect(hidden.has(17)).toBe(false);
+  });
+});
+
+describe("guideCoversLine", () => {
+  const main = { start: 8, end: 15 };
+  const innerIf = { start: 10, end: 13 };
+
+  it("paints interior lines but not the opening line", () => {
+    expect(guideCoversLine(main, 8, "func main() {")).toBe(false);
+    expect(guideCoversLine(main, 14, '    fmt.Println("已保存")')).toBe(true);
+  });
+
+  it("stops before a closing brace or paren so the guide does not run under }", () => {
+    expect(guideCoversLine(main, 15, "}")).toBe(false);
+    expect(guideCoversLine(innerIf, 13, "    }")).toBe(false);
+    expect(guideCoversLine({ start: 3, end: 6 }, 6, ")")).toBe(false);
+  });
+
+  it("still covers the last indented line of a Python block", () => {
+    expect(guideCoversLine({ start: 1, end: 4 }, 4, '        print("ok")')).toBe(true);
+    expect(guideCoversLine({ start: 3, end: 4 }, 4, '        print("ok")')).toBe(true);
   });
 });

@@ -123,6 +123,17 @@ export function widestRangeByStart(ranges: CodeFoldRange[]): CodeFoldRange[] {
   return [...byStart.values()].sort((a, b) => a.start - b.start || b.end - a.end);
 }
 
+/** True when this fold range should paint an indent guide on `lineNo`. */
+export function guideCoversLine(
+  range: CodeFoldRange,
+  lineNo: number,
+  lineText: string,
+): boolean {
+  if (lineNo <= range.start || lineNo > range.end) return false;
+  if (lineNo === range.end && /^\s*[})\]]/.test(lineText)) return false;
+  return true;
+}
+
 export function hiddenLinesForFolds(
   ranges: CodeFoldRange[],
   foldedStarts: ReadonlySet<number>,
