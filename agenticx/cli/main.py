@@ -126,6 +126,16 @@ def _get_cc_bridge_app():
         raise typer.Exit(1)
 
 
+def _get_wb_bridge_app():
+    """Lazy import wb-bridge sub-application."""
+    try:
+        from agenticx.cli.wb_bridge_commands import wb_bridge_app
+        return wb_bridge_app
+    except ImportError:
+        console.print("[bold red]错误:[/bold red] 无法导入 wb_bridge 模块")
+        raise typer.Exit(1)
+
+
 def _get_generate_app():
     """Lazy import generate sub-application."""
     try:
@@ -446,6 +456,13 @@ except Exception:
 try:
     cc_bridge_app = _get_cc_bridge_app()
     app.add_typer(cc_bridge_app)
+except Exception:
+    pass
+
+# 注册 wb-bridge 子命令 (延迟加载)
+try:
+    wb_bridge_app = _get_wb_bridge_app()
+    app.add_typer(wb_bridge_app)
 except Exception:
     pass
 

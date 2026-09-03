@@ -190,6 +190,8 @@ _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
         "list_scheduled_tasks",
         "get_automation_task_logs",
         "cc_bridge_list",
+        "wb_bridge_list",
+        "wb_bridge_describe",
         "bash_bg_poll",
         "knowledge_search",  # Plan-Id: machi-kb-stage1-local-mvp — read-only vector search.
         "knowledge_synthesize",
@@ -1162,6 +1164,117 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["session_id", "request_id", "allow"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wb_bridge_start",
+            "description": (
+                "Start a local CodeBuddy headless session via the WB bridge HTTP server (run "
+                "`agx wb-bridge serve` in another terminal). Token is read from AGX_WB_BRIDGE_TOKEN or "
+                "~/.agenticx/config.yaml wb_bridge.token (auto-generated on first use). Default address "
+                "is 127.0.0.1:9743. Then wb_bridge_send with the returned session_id."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cwd": {
+                        "type": "string",
+                        "description": "Working directory for codebuddy child; defaults to session workspace_dir.",
+                    },
+                    "permission_mode": {
+                        "type": "string",
+                        "enum": [
+                            "default",
+                            "acceptEdits",
+                            "bypassPermissions",
+                            "dontAsk",
+                            "plan",
+                            "auto",
+                        ],
+                        "description": "Session-level --permission-mode. Invalid values fall back to default.",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wb_bridge_send",
+            "description": (
+                "Send a user turn to an existing WB bridge session and wait for result/timeout. "
+                "Requires bridge at wb_bridge.url (default 127.0.0.1:9743) and matching bearer token. "
+                "Start the server first: agx wb-bridge serve."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "text": {"type": "string", "description": "User prompt to send."},
+                    "wait_seconds": {
+                        "type": "number",
+                        "description": "Seconds to wait for a result/success line (default 180).",
+                    },
+                },
+                "required": ["session_id", "text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wb_bridge_list",
+            "description": (
+                "List WB bridge sessions. Requires `agx wb-bridge serve` at 127.0.0.1:9743 "
+                "with AGX_WB_BRIDGE_TOKEN or ~/.agenticx/config.yaml wb_bridge.token."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wb_bridge_describe",
+            "description": (
+                "Describe one WB bridge session by session_id. Requires `agx wb-bridge serve` "
+                "at 127.0.0.1:9743 with AGX_WB_BRIDGE_TOKEN or ~/.agenticx/config.yaml wb_bridge.token."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                },
+                "required": ["session_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wb_bridge_stop",
+            "description": (
+                "Stop a WB bridge session. Requires `agx wb-bridge serve` at 127.0.0.1:9743 "
+                "with AGX_WB_BRIDGE_TOKEN or ~/.agenticx/config.yaml wb_bridge.token."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                },
+                "required": ["session_id"],
                 "additionalProperties": False,
             },
         },
@@ -6009,6 +6122,120 @@ async def _tool_cc_bridge_permission(arguments: Dict[str, Any], session: StudioS
     )
 
 
+async def _tool_wb_bridge_http(
+    session: StudioSession,
+    method: str,
+    path: str,
+    json_body: Optional[Dict[str, Any]] = None,
+    *,
+    timeout_sec: float = 300.0,
+) -> str:
+    _ = session
+    from agenticx.wb_bridge.settings import (
+        validate_bridge_url_for_studio,
+        wb_bridge_base_url,
+        wb_bridge_token,
+    )
+
+    try:
+        import httpx
+    except ImportError:
+        return "ERROR: httpx is required for wb_bridge tools"
+
+    base = wb_bridge_base_url()
+    err = validate_bridge_url_for_studio(base)
+    if err:
+        return f"ERROR: {err}"
+    token = wb_bridge_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{base}{path}"
+    client_kwargs = _cc_bridge_http_client_kwargs(base, timeout_sec)
+    try:
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            m = method.upper()
+            if m == "GET":
+                r = await client.get(url, headers=headers)
+            elif m == "POST":
+                r = await client.post(url, headers=headers, json=json_body)
+            elif m == "DELETE":
+                r = await client.delete(url, headers=headers)
+            else:
+                return f"ERROR: unsupported HTTP method {method}"
+    except httpx.ConnectError as exc:
+        return (
+            "ERROR: WB bridge not reachable (connection refused). "
+            "Start it first: agx wb-bridge serve "
+            f"(expects {base}). Details: {exc}"
+        )
+    except httpx.TimeoutException as exc:
+        return f"ERROR: WB bridge HTTP timed out: {exc}"
+    except httpx.HTTPError as exc:
+        return f"ERROR: WB bridge HTTP failed: {exc}"
+    text = r.text
+    if r.status_code in (401, 403):
+        return (
+            f"ERROR: WB bridge auth rejected (HTTP {r.status_code}). "
+            "Use the same token on the bridge as in ~/.agenticx/config.yaml (wb_bridge.token) "
+            f"or set matching WB_BRIDGE_TOKEN / AGX_WB_BRIDGE_TOKEN. Body: {text[:800]}"
+        )
+    if r.status_code >= 400:
+        return f"ERROR: bridge {r.status_code}: {text[:2000]}"
+    return text
+
+
+async def _tool_wb_bridge_start(arguments: Dict[str, Any], session: StudioSession) -> str:
+    cwd = str(arguments.get("cwd", "") or "").strip()
+    if not cwd:
+        cwd = _session_default_cwd_for_cc_bridge(session)
+    mode = str(arguments.get("permission_mode", "") or "default").strip()
+    return await _tool_wb_bridge_http(
+        session,
+        "POST",
+        "/v1/sessions",
+        {"cwd": cwd, "permission_mode": mode},
+        timeout_sec=60.0,
+    )
+
+
+async def _tool_wb_bridge_send(arguments: Dict[str, Any], session: StudioSession) -> str:
+    sid = str(arguments.get("session_id", "")).strip()
+    text = str(arguments.get("text", "") or "")
+    if not sid or not text:
+        return "ERROR: session_id and text are required"
+    wait = arguments.get("wait_seconds", 180.0)
+    try:
+        wait_f = float(wait)
+    except (TypeError, ValueError):
+        wait_f = 180.0
+    wait_f = max(1.0, min(3600.0, wait_f))
+    return await _tool_wb_bridge_http(
+        session,
+        "POST",
+        f"/v1/sessions/{sid}/message",
+        {"text": text, "wait_seconds": wait_f},
+        timeout_sec=wait_f + 45.0,
+    )
+
+
+async def _tool_wb_bridge_list(arguments: Dict[str, Any], session: StudioSession) -> str:
+    _ = arguments
+    return await _tool_wb_bridge_http(session, "GET", "/v1/sessions", None, timeout_sec=30.0)
+
+
+async def _tool_wb_bridge_describe(arguments: Dict[str, Any], session: StudioSession) -> str:
+    sid = str(arguments.get("session_id", "") or "").strip()
+    if not sid:
+        return "ERROR: session_id required"
+    return await _tool_wb_bridge_http(session, "GET", f"/v1/sessions/{sid}", None, timeout_sec=15.0)
+
+
+async def _tool_wb_bridge_stop(arguments: Dict[str, Any], session: StudioSession) -> str:
+    sid = str(arguments.get("session_id", "") or "").strip()
+    if not sid:
+        return "ERROR: session_id required"
+    return await _tool_wb_bridge_http(session, "DELETE", f"/v1/sessions/{sid}", None, timeout_sec=30.0)
+
+
 _SCREENSHOT_TOOL_NAMES = frozenset({
     "browser_screenshot", "screenshot", "take_screenshot",
     "browser_take_screenshot", "computer_screenshot",
@@ -8901,6 +9128,16 @@ async def dispatch_tool_async(
             return await _tool_cc_bridge_stop(arguments, session)
         if name == "cc_bridge_permission":
             return await _tool_cc_bridge_permission(arguments, session)
+        if name == "wb_bridge_start":
+            return await _tool_wb_bridge_start(arguments, session)
+        if name == "wb_bridge_send":
+            return await _tool_wb_bridge_send(arguments, session)
+        if name == "wb_bridge_list":
+            return await _tool_wb_bridge_list(arguments, session)
+        if name == "wb_bridge_describe":
+            return await _tool_wb_bridge_describe(arguments, session)
+        if name == "wb_bridge_stop":
+            return await _tool_wb_bridge_stop(arguments, session)
         if name == "desktop_screenshot":
             return await _tool_desktop_screenshot(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "desktop_mouse_click":
