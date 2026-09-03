@@ -21,4 +21,12 @@ describe("artifactGlyph", () => {
     expect(go.tint).not.toBe(py.tint);
     expect(txt.tint).toBe("#6F8CFF");
   });
+
+  it("uses a sky-blue folded-sheet swatch for markdown, not the old amber tile", () => {
+    const md = artifactGlyph("/tmp/notes.md");
+    expect(md.kind).toBe("md");
+    expect(md.tint).toBe("#8BB6EE");
+    expect(md.fg).toBe("#1E3F70");
+    expect(md.tint).not.toBe("#C9843A");
+  });
 });

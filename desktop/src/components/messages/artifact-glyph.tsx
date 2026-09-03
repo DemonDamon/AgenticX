@@ -2,6 +2,7 @@
  * File-type marks for deliverable cards and the workbench change list.
  * Compact original filled SVGs (16px) — no webfont / no remote icon pack,
  * so list refresh stays cheap. TXT follows a periwinkle folded sheet;
+ * MD follows a sky-blue folded sheet with a navy M↓ mark;
  * generic source files use a silver folded sheet; known languages get
  * distinct color lockups.
  *
@@ -118,7 +119,7 @@ const KIND_SWATCH: Record<FileMarkKind, { tint: string; fg: string }> = {
   txt: { tint: "#6F8CFF", fg: "#FFFFFF" },
   code: { tint: "#C9CED8", fg: "#5C6570" },
   generic: { tint: "#C9CED8", fg: "#5C6570" },
-  md: { tint: "#C9843A", fg: "#FFFFFF" },
+  md: { tint: "#8BB6EE", fg: "#1E3F70" },
   py: { tint: "#3776AB", fg: "#FFD43B" },
   go: { tint: "#00ADD8", fg: "#FFFFFF" },
   c: { tint: "#5C8DBC", fg: "#FFFFFF" },
@@ -151,7 +152,8 @@ function Mark({ kind, children }: { kind: FileMarkKind; children: ReactNode }) {
       viewBox="0 0 16 16"
       width={16}
       height={16}
-      className="h-4 w-4"
+      preserveAspectRatio="xMidYMid meet"
+      className="h-4 w-4 shrink-0"
       fill="none"
       aria-hidden
       data-file-mark={kind}
@@ -224,10 +226,26 @@ export function FileTypeMark({ kind }: { kind: FileMarkKind }) {
     case "md":
       return (
         <Mark kind="md">
-          <rect x="0.6" y="2.4" width="14.8" height="11.2" rx="2" fill="#C9843A" />
           <path
-            fill="#fff"
-            d="M3.3 11.2V4.9L5.7 8.05 8.1 4.9v6.3H3.3Zm6.5-2.4 1.85 2.4 1.85-2.4h.05V11.2h1.15V4.9h-1.15v3.5L11.7 6.3 9.8 8.4V4.9H8.65v6.3H9.8V8.8Z"
+            fill="#8BB6EE"
+            d="M2.95 1.85h8.55L14.3 4.65v8.3c0 .7-.55 1.25-1.25 1.25H2.95c-.7 0-1.25-.55-1.25-1.25V3.1c0-.7.55-1.25 1.25-1.25Z"
+          />
+          <path fill="#4F86C8" d="M11.5 1.85v2.8h2.8Z" />
+          <path
+            fill="none"
+            stroke="#1E3F70"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M4.15 11.05V7.25L6.55 9.5 8.95 7.25v3.8"
+          />
+          <path
+            fill="none"
+            stroke="#1E3F70"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M10.75 7.3v2.45M9.7 9.2 10.75 11.05 11.8 9.2"
           />
         </Mark>
       );

@@ -40,6 +40,11 @@ describe("TurnArtifactCard deliverable grid", () => {
     expect(html).not.toContain("查看全部");
     expect(html).toContain('data-file-mark="md"');
     expect(html).toContain('data-file-mark="sheet"');
+    expect(html).toContain("#8BB6EE");
+    expect(html).toContain("#1E3F70");
+    expect(html).not.toContain("#C9843A");
+    expect(html).toContain("M2.95 1.85h8.55");
+    expect(html).not.toContain("M3.15 1.55h7.15L12.95 4.2");
     expect(html).toContain("agx-artifact-grid--multi");
     expect(html).toContain("justify-between");
   });
