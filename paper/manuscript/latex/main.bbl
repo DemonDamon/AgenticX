@@ -1,0 +1,155 @@
+\begin{thebibliography}{20}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Brooks(1995)]{brooks1995mythical}
+Frederick~P Brooks.
+\newblock \emph{The Mythical Man-Month: Essays on Software Engineering}.
+\newblock Addison-Wesley, anniversary edition, 1995.
+
+\bibitem[Cemri et~al.(2025)Cemri, Guo, Stoica, et~al.]{cemri2025masfail}
+Mert Cemri, Zhiwei~Daniel Guo, Ion Stoica, et~al.
+\newblock Why do multi-agent llm systems fail?
+\newblock \emph{arXiv preprint arXiv:2503.13657}, 2025.
+
+\bibitem[Chen et~al.(2024)Chen, Davis, Hanin, Bailis, Stoica, Zaharia, and
+  Zou]{chen2024morellmcalls}
+Lingjiao Chen, Jared~Quincy Davis, Boris Hanin, Peter Bailis, Ion Stoica, Matei
+  Zaharia, and James Zou.
+\newblock Are more llm calls all you need? towards scaling laws of compound
+  inference systems.
+\newblock arXiv preprint arXiv:2403.02419, 2024.
+
+\bibitem[{CrewAI Inc.}(2024)]{crewai2024}
+{CrewAI Inc.}
+\newblock Crewai: Framework for orchestrating role-playing ai agents.
+\newblock \url{https://github.com/crewAIInc/crewAI}, 2024.
+
+\bibitem[Guo et~al.(2024)Guo, Chen, Wang, Chang, Pei, Chawla, Wiest, and
+  Zhang]{guo2024survey}
+Taicheng Guo, Xiuying Chen, Yujie Wang, Ruidong Chang, Shichao Pei, Nitesh~V.
+  Chawla, Olaf Wiest, and Xiangliang Zhang.
+\newblock Large language model based multi-agents: A survey of progress and
+  challenges.
+\newblock In \emph{International Joint Conference on Artificial Intelligence
+  (IJCAI)}, 2024.
+
+\bibitem[Hong et~al.(2024)Hong, Zhuge, Chen, Zheng, Cheng, Zhang, Wang, Wang,
+  Yau, Lin, et~al.]{hong2024metagpt}
+Sirui Hong, Mingchen Zhuge, Jonathan Chen, Xiawu Zheng, Yuheng Cheng, Ceyao
+  Zhang, Jinlin Wang, Zili Wang, Steven~Kuan Yau, Zijuan Lin, et~al.
+\newblock Metagpt: Meta programming for a multi-agent collaborative framework.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2024.
+
+\bibitem[Huot et~al.(2025)Huot, Amplayo, Palomaki, Jakobovits, Clark, and
+  Lapata]{huot2025agentsroom}
+Fantine Huot, Reinald~Kim Amplayo, Jennimaria Palomaki, Alice~Shoshana
+  Jakobovits, Elizabeth Clark, and Mirella Lapata.
+\newblock Agents' room: Narrative generation through multi-step collaboration.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2025.
+
+\bibitem[Jimenez et~al.(2024)Jimenez, Yang, Wettig, Yao, Pei, Press, and
+  Narasimhan]{jimenez2024swebench}
+Carlos Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press,
+  and Karthik Narasimhan.
+\newblock Swe-bench: Can language models resolve real-world github issues?
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2024.
+
+\bibitem[{LangChain Inc.}(2024)]{langgraph2024}
+{LangChain Inc.}
+\newblock Langgraph: Building stateful, multi-actor applications with llms.
+\newblock \url{https://github.com/langchain-ai/langgraph}, 2024.
+
+\bibitem[Li et~al.(2024)Li, Zhang, Yu, Fu, and Ye]{li2024moreagents}
+Junyou Li, Qin Zhang, Yangbin Yu, Qiang Fu, and Deheng Ye.
+\newblock More agents is all you need.
+\newblock \emph{Transactions of the Association for Computational Linguistics},
+  12, 2024.
+
+\bibitem[Liu et~al.(2024)Liu, Yu, Zhang, Xu, Lei, Lai, Gu, Ding, Men, Yang,
+  et~al.]{liu2023agentbench}
+Xiao Liu, Hao Yu, Hanchen Zhang, Yifan Xu, Xuanyu Lei, Hanyu Lai, Yu~Gu,
+  Hangliang Ding, Kaiwen Men, Kejuan Yang, et~al.
+\newblock Agentbench: Evaluating llms as agents.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2024.
+
+\bibitem[Malone and Crowston(1994)]{malone1994interdisciplinary}
+Thomas~W Malone and Kevin Crowston.
+\newblock The interdisciplinary study of coordination.
+\newblock \emph{ACM Computing Surveys}, 26\penalty0 (1):\penalty0 87--119,
+  1994.
+
+\bibitem[Mialon et~al.(2024)Mialon, Fourrier, Swift, Wolf, LeCun, and
+  Scialom]{mialon2023gaia}
+Gr{\'e}goire Mialon, Cl{\'e}mentine Fourrier, Craig Swift, Thomas Wolf, Yann
+  LeCun, and Thomas Scialom.
+\newblock Gaia: A benchmark for general ai assistants.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2024.
+
+\bibitem[Qian et~al.(2024)Qian, Liu, Liu, Chen, Dang, Li, Yang, Chen, Su, Cong,
+  et~al.]{qian2024chatdev}
+Chen Qian, Wei Liu, Hongzhang Liu, Ning Chen, Yufan Dang, Jiahao Li, Cheng
+  Yang, Weize Chen, Yusheng Su, Xin Cong, et~al.
+\newblock Chatdev: Communicative agents for software development.
+\newblock In \emph{Annual Meeting of the Association for Computational
+  Linguistics (ACL)}, 2024.
+
+\bibitem[Woolley et~al.(2010)Woolley, Chabris, Pentland, Hashmi, and
+  Malone]{woolley2010evidence}
+Anita~Williams Woolley, Christopher~F Chabris, Alex Pentland, Nada Hashmi, and
+  Thomas~W Malone.
+\newblock Evidence for a collective intelligence factor in the performance of
+  human groups.
+\newblock \emph{Science}, 330\penalty0 (6004):\penalty0 686--688, 2010.
+
+\bibitem[Wu et~al.(2023)Wu, Bansal, Zhang, Wu, Li, Zhu, Jiang, Zhang, Zhang,
+  Liu, et~al.]{wu2023autogen}
+Qingyun Wu, Gagan Bansal, Jieyu Zhang, Yiran Wu, Beibin Li, Erkang Zhu,
+  Li~Jiang, Xiaoyun Zhang, Shaokun Zhang, Jiale Liu, et~al.
+\newblock Autogen: Enabling next-gen llm applications via multi-agent
+  conversation.
+\newblock In \emph{arXiv preprint arXiv:2308.08155}, 2023.
+
+\bibitem[Xie et~al.(2024)Xie, Zhang, Chen, Li, Zhao, Cao, Hua, Zhou, Shi, Chu,
+  et~al.]{xie2024osworld}
+Tianbao Xie, Danyang Zhang, Jixuan Chen, Xin Li, Siheng Zhao, Ruisheng Cao,
+  Toh~Jing Hua, Wenfeng Zhou, Dennis Shi, Victor Chu, et~al.
+\newblock Osworld: Benchmarking multimodal agents for open-ended tasks in real
+  computer environments.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2024.
+
+\bibitem[Xu et~al.(2024)Xu, Li, Yuan, Wu, Zhong, Xu, Zhang, Peng, Wang, Yang,
+  et~al.]{xu2024theagentcompany}
+Frank Xu, Boyu Li, Zidian Yuan, Shuyi Wu, Skyler Zhong, Hongxuan Xu, Yuchen
+  Zhang, Min Peng, Jiaxuan Wang, Yu~Yang, et~al.
+\newblock Theagentcompany: Benchmarking llm agents on consequential real world
+  tasks.
+\newblock \emph{arXiv preprint arXiv:2412.14161}, 2024.
+
+\bibitem[Zheng et~al.(2023)Zheng, Chiang, Sheng, Zhuang, Wu, Zhuang, Lin, Li,
+  Li, Xing, et~al.]{zheng2023judging}
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao
+  Zhuang, Zi~Lin, Zhuohan Li, Dacheng Li, Eric Xing, et~al.
+\newblock Judging llm-as-a-judge with mt-bench and chatbot arena.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2023.
+
+\bibitem[Zhu et~al.(2025)Zhu, Du, Hong, Yang, Guo, Wang, Wang, Qian, Tang, Ji,
+  and You]{zhu2025multiagentbench}
+Kunlun Zhu, Hongyi Du, Zhaochen Hong, Xiaocheng Yang, Shuyi Guo, Zhe Wang,
+  Zhenhailong Wang, Cheng Qian, Xiangru Tang, Heng Ji, and Jiaxuan You.
+\newblock Multiagentbench: Evaluating the collaboration and competition of llm
+  agents.
+\newblock In \emph{Proceedings of the 63rd Annual Meeting of the Association
+  for Computational Linguistics (ACL)}, 2025.
+
+\end{thebibliography}

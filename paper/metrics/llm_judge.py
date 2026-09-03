@@ -118,10 +118,14 @@ def build_rubric(task: Dict, mode: str) -> str:
 
 class LLMJudgeScorer:
     def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com/v1",
-                 judge_model: str = "deepseek-v4-pro", temperature: float = 0.0):
+                 judge_model: str = "deepseek-v4-pro", temperature: float = 0.0,
+                 max_tokens: int = 800):
         self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=180, max_retries=3)
         self.judge_model = judge_model
         self.temperature = temperature
+        # 推理型 judge（DS v4 Pro / kimi-k3 等）thinking 会吃掉 max_tokens，
+        # 800 不够会导致 content 为空，必须给 4000（项目记忆教训）
+        self.max_tokens = max_tokens
 
     def judge(self, artifact_output: str, task: Dict, mode: str) -> Tuple[float, str]:
         """返回 (归一化分数 0-1, 评分理由)。原始 1-5 分 → /5。"""
@@ -143,7 +147,7 @@ class LLMJudgeScorer:
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=self.temperature,
-                max_tokens=800,
+                max_tokens=self.max_tokens,
             )
             text = (resp.choices[0].message.content or "").strip()
         except Exception as e:
