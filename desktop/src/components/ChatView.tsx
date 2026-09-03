@@ -23,6 +23,7 @@ import {
   parseCcBridgeModeFromPayload,
   type CcBridgeSessionModeHint,
 } from "../utils/cc-bridge-ui";
+import { formatWbBridgeSendToolResult } from "../utils/wb-bridge-ui";
 import { KeybindingsPanel } from "./KeybindingsPanel";
 import {
   mapLoadedSessionMessage,
@@ -217,6 +218,12 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
       }
     } catch {
       // fall through
+    }
+  }
+  if (toolName === "wb_bridge_send") {
+    const formatted = formatWbBridgeSendToolResult(resultText);
+    if (formatted) {
+      return { content: formatted, silent: false };
     }
   }
   if (toolName === "query_subagent_status") {

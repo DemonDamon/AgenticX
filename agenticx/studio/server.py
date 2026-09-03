@@ -7917,6 +7917,84 @@ def create_studio_app() -> FastAPI:
             logger.warning("regenerate_cc_bridge_token error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    # --- WB Bridge (local CodeBuddy HTTP) config ---
+
+    @app.get("/api/wb-bridge/config")
+    async def get_wb_bridge_config(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Return WB bridge URL and token (Desktop-only; requires desktop token)."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.wb_bridge.settings import (
+                ensure_wb_bridge_token_persisted,
+                wb_bridge_base_url,
+            )
+
+            return {
+                "ok": True,
+                "url": wb_bridge_base_url(),
+                "token": ensure_wb_bridge_token_persisted(),
+            }
+        except Exception as exc:
+            logger.warning("get_wb_bridge_config error: %s", exc)
+            return {
+                "ok": False,
+                "url": "http://127.0.0.1:9743",
+                "token": "",
+                "error": str(exc),
+            }
+
+    @app.put("/api/wb-bridge/config")
+    async def put_wb_bridge_config(
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.wb_bridge.settings import (
+                ensure_wb_bridge_token_persisted,
+                validate_bridge_url_for_studio,
+                wb_bridge_base_url,
+            )
+
+            if "url" in payload:
+                u = str(payload.get("url") or "").strip().rstrip("/")
+                if u:
+                    err = validate_bridge_url_for_studio(u)
+                    if err:
+                        raise HTTPException(status_code=400, detail=err)
+                    ConfigManager.set_wb_bridge_field("url", u)
+            if "token" in payload:
+                t = str(payload.get("token") or "").strip()
+                ConfigManager.set_wb_bridge_field("token", t)
+
+            return {
+                "ok": True,
+                "url": wb_bridge_base_url(),
+                "token": ensure_wb_bridge_token_persisted(),
+            }
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("put_wb_bridge_config error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/api/wb-bridge/token/regenerate")
+    async def regenerate_wb_bridge_token(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        import secrets
+
+        try:
+            tok = secrets.token_urlsafe(32)
+            ConfigManager.set_wb_bridge_field("token", tok)
+            return {"ok": True, "token": tok}
+        except Exception as exc:
+            logger.warning("regenerate_wb_bridge_token error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     # --- Hooks API ---
 
     @app.get("/api/hooks")

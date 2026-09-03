@@ -342,6 +342,10 @@ import {
   parseCcBridgeModeFromPayload,
   type CcBridgeSessionModeHint,
 } from "../utils/cc-bridge-ui";
+import {
+  formatWbBridgeSendToolResult,
+  wbBridgeSendToolProgressLabel,
+} from "../utils/wb-bridge-ui";
 import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import {
@@ -2485,6 +2489,12 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown, provi
       // fall through
     }
   }
+  if (toolName === "wb_bridge_send") {
+    const formatted = formatWbBridgeSendToolResult(resultText);
+    if (formatted) {
+      return { content: formatted, silent: false };
+    }
+  }
   if (toolName === "query_subagent_status") {
     if (/【已阻止】/.test(resultText)) {
       return { content: "", silent: true };
@@ -3190,6 +3200,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const boundSessionIdRef = useRef<{ feishu: string; wechat: string }>({ feishu: "", wechat: "" });
   const ccBridgeVisibleLaunchGuardRef = useRef<Map<string, number>>(new Map());
   const ccBridgeTailGuardRef = useRef<Map<string, number>>(new Map());
+  const wbBridgeServeLaunchGuardRef = useRef<Map<string, number>>(new Map());
   /** Last resolved bridge session mode (cc_bridge_start), not global Settings radio. */
   const ccBridgeLastSessionModeRef = useRef<CcBridgeSessionModeHint>("");
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
@@ -4423,6 +4434,97 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       for (let i = 0; i < 20; i += 1) {
         const latestPane = useAppStore.getState().panes.find((item) => item.id === pane.id);
         if (!latestPane) return;
+        const writeRes = await window.agenticxDesktop.terminalWriteByTab({
+          tabId: terminalTabId,
+          data: `${launchCmd}\n`,
+        });
+        if (writeRes?.ok) return;
+        await sleep(180);
+      }
+    },
+    [
+      pane.id,
+      pane.sessionId,
+      pane.activeTaskspaceId,
+      apiBase,
+      apiToken,
+      setActiveTaskspace,
+      openSidePanel,
+      addPaneTerminalTab,
+      paneWidth,
+    ]
+  );
+
+  const triggerWbBridgeServeTerminal = useCallback(
+    async (toolCallKey: string) => {
+      if (!pane.sessionId) return;
+      const now = Date.now();
+      const last = wbBridgeServeLaunchGuardRef.current.get(toolCallKey) ?? 0;
+      if (now - last < 20_000) return;
+      wbBridgeServeLaunchGuardRef.current.set(toolCallKey, now);
+      if (wbBridgeServeLaunchGuardRef.current.size > 32) {
+        const cutoff = now - 120_000;
+        for (const [k, ts] of wbBridgeServeLaunchGuardRef.current.entries()) {
+          if (ts < cutoff) wbBridgeServeLaunchGuardRef.current.delete(k);
+        }
+      }
+
+      const wsResp = await window.agenticxDesktop.listTaskspaces(pane.sessionId);
+      if (!wsResp.ok || !Array.isArray(wsResp.workspaces) || wsResp.workspaces.length === 0) return;
+      const activeWorkspace =
+        (pane.activeTaskspaceId
+          ? wsResp.workspaces.find((item) => item.id === pane.activeTaskspaceId)
+          : undefined) ?? wsResp.workspaces[0];
+      if (!activeWorkspace?.path) return;
+      if (!pane.activeTaskspaceId || pane.activeTaskspaceId !== activeWorkspace.id) {
+        setActiveTaskspace(pane.id, activeWorkspace.id);
+      }
+
+      openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
+      addPaneTerminalTab(pane.id, activeWorkspace.path, "wb-bridge");
+
+      let bridgeUrl = "http://127.0.0.1:9743";
+      try {
+        const headers: Record<string, string> = {};
+        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
+        const res = await fetch(`${apiBase}/api/wb-bridge/config`, { headers });
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : {};
+        const parsedUrl = typeof data?.url === "string" ? data.url.trim() : "";
+        if (parsedUrl) bridgeUrl = parsedUrl;
+      } catch {
+        // keep fallback URL
+      }
+
+      let launchCmd =
+        'lsof -nP -iTCP:9743 -sTCP:LISTEN >/dev/null 2>&1 && echo "[wb-bridge] already listening on 127.0.0.1:9743" || agx wb-bridge serve --host 127.0.0.1 --port 9743';
+      try {
+        const parsed = new URL(bridgeUrl);
+        const host = (parsed.hostname || "").trim();
+        const lowerHost = host.toLowerCase();
+        const loopback = lowerHost === "127.0.0.1" || lowerHost === "localhost" || lowerHost === "::1";
+        const parsedPort = parsed.port ? Number(parsed.port) : parsed.protocol === "https:" ? 443 : 80;
+        const safePort = Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : 9743;
+        if (loopback) {
+          launchCmd = [
+            `lsof -nP -iTCP:${safePort} -sTCP:LISTEN >/dev/null 2>&1`,
+            `&& echo "[wb-bridge] already listening on ${host || "127.0.0.1"}:${safePort}"`,
+            `|| agx wb-bridge serve --host ${shellSingleQuote(host || "127.0.0.1")} --port ${safePort}`,
+          ].join(" ");
+        } else {
+          launchCmd = `echo "[wb-bridge] configured remote URL: ${bridgeUrl}. Skip local autostart."`;
+        }
+      } catch {
+        // keep fallback launch command
+      }
+
+      const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+      const latestPane = useAppStore.getState().panes.find((item) => item.id === pane.id);
+      const terminalTabId = latestPane?.activeTerminalTabId;
+      if (!terminalTabId) return;
+      for (let i = 0; i < 20; i += 1) {
+        const paneNow = useAppStore.getState().panes.find((item) => item.id === pane.id);
+        if (!paneNow) return;
         const writeRes = await window.agenticxDesktop.terminalWriteByTab({
           tabId: terminalTabId,
           data: `${launchCmd}\n`,
@@ -10562,6 +10664,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 updateSubAgent(eventAgentId, {
                   currentAction: ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current),
                 });
+              } else if (name === "wb_bridge_send") {
+                updateSubAgent(eventAgentId, {
+                  currentAction: wbBridgeSendToolProgressLabel(sec),
+                });
               } else {
                 updateSubAgent(eventAgentId, {
                   currentAction: Number.isFinite(sec) ? `${name} 执行中… (${sec}s)` : `${name} 执行中…`,
@@ -10631,6 +10737,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if (modeHint !== "headless") {
                   void triggerCcBridgeVisibleTerminal(callKey);
                 }
+              }
+              if (
+                eventAgentId === "meta" &&
+                (toolNameStr === "wb_bridge_start" || toolNameStr === "wb_bridge_send")
+              ) {
+                const callKey =
+                  toolCallId || `${requestSessionId || "session"}:${toolNameStr}`;
+                void triggerWbBridgeServeTerminal(callKey);
               }
               // Filter out internal housekeeping tools that add no user-visible signal
               const SILENT_TOOLS = new Set(["check_resources"]);

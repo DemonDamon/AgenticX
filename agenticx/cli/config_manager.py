@@ -485,6 +485,20 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
         return cls.GLOBAL_CONFIG_PATH
 
     @classmethod
+    def set_wb_bridge_field(cls, field: str, value: Any) -> Path:
+        """Write ``wb_bridge.<field>`` to global config (mirrors cc_bridge helper)."""
+        dotted = f"wb_bridge.{field}"
+        global_data = cls._load_yaml(cls.GLOBAL_CONFIG_PATH)
+        cls._set_nested(global_data, dotted, value)
+        cls._dump_yaml(cls.GLOBAL_CONFIG_PATH, global_data)
+
+        project_data = cls._load_yaml(cls.PROJECT_CONFIG_PATH)
+        if cls._get_nested(project_data, dotted) is not None:
+            cls._set_nested(project_data, dotted, value)
+            cls._dump_yaml(cls.PROJECT_CONFIG_PATH, project_data)
+        return cls.GLOBAL_CONFIG_PATH
+
+    @classmethod
     def get_value(cls, key: str) -> Any:
         """Get a dotted key from merged global+project YAML.
 

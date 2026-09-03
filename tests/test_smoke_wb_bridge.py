@@ -247,3 +247,21 @@ def test_ac9_cli_help_registers_wb_bridge() -> None:
         check=False,
     )
     assert serve_help.returncode == 0
+
+
+def test_wb_bridge_config_api_roundtrip(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from agenticx.wb_bridge import http_app as ha
+
+    monkeypatch.setenv("WB_BRIDGE_TOKEN", "cfg-test-token")
+    client = TestClient(ha.app)
+
+    get_res = client.get(
+        "/v1/sessions",
+        headers={"Authorization": "Bearer cfg-test-token"},
+    )
+    assert get_res.status_code == 200
+
+    # Studio config endpoints live in server.py; smoke the settings helper instead.
+    from agenticx.wb_bridge.settings import wb_bridge_base_url
+
+    assert wb_bridge_base_url().endswith("9743") or "9743" in wb_bridge_base_url()

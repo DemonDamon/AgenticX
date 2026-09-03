@@ -1522,8 +1522,229 @@ const CcBridgeSettingsPanel = forwardRef<CcBridgePanelHandle, Record<string, nev
   );
 });
 
+type WbBridgePanelHandle = {
+  save: () => Promise<{ ok: boolean; error?: string }>;
+};
+
+const WbBridgeSettingsPanel = forwardRef<WbBridgePanelHandle, Record<string, never>>(
+  function WbBridgeSettingsPanel(_props, ref) {
+    const apiToken = useAppStore((s) => s.apiToken);
+    const backendUrl = useAppStore((s) => s.backendUrl);
+    const [url, setUrl] = useState("http://127.0.0.1:9743");
+    const [token, setToken] = useState("");
+    const [showToken, setShowToken] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [busy, setBusy] = useState(false);
+    const [msg, setMsg] = useState("");
+
+    const parseJsonOrError = useCallback(async (res: Response): Promise<any> => {
+      const text = await res.text();
+      try {
+        return text ? JSON.parse(text) : {};
+      } catch {
+        const short = text.slice(0, 120).replace(/\s+/g, " ");
+        throw new Error(
+          `后端返回非 JSON（可能是 API 地址不正确或未连到 agx serve）：HTTP ${res.status}，响应片段：${short}`,
+        );
+      }
+    }, []);
+
+    const load = useCallback(async () => {
+      setLoading(true);
+      setMsg("");
+      try {
+        const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+        const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+        const headers: Record<string, string> = {};
+        if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+        const res = await fetch(`${effectiveBase}/api/wb-bridge/config`, { headers });
+        const data = (await parseJsonOrError(res)) as {
+          ok?: boolean;
+          url?: string;
+          token?: string;
+          error?: string;
+        };
+        if (data.ok) {
+          setUrl((data.url || "http://127.0.0.1:9743").trim());
+          setToken(data.token || "");
+        } else {
+          setMsg(data.error || "加载失败");
+        }
+      } catch (e) {
+        setMsg(String(e));
+      } finally {
+        setLoading(false);
+      }
+    }, [apiToken, backendUrl, parseJsonOrError]);
+
+    useEffect(() => {
+      void load();
+    }, [load]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        async save() {
+          if (loading) {
+            return { ok: false, error: "WB Bridge 配置仍在加载，请稍后再点窗口底部「退出」。" };
+          }
+          setBusy(true);
+          setMsg("");
+          try {
+            const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+            const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+            const res = await fetch(`${effectiveBase}/api/wb-bridge/config`, {
+              method: "PUT",
+              headers,
+              body: JSON.stringify({ url: url.trim(), token }),
+            });
+            const data = (await parseJsonOrError(res)) as {
+              ok?: boolean;
+              url?: string;
+              token?: string;
+              detail?: unknown;
+            };
+            if (data.ok) {
+              setUrl((data.url || url).trim());
+              setToken(data.token || token);
+              setMsg("已保存");
+              return { ok: true };
+            }
+            const d = data.detail;
+            const errText = typeof d === "string" ? d : d != null ? JSON.stringify(d) : "保存失败";
+            setMsg(errText);
+            return { ok: false, error: errText };
+          } catch (e) {
+            const errText = String(e);
+            setMsg(errText);
+            return { ok: false, error: errText };
+          } finally {
+            setBusy(false);
+          }
+        },
+      }),
+      [apiToken, backendUrl, loading, parseJsonOrError, token, url],
+    );
+
+    const regen = async () => {
+      setBusy(true);
+      setMsg("");
+      try {
+        const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+        const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+        const headers: Record<string, string> = {};
+        if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+        const res = await fetch(`${effectiveBase}/api/wb-bridge/token/regenerate`, {
+          method: "POST",
+          headers,
+        });
+        const data = (await parseJsonOrError(res)) as { ok?: boolean; token?: string; detail?: unknown };
+        if (data.ok && data.token) {
+          setToken(data.token);
+          setMsg("已重新生成 token。请重启本机 `agx wb-bridge serve`（或在工作区终端重新运行）以使用相同 token。");
+        } else {
+          const d = data.detail;
+          setMsg(typeof d === "string" ? d : d != null ? JSON.stringify(d) : "重新生成失败");
+        }
+      } catch (e) {
+        setMsg(String(e));
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    if (loading) {
+      return (
+        <Panel title="CodeBuddy 本机 Bridge（WB）">
+          <div className="py-4 text-center text-xs text-text-faint">加载中…</div>
+        </Panel>
+      );
+    }
+
+    return (
+      <Panel title="CodeBuddy 本机 Bridge（WB）">
+        <div className={`mb-2 space-y-1 ${SETTINGS_INTRO_CLASS}`}>
+          <p>
+            与终端或工作区内嵌终端中运行的{" "}
+            <code className="rounded bg-surface-panel px-0.5">agx wb-bridge serve</code> 通信。首次使用会在本机配置中自动生成
+            token（与 Near 工具 <code className="rounded bg-surface-panel px-0.5">wb_bridge_*</code> 一致）。
+          </p>
+          <p>
+            用法：先确保 serve 在监听（默认 <code className="rounded bg-surface-panel px-0.5">127.0.0.1:9743</code>
+            ），再 <code className="rounded bg-surface-panel px-0.5">wb_bridge_start</code> →{" "}
+            <code className="rounded bg-surface-panel px-0.5">wb_bridge_send</code>。
+          </p>
+        </div>
+        <div className="space-y-2">
+          <div>
+            <label className={`mb-0.5 block ${SETTINGS_LABEL_CLASS}`} htmlFor="wb-bridge-url">
+              Bridge URL
+            </label>
+            <input
+              id="wb-bridge-url"
+              className={SETTINGS_INPUT_CLASS}
+              value={url}
+              disabled={busy}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="http://127.0.0.1:9743"
+            />
+          </div>
+          <div>
+            <div className="mb-0.5 flex items-center justify-between gap-2">
+              <label className={SETTINGS_LABEL_CLASS} htmlFor="wb-bridge-token">
+                Bearer token
+              </label>
+              <button
+                type="button"
+                className="text-[11px] text-text-faint transition hover:text-text-subtle"
+                onClick={() => setShowToken((v) => !v)}
+              >
+                {showToken ? "隐藏" : "显示"}
+              </button>
+            </div>
+            <input
+              id="wb-bridge-token"
+              className={SETTINGS_INPUT_CLASS}
+              type={showToken ? "text" : "password"}
+              value={token}
+              disabled={busy}
+              onChange={(e) => setToken(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <p className="text-[11px] text-text-faint">
+            URL、token 修改后，请点击窗口底部「退出」与「工具」页其它项一并写入本机配置。
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-amber-200 disabled:opacity-40"
+              disabled={busy}
+              onClick={() => void regen()}
+            >
+              重新生成 token
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              disabled={busy}
+              onClick={() => void load()}
+            >
+              重新加载
+            </button>
+          </div>
+          {msg ? <div className="text-xs text-text-subtle">{msg}</div> : null}
+        </div>
+      </Panel>
+    );
+  },
+);
+
 const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function ToolsTab(_props, ref) {
   const ccBridgePanelRef = useRef<CcBridgePanelHandle>(null);
+  const wbBridgePanelRef = useRef<WbBridgePanelHandle>(null);
   const [registry, setRegistry] = useState<RegistryTool[]>([]);
   const [policy, setPolicy] = useState<Record<string, boolean>>({});
   const [toolsOptions, setToolsOptions] = useState<StudioToolsOptions>({});
@@ -1883,7 +2104,13 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         if (!bridge) {
           return { ok: false, error: "Claude Code Bridge 区块未就绪，请稍后再试。" };
         }
-        return bridge.save();
+        const ccRes = await bridge.save();
+        if (!ccRes.ok) return ccRes;
+        const wbBridge = wbBridgePanelRef.current;
+        if (!wbBridge) {
+          return { ok: false, error: "WB Bridge 区块未就绪，请稍后再试。" };
+        }
+        return wbBridge.save();
       },
     }),
     [
@@ -2167,6 +2394,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
       </Panel>
 
       <CcBridgeSettingsPanel ref={ccBridgePanelRef} />
+      <WbBridgeSettingsPanel ref={wbBridgePanelRef} />
     </div>
   );
 });
