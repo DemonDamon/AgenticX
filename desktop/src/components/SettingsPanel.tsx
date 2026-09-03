@@ -1684,7 +1684,8 @@ const WbBridgeSettingsPanel = forwardRef<WbBridgePanelHandle, Record<string, nev
             </label>
             <input
               id="wb-bridge-url"
-              className={SETTINGS_INPUT_CLASS}
+              type="text"
+              className="w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-xs text-text-primary"
               value={url}
               disabled={busy}
               onChange={(e) => setUrl(e.target.value)}
@@ -1706,7 +1707,7 @@ const WbBridgeSettingsPanel = forwardRef<WbBridgePanelHandle, Record<string, nev
             </div>
             <input
               id="wb-bridge-token"
-              className={SETTINGS_INPUT_CLASS}
+              className="w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-xs text-text-primary"
               type={showToken ? "text" : "password"}
               value={token}
               disabled={busy}
