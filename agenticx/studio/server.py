@@ -7995,6 +7995,68 @@ def create_studio_app() -> FastAPI:
             logger.warning("regenerate_wb_bridge_token error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.get("/api/wb-bridge/status")
+    async def get_wb_bridge_status(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Probe whether local wb-bridge serve is listening and token matches."""
+        _check_token(x_agx_desktop_token)
+        try:
+            from agenticx.wb_bridge.settings import probe_wb_bridge
+
+            return probe_wb_bridge()
+        except Exception as exc:
+            logger.warning("get_wb_bridge_status error: %s", exc)
+            return {
+                "ok": False,
+                "url": "http://127.0.0.1:9743",
+                "reachable": False,
+                "auth_ok": False,
+                "ready": False,
+                "detail": str(exc),
+            }
+
+    @app.post("/api/wb-bridge/ensure")
+    async def ensure_wb_bridge(
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        """Start loopback ``agx wb-bridge serve`` if needed, then re-probe."""
+        _check_token(x_agx_desktop_token)
+        try:
+            import asyncio
+
+            from agenticx.wb_bridge.process import ensure_wb_bridge_local_process
+            from agenticx.wb_bridge.settings import (
+                probe_wb_bridge,
+                wb_bridge_base_url,
+                wb_bridge_token,
+            )
+
+            base = wb_bridge_base_url()
+            token = wb_bridge_token()
+            probe = probe_wb_bridge(url=base, token=token)
+            if probe.get("ready"):
+                probe["autostart"] = "already_ready"
+                return probe
+            if probe.get("reachable") and not probe.get("auth_ok"):
+                probe["autostart"] = "skipped_token_mismatch"
+                return probe
+
+            started, detail = ensure_wb_bridge_local_process(base, token)
+            if started and detail != "already running":
+                for _ in range(40):
+                    await asyncio.sleep(0.4)
+                    probe = probe_wb_bridge(url=base, token=token)
+                    if probe.get("reachable"):
+                        break
+            else:
+                probe = probe_wb_bridge(url=base, token=token)
+            probe["autostart"] = detail
+            return probe
+        except Exception as exc:
+            logger.warning("ensure_wb_bridge error: %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     # --- Hooks API ---
 
     @app.get("/api/hooks")

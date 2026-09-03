@@ -39,6 +39,12 @@ def verify_token(request: Request) -> None:
 app = FastAPI(title="AgenticX WB Bridge", version="0.1.0")
 
 
+@app.get("/health")
+def health() -> dict:
+    """Unauthenticated liveness for settings / Studio status probes."""
+    return {"ok": True, "service": "wb-bridge"}
+
+
 def _parse_session_id(session_id: str) -> str:
     try:
         return str(uuid.UUID(session_id))

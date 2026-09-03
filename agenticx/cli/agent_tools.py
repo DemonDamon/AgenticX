@@ -1173,10 +1173,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "wb_bridge_start",
             "description": (
-                "Start a local CodeBuddy headless session via the WB bridge HTTP server (run "
-                "`agx wb-bridge serve` in another terminal). Token is read from AGX_WB_BRIDGE_TOKEN or "
-                "~/.agenticx/config.yaml wb_bridge.token (auto-generated on first use). Default address "
-                "is 127.0.0.1:9743. Then wb_bridge_send with the returned session_id."
+                "Start a local CodeBuddy headless session via the WB bridge HTTP server at "
+                "127.0.0.1:9743 (token from AGX_WB_BRIDGE_TOKEN or ~/.agenticx/config.yaml "
+                "wb_bridge.token). Studio autostarts loopback `agx wb-bridge serve` if needed. "
+                "Do NOT start serve via bash/bash_bg (sandbox cannot import agenticx). "
+                "Then wb_bridge_send with the returned session_id."
             ),
             "parameters": {
                 "type": "object",
@@ -1210,7 +1211,7 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "description": (
                 "Send a user turn to an existing WB bridge session and wait for result/timeout. "
                 "Requires bridge at wb_bridge.url (default 127.0.0.1:9743) and matching bearer token. "
-                "Start the server first: agx wb-bridge serve."
+                "Studio autostarts loopback serve if needed. Do NOT use bash to start serve."
             ),
             "parameters": {
                 "type": "object",
@@ -1232,8 +1233,8 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "wb_bridge_list",
             "description": (
-                "List WB bridge sessions. Requires `agx wb-bridge serve` at 127.0.0.1:9743 "
-                "with AGX_WB_BRIDGE_TOKEN or ~/.agenticx/config.yaml wb_bridge.token."
+                "List WB bridge sessions. Studio autostarts loopback serve if needed. "
+                "Do NOT start serve via bash."
             ),
             "parameters": {
                 "type": "object",
@@ -1248,8 +1249,8 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "wb_bridge_describe",
             "description": (
-                "Describe one WB bridge session by session_id. Requires `agx wb-bridge serve` "
-                "at 127.0.0.1:9743 with AGX_WB_BRIDGE_TOKEN or ~/.agenticx/config.yaml wb_bridge.token."
+                "Describe one WB bridge session by session_id. Studio autostarts loopback serve "
+                "if needed. Do NOT start serve via bash."
             ),
             "parameters": {
                 "type": "object",
@@ -1266,8 +1267,8 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "wb_bridge_stop",
             "description": (
-                "Stop a WB bridge session. Requires `agx wb-bridge serve` at 127.0.0.1:9743 "
-                "with AGX_WB_BRIDGE_TOKEN or ~/.agenticx/config.yaml wb_bridge.token."
+                "Stop a WB bridge session. Studio autostarts loopback serve if needed. "
+                "Do NOT start serve via bash."
             ),
             "parameters": {
                 "type": "object",
@@ -6150,23 +6151,50 @@ async def _tool_wb_bridge_http(
     headers = {"Authorization": f"Bearer {token}"}
     url = f"{base}{path}"
     client_kwargs = _cc_bridge_http_client_kwargs(base, timeout_sec)
-    try:
+
+    async def _do_request() -> Any:
         async with httpx.AsyncClient(**client_kwargs) as client:
             m = method.upper()
             if m == "GET":
-                r = await client.get(url, headers=headers)
-            elif m == "POST":
-                r = await client.post(url, headers=headers, json=json_body)
-            elif m == "DELETE":
-                r = await client.delete(url, headers=headers)
-            else:
-                return f"ERROR: unsupported HTTP method {method}"
+                return await client.get(url, headers=headers)
+            if m == "POST":
+                return await client.post(url, headers=headers, json=json_body)
+            if m == "DELETE":
+                return await client.delete(url, headers=headers)
+            return f"ERROR: unsupported HTTP method {method}"
+
+    try:
+        r = await _do_request()
+        if isinstance(r, str):
+            return r
     except httpx.ConnectError as exc:
-        return (
-            "ERROR: WB bridge not reachable (connection refused). "
-            "Start it first: agx wb-bridge serve "
-            f"(expects {base}). Details: {exc}"
-        )
+        from agenticx.wb_bridge.process import ensure_wb_bridge_local_process
+
+        started, detail = ensure_wb_bridge_local_process(base, token)
+        if not started:
+            return (
+                "ERROR: WB bridge not reachable (connection refused). "
+                "Do not start it with bash/bash_bg (sandbox PermissionError). "
+                f"Open Settings → Tools → CodeBuddy 本机 Bridge and click「启动并检测」. "
+                f"Autostart skipped: {detail}. expects {base}. Details: {exc}"
+            )
+        last_exc: Exception = exc
+        r = None
+        for _ in range(40):
+            await asyncio.sleep(0.4)
+            try:
+                r = await _do_request()
+                if isinstance(r, str):
+                    return r
+                break
+            except httpx.ConnectError as exc2:
+                last_exc = exc2
+        if r is None:
+            return (
+                "ERROR: WB bridge not reachable after autostart. "
+                f"Autostart: {detail}. expects {base}. Details: {last_exc}. "
+                "Check Settings → Tools → CodeBuddy 本机 Bridge status (red = not listening)."
+            )
     except httpx.TimeoutException as exc:
         return f"ERROR: WB bridge HTTP timed out: {exc}"
     except httpx.HTTPError as exc:

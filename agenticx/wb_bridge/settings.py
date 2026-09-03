@@ -38,6 +38,81 @@ def wb_bridge_base_url() -> str:
     return _DEFAULT_URL
 
 
+def parse_wb_bridge_url(base_url: str) -> Tuple[bool, str, int]:
+    """Return ``(is_loopback, host, port)``; missing port defaults to 9743."""
+    try:
+        parsed = urlparse(base_url)
+    except ValueError:
+        return (False, "127.0.0.1", 9743)
+    host = (parsed.hostname or "").strip().lower()
+    try:
+        port = int(parsed.port or 9743)
+    except (TypeError, ValueError):
+        port = 9743
+    is_loopback = host in {"127.0.0.1", "localhost", "::1", "[::1]"}
+    return (is_loopback, host or "127.0.0.1", port)
+
+
+def probe_wb_bridge(*, url: Optional[str] = None, token: Optional[str] = None) -> dict:
+    """Check whether ``agx wb-bridge serve`` is listening and the token matches.
+
+    ``reachable``: process answered ``GET /health``.
+    ``auth_ok``: ``GET /v1/sessions`` accepted the bearer token.
+    ``ready``: both true.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return {
+            "ok": False,
+            "url": (url or wb_bridge_base_url()).rstrip("/"),
+            "reachable": False,
+            "auth_ok": False,
+            "ready": False,
+            "detail": "httpx is required",
+        }
+
+    base = (url or wb_bridge_base_url()).rstrip("/")
+    tok = token if token is not None else wb_bridge_token()
+    is_loopback, _host, _port = parse_wb_bridge_url(base)
+    kwargs: dict = {"timeout": 2.0, "trust_env": False}
+    if is_loopback:
+        kwargs["transport"] = httpx.HTTPTransport()
+
+    reachable = False
+    auth_ok = False
+    detail = "connection refused"
+    try:
+        with httpx.Client(**kwargs) as client:
+            health = client.get(f"{base}/health")
+            reachable = health.status_code == 200
+            if not reachable:
+                detail = f"health HTTP {health.status_code}"
+            else:
+                sessions = client.get(
+                    f"{base}/v1/sessions",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                auth_ok = sessions.status_code == 200
+                if auth_ok:
+                    detail = "ready"
+                else:
+                    detail = f"auth HTTP {sessions.status_code}"
+    except httpx.ConnectError:
+        detail = "connection refused"
+    except Exception as exc:  # pragma: no cover - network/env specific
+        detail = str(exc)[:300]
+
+    return {
+        "ok": True,
+        "url": base,
+        "reachable": reachable,
+        "auth_ok": auth_ok,
+        "ready": bool(reachable and auth_ok),
+        "detail": detail,
+    }
+
+
 def ensure_wb_bridge_token_persisted() -> str:
     """Return bearer token for Studio WB bridge HTTP client.
 

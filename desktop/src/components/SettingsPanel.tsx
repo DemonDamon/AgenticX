@@ -1536,6 +1536,14 @@ const WbBridgeSettingsPanel = forwardRef<WbBridgePanelHandle, Record<string, nev
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [msg, setMsg] = useState("");
+    const [probeBusy, setProbeBusy] = useState(false);
+    const [probe, setProbe] = useState<{
+      ready?: boolean;
+      reachable?: boolean;
+      auth_ok?: boolean;
+      detail?: string;
+      autostart?: string;
+    } | null>(null);
 
     const parseJsonOrError = useCallback(async (res: Response): Promise<any> => {
       const text = await res.text();
@@ -1577,9 +1585,76 @@ const WbBridgeSettingsPanel = forwardRef<WbBridgePanelHandle, Record<string, nev
       }
     }, [apiToken, backendUrl, parseJsonOrError]);
 
+    const authHeaders = useCallback(async (): Promise<{
+      headers: Record<string, string>;
+      effectiveBase: string;
+    }> => {
+      const tokenHeader = apiToken || (await window.agenticxDesktop.getApiAuthToken()) || "";
+      const effectiveBase = backendUrl || (await window.agenticxDesktop.getApiBase());
+      const headers: Record<string, string> = {};
+      if (tokenHeader) headers["x-agx-desktop-token"] = tokenHeader;
+      return { headers, effectiveBase };
+    }, [apiToken, backendUrl]);
+
+    const checkStatus = useCallback(async () => {
+      setProbeBusy(true);
+      try {
+        const { headers, effectiveBase } = await authHeaders();
+        const res = await fetch(`${effectiveBase}/api/wb-bridge/status`, { headers });
+        const data = (await parseJsonOrError(res)) as {
+          ready?: boolean;
+          reachable?: boolean;
+          auth_ok?: boolean;
+          detail?: string;
+        };
+        setProbe(data);
+      } catch (e) {
+        setProbe({ ready: false, reachable: false, auth_ok: false, detail: String(e) });
+      } finally {
+        setProbeBusy(false);
+      }
+    }, [authHeaders, parseJsonOrError]);
+
+    const ensureServe = useCallback(async () => {
+      setProbeBusy(true);
+      setMsg("");
+      try {
+        const { headers, effectiveBase } = await authHeaders();
+        const res = await fetch(`${effectiveBase}/api/wb-bridge/ensure`, {
+          method: "POST",
+          headers,
+        });
+        const data = (await parseJsonOrError(res)) as {
+          ready?: boolean;
+          reachable?: boolean;
+          auth_ok?: boolean;
+          detail?: string;
+          autostart?: string;
+        };
+        setProbe(data);
+        if (data.ready) {
+          setMsg("本机 serve 已就绪，可以调用 wb_bridge_start。");
+        } else if (data.reachable && !data.auth_ok) {
+          setMsg("serve 在监听，但 token 不匹配。请点「退出」保存当前 token 后重启 serve，或点「启动并检测」。");
+        } else {
+          setMsg(data.detail || data.autostart || "未能拉起本机 serve");
+        }
+      } catch (e) {
+        setProbe({ ready: false, reachable: false, auth_ok: false, detail: String(e) });
+        setMsg(String(e));
+      } finally {
+        setProbeBusy(false);
+      }
+    }, [authHeaders, parseJsonOrError]);
+
     useEffect(() => {
       void load();
     }, [load]);
+
+    useEffect(() => {
+      if (loading) return;
+      void checkStatus();
+    }, [loading, checkStatus]);
 
     useImperativeHandle(
       ref,
@@ -1655,6 +1730,21 @@ const WbBridgeSettingsPanel = forwardRef<WbBridgePanelHandle, Record<string, nev
       }
     };
 
+    const statusLabel = probeBusy
+      ? "检测中…"
+      : probe?.ready
+        ? "已就绪"
+        : probe?.reachable && !probe?.auth_ok
+          ? "Token 不匹配"
+          : probe
+            ? "未监听"
+            : "未知";
+    const statusDot = probeBusy
+      ? "bg-text-faint"
+      : probe?.ready
+        ? "bg-emerald-400"
+        : "bg-rose-400";
+
     if (loading) {
       return (
         <Panel title="CodeBuddy 本机 Bridge（WB）">
@@ -1664,17 +1754,24 @@ const WbBridgeSettingsPanel = forwardRef<WbBridgePanelHandle, Record<string, nev
     }
 
     return (
-      <Panel title="CodeBuddy 本机 Bridge（WB）">
+      <Panel
+        title="CodeBuddy 本机 Bridge（WB）"
+        actions={
+          <span className="flex items-center gap-1.5 text-[11px] text-text-subtle">
+            <span className={`h-2 w-2 rounded-full ${statusDot}`} aria-hidden />
+            {statusLabel}
+          </span>
+        }
+      >
         <div className={`mb-2 space-y-1 ${SETTINGS_INTRO_CLASS}`}>
           <p>
-            与终端或工作区内嵌终端中运行的{" "}
-            <code className="rounded bg-surface-panel px-0.5">agx wb-bridge serve</code> 通信。首次使用会在本机配置中自动生成
-            token（与 Near 工具 <code className="rounded bg-surface-panel px-0.5">wb_bridge_*</code> 一致）。
+            与本机 <code className="rounded bg-surface-panel px-0.5">agx wb-bridge serve</code> 通信。标题右侧红/绿点表示
+            <code className="rounded bg-surface-panel px-0.5">127.0.0.1:9743</code> 当前是否可调用（绿=已就绪）。
           </p>
           <p>
-            用法：先确保 serve 在监听（默认 <code className="rounded bg-surface-panel px-0.5">127.0.0.1:9743</code>
-            ），再 <code className="rounded bg-surface-panel px-0.5">wb_bridge_start</code> →{" "}
-            <code className="rounded bg-surface-panel px-0.5">wb_bridge_send</code>。
+            未监听时点「启动并检测」，或直接在对话里调用{" "}
+            <code className="rounded bg-surface-panel px-0.5">wb_bridge_start</code>
+            （Studio 会自动拉起 serve）。不要用 bash 去起 serve。
           </p>
         </div>
         <div className="space-y-2">
@@ -1719,6 +1816,22 @@ const WbBridgeSettingsPanel = forwardRef<WbBridgePanelHandle, Record<string, nev
             URL、token 修改后，请点击窗口底部「退出」与「工具」页其它项一并写入本机配置。
           </p>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+              disabled={busy || probeBusy}
+              onClick={() => void checkStatus()}
+            >
+              {probeBusy ? "检测中…" : "检测连通性"}
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-emerald-200 disabled:opacity-40"
+              disabled={busy || probeBusy}
+              onClick={() => void ensureServe()}
+            >
+              启动并检测
+            </button>
             <button
               type="button"
               className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-amber-200 disabled:opacity-40"

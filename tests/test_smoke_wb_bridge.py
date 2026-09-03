@@ -265,3 +265,100 @@ def test_wb_bridge_config_api_roundtrip(monkeypatch: pytest.MonkeyPatch, tmp_pat
     from agenticx.wb_bridge.settings import wb_bridge_base_url
 
     assert wb_bridge_base_url().endswith("9743") or "9743" in wb_bridge_base_url()
+
+
+def test_health_unauthenticated() -> None:
+    from agenticx.wb_bridge import http_app as ha
+
+    client = TestClient(ha.app)
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json().get("ok") is True
+    assert r.json().get("service") == "wb-bridge"
+
+
+def test_parse_wb_bridge_url_default_port() -> None:
+    from agenticx.wb_bridge.settings import parse_wb_bridge_url
+
+    loopback, host, port = parse_wb_bridge_url("http://127.0.0.1")
+    assert loopback is True
+    assert host == "127.0.0.1"
+    assert port == 9743
+
+
+def test_probe_wb_bridge_when_down() -> None:
+    from agenticx.wb_bridge.settings import probe_wb_bridge
+
+    out = probe_wb_bridge(url="http://127.0.0.1:59991", token="unused")
+    assert out.get("ok") is True
+    assert out.get("reachable") is False
+    assert out.get("ready") is False
+    assert "refused" in str(out.get("detail", "")).lower() or out.get("detail")
+
+
+def test_ensure_skips_nonlocal_url() -> None:
+    from agenticx.wb_bridge.process import ensure_wb_bridge_local_process
+
+    ok, detail = ensure_wb_bridge_local_process("http://10.0.0.8:9743", "tok")
+    assert ok is False
+    assert "non-loopback" in detail
+
+
+def test_ensure_spawns_popen(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agenticx.wb_bridge import process as procmod
+
+    procmod._WB_BRIDGE_AUTO_PROC = None
+
+    class _FakeProc:
+        pid = 7
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(procmod.subprocess, "Popen", lambda *a, **k: _FakeProc())
+    ok, detail = procmod.ensure_wb_bridge_local_process("http://127.0.0.1:9743", "tok")
+    assert ok is True
+    assert "started pid=7" in detail
+    procmod._WB_BRIDGE_AUTO_PROC = None
+
+
+def test_studio_wb_bridge_status_when_down(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from agenticx.cli.config_manager import ConfigManager
+    from agenticx.studio.server import create_studio_app
+
+    monkeypatch.setattr(ConfigManager, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr(ConfigManager, "PROJECT_CONFIG_PATH", tmp_path / "project.yaml")
+    monkeypatch.delenv("AGX_DESKTOP_TOKEN", raising=False)
+    monkeypatch.setenv("AGX_WB_BRIDGE_URL", "http://127.0.0.1:59991")
+    client = TestClient(create_studio_app())
+    r = client.get("/api/wb-bridge/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("reachable") is False
+    assert body.get("ready") is False
+
+
+def test_studio_wb_bridge_ensure_already_ready(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from agenticx.cli.config_manager import ConfigManager
+    from agenticx.studio.server import create_studio_app
+
+    monkeypatch.setattr(ConfigManager, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr(ConfigManager, "PROJECT_CONFIG_PATH", tmp_path / "project.yaml")
+    monkeypatch.delenv("AGX_DESKTOP_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "agenticx.wb_bridge.settings.probe_wb_bridge",
+        lambda **_kw: {
+            "ok": True,
+            "url": "http://127.0.0.1:9743",
+            "reachable": True,
+            "auth_ok": True,
+            "ready": True,
+            "detail": "ready",
+        },
+    )
+    client = TestClient(create_studio_app())
+    r = client.post("/api/wb-bridge/ensure")
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("ready") is True
+    assert body.get("autostart") == "already_ready"
