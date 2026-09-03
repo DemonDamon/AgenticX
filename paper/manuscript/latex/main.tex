@@ -266,10 +266,7 @@ We document two scorer ablations in place of a full human study (left for the fu
 \paragraph{L2 off (v1) vs.\ L2 on (v2), same task matrix.} Enabling L2 lowered every arm's absolute $Q$ (single $0.692 \to 0.606$; integrator $0.958 \to 0.881$) but \emph{increased} the integrator's relative advantage ($\ctrm$ $1.54 \to 1.55$; $d$ $+0.59 \to +0.74$): the numeric layer rewards exactly the cross-role aggregation that only the integrator performs. Findings F1--F4 are robust to the L2 switch.
 
 \paragraph{L3 judge on/off ablation (cross-family judges).}
-% TODO(judge-ablation): 数字待 judge_v2_results.jsonl 分析后填入
-% 设计：15 任务 × seed 0 × 7 臂 × 2 模型，交叉家族 judge
-%（Flash 产出由 kimi-k3 判，K3 产出由 deepseek-v4-pro 判），每条 run 判 2 轮。
-\textcolor{red}{[Placeholder: numbers to be inserted from the running L3 ablation --- judge double-round consistency, arm-ordering Spearman under L3-on, CTR\_matched on/off.]}
+We re-scored the full seed-0 subsample of both models (15 tasks $\times$ 7 arms $\times$ 2 models $=$ 210 runs) with the L3 judge enabled, using a \emph{cross-family judge matrix} to avoid same-family bias: Flash artifacts judged by kimi-k3, K3 artifacts judged by deepseek-v4-pro; each run judged twice independently. Judge test-retest agreement is good and nearly identical across judges (Flash: 74\% exact match, Spearman $\rho = 0.855$; K3: 74\%, $\rho = 0.824$). \textbf{The arm ordering is perfectly stable under L3}: Spearman between L3-off and L3-on arm ranks is $1.000$ on both models---the integrator remains first, mechanical protocols remain last. Absolute $Q$ rises slightly for non-ceiling arms ($+0.02$--$0.05$; the judge is mildly lenient) while the integrator is unchanged ($\Delta \le 0.002$, ceiling effect); $\ctrm(\text{integrator})$ moves from 1.60 to 1.49 (Flash) and 1.38 to 1.29 (K3)---both far above 1. Findings F1--F5 are robust to the L3 switch: the assembly effect is not an artifact of deterministic-only scoring.
 
 \subsection{Statistical details}
 \label{sec:stats}
@@ -308,7 +305,7 @@ High coupling & Team + integrator & Only integrator reliably assembles conflicti
 \item \textbf{Synthetic office tasks.} Seeded from real documents but synthetic; no ground-truth downstream outcomes.
 \item \textbf{Fixed team topology.} Serial handoff with fixed role templates; no self-organizing role discovery, no parallel tool usage, no agent churn.
 \item \textbf{Model coverage.} Two model families completed (DS v4 Flash, Kimi K3, 630 runs); the assembly effect, arm ordering, and variance structure replicate across both. A third family is queued.
-\item \textbf{L3 judge.} Main tables score with L3 off (renormalized L1/L2); an L3-on ablation on a subsample with cross-family judges appears in \S\ref{sec:scorer-validity}.
+\item \textbf{L3 judge.} Main tables score with L3 off (renormalized L1/L2); \S\ref{sec:scorer-validity} reports a completed L3-on ablation over the full seed-0 subsample (210 runs, cross-family judges, two rounds each) showing the arm ordering is perfectly stable (Spearman $= 1.000$ on both models).
 \item \textbf{Open-loop runtime.} No mid-run budget halts, no human-in-the-loop interventions.
 \end{enumerate}
 

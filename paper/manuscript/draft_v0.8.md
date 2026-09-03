@@ -197,10 +197,11 @@ The integrator advantage is **uniform across coupling levels on both models** (a
 
 ### 5.3 Scorer validity
 
-We document two scorer ablations in place of a full human study (left for the full experiment).
+We document three scorer ablations in place of a full human study (left for the full experiment).
 
 - **L1 v0 (title-only) vs v2.2 (content-aware).** In the v1 pilot, blackboard mechanically rendered every required heading, 41/45 runs had empty sections (`（本节无内容）`), and all 45 received perfect L1 = 1.0—flipping the arm from "best" to "below average" once the content gate landed. This incident is itself evidence that automated structural rubrics without content gates are gameable by construction.
 - **L2 off (v1) vs L2 on (v2), same task matrix.** Enabling L2 lowered every arm's absolute Q (single 0.692 → 0.606; integrator 0.958 → 0.881) but *increased* the integrator's relative advantage (CTR_matched 1.54 → 1.55; d +0.59 → +0.74): the numeric layer rewards exactly the cross-role aggregation that only the integrator performs, and punishes the stranded numeric content in mechanical concatenation (concat L2 0.536 < last 0.566). Findings F1–F4 are robust to the L2 switch—direction, significance, and effect ordering all preserved.
+- **L3 judge on/off ablation (cross-family judges, 210 runs × 2 rounds).** We re-scored the full seed-0 subsample of both models (15 tasks × 7 arms × 2 models = 210 runs) with the L3 judge enabled, using a **cross-family judge matrix** to avoid same-family bias: Flash artifacts judged by kimi-k3, K3 artifacts judged by deepseek-v4-pro. Each run was judged twice independently; judge test-retest agreement is good and nearly identical across judges (Flash: 74% exact match, Spearman ρ = 0.855; K3: 74%, ρ = 0.824). **The arm ordering is perfectly stable under L3** (Spearman between L3-off and L3-on arm ranks = 1.000 on both models): the integrator remains first, mechanical protocols remain last. Absolute Q rises slightly for all non-ceiling arms (+0.02–0.05, the judge is mildly lenient), while the integrator is unchanged (Δ ≤ 0.002, ceiling effect); CTR_matched(integrator) moves from 1.60 to 1.49 (Flash) and 1.38 to 1.29 (K3)—both remain far above 1. Findings F1–F5 are therefore robust to the L3 switch: the assembly effect is not an artifact of our deterministic-only scoring.
 
 ### 5.4 Statistical details
 
@@ -230,7 +231,7 @@ All directional claims use the one-sided Wilcoxon signed-rank test on paired per
 2. **Synthetic office tasks.** While seeded from real documents (seed-01 weekly report, seed-02 risk alert, seed-03 cross-source check), they are still synthetic and do not measure ground-truth downstream outcomes.
 3. **Fixed team topology.** We use serial handoff with the same role templates for all tasks; no self-organizing role discovery, no parallel tool usage, no agent churn.
 4. **Model coverage in this draft.** Two model families completed with migrated tasks (DS v4 Flash and Kimi K3, 630 runs total); the assembly effect, arm ordering, and variance structure replicate across both. A third family (GLM-5.3) is queued to further test generalization.
-5. **L3 judge disabled in this draft.** A subsample with L3 enabled will assess stability of arm ordering when semantic judgment is added; if the top/bottom two arms are preserved under L3 on, we use this as sufficiency argument for the full study.
+5. **L3 judge.** Main tables score with L3 off (renormalized L1/L2); §5.3 reports a completed L3-on ablation over the full seed-0 subsample (210 runs, cross-family judges, two rounds each) showing the arm ordering is perfectly stable (Spearman = 1.000 on both models).
 6. **Open-loop runtime.** No mid-run budget halts, no human-in-the-loop interventions, no pause/resume. v0.5 §6's runtime-controllability discussion is retained as future work.
 7. **TMS definition harmonization.** v0.5 had three inconsistent TMS meanings (section-only hit / section + numeric hit / team memory retention). v0.6 fixes a single definition in §3 and is checked in code.
 
