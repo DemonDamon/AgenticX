@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
+  <defs>
+    <marker id="arrGray" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#64748B"/></marker>
+    <marker id="arrRed" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker>
+    <marker id="arrAmber" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#F59E0B"/></marker>
+    <marker id="arrBrown" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#B45309"/></marker>
+    <marker id="arrGreen" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#059669"/></marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="40" y="58" font-size="34" font-weight="bold" fill="#0F172A">Same Role Outputs, Four Assembly Protocols, Four Destinies</text>
+  <text x="40" y="88" font-size="17" fill="#64748B">TeamBench · assembly protocol as a first-class controlled variable · pilot v2, two model families</text>
+
+  <!-- ===== Left: team mode, role chain ===== -->
+  <text x="40" y="118" font-size="14" font-weight="bold" fill="#94A3B8">TEAM MODE — 3-ROLE CHAIN</text>
+
+  <rect x="40" y="130" width="300" height="64" rx="10" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5"/>
+  <text x="190" y="156" font-size="18" font-weight="bold" fill="#0F172A" text-anchor="middle">Task input τ</text>
+  <text x="190" y="178" font-size="15" fill="#64748B" text-anchor="middle">office scenario × coupling level</text>
+
+  <line x1="200" y1="194" x2="200" y2="222" stroke="#64748B" stroke-width="2" marker-end="url(#arrGray)"/>
+
+  <rect x="60" y="230" width="280" height="84" rx="10" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1.5"/>
+  <text x="200" y="266" font-size="20" font-weight="bold" fill="#065F46" text-anchor="middle">Writer (r1)</text>
+  <text x="200" y="292" font-size="15" fill="#64748B" text-anchor="middle">drafts the deliverable body</text>
+
+  <line x1="200" y1="314" x2="200" y2="326" stroke="#64748B" stroke-width="2" marker-end="url(#arrGray)"/>
+
+  <rect x="60" y="330" width="280" height="84" rx="10" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1.5"/>
+  <text x="200" y="366" font-size="20" font-weight="bold" fill="#065F46" text-anchor="middle">Evaluator (r2)</text>
+  <text x="200" y="392" font-size="15" fill="#64748B" text-anchor="middle">checks feasibility &amp; coverage</text>
+
+  <line x1="200" y1="414" x2="200" y2="426" stroke="#64748B" stroke-width="2" marker-end="url(#arrGray)"/>
+
+  <rect x="60" y="430" width="280" height="84" rx="10" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1.5"/>
+  <text x="200" y="466" font-size="20" font-weight="bold" fill="#065F46" text-anchor="middle">Risk (r3)</text>
+  <text x="200" y="492" font-size="15" fill="#64748B" text-anchor="middle">identifies risks &amp; conflicts</text>
+
+  <line x1="200" y1="514" x2="200" y2="556" stroke="#64748B" stroke-width="2" marker-end="url(#arrGray)"/>
+
+  <!-- Identical role outputs node -->
+  <rect x="40" y="560" width="320" height="120" rx="12" fill="#F0FDF4" stroke="#059669" stroke-width="2.5" stroke-dasharray="8 5"/>
+  <rect x="56" y="598" width="24" height="18" rx="3" fill="#059669"/>
+  <path d="M62,598 v-7 a6,6 0 0 1 12,0 v7" fill="none" stroke="#059669" stroke-width="3"/>
+  <text x="88" y="611" font-size="16" font-weight="bold" fill="#065F46">IDENTICAL ROLE OUTPUTS</text>
+  <text x="200" y="640" font-size="15" fill="#047857" text-anchor="middle">(r1, r2, r3) — frozen</text>
+  <text x="200" y="662" font-size="15" fill="#047857" text-anchor="middle">fed to all four protocols</text>
+
+  <!-- Fan-out connectors -->
+  <polyline points="360,620 400,620 400,200 428,200" fill="none" stroke="#DC2626" stroke-width="2.5" marker-end="url(#arrRed)"/>
+  <polyline points="360,620 400,620 400,350 428,350" fill="none" stroke="#F59E0B" stroke-width="2.5" marker-end="url(#arrAmber)"/>
+  <polyline points="360,620 400,620 400,500 428,500" fill="none" stroke="#B45309" stroke-width="2.5" marker-end="url(#arrBrown)"/>
+  <polyline points="360,620 404,620 404,650 428,650" fill="none" stroke="#059669" stroke-width="3.5" marker-end="url(#arrGreen)"/>
+
+  <!-- ===== Middle: four swimlanes ===== -->
+  <!-- last -->
+  <rect x="440" y="130" width="560" height="140" rx="12" fill="#FEF2F2" stroke="#FECACA" stroke-width="1.5"/>
+  <rect x="460" y="148" width="84" height="34" rx="17" fill="#DC2626"/>
+  <text x="502" y="171" font-size="20" font-weight="bold" fill="#FFFFFF" text-anchor="middle">last</text>
+  <rect x="856" y="148" width="128" height="34" rx="17" fill="none" stroke="#DC2626" stroke-width="1.5"/>
+  <text x="920" y="171" font-size="16" fill="#DC2626" text-anchor="middle">+0 calls</text>
+  <text x="460" y="215" font-size="20" fill="#1F2937">a_T = r_3</text>
+  <text x="460" y="248" font-size="17" fill="#64748B">take last role only</text>
+
+  <!-- concat -->
+  <rect x="440" y="280" width="560" height="140" rx="12" fill="#FFFBEB" stroke="#FDE68A" stroke-width="1.5"/>
+  <rect x="460" y="298" width="110" height="34" rx="17" fill="#F59E0B"/>
+  <text x="515" y="321" font-size="20" font-weight="bold" fill="#FFFFFF" text-anchor="middle">concat</text>
+  <rect x="856" y="298" width="128" height="34" rx="17" fill="none" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="920" y="321" font-size="16" fill="#F59E0B" text-anchor="middle">+0 calls</text>
+  <text x="460" y="365" font-size="20" fill="#1F2937">a_T = ⊕(heading_i + r_i)</text>
+  <text x="460" y="398" font-size="17" fill="#64748B">deterministic glue, no semantics</text>
+
+  <!-- blackboard -->
+  <rect x="440" y="430" width="560" height="140" rx="12" fill="#FAF5EB" stroke="#E7D8BF" stroke-width="1.5"/>
+  <rect x="460" y="448" width="150" height="34" rx="17" fill="#B45309"/>
+  <text x="535" y="471" font-size="20" font-weight="bold" fill="#FFFFFF" text-anchor="middle">blackboard</text>
+  <rect x="856" y="448" width="128" height="34" rx="17" fill="none" stroke="#B45309" stroke-width="1.5"/>
+  <text x="920" y="471" font-size="16" fill="#B45309" text-anchor="middle">+0 calls</text>
+  <text x="460" y="515" font-size="20" fill="#1F2937">a_T = slot-schema merge({r_i})</text>
+  <text x="460" y="548" font-size="17" fill="#64748B">unmatched headings → empty slots</text>
+
+  <!-- integrator (highlighted) -->
+  <polyline points="434,574 1000,574 1006,580 1006,716 1000,722 434,722 428,716 428,580" fill="none" stroke="#059669" stroke-width="1.5"/>
+  <rect x="440" y="580" width="560" height="136" rx="12" fill="#ECFDF5" stroke="#059669" stroke-width="2.5"/>
+  <rect x="460" y="598" width="150" height="34" rx="17" fill="#059669"/>
+  <text x="535" y="621" font-size="20" font-weight="bold" fill="#FFFFFF" text-anchor="middle">integrator</text>
+  <rect x="844" y="598" width="140" height="34" rx="17" fill="none" stroke="#059669" stroke-width="1.5"/>
+  <text x="914" y="621" font-size="16" fill="#059669" text-anchor="middle">+1 LLM call</text>
+  <text x="460" y="665" font-size="20" fill="#1F2937">a_T = LLM({r_i}, task schema)</text>
+  <text x="460" y="698" font-size="17" fill="#047857">semantic merge — one coherent document</text>
+
+  <!-- ===== Right: CTR_matched bars ===== -->
+  <text x="1100" y="115" font-size="20" font-weight="bold" fill="#0F172A">CTR_matched</text>
+  <rect x="1350" y="98" width="18" height="18" fill="#2563EB"/>
+  <text x="1374" y="113" font-size="15" fill="#1F2937">DS v4 Flash</text>
+  <rect x="1350" y="122" width="18" height="18" fill="#7C3AED"/>
+  <text x="1374" y="137" font-size="15" fill="#1F2937">Kimi K3</text>
+
+  <!-- break-even line -->
+  <line x1="1333" y1="150" x2="1333" y2="735" stroke="#DC2626" stroke-width="2" stroke-dasharray="7 5"/>
+  <text x="1320" y="140" font-size="15" font-weight="bold" fill="#DC2626" text-anchor="end">break-even (1.0)</text>
+  <text x="1320" y="158" font-size="13" fill="#DC2626" text-anchor="end">refine-k baseline</text>
+
+  <!-- last group -->
+  <text x="1100" y="152" font-size="16" fill="#475569">last</text>
+  <rect x="1100" y="160" width="161" height="26" fill="#2563EB"/>
+  <text x="1269" y="178" font-size="16" font-weight="bold" fill="#1F2937">0.69</text>
+  <rect x="1100" y="196" width="161" height="26" fill="#7C3AED"/>
+  <text x="1269" y="214" font-size="16" font-weight="bold" fill="#1F2937">0.69</text>
+
+  <!-- concat group -->
+  <text x="1100" y="302" font-size="16" fill="#475569">concat</text>
+  <rect x="1100" y="310" width="212" height="26" fill="#2563EB"/>
+  <text x="1320" y="328" font-size="16" font-weight="bold" fill="#1F2937">0.91</text>
+  <rect x="1100" y="346" width="208" height="26" fill="#7C3AED"/>
+  <text x="1316" y="364" font-size="16" font-weight="bold" fill="#1F2937">0.89</text>
+
+  <!-- blackboard group -->
+  <text x="1100" y="452" font-size="16" fill="#475569">blackboard</text>
+  <rect x="1100" y="460" width="189" height="26" fill="#2563EB"/>
+  <text x="1297" y="478" font-size="16" font-weight="bold" fill="#1F2937">0.81</text>
+  <rect x="1100" y="496" width="175" height="26" fill="#7C3AED"/>
+  <text x="1283" y="514" font-size="16" font-weight="bold" fill="#1F2937">0.75</text>
+
+  <!-- integrator group -->
+  <text x="1100" y="602" font-size="16" font-weight="bold" fill="#059669">integrator</text>
+  <rect x="1100" y="610" width="361" height="26" fill="#2563EB"/>
+  <text x="1469" y="628" font-size="16" font-weight="bold" fill="#1F2937">1.55</text>
+  <rect x="1100" y="646" width="376" height="26" fill="#7C3AED"/>
+  <text x="1484" y="664" font-size="16" font-weight="bold" fill="#1F2937">1.61</text>
+
+  <!-- axis -->
+  <line x1="1100" y1="735" x2="1520" y2="735" stroke="#94A3B8" stroke-width="1.5"/>
+  <line x1="1287" y1="735" x2="1287" y2="741" stroke="#94A3B8" stroke-width="1.5"/>
+  <text x="1287" y="758" font-size="15" fill="#64748B" text-anchor="middle">0.8</text>
+  <line x1="1333" y1="735" x2="1333" y2="741" stroke="#94A3B8" stroke-width="1.5"/>
+  <text x="1333" y="758" font-size="15" fill="#64748B" text-anchor="middle">1.0</text>
+  <line x1="1380" y1="735" x2="1380" y2="741" stroke="#94A3B8" stroke-width="1.5"/>
+  <text x="1380" y="758" font-size="15" fill="#64748B" text-anchor="middle">1.2</text>
+  <line x1="1427" y1="735" x2="1427" y2="741" stroke="#94A3B8" stroke-width="1.5"/>
+  <text x="1427" y="758" font-size="15" fill="#64748B" text-anchor="middle">1.4</text>
+  <line x1="1473" y1="735" x2="1473" y2="741" stroke="#94A3B8" stroke-width="1.5"/>
+  <text x="1473" y="758" font-size="15" fill="#64748B" text-anchor="middle">1.6</text>
+  <line x1="1520" y1="735" x2="1520" y2="741" stroke="#94A3B8" stroke-width="1.5"/>
+  <text x="1520" y="758" font-size="15" fill="#64748B" text-anchor="middle">1.8</text>
+
+  <!-- ===== Bottom banner ===== -->
+  <rect x="40" y="780" width="1520" height="80" rx="12" fill="#1E293B"/>
+  <text x="70" y="822" font-size="22" font-weight="bold" fill="#FFFFFF">Protocol alone swings CTR_matched from 0.69 to 1.61 — over identical role outputs</text>
+  <text x="70" y="846" font-size="15" fill="#CBD5E1">15 tasks × 3 seeds per model · CTR vs compute-matched refine-k · Wilcoxon p ≤ 5×10⁻³ (BH-FDR)</text>
+</svg>
