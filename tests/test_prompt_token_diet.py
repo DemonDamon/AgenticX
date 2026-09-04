@@ -278,6 +278,29 @@ def test_show_widget_trigger_rules_stay_in_the_prompt():
     assert "show_widget" in prompt
 
 
+def test_meta_static_prompt_stays_under_char_budget():
+    session = StudioSession()
+    prompt = build_meta_agent_system_prompt(session, include_volatile=False)
+    assert len(prompt) <= 12_500, f"static prompt regressed to {len(prompt)} chars"
+
+
+def test_static_prompt_has_triggers_not_deferred_manuals():
+    session = StudioSession()
+    prompt = build_meta_agent_system_prompt(session, include_volatile=False)
+    pop_volatile_sections(session)
+    assert "强制触发" in prompt
+    assert "show_widget" in prompt
+    assert "show_images" in prompt
+    assert "禁止只用表格" in prompt
+    assert "query_data_source" in prompt
+    assert "编造" in prompt
+    assert "cc_bridge 可见模式强约束" not in prompt
+    assert "write is only for visible_tui" not in prompt
+    assert "lsp_goto_definition(file, line, column)" not in prompt
+    assert "URL content and visual inspection" not in prompt
+    assert "今天日期：" not in prompt
+
+
 # --------------------------------------------------------------------------
 # 6. 端到端预算
 # --------------------------------------------------------------------------
@@ -544,7 +567,7 @@ def test_switching_models_does_not_move_the_system_prompt(monkeypatch):
     sections = pop_volatile_sections(session)
 
     assert after == before
-    # provider 目录本身还在——稳定的部分没被误伤。
-    assert "MOMA/GLM-5.2" in after
-    # 当前模型没丢，只是搬进了易变区。
+    # 稳定前缀不再带厂商目录；目录与当前模型都在易变区。
+    assert "MOMA/GLM-5.2" not in after
+    assert any("MOMA/GLM-5.2" in body for _, body in sections)
     assert any("qwen3-vl-27b" in body for _, body in sections)

@@ -976,7 +976,11 @@ def test_meta_agent_wb_discipline() -> None:
     assert "wb_bridge 无人值守强约束" in src
     assert "wb_bridge 重发禁令" in src
     assert "wb_bridge 证据门禁" in src
-    assert "cc_bridge 可见模式强约束" in src
+    cc_desc = _studio_fn("cc_bridge_send")["description"]
+    assert "visible_tui" in cc_desc
+    assert "禁止 bash_exec 轮询" in cc_desc
+    assert "parsed_response 为空" in cc_desc
+    assert "write is only for visible_tui" in cc_desc
 
 
 def test_automation_blocks_wb_mutate_tools() -> None:

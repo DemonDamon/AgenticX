@@ -851,7 +851,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "description": (
                 "Start an interactive or long-running shell command in background without timeout kill. "
                 "Use for QR/auth/login commands that wait for user actions. Returns job_id, first-screen output, "
-                "and extracted auth URLs."
+                "and extracted auth URLs. "
+                "转述 auth_urls 给用户完成扫码/授权；确认完成前最多每 15-30 秒 bash_bg_poll 一次，"
+                "禁止高频轮询，禁止此时 bash_bg_stop。需要键入用 bash_bg_input；确认完成后再 poll 读 exit_code，不得谎报成功。"
             ),
             "parameters": {
                 "type": "object",
@@ -1092,7 +1094,14 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "Send a user turn to an existing CC bridge session. In headless mode it waits for result/timeout; "
                 "in visible_tui mode it only writes input to PTY and returns immediately (no final result inference). "
                 "Requires bridge at cc_bridge.url (default 127.0.0.1:9742) and matching bearer token. "
-                "Afterward confirm any expected files with file_read or bash_exec test -f."
+                "Afterward confirm any expected files with file_read or bash_exec test -f. "
+                "可见模式强约束：返回 mode=visible_tui 且 interactive=true 时任务已投递到交互终端；"
+                "禁止 bash_exec 轮询 cc-bridge 日志、禁止重复 cc_bridge_send 追问进度、禁止擅自 cc_bridge_stop；"
+                "直接向用户报告已投递并等待终端交互。 "
+                "证据门禁：parsed_response 为空、ok=false 或仅有 tail/log 时不得称分析完成，只能汇报状态、阻塞原因与下一步。 "
+                "模式路由：headless 走 /message，visible_tui 走 /write。"
+                "若返回 write is only for visible_tui，工具层至多纠偏一次（可能出现 mode_corrected）；"
+                "禁止在同一失败点连续多次重试。"
             ),
             "parameters": {
                 "type": "object",
@@ -1985,7 +1994,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "lsp_goto_definition",
-            "description": "Jump to symbol definition at given file position.",
+            "description": (
+                "Jump to symbol definition at given file position. "
+                "理解函数/类来源时优先用本工具，不要先 grep。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2002,7 +2014,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "lsp_find_references",
-            "description": "Find all references to a symbol at given file position.",
+            "description": (
+                "Find all references to a symbol at given file position. "
+                "重构前评估影响面时优先用本工具。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2019,7 +2034,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "lsp_hover",
-            "description": "Get type info and documentation for a symbol at given file position.",
+            "description": (
+                "Get type info and documentation for a symbol at given file position. "
+                "判断 API 参数/返回值时优先用本工具。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2036,7 +2054,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "lsp_diagnostics",
-            "description": "Get lint/type diagnostics for a file or all opened files.",
+            "description": (
+                "Get lint/type diagnostics for a file or all opened files. "
+                "改动代码后验证质量时调用；首次调用可能需要几秒启动语言服务器。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2056,7 +2077,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "The user can also view, edit and manage the task in the sidebar '定时' section. "
                 "Before calling this tool: if the task runs Python scripts, prepare the runtime under the task root only — "
                 "the root is the user-provided workspace if set, else ~/.agenticx/crontask/<task_id>/. "
-                "Create <task_root>/.venv, pip install there, smoke-run with <task_root>/.venv/bin/python, and reference that path in instruction."
+                "Create <task_root>/.venv, pip install there, smoke-run with <task_root>/.venv/bin/python, and reference that path in instruction. "
+                "名称 + 频率/时间/日期 + instruction + workspace 齐了必须同一轮直接调用；"
+                "禁止先说“我先加载某个 skill/脚本”。除非用户明确要求复用 skill 源码，"
+                "不要先 file_read ~/.cursor/skills/* 大文件。"
             ),
             "parameters": {
                 "type": "object",
@@ -2441,7 +2465,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "Pass direct image http(s) URLs from web_fetch [discovered_images] "
                 "or obvious image CDN links. Do not pass HTML gallery pages. "
                 "This is display-only: the current model does not need vision. "
-                "Never tell the user the bubble cannot render images."
+                "Never tell the user the bubble cannot render images. "
+                "不要图集 HTML；不要选 URL 含 /ops/、/avatar/、/banner/ 或边长 ≤160 的运营位。"
+                "不要用 generate_image 画公众人物照片。"
             ),
             "parameters": {
                 "type": "object",
