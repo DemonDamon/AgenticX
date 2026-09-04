@@ -57,6 +57,12 @@ P0 的 E-3 已实测：codebuddy **不支持** `--permission-prompt-tool`，head
 - **分类尽力而为**：`permission_denials` 非空 → `blocked`；`is_error` 为真或 `subtype != "success"` → `error`。字段名来自已实测的 `result` 行（`tests/test_smoke_wb_bridge.py:41-57` 的 `_E2_RESULT`，其中 `"permission_denials":[]` 确实存在）。
 - **要求补一次证据**：子规划 A 的 AC-A11 是人工采样。若采样发现被权限挡住时**根本不吐 `result` 行**（就地静默挂起），则按 A 的 stall/timeline 兜底处理，并把结论追写回本文件本节，**不要临场改设计**。
 
+**AC-A11 本机实测（2026-09-05，真实 WorkBuddy `codebuddy`，新代码 bridge `:19743`）：**
+
+- `permission_mode=default` + `write a file /tmp/agx-wb-e2e-probe-<ts>.txt with content hi`：`wait_seconds=25` 返回 `status=running`、`stalled=false`、`observed_tools=["Write"]`、`result_text=""`、目标文件**不存在**；再 poll 40s 后仍是 `turn_state=running`、`last_terminal_kind` 空、`stalled_age≈57.9s`、文件仍不存在。
+- **结论：被权限挡住时 stdout 根本不吐 `type=result` 行**（因此没有真实 subtype 可回填 `_RESULT_BLOCKED`）。分类路径保持夹具占位；运行时靠 `running` + timeline/`stalled` 兜底。**不要临场改设计。**
+- 对照：同机 `acceptEdits` 文本轮 `status=success`、`result_text="OK"`（约 5s）；`acceptEdits` 写文件 `status=success`、`observed_tools=["Write"]`、文件内容 `hi`。
+
 ---
 
 ## 2. 借鉴来源：loopx 控制面（研究产物已在仓库内）
