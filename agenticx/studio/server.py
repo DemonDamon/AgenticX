@@ -2539,8 +2539,19 @@ def create_studio_app() -> FastAPI:
                 removed_agent += _strip_compacted_blocks(session.agent_messages)
         if matched_chat or matched_agent:
             from agenticx.runtime.session_summary_store import delete_session_summary
+            from agenticx.runtime.usage_store import get_usage_store
+            from agenticx.studio.usage_alive import keep_before_ms_from_messages
 
             delete_session_summary(session_id)
+            remaining = session.chat_history if isinstance(session.chat_history, list) else []
+            try:
+                get_usage_store().set_session_alive_window(
+                    session_id,
+                    keep_before_ms=keep_before_ms_from_messages(remaining),
+                    alive_after_ms=int(time.time() * 1000),
+                )
+            except Exception:
+                logger.warning("usage alive window update failed for %s", session_id, exc_info=True)
         await manager.persist_async(session_id)
         return {
             "ok": True,

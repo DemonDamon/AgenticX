@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS usage_events (
 CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_events(ts_ms);
 CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_events(session_id, ts_ms);
 CREATE INDEX IF NOT EXISTS idx_usage_prov_model_ts ON usage_events(provider, model, ts_ms);
+CREATE TABLE IF NOT EXISTS usage_session_window (
+    session_id TEXT PRIMARY KEY,
+    keep_before_ms INTEGER NOT NULL DEFAULT 0,
+    alive_after_ms INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -75,6 +80,7 @@ class UsageStore:
         cached_tokens: int,
         reasoning_tokens: int,
         total_tokens: int,
+        ts_ms: int | None = None,
     ) -> None:
         sid = (session_id or "").strip()
         aid = (avatar_id or "").strip()
@@ -88,7 +94,12 @@ class UsageStore:
         if inp == 0 and out == 0 and total == 0 and cached == 0 and reasoning == 0:
             return
         cost = compute_cost_usd(mdl, input_tokens=inp, output_tokens=out, cached_tokens=cached)
-        ts_ms = int(time.time() * 1000)
+        try:
+            event_ts = int(ts_ms) if ts_ms is not None else 0
+        except (TypeError, ValueError):
+            event_ts = 0
+        if event_ts <= 0:
+            event_ts = int(time.time() * 1000)
         with self._lock:
             conn = self._connect()
             try:
@@ -100,7 +111,7 @@ class UsageStore:
                         total_tokens, cost_usd
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (ts_ms, sid, aid, prov, mdl, inp, out, cached, reasoning, total, cost),
+                    (event_ts, sid, aid, prov, mdl, inp, out, cached, reasoning, total, cost),
                 )
                 conn.commit()
             finally:
@@ -135,12 +146,70 @@ class UsageStore:
         except Exception as exc:
             _log.warning("usage_store.record_async failed: %s", exc)
 
+    def set_session_alive_window(
+        self,
+        session_id: str,
+        *,
+        keep_before_ms: int,
+        alive_after_ms: int,
+    ) -> None:
+        """Mark discarded generations after a retry/edit truncate.
+
+        Session-usage reads keep events at/before ``keep_before_ms`` or at/after
+        ``alive_after_ms``. The global billing dashboard still sums every row.
+        """
+        sid = str(session_id or "").strip()
+        if not sid:
+            return
+        keep = max(0, int(keep_before_ms or 0))
+        alive = max(0, int(alive_after_ms or 0))
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO usage_session_window (
+                        session_id, keep_before_ms, alive_after_ms
+                    ) VALUES (?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        keep_before_ms = excluded.keep_before_ms,
+                        alive_after_ms = excluded.alive_after_ms
+                    """,
+                    (sid, keep, alive),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_session_alive_window(self, session_id: str) -> tuple[int, int] | None:
+        sid = str(session_id or "").strip()
+        if not sid:
+            return None
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT keep_before_ms, alive_after_ms
+                    FROM usage_session_window
+                    WHERE session_id = ?
+                    """,
+                    (sid,),
+                ).fetchone()
+            finally:
+                conn.close()
+        if not row:
+            return None
+        return int(row[0] or 0), int(row[1] or 0)
+
     def cache_stats(
         self,
         *,
         since_ms: int | None = None,
         provider: str | None = None,
         session_id: str | None = None,
+        keep_before_ms: int | None = None,
+        alive_after_ms: int | None = None,
     ) -> dict[str, Any]:
         """Read-only cache-hit summary for local verification (no schema change)."""
         clauses = ["1=1"]
@@ -156,6 +225,17 @@ class UsageStore:
         if sid:
             clauses.append("session_id = ?")
             params.append(sid)
+            if keep_before_ms is None or alive_after_ms is None:
+                window = self.get_session_alive_window(sid)
+                if window is not None:
+                    keep_before_ms, alive_after_ms = window
+        if (
+            sid
+            and keep_before_ms is not None
+            and alive_after_ms is not None
+        ):
+            clauses.append("(ts_ms <= ? OR ts_ms >= ?)")
+            params.extend([int(keep_before_ms), int(alive_after_ms)])
         where = " AND ".join(clauses)
         last_input = 0
         last_cached = 0
@@ -178,14 +258,14 @@ class UsageStore:
                 ).fetchone()
                 if sid:
                     last = conn.execute(
-                        """
+                        f"""
                         SELECT input_tokens, cached_tokens
                         FROM usage_events
-                        WHERE session_id = ?
+                        WHERE {where}
                         ORDER BY ts_ms DESC, id DESC
                         LIMIT 1
                         """,
-                        (sid,),
+                        params,
                     ).fetchone()
                     if last:
                         last_input = int(last[0] or 0)

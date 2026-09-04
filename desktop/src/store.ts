@@ -833,6 +833,7 @@ type AppState = {
   removePaneTerminalTab: (paneId: string, tabId: string) => void;
   setActivePaneTerminalTab: (paneId: string, tabId: string | null) => void;
   accumulatePaneTokens: (paneId: string, input: number, output: number, cached?: number) => void;
+  replacePaneTokens: (paneId: string, tokens: SessionTokens) => void;
   addMessage: (
     role: MsgRole,
     content: string,
@@ -2135,6 +2136,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         targetSessionId = String(pane.sessionId ?? "").trim();
         nextTokens = merged;
         return { ...pane, sessionTokens: merged };
+      });
+      if (targetSessionId) {
+        upsertSessionTokenCache(targetSessionId, nextTokens);
+      }
+      return { panes: nextPanes };
+    }),
+  replacePaneTokens: (paneId, tokens) =>
+    set((state) => {
+      const nextTokens = normalizeSessionTokens(tokens);
+      let targetSessionId = "";
+      const nextPanes = state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        targetSessionId = String(pane.sessionId ?? "").trim();
+        return { ...pane, sessionTokens: nextTokens };
       });
       if (targetSessionId) {
         upsertSessionTokenCache(targetSessionId, nextTokens);

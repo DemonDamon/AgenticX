@@ -3,6 +3,11 @@ import { createPortal } from "react-dom";
 
 import { useAppStore } from "../store";
 import { formatHitPercent } from "../utils/cache-hit";
+import {
+  buildContextUsageRefreshKey,
+  contextUsageMessageSignature,
+  shouldFetchContextUsage,
+} from "../utils/context-usage-refresh";
 import { HoverTip } from "./ds/HoverTip";
 
 interface SessionCacheUsage {
@@ -167,11 +172,13 @@ export function ContextUsageButton({
   sessionId,
   apiBase,
   apiToken,
+  isStreaming = false,
 }: {
   paneId: string;
   sessionId: string;
   apiBase: string;
   apiToken: string;
+  isStreaming?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [usage, setUsage] = useState<ContextUsage | null>(null);
@@ -187,6 +194,31 @@ export function ContextUsageButton({
   const paneModel = useAppStore((s) => {
     const pane = s.panes.find((item) => item.id === paneId);
     return String(pane?.modelName ?? "").trim();
+  });
+  const messageCount = useAppStore((s) => {
+    const pane = s.panes.find((item) => item.id === paneId);
+    return contextUsageMessageSignature(pane?.messages ?? []).messageCount;
+  });
+  const lastMessageId = useAppStore((s) => {
+    const pane = s.panes.find((item) => item.id === paneId);
+    return contextUsageMessageSignature(pane?.messages ?? []).lastMessageId;
+  });
+  const sessionInputTokens = useAppStore((s) => {
+    const tokens = s.panes.find((item) => item.id === paneId)?.sessionTokens;
+    return tokens?.input ?? 0;
+  });
+  const sessionOutputTokens = useAppStore((s) => {
+    const tokens = s.panes.find((item) => item.id === paneId)?.sessionTokens;
+    return tokens?.output ?? 0;
+  });
+  const refreshKey = buildContextUsageRefreshKey({
+    sessionId,
+    model: paneModel,
+    isStreaming,
+    messageCount,
+    lastMessageId,
+    sessionInputTokens,
+    sessionOutputTokens,
   });
 
   const refreshPanelPosition = useCallback(() => {
@@ -280,7 +312,8 @@ export function ContextUsageButton({
 
   // Restore this session's last payload instantly on switch. Never keep
   // another session's numbers on screen; never blank to "加载中" when we
-  // already have a row for the new session.
+  // already have a row for the new session. Same-session retry trim and
+  // turn settle change refreshKey so occupancy / ledger are fetched again.
   useEffect(() => {
     setLoadFailed(false);
     if (!sessionId) {
@@ -289,8 +322,9 @@ export function ContextUsageButton({
     }
     const cached = readUsageCache(sessionId, paneModel);
     setUsage(cached);
+    if (!shouldFetchContextUsage(isStreaming)) return;
     void fetchUsage();
-  }, [fetchUsage, paneModel, sessionId]);
+  }, [fetchUsage, isStreaming, paneModel, refreshKey, sessionId]);
 
   useEffect(() => {
     if (open && sessionId) refreshPanelPosition();

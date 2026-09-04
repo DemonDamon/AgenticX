@@ -202,6 +202,7 @@ import {
   isDoubleEnterWithinWindow,
   isStreamRunActiveForQueue,
   resolveQueueSessionKey,
+  shouldAwaitInterruptBeforeRetry,
   shouldEnqueueOnResend,
   shouldInterruptOnResend,
   shouldShowSessionWorkInProgress,
@@ -281,6 +282,7 @@ import {
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
 import { parseMessageUsage } from "../utils/message-turn-meta";
+import { sessionTokensFromMessages } from "../utils/session-tokens-from-messages";
 import {
   assistantVisibleBodyForUi,
   buildCommittedAssistantPatch,
@@ -6617,8 +6619,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         await reloadSessionFromDisk(sid);
         return;
       }
-      setPaneMessages(pane.id, msgs.slice(0, idx));
-      await sendChatRef.current(newContent, {
+        const remainingEdit = msgs.slice(0, idx);
+        setPaneMessages(pane.id, remainingEdit);
+        useAppStore.getState().replacePaneTokens(pane.id, sessionTokensFromMessages(remainingEdit));
+        await sendChatRef.current(newContent, {
         lockedSessionId: sid,
         retryAttachments: msg.attachments ?? [],
       });
@@ -7520,15 +7524,52 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (!sid || !apiBase) return;
       if (retryInFlightRef.current[sid]) return;
       retryInFlightRef.current[sid] = true;
+      const paintRetryPending = (remaining: Message[]) => {
+        setPaneMessages(pane.id, remaining);
+        useAppStore.getState().replacePaneTokens(pane.id, sessionTokensFromMessages(remaining));
+        sessionStreamStateRef.current[sid] = {
+          active: true,
+          text: "",
+          provider: chatProvider,
+          model: chatModel,
+        };
+        setSessionExecutionState("running");
+        prevExecutionStateBySidRef.current[sid] = "running";
+        useAppStore.getState().markSessionHistoryActive(sid);
+        if ((pane.sessionId || "").trim() === sid) {
+          syncStreamingUiForCurrentSession();
+        }
+      };
+      const clearRetryPending = () => {
+        const st = sessionStreamStateRef.current[sid];
+        if (st) {
+          st.active = false;
+          st.text = "";
+          sessionStreamStateRef.current[sid] = st;
+        }
+        setSessionExecutionState("idle");
+        if ((pane.sessionId || "").trim() === sid) {
+          syncStreamingUiForCurrentSession();
+        }
+      };
       try {
-        await interruptForResume(sid);
-        await new Promise((resolve) => window.setTimeout(resolve, 60));
-
         const msgs = pane.messages ?? [];
         const idx = msgs.findIndex((m) => m.id === msg.id);
         if (idx < 0) return;
         const userOccurrence = countUserOccurrenceThrough(msgs, idx, msg.content);
         const expectRemoved = hasTrailingTurnMessages(msgs, idx);
+        const remainingRetry = msgs.slice(0, idx + 1);
+        const streamWasActive = Boolean(sessionStreamStateRef.current[sid]?.active);
+
+        // Optimistic: drop trailing turns and show generating chrome before any persist.
+        paintRetryPending(remainingRetry);
+
+        if (shouldAwaitInterruptBeforeRetry({ streamActive: streamWasActive })) {
+          await interruptForResume(sid);
+          await new Promise((resolve) => window.setTimeout(resolve, 60));
+          paintRetryPending(remainingRetry);
+        }
+
         const ok = await truncateSessionAtUserMessage(
           sid,
           msg.content,
@@ -7537,6 +7578,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           expectRemoved
         );
         if (!ok) {
+          clearRetryPending();
           addPaneMessage(
             pane.id,
             "tool",
@@ -7546,16 +7588,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           await reloadSessionFromDisk(sid);
           return;
         }
-        setPaneMessages(pane.id, msgs.slice(0, idx + 1));
         await sendChatRef.current(msg.content, {
           lockedSessionId: sid,
           retryAttachments: msg.attachments ?? [],
           suppressUserEcho: true,
           skipUserHistory: true,
           forceSend: true,
+          skipInterrupt: true,
         });
       } catch (err) {
         console.error("[ChatPane] retry user message failed:", err);
+        clearRetryPending();
         addPaneMessage(pane.id, "tool", `⚠️ 重试失败：${String(err)}`, "meta");
       } finally {
         retryInFlightRef.current[sid] = false;
@@ -7564,6 +7607,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [
       addPaneMessage,
       apiBase,
+      chatModel,
+      chatProvider,
       countUserOccurrenceThrough,
       hasTrailingTurnMessages,
       interruptForResume,
@@ -7572,6 +7617,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       pane.sessionId,
       reloadSessionFromDisk,
       setPaneMessages,
+      syncStreamingUiForCurrentSession,
       truncateSessionAtUserMessage,
     ]
   );
@@ -8937,6 +8983,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       suppressUserEcho?: boolean;
       skipUserHistory?: boolean;
       forceSend?: boolean;
+      skipInterrupt?: boolean;
       queueDrain?: boolean;
       lockedSessionId?: string;
       continuation?: { reason: ContinueReason; source: ContinueSource };
@@ -9027,6 +9074,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       suppressUserEcho?: boolean;
       skipUserHistory?: boolean;
       forceSend?: boolean;
+      skipInterrupt?: boolean;
       queueDrain?: boolean;
       lockedSessionId?: string;
       continuation?: { reason: ContinueReason; source: ContinueSource };
@@ -9243,6 +9291,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         isStreamRunActive,
         forceSend: options?.forceSend,
         queueDrain: options?.queueDrain,
+        skipInterrupt: options?.skipInterrupt,
       })
     ) {
       // Force-send while streaming: abort the current run, then start the new round.
@@ -9401,6 +9450,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           implicitRetryIdx,
           messageText
         );
+        const remainingImplicit = currentMsgs.slice(0, implicitRetryIdx + 1);
+        setPaneMessages(pane.id, remainingImplicit);
+        useAppStore.getState().replacePaneTokens(pane.id, sessionTokensFromMessages(remainingImplicit));
         const ok = await truncateSessionAtUserMessage(
           requestSessionId,
           messageText,
@@ -9413,7 +9465,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           releaseSendLock();
           return;
         }
-        setPaneMessages(pane.id, currentMsgs.slice(0, implicitRetryIdx + 1));
         suppressUserEcho = true;
         skipUserHistory = true;
       }
@@ -13733,6 +13784,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       sessionId={pane.sessionId ?? ""}
                       apiBase={apiBase}
                       apiToken={apiToken}
+                      isStreaming={isStreamingCurrentSession}
                     />
                   ) : null}
                   <PaneModelPicker paneId={pane.id} />
