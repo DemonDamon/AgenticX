@@ -1,0 +1,389 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="gradTitle" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="gradS1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F0F6FF"/>
+      <stop offset="1" stop-color="#E3EDFB"/>
+    </linearGradient>
+    <linearGradient id="gradS2a" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F0F6FF"/>
+      <stop offset="1" stop-color="#E6EFFC"/>
+    </linearGradient>
+    <linearGradient id="gradS2b" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F0FDF4"/>
+      <stop offset="1" stop-color="#E8F7EF"/>
+    </linearGradient>
+    <linearGradient id="gradS3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F5F3FF"/>
+      <stop offset="1" stop-color="#EBE4FC"/>
+    </linearGradient>
+    <linearGradient id="gradBanner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1E293B"/>
+      <stop offset="1" stop-color="#111C2E"/>
+    </linearGradient>
+    <linearGradient id="gradFlow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="gradQ" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="gradGen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#60A5FA"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#0F172A" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <!-- ============ canvas & decoration ============ -->
+  <rect x="0" y="0" width="1600" height="900" fill="#FFFFFF"/>
+  <circle cx="1500" cy="58" r="36" fill="#EDF1FA"/>
+  <circle cx="1551" cy="28" r="9" fill="none" stroke="#DDE4F2" stroke-width="3"/>
+  <circle cx="1446" cy="98" r="6" fill="#E7E2F8"/>
+  <circle cx="24" cy="756" r="11" fill="#E9EEFA"/>
+  <circle cx="20" cy="704" r="5" fill="none" stroke="#D8E0F2" stroke-width="2.5"/>
+  <circle cx="1578" cy="480" r="8" fill="#E9EEFA"/>
+  <circle cx="1582" cy="556" r="5" fill="none" stroke="#D8E0F2" stroke-width="2.5"/>
+
+  <!-- ============ header ============ -->
+  <rect x="48" y="42" width="8" height="60" rx="4" fill="url(#gradTitle)"/>
+  <text x="68" y="74" font-size="26" font-weight="bold" fill="#0F172A">TeamBench: A Paired Benchmark with Assembly Protocol as a First-Class Controlled Variable</text>
+  <text x="69" y="104" font-size="14.5" fill="#64748B">Stage 1 task space &#8594; Stage 2 paired execution (7 arms) &#8594; Stage 3 artifact scoring &#8212; assembly protocol held as the controlled variable</text>
+
+  <!-- ============ Stage 1 : Task Space ============ -->
+  <rect x="48" y="130" width="416" height="560" rx="16" fill="url(#gradS1)" stroke="#C7D7F0" stroke-width="1.5" filter="url(#cardShadow)"/>
+  <rect x="72" y="152" width="76" height="26" rx="13" fill="#2563EB"/>
+  <text x="110" y="170" font-size="12.5" font-weight="bold" fill="#FFFFFF" text-anchor="middle">STAGE 1</text>
+  <text x="160" y="171" font-size="19" font-weight="bold" fill="#0F172A">Task Space</text>
+
+  <text x="256" y="205" font-size="13" fill="#475569" text-anchor="middle">5 workplace scenarios &#215; 3 coupling levels</text>
+
+  <!-- 5x3 grid -->
+  <text x="168" y="236" font-size="12.5" font-weight="bold" fill="#334155" text-anchor="middle">Low</text>
+  <text x="262" y="236" font-size="12.5" font-weight="bold" fill="#334155" text-anchor="middle">Med</text>
+  <text x="356" y="236" font-size="12.5" font-weight="bold" fill="#334155" text-anchor="middle">High</text>
+  <rect x="124" y="244" width="88" height="36" rx="5" fill="#DBEAFE"/>
+  <rect x="218" y="244" width="88" height="36" rx="5" fill="#BFDBFE"/>
+  <rect x="312" y="244" width="88" height="36" rx="5" fill="#93C5FD"/>
+  <rect x="124" y="285" width="88" height="36" rx="5" fill="#E8F1FE"/>
+  <rect x="218" y="285" width="88" height="36" rx="5" fill="#CFE2FD"/>
+  <rect x="312" y="285" width="88" height="36" rx="5" fill="#A5CDFD"/>
+  <rect x="124" y="326" width="88" height="36" rx="5" fill="#DBEAFE"/>
+  <rect x="218" y="326" width="88" height="36" rx="5" fill="#BFDBFE"/>
+  <rect x="312" y="326" width="88" height="36" rx="5" fill="#93C5FD"/>
+  <rect x="124" y="367" width="88" height="36" rx="5" fill="#E8F1FE"/>
+  <rect x="218" y="367" width="88" height="36" rx="5" fill="#CFE2FD"/>
+  <rect x="312" y="367" width="88" height="36" rx="5" fill="#A5CDFD"/>
+  <rect x="124" y="408" width="88" height="36" rx="5" fill="#DBEAFE"/>
+  <rect x="218" y="408" width="88" height="36" rx="5" fill="#BFDBFE"/>
+  <rect x="312" y="408" width="88" height="36" rx="5" fill="#93C5FD"/>
+  <text x="114" y="267" font-size="11.5" font-weight="bold" fill="#334155" text-anchor="end">DOC</text>
+  <text x="114" y="308" font-size="11.5" font-weight="bold" fill="#334155" text-anchor="end">DATA</text>
+  <text x="114" y="349" font-size="11.5" font-weight="bold" fill="#334155" text-anchor="end">PROJ</text>
+  <text x="114" y="390" font-size="11.5" font-weight="bold" fill="#334155" text-anchor="end">CROSS</text>
+  <text x="114" y="431" font-size="11.5" font-weight="bold" fill="#334155" text-anchor="end">CONTENT</text>
+  <text x="256" y="466" font-size="11" fill="#64748B" text-anchor="middle">15 task families &#8212; every scenario &#215; coupling cell</text>
+
+  <!-- generator card -->
+  <rect x="72" y="482" width="368" height="92" rx="12" fill="#FFFFFF" stroke="#C7D7F0" stroke-width="1.5" filter="url(#cardShadow)"/>
+  <rect x="88" y="496" width="44" height="44" rx="10" fill="url(#gradGen)"/>
+  <line x1="96" y1="509" x2="124" y2="509" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="96" y1="518" x2="124" y2="518" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="96" y1="527" x2="124" y2="527" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>
+  <circle cx="104" cy="509" r="3.2" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+  <circle cx="117" cy="518" r="3.2" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+  <circle cx="101" cy="527" r="3.2" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+  <text x="142" y="514" font-size="14.5" font-weight="bold" fill="#0F172A">Parametric generators &#215;10</text>
+  <text x="142" y="536" font-size="12.5" fill="#475569">&#8594; 150 unique task variants</text>
+  <line x1="88" y1="550" x2="424" y2="550" stroke="#E2E8F0" stroke-width="1.5"/>
+  <path d="M 98 556.5 L 105.5 559.3 V 564 C 105.5 568 102.5 570.8 98 572.3 C 93.5 570.8 90.5 568 90.5 564 V 559.3 Z" fill="#D1FAE5" stroke="#059669" stroke-width="1.5"/>
+  <path d="M 94.8 564.2 L 97.2 566.6 L 101.5 561.6" fill="none" stroke="#059669" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="112" y="568" font-size="11" fill="#334155">contamination defense via held-out parameters</text>
+
+  <!-- number badges -->
+  <rect x="72" y="590" width="112" height="66" rx="12" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1.5" filter="url(#cardShadow)"/>
+  <text x="128" y="622" font-size="24" font-weight="bold" fill="#2563EB" text-anchor="middle">15</text>
+  <text x="128" y="644" font-size="11" fill="#64748B" text-anchor="middle">task families</text>
+  <rect x="196" y="590" width="112" height="66" rx="12" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1.5" filter="url(#cardShadow)"/>
+  <text x="252" y="622" font-size="24" font-weight="bold" fill="#2563EB" text-anchor="middle">150</text>
+  <text x="252" y="644" font-size="11" fill="#64748B" text-anchor="middle">variants</text>
+  <rect x="320" y="590" width="120" height="66" rx="12" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1.5" filter="url(#cardShadow)"/>
+  <text x="380" y="622" font-size="24" font-weight="bold" fill="#2563EB" text-anchor="middle">3</text>
+  <text x="380" y="644" font-size="11" fill="#64748B" text-anchor="middle">seeds</text>
+
+  <!-- ============ flow arrow 1 ============ -->
+  <text x="499" y="364" font-size="10.5" fill="#94A3B8" text-anchor="middle">tasks</text>
+  <polygon points="474,388 506,388 506,374 534,410 506,446 506,432 474,432" fill="url(#gradFlow)"/>
+
+  <!-- ============ Stage 2 : Paired Execution ============ -->
+  <rect x="534" y="130" width="560" height="218" rx="16" fill="url(#gradS2a)" stroke="#BFDBFE" stroke-width="1.5" filter="url(#cardShadow)"/>
+  <rect x="558" y="152" width="76" height="26" rx="13" fill="#059669"/>
+  <text x="596" y="170" font-size="12.5" font-weight="bold" fill="#FFFFFF" text-anchor="middle">STAGE 2</text>
+  <text x="646" y="171" font-size="19" font-weight="bold" fill="#0F172A">Paired Execution</text>
+  <rect x="1002" y="152" width="68" height="26" rx="13" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1.5"/>
+  <text x="1036" y="170" font-size="12.5" font-weight="bold" fill="#047857" text-anchor="middle">7 arms</text>
+
+  <!-- single mode -->
+  <circle cx="582" cy="207" r="5" fill="#2563EB"/>
+  <text x="594" y="212" font-size="15" font-weight="bold" fill="#1D4ED8">Single mode</text>
+  <rect x="870" y="198" width="200" height="24" rx="12" fill="#DBEAFE"/>
+  <text x="970" y="214" font-size="11.5" font-weight="bold" fill="#1E40AF" text-anchor="middle">3 arms &#183; compute-matched</text>
+  <!-- 1-shot -->
+  <rect x="578" y="226" width="146" height="104" rx="10" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1.5"/>
+  <circle cx="651" cy="254" r="15" fill="#DBEAFE"/>
+  <path d="M 646 247 L 654 247 L 658 251 L 658 261 L 646 261 Z" fill="none" stroke="#2563EB" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="M 654 247 L 654 251 L 658 251" fill="none" stroke="#2563EB" stroke-width="1.5" stroke-linejoin="round"/>
+  <line x1="649" y1="255" x2="655" y2="255" stroke="#2563EB" stroke-width="1.3"/>
+  <line x1="649" y1="258" x2="655" y2="258" stroke="#2563EB" stroke-width="1.3"/>
+  <text x="651" y="288" font-size="15" font-weight="bold" fill="#1E3A8A" text-anchor="middle">1-shot</text>
+  <text x="651" y="306" font-size="10.5" fill="#64748B" text-anchor="middle">single pass</text>
+  <text x="651" y="320" font-size="10.5" fill="#64748B" text-anchor="middle">1 model call</text>
+  <!-- refine-k -->
+  <rect x="740" y="226" width="146" height="104" rx="10" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1.5"/>
+  <circle cx="813" cy="254" r="15" fill="#DBEAFE"/>
+  <path d="M 813 246 A 8 8 0 1 0 813 262" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/>
+  <polygon points="813,259.2 817.5,262 813,264.8" fill="#2563EB"/>
+  <text x="813" y="288" font-size="15" font-weight="bold" fill="#1E3A8A" text-anchor="middle">Refine-k</text>
+  <text x="813" y="306" font-size="10.5" fill="#64748B" text-anchor="middle">k-round</text>
+  <text x="813" y="320" font-size="10.5" fill="#64748B" text-anchor="middle">self-revision</text>
+  <!-- best-of-k -->
+  <rect x="902" y="226" width="146" height="104" rx="10" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1.5"/>
+  <circle cx="975" cy="254" r="15" fill="#DBEAFE"/>
+  <polygon points="975,246 977,251.25 982.6,251.5 978.2,255.05 979.7,260.5 975,257.4 970.3,260.5 971.8,255.05 967.4,251.5 973,251.25" fill="#2563EB"/>
+  <text x="975" y="288" font-size="15" font-weight="bold" fill="#1E3A8A" text-anchor="middle">Best-of-k</text>
+  <text x="975" y="306" font-size="10.5" fill="#64748B" text-anchor="middle">k samples</text>
+  <text x="975" y="320" font-size="10.5" fill="#64748B" text-anchor="middle">+ selection</text>
+
+  <!-- team mode panel -->
+  <rect x="534" y="360" width="560" height="330" rx="16" fill="url(#gradS2b)" stroke="#A7F3D0" stroke-width="1.5" filter="url(#cardShadow)"/>
+  <circle cx="582" cy="380" r="5" fill="#059669"/>
+  <text x="594" y="385" font-size="15" font-weight="bold" fill="#047857">Team mode</text>
+  <text x="690" y="385" font-size="11.5" fill="#64748B">3-role serial chain</text>
+  <rect x="898" y="371" width="172" height="24" rx="12" fill="#D1FAE5"/>
+  <text x="984" y="387" font-size="11.5" font-weight="bold" fill="#065F46" text-anchor="middle">4 assembly protocols</text>
+
+  <!-- role chain -->
+  <rect x="578" y="396" width="146" height="64" rx="10" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1.5"/>
+  <circle cx="651" cy="418" r="13" fill="#D1FAE5"/>
+  <path d="M 646.5 425.5 L 648 421 L 656 413 L 658.5 415.5 L 650.5 423.5 L 646.5 425.5 Z" fill="#059669"/>
+  <text x="651" y="442" font-size="14.5" font-weight="bold" fill="#065F46" text-anchor="middle">Writer</text>
+  <text x="651" y="457" font-size="10" fill="#64748B" text-anchor="middle">drafts the artifact</text>
+  <line x1="725" y1="428" x2="733" y2="428" stroke="#059669" stroke-width="2"/>
+  <polygon points="733,424.5 739,428 733,431.5" fill="#059669"/>
+
+  <rect x="740" y="396" width="146" height="64" rx="10" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1.5"/>
+  <circle cx="813" cy="418" r="13" fill="#D1FAE5"/>
+  <path d="M 807.5 418.5 L 811.5 422.5 L 819 414.5" fill="none" stroke="#059669" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="813" y="442" font-size="14.5" font-weight="bold" fill="#065F46" text-anchor="middle">Evaluator</text>
+  <text x="813" y="457" font-size="10" fill="#64748B" text-anchor="middle">critiques &amp; scores</text>
+  <line x1="887" y1="428" x2="895" y2="428" stroke="#059669" stroke-width="2"/>
+  <polygon points="895,424.5 901,428 895,431.5" fill="#059669"/>
+
+  <rect x="902" y="396" width="146" height="64" rx="10" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1.5"/>
+  <circle cx="975" cy="418" r="13" fill="#D1FAE5"/>
+  <path d="M 975 410 L 981 412.3 V 416.2 C 981 419.3 978.5 421.6 975 423 C 971.5 421.6 969 419.3 969 416.2 V 412.3 Z" fill="#059669"/>
+  <line x1="975" y1="414.5" x2="975" y2="418.5" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="975" cy="420.8" r="0.9" fill="#FFFFFF"/>
+  <text x="975" y="442" font-size="14.5" font-weight="bold" fill="#065F46" text-anchor="middle">Risk</text>
+  <text x="975" y="457" font-size="10" fill="#64748B" text-anchor="middle">compliance gate</text>
+
+  <!-- convergence bus -->
+  <line x1="651" y1="460" x2="651" y2="468" stroke="#059669" stroke-width="1.8"/>
+  <line x1="813" y1="460" x2="813" y2="468" stroke="#059669" stroke-width="1.8"/>
+  <line x1="975" y1="460" x2="975" y2="468" stroke="#059669" stroke-width="1.8"/>
+  <line x1="651" y1="468" x2="975" y2="468" stroke="#059669" stroke-width="1.8"/>
+  <line x1="813" y1="468" x2="813" y2="470" stroke="#059669" stroke-width="1.8"/>
+  <polygon points="809.5,470 816.5,470 813,476" fill="#059669"/>
+
+  <!-- identical role outputs node -->
+  <rect x="688" y="476" width="250" height="48" rx="24" fill="#FFFFFF" stroke="#059669" stroke-width="1.8" filter="url(#cardShadow)"/>
+  <text x="813" y="500" font-size="14" font-weight="bold" fill="#065F46" text-anchor="middle">identical role outputs</text>
+  <text x="813" y="519" font-size="10.5" fill="#64748B" text-anchor="middle">held fixed across all protocols</text>
+
+  <!-- fan-out bus -->
+  <line x1="813" y1="524" x2="813" y2="530" stroke="#059669" stroke-width="1.8"/>
+  <line x1="632" y1="530" x2="995" y2="530" stroke="#059669" stroke-width="1.8"/>
+  <line x1="632" y1="530" x2="632" y2="534" stroke="#059669" stroke-width="1.8"/>
+  <polygon points="628.5,534 635.5,534 632,539" fill="#059669"/>
+  <line x1="753" y1="530" x2="753" y2="534" stroke="#059669" stroke-width="1.8"/>
+  <polygon points="749.5,534 756.5,534 753,539" fill="#059669"/>
+  <line x1="874" y1="530" x2="874" y2="534" stroke="#059669" stroke-width="1.8"/>
+  <polygon points="870.5,534 877.5,534 874,539" fill="#059669"/>
+  <line x1="995" y1="530" x2="995" y2="534" stroke="#059669" stroke-width="1.8"/>
+  <polygon points="991.5,534 998.5,534 995,539" fill="#059669"/>
+
+  <!-- protocol cards -->
+  <rect x="578" y="540" width="109" height="104" rx="10" fill="#FEF2F2" stroke="#DC2626" stroke-width="1.5"/>
+  <circle cx="632.5" cy="566" r="11" fill="#FEE2E2"/>
+  <line x1="623.5" y1="566" x2="633.5" y2="566" stroke="#DC2626" stroke-width="2"/>
+  <polygon points="633.5,562.5 639.5,566 633.5,569.5" fill="#DC2626"/>
+  <line x1="641.5" y1="560" x2="641.5" y2="572" stroke="#DC2626" stroke-width="2.5" stroke-linecap="round"/>
+  <text x="632.5" y="598" font-size="14.5" font-weight="bold" fill="#B91C1C" text-anchor="middle">Last</text>
+  <text x="632.5" y="616" font-size="10" fill="#991B1B" text-anchor="middle">final-turn</text>
+  <text x="632.5" y="630" font-size="10" fill="#991B1B" text-anchor="middle">output</text>
+
+  <rect x="699" y="540" width="109" height="104" rx="10" fill="#FFF6DC" stroke="#F59E0B" stroke-width="1.5"/>
+  <circle cx="753.5" cy="566" r="11" fill="#FDEBB8"/>
+  <line x1="747.5" y1="561" x2="759.5" y2="561" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="747.5" y1="566" x2="759.5" y2="566" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="747.5" y1="571" x2="759.5" y2="571" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round"/>
+  <text x="753.5" y="598" font-size="14.5" font-weight="bold" fill="#92400E" text-anchor="middle">Concat</text>
+  <text x="753.5" y="616" font-size="10" fill="#92400E" text-anchor="middle">verbatim</text>
+  <text x="753.5" y="630" font-size="10" fill="#92400E" text-anchor="middle">concatenation</text>
+
+  <rect x="820" y="540" width="109" height="104" rx="10" fill="#F3E8D8" stroke="#B45309" stroke-width="1.5"/>
+  <circle cx="874.5" cy="566" r="11" fill="#EBDCC3"/>
+  <rect x="866.5" y="559" width="16" height="11" rx="1.5" fill="#FFFFFF" stroke="#B45309" stroke-width="1.6"/>
+  <line x1="869.5" y1="562.5" x2="879.5" y2="562.5" stroke="#B45309" stroke-width="1.1"/>
+  <line x1="869.5" y1="565.5" x2="876" y2="565.5" stroke="#B45309" stroke-width="1.1"/>
+  <line x1="869" y1="570" x2="866.5" y2="574" stroke="#B45309" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="880" y1="570" x2="882.5" y2="574" stroke="#B45309" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="874.5" y="598" font-size="14.5" font-weight="bold" fill="#7C2D12" text-anchor="middle">Blackboard</text>
+  <text x="874.5" y="616" font-size="10" fill="#7C2D12" text-anchor="middle">shared-state</text>
+  <text x="874.5" y="630" font-size="10" fill="#7C2D12" text-anchor="middle">merge</text>
+
+  <rect x="941" y="540" width="109" height="104" rx="10" fill="#D1FAE5" stroke="#059669" stroke-width="2.5"/>
+  <circle cx="995.5" cy="566" r="11" fill="#A7F3D0"/>
+  <path d="M 995.5 560 L 997.2 564.3 L 1001.5 566 L 997.2 567.7 L 995.5 572 L 993.8 567.7 L 989.5 566 L 993.8 564.3 Z" fill="#059669"/>
+  <text x="995.5" y="598" font-size="14.5" font-weight="bold" fill="#047857" text-anchor="middle">Integrator</text>
+  <text x="995.5" y="616" font-size="10" fill="#047857" text-anchor="middle">LLM synthesis</text>
+  <rect x="951" y="622" width="89" height="21" rx="10.5" fill="#059669"/>
+  <text x="995.5" y="636.5" font-size="10.5" font-weight="bold" fill="#FFFFFF" text-anchor="middle">+1 LLM call</text>
+
+  <!-- group labels -->
+  <line x1="578" y1="656" x2="929" y2="656" stroke="#94A3B8" stroke-width="1.5"/>
+  <line x1="578" y1="652" x2="578" y2="656" stroke="#94A3B8" stroke-width="1.5"/>
+  <line x1="929" y1="652" x2="929" y2="656" stroke="#94A3B8" stroke-width="1.5"/>
+  <text x="753.5" y="674" font-size="10.5" fill="#64748B" text-anchor="middle">mechanical assembly &#8212; no extra LLM calls</text>
+  <text x="995.5" y="674" font-size="10.5" font-weight="600" fill="#059669" text-anchor="middle">learned assembly</text>
+
+  <!-- ============ flow arrow 2 ============ -->
+  <text x="1129" y="364" font-size="10.5" fill="#94A3B8" text-anchor="middle">artifacts</text>
+  <polygon points="1104,388 1136,388 1136,374 1164,410 1136,446 1136,432 1104,432" fill="url(#gradFlow)"/>
+
+  <!-- ============ Stage 3 : Artifact Scoring ============ -->
+  <rect x="1164" y="130" width="388" height="560" rx="16" fill="url(#gradS3)" stroke="#D8D0F2" stroke-width="1.5" filter="url(#cardShadow)"/>
+  <rect x="1188" y="152" width="76" height="26" rx="13" fill="#7C3AED"/>
+  <text x="1226" y="170" font-size="12.5" font-weight="bold" fill="#FFFFFF" text-anchor="middle">STAGE 3</text>
+  <text x="1276" y="171" font-size="19" font-weight="bold" fill="#0F172A">Artifact Scoring</text>
+
+  <text x="1188" y="206" font-size="12.5" font-weight="bold" fill="#334155">3-layer rubric</text>
+  <text x="1528" y="206" font-size="11" fill="#64748B" text-anchor="end">&#931; weights = 1</text>
+
+  <!-- L1 -->
+  <rect x="1188" y="214" width="340" height="62" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <rect x="1196" y="223" width="4.5" height="44" rx="2.25" fill="#2563EB"/>
+  <text x="1210" y="239" font-size="13" font-weight="bold" fill="#2563EB">L1</text>
+  <text x="1234" y="239" font-size="15" font-weight="bold" fill="#0F172A">Structural</text>
+  <text x="1210" y="260" font-size="11" fill="#64748B">content-aware metrics</text>
+  <rect x="1462" y="233" width="54" height="24" rx="12" fill="#DBEAFE"/>
+  <text x="1489" y="249.5" font-size="12.5" font-weight="bold" fill="#1E40AF" text-anchor="middle">0.50</text>
+  <!-- L2 -->
+  <rect x="1188" y="288" width="340" height="62" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <rect x="1196" y="297" width="4.5" height="44" rx="2.25" fill="#059669"/>
+  <text x="1210" y="313" font-size="13" font-weight="bold" fill="#059669">L2</text>
+  <text x="1234" y="313" font-size="15" font-weight="bold" fill="#0F172A">Factual</text>
+  <text x="1210" y="334" font-size="11" fill="#64748B">assertion checks</text>
+  <rect x="1462" y="307" width="54" height="24" rx="12" fill="#D1FAE5"/>
+  <text x="1489" y="323.5" font-size="12.5" font-weight="bold" fill="#065F46" text-anchor="middle">0.30</text>
+  <!-- L3 -->
+  <rect x="1188" y="362" width="340" height="62" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <rect x="1196" y="371" width="4.5" height="44" rx="2.25" fill="#7C3AED"/>
+  <text x="1210" y="387" font-size="13" font-weight="bold" fill="#7C3AED">L3</text>
+  <text x="1234" y="387" font-size="15" font-weight="bold" fill="#0F172A">Semantic</text>
+  <text x="1210" y="408" font-size="11" fill="#64748B">LLM judge</text>
+  <rect x="1462" y="381" width="54" height="24" rx="12" fill="#EDE9FE"/>
+  <text x="1489" y="397.5" font-size="12.5" font-weight="bold" fill="#5B21B6" text-anchor="middle">0.20</text>
+
+  <!-- stacked weight bar -->
+  <rect x="1184" y="434" width="348" height="20" rx="10" fill="#F1F5F9"/>
+  <rect x="1188" y="438" width="170" height="12" rx="3" fill="#2563EB"/>
+  <rect x="1358" y="438" width="102" height="12" fill="#059669"/>
+  <rect x="1460" y="438" width="68" height="12" rx="3" fill="#7C3AED"/>
+  <line x1="1358" y1="452" x2="1358" y2="460" stroke="#7C3AED" stroke-width="2"/>
+  <polygon points="1354,460 1362,460 1358,466" fill="#7C3AED"/>
+
+  <!-- Q node -->
+  <rect x="1248" y="466" width="220" height="58" rx="16" fill="url(#gradQ)" filter="url(#cardShadow)"/>
+  <text x="1358" y="497" font-size="22" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Q &#8712; [0, 1]</text>
+  <text x="1358" y="516" font-size="11" fill="#E0E7FF" text-anchor="middle">per-artifact quality</text>
+
+  <!-- team-level metrics -->
+  <text x="1188" y="556" font-size="12.5" font-weight="bold" fill="#334155">team-level metrics</text>
+  <text x="1528" y="556" font-size="11" fill="#64748B" text-anchor="end">per team run</text>
+
+  <rect x="1188" y="568" width="106" height="86" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <path d="M 1228 594 A 13 13 0 0 1 1254 594" fill="none" stroke="#E2E8F0" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M 1228 594 A 13 13 0 0 1 1252.3 587.5" fill="none" stroke="#2563EB" stroke-width="3.5" stroke-linecap="round"/>
+  <line x1="1241" y1="594" x2="1249.5" y2="587.5" stroke="#0F172A" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="1241" cy="594" r="2" fill="#0F172A"/>
+  <text x="1241" y="624" font-size="15.5" font-weight="bold" fill="#0F172A" text-anchor="middle">CTR</text>
+  <text x="1241" y="640" font-size="9.5" fill="#64748B" text-anchor="middle">capability</text>
+  <text x="1241" y="651" font-size="9.5" fill="#64748B" text-anchor="middle">transfer rate</text>
+
+  <rect x="1305" y="568" width="106" height="86" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <path d="M 1345 594 A 13 13 0 0 1 1371 594" fill="none" stroke="#E2E8F0" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M 1345 594 A 13 13 0 0 1 1369.3 587.5" fill="none" stroke="#F59E0B" stroke-width="3.5" stroke-linecap="round"/>
+  <line x1="1358" y1="594" x2="1366.5" y2="587.5" stroke="#0F172A" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="1358" cy="594" r="2" fill="#0F172A"/>
+  <text x="1358" y="624" font-size="15.5" font-weight="bold" fill="#0F172A" text-anchor="middle">CO</text>
+  <text x="1358" y="640" font-size="9.5" fill="#64748B" text-anchor="middle">coordination</text>
+  <text x="1358" y="651" font-size="9.5" fill="#64748B" text-anchor="middle">overhead</text>
+
+  <rect x="1422" y="568" width="106" height="86" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <path d="M 1462 594 A 13 13 0 0 1 1488 594" fill="none" stroke="#E2E8F0" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M 1462 594 A 13 13 0 0 1 1486.3 587.5" fill="none" stroke="#7C3AED" stroke-width="3.5" stroke-linecap="round"/>
+  <line x1="1475" y1="594" x2="1483.5" y2="587.5" stroke="#0F172A" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="1475" cy="594" r="2" fill="#0F172A"/>
+  <text x="1475" y="624" font-size="15.5" font-weight="bold" fill="#0F172A" text-anchor="middle">TMS</text>
+  <text x="1475" y="640" font-size="9.5" fill="#64748B" text-anchor="middle">transactive</text>
+  <text x="1475" y="651" font-size="9.5" fill="#64748B" text-anchor="middle">memory system</text>
+
+  <!-- ============ results banner ============ -->
+  <rect x="48" y="710" width="1504" height="136" rx="18" fill="url(#gradBanner)" filter="url(#cardShadow)"/>
+  <line x1="560" y1="732" x2="560" y2="818" stroke="#334155" stroke-width="1.5"/>
+  <line x1="1060" y1="732" x2="1060" y2="818" stroke="#334155" stroke-width="1.5"/>
+
+  <!-- col 1 -->
+  <rect x="80" y="727" width="6.5" height="6.5" rx="1.5" fill="#64748B"/>
+  <rect x="89.5" y="727" width="6.5" height="6.5" rx="1.5" fill="#64748B"/>
+  <rect x="80" y="736.5" width="6.5" height="6.5" rx="1.5" fill="#64748B"/>
+  <rect x="89.5" y="736.5" width="6.5" height="6.5" rx="1.5" fill="#64748B"/>
+  <text x="106" y="739" font-size="11" font-weight="bold" fill="#94A3B8">2 MODEL FAMILIES &#183; 630 PAIRED RUNS</text>
+  <rect x="80" y="754" width="132" height="32" rx="16" fill="#334155" stroke="#475569" stroke-width="1.2"/>
+  <circle cx="100" cy="770" r="5" fill="#60A5FA"/>
+  <text x="112" y="775" font-size="13" font-weight="bold" fill="#DBEAFE">DS v4 Flash</text>
+  <rect x="222" y="754" width="106" height="32" rx="16" fill="#334155" stroke="#475569" stroke-width="1.2"/>
+  <circle cx="242" cy="770" r="5" fill="#A78BFA"/>
+  <text x="254" y="775" font-size="13" font-weight="bold" fill="#DBEAFE">Kimi K3</text>
+  <text x="80" y="814" font-size="12.5" fill="#94A3B8">7 arms &#215; 3 seeds &#215; 15 families &#215; 2 models = <tspan font-weight="bold" fill="#F1F5F9">630 runs</tspan></text>
+
+  <!-- col 2 -->
+  <rect x="592" y="732" width="4" height="4.5" rx="1" fill="#64748B"/>
+  <rect x="599" y="729.5" width="4" height="7" rx="1" fill="#64748B"/>
+  <rect x="606" y="727" width="4" height="9.5" rx="1" fill="#64748B"/>
+  <text x="616" y="739" font-size="11" font-weight="bold" fill="#94A3B8">VARIANCE IN QUALITY Q EXPLAINED BY</text>
+  <text x="592" y="790" font-size="30" font-weight="bold" fill="#34D399">40&#8211;43%</text>
+  <text x="724" y="790" font-size="14.5" fill="#F1F5F9">assembly protocol</text>
+  <text x="592" y="816" font-size="12.5" fill="#94A3B8">vs <tspan font-weight="bold" fill="#F87171">&#8804; 0.3%</tspan> for compute matching</text>
+
+  <!-- col 3 -->
+  <path d="M 1092 737 L 1099 730 L 1104 734 L 1112 726" fill="none" stroke="#64748B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="1114,728 1114.8,723.2 1110,724" fill="#64748B"/>
+  <text x="1118" y="739" font-size="11" font-weight="bold" fill="#94A3B8">CTR_MATCHED &#183; BY PROTOCOL ALONE</text>
+  <text x="1092" y="790" font-size="30" font-weight="bold" fill="#E2E8F0">0.69</text>
+  <line x1="1178" y1="780" x2="1206" y2="780" stroke="#34D399" stroke-width="3"/>
+  <polygon points="1206,774 1218,780 1206,786" fill="#34D399"/>
+  <text x="1230" y="790" font-size="30" font-weight="bold" fill="#34D399">1.61</text>
+  <text x="1092" y="816" font-size="12.5" fill="#94A3B8">no model or prompt change &#8212; protocol choice alone</text>
+
+  <!-- ============ footer ============ -->
+  <text x="48" y="874" font-size="11.5" fill="#94A3B8">TeamBench &#183; Figure 1 &#183; Architecture overview</text>
+  <text x="1552" y="874" font-size="11.5" fill="#94A3B8" text-anchor="end">assembly protocol as a first-class controlled variable</text>
+</svg>

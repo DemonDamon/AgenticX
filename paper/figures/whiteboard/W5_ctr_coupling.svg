@@ -1,0 +1,175 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="850" viewBox="0 0 1500 850">
+  <defs>
+    <linearGradient id="gradTitle" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="gradChip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0F172A" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- ============ background & decoration ============ -->
+  <!-- canvas base #F8FAFC tiled as flush strips (no overlap with panels) -->
+  <rect x="0" y="0" width="1500" height="132" fill="#F8FAFC"/>
+  <rect x="0" y="132" width="56" height="692" fill="#F8FAFC"/>
+  <rect x="1448" y="132" width="52" height="692" fill="#F8FAFC"/>
+  <rect x="56" y="656" width="1392" height="18" fill="#F8FAFC"/>
+  <rect x="0" y="824" width="1500" height="26" fill="#F8FAFC"/>
+  <circle cx="1452" cy="52" r="36" fill="#E9EEFA"/>
+  <circle cx="1410" cy="96" r="11" fill="none" stroke="#D8E0F2" stroke-width="3"/>
+  <circle cx="1362" cy="38" r="7" fill="#E7E2F8"/>
+  <circle cx="26" cy="800" r="14" fill="#EAF0FB"/>
+  <circle cx="1476" cy="712" r="9" fill="#E7E2F8"/>
+
+  <!-- ============ header ============ -->
+  <rect x="56" y="40" width="8" height="56" rx="4" fill="url(#gradTitle)"/>
+  <text x="76" y="76" font-size="26" font-weight="bold" fill="#0F172A">Integrator CTR_matched by Coupling Level — All Six 95% CIs Exclude Break-Even</text>
+  <text x="77" y="106" font-size="15" fill="#64748B">DS v4 Flash &amp; Kimi K3 · three task-coupling levels · paired runs</text>
+
+  <!-- ============ chart panel ============ -->
+  <rect x="56" y="132" width="1392" height="524" rx="18" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+
+  <!-- panel header -->
+  <rect x="80" y="146" width="5" height="30" rx="2.5" fill="url(#gradTitle)"/>
+  <text x="96" y="167" font-size="17" font-weight="bold" fill="#0F172A">CTR_matched ratio (integrator vs. refine-k)</text>
+
+  <!-- legend -->
+  <rect x="1150" y="146" width="144" height="32" rx="16" fill="#DBEAFE"/>
+  <circle cx="1168" cy="162" r="6" fill="#2563EB"/>
+  <text x="1182" y="167" font-size="14" font-weight="bold" fill="#1E3A8A">DS v4 Flash</text>
+  <rect x="1306" y="146" width="118" height="32" rx="16" fill="#EDE9FE"/>
+  <circle cx="1324" cy="162" r="6" fill="#7C3AED"/>
+  <text x="1338" y="167" font-size="14" font-weight="bold" fill="#4C1D95">Kimi K3</text>
+  <text x="1420" y="196" font-size="11.5" fill="#94A3B8" text-anchor="end">bar = geometric mean · whisker = 95% CI</text>
+
+  <!-- break-even label -->
+  <text x="440" y="200" font-size="13.5" font-weight="bold" fill="#DC2626" text-anchor="middle">break-even (refine-k baseline)</text>
+
+  <!-- coupling group bands -->
+  <rect x="84" y="210" width="1256" height="110" rx="12" fill="#F8FAFC"/>
+  <rect x="84" y="338" width="1256" height="110" rx="12" fill="#F8FAFC"/>
+  <rect x="84" y="466" width="1256" height="110" rx="12" fill="#F8FAFC"/>
+
+  <!-- sub-break-even tint zone -->
+  <rect x="300" y="210" width="140" height="388" fill="#FEF2F2"/>
+  <text x="370" y="591" font-size="11" fill="#EF4444" text-anchor="middle">below break-even</text>
+
+  <!-- group labels -->
+  <text x="268" y="271" font-size="18" font-weight="600" fill="#334155" text-anchor="end">Low coupling</text>
+  <text x="268" y="399" font-size="18" font-weight="600" fill="#334155" text-anchor="end">Medium coupling</text>
+  <text x="268" y="527" font-size="18" font-weight="600" fill="#334155" text-anchor="end">High coupling</text>
+
+  <!-- gridlines -->
+  <g stroke="#E2E8F0" stroke-width="1.5" stroke-dasharray="3 4">
+    <line x1="580" y1="210" x2="580" y2="598"/>
+    <line x1="720" y1="210" x2="720" y2="598"/>
+    <line x1="860" y1="210" x2="860" y2="598"/>
+    <line x1="1000" y1="210" x2="1000" y2="598"/>
+    <line x1="1140" y1="210" x2="1140" y2="598"/>
+    <line x1="1280" y1="210" x2="1280" y2="598"/>
+  </g>
+
+  <!-- axis -->
+  <line x1="300" y1="598" x2="1280" y2="598" stroke="#94A3B8" stroke-width="1.5"/>
+  <g stroke="#94A3B8" stroke-width="1.5">
+    <line x1="300" y1="598" x2="300" y2="605"/>
+    <line x1="440" y1="598" x2="440" y2="605"/>
+    <line x1="580" y1="598" x2="580" y2="605"/>
+    <line x1="720" y1="598" x2="720" y2="605"/>
+    <line x1="860" y1="598" x2="860" y2="605"/>
+    <line x1="1000" y1="598" x2="1000" y2="605"/>
+    <line x1="1140" y1="598" x2="1140" y2="605"/>
+    <line x1="1280" y1="598" x2="1280" y2="605"/>
+  </g>
+  <text x="300" y="626" font-size="14" fill="#64748B" text-anchor="middle">0.8</text>
+  <text x="440" y="626" font-size="14" font-weight="bold" fill="#DC2626" text-anchor="middle">1.0</text>
+  <text x="580" y="626" font-size="14" fill="#64748B" text-anchor="middle">1.2</text>
+  <text x="720" y="626" font-size="14" fill="#64748B" text-anchor="middle">1.4</text>
+  <text x="860" y="626" font-size="14" fill="#64748B" text-anchor="middle">1.6</text>
+  <text x="1000" y="626" font-size="14" fill="#64748B" text-anchor="middle">1.8</text>
+  <text x="1140" y="626" font-size="14" fill="#64748B" text-anchor="middle">2.0</text>
+  <text x="1280" y="626" font-size="14" fill="#64748B" text-anchor="middle">2.2</text>
+
+  <!-- ===== group: Low coupling ===== -->
+  <rect x="300" y="228" width="623" height="30" rx="5" fill="#2563EB"/>
+  <text x="312" y="248" font-size="12" font-weight="600" fill="#FFFFFF">Flash</text>
+  <rect x="300" y="272" width="441" height="30" rx="5" fill="#7C3AED"/>
+  <text x="312" y="292" font-size="12" font-weight="600" fill="#FFFFFF">K3</text>
+
+  <!-- ===== group: Medium coupling ===== -->
+  <rect x="300" y="356" width="462" height="30" rx="5" fill="#2563EB"/>
+  <text x="312" y="376" font-size="12" font-weight="600" fill="#FFFFFF">Flash</text>
+  <rect x="300" y="400" width="525" height="30" rx="5" fill="#7C3AED"/>
+  <text x="312" y="420" font-size="12" font-weight="600" fill="#FFFFFF">K3</text>
+
+  <!-- ===== group: High coupling ===== -->
+  <rect x="300" y="484" width="487" height="30" rx="5" fill="#2563EB"/>
+  <text x="312" y="504" font-size="12" font-weight="600" fill="#FFFFFF">Flash</text>
+  <rect x="300" y="528" width="494" height="30" rx="5" fill="#7C3AED"/>
+  <text x="312" y="548" font-size="12" font-weight="600" fill="#FFFFFF">K3</text>
+
+  <!-- break-even dashed line (over bars) -->
+  <line x1="440" y1="209" x2="440" y2="598" stroke="#DC2626" stroke-width="2.5" stroke-dasharray="9 6"/>
+
+  <!-- 95% CI whiskers (over bars) -->
+  <g stroke="#0F172A" stroke-width="2">
+    <!-- Low · Flash 1.69 [1.28, 2.16] -->
+    <line x1="636" y1="243" x2="1252" y2="243"/>
+    <line x1="636" y1="235" x2="636" y2="251"/>
+    <line x1="1252" y1="235" x2="1252" y2="251"/>
+    <!-- Low · K3 1.43 [1.21, 1.69] -->
+    <line x1="587" y1="287" x2="923" y2="287"/>
+    <line x1="587" y1="279" x2="587" y2="295"/>
+    <line x1="923" y1="279" x2="923" y2="295"/>
+    <!-- Medium · Flash 1.46 [1.30, 1.66] -->
+    <line x1="650" y1="371" x2="902" y2="371"/>
+    <line x1="650" y1="363" x2="650" y2="379"/>
+    <line x1="902" y1="363" x2="902" y2="379"/>
+    <!-- Medium · K3 1.55 [1.29, 1.86] -->
+    <line x1="643" y1="415" x2="1042" y2="415"/>
+    <line x1="643" y1="407" x2="643" y2="423"/>
+    <line x1="1042" y1="407" x2="1042" y2="423"/>
+    <!-- High · Flash 1.51 [1.21, 1.90] -->
+    <line x1="587" y1="499" x2="1070" y2="499"/>
+    <line x1="587" y1="491" x2="587" y2="507"/>
+    <line x1="1070" y1="491" x2="1070" y2="507"/>
+    <!-- High · K3 1.52 [1.20, 1.89] -->
+    <line x1="580" y1="543" x2="1063" y2="543"/>
+    <line x1="580" y1="535" x2="580" y2="551"/>
+    <line x1="1063" y1="535" x2="1063" y2="551"/>
+  </g>
+
+  <!-- value labels -->
+  <text x="933" y="235" font-size="15" font-weight="bold" fill="#2563EB">1.69</text>
+  <text x="751" y="279" font-size="15" font-weight="bold" fill="#7C3AED">1.43</text>
+  <text x="772" y="363" font-size="15" font-weight="bold" fill="#2563EB">1.46</text>
+  <text x="835" y="407" font-size="15" font-weight="bold" fill="#7C3AED">1.55</text>
+  <text x="797" y="491" font-size="15" font-weight="bold" fill="#2563EB">1.51</text>
+  <text x="804" y="535" font-size="15" font-weight="bold" fill="#7C3AED">1.52</text>
+
+  <!-- ============ notes card ============ -->
+  <rect x="56" y="674" width="1392" height="150" rx="18" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+
+  <rect x="84" y="688" width="30" height="30" rx="8" fill="#DBEAFE"/>
+  <rect x="92" y="703" width="4" height="9" rx="1" fill="#2563EB"/>
+  <rect x="98" y="699" width="4" height="13" rx="1" fill="#2563EB"/>
+  <rect x="104" y="705" width="4" height="7" rx="1" fill="#2563EB"/>
+  <text x="126" y="709" font-size="15" fill="#334155">Geometric mean over 15 paired runs per cell</text>
+
+  <rect x="84" y="728" width="30" height="30" rx="8" fill="#EDE9FE"/>
+  <path d="M 90 753 C 94 742, 96 737, 99 737 C 102 737, 104 742, 108 753" fill="none" stroke="#7C3AED" stroke-width="2.2" stroke-linecap="round"/>
+  <text x="126" y="749" font-size="15" fill="#334155">Log-domain paired bootstrap, 2000 replications (task = block)</text>
+
+  <rect x="84" y="768" width="30" height="30" rx="8" fill="url(#gradChip)"/>
+  <path d="M 91 786 L 97 792 L 107 779" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="126" y="789" font-size="15" fill="#334155">All six CIs exclude 1.0 → <tspan font-weight="bold" fill="#0F172A">integrator advantage is uniform across coupling levels on both models</tspan></text>
+
+  <!-- ============ footer ============ -->
+  <text x="56" y="845" font-size="12" fill="#94A3B8">TeamBench · W5</text>
+  <text x="1444" y="845" font-size="12" fill="#94A3B8" text-anchor="end">CTR_matched · higher is better</text>
+</svg>

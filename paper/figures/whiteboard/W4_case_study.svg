@@ -1,0 +1,286 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="gradTitle" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#059669"/>
+      <stop offset="1" stop-color="#047857"/>
+    </linearGradient>
+    <linearGradient id="gradChipGreen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10B981"/>
+      <stop offset="1" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="gradBanner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1E293B"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <radialGradient id="gradLane1">
+      <stop offset="0" stop-color="#D1FAE5"/>
+      <stop offset="1" stop-color="#ECFDF5"/>
+    </radialGradient>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="9" flood-color="#0F172A" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- ============ background & decoration ============ -->
+  <rect x="0" y="0" width="1600" height="900" fill="#F8FAFC"/>
+  <circle cx="1516" cy="54" r="27" fill="#E6F4EF"/>
+  <circle cx="1466" cy="98" r="10" fill="none" stroke="#D8E0F2" stroke-width="3"/>
+  <circle cx="1560" cy="108" r="6" fill="#E7E2F8"/>
+  <circle cx="30" cy="772" r="11" fill="#EAF0FB"/>
+  <circle cx="1552" cy="782" r="7" fill="#F3E8DC"/>
+  <circle cx="38" cy="122" r="5" fill="#E7E2F8"/>
+
+  <!-- ============ header ============ -->
+  <rect x="56" y="40" width="8" height="56" rx="4" fill="url(#gradTitle)"/>
+  <text x="76" y="74" font-size="26" font-weight="bold" fill="#0F172A">Case Study — t-DATA-L-01 (Data Aggregation, Kimi K3, seed 0)</text>
+  <text x="77" y="104" font-size="15" fill="#64748B">Same two role outputs. Assembly alone decides whether team capability survives.</text>
+
+  <!-- ============ left column : source role pipeline ============ -->
+  <rect x="56" y="138" width="158" height="24" rx="12" fill="#D1FAE5"/>
+  <text x="135" y="154" font-size="11" font-weight="bold" fill="#065F46" text-anchor="middle">SOURCE · FIXED INPUT</text>
+
+  <!-- role card r1 -->
+  <rect x="56" y="176" width="280" height="136" rx="12" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+  <rect x="56" y="188" width="6" height="112" rx="3" fill="#059669"/>
+  <rect x="74" y="192" width="34" height="20" rx="10" fill="#059669"/>
+  <text x="91" y="206" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">r1</text>
+  <text x="118" y="206" font-size="13.5" font-weight="bold" fill="#0F172A">Channel A Aggregator</text>
+  <text x="74" y="228" font-size="11" fill="#64748B">role: aggregate channel-A sales</text>
+  <line x1="74" y1="240" x2="320" y2="240" stroke="#E2E8F0" stroke-width="1.5"/>
+  <text x="74" y="260" font-size="12" font-weight="600" fill="#334155">## Channel A Monthly Summary</text>
+  <text x="74" y="279" font-size="11.5" fill="#64748B">- qty 4,345 · revenue ¥505,990</text>
+  <text x="74" y="298" font-size="11.5" fill="#64748B">- Top3 SKU by revenue …</text>
+
+  <!-- arrow r1 -> r2 -->
+  <line x1="196" y1="312" x2="196" y2="324" stroke="#059669" stroke-width="2.5"/>
+  <polygon points="196,332 191,323 201,323" fill="#059669"/>
+
+  <!-- role card r2 -->
+  <rect x="56" y="340" width="280" height="136" rx="12" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+  <rect x="56" y="352" width="6" height="112" rx="3" fill="#059669"/>
+  <rect x="74" y="356" width="34" height="20" rx="10" fill="#059669"/>
+  <text x="91" y="370" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">r2</text>
+  <text x="118" y="370" font-size="13.5" font-weight="bold" fill="#0F172A">Channel B Aggregator</text>
+  <text x="74" y="392" font-size="11" fill="#64748B">role: aggregate channel-B sales</text>
+  <line x1="74" y1="404" x2="320" y2="404" stroke="#E2E8F0" stroke-width="1.5"/>
+  <text x="74" y="424" font-size="12" font-weight="600" fill="#334155">## Channel B Monthly Summary</text>
+  <text x="74" y="443" font-size="11.5" fill="#64748B">- qty 3,345 · revenue ¥351,040</text>
+  <text x="74" y="462" font-size="11.5" fill="#64748B">- Top3 SKU by revenue …</text>
+
+  <!-- arrow r2 -> node -->
+  <line x1="196" y1="476" x2="196" y2="494" stroke="#059669" stroke-width="2.5"/>
+  <polygon points="196,502 191,493 201,493" fill="#059669"/>
+
+  <!-- convergence node : identical role outputs -->
+  <rect x="56" y="510" width="280" height="112" rx="14" fill="#ECFDF5" stroke="#059669" stroke-width="2" stroke-dasharray="8 6"/>
+  <rect x="76" y="540" width="22" height="17" rx="3" fill="#059669"/>
+  <path d="M 81 540 L 81 535 A 6 6 0 0 1 93 535 L 93 540" fill="none" stroke="#059669" stroke-width="3"/>
+  <circle cx="87" cy="548" r="2" fill="#ECFDF5"/>
+  <text x="110" y="550" font-size="16" font-weight="bold" fill="#065F46">IDENTICAL</text>
+  <text x="110" y="571" font-size="16" font-weight="bold" fill="#065F46">ROLE OUTPUTS</text>
+  <text x="196" y="600" font-size="10.5" fill="#047857" text-anchor="middle">the same two outputs feed every arm</text>
+
+  <!-- paired-design note -->
+  <rect x="56" y="640" width="280" height="96" rx="12" fill="#F0FDF4" stroke="#A7F3D0" stroke-width="1.5"/>
+  <rect x="72" y="656" width="16" height="16" rx="5" fill="none" stroke="#059669" stroke-width="2.5"/>
+  <rect x="82" y="666" width="16" height="16" rx="5" fill="none" stroke="#059669" stroke-width="2.5"/>
+  <text x="72" y="694" font-size="12" fill="#334155">Paired design: every arm</text>
+  <text x="72" y="712" font-size="12" fill="#334155">consumes exactly these two</text>
+  <text x="72" y="730" font-size="12" fill="#334155">outputs — only assembly differs.</text>
+  <text x="56" y="772" font-size="11" fill="#94A3B8">one source · four fates</text>
+
+  <!-- ============ fan-out connectors ============ -->
+  <polyline points="414,138 1146,138 1166,158 1166,278 1146,298 414,298 394,278 394,158 414,138" fill="none" stroke="#059669" stroke-width="2" stroke-opacity="0.22"/>
+  <polyline points="412,130 1148,130 1174,156 1174,280 1148,306 412,306 386,280 386,156 412,130" fill="none" stroke="#059669" stroke-width="1.5" stroke-opacity="0.10"/>
+
+  <polyline points="336,566 372,566" fill="none" stroke="#059669" stroke-width="5" stroke-opacity="0.55"/>
+  <line x1="372" y1="218" x2="372" y2="710" stroke="#059669" stroke-width="5" stroke-opacity="0.55"/>
+  <!-- branches -->
+  <polyline points="372,218 394,218" fill="none" stroke="#059669" stroke-width="6.5"/>
+  <polyline points="372,382 394,382" fill="none" stroke="#F59E0B" stroke-width="5"/>
+  <polyline points="372,546 394,546" fill="none" stroke="#DC2626" stroke-width="5"/>
+  <polyline points="372,710 394,710" fill="none" stroke="#B45309" stroke-width="5"/>
+  <polygon points="402,218 391,212.5 391,223.5" fill="#059669"/>
+  <polygon points="402,382 391,376.5 391,387.5" fill="#F59E0B"/>
+  <polygon points="402,546 391,540.5 391,551.5" fill="#DC2626"/>
+  <polygon points="402,710 391,704.5 391,715.5" fill="#B45309"/>
+  <circle cx="372" cy="566" r="5.5" fill="#059669" stroke="#F8FAFC" stroke-width="2"/>
+
+  <!-- ============ lane 1 : integrator ============ -->
+  <rect x="400" y="144" width="760" height="148" rx="16" fill="url(#gradLane1)" stroke="#059669" stroke-width="2.5" stroke-opacity="0.6"/>
+  <rect x="418" y="184" width="134" height="40" rx="20" fill="url(#gradChipGreen)"/>
+  <text x="485" y="209" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">integrator</text>
+  <text x="418" y="244" font-size="10.5" fill="#64748B">semantic merge · 1 extra call</text>
+
+  <!-- integrator micro-doc -->
+  <rect x="600" y="156" width="352" height="124" rx="10" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+  <path d="M 920 156 L 952 156 L 952 188 Z" fill="#D1FAE5"/>
+  <rect x="616" y="172" width="108" height="20" rx="6" fill="#059669"/>
+  <text x="624" y="186" font-size="10.5" font-weight="bold" fill="#FFFFFF">## Channel A</text>
+  <rect x="736" y="176" width="120" height="5" rx="2.5" fill="#A7F3D0"/>
+  <rect x="736" y="184" width="88" height="5" rx="2.5" fill="#D1FAE5"/>
+  <text x="936" y="187" font-size="10" font-weight="bold" fill="#047857" text-anchor="end">4,345</text>
+  <rect x="616" y="202" width="108" height="20" rx="6" fill="#059669"/>
+  <text x="624" y="216" font-size="10.5" font-weight="bold" fill="#FFFFFF">## Channel B</text>
+  <rect x="736" y="206" width="120" height="5" rx="2.5" fill="#A7F3D0"/>
+  <rect x="736" y="214" width="88" height="5" rx="2.5" fill="#D1FAE5"/>
+  <text x="936" y="217" font-size="10" font-weight="bold" fill="#047857" text-anchor="end">3,345</text>
+  <rect x="616" y="232" width="108" height="20" rx="6" fill="#059669"/>
+  <text x="624" y="246" font-size="10.5" font-weight="bold" fill="#FFFFFF">## Total</text>
+  <rect x="736" y="236" width="120" height="5" rx="2.5" fill="#A7F3D0"/>
+  <rect x="736" y="244" width="88" height="5" rx="2.5" fill="#D1FAE5"/>
+  <text x="936" y="247" font-size="10" font-weight="bold" fill="#047857" text-anchor="end">7,690</text>
+  <rect x="616" y="258" width="320" height="19" rx="9.5" fill="#059669"/>
+  <path d="M 626 267.5 L 630.5 272 L 638 263" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="646" y="271.5" font-size="10.5" font-weight="bold" fill="#FFFFFF">answer block · qty 7,690 · rev ¥857,030</text>
+
+  <text x="1056" y="180" font-size="10" font-weight="bold" fill="#059669" text-anchor="middle" letter-spacing="1">CAPABILITY SURVIVES</text>
+  <text x="980" y="238" font-size="16" font-weight="bold" fill="#334155">Q =</text>
+  <text x="1016" y="238" font-size="46" font-weight="bold" fill="#059669">1.00</text>
+  <text x="1056" y="264" font-size="11.5" fill="#047857" text-anchor="middle">all sections +</text>
+  <text x="1056" y="280" font-size="11.5" fill="#047857" text-anchor="middle">consistent answer block</text>
+
+  <!-- ============ lane 2 : concat ============ -->
+  <rect x="400" y="308" width="760" height="148" rx="16" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.5" stroke-opacity="0.4"/>
+  <rect x="418" y="348" width="134" height="40" rx="20" fill="#F59E0B"/>
+  <text x="485" y="373" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">concat</text>
+  <text x="418" y="408" font-size="10.5" fill="#64748B">raw paste · 0 extra calls</text>
+
+  <!-- concat micro-doc : two pasted halves -->
+  <rect x="600" y="320" width="352" height="124" rx="10" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+  <path d="M 920 320 L 952 320 L 952 352 Z" fill="#FEF3C7"/>
+  <line x1="776" y1="328" x2="776" y2="436" stroke="#F59E0B" stroke-width="2" stroke-dasharray="4 4" stroke-opacity="0.7"/>
+  <rect x="616" y="336" width="108" height="20" rx="6" fill="#F59E0B"/>
+  <text x="624" y="350" font-size="10.5" font-weight="bold" fill="#FFFFFF">## Channel A</text>
+  <rect x="616" y="362" width="110" height="5" rx="2.5" fill="#FDE68A"/>
+  <rect x="616" y="370" width="82" height="5" rx="2.5" fill="#FEF3C7"/>
+  <text x="758" y="373" font-size="10" font-weight="bold" fill="#B45309" text-anchor="end">4,345</text>
+  <rect x="790" y="336" width="108" height="20" rx="6" fill="#F59E0B"/>
+  <text x="798" y="350" font-size="10.5" font-weight="bold" fill="#FFFFFF">## Channel B</text>
+  <rect x="790" y="362" width="110" height="5" rx="2.5" fill="#FDE68A"/>
+  <rect x="790" y="370" width="82" height="5" rx="2.5" fill="#FEF3C7"/>
+  <text x="936" y="373" font-size="10" font-weight="bold" fill="#B45309" text-anchor="end">3,345</text>
+  <rect x="616" y="386" width="320" height="46" rx="8" fill="#FEF3C7"/>
+  <circle cx="630" cy="402" r="7" fill="none" stroke="#D97706" stroke-width="2"/>
+  <line x1="630" y1="398" x2="630" y2="403" stroke="#D97706" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="630" cy="406.5" r="1.2" fill="#D97706"/>
+  <text x="644" y="406" font-size="10.5" fill="#92400E">answer extractor reads the LAST block →</text>
+  <text x="628" y="424" font-size="10.5" fill="#92400E">3,345 ≠ 7,690 · no unified Total section</text>
+
+  <text x="1056" y="344" font-size="10" font-weight="bold" fill="#D97706" text-anchor="middle" letter-spacing="1">PARTIALLY SURVIVES</text>
+  <text x="990" y="398" font-size="16" font-weight="bold" fill="#334155">Q =</text>
+  <text x="1026" y="398" font-size="38" font-weight="bold" fill="#F59E0B">0.42</text>
+  <text x="1056" y="424" font-size="11.5" fill="#B45309" text-anchor="middle">numbers stranded</text>
+  <text x="1056" y="440" font-size="11.5" fill="#B45309" text-anchor="middle">in separate blocks</text>
+
+  <!-- ============ lane 3 : last ============ -->
+  <rect x="400" y="472" width="760" height="148" rx="16" fill="#FEF2F2" stroke="#DC2626" stroke-width="1.5" stroke-opacity="0.4"/>
+  <rect x="418" y="512" width="134" height="40" rx="20" fill="#DC2626"/>
+  <text x="485" y="537" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">last</text>
+  <text x="418" y="572" font-size="10.5" fill="#64748B">pass-through · 0 extra calls</text>
+
+  <!-- last micro-doc : only final role fragment -->
+  <rect x="600" y="484" width="352" height="124" rx="10" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+  <path d="M 920 484 L 952 484 L 952 516 Z" fill="#FEE2E2"/>
+  <rect x="616" y="500" width="108" height="20" rx="6" fill="#DC2626"/>
+  <text x="624" y="514" font-size="10.5" font-weight="bold" fill="#FFFFFF">## Channel B</text>
+  <rect x="736" y="504" width="120" height="5" rx="2.5" fill="#FECACA"/>
+  <rect x="736" y="512" width="88" height="5" rx="2.5" fill="#FEE2E2"/>
+  <text x="936" y="515" font-size="10" font-weight="bold" fill="#B91C1C" text-anchor="end">3,345</text>
+  <rect x="616" y="530" width="250" height="21" rx="6" fill="#FEF2F2" stroke="#FCA5A5" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <path d="M 628 536.5 L 638 546.5 M 638 536.5 L 628 546.5" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+  <text x="648" y="544.5" font-size="10" fill="#EF4444">## Channel A — missing</text>
+  <rect x="616" y="557" width="250" height="21" rx="6" fill="#FEF2F2" stroke="#FCA5A5" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <path d="M 628 563.5 L 638 573.5 M 638 563.5 L 628 573.5" stroke="#EF4444" stroke-width="2" stroke-linecap="round"/>
+  <text x="648" y="571.5" font-size="10" fill="#EF4444">## Total — missing</text>
+  <rect x="616" y="584" width="320" height="19" rx="9.5" fill="#FEE2E2"/>
+  <path d="M 626 593.5 L 636 603.5 M 636 593.5 L 626 603.5" stroke="#DC2626" stroke-width="2.2" stroke-linecap="round"/>
+  <text x="646" y="597.5" font-size="10.5" font-weight="bold" fill="#B91C1C">no answer block · schema needs 3 sections</text>
+
+  <text x="1056" y="508" font-size="10" font-weight="bold" fill="#DC2626" text-anchor="middle" letter-spacing="1">CAPABILITY LOST</text>
+  <text x="990" y="562" font-size="16" font-weight="bold" fill="#334155">Q =</text>
+  <text x="1026" y="562" font-size="38" font-weight="bold" fill="#DC2626">0.00</text>
+  <text x="1056" y="588" font-size="11.5" fill="#B91C1C" text-anchor="middle">last role ≠ required</text>
+  <text x="1056" y="604" font-size="11.5" fill="#B91C1C" text-anchor="middle">deliverable schema</text>
+
+  <!-- ============ lane 4 : blackboard ============ -->
+  <rect x="400" y="636" width="760" height="148" rx="16" fill="#F8F0E6" stroke="#B45309" stroke-width="1.5" stroke-opacity="0.4"/>
+  <rect x="418" y="676" width="134" height="40" rx="20" fill="#B45309"/>
+  <text x="485" y="701" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">blackboard</text>
+  <text x="418" y="736" font-size="10.5" fill="#64748B">slot match · 0 extra calls</text>
+
+  <!-- blackboard micro-doc : headings present, slots empty -->
+  <rect x="600" y="648" width="352" height="124" rx="10" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+  <path d="M 920 648 L 952 648 L 952 680 Z" fill="#F3E4D3"/>
+  <rect x="616" y="664" width="108" height="20" rx="6" fill="#B45309"/>
+  <text x="624" y="678" font-size="10.5" font-weight="bold" fill="#FFFFFF">## Channel A</text>
+  <rect x="736" y="667" width="200" height="14" rx="4" fill="none" stroke="#B45309" stroke-width="1.5" stroke-dasharray="4 3" stroke-opacity="0.5"/>
+  <text x="742" y="677" font-size="9" fill="#C8A882">(no content)</text>
+  <rect x="616" y="692" width="108" height="20" rx="6" fill="#B45309"/>
+  <text x="624" y="706" font-size="10.5" font-weight="bold" fill="#FFFFFF">## Channel B</text>
+  <rect x="736" y="695" width="200" height="14" rx="4" fill="none" stroke="#B45309" stroke-width="1.5" stroke-dasharray="4 3" stroke-opacity="0.5"/>
+  <text x="742" y="705" font-size="9" fill="#C8A882">(no content)</text>
+  <rect x="616" y="720" width="108" height="20" rx="6" fill="#B45309"/>
+  <text x="624" y="734" font-size="10.5" font-weight="bold" fill="#FFFFFF">## Total</text>
+  <rect x="736" y="723" width="200" height="14" rx="4" fill="none" stroke="#B45309" stroke-width="1.5" stroke-dasharray="4 3" stroke-opacity="0.5"/>
+  <text x="742" y="733" font-size="9" fill="#C8A882">(no content)</text>
+  <rect x="616" y="748" width="320" height="19" rx="9.5" fill="#F3E4D3"/>
+  <line x1="628" y1="752.5" x2="636" y2="763.5" stroke="#92400E" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="636" y1="752.5" x2="628" y2="763.5" stroke="#92400E" stroke-width="2.2" stroke-linecap="round"/>
+  <text x="646" y="761.5" font-size="10.5" font-weight="bold" fill="#92400E">slot-matcher writes headings · bodies empty</text>
+
+  <text x="1056" y="672" font-size="10" font-weight="bold" fill="#B45309" text-anchor="middle" letter-spacing="1">CAPABILITY LOST</text>
+  <text x="990" y="726" font-size="16" font-weight="bold" fill="#334155">Q =</text>
+  <text x="1026" y="726" font-size="38" font-weight="bold" fill="#B45309">0.00</text>
+  <text x="1056" y="752" font-size="11.5" fill="#92400E" text-anchor="middle">headings present,</text>
+  <text x="1056" y="768" font-size="11.5" fill="#92400E" text-anchor="middle">slots empty</text>
+
+  <!-- ============ right column : single-mode baselines ============ -->
+  <rect x="1200" y="144" width="344" height="320" rx="16" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+  <rect x="1220" y="164" width="5" height="28" rx="2.5" fill="#2563EB"/>
+  <text x="1234" y="184" font-size="15" font-weight="bold" fill="#0F172A">SINGLE-MODE BASELINES</text>
+  <text x="1234" y="204" font-size="11" fill="#64748B">same model · no team · no assembly</text>
+
+  <text x="1224" y="244" font-size="13" font-weight="bold" fill="#1E293B">single (1-shot)</text>
+  <path d="M 1230 252 h 168 a 6 6 0 0 1 6 6 a 6 6 0 0 1 -6 6 h -168 a 6 6 0 0 1 -6 -6 a 6 6 0 0 1 6 -6 Z" fill="#DBEAFE"/>
+  <rect x="1224" y="252" width="68" height="12" rx="6" fill="#2563EB"/>
+  <text x="1524" y="264" font-size="16" font-weight="bold" fill="#1E3A8A" text-anchor="end">0.38</text>
+
+  <text x="1224" y="300" font-size="13" font-weight="bold" fill="#1E293B">refine-k</text>
+  <rect x="1300" y="288" width="46" height="17" rx="8.5" fill="#DBEAFE"/>
+  <text x="1323" y="300" font-size="9.5" font-weight="bold" fill="#1E3A8A" text-anchor="middle">best</text>
+  <path d="M 1230 308 h 168 a 6 6 0 0 1 6 6 a 6 6 0 0 1 -6 6 h -168 a 6 6 0 0 1 -6 -6 a 6 6 0 0 1 6 -6 Z" fill="#DBEAFE"/>
+  <rect x="1224" y="308" width="143" height="12" rx="6" fill="#2563EB"/>
+  <text x="1524" y="320" font-size="16" font-weight="bold" fill="#1E3A8A" text-anchor="end">0.79</text>
+
+  <text x="1224" y="356" font-size="13" font-weight="bold" fill="#1E293B">best-of-k</text>
+  <path d="M 1230 364 h 168 a 6 6 0 0 1 6 6 a 6 6 0 0 1 -6 6 h -168 a 6 6 0 0 1 -6 -6 a 6 6 0 0 1 6 -6 Z" fill="#DBEAFE"/>
+  <rect x="1224" y="364" width="68" height="12" rx="6" fill="#2563EB"/>
+  <text x="1524" y="376" font-size="16" font-weight="bold" fill="#1E3A8A" text-anchor="end">0.38</text>
+
+  <rect x="1224" y="404" width="204" height="26" rx="13" fill="#DBEAFE"/>
+  <text x="1326" y="421" font-size="12" font-weight="bold" fill="#1E3A8A" text-anchor="middle">all land at Q = 0.38–0.79</text>
+  <text x="1528" y="421" font-size="10.5" fill="#64748B" text-anchor="end">same rubric</text>
+
+  <!-- conclusion card -->
+  <rect x="1200" y="484" width="344" height="180" rx="16" fill="#DBEAFE" stroke="#93C5FD" stroke-width="1.5"/>
+  <text x="1216" y="514" font-size="12" fill="#1E3A8A">Even the best single baseline</text>
+  <text x="1216" y="532" font-size="12" fill="#1E3A8A">(0.79) loses to the integrator</text>
+  <text x="1216" y="550" font-size="12" fill="#1E3A8A">(1.00) — and every mechanical</text>
+  <text x="1216" y="568" font-size="12" fill="#1E3A8A">assembly loses to every single</text>
+  <text x="1216" y="586" font-size="12" fill="#1E3A8A">baseline.</text>
+  <rect x="1216" y="606" width="150" height="10" rx="5" fill="#059669"/>
+  <text x="1374" y="615" font-size="10.5" font-weight="bold" fill="#065F46">integrator · 1.00</text>
+  <rect x="1216" y="624" width="118" height="10" rx="5" fill="#2563EB"/>
+  <text x="1374" y="633" font-size="10.5" font-weight="bold" fill="#1E3A8A">best single · 0.79</text>
+
+  <!-- ============ bottom banner ============ -->
+  <rect x="56" y="800" width="1488" height="64" rx="14" fill="url(#gradBanner)" filter="url(#cardShadow)"/>
+  <path d="M 92 826 L 99 836 L 92 846 L 85 836 Z" fill="#34D399"/>
+  <path d="M 1508 826 L 1515 836 L 1508 846 L 1501 836 Z" fill="#34D399"/>
+  <text x="800" y="842" font-size="16" fill="#F8FAFC" text-anchor="middle">The capability was present in the role outputs all along — the assembly protocol alone determined whether it survived to the artifact.</text>
+
+  <!-- ============ footer ============ -->
+  <text x="56" y="884" font-size="12" fill="#94A3B8">TeamBench · W4 · case study</text>
+  <text x="1544" y="884" font-size="12" fill="#94A3B8" text-anchor="end">t-DATA-L-01 · Kimi K3 · seed 0 · Q = artifact quality (0–1)</text>
+</svg>

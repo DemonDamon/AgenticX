@@ -1,0 +1,260 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="950" viewBox="0 0 1800 950">
+  <defs>
+    <linearGradient id="gradTitle" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="gradBlue" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#60A5FA"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="gradPurple" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0F172A" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- ============ background & decoration ============ -->
+  <rect x="0" y="0" width="1800" height="950" fill="#F4F6FA"/>
+  <circle cx="1690" cy="55" r="46" fill="#E9EEFA"/>
+  <circle cx="1748" cy="42" r="15" fill="none" stroke="#D8E0F2" stroke-width="3"/>
+  <circle cx="1636" cy="92" r="9" fill="#E7E2F8"/>
+  <circle cx="1624" cy="926" r="18" fill="#EAF0FB"/>
+
+  <!-- ============ header ============ -->
+  <rect x="36" y="42" width="8" height="60" rx="4" fill="url(#gradTitle)"/>
+  <text x="62" y="74" font-size="29" font-weight="bold" fill="#0F172A">Assembly Protocol × Coupling Level (Quality Q) and Variance Decomposition</text>
+  <text x="63" y="104" font-size="14" fill="#64748B">DS v4 Flash &amp; Kimi K3 · six assembly protocols × three coupling levels · paired runs</text>
+
+  <!-- ============ panel (a): DS v4 Flash heatmap ============ -->
+  <g>
+    <rect x="36" y="120" width="560" height="770" rx="16" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+    <rect x="60" y="146" width="5" height="30" rx="2.5" fill="url(#gradBlue)"/>
+    <text x="76" y="168" font-size="20" font-weight="bold" fill="#0F172A">(a)  DS v4 Flash</text>
+    <text x="572" y="168" font-size="12" fill="#94A3B8" text-anchor="end">Quality Q</text>
+
+    <!-- column headers -->
+    <text x="390" y="210" font-size="12" fill="#64748B" text-anchor="middle">Coupling level</text>
+    <text x="272" y="234" font-size="15" font-weight="600" fill="#334155" text-anchor="middle">Low</text>
+    <text x="390" y="234" font-size="15" font-weight="600" fill="#334155" text-anchor="middle">Medium</text>
+    <text x="508" y="234" font-size="15" font-weight="600" fill="#334155" text-anchor="middle">High</text>
+
+    <!-- row labels -->
+    <text x="204" y="298" font-size="14" font-weight="500" fill="#334155" text-anchor="end">single (1-shot)</text>
+    <text x="204" y="384" font-size="14" font-weight="500" fill="#334155" text-anchor="end">single_refine_k</text>
+    <text x="204" y="470" font-size="14" font-weight="500" fill="#334155" text-anchor="end">team_last</text>
+    <text x="204" y="556" font-size="14" font-weight="500" fill="#334155" text-anchor="end">team_concat</text>
+    <text x="204" y="642" font-size="14" font-weight="500" fill="#334155" text-anchor="end">team_blackboard</text>
+    <text x="204" y="728" font-size="14" font-weight="bold" fill="#047857" text-anchor="end">team_integrator</text>
+
+    <!-- heatmap cells: row 1 single -->
+    <rect x="216" y="252" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <rect x="334" y="252" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <rect x="452" y="252" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <text x="272" y="298" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.603</text>
+    <text x="390" y="298" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.595</text>
+    <text x="508" y="298" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.621</text>
+    <!-- row 2 single_refine_k -->
+    <rect x="216" y="338" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <rect x="334" y="338" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <rect x="452" y="338" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <text x="272" y="384" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.522</text>
+    <text x="390" y="384" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.608</text>
+    <text x="508" y="384" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.615</text>
+    <!-- row 3 team_last -->
+    <rect x="216" y="424" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <rect x="334" y="424" width="112" height="80" rx="7" fill="#FEE2E2"/>
+    <rect x="452" y="424" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <text x="272" y="470" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.404</text>
+    <text x="390" y="470" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.339</text>
+    <text x="508" y="470" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.510</text>
+    <!-- row 4 team_concat -->
+    <rect x="216" y="510" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <rect x="334" y="510" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <rect x="452" y="510" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <text x="272" y="556" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.537</text>
+    <text x="390" y="556" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.493</text>
+    <text x="508" y="556" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.574</text>
+    <!-- row 5 team_blackboard -->
+    <rect x="216" y="596" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <rect x="334" y="596" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <rect x="452" y="596" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <text x="272" y="642" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.500</text>
+    <text x="390" y="642" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.447</text>
+    <text x="508" y="642" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.488</text>
+    <!-- row 6 team_integrator -->
+    <rect x="216" y="682" width="112" height="80" rx="7" fill="#A7F3D0"/>
+    <rect x="334" y="682" width="112" height="80" rx="7" fill="#A7F3D0"/>
+    <rect x="452" y="682" width="112" height="80" rx="7" fill="#A7F3D0"/>
+    <text x="272" y="728" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.905</text>
+    <text x="390" y="728" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.876</text>
+    <text x="508" y="728" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.861</text>
+
+    <!-- integrator row highlight -->
+    <rect x="212" y="676" width="356" height="92" rx="10" fill="none" stroke="#059669" stroke-width="3"/>
+    <rect x="466" y="654" width="88" height="22" rx="11" fill="#059669"/>
+    <text x="510" y="670" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">BEST</text>
+
+    <!-- legend -->
+    <line x1="60" y1="782" x2="572" y2="782" stroke="#F1F5F9" stroke-width="1"/>
+    <text x="60" y="806" font-size="11" fill="#94A3B8">Quality Q</text>
+    <rect x="60" y="816" width="62" height="16" rx="3" fill="#FEE2E2"/>
+    <rect x="130" y="816" width="62" height="16" rx="3" fill="#FFEDD5"/>
+    <rect x="200" y="816" width="62" height="16" rx="3" fill="#FEF9C3"/>
+    <rect x="270" y="816" width="62" height="16" rx="3" fill="#D1FAE5"/>
+    <rect x="340" y="816" width="62" height="16" rx="3" fill="#A7F3D0"/>
+    <text x="91" y="846" font-size="10.5" fill="#64748B" text-anchor="middle">≤0.40</text>
+    <text x="161" y="846" font-size="10.5" fill="#64748B" text-anchor="middle">0.41–0.55</text>
+    <text x="231" y="846" font-size="10.5" fill="#64748B" text-anchor="middle">0.56–0.70</text>
+    <text x="301" y="846" font-size="10.5" fill="#64748B" text-anchor="middle">0.71–0.85</text>
+    <text x="371" y="846" font-size="10.5" fill="#64748B" text-anchor="middle">&gt;0.85</text>
+    <text x="414" y="828" font-size="10.5" fill="#94A3B8">low → high</text>
+  </g>
+
+  <!-- ============ panel (b): Kimi K3 heatmap ============ -->
+  <g transform="translate(580,0)">
+    <rect x="36" y="120" width="560" height="770" rx="16" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+    <rect x="60" y="146" width="5" height="30" rx="2.5" fill="url(#gradPurple)"/>
+    <text x="76" y="168" font-size="20" font-weight="bold" fill="#0F172A">(b)  Kimi K3</text>
+    <text x="572" y="168" font-size="12" fill="#94A3B8" text-anchor="end">Quality Q</text>
+
+    <text x="390" y="210" font-size="12" fill="#64748B" text-anchor="middle">Coupling level</text>
+    <text x="272" y="234" font-size="15" font-weight="600" fill="#334155" text-anchor="middle">Low</text>
+    <text x="390" y="234" font-size="15" font-weight="600" fill="#334155" text-anchor="middle">Medium</text>
+    <text x="508" y="234" font-size="15" font-weight="600" fill="#334155" text-anchor="middle">High</text>
+
+    <text x="204" y="298" font-size="14" font-weight="500" fill="#334155" text-anchor="end">single (1-shot)</text>
+    <text x="204" y="384" font-size="14" font-weight="500" fill="#334155" text-anchor="end">single_refine_k</text>
+    <text x="204" y="470" font-size="14" font-weight="500" fill="#334155" text-anchor="end">team_last</text>
+    <text x="204" y="556" font-size="14" font-weight="500" fill="#334155" text-anchor="end">team_concat</text>
+    <text x="204" y="642" font-size="14" font-weight="500" fill="#334155" text-anchor="end">team_blackboard</text>
+    <text x="204" y="728" font-size="14" font-weight="bold" fill="#047857" text-anchor="end">team_integrator</text>
+
+    <!-- row 1 single -->
+    <rect x="216" y="252" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <rect x="334" y="252" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <rect x="452" y="252" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <text x="272" y="298" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.604</text>
+    <text x="390" y="298" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.579</text>
+    <text x="508" y="298" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.656</text>
+    <!-- row 2 single_refine_k -->
+    <rect x="216" y="338" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <rect x="334" y="338" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <rect x="452" y="338" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <text x="272" y="384" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.657</text>
+    <text x="390" y="384" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.586</text>
+    <text x="508" y="384" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.669</text>
+    <!-- row 3 team_last -->
+    <rect x="216" y="424" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <rect x="334" y="424" width="112" height="80" rx="7" fill="#FEE2E2"/>
+    <rect x="452" y="424" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <text x="272" y="470" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.444</text>
+    <text x="390" y="470" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.321</text>
+    <text x="508" y="470" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.494</text>
+    <!-- row 4 team_concat -->
+    <rect x="216" y="510" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <rect x="334" y="510" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <rect x="452" y="510" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <text x="272" y="556" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.625</text>
+    <text x="390" y="556" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.432</text>
+    <text x="508" y="556" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.569</text>
+    <!-- row 5 team_blackboard -->
+    <rect x="216" y="596" width="112" height="80" rx="7" fill="#FFEDD5"/>
+    <rect x="334" y="596" width="112" height="80" rx="7" fill="#FEE2E2"/>
+    <rect x="452" y="596" width="112" height="80" rx="7" fill="#FEF9C3"/>
+    <text x="272" y="642" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.482</text>
+    <text x="390" y="642" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.292</text>
+    <text x="508" y="642" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.573</text>
+    <!-- row 6 team_integrator -->
+    <rect x="216" y="682" width="112" height="80" rx="7" fill="#A7F3D0"/>
+    <rect x="334" y="682" width="112" height="80" rx="7" fill="#A7F3D0"/>
+    <rect x="452" y="682" width="112" height="80" rx="7" fill="#A7F3D0"/>
+    <text x="272" y="728" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.919</text>
+    <text x="390" y="728" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.872</text>
+    <text x="508" y="728" font-size="17" font-weight="600" fill="#1F2937" text-anchor="middle">0.925</text>
+
+    <rect x="212" y="676" width="356" height="92" rx="10" fill="none" stroke="#059669" stroke-width="3"/>
+    <rect x="466" y="654" width="88" height="22" rx="11" fill="#059669"/>
+    <text x="510" y="670" font-size="11" font-weight="bold" fill="#FFFFFF" text-anchor="middle">BEST</text>
+
+    <line x1="60" y1="782" x2="572" y2="782" stroke="#F1F5F9" stroke-width="1"/>
+    <text x="60" y="806" font-size="11" fill="#94A3B8">Quality Q</text>
+    <rect x="60" y="816" width="62" height="16" rx="3" fill="#FEE2E2"/>
+    <rect x="130" y="816" width="62" height="16" rx="3" fill="#FFEDD5"/>
+    <rect x="200" y="816" width="62" height="16" rx="3" fill="#FEF9C3"/>
+    <rect x="270" y="816" width="62" height="16" rx="3" fill="#D1FAE5"/>
+    <rect x="340" y="816" width="62" height="16" rx="3" fill="#A7F3D0"/>
+    <text x="91" y="846" font-size="10.5" fill="#64748B" text-anchor="middle">≤0.40</text>
+    <text x="161" y="846" font-size="10.5" fill="#64748B" text-anchor="middle">0.41–0.55</text>
+    <text x="231" y="846" font-size="10.5" fill="#64748B" text-anchor="middle">0.56–0.70</text>
+    <text x="301" y="846" font-size="10.5" fill="#64748B" text-anchor="middle">0.71–0.85</text>
+    <text x="371" y="846" font-size="10.5" fill="#64748B" text-anchor="middle">&gt;0.85</text>
+    <text x="414" y="828" font-size="10.5" fill="#94A3B8">low → high</text>
+  </g>
+
+  <!-- ============ panel (c): variance decomposition ============ -->
+  <g>
+    <rect x="1196" y="120" width="568" height="770" rx="16" fill="#FFFFFF" stroke="#E2E8F0" filter="url(#cardShadow)"/>
+    <rect x="1220" y="146" width="5" height="30" rx="2.5" fill="url(#gradPurple)"/>
+    <text x="1236" y="168" font-size="20" font-weight="bold" fill="#0F172A">(c)  Variance decomposition</text>
+    <text x="1740" y="168" font-size="12" fill="#94A3B8" text-anchor="end">η² (%)</text>
+
+    <!-- group: Flash -->
+    <rect x="1220" y="212" width="14" height="14" rx="4" fill="#2563EB"/>
+    <text x="1242" y="224" font-size="14" font-weight="bold" fill="#1E293B">DS v4 Flash</text>
+
+    <text x="1364" y="271" font-size="13" fill="#475569" text-anchor="end">Assembly protocol</text>
+    <rect x="1378" y="250" width="267" height="32" rx="4" fill="#2563EB"/>
+    <text x="1653" y="271" font-size="15" font-weight="bold" fill="#2563EB">40.0%</text>
+
+    <text x="1364" y="323" font-size="13" fill="#475569" text-anchor="end">Compute strategy</text>
+    <rect x="1378" y="302" width="14" height="32" rx="3" fill="#93C5FD"/>
+    <polygon points="1398,318 1410,311.5 1410,324.5" fill="#2563EB"/>
+    <text x="1418" y="324" font-size="17" font-weight="bold" fill="#2563EB">0.3%</text>
+
+    <!-- group: Kimi K3 -->
+    <rect x="1220" y="372" width="14" height="14" rx="4" fill="#7C3AED"/>
+    <text x="1242" y="384" font-size="14" font-weight="bold" fill="#1E293B">Kimi K3</text>
+
+    <text x="1364" y="429" font-size="13" fill="#475569" text-anchor="end">Assembly protocol</text>
+    <rect x="1378" y="408" width="285" height="32" rx="4" fill="#7C3AED"/>
+    <text x="1671" y="429" font-size="15" font-weight="bold" fill="#7C3AED">42.8%</text>
+
+    <text x="1364" y="481" font-size="13" fill="#475569" text-anchor="end">Compute strategy</text>
+    <rect x="1378" y="460" width="14" height="32" rx="3" fill="#C4B5FD"/>
+    <polygon points="1398,476 1410,469.5 1410,482.5" fill="#7C3AED"/>
+    <text x="1418" y="482" font-size="17" font-weight="bold" fill="#7C3AED">0.2%</text>
+
+    <!-- gridlines & axis -->
+    <line x1="1478" y1="244" x2="1478" y2="508" stroke="#E2E8F0" stroke-width="1.5" stroke-dasharray="3 4"/>
+    <line x1="1578" y1="244" x2="1578" y2="508" stroke="#E2E8F0" stroke-width="1.5" stroke-dasharray="3 4"/>
+    <line x1="1678" y1="244" x2="1678" y2="508" stroke="#E2E8F0" stroke-width="1.5" stroke-dasharray="3 4"/>
+    <line x1="1378" y1="508" x2="1690" y2="508" stroke="#CBD5E1" stroke-width="1.5"/>
+    <line x1="1378" y1="508" x2="1378" y2="514" stroke="#CBD5E1" stroke-width="1.5"/>
+    <line x1="1478" y1="508" x2="1478" y2="514" stroke="#CBD5E1" stroke-width="1.5"/>
+    <line x1="1578" y1="508" x2="1578" y2="514" stroke="#CBD5E1" stroke-width="1.5"/>
+    <line x1="1678" y1="508" x2="1678" y2="514" stroke="#CBD5E1" stroke-width="1.5"/>
+    <text x="1378" y="530" font-size="11" fill="#94A3B8" text-anchor="middle">0</text>
+    <text x="1478" y="530" font-size="11" fill="#94A3B8" text-anchor="middle">15</text>
+    <text x="1578" y="530" font-size="11" fill="#94A3B8" text-anchor="middle">30</text>
+    <text x="1678" y="530" font-size="11" fill="#94A3B8" text-anchor="middle">45</text>
+    <text x="1534" y="552" font-size="12" fill="#64748B" text-anchor="middle">Variance share η² (%)</text>
+    <text x="1220" y="578" font-size="11.5" fill="#94A3B8">bars for 0.3% / 0.2% shown at minimum visible length</text>
+
+    <!-- annotation callout -->
+    <rect x="1220" y="630" width="520" height="168" rx="16" fill="#0F172A" filter="url(#cardShadow)"/>
+    <circle cx="1256" cy="714" r="24" fill="#F59E0B"/>
+    <path d="M1261,698 L1246,718 L1255,718 L1251,731 L1266,710 L1257,710 Z" fill="#0F172A"/>
+    <text x="1294" y="700" font-size="22" font-weight="bold" fill="#FBBF24">130–200×</text>
+    <text x="1410" y="700" font-size="15" font-weight="bold" fill="#F8FAFC">variance gap</text>
+    <text x="1294" y="734" font-size="13.5" fill="#CBD5E1">assembly vs compute — over identical role outputs</text>
+    <text x="1294" y="760" font-size="13.5" fill="#94A3B8">(η², one-way ANOVA)</text>
+  </g>
+
+  <!-- ============ footer ============ -->
+  <text x="36" y="936" font-size="13" fill="#64748B">n = 15 paired runs per cell · scoring v2.2, L3 judge off</text>
+  <text x="1764" y="936" font-size="13" fill="#94A3B8" text-anchor="end">TeamBench · W3</text>
+</svg>
