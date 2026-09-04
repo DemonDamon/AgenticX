@@ -16,10 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from agenticx.cc_bridge.ndjson import (
-    build_user_message_line,
-    line_looks_like_result_success,
-)
+from agenticx.cc_bridge.ndjson import build_user_message_line
+from agenticx.wb_bridge import events as wb_events
 from agenticx.wb_bridge.settings import resolve_codebuddy_executable
 
 _LOG = logging.getLogger(__name__)
@@ -47,6 +45,26 @@ class WbBridgeSession:
     exit_code: Optional[int] = None
     log_path: str = ""
     log_lock: threading.Lock = field(default_factory=threading.Lock)
+    permission_mode: str = "default"
+    turn_state: str = "idle"  # "idle" | "running"
+    turn_seq: int = 0  # incremented on each send
+    turns_completed: int = 0
+    dispatched_at: Optional[float] = None  # time.monotonic() at send
+    first_activity_at: Optional[float] = None  # first tool_use of current turn
+    terminal_at: Optional[float] = None  # last terminal result
+    last_activity: str = ""  # e.g. "Write" / "Bash"
+    last_activity_at: Optional[float] = None
+    observed_tools: List[str] = field(default_factory=list)  # current turn, dedup, cap 20
+    last_terminal_kind: str = ""  # "success" | "blocked" | "error"
+    last_terminal_detail: str = ""
+    last_result_text: str = ""
+    last_duration_ms: Optional[int] = None
+    last_num_turns: Optional[int] = None
+    usage_totals: Dict[str, int] = field(default_factory=dict)
+    blocked_count: int = 0
+    turn_done: threading.Event = field(default_factory=threading.Event)
+    turn_line_start: int = 0  # lines index at last send; 0 if never sent
+    last_idempotency_key: str = ""
 
     def append_line(self, line: str) -> None:
         with self.lock:
@@ -64,10 +82,51 @@ class WbBridgeSession:
             return
         with self.log_lock:
             try:
-                with open(self.log_path, "a", encoding="utf-8") as f:
+                dest = Path(self.log_path)
+                with dest.open("a", encoding="utf-8") as f:
                     f.write(line + "\n")
             except OSError:
                 pass
+
+    def observe_line(self, line: str) -> None:
+        """Update turn state from one stdout line. Never raises."""
+        try:
+            with self.lock:
+                activity = wb_events.extract_tool_activity(line)
+                if activity is not None:
+                    now = time.monotonic()
+                    self.last_activity = activity
+                    self.last_activity_at = now
+                    if self.first_activity_at is None:
+                        self.first_activity_at = now
+                    if activity not in self.observed_tools and len(self.observed_tools) < 20:
+                        self.observed_tools.append(activity)
+
+                if wb_events.line_is_turn_terminal(line):
+                    obj = wb_events.parse_stream_line(line)
+                    kind, detail = wb_events.classify_result(obj)
+                    self.last_terminal_kind = kind
+                    self.last_terminal_detail = detail
+                    self.last_result_text = wb_events.extract_result_text(obj)
+                    if isinstance(obj, dict):
+                        try:
+                            self.last_duration_ms = int(obj["duration_ms"])
+                        except (KeyError, ValueError, TypeError):
+                            pass
+                        try:
+                            self.last_num_turns = int(obj["num_turns"])
+                        except (KeyError, ValueError, TypeError):
+                            pass
+                    for k, v in wb_events.extract_usage(obj).items():
+                        self.usage_totals[k] = self.usage_totals.get(k, 0) + v
+                    self.turns_completed += 1
+                    if kind == "blocked":
+                        self.blocked_count += 1
+                    self.turn_state = "idle"
+                    self.terminal_at = time.monotonic()
+                    self.turn_done.set()
+        except Exception as exc:  # never kill the reader thread
+            _LOG.warning("observe_line failed session=%s err=%s", self.session_id, exc)
 
 
 def _reader_thread(session: WbBridgeSession, stream: Any) -> None:
@@ -78,6 +137,7 @@ def _reader_thread(session: WbBridgeSession, stream: Any) -> None:
             line = raw.rstrip("\n\r")
             session.append_line(line)
             session.append_log(line)
+            session.observe_line(line)
     finally:
         try:
             stream.close()
@@ -121,14 +181,46 @@ class WbBridgeSessionManager:
     def _session_to_dict(self, sid: str, s: WbBridgeSession) -> Dict[str, Any]:
         poll = s.proc.poll()
         running = poll is None
-        return {
-            "session_id": sid,
-            "cwd": s.cwd,
-            "pid": s.proc.pid,
-            "poll": poll,
-            "log_path": s.log_path,
-            "state": "running" if running else "stopped",
-        }
+        now = time.monotonic()
+        with s.lock:
+            turn_elapsed = (
+                round(now - s.dispatched_at, 1)
+                if s.dispatched_at and s.turn_state == "running"
+                else None
+            )
+            last_activity_age = (
+                round(now - s.last_activity_at, 1) if s.last_activity_at else None
+            )
+            first_activity_lag = (
+                round(s.first_activity_at - s.dispatched_at, 1)
+                if s.first_activity_at and s.dispatched_at
+                else None
+            )
+            return {
+                "session_id": sid,
+                "cwd": s.cwd,
+                "pid": s.proc.pid,
+                "poll": poll,
+                "log_path": s.log_path,
+                "state": "running" if running else "stopped",
+                "permission_mode": s.permission_mode,
+                "turn_state": s.turn_state,
+                "turn_seq": s.turn_seq,
+                "turn_elapsed_sec": turn_elapsed,
+                "turns_completed": s.turns_completed,
+                "last_activity": s.last_activity,
+                "last_activity_age_sec": last_activity_age,
+                "first_activity_lag_sec": first_activity_lag,
+                "observed_tools": list(s.observed_tools),
+                "last_terminal_kind": s.last_terminal_kind,
+                "terminal_detail": s.last_terminal_detail,
+                "last_result_text": s.last_result_text[:2000],
+                "last_duration_ms": s.last_duration_ms,
+                "last_num_turns": s.last_num_turns,
+                "usage_totals": dict(s.usage_totals),
+                "blocked_count": s.blocked_count,
+                "exit_code": s.exit_code,
+            }
 
     def get(self, session_id: str) -> Optional[WbBridgeSession]:
         with self._global_lock:
@@ -201,6 +293,7 @@ class WbBridgeSessionManager:
             cwd=str(path),
             proc=proc,
             log_path=log_path,
+            permission_mode=mode,
         )
         session.append_log(
             f"[bridge] started headless session_id={sid} pid={proc.pid} cwd={path} argv={args}"
@@ -231,11 +324,32 @@ class WbBridgeSessionManager:
         session.exit_code = code
         session.done.set()
 
-    def send_user_message(self, session_id: str, text: str) -> None:
+    def turn_matches_idempotency_key(self, session_id: str, key: str) -> bool:
+        """True when ``key`` is non-empty and equals this session's last key."""
+        if not key:
+            return False
+        session = self.get(session_id)
+        if session is None:
+            return False
+        with session.lock:
+            return bool(session.last_idempotency_key) and session.last_idempotency_key == key
+
+    def send_user_message(self, session_id: str, text: str, *, idempotency_key: str = "") -> None:
         session = self.get(session_id)
         if session is None:
             raise KeyError("unknown session")
         line = build_user_message_line(text)
+        with session.lock:
+            session.turn_done.clear()
+            session.turn_state = "running"
+            session.turn_seq += 1
+            session.dispatched_at = time.monotonic()
+            session.first_activity_at = None
+            session.terminal_at = None
+            session.last_activity = ""
+            session.observed_tools = []
+            session.turn_line_start = len(session.lines)
+            session.last_idempotency_key = idempotency_key
         self._write_stdin(session, line)
 
     def stop_session(self, session_id: str) -> bool:
@@ -251,6 +365,70 @@ class WbBridgeSessionManager:
                 session.proc.kill()
         return True
 
+    def wait_for_turn(
+        self,
+        session_id: str,
+        timeout_sec: float,
+        poll_interval: float = 0.2,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Block until the current turn ends, the child exits, or timeout."""
+        session = self.get(session_id)
+        if session is None:
+            return "unknown_session", {}
+
+        if not session.turn_done.is_set():
+            with session.lock:
+                pending = list(session.lines[session.turn_line_start :])
+            for line in pending:
+                session.observe_line(line)
+                if session.turn_done.is_set():
+                    break
+
+        def _snapshot(status: str, stalled: bool) -> Tuple[str, Dict[str, Any]]:
+            # Must not run while holding session.lock: describe_session takes
+            # _global_lock then session.lock.
+            snap = self.describe_session(session_id) or {}
+            snap["status"] = status
+            snap["tail"] = session.recent_text()
+            snap["stalled"] = stalled
+            return status, snap
+
+        if timeout_sec <= 0:
+            with session.lock:
+                done = session.turn_done.is_set()
+                kind = session.last_terminal_kind or "error"
+                exited = session.proc.poll() is not None
+            if done:
+                return _snapshot(kind, False)
+            if exited:
+                return _snapshot("exited", False)
+            return _snapshot("running", False)
+
+        deadline = time.monotonic() + timeout_sec
+        with session.lock:
+            start_activity_at = session.last_activity_at
+            start_line_count = len(session.lines)
+
+        while True:
+            with session.lock:
+                done = session.turn_done.is_set()
+                kind = session.last_terminal_kind or "error"
+            if done:
+                return _snapshot(kind, False)
+            if session.proc.poll() is not None:
+                return _snapshot("exited", False)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            session.turn_done.wait(min(poll_interval, remaining))
+
+        with session.lock:
+            stalled = (
+                session.last_activity_at == start_activity_at
+                and len(session.lines) == start_line_count
+            )
+        return _snapshot("running", stalled)
+
     def wait_for_success_result(
         self,
         session_id: str,
@@ -258,25 +436,14 @@ class WbBridgeSessionManager:
         poll_interval: float = 0.2,
     ) -> Tuple[bool, str]:
         """Block until a result/success line appears, timeout, or process exit."""
-        session = self.get(session_id)
-        if session is None:
+        status, snap = self.wait_for_turn(session_id, timeout_sec, poll_interval)
+        tail = str(snap.get("tail", ""))
+        if status == "success":
+            return True, tail
+        if status == "unknown_session":
             return False, "unknown session"
-        deadline = time.monotonic() + timeout_sec
-        last_count = 0
-        while time.monotonic() < deadline:
-            if session.done.is_set() and session.proc.poll() is not None:
-                with session.lock:
-                    all_lines = list(session.lines)
-                    tail = session.recent_text()
-                for line in all_lines:
-                    if line_looks_like_result_success(line):
-                        return True, tail
-                return False, f"process exited code={session.exit_code}\n{tail}"
-            with session.lock:
-                chunk = session.lines[last_count:]
-                last_count = len(session.lines)
-            for line in chunk:
-                if line_looks_like_result_success(line):
-                    return True, session.recent_text()
-            time.sleep(poll_interval)
-        return False, f"timeout after {timeout_sec}s\n{session.recent_text()}"
+        if status == "exited":
+            return False, f"process exited code={snap.get('exit_code')}\n{tail}"
+        if status == "running":
+            return False, f"timeout after {timeout_sec}s\n{tail}"
+        return False, f"{status}: {snap.get('terminal_detail', '')}\n{tail}"

@@ -3610,7 +3610,8 @@ def create_studio_app() -> FastAPI:
             # Automation avatar is an execution worker, not a scheduler author.
             # Keep runtime/file/mcp tools, but block task-management meta tools to
             # prevent recursive "create another schedule_task" behavior.
-            _blocked = {"schedule_task", "list_scheduled_tasks", "cancel_scheduled_task", "delegate_to_avatar"}
+            _blocked = {"schedule_task", "list_scheduled_tasks", "cancel_scheduled_task", "delegate_to_avatar",
+                        "wb_bridge_start", "wb_bridge_send", "wb_bridge_stop"}
             effective_tools_source: list = [
                 t
                 for t in visible_meta_agent_tools()

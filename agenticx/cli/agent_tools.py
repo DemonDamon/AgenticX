@@ -1177,7 +1177,15 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "127.0.0.1:9743 (token from AGX_WB_BRIDGE_TOKEN or ~/.agenticx/config.yaml "
                 "wb_bridge.token). Studio autostarts loopback `agx wb-bridge serve` if needed. "
                 "Do NOT start serve via bash/bash_bg (sandbox cannot import agenticx). "
-                "Then wb_bridge_send with the returned session_id."
+                "Then wb_bridge_send with the returned session_id. "
+                "IMPORTANT unattended contract: permission_mode=default (the API default) will "
+                "pause on Write/Bash approval and this bridge has NO approval channel "
+                "(cc_bridge_permission belongs to the Claude Code bridge and does not work "
+                "here). For any task that writes files or runs commands without a human "
+                "watching, pass permission_mode=acceptEdits (file edits only) or "
+                "dontAsk / bypassPermissions (edits + commands). Use default/plan only for "
+                "read-only or planning turns. The create response returns unattended_ok and a "
+                "hint field; read them."
             ),
             "parameters": {
                 "type": "object",
@@ -1196,7 +1204,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                             "plan",
                             "auto",
                         ],
-                        "description": "Session-level --permission-mode. Invalid values fall back to default.",
+                        "description": (
+                            "Session-level --permission-mode. Invalid values fall back to default. "
+                            "default/plan are NOT usable for unattended write/exec tasks: they stall on an "
+                            "approval prompt that this bridge cannot answer."
+                        ),
                     },
                 },
                 "required": [],
@@ -1211,7 +1223,16 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "description": (
                 "Send a user turn to an existing WB bridge session and wait for result/timeout. "
                 "Requires bridge at wb_bridge.url (default 127.0.0.1:9743) and matching bearer token. "
-                "Studio autostarts loopback serve if needed. Do NOT use bash to start serve."
+                "Studio autostarts loopback serve if needed. Do NOT use bash to start serve. "
+                "Returns status = success | blocked | error | exited | running, plus "
+                "usage_totals, observed_tools and next_action. On status=running the turn is "
+                "STILL EXECUTING: poll wb_bridge_describe with the same session_id and never "
+                "resend the same instruction (a resend while a turn is in flight is rejected "
+                "with HTTP 409). On status=blocked the session hit a permission prompt: check "
+                "observed_tools first, because side effects before the block are already "
+                "committed on disk, then start a NEW session with an unattended "
+                "permission_mode instead of resending. Pass idempotency_key to make a retry "
+                "safe: an identical key is not re-dispatched."
             ),
             "parameters": {
                 "type": "object",
@@ -1220,7 +1241,17 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "text": {"type": "string", "description": "User prompt to send."},
                     "wait_seconds": {
                         "type": "number",
-                        "description": "Seconds to wait for a result/success line (default 180).",
+                        "description": (
+                            "Seconds to wait for this turn to end (default 180). Pass 0 to dispatch and "
+                            "return immediately, then poll wb_bridge_describe."
+                        ),
+                    },
+                    "idempotency_key": {
+                        "type": "string",
+                        "description": (
+                            "Optional retry-safety token. Reusing the key of the current or "
+                            "last turn returns that turn's snapshot instead of re-dispatching."
+                        ),
                     },
                 },
                 "required": ["session_id", "text"],
@@ -1250,7 +1281,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "name": "wb_bridge_describe",
             "description": (
                 "Describe one WB bridge session by session_id. Studio autostarts loopback serve "
-                "if needed. Do NOT start serve via bash."
+                "if needed. Do NOT start serve via bash. "
+                "Returns live turn state, last tool activity, observed_tools, cumulative token "
+                "usage and terminal kind. Do NOT try to read ~/.agenticx/logs/wb-bridge/*.log "
+                "from bash: the agent workspace sandbox blocks it and describe already carries "
+                "the same data."
             ),
             "parameters": {
                 "type": "object",
@@ -1268,12 +1303,22 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "name": "wb_bridge_stop",
             "description": (
                 "Stop a WB bridge session. Studio autostarts loopback serve if needed. "
-                "Do NOT start serve via bash."
+                "Do NOT start serve via bash. "
+                "This terminates the child process immediately. If a turn is still running "
+                "(turn_state=running), in-flight file writes may be incomplete. The tool "
+                "refuses to stop a running turn unless force=true."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "session_id": {"type": "string"},
+                    "force": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, terminate even when turn_state=running. "
+                            "Default false: return a warning and do not kill the child."
+                        ),
+                    },
                 },
                 "required": ["session_id"],
                 "additionalProperties": False,
@@ -6235,12 +6280,17 @@ async def _tool_wb_bridge_send(arguments: Dict[str, Any], session: StudioSession
         wait_f = float(wait)
     except (TypeError, ValueError):
         wait_f = 180.0
-    wait_f = max(1.0, min(3600.0, wait_f))
+    wait_f = max(0.0, min(3600.0, wait_f))
+    body: Dict[str, Any] = {"text": text, "wait_seconds": wait_f}
+    idem = str(arguments.get("idempotency_key", "") or "").strip()
+    if not idem:
+        idem = f"{sid}:{hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]}"
+    body["idempotency_key"] = idem[:200]
     return await _tool_wb_bridge_http(
         session,
         "POST",
         f"/v1/sessions/{sid}/message",
-        {"text": text, "wait_seconds": wait_f},
+        body,
         timeout_sec=wait_f + 45.0,
     )
 
@@ -6261,6 +6311,21 @@ async def _tool_wb_bridge_stop(arguments: Dict[str, Any], session: StudioSession
     sid = str(arguments.get("session_id", "") or "").strip()
     if not sid:
         return "ERROR: session_id required"
+    force = bool(arguments.get("force", False))
+    if not force:
+        desc = await _tool_wb_bridge_http(
+            session, "GET", f"/v1/sessions/{sid}", None, timeout_sec=15.0
+        )
+        if not desc.startswith("ERROR:"):
+            try:
+                row = json.loads(desc)
+            except (TypeError, ValueError):
+                row = {}
+            if isinstance(row, dict) and row.get("turn_state") == "running":
+                return (
+                    "ERROR: turn is still running; in-flight file writes may be incomplete. "
+                    "Pass force=true to stop anyway, or wait and poll wb_bridge_describe."
+                )
     return await _tool_wb_bridge_http(session, "DELETE", f"/v1/sessions/{sid}", None, timeout_sec=30.0)
 
 
