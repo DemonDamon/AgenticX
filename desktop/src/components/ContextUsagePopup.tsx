@@ -6,6 +6,7 @@ import { formatHitPercent } from "../utils/cache-hit";
 import {
   buildContextUsageRefreshKey,
   contextUsageMessageSignature,
+  shouldDropCachedOccupancy,
   shouldFetchContextUsage,
 } from "../utils/context-usage-refresh";
 import { HoverTip } from "./ds/HoverTip";
@@ -321,10 +322,20 @@ export function ContextUsageButton({
       return;
     }
     const cached = readUsageCache(sessionId, paneModel);
-    setUsage(cached);
+    if (
+      cached &&
+      shouldDropCachedOccupancy({
+        sessionInputTokens,
+        cachedLedgerInput: cached.cache?.session_input_tokens ?? 0,
+      })
+    ) {
+      setUsage(null);
+    } else {
+      setUsage(cached);
+    }
     if (!shouldFetchContextUsage(isStreaming)) return;
     void fetchUsage();
-  }, [fetchUsage, isStreaming, paneModel, refreshKey, sessionId]);
+  }, [fetchUsage, isStreaming, paneModel, refreshKey, sessionId, sessionInputTokens]);
 
   useEffect(() => {
     if (open && sessionId) refreshPanelPosition();

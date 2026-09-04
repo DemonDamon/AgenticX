@@ -12,7 +12,9 @@ from agenticx.runtime.usage_store import UsageStore
 from agenticx.studio.context_usage import (
     _reset_usage_caches,
     _text_tokens,
+    apply_last_request_occupancy_floor,
     estimate_session_context_usage,
+    invalidate_occupancy_cache,
     load_session_cache_payload,
 )
 
@@ -112,6 +114,12 @@ def test_estimate_uses_override_model_for_window(monkeypatch) -> None:
         ]
         == 1_000_000
     )
+    assert (
+        estimate_session_context_usage(
+            managed, session_id="sid-test", model_name="glm-5.3-flash"
+        )["max_tokens"]
+        == 1_000_000
+    )
     managed.studio_session.model_name = "glm-5.2"
     assert (
         estimate_session_context_usage(managed, session_id="sid-test", model_name="MiniMax-M2.7")[
@@ -121,18 +129,44 @@ def test_estimate_uses_override_model_for_window(monkeypatch) -> None:
     )
 
 
+def test_apply_last_request_occupancy_floor_lifts_undercount() -> None:
+    usage = {
+        "used_tokens": 27_100,
+        "max_tokens": 1_000_000,
+        "percent": 2.7,
+        "categories": {
+            "system_prompt": 11_500,
+            "tools_and_subagents": 7_300,
+            "messages": 260,
+            "connectors_and_mcp": 228,
+            "skills": 7_812,
+        },
+    }
+    lifted = apply_last_request_occupancy_floor(usage, 51_615)
+    assert lifted["used_tokens"] == 51_615
+    assert lifted["percent"] == 5.2
+    assert lifted["categories"]["system_prompt"] == 11_500 + (51_615 - 27_100)
+    assert lifted["categories"]["messages"] == 260
+    assert apply_last_request_occupancy_floor(usage, 10_000)["used_tokens"] == 27_100
+    assert apply_last_request_occupancy_floor(usage, 0)["used_tokens"] == 27_100
+
+
 def test_estimate_reuses_occupancy_cache_without_rescan(monkeypatch) -> None:
     _reset_usage_caches()
-    calls = {"skills": 0}
+    calls = {"skills": 0, "workspace": 0}
 
     def _skills(**_kwargs):
         calls["skills"] += 1
         return []
 
+    def _workspace(*_args, **_kwargs):
+        calls["workspace"] += 1
+        return ""
+
     monkeypatch.setattr("agenticx.studio.context_usage.get_all_skill_summaries", _skills)
     monkeypatch.setattr(
         "agenticx.studio.context_usage._build_workspace_context_block",
-        lambda *args, **kwargs: "",
+        _workspace,
     )
     managed = _empty_managed("sid-cache")
     first = estimate_session_context_usage(managed, session_id="sid-cache")
@@ -140,8 +174,12 @@ def test_estimate_reuses_occupancy_cache_without_rescan(monkeypatch) -> None:
         managed, session_id="sid-cache", model_name="glm-5.2"
     )
     assert calls["skills"] == 1
+    assert calls["workspace"] == 1
     assert first["categories"] == second["categories"]
     assert second["max_tokens"] == 1_000_000
+    invalidate_occupancy_cache("sid-cache")
+    estimate_session_context_usage(managed, session_id="sid-cache")
+    assert calls["workspace"] == 2
 
 
 def test_estimate_ignores_inline_attachment_data_urls(monkeypatch) -> None:

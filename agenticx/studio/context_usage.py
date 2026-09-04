@@ -120,6 +120,15 @@ def _reset_usage_caches() -> None:
         _OCCUPANCY_CACHE.clear()
 
 
+def invalidate_occupancy_cache(session_id: str) -> None:
+    """Drop a session's occupancy row after retry/edit truncate."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    with _OCCUPANCY_LOCK:
+        _OCCUPANCY_CACHE.pop(sid, None)
+
+
 def _skill_summaries(bound_avatar_id: str | None) -> list:
     key = str(bound_avatar_id or "")
     now = time.monotonic()
@@ -188,6 +197,36 @@ def _payload_from_categories(
         "max_tokens": max_tokens,
         "percent": round(min(100.0, (used_tokens / max_tokens) * 100), 1) if max_tokens > 0 else 0.0,
         "categories": categories,
+    }
+
+
+def apply_last_request_occupancy_floor(
+    usage: dict[str, Any],
+    last_input_tokens: int,
+) -> dict[str, Any]:
+    """Lift reconstructed occupancy to the last billed prompt when it is larger.
+
+    The category rebuild skips the live system prompt (static duty tokens) so it
+    can under-count by tens of thousands versus the provider's input_tokens.
+    """
+    used = int(usage.get("used_tokens") or 0)
+    try:
+        last = int(last_input_tokens or 0)
+    except (TypeError, ValueError):
+        last = 0
+    if last <= used:
+        return usage
+    categories = dict(usage.get("categories") or {})
+    residual = last - used
+    categories["system_prompt"] = int(categories.get("system_prompt") or 0) + residual
+    max_tokens = int(usage.get("max_tokens") or 0)
+    return {
+        **usage,
+        "categories": categories,
+        "used_tokens": last,
+        "percent": (
+            round(min(100.0, (last / max_tokens) * 100), 1) if max_tokens > 0 else 0.0
+        ),
     }
 
 

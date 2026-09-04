@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildContextUsageRefreshKey,
   contextUsageMessageSignature,
+  shouldDropCachedOccupancy,
   shouldFetchContextUsage,
 } from "./context-usage-refresh";
 
@@ -17,7 +18,7 @@ const base = {
 };
 
 describe("buildContextUsageRefreshKey", () => {
-  it("freezes the key while streaming so token_usage ticks do not refetch", () => {
+  it("ignores token_usage ticks while streaming but not a retry trim", () => {
     const before = buildContextUsageRefreshKey({
       ...base,
       isStreaming: true,
@@ -28,10 +29,15 @@ describe("buildContextUsageRefreshKey", () => {
       isStreaming: true,
       sessionInputTokens: 996_400,
       sessionOutputTokens: 4_200,
-      messageCount: 13,
-      lastMessageId: "asst-draft",
     });
     expect(afterTick).toBe(before);
+    const afterTrim = buildContextUsageRefreshKey({
+      ...base,
+      isStreaming: true,
+      messageCount: 1,
+      lastMessageId: "user-retry",
+    });
+    expect(afterTrim).not.toBe(before);
   });
 
   it("changes after a retry trim while the session is idle", () => {
@@ -63,8 +69,22 @@ describe("buildContextUsageRefreshKey", () => {
 });
 
 describe("shouldFetchContextUsage", () => {
-  it("skips in-flight streams and fetches once the turn is idle", () => {
-    expect(shouldFetchContextUsage(true)).toBe(false);
+  it("fetches on refresh-key change; streaming key already ignores token ticks", () => {
+    expect(shouldFetchContextUsage(true)).toBe(true);
     expect(shouldFetchContextUsage(false)).toBe(true);
+  });
+});
+
+describe("shouldDropCachedOccupancy", () => {
+  it("drops the previous turn when retry has already zeroed pane tokens", () => {
+    expect(
+      shouldDropCachedOccupancy({ sessionInputTokens: 0, cachedLedgerInput: 51_615 })
+    ).toBe(true);
+    expect(
+      shouldDropCachedOccupancy({ sessionInputTokens: 51_615, cachedLedgerInput: 51_615 })
+    ).toBe(false);
+    expect(
+      shouldDropCachedOccupancy({ sessionInputTokens: 0, cachedLedgerInput: 0 })
+    ).toBe(false);
   });
 });

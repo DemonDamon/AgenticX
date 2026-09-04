@@ -19,6 +19,8 @@ MODEL_CONTEXT_WINDOWS: list[tuple[str, int]] = [
     ("deepseek-v4", 1_048_576),
     ("deepseek", 128_000),
     ("qwen", 128_000),
+    # 5.3 / 5.3-Flash are 1M-class; must beat the generic "glm" 128K fallback.
+    ("glm-5.3", 1_000_000),
     ("glm-5.2", 1_000_000),
     ("glm-5.1", 200_000),
     ("glm", 128_000),

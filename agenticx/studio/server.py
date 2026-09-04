@@ -2115,6 +2115,7 @@ def create_studio_app() -> FastAPI:
         if managed is None:
             raise HTTPException(status_code=404, detail="session not found")
         from agenticx.studio.context_usage import (
+            apply_last_request_occupancy_floor,
             estimate_session_context_usage,
             load_session_cache_payload,
         )
@@ -2166,6 +2167,10 @@ def create_studio_app() -> FastAPI:
                 "requests": 0,
                 "zero_cache_requests": 0,
             }
+        usage = apply_last_request_occupancy_floor(
+            usage,
+            int(cache.get("last_input_tokens") or 0),
+        )
         return {
             "ok": True,
             "session_id": session_id,
@@ -2540,9 +2545,11 @@ def create_studio_app() -> FastAPI:
         if matched_chat or matched_agent:
             from agenticx.runtime.session_summary_store import delete_session_summary
             from agenticx.runtime.usage_store import get_usage_store
+            from agenticx.studio.context_usage import invalidate_occupancy_cache
             from agenticx.studio.usage_alive import keep_before_ms_from_messages
 
             delete_session_summary(session_id)
+            invalidate_occupancy_cache(session_id)
             remaining = session.chat_history if isinstance(session.chat_history, list) else []
             try:
                 get_usage_store().set_session_alive_window(
