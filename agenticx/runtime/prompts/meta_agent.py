@@ -17,7 +17,7 @@ from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.prompts.skill_authoring import build_skill_authoring_prompt_block
 from agenticx.skills.meta_skill import MetaSkillInjector
 from agenticx.runtime.prompts.code_mode import build_code_dev_prompt_blocks
-from agenticx.runtime.prompts.current_time import build_current_time_block
+from agenticx.runtime.prompts.current_time import build_current_time_rules_block
 from agenticx.runtime.prompts.session_context import stash_volatile_sections
 from agenticx.runtime.prompts.credential_safety import (
     CREDENTIAL_SAFETY_BLOCK,
@@ -34,7 +34,8 @@ from agenticx.workspace.loader import load_subject_workspace_context
 
 MAX_WORKSPACE_BLOCK_CHARS = 1800
 MAX_WORKSPACE_TOTAL_CHARS = 6000
-MAX_SKILL_DESCRIPTION_CHARS = 160
+MAX_SKILL_CATALOG_HINT_CHARS = 48
+MAX_SKILL_DESCRIPTION_CHARS = MAX_SKILL_CATALOG_HINT_CHARS
 
 AVATAR_IDENTITY_UPDATE_RULES = (
     "- 当用户重新定义你的角色/人设（如「你现在是 X」），或要求改名（如「你以后叫 X」）时，"
@@ -45,6 +46,19 @@ AVATAR_IDENTITY_UPDATE_RULES = (
     "得到肯定答复后再调用。\n"
     "- 只改角色不改名时，`update_self_identity` 只传 role/system_prompt，不要传 name。"
 )
+
+
+def _skill_catalog_hint(description: str) -> str:
+    """Keep catalog rows to a short first-sentence hint; full SKILL.md via skill_use."""
+    text = str(description or "").strip() or "(无描述)"
+    for sep in ("。", ".", "；", ";", "\n"):
+        head, found, _ = text.partition(sep)
+        if found and head.strip():
+            text = head.strip()
+            break
+    if len(text) > MAX_SKILL_CATALOG_HINT_CHARS:
+        return text[: MAX_SKILL_CATALOG_HINT_CHARS - 1] + "…"
+    return text
 
 
 def _build_skills_context(
@@ -59,13 +73,14 @@ def _build_skills_context(
             skills = []
     if not skills:
         return "### Skills（共 0 个）\n- (未发现可用 skills)\n"
-    lines = [f"### Skills（共 {len(skills)} 个）"]
+    lines = [
+        f"### Skills（共 {len(skills)} 个）",
+        "完整步骤与 when-to-use 不在此列出；需要对某技能时调用 skill_use。",
+    ]
     for skill in skills:
         name = str(skill.get("name", "")).strip() or "(unknown)"
-        description = str(skill.get("description", "")).strip() or "(无描述)"
-        if len(description) > MAX_SKILL_DESCRIPTION_CHARS:
-            description = description[: MAX_SKILL_DESCRIPTION_CHARS - 1] + "…"
-        lines.append(f"- {name}: {description}")
+        hint = _skill_catalog_hint(str(skill.get("description", "")))
+        lines.append(f"- {name}: {hint}")
     return "\n".join(lines) + "\n"
 
 
@@ -939,7 +954,7 @@ def build_meta_agent_system_prompt(
         f"{avatar_block}"
         f"{group_block}"
         f"{identity_line}"
-        f"{build_current_time_block()}"
+        f"{build_current_time_rules_block()}"
         "你既能直接使用工具（bash_exec、file_read、file_write、file_edit 等），也能调度子智能体。\n"
         "- 简单/快速任务（查目录、读文件、执行单条命令、回答事实性问题）：直接使用工具完成，不要委派子智能体。\n"
         "- 复杂/多步骤任务（需多文件协作、长时间运行、需要专业角色）：拆解后通过 spawn_subagent 委派。\n\n"
@@ -1102,7 +1117,6 @@ def build_meta_agent_system_prompt(
         "- `request_action_confirmation` 会弹出等宽「确认/取消」按钮；用户点击或输入「确认」「取消」后，工具结果会返回 `[ACTION_CONFIRMED]` / `[ACTION_REJECTED]` / `[ACTION_CONFIRMATION_EXPIRED]`，你须在同一回合内继续或停止。禁止在参数中放入 secret / OAuth / confirmation token。\n"
         "- 权限类确认（写文件、执行命令）仍走原有 `confirm_required` 流程，不要用 `request_clarification` 或 `request_action_confirmation` 替代。\n"
         "- 涉及模型/厂商选择时，`prompt` 与 `options` 只能写用户可见的「厂商展示名/模型短名」（如「彩讯-外网/kimi-k2.6」「MOMA/GLM-5.2」），禁止出现 `custom_openai_*` 等内部配置 id。\n\n"
-        f"{build_provider_catalog_block(current_provider=session.provider_name or '', current_model=session.model_name or '')}"
         f"{lsp_context}"
         f"{_tail_state_block if include_volatile else ''}"
         f"{_build_user_profile_block(user_nickname, user_preference)}"
@@ -1173,6 +1187,7 @@ def build_meta_agent_volatile_sections(
         ("", _build_session_summary_context(session)),
         ("", _build_taskspaces_context(taskspaces)),
         ("", build_code_dev_prompt_blocks(session)),
+        ("", build_provider_catalog_block()),
         ("当前会话上下文", session_line),
     ]
 

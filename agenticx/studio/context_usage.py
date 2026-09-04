@@ -14,7 +14,7 @@ from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.model_context_window import resolve_context_window
-from agenticx.runtime.prompts.current_time import build_current_time_block
+from agenticx.runtime.prompts.current_time import build_current_time_rules_block
 from agenticx.runtime.prompts.meta_agent import (
     _build_active_subagents_context,
     _build_avatars_context,
@@ -329,7 +329,7 @@ def estimate_session_context_usage(
         + connector_tokens
         + avatars_tokens
         + _text_tokens(identity)
-        + _text_tokens(_safe_block(build_current_time_block))
+        + _text_tokens(_safe_block(build_current_time_rules_block))
         + _text_tokens(_safe_block(_build_computer_use_capabilities_block))
         + _text_tokens(_safe_block(_build_kb_retrieval_policy_block, kb_mode))
         + _text_tokens(str(user_nickname or ""))

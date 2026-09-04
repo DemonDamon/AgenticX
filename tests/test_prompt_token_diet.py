@@ -13,13 +13,17 @@ import pytest
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS, studio_tools_for_session
 from agenticx.runtime import AgentRuntime, ConfirmGate
+from agenticx.llms.provider_display import build_provider_catalog_block
 from agenticx.runtime.prompts.current_time import (
     build_current_time_block,
     build_current_time_reminder,
     get_current_time_facts,
 )
 from agenticx.runtime.prompts.meta_agent import (
+    MAX_SKILL_CATALOG_HINT_CHARS,
     MAX_SKILL_DESCRIPTION_CHARS,
+    _build_skills_context,
+    _skill_catalog_hint,
     build_meta_agent_system_prompt,
     build_meta_agent_volatile_sections,
 )
@@ -57,6 +61,36 @@ def test_time_block_keeps_the_date_and_drops_the_clock():
     # 精确时刻不该出现在 system prompt 里，它归尾部注入。
     assert facts["local_iso"] not in block
     assert facts["local_iso"] in build_current_time_reminder()
+
+
+def test_meta_static_prompt_is_date_free_and_catalog_free():
+    """前缀缓存的根基：Meta 静态块跨午夜也必须字节稳定。
+
+    实测 session 2bbaa24b：静态块 fp 一天内漂了 3 次——午夜日期翻页一次
+    （`今天日期：2026-09-04` → `09-05`，等宽所以 chars 不变），其余来自
+    实时读 config 的模型服务目录。每次漂移 = GLM 前缀缓存全废、当轮全价。
+    日期与目录都归 <session-context>。
+    """
+    session = StudioSession()
+    prompt = build_meta_agent_system_prompt(session, include_volatile=False)
+    facts = get_current_time_facts()
+    assert facts["date"] not in prompt
+    assert "今天日期：" not in prompt  # 旧的带具体日期标签；规则里「今天日期与当前时刻见…」允许
+    assert "## 模型服务" not in prompt
+    # 时间纪律保留，只是日期改指 session-context。
+    assert "禁止" in prompt
+    assert "get_current_datetime" in prompt
+    assert "<session-context>" in prompt
+
+
+def test_date_and_provider_catalog_live_in_session_context():
+    """模型仍须看到日期与模型服务目录——在随轮变化的尾部，而不是静态前缀。"""
+    assert get_current_time_facts()["date"] in build_current_time_reminder()
+    catalog = build_provider_catalog_block()
+    session = StudioSession()
+    bodies = [body for _, body in build_meta_agent_volatile_sections(session)]
+    if catalog.strip():
+        assert any(catalog.strip() in body for body in bodies)
 
 
 # --------------------------------------------------------------------------
@@ -115,9 +149,41 @@ def test_skill_descriptions_are_capped():
     session = StudioSession()
     sections = build_meta_agent_volatile_sections(session)
     catalog = next(body for title, body in sections if title == "已注册能力")
+    in_skills = False
     for line in catalog.splitlines():
-        if line.startswith("- ") and ": " in line:
-            assert len(line.split(": ", 1)[1]) <= MAX_SKILL_DESCRIPTION_CHARS
+        if line.startswith("### Skills"):
+            in_skills = True
+            continue
+        if in_skills and line.startswith("### "):
+            break
+        if in_skills and line.startswith("- ") and ": " in line:
+            assert len(line.split(": ", 1)[1]) <= MAX_SKILL_CATALOG_HINT_CHARS
+            assert MAX_SKILL_DESCRIPTION_CHARS == MAX_SKILL_CATALOG_HINT_CHARS
+
+
+def test_skill_catalog_hint_takes_first_sentence_and_caps():
+    assert _skill_catalog_hint("短句。后面很长很长") == "短句"
+    assert _skill_catalog_hint("Use this when X. More details follow.") == "Use this when X"
+    long_hint = _skill_catalog_hint("x" * 80)
+    assert long_hint == "x" * (MAX_SKILL_CATALOG_HINT_CHARS - 1) + "…"
+    assert len(long_hint) == MAX_SKILL_CATALOG_HINT_CHARS
+    assert _skill_catalog_hint("") == "(无描述)"
+
+
+def test_skills_context_keeps_names_and_points_to_skill_use():
+    block = _build_skills_context(
+        [
+            {"name": "foo", "description": "x" * 200},
+            {"name": "bar", "description": "做一件事。然后写很长的 when-to-use。"},
+        ]
+    )
+    assert "foo" in block
+    assert "bar" in block
+    assert "skill_use" in block
+    foo_line = next(line for line in block.splitlines() if line.startswith("- foo:"))
+    assert len(foo_line.split(": ", 1)[1]) <= MAX_SKILL_CATALOG_HINT_CHARS
+    bar_line = next(line for line in block.splitlines() if line.startswith("- bar:"))
+    assert bar_line.split(": ", 1)[1] == "做一件事"
 
 
 # --------------------------------------------------------------------------
