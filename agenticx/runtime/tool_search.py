@@ -194,6 +194,7 @@ class ToolSearchRuntimeContext:
     state: ToolSearchStateV1
     tool_search_allowed: bool
     effective_threshold: Optional[int] = None
+    apply_threshold: Optional[int] = None
     prev_applied: Optional[bool] = None
     resolved_applied: Optional[bool] = None
 
@@ -350,6 +351,11 @@ def resolve_effective_threshold(
     return max(THRESHOLD_FLOOR, min(THRESHOLD_CEIL, raw))
 
 
+def resolve_apply_threshold(config: ToolSearchConfig) -> int:
+    """Gate for turning projection on. Never scale with context window."""
+    return int(config.normalized().auto_schema_token_threshold)
+
+
 def decide_apply_with_hysteresis(
     *,
     prev_applied: Optional[bool],
@@ -410,11 +416,14 @@ def should_apply_tool_search(
 def _resolve_applied(ctx: ToolSearchRuntimeContext, full_openai_tools: list[dict]) -> bool:
     if ctx.resolved_applied is not None:
         return bool(ctx.resolved_applied)
+    thr = ctx.apply_threshold
+    if thr is None:
+        thr = resolve_apply_threshold(ctx.config)
     return should_apply_tool_search(
         ctx.config,
         full_pool_schema_tokens=estimate_schema_tokens(list(full_openai_tools)),
         tool_search_allowed=ctx.tool_search_allowed,
-        effective_threshold=ctx.effective_threshold,
+        effective_threshold=thr,
         prev_applied=ctx.prev_applied,
     )
 
@@ -668,6 +677,7 @@ def apply_search(
         state=new_state,
         tool_search_allowed=ctx.tool_search_allowed,
         effective_threshold=ctx.effective_threshold,
+        apply_threshold=ctx.apply_threshold,
         prev_applied=ctx.prev_applied,
         resolved_applied=ctx.resolved_applied,
     )

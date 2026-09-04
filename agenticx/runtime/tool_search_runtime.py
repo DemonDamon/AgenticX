@@ -21,6 +21,7 @@ from agenticx.runtime.tool_search import (
     estimate_schema_tokens,
     load_state_from_scratchpad,
     prune_state_to_catalog,
+    resolve_apply_threshold,
     resolve_effective_threshold,
     should_apply_tool_search,
 )
@@ -134,6 +135,7 @@ def build_runtime_context(
     tool_search_allowed = TOOL_SEARCH_TOOL_NAME in pool_names
 
     window = resolve_context_window(str(getattr(session, "model_name", "") or ""))
+    apply_threshold = resolve_apply_threshold(cfg)
     effective_threshold = resolve_effective_threshold(cfg, context_window=window)
     prev_raw = scratchpad.get(TOOL_SEARCH_DECISION_KEY)
     prev_applied = (
@@ -146,7 +148,7 @@ def build_runtime_context(
         cfg,
         full_pool_schema_tokens=pool_tokens,
         tool_search_allowed=tool_search_allowed,
-        effective_threshold=effective_threshold,
+        effective_threshold=apply_threshold,
         prev_applied=prev_applied,
     )
     scratchpad[TOOL_SEARCH_DECISION_KEY] = {
@@ -154,6 +156,7 @@ def build_runtime_context(
         "applied": bool(applied),
         "pool_tokens": int(pool_tokens),
         "effective_threshold": int(effective_threshold),
+        "apply_threshold": int(apply_threshold),
         "context_window": int(window),
         "threshold_strategy": cfg.normalized().threshold_strategy,
     }
@@ -164,6 +167,7 @@ def build_runtime_context(
         state=state,
         tool_search_allowed=tool_search_allowed,
         effective_threshold=effective_threshold,
+        apply_threshold=apply_threshold,
         prev_applied=prev_applied,
         resolved_applied=applied,
     )

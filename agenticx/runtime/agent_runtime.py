@@ -3876,6 +3876,7 @@ class AgentRuntime:
                 try:
                     from agenticx.runtime.tool_search import (
                         estimate_schema_tokens,
+                        resolve_apply_threshold,
                         should_apply_tool_search,
                     )
 
@@ -3884,17 +3885,21 @@ class AgentRuntime:
                     if ts_ctx.resolved_applied is not None:
                         _ts_applied = bool(ts_ctx.resolved_applied)
                     else:
+                        _ts_apply_gate = ts_ctx.apply_threshold
+                        if _ts_apply_gate is None:
+                            _ts_apply_gate = resolve_apply_threshold(ts_ctx.config)
                         _ts_applied = should_apply_tool_search(
                             ts_ctx.config,
                             full_pool_schema_tokens=_ts_before,
                             tool_search_allowed=ts_ctx.tool_search_allowed,
-                            effective_threshold=ts_ctx.effective_threshold,
+                            effective_threshold=_ts_apply_gate,
                             prev_applied=ts_ctx.prev_applied,
                         )
                     _ts_mode = str(ts_ctx.config.normalized().mode)
                     _ts_loaded = len(ts_ctx.state.loaded_ids)
                     _ts_candidates = len(ts_ctx.catalog.descriptors)
                     _ts_threshold = int(ts_ctx.effective_threshold or 0)
+                    _ts_apply_threshold = int(getattr(ts_ctx, "apply_threshold", None) or 0)
                     _ts_strategy = str(ts_ctx.config.normalized().threshold_strategy)
                     _ts_latched = bool(
                         ts_ctx.prev_applied is not None and ts_ctx.prev_applied == _ts_applied
@@ -3907,6 +3912,7 @@ class AgentRuntime:
                     _ts_loaded = 0
                     _ts_candidates = 0
                     _ts_threshold = 0
+                    _ts_apply_threshold = 0
                     _ts_strategy = "adaptive"
                     _ts_latched = False
                 context_payload = {
@@ -3931,6 +3937,7 @@ class AgentRuntime:
                     "tool_search_schema_tokens_sent": int(_ts_sent),
                     "tool_search_schema_tokens_saved": max(0, int(_ts_before) - int(_ts_sent)),
                     "tool_search_effective_threshold": int(_ts_threshold),
+                    "tool_search_apply_threshold": int(_ts_apply_threshold),
                     "tool_search_threshold_strategy": str(_ts_strategy),
                     "tool_search_decision_latched": bool(_ts_latched),
                 }

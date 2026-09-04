@@ -18,7 +18,7 @@ const TOOL_SEARCH_MODE_OPTIONS = [
 ] as const;
 
 const TOOL_SEARCH_STRATEGY_OPTIONS = [
-  { value: "adaptive", label: "自适应（按上下文比例）" },
+  { value: "adaptive", label: "自适应（窗口只扩热缓存）" },
   { value: "manual", label: "手动（绝对 token）" },
 ] as const;
 
@@ -54,7 +54,7 @@ export function ToolSearchConfigSection({
     TOOL_SEARCH_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "关闭";
   const strategyLabel =
     TOOL_SEARCH_STRATEGY_OPTIONS.find((opt) => opt.value === thresholdStrategy)?.label ??
-    "自适应（按上下文比例）";
+    "自适应（窗口只扩热缓存）";
   const example128k = clampThresholdTokens(128_000, contextBudgetRatioPercent);
   const example200k = clampThresholdTokens(200_000, contextBudgetRatioPercent);
 
@@ -99,10 +99,28 @@ export function ToolSearchConfigSection({
             />
           </div>
 
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-text-muted">自动启用阈值（约 token）</span>
+              <span className="text-[11px] tabular-nums text-text-muted">{threshold}</span>
+            </div>
+            <SettingsRangeField
+              min={TOOL_SEARCH_THRESHOLD_MIN}
+              max={TOOL_SEARCH_THRESHOLD_MAX}
+              step={500}
+              value={threshold}
+              onChange={onThresholdChange}
+              disabled={disabled}
+            />
+            <p className="mt-2 text-[11px] leading-relaxed text-text-faint">
+              整表 schema 超过该值才启用按需加载。与模型上下文窗口无关。
+            </p>
+          </div>
+
           {thresholdStrategy === "adaptive" ? (
             <div>
               <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="text-[11px] text-text-muted">工具最多占上下文（%）</span>
+                <span className="text-[11px] text-text-muted">延迟工具热缓存占窗口（%）</span>
                 <span className="text-[11px] tabular-nums text-text-muted">
                   {contextBudgetRatioPercent}%
                 </span>
@@ -116,26 +134,11 @@ export function ToolSearchConfigSection({
                 disabled={disabled}
               />
               <p className="mt-2 text-[11px] leading-relaxed text-text-faint">
-                上下文窗口 × {contextBudgetRatioPercent}%（128k 模型 ≈ {example128k}，200k ≈{" "}
-                {example200k}，1M 封顶 {TOOL_SEARCH_THRESHOLD_MAX}）
+                仅限制已加载的延迟工具可占窗口的比例（128k ≈ {example128k}，200k ≈{" "}
+                {example200k}，1M 封顶 {TOOL_SEARCH_THRESHOLD_MAX}），不决定是否启用按需加载。
               </p>
             </div>
-          ) : (
-            <div>
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="text-[11px] text-text-muted">自动启用阈值（约 token）</span>
-                <span className="text-[11px] tabular-nums text-text-muted">{threshold}</span>
-              </div>
-              <SettingsRangeField
-                min={TOOL_SEARCH_THRESHOLD_MIN}
-                max={TOOL_SEARCH_THRESHOLD_MAX}
-                step={500}
-                value={threshold}
-                onChange={onThresholdChange}
-                disabled={disabled}
-              />
-            </div>
-          )}
+          ) : null}
         </div>
       ) : null}
     </div>
