@@ -17,6 +17,10 @@ from agenticx.cli.config_manager import ConfigManager
 
 _DEFAULT_URL = "http://127.0.0.1:9743"
 
+# Old serve /health has no this field. Probe treats a missing/mismatched
+# value as stale so Studio can recycle the loopback process.
+WB_BRIDGE_HEALTH_SCHEMA = "supervision-2"
+
 # Fixed app-bundle candidates. Never include standalone "wb" (Weights & Biases).
 CODEBUDDY_PATH_CANDIDATES: Tuple[str, ...] = (
     "/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy",
@@ -58,7 +62,8 @@ def probe_wb_bridge(*, url: Optional[str] = None, token: Optional[str] = None) -
 
     ``reachable``: process answered ``GET /health``.
     ``auth_ok``: ``GET /v1/sessions`` accepted the bearer token.
-    ``ready``: both true.
+    ``schema_ok``: health JSON ``schema`` matches ``WB_BRIDGE_HEALTH_SCHEMA``.
+    ``ready``: reachable and auth_ok (schema is reported separately).
     """
     try:
         import httpx
@@ -81,6 +86,8 @@ def probe_wb_bridge(*, url: Optional[str] = None, token: Optional[str] = None) -
 
     reachable = False
     auth_ok = False
+    schema = ""
+    schema_ok = False
     detail = "connection refused"
     try:
         with httpx.Client(**kwargs) as client:
@@ -89,13 +96,20 @@ def probe_wb_bridge(*, url: Optional[str] = None, token: Optional[str] = None) -
             if not reachable:
                 detail = f"health HTTP {health.status_code}"
             else:
+                try:
+                    payload = health.json()
+                except Exception:
+                    payload = None
+                if isinstance(payload, dict):
+                    schema = str(payload.get("schema") or "").strip()
+                    schema_ok = schema == WB_BRIDGE_HEALTH_SCHEMA
                 sessions = client.get(
                     f"{base}/v1/sessions",
                     headers={"Authorization": f"Bearer {tok}"},
                 )
                 auth_ok = sessions.status_code == 200
                 if auth_ok:
-                    detail = "ready"
+                    detail = "ready" if schema_ok else "ready_stale_schema"
                 else:
                     detail = f"auth HTTP {sessions.status_code}"
     except httpx.ConnectError:
@@ -108,6 +122,8 @@ def probe_wb_bridge(*, url: Optional[str] = None, token: Optional[str] = None) -
         "url": base,
         "reachable": reachable,
         "auth_ok": auth_ok,
+        "schema": schema,
+        "schema_ok": schema_ok,
         "ready": bool(reachable and auth_ok),
         "detail": detail,
     }

@@ -302,6 +302,9 @@ def test_health_unauthenticated() -> None:
     assert r.status_code == 200
     assert r.json().get("ok") is True
     assert r.json().get("service") == "wb-bridge"
+    from agenticx.wb_bridge.settings import WB_BRIDGE_HEALTH_SCHEMA
+
+    assert r.json().get("schema") == WB_BRIDGE_HEALTH_SCHEMA
 
 
 def test_parse_wb_bridge_url_default_port() -> None:
@@ -349,6 +352,72 @@ def test_ensure_spawns_popen(monkeypatch: pytest.MonkeyPatch) -> None:
     procmod._WB_BRIDGE_AUTO_PROC = None
 
 
+def test_ensure_protocol_recycles_stale_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agenticx.wb_bridge import process as procmod
+    from agenticx.wb_bridge import settings as wb_settings
+
+    procmod._WB_BRIDGE_AUTO_PROC = None
+    stopped: list[int] = []
+
+    monkeypatch.setattr(
+        wb_settings,
+        "probe_wb_bridge",
+        lambda **_k: {
+            "ok": True,
+            "reachable": True,
+            "auth_ok": True,
+            "schema_ok": False,
+            "ready": True,
+            "detail": "ready_stale_schema",
+        },
+    )
+
+    def _stop(port: int, *, timeout_sec: float = 5.0) -> str:
+        stopped.append(port)
+        return "stopped pids=[1]"
+
+    monkeypatch.setattr(procmod, "terminate_loopback_listener", _stop)
+
+    class _FakeProc:
+        pid = 9
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(procmod.subprocess, "Popen", lambda *a, **k: _FakeProc())
+    ok, detail = procmod.ensure_wb_bridge_protocol("http://127.0.0.1:9743", "tok")
+    assert ok is True
+    assert detail.startswith("recycled")
+    assert stopped == [9743]
+    procmod._WB_BRIDGE_AUTO_PROC = None
+
+
+def test_ensure_protocol_does_not_kill_remote(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agenticx.wb_bridge import process as procmod
+    from agenticx.wb_bridge import settings as wb_settings
+
+    killed: list[int] = []
+    monkeypatch.setattr(
+        wb_settings,
+        "probe_wb_bridge",
+        lambda **_k: {
+            "ready": True,
+            "schema_ok": False,
+            "reachable": True,
+            "auth_ok": True,
+        },
+    )
+    monkeypatch.setattr(
+        procmod,
+        "terminate_loopback_listener",
+        lambda *a, **k: killed.append(1) or "stopped",
+    )
+    ok, detail = procmod.ensure_wb_bridge_protocol("http://10.0.0.8:9743", "tok")
+    assert ok is True
+    assert detail == "nonlocal_ready_unversioned"
+    assert killed == []
+
+
 def test_studio_wb_bridge_status_when_down(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from agenticx.cli.config_manager import ConfigManager
     from agenticx.studio.server import create_studio_app
@@ -379,6 +448,8 @@ def test_studio_wb_bridge_ensure_already_ready(monkeypatch: pytest.MonkeyPatch, 
             "url": "http://127.0.0.1:9743",
             "reachable": True,
             "auth_ok": True,
+            "schema": wb_settings.WB_BRIDGE_HEALTH_SCHEMA,
+            "schema_ok": True,
             "ready": True,
             "detail": "ready",
         },
@@ -459,6 +530,19 @@ def test_extract_written_paths() -> None:
         '"input":{"path":"/tmp/via-path.py"}}]}}'
     )
     assert wb_events.extract_written_paths(path_alias) == ["/tmp/via-path.py"]
+    relative = (
+        '{"type":"assistant","message":{"role":"assistant",'
+        '"content":[{"type":"tool_use","id":"toolu_r","name":"Write",'
+        '"input":{"file_path":"2048-game/index.html"}}]}}'
+    )
+    assert wb_events.extract_written_paths(relative) == ["2048-game/index.html"]
+    assert wb_events.resolve_written_path("2048-game/index.html", "/tmp") == str(
+        Path("/tmp").joinpath("2048-game/index.html").resolve()
+    )
+    assert wb_events.resolve_written_path("/private/tmp/hello.py", "/tmp") == (
+        "/private/tmp/hello.py"
+    )
+    assert wb_events.resolve_written_path("2048-game/index.html", "") == ""
 
 
 def test_observe_line_records_written_paths() -> None:
@@ -470,6 +554,29 @@ def test_observe_line_records_written_paths() -> None:
     snap = mgr.describe_session(sid)
     assert snap is not None
     assert snap["written_paths"] == ["/private/tmp/hello.py"]
+    assert snap["observed_tools"] == ["Write"]
+
+
+def test_observe_line_resolves_relative_written_paths() -> None:
+    from pathlib import Path
+
+    from agenticx.wb_bridge import events as wb_events
+
+    mgr = WbBridgeSessionManager()
+    sid = _make_running_session(mgr)
+    session = mgr.get(sid)
+    assert session is not None
+    relative = (
+        '{"type":"assistant","message":{"role":"assistant",'
+        '"content":[{"type":"tool_use","id":"toolu_r","name":"Write",'
+        '"input":{"file_path":"2048-game/index.html"}}]}}'
+    )
+    session.observe_line(relative)
+    snap = mgr.describe_session(sid)
+    assert snap is not None
+    expected = wb_events.resolve_written_path("2048-game/index.html", session.cwd)
+    assert expected == str(Path(session.cwd).joinpath("2048-game/index.html").resolve())
+    assert snap["written_paths"] == [expected]
     assert snap["observed_tools"] == ["Write"]
 
 

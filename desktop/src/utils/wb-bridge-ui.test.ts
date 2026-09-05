@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatWbBridgeLiveSnapshot,
   formatWbBridgeSendToolResult,
+  latestRunningWbBridgeProgress,
   wbBridgeSendToolProgressLabel,
 } from "./wb-bridge-ui";
 
@@ -154,6 +155,43 @@ describe("formatWbBridgeLiveSnapshot", () => {
     expect(out).toContain("当前 Write");
     expect(out).toContain("已执行 Write");
     expect(out).toContain("写入 1 个文件");
+  });
+
+  it("marks a quiet turn as no new output, not an approval wait", () => {
+    const out = formatWbBridgeLiveSnapshot({
+      turn_state: "running",
+      last_activity: "Bash",
+      last_activity_age_sec: 40,
+    });
+    expect(out).toContain("长时间无新输出");
+    expect(out).not.toContain("疑似等待确认");
+  });
+});
+
+describe("latestRunningWbBridgeProgress", () => {
+  it("returns the live send line while the tool is running", () => {
+    const line = latestRunningWbBridgeProgress([
+      {
+        role: "tool",
+        toolName: "wb_bridge_send",
+        toolStatus: "running",
+        content: "⏳ WB：running · 当前 Bash",
+      },
+    ]);
+    expect(line).toContain("当前 Bash");
+  });
+
+  it("returns null after the send tool finished", () => {
+    expect(
+      latestRunningWbBridgeProgress([
+        {
+          role: "tool",
+          toolName: "wb_bridge_send",
+          toolStatus: "success",
+          content: "✅ 完成",
+        },
+      ]),
+    ).toBeNull();
   });
 });
 

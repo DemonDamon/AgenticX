@@ -191,24 +191,50 @@ function normalizeArtifactPath(raw: string): string | null {
   return normalized || null;
 }
 
+function parseWbBridgeResultJson(raw: string): Record<string, unknown> | null {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  const stripped = text.replace(/^\[micro-compact[^\]]*\]\s*/i, "");
+  const start = stripped.indexOf("{");
+  if (start < 0) return null;
+  try {
+    const parsed = JSON.parse(stripped.slice(start)) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* persist may leave raw control chars inside tail — fall through */
+  }
+  const match = stripped.match(/"written_paths"\s*:\s*(\[[^\]]*\])/);
+  if (!match?.[1]) return null;
+  try {
+    const list = JSON.parse(match[1]) as unknown;
+    if (!Array.isArray(list)) return null;
+    const statusMatch = stripped.match(/"status"\s*:\s*"([^"]*)"/);
+    const turnMatch = stripped.match(/"turn_state"\s*:\s*"([^"]*)"/);
+    return {
+      status: statusMatch?.[1] ?? "",
+      turn_state: turnMatch?.[1] ?? "",
+      written_paths: list,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function extractWbBridgeWrittenPaths(
   raw: string,
   paths: string[],
   seen: Set<string>,
 ): void {
-  const text = String(raw || "").trim();
-  if (!text.startsWith("{")) return;
-  try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    const status = String(parsed.status || parsed.turn_state || "");
-    if (status === "running") return;
-    const list = parsed.written_paths;
-    if (!Array.isArray(list)) return;
-    for (const item of list) {
-      addPath(paths, seen, String(item || "").trim());
-    }
-  } catch {
-    /* formatted Chinese tool cards are not JSON — ignore */
+  const parsed = parseWbBridgeResultJson(raw);
+  if (!parsed) return;
+  const status = String(parsed.status || parsed.turn_state || "");
+  if (status === "running") return;
+  const list = parsed.written_paths;
+  if (!Array.isArray(list)) return;
+  for (const item of list) {
+    addPath(paths, seen, String(item || "").trim());
   }
 }
 

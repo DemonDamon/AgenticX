@@ -10,6 +10,7 @@ Author: Damon Li
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import ujson
@@ -126,8 +127,30 @@ def extract_tool_activity(line: str) -> Optional[str]:
 _WRITE_PATH_TOOLS = frozenset({"Write", "Edit"})
 
 
+def _is_absolute_file_path(path: str) -> bool:
+    if path.startswith("/"):
+        return True
+    return len(path) >= 3 and path[1] == ":" and path[0].isalpha()
+
+
+def resolve_written_path(path: str, cwd: str = "") -> str:
+    """Turn a Write/Edit path into an absolute path using the session cwd."""
+    raw = (path or "").strip()
+    if not raw or raw in {".", ".."}:
+        return ""
+    if _is_absolute_file_path(raw):
+        return raw
+    base = (cwd or "").strip()
+    if not base:
+        return ""
+    try:
+        return str(Path(base).joinpath(raw).resolve())
+    except (OSError, ValueError):
+        return ""
+
+
 def extract_written_paths(line: str) -> list[str]:
-    """Absolute paths from Write/Edit tool_use input. Empty when shape mismatches."""
+    """Write/Edit tool_use paths (absolute or cwd-relative). Empty when shape mismatches."""
     obj = parse_stream_line(line)
     if obj is None:
         return []
@@ -148,6 +171,6 @@ def extract_written_paths(line: str) -> list[str]:
             continue
         raw = inp.get("file_path") or inp.get("path")
         path = str(raw or "").strip()
-        if path.startswith("/") or (len(path) >= 3 and path[1] == ":" and path[0].isalpha()):
+        if path:
             out.append(path)
     return out

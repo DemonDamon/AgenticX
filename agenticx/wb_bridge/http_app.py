@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from agenticx.wb_bridge import events as wb_events
 from agenticx.wb_bridge.session_manager import WbBridgeSessionManager
+from agenticx.wb_bridge.settings import WB_BRIDGE_HEALTH_SCHEMA
 
 _manager = WbBridgeSessionManager()
 
@@ -74,7 +75,7 @@ app = FastAPI(title="AgenticX WB Bridge", version="0.1.0")
 @app.get("/health")
 def health() -> dict:
     """Unauthenticated liveness for settings / Studio status probes."""
-    return {"ok": True, "service": "wb-bridge"}
+    return {"ok": True, "service": "wb-bridge", "schema": WB_BRIDGE_HEALTH_SCHEMA}
 
 
 def _parse_session_id(session_id: str) -> str:

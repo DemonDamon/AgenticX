@@ -8044,7 +8044,7 @@ def create_studio_app() -> FastAPI:
         try:
             import asyncio
 
-            from agenticx.wb_bridge.process import ensure_wb_bridge_local_process
+            from agenticx.wb_bridge.process import ensure_wb_bridge_protocol
             from agenticx.wb_bridge.settings import (
                 probe_wb_bridge,
                 wb_bridge_base_url,
@@ -8053,20 +8053,25 @@ def create_studio_app() -> FastAPI:
 
             base = wb_bridge_base_url()
             token = wb_bridge_token()
-            probe = probe_wb_bridge(url=base, token=token)
-            if probe.get("ready"):
+            started, detail = ensure_wb_bridge_protocol(base, token)
+            if detail == "already_ready":
+                probe = probe_wb_bridge(url=base, token=token)
                 probe["autostart"] = "already_ready"
                 return probe
-            if probe.get("reachable") and not probe.get("auth_ok"):
+            if detail == "skipped_token_mismatch":
+                probe = probe_wb_bridge(url=base, token=token)
                 probe["autostart"] = "skipped_token_mismatch"
                 return probe
 
-            started, detail = ensure_wb_bridge_local_process(base, token)
             if started and detail != "already running":
                 for _ in range(40):
                     await asyncio.sleep(0.4)
                     probe = probe_wb_bridge(url=base, token=token)
-                    if probe.get("reachable"):
+                    if probe.get("reachable") and (
+                        probe.get("schema_ok") or detail.startswith("nonlocal_")
+                    ):
+                        break
+                    if probe.get("reachable") and not detail.startswith("recycled"):
                         break
             else:
                 probe = probe_wb_bridge(url=base, token=token)

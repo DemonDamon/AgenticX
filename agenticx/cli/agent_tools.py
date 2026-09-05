@@ -6221,6 +6221,15 @@ async def _tool_wb_bridge_http(
     if err:
         return f"ERROR: {err}"
     token = wb_bridge_token()
+    from agenticx.wb_bridge.process import ensure_wb_bridge_protocol
+    from agenticx.wb_bridge.settings import probe_wb_bridge as _probe_wb
+
+    _ok, ensure_detail = ensure_wb_bridge_protocol(base, token)
+    if ensure_detail.startswith("recycled") or ensure_detail.startswith("started"):
+        for _ in range(40):
+            await asyncio.sleep(0.4)
+            if _probe_wb(url=base, token=token).get("reachable"):
+                break
     headers = {"Authorization": f"Bearer {token}"}
     url = f"{base}{path}"
     client_kwargs = _cc_bridge_http_client_kwargs(base, timeout_sec)

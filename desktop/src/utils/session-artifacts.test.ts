@@ -78,6 +78,34 @@ describe("collectSessionArtifactPaths", () => {
     expect(collectSessionArtifactPaths(messages)).toEqual([path]);
   });
 
+  it("collects written_paths from a micro-compact wb_bridge_send persist row", () => {
+    const path = "/Users/damon/.agenticx/taskspaces/sid/default/2048-game/index.html";
+    const messages: Message[] = [
+      toolMsg({
+        id: "wb-compact",
+        toolName: "wb_bridge_send",
+        content:
+          `[micro-compact tool=wb_bridge_send original_chars=99]\n` +
+          JSON.stringify({ status: "success", written_paths: [path] }),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([path]);
+  });
+
+  it("collects written_paths when persist JSON is invalid but the array is intact", () => {
+    const path = "/Users/damon/.agenticx/taskspaces/sid/default/2048-game/js/game.js";
+    const messages: Message[] = [
+      toolMsg({
+        id: "wb-broken",
+        toolName: "wb_bridge_send",
+        content:
+          `[micro-compact tool=wb_bridge_send original_chars=12]\n` +
+          `{"ok":true,"tail":"bad\ncontrol","status":"success","written_paths":["${path}"]}`,
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([path]);
+  });
+
   it("skips written_paths while a wb_bridge_send turn is still running", () => {
     const messages: Message[] = [
       toolMsg({

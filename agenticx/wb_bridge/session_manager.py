@@ -103,8 +103,9 @@ class WbBridgeSession:
                     if activity not in self.observed_tools and len(self.observed_tools) < 20:
                         self.observed_tools.append(activity)
                 for path in wb_events.extract_written_paths(line):
-                    if path not in self.written_paths and len(self.written_paths) < 20:
-                        self.written_paths.append(path)
+                    resolved = wb_events.resolve_written_path(path, self.cwd)
+                    if resolved and resolved not in self.written_paths and len(self.written_paths) < 20:
+                        self.written_paths.append(resolved)
 
                 if wb_events.line_is_turn_terminal(line):
                     obj = wb_events.parse_stream_line(line)

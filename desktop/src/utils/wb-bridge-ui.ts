@@ -63,7 +63,7 @@ export function formatWbBridgeLiveSnapshot(snap: Record<string, unknown>): strin
   if (typeof elapsed === "number") parts.push(`已 ${elapsed}s`);
   if (activity) parts.push(`当前 ${activity}`);
   if (tools.length) parts.push(`已执行 ${tools.join(" → ")}`);
-  if (typeof stalledAge === "number" && stalledAge >= 30) parts.push("疑似等待确认");
+  if (typeof stalledAge === "number" && stalledAge >= 30) parts.push("长时间无新输出");
   if (paths.length) parts.push(`写入 ${paths.length} 个文件`);
   return parts.join(" · ");
 }
@@ -123,6 +123,28 @@ export function formatWbBridgeSendToolResult(resultText: string): string | null 
     }
   } catch {
     // fall through
+  }
+  return null;
+}
+
+/** Latest in-flight send line for WorkPanel when Meta never called todo_write. */
+export function latestRunningWbBridgeProgress(
+  messages: Array<{
+    role?: string;
+    toolName?: string;
+    toolStatus?: string;
+    content?: string;
+  }>,
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || message.role !== "tool") continue;
+    const name = String(message.toolName ?? "").trim();
+    if (name !== "wb_bridge_send") continue;
+    const content = String(message.content ?? "").trim();
+    const running = message.toolStatus === "running" || content.startsWith("⏳ WB");
+    if (!running) return null;
+    return content || "委派任务执行中";
   }
   return null;
 }

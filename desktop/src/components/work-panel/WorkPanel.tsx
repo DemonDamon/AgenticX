@@ -89,6 +89,8 @@ import {
 } from "./summary-sections";
 import { collectSessionReferences } from "../../utils/session-references";
 import { resolveWorkPanelTodoFromMessages } from "../../utils/task-stall-policy";
+import { latestRunningWbBridgeProgress } from "../../utils/wb-bridge-ui";
+import type { ParsedTodo } from "../TodoUpdateCard";
 import {
   ensureArtifactTaskspacesForSession,
   startPersistedArtifactPathResync,
@@ -933,10 +935,28 @@ export function WorkPanel({
    * - 用户已发下一轮且尚未新 todo_write：清空旧清单（刷新），勿把完成态打回空心圆
    * - 新一轮写出新 todo_write：整栏替换为新清单
    */
-  const sessionTodo = useMemo(
-    () => resolveWorkPanelTodoFromMessages(paneMessages, todoLiveness, todoExecutionState),
-    [paneMessages, todoLiveness, todoExecutionState],
-  );
+  const sessionTodo = useMemo(() => {
+    const real = resolveWorkPanelTodoFromMessages(
+      paneMessages,
+      todoLiveness,
+      todoExecutionState,
+    );
+    if (real) return real;
+    const wbLine = latestRunningWbBridgeProgress(paneMessages);
+    if (!wbLine) return null;
+    const delegated: ParsedTodo = {
+      items: [
+        {
+          status: "in_progress",
+          content: "委派任务执行中",
+          activeForm: wbLine,
+        },
+      ],
+      completed: 0,
+      total: 1,
+    };
+    return delegated;
+  }, [paneMessages, todoLiveness, todoExecutionState]);
   const hasSessionTodo = !!sessionTodo;
   const overviewOpenSections = () =>
     contentDrivenOpenSections({
@@ -2069,7 +2089,7 @@ export function WorkPanel({
                 <EmptyBlock
                   icon={<CheckSquare className="h-9 w-9" strokeWidth={1.3} />}
                   title="暂无待办"
-                  subtitle="复杂任务的进展会显示在这里"
+                  subtitle="团长列出的步骤会显示在这里；委派进度在对话工具卡"
                 />
               ) : (
                 <SessionTodoList todo={sessionTodo} />
