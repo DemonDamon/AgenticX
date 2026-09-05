@@ -446,6 +446,61 @@ def test_events_extract_usage_and_activity() -> None:
     assert wb_events.extract_tool_activity(_MALFORMED) is None
 
 
+def test_extract_written_paths() -> None:
+    from agenticx.wb_bridge import events as wb_events
+
+    assert wb_events.extract_written_paths(_E2_TOOL_USE) == ["/private/tmp/hello.py"]
+    assert wb_events.extract_written_paths(_E2_TOOL_USE_BASH) == []
+    assert wb_events.extract_written_paths(_E2_ASSISTANT) == []
+    assert wb_events.extract_written_paths("not json") == []
+    path_alias = (
+        '{"type":"assistant","message":{"role":"assistant",'
+        '"content":[{"type":"tool_use","id":"toolu_p","name":"Write",'
+        '"input":{"path":"/tmp/via-path.py"}}]}}'
+    )
+    assert wb_events.extract_written_paths(path_alias) == ["/tmp/via-path.py"]
+
+
+def test_observe_line_records_written_paths() -> None:
+    mgr = WbBridgeSessionManager()
+    sid = _make_running_session(mgr)
+    session = mgr.get(sid)
+    assert session is not None
+    session.observe_line(_E2_TOOL_USE)
+    snap = mgr.describe_session(sid)
+    assert snap is not None
+    assert snap["written_paths"] == ["/private/tmp/hello.py"]
+    assert snap["observed_tools"] == ["Write"]
+
+
+def test_send_user_message_clears_written_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_popen(args, **kwargs):
+        return _FakeProc()
+
+    monkeypatch.setattr(
+        "agenticx.wb_bridge.session_manager.resolve_codebuddy_executable",
+        lambda: "/tmp/fake-cb",
+    )
+    monkeypatch.setattr(
+        "agenticx.wb_bridge.session_manager.subprocess.Popen",
+        fake_popen,
+    )
+    monkeypatch.setenv("WB_BRIDGE_LOG_DIR", str(tmp_path / "logs"))
+
+    mgr = WbBridgeSessionManager()
+    s = mgr.start_session(str(tmp_path / "cwd"), permission_mode="acceptEdits")
+    session = mgr.get(s.session_id)
+    assert session is not None
+    session.observe_line(_E2_TOOL_USE)
+    assert session.written_paths == ["/private/tmp/hello.py"]
+    mgr.send_user_message(s.session_id, "next")
+    assert session.written_paths == []
+    assert session.observed_tools == []
+    mgr.stop_session(s.session_id)
+
+
 def test_wait_for_turn_blocked_returns_fast() -> None:
     mgr = WbBridgeSessionManager()
     sid = _make_running_session(mgr)
@@ -541,6 +596,7 @@ def test_session_to_dict_full_field_set() -> None:
         "turns_completed",
         "last_activity",
         "observed_tools",
+        "written_paths",
         "usage_totals",
         "last_terminal_kind",
         "terminal_detail",
@@ -721,6 +777,28 @@ def test_http_message_success_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["ok"] is True
     assert body["result_text"] == "Hello, World!"
     assert body["next_action"] == "done"
+
+
+def test_http_message_written_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    ha, client = _auth_client(monkeypatch)
+    sid = str(uuid.uuid4())
+    _patch_idle_send_wait(
+        monkeypatch,
+        ha,
+        "success",
+        {
+            "last_result_text": "ok",
+            "tail": "ok",
+            "written_paths": ["/tmp/a.txt"],
+        },
+    )
+    r = client.post(
+        f"/v1/sessions/{sid}/message",
+        json={"text": "go"},
+        headers=_AUTH,
+    )
+    assert r.status_code == 200
+    assert r.json()["written_paths"] == ["/tmp/a.txt"]
 
 
 def test_http_message_blocked_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:

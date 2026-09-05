@@ -121,3 +121,33 @@ def extract_tool_activity(line: str) -> Optional[str]:
             if name:
                 last_name = str(name)
     return last_name
+
+
+_WRITE_PATH_TOOLS = frozenset({"Write", "Edit"})
+
+
+def extract_written_paths(line: str) -> list[str]:
+    """Absolute paths from Write/Edit tool_use input. Empty when shape mismatches."""
+    obj = parse_stream_line(line)
+    if obj is None:
+        return []
+    message = obj.get("message")
+    if not isinstance(message, dict):
+        return []
+    content = message.get("content")
+    if not isinstance(content, list):
+        return []
+    out: list[str] = []
+    for item in content:
+        if not isinstance(item, dict) or item.get("type") != "tool_use":
+            continue
+        if str(item.get("name") or "") not in _WRITE_PATH_TOOLS:
+            continue
+        inp = item.get("input")
+        if not isinstance(inp, dict):
+            continue
+        raw = inp.get("file_path") or inp.get("path")
+        path = str(raw or "").strip()
+        if path.startswith("/") or (len(path) >= 3 and path[1] == ":" and path[0].isalpha()):
+            out.append(path)
+    return out

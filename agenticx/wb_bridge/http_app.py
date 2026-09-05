@@ -117,6 +117,7 @@ def _build_message_response(
         deduplicated=deduplicated,
         terminal_detail=str(snap.get("terminal_detail", "") or ""),
         observed_tools=list(snap.get("observed_tools") or []),
+        written_paths=list(snap.get("written_paths") or []),
         usage_totals=dict(snap.get("usage_totals") or {}),
         last_activity=str(snap.get("last_activity", "") or ""),
         turns_completed=int(snap.get("turns_completed") or 0),
@@ -164,6 +165,7 @@ class MessageResponse(BaseModel):
     deduplicated: bool = False
     terminal_detail: str = ""
     observed_tools: List[str] = Field(default_factory=list)
+    written_paths: List[str] = Field(default_factory=list)
     usage_totals: Dict[str, int] = Field(default_factory=dict)
     last_activity: str = ""
     turns_completed: int = 0

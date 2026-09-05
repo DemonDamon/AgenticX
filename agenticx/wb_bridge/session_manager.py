@@ -55,6 +55,7 @@ class WbBridgeSession:
     last_activity: str = ""  # e.g. "Write" / "Bash"
     last_activity_at: Optional[float] = None
     observed_tools: List[str] = field(default_factory=list)  # current turn, dedup, cap 20
+    written_paths: List[str] = field(default_factory=list)  # current turn, dedup, cap 20
     last_terminal_kind: str = ""  # "success" | "blocked" | "error"
     last_terminal_detail: str = ""
     last_result_text: str = ""
@@ -101,6 +102,9 @@ class WbBridgeSession:
                         self.first_activity_at = now
                     if activity not in self.observed_tools and len(self.observed_tools) < 20:
                         self.observed_tools.append(activity)
+                for path in wb_events.extract_written_paths(line):
+                    if path not in self.written_paths and len(self.written_paths) < 20:
+                        self.written_paths.append(path)
 
                 if wb_events.line_is_turn_terminal(line):
                     obj = wb_events.parse_stream_line(line)
@@ -212,6 +216,7 @@ class WbBridgeSessionManager:
                 "last_activity_age_sec": last_activity_age,
                 "first_activity_lag_sec": first_activity_lag,
                 "observed_tools": list(s.observed_tools),
+                "written_paths": list(s.written_paths),
                 "last_terminal_kind": s.last_terminal_kind,
                 "terminal_detail": s.last_terminal_detail,
                 "last_result_text": s.last_result_text[:2000],
@@ -348,6 +353,7 @@ class WbBridgeSessionManager:
             session.terminal_at = None
             session.last_activity = ""
             session.observed_tools = []
+            session.written_paths = []
             session.turn_line_start = len(session.lines)
             session.last_idempotency_key = idempotency_key
         self._write_stdin(session, line)

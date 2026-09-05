@@ -170,6 +170,7 @@ flowchart LR
 
 ## 7.5 后续（不在本组子规划，另开）
 
+- **桌面可见性（进度 + 产物）**：用户在 Near 里看不到委派进度与写出的文件。已另开 `.cursor/plans/pending/2026-09-05-wb-bridge-desktop-visibility.plan.md`。
 - **idle 会话自动回收**：`wb_bridge_list` 可见长挂会话但无 TTL。对齐 cc_bridge 的 `_cc_bridge_idle_stop_seconds`（`agent_tools.py:5543`），给 wb_bridge 加 idle 自动 stop，避免僵尸 CodeBuddy 进程累积。
 - **用户文档** `docs/guides/wb-bridge.md`：serve / token / `permission_mode` / `wait_seconds=0` / `idempotency_key`。本组不阻塞交付。
 - **跨会话/按天用量聚合报表**。
