@@ -291,3 +291,19 @@ export function parseDesktopBoundSessionId(bindings: Record<string, unknown> | u
 export const SIDEBAR_HISTORY_PAGE_SIZE = 20;
 export const SIDEBAR_HISTORY_FILTER_KEY = "agx-sidebar-history-avatar-filter-v1";
 export const SIDEBAR_HISTORY_COLLAPSE_KEY = "agx-sidebar-history-collapse-v1";
+
+/** Loop-review IDs still needed for the currently visible sidebar rows. */
+export function sidebarLoopReviewFetchIds(
+  candidateIds: readonly string[],
+  alreadyFetched: ReadonlySet<string>,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of candidateIds) {
+    const id = String(raw || "").trim();
+    if (!id || seen.has(id) || alreadyFetched.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}

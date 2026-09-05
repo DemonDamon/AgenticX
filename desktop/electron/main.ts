@@ -2829,6 +2829,10 @@ function findAgxBinaryOnPath(augmentedPath: string): string | null {
 async function checkAgxCli(): Promise<boolean> {
   const augmentedPath = buildAugmentedPath();
   const binaryPath = findAgxBinaryOnPath(augmentedPath);
+  // After `pip install -e .` the first `agx --version` can exceed 40s (full
+  // package import). The old 30s probe then killed the process and reported
+  // "agx not found" even though the executable was on the augmented PATH.
+  if (binaryPath) return true;
 
   return new Promise((resolve) => {
     const proc = spawnAgx(binaryPath, ["--version"], {
@@ -7256,7 +7260,10 @@ function registerEarlyIpc(): void {
   // a misleading empty list during the cold-start window (issue #11).
   ipcMain.handle("list-sessions", async (_event, avatarId?: string) => {
     try {
-      await waitForStudio();
+      // Align with waitServeReady: a 30s barrier returns {ok:false, sessions:[]}
+      // while `agx serve` is still importing after an editable install, and the
+      // sidebar then paints an empty history until the next 5s poll.
+      await waitForStudio(getServeStartupTimeoutMs());
       const params = avatarId ? `?avatar_id=${encodeURIComponent(avatarId)}` : "";
       const resp = await fetch(`${getStudioUrl()}/api/sessions${params}`, {
         headers: { "x-agx-desktop-token": getStudioToken() },

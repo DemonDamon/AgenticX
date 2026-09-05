@@ -8,6 +8,7 @@ import {
   matchesSidebarAvatarFilter,
   normalizeSidebarSessionRows,
   resolveSidebarAvatarChipName,
+  sidebarLoopReviewFetchIds,
   sidebarSessionHasRenderableMessages,
   sidebarSessionLabel,
 } from "./sidebar-session-history";
@@ -192,5 +193,14 @@ describe("sidebar-session-history utils", () => {
     expect(activeAvatarIdForSidebarRow("automation:t1")).toBeNull();
     expect(activeAvatarIdForSidebarRow("av1")).toBe("av1");
     expect(activeAvatarIdForSidebarRow(null)).toBeNull();
+  });
+
+  it("only fetches loop-review for visible ids not already fetched", () => {
+    const already = new Set(["a", "c"]);
+    expect(sidebarLoopReviewFetchIds(["a", "b", "b", "", "c", "d"], already)).toEqual([
+      "b",
+      "d",
+    ]);
+    expect(sidebarLoopReviewFetchIds(["a", "c"], already)).toEqual([]);
   });
 });

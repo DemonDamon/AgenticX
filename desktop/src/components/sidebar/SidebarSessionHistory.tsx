@@ -46,6 +46,7 @@ import {
   normalizeSidebarSessionRows,
   parseDesktopBoundSessionId,
   resolveSidebarAvatarChipName,
+  sidebarLoopReviewFetchIds,
   sidebarSessionHasRenderableMessages,
   sidebarSessionLabel,
   type SidebarSessionRow,
@@ -141,6 +142,7 @@ export function SidebarSessionHistory() {
   const setMainView = useAppStore((s) => s.setMainView);
 
   const [sessions, setSessions] = useState<SidebarSessionRow[]>([]);
+  const [historyReady, setHistoryReady] = useState(false);
   const [feishuBoundId, setFeishuBoundId] = useState("");
   const [wechatBoundId, setWechatBoundId] = useState("");
   const [collapse, setCollapse] = useState<CollapseState>(() => loadCollapse());
@@ -167,6 +169,7 @@ export function SidebarSessionHistory() {
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const fetchedLoopReviewRef = useRef<Set<string>>(new Set());
   const [filterMenuPos, setFilterMenuPos] = useState<{ left: number; top: number } | null>(null);
 
   const avatarNameById = useMemo(() => {
@@ -208,26 +211,11 @@ export function SidebarSessionHistory() {
             clearSessionHistoryHint(row.session_id);
           }
         }
-        // Best-effort batch fetch of loop-review scores; failures stay silent.
-        // Sessions without tool observations carry no real signal — their score
-        // is a floor imposed by missing evidence, so we show no badge at all.
-        void Promise.allSettled(
-          rows.map(async (row) => {
-            const r = await window.agenticxDesktop.getSessionLoopReview(row.session_id);
-            return r.ok && r.review && r.review.observations_available !== false
-              ? { id: row.session_id, score: r.review.overall }
-              : null;
-          }),
-        ).then((results) => {
-          const next: Record<string, number> = {};
-          for (const res of results) {
-            if (res.status === "fulfilled" && res.value) next[res.value.id] = res.value.score;
-          }
-          setLoopReviewScores(next);
-        });
       }
     } catch (err) {
       console.warn("[SidebarSessionHistory] listSessions failed", err);
+    } finally {
+      setHistoryReady(true);
     }
   }, [clearSessionHistoryHint]);
 
@@ -421,6 +409,49 @@ export function SidebarSessionHistory() {
   const todayVisible = visibleChrono.filter((r) => buckets.today.includes(r));
   const earlierVisible = visibleChrono.filter((r) => buckets.earlier.includes(r));
   const hasMore = chronological.length > visibleLimit;
+  const historyEmptyHint = historyReady ? "暂无" : "加载中…";
+  const pinnedEmptyHint = historyReady ? "暂无置顶" : "加载中…";
+  const visibleLoopReviewKey = [
+    wechatRow?.session_id,
+    feishuRow?.session_id,
+    ...buckets.pinned.map((row) => row.session_id),
+    ...todayVisible.map((row) => row.session_id),
+    ...earlierVisible.map((row) => row.session_id),
+  ]
+    .filter((id): id is string => Boolean(id))
+    .join("\n");
+
+  useEffect(() => {
+    const visibleLoopReviewIds = visibleLoopReviewKey
+      ? visibleLoopReviewKey.split("\n")
+      : [];
+    const targets = sidebarLoopReviewFetchIds(
+      visibleLoopReviewIds,
+      fetchedLoopReviewRef.current,
+    );
+    if (targets.length === 0) return;
+    for (const id of targets) fetchedLoopReviewRef.current.add(id);
+    let cancelled = false;
+    void Promise.allSettled(
+      targets.map(async (id) => {
+        const r = await window.agenticxDesktop.getSessionLoopReview(id);
+        return r.ok && r.review && r.review.observations_available !== false
+          ? { id, score: r.review.overall }
+          : null;
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      const next: Record<string, number> = {};
+      for (const res of results) {
+        if (res.status === "fulfilled" && res.value) next[res.value.id] = res.value.score;
+      }
+      if (Object.keys(next).length === 0) return;
+      setLoopReviewScores((prev) => ({ ...prev, ...next }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [visibleLoopReviewKey]);
 
   const selectableRows = useMemo(() => {
     const map = new Map<string, SidebarSessionRow>();
@@ -1329,7 +1360,7 @@ export function SidebarSessionHistory() {
         {!collapse.pinned && (
           <div className="mb-1">
             {buckets.pinned.length === 0 ? (
-              <div className="px-2 py-1 text-[11px] text-text-faint">暂无置顶</div>
+              <div className="px-2 py-1 text-[11px] text-text-faint">{pinnedEmptyHint}</div>
             ) : (
               buckets.pinned.map((row) => renderRow(row))
             )}
@@ -1341,7 +1372,7 @@ export function SidebarSessionHistory() {
         {!collapse.today && (
           <div className="mb-1">
             {todayVisible.length === 0 ? (
-              <div className="px-2 py-1 text-[11px] text-text-faint">暂无</div>
+              <div className="px-2 py-1 text-[11px] text-text-faint">{historyEmptyHint}</div>
             ) : (
               todayVisible.map((row) => renderRow(row))
             )}
@@ -1353,7 +1384,7 @@ export function SidebarSessionHistory() {
         {!collapse.earlier && (
           <div className="mb-1">
             {earlierVisible.length === 0 ? (
-              <div className="px-2 py-1 text-[11px] text-text-faint">暂无</div>
+              <div className="px-2 py-1 text-[11px] text-text-faint">{historyEmptyHint}</div>
             ) : (
               earlierVisible.map((row) => renderRow(row))
             )}
