@@ -345,9 +345,15 @@ import {
   type CcBridgeSessionModeHint,
 } from "../utils/cc-bridge-ui";
 import {
+  formatWbBridgeLiveSnapshot,
   formatWbBridgeSendToolResult,
   wbBridgeSendToolProgressLabel,
 } from "../utils/wb-bridge-ui";
+import {
+  startWbBridgeProgressPoll,
+  stopAllWbBridgeProgressPolls,
+  stopWbBridgeProgressPoll,
+} from "../utils/wb-bridge-progress";
 import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import {
@@ -2820,6 +2826,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     kbNewSessionDefaultRef.current = mode;
     setKbGlobalDefaultMode(mode);
     setCachedGlobalKbRetrievalMode(mode);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopAllWbBridgeProgressPolls();
+    };
   }, []);
 
   useEffect(() => {
@@ -9627,6 +9639,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     >();
     streamTextRef.current = "";
     const abortController = new AbortController();
+    const wbBridgeLivePollKeys = new Set<string>();
     sessionAbortControllersRef.current[requestSessionId] = abortController;
     if ((pane.sessionId || "").trim() === requestSessionId) {
       abortRef.current = abortController;
@@ -10716,9 +10729,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   currentAction: ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current),
                 });
               } else if (name === "wb_bridge_send") {
-                updateSubAgent(eventAgentId, {
-                  currentAction: wbBridgeSendToolProgressLabel(sec),
-                });
+                if (!wbBridgeLivePollKeys.has(progressCallId)) {
+                  updateSubAgent(eventAgentId, {
+                    currentAction: wbBridgeSendToolProgressLabel(sec),
+                  });
+                }
               } else {
                 updateSubAgent(eventAgentId, {
                   currentAction: Number.isFinite(sec) ? `${name} 执行中… (${sec}s)` : `${name} 执行中…`,
@@ -10796,6 +10811,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 const callKey =
                   toolCallId || `${requestSessionId || "session"}:${toolNameStr}`;
                 void triggerWbBridgeServeTerminal(callKey);
+              }
+              if (
+                eventAgentId === "meta" &&
+                toolNameStr === "wb_bridge_send" &&
+                toolCallId &&
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                  String(toolArgs.session_id ?? ""),
+                )
+              ) {
+                wbBridgeLivePollKeys.add(toolCallId);
+                startWbBridgeProgressPoll({
+                  key: toolCallId,
+                  sessionId: String(toolArgs.session_id),
+                  apiBase,
+                  apiToken,
+                  onSnapshot: (snap) => {
+                    updatePaneToolMessageForSession(toolCallId, {
+                      toolStatus: "running",
+                      content: formatWbBridgeLiveSnapshot(snap),
+                    });
+                  },
+                });
               }
               // Filter out internal housekeeping tools that add no user-visible signal
               const SILENT_TOOLS = new Set(["check_resources"]);
@@ -10922,6 +10959,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "tool_result") {
               const toolName = String(payload.data?.name ?? payload.data?.tool_name ?? "");
+              if (toolName === "wb_bridge_send") {
+                const resultCallId = String(
+                  payload.data?.tool_call_id ?? payload.data?.id ?? "",
+                ).trim();
+                if (resultCallId) {
+                  stopWbBridgeProgressPoll(resultCallId);
+                  wbBridgeLivePollKeys.delete(resultCallId);
+                }
+              }
               if (SEARCH_REFERENCE_TOOLS.has(toolName)) {
                 const accumulated = accumulateReferenceTurn(
                   pendingReferences,
@@ -11759,6 +11805,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 // (hook-block / not-loaded / permission deny all share tool_call_id).
                 const errToolCallId = String(payload.data?.tool_call_id ?? "").trim();
                 if (errToolCallId) {
+                  stopWbBridgeProgressPoll(errToolCallId);
+                  wbBridgeLivePollKeys.delete(errToolCallId);
                   const merged = updatePaneToolMessageForSession(errToolCallId, {
                     content: errText,
                     toolStatus: "error",
@@ -11997,6 +12045,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         void mergeTailFromDisk(requestSessionId);
       }
 
+      stopAllWbBridgeProgressPolls();
       if (abortRef.current === abortController) {
         abortRef.current = null;
       }

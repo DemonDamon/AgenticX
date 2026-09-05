@@ -28,10 +28,30 @@ function observedToolsLine(parsed: Record<string, unknown>, status: string): str
   if (!Array.isArray(tools) || tools.length === 0) {
     return "";
   }
-  if (status !== "blocked" && status !== "error") {
-    return "";
+  const chain = tools.map(String).join(" → ");
+  if (status === "blocked" || status === "error") {
+    return `\n\n本轮已执行：${chain}（产物可能已落盘，重试前请先核验）`;
   }
-  return `\n\n本轮已执行：${tools.map(String).join(" → ")}（产物可能已落盘，重试前请先核验）`;
+  if (status === "success" || status === "running") {
+    return `\n\n本轮已执行：${chain}`;
+  }
+  return "";
+}
+
+export function formatWbBridgeLiveSnapshot(snap: Record<string, unknown>): string {
+  const turnState = String(snap.turn_state ?? "");
+  const activity = String(snap.last_activity ?? "").trim();
+  const elapsed = snap.turn_elapsed_sec;
+  const tools = Array.isArray(snap.observed_tools) ? snap.observed_tools.map(String) : [];
+  const stalledAge = snap.last_activity_age_sec;
+  const paths = Array.isArray(snap.written_paths) ? snap.written_paths.map(String) : [];
+  const parts = [`⏳ WB：${turnState || "running"}`];
+  if (typeof elapsed === "number") parts.push(`已 ${elapsed}s`);
+  if (activity) parts.push(`当前 ${activity}`);
+  if (tools.length) parts.push(`已执行 ${tools.join(" → ")}`);
+  if (typeof stalledAge === "number" && stalledAge >= 30) parts.push("疑似等待确认");
+  if (paths.length) parts.push(`写入 ${paths.length} 个文件`);
+  return parts.join(" · ");
 }
 
 export function formatWbBridgeSendToolResult(resultText: string): string | null {

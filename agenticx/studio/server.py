@@ -8076,6 +8076,51 @@ def create_studio_app() -> FastAPI:
             logger.warning("ensure_wb_bridge error: %s", exc)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    @app.get("/api/wb-bridge/sessions/{session_id}")
+    async def get_wb_bridge_session(
+        session_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        import uuid as _uuid
+
+        try:
+            sid = str(_uuid.UUID(session_id))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="session_id must be a UUID") from None
+        try:
+            import httpx
+            from agenticx.wb_bridge.settings import (
+                parse_wb_bridge_url,
+                wb_bridge_base_url,
+                wb_bridge_token,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        base = wb_bridge_base_url().rstrip("/")
+        tok = wb_bridge_token()
+        is_loopback, _h, _p = parse_wb_bridge_url(base)
+        kwargs: dict = {"timeout": 5.0, "trust_env": False}
+        if is_loopback:
+            kwargs["transport"] = httpx.HTTPTransport()
+        try:
+            with httpx.Client(**kwargs) as client:
+                resp = client.get(
+                    f"{base}/v1/sessions/{sid}",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+        except httpx.ConnectError:
+            raise HTTPException(status_code=503, detail="wb-bridge unreachable") from None
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="session not found")
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text[:300])
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=502, detail="invalid describe payload")
+        return data
+
     # --- Hooks API ---
 
     @app.get("/api/hooks")

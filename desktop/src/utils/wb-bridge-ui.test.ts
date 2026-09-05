@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatWbBridgeLiveSnapshot,
   formatWbBridgeSendToolResult,
   wbBridgeSendToolProgressLabel,
 } from "./wb-bridge-ui";
@@ -48,6 +49,18 @@ describe("formatWbBridgeSendToolResult", () => {
     );
     expect(out).toContain("Write → Bash");
     expect(out).toContain("重试前请先核验");
+  });
+
+  it("shows observed tools on success without the retry-check warning", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({
+        status: "success",
+        result_text: "done",
+        observed_tools: ["Write"],
+      }),
+    );
+    expect(out).toContain("Write");
+    expect(out).not.toContain("重试前请先核验");
   });
 
   it("marks stalled running turns", () => {
@@ -100,6 +113,21 @@ describe("formatWbBridgeSendToolResult", () => {
       JSON.stringify({ ok: false, tail: "some tail" }),
     );
     expect(out).toContain("some tail");
+  });
+});
+
+describe("formatWbBridgeLiveSnapshot", () => {
+  it("summarizes activity, tools, and written files", () => {
+    const out = formatWbBridgeLiveSnapshot({
+      turn_state: "running",
+      last_activity: "Write",
+      turn_elapsed_sec: 8,
+      observed_tools: ["Write"],
+      written_paths: ["/tmp/a.txt"],
+    });
+    expect(out).toContain("当前 Write");
+    expect(out).toContain("已执行 Write");
+    expect(out).toContain("写入 1 个文件");
   });
 });
 
