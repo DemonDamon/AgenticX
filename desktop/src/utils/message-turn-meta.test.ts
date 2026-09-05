@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCompactTokens,
+  formatTurnCacheHit,
   formatTurnModelLabel,
   formatTurnUsageCount,
   formatTurnUsageLabel,
@@ -21,7 +22,7 @@ describe("message-turn-meta", () => {
     expect(formatTurnUsageCount(usage)).toBe("1,540");
     expect(formatTurnUsageLabel(usage)).toBe("本轮消耗 1,540");
     expect(formatTurnUsageTitle(usage)).toBe(
-      "本轮输入 1,200（含重发的上下文） · 输出 340 · 缓存 80",
+      "本轮输入 1,200（含重发的上下文） · 输出 340 · 缓存 80 · 本轮命中 6.7%（80 / 1.2K）",
     );
   });
 
@@ -54,6 +55,27 @@ describe("message-turn-meta", () => {
     expect(formatCompactTokens(1000)).toBe("1.0K");
     expect(formatCompactTokens(28294)).toBe("28.3K");
     expect(formatCompactTokens(0)).toBe("0");
+  });
+
+  it("formats the turn cache-hit ratio from cached / input", () => {
+    expect(
+      formatTurnCacheHit({
+        totalTokens: 430385,
+        inputTokens: 429400,
+        outputTokens: 985,
+        cachedTokens: 404000,
+        reasoningTokens: 0,
+      }),
+    ).toEqual({ percent: 94.1, cached: "404.0K", input: "429.4K" });
+    expect(
+      formatTurnCacheHit({
+        totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        reasoningTokens: 0,
+      }),
+    ).toBeUndefined();
   });
 
   it("returns empty usage label for zeros", () => {

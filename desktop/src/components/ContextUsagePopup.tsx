@@ -362,16 +362,16 @@ export function ContextUsageButton({
   const percent = visibleUsage?.percent ?? 0;
   const hoverLabel = useMemo(() => {
     if (open) return "";
-    if (!sessionId) return "当前上下文（会话未就绪）";
-    if (!visibleUsage) return "当前上下文";
-    const occupancy = `${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)} 当前上下文已占用`;
+    if (!sessionId) return "下一请求占用（会话未就绪）";
+    if (!visibleUsage) return "下一请求占用";
+    const occupancy = `${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)} 下一请求占用`;
     return cardHit !== null ? `${occupancy} · 会话命中 ${cardHit}%` : occupancy;
   }, [cardHit, open, sessionId, visibleUsage]);
 
   const ariaLabel = useMemo(() => {
-    if (!sessionId) return "当前上下文（会话未就绪）";
-    if (!visibleUsage) return "当前上下文";
-    const occupancy = `当前上下文 ${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)}`;
+    if (!sessionId) return "下一请求占用（会话未就绪）";
+    if (!visibleUsage) return "下一请求占用";
+    const occupancy = `下一请求占用 ${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)}`;
     return cardHit !== null ? `${occupancy} · 会话命中 ${cardHit}%` : occupancy;
   }, [cardHit, sessionId, visibleUsage]);
 
@@ -458,13 +458,13 @@ export function ContextUsageButton({
                     </div>
                   </div>
                   <div className="mb-1.5 flex items-baseline justify-between">
-                    <span className="text-[12px] text-text-muted">当前上下文</span>
+                    <span className="text-[12px] text-text-muted">下一请求占用</span>
                     <span className="text-[11px] tabular-nums text-text-faint">
                       {visibleUsage.percent}% · {formatK(visibleUsage.used_tokens)} /{" "}
                       {formatK(visibleUsage.max_tokens)}
                     </span>
                   </div>
-                  <div className="mb-3 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
+                  <div className="mb-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
                     {visibleUsage.max_tokens > 0
                       ? CATEGORY_ORDER.map((key) => {
                           const value = visibleUsage.categories[key] ?? 0;
@@ -480,6 +480,10 @@ export function ContextUsageButton({
                         })
                       : null}
                   </div>
+                  <p className="mb-3 text-[11px] leading-snug text-text-faint">
+                    横条是下次会带上的内容 / 模型窗口，不是上面的会话累计。累计是各轮账单相加，可以超过
+                    {formatK(visibleUsage.max_tokens)}。
+                  </p>
                   <div className="flex flex-col gap-1.5">
                     {CATEGORY_ORDER.map((key) => (
                       <div key={key} className="flex items-center justify-between text-[12px]">

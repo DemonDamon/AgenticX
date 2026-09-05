@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import type { MessageUsage, ModelSelection } from "../../store";
 import { normalizeBareModelId } from "../../utils/model-display";
 import {
+  formatTurnCacheHit,
   formatTurnModelLabel,
   formatTurnUsageSplit,
   formatTurnUsageTitle,
@@ -49,6 +50,7 @@ export function MessageTurnMeta({
   modelSelection?: ModelSelection;
 }) {
   const usageSplit = usage ? formatTurnUsageSplit(usage) : undefined;
+  const cacheHit = usage ? formatTurnCacheHit(usage) : undefined;
   const bareModel = normalizeBareModelId(model ?? "");
   const modelLabel = formatTurnModelLabel(model, modelSelection);
   const isAuto = modelSelection === "auto" && Boolean(bareModel);
@@ -86,6 +88,15 @@ export function MessageTurnMeta({
             <TurnUsageArrow direction="out" />
             <span>{usageSplit.output}</span>
           </span>
+          {cacheHit ? (
+            <span
+              data-turn-cache-hit=""
+              className="tabular-nums text-emerald-400 [html[data-theme=light]_&]:text-emerald-600"
+            >
+              <span className="sr-only">本轮缓存命中 </span>
+              {cacheHit.percent.toFixed(1)}%
+            </span>
+          ) : null}
         </span>
       ) : null}
       {modelLabel && (usageSplit || usageMissing) ? <TurnMetaRule kind="model" /> : null}

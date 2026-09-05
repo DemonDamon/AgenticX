@@ -9,7 +9,7 @@ describe("MessageTurnMeta", () => {
         usage={{
           inputTokens: 28294,
           outputTokens: 369,
-          cachedTokens: 0,
+          cachedTokens: 26600,
           reasoningTokens: 0,
           totalTokens: 28663,
         }}
@@ -20,6 +20,9 @@ describe("MessageTurnMeta", () => {
     expect(html).toContain("本轮消耗");
     expect(html).toContain("28.3K");
     expect(html).toContain("369");
+    expect(html).toContain("94.0%");
+    expect(html).toContain("本轮缓存命中");
+    expect(html).toContain("data-turn-cache-hit");
     expect(html).toContain("kimi-k2.6");
     expect(html).toContain('data-turn-usage-arrow="in"');
     expect(html).toContain('data-turn-usage-arrow="out"');
@@ -39,6 +42,24 @@ describe("MessageTurnMeta", () => {
     // The summed number would read as if one turn outgrew the whole session.
     expect(html).not.toContain("28,663");
     expect(html).not.toContain("auto");
+  });
+
+  it("omits the cache-hit chip when the turn has no input", () => {
+    const html = renderToStaticMarkup(
+      <MessageTurnMeta
+        usage={{
+          inputTokens: 0,
+          outputTokens: 120,
+          cachedTokens: 0,
+          reasoningTokens: 0,
+          totalTokens: 120,
+        }}
+        model="glm-5.3"
+      />,
+    );
+    expect(html).toContain("120");
+    expect(html).not.toContain("data-turn-cache-hit");
+    expect(html).not.toContain("本轮缓存命中");
   });
 
   it("renders auto prefix and bare model when selection is auto", () => {

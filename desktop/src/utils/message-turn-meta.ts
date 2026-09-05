@@ -1,4 +1,5 @@
 import type { MessageUsage, ModelSelection } from "../store";
+import { formatHitPercent } from "./cache-hit";
 import { normalizeBareModelId } from "./model-display";
 
 export function parseMessageUsage(raw: unknown): MessageUsage | undefined {
@@ -51,6 +52,19 @@ export function formatTurnUsageSplit(
   };
 }
 
+/** Turn-level prefix-cache hit, same ratio as the session usage card. */
+export function formatTurnCacheHit(
+  usage: MessageUsage,
+): { percent: number; cached: string; input: string } | undefined {
+  const percent = formatHitPercent(usage.cachedTokens, usage.inputTokens);
+  if (percent === null) return undefined;
+  return {
+    percent,
+    cached: formatCompactTokens(usage.cachedTokens),
+    input: formatCompactTokens(usage.inputTokens),
+  };
+}
+
 /**
  * A finished turn that carries a model but no usage means the provider never
  * sent the trailing usage chunk — typically an aborted stream. The prompt was
@@ -68,6 +82,10 @@ export function formatTurnUsageTitle(usage: MessageUsage): string {
   ];
   if (usage.cachedTokens > 0) {
     parts.push(`缓存 ${usage.cachedTokens.toLocaleString("en-US")}`);
+  }
+  const hit = formatTurnCacheHit(usage);
+  if (hit) {
+    parts.push(`本轮命中 ${hit.percent.toFixed(1)}%（${hit.cached} / ${hit.input}）`);
   }
   return parts.join(" · ");
 }
