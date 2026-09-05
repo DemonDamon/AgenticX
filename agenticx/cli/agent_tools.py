@@ -1294,7 +1294,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "Returns live turn state, last tool activity, observed_tools, cumulative token "
                 "usage and terminal kind. Do NOT try to read ~/.agenticx/logs/wb-bridge/*.log "
                 "from bash: the agent workspace sandbox blocks it and describe already carries "
-                "the same data."
+                "the same data. Also returns written_paths (absolute files from Write/Edit this "
+                "turn). Treat written_paths plus result_text as delivery evidence; do not "
+                "bash_exec or file_read the WB cwd or /tmp to verify."
             ),
             "parameters": {
                 "type": "object",

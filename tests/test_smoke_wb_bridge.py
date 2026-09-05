@@ -1004,6 +1004,16 @@ def test_wb_bridge_describe_contract() -> None:
     desc = fn["description"]
     assert "Do NOT try to read" in desc
     assert "observed_tools" in desc
+    assert "written_paths" in desc
+    assert "do not bash_exec" in desc.lower()
+
+
+def test_meta_agent_wb_bridge_acceptance_rules() -> None:
+    from pathlib import Path
+
+    src = Path("agenticx/runtime/prompts/meta_agent.py").read_text(encoding="utf-8")
+    assert "wb_bridge 验收禁令" in src
+    assert "wb_bridge 收尾清单" in src
 
 
 @pytest.mark.asyncio

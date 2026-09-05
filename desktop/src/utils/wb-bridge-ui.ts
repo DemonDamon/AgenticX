@@ -23,6 +23,20 @@ function usageLine(parsed: Record<string, unknown>): string {
   return `\n\n· 累计 ${turnsLabel} 轮 · in ${inLabel} / out ${outLabel} tokens`;
 }
 
+function writtenPathsBlock(parsed: Record<string, unknown>): string {
+  const list = parsed.written_paths;
+  if (!Array.isArray(list) || list.length === 0) {
+    return "";
+  }
+  const paths = list.map((item) => String(item || "").trim()).filter(Boolean);
+  if (paths.length === 0) {
+    return "";
+  }
+  const shown = paths.slice(0, 5);
+  const extra = paths.length > 5 ? `\n…共 ${paths.length} 个` : "";
+  return `\n\n产物：\n${shown.map((path) => `\`${path}\``).join("\n")}${extra}`;
+}
+
 function observedToolsLine(parsed: Record<string, unknown>, status: string): string {
   const tools = parsed.observed_tools;
   if (!Array.isArray(tools) || tools.length === 0) {
@@ -59,13 +73,19 @@ export function formatWbBridgeSendToolResult(resultText: string): string | null 
     const parsed = JSON.parse(resultText) as Record<string, unknown>;
     const ok = Boolean(parsed.ok);
     const statusRaw = parsed.status;
+    const lastKind = parsed.last_terminal_kind;
+    const turnState = String(parsed.turn_state ?? "");
     const status =
       typeof statusRaw === "string" && statusRaw
         ? statusRaw
-        : ok
-          ? "success"
-          : "";
-    const resultTextBody = String(parsed.result_text ?? "").trim();
+        : typeof lastKind === "string" && lastKind
+          ? lastKind
+          : turnState === "running"
+            ? "running"
+            : ok
+              ? "success"
+              : "";
+    const resultTextBody = String(parsed.result_text ?? parsed.last_result_text ?? "").trim();
     const terminalDetail = String(parsed.terminal_detail ?? "").trim();
     const lastActivity = String(parsed.last_activity ?? "").trim();
     const turnSeq = parsed.turn_seq;
@@ -92,6 +112,7 @@ export function formatWbBridgeSendToolResult(resultText: string): string | null 
 
     if (body) {
       body += observedToolsLine(parsed, status);
+      body += writtenPathsBlock(parsed);
       return deduplicated ? `（重复投递已去重）${body}` : body;
     }
 

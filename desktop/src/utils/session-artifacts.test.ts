@@ -66,6 +66,32 @@ describe("collectSessionArtifactPaths", () => {
     ]);
   });
 
+  it("collects written_paths from a finished wb_bridge_send result", () => {
+    const path = "/tmp/agx-near-desktop-e2e.txt";
+    const messages: Message[] = [
+      toolMsg({
+        id: "wb1",
+        toolName: "wb_bridge_send",
+        content: JSON.stringify({ status: "success", written_paths: [path] }),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([path]);
+  });
+
+  it("skips written_paths while a wb_bridge_send turn is still running", () => {
+    const messages: Message[] = [
+      toolMsg({
+        id: "wb2",
+        toolName: "wb_bridge_send",
+        content: JSON.stringify({
+          status: "running",
+          written_paths: ["/tmp/agx-near-desktop-e2e.txt"],
+        }),
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([]);
+  });
+
   it("skips directory-only 保存路径 labels (join base, not an artifact row)", () => {
     const messages: Message[] = [
       assistantMsg({

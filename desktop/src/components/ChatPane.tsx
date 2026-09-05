@@ -2503,6 +2503,10 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown, provi
       return { content: formatted, silent: false };
     }
   }
+  if (toolName === "wb_bridge_describe") {
+    const formatted = formatWbBridgeSendToolResult(resultText);
+    if (formatted) return { content: formatted, silent: false };
+  }
   if (toolName === "query_subagent_status") {
     if (/【已阻止】/.test(resultText)) {
       return { content: "", silent: true };

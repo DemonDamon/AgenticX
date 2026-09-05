@@ -51,6 +51,32 @@ describe("formatWbBridgeSendToolResult", () => {
     expect(out).toContain("重试前请先核验");
   });
 
+  it("lists written_paths in backticks on success", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({
+        status: "success",
+        result_text: "done",
+        written_paths: ["/tmp/a.txt", "/tmp/b.py"],
+      }),
+    );
+    expect(out).toContain("`/tmp/a.txt`");
+    expect(out).toContain("`/tmp/b.py`");
+  });
+
+  it("formats a describe snapshot via last_terminal_kind and last_result_text", () => {
+    const out = formatWbBridgeSendToolResult(
+      JSON.stringify({
+        turn_state: "idle",
+        last_terminal_kind: "success",
+        written_paths: ["/tmp/a.py"],
+        last_result_text: "ok",
+      }),
+    );
+    expect(out).not.toBeNull();
+    expect(out).toContain("ok");
+    expect(out).toContain("/tmp/a.py");
+  });
+
   it("shows observed tools on success without the retry-check warning", () => {
     const out = formatWbBridgeSendToolResult(
       JSON.stringify({

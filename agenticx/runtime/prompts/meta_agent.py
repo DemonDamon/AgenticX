@@ -967,6 +967,8 @@ def build_meta_agent_system_prompt(
         "- **wb_bridge 无人值守强约束**：写文件/跑命令须显式 `acceptEdits` 或 `dontAsk`/`bypassPermissions`。\n"
         "- **wb_bridge 重发禁令**：`running` 时禁止重复 `wb_bridge_send`，改 `wb_bridge_describe`；`blocked` 先看 `observed_tools`。\n"
         "- **wb_bridge 证据门禁**：`ok=false` 或仅 tail 时禁止称完成。禁止读 `~/.agenticx/logs/wb-bridge/*.log`。\n"
+        "- **wb_bridge 验收禁令**：禁止用 `bash_exec`/`file_read`/`ls`/`cat` 去读 WB 会话 cwd 或 `/tmp` 证明落盘（沙箱会拒，且结果不代表失败）。验收只信 `wb_bridge_describe` / `written_paths` / `result_text`。\n"
+        "- **wb_bridge 收尾清单**：向用户复述 session_id、status、observed_tools，并逐条列出 `written_paths`；没有路径则明确说「桥未回报路径」，不要改口成任务失败。\n"
         "- 提到资源评估须同轮 `check_resources`。`spawn_subagent` 前须 `recommend_subagent_model`。MCP 最短闭环：`mcp_import` → `mcp_connect`。\n"
         "- 工具调用必须是裸函数，禁止 `print(...)` / `<tool_code>`。\n\n"
         f"{build_skill_authoring_prompt_block()}"

@@ -191,6 +191,27 @@ function normalizeArtifactPath(raw: string): string | null {
   return normalized || null;
 }
 
+function extractWbBridgeWrittenPaths(
+  raw: string,
+  paths: string[],
+  seen: Set<string>,
+): void {
+  const text = String(raw || "").trim();
+  if (!text.startsWith("{")) return;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    const status = String(parsed.status || parsed.turn_state || "");
+    if (status === "running") return;
+    const list = parsed.written_paths;
+    if (!Array.isArray(list)) return;
+    for (const item of list) {
+      addPath(paths, seen, String(item || "").trim());
+    }
+  } catch {
+    /* formatted Chinese tool cards are not JSON — ignore */
+  }
+}
+
 function addPath(paths: string[], seen: Set<string>, raw: string): void {
   const normalized = normalizeArtifactPath(raw);
   if (!normalized) return;
@@ -577,6 +598,11 @@ export function collectSessionArtifactPaths(
         if (command) extractBashRedirectPaths(command, paths, seen);
         extractJsonOutputArtifactPaths(String(message.content || ""), paths, seen);
         extractJsonOutputArtifactPaths(String(message.toolResultPreview || ""), paths, seen);
+        extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
+        extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
+      } else if (toolName === "wb_bridge_send" || toolName === "wb_bridge_describe") {
+        extractWbBridgeWrittenPaths(String(message.content || ""), paths, seen);
+        extractWbBridgeWrittenPaths(String(message.toolResultPreview || ""), paths, seen);
         extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
         extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
       } else {

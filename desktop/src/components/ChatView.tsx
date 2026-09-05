@@ -226,6 +226,10 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown): { co
       return { content: formatted, silent: false };
     }
   }
+  if (toolName === "wb_bridge_describe") {
+    const formatted = formatWbBridgeSendToolResult(resultText);
+    if (formatted) return { content: formatted, silent: false };
+  }
   if (toolName === "query_subagent_status") {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
