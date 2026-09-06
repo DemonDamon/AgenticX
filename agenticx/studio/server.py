@@ -3611,7 +3611,7 @@ def create_studio_app() -> FastAPI:
             # Keep runtime/file/mcp tools, but block task-management meta tools to
             # prevent recursive "create another schedule_task" behavior.
             _blocked = {"schedule_task", "list_scheduled_tasks", "cancel_scheduled_task", "delegate_to_avatar",
-                        "wb_bridge_start", "wb_bridge_send", "wb_bridge_stop"}
+                        "wb_bridge_start", "wb_bridge_send", "wb_bridge_stop", "work_item_upsert"}
             effective_tools_source: list = [
                 t
                 for t in visible_meta_agent_tools()
@@ -6522,6 +6522,170 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"queue full: {exc}")
         return {"ok": True, "action": action_str}
+
+    def _require_group(group_id: str):
+        cfg = group_registry.get_group(group_id)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail="group not found")
+        return cfg
+
+    def _work_item_http(exc: Exception) -> None:
+        from agenticx.runtime.work_items import WorkItemError
+
+        if isinstance(exc, WorkItemError):
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise
+
+    def _expected_version(payload: dict) -> int:
+        raw = (payload or {}).get("expected_version")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="expected_version required")
+
+    @app.get("/api/groups/{group_id}/work-items")
+    async def list_work_items(
+        group_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        _require_group(group_id)
+        items = get_work_item_store().list_items(group_id)
+        return {"ok": True, "items": [i.to_dict() for i in items]}
+
+    @app.post("/api/groups/{group_id}/work-items")
+    async def create_work_item(
+        group_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        cfg = _require_group(group_id)
+        allowed = set(cfg.avatar_ids)
+        try:
+            item = get_work_item_store().create_item(
+                group_id,
+                title=str(payload.get("title") or ""),
+                owner_kind=str(payload.get("owner_kind") or "human"),
+                owner_id=str(payload.get("owner_id") or ""),
+                definition_of_done=str(payload.get("definition_of_done") or ""),
+                blocked_by=list(payload.get("blocked_by") or []),
+                source_session_id=str(payload.get("source_session_id") or ""),
+                source_preview=str(payload.get("source_preview") or ""),
+                allowed_owner_ids=allowed,
+            )
+        except Exception as exc:
+            _work_item_http(exc)
+            raise
+        return {"ok": True, "item": item.to_dict()}
+
+    @app.patch("/api/groups/{group_id}/work-items/{item_id}")
+    async def patch_work_item(
+        group_id: str,
+        item_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        cfg = _require_group(group_id)
+        if "status" in (payload or {}):
+            raise HTTPException(status_code=400, detail="status cannot be changed via PATCH")
+        expected = _expected_version(payload)
+        kwargs: dict[str, Any] = {}
+        if "title" in payload:
+            kwargs["title"] = payload.get("title")
+        if "definition_of_done" in payload:
+            kwargs["definition_of_done"] = payload.get("definition_of_done")
+        if "artifact_paths" in payload:
+            kwargs["artifact_paths"] = list(payload.get("artifact_paths") or [])
+        if "blocked_by" in payload:
+            kwargs["blocked_by"] = list(payload.get("blocked_by") or [])
+        if "owner_kind" in payload:
+            kwargs["owner_kind"] = payload.get("owner_kind")
+        if "owner_id" in payload:
+            kwargs["owner_id"] = payload.get("owner_id")
+        try:
+            item = get_work_item_store().patch_item(
+                group_id,
+                item_id,
+                expected_version=expected,
+                allow_status=False,
+                allowed_owner_ids=set(cfg.avatar_ids),
+                **kwargs,
+            )
+        except Exception as exc:
+            _work_item_http(exc)
+            raise
+        return {"ok": True, "item": item.to_dict()}
+
+    @app.post("/api/groups/{group_id}/work-items/{item_id}/accept")
+    async def accept_work_item(
+        group_id: str,
+        item_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        _require_group(group_id)
+        expected = _expected_version(payload)
+        try:
+            item = get_work_item_store().accept(
+                group_id, item_id, expected_version=expected
+            )
+        except Exception as exc:
+            _work_item_http(exc)
+            raise
+        return {"ok": True, "item": item.to_dict()}
+
+    @app.post("/api/groups/{group_id}/work-items/{item_id}/pause")
+    async def pause_work_item(
+        group_id: str,
+        item_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        _require_group(group_id)
+        expected = _expected_version(payload)
+        try:
+            item = get_work_item_store().pause(
+                group_id, item_id, expected_version=expected
+            )
+        except Exception as exc:
+            _work_item_http(exc)
+            raise
+        return {"ok": True, "item": item.to_dict()}
+
+    @app.post("/api/groups/{group_id}/work-items/{item_id}/resume")
+    async def resume_work_item(
+        group_id: str,
+        item_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        _check_token(x_agx_desktop_token)
+        _require_group(group_id)
+        expected = _expected_version(payload)
+        try:
+            item = get_work_item_store().resume(
+                group_id, item_id, expected_version=expected
+            )
+        except Exception as exc:
+            _work_item_http(exc)
+            raise
+        return {"ok": True, "item": item.to_dict()}
 
     @app.delete("/api/groups/{group_id}")
     async def delete_group(

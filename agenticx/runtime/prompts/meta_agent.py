@@ -853,6 +853,27 @@ def build_meta_agent_system_prompt(
             "- **禁止**把未出现在「本群成员」中的其他已注册分身算作本群成员；全局注册表若更大，在本会话中视为无关。\n"
             "- `delegate_to_avatar` / `chat_with_avatar` 仅针对「本群成员」中的 id；勿对群外分身做群内调度表述。\n\n"
         )
+        wi_gid = str((group_chat or {}).get("id") or "").strip() if isinstance(group_chat, dict) else ""
+        if not wi_gid:
+            aid = str(
+                getattr(session, "bound_avatar_id", "")
+                or getattr(session, "avatar_id", "")
+                or ""
+            ).strip()
+            if aid.startswith("group:"):
+                from agenticx.memory.graph.group_id import parse_group_id_from_avatar
+
+                wi_gid = parse_group_id_from_avatar(aid)
+        wi_block = ""
+        if wi_gid:
+            try:
+                from agenticx.runtime.work_items import build_work_items_prompt_block
+
+                wi_block = build_work_items_prompt_block(wi_gid)
+            except Exception:
+                wi_block = ""
+        if wi_block:
+            group_block = group_block + wi_block + "\n"
     identity_line = (
         f"你是 AgenticX Desktop 的分身智能体「{avatar_name}」。\n"
         if has_avatar_context

@@ -810,6 +810,41 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "work_item_upsert",
+            "description": (
+                "创建或更新当前群的事项（组织后台）。"
+                "action=create|update|submit|attach|cancel。"
+                "不能验收、不能暂停、不能恢复；那是用户按钮。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "update", "submit", "attach", "cancel"],
+                    },
+                    "item_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "owner_id": {
+                        "type": "string",
+                        "description": "群成员 avatar_id；空表示用户负责",
+                    },
+                    "owner_kind": {
+                        "type": "string",
+                        "enum": ["human", "avatar", "meta"],
+                    },
+                    "definition_of_done": {"type": "string"},
+                    "artifact_paths": {"type": "array", "items": {"type": "string"}},
+                    "blocked_by": {"type": "array", "items": {"type": "string"}},
+                    "expected_version": {"type": "integer"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
 ]
 
 _studio_tool_names = {
@@ -3980,4 +4015,122 @@ async def dispatch_meta_tool_async(
                 payload["preflight"] = preflight_payload
             return json.dumps(payload, ensure_ascii=False)
 
+    if name == "work_item_upsert":
+        return _dispatch_work_item_upsert(arguments, session=session)
+
     return json.dumps({"ok": False, "error": f"unknown meta tool: {name}"}, ensure_ascii=False)
+
+
+def _session_group_id(session: Optional["StudioSession"]) -> str:
+    if session is None:
+        return ""
+    for attr in ("avatar_id", "bound_avatar_id"):
+        aid = str(getattr(session, attr, "") or "").strip()
+        if aid.startswith("group:"):
+            return aid[len("group:") :].strip()
+    return ""
+
+
+def _dispatch_work_item_upsert(
+    arguments: Dict[str, Any],
+    *,
+    session: Optional["StudioSession"] = None,
+) -> str:
+    from agenticx.avatar.group_chat import GroupChatRegistry
+    from agenticx.runtime.work_items import WorkItemError, get_work_item_store
+
+    gid = _session_group_id(session)
+    if not gid:
+        return json.dumps(
+            {"ok": False, "error": "work_item_upsert 只能在群聊会话使用"},
+            ensure_ascii=False,
+        )
+    action = str((arguments or {}).get("action") or "").strip()
+    if action not in {"create", "update", "submit", "attach", "cancel"}:
+        return json.dumps({"ok": False, "error": "unsupported action"}, ensure_ascii=False)
+    store = get_work_item_store()
+
+    def _expected_version() -> int:
+        raw = (arguments or {}).get("expected_version")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            raise WorkItemError("expected_version required", status_code=400)
+
+    try:
+        if action == "create":
+            cfg = GroupChatRegistry().get_group(gid)
+            allowed = set(cfg.avatar_ids) if cfg is not None else set()
+            item = store.create_item(
+                gid,
+                title=str((arguments or {}).get("title") or ""),
+                owner_kind=str((arguments or {}).get("owner_kind") or "human"),
+                owner_id=str((arguments or {}).get("owner_id") or ""),
+                definition_of_done=str((arguments or {}).get("definition_of_done") or ""),
+                blocked_by=list((arguments or {}).get("blocked_by") or []),
+                allowed_owner_ids=allowed,
+            )
+            return json.dumps({"ok": True, "item": item.to_dict()}, ensure_ascii=False)
+        item_id = str((arguments or {}).get("item_id") or "").strip()
+        if not item_id:
+            raise WorkItemError("item_id required", status_code=400)
+        expected = _expected_version()
+        if action == "update":
+            kwargs: Dict[str, Any] = {}
+            if "title" in (arguments or {}):
+                kwargs["title"] = arguments.get("title")
+            if "definition_of_done" in (arguments or {}):
+                kwargs["definition_of_done"] = arguments.get("definition_of_done")
+            if "artifact_paths" in (arguments or {}):
+                kwargs["artifact_paths"] = list(arguments.get("artifact_paths") or [])
+            if "blocked_by" in (arguments or {}):
+                kwargs["blocked_by"] = list(arguments.get("blocked_by") or [])
+            if "owner_kind" in (arguments or {}):
+                kwargs["owner_kind"] = arguments.get("owner_kind")
+            if "owner_id" in (arguments or {}):
+                kwargs["owner_id"] = arguments.get("owner_id")
+            cfg = GroupChatRegistry().get_group(gid)
+            item = store.patch_item(
+                gid,
+                item_id,
+                expected_version=expected,
+                allow_status=False,
+                allowed_owner_ids=set(cfg.avatar_ids) if cfg is not None else None,
+                **kwargs,
+            )
+            return json.dumps({"ok": True, "item": item.to_dict()}, ensure_ascii=False)
+        if action == "submit":
+            paths = (arguments or {}).get("artifact_paths")
+            item = store.submit(
+                gid,
+                item_id,
+                expected_version=expected,
+                artifact_paths=list(paths) if paths is not None else None,
+            )
+            return json.dumps({"ok": True, "item": item.to_dict()}, ensure_ascii=False)
+        if action == "attach":
+            incoming = [
+                str(x).strip()
+                for x in ((arguments or {}).get("artifact_paths") or [])
+                if str(x).strip()
+            ]
+            current = store.get_item(gid, item_id)
+            if current is None:
+                raise WorkItemError("work item not found", status_code=404)
+            merged = list(dict.fromkeys([*current.artifact_paths, *incoming]))
+            item = store.patch_item(
+                gid,
+                item_id,
+                expected_version=expected,
+                artifact_paths=merged,
+                allow_status=False,
+            )
+            return json.dumps({"ok": True, "item": item.to_dict()}, ensure_ascii=False)
+        item = store.cancel(gid, item_id, expected_version=expected)
+        return json.dumps({"ok": True, "item": item.to_dict()}, ensure_ascii=False)
+    except WorkItemError as exc:
+        return json.dumps(
+            {"ok": False, "error": str(exc), "status_code": exc.status_code},
+            ensure_ascii=False,
+        )
+

@@ -81,12 +81,19 @@ import { SessionArtifactList } from "./SessionArtifactList";
 import { SessionChangeList } from "./SessionChangeList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { SessionTodoList } from "./SessionTodoList";
+import { GroupWorkItemList } from "./GroupWorkItemList";
 import {
   applyPinnedAutoExpand,
   contentDrivenOpenSections,
   exclusiveOpenSections,
   type SummarySectionId,
 } from "./summary-sections";
+import {
+  createWorkItem,
+  fetchWorkItems,
+  postWorkItemAction,
+  type WorkItem,
+} from "../../utils/work-items";
 import { collectSessionReferences } from "../../utils/session-references";
 import { resolveWorkPanelTodoFromMessages } from "../../utils/task-stall-policy";
 import { latestRunningWbBridgeProgress } from "../../utils/wb-bridge-ui";
@@ -784,12 +791,19 @@ export function WorkPanel({
   // Empty zones stay collapsed by default; content arrival auto-expands (Trae-style).
   const [openSections, setOpenSections] = useState<Record<SummarySectionId, boolean>>({
     todo: false,
+    workitems: false,
     artifacts: false,
     changes: false,
     spawns: false,
     refs: false,
     members: false,
   });
+  const apiToken = useAppStore((s) => s.apiToken);
+  const addPane = useAppStore((s) => s.addPane);
+  const setActivePaneId = useAppStore((s) => s.setActivePaneId);
+  const panes = useAppStore((s) => s.panes);
+  const [workItems, setWorkItems] = useState<WorkItem[]>([]);
+  const [workItemError, setWorkItemError] = useState("");
   const [extraArtifactPaths, setExtraArtifactPaths] = useState<string[]>([]);
   /**
    * Paths from on-disk session files. `messages.json` is the full chat history;
@@ -831,6 +845,81 @@ export function WorkPanel({
       },
     });
   }, [sessionId, summaryTabOpen, autoRefreshKey]);
+
+  const reloadWorkItems = useCallback(async () => {
+    if (!groupId) return;
+    try {
+      const rows = await fetchWorkItems(groupId, apiToken);
+      setWorkItems(rows);
+      setWorkItemError("");
+    } catch (e) {
+      setWorkItemError(e instanceof Error ? e.message : "事项加载失败");
+    }
+  }, [groupId, apiToken]);
+
+  useEffect(() => {
+    if (!isGroupPane || !summaryTabOpen) return;
+    void reloadWorkItems();
+    const t = window.setInterval(() => void reloadWorkItems(), 5000);
+    return () => window.clearInterval(t);
+  }, [isGroupPane, summaryTabOpen, reloadWorkItems]);
+
+  const runWorkItemAction = useCallback(
+    async (item: WorkItem, action: "accept" | "pause" | "resume") => {
+      if (!groupId) return;
+      try {
+        const next = await postWorkItemAction(groupId, item.id, apiToken, action, item.version);
+        setWorkItems((prev) => prev.map((row) => (row.id === next.id ? next : row)));
+        setWorkItemError("");
+      } catch (e) {
+        const code = e instanceof Error ? (e as Error & { code?: string }).code : "";
+        if (code === "conflict") {
+          await reloadWorkItems();
+          setWorkItemError("事项已变化，请再试一次");
+          return;
+        }
+        setWorkItemError(e instanceof Error ? e.message : "事项操作失败");
+      }
+    },
+    [groupId, apiToken, reloadWorkItems],
+  );
+
+  const runCreateWorkItem = useCallback(
+    async (input: { title: string; owner_kind: WorkItem["owner_kind"]; owner_id: string }) => {
+      if (!groupId) return;
+      try {
+        const created = await createWorkItem(groupId, apiToken, input);
+        setWorkItems((prev) => [...prev, created]);
+        setWorkItemError("");
+      } catch (e) {
+        setWorkItemError(e instanceof Error ? e.message : "事项创建失败");
+      }
+    },
+    [groupId, apiToken],
+  );
+
+  const openWorkItemOwner = useCallback(
+    (item: WorkItem) => {
+      if (item.owner_kind === "human") return;
+      if (item.owner_kind === "meta" || item.owner_id === "__meta__") {
+        const existing = panes.find((p) => !p.avatarId || p.avatarId === "__meta__");
+        if (existing) {
+          setActivePaneId(existing.id);
+          return;
+        }
+        addPane(null, metaLeaderLabel, "");
+        return;
+      }
+      const existing = panes.find((p) => p.avatarId === item.owner_id);
+      if (existing) {
+        setActivePaneId(existing.id);
+        return;
+      }
+      const name = avatarList.find((a) => a.id === item.owner_id)?.name || item.owner_id;
+      addPane(item.owner_id, name, "");
+    },
+    [addPane, avatarList, metaLeaderLabel, panes, setActivePaneId],
+  );
 
   const artifactPaths = useMemo(
     () =>
@@ -961,6 +1050,7 @@ export function WorkPanel({
   const overviewOpenSections = () =>
     contentDrivenOpenSections({
       todo: hasSessionTodo,
+      workitems: isGroupPane && workItems.length > 0,
       artifacts: presentArtifactPaths.length > 0,
       changes: changeRows.length > 0,
       spawns: subAgents.length > 0,
@@ -1321,6 +1411,17 @@ export function WorkPanel({
       applyPinnedAutoExpand(prev, "members", isGroupPane, pinnedSummarySectionRef.current),
     );
   }, [isGroupPane, pinnedSummarySection]);
+
+  useEffect(() => {
+    setOpenSections((prev) =>
+      applyPinnedAutoExpand(
+        prev,
+        "workitems",
+        isGroupPane && workItems.length > 0,
+        pinnedSummarySectionRef.current,
+      ),
+    );
+  }, [isGroupPane, workItems.length, pinnedSummarySection]);
 
   useEffect(() => {
     setOpenSections((prev) =>
@@ -2095,6 +2196,29 @@ export function WorkPanel({
                 <SessionTodoList todo={sessionTodo} />
               )}
             </Section>
+
+            {isGroupPane && groupId ? (
+              <Section
+                id="workitems"
+                title="事项"
+                count={workItems.length}
+                open={openSections.workitems}
+                onToggle={toggleSection}
+              >
+                <GroupWorkItemList
+                  groupId={groupId}
+                  items={workItems}
+                  avatars={avatarList}
+                  metaLeaderLabel={metaLeaderLabel}
+                  errorText={workItemError}
+                  onAccept={(item) => void runWorkItemAction(item, "accept")}
+                  onPause={(item) => void runWorkItemAction(item, "pause")}
+                  onResume={(item) => void runWorkItemAction(item, "resume")}
+                  onOpenOwner={openWorkItemOwner}
+                  onCreate={(input) => void runCreateWorkItem(input)}
+                />
+              </Section>
+            ) : null}
 
             <Section
               id="artifacts"

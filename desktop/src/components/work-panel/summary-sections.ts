@@ -4,10 +4,18 @@
  * Author: Damon Li
  */
 
-export type SummarySectionId = "todo" | "artifacts" | "changes" | "spawns" | "refs" | "members";
+export type SummarySectionId =
+  | "todo"
+  | "workitems"
+  | "artifacts"
+  | "changes"
+  | "spawns"
+  | "refs"
+  | "members";
 
 export const COLLAPSED_SUMMARY_SECTIONS: Record<SummarySectionId, boolean> = {
   todo: false,
+  workitems: false,
   artifacts: false,
   changes: false,
   spawns: false,
@@ -23,6 +31,7 @@ export function exclusiveOpenSections(
 
 export function contentDrivenOpenSections(flags: {
   todo: boolean;
+  workitems: boolean;
   artifacts: boolean;
   changes: boolean;
   spawns: boolean;
@@ -31,6 +40,7 @@ export function contentDrivenOpenSections(flags: {
 }): Record<SummarySectionId, boolean> {
   return {
     todo: flags.todo,
+    workitems: flags.workitems,
     artifacts: flags.artifacts,
     changes: flags.changes,
     spawns: flags.spawns,

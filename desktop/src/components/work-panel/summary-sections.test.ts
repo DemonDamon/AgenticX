@@ -16,6 +16,10 @@ describe("exclusiveOpenSections", () => {
       ...COLLAPSED_SUMMARY_SECTIONS,
       artifacts: true,
     });
+    expect(exclusiveOpenSections("workitems")).toEqual({
+      ...COLLAPSED_SUMMARY_SECTIONS,
+      workitems: true,
+    });
   });
 });
 
@@ -24,6 +28,7 @@ describe("contentDrivenOpenSections", () => {
     expect(
       contentDrivenOpenSections({
         todo: true,
+        workitems: false,
         artifacts: true,
         changes: false,
         spawns: true,
@@ -32,6 +37,7 @@ describe("contentDrivenOpenSections", () => {
       }),
     ).toEqual({
       todo: true,
+      workitems: false,
       artifacts: true,
       changes: false,
       spawns: true,
