@@ -85,10 +85,13 @@ const BY_EXT: Record<string, FileMarkKind> = {
   pptx: "slide",
 
   json: "data",
+  jsonl: "data",
   yaml: "data",
   yml: "data",
   toml: "data",
   ini: "data",
+  patch: "code",
+  diff: "code",
 
   zip: "archive",
   gz: "archive",

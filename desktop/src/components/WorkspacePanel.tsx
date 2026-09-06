@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   Check,
@@ -53,6 +53,7 @@ import {
 import { ensureSessionArtifactsFromAvailableSources } from "../utils/ensure-artifact-taskspaces";
 import { useAttachWorkspaceSources } from "../hooks/useAttachWorkspaceSources";
 import { MountModeDialog } from "./composer/MountModeDialog";
+import { artifactGlyph, FileTypeMark } from "./messages/artifact-glyph";
 
 type TaskspaceFile = {
   name: string;
@@ -66,6 +67,26 @@ type TaskspaceFile = {
   source_path?: string;
   virtual?: boolean;
 };
+
+function WorkspaceFileTypeIcon({ name }: { name: string }) {
+  return <FileTypeMark kind={artifactGlyph(name).kind} />;
+}
+
+function WorkspaceFileRowLabel({
+  name,
+  extra,
+}: {
+  name: string;
+  extra?: ReactNode;
+}) {
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+      <WorkspaceFileTypeIcon name={name} />
+      <span className="min-w-0 truncate">{name}</span>
+      {extra}
+    </span>
+  );
+}
 
 function mountModeBadge(mode?: TaskspaceMountMode): { label: string; className: string } | null {
   if (!mode) return null;
@@ -1249,6 +1270,7 @@ export function WorkspacePanel({
                     title={dangling ? `${item.path}（源已失效）` : item.path}
                   >
                     <span className="inline-block w-3 shrink-0 text-center">{isExpanded ? "▾" : "▸"}</span>
+                    <Folder className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.7} />
                     <span className="min-w-0 truncate">{item.name}/</span>
                     {badge ? (
                       <span className={`ml-1 shrink-0 rounded px-1 py-0.5 text-[10px] ${badge.className}`}>
@@ -1303,7 +1325,7 @@ export function WorkspacePanel({
               }}
             >
               <button
-                className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
+                className={`flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
                   dangling
                     ? "text-text-faint"
                     : selectedFilePath === item.path
@@ -1314,14 +1336,15 @@ export function WorkspacePanel({
                 title={dangling ? `${item.path}（源已失效）` : item.path}
                 onClick={() => void openFile(taskspaceId, item.path, item)}
               >
-                {item.name}
+                <WorkspaceFileTypeIcon name={item.name} />
+                <span className="min-w-0 truncate">{item.name}</span>
                 {badge ? (
-                  <span className={`ml-1 inline-block rounded px-1 py-0.5 text-[10px] ${badge.className}`}>
+                  <span className={`ml-1 inline-block shrink-0 rounded px-1 py-0.5 text-[10px] ${badge.className}`}>
                     {badge.label}
                   </span>
                 ) : null}
                 {dangling ? (
-                  <span className="ml-1 text-[10px] text-text-faint">源已失效</span>
+                  <span className="ml-1 shrink-0 text-[10px] text-text-faint">源已失效</span>
                 ) : null}
               </button>
               <button
@@ -1624,14 +1647,16 @@ export function WorkspacePanel({
                   }}
                 >
                   <button
-                    className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
+                    className={`flex min-w-0 flex-1 items-center rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
                       selectedFilePath === file.path ? "text-text-strong" : "text-text-subtle"
                     }`}
                     title={file.path}
                     onClick={() => void openFile(taskspaceId, file.path)}
                   >
-                    {file.name}
-                    <span className="ml-1 text-[11px] text-text-faint">{file.path}</span>
+                    <WorkspaceFileRowLabel
+                      name={file.name}
+                      extra={<span className="min-w-0 truncate text-[11px] text-text-faint">{file.path}</span>}
+                    />
                   </button>
                   <button
                     className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
@@ -1652,13 +1677,13 @@ export function WorkspacePanel({
               listViewFiles.map(({ taskspaceId, file }) => (
                 <div key={`${taskspaceId}:${file.path}`} className="flex min-w-0 items-center gap-1">
                   <button
-                    className={`min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
+                    className={`flex min-w-0 flex-1 items-center rounded px-1 py-1 text-left text-[13px] transition hover:bg-surface-hover ${
                       selectedFilePath === file.path ? "text-text-strong" : "text-text-subtle"
                     }`}
                     title={file.path}
                     onClick={() => void openFile(taskspaceId, file.path)}
                   >
-                    {file.name}
+                    <WorkspaceFileRowLabel name={file.name} />
                   </button>
                   <button
                     className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
