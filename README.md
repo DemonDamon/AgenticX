@@ -707,6 +707,7 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **AgentKit SDK** | [volcengine/agentkit-sdk-python](https://github.com/volcengine/agentkit-sdk-python) | Agent deployment & skill packaging |
 | **AgentRun SDK** | [Serverless-Devs/agentrun-sdk-python](https://github.com/Serverless-Devs/agentrun-sdk-python) | Serverless agent runtime patterns |
 | **AgentScope** | [agentscope-ai/agentscope](https://github.com/agentscope-ai/agentscope) | Multi-agent communication & pipeline |
+| **AgentTeams** | [agentscope-ai/AgentTeams](https://github.com/agentscope-ai/AgentTeams) | Human-visible accountability and a persistent work docket in multi-agent collaboration |
 | **Agno** | [agno-agi/agno](https://github.com/agno-agi/agno) | Lightweight agent framework design |
 | **Better Harness** | [QoderAI/better-harness](https://github.com/QoderAI/better-harness) | Evidence-graded session loop review (Present / Wired / Exercised / Outcome-supported) |
 | **Camel** | [camel-ai/camel](https://github.com/camel-ai/camel) | Role-playing agents & society simulation |
@@ -733,6 +734,7 @@ AgenticX would not exist in its current form without the inspiration, architectu
 | **MobileAgent** | [X-PLUG/MobileAgent](https://github.com/X-PLUG/MobileAgent) | Multi-agent mobile GUI automation |
 | **Model Context Protocol** | [modelcontextprotocol/modelcontextprotocol](https://github.com/modelcontextprotocol/modelcontextprotocol) | Standardized LLM tool/resource protocol |
 | **NVIDIA NemoClaw** | [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw) | GPU-accelerated agent plugin system |
+| **OpenBot** | [CopilotKit/openbot](https://github.com/CopilotKit/openbot) | Decide-before-execute with fail-closed audit, split capability catalog from policy, and a watchable action surface |
 | **OpenClaw** | [openclaw/openclaw](https://github.com/openclaw/openclaw) | Open desktop agent platform & extensions |
 | **OpenSandbox** | [alibaba/OpenSandbox](https://github.com/alibaba/OpenSandbox) | Container-based code sandbox |
 | **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust-based secure agent shell |
