@@ -933,6 +933,9 @@ input[type="radio"] {
 
 .agx-pptx-preview {
   min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .agx-pptx-preview img,

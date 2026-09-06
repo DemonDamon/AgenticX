@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { officePreviewKind, officePreviewMime } from "./office-preview-kind";
+import { pptxNavDeltaFromKey } from "./pptx-preview-keys";
+import { pptxNavDeltaFromKey } from "./pptx-preview-keys";
 
 describe("officePreviewKind", () => {
   it("routes modern Office files to the matching preview", () => {
@@ -26,9 +28,27 @@ describe("officePreviewMime", () => {
   });
 });
 
+describe("pptxNavDeltaFromKey", () => {
+  it("maps left/right arrows to slide steps and ignores vertical keys", () => {
+    expect(pptxNavDeltaFromKey("ArrowLeft")).toBe(-1);
+    expect(pptxNavDeltaFromKey("ArrowRight")).toBe(1);
+    expect(pptxNavDeltaFromKey("ArrowUp")).toBe(0);
+    expect(pptxNavDeltaFromKey("ArrowDown")).toBe(0);
+  });
+});
+
 describe("@aiden0z/pptx-renderer", () => {
   it("exports PptxViewer.open", async () => {
     const { PptxViewer } = await import("@aiden0z/pptx-renderer");
     expect(typeof PptxViewer.open).toBe("function");
+  });
+});
+
+describe("pptxNavDeltaFromKey", () => {
+  it("maps left and right arrows to slide steps", () => {
+    expect(pptxNavDeltaFromKey("ArrowLeft")).toBe(-1);
+    expect(pptxNavDeltaFromKey("ArrowRight")).toBe(1);
+    expect(pptxNavDeltaFromKey("ArrowDown")).toBe(0);
+    expect(pptxNavDeltaFromKey("a")).toBe(0);
   });
 });
