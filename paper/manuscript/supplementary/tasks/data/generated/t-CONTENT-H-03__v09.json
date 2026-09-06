@@ -1,0 +1,87 @@
+{
+ "task_id": "t-CONTENT-H-03",
+ "office_type": "content",
+ "task_type": "high_coupling",
+ "team_size": 4,
+ "description": "技术产品发布会全稿：主演讲稿+竞品对比+技术Q&A+业务Q&A",
+ "roles": [
+  {
+   "name": "主稿撰写员",
+   "role": "keynote",
+   "responsibility": "撰写20分钟发布会主演讲稿，含3个核心信息点"
+  },
+  {
+   "name": "竞品对比分析师",
+   "role": "comp",
+   "responsibility": "对比3款竞品，输出差异化论据"
+  },
+  {
+   "name": "技术Q&A整理员",
+   "role": "tech_qa",
+   "responsibility": "预判12+常见技术问题并撰写标准答复"
+  },
+  {
+   "name": "业务Q&A整理员",
+   "role": "biz_qa",
+   "responsibility": "预判11+常见商业问题并撰写标准答复"
+  }
+ ],
+ "shared_initial": {
+  "product_name": "AgentHub 2.0 企业级智能体开发平台",
+  "core_messages": [
+   "开箱即用的多智能体编排，企业部署效率提升5倍",
+   "全链路可审计，满足金融/政府合规要求",
+   "MCP协议兼容，无缝对接企业现有系统"
+  ],
+  "competitors": [
+   {
+    "name": "Company E",
+    "position": "传统BPM厂商",
+    "weakness": "智能化程度低，迭代慢"
+   },
+   {
+    "name": "Company C",
+    "position": "工作流引擎",
+    "weakness": "学习曲线陡，原生Agent能力弱"
+   },
+   {
+    "name": "Company B",
+    "position": "开源框架",
+    "weakness": "合规审计弱"
+   }
+  ],
+  "tech_questions_count_target": 12,
+  "biz_questions_count_target": 11
+ },
+ "verification": {
+  "required_sections": [
+   "主演讲稿",
+   "竞品对比",
+   "技术Q&A",
+   "业务Q&A"
+  ],
+  "core_msg_covered_all": true,
+  "tech_qa_count_min": 10,
+  "biz_qa_count_min": 9,
+  "competitor_count_covered": 3,
+  "answer_block_schema": {
+   "tech_qa_count_min": "list (min_length)",
+   "biz_qa_count_min": "list (min_length)",
+   "competitor_count_covered": "list (min_length)"
+  },
+  "expected_sets": {},
+  "expected_values": {},
+  "expected_counts": {
+   "tech_qa_count_min": 10,
+   "biz_qa_count_min": 9,
+   "competitor_count_covered": 3
+  }
+ },
+ "params": {
+  "tech_qa_n": "t-int(8,15)",
+  "biz_qa_n": "t-int(8,15)",
+  "comp_n": "t-int(2,5)"
+ },
+ "variant_id": "t-CONTENT-H-03__v09",
+ "variant_seed": 42009
+}

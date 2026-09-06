@@ -1,0 +1,255 @@
+{
+ "task_id": "t-PROJ-L-01",
+ "office_type": "project",
+ "task_type": "low_coupling",
+ "team_size": 3,
+ "description": "基于4个迭代的任务数据产出迭代回顾总结：提取完成项、提取问题、撰写报告",
+ "roles": [
+  {
+   "name": "完成项提取员",
+   "role": "collect_done",
+   "responsibility": "汇总所有已完成任务，按迭代分组"
+  },
+  {
+   "name": "问题提取员",
+   "role": "collect_issue",
+   "responsibility": "识别未完成/延期任务，分类问题类型"
+  },
+  {
+   "name": "报告撰写员",
+   "role": "writer",
+   "responsibility": "整合为迭代回顾报告"
+  }
+ ],
+ "shared_initial": {
+  "sprints": [
+   "S1",
+   "S2",
+   "S3",
+   "S4"
+  ],
+  "tasks": [
+   {
+    "id": "S1-T1",
+    "sprint": "S1",
+    "name": "S1迭代子任务1",
+    "owner": "徐涛",
+    "status": "done"
+   },
+   {
+    "id": "S1-T2",
+    "sprint": "S1",
+    "name": "S1迭代子任务2",
+    "owner": "吴芳",
+    "status": "in_progress"
+   },
+   {
+    "id": "S1-T3",
+    "sprint": "S1",
+    "name": "S1迭代子任务3",
+    "owner": "孙磊",
+    "status": "done"
+   },
+   {
+    "id": "S1-T4",
+    "sprint": "S1",
+    "name": "S1迭代子任务4",
+    "owner": "胡军",
+    "status": "in_progress"
+   },
+   {
+    "id": "S1-T5",
+    "sprint": "S1",
+    "name": "S1迭代子任务5",
+    "owner": "王强",
+    "status": "in_progress"
+   },
+   {
+    "id": "S1-T6",
+    "sprint": "S1",
+    "name": "S1迭代子任务6",
+    "owner": "马超",
+    "status": "done"
+   },
+   {
+    "id": "S1-T7",
+    "sprint": "S1",
+    "name": "S1迭代子任务7",
+    "owner": "朱琳",
+    "status": "in_progress"
+   },
+   {
+    "id": "S2-T1",
+    "sprint": "S2",
+    "name": "S2迭代子任务1",
+    "owner": "马超",
+    "status": "done"
+   },
+   {
+    "id": "S2-T2",
+    "sprint": "S2",
+    "name": "S2迭代子任务2",
+    "owner": "张伟",
+    "status": "todo"
+   },
+   {
+    "id": "S2-T3",
+    "sprint": "S2",
+    "name": "S2迭代子任务3",
+    "owner": "黄丽",
+    "status": "done"
+   },
+   {
+    "id": "S2-T4",
+    "sprint": "S2",
+    "name": "S2迭代子任务4",
+    "owner": "王强",
+    "status": "todo"
+   },
+   {
+    "id": "S2-T5",
+    "sprint": "S2",
+    "name": "S2迭代子任务5",
+    "owner": "刘洋",
+    "status": "todo"
+   },
+   {
+    "id": "S2-T6",
+    "sprint": "S2",
+    "name": "S2迭代子任务6",
+    "owner": "李娜",
+    "status": "done"
+   },
+   {
+    "id": "S2-T7",
+    "sprint": "S2",
+    "name": "S2迭代子任务7",
+    "owner": "赵磊",
+    "status": "todo"
+   },
+   {
+    "id": "S3-T1",
+    "sprint": "S3",
+    "name": "S3迭代子任务1",
+    "owner": "王强",
+    "status": "done"
+   },
+   {
+    "id": "S3-T2",
+    "sprint": "S3",
+    "name": "S3迭代子任务2",
+    "owner": "张伟",
+    "status": "in_progress"
+   },
+   {
+    "id": "S3-T3",
+    "sprint": "S3",
+    "name": "S3迭代子任务3",
+    "owner": "周明",
+    "status": "done"
+   },
+   {
+    "id": "S3-T4",
+    "sprint": "S3",
+    "name": "S3迭代子任务4",
+    "owner": "王强",
+    "status": "done"
+   },
+   {
+    "id": "S3-T5",
+    "sprint": "S3",
+    "name": "S3迭代子任务5",
+    "owner": "杨帆",
+    "status": "todo"
+   },
+   {
+    "id": "S3-T6",
+    "sprint": "S3",
+    "name": "S3迭代子任务6",
+    "owner": "胡军",
+    "status": "done"
+   },
+   {
+    "id": "S3-T7",
+    "sprint": "S3",
+    "name": "S3迭代子任务7",
+    "owner": "徐涛",
+    "status": "done"
+   },
+   {
+    "id": "S4-T1",
+    "sprint": "S4",
+    "name": "S4迭代子任务1",
+    "owner": "陈静",
+    "status": "done"
+   },
+   {
+    "id": "S4-T2",
+    "sprint": "S4",
+    "name": "S4迭代子任务2",
+    "owner": "胡军",
+    "status": "todo"
+   },
+   {
+    "id": "S4-T3",
+    "sprint": "S4",
+    "name": "S4迭代子任务3",
+    "owner": "徐涛",
+    "status": "done"
+   },
+   {
+    "id": "S4-T4",
+    "sprint": "S4",
+    "name": "S4迭代子任务4",
+    "owner": "周明",
+    "status": "todo"
+   },
+   {
+    "id": "S4-T5",
+    "sprint": "S4",
+    "name": "S4迭代子任务5",
+    "owner": "徐涛",
+    "status": "done"
+   },
+   {
+    "id": "S4-T6",
+    "sprint": "S4",
+    "name": "S4迭代子任务6",
+    "owner": "杨帆",
+    "status": "done"
+   },
+   {
+    "id": "S4-T7",
+    "sprint": "S4",
+    "name": "S4迭代子任务7",
+    "owner": "吴芳",
+    "status": "todo"
+   }
+  ]
+ },
+ "verification": {
+  "required_sections": [
+   "本次完成",
+   "遗留问题",
+   "改进建议"
+  ],
+  "min_completed_tasks": 15,
+  "min_sprints_mentioned": 4,
+  "answer_block_schema": {
+   "min_completed_tasks": "list (min_length)",
+   "min_sprints_mentioned": "list (min_length)"
+  },
+  "expected_sets": {},
+  "expected_values": {},
+  "expected_counts": {
+   "min_completed_tasks": 15,
+   "min_sprints_mentioned": 4
+  }
+ },
+ "params": {
+  "sprint_count": "t-int(2,5)",
+  "tasks_per_sprint": "t-int(3,7)"
+ },
+ "variant_id": "t-PROJ-L-01__v09",
+ "variant_seed": 42009
+}

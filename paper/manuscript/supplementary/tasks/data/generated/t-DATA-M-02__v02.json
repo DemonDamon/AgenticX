@@ -1,0 +1,105 @@
+{
+ "task_id": "t-DATA-M-02",
+ "office_type": "data",
+ "task_type": "medium_coupling",
+ "team_size": 3,
+ "description": "产出部门预算偏差分析报告：实际提取→偏差计算→原因分析→建议",
+ "roles": [
+  {
+   "name": "数据提取员",
+   "role": "extract",
+   "responsibility": "提取各部门计划/实际金额，计算偏差"
+  },
+  {
+   "name": "偏差分析师",
+   "role": "analyst",
+   "responsibility": "识别偏差>10%的部门，按正负分类"
+  },
+  {
+   "name": "报告撰写员",
+   "role": "writer",
+   "responsibility": "给出原因解读和3条成本管控建议"
+  }
+ ],
+ "shared_initial": {
+  "budget_rows": [
+   {
+    "department": "销售部",
+    "planned": 172630,
+    "actual": 163998,
+    "deviation": -8632,
+    "deviation_pct": -5.0
+   },
+   {
+    "department": "人力部",
+    "planned": 222630,
+    "actual": 178104,
+    "deviation": -44526,
+    "deviation_pct": -20.0
+   },
+   {
+    "department": "市场部",
+    "planned": 272630,
+    "actual": 245367,
+    "deviation": -27263,
+    "deviation_pct": -10.0
+   },
+   {
+    "department": "财务部",
+    "planned": 322630,
+    "actual": 241972,
+    "deviation": -80658,
+    "deviation_pct": -25.0
+   },
+   {
+    "department": "运营部",
+    "planned": 372630,
+    "actual": 316735,
+    "deviation": -55895,
+    "deviation_pct": -15.0
+   }
+  ],
+  "period": "2026年Q2"
+ },
+ "verification": {
+  "required_sections": [
+   "偏差明细",
+   "偏差分类",
+   "原因分析",
+   "管控建议"
+  ],
+  "min_deviation_items": 4,
+  "expected_deviation_depts": [
+   "人力部",
+   "市场部",
+   "财务部",
+   "运营部"
+  ],
+  "suggestion_count": 3,
+  "answer_block_schema": {
+   "deviation_depts": "list",
+   "min_deviation_items": "list (min_length)",
+   "suggestion_count": "list (min_length)"
+  },
+  "expected_sets": {
+   "deviation_depts": [
+    "人力部",
+    "市场部",
+    "财务部",
+    "运营部"
+   ]
+  },
+  "expected_values": {},
+  "expected_counts": {
+   "min_deviation_items": 4,
+   "suggestion_count": 3
+  }
+ },
+ "params": {
+  "dept_count": "t-int(4,8)",
+  "base_budget": "t-int(50000, 200000)",
+  "deviation_std": "t-int(5,25)"
+ },
+ "variant_id": "t-DATA-M-02__v02",
+ "variant_seed": 42002
+}

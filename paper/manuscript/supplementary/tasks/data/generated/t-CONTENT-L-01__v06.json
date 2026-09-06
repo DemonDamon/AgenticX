@@ -1,0 +1,71 @@
+{
+ "task_id": "t-CONTENT-L-01",
+ "office_type": "content",
+ "task_type": "low_coupling",
+ "team_size": 3,
+ "description": "公众号推文生产：撰写初稿→事实核对→文字润色",
+ "roles": [
+  {
+   "name": "初稿撰写员",
+   "role": "writer",
+   "responsibility": "撰写产品宣发推文初稿"
+  },
+  {
+   "name": "事实核对员",
+   "role": "fact",
+   "responsibility": "核对产品参数、价格、发布时间等事实错误"
+  },
+  {
+   "name": "润色员",
+   "role": "polish",
+   "responsibility": "润色标题和行文，确保符合公众号风格"
+  }
+ ],
+ "shared_initial": {
+  "product_brief": {
+   "name": "SmartDesk 2.0 智能升降桌",
+   "price": 2299,
+   "launch_date": "2026-11-09",
+   "features": [
+    "环保材质，通过安全认证",
+    "承重60kg，3年质保",
+    "USB-C 65W快充",
+    "多档位调节，一键切换"
+   ],
+   "target_audience": "都市白领/效率爱好者",
+   "word_count_target": 1015
+  },
+  "fact_check_reference": {
+   "name": "SmartDesk",
+   "price_rmb": 2299,
+   "speed_mm_per_s": 38,
+   "weight_capacity_kg": 60,
+   "warranty_years": 3,
+   "usb_power_w": 65
+  }
+ },
+ "verification": {
+  "required_sections": [
+   "标题",
+   "正文",
+   "卖点小结"
+  ],
+  "min_word_count": 507,
+  "fact_error_count_max": 1,
+  "required_facts_count_min": 3,
+  "answer_block_schema": {
+   "required_facts_count_min": "list (min_length)"
+  },
+  "expected_sets": {},
+  "expected_values": {},
+  "expected_counts": {
+   "required_facts_count_min": 3
+  }
+ },
+ "params": {
+  "feature_count": "t-int(3,6)",
+  "target_word": "t-int(800,2000)"
+ },
+ "variant_id": "t-CONTENT-L-01__v06",
+ "variant_seed": 42006
+}

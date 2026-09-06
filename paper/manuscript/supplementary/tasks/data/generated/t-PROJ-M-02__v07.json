@@ -1,0 +1,223 @@
+{
+ "task_id": "t-PROJ-M-02",
+ "task_type": "medium_coupling",
+ "description": "基于项目看板（含8任务、3里程碑、2延期记录），产出风险预警报告：识别延期/阻塞风险、分析根因、给出3条可执行缓解建议",
+ "team_size": 3,
+ "board": {
+  "tasks": [
+   {
+    "id": "T1",
+    "name": "订单结算评审",
+    "owner": "后端组",
+    "milestone": "M1",
+    "planned_end": "2026-08-01",
+    "status": "done",
+    "actual_end": "2026-08-01"
+   },
+   {
+    "id": "T2",
+    "name": "文件预览搭建",
+    "owner": "产品组",
+    "milestone": "M2",
+    "planned_end": "2026-08-03",
+    "status": "done",
+    "actual_end": "2026-08-03"
+   },
+   {
+    "id": "T3",
+    "name": "支付回调适配",
+    "owner": "产品组",
+    "milestone": "M3",
+    "planned_end": "2026-08-05",
+    "status": "pending",
+    "progress": 30,
+    "actual_delay_days": 4,
+    "blocker": "第三方SDK文档过期，接口不符"
+   },
+   {
+    "id": "T4",
+    "name": "消息推送评审",
+    "owner": "前端组",
+    "milestone": "M1",
+    "planned_end": "2026-08-07",
+    "status": "done",
+    "actual_end": "2026-08-07"
+   },
+   {
+    "id": "T5",
+    "name": "报表导出适配",
+    "owner": "测试组",
+    "milestone": "M2",
+    "planned_end": "2026-08-09",
+    "status": "done",
+    "actual_end": "2026-08-10",
+    "delay_days": 1
+   },
+   {
+    "id": "T6",
+    "name": "消息推送压测",
+    "owner": "运维组",
+    "milestone": "M3",
+    "planned_end": "2026-08-11",
+    "status": "done",
+    "actual_end": "2026-08-11"
+   },
+   {
+    "id": "T7",
+    "name": "搜索压测",
+    "owner": "测试组",
+    "milestone": "M1",
+    "planned_end": "2026-08-13",
+    "status": "in_progress",
+    "progress": 30,
+    "actual_delay_days": 6,
+    "blocker": "依赖上游任务完成，阻塞传导"
+   },
+   {
+    "id": "T8",
+    "name": "支付回调重构",
+    "owner": "后端组",
+    "milestone": "M2",
+    "planned_end": "2026-08-15",
+    "status": "done",
+    "actual_end": "2026-08-16",
+    "delay_days": 1
+   },
+   {
+    "id": "T9",
+    "name": "用户认证联调",
+    "owner": "产品组",
+    "milestone": "M3",
+    "planned_end": "2026-08-17",
+    "status": "done",
+    "actual_end": "2026-08-17"
+   },
+   {
+    "id": "T10",
+    "name": "支付回调搭建",
+    "owner": "测试组",
+    "milestone": "M1",
+    "planned_end": "2026-08-19",
+    "status": "pending",
+    "progress": 55,
+    "actual_delay_days": 3,
+    "blocker": "第三方SDK文档过期，接口不符"
+   }
+  ],
+  "milestones": [
+   {
+    "id": "M1",
+    "name": "认证模块上线",
+    "planned_date": "2026-08-10",
+    "status": "done"
+   },
+   {
+    "id": "M2",
+    "name": "支付能力交付",
+    "planned_date": "2026-08-22",
+    "status": "at_risk"
+   },
+   {
+    "id": "M3",
+    "name": "全链路验收",
+    "planned_date": "2026-08-30",
+    "status": "at_risk"
+   }
+  ],
+  "history": [
+   {
+    "task": "T2",
+    "event": "延期1天",
+    "reason": "OAuth2库版本兼容问题",
+    "date": "2026-08-09"
+   },
+   {
+    "task": "T4",
+    "event": "延期2天",
+    "reason": "支付网关8/15变更接口签名算法",
+    "date": "2026-08-17"
+   },
+   {
+    "task": "T5",
+    "event": "延期5天",
+    "reason": "第三方SDK文档v2.1与实际API不符",
+    "date": "2026-08-20"
+   }
+  ]
+ },
+ "report_template": {
+  "sections": [
+   "风险清单",
+   "根因分析",
+   "缓解建议"
+  ],
+  "format": "markdown"
+ },
+ "verification": {
+  "required_sections": [
+   "风险清单",
+   "根因分析",
+   "缓解建议"
+  ],
+  "min_risks_identified_ratio": 0.8,
+  "min_root_cause_hit_ratio": 0.6,
+  "min_suggestion_executability_score": 3.0,
+  "suggestion_count": 3,
+  "actual_risk_tasks": [
+   "T3",
+   "T7",
+   "T10"
+  ],
+  "actual_root_causes": [
+   "T3: 第三方SDK文档过期，接口不符",
+   "T7: 依赖上游任务完成，阻塞传导",
+   "T10: 第三方SDK文档过期，接口不符"
+  ],
+  "answer_block_schema": {
+   "risk_tasks": "list",
+   "root_causes": "list",
+   "suggestion_count": "list (min_length)"
+  },
+  "expected_sets": {
+   "risk_tasks": [
+    "T3",
+    "T7",
+    "T10"
+   ],
+   "root_causes": [
+    "T3: 第三方SDK文档过期，接口不符",
+    "T7: 依赖上游任务完成，阻塞传导",
+    "T10: 第三方SDK文档过期，接口不符"
+   ]
+  },
+  "expected_values": {},
+  "expected_counts": {
+   "suggestion_count": 3
+  }
+ },
+ "office_type": "project",
+ "roles": [
+  {
+   "name": "进度收集员",
+   "role": "tracker",
+   "responsibility": "读取看板提取延期/阻塞风险任务"
+  },
+  {
+   "name": "根因分析师",
+   "role": "diagnoser",
+   "responsibility": "分析每个风险任务的延期根因"
+  },
+  {
+   "name": "建议员",
+   "role": "advisor",
+   "responsibility": "给出3条可执行缓解建议"
+  }
+ ],
+ "params": {
+  "task_count": "t-int(6,12)",
+  "milestone_count": "t-int(2,5)",
+  "delay_prob": "t-float(0.1,0.4,2)"
+ },
+ "variant_id": "t-PROJ-M-02__v07",
+ "variant_seed": 42007
+}

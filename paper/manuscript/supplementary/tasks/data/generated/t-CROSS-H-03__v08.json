@@ -1,0 +1,144 @@
+{
+ "task_id": "t-CROSS-H-03",
+ "office_type": "cross_dept",
+ "task_type": "high_coupling",
+ "team_size": 4,
+ "description": "跨部门季度需求对齐：三部门各自提需求→优先级仲裁，产出季度优先级排序",
+ "roles": [
+  {
+   "name": "研发部代表",
+   "role": "rd",
+   "responsibility": "提出研发侧关键需求（技术债、基建），陈述重要性和资源要求"
+  },
+  {
+   "name": "市场部代表",
+   "role": "mk",
+   "responsibility": "提出市场侧需求（活动、宣发、增长），陈述ROI预期"
+  },
+  {
+   "name": "产品部代表",
+   "role": "pd",
+   "responsibility": "提出产品侧需求（功能、体验、合规），陈述用户影响"
+  },
+  {
+   "name": "优先级仲裁员",
+   "role": "arb",
+   "responsibility": "按影响×紧急×资源三维打分，输出最终排序+冲突解决说明"
+  }
+ ],
+ "shared_initial": {
+  "quarter": "Q2 2026",
+  "total_budget_hours": 1503,
+  "demands": [
+   {
+    "id": "研发-01",
+    "name": "消息队列扩容",
+    "dept": "研发",
+    "impact": 6,
+    "urgency": 9,
+    "hours": 400
+   },
+   {
+    "id": "市场-02",
+    "name": "行业峰会展位与演讲",
+    "dept": "市场",
+    "impact": 4,
+    "urgency": 9,
+    "hours": 500
+   },
+   {
+    "id": "研发-03",
+    "name": "可观测性平台升级",
+    "dept": "研发",
+    "impact": 6,
+    "urgency": 3,
+    "hours": 200
+   },
+   {
+    "id": "产品-04",
+    "name": "数据合规功能改造",
+    "dept": "产品",
+    "impact": 5,
+    "urgency": 7,
+    "hours": 150
+   },
+   {
+    "id": "市场-05",
+    "name": "品牌升级Slogan全渠道宣发",
+    "dept": "市场",
+    "impact": 10,
+    "urgency": 9,
+    "hours": 400
+   },
+   {
+    "id": "市场-06",
+    "name": "季度拉新投放计划",
+    "dept": "市场",
+    "impact": 6,
+    "urgency": 7,
+    "hours": 200
+   },
+   {
+    "id": "产品-07",
+    "name": "搜索体验优化",
+    "dept": "产品",
+    "impact": 9,
+    "urgency": 7,
+    "hours": 250
+   },
+   {
+    "id": "产品-08",
+    "name": "移动端信息无障碍适配",
+    "dept": "产品",
+    "impact": 4,
+    "urgency": 7,
+    "hours": 300
+   },
+   {
+    "id": "市场-09",
+    "name": "双十一大促活动页+投放",
+    "dept": "市场",
+    "impact": 8,
+    "urgency": 10,
+    "hours": 400
+   },
+   {
+    "id": "研发-10",
+    "name": "核心服务容器化",
+    "dept": "研发",
+    "impact": 10,
+    "urgency": 7,
+    "hours": 250
+   }
+  ]
+ },
+ "verification": {
+  "required_sections": [
+   "部门需求汇总",
+   "打分与冲突说明",
+   "最终优先级"
+  ],
+  "min_ranked_items": 9,
+  "min_budget_total": 1352,
+  "conflict_min_identified": 1,
+  "answer_block_schema": {
+   "budget_total": "number",
+   "min_ranked_items": "list (min_length)",
+   "conflict_min_identified": "list (min_length)"
+  },
+  "expected_sets": {},
+  "expected_values": {
+   "budget_total": 1352
+  },
+  "expected_counts": {
+   "min_ranked_items": 9,
+   "conflict_min_identified": 1
+  }
+ },
+ "params": {
+  "demand_count": "t-int(5,10)",
+  "budget_hours": "t-int(1200,3000)"
+ },
+ "variant_id": "t-CROSS-H-03__v08",
+ "variant_seed": 42008
+}
