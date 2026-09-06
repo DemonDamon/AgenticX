@@ -931,6 +931,16 @@ input[type="radio"] {
   background-clip: padding-box;
 }
 
+.agx-pptx-preview {
+  min-height: 280px;
+}
+
+.agx-pptx-preview img,
+.agx-pptx-preview canvas,
+.agx-pptx-preview svg {
+  max-width: 100%;
+}
+
 /* Empty-state composer lift: flex-grow is animatable; keep the spacer mounted. */
 .agx-composer-lift-spacer {
   flex-basis: 0;

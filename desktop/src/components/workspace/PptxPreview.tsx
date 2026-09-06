@@ -1,0 +1,198 @@
+import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
+import { PreviewFallback } from "./PreviewFallback";
+import { dataUrlToArrayBuffer, loadLocalPreviewDataUrl } from "./preview-data";
+
+type PptxPreviewProps = {
+  absolutePath: string;
+  mimeType: string;
+  onCopyPath: () => void;
+  onRevealInFileManager?: (absolutePath: string) => void;
+  revealInFileManagerLabel?: string;
+};
+
+export function PptxPreview({
+  absolutePath,
+  mimeType,
+  onCopyPath,
+  onRevealInFileManager,
+  revealInFileManagerLabel,
+}: PptxPreviewProps) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [buffer, setBuffer] = useState<ArrayBuffer | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pageNum, setPageNum] = useState(1);
+  const [pageCount, setPageCount] = useState(0);
+  const [zoom, setZoom] = useState(100);
+  const goToSlideRef = useRef<((index: number) => Promise<void>) | null>(null);
+  const setZoomRef = useRef<((percent: number) => Promise<void>) | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setBuffer(null);
+    setPageNum(1);
+    setPageCount(0);
+    setZoom(100);
+    goToSlideRef.current = null;
+    setZoomRef.current = null;
+
+    void (async () => {
+      const loaded = await loadLocalPreviewDataUrl(absolutePath);
+      if (cancelled) return;
+      if (!loaded.ok) {
+        setError(loaded.error);
+        setLoading(false);
+        return;
+      }
+      try {
+        const next = await dataUrlToArrayBuffer(loaded.dataUrl);
+        if (cancelled) return;
+        setBuffer(next);
+      } catch (err) {
+        if (cancelled) return;
+        setError(String(err));
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [absolutePath]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!buffer || !host) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    let viewer: { destroy: () => void } | null = null;
+
+    void (async () => {
+      try {
+        const { PptxViewer } = await import("@aiden0z/pptx-renderer");
+        const opened = await PptxViewer.open(buffer, host, {
+          fitMode: "contain",
+          renderMode: "slide",
+          lazyMedia: true,
+          lazySlides: true,
+          zoomPercent: 100,
+          signal: controller.signal,
+          onSlideChange: (index) => {
+            if (!cancelled) setPageNum(index + 1);
+          },
+        });
+        if (cancelled) {
+          opened.destroy();
+          return;
+        }
+        viewer = opened;
+        goToSlideRef.current = (index) => opened.goToSlide(index);
+        setZoomRef.current = (percent) => opened.setZoom(percent);
+        setPageCount(Math.max(1, opened.slideCount));
+        setPageNum(opened.currentSlideIndex + 1);
+        setLoading(false);
+      } catch (err) {
+        if (cancelled || controller.signal.aborted) return;
+        setError(String(err));
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      goToSlideRef.current = null;
+      setZoomRef.current = null;
+      viewer?.destroy();
+      host.replaceChildren();
+    };
+  }, [buffer]);
+
+  const changePage = (next: number) => {
+    const clamped = Math.min(pageCount, Math.max(1, next));
+    setPageNum(clamped);
+    void goToSlideRef.current?.(clamped - 1);
+  };
+
+  const changeZoom = (next: number) => {
+    const clamped = Math.min(250, Math.max(50, next));
+    setZoom(clamped);
+    void setZoomRef.current?.(clamped);
+  };
+
+  if (error) {
+    return (
+      <PreviewFallback
+        title="演示文稿"
+        message={error}
+        mimeType={mimeType}
+        onCopyPath={onCopyPath}
+        onRevealInFileManager={onRevealInFileManager}
+        revealInFileManagerLabel={revealInFileManagerLabel}
+        absolutePath={absolutePath}
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-surface-base">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
+        <div className="text-xs text-text-muted">
+          {loading ? "正在加载演示文稿…" : `第 ${pageNum} / ${pageCount} 页`}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-40"
+            disabled={loading || pageNum <= 1}
+            onClick={() => changePage(pageNum - 1)}
+            title="上一页"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-40"
+            disabled={loading || pageNum >= pageCount}
+            onClick={() => changePage(pageNum + 1)}
+            title="下一页"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-40"
+            disabled={loading}
+            onClick={() => changeZoom(zoom - 15)}
+            title="缩小"
+          >
+            <ZoomOut className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-40"
+            disabled={loading}
+            onClick={() => changeZoom(zoom + 15)}
+            title="放大"
+          >
+            <ZoomIn className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      <div className="relative min-h-0 flex-1 overflow-auto">
+        {loading ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface-base text-sm text-text-muted">
+            正在加载演示文稿…
+          </div>
+        ) : null}
+        <div className="flex min-h-full items-start justify-center p-4">
+          <div ref={hostRef} className="agx-pptx-preview w-full max-w-5xl" />
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -12015,6 +12015,7 @@ function registerIpc(): void {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xls": "application/vnd.ms-excel",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   };
 
   ipcMain.handle("load-local-file-data-url", async (_event, inputPath: string) => {

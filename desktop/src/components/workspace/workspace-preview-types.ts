@@ -1,4 +1,5 @@
 import { absoluteTaskspacePath } from "../../utils/workspace-file-path";
+import { officePreviewMime } from "./office-preview-kind";
 
 export type WorkspacePreviewKind =
   | "text"
@@ -319,7 +320,7 @@ export async function loadAbsoluteFilePreview(
           path: base,
           absolutePath,
           size: 0,
-          mimeType: "application/octet-stream",
+          mimeType: officePreviewMime(lower),
           message: "Office 预览加载失败时，可在文件管理器中打开。",
         },
       };

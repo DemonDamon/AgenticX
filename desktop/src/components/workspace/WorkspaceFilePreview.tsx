@@ -50,7 +50,9 @@ import {
 import { DocxPreview } from "./DocxPreview";
 import { isHtmlPreviewPath } from "./HtmlPreviewBody";
 import { HtmlPreviewShell } from "./HtmlPreviewShell";
+import { officePreviewKind } from "./office-preview-kind";
 import { PdfPreview } from "./PdfPreview";
+import { PptxPreview } from "./PptxPreview";
 import { PreviewFallback } from "./PreviewFallback";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
 import {
@@ -146,13 +148,6 @@ function previewKindLabel(kind: WorkspacePreview["kind"]): string {
   }
 }
 
-function officePreviewVariant(path: string): "docx" | "xlsx" | "other" {
-  const lower = path.toLowerCase();
-  if (lower.endsWith(".docx") || lower.endsWith(".doc")) return "docx";
-  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return "xlsx";
-  return "other";
-}
-
 function BinaryPlaceholderBody({
   preview,
   onCopy,
@@ -190,7 +185,7 @@ function OfficePreviewBody({
   onRevealInFileManager?: (absolutePath: string) => void;
   revealInFileManagerLabel?: string;
 }) {
-  const variant = officePreviewVariant(preview.path);
+  const variant = officePreviewKind(preview.path);
   if (variant === "docx") {
     return (
       <DocxPreview
@@ -210,6 +205,17 @@ function OfficePreviewBody({
         mimeType={preview.mimeType}
         onCopyPath={onCopy}
         onQuoteSelection={onQuoteSnippet}
+        onRevealInFileManager={onRevealInFileManager}
+        revealInFileManagerLabel={revealInFileManagerLabel}
+      />
+    );
+  }
+  if (variant === "pptx") {
+    return (
+      <PptxPreview
+        absolutePath={preview.absolutePath}
+        mimeType={preview.mimeType}
+        onCopyPath={onCopy}
         onRevealInFileManager={onRevealInFileManager}
         revealInFileManagerLabel={revealInFileManagerLabel}
       />
