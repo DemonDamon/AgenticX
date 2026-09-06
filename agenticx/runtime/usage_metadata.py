@@ -233,3 +233,118 @@ def usage_dict_has_counts(usage: dict[str, int] | None) -> bool:
     if not usage:
         return False
     return any(int(usage.get(key, 0) or 0) > 0 for key in _USAGE_KEYS)
+
+
+def request_usage_for_message(
+    last_round: dict[str, int] | None,
+    turn_total: dict[str, int] | None,
+) -> dict[str, int] | None:
+    """Footer numbers are the last LLM request; turn_* is the billed sum.
+
+    One user turn can contain several tool-loop calls. The message row must
+    show that last call (the current window), not the stacked bill.
+    """
+    last = last_round if usage_dict_has_counts(last_round) else None
+    turn = turn_total if usage_dict_has_counts(turn_total) else None
+    src = last or turn
+    if not src:
+        return None
+    out = {key: max(0, int(src.get(key, 0) or 0)) for key in _USAGE_KEYS}
+    if out["total_tokens"] == 0 and (out["input_tokens"] or out["output_tokens"]):
+        out["total_tokens"] = out["input_tokens"] + out["output_tokens"]
+    bill = turn or src
+    out["turn_input_tokens"] = max(0, int(bill.get("input_tokens", 0) or 0))
+    out["turn_output_tokens"] = max(0, int(bill.get("output_tokens", 0) or 0))
+    out["turn_cached_tokens"] = max(0, int(bill.get("cached_tokens", 0) or 0))
+    turn_total_tokens = max(0, int(bill.get("total_tokens", 0) or 0))
+    if turn_total_tokens == 0:
+        turn_total_tokens = out["turn_input_tokens"] + out["turn_output_tokens"]
+    out["turn_total_tokens"] = turn_total_tokens
+    return out
+
+
+def hydrate_legacy_message_usage(
+    messages: list[dict[str, Any]],
+    events: list[tuple[int, int, int, int]],
+    *,
+    initial_user_ts: int = 0,
+    asst_ts_slack_ms: int = 5000,
+) -> None:
+    """Rewrite pre-split usage rows so the footer is the last request, not the turn sum.
+
+    Old assistant rows stored ``input_tokens`` as the sum of every tool-loop call
+    in that user turn. The ledger still has each call. For rows that lack
+    ``turn_*``, map events in ``(prev_user_ts, assistant_ts]`` and keep the
+    last event as the display counts.
+    """
+    if not events or not messages:
+        return
+    try:
+        last_user_ts = max(0, int(initial_user_ts or 0))
+    except (TypeError, ValueError):
+        last_user_ts = 0
+    slack = max(0, int(asst_ts_slack_ms))
+    ei = 0
+    n_events = len(events)
+    for row in messages:
+        if not isinstance(row, dict):
+            continue
+        role = str(row.get("role") or "")
+        try:
+            ts = int(row.get("timestamp") or 0)
+        except (TypeError, ValueError):
+            ts = 0
+        if role == "user":
+            if ts > 0:
+                last_user_ts = ts
+            while ei < n_events and events[ei][0] <= last_user_ts:
+                ei += 1
+            continue
+        if role != "assistant":
+            continue
+        usage = row.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        try:
+            if int(usage.get("turn_input_tokens") or 0) > 0:
+                continue
+            stored_in = int(usage.get("input_tokens") or 0)
+        except (TypeError, ValueError):
+            continue
+        if stored_in <= 0:
+            continue
+        while ei < n_events and events[ei][0] <= last_user_ts:
+            ei += 1
+        start = ei
+        end = start
+        limit_ts = ts + slack if ts > 0 else 0
+        while end < n_events:
+            ev_ts = events[end][0]
+            if limit_ts and ev_ts > limit_ts:
+                break
+            end += 1
+        window = events[start:end]
+        ei = end
+        if not window:
+            continue
+        last = window[-1]
+        if stored_in <= last[1]:
+            continue
+        try:
+            turn_out = int(usage.get("output_tokens") or 0)
+            turn_cached = int(usage.get("cached_tokens") or 0)
+            turn_total = int(usage.get("total_tokens") or 0)
+        except (TypeError, ValueError):
+            turn_out = 0
+            turn_cached = 0
+            turn_total = 0
+        if turn_total <= 0:
+            turn_total = stored_in + turn_out
+        usage["turn_input_tokens"] = stored_in
+        usage["turn_output_tokens"] = max(0, turn_out)
+        usage["turn_cached_tokens"] = max(0, turn_cached)
+        usage["turn_total_tokens"] = max(0, turn_total)
+        usage["input_tokens"] = last[1]
+        usage["output_tokens"] = last[2]
+        usage["cached_tokens"] = last[3]
+        usage["total_tokens"] = last[1] + last[2]

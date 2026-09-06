@@ -41,4 +41,32 @@ describe("sessionTokensFromMessages", () => {
       lastCached: 4_000,
     });
   });
+
+  it("prefers the turn bill when the footer stores last-request usage", () => {
+    expect(
+      sessionTokensFromMessages([
+        {
+          id: "a1",
+          role: "assistant",
+          content: "ans",
+          usage: {
+            inputTokens: 27111,
+            outputTokens: 345,
+            cachedTokens: 26112,
+            reasoningTokens: 0,
+            totalTokens: 27456,
+            turnInputTokens: 78821,
+            turnOutputTokens: 666,
+            turnCachedTokens: 62848,
+          },
+        },
+      ]),
+    ).toEqual({
+      input: 78821,
+      output: 666,
+      cached: 62848,
+      lastInput: 78821,
+      lastCached: 62848,
+    });
+  });
 });

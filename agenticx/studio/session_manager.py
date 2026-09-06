@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.runtime.usage_metadata import hydrate_legacy_message_usage
+from agenticx.runtime.usage_store import get_usage_store
 from agenticx.runtime.assistant_output import (
     parse_assistant_output,
     sanitize_suggested_questions,
@@ -1634,7 +1636,7 @@ class SessionManager:
     def get_messages(self, session_id: str) -> list[dict]:
         """Return normalized chat messages for session."""
         raw = self._get_raw_messages_list(session_id)
-        return self._normalize_messages(raw)
+        return self._normalize_messages_for_api(session_id, raw)
 
     def _get_raw_messages_list(self, session_id: str) -> list[dict]:
         """Return raw chat_history rows before normalization."""
@@ -1732,7 +1734,12 @@ class SessionManager:
                     last_user_abs_index=last_user,
                 )
                 return {
-                    "messages": self._normalize_messages(window),
+                    "messages": self._normalize_messages_for_api(
+                        session_id,
+                        window,
+                        raw_full=raw_full,
+                        start_index=abs_start,
+                    ),
                     "start_index": abs_start,
                     "total_count": total_count,
                     "has_older": abs_start > 0,
@@ -1773,7 +1780,12 @@ class SessionManager:
             window = raw
 
         return {
-            "messages": self._normalize_messages(window),
+            "messages": self._normalize_messages_for_api(
+                session_id,
+                window,
+                raw_full=raw,
+                start_index=start_index,
+            ),
             "start_index": start_index,
             "total_count": total_count,
             "has_older": start_index > 0,
@@ -2226,7 +2238,9 @@ class SessionManager:
                         self._storage.save_messages(session_id, messages)
                     except Exception:
                         pass
-                session.chat_history = self._normalize_messages(messages)
+                session.chat_history = self._normalize_messages_for_api(
+                    session_id, messages
+                )
         except Exception:
             pass
 
@@ -2582,6 +2596,56 @@ class SessionManager:
             with open(fpath, "r", encoding="utf-8") as fh:
                 session.context_files[fpath] = fh.read()
 
+    @staticmethod
+    def _user_ts_before(raw: list[dict], start_index: int) -> int:
+        start = max(0, int(start_index or 0))
+        for idx in range(start - 1, -1, -1):
+            item = raw[idx]
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("role") or "") != "user":
+                continue
+            try:
+                return int(item.get("timestamp") or 0)
+            except (TypeError, ValueError):
+                return 0
+        return 0
+
+    def _normalize_messages_for_api(
+        self,
+        session_id: str,
+        messages: list[dict],
+        *,
+        raw_full: list[dict] | None = None,
+        start_index: int = 0,
+    ) -> list[dict]:
+        rows = self._normalize_messages(messages)
+        initial_user_ts = 0
+        if start_index > 0 and raw_full:
+            initial_user_ts = self._user_ts_before(raw_full, start_index)
+        self._hydrate_legacy_usage(
+            session_id, rows, initial_user_ts=initial_user_ts
+        )
+        return rows
+
+    def _hydrate_legacy_usage(
+        self,
+        session_id: str,
+        rows: list[dict],
+        *,
+        initial_user_ts: int = 0,
+    ) -> None:
+        sid = str(session_id or "").strip()
+        if not sid or not rows:
+            return
+        try:
+            events = get_usage_store().list_session_events_sync(sid)
+        except Exception:
+            return
+        hydrate_legacy_message_usage(
+            rows, events, initial_user_ts=initial_user_ts
+        )
+
     def _normalize_messages(self, messages: list[dict]) -> list[dict]:
         max_data_url = 8_000_000
         normalized: list[dict] = []
@@ -2620,6 +2684,10 @@ class SessionManager:
                     "cached_tokens",
                     "reasoning_tokens",
                     "total_tokens",
+                    "turn_input_tokens",
+                    "turn_output_tokens",
+                    "turn_cached_tokens",
+                    "turn_total_tokens",
                 ):
                     try:
                         usage_out[usage_key] = max(0, int(raw_usage.get(usage_key, 0) or 0))

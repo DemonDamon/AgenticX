@@ -76,6 +76,7 @@ from agenticx.runtime.usage_metadata import (
     add_usage_dicts,
     empty_usage_dict,
     normalize_stream_usage,
+    request_usage_for_message,
     usage_dict_has_counts,
     usage_metadata_from_llm_response,
 )
@@ -3051,6 +3052,14 @@ class AgentRuntime:
                     hist_usage["total_tokens"] = (
                         hist_usage["input_tokens"] + hist_usage["output_tokens"]
                     )
+                for key in (
+                    "turn_input_tokens",
+                    "turn_output_tokens",
+                    "turn_cached_tokens",
+                    "turn_total_tokens",
+                ):
+                    if int(usage_metadata.get(key, 0) or 0) > 0:
+                        hist_usage[key] = int(usage_metadata.get(key, 0) or 0)
                 if usage_dict_has_counts(hist_usage):
                     hist["usage"] = hist_usage
             _chat_history_append_deduped(session.chat_history, hist)
@@ -3698,6 +3707,17 @@ class AgentRuntime:
             )
 
         turn_usage = empty_usage_dict()
+        last_round_usage = empty_usage_dict()
+
+        def _usage_for_terminal() -> dict[str, Any] | None:
+            row = request_usage_for_message(last_round_usage, turn_usage)
+            if not row:
+                return None
+            out: dict[str, Any] = dict(row)
+            out["model"] = model_name
+            out["provider"] = provider_name
+            return out
+
         for round_idx in range(max(1, int(resume_start_round)), self.max_tool_rounds + 1):
             if await _check_should_stop():
                 yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
@@ -4413,6 +4433,7 @@ class AgentRuntime:
                 turn_usage = add_usage_dicts(turn_usage, _round_usage)
                 self.token_budget.record(_round_usage)
                 if _round_usage:
+                    last_round_usage = dict(_round_usage)
                     usage_snapshot = dict(_round_usage)
 
                     async def _persist_usage_row() -> None:
@@ -5440,33 +5461,28 @@ class AgentRuntime:
                 except Exception:
                     pass
 
-                _um = (
-                    dict(turn_usage)
-                    if usage_dict_has_counts(turn_usage)
-                    else usage_metadata_from_llm_response(response)
-                )
-                _usage_payload: dict[str, Any] | None = None
-                if _um and usage_dict_has_counts(_um):
-                    _usage_payload = {
-                        **{
-                            key: int(_um.get(key, 0) or 0)
-                            for key in (
-                                "input_tokens",
-                                "output_tokens",
-                                "cached_tokens",
-                                "reasoning_tokens",
-                                "total_tokens",
-                            )
-                        },
-                        "model": model_name,
-                        "provider": provider_name,
-                        "cache_mode": latest_cache_telemetry.get("cache_mode", "disabled"),
-                        "cache_breakpoints": int(latest_cache_telemetry.get("cache_breakpoints", 0) or 0),
-                        "cache_eligible_chars": int(latest_cache_telemetry.get("cache_eligible_chars", 0) or 0),
-                        "cache_hit_chars": int(latest_cache_telemetry.get("cache_hit_chars", 0) or 0),
-                        "cache_hit_rate": float(latest_cache_telemetry.get("cache_hit_rate", 0.0) or 0.0),
-                        "cache_saved_tokens_est": int(latest_cache_telemetry.get("cache_saved_tokens_est", 0) or 0),
-                    }
+                _usage_payload = _usage_for_terminal()
+                if _usage_payload is None:
+                    recovered = usage_metadata_from_llm_response(response)
+                    _usage_payload = request_usage_for_message(recovered, recovered)
+                    if _usage_payload is not None:
+                        _usage_payload["model"] = model_name
+                        _usage_payload["provider"] = provider_name
+                if _usage_payload is not None:
+                    _usage_payload.update(
+                        {
+                            "cache_mode": latest_cache_telemetry.get("cache_mode", "disabled"),
+                            "cache_breakpoints": int(latest_cache_telemetry.get("cache_breakpoints", 0) or 0),
+                            "cache_eligible_chars": int(
+                                latest_cache_telemetry.get("cache_eligible_chars", 0) or 0
+                            ),
+                            "cache_hit_chars": int(latest_cache_telemetry.get("cache_hit_chars", 0) or 0),
+                            "cache_hit_rate": float(latest_cache_telemetry.get("cache_hit_rate", 0.0) or 0.0),
+                            "cache_saved_tokens_est": int(
+                                latest_cache_telemetry.get("cache_saved_tokens_est", 0) or 0
+                            ),
+                        }
+                    )
 
                 yield await self._finish_terminal_reply(
                     session,
@@ -5834,7 +5850,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
-                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
+                                usage_metadata=_usage_for_terminal(),
                                 terminal_reason="status_query_budget",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -5882,7 +5898,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
-                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
+                                usage_metadata=_usage_for_terminal(),
                                 terminal_reason="status_query_cooldown",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -5926,7 +5942,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
-                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
+                                usage_metadata=_usage_for_terminal(),
                                 terminal_reason="status_query_repeat",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -5990,7 +6006,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
-                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
+                                usage_metadata=_usage_for_terminal(),
                                 terminal_reason="status_query_throttled",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -6476,7 +6492,7 @@ class AgentRuntime:
                     yield await self._finish_terminal_reply(
                         session,
                         clean_body=summary_text,
-                        usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
+                        usage_metadata=_usage_for_terminal(),
                         terminal_reason="loop_halt",
                         agent_id=agent_id,
                         is_system_trigger=_is_system_trigger,

@@ -146,6 +146,35 @@ class UsageStore:
         except Exception as exc:
             _log.warning("usage_store.record_async failed: %s", exc)
 
+    def list_session_events_sync(
+        self, session_id: str
+    ) -> list[tuple[int, int, int, int]]:
+        """Return (ts_ms, input, output, cached) for one session, oldest first."""
+        sid = (session_id or "").strip()
+        if not sid:
+            return []
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT ts_ms, input_tokens, output_tokens, cached_tokens
+                    FROM usage_events
+                    WHERE session_id = ?
+                    ORDER BY ts_ms ASC, id ASC
+                    """,
+                    (sid,),
+                ).fetchall()
+            finally:
+                conn.close()
+        out: list[tuple[int, int, int, int]] = []
+        for row in rows:
+            try:
+                out.append((int(row[0]), int(row[1]), int(row[2]), int(row[3])))
+            except (TypeError, ValueError):
+                continue
+        return out
+
     def set_session_alive_window(
         self,
         session_id: str,

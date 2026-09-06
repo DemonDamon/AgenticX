@@ -243,6 +243,9 @@ export type MessageUsage = {
   cachedTokens: number;
   reasoningTokens: number;
   totalTokens: number;
+  turnInputTokens?: number;
+  turnOutputTokens?: number;
+  turnCachedTokens?: number;
 };
 
 export type ModelSelection = "manual" | "auto";

@@ -281,7 +281,7 @@ import {
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
-import { parseMessageUsage } from "../utils/message-turn-meta";
+import { parseMessageUsage, sessionAccumulateFromUsageEvent } from "../utils/message-turn-meta";
 import { sessionTokensFromMessages } from "../utils/session-tokens-from-messages";
 import {
   assistantVisibleBodyForUi,
@@ -11607,11 +11607,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "token_usage") {
               const parsed = parseMessageUsage(payload.data);
-              const inp = parsed?.inputTokens ?? 0;
-              const out = parsed?.outputTokens ?? 0;
-              const cached = parsed?.cachedTokens ?? 0;
-              if (inp > 0 || out > 0 || cached > 0) {
-                useAppStore.getState().accumulatePaneTokens(pane.id, inp, out, cached);
+              const billed = parsed
+                ? sessionAccumulateFromUsageEvent(payload.data, parsed)
+                : { input: 0, output: 0, cached: 0 };
+              if (billed.input > 0 || billed.output > 0 || billed.cached > 0) {
+                useAppStore.getState().accumulatePaneTokens(
+                  pane.id,
+                  billed.input,
+                  billed.output,
+                  billed.cached,
+                );
               }
               if (parsed) {
                 pendingTurnUsage = parsed;
