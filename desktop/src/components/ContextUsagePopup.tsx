@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { useAppStore } from "../store";
-import { formatHitPercent } from "../utils/cache-hit";
 import {
   buildContextUsageRefreshKey,
   contextUsageMessageSignature,
+  formatCategoryTokens,
+  formatOccupancyFullLabel,
+  formatOccupancyTokenPair,
   shouldDropCachedOccupancy,
   shouldFetchContextUsage,
 } from "../utils/context-usage-refresh";
@@ -45,29 +47,42 @@ function parseCache(raw: unknown): SessionCacheUsage | undefined {
 
 const CATEGORY_ORDER = [
   "system_prompt",
-  "tools_and_subagents",
-  "messages",
-  "connectors_and_mcp",
+  "tool_definitions",
   "skills",
+  "connectors_and_mcp",
+  "subagents",
+  "summarized_conversation",
+  "messages",
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
   system_prompt: "系统提示词",
-  tools_and_subagents: "工具及子智能体",
-  messages: "对话消息",
-  connectors_and_mcp: "连接器及MCP",
+  tool_definitions: "工具定义",
   skills: "技能",
+  connectors_and_mcp: "连接器及 MCP",
+  subagents: "子智能体",
+  summarized_conversation: "会话摘要",
+  messages: "对话消息",
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  system_prompt: "bg-emerald-500",
-  tools_and_subagents: "bg-amber-500",
-  messages: "bg-indigo-500",
-  connectors_and_mcp: "bg-cyan-500",
-  skills: "bg-violet-500",
+  system_prompt: "bg-neutral-400",
+  tool_definitions: "bg-violet-500",
+  skills: "bg-amber-400",
+  connectors_and_mcp: "bg-purple-400",
+  subagents: "bg-sky-500",
+  summarized_conversation: "bg-rose-400",
+  messages: "bg-indigo-700",
 };
 
-const CONTEXT_PANEL_WIDTH = 300;
+function categoryTokens(categories: Record<string, number>, key: string): number {
+  if (key === "tool_definitions" && !Object.hasOwn(categories, "tool_definitions")) {
+    return Number(categories.tools_and_subagents ?? 0);
+  }
+  return Number(categories[key] ?? 0);
+}
+
+const CONTEXT_PANEL_WIDTH = 248;
 const CONTEXT_PANEL_GUTTER = 12;
 const USAGE_CACHE_MAX = 24;
 const usageBySession = new Map<string, ContextUsage>();
@@ -94,11 +109,6 @@ function writeUsageCache(row: ContextUsage): void {
   }
 }
 
-function formatK(n: number): string {
-  if (!Number.isFinite(n)) return "0";
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
-}
-
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(100, Math.max(0, value));
@@ -111,56 +121,28 @@ function ringDash(radius: number, percent: number): string {
   return `${filled} ${Math.max(0, c - filled)}`;
 }
 
-function UsageDualRingIcon({
-  occupancy,
-  hit,
-}: {
-  occupancy: number;
-  hit: number | null;
-}) {
-  const outerR = 9;
-  const innerR = 5.35;
-  const showOuter = occupancy > 0.05;
-  const showInner = hit !== null && hit > 0.05;
+function UsageOccupancyIcon({ occupancy }: { occupancy: number }) {
+  const radius = 7.25;
+  const show = occupancy > 0.05;
   return (
     <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px] shrink-0" aria-hidden>
       <circle
         cx="12"
         cy="12"
-        r={outerR}
+        r={radius}
         stroke="currentColor"
-        strokeWidth="1.45"
+        strokeWidth="1.7"
         opacity={0.22}
       />
-      {showOuter ? (
+      {show ? (
         <circle
           cx="12"
           cy="12"
-          r={outerR}
+          r={radius}
           stroke="currentColor"
-          strokeWidth="1.65"
+          strokeWidth="1.85"
           strokeLinecap="round"
-          strokeDasharray={ringDash(outerR, occupancy)}
-          transform="rotate(-90 12 12)"
-        />
-      ) : null}
-      <circle
-        cx="12"
-        cy="12"
-        r={innerR}
-        className="stroke-emerald-400 [html[data-theme=light]_&]:stroke-emerald-500"
-        strokeWidth="2.35"
-        opacity={0.22}
-      />
-      {showInner ? (
-        <circle
-          cx="12"
-          cy="12"
-          r={innerR}
-          className="stroke-emerald-400 [html[data-theme=light]_&]:stroke-emerald-500"
-          strokeWidth="2.35"
-          strokeLinecap="round"
-          strokeDasharray={ringDash(innerR, hit ?? 0)}
+          strokeDasharray={ringDash(radius, occupancy)}
           transform="rotate(-90 12 12)"
         />
       ) : null}
@@ -341,46 +323,21 @@ export function ContextUsageButton({
     if (open && sessionId) refreshPanelPosition();
   }, [open, refreshPanelPosition, sessionId]);
 
-  const sessionTokens = useAppStore((s) => s.panes.find((p) => p.id === paneId)?.sessionTokens);
   const visibleUsage = usage && usage.fetchedForSessionId === sessionId ? usage : null;
-  // The panel reports the whole session; the per-turn number lives on the
-  // message bubble. The ledger (sqlite) wins when it has rows, since it also
-  // covers turns produced before this pane was mounted.
-  const ledgerInput = visibleUsage?.cache?.session_input_tokens ?? 0;
-  const useLedger = ledgerInput > 0;
-  const sessionInput = useLedger ? ledgerInput : sessionTokens?.input ?? 0;
-  const sessionOutput = useLedger
-    ? visibleUsage?.cache?.session_output_tokens ?? 0
-    : sessionTokens?.output ?? 0;
-  const sessionCached = useLedger
-    ? visibleUsage?.cache?.session_cached_tokens ?? 0
-    : sessionTokens?.cached ?? 0;
-  const ledgerTotal = useLedger ? visibleUsage?.cache?.session_total_tokens ?? 0 : 0;
-  const sessionTotal = ledgerTotal > 0 ? ledgerTotal : sessionInput + sessionOutput;
-  const cardHit = formatHitPercent(sessionCached, sessionInput);
-
   const percent = visibleUsage?.percent ?? 0;
+  const occupancyLine = visibleUsage
+    ? `${formatOccupancyFullLabel(visibleUsage.percent)} · ${formatOccupancyTokenPair(visibleUsage.used_tokens, visibleUsage.max_tokens)}`
+    : "上下文用量";
   const hoverLabel = useMemo(() => {
     if (open) return "";
-    if (!sessionId) return "下一请求占用（会话未就绪）";
-    if (!visibleUsage) return "下一请求占用";
-    const occupancy = `${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)} 下一请求占用`;
-    return cardHit !== null ? `${occupancy} · 会话命中 ${cardHit}%` : occupancy;
-  }, [cardHit, open, sessionId, visibleUsage]);
+    if (!sessionId) return "上下文用量（会话未就绪）";
+    return occupancyLine;
+  }, [occupancyLine, open, sessionId]);
 
   const ariaLabel = useMemo(() => {
-    if (!sessionId) return "下一请求占用（会话未就绪）";
-    if (!visibleUsage) return "下一请求占用";
-    const occupancy = `下一请求占用 ${visibleUsage.percent}% · ${formatK(visibleUsage.used_tokens)} / ${formatK(visibleUsage.max_tokens)}`;
-    return cardHit !== null ? `${occupancy} · 会话命中 ${cardHit}%` : occupancy;
-  }, [cardHit, sessionId, visibleUsage]);
-
-  const hitColor =
-    cardHit === null
-      ? "text-text-faint"
-      : cardHit > 0
-        ? "text-emerald-400 [html[data-theme=light]_&]:text-emerald-600"
-        : "text-text-muted";
+    if (!sessionId) return "上下文用量（会话未就绪）";
+    return occupancyLine;
+  }, [occupancyLine, sessionId]);
 
   const trigger = (
     <button
@@ -395,7 +352,7 @@ export function ContextUsageButton({
       aria-expanded={open}
       onClick={toggleOpen}
     >
-      <UsageDualRingIcon occupancy={percent} hit={cardHit} />
+      <UsageOccupancyIcon occupancy={percent} />
     </button>
   );
 
@@ -406,11 +363,11 @@ export function ContextUsageButton({
         ? createPortal(
             <div
               ref={panelRef}
-              className="fixed z-[100] max-h-[calc(100vh-24px)] max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border border-border bg-surface-panel p-4 text-text-primary shadow-lg backdrop-blur-xl"
+              className="fixed z-[100] max-h-[calc(100vh-24px)] max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border border-border bg-surface-panel px-3.5 py-3 text-text-primary shadow-lg backdrop-blur-xl"
               style={{ left: panelPos.left, bottom: panelPos.bottom, width: panelPos.width }}
             >
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-[13px] font-medium text-text-strong">会话用量</span>
+              <div className="mb-2.5 flex items-center justify-between">
+                <span className="text-[13px] font-medium text-text-strong">上下文用量</span>
                 <button
                   type="button"
                   className="flex h-5 w-5 items-center justify-center rounded text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
@@ -428,46 +385,18 @@ export function ContextUsageButton({
                 <div className="py-2 text-[12px] text-text-faint">加载中…</div>
               ) : (
                 <>
-                  <div className="mb-3 grid grid-cols-2 gap-2">
-                    <div className="min-w-0 rounded-xl bg-[var(--surface-card-strong)] px-2.5 py-2 [html[data-theme=light]_&]:bg-zinc-100">
-                      <div className="text-[11px] text-text-faint">会话累计</div>
-                      <div className="mt-0.5 text-2xl font-semibold tabular-nums leading-none text-text-strong">
-                        {formatK(sessionTotal)}
-                      </div>
-                      <div className="mt-1.5 text-[11px] leading-snug text-text-faint">
-                        ↑ {formatK(sessionInput)}
-                        <br />↓ {formatK(sessionOutput)}
-                      </div>
-                    </div>
-                    <div className="min-w-0 rounded-xl bg-emerald-500/15 px-2.5 py-2 [html[data-theme=light]_&]:bg-emerald-50">
-                      <div className="text-[11px] text-emerald-400 [html[data-theme=light]_&]:text-emerald-600">
-                        会话缓存命中
-                      </div>
-                      <div className={`mt-0.5 text-2xl font-semibold tabular-nums leading-none ${hitColor}`}>
-                        {cardHit === null ? "—" : `${cardHit}%`}
-                      </div>
-                      {cardHit === null ? (
-                        <div className="mt-1.5 text-[11px] leading-snug text-text-faint">尚未返回用量</div>
-                      ) : (
-                        <div className="mt-1.5 text-[11px] leading-snug text-emerald-400/75 [html[data-theme=light]_&]:text-emerald-700/70">
-                          {formatK(sessionCached)} cached
-                          <br />
-                          / {formatK(sessionInput)} input
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mb-1.5 flex items-baseline justify-between">
-                    <span className="text-[12px] text-text-muted">下一请求占用</span>
-                    <span className="text-[11px] tabular-nums text-text-faint">
-                      {visibleUsage.percent}% · {formatK(visibleUsage.used_tokens)} /{" "}
-                      {formatK(visibleUsage.max_tokens)}
+                  <div className="mb-2 flex items-baseline justify-between gap-3">
+                    <span className="text-[13px] font-medium tabular-nums text-text-strong">
+                      {formatOccupancyFullLabel(visibleUsage.percent)}
+                    </span>
+                    <span className="text-[13px] tabular-nums text-text-muted">
+                      {formatOccupancyTokenPair(visibleUsage.used_tokens, visibleUsage.max_tokens)}
                     </span>
                   </div>
-                  <div className="mb-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
+                  <div className="mb-3 flex h-1 w-full overflow-hidden rounded-full bg-surface-hover">
                     {visibleUsage.max_tokens > 0
                       ? CATEGORY_ORDER.map((key) => {
-                          const value = visibleUsage.categories[key] ?? 0;
+                          const value = categoryTokens(visibleUsage.categories, key);
                           if (value <= 0) return null;
                           const widthPct = (value / visibleUsage.max_tokens) * 100;
                           return (
@@ -480,18 +409,18 @@ export function ContextUsageButton({
                         })
                       : null}
                   </div>
-                  <p className="mb-3 text-[11px] leading-snug text-text-faint">
-                    横条是下次会带上的内容 / 模型窗口，不是上面的会话累计。累计是各轮账单相加，可以超过
-                    {formatK(visibleUsage.max_tokens)}。
-                  </p>
-                  <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-col gap-2">
                     {CATEGORY_ORDER.map((key) => (
-                      <div key={key} className="flex items-center justify-between text-[12px]">
-                        <div className="flex items-center gap-2">
-                          <span className={`h-2 w-2 shrink-0 rounded-full ${CATEGORY_COLORS[key]}`} />
-                          <span className="text-text-muted">{CATEGORY_LABELS[key]}</span>
+                      <div key={key} className="flex items-center justify-between text-[13px]">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className={`h-2.5 w-2.5 shrink-0 rounded-[3px] ${CATEGORY_COLORS[key]}`}
+                          />
+                          <span className="truncate text-text-muted">{CATEGORY_LABELS[key]}</span>
                         </div>
-                        <span className="text-text-faint">~{formatK(visibleUsage.categories[key] ?? 0)}</span>
+                        <span className="ml-3 tabular-nums text-text-faint">
+                          {formatCategoryTokens(categoryTokens(visibleUsage.categories, key))}
+                        </span>
                       </div>
                     ))}
                   </div>

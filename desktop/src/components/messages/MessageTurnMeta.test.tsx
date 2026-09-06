@@ -20,9 +20,12 @@ describe("MessageTurnMeta", () => {
     expect(html).toContain("本轮消耗");
     expect(html).toContain("28.3K");
     expect(html).toContain("369");
-    expect(html).toContain("94.0%");
+    expect(html).toContain("缓存 94.0%");
     expect(html).toContain("本轮缓存命中");
     expect(html).toContain("data-turn-cache-hit");
+    expect(html).toContain("leading-5");
+    expect(html).toContain("overflow-x-hidden");
+    expect(html).toContain("data-turn-model-chip");
     expect(html).toContain("kimi-k2.6");
     expect(html).toContain('data-turn-usage-arrow="in"');
     expect(html).toContain('data-turn-usage-arrow="out"');

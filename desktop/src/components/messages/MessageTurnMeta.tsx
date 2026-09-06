@@ -4,12 +4,15 @@ import type { MessageUsage, ModelSelection } from "../../store";
 import { normalizeBareModelId } from "../../utils/model-display";
 import {
   formatTurnCacheHit,
+  formatTurnCacheHitLabel,
+  formatTurnCacheHitTip,
   formatTurnModelLabel,
   formatTurnUsageSplit,
   formatTurnUsageTitle,
   TURN_USAGE_MISSING_LABEL,
   TURN_USAGE_MISSING_TITLE,
 } from "../../utils/message-turn-meta";
+import { HoverTip } from "../ds/HoverTip";
 
 function TurnMetaRule({
   kind,
@@ -62,7 +65,7 @@ export function MessageTurnMeta({
   return (
     <span
       data-turn-meta=""
-      className="inline-flex h-5 min-w-0 items-center select-none"
+      className="inline-flex min-h-5 min-w-0 items-center select-none"
       title={
         usage
           ? formatTurnUsageTitle(usage)
@@ -89,13 +92,20 @@ export function MessageTurnMeta({
             <span>{usageSplit.output}</span>
           </span>
           {cacheHit ? (
-            <span
-              data-turn-cache-hit=""
-              className="tabular-nums text-emerald-400 [html[data-theme=light]_&]:text-emerald-600"
+            <HoverTip
+              label={formatTurnCacheHitTip(cacheHit)}
+              inline
+              tooltipAlign="end"
+              className="inline-flex items-center"
             >
-              <span className="sr-only">本轮缓存命中 </span>
-              {cacheHit.percent.toFixed(1)}%
-            </span>
+              <span
+                data-turn-cache-hit=""
+                className="tabular-nums text-emerald-400 [html[data-theme=light]_&]:text-emerald-600"
+              >
+                <span className="sr-only">本轮缓存命中 </span>
+                {formatTurnCacheHitLabel(cacheHit)}
+              </span>
+            </HoverTip>
           ) : null}
         </span>
       ) : null}
@@ -103,11 +113,13 @@ export function MessageTurnMeta({
       {modelLabel ? (
         <span
           data-turn-model-chip=""
-          className="inline-flex h-5 min-w-0 max-w-[13rem] items-center gap-1 truncate rounded-md bg-surface-card-strong pr-1 text-[13px] leading-none text-text-subtle"
+          className="inline-flex min-h-5 min-w-0 max-w-[13rem] items-center gap-1 rounded-md bg-surface-card-strong px-1 text-[13px] leading-5 text-text-subtle"
           title={modelLabel}
         >
           {isAuto ? <span className="shrink-0 text-text-faint">auto</span> : null}
-          <span className="truncate">{bareModel}</span>
+          <span className="min-w-0 overflow-x-hidden text-ellipsis whitespace-nowrap leading-5">
+            {bareModel}
+          </span>
         </span>
       ) : null}
     </span>

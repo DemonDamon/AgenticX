@@ -12,6 +12,7 @@ from typing import Any
 
 from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio_skill import get_all_skill_summaries
+from agenticx.runtime.compactor import ContextCompactor
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
 from agenticx.runtime.model_context_window import resolve_context_window
 from agenticx.runtime.prompts.current_time import build_current_time_rules_block
@@ -145,6 +146,58 @@ def _skill_summaries(bound_avatar_id: str | None) -> list:
     return rows
 
 
+def _bind_team_manager_for_estimate(managed: Any, session: Any) -> None:
+    """Reuse the live team manager the chat path already attached."""
+    if getattr(session, "_team_manager", None) is not None:
+        return
+    team_manager = getattr(managed, "team_manager", None)
+    if team_manager is not None:
+        setattr(session, "_team_manager", team_manager)
+
+
+def _subagent_fingerprint(managed: Any, session: Any) -> tuple[Any, ...]:
+    team_manager = getattr(session, "_team_manager", None) or getattr(
+        managed, "team_manager", None
+    )
+    count = 0
+    last = ""
+    if team_manager is not None:
+        try:
+            rows = (team_manager.get_status() or {}).get("subagents") or []
+            count = len(rows)
+            if rows:
+                last_row = rows[-1] if isinstance(rows[-1], dict) else {}
+                last = f"{last_row.get('agent_id', '')}:{last_row.get('status', '')}"
+        except Exception:
+            pass
+    scratch = getattr(session, "scratchpad", None) or {}
+    scratch_n = 0
+    if isinstance(scratch, dict):
+        scratch_n = sum(1 for key in scratch if str(key).startswith("subagent_result::"))
+    return (count, last, scratch_n)
+
+
+def _summary_fingerprint(session: Any) -> tuple[Any, ...]:
+    msgs = getattr(session, "agent_messages", None) or []
+    has_compact = False
+    compact_len = 0
+    inherited = False
+    if msgs:
+        first = msgs[0]
+        if isinstance(first, dict):
+            content = str(first.get("content") or "")
+            if "[compacted]" in content:
+                has_compact = True
+                compact_len = min(len(content), 160)
+        for msg in msgs:
+            if not isinstance(msg, dict):
+                continue
+            if "[context_inherited]" in str(msg.get("content") or ""):
+                inherited = True
+                break
+    return (has_compact, compact_len, inherited)
+
+
 def _occupancy_fingerprint(
     managed: Any,
     *,
@@ -178,6 +231,8 @@ def _occupancy_fingerprint(
         avatar_key,
         group_ids,
         str(getattr(session, "kb_retrieval_mode", "") or ""),
+        *_subagent_fingerprint(managed, session),
+        *_summary_fingerprint(session),
     )
 
 
@@ -251,7 +306,7 @@ def estimate_session_context_usage(
     model_name: str = "",
     session_id: str = "",
 ) -> dict:
-    """Read-only estimate of context usage broken down into 5 categories.
+    """Read-only estimate of context usage broken down by window category.
 
     Session switches must stay cheap: do not rebuild the live system prompt
     (that path scans skills and runs hybrid memory recall). Categories come
@@ -259,6 +314,7 @@ def estimate_session_context_usage(
     cached in-process.
     """
     session = managed.studio_session
+    _bind_team_manager_for_estimate(managed, session)
     bound_avatar_id = str(getattr(session, "bound_avatar_id", "") or "").strip() or None
     if not isinstance(avatar_context, dict):
         avatar_context = None
@@ -287,7 +343,7 @@ def estimate_session_context_usage(
     subagents_tokens = _text_tokens(_safe_block(_build_active_subagents_context, session))
     context_files_tokens = _text_tokens(_safe_block(_build_context_files_block, session))
     todo_tokens = _text_tokens(_safe_block(_build_todo_context, session))
-    summary_tokens = _text_tokens(_safe_block(_build_session_summary_context, session))
+    inherit_summary_tokens = _text_tokens(_safe_block(_build_session_summary_context, session))
     taskspaces = getattr(managed, "taskspaces", None) or []
     taskspace_tokens = _text_tokens(_safe_block(_build_taskspaces_context, taskspaces))
     connector_tokens = _text_tokens(_safe_block(_build_native_connectors_context))
@@ -324,7 +380,7 @@ def estimate_session_context_usage(
         _STATIC_DUTY_TOKENS
         + workspace_tokens
         + todo_tokens
-        + summary_tokens
+        + inherit_summary_tokens
         + taskspace_tokens
         + connector_tokens
         + avatars_tokens
@@ -360,10 +416,14 @@ def estimate_session_context_usage(
 
     # Estimate from the model-facing history (post-compaction agent_messages),
     # not the full UI transcript (chat_history), so the chip tracks what the
-    # next request would actually send and drops after compaction.
+    # next request would actually send and drops after compaction. The
+    # ``[compacted]`` prefix is the in-window conversation summary and must
+    # not stay lumped into ``messages``.
     agent_messages = getattr(session, "agent_messages", None) or []
+    compact_block, tail_messages = ContextCompactor._split_compacted_messages(agent_messages)
+    compact_tokens = _message_tokens_for_occupancy(compact_block) if compact_block else 0
     messages_tokens = 0
-    for item in agent_messages:
+    for item in tail_messages:
         messages_tokens += _message_tokens_for_occupancy(item)
 
     hub = getattr(session, "mcp_hub", None)
@@ -378,11 +438,13 @@ def estimate_session_context_usage(
             mcp_tool_tokens = 0
 
     categories = {
-        "system_prompt": system_tokens,
-        "tools_and_subagents": tools_tokens + subagents_tokens,
-        "messages": messages_tokens + context_files_tokens,
-        "connectors_and_mcp": mcp_tokens + mcp_tool_tokens,
+        "system_prompt": max(0, system_tokens - inherit_summary_tokens),
+        "tool_definitions": tools_tokens,
         "skills": skills_tokens,
+        "connectors_and_mcp": mcp_tokens + mcp_tool_tokens,
+        "subagents": subagents_tokens,
+        "summarized_conversation": inherit_summary_tokens + compact_tokens,
+        "messages": messages_tokens + context_files_tokens,
     }
     if sid:
         with _OCCUPANCY_LOCK:

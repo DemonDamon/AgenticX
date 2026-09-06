@@ -18,7 +18,19 @@ export function parseMessageUsage(raw: unknown): MessageUsage | undefined {
   if (inputTokens <= 0 && outputTokens <= 0 && totalTokens <= 0 && cachedTokens <= 0) {
     return undefined;
   }
-  return { inputTokens, outputTokens, cachedTokens, reasoningTokens, totalTokens };
+  const turnInputTokens = n(o.turn_input_tokens ?? o.turnInputTokens);
+  const turnOutputTokens = n(o.turn_output_tokens ?? o.turnOutputTokens);
+  const turnCachedTokens = n(o.turn_cached_tokens ?? o.turnCachedTokens);
+  return {
+    inputTokens,
+    outputTokens,
+    cachedTokens,
+    reasoningTokens,
+    totalTokens,
+    ...(turnInputTokens > 0 || turnOutputTokens > 0 || turnCachedTokens > 0
+      ? { turnInputTokens, turnOutputTokens, turnCachedTokens }
+      : {}),
+  };
 }
 
 export function formatTurnUsageCount(usage: MessageUsage): string {
@@ -65,6 +77,18 @@ export function formatTurnCacheHit(
   };
 }
 
+export function formatTurnCacheHitLabel(hit: { percent: number }): string {
+  return `缓存 ${hit.percent.toFixed(1)}%`;
+}
+
+export function formatTurnCacheHitTip(hit: {
+  percent: number;
+  cached: string;
+  input: string;
+}): string {
+  return `本轮缓存命中 ${hit.percent.toFixed(1)}%（${hit.cached} / ${hit.input}）。越高说明重复上下文越多，不是窗口占用。`;
+}
+
 /**
  * A finished turn that carries a model but no usage means the provider never
  * sent the trailing usage chunk — typically an aborted stream. The prompt was
@@ -77,7 +101,7 @@ export const TURN_USAGE_MISSING_TITLE =
 
 export function formatTurnUsageTitle(usage: MessageUsage): string {
   const parts = [
-    `本轮输入 ${usage.inputTokens.toLocaleString("en-US")}（含重发的上下文）`,
+    `本次请求输入 ${usage.inputTokens.toLocaleString("en-US")}`,
     `输出 ${usage.outputTokens.toLocaleString("en-US")}`,
   ];
   if (usage.cachedTokens > 0) {
@@ -85,9 +109,32 @@ export function formatTurnUsageTitle(usage: MessageUsage): string {
   }
   const hit = formatTurnCacheHit(usage);
   if (hit) {
-    parts.push(`本轮命中 ${hit.percent.toFixed(1)}%（${hit.cached} / ${hit.input}）`);
+    parts.push(`命中 ${hit.percent.toFixed(1)}%（${hit.cached} / ${hit.input}）`);
   }
   return parts.join(" · ");
+}
+
+/** Pane session chip still bills the whole tool loop; footer uses last request. */
+export function sessionAccumulateFromUsageEvent(
+  raw: unknown,
+  parsed: MessageUsage,
+): { input: number; output: number; cached: number } {
+  const row = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const turnIn = Number(row.turn_input_tokens ?? 0);
+  const turnOut = Number(row.turn_output_tokens ?? 0);
+  const turnCached = Number(row.turn_cached_tokens ?? 0);
+  if (turnIn > 0 || turnOut > 0 || turnCached > 0) {
+    return {
+      input: Number.isFinite(turnIn) ? Math.max(0, Math.trunc(turnIn)) : 0,
+      output: Number.isFinite(turnOut) ? Math.max(0, Math.trunc(turnOut)) : 0,
+      cached: Number.isFinite(turnCached) ? Math.max(0, Math.trunc(turnCached)) : 0,
+    };
+  }
+  return {
+    input: parsed.inputTokens,
+    output: parsed.outputTokens,
+    cached: parsed.cachedTokens,
+  };
 }
 
 export function formatTurnModelLabel(
