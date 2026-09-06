@@ -1651,7 +1651,7 @@ export function WorkspaceFilePreview({
         ) : null}
         <div
           className={`preview-scrollbar min-h-0 flex-1 bg-surface-base ${
-            isHtmlFile && viewMode === "preview"
+            preview.kind === "pdf" || (isHtmlFile && viewMode === "preview")
               ? "overflow-hidden"
               : "overflow-auto"
           }`}

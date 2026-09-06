@@ -944,6 +944,18 @@ input[type="radio"] {
   max-width: 100%;
 }
 
+.agx-pdf-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.agx-pdf-preview canvas {
+  max-width: 100%;
+  height: auto;
+}
+
 /* Empty-state composer lift: flex-grow is animatable; keep the spacer mounted. */
 .agx-composer-lift-spacer {
   flex-basis: 0;
