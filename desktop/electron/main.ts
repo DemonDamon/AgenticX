@@ -10,6 +10,8 @@ import {
   powerSaveBlocker,
   screen,
   session,
+  net as electronNet,
+  protocol,
   shell,
   Tray
 } from "electron";
@@ -93,6 +95,18 @@ import {
 } from "./session-messages-disk";
 import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import {
+  previewLimitExceededMessage,
+  previewMaxBytesForHost,
+} from "./preview-file-limit";
+import {
+  LOCAL_MEDIA_SCHEME,
+  LOCAL_MEDIA_SCHEME_PRIVILEGES,
+  buildLocalMediaUrl,
+  localVideoMime,
+  parseLocalMediaPath,
+  resolveAllowedLocalVideoFile,
+} from "./local-media-protocol";
+import {
   applySessionWorkspaceCopy,
   copySourceIntoWorkspace,
   createWorkspaceLink,
@@ -133,6 +147,8 @@ import {
   readBodyWithLimit,
   wecomNpmPlatformPackage,
 } from "./native-connectors-core";
+
+protocol.registerSchemesAsPrivileged([...LOCAL_MEDIA_SCHEME_PRIVILEGES]);
 
 /** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
 function ccBridgeUrlIsLoopback(urlStr: string): boolean {
@@ -12009,7 +12025,6 @@ function registerIpc(): void {
     },
   );
 
-  const PREVIEW_MAX_BYTES = 25 * 1024 * 1024;
   const PREVIEW_FILE_MIME_BY_EXT: Record<string, string> = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -12029,8 +12044,9 @@ function registerIpc(): void {
       if (stat.isDirectory()) {
         return { ok: false, error: "path is a directory" };
       }
-      if (stat.size > PREVIEW_MAX_BYTES) {
-        return { ok: false, error: `file exceeds preview limit (${PREVIEW_MAX_BYTES} bytes)` };
+      const previewMaxBytes = previewMaxBytesForHost();
+      if (stat.size > previewMaxBytes) {
+        return { ok: false, error: previewLimitExceededMessage(previewMaxBytes) };
       }
       const ext = path.extname(normalized).toLowerCase();
       const mime = PREVIEW_FILE_MIME_BY_EXT[ext];
@@ -12043,6 +12059,31 @@ function registerIpc(): void {
         dataUrl: `data:${mime};base64,${buf.toString("base64")}`,
         mime,
         size: stat.size,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("resolve-local-media-url", async (_event, inputPath: string) => {
+    try {
+      const resolved = resolveAllowedLocalVideoFile(String(inputPath || ""), {
+        normalizePath: normalizeLocalFsPath,
+        isFile: (absolutePath) => {
+          try {
+            return fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile();
+          } catch {
+            return false;
+          }
+        },
+      });
+      if (!resolved) {
+        return { ok: false, error: "video preview not allowed" };
+      }
+      return {
+        ok: true,
+        url: buildLocalMediaUrl(resolved),
+        mime: localVideoMime(resolved),
       };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -12330,6 +12371,22 @@ if (!gotTheLock) {
 
   app.whenReady().then(async () => {
     try {
+      protocol.handle(LOCAL_MEDIA_SCHEME, (request) => {
+        const resolved = resolveAllowedLocalVideoFile(parseLocalMediaPath(request.url), {
+          normalizePath: normalizeLocalFsPath,
+          isFile: (absolutePath) => {
+            try {
+              return fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile();
+            } catch {
+              return false;
+            }
+          },
+        });
+        if (!resolved) {
+          return new Response("forbidden", { status: 403 });
+        }
+        return electronNet.fetch(pathToFileURL(resolved).href);
+      });
       logProxyConfig();
       if (process.platform === "win32" || process.platform === "linux") {
         Menu.setApplicationMenu(null);

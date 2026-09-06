@@ -50,6 +50,16 @@ def test_classify_pdf(tmp_path: Path) -> None:
     assert info["preview_supported"] is True
 
 
+def test_classify_mp4_as_video(tmp_path: Path) -> None:
+    file_path = tmp_path / "clip.mp4"
+    file_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    info = classify_taskspace_file(file_path)
+    assert info["preview_kind"] == "video"
+    assert info["is_binary"] is True
+    assert info["preview_supported"] is True
+    assert info["mime_type"] == "video/mp4"
+
+
 def test_classify_xlsx_as_office(tmp_path: Path) -> None:
     file_path = tmp_path / "sheet.xlsx"
     file_path.write_bytes(b"PK\x03\x04" + b"\x00" * 32)

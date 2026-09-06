@@ -401,6 +401,7 @@ _PREVIEW_KIND_CODE = "code"
 _PREVIEW_KIND_IMAGE = "image"
 _PREVIEW_KIND_PDF = "pdf"
 _PREVIEW_KIND_OFFICE = "office"
+_PREVIEW_KIND_VIDEO = "video"
 _PREVIEW_KIND_BINARY = "binary"
 
 _MARKDOWN_EXTS = frozenset({".md", ".markdown", ".mdx", ".mmd"})
@@ -427,6 +428,7 @@ _CODE_EXTS = frozenset(
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico"})
 _PDF_EXTS = frozenset({".pdf"})
 _OFFICE_EXTS = frozenset({".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"})
+_VIDEO_EXTS = frozenset({".mp4", ".m4v", ".mov", ".webm"})
 
 _MIME_BY_EXT: dict[str, str] = {
     ".md": "text/markdown",
@@ -463,6 +465,10 @@ _MIME_BY_EXT: dict[str, str] = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".ppt": "application/vnd.ms-powerpoint",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
 }
 
 
@@ -488,6 +494,8 @@ def _guess_preview_kind(path: Path, mime_type: str) -> str:
         return _PREVIEW_KIND_PDF
     if ext in _OFFICE_EXTS:
         return _PREVIEW_KIND_OFFICE
+    if ext in _VIDEO_EXTS:
+        return _PREVIEW_KIND_VIDEO
     if mime_type.startswith("text/"):
         return _PREVIEW_KIND_TEXT
     if mime_type in ("application/json", "application/xml", "application/javascript"):
@@ -504,7 +512,7 @@ def classify_taskspace_file(path: Path) -> dict[str, Any]:
     mime_type = _guess_preview_mime(path)
     preview_kind = _guess_preview_kind(path, mime_type)
     is_binary = not _is_textual_preview_kind(preview_kind)
-    # Desktop WorkspaceFilePreview renders text/image plus PDF/Office (pdf.js / docx).
+    # Desktop WorkspaceFilePreview renders text/image plus PDF/Office/video.
     preview_supported = preview_kind in (
         _PREVIEW_KIND_TEXT,
         _PREVIEW_KIND_MARKDOWN,
@@ -512,6 +520,7 @@ def classify_taskspace_file(path: Path) -> dict[str, Any]:
         _PREVIEW_KIND_IMAGE,
         _PREVIEW_KIND_PDF,
         _PREVIEW_KIND_OFFICE,
+        _PREVIEW_KIND_VIDEO,
     )
     return {
         "mime_type": mime_type,

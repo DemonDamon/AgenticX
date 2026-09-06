@@ -792,7 +792,7 @@ declare global {
         truncated?: boolean;
         size?: number;
         mime_type?: string;
-        preview_kind?: "text" | "markdown" | "code" | "image" | "pdf" | "office" | "binary";
+        preview_kind?: "text" | "markdown" | "code" | "image" | "pdf" | "office" | "video" | "binary";
         is_binary?: boolean;
         preview_supported?: boolean;
         error?: string;
@@ -1498,6 +1498,12 @@ declare global {
         dataUrl?: string;
         mime?: string;
         size?: number;
+        error?: string;
+      }>;
+      resolveLocalMediaUrl: (path: string) => Promise<{
+        ok: boolean;
+        url?: string;
+        mime?: string;
         error?: string;
       }>;
       installFromRegistry: (args: {

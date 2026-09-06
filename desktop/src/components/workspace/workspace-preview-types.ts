@@ -1,5 +1,6 @@
 import { absoluteTaskspacePath } from "../../utils/workspace-file-path";
 import { officePreviewMime } from "./office-preview-kind";
+import { isWorkspaceVideoPath, workspaceVideoMime } from "./video-preview-kind";
 
 export type WorkspacePreviewKind =
   | "text"
@@ -8,6 +9,7 @@ export type WorkspacePreviewKind =
   | "image"
   | "pdf"
   | "office"
+  | "video"
   | "binary";
 
 export type WorkspaceTextRangeQuote = {
@@ -90,6 +92,13 @@ export type WorkspacePreview =
       size: number;
       mimeType: string;
       message: string;
+    }
+  | {
+      kind: "video";
+      path: string;
+      absolutePath: string;
+      size: number;
+      mimeType: string;
     };
 
 export type TaskspaceFilePreviewApi = {
@@ -159,6 +168,15 @@ export function mapTaskspaceFileToWorkspacePreview(
       size,
       mimeType,
       message: "Office 预览加载失败时，可在文件管理器中打开。",
+    };
+  }
+  if (previewKind === "video" || isWorkspaceVideoPath(path) || isWorkspaceVideoPath(absolutePath)) {
+    return {
+      kind: "video",
+      path,
+      absolutePath,
+      size,
+      mimeType: mimeType.startsWith("video/") ? mimeType : workspaceVideoMime(path || absolutePath),
     };
   }
   if (previewKind === "binary") {
@@ -302,6 +320,18 @@ export async function loadAbsoluteFilePreview(
           size: 0,
           mimeType: "application/pdf",
           message: "PDF 预览加载失败时，可在文件管理器中打开。",
+        },
+      };
+    }
+    if (isWorkspaceVideoPath(lower)) {
+      return {
+        ok: true,
+        preview: {
+          kind: "video",
+          path: base,
+          absolutePath,
+          size: 0,
+          mimeType: workspaceVideoMime(lower),
         },
       };
     }

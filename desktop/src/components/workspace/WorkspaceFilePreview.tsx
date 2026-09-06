@@ -53,6 +53,7 @@ import { HtmlPreviewShell } from "./HtmlPreviewShell";
 import { officePreviewKind } from "./office-preview-kind";
 import { PdfPreview } from "./PdfPreview";
 import { PptxPreview } from "./PptxPreview";
+import { VideoPreview } from "./VideoPreview";
 import { PreviewFallback } from "./PreviewFallback";
 import { SpreadsheetPreview } from "./SpreadsheetPreview";
 import {
@@ -139,6 +140,8 @@ function previewKindLabel(kind: WorkspacePreview["kind"]): string {
       return "PDF";
     case "office":
       return "Office";
+    case "video":
+      return "视频";
     case "binary":
       return "Binary";
     default: {
@@ -1651,7 +1654,9 @@ export function WorkspaceFilePreview({
         ) : null}
         <div
           className={`preview-scrollbar min-h-0 flex-1 bg-surface-base ${
-            preview.kind === "pdf" || (isHtmlFile && viewMode === "preview")
+            preview.kind === "pdf" ||
+            preview.kind === "video" ||
+            (isHtmlFile && viewMode === "preview")
               ? "overflow-hidden"
               : "overflow-auto"
           }`}
@@ -1666,6 +1671,14 @@ export function WorkspaceFilePreview({
             />
           ) : preview.kind === "pdf" ? (
             <PdfPreview
+              absolutePath={preview.absolutePath}
+              mimeType={preview.mimeType}
+              onCopyPath={onCopy}
+              onRevealInFileManager={onRevealInFileManager}
+              revealInFileManagerLabel={revealInFileManagerLabel}
+            />
+          ) : preview.kind === "video" ? (
+            <VideoPreview
               absolutePath={preview.absolutePath}
               mimeType={preview.mimeType}
               onCopyPath={onCopy}

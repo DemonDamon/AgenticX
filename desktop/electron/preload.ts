@@ -888,6 +888,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       error?: string;
     }>,
   loadLocalFileDataUrl: async (path: string) => ipcRenderer.invoke("load-local-file-data-url", path),
+  resolveLocalMediaUrl: async (path: string) => ipcRenderer.invoke("resolve-local-media-url", path),
   installFromRegistry: async (args: {
     source: string;
     name: string;
