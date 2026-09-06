@@ -148,9 +148,16 @@ Weights in $Q$: $Q = w_1 \cdot \mathrm{L1} + w_2 \cdot \mathrm{L2} + w_3 \cdot \
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{fig1_teambench_overview.jpg}
+\includegraphics[width=\textwidth]{fig1_overview_wb.png}
 \caption{\teambench{} overview. \textbf{Stage 1}---task space: 5 office scenarios $\times$ 3 coupling levels yield 15 task families, expanded to 150 variants by parameterized generators. \textbf{Stage 2}---paired execution over 7 arms: three single-mode baselines (1-shot, Refine-k, Best-of-k) and a team mode whose identical role outputs are assembled under 4 protocols (Last, Concat, Blackboard, Integrator). \textbf{Stage 3}---artifact scoring: three layers (L1 structural content-aware, L2 factual assertions, L3 semantic judge) produce team-level metrics CTR, CO, TMS.}
 \label{fig:overview}
+\end{figure*}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig2_mechanism_wb.png}
+\caption{The four assembly protocols over \emph{identical role outputs}. Only the integrator performs semantic merging of role content into the required artifact schema; the three mechanical protocols (last, concat, blackboard) rearrange or pass through role text without reconciling it against the schema. CTR\_matched by protocol alone spans 0.69--1.61 across both model families, with no change to model, prompts, or role outputs.}
+\label{fig:mechanism}
 \end{figure*}
 
 \subsection{Task space}
@@ -238,7 +245,14 @@ $\ctrm$ shown as arithmetic means for cross-arm comparability (K3 mechanical arm
 
 \paragraph{Finding 4 (mechanical assembly fails at semantics; L2 localizes where).} On both Flash and K3, concat's factual layer (L2 0.536 / 0.548) falls \emph{below} last's (0.566 / 0.580): the answer-block extractor takes the last \code{json} block, which in a naive concatenation is the final role's \emph{partial} block, while earlier roles' numeric content is stranded. The integrator is the only protocol that reliably aggregates all roles' numbers into one consistent answer block.
 
-\paragraph{Finding 5 (cross-model replication).} The entire effect structure replicates across two model families: the arm ordering (integrator $\gg$ concat $>$ blackboard $>$ last) is identical; all four team arms deviate significantly from refine-k on both models under BH-FDR; the assembly-vs-compute variance gap holds on both; and per-coupling $\ctrm$ CIs exclude 1.0 in all six cells. A single-case study makes the mechanism vivid (K3, \code{t-DATA-L-01}, seed 0): the same two role outputs score $Q=1.00$ under the integrator, 0.42 under concat, and \textbf{0.00 under both last and blackboard}---while every single-mode baseline lands at 0.38--0.79. The capability was present in the role outputs all along; the assembly protocol alone determined whether it survived to the artifact.
+\paragraph{Finding 5 (cross-model replication).} The entire effect structure replicates across two model families: the arm ordering (integrator $\gg$ concat $>$ blackboard $>$ last) is identical; all four team arms deviate significantly from refine-k on both models under BH-FDR; the assembly-vs-compute variance gap holds on both; and per-coupling $\ctrm$ CIs exclude 1.0 in all six cells. A single-case study makes the mechanism vivid (K3, \code{t-DATA-L-01}, seed 0; Figure~\ref{fig:case}): the same two role outputs score $Q=1.00$ under the integrator, 0.42 under concat, and \textbf{0.00 under both last and blackboard}---while every single-mode baseline lands at 0.38--0.79. The capability was present in the role outputs all along; the assembly protocol alone determined whether it survived to the artifact.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_case_study_wb.png}
+\caption{Case study \code{t-DATA-L-01} (DATA aggregation, low coupling; Kimi K3, seed 0). The same two role outputs (channel-A and channel-B aggregators) feed all four assembly arms. The integrator merges both channels into the three-section schema with a consistent answer block ($Q{=}1.00$); concat strands each channel's numbers in separate blocks that the answer extractor cannot reconcile ($Q{=}0.42$); last passes through only the final role, missing two required sections ($Q{=}0.00$); blackboard writes the required headings but leaves slot bodies empty ($Q{=}0.00$). Every single-mode baseline lands at $Q = 0.38$--$0.79$ on the same task and rubric.}
+\label{fig:case}
+\end{figure*}
 
 \subsection{CTR after controlling assembly, by coupling}
 \label{sec:coupling}
@@ -267,14 +281,14 @@ The integrator advantage is \textbf{uniform across coupling levels on both model
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{fig4_assembly_coupling.pdf}
+\includegraphics[width=\textwidth]{fig4_assembly_coupling_wb.png}
 \caption{(a)(b) Quality $Q$ by assembly protocol $\times$ coupling level (15 paired runs per cell), DS v4 Flash and Kimi K3 side by side. The integrator row dominates every coupling level on both models while all mechanical protocols fall below both single baselines. (c) Variance decomposition of $Q$: the assembly-protocol factor explains 40.0\% of variance on Flash and 42.8\% on K3 ($\eta^2 = 0.400/0.428$) versus 0.3\%/0.2\% for the compute strategy---a 130--200$\times$ gap over identical role outputs, replicated across model families.}
 \label{fig:heatmap}
 \end{figure*}
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{fig5_ctr_matched.pdf}
+\includegraphics[width=\columnwidth]{fig5_ctr_matched_wb.png}
 \caption{Integrator $\ctrm$ by coupling level, both models (geometric mean, log-domain paired bootstrap 95\% CI, $n=15$ per level per model). All six CIs exclude the break-even line at 1.0.}
 \label{fig:ctr}
 \end{figure}
