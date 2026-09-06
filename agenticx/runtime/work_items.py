@@ -375,6 +375,82 @@ def get_work_item_store() -> WorkItemStore:
     return _STORE
 
 
+_INTERNAL_WORKSPACE_NAMES = frozenset(
+    {"IDENTITY.md", "MEMORY.md", "USER.md", "SOUL.md", "favorites.json"}
+)
+
+
+def group_workspace_dir(group_id: str) -> Path:
+    return _groups_root() / str(group_id or "").strip() / "workspace"
+
+
+def promote_artifacts_to_group_workspace(group_id: str, paths: list[str]) -> list[str]:
+    gid = str(group_id or "").strip()
+    if not gid:
+        return []
+    ws = group_workspace_dir(gid)
+    ws.mkdir(parents=True, exist_ok=True)
+    out: list[str] = []
+    seen: set[str] = set()
+    try:
+        ws_resolved = ws.resolve()
+    except OSError:
+        ws_resolved = ws
+    for raw in paths:
+        src = Path(str(raw)).expanduser()
+        if not src.is_file() or src.name in _INTERNAL_WORKSPACE_NAMES:
+            continue
+        try:
+            resolved = src.resolve()
+        except OSError:
+            continue
+        try:
+            if resolved.is_relative_to(ws_resolved):
+                dest_s = str(resolved)
+            else:
+                dest = ws / src.name
+                if dest.resolve() != resolved:
+                    dest.write_bytes(src.read_bytes())
+                dest_s = str(dest.resolve())
+        except OSError:
+            continue
+        if dest_s not in seen:
+            seen.add(dest_s)
+            out.append(dest_s)
+    return out
+
+
+def submit_owner_delivery(
+    group_id: str,
+    owner_id: str,
+    artifact_paths: list[str] | None,
+) -> WorkItem | None:
+    """When a member delivers files on an in_progress item, promote and submit."""
+    gid = str(group_id or "").strip()
+    oid = str(owner_id or "").strip()
+    paths = [str(p).strip() for p in (artifact_paths or []) if str(p).strip()]
+    if not gid or not oid or not paths:
+        return None
+    store = get_work_item_store()
+    owned = [
+        item
+        for item in store.list_items(gid)
+        if item.owner_id == oid and item.status == "in_progress"
+    ]
+    if not owned:
+        return None
+    promoted = promote_artifacts_to_group_workspace(gid, paths)
+    if not promoted:
+        return None
+    item = owned[0]
+    return store.submit(
+        gid,
+        item.id,
+        expected_version=item.version,
+        artifact_paths=promoted,
+    )
+
+
 def build_work_items_prompt_block(group_id: str) -> str:
     gid = str(group_id or "").strip()
     if not gid:
@@ -384,7 +460,7 @@ def build_work_items_prompt_block(group_id: str) -> str:
     if not active:
         return ""
     lines = ["## 本群事项（组织后台，不是聊天记录）"]
-    lines.append("- 长产物写群共享工作区；群里只回结论。")
+    lines.append("- 长产物写群共享工作区；群里只回结论。写完产物后系统会把事项标成待验收。")
     lines.append("- 你不能把事项标为 accepted；验收是用户的按钮。")
     store = get_work_item_store()
     for item in active:

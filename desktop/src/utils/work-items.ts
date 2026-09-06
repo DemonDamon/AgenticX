@@ -25,9 +25,34 @@ export type WorkItem = {
   version: number;
 };
 
-export function studioBaseUrl(): string {
-  if (typeof window === "undefined") return "http://localhost:19080";
-  return (window as unknown as { __AGX_URL__?: string }).__AGX_URL__ ?? "http://localhost:19080";
+export function studioBaseUrl(apiBase?: string): string {
+  const fromArg = String(apiBase ?? "").trim().replace(/\/+$/, "");
+  if (fromArg) return fromArg;
+  if (typeof window !== "undefined") {
+    const fromWindow = String(
+      (window as unknown as { __AGX_URL__?: string }).__AGX_URL__ ?? "",
+    ).trim().replace(/\/+$/, "");
+    if (fromWindow) return fromWindow;
+  }
+  return "http://localhost:19080";
+}
+
+export function workItemRequestError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : "事项请求失败";
+  if (raw === "Failed to fetch" || raw === "NetworkError when attempting to fetch resource.") {
+    return "事项接口连不上";
+  }
+  return raw;
+}
+
+export function workItemBlockerHint(item: WorkItem, items: WorkItem[]): string {
+  if (!item.blocked_by?.length) return "";
+  const byId = new Map(items.map((row) => [row.id, row]));
+  const pending = item.blocked_by.some((id) => {
+    const other = byId.get(id);
+    return !other || other.status !== "accepted";
+  });
+  return pending ? "前置未验收" : "";
 }
 
 export function workItemStatusLabel(status: WorkItemStatus): string {
@@ -42,8 +67,12 @@ export function workItemStatusLabel(status: WorkItemStatus): string {
   return map[status];
 }
 
-export async function fetchWorkItems(groupId: string, apiToken: string): Promise<WorkItem[]> {
-  const resp = await fetch(`${studioBaseUrl()}/api/groups/${encodeURIComponent(groupId)}/work-items`, {
+export async function fetchWorkItems(
+  groupId: string,
+  apiToken: string,
+  apiBase?: string,
+): Promise<WorkItem[]> {
+  const resp = await fetch(`${studioBaseUrl(apiBase)}/api/groups/${encodeURIComponent(groupId)}/work-items`, {
     headers: { "x-agx-desktop-token": apiToken },
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -55,8 +84,9 @@ export async function createWorkItem(
   groupId: string,
   apiToken: string,
   body: { title: string; owner_kind: WorkItem["owner_kind"]; owner_id: string },
+  apiBase?: string,
 ): Promise<WorkItem> {
-  const resp = await fetch(`${studioBaseUrl()}/api/groups/${encodeURIComponent(groupId)}/work-items`, {
+  const resp = await fetch(`${studioBaseUrl(apiBase)}/api/groups/${encodeURIComponent(groupId)}/work-items`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -76,9 +106,10 @@ export async function postWorkItemAction(
   apiToken: string,
   action: "accept" | "pause" | "resume",
   expected_version: number,
+  apiBase?: string,
 ): Promise<WorkItem> {
   const resp = await fetch(
-    `${studioBaseUrl()}/api/groups/${encodeURIComponent(groupId)}/work-items/${encodeURIComponent(itemId)}/${action}`,
+    `${studioBaseUrl(apiBase)}/api/groups/${encodeURIComponent(groupId)}/work-items/${encodeURIComponent(itemId)}/${action}`,
     {
       method: "POST",
       headers: {

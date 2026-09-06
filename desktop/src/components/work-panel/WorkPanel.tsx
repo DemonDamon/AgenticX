@@ -92,6 +92,7 @@ import {
   createWorkItem,
   fetchWorkItems,
   postWorkItemAction,
+  workItemRequestError,
   type WorkItem,
 } from "../../utils/work-items";
 import { collectSessionReferences } from "../../utils/session-references";
@@ -799,6 +800,7 @@ export function WorkPanel({
     members: false,
   });
   const apiToken = useAppStore((s) => s.apiToken);
+  const apiBase = useAppStore((s) => s.apiBase);
   const addPane = useAppStore((s) => s.addPane);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
   const panes = useAppStore((s) => s.panes);
@@ -847,15 +849,15 @@ export function WorkPanel({
   }, [sessionId, summaryTabOpen, autoRefreshKey]);
 
   const reloadWorkItems = useCallback(async () => {
-    if (!groupId) return;
+    if (!groupId || !apiBase) return;
     try {
-      const rows = await fetchWorkItems(groupId, apiToken);
+      const rows = await fetchWorkItems(groupId, apiToken, apiBase);
       setWorkItems(rows);
       setWorkItemError("");
     } catch (e) {
-      setWorkItemError(e instanceof Error ? e.message : "事项加载失败");
+      setWorkItemError(workItemRequestError(e));
     }
-  }, [groupId, apiToken]);
+  }, [groupId, apiToken, apiBase]);
 
   useEffect(() => {
     if (!isGroupPane || !summaryTabOpen) return;
@@ -866,9 +868,16 @@ export function WorkPanel({
 
   const runWorkItemAction = useCallback(
     async (item: WorkItem, action: "accept" | "pause" | "resume") => {
-      if (!groupId) return;
+      if (!groupId || !apiBase) return;
       try {
-        const next = await postWorkItemAction(groupId, item.id, apiToken, action, item.version);
+        const next = await postWorkItemAction(
+          groupId,
+          item.id,
+          apiToken,
+          action,
+          item.version,
+          apiBase,
+        );
         setWorkItems((prev) => prev.map((row) => (row.id === next.id ? next : row)));
         setWorkItemError("");
       } catch (e) {
@@ -878,24 +887,24 @@ export function WorkPanel({
           setWorkItemError("事项已变化，请再试一次");
           return;
         }
-        setWorkItemError(e instanceof Error ? e.message : "事项操作失败");
+        setWorkItemError(workItemRequestError(e));
       }
     },
-    [groupId, apiToken, reloadWorkItems],
+    [groupId, apiBase, apiToken, reloadWorkItems],
   );
 
   const runCreateWorkItem = useCallback(
     async (input: { title: string; owner_kind: WorkItem["owner_kind"]; owner_id: string }) => {
-      if (!groupId) return;
+      if (!groupId || !apiBase) return;
       try {
-        const created = await createWorkItem(groupId, apiToken, input);
+        const created = await createWorkItem(groupId, apiToken, input, apiBase);
         setWorkItems((prev) => [...prev, created]);
         setWorkItemError("");
       } catch (e) {
-        setWorkItemError(e instanceof Error ? e.message : "事项创建失败");
+        setWorkItemError(workItemRequestError(e));
       }
     },
-    [groupId, apiToken],
+    [groupId, apiBase, apiToken],
   );
 
   const openWorkItemOwner = useCallback(

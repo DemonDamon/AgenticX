@@ -1998,6 +1998,17 @@ class GroupChatRouter:
         artifacts = _group_artifacts_from_paths(
             changed_artifact_paths(artifact_before, artifact_after)
         )
+        if artifacts:
+            try:
+                from agenticx.runtime.work_items import submit_owner_delivery
+
+                submit_owner_delivery(
+                    group_id,
+                    avatar_id,
+                    [item.source_path for item in artifacts],
+                )
+            except Exception:
+                pass
         reply = GroupReply(
             agent_id=avatar_id,
             avatar_name=avatar_name,

@@ -7,6 +7,7 @@
 import { useState } from "react";
 import type { Avatar } from "../../store";
 import {
+  workItemBlockerHint,
   workItemStatusLabel,
   type WorkItem,
   type WorkItemStatus,
@@ -73,6 +74,7 @@ export function GroupWorkItemList({
           {items.map((item) => {
             const actions = visibleWorkItemActions(item.status);
             const name = ownerLabel(item, avatars, metaLeaderLabel);
+            const blockerHint = workItemBlockerHint(item, items);
             const ownerClickable = item.owner_kind === "avatar" || item.owner_kind === "meta";
             const statusClass =
               item.status === "in_progress"
@@ -98,13 +100,19 @@ export function GroupWorkItemList({
                     ) : (
                       <span>{name}</span>
                     )}
+                    {blockerHint ? (
+                      <>
+                        <span> · </span>
+                        <span>{blockerHint}</span>
+                      </>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {actions.includes("accept") ? (
                     <button
                       type="button"
-                      className="rounded px-1.5 py-0.5 text-[11px] bg-[var(--ui-btn-primary-bg)] text-[var(--ui-btn-primary-fg,#fff)] hover:bg-[var(--ui-btn-primary-bg-hover,var(--ui-btn-primary-bg))]"
+                      className="rounded px-1.5 py-0.5 text-[11px] bg-[var(--ui-btn-primary-bg)] text-[var(--ui-btn-primary-text)] hover:bg-[var(--ui-btn-primary-bg-hover,var(--ui-btn-primary-bg))]"
                       onClick={() => onAccept(item)}
                     >
                       验收
@@ -159,7 +167,7 @@ export function GroupWorkItemList({
         </select>
         <button
           type="button"
-          className="rounded px-1.5 py-0.5 text-[11px] bg-[var(--ui-btn-primary-bg)] text-[var(--ui-btn-primary-fg,#fff)] hover:bg-[var(--ui-btn-primary-bg-hover,var(--ui-btn-primary-bg))]"
+          className="rounded px-1.5 py-0.5 text-[11px] bg-[var(--ui-btn-primary-bg)] text-[var(--ui-btn-primary-text)] hover:bg-[var(--ui-btn-primary-bg-hover,var(--ui-btn-primary-bg))]"
           onClick={submitCreate}
         >
           创建

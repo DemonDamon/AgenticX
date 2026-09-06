@@ -166,6 +166,66 @@ def test_meta_tool_create_and_cannot_accept(
     assert stored.status != "accepted"
 
 
+def test_submit_owner_delivery_promotes_and_submits(
+    isolated_store: WorkItemStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agenticx.runtime.work_items import submit_owner_delivery
+
+    monkeypatch.setattr(work_items, "get_work_item_store", lambda: isolated_store)
+    item = isolated_store.create_item(
+        "g-deliver",
+        title="统一模型调用协议",
+        owner_kind="avatar",
+        owner_id="beichen",
+    )
+    isolated_store.mark_in_progress("g-deliver", item.id, expected_version=item.version)
+    src = tmp_path / "taskspace" / "model-api-contract.md"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text("# contract\n", encoding="utf-8")
+
+    submitted = submit_owner_delivery("g-deliver", "beichen", [str(src)])
+    assert submitted is not None
+    assert submitted.status == "submitted"
+    assert submitted.artifact_paths
+    dest = Path(submitted.artifact_paths[0])
+    assert dest.is_file()
+    assert dest.name == "model-api-contract.md"
+    assert "groups" in dest.parts
+    assert dest.read_text(encoding="utf-8") == "# contract\n"
+    stored = isolated_store.get_item("g-deliver", item.id)
+    assert stored is not None
+    assert stored.status == "submitted"
+
+
+def test_submit_owner_delivery_skips_without_files_or_progress(
+    isolated_store: WorkItemStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agenticx.runtime.work_items import submit_owner_delivery
+
+    monkeypatch.setattr(work_items, "get_work_item_store", lambda: isolated_store)
+    open_item = isolated_store.create_item(
+        "g-skip",
+        title="还没开工",
+        owner_kind="avatar",
+        owner_id="qingkong",
+    )
+    assert submit_owner_delivery("g-skip", "qingkong", []) is None
+    src = tmp_path / "note.md"
+    src.write_text("draft", encoding="utf-8")
+    assert submit_owner_delivery("g-skip", "qingkong", [str(src)]) is None
+    assert isolated_store.get_item("g-skip", open_item.id).status == "open"
+
+    progressing = isolated_store.mark_in_progress(
+        "g-skip", open_item.id, expected_version=open_item.version
+    )
+    assert submit_owner_delivery("g-skip", "other-owner", [str(src)]) is None
+    assert isolated_store.get_item("g-skip", progressing.id).status == "in_progress"
+
+
 def test_meta_tool_rejected_outside_group() -> None:
     session = StudioSession()
     setattr(session, "avatar_id", "plain-avatar")
