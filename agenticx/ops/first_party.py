@@ -10,7 +10,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agenticx.ops.change_log import read_change_events
+from agenticx.ops.change_log import read_change_events, read_ops_change_events
 from agenticx.ops.query import (
     LogRecord,
     QueryResult,
@@ -171,12 +171,18 @@ class FirstPartyProvider:
         if scope_is_invalid(scope):
             return QueryResult(items=[], source="first_party", reason="invalid_scope")
         session_id = (scope.session_id or "").strip()
-        if not session_id:
-            return QueryResult(items=[], source="first_party", reason="no_change_events")
-        events = read_change_events(self._session_dir(session_id), scope.limit)
-        if not events:
-            return QueryResult(items=[], source="first_party", reason="no_change_events")
-        return QueryResult(items=events, source="first_party", reason="")
+        deployment_id = (scope.deployment_id or "").strip()
+        if session_id:
+            events = read_change_events(self._session_dir(session_id), scope.limit)
+            if not events:
+                return QueryResult(items=[], source="first_party", reason="no_change_events")
+            return QueryResult(items=events, source="first_party", reason="")
+        if deployment_id:
+            events = read_ops_change_events(deployment_id=deployment_id, limit=scope.limit)
+            if not events:
+                return QueryResult(items=[], source="first_party", reason="no_change_events")
+            return QueryResult(items=events, source="first_party", reason="")
+        return QueryResult(items=[], source="first_party", reason="no_change_events")
 
     def _spans_from_messages(self, messages: list[dict], scope: QueryScope) -> list[TraceSpan]:
         session_id = (scope.session_id or "").strip()

@@ -17,7 +17,14 @@ def test_ops_tools_in_studio_by_default(monkeypatch):
 
     merged = merge_ops_tools_into([{"type": "function", "function": {"name": "knowledge_search"}}])
     names = {t["function"]["name"] for t in merged}
-    assert {"get_trace", "get_logs", "get_recent_changes", "get_session_review", "get_umodel"} <= names
+    assert {
+        "get_trace",
+        "get_logs",
+        "get_recent_changes",
+        "get_session_review",
+        "get_umodel",
+        "sync_changeplane",
+    } <= names
 
 
 def test_ops_tools_disabled_when_env_off(monkeypatch):
@@ -31,6 +38,7 @@ def test_ops_tools_disabled_when_env_off(monkeypatch):
     assert "get_recent_changes" not in names
     assert "get_session_review" not in names
     assert "get_umodel" not in names
+    assert "sync_changeplane" not in names
 
 
 def test_ops_tools_disabled_when_config_false(monkeypatch):
@@ -45,6 +53,7 @@ def test_ops_tools_disabled_when_config_false(monkeypatch):
 
     names = {t["function"]["name"] for t in merge_ops_tools_into([])}
     assert "get_trace" not in names
+    assert "sync_changeplane" not in names
 
 
 def test_ops_tools_merge_when_enabled(monkeypatch):
@@ -58,6 +67,7 @@ def test_ops_tools_merge_when_enabled(monkeypatch):
         "get_recent_changes",
         "get_session_review",
         "get_umodel",
+        "sync_changeplane",
     }
 
 
@@ -81,7 +91,14 @@ def test_ops_tools_merge_onto_visible_meta_tools(monkeypatch):
     from agenticx.runtime.meta_tools import visible_meta_agent_tools
 
     names = {t["function"]["name"] for t in merge_ops_tools_into(list(visible_meta_agent_tools()))}
-    assert {"get_trace", "get_logs", "get_recent_changes", "get_session_review", "get_umodel"} <= names
+    assert {
+        "get_trace",
+        "get_logs",
+        "get_recent_changes",
+        "get_session_review",
+        "get_umodel",
+        "sync_changeplane",
+    } <= names
 
 
 def test_studio_tools_body_does_not_list_ops_tools():
@@ -97,6 +114,7 @@ def test_studio_tools_body_does_not_list_ops_tools():
     assert "get_recent_changes" not in names
     assert "get_session_review" not in names
     assert "get_umodel" not in names
+    assert "sync_changeplane" not in names
 
 
 def test_dispatch_get_session_review_obs_only(tmp_path, monkeypatch):

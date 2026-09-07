@@ -105,6 +105,25 @@ OPS_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "sync_changeplane",
+            "description": (
+                "Read-only remote. Pull deployments and upsert local umodel. "
+                "Never invent. Never restart. Not the health score."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "session_id": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 OPS_TOOL_NAMES = frozenset(
@@ -114,6 +133,7 @@ OPS_TOOL_NAMES = frozenset(
         "get_recent_changes",
         "get_session_review",
         "get_umodel",
+        "sync_changeplane",
     }
 )
 
@@ -258,11 +278,47 @@ def _dispatch_umodel(arguments: dict[str, Any] | None) -> str:
     )
 
 
+def _dispatch_sync_changeplane(arguments: dict[str, Any] | None) -> str:
+    from agenticx.ops.changeplane.provider import changeplane_base_url, get_changeplane
+    from agenticx.ops.changeplane.sync import sync_deployments
+    from agenticx.ops.umodel.store import get_object_store
+
+    if not changeplane_base_url():
+        return json.dumps(
+            {"source": "changeplane", "reason": "not_configured", "items": []},
+            ensure_ascii=False,
+        )
+    args = arguments or {}
+    project_id = str(args.get("project_id") or "").strip()
+    try:
+        limit = clamp_limit(int(args.get("limit", 50)))
+    except (TypeError, ValueError):
+        limit = 50
+    provider = get_changeplane()
+    snapshots = sync_deployments(
+        provider,
+        get_object_store(),
+        project_id=project_id,
+        limit=limit,
+    )
+    reason = str(getattr(provider, "last_reason", "") or "")
+    return json.dumps(
+        {
+            "source": "changeplane",
+            "reason": reason,
+            "items": [_json_ready(item) for item in snapshots],
+        },
+        ensure_ascii=False,
+    )
+
+
 def dispatch_ops_tool(name: str, arguments: dict[str, Any] | None, session: Any = None) -> str:
     if name == "get_session_review":
         return _dispatch_session_review(arguments)
     if name == "get_umodel":
         return _dispatch_umodel(arguments)
+    if name == "sync_changeplane":
+        return _dispatch_sync_changeplane(arguments)
     query = get_telemetry_query()
     scope = _scope_from_args(arguments)
     if name == "get_trace":

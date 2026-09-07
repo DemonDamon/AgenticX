@@ -521,7 +521,7 @@ flowchart TB
 | S1 | `otel-correlation-keys` | **已拆** [subplan](./2026-09-06-otel-correlation-keys.plan.md)。给 Runtime / Gateway span 补齐关联键；冻结字段表 | Composer 2.5 / 代码中档 | 无 |
 | S2 | `telemetry-query-and-default-box` | **已拆** [subplan](./2026-09-06-telemetry-query-and-default-box.plan.md)。冻结 `TelemetryQuery`；FirstParty 接通轨迹/审计；默认盒走 Foundry casting；LGTM 后置 | Composer 2.5 | S1 |
 | S3 | `umodel-v0` | **已拆** [subplan](../2026-09-07-umodel-v0.plan.md)。对象图 schema + 写入 API；只建模 Service/Session/ToolCall/ModelChannel/Alert/Deployment | Composer 2.5 / 代码中档 | S1 |
-| S4 | `openship-changeplane-adapter` | `ChangePlaneProvider` + Openship MCP/REST 只读同步部署快照；webhook → 变更事件 | 代码中档 | S3 |
+| S4 | `openship-changeplane-adapter` | **已拆** [subplan](../2026-09-07-openship-changeplane-adapter.plan.md)。`ChangePlaneProvider` + 只读同步部署快照；webhook → 变更事件 | Composer 2.5 / 代码中档 | S3 |
 | S5 | `agent-trace-parity` | 工具调用 / 委派 / 确认等待与 OTel span、轨迹步、Gateway usage 三方对账 | 强推理档 | S1, S3 |
 | S6 | `gateway-slo-via-query` | 调查 Agent 能按通道/模型查出 TTFT、TPS、冷却、plugin 错误；人看页可复用 SigNoz 服务视图，不另做 Grafana 必选项 | Composer 2.5 | S2 |
 
@@ -601,7 +601,8 @@ flowchart TB
    - S2：`.cursor/plans/2026-09-06-telemetry-query-and-default-box.plan.md`
    - S2.1：`.cursor/plans/2026-09-07-first-party-observation-review.plan.md`
    - S3：`.cursor/plans/2026-09-07-umodel-v0.plan.md`
-   S4–S18 先不拆。开干前把对应文件移到 `.cursor/plans/` 根目录。
+   - S4：`.cursor/plans/2026-09-07-openship-changeplane-adapter.plan.md`
+   S5–S18 先不拆。开干前把对应文件移到 `.cursor/plans/` 根目录。
 4. 不要先做给人看的 Grafana 套件，也不要先做无取证的「一键部署 Copilot」。
 
 ---

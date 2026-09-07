@@ -1186,6 +1186,8 @@ def create_studio_app() -> FastAPI:
                 await asyncio.wait_for(task, timeout=1.0)
 
     app = FastAPI(title="AgenticX Studio Service", version="0.1.0", lifespan=_studio_lifespan)
+    from agenticx.studio.changeplane_routes import mount_changeplane_routes
+    mount_changeplane_routes(app)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_studio_cors_origins(),

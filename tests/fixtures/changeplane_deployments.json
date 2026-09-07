@@ -1,0 +1,23 @@
+{
+  "deployments": [
+    {
+      "id": "dep_ready",
+      "projectId": "proj_web",
+      "status": "ready",
+      "environment": "production",
+      "createdAt": "2026-09-07T01:00:00.000Z",
+      "meta": {
+        "repoUrl": "https://example.local/app.git",
+        "branch": "main",
+        "runtimeMode": "docker",
+        "deployTarget": "local",
+        "previousActiveDeploymentId": "dep_old",
+        "environment": { "SECRET": "do-not-copy" }
+      }
+    },
+    {
+      "deploymentId": "   ",
+      "projectId": "proj_skip"
+    }
+  ]
+}
