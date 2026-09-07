@@ -63,7 +63,12 @@ _GROUP_CONTROL_PLANE_CONTRACT = (
     "- 工具过程由系统状态卡展示，正文不要写“正在调用工具 / 已回答 / 等待追问”。\n"
     "- 未实际调用 web_search 时，禁止声称已经上网检索或「查了一圈 / 搜了多个来源」。\n"
     "- 长代码、长报告、详细表格优先写入群工作区，最终只给摘要和产物；用户明确要求全文贴群时例外。\n"
-    "- FINAL 表示本轮结束，禁止以“稍等 / 等我回复 / 我去处理”作为 FINAL。\n"
+    "- 本轮结束时直接给出结论，不要在正文写出 FINAL 或 __SKIP__。\n"
+    "- 禁止以“稍等 / 等我回复 / 我去处理”结束本轮。\n"
+)
+_TRAILING_FINAL_RE = re.compile(
+    r"(?:(?:\s+|(?<=[。．.！!？?]))(?:\*\*)?FINAL(?:\*\*)?\.?)+$",
+    re.IGNORECASE,
 )
 
 
@@ -129,8 +134,8 @@ def _group_turn_image_blocks(
 
 
 _EXECUTION_TURN_INSTRUCTION = (
-    "这是执行请求。你必须在本轮使用必要工具实际推进；FINAL 只能汇报本轮已经发生的事实。\n"
-    "禁止以“我去处理 / 稍等 / 等我回复 / 后续给你”结束本轮。"
+    "这是执行请求。你必须在本轮使用必要工具实际推进；结束时只汇报本轮已经发生的事实。\n"
+    "禁止以“我去处理 / 稍等 / 等我回复 / 后续给你”结束本轮。不要在正文写出 FINAL。"
 )
 _DEFERRED_PROMISE_REPLACEMENT = (
     "本轮没有产生实际执行记录，不能让你继续空等。请重试，或明确指定要执行的专家。"
@@ -417,6 +422,14 @@ def _is_complex_multistep_task(user_input: str) -> bool:
 def _normalize_reply_text(text: str) -> str:
     """Collapse whitespace so 'A  B\\n' and 'A B' compare equal."""
     return " ".join(str(text or "").split())
+
+
+def _strip_visible_final_marker(text: str) -> str:
+    """Drop a trailing control-plane FINAL token so it never reaches the bubble."""
+    raw = str(text or "")
+    if re.fullmatch(r"(?:\*\*)?FINAL(?:\*\*)?", raw.strip(), flags=re.IGNORECASE):
+        return ""
+    return _TRAILING_FINAL_RE.sub("", raw).rstrip()
 
 
 def _looks_like_execution_request(text: str) -> bool:
@@ -1680,7 +1693,7 @@ class GroupChatRouter:
             temperature=0.2,
             max_tokens=group_meta_reply_max_tokens(),
         )
-        final_text = text.strip()
+        final_text = _strip_visible_final_marker(text.strip())
         if not final_text:
             _log.warning(
                 "group_router: meta PM reply empty after retry; emitting no-output notice"
@@ -1799,7 +1812,7 @@ class GroupChatRouter:
             "## 群共享工作区\n"
             f"- 当前工作目录：{getattr(base_session, 'workspace_dir', None) or ''}\n"
             "- 需要交付长文、代码、数据时写入该目录或已绑定 taskspace。\n"
-            "- FINAL 只需给 1–3 句结论；系统会自动把本轮新增/修改文件显示为产物芯片。\n"
+            "- 结论只需 1–3 句；系统会自动把本轮新增/修改文件显示为产物芯片。不要在正文写 FINAL。\n"
             "- 不要伪造路径，不要把未写成的文件说成已交付。\n"
             "- 用户明确要求全文贴群时，按用户要求直接回答。\n"
             f"{str(extra_instruction or '').strip()}\n"
@@ -1971,7 +1984,9 @@ class GroupChatRouter:
                     if tool_name == "web_search":
                         successful_web_search = True
             if event.type == EventType.FINAL.value:
-                final_text = str(event.data.get("text", "") or "").strip()
+                final_text = _strip_visible_final_marker(
+                    str(event.data.get("text", "") or "").strip()
+                )
             elif event.type == EventType.ERROR.value:
                 error_text = str(event.data.get("text", "") or "").strip()
         artifact_after = scan_artifact_snapshot(local_session.taskspaces)

@@ -230,6 +230,21 @@ describe("ChatImAvatar", () => {
 
 // Ported-ref: fix/glm-stream-common-finalization@5bf63d3e
 describe("ImBubble assistant protocol boundary", () => {
+  it("does not render a trailing group-control FINAL token", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "leaked-control-token",
+          role: "assistant",
+          content: "字段已补进协议。 FINAL",
+          avatarName: "后端·北辰",
+        }}
+      />,
+    );
+    expect(html).toContain("字段已补进协议。");
+    expect(html).not.toContain("FINAL");
+  });
+
   it("does not render an unclosed followups tail from historical messages", () => {
     const raw =
       "全部修复完成。\n\n粒子间距离 < 120px 时自动连线。\n\n<followups>粒子动画太卡了怎么优化\n待办事项能不能按分类筛选\n背景粒子颜色能不能换成其他配色";

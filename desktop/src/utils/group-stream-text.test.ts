@@ -12,6 +12,8 @@ describe("group-stream-text", () => {
     expect(visibleGroupStreamBody("<think>先想</think>许可证是 MIT。")).toBe("许可证是 MIT。");
     expect(visibleGroupStreamBody("__SK")).toBe("");
     expect(visibleGroupStreamBody("__SKIP__")).toBe("");
+    expect(visibleGroupStreamBody("字段已补进协议。 FINAL")).toBe("字段已补进协议。");
+    expect(visibleGroupStreamBody("没有阻塞了。 **FINAL**")).toBe("没有阻塞了。");
   });
 
   it("resets the live buffer when a tool call starts", () => {

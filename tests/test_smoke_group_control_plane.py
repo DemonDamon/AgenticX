@@ -26,8 +26,16 @@ from agenticx.runtime.group_router import (
     _looks_like_deferred_promise,
     _looks_like_execution_request,
     _looks_like_search_claim,
+    _strip_visible_final_marker,
     _tool_result_succeeded,
 )
+
+
+def test_strip_visible_final_marker_hides_control_token() -> None:
+    assert _strip_visible_final_marker("字段已补进协议。 FINAL") == "字段已补进协议。"
+    assert _strip_visible_final_marker("没有阻塞了。 **FINAL**") == "没有阻塞了。"
+    assert _strip_visible_final_marker("FINAL") == ""
+    assert _strip_visible_final_marker("协议里的 FINAL 事件还在") == "协议里的 FINAL 事件还在"
 
 
 # ---------------------------------------------------------------------------
@@ -757,7 +765,8 @@ async def test_member_and_meta_prompts_share_control_plane_contract(
     for prompt in captured:
         assert "群聊控制面答复" in prompt
         assert "默认 1–3 句" in prompt
-        assert "禁止以“稍等 / 等我回复 / 我去处理”作为 FINAL" in prompt
+        assert "不要在正文写出 FINAL" in prompt
+        assert "禁止以“稍等 / 等我回复 / 我去处理”结束本轮" in prompt
         assert "正在调用工具 / 已回答 / 等待追问" in prompt
         assert "web_search" in prompt
         assert "查了一圈" in prompt

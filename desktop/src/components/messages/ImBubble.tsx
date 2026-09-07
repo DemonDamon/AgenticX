@@ -38,7 +38,7 @@ import {
 import { resolveMetaDisplayName } from "../../utils/display-name";
 import { avatarBgClass, avatarFgClass } from "../../utils/avatar-color";
 import { shouldShowAssistantFollowups, shouldShowAssistantIconButtons } from "../../utils/im-bubble-actions";
-import { isGroupStreamMessageId } from "../../utils/group-stream-text";
+import { isGroupStreamMessageId, stripTrailingFinalMarker } from "../../utils/group-stream-text";
 import { MessageTimestamp } from "./MessageTimestamp";
 import { MessageTurnMeta } from "./MessageTurnMeta";
 import { Shimmer } from "../ds/Shimmer";
@@ -268,10 +268,11 @@ export function ImBubble({
     ? (protocolParsed?.visibleBody ?? (hasThinkTag ? (parsed?.response ?? "") : message.content))
     : (userQuoteDisplay?.body ?? message.content);
   /** Drop leading `---` so Meta/PM reports don't leave a hole under the expert label. */
+  const strippedBody = !isUser ? stripTrailingFinalMarker(String(rawBodyText ?? "")) : rawBodyText;
   const bodyText =
     showExpertLabel && !isUser
-      ? String(rawBodyText ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
-      : rawBodyText;
+      ? String(strippedBody ?? "").replace(/^(?:\s*---\s*(?:\n|$))+/, "").replace(/^\s+/, "")
+      : strippedBody;
   const displayQuotedItems = isUser
     ? (userQuoteDisplay?.quotedItems ?? [])
     : parseQuotedContentItems(message.quotedContent);
