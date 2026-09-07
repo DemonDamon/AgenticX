@@ -3234,6 +3234,12 @@ class AgentRuntime:
             reset_turn_references(session)
         except Exception:
             pass
+        try:
+            from agenticx.observability.correlation import bind_correlation_from_session
+
+            bind_correlation_from_session(session)
+        except Exception:
+            pass
         # Reset per-turn exploratory tracking so each turn starts with a
         # fresh "schema discovery" budget.
         self._recent_exploratory_fps.clear()
@@ -3245,6 +3251,12 @@ class AgentRuntime:
         full_tool_pool: list[Dict[str, Any]] = list(
             studio_tools_for_session(session) if tools is None else tools
         )
+        try:
+            from agenticx.ops.tools import merge_ops_tools_into
+
+            full_tool_pool = merge_ops_tools_into(full_tool_pool)
+        except Exception:
+            pass
         from agenticx.runtime.context_budget import maybe_compact_meta_turn_context
         from agenticx.runtime.tool_search import (
             auto_load_deferred_tool,

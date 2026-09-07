@@ -198,6 +198,8 @@ def _otel_before_llm_call(ctx: "LLMCallHookContext") -> None:
         # 消息数量和迭代次数
         span.set_attribute("gen_ai.messages.count", len(ctx.messages))
         span.set_attribute("gen_ai.iterations", ctx.iterations)
+        from agenticx.observability.correlation import apply_correlation_attributes
+        apply_correlation_attributes(span)
         
         # 存储 Span 引用
         span_key = f"llm:{id(ctx)}"
@@ -276,6 +278,8 @@ def _otel_before_tool_call(ctx: "ToolCallHookContext") -> None:
         # AgenticX 扩展属性
         if hasattr(ctx, 'agent_id') and ctx.agent_id:
             span.set_attribute(AiObservationAttributes.AGENTICX_AGENT_ID, ctx.agent_id)
+        from agenticx.observability.correlation import apply_correlation_attributes
+        apply_correlation_attributes(span)
         
         # 存储 Span 引用
         span_key = f"tool:{id(ctx)}"

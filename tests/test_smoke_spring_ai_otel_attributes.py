@@ -55,6 +55,10 @@ class TestAiObservationAttributes:
         assert AiObservationAttributes.AGENTICX_AGENT_ID == "agenticx.agent.id"
         assert AiObservationAttributes.AGENTICX_TASK_ID == "agenticx.task.id"
         assert AiObservationAttributes.AGENTICX_TOOL_NAME == "agenticx.tool.name"
+        assert AiObservationAttributes.AGENTICX_SESSION_ID == "agenticx.session.id"
+        assert AiObservationAttributes.AGENTICX_TENANT_ID == "agenticx.tenant.id"
+        assert AiObservationAttributes.AGENTICX_DEPLOYMENT_ID == "agenticx.deployment.id"
+        assert AiObservationAttributes.AGENTICX_GATEWAY_TRACE_ID == "agenticx.gateway.trace_id"
     
     def test_get_all_otel_attributes(self):
         """测试获取所有 OpenTelemetry 标准属性"""

@@ -148,6 +148,36 @@ class TestOTelHooksWithMock:
             # 恢复
             hooks_module._tracer = original_tracer
             hooks_module._active_spans = original_spans
+
+    def test_before_llm_and_tool_apply_session_correlation(self):
+        from agenticx.observability.correlation import bind_correlation, reset_correlation
+        from agenticx.observability.otel.hooks import (
+            _otel_before_llm_call,
+            _otel_before_tool_call,
+        )
+        import agenticx.observability.otel.hooks as hooks_module
+
+        original_tracer = hooks_module._tracer
+        original_spans = hooks_module._active_spans.copy()
+        mock_span = MagicMock()
+        mock_tracer = MagicMock()
+        mock_tracer.start_span.return_value = mock_span
+        tokens = bind_correlation(session_id="sess-h")
+        try:
+            hooks_module._tracer = mock_tracer
+            hooks_module._active_spans = {}
+            _otel_before_llm_call(MockLLMCallHookContext())
+            _otel_before_tool_call(MockToolCallHookContext())
+            hits = sum(
+                1
+                for c in mock_span.set_attribute.call_args_list
+                if c.args[:2] == ("agenticx.session.id", "sess-h")
+            )
+            assert hits >= 2
+        finally:
+            reset_correlation(tokens)
+            hooks_module._tracer = original_tracer
+            hooks_module._active_spans = original_spans
     
     def test_after_llm_call_hook(self):
         """测试 LLM 调用后 hook"""

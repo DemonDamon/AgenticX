@@ -2810,6 +2810,9 @@ def _code_search_tool_defs() -> List[Dict[str, Any]]:
 def studio_tools_for_session(session: Optional[StudioSession] = None) -> List[Dict[str, Any]]:
     """Studio/Meta tool list with optional code_search when mounted code brains exist."""
     tools = merge_computer_use_tools_into(list(STUDIO_TOOLS))
+    from agenticx.ops.tools import merge_ops_tools_into
+
+    tools = merge_ops_tools_into(tools)
     try:
         from agenticx.brain.mount import session_has_mounted_code_brains
 
@@ -9320,6 +9323,12 @@ async def dispatch_tool_async(
             return await _tool_memory_search(arguments, session)
         if name == "memory_forget":
             return await _tool_memory_forget(arguments, session)
+        if name in {"get_trace", "get_logs", "get_recent_changes"}:
+            from agenticx.ops.tools import dispatch_ops_tool, ops_tools_enabled
+
+            if not ops_tools_enabled():
+                return "ERROR: ops tools disabled. Set AGENTICX_OPS_TOOLS=1"
+            return await asyncio.to_thread(dispatch_ops_tool, name, arguments, session)
         if name == "knowledge_search":
             return await asyncio.to_thread(_tool_knowledge_search, arguments, session)
         if name == "knowledge_synthesize":

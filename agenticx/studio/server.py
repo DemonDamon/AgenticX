@@ -939,6 +939,13 @@ def create_studio_app() -> FastAPI:
         except Exception as exc:
             logger.debug("LongRun orchestrator not started: %s", exc)
 
+        try:
+            from agenticx.ops.otel_bootstrap import maybe_enable_studio_otel
+
+            maybe_enable_studio_otel()
+        except Exception as exc:
+            logger.debug("otel bootstrap skipped: %s", exc)
+
         def _preload_code_index_model() -> None:
             try:
                 from agenticx.code_index.config import load_code_index_config
@@ -3624,6 +3631,9 @@ def create_studio_app() -> FastAPI:
         else:
             effective_tools_source = list(visible_meta_agent_tools())
         effective_tools_source = merge_computer_use_tools_into(effective_tools_source)
+        from agenticx.ops.tools import merge_ops_tools_into
+
+        effective_tools_source = merge_ops_tools_into(effective_tools_source)
         effective_tools_source = _strip_disabled_web_search_tools(effective_tools_source)
         effective_tools_source = _maybe_inject_code_search_tools(
             session,
@@ -4505,6 +4515,9 @@ def create_studio_app() -> FastAPI:
                 loop_avatar_tools_enabled = _sanitize_tools_enabled(loop_avatar_cfg.tools_enabled)
         loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(visible_meta_agent_tools())
         loop_tools_source = merge_computer_use_tools_into(loop_tools_source)
+        from agenticx.ops.tools import merge_ops_tools_into
+
+        loop_tools_source = merge_ops_tools_into(loop_tools_source)
         loop_tools_source = _strip_disabled_web_search_tools(loop_tools_source)
         loop_tools_source = _maybe_inject_code_search_tools(
             session,

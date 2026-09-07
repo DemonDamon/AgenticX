@@ -117,3 +117,4 @@ enterprise/apps/gateway/.runtime/
 enterprise/apps/web-portal/.runtime/
 enterprise/.runtime/
 .dataset/
+deploy/observability/pours/

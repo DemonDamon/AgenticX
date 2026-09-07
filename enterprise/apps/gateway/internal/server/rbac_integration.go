@@ -60,6 +60,7 @@ func (s *Server) writeFieldPolicyBlock(w http.ResponseWriter, identity requestId
 			DepartmentID: identity.DepartmentID,
 			SessionID:    identity.SessionID,
 			TraceID:      identity.TraceID,
+			DeploymentID: identity.DeploymentID,
 			ClientType:   "web-portal",
 			ClientIP:     r.RemoteAddr,
 			Route:        "field:deny",

@@ -90,6 +90,7 @@ func (s *Server) tryServeFromCache(ctx cacheServeContext) bool {
 		DepartmentID:       ctx.identity.DepartmentID,
 		SessionID:          ctx.identity.SessionID,
 		TraceID:            ctx.identity.TraceID,
+		DeploymentID:       ctx.identity.DeploymentID,
 		ClientType:         "web-portal",
 		ClientIP:           ctx.r.RemoteAddr,
 		Provider:           ctx.decision.Provider,
@@ -186,6 +187,12 @@ func (s *Server) reportUsageDetailed(
 		}
 		if io := metering.BuildTraceIOMetadata(span.PromptText, span.CompletionText); io != nil {
 			meta["io"] = io
+		}
+		if sid := strings.TrimSpace(identity.SessionID); sid != "" {
+			meta["session_id"] = sid
+		}
+		if did := strings.TrimSpace(identity.DeploymentID); did != "" {
+			meta["deployment_id"] = did
 		}
 		meta = metering.CapTraceMetadata(meta)
 		s.traceReporter.ReportAsync(metering.TraceSpanRecord{
@@ -328,6 +335,7 @@ func (s *Server) tryServeProtocolCache(w http.ResponseWriter, ctx cacheServeCont
 		DepartmentID:       ctx.identity.DepartmentID,
 		SessionID:          ctx.identity.SessionID,
 		TraceID:            ctx.identity.TraceID,
+		DeploymentID:       ctx.identity.DeploymentID,
 		ClientType:         "web-portal",
 		ClientIP:           ctx.r.RemoteAddr,
 		Provider:           ctx.decision.Provider,

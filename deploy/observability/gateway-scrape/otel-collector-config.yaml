@@ -1,0 +1,21 @@
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: agx-gateway
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["${GATEWAY_METRICS_HOST:host.docker.internal}:9090"]
+processors:
+  batch: {}
+exporters:
+  otlp:
+    endpoint: host.docker.internal:4317
+    tls:
+      insecure: true
+service:
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      processors: [batch]
+      exporters: [otlp]
