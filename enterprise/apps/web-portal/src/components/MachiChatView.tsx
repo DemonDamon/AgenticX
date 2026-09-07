@@ -832,10 +832,10 @@ export function MachiChatView({
         }
         placeholder={
           planChatGateActive
-            ? "修改研究计划，例如：侧重性能 / 增加成本分析 / 去掉某方向…"
+            ? t("planRevisePlaceholder")
             : deepResearchMode
               ? tw("deepResearchPlaceholder")
-              : "发送消息给 Near..."
+              : t("composerPlaceholder")
         }
         attachments={Object.values(attachments)}
         onAddFiles={handleAddFiles}

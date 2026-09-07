@@ -392,10 +392,10 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
               onClick={() => router.push("/rooms")}
               className={collapsed ? "" : "w-full justify-start"}
               size={collapsed ? "icon" : "default"}
-              aria-label="协作房间"
+              aria-label={t("collabRoom")}
             >
               <Users />
-              {!collapsed && "协作房间"}
+              {!collapsed && t("collabRoom")}
             </Button>
           </div>
 

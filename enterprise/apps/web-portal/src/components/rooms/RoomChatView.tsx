@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Button, Input } from "@agenticx/ui";
 import type { CollabRoom, CollabRoomMember, CollabRoomMessage } from "../../lib/collab-room/types";
 import { RoomMembersPanel } from "./RoomMembersPanel";
@@ -26,25 +27,28 @@ function visibleMessageContent(content: string): string {
   return stripped || content.trim();
 }
 
+type LoadErrorKey = "" | "revoked" | "openFailed";
+
 export function RoomChatView({ roomId, currentUserId }: RoomChatViewProps) {
+  const t = useTranslations("rooms");
   const { messages, status, send } = useRoomStream(roomId);
   const [room, setRoom] = useState<CollabRoom | null>(null);
   const [members, setMembers] = useState<CollabRoomMember[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState<LoadErrorKey>("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const loadRoom = useCallback(async () => {
     const res = await fetch(`/api/rooms/${roomId}`, { cache: "no-store" });
     const body = (await res.json()) as Envelope<{ room: CollabRoom; members: CollabRoomMember[] }>;
     if (res.status === 403) {
-      setLoadError("你已被移出该房间");
+      setLoadError("revoked");
       return;
     }
     if (!res.ok) {
-      setLoadError("无法打开房间");
+      setLoadError("openFailed");
       return;
     }
     setLoadError("");
@@ -60,7 +64,7 @@ export function RoomChatView({ roomId, currentUserId }: RoomChatViewProps) {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length]);
 
-  const revoked = status === "revoked" || loadError === "你已被移出该房间";
+  const revoked = status === "revoked" || loadError === "revoked";
 
   const onSend = async () => {
     const text = draft;
@@ -71,7 +75,7 @@ export function RoomChatView({ roomId, currentUserId }: RoomChatViewProps) {
       await send(text);
       setDraft("");
     } catch {
-      setSendError("发送失败，内容仍保留在输入框，请重试");
+      setSendError(t("sendFailed"));
     } finally {
       setSending(false);
     }
@@ -82,27 +86,33 @@ export function RoomChatView({ roomId, currentUserId }: RoomChatViewProps) {
       <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
           <Link href="/rooms" className="text-sm text-muted-foreground hover:text-foreground">
-            返回房间列表
+            {t("backToList")}
           </Link>
-          <h1 className="truncate text-lg font-semibold">{room?.title ?? "协作房间"}</h1>
+          <h1 className="truncate text-lg font-semibold">{room?.title ?? t("title")}</h1>
         </div>
         <span className="shrink-0 text-xs text-muted-foreground">
-          {status === "live" ? "实时" : status === "polling" ? "轮询同步" : status === "connecting" ? "连接中" : null}
+          {status === "live"
+            ? t("statusLive")
+            : status === "polling"
+              ? t("statusPolling")
+              : status === "connecting"
+                ? t("statusConnecting")
+                : null}
         </span>
       </header>
 
       {revoked ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-          <p className="text-base font-medium">你已被移出该房间</p>
+          <p className="text-base font-medium">{t("revoked")}</p>
           <Link href="/rooms">
-            <Button>返回房间列表</Button>
+            <Button>{t("backToList")}</Button>
           </Link>
         </div>
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1">
           <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {loadError && loadError !== "你已被移出该房间" ? (
-              <p className="px-4 py-2 text-sm text-destructive">{loadError}</p>
+            {loadError && loadError !== "revoked" ? (
+              <p className="px-4 py-2 text-sm text-destructive">{t(loadError)}</p>
             ) : null}
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
               {messages.map((message) => {
@@ -128,7 +138,7 @@ export function RoomChatView({ roomId, currentUserId }: RoomChatViewProps) {
                       ].join(" ")}
                     >
                       <div className="mb-1 text-[11px] opacity-80">
-                        {kind === "meta" ? "Meta" : mine ? "我" : message.sender_name || "成员"}
+                        {kind === "meta" ? "Meta" : mine ? t("me") : message.sender_name || t("member")}
                       </div>
                       <div className="whitespace-pre-wrap break-words">{visibleMessageContent(message.content)}</div>
                     </div>
@@ -147,11 +157,11 @@ export function RoomChatView({ roomId, currentUserId }: RoomChatViewProps) {
               <Input
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                placeholder={sending ? "发送中…" : "输入消息，@Meta 可点名助手"}
+                placeholder={sending ? t("sending") : t("inputPlaceholder")}
                 disabled={sending}
               />
               <Button type="submit" disabled={sending || !draft.trim()}>
-                发送
+                {t("send")}
               </Button>
             </form>
             {sendError ? <p className="px-3 pb-3 text-xs text-destructive">{sendError}</p> : null}
