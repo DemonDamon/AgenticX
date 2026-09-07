@@ -4,6 +4,7 @@
  */
 
 import { stripThinkBlocks } from "./content-clean";
+import { languageDirective } from "./copy";
 import {
   DEFAULT_DELIVERY_PREFS,
   primaryReportPathSuffix,
@@ -39,6 +40,7 @@ export type CompletionSummaryInput = {
 
 export type CompletionSummaryDeps = {
   callJson: (messages: Array<{ role: string; content: string }>) => Promise<string>;
+  locale?: "zh" | "en";
 };
 
 const SUMMARY_SYSTEM = [
@@ -309,7 +311,7 @@ export async function buildCompletionSummary(
 
   try {
     const raw = await deps.callJson([
-      { role: "system", content: SUMMARY_SYSTEM },
+      { role: "system", content: `${SUMMARY_SYSTEM}\n${languageDirective(deps.locale === "en" ? "en" : "zh")}` },
       { role: "user", content: user },
     ]);
     const text = stripThinkBlocks(raw ?? "").trim();

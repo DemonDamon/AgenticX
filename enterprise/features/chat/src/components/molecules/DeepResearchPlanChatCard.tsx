@@ -10,6 +10,7 @@ import {
 } from "../../utils/deep-research-plan-chat-composer";
 import { useChatStore } from "../../store";
 import { PLAN_GATE_RESUMED_EVENT } from "./DeepResearchPreflightCard";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 
 type ResearchPlanEvent = Extract<DeepResearchEvent, { type: "research_plan" }>;
 
@@ -38,15 +39,16 @@ function latestPlanEvent(events: DeepResearchEvent[]): ResearchPlanEvent | null 
 export { isPlanChatGatePending };
 
 function PlanBody({ plan }: { plan: ResearchPlanSnapshot }) {
+  const copy = useChatCopy();
   return (
     <div className="mt-2 space-y-2 text-sm leading-6">
       <div>
-        <span className="text-xs font-medium text-muted-foreground">我的理解：</span>
+        <span className="text-xs font-medium text-muted-foreground">{copy.preflight.myUnderstanding}</span>
         <span className="text-foreground">{plan.objective}</span>
       </div>
       {plan.subQuestions.length > 0 ? (
         <div>
-          <div className="text-xs font-medium text-muted-foreground">研究计划草案：</div>
+          <div className="text-xs font-medium text-muted-foreground">{copy.preflight.planDraft}</div>
           <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-foreground">
             {plan.subQuestions.map((sq) => (
               <li key={sq.id}>{sq.title}</li>
@@ -76,6 +78,7 @@ export function DeepResearchPlanChatCard({
   disabled,
   onSubmitted,
 }: DeepResearchPlanChatCardProps) {
+  const copy = useChatCopy();
   const planEvent = React.useMemo(() => latestPlanEvent(events), [events]);
   const updating = React.useMemo(
     () => awaiting && interactive && isPlanChatUpdating(events),
@@ -150,18 +153,19 @@ export function DeepResearchPlanChatCard({
       onSubmitted?.();
       setError(parsed.message);
     } catch {
-      setError("网络异常，提交失败，请重试。");
+      setError(copy.planChat.networkFailed);
     } finally {
       submitLockRef.current = false;
       setSubmitting(false);
     }
   };
 
-  const ACTION_LABEL: Record<ResearchPlanEvent["action"], string> = {
-    proposed: "草案",
-    updated: "已更新",
-    approved: "已确认",
-  };
+  const actionLabel =
+    planEvent.action === "updated"
+      ? copy.planChat.actionUpdated
+      : planEvent.action === "approved"
+        ? copy.planChat.actionApproved
+        : copy.planChat.actionProposed;
 
   return (
     <div
@@ -169,19 +173,19 @@ export function DeepResearchPlanChatCard({
       data-testid="deep-research-plan-chat-card"
     >
       <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-        <span>深度研究 · 计划对齐</span>
+        <span>{copy.planChat.title}</span>
         <span
           className="rounded-full bg-background px-2 py-0.5"
           data-testid="deep-research-plan-chat-version"
         >
-          v{planEvent.version} · {ACTION_LABEL[planEvent.action]}
+          v{planEvent.version} · {actionLabel}
         </span>
         {updating ? (
           <span
             className="rounded-full bg-primary/10 px-2 py-0.5 text-primary"
             data-testid="deep-research-plan-chat-updating"
           >
-            更新中
+            {copy.planChat.updating}
           </span>
         ) : null}
       </div>
@@ -190,11 +194,11 @@ export function DeepResearchPlanChatCard({
 
       {showInteractive ? (
         <p className="mt-3 text-xs leading-5 text-muted-foreground">
-          可在下方输入框用自然语言修改计划（如：侧重性能 / 增加成本分析）；满意后点「开始调研」。
+          {copy.planChat.editHint}
         </p>
       ) : !interactive && planEvent.action !== "approved" ? (
         <p className="mt-3 text-xs leading-5 text-muted-foreground">
-          此为历史方案；请查看下方更新后的计划卡。
+          {copy.planChat.historic}
         </p>
       ) : null}
 
@@ -208,7 +212,7 @@ export function DeepResearchPlanChatCard({
             onClick={() => void submitStart()}
             data-testid="deep-research-plan-chat-start"
           >
-            开始调研
+            {copy.planChat.startResearch}
           </Button>
         </div>
       ) : null}

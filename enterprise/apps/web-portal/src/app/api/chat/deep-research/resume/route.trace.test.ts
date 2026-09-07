@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const cookiesSet = vi.fn();
+const cookiesGet = vi.fn(() => undefined as { value: string } | undefined);
 vi.mock("next/headers", () => ({
-  cookies: async () => ({ set: cookiesSet }),
+  cookies: async () => ({ set: cookiesSet, get: cookiesGet }),
 }));
 
 vi.mock("../../../../../lib/session", () => ({
@@ -35,7 +36,9 @@ vi.mock("../../../../../lib/deep-research/run-wait", () => ({
   resolveClarifyResume: vi.fn(() => false),
 }));
 
-const runDeepResearchTurn = vi.fn(async () => new Response("ok", { status: 200 }));
+const runDeepResearchTurn = vi.fn<(...args: unknown[]) => Promise<Response>>(
+  async () => new Response("ok", { status: 200 }),
+);
 vi.mock("../../../../../lib/deep-research/orchestrator", async () => {
   const actual = await vi.importActual<typeof import("../../../../../lib/deep-research/orchestrator")>(
     "../../../../../lib/deep-research/orchestrator",
@@ -139,8 +142,68 @@ describe("deep-research resume trace_id", () => {
     const deps = runDeepResearchTurn.mock.calls[0]?.[1] as {
       traceId?: string;
       headers?: Record<string, string>;
+      locale?: string;
     };
     expect(deps.traceId).toBe(TID);
     expect(deps.headers?.["x-agenticx-trace-id"]).toBe(TID);
+    expect(deps.locale).toBe("zh");
+  });
+
+  it("passes locale en when NEXT_LOCALE cookie is en", async () => {
+    cookiesGet.mockReturnValue({ value: "en" });
+    vi.mocked(getSessionAuthFromCookies).mockResolvedValue({
+      session: {
+        userId: "u1",
+        tenantId: "t1",
+        deptId: "d1",
+        email: "u@example.com",
+        sessionId: "auth-session",
+      },
+      accessToken: "access",
+      refreshToken: "refresh",
+    } as never);
+    getRun.mockResolvedValue({
+      runId: "run-1",
+      tenantId: "t1",
+      userId: "u1",
+      sessionId: "chat-session",
+      topic: "topic",
+      status: "awaiting_clarify",
+      phase: "plan",
+      events: [
+        {
+          type: "research_plan",
+          runId: "run-1",
+          action: "proposed",
+          version: 1,
+          plan: {
+            version: 1,
+            objective: "topic",
+            scope: [],
+            subQuestions: [{ id: "q1", title: "Q1" }],
+            sourceStrategy: [],
+            deliverables: [],
+            assumptions: [],
+          },
+        },
+      ],
+    });
+    appendEvents.mockResolvedValue(undefined);
+    reopenForContinue.mockResolvedValue(true);
+
+    await POST(
+      new Request("http://localhost/api/chat/deep-research/resume", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          runId: "run-1",
+          answers: { __plan_action__: "approve" },
+          model: "gpt-test",
+        }),
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    const deps = runDeepResearchTurn.mock.calls[0]?.[1] as { locale?: string };
+    expect(deps.locale).toBe("en");
   });
 });

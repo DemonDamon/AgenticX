@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseClarifierJson, proposeClarification } from "./clarifier";
+import { defaultOpenEndedClarification, parseClarifierJson, proposeClarification } from "./clarifier";
+import { languageDirective } from "./copy";
 
 describe("parseClarifierJson", () => {
   it("returns needed false for invalid JSON", () => {
@@ -71,6 +72,19 @@ describe("parseClarifierJson", () => {
   });
 });
 
+describe("defaultOpenEndedClarification locale", () => {
+  it("uses English question and options without CJK", () => {
+    const result = defaultOpenEndedClarification("deepseek v4 core techniques", "en");
+    expect(result.needed).toBe(true);
+    if (!result.needed) return;
+    expect(result.questions[0]?.question).toMatch(/Which aspects/);
+    expect(result.questions[0]?.question).not.toMatch(/[\u4e00-\u9fff]/);
+    expect(result.questions[0]?.options.every((opt) => !/[\u4e00-\u9fff]/.test(opt.label))).toBe(
+      true,
+    );
+  });
+});
+
 describe("proposeClarification grounding", () => {
   function stubGateway() {
     return vi.fn().mockResolvedValue({
@@ -115,6 +129,19 @@ describe("proposeClarification grounding", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(sentMessages(fetchImpl)).toHaveLength(2);
+  });
+
+  it("appends the English language directive to the system prompt", async () => {
+    const fetchImpl = stubGateway();
+    await proposeClarification({
+      url: "http://gw",
+      headers: {},
+      body: { model: "m" },
+      userQuery: "q",
+      locale: "en",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(sentMessages(fetchImpl)[0]?.content).toContain(languageDirective("en"));
   });
 
   it("forces a focus clarify when the model skips an open-ended research ask", async () => {

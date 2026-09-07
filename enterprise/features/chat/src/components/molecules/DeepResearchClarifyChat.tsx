@@ -4,6 +4,7 @@ import * as React from "react";
 import type { DeepResearchEvent } from "@agenticx/core-api";
 import { Button } from "@agenticx/ui";
 import { parseClarifyResumeResponse } from "../../utils/deep-research-clarify-resume";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 
 type ClarifyChatEvent = Extract<DeepResearchEvent, { type: "clarify_chat" }>;
 
@@ -41,6 +42,7 @@ export function DeepResearchClarifyChat({
   disabled,
   onSubmitted,
 }: DeepResearchClarifyChatProps) {
+  const copy = useChatCopy();
   const chatEvent = React.useMemo(() => latestChatEvent(events), [events]);
   const [reply, setReply] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
@@ -56,7 +58,7 @@ export function DeepResearchClarifyChat({
   const submit = async (skip: boolean) => {
     const text = reply.trim();
     if (!skip && !text) {
-      setError("请先输入回复，或点击「直接开始」按默认范围调研。");
+      setError(copy.clarify.emptyReply);
       return;
     }
     setSubmitting(true);
@@ -80,7 +82,7 @@ export function DeepResearchClarifyChat({
         setError(parsed.message);
       }
     } catch {
-      setError("网络异常，提交失败，请重试。");
+      setError(copy.clarify.networkFailed);
     } finally {
       setSubmitting(false);
     }
@@ -92,7 +94,7 @@ export function DeepResearchClarifyChat({
       data-testid="deep-research-clarify-chat"
     >
       <div className="text-xs font-medium text-muted-foreground">
-        深度研究 · 开题确认{chatEvent.phase === "midrun" ? "（运行中补充）" : ""}
+        {copy.clarify.title}{chatEvent.phase === "midrun" ? copy.clarify.midrunSuffix : ""}
       </div>
       <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">
         {chatEvent.promptText}
@@ -100,18 +102,18 @@ export function DeepResearchClarifyChat({
 
       {savedReply ? (
         <div className="mt-2 rounded-lg bg-background/70 px-3 py-2 text-sm text-foreground">
-          <span className="text-xs text-muted-foreground">我的回复：</span>
+          <span className="text-xs text-muted-foreground">{copy.clarify.myReply}</span>
           {savedReply}
         </div>
       ) : effectivelyTimedOut && !showInteractive ? (
-        <div className="mt-2 text-xs text-muted-foreground">澄清超时，已按默认范围继续。</div>
+        <div className="mt-2 text-xs text-muted-foreground">{copy.clarify.chatTimeout}</div>
       ) : null}
 
       {showInteractive ? (
         <div className="mt-3 space-y-2">
           <textarea
             className="min-h-[64px] w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            placeholder="直接回复即可；也可以说「直接开始」…"
+            placeholder={copy.clarify.chatPlaceholder}
             value={reply}
             disabled={disabled || submitting}
             onChange={(e) => setReply(e.target.value)}
@@ -125,7 +127,7 @@ export function DeepResearchClarifyChat({
               onClick={() => void submit(false)}
               data-testid="deep-research-clarify-chat-submit"
             >
-              提交回复
+              {copy.clarify.submitReply}
             </Button>
             <Button
               size="sm"
@@ -134,7 +136,7 @@ export function DeepResearchClarifyChat({
               onClick={() => void submit(true)}
               data-testid="deep-research-clarify-chat-skip"
             >
-              直接开始
+              {copy.clarify.startNow}
             </Button>
           </div>
         </div>

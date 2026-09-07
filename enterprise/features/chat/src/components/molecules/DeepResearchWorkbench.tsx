@@ -12,6 +12,7 @@ import {
   deepResearchNeedsTrailingActivity,
   deepResearchWaitingLabel,
 } from "./deep-research-segments";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 import type { ResearchStep } from "./deep-research-steps";
 import {
   laneSourceHost,
@@ -466,9 +467,10 @@ export function DeepResearchWorkbench({
   planChatInteractive = true,
   className,
 }: DeepResearchWorkbenchProps) {
+  const copy = useChatCopy();
   const segments = React.useMemo(
-    () => buildDeepResearchSegments(deepResearch.events, deepResearch.status),
-    [deepResearch.events, deepResearch.status],
+    () => buildDeepResearchSegments(deepResearch.events, deepResearch.status, copy),
+    [deepResearch.events, deepResearch.status, copy],
   );
 
   // clarify / plan phases render no segment, so events alone can't tell whether the
@@ -494,7 +496,7 @@ export function DeepResearchWorkbench({
       <div className={["mb-3 text-sm leading-5 text-foreground", className].filter(Boolean).join(" ")}>
         <div className="flex items-center gap-2">
           <IconSpinner className="h-4 w-4 animate-spin text-primary" />
-          <span>{deepResearchWaitingLabel(deepResearch.events)}</span>
+          <span>{deepResearchWaitingLabel(deepResearch.events, copy)}</span>
         </div>
       </div>
     );

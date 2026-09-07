@@ -24,6 +24,7 @@ export type HtmlReportInput = {
     pagesFetched: number;
   };
   generatedAt: string;
+  locale?: "zh" | "en";
 };
 
 export function escapeHtml(raw: string): string {
@@ -560,7 +561,7 @@ export function renderHtmlReport(input: HtmlReportInput): string {
     : "";
 
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${input.locale === "en" ? "en" : "zh-CN"}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />

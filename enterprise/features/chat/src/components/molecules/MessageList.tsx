@@ -35,6 +35,7 @@ import { UserMessageAttachmentCard } from "../atoms/UserMessageAttachmentCard";
 import { stripDeepResearchProgressFromContent } from "./deep-research-segments";
 import { findActivePlanChatGate } from "../../utils/deep-research-plan-chat-composer";
 import { useChatStore } from "../../store";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 import "../../markdown/chat-prism-themes.css";
 
 // 内联 SVG 图标组件
@@ -371,6 +372,7 @@ export function MessageList({
   onRequestDeepResearchLaneSources,
   onRequestAttachmentPreview,
 }: MessageListProps) {
+  const copy = useChatCopy();
   const parentRef = React.useRef<HTMLDivElement>(null);
   const autoScrollPinnedRef = React.useRef(true);
   const listSessionIdForStream = messages[0]?.session_id ?? null;
@@ -650,16 +652,16 @@ export function MessageList({
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 px-4 py-2 backdrop-blur">
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">
-              已选择 {selectedMessages.size} 条消息
+              {copy.messageActions.selectedCount(selectedMessages.size)}
             </span>
           </div>
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" onClick={selectAll} className="gap-1">
               <IconCheck className="h-4 w-4" />
-              全选
+              {copy.messageActions.selectAll}
             </Button>
             <Button variant="ghost" size="sm" onClick={clearSelection}>
-              取消
+              {copy.messageActions.cancel}
             </Button>
           </div>
         </div>
@@ -1037,7 +1039,7 @@ export function MessageList({
                                     <IconChevronLeft className="h-3.5 w-3.5" />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>上一版回复</TooltipContent>
+                                <TooltipContent>{copy.messageActions.prevVersion}</TooltipContent>
                               </Tooltip>
                               <span className="min-w-[2.3rem] text-center text-sm font-medium text-muted-foreground">
                                 {retryVersionMeta!.activeIndex + 1}/{retryVersionMeta!.total}
@@ -1057,7 +1059,7 @@ export function MessageList({
                                     <IconChevronRight className="h-3.5 w-3.5" />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>下一版回复</TooltipContent>
+                                <TooltipContent>{copy.messageActions.nextVersion}</TooltipContent>
                               </Tooltip>
                               <div className="mx-0.5 h-4 w-px bg-border/80" />
                             </>
@@ -1082,7 +1084,7 @@ export function MessageList({
                                 )}
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>复制</TooltipContent>
+                            <TooltipContent>{copy.messageActions.copy}</TooltipContent>
                           </Tooltip>
 
                           <Tooltip>
@@ -1099,7 +1101,7 @@ export function MessageList({
                                 <IconListChecks className="h-3.5 w-3.5" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>多选</TooltipContent>
+                            <TooltipContent>{copy.messageActions.multiSelect}</TooltipContent>
                           </Tooltip>
 
                           {isUser ? (
@@ -1118,7 +1120,7 @@ export function MessageList({
                                     <IconEdit className="h-3.5 w-3.5" />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>编辑</TooltipContent>
+                                <TooltipContent>{copy.messageActions.edit}</TooltipContent>
                               </Tooltip>
 
                               {hasUserResponseVersions && (
@@ -1139,7 +1141,7 @@ export function MessageList({
                                         <IconChevronLeft className="h-3.5 w-3.5" />
                                       </Button>
                                     </TooltipTrigger>
-                                    <TooltipContent>上一版回复</TooltipContent>
+                                    <TooltipContent>{copy.messageActions.prevVersion}</TooltipContent>
                                   </Tooltip>
                                   <span className="min-w-[2.3rem] text-center text-sm font-medium text-muted-foreground">
                                     {userResponseVersionMeta!.activeIndex + 1}/{userResponseVersionMeta!.total}
@@ -1159,7 +1161,7 @@ export function MessageList({
                                         <IconChevronRight className="h-3.5 w-3.5" />
                                       </Button>
                                     </TooltipTrigger>
-                                    <TooltipContent>下一版回复</TooltipContent>
+                                    <TooltipContent>{copy.messageActions.nextVersion}</TooltipContent>
                                   </Tooltip>
                                 </>
                               )}
@@ -1182,7 +1184,7 @@ export function MessageList({
                                       <IconRefresh className="h-3.5 w-3.5" />
                                     </Button>
                                   </TooltipTrigger>
-                                  <TooltipContent>重新生成</TooltipContent>
+                                  <TooltipContent>{copy.messageActions.retry}</TooltipContent>
                                 </Tooltip>
                               )}
 
@@ -1201,7 +1203,7 @@ export function MessageList({
                                     <IconShare className="h-3.5 w-3.5" />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>分享</TooltipContent>
+                                <TooltipContent>{copy.messageActions.share}</TooltipContent>
                               </Tooltip>
                             </>
                           )}
@@ -1223,7 +1225,7 @@ export function MessageList({
                                     <IconThumbsUp className="h-3.5 w-3.5" />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>有帮助</TooltipContent>
+                                <TooltipContent>{copy.messageActions.helpful}</TooltipContent>
                               </Tooltip>
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -1239,7 +1241,7 @@ export function MessageList({
                                     <IconThumbsDown className="h-3.5 w-3.5" />
                                   </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>没帮助</TooltipContent>
+                                <TooltipContent>{copy.messageActions.unhelpful}</TooltipContent>
                               </Tooltip>
                               {message.trace_id ? (
                                 <Tooltip>
@@ -1262,7 +1264,7 @@ export function MessageList({
                                       )}
                                     </Button>
                                   </TooltipTrigger>
-                                  <TooltipContent>复制请求 ID</TooltipContent>
+                                  <TooltipContent>{copy.messageActions.copyTraceId}</TooltipContent>
                                 </Tooltip>
                               ) : null}
                               {hasCitationSources && citationSources ? (
@@ -1300,7 +1302,7 @@ export function MessageList({
                                 cancelEditMessage();
                               }}
                             >
-                              取消
+                              {copy.messageActions.cancel}
                             </Button>
                             <Button
                               size="sm"
@@ -1310,7 +1312,7 @@ export function MessageList({
                               }}
                               disabled={!editingDraft.trim()}
                             >
-                              发送
+                              {copy.messageActions.send}
                             </Button>
                           </div>
                         </div>
@@ -1352,13 +1354,13 @@ export function MessageList({
                 onClick={() => {
                   const content = messages
                     .filter((m) => selectedMessages.has(m.id))
-                    .map((m) => `${m.role === "user" ? "用户" : "助手"}: ${toCopyableMessageText(m)}`)
+                    .map((m) => `${m.role === "user" ? copy.messageActions.userRole : copy.messageActions.assistantRole}: ${toCopyableMessageText(m)}`)
                     .join("\n\n");
                   navigator.clipboard.writeText(content);
                 }}
               >
                 <IconCopy className="h-4 w-4" />
-                复制文本
+                {copy.messageActions.copyText}
               </Button>
               <Button
                 variant="outline"
@@ -1366,11 +1368,11 @@ export function MessageList({
                 onClick={() => onShare?.(Array.from(selectedMessages).join(","))}
               >
                 <IconShare className="h-4 w-4" />
-                分享
+                {copy.messageActions.share}
               </Button>
             </div>
             <Button variant="ghost" size="sm" onClick={clearSelection}>
-              取消
+              {copy.messageActions.cancel}
             </Button>
           </div>
         </div>

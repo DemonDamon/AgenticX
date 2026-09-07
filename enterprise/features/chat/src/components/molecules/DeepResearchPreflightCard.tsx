@@ -5,6 +5,7 @@ import type { DeepResearchEvent, ResearchPlanSnapshot } from "@agenticx/core-api
 import { Button } from "@agenticx/ui";
 import { parseClarifyResumeResponse } from "../../utils/deep-research-clarify-resume";
 import { useChatStore } from "../../store";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 
 /** Portal listens and starts reconnect so orphan-continue events reach the workbench. */
 export const PLAN_GATE_RESUMED_EVENT = "agx-deep-research-plan-resumed";
@@ -35,22 +36,17 @@ export function isPlanGatePending(events: DeepResearchEvent[]): boolean {
   return latest?.action === "proposed";
 }
 
-const ACTION_LABEL: Record<ResearchPlanEvent["action"], string> = {
-  proposed: "草案",
-  updated: "已更新",
-  approved: "已确认",
-};
-
 function PlanBody({ plan }: { plan: ResearchPlanSnapshot }) {
+  const copy = useChatCopy();
   return (
     <div className="mt-2 space-y-2 text-sm leading-6">
       <div>
-        <span className="text-xs font-medium text-muted-foreground">我的理解：</span>
+        <span className="text-xs font-medium text-muted-foreground">{copy.preflight.myUnderstanding}</span>
         <span className="text-foreground">{plan.objective}</span>
       </div>
       {plan.subQuestions.length > 0 ? (
         <div>
-          <div className="text-xs font-medium text-muted-foreground">研究计划草案：</div>
+          <div className="text-xs font-medium text-muted-foreground">{copy.preflight.planDraft}</div>
           <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-foreground">
             {plan.subQuestions.map((sq) => (
               <li key={sq.id}>{sq.title}</li>
@@ -79,6 +75,7 @@ export function DeepResearchPreflightCard({
   disabled,
   onSubmitted,
 }: DeepResearchPreflightCardProps) {
+  const copy = useChatCopy();
   const planEvent = React.useMemo(() => latestPlanEvent(events), [events]);
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState("");
@@ -109,7 +106,7 @@ export function DeepResearchPreflightCard({
           .slice(0, 8)
           .map((line) => line.slice(0, 200));
         if (subQuestions.length === 0) {
-          setError("请至少保留一条子问题，或点「确认并开始」按草案执行。");
+          setError(copy.preflight.keepOne);
           return;
         }
         planPatch = JSON.stringify({ subQuestions });
@@ -185,7 +182,7 @@ export function DeepResearchPreflightCard({
       setError(parsed.message);
       setEditing(false);
     } catch {
-      setError("网络异常，提交失败，请重试。");
+      setError(copy.preflight.networkFailed);
     } finally {
       submitLockRef.current = false;
       setSubmitting(false);
@@ -198,16 +195,16 @@ export function DeepResearchPreflightCard({
       data-testid="deep-research-preflight-card"
     >
       <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        <span>深度研究 · 研究计划</span>
+        <span>{copy.preflight.title}</span>
         <span className="rounded-full bg-background px-2 py-0.5">
-          v{planEvent.version} · {ACTION_LABEL[planEvent.action]}
+          v{planEvent.version} · {planEvent.action === "updated" ? copy.preflight.actionUpdated : planEvent.action === "approved" ? copy.preflight.actionApproved : copy.preflight.actionProposed}
         </span>
       </div>
 
       {editing && showInteractive ? (
         <div className="mt-3 space-y-2">
           <div className="text-xs text-muted-foreground">
-            每行一条子问题（最多 8 条），提交后按计划 v{planEvent.version + 1} 执行：
+            {copy.preflight.editHint(planEvent.version + 1)}
           </div>
           <textarea
             className="min-h-[120px] w-full resize-y rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -226,7 +223,7 @@ export function DeepResearchPreflightCard({
       {showInteractive ? (
         <div className="mt-3 space-y-2">
           <p className="text-[11px] text-muted-foreground">
-            确认或修改前不会自动开始检索，请点下方按钮继续。
+            {copy.preflight.waitHint}
           </p>
         <div className="flex flex-wrap items-center gap-2">
           {editing ? (
@@ -237,7 +234,7 @@ export function DeepResearchPreflightCard({
                 onClick={() => void submit("edit")}
                 data-testid="deep-research-plan-edit-submit"
               >
-                提交修改并开始
+                {copy.preflight.submitEdits}
               </Button>
               <Button
                 size="sm"
@@ -245,7 +242,7 @@ export function DeepResearchPreflightCard({
                 disabled={disabled || submitting}
                 onClick={() => setEditing(false)}
               >
-                取消
+                {copy.preflight.cancel}
               </Button>
             </>
           ) : (
@@ -256,7 +253,7 @@ export function DeepResearchPreflightCard({
                 onClick={() => void submit("approve")}
                 data-testid="deep-research-plan-approve"
               >
-                确认并开始
+                {copy.preflight.confirmStart}
               </Button>
               <Button
                 size="sm"
@@ -268,7 +265,7 @@ export function DeepResearchPreflightCard({
                 }}
                 data-testid="deep-research-plan-edit-open"
               >
-                修改计划
+                {copy.preflight.editPlan}
               </Button>
               <Button
                 size="sm"
@@ -277,7 +274,7 @@ export function DeepResearchPreflightCard({
                 onClick={() => void submit("skip")}
                 data-testid="deep-research-plan-skip"
               >
-                直接开始
+                {copy.preflight.startNow}
               </Button>
             </>
           )}

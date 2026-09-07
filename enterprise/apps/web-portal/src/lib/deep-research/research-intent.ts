@@ -27,9 +27,29 @@ export function looksOpenEndedResearchQuery(query: string): boolean {
   return q.length >= 4 && q.length <= 48 && !/[?？]/.test(q);
 }
 
-export function defaultFocusOptions(query: string): Array<{ id: string; label: string }> {
+export function defaultFocusOptions(
+  query: string,
+  locale: "zh" | "en" = "zh",
+): Array<{ id: string; label: string }> {
   const q = query.trim();
-  if (/模型|llm|deepseek|gpt|claude|架构|训练|推理|大模型/i.test(q)) {
+  const isModel = /模型|llm|deepseek|gpt|claude|架构|训练|推理|大模型/i.test(q);
+  if (locale === "en") {
+    if (isModel) {
+      return [
+        { id: "arch", label: "Architecture innovations (e.g. MoE, attention)" },
+        { id: "train", label: "Training data and optimization" },
+        { id: "infer", label: "Inference, serving, and cost" },
+        { id: "eval", label: "Evaluation and typical applications" },
+      ];
+    }
+    return [
+      { id: "overview", label: "Definitions and recent progress" },
+      { id: "mechanism", label: "Key mechanisms and details" },
+      { id: "practice", label: "Practice and deployment" },
+      { id: "gaps", label: "Limits, debates, and gaps" },
+    ];
+  }
+  if (isModel) {
     return [
       { id: "arch", label: "模型架构创新（如 MoE、注意力机制等）" },
       { id: "train", label: "训练数据与训练/优化方式" },
@@ -45,9 +65,9 @@ export function defaultFocusOptions(query: string): Array<{ id: string; label: s
   ];
 }
 
-export function defaultFacetLanes(topic: string): string[] {
-  const base = topic.trim() || "研究主题";
-  return defaultFocusOptions(base).map((opt) => `${base}：${opt.label}`);
+export function defaultFacetLanes(topic: string, locale: "zh" | "en" = "zh"): string[] {
+  const base = topic.trim() || (locale === "en" ? "research topic" : "研究主题");
+  return defaultFocusOptions(base, locale).map((opt) => `${base}：${opt.label}`);
 }
 
 export function truncateTopic(query: string, maxChars = 28): string {

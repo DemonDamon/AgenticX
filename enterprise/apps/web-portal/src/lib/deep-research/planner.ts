@@ -3,6 +3,7 @@
  */
 
 import { extractJsonText } from "./llm-json";
+import { languageDirective } from "./copy";
 import {
   defaultFacetLanes,
   looksOpenEndedResearchQuery,
@@ -32,6 +33,7 @@ export type PlannerDeps = {
   reconBrief?: string;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  locale?: "zh" | "en";
 };
 
 const PLANNER_SYSTEM = [
@@ -51,7 +53,11 @@ function normalizeKey(text: string): string {
 }
 
 /** Keep open-ended asks from collapsing into a single raw-query lane after recon. */
-export function enforcePlanBreadth(plan: ResearchPlan, userQuery: string): ResearchPlan {
+export function enforcePlanBreadth(
+  plan: ResearchPlan,
+  userQuery: string,
+  locale: "zh" | "en" = "zh",
+): ResearchPlan {
   const base = userQuery.trim() || plan.topic;
   const openEnded = looksOpenEndedResearchQuery(base);
   if (!openEnded) return plan;
@@ -69,7 +75,7 @@ export function enforcePlanBreadth(plan: ResearchPlan, userQuery: string): Resea
     return plan.complexity === "simple" ? { ...plan, complexity: "moderate" } : plan;
   }
 
-  const facets = defaultFacetLanes(plan.topic || base).slice(0, OPEN_ENDED_MIN_LANES);
+  const facets = defaultFacetLanes(plan.topic || base, locale).slice(0, OPEN_ENDED_MIN_LANES);
   return {
     topic: plan.topic || base,
     complexity: plan.complexity === "simple" ? "moderate" : plan.complexity,
@@ -178,7 +184,8 @@ function extractCompletionText(payload: unknown): string {
 
 export async function buildResearchPlan(deps: PlannerDeps): Promise<ResearchPlan> {
   const fetchImpl = deps.fetchImpl ?? fetch;
-  const userQuery = deps.userQuery.trim() || "研究该主题";
+  const locale = deps.locale === "en" ? "en" : "zh";
+  const userQuery = deps.userQuery.trim() || (locale === "en" ? "research this topic" : "研究该主题");
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), 30_000);
   const onParentAbort = () => timeoutController.abort();
@@ -190,7 +197,7 @@ export async function buildResearchPlan(deps: PlannerDeps): Promise<ResearchPlan
 
   const { tools: _tools, tool_choice: _toolChoice, stream: _stream, ...rest } = deps.body;
   const messages = [
-    { role: "system", content: PLANNER_SYSTEM },
+    { role: "system", content: `${PLANNER_SYSTEM}\n${languageDirective(locale)}` },
     ...(deps.todayLine ? [{ role: "system", content: deps.todayLine }] : []),
     ...(deps.reconBrief ? [{ role: "system", content: deps.reconBrief }] : []),
     { role: "user", content: userQuery },
@@ -212,9 +219,9 @@ export async function buildResearchPlan(deps: PlannerDeps): Promise<ResearchPlan
     }
     const payload = (await response.json()) as unknown;
     const text = extractCompletionText(payload);
-    return enforcePlanBreadth(parseResearchPlanJson(text, userQuery), userQuery);
+    return enforcePlanBreadth(parseResearchPlanJson(text, userQuery), userQuery, locale);
   } catch {
-    return enforcePlanBreadth(parseResearchPlanJson("", userQuery), userQuery);
+    return enforcePlanBreadth(parseResearchPlanJson("", userQuery), userQuery, locale);
   } finally {
     clearTimeout(timeoutId);
     deps.signal?.removeEventListener("abort", onParentAbort);

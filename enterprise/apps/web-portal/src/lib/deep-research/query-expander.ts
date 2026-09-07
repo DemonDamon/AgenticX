@@ -3,6 +3,7 @@
  */
 
 import { parseLlmJson } from "./llm-json";
+import { languageDirective } from "./copy";
 
 export const MIN_VARIANTS_PER_LANE = 3;
 export const MAX_VARIANTS_PER_LANE = 6;
@@ -19,6 +20,7 @@ export type ExpandDeps = {
   topic: string;
   subQuestion: string;
   todayLine: string;
+  locale?: "zh" | "en";
 };
 
 const EXPAND_SYSTEM = [
@@ -159,7 +161,7 @@ export function parseVariantsJson(raw: string, subQuestion: string): QueryVarian
 export async function expandQueries(deps: ExpandDeps): Promise<QueryVariant[]> {
   try {
     const raw = await deps.callJson([
-      { role: "system", content: EXPAND_SYSTEM },
+      { role: "system", content: `${EXPAND_SYSTEM}\n${languageDirective(deps.locale === "en" ? "en" : "zh")}` },
       {
         role: "user",
         content: [

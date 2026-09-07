@@ -25,8 +25,7 @@ import {
   isSessionStreaming,
   getDeepResearchInteractionPref,
   setDeepResearchInteractionPref,
-  labelForDeepResearchInteractionPref,
-  DEEP_RESEARCH_INTERACTION_OPTIONS,
+  DEEP_RESEARCH_INTERACTION_OPTION_IDS,
   findActivePlanChatGate,
   type DeepResearchInteractionPref,
   type ActiveDeepResearchRun,
@@ -141,6 +140,50 @@ export function MachiChatView({
   /** 深度研究确认方式偏好（localStorage 持久化；auto = 交给服务端 policy）。 */
   const [interactionPref, setInteractionPref] =
     React.useState<DeepResearchInteractionPref>(() => getDeepResearchInteractionPref());
+  const interactionLabel = React.useMemo(() => {
+    switch (interactionPref) {
+      case "direct":
+        return tw("deepResearchInteractionDirect");
+      case "card_first":
+        return tw("deepResearchInteractionCard");
+      case "plan_chat":
+        return tw("deepResearchInteractionPlan");
+      default:
+        return tw("deepResearchInteractionAuto");
+    }
+  }, [interactionPref, tw]);
+  const interactionOptions = React.useMemo(
+    () =>
+      DEEP_RESEARCH_INTERACTION_OPTION_IDS.map((id) => {
+        switch (id) {
+          case "direct":
+            return {
+              id,
+              label: tw("deepResearchInteractionDirect"),
+              hint: tw("deepResearchInteractionDirectHint"),
+            };
+          case "card_first":
+            return {
+              id,
+              label: tw("deepResearchInteractionCard"),
+              hint: tw("deepResearchInteractionCardHint"),
+            };
+          case "plan_chat":
+            return {
+              id,
+              label: tw("deepResearchInteractionPlan"),
+              hint: tw("deepResearchInteractionPlanHint"),
+            };
+          default:
+            return {
+              id,
+              label: tw("deepResearchInteractionAuto"),
+              hint: tw("deepResearchInteractionAutoHint"),
+            };
+        }
+      }),
+    [tw],
+  );
   const [prefMenuOpen, setPrefMenuOpen] = React.useState(false);
   const prefMenuRef = React.useRef<HTMLDivElement>(null);
 
@@ -854,7 +897,7 @@ export function MachiChatView({
               <span
                 key="deep-research-chip"
                 className="group/dr-chip inline-flex h-8 max-w-full items-center gap-1.5 rounded-full bg-primary-soft/70 px-2.5 text-xs font-medium text-primary"
-                aria-label={`${tw("deepResearchChip")} · ${labelForDeepResearchInteractionPref(interactionPref)}`}
+                aria-label={`${tw("deepResearchChip")} · ${interactionLabel}`}
               >
                 <button
                   type="button"
@@ -867,7 +910,7 @@ export function MachiChatView({
                   aria-label={tw("exitDeepResearch")}
                   title={
                     planChatGateActive
-                      ? "请先确认或继续修改研究计划"
+                      ? tw("deepResearchPlanGateHint")
                       : tw("exitDeepResearch")
                   }
                 >
@@ -880,12 +923,12 @@ export function MachiChatView({
                     type="button"
                     onClick={() => setPrefMenuOpen((v) => !v)}
                     className="inline-flex h-5 max-w-[7.5rem] items-center gap-0.5 rounded-full bg-primary/12 px-1.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
-                    aria-label={`确认方式：${labelForDeepResearchInteractionPref(interactionPref)}`}
-                    title={`澄清与计划确认方式：${labelForDeepResearchInteractionPref(interactionPref)}（点击切换）`}
+                    aria-label={tw("deepResearchInteractionAria", { label: interactionLabel })}
+                    title={tw("deepResearchInteractionHint", { label: interactionLabel })}
                     data-testid="deep-research-pref-trigger"
                   >
                     <span className="truncate" data-testid="deep-research-pref-tag">
-                      {labelForDeepResearchInteractionPref(interactionPref)}
+                      {interactionLabel}
                     </span>
                     <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
                   </button>
@@ -895,9 +938,9 @@ export function MachiChatView({
                       data-testid="deep-research-pref-menu"
                     >
                       <div className="px-2.5 pb-1.5 pt-1 text-[11px] font-medium text-muted-foreground">
-                        澄清与计划确认方式
+                        {tw("deepResearchInteractionTitle")}
                       </div>
-                      {DEEP_RESEARCH_INTERACTION_OPTIONS.map((opt) => (
+                      {interactionOptions.map((opt) => (
                         <button
                           key={opt.id}
                           type="button"
@@ -1056,7 +1099,7 @@ export function MachiChatView({
                     {copiedSessionId ? <Check className="h-3.5 w-3.5 text-success" /> : <Hash className="h-3.5 w-3.5" />}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>复制会话 ID</TooltipContent>
+                <TooltipContent>{tw("copySessionId")}</TooltipContent>
               </Tooltip>
             ) : null}
             <Badge variant="success" className="mr-2 gap-1 px-2.5 py-0.5 text-[11px] font-medium">

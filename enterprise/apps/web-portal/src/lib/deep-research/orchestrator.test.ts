@@ -1075,6 +1075,44 @@ describe("recon cold-start", () => {
     expect(raw).toContain("https://recon.example/v4");
   });
 
+  it("emits English canned narratives when locale is en", async () => {
+    const response = await runDeepResearchTurn(
+      { model: "m", messages: [{ role: "user", content: "deepseek v4 core techniques" }] },
+      {
+        ...baseDeps({
+          locale: "en",
+          fetchImpl: gatewayStub() as unknown as typeof fetch,
+          runReconFn: async () => ({
+            brief: "recon",
+            hits: [{ title: "V4", url: "https://recon.example/v4", snippet: "s" }],
+          }),
+          proposeClarify: async () => ({ needed: false as const }),
+          buildPlan: async () => ({
+            topic: "T",
+            complexity: "moderate" as const,
+            subQuestions: ["q1"],
+          }),
+          executeSearch: async () => [{ title: "t", url: "https://lane.example/1", snippet: "s" }],
+        }),
+      },
+    );
+
+    const { events } = await readSsePayload(response);
+    expect(
+      events.some(
+        (e) =>
+          e.type === "narrative" &&
+          String(e.text).includes(
+            "I'll quickly search the latest public sources to calibrate the research premise.",
+          ),
+      ),
+    ).toBe(true);
+    const joined = events.map((e) => JSON.stringify(e)).join("\n");
+    expect(joined).not.toContain("校准调研前提");
+    expect(joined).not.toContain("开题冷启动检索");
+    expect(joined).not.toContain("已拆解");
+  });
+
   it("puts recon findings into the evidence pack so their numbers are citable", () => {
     const pack = formatEvidencePack(
       { topic: "主题", complexity: "moderate", subQuestions: ["子问"] },

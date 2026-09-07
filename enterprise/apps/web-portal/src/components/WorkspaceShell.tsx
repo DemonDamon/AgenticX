@@ -48,6 +48,7 @@ import {
   Users,
 } from "lucide-react";
 import {
+  ChatLocaleProvider,
   createPortalChatHistoryClient,
   disposeHistoryOutbox,
   startHistoryOutboxCoordinator,
@@ -314,6 +315,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
   const languageLabel = locale === "zh" ? t("languageZh") : t("languageEn");
 
   return (
+    <ChatLocaleProvider locale={locale === "en" ? "en" : "zh"}>
     <TooltipProvider delayDuration={200}>
       <main className="flex h-[100dvh] overflow-hidden bg-background text-foreground">
         {/* 侧栏 */}
@@ -655,6 +657,7 @@ export function WorkspaceShell({ userEmail, userScopes }: WorkspaceShellProps) {
         <Toaster />
       </main>
     </TooltipProvider>
+    </ChatLocaleProvider>
   );
 }
 

@@ -16,6 +16,7 @@ import { withCurrentTimeContext } from "../../../../lib/current-time";
 import { runWebSearchTurn } from "../../../../lib/web-search/tool-loop";
 import { loadTenantWebSearchConfig } from "../../../../lib/web-search/tenant-config";
 import { runDeepResearchTurn } from "../../../../lib/deep-research/orchestrator";
+import { resolvePortalLocaleFromCookies } from "../../../../lib/portal-locale";
 import { defaultArtifactStore } from "../../../../lib/deep-research/artifact-store";
 import { log } from "../../../../lib/observability/logger";
 import { withRequestLog } from "../../../../lib/observability/with-request-log";
@@ -214,6 +215,7 @@ export async function POST(request: Request) {
       url: GATEWAY_COMPLETIONS_URL,
       headers: gatewayHeaders,
       signal: request.signal,
+      locale: await resolvePortalLocaleFromCookies(),
       loadTenantConfig: () => loadTenantWebSearchConfig(session.tenantId),
       artifactStore: defaultArtifactStore,
       tenantId: session.tenantId,

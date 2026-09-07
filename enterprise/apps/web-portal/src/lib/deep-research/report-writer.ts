@@ -5,6 +5,7 @@
 
 import { parseLlmJson } from "./llm-json";
 import { parseChartSpec } from "./report-chart";
+import { languageDirective } from "./copy";
 
 export const MIN_SECTIONS = 5;
 export const MAX_SECTIONS = 9;
@@ -48,6 +49,7 @@ export type OutlineDeps = {
   callJson: (messages: Array<{ role: string; content: string }>) => Promise<string>;
   topic: string;
   evidence: string;
+  locale?: "zh" | "en";
 };
 
 const OUTLINE_SYSTEM = [
@@ -217,7 +219,7 @@ export function parseOutlineJson(raw: string, fallbackTitle: string): ReportOutl
 export async function buildReportOutline(deps: OutlineDeps): Promise<ReportOutline> {
   try {
     const raw = await deps.callJson([
-      { role: "system", content: OUTLINE_SYSTEM },
+      { role: "system", content: `${OUTLINE_SYSTEM}\n${languageDirective(deps.locale === "en" ? "en" : "zh")}` },
       {
         role: "user",
         content: `主题：${deps.topic}\n\n证据包：\n${deps.evidence}`,
@@ -235,6 +237,7 @@ export function buildSectionMessages(args: {
   sectionIndex: number;
   evidence: string;
   previousSummaries: string[];
+  locale?: "zh" | "en";
 }): Array<{ role: string; content: string }> {
   const prev =
     args.previousSummaries.length > 0
@@ -250,7 +253,7 @@ export function buildSectionMessages(args: {
   return [
     {
       role: "system",
-      content: isLead ? LEAD_SECTION_SYSTEM : SECTION_SYSTEM,
+      content: `${isLead ? LEAD_SECTION_SYSTEM : SECTION_SYSTEM}\n${languageDirective(args.locale === "en" ? "en" : "zh")}`,
     },
     {
       role: "user",
