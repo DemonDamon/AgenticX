@@ -143,6 +143,27 @@ OPS_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_channel_slo",
+            "description": (
+                "Read-only. Fetch channel/model TTFT, TPS, cooldown, "
+                "and plugin error counters. Never invent a present value. "
+                "Missing is not a root cause. Not the health score."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "channel": {"type": "string"},
+                    "model": {"type": "string"},
+                    "plugin": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 OPS_TOOL_NAMES = frozenset(
@@ -154,6 +175,7 @@ OPS_TOOL_NAMES = frozenset(
         "get_umodel",
         "sync_changeplane",
         "get_trace_parity",
+        "get_channel_slo",
     }
 )
 
@@ -368,6 +390,29 @@ def _dispatch_trace_parity(arguments: dict[str, Any] | None) -> str:
     )
 
 
+def _dispatch_channel_slo(arguments: dict[str, Any] | None) -> str:
+    from agenticx.ops.slo import query_channel_slo
+
+    args = arguments or {}
+    try:
+        limit = clamp_limit(int(args.get("limit", 50)))
+    except (TypeError, ValueError):
+        limit = 50
+    result = query_channel_slo(
+        channel=str(args.get("channel") or "").strip(),
+        model=str(args.get("model") or "").strip(),
+        plugin=str(args.get("plugin") or "").strip(),
+    )
+    return json.dumps(
+        {
+            "source": "slo",
+            "reason": result.reason,
+            "items": [_json_ready(item) for item in result.rows[:limit]],
+        },
+        ensure_ascii=False,
+    )
+
+
 def dispatch_ops_tool(name: str, arguments: dict[str, Any] | None, session: Any = None) -> str:
     if name == "get_session_review":
         return _dispatch_session_review(arguments)
@@ -377,6 +422,8 @@ def dispatch_ops_tool(name: str, arguments: dict[str, Any] | None, session: Any 
         return _dispatch_sync_changeplane(arguments)
     if name == "get_trace_parity":
         return _dispatch_trace_parity(arguments)
+    if name == "get_channel_slo":
+        return _dispatch_channel_slo(arguments)
     query = get_telemetry_query()
     scope = _scope_from_args(arguments)
     if name == "get_trace":

@@ -63,3 +63,7 @@ docker compose -f deploy/observability/gateway-scrape/docker-compose.yml up -d
 ```
 
 compose 只跑 `otel/opentelemetry-collector-contrib` 一个服务。
+
+## 通道 SLO（调查工具）
+
+调查 Agent 用只读工具 `get_channel_slo` 查通道 / 模型的 TTFT、TPS、冷却和 plugin 错误计数。TTFT / TPS / plugin 错误读 Gateway `/metrics`；冷却读 `/internal/channel-stats` 的 `cooldown_until`。本机与 CI 优先用 `AGENTICX_GATEWAY_METRICS_FILE` 与 `AGENTICX_GATEWAY_CHANNEL_STATS_FILE`，有文件时不走 URL。人看默认盒 UI 的服务视图即可，不要再起一份 Grafana。`channel_health` gauge 若为空，以 channel-stats 为准，不要把它解释成「通道一定健康」。

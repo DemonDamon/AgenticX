@@ -25,6 +25,7 @@ def test_ops_tools_in_studio_by_default(monkeypatch):
         "get_umodel",
         "sync_changeplane",
         "get_trace_parity",
+        "get_channel_slo",
     } <= names
 
 
@@ -41,6 +42,7 @@ def test_ops_tools_disabled_when_env_off(monkeypatch):
     assert "get_umodel" not in names
     assert "sync_changeplane" not in names
     assert "get_trace_parity" not in names
+    assert "get_channel_slo" not in names
 
 
 def test_ops_tools_disabled_when_config_false(monkeypatch):
@@ -57,6 +59,7 @@ def test_ops_tools_disabled_when_config_false(monkeypatch):
     assert "get_trace" not in names
     assert "sync_changeplane" not in names
     assert "get_trace_parity" not in names
+    assert "get_channel_slo" not in names
 
 
 def test_ops_tools_merge_when_enabled(monkeypatch):
@@ -72,6 +75,7 @@ def test_ops_tools_merge_when_enabled(monkeypatch):
         "get_umodel",
         "sync_changeplane",
         "get_trace_parity",
+        "get_channel_slo",
     }
 
 
@@ -103,6 +107,7 @@ def test_ops_tools_merge_onto_visible_meta_tools(monkeypatch):
         "get_umodel",
         "sync_changeplane",
         "get_trace_parity",
+        "get_channel_slo",
     } <= names
 
 
@@ -121,6 +126,7 @@ def test_studio_tools_body_does_not_list_ops_tools():
     assert "get_umodel" not in names
     assert "sync_changeplane" not in names
     assert "get_trace_parity" not in names
+    assert "get_channel_slo" not in names
 
 
 def test_dispatch_get_session_review_obs_only(tmp_path, monkeypatch):
