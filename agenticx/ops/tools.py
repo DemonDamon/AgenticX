@@ -124,6 +124,25 @@ OPS_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_trace_parity",
+            "description": (
+                "Read-only. Reconcile tool, delegate, confirm, and usage sides "
+                "for a session_id. Never invent a present side. "
+                "Missing is not a root cause. Not the health score."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 OPS_TOOL_NAMES = frozenset(
@@ -134,6 +153,7 @@ OPS_TOOL_NAMES = frozenset(
         "get_session_review",
         "get_umodel",
         "sync_changeplane",
+        "get_trace_parity",
     }
 )
 
@@ -312,6 +332,42 @@ def _dispatch_sync_changeplane(arguments: dict[str, Any] | None) -> str:
     )
 
 
+def _dispatch_trace_parity(arguments: dict[str, Any] | None) -> str:
+    from agenticx.ops.first_party import FirstPartyProvider
+    from agenticx.ops.parity import build_parity
+    from agenticx.ops.query import QueryScope
+
+    args = arguments or {}
+    session_id = str(args.get("session_id") or "").strip()
+    try:
+        limit = clamp_limit(int(args.get("limit", 50)))
+    except (TypeError, ValueError):
+        limit = 50
+    if not session_id:
+        return json.dumps(
+            {"source": "parity", "reason": "invalid_scope", "items": []},
+            ensure_ascii=False,
+        )
+    provider = FirstPartyProvider()
+    session_dir = provider._session_dir(session_id)
+    if not session_dir.is_dir():
+        return json.dumps(
+            {"source": "parity", "reason": "no_session", "items": []},
+            ensure_ascii=False,
+        )
+    traces = provider.get_trace(QueryScope(session_id=session_id, limit=200))
+    messages = provider._load_messages(session_id) or []
+    rows = build_parity(session_dir, traces.items, messages, session_id=session_id)
+    return json.dumps(
+        {
+            "source": "parity",
+            "reason": "",
+            "items": [_json_ready(item) for item in rows[:limit]],
+        },
+        ensure_ascii=False,
+    )
+
+
 def dispatch_ops_tool(name: str, arguments: dict[str, Any] | None, session: Any = None) -> str:
     if name == "get_session_review":
         return _dispatch_session_review(arguments)
@@ -319,6 +375,8 @@ def dispatch_ops_tool(name: str, arguments: dict[str, Any] | None, session: Any 
         return _dispatch_umodel(arguments)
     if name == "sync_changeplane":
         return _dispatch_sync_changeplane(arguments)
+    if name == "get_trace_parity":
+        return _dispatch_trace_parity(arguments)
     query = get_telemetry_query()
     scope = _scope_from_args(arguments)
     if name == "get_trace":

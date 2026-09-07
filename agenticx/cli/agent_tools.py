@@ -9323,7 +9323,7 @@ async def dispatch_tool_async(
             return await _tool_memory_search(arguments, session)
         if name == "memory_forget":
             return await _tool_memory_forget(arguments, session)
-        if name in {"get_trace", "get_logs", "get_recent_changes", "get_session_review", "get_umodel", "sync_changeplane"}:
+        if name in {"get_trace", "get_logs", "get_recent_changes", "get_session_review", "get_umodel", "sync_changeplane", "get_trace_parity"}:
             from agenticx.ops.tools import dispatch_ops_tool, ops_tools_enabled
 
             if not ops_tools_enabled():

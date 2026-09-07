@@ -270,6 +270,11 @@ def _otel_before_tool_call(ctx: "ToolCallHookContext") -> None:
         # 设置属性
         span.set_attribute(AiObservationAttributes.AI_OPERATION_TYPE, AiOperationType.TOOL_CALL.value)
         span.set_attribute(AiObservationAttributes.AGENTICX_TOOL_NAME, tool_name)
+        from agenticx.ops.parity import ATTR_RUN_KIND, run_kind_for_tool_name
+
+        run_kind = run_kind_for_tool_name(str(tool_name or ""))
+        if run_kind:
+            span.set_attribute(ATTR_RUN_KIND, run_kind)
         
         # 参数数量
         if hasattr(ctx, 'tool_args') and ctx.tool_args:

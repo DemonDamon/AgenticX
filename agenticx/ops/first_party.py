@@ -131,6 +131,7 @@ class FirstPartyProvider:
             ):
                 continue
             spans.append(span)
+        self._merge_run_and_confirm_spans(spans, scope)
         limit = clamp_limit(scope.limit)
         return QueryResult(items=spans[:limit], source="first_party", reason="")
 
@@ -256,6 +257,101 @@ class FirstPartyProvider:
             if not span.name or span.name == "tool":
                 span.name = name
         return spans
+
+    def _merge_run_and_confirm_spans(self, spans: list[TraceSpan], scope: QueryScope) -> None:
+        from agenticx.ops.parity import (
+            ATTR_CONFIRM_ID,
+            ATTR_EVIDENCE,
+            ATTR_RUN_AVATAR_SESSION,
+            ATTR_RUN_ID,
+            ATTR_RUN_KIND,
+            DELEGATE_TOOL_NAMES,
+            RUN_KINDS,
+            load_confirm_pendings,
+            load_run_records,
+            run_status_from_record,
+        )
+
+        session_id = (scope.session_id or "").strip()
+        if not session_id:
+            return
+        session_dir = self._session_dir(session_id)
+        trace_id = _synthetic_trace_id(scope)
+        for run in load_run_records(session_dir):
+            src = (run.source_tool_call_id or "").strip()
+            matched = next((span for span in spans if src and span.span_id == src), None)
+            if matched is None:
+                matched = next(
+                    (
+                        span
+                        for span in spans
+                        if span.name in DELEGATE_TOOL_NAMES
+                        and not str((span.attributes or {}).get(ATTR_RUN_ID) or "").strip()
+                    ),
+                    None,
+                )
+            if matched is not None:
+                matched.attributes[ATTR_RUN_KIND] = str(run.kind or "")
+                matched.attributes[ATTR_RUN_ID] = str(run.run_id or "")
+                avatar = str(run.avatar_session_id or "").strip()
+                if avatar:
+                    matched.attributes[ATTR_RUN_AVATAR_SESSION] = avatar
+                continue
+            kind = run.kind if run.kind in RUN_KINDS else "delegate"
+            start_ts = None
+            raw_ts = run.started_at or run.created_at
+            if raw_ts:
+                try:
+                    start_ts = datetime.fromtimestamp(float(raw_ts), tz=timezone.utc)
+                except (OSError, OverflowError, TypeError, ValueError):
+                    start_ts = None
+            attrs = {
+                "agenticx.session.id": session_id,
+                ATTR_EVIDENCE: "subagent_runs",
+                ATTR_RUN_KIND: kind,
+                ATTR_RUN_ID: str(run.run_id or ""),
+            }
+            avatar = str(run.avatar_session_id or "").strip()
+            if avatar:
+                attrs[ATTR_RUN_AVATAR_SESSION] = avatar
+            spans.append(
+                TraceSpan(
+                    trace_id=trace_id,
+                    span_id=str(run.run_id or ""),
+                    name=kind,
+                    start_ts=start_ts,
+                    duration_ms=None,
+                    status=run_status_from_record(run.status),
+                    attributes=attrs,
+                    source="first_party",
+                )
+            )
+        existing_confirm = {
+            str((span.attributes or {}).get(ATTR_CONFIRM_ID) or "").strip()
+            for span in spans
+            if str((span.attributes or {}).get(ATTR_CONFIRM_ID) or "").strip()
+        }
+        for pending in load_confirm_pendings(session_dir):
+            request_id = str(pending.get("request_id") or "").strip()
+            if not request_id or request_id in existing_confirm:
+                continue
+            existing_confirm.add(request_id)
+            spans.append(
+                TraceSpan(
+                    trace_id=trace_id,
+                    span_id=request_id,
+                    name="confirm.wait",
+                    start_ts=None,
+                    duration_ms=None,
+                    status="unknown",
+                    attributes={
+                        "agenticx.session.id": session_id,
+                        ATTR_EVIDENCE: "agent_state",
+                        ATTR_CONFIRM_ID: request_id,
+                    },
+                    source="first_party",
+                )
+            )
 
     def _observation_records(self, session_id: str) -> list[dict]:
         from agenticx.learning.analyzer import load_session_observations

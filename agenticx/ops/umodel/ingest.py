@@ -77,6 +77,14 @@ def ingest_session(
         raw_attrs = getattr(span, "attributes", None)
         if isinstance(raw_attrs, dict):
             evidence = str(raw_attrs.get("agenticx.evidence.source") or "").strip()
+            for key in (
+                "agenticx.run.kind",
+                "agenticx.run.id",
+                "agenticx.confirm.request_id",
+            ):
+                copied = str(raw_attrs.get(key) or "").strip()
+                if copied:
+                    attrs[key] = copied
         if evidence:
             attrs["agenticx.evidence.source"] = evidence
         written.append(

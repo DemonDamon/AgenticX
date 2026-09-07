@@ -47,7 +47,7 @@ export function RuntimeConfigSection({
             <div className="min-w-0">
               <div className="text-xs font-medium text-text-primary">调查取证</div>
               <p className="mt-1 text-[11px] leading-relaxed text-text-faint">
-                默认开启。对话里可按会话 ID 调用 get_trace / get_logs / get_recent_changes / get_session_review / get_umodel / sync_changeplane。
+                默认开启。对话里可按会话 ID 调用 get_trace / get_logs / get_recent_changes / get_session_review / get_umodel / sync_changeplane / get_trace_parity。
                 修改后请点窗口底部「退出」保存，再完全退出并重启 Near。
               </p>
             </div>
