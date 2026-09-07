@@ -81,10 +81,40 @@ OPS_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_umodel",
+            "description": (
+                "Read-only. List UModel objects (service/session/tool_call/"
+                "model_channel/alert/deployment) by session_id or deployment_id. "
+                "Never invent objects. Ingest from first_party when empty. "
+                "No chat text. Not the health score."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "tenant_id": {"type": "string"},
+                    "deployment_id": {"type": "string"},
+                    "trace_id": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 OPS_TOOL_NAMES = frozenset(
-    {"get_trace", "get_logs", "get_recent_changes", "get_session_review"}
+    {
+        "get_trace",
+        "get_logs",
+        "get_recent_changes",
+        "get_session_review",
+        "get_umodel",
+    }
 )
 
 
@@ -188,9 +218,51 @@ def _dispatch_session_review(arguments: dict[str, Any] | None) -> str:
     )
 
 
+def _dispatch_umodel(arguments: dict[str, Any] | None) -> str:
+    from agenticx.ops.query import scope_is_invalid
+    from agenticx.ops.umodel.ingest import ingest_session
+    from agenticx.ops.umodel.schema import OBJECT_KINDS
+    from agenticx.ops.umodel.store import get_object_store
+
+    scope = _scope_from_args(arguments)
+    kind = str((arguments or {}).get("kind") or "").strip()
+    if scope_is_invalid(scope):
+        return json.dumps(
+            {"source": "umodel", "reason": "invalid_scope", "items": []},
+            ensure_ascii=False,
+        )
+    if kind and kind not in OBJECT_KINDS:
+        return json.dumps(
+            {"source": "umodel", "reason": "unknown_kind", "items": []},
+            ensure_ascii=False,
+        )
+    store = get_object_store()
+    sid = (scope.session_id or "").strip()
+    if sid:
+        existing = store.list(scope, kind=kind)
+        if not existing:
+            ingest_session(sid, store=store)
+    items = store.list(scope, kind=kind)
+    if not items:
+        return json.dumps(
+            {"source": "umodel", "reason": "no_objects", "items": []},
+            ensure_ascii=False,
+        )
+    return json.dumps(
+        {
+            "source": "umodel",
+            "reason": "",
+            "items": [_json_ready(item) for item in items],
+        },
+        ensure_ascii=False,
+    )
+
+
 def dispatch_ops_tool(name: str, arguments: dict[str, Any] | None, session: Any = None) -> str:
     if name == "get_session_review":
         return _dispatch_session_review(arguments)
+    if name == "get_umodel":
+        return _dispatch_umodel(arguments)
     query = get_telemetry_query()
     scope = _scope_from_args(arguments)
     if name == "get_trace":
