@@ -1872,6 +1872,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
   const [search, setSearch] = useState("");
   const [maxToolRounds, setMaxToolRounds] = useState(60);
   const [maxTaskspaces, setMaxTaskspaces] = useState(RUNTIME_DEFAULT_TASKSPACES);
+  const [opsToolsEnabled, setOpsToolsEnabled] = useState(true);
   const [toolSearchMode, setToolSearchMode] = useState<"off" | "auto" | "always">("off");
   const [toolSearchThreshold, setToolSearchThreshold] = useState(6000);
   const [toolSearchStrategy, setToolSearchStrategy] = useState<"adaptive" | "manual">("adaptive");
@@ -2106,6 +2107,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
             max_tokens_per_turn: Number(runtimeResult.max_tokens_per_turn),
           }),
         );
+        setOpsToolsEnabled(runtimeResult.ops_tools_enabled !== false);
       } else {
         setRuntimeLoadError("读取运行时参数失败，仍可按当前滑块值保存。");
       }
@@ -2207,6 +2209,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
           unattended_auto_resume_interrupted: unattended.unattended_auto_resume_interrupted,
           max_tokens_per_session: tokenBudget.max_tokens_per_session,
           max_tokens_per_turn: tokenBudget.max_tokens_per_turn,
+          ops_tools_enabled: opsToolsEnabled,
         });
         if (!rtRes?.ok) {
           return {
@@ -2231,6 +2234,7 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
       loading,
       maxToolRounds,
       maxTaskspaces,
+      opsToolsEnabled,
       toolSearchMode,
       toolSearchThreshold,
       toolSearchStrategy,
@@ -2306,6 +2310,8 @@ const ToolsTab = forwardRef<ToolsTabHandle, Record<string, never>>(function Tool
         onMaxToolRoundsChange={setMaxToolRounds}
         maxTaskspaces={maxTaskspaces}
         onMaxTaskspacesChange={setMaxTaskspaces}
+        opsToolsEnabled={opsToolsEnabled}
+        onOpsToolsEnabledChange={setOpsToolsEnabled}
         disabled={loading}
       />
       <ToolSearchConfigSection

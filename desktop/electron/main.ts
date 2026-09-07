@@ -348,6 +348,7 @@ type AgxConfig = {
   };
   automation?: { prevent_sleep?: boolean };
   skills?: { non_high_risk_auto_install?: boolean };
+  ops?: Record<string, unknown>;
   /** Meta-agent default workspace root (supports ~); mirrors config.yaml workspace_dir */
   workspace_dir?: string;
   enterprise?: {
@@ -1508,6 +1509,13 @@ function loadAgxConfig(): AgxConfig {
 function saveAgxConfig(cfg: AgxConfig): void {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, yaml.dump(cfg, { lineWidth: -1 }), "utf-8");
+}
+
+function readOpsToolsEnabled(cfg: AgxConfig): boolean {
+  const raw = cfg.ops;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return true;
+  if (raw.tools_enabled === undefined) return true;
+  return Boolean(raw.tools_enabled);
 }
 
 function loadSoulFile(pathName: string): string {
@@ -2906,6 +2914,8 @@ async function startStudioServe(): Promise<void> {
     AGX_SKILL_MANAGE: trinity.skill_manage_enabled ? "1" : "0",
     AGX_LEARNING_NUDGE_INTERVAL: String(trinity.learning_nudge_interval),
     AGX_LEARNING_MIN_TOOL_CALLS: String(trinity.learning_min_tool_calls),
+    // Override leftover shell exports so Settings → 工具 → 调查取证 wins.
+    AGENTICX_OPS_TOOLS: readOpsToolsEnabled(cfg) ? "1" : "0",
   };
 
   const agxResolved = findAgxBinaryOnPath(augmentedPath);
@@ -9402,6 +9412,7 @@ function registerIpc(): void {
         ...readUnattendedRuntime(raw),
         ...readTokenBudgetRuntime(raw),
         live_reattach_enabled: Boolean(raw.live_reattach_enabled ?? false),
+        ops_tools_enabled: readOpsToolsEnabled(cfg),
       };
     } catch (err) {
       return {
@@ -9431,6 +9442,7 @@ function registerIpc(): void {
         max_tokens_per_session: 500_000,
         max_tokens_per_turn: 100_000,
         live_reattach_enabled: false,
+        ops_tools_enabled: true,
       };
     }
   });
@@ -9604,6 +9616,14 @@ function registerIpc(): void {
         if (prevTs.threshold_strategy === undefined) prevTs.threshold_strategy = "adaptive";
         if (prevTs.context_budget_ratio === undefined) prevTs.context_budget_ratio = 0.05;
         merged.tool_search = prevTs;
+      }
+      if (p.ops_tools_enabled !== undefined) {
+        const prevOps =
+          root.ops && typeof root.ops === "object" && !Array.isArray(root.ops)
+            ? { ...(root.ops as Record<string, unknown>) }
+            : {};
+        prevOps.tools_enabled = Boolean(p.ops_tools_enabled);
+        root.ops = prevOps;
       }
       root.runtime = merged;
       saveAgxConfig(cfg);

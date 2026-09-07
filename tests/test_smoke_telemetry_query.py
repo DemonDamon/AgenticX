@@ -59,11 +59,48 @@ STUDIO_SHAPED_SESSION = [
 ]
 
 
+OBS_ONLY_MESSAGES = [
+    {"role": "user", "content": "read the doc", "timestamp": "2026-08-31T01:36:00+00:00"},
+    {"role": "assistant", "content": "ok I will try", "timestamp": "2026-08-31T01:36:48+00:00"},
+    {"role": "user", "content": "try again", "timestamp": "2026-08-31T02:44:00+00:00"},
+    {"role": "assistant", "content": "done", "timestamp": "2026-08-31T02:45:16+00:00"},
+]
+
+OBS_FAILURES = [
+    {
+        "timestamp": "2026-08-31T01:37:38+00:00",
+        "tool_name": "file_read",
+        "result_summary": "ERROR: path escapes workspace: /other/taskspace/doc.md",
+        "success": False,
+        "turn_index": 1,
+    },
+    {
+        "timestamp": "2026-08-31T01:37:40+00:00",
+        "tool_name": "bash_exec",
+        "result_summary": "ERROR: path escapes workspace: /other/taskspace",
+        "success": False,
+        "turn_index": 2,
+    },
+]
+
+
 def _write_failed_session(root: Path) -> Path:
     session_dir = root / "sessions" / "sess-fail"
     session_dir.mkdir(parents=True)
     (session_dir / "messages.json").write_text(
         json.dumps(FAILED_SESSION), encoding="utf-8"
+    )
+    return session_dir
+
+
+def _write_obs_only_session(root: Path, session_id: str = "sess-obs") -> Path:
+    session_dir = root / "sessions" / session_id
+    session_dir.mkdir(parents=True)
+    (session_dir / "messages.json").write_text(
+        json.dumps(OBS_ONLY_MESSAGES), encoding="utf-8"
+    )
+    (session_dir / "tool_call_observations.json").write_text(
+        json.dumps(OBS_FAILURES), encoding="utf-8"
     )
     return session_dir
 
@@ -204,3 +241,64 @@ def test_factory_auto_without_signoz_url(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTICX_SESSIONS_ROOT", str(tmp_path / "sessions"))
     q = get_telemetry_query()
     assert isinstance(q, FirstPartyProvider)
+
+
+def test_first_party_merges_observations_when_messages_have_no_tools(tmp_path):
+    from agenticx.ops.first_party import FirstPartyProvider
+    from agenticx.ops.query import QueryScope
+
+    _write_obs_only_session(tmp_path)
+    provider = FirstPartyProvider(sessions_root=tmp_path / "sessions")
+    scope = QueryScope(session_id="sess-obs")
+    traces = provider.get_trace(scope)
+    by_name = {s.name: s for s in traces.items if s.name in {"file_read", "bash_exec"}}
+    assert set(by_name) == {"file_read", "bash_exec"}
+    assert by_name["file_read"].status == "error"
+    assert by_name["bash_exec"].status == "error"
+    assert any(s.attributes.get("agenticx.evidence.source") == "observations" for s in traces.items)
+    assert all(s.trace_id == "session:sess-obs" for s in traces.items)
+
+    logs = provider.get_logs(scope)
+    assert logs.reason == ""
+    assert logs.items
+    blob = " ".join(r.message for r in logs.items)
+    assert "path escapes workspace" in blob
+
+
+def test_first_party_dedupes_observation_span_matching_message_tool(tmp_path):
+    from agenticx.ops.first_party import FirstPartyProvider
+    from agenticx.ops.query import QueryScope
+
+    session_dir = tmp_path / "sessions" / "sess-dedup"
+    session_dir.mkdir(parents=True)
+    messages = [
+        {"role": "user", "content": "run", "timestamp": "2026-08-31T01:37:39+00:00"},
+        {
+            "role": "tool",
+            "tool_name": "bash_exec",
+            "content": "ERROR: path escapes workspace: /other/taskspace",
+            "tool_status": "error",
+            "timestamp": "2026-08-31T01:37:40+00:00",
+        },
+        {"role": "assistant", "content": "blocked", "timestamp": "2026-08-31T01:37:41+00:00"},
+    ]
+    (session_dir / "messages.json").write_text(json.dumps(messages), encoding="utf-8")
+    (session_dir / "tool_call_observations.json").write_text(
+        json.dumps(
+            [
+                {
+                    "timestamp": "2026-08-31T01:37:40+00:00",
+                    "tool_name": "bash_exec",
+                    "result_summary": "ERROR: path escapes workspace: /other/taskspace",
+                    "success": False,
+                    "turn_index": 1,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    traces = FirstPartyProvider(sessions_root=tmp_path / "sessions").get_trace(
+        QueryScope(session_id="sess-dedup")
+    )
+    bash = [s for s in traces.items if s.name == "bash_exec"]
+    assert len(bash) == 1

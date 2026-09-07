@@ -1,4 +1,5 @@
 import { SettingsRangeField } from "../settings/SettingsRangeField";
+import { SettingsSwitch } from "../settings/SettingsSwitch";
 
 export const RUNTIME_MIN_TOOL_ROUNDS = 10;
 export const RUNTIME_MAX_TOOL_ROUNDS = 120;
@@ -13,6 +14,8 @@ type RuntimeConfigSectionProps = {
   onMaxToolRoundsChange: (value: number) => void;
   maxTaskspaces: number;
   onMaxTaskspacesChange: (value: number) => void;
+  opsToolsEnabled: boolean;
+  onOpsToolsEnabledChange: (value: boolean) => void;
   disabled?: boolean;
 };
 
@@ -21,6 +24,8 @@ export function RuntimeConfigSection({
   onMaxToolRoundsChange,
   maxTaskspaces,
   onMaxTaskspacesChange,
+  opsToolsEnabled,
+  onOpsToolsEnabledChange,
   disabled,
 }: RuntimeConfigSectionProps) {
   return (
@@ -37,6 +42,24 @@ export function RuntimeConfigSection({
       </p>
 
       <div className="mt-4 space-y-3">
+        <div className="rounded-lg border border-border bg-surface-panel px-3 py-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-text-primary">调查取证</div>
+              <p className="mt-1 text-[11px] leading-relaxed text-text-faint">
+                默认开启。对话里可按会话 ID 调用 get_trace / get_logs / get_recent_changes / get_session_review。
+                修改后请点窗口底部「退出」保存，再完全退出并重启 Near。
+              </p>
+            </div>
+            <SettingsSwitch
+              checked={opsToolsEnabled}
+              disabled={disabled}
+              onChange={onOpsToolsEnabledChange}
+              aria-label="调查取证"
+            />
+          </div>
+        </div>
+
         <div className="rounded-lg border border-border bg-surface-panel px-3 py-3">
           <div className="mb-2.5 flex items-center justify-between gap-2">
             <span className="text-xs font-medium text-text-primary">最大工具轮数</span>

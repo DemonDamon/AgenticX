@@ -9323,11 +9323,14 @@ async def dispatch_tool_async(
             return await _tool_memory_search(arguments, session)
         if name == "memory_forget":
             return await _tool_memory_forget(arguments, session)
-        if name in {"get_trace", "get_logs", "get_recent_changes"}:
+        if name in {"get_trace", "get_logs", "get_recent_changes", "get_session_review"}:
             from agenticx.ops.tools import dispatch_ops_tool, ops_tools_enabled
 
             if not ops_tools_enabled():
-                return "ERROR: ops tools disabled. Set AGENTICX_OPS_TOOLS=1"
+                return (
+                    "ERROR: ops tools disabled. Enable them in Settings → 工具 → 调查取证, "
+                    "or set AGENTICX_OPS_TOOLS=1"
+                )
             return await asyncio.to_thread(dispatch_ops_tool, name, arguments, session)
         if name == "knowledge_search":
             return await asyncio.to_thread(_tool_knowledge_search, arguments, session)

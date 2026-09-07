@@ -694,6 +694,7 @@ declare global {
         max_tokens_per_session?: number;
         max_tokens_per_turn?: number;
         live_reattach_enabled?: boolean;
+        ops_tools_enabled?: boolean;
         error?: string;
       }>;
       saveRuntimeConfig: (payload: {
@@ -720,6 +721,7 @@ declare global {
         unattended_stall_continue_after_seconds?: number;
         unattended_auto_resume_exhausted?: boolean;
         unattended_auto_resume_interrupted?: boolean;
+        ops_tools_enabled?: boolean;
       }) => Promise<{ ok: boolean; error?: string }>;
       searchSessions: (payload: { q: string; avatarId?: string }) => Promise<{
         ok: boolean;

@@ -71,6 +71,12 @@ def _synthetic_trace_id(scope: QueryScope) -> str:
     return f"session:{sid}" if sid else ""
 
 
+def _near_ts(left: datetime | None, right: datetime | None) -> bool:
+    if left is None or right is None:
+        return False
+    return abs((left - right).total_seconds()) <= 2.0
+
+
 class FirstPartyProvider:
     """Read local session evidence. Never invent W3C 32-hex trace ids."""
 
@@ -117,6 +123,14 @@ class FirstPartyProvider:
         if messages is None:
             return QueryResult(items=[], source="first_party", reason="no_messages")
         spans = self._spans_from_messages(messages, scope)
+        existing_tool = [(s.name, s.start_ts) for s in spans if s.name != "assistant.reply"]
+        for span in self._spans_from_observations(self._observation_records(session_id), scope):
+            if any(
+                name == span.name and _near_ts(ts, span.start_ts)
+                for name, ts in existing_tool
+            ):
+                continue
+            spans.append(span)
         limit = clamp_limit(scope.limit)
         return QueryResult(items=spans[:limit], source="first_party", reason="")
 
@@ -125,11 +139,23 @@ class FirstPartyProvider:
             return QueryResult(items=[], source="first_party", reason="invalid_scope")
         session_id = (scope.session_id or "").strip()
         records: list[LogRecord] = []
+        existing_tool: list[tuple[str, datetime | None]] = []
         if session_id:
             messages = self._load_messages(session_id)
             if messages is None:
                 return QueryResult(items=[], source="first_party", reason="no_messages")
             records.extend(self._logs_from_messages(messages, scope))
+            existing_tool = [
+                (s.name, s.start_ts)
+                for s in self._spans_from_messages(messages, scope)
+                if s.name != "assistant.reply"
+            ]
+            for name, rec in self._logs_from_observations(
+                self._observation_records(session_id), scope
+            ):
+                if any(n == name and _near_ts(ts, rec.ts) for n, ts in existing_tool):
+                    continue
+                records.append(rec)
         records.extend(self._logs_from_audit(scope))
         limit = clamp_limit(scope.limit)
         trimmed = records[:limit]
@@ -224,6 +250,70 @@ class FirstPartyProvider:
             if not span.name or span.name == "tool":
                 span.name = name
         return spans
+
+    def _observation_records(self, session_id: str) -> list[dict]:
+        from agenticx.learning.analyzer import load_session_observations
+
+        return [
+            row
+            for row in load_session_observations(self._session_dir(session_id))
+            if isinstance(row, dict)
+        ]
+
+    def _spans_from_observations(
+        self, observations: list[dict], scope: QueryScope
+    ) -> list[TraceSpan]:
+        session_id = (scope.session_id or "").strip()
+        trace_id = _synthetic_trace_id(scope)
+        spans: list[TraceSpan] = []
+        for index, row in enumerate(observations):
+            name = str(row.get("tool_name") or "").strip() or "tool"
+            turn = row.get("turn_index")
+            span_id = f"obs-{turn if turn is not None else index}-{name}"
+            success = row.get("success")
+            spans.append(
+                TraceSpan(
+                    trace_id=trace_id,
+                    span_id=span_id,
+                    name=name,
+                    start_ts=_parse_ts(row.get("timestamp")),
+                    duration_ms=None,
+                    status="error" if success is False else "ok",
+                    attributes={
+                        "agenticx.session.id": session_id,
+                        "agenticx.evidence.source": "observations",
+                    },
+                    source="first_party",
+                )
+            )
+        return spans
+
+    def _logs_from_observations(
+        self, observations: list[dict], scope: QueryScope
+    ) -> list[tuple[str, LogRecord]]:
+        session_id = (scope.session_id or "").strip()
+        trace_id = _synthetic_trace_id(scope)
+        records: list[tuple[str, LogRecord]] = []
+        for row in observations:
+            name = str(row.get("tool_name") or "").strip() or "tool"
+            summary = str(row.get("result_summary") or "")
+            if not summary:
+                continue
+            failed = row.get("success") is False or summary.startswith("ERROR") or summary.startswith("Error")
+            records.append(
+                (
+                    name,
+                    LogRecord(
+                        ts=_parse_ts(row.get("timestamp")),
+                        level="error" if failed else "info",
+                        message=_truncate_4kib(summary),
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        source="first_party",
+                    ),
+                )
+            )
+        return records
 
     def _logs_from_messages(self, messages: list[dict], scope: QueryScope) -> list[LogRecord]:
         session_id = (scope.session_id or "").strip()

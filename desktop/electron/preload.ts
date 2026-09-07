@@ -291,6 +291,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     tool_search_auto_schema_token_threshold?: number;
     tool_search_threshold_strategy?: "adaptive" | "manual";
     tool_search_context_budget_ratio?: number;
+    ops_tools_enabled?: boolean;
   }) =>
     ipcRenderer.invoke("save-runtime-config", payload),
   searchSessions: async (payload: { q: string; avatarId?: string }) => {

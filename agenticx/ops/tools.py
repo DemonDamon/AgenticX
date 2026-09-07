@@ -1,4 +1,4 @@
-"""Read-only investigation tools. Off by default.
+"""Read-only investigation tools. On by default; disable via config or env.
 
 Author: Damon Li
 """
@@ -31,7 +31,11 @@ OPS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_trace",
-            "description": "Read-only. Fetch spans for a session_id or trace_id. Never invent spans.",
+            "description": (
+                "Read-only. Fetch spans for a session_id or trace_id. Never invent spans. "
+                "Includes tool rows from messages.json and tool_call_observations.json. "
+                "No chat text. For health score call get_session_review."
+            ),
             "parameters": _TOOL_PARAMS,
         },
     },
@@ -39,7 +43,11 @@ OPS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_logs",
-            "description": "Read-only. Fetch logs for a session_id or trace_id. Never invent logs.",
+            "description": (
+                "Read-only. Fetch logs for a session_id or trace_id. Never invent logs. "
+                "Includes observation result_summary when tool rows are missing. "
+                "Call this when asking why a session failed."
+            ),
             "parameters": _TOOL_PARAMS,
         },
     },
@@ -47,18 +55,59 @@ OPS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_recent_changes",
-            "description": "Read-only. Fetch recent change events for a session_id. Never invent events.",
+            "description": (
+                "Read-only. Fetch recent change events for a session_id. "
+                "Never invent events. Not the health score."
+            ),
             "parameters": _TOOL_PARAMS,
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_session_review",
+            "description": (
+                "Read-only. Compute the session health review (overall 0-100 and five "
+                "dimensions) for a session_id. Same scoring as the Desktop health card. "
+                "Does not write files. Never invent scores."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "additionalProperties": False,
+            },
         },
     },
 ]
 
-OPS_TOOL_NAMES = frozenset({"get_trace", "get_logs", "get_recent_changes"})
+OPS_TOOL_NAMES = frozenset(
+    {"get_trace", "get_logs", "get_recent_changes", "get_session_review"}
+)
 
 
 def ops_tools_enabled() -> bool:
-    raw = os.environ.get("AGENTICX_OPS_TOOLS", "").strip().lower()
-    return raw in {"1", "true", "on"}
+    """Env overrides config. Unset env + missing config key → enabled."""
+    env_raw = os.environ.get("AGENTICX_OPS_TOOLS")
+    if env_raw is not None and str(env_raw).strip() != "":
+        flag = str(env_raw).strip().lower()
+        if flag in {"1", "true", "on", "yes"}:
+            return True
+        if flag in {"0", "false", "off", "no"}:
+            return False
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        raw = ConfigManager.get_value("ops.tools_enabled")
+        if raw is None:
+            return True
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in {"1", "true", "on", "yes"}
+    except Exception:
+        return True
 
 
 def merge_ops_tools_into(tool_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -112,7 +161,36 @@ def _scope_from_args(arguments: dict[str, Any] | None) -> QueryScope:
     )
 
 
+def _dispatch_session_review(arguments: dict[str, Any] | None) -> str:
+    from agenticx.learning.loop_review import review_session
+    from agenticx.ops.first_party import FirstPartyProvider
+
+    session_id = str((arguments or {}).get("session_id") or "").strip()
+    if not session_id:
+        return json.dumps(
+            {"source": "loop_review", "reason": "invalid_scope", "items": []},
+            ensure_ascii=False,
+        )
+    session_dir = FirstPartyProvider()._session_dir(session_id)
+    if not session_dir.is_dir():
+        return json.dumps(
+            {"source": "loop_review", "reason": "no_session", "items": []},
+            ensure_ascii=False,
+        )
+    review = review_session(session_dir)
+    return json.dumps(
+        {
+            "source": "loop_review",
+            "reason": "",
+            "items": [_json_ready(review)],
+        },
+        ensure_ascii=False,
+    )
+
+
 def dispatch_ops_tool(name: str, arguments: dict[str, Any] | None, session: Any = None) -> str:
+    if name == "get_session_review":
+        return _dispatch_session_review(arguments)
     query = get_telemetry_query()
     scope = _scope_from_args(arguments)
     if name == "get_trace":
