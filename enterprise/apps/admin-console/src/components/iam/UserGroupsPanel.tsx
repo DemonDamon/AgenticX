@@ -24,7 +24,7 @@ import {
 import { Plus, RefreshCcw, Trash2, UsersRound } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { adminFetch } from "../../lib/admin-client-auth";
+import { adminFetch, adminFetchOrTimeout } from "../../lib/admin-client-auth";
 import { groupAssignmentKey, groupPackBindingChanges } from "../../lib/capability-pack-form";
 
 type GroupRow = {
@@ -51,29 +51,36 @@ export function UserGroupsPanel() {
   const [packIds, setPackIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const loadDirectory = useCallback(async () => {
     try {
-      const [groupRes, userRes, packRes] = await Promise.all([
-        adminFetch("/api/admin/user-groups", { cache: "no-store" }),
+      const [userRes, packRes] = await Promise.all([
         adminFetch("/api/admin/users?limit=200", { cache: "no-store" }),
         adminFetch("/api/admin/capability-packs", { cache: "no-store" }),
       ]);
-      const groupJson = (await groupRes.json()) as { message?: string; data?: { items?: GroupRow[] } };
-      if (!groupRes.ok) throw new Error(groupJson.message || t("toast.loadFailed"));
-      setGroups(groupJson.data?.items ?? []);
-
       const userJson = (await userRes.json().catch(() => ({}))) as { data?: { items?: UserRow[] } };
       setUsers(userJson.data?.items ?? []);
 
       const packJson = (await packRes.json().catch(() => ({}))) as { data?: { packs?: PackRow[] } };
       setPacks((packJson.data?.packs ?? []).filter((pack) => pack.status === "active"));
+    } catch {
+      /* directory is only needed for the edit dialog */
+    }
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const groupRes = await adminFetchOrTimeout("/api/admin/user-groups", { cache: "no-store" }, 20_000);
+      const groupJson = (await groupRes.json()) as { message?: string; data?: { items?: GroupRow[] } };
+      if (!groupRes.ok) throw new Error(groupJson.message || t("toast.loadFailed"));
+      setGroups(groupJson.data?.items ?? []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("toast.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+    void loadDirectory();
+  }, [t, loadDirectory]);
 
   useEffect(() => {
     void load();
@@ -243,7 +250,7 @@ export function UserGroupsPanel() {
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="group-desc">{t("description")}</Label>
+                <Label htmlFor="group-desc">{t("descriptionField")}</Label>
                 <Textarea
                   id="group-desc"
                   value={form.description}

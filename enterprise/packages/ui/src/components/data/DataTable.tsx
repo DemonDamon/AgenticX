@@ -42,6 +42,70 @@ import {
 } from "../ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { EmptyState } from "../layout/EmptyState";
+import { useLocale } from "../../branding/locale";
+
+const DATA_TABLE_COPY = {
+  zh: {
+    searchPlaceholder: "搜索...",
+    export: "导出",
+    filtered: "已筛选：",
+    clear: "清空",
+    removeFilter: (label: string) => `移除 ${label}`,
+    emptyTitle: "暂无数据",
+    emptyDescription: "调整筛选条件或稍后再试",
+    pagination: (total: number, page: number, pages: number) =>
+      `共 ${total} 条 · 第 ${page} / ${pages} 页`,
+    prevPage: "上一页",
+    nextPage: "下一页",
+    columns: "列",
+    showColumns: "显示列",
+    density: "密度",
+    densityAria: "切换密度",
+    compact: "紧凑",
+    standard: "标准",
+    comfortable: "宽松",
+  },
+  en: {
+    searchPlaceholder: "Search...",
+    export: "Export",
+    filtered: "Filtered:",
+    clear: "Clear",
+    removeFilter: (label: string) => `Remove ${label}`,
+    emptyTitle: "No data",
+    emptyDescription: "Adjust filters or try again later",
+    pagination: (total: number, page: number, pages: number) =>
+      `${total} items · Page ${page} / ${pages}`,
+    prevPage: "Previous page",
+    nextPage: "Next page",
+    columns: "Columns",
+    showColumns: "Toggle columns",
+    density: "Density",
+    densityAria: "Change density",
+    compact: "Compact",
+    standard: "Default",
+    comfortable: "Comfortable",
+  },
+};
+
+type DataTableCopy = {
+  searchPlaceholder: string;
+  export: string;
+  filtered: string;
+  clear: string;
+  removeFilter: (label: string) => string;
+  emptyTitle: string;
+  emptyDescription: string;
+  pagination: (total: number, page: number, pages: number) => string;
+  prevPage: string;
+  nextPage: string;
+  columns: string;
+  showColumns: string;
+  density: string;
+  densityAria: string;
+  compact: string;
+  standard: string;
+  comfortable: string;
+};
 
 /**
  * DataTable · IAM/审计/计量等表格页面的统一工具
@@ -102,7 +166,7 @@ export function DataTable<TData, TValue>({
   columns,
   data,
   enableGlobalFilter = true,
-  searchPlaceholder = "搜索...",
+  searchPlaceholder,
   toolbarLeft,
   toolbarRight,
   activeFilters,
@@ -115,6 +179,8 @@ export function DataTable<TData, TValue>({
   getRowId,
   className,
 }: DataTableProps<TData, TValue>) {
+  const { locale } = useLocale();
+  const copy: DataTableCopy = locale === "en" ? DATA_TABLE_COPY.en : DATA_TABLE_COPY.zh;
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
@@ -153,7 +219,7 @@ export function DataTable<TData, TValue>({
             <Input
               value={globalFilter}
               onChange={(event) => setGlobalFilter(event.target.value)}
-              placeholder={searchPlaceholder}
+              placeholder={searchPlaceholder ?? copy.searchPlaceholder}
               className="pl-8"
             />
           </div>
@@ -164,13 +230,13 @@ export function DataTable<TData, TValue>({
         <div className="ml-auto flex items-center gap-2">
           {toolbarRight}
 
-          <DensitySwitcher density={density} onChange={setDensity} />
-          <ColumnVisibilityMenu table={table} />
+          <DensitySwitcher density={density} onChange={setDensity} copy={copy} />
+          <ColumnVisibilityMenu table={table} copy={copy} />
 
           {onExport ? (
             <Button variant="outline" size="sm" onClick={() => void onExport()} className="gap-1.5">
               <Download />
-              导出
+              {copy.export}
             </Button>
           ) : null}
         </div>
@@ -180,7 +246,7 @@ export function DataTable<TData, TValue>({
       {hasFilters ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="mr-1 text-xs text-muted-foreground">已筛选：</span>
+          <span className="mr-1 text-xs text-muted-foreground">{copy.filtered}</span>
           {activeFilters?.map((filter) => (
             <Badge key={filter.id} variant="soft" className="gap-1 pl-2 pr-1">
               <span>
@@ -192,7 +258,7 @@ export function DataTable<TData, TValue>({
                   type="button"
                   onClick={filter.onRemove}
                   className="rounded-full p-0.5 hover:bg-background/60"
-                  aria-label={`移除 ${filter.label}`}
+                  aria-label={copy.removeFilter(filter.label)}
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -210,7 +276,7 @@ export function DataTable<TData, TValue>({
             className="ml-1 gap-1"
           >
             <X />
-            清空
+            {copy.clear}
           </Button>
         </div>
       ) : null}
@@ -262,8 +328,8 @@ export function DataTable<TData, TValue>({
                   {emptyState ?? (
                     <EmptyState
                       icon={<LayoutList className="h-5 w-5" />}
-                      title="暂无数据"
-                      description="调整筛选条件或稍后再试"
+                      title={copy.emptyTitle}
+                      description={copy.emptyDescription}
                       size="sm"
                       className="border-0"
                     />
@@ -279,7 +345,11 @@ export function DataTable<TData, TValue>({
       {enablePagination ? (
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
           <span>
-            共 <span className="font-medium text-foreground">{table.getFilteredRowModel().rows.length}</span> 条 · 第 {table.getState().pagination.pageIndex + 1} / {Math.max(1, table.getPageCount())} 页
+            {copy.pagination(
+              table.getFilteredRowModel().rows.length,
+              table.getState().pagination.pageIndex + 1,
+              Math.max(1, table.getPageCount()),
+            )}
           </span>
           <div className="flex items-center gap-1">
             <Button
@@ -287,7 +357,7 @@ export function DataTable<TData, TValue>({
               size="icon-sm"
               onClick={() => table.previousPage()}
               disabled={!table.getCanPreviousPage()}
-              aria-label="上一页"
+              aria-label={copy.prevPage}
             >
               <ChevronLeft />
             </Button>
@@ -296,7 +366,7 @@ export function DataTable<TData, TValue>({
               size="icon-sm"
               onClick={() => table.nextPage()}
               disabled={!table.getCanNextPage()}
-              aria-label="下一页"
+              aria-label={copy.nextPage}
             >
               <ChevronRight />
             </Button>
@@ -310,18 +380,24 @@ export function DataTable<TData, TValue>({
 /* ============================================================
  * 辅助：列显隐下拉
  * ============================================================ */
-function ColumnVisibilityMenu<TData>({ table }: { table: TanstackTable<TData> }) {
+function ColumnVisibilityMenu<TData>({
+  table,
+  copy,
+}: {
+  table: TanstackTable<TData>;
+  copy: DataTableCopy;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="gap-1.5">
           <Columns3 />
-          列
+          {copy.columns}
           <ChevronDown className="opacity-60" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuLabel>显示列</DropdownMenuLabel>
+        <DropdownMenuLabel>{copy.showColumns}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {table
           .getAllColumns()
@@ -343,25 +419,33 @@ function ColumnVisibilityMenu<TData>({ table }: { table: TanstackTable<TData> })
 /* ============================================================
  * 辅助：密度切换
  * ============================================================ */
-function DensitySwitcher({ density, onChange }: { density: Density; onChange: (value: Density) => void }) {
+function DensitySwitcher({
+  density,
+  onChange,
+  copy,
+}: {
+  density: Density;
+  onChange: (value: Density) => void;
+  copy: DataTableCopy;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon-sm" aria-label="切换密度">
+        <Button variant="outline" size="icon-sm" aria-label={copy.densityAria}>
           <Rows3 />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuLabel>密度</DropdownMenuLabel>
+        <DropdownMenuLabel>{copy.density}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuCheckboxItem checked={density === "compact"} onCheckedChange={() => onChange("compact")}>
-          紧凑
+          {copy.compact}
         </DropdownMenuCheckboxItem>
         <DropdownMenuCheckboxItem checked={density === "default"} onCheckedChange={() => onChange("default")}>
-          标准
+          {copy.standard}
         </DropdownMenuCheckboxItem>
         <DropdownMenuCheckboxItem checked={density === "comfortable"} onCheckedChange={() => onChange("comfortable")}>
-          宽松
+          {copy.comfortable}
         </DropdownMenuCheckboxItem>
       </DropdownMenuContent>
     </DropdownMenu>
