@@ -1,6 +1,7 @@
 import { Fragment, useContext, useMemo, type CSSProperties, type ReactNode } from "react";
 import { isValidElement } from "react";
 import ReactMarkdown from "react-markdown";
+import { useTranslation } from "react-i18next";
 import type { Components } from "react-markdown";
 import type { SearchReference } from "../../types/search-references";
 import { CitationBadge } from "./CitationBadge";
@@ -52,10 +53,11 @@ function KeyCitationsBlock({
   refMap: Map<number, SearchReference>;
   docNumberById: Map<number, number>;
 }) {
+  const { t } = useTranslation("chat");
   if (items.length === 0) return null;
   return (
     <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
-      <div className="text-[13px] font-semibold text-text-strong">关键引用</div>
+      <div className="text-[13px] font-semibold text-text-strong">{t("citation.keyCitations")}</div>
       <ol className="m-0 space-y-2 pl-0">
         {items.map((item, index) => {
           const rawId = item.id ?? index + 1;

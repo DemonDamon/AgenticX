@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Save, RotateCcw, X } from "lucide-react";
 import type { Avatar } from "../store";
 import { avatarBgClass, avatarFgClass, AVATAR_PALETTE, AVATAR_COLOR_SWATCH, normalizeAvatarColor } from "../utils/avatar-color";
 import type { AvatarPaletteKey } from "../utils/avatar-color";
 import { DefaultModelSelect } from "./DefaultModelSelect";
+import { i18n } from "../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 function avatarInitials(name: string): string {
   const t = name.trim();
@@ -59,10 +66,10 @@ type ToolItem = {
 };
 
 const DEFAULT_TOOLS: ToolItem[] = [
-  { id: "liteparse", name: "LiteParse", description: "轻量 PDF/Office 文档解析" },
-  { id: "mineru", name: "MinerU", description: "深度文档解析" },
-  { id: "libreoffice", name: "LibreOffice", description: "Office 格式转换依赖" },
-  { id: "imagemagick", name: "ImageMagick", description: "图像转换依赖" },
+  { id: "liteparse", name: "LiteParse", description: st("avatar.toolLiteparse") },
+  { id: "mineru", name: "MinerU", description: st("avatar.toolMineru") },
+  { id: "libreoffice", name: "LibreOffice", description: st("avatar.toolLibreoffice") },
+  { id: "imagemagick", name: "ImageMagick", description: st("avatar.toolImagemagick") },
 ];
 
 type Tab = "general" | "tools" | "skills" | "soul";
@@ -72,6 +79,7 @@ type Props =
   | { mode: "machi"; onClose: () => void; onSaved: () => void };
 
 export function AvatarSettingsPanel(props: Props) {
+  const { t } = useTranslation("settings");
   const { mode, onClose, onSaved } = props;
   const avatar = mode === "avatar" ? (props as { avatar: Avatar }).avatar : null;
 
@@ -109,7 +117,7 @@ export function AvatarSettingsPanel(props: Props) {
   const [soulValue, setSoulValue] = useState("");
   const [loadingSoul, setLoadingSoul] = useState(false);
 
-  const title = mode === "avatar" ? `${avatar?.name ?? "分身"} · 设置` : "Near · 设置";
+  const title = mode === "avatar" ? st("avatar.titleNamed", { name: avatar?.name ?? st("avatar.fallbackName") }) : st("avatar.titleNear");
 
   const loadTools = useCallback(async () => {
     setLoadingTools(true);
@@ -219,24 +227,24 @@ export function AvatarSettingsPanel(props: Props) {
   const handlePickAvatarImage = useCallback((file: File) => {
     const maxBytes = 1.8 * 1024 * 1024;
     if (!file.type.startsWith("image/")) {
-      setAvatarImageHint("请选择图片文件（PNG/JPG/WebP/GIF）。");
+      setAvatarImageHint(st("avatar.pickImage"));
       return;
     }
     if (file.size > maxBytes) {
-      setAvatarImageHint("图片过大，请选择小于 1.8MB 的文件。");
+      setAvatarImageHint(st("avatar.imageTooLarge"));
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
       const result = typeof reader.result === "string" ? reader.result : "";
       if (!result) {
-        setAvatarImageHint("读取图片失败，请重试。");
+        setAvatarImageHint(st("avatar.readImageFailed"));
         return;
       }
       setAvatarUrlDraft(result);
-      setAvatarImageHint("已选择图片，请点击「保存」写入分身配置。");
+      setAvatarImageHint(st("avatar.imagePicked"));
     };
-    reader.onerror = () => setAvatarImageHint("读取图片失败，请重试。");
+    reader.onerror = () => setAvatarImageHint(st("avatar.readImageFailed"));
     reader.readAsDataURL(file);
   }, []);
 
@@ -247,8 +255,8 @@ export function AvatarSettingsPanel(props: Props) {
 
   const toolsModeHint =
     mode === "avatar"
-      ? "未设置项继承 Near 全局策略；如全局未设置，则默认启用。"
-      : "Near 全局策略将作为所有分身默认值；未设置项默认启用。";
+      ? st("avatar.inheritHintAvatar")
+      : st("avatar.inheritHintNear");
 
   /** 分身「基本信息」Tab：名称 / 角色 / System Prompt + SOUL 一并保存 */
   const handleSaveGeneralAndSoul = async () => {
@@ -280,7 +288,7 @@ export function AvatarSettingsPanel(props: Props) {
         brains_enabled: brainsPayload,
       });
       if (!res?.ok) {
-        setMessage(`保存失败: ${res?.error ?? "未知错误"}`);
+        setMessage(st("avatar.saveFailed", { reason: res?.error ?? st("avatar.unknownError") }));
         return;
       }
       const soulRes = await window.agenticxDesktop.saveAvatarSoul({
@@ -288,14 +296,14 @@ export function AvatarSettingsPanel(props: Props) {
         content: soulValue,
       });
       if (!soulRes?.ok) {
-        setMessage(`基本信息已保存；灵魂保存失败: ${soulRes?.error ?? "未知错误"}`);
+        setMessage(st("avatar.generalSavedSoulFailed", { reason: soulRes?.error ?? st("avatar.unknownError") }));
         return;
       }
-      setMessage("已保存，下一轮对话生效。");
+      setMessage(st("avatar.savedNextTurn"));
       setAvatarImageHint("");
       onSaved();
     } catch (err) {
-      setMessage(`保存失败: ${String(err)}`);
+      setMessage(st("avatar.saveFailed", { reason: String(err) }));
     } finally {
       setSaving(false);
     }
@@ -318,10 +326,10 @@ export function AvatarSettingsPanel(props: Props) {
         id: avatar.id,
         skills_enabled: Object.keys(onlyFalse).length > 0 ? onlyFalse : {},
       });
-      setMessage(res?.ok ? "已保存" : `保存失败: ${res?.error ?? "未知错误"}`);
+      setMessage(res?.ok ? st("avatar.saved") : st("avatar.saveFailed", { reason: res?.error ?? st("avatar.unknownError") }));
       if (res?.ok) onSaved();
     } catch (err) {
-      setMessage(`保存失败: ${String(err)}`);
+      setMessage(st("avatar.saveFailed", { reason: String(err) }));
     } finally {
       setSaving(false);
     }
@@ -336,14 +344,14 @@ export function AvatarSettingsPanel(props: Props) {
           id: avatar.id,
           tools_enabled: { ...toolsEnabled },
         });
-        setMessage(res?.ok ? "已保存" : `保存失败: ${res?.error ?? "未知错误"}`);
+        setMessage(res?.ok ? st("avatar.saved") : st("avatar.saveFailed", { reason: res?.error ?? st("avatar.unknownError") }));
         if (res?.ok) onSaved();
       } else {
         const res = await window.agenticxDesktop.saveToolsPolicy({ tools_enabled: { ...toolsEnabled } });
-        setMessage(res?.ok ? "已保存" : `保存失败: ${res?.error ?? "未知错误"}`);
+        setMessage(res?.ok ? st("avatar.saved") : st("avatar.saveFailed", { reason: res?.error ?? st("avatar.unknownError") }));
       }
     } catch (err) {
-      setMessage(`保存失败: ${String(err)}`);
+      setMessage(st("avatar.saveFailed", { reason: String(err) }));
     } finally {
       setSaving(false);
     }
@@ -355,9 +363,9 @@ export function AvatarSettingsPanel(props: Props) {
     setMessage("");
     try {
       const res = await window.agenticxDesktop.saveMetaSoul({ content: soulValue });
-      setMessage(res?.ok ? "已保存，下一轮 Near 对话生效。" : `保存失败: ${res?.error ?? "未知错误"}`);
+      setMessage(res?.ok ? st("avatar.savedNearNext") : st("avatar.saveFailed", { reason: res?.error ?? st("avatar.unknownError") }));
     } catch (err) {
-      setMessage(`保存失败: ${String(err)}`);
+      setMessage(st("avatar.saveFailed", { reason: String(err) }));
     } finally {
       setSaving(false);
     }
@@ -372,13 +380,13 @@ export function AvatarSettingsPanel(props: Props) {
   const tabs: { id: Tab; label: string }[] =
     mode === "avatar"
       ? [
-          { id: "general", label: "基本信息" },
-          { id: "tools", label: "工具权限" },
-          { id: "skills", label: "技能" },
+          { id: "general", label: st("avatar.tabGeneral") },
+          { id: "tools", label: st("avatar.tabTools") },
+          { id: "skills", label: st("avatar.tabSkills") },
         ]
       : [
-          { id: "tools", label: "工具权限（全局）" },
-          { id: "soul", label: "灵魂" },
+          { id: "tools", label: st("avatar.tabToolsGlobal") },
+          { id: "soul", label: st("avatar.tabSoul") },
         ];
 
   const activeTab = tabs.find((t) => t.id === tab) ? tab : tabs[0].id;
@@ -394,7 +402,7 @@ export function AvatarSettingsPanel(props: Props) {
           <div className="min-w-0 flex-1 truncate text-sm font-semibold text-text-strong">{title}</div>
           <button
             type="button"
-            aria-label="关闭"
+            aria-label={st("avatar.closeAria")}
             className="shrink-0 rounded-md p-1.5 text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
             onClick={onClose}
           >
@@ -427,11 +435,10 @@ export function AvatarSettingsPanel(props: Props) {
           {activeTab === "general" && mode === "avatar" && (
             <div className="space-y-4">
               <p className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-subtle">
-                「系统提示」用于定义该分身的即时行为规则；「灵魂」用于长期风格偏好与策略。两者会一起生效，
-                互不替代。
+                {st("avatar.promptSoulHint")}
               </p>
               <div>
-                <div className="text-sm text-text-muted">分身头像</div>
+                <div className="text-sm text-text-muted">{st("avatar.avatarImage")}</div>
                 <div className="mt-2 flex items-center gap-3">
                   {avatarUrlDraft ? (
                     <img
@@ -448,7 +455,7 @@ export function AvatarSettingsPanel(props: Props) {
                   )}
                   <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                     <label className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong">
-                      上传图片
+                      {st("avatar.uploadImage")}
                       <input
                         type="file"
                         accept="image/*"
@@ -466,29 +473,29 @@ export function AvatarSettingsPanel(props: Props) {
                       disabled={!avatarUrlDraft}
                       onClick={() => {
                         setAvatarUrlDraft("");
-                        setAvatarImageHint("已清除预览，请点击「保存」以恢复默认头像。");
+                        setAvatarImageHint(st("avatar.imageCleared"));
                       }}
                     >
-                      恢复默认
+                      {st("avatar.resetDefault")}
                     </button>
                   </div>
                 </div>
                 <p className="mt-1 text-[11px] text-text-subtle">
-                  与侧栏、会话列表一致展示；建议小于 1.8MB 的方形图片。保存后写入该分身目录下的 avatar.yaml。
+                  {st("avatar.avatarImageHint")}
                 </p>
                 {avatarImageHint ? <p className="mt-1 text-[11px] text-text-subtle">{avatarImageHint}</p> : null}
               </div>
               <div>
-                <div className="text-sm text-text-muted">背景色</div>
+                <div className="text-sm text-text-muted">{st("avatar.bgColor")}</div>
                 <p className="mt-1 text-[11px] text-text-subtle">
-                  用于对话窗格轻底色与无头像时的占位色。默认与元智能体一致（主题色、无窗格 tint）。
+                  {st("avatar.bgColorHint")}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    aria-label="默认（与元智能体一致）"
+                    aria-label={st("avatar.defaultWithMetaAria")}
                     aria-pressed={colorDraft === ""}
-                    title="默认"
+                    title={st("avatar.defaultTitle")}
                     className={`h-7 w-7 rounded-full border-2 transition ${
                       colorDraft === ""
                         ? "border-text-strong ring-2 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]"
@@ -516,55 +523,55 @@ export function AvatarSettingsPanel(props: Props) {
                 </div>
               </div>
               <label className="block text-sm text-text-muted">
-                名称
+                {st("avatar.name")}
                 <input
                   className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="分身名称"
+                  placeholder={st("avatar.namePh")}
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                角色
+                {st("avatar.role")}
                 <input
                   className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
-                  placeholder="例：全栈开发工程师、数据分析师"
+                  placeholder={st("avatar.rolePh")}
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                系统提示
+                {st("avatar.systemPrompt")}
                 <textarea
                   className="mt-1 min-h-[120px] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
-                  placeholder="例如：你是资深前端工程师，先给结论，再给步骤；代码优先给可直接运行版本。"
+                  placeholder={st("avatar.systemPromptPh")}
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                简介
-                <span className="ml-1 text-xs font-normal text-text-faint">（可选，展示在分身卡片上）</span>
+                {st("avatar.blurb")}
+                <span className="ml-1 text-xs font-normal text-text-faint">{st("avatar.blurbOptional")}</span>
                 <textarea
                   className="mt-1 min-h-[64px] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={blurb}
                   onChange={(e) => setBlurb(e.target.value)}
-                  placeholder="一两句话说明该分身能做什么，会展示在分身卡片上..."
+                  placeholder={st("avatar.blurbPh")}
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                标签
-                <span className="ml-1 text-xs font-normal text-text-faint">（可选，逗号分隔，最多 8 个）</span>
+                {st("avatar.tags")}
+                <span className="ml-1 text-xs font-normal text-text-faint">{st("avatar.tagsOptional")}</span>
                 <input
                   className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={tagsInput}
                   onChange={(e) => setTagsInput(e.target.value)}
-                  placeholder="例：PyTorch优化, 大模型运行框架, GPU性能调优"
+                  placeholder={st("avatar.tagsPh")}
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                默认模型
-                <span className="ml-1 text-xs font-normal text-text-faint">（新建会话或未显式选择模型时使用）</span>
+                {st("avatar.defaultModel")}
+                <span className="ml-1 text-xs font-normal text-text-faint">{st("avatar.defaultModelHint")}</span>
                 <DefaultModelSelect
                   provider={defaultProvider}
                   model={defaultModel}
@@ -575,9 +582,9 @@ export function AvatarSettingsPanel(props: Props) {
                 />
               </label>
               <div className="rounded-md border border-border bg-surface-card p-3">
-                <div className="text-sm font-medium text-text-primary">挂载知识脑</div>
+                <div className="text-sm font-medium text-text-primary">{st("avatar.mountBrains")}</div>
                 <p className="mt-1 text-xs text-text-faint">
-                  控制该分身对话时 knowledge_search / code_search 可检索的脑。默认仅全局脑。
+                  {st("avatar.mountBrainsHint")}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-3 text-xs">
                   <label className="flex items-center gap-1.5">
@@ -586,7 +593,7 @@ export function AvatarSettingsPanel(props: Props) {
                       checked={brainsMountMode === "default"}
                       onChange={() => setBrainsMountMode("default")}
                     />
-                    默认（仅全局）
+                    {st("avatar.brainsDefault")}
                   </label>
                   <label className="flex items-center gap-1.5">
                     <input
@@ -594,7 +601,7 @@ export function AvatarSettingsPanel(props: Props) {
                       checked={brainsMountMode === "all"}
                       onChange={() => setBrainsMountMode("all")}
                     />
-                    全部可见脑
+                    {st("avatar.brainsAll")}
                   </label>
                   <label className="flex items-center gap-1.5">
                     <input
@@ -602,7 +609,7 @@ export function AvatarSettingsPanel(props: Props) {
                       checked={brainsMountMode === "custom"}
                       onChange={() => setBrainsMountMode("custom")}
                     />
-                    自定义
+                    {st("avatar.brainsCustom")}
                   </label>
                 </div>
                 {brainsMountMode === "custom" ? (
@@ -628,19 +635,19 @@ export function AvatarSettingsPanel(props: Props) {
               </div>
               <div className="border-t border-border pt-4">
                 <label className="block text-sm text-text-muted">
-                  灵魂
-                  <span className="ml-1 text-xs font-normal text-text-faint">（长期风格与策略，支持 Markdown）</span>
+                  {st("avatar.soul")}
+                  <span className="ml-1 text-xs font-normal text-text-faint">{st("avatar.soulHint")}</span>
                 </label>
                 {loadingSoul ? (
                   <div className="mt-1 rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
-                    加载中...
+                    {st("avatar.loading")}
                   </div>
                 ) : (
                   <textarea
                     className="mt-1 min-h-[160px] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                     value={soulValue}
                     onChange={(e) => setSoulValue(e.target.value)}
-                    placeholder="例如：先给结论，再给证据；避免重复确认；把进度和风险讲清楚。"
+                    placeholder={st("avatar.soulPh")}
                   />
                 )}
               </div>
@@ -651,7 +658,7 @@ export function AvatarSettingsPanel(props: Props) {
                   onClick={() => void handleSaveGeneralAndSoul()}
                 >
                   <Save className="h-3.5 w-3.5" />
-                  {saving ? "保存中..." : "保存"}
+                  {saving ? st("avatar.saving") : st("avatar.save")}
                 </button>
               </div>
             </div>
@@ -660,15 +667,15 @@ export function AvatarSettingsPanel(props: Props) {
           {activeTab === "skills" && mode === "avatar" && (
             <div className="space-y-3">
               <p className="text-xs text-text-faint">
-                已在设置 → 技能中全局禁用的条目不会出现在此列表。未列出的技能对该分身默认启用；关闭开关表示该分身不使用此技能。
+                {st("avatar.skillsHint")}
               </p>
               {loadingSkills ? (
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
-                  加载技能列表中...
+                  {st("avatar.loadingSkills")}
                 </div>
               ) : skillsItems.length === 0 ? (
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
-                  当前没有可用的技能（或全部被全局禁用）。
+                  {st("avatar.noSkills")}
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -686,7 +693,7 @@ export function AvatarSettingsPanel(props: Props) {
                           <SettingsSwitch
                             checked={!skillOffForAvatar}
                             disabled={saving}
-                            aria-label={`${skill.name} 对该分身启用`}
+                            aria-label={st("avatar.enableSkillAria", { name: skill.name })}
                             onChange={(next) => {
                               setSkillsEnabledDraft((prev) => {
                                 const draft = { ...prev };
@@ -710,7 +717,7 @@ export function AvatarSettingsPanel(props: Props) {
                   disabled={skillsCustomizedCount === 0 || saving}
                 >
                   <RotateCcw className="h-3 w-3" />
-                  重置（全部启用）
+                  {st("avatar.resetAllEnabled")}
                 </button>
                 <button
                   className="flex items-center gap-1.5 rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
@@ -718,7 +725,7 @@ export function AvatarSettingsPanel(props: Props) {
                   onClick={() => void handleSaveSkills()}
                 >
                   <Save className="h-3.5 w-3.5" />
-                  {saving ? "保存中..." : "保存"}
+                  {saving ? st("avatar.saving") : st("avatar.save")}
                 </button>
               </div>
             </div>
@@ -727,18 +734,22 @@ export function AvatarSettingsPanel(props: Props) {
           {activeTab === "tools" && (
             <div className="space-y-3">
               <p className="text-xs text-text-faint">
-                {customizedCount > 0 ? `已自定义 ${customizedCount} 项` : "未自定义（使用默认）"} · {toolsModeHint}
+                {customizedCount > 0 ? st("avatar.customizedCount", { count: customizedCount }) : st("avatar.notCustomized")} · {toolsModeHint}
               </p>
               {loadingTools ? (
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
-                  加载工具列表中...
+                  {st("avatar.loadingTools")}
                 </div>
               ) : (
                 <div className="space-y-2">
                   {tools.map((tool) => {
                     const inherited = !(tool.id in toolsEnabled);
                     const enabled = inherited ? true : Boolean(toolsEnabled[tool.id]);
-                    const stateLabel = inherited ? "默认" : enabled ? "启用" : "禁用";
+                    const stateLabel = inherited
+                      ? st("avatar.stateDefault")
+                      : enabled
+                        ? st("avatar.stateOn")
+                        : st("avatar.stateOff");
                     return (
                       <div key={tool.id} className="rounded-md border border-border bg-surface-card px-2.5 py-2">
                         <div className="flex items-center justify-between gap-2">
@@ -786,7 +797,7 @@ export function AvatarSettingsPanel(props: Props) {
                   disabled={customizedCount === 0 || saving}
                 >
                   <RotateCcw className="h-3 w-3" />
-                  重置默认
+                  {st("avatar.resetDefaults")}
                 </button>
                 <button
                   className="flex items-center gap-1.5 rounded-md bg-btnPrimary px-3 py-1.5 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
@@ -794,7 +805,7 @@ export function AvatarSettingsPanel(props: Props) {
                   onClick={() => void handleSaveTools()}
                 >
                   <Save className="h-3.5 w-3.5" />
-                  {saving ? "保存中..." : "保存"}
+                  {saving ? st("avatar.saving") : st("avatar.save")}
                 </button>
               </div>
             </div>
@@ -803,18 +814,18 @@ export function AvatarSettingsPanel(props: Props) {
           {activeTab === "soul" && mode === "machi" && (
             <div className="space-y-3">
               <p className="text-xs text-text-faint">
-                支持自由 Markdown 文本。该配置用于塑造 Near（Meta-Agent）的长期行为风格。
+                {st("avatar.nearSoulHint")}
               </p>
               {loadingSoul ? (
                 <div className="rounded-md border border-border bg-surface-card px-3 py-2 text-xs text-text-faint">
-                  加载中...
+                  {st("avatar.loading")}
                 </div>
               ) : (
                 <textarea
                   className="min-h-[220px] w-full resize-y rounded-md border border-border bg-surface-panel px-3 py-2 text-sm text-text-primary"
                   value={soulValue}
                   onChange={(e) => setSoulValue(e.target.value)}
-                  placeholder="例如：先给结论，再给证据；避免重复确认；把进度和风险讲清楚。"
+                  placeholder={st("avatar.soulPh")}
                 />
               )}
               <div className="flex justify-end">
@@ -824,7 +835,7 @@ export function AvatarSettingsPanel(props: Props) {
                   onClick={() => void handleSaveMetaSoul()}
                 >
                   <Save className="h-3.5 w-3.5" />
-                  {saving ? "保存中..." : "保存"}
+                  {saving ? st("avatar.saving") : st("avatar.save")}
                 </button>
               </div>
             </div>
@@ -835,7 +846,7 @@ export function AvatarSettingsPanel(props: Props) {
         {message && (
           <div className="shrink-0 border-t border-border bg-surface-panel px-4 py-2">
             <div
-              className={`text-xs ${message.startsWith("已保存") ? "text-emerald-400" : "text-rose-400"}`}
+              className={`text-xs ${message.startsWith(st("avatar.saved")) ? "text-emerald-400" : "text-rose-400"}`}
             >
               {message}
             </div>

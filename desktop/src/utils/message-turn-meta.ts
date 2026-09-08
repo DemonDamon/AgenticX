@@ -39,9 +39,11 @@ export function formatTurnUsageCount(usage: MessageUsage): string {
   return n.toLocaleString("en-US");
 }
 
-export function formatTurnUsageLabel(usage: MessageUsage): string {
+export type ChatTranslate = (key: string, options?: Record<string, unknown>) => string;
+
+export function formatTurnUsageLabel(usage: MessageUsage, t: ChatTranslate): string {
   const count = formatTurnUsageCount(usage);
-  return count ? `本轮消耗 ${count}` : "";
+  return count ? t("usage.turnCost", { count }) : "";
 }
 
 /** Compact token count matching the context popup's `formatK` (1234 -> "1.2K"). */
@@ -77,39 +79,42 @@ export function formatTurnCacheHit(
   };
 }
 
-export function formatTurnCacheHitLabel(hit: { percent: number }): string {
-  return `缓存 ${hit.percent.toFixed(1)}%`;
+export function formatTurnCacheHitLabel(hit: { percent: number }, t: ChatTranslate): string {
+  return t("usage.cachePercent", { percent: hit.percent.toFixed(1) });
 }
 
-export function formatTurnCacheHitTip(hit: {
-  percent: number;
-  cached: string;
-  input: string;
-}): string {
-  return `本轮缓存命中 ${hit.percent.toFixed(1)}%（${hit.cached} / ${hit.input}）。越高说明重复上下文越多，不是窗口占用。`;
+export function formatTurnCacheHitTip(
+  hit: {
+    percent: number;
+    cached: string;
+    input: string;
+  },
+  t: ChatTranslate,
+): string {
+  return t("usage.cacheHitTip", {
+    percent: hit.percent.toFixed(1),
+    cached: hit.cached,
+    input: hit.input,
+  });
 }
 
-/**
- * A finished turn that carries a model but no usage means the provider never
- * sent the trailing usage chunk — typically an aborted stream. The prompt was
- * still billed upstream, so say so rather than rendering nothing.
- */
-export const TURN_USAGE_MISSING_LABEL = "用量未返回";
-
-export const TURN_USAGE_MISSING_TITLE =
-  "本轮用量未返回：模型未回传用量（多为响应中断），厂商侧仍会计费";
-
-export function formatTurnUsageTitle(usage: MessageUsage): string {
+export function formatTurnUsageTitle(usage: MessageUsage, t: ChatTranslate): string {
   const parts = [
-    `本次请求输入 ${usage.inputTokens.toLocaleString("en-US")}`,
-    `输出 ${usage.outputTokens.toLocaleString("en-US")}`,
+    t("usage.titleInput", { count: usage.inputTokens.toLocaleString("en-US") }),
+    t("usage.titleOutput", { count: usage.outputTokens.toLocaleString("en-US") }),
   ];
   if (usage.cachedTokens > 0) {
-    parts.push(`缓存 ${usage.cachedTokens.toLocaleString("en-US")}`);
+    parts.push(t("usage.titleCache", { count: usage.cachedTokens.toLocaleString("en-US") }));
   }
   const hit = formatTurnCacheHit(usage);
   if (hit) {
-    parts.push(`命中 ${hit.percent.toFixed(1)}%（${hit.cached} / ${hit.input}）`);
+    parts.push(
+      t("usage.titleHit", {
+        percent: hit.percent.toFixed(1),
+        cached: hit.cached,
+        input: hit.input,
+      }),
+    );
   }
   return parts.join(" · ");
 }

@@ -1,12 +1,17 @@
 import { PanelRight, Pin, PinOff, RefreshCw, Search, Share2, Trash2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import {
+
   listProviderVisibleModelIds,
   type ProviderCatalogEntry,
 } from "../../utils/model-options";
 import { Button } from "../ds/Button";
 import { Modal } from "../ds/Modal";
+import { Panel } from "../ds/Panel";
+import { SettingsDropdown } from "../ds/SettingsDropdown";
+import { i18n } from "../../i18n/i18n";
 import { MemoryGraphCanvas } from "./MemoryGraphCanvas";
 import { MemoryGraphDetail } from "./MemoryGraphDetail";
 import { WorkspaceMemoryList } from "./WorkspaceMemoryList";
@@ -36,6 +41,10 @@ import type {
   MemoryGraphScope,
   MemoryGraphStatus,
 } from "./memory-graph-types";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
 
 type EpisodeTimeFilter = "all" | "7d" | "30d" | "older30d";
 
@@ -95,23 +104,27 @@ const EMPTY_GRAPH: GraphViewDTO = {
 };
 
 function scopeLabel(scope: MemoryGraphScope): string {
-  if (scope === "avatar") return "数字分身";
-  if (scope === "group") return "群聊";
-  return "元智能体";
+  if (scope === "avatar") return st("memoryGraph.scopeAvatarLong");
+  if (scope === "group") return st("memoryGraph.scopeGroupLong");
+  return st("memoryGraph.scopeMetaLong");
 }
 
-const JOB_STAGE_LABELS: Record<string, string> = {
-  queued: "排队",
-  preparing: "准备引擎",
-  formatting: "整理对话",
-  extracting: "抽取实体与关系",
-  extracting_entities: "抽取实体",
-  extracting_edges: "抽取关系",
-  embedding: "向量化",
-  linking: "关联写入",
-  updating: "更新图谱",
-  finalizing: "收尾",
-};
+function jobStageLabel(stageKey: string): string {
+  const keys: Record<string, string> = {
+    queued: "memoryGraph.stageQueued",
+    preparing: "memoryGraph.stagePreparing",
+    formatting: "memoryGraph.stageFormatting",
+    extracting: "memoryGraph.stageExtracting",
+    extracting_entities: "memoryGraph.stageEntities",
+    extracting_edges: "memoryGraph.stageEdges",
+    embedding: "memoryGraph.stageEmbedding",
+    linking: "memoryGraph.stageLinking",
+    updating: "memoryGraph.stageUpdating",
+    finalizing: "memoryGraph.stageFinalizing",
+  };
+  const key = keys[stageKey];
+  return key ? st(key) : stageKey;
+}
 
 function shouldShowBuildError(st: MemoryGraphStatus | null): boolean {
   const err = st?.last_error?.trim();
@@ -140,17 +153,14 @@ function resolveMemoryBuildUi(st: MemoryGraphStatus | null): {
     return { hint: null, progress: null };
   }
   const stageKey = String(st.job_stage || "").trim();
-  const stageLabel = stageKey ? JOB_STAGE_LABELS[stageKey] || stageKey : null;
-  let hint = "正在构建记忆…";
-  if (pending > 0) hint += `（队列 ${pending}）`;
+  const stageLabel = stageKey ? jobStageLabel(stageKey) || stageKey : null;
+  let hint = i18n.t("memoryGraph.building", { ns: "settings" }) as string;
+  if (pending > 0) hint += st("memoryGraph.queuePending", { count: pending });
   if (stageLabel) {
     hint += pending > 0 ? ` · ${stageLabel}` : `（${stageLabel}）`;
   }
   return { hint, progress };
 }
-
-import { Panel } from "../ds/Panel";
-import { SettingsDropdown } from "../ds/SettingsDropdown";
 
 /** 与设置页 Panel / 知识库卡片一致的边线语义 */
 const MG_PANEL = "rounded-lg border border-border bg-surface-card";
@@ -223,6 +233,7 @@ function MemoryGraphExplorerInner({
   providerOptions = [],
   onClose,
 }: Props) {
+  const { t } = useTranslation("workspace");
   const scopeLocked = layout === "sidebar";
   const [scope, setScope] = useState<MemoryGraphScope>(initialScope);
   const [graph, setGraph] = useState<GraphViewDTO>(EMPTY_GRAPH);
@@ -303,7 +314,7 @@ function MemoryGraphExplorerInner({
   }, [scope, groupsList, avatarsList]);
 
   const subjectDisplayLabel = useMemo(() => {
-    const empty = scope === "group" ? "暂无群聊" : "暂无分身";
+    const empty = scope === "group" ? st("memoryGraph.noGroups") : st("memoryGraph.noAvatars");
     if (!selectedSubjectId.trim()) return empty;
     return subjectOptions.find((o) => o.value === selectedSubjectId)?.label ?? selectedSubjectId;
   }, [scope, selectedSubjectId, subjectOptions]);
@@ -347,18 +358,18 @@ function MemoryGraphExplorerInner({
 
   const reload = useCallback(async () => {
     if (!apiBase.trim()) {
-      setError("后端未连接");
+      setError(st("memoryGraph.backendOff"));
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const st = await fetchMemoryGraphStatus(apiBase, apiToken);
-      setStatus(st);
-      if (st.models?.default_provider) setDefaultProvider(st.models.default_provider);
-      if (!isMemoryGraphEnabled(st)) {
+      const graphStatus = await fetchMemoryGraphStatus(apiBase, apiToken);
+      setStatus(graphStatus);
+      if (graphStatus.models?.default_provider) setDefaultProvider(graphStatus.models.default_provider);
+      if (!isMemoryGraphEnabled(graphStatus)) {
         setDisabled(true);
-        setStatusHint("记忆图谱未启用。在上方配置中开启，或编辑 ~/.agenticx/config.yaml。");
+        setStatusHint(st("memoryGraph.disabledHintConfig"));
         setBuildProgress(null);
         setGraph(EMPTY_GRAPH);
         setEpisodes([]);
@@ -368,9 +379,9 @@ function MemoryGraphExplorerInner({
       if (!groupId) {
         setStatusHint(
           scope === "avatar"
-            ? "当前窗格不是分身会话（请在分身窗格查看其记忆）"
+            ? st("memoryGraph.notAvatarPane")
             : scope === "group"
-              ? "当前窗格不是群聊会话（请在群聊窗格查看其群体记忆）"
+              ? st("memoryGraph.notGroupPane")
               : null,
         );
         setBuildProgress(null);
@@ -378,22 +389,25 @@ function MemoryGraphExplorerInner({
         setEpisodes([]);
         return;
       }
-      if (st.graphiti_installed === false) {
-        const hint = st.install_hint?.trim();
+      if (graphStatus.graphiti_installed === false) {
+        const hint = graphStatus.install_hint?.trim();
         setStatusHint(
           hint
-            ? `graphiti-core 未安装于当前后端（${st.python_executable || "agx serve"}）。请执行：${hint}`
-            : "graphiti-core 未安装于当前 agx serve 环境",
+            ? st("memoryGraph.graphitiMissingAt", {
+                exe: graphStatus.python_executable || "agx serve",
+                hint,
+              })
+            : st("memoryGraph.graphitiMissing"),
         );
         setBuildProgress(null);
         setGraph(EMPTY_GRAPH);
         setEpisodes([]);
         return;
-      } else if (shouldShowBuildError(st)) {
-        const corrupt = isLikelyGraphCorruptionError(st.last_error);
+      } else if (shouldShowBuildError(graphStatus)) {
+        const corrupt = isLikelyGraphCorruptionError(graphStatus.last_error);
         if (corrupt && !autoRecoverAttemptedRef.current) {
           autoRecoverAttemptedRef.current = true;
-          setStatusHint("记忆图谱数据异常，正在自动修复…");
+          setStatusHint(st("memoryGraph.repairing"));
           setStatusHintIsError(false);
           setBuildProgress(20);
           try {
@@ -405,10 +419,10 @@ function MemoryGraphExplorerInner({
               const action = String(repair.recovery?.action || "");
               setStatusHint(
                 action === "restored_from_backup"
-                  ? "记忆图谱已从备份恢复，请稍候加载…"
+                  ? st("memoryGraph.restoredBackup")
                   : action === "recreated_empty"
-                    ? "记忆图谱已重建为空库，后续对话会继续写入新记忆。"
-                    : "记忆图谱已修复，正在加载…",
+                    ? st("memoryGraph.rebuiltEmpty")
+                    : st("memoryGraph.repaired"),
               );
               setStatusHintIsError(false);
             } else if (shouldShowBuildError(stAfter)) {
@@ -420,19 +434,19 @@ function MemoryGraphExplorerInner({
             }
           } catch (repairErr) {
             setBuildProgress(null);
-            setStatusHint(formatMemoryGraphFetchError(repairErr, "记忆图谱自动修复失败"));
+            setStatusHint(formatMemoryGraphFetchError(repairErr, st("memoryGraph.repairFailed")));
             setStatusHintIsError(true);
             setGraph(EMPTY_GRAPH);
             setEpisodes([]);
             return;
           }
         } else {
-          setStatusHint(humanizeMemoryGraphError(st.last_error || ""));
+          setStatusHint(humanizeMemoryGraphError(graphStatus.last_error || ""));
           setStatusHintIsError(true);
           setBuildProgress(null);
         }
       } else {
-        const buildUi = resolveMemoryBuildUi(st);
+        const buildUi = resolveMemoryBuildUi(graphStatus);
         if (buildUi.hint) {
           setStatusHint(buildUi.hint);
           setStatusHintIsError(false);
@@ -462,7 +476,7 @@ function MemoryGraphExplorerInner({
       setStatusHintIsError(false);
       setBuildProgress(null);
     } catch (e) {
-      const msg = formatMemoryGraphFetchError(e, "加载记忆图谱失败");
+      const msg = formatMemoryGraphFetchError(e, st("memoryGraph.loadFailed"));
       if (
         /无法连接 agx serve|failed to fetch|networkerror|load failed/i.test(msg) &&
         typeof window !== "undefined" &&
@@ -471,7 +485,7 @@ function MemoryGraphExplorerInner({
         try {
           const freshBase = await window.agenticxDesktop.getApiBase();
           if (freshBase && freshBase !== apiBase) {
-            setStatusHint("检测到后端地址已更新，正在重连…");
+            setStatusHint(st("memoryGraph.reconnecting"));
             setApiBase(freshBase);
             return;
           }
@@ -481,7 +495,7 @@ function MemoryGraphExplorerInner({
       }
       if (msg.includes("memory_graph_disabled")) {
         setDisabled(true);
-        setStatusHint("记忆图谱未启用");
+        setStatusHint(st("memoryGraph.disabledShort"));
         setBuildProgress(null);
       } else {
         setError(msg);
@@ -563,7 +577,7 @@ function MemoryGraphExplorerInner({
       );
       setGraph(result);
     } catch (e) {
-      setError(formatMemoryGraphFetchError(e, "搜索失败"));
+      setError(formatMemoryGraphFetchError(e, st("memoryGraph.searchFailed")));
     } finally {
       setLoading(false);
     }
@@ -583,7 +597,7 @@ function MemoryGraphExplorerInner({
       await reload();
       setSelectedId(null);
     } catch (e) {
-      setError(formatMemoryGraphActionError(e, "删除 episode 失败"));
+      setError(formatMemoryGraphActionError(e, st("memoryGraph.deleteEpisodeFailed")));
     }
   };
 
@@ -618,7 +632,7 @@ function MemoryGraphExplorerInner({
     });
     const pinnedSkipped = ids.length - deletable.length;
     if (deletable.length === 0) {
-      setError("所选 episode 均为 pinned，无法删除");
+      setError(st("memoryGraph.allPinned"));
       return;
     }
     setPendingBulkDelete({ ids: deletable, pinnedSkipped });
@@ -648,15 +662,20 @@ function MemoryGraphExplorerInner({
           .map((f) => `${f.episode_uuid.slice(0, 8)}…：${f.error}`)
           .join("；");
         const suffix =
-          result.failed.length > 2 ? `（另有 ${result.failed.length - 2} 条失败）` : "";
+          result.failed.length > 2 ? st("memoryGraph.moreFailed", { count: result.failed.length - 2 }) : "";
         setError(
           result.deleted.length > 0
-            ? `已删除 ${result.deleted.length} 条，${result.failed.length} 条失败：${preview}${suffix}`
-            : `删除失败：${preview}${suffix}`,
+            ? st("memoryGraph.deletedPartial", {
+                ok: result.deleted.length,
+                fail: result.failed.length,
+                preview,
+                suffix,
+              })
+            : st("memoryGraph.deleteFailed", { preview, suffix }),
         );
       }
     } catch (e) {
-      const msg = formatMemoryGraphActionError(e, "批量删除失败");
+      const msg = formatMemoryGraphActionError(e, st("memoryGraph.bulkDeleteFailed"));
       if (
         /无法连接 agx serve|failed to fetch|networkerror|load failed/i.test(msg) &&
         typeof window !== "undefined" &&
@@ -666,7 +685,7 @@ function MemoryGraphExplorerInner({
           const freshBase = await window.agenticxDesktop.getApiBase();
           if (freshBase && freshBase !== apiBase) {
             setApiBase(freshBase);
-            setError("后端地址已变更，请关闭对话框后重试删除");
+            setError(st("memoryGraph.retryAfterUrlChange"));
             return;
           }
         } catch {
@@ -675,7 +694,7 @@ function MemoryGraphExplorerInner({
       }
       setError(
         /无法连接 agx serve|failed to fetch|networkerror|load failed/i.test(msg)
-          ? "后端无响应（可能仍在删除中或已退出）。请等待约 1 分钟后再点「刷新」，勿重复点删除；若仍失败请 ⌘Q 退出 Near 后重开。"
+          ? st("memoryGraph.backendHung")
           : msg,
       );
       return;
@@ -686,7 +705,7 @@ function MemoryGraphExplorerInner({
     try {
       await reload();
     } catch (e) {
-      setError(formatMemoryGraphActionError(e, "删除已完成，但刷新列表失败，请点「刷新」"));
+      setError(formatMemoryGraphActionError(e, st("memoryGraph.deletedRefreshFailed")));
     }
   };
 
@@ -704,7 +723,7 @@ function MemoryGraphExplorerInner({
       );
       await reload();
     } catch (e) {
-      setError(formatMemoryGraphActionError(e, "更新 pin 失败"));
+      setError(formatMemoryGraphActionError(e, st("memoryGraph.pinFailed")));
     }
   };
 
@@ -721,7 +740,7 @@ function MemoryGraphExplorerInner({
       );
       setPendingRetentionRun(result.count ?? result.would_delete?.length ?? 0);
     } catch (e) {
-      setError(formatMemoryGraphActionError(e, "预览清理失败"));
+      setError(formatMemoryGraphActionError(e, st("memoryGraph.previewCleanFailed")));
     }
   };
 
@@ -739,7 +758,7 @@ function MemoryGraphExplorerInner({
       setPendingRetentionRun(null);
       await reload();
     } catch (e) {
-      setError(formatMemoryGraphActionError(e, "执行清理失败"));
+      setError(formatMemoryGraphActionError(e, st("memoryGraph.runCleanFailed")));
     }
   };
 
@@ -793,10 +812,10 @@ function MemoryGraphExplorerInner({
       if (patch.llm) body.llm = patch.llm;
       if (patch.embedder) body.embedder = patch.embedder;
       await updateMemoryGraphConfig(apiBase, apiToken, body);
-      setConfigMsg("已保存");
+      setConfigMsg(st("memoryGraph.saved"));
       void reload();
     } catch (e) {
-      setConfigMsg(e instanceof Error ? e.message : "保存失败");
+      setConfigMsg(e instanceof Error ? e.message : st("memoryGraph.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -835,7 +854,7 @@ function MemoryGraphExplorerInner({
       <div className="flex items-center gap-2 border-b border-[var(--border-muted)] px-3 py-2">
         <Share2 className="h-4 w-4 shrink-0 text-text-strong" strokeWidth={1.8} />
         <div className="mr-auto min-w-0">
-          <div className="truncate text-sm font-medium text-text-strong">记忆图谱</div>
+          <div className="truncate text-sm font-medium text-text-strong">{st("memoryGraph.title")}</div>
           {contextTitle.trim() ? (
             <div className="truncate text-[10px] text-text-faint">{contextTitle.trim()}</div>
           ) : null}
@@ -844,7 +863,7 @@ function MemoryGraphExplorerInner({
           {scopeLabel(scope)}
         </span>
         {onClose ? (
-          <button type="button" className="agx-topbar-btn !px-[5px]" onClick={onClose} title="收起">
+          <button type="button" className="agx-topbar-btn !px-[5px]" onClick={onClose} title={st("memoryGraph.collapse")}>
             <PanelRight className="h-4 w-4" />
           </button>
         ) : null}
@@ -859,7 +878,7 @@ function MemoryGraphExplorerInner({
               onKeyDown={(e) => {
                 if (e.key === "Enter") void onSearch();
               }}
-              placeholder="搜索实体、关系…"
+              placeholder={st("memoryGraph.searchPh")}
               className={`w-full pl-8 pr-2 ${MG_FIELD}`}
             />
           </div>
@@ -869,14 +888,14 @@ function MemoryGraphExplorerInner({
             style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
             onClick={() => void onSearch()}
           >
-            搜索
+            {st("memoryGraph.search")}
           </button>
         </div>
         <button
           type="button"
           className="agx-topbar-btn !px-[5px]"
           onClick={() => void reload()}
-          title="刷新图谱"
+          title={st("memoryGraph.refreshTitle")}
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
@@ -917,7 +936,7 @@ function MemoryGraphExplorerInner({
             options={subjectOptions}
             onChange={setSelectedSubjectId}
             disabled={subjectOptions.length === 0}
-            title={scope === "group" ? "选择群聊查看其记忆" : "选择分身查看其记忆"}
+            title={scope === "group" ? st("memoryGraph.pickGroup") : st("memoryGraph.pickAvatar")}
           />
         ) : (
           <div className="min-w-0 flex-1" />
@@ -927,7 +946,7 @@ function MemoryGraphExplorerInner({
             type="button"
             className="agx-topbar-btn !px-[5px] shrink-0"
             onClick={onClose}
-            title="收起"
+            title={st("memoryGraph.collapse")}
           >
             <PanelRight className="h-4 w-4" />
           </button>
@@ -943,7 +962,7 @@ function MemoryGraphExplorerInner({
             onKeyDown={(e) => {
               if (e.key === "Enter") void onSearch();
             }}
-            placeholder="搜索实体、关系…"
+            placeholder={st("memoryGraph.searchPh")}
             className={`h-8 w-full pl-8 pr-2 ${MG_TOOLBAR_CTRL}`}
           />
         </div>
@@ -953,7 +972,7 @@ function MemoryGraphExplorerInner({
           style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
           onClick={() => void onSearch()}
         >
-          搜索
+          {st("memoryGraph.search")}
         </button>
         <button
           type="button"
@@ -962,7 +981,7 @@ function MemoryGraphExplorerInner({
             autoRecoverAttemptedRef.current = false;
             void reload();
           }}
-          title="刷新图谱"
+          title={st("memoryGraph.refreshTitle")}
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
@@ -1027,19 +1046,19 @@ function MemoryGraphExplorerInner({
           <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-surface-card">
             <Share2 className="h-7 w-7 text-text-faint/50" strokeWidth={1.2} />
           </div>
-          <p className="text-sm font-medium text-text-subtle">记忆图谱未启用</p>
+          <p className="text-sm font-medium text-text-subtle">{st("memoryGraph.disabledTitle")}</p>
           <p className="max-w-xs text-xs leading-relaxed text-text-faint">
-            开启后，对话中的实体与关系会以力导向图呈现；与文本记忆并行，不互相替换。
+            {st("memoryGraph.disabledHint")}
           </p>
         </div>
       ) : graph.nodes.length === 0 ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
           <div className="h-20 w-20 rounded-full border border-dashed border-[var(--border-muted)] opacity-60" />
-          <p className="text-sm font-medium text-text-subtle">{loading ? "加载图谱…" : "暂无节点"}</p>
+          <p className="text-sm font-medium text-text-subtle">{loading ? st("memoryGraph.loadingGraph") : st("memoryGraph.noNodes")}</p>
           <p className="max-w-xs text-xs leading-relaxed text-text-faint">
             {status?.graphiti_installed === false
-              ? "请先安装 graphiti-core，再完成几轮对话"
-              : "完成几轮含人名/关系的对话后点击刷新；ingest 在后台异步执行，可稍等几秒。"}
+              ? st("memoryGraph.installHint")
+              : st("memoryGraph.emptyHint")}
           </p>
         </div>
       ) : (
@@ -1054,22 +1073,22 @@ function MemoryGraphExplorerInner({
       {graph.nodes.length > 0 ? (
         <>
           <div className="pointer-events-none absolute left-2 top-2 max-w-[calc(100%-9rem)] rounded-md bg-surface-base/90 px-2 py-0.5 text-[10px] text-text-faint shadow-[inset_0_0_0_1px_var(--border-muted)]">
-            显示近期/高频片段，非完整记忆
+            {st("memoryGraph.partialNote")}
           </div>
           <div className="pointer-events-none absolute right-2 top-2 rounded-md bg-surface-base/90 px-2 py-1.5 shadow-[inset_0_0_0_1px_var(--border-muted)]">
             <div className="flex flex-col gap-1 text-[10px] text-text-faint">
               <span className="inline-flex items-center gap-1.5">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-[#60a5fa]" /> 实体
+                <span className="h-2 w-2 shrink-0 rounded-full bg-[#60a5fa]" /> {st("memoryGraph.entity")}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-[#94a3b8]" /> Episode
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-[#a78bfa]" /> 社区
+                <span className="h-2 w-2 shrink-0 rounded-full bg-[#a78bfa]" /> {st("memoryGraph.community")}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <span className="inline-block h-px w-4 shrink-0 border-t border-dashed border-text-faint/70" />{" "}
-                已失效关系
+                {st("memoryGraph.staleEdge")}
               </span>
             </div>
           </div>
@@ -1077,7 +1096,7 @@ function MemoryGraphExplorerInner({
       ) : null}
       {graph.meta.truncated ? (
         <div className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-surface-base/90 px-2 py-0.5 text-[10px] text-text-faint shadow-[inset_0_0_0_1px_var(--border-muted)]">
-          已截断展示 · 全量 {nodeCount} 节点
+          {st("memoryGraph.truncated", { count: nodeCount })}
         </div>
       ) : null}
     </div>
@@ -1086,25 +1105,25 @@ function MemoryGraphExplorerInner({
   const statsBar = (
     <div className={`flex shrink-0 flex-wrap items-stretch overflow-hidden ${MG_PANEL}`}>
       <StatChip
-        label="节点"
+        label={st("memoryGraph.nodes")}
         value={nodeCount}
-        sub={`实体 ${entityCount} · 片段 ${episodeCount}`}
+        sub={st("memoryGraph.nodeSub", { entities: entityCount, episodes: episodeCount })}
         accent="rgba(96,165,250,0.9)"
       />
       <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
-      <StatChip label="关系" value={edgeCount} accent="rgba(167,139,250,0.9)" />
+      <StatChip label={st("memoryGraph.edges")} value={edgeCount} accent="rgba(167,139,250,0.9)" />
       <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
-      <StatChip label="记忆片段" value={episodes.length} sub="时间轴条目" accent="rgba(148,163,184,0.9)" />
+      <StatChip label={st("memoryGraph.episodes")} value={episodes.length} sub={st("memoryGraph.timelineItems")} accent="rgba(148,163,184,0.9)" />
       <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
       <StatChip
-        label="队列"
+        label={st("memoryGraph.queue")}
         value={status?.pending_jobs ?? 0}
-        sub={status?.graphiti_installed === false ? "未安装引擎" : "待 ingest"}
+        sub={status?.graphiti_installed === false ? st("memoryGraph.engineMissing") : st("memoryGraph.pendingIngest")}
         accent="rgba(245,158,11,0.9)"
       />
       <div className="hidden w-px shrink-0 self-stretch bg-[var(--border-muted)] sm:block" aria-hidden />
       <StatChip
-        label="分区"
+        label={st("memoryGraph.partition")}
         value={groupId}
         mono
         className="min-w-0 flex-[1.2]"
@@ -1120,7 +1139,7 @@ function MemoryGraphExplorerInner({
         <header className="space-y-2 border-b border-[var(--border-muted)] px-3 py-2">
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-[11px] font-semibold uppercase tracking-[0.06em] text-text-subtle">
-              Episode 时间轴
+              {st("memoryGraph.timeline")}
             </h4>
             <button
               type="button"
@@ -1130,16 +1149,16 @@ function MemoryGraphExplorerInner({
                 if (episodeSelectMode) setSelectedEpisodeIds(new Set());
               }}
             >
-              {episodeSelectMode ? "取消多选" : "多选"}
+              {episodeSelectMode ? st("memoryGraph.cancelMulti") : st("memoryGraph.multiSelect")}
             </button>
           </div>
           <div className="flex flex-wrap gap-1">
             {(
               [
-                ["all", "全部"],
-                ["7d", "近7天"],
-                ["30d", "近30天"],
-                ["older30d", "30天前"],
+                ["all", st("memoryGraph.filterAll")],
+                ["7d", st("memoryGraph.filter7d")],
+                ["30d", st("memoryGraph.filter30d")],
+                ["older30d", st("memoryGraph.filterOlder")],
               ] as const
             ).map(([key, label]) => (
               <button
@@ -1165,14 +1184,14 @@ function MemoryGraphExplorerInner({
                   setSelectedEpisodeIds(new Set(filteredEpisodes.filter((e) => !e.pinned).map((e) => e.id)))
                 }
               >
-                全选
+                {st("memoryGraph.selectAll")}
               </button>
               <button
                 type="button"
                 className="text-[10px] text-text-faint hover:text-text-subtle"
                 onClick={() => setSelectedEpisodeIds(new Set())}
               >
-                取消
+                {st("memoryGraph.cancel")}
               </button>
               <button
                 type="button"
@@ -1181,7 +1200,7 @@ function MemoryGraphExplorerInner({
                 onClick={() => requestBulkDelete(Array.from(selectedEpisodeIds))}
               >
                 <Trash2 className="h-3 w-3" />
-                删除选中
+                {st("memoryGraph.deleteSelected")}
               </button>
               {episodeTimeFilter === "older30d" ? (
                 <button
@@ -1191,7 +1210,7 @@ function MemoryGraphExplorerInner({
                     requestBulkDelete(filteredEpisodes.filter((e) => !e.pinned).map((e) => e.id))
                   }
                 >
-                  删除筛选结果
+                  {st("memoryGraph.deleteFiltered")}
                 </button>
               ) : null}
             </div>
@@ -1199,7 +1218,7 @@ function MemoryGraphExplorerInner({
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
           {filteredEpisodes.length === 0 ? (
-            <div className="px-1.5 py-2 text-[10px] text-text-faint">暂无 episode</div>
+            <div className="px-1.5 py-2 text-[10px] text-text-faint">{st("memoryGraph.noEpisode")}</div>
           ) : (
             filteredEpisodes.map((ep) => (
               <div
@@ -1236,7 +1255,7 @@ function MemoryGraphExplorerInner({
                 <button
                   type="button"
                   className="shrink-0 rounded p-1 text-text-faint hover:bg-surface-card hover:text-text-subtle"
-                  title={ep.pinned ? "取消 pin" : "pin 保护"}
+                  title={ep.pinned ? st("memoryGraph.unpin") : st("memoryGraph.pinProtect")}
                   onClick={() => void onTogglePin(ep.id, !ep.pinned)}
                 >
                   {ep.pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
@@ -1250,54 +1269,54 @@ function MemoryGraphExplorerInner({
   );
 
   const configStrip = showConfig ? (
-    <Panel title="记忆图谱设置" collapsible defaultCollapsed>
+    <Panel title={st("memoryGraph.settingsTitle")} collapsible defaultCollapsed>
       <div className="space-y-0 text-sm text-text-subtle">
         <p className="pb-2 text-[11px] leading-relaxed text-text-faint">
-          结构化时态记忆的可视化视图。文本检索仍走 WorkspaceMemoryStore，二者并行不替换。
+          {st("memoryGraph.settingsIntro")}
         </p>
         <div className={MG_DIVIDER} />
         <div className="flex items-center justify-between gap-4 py-1">
           <div>
-            <div>启用记忆图谱</div>
-            <div className="mt-0.5 text-[11px] text-text-faint">默认关闭；开启后异步 ingest</div>
+            <div>{st("memoryGraph.enable")}</div>
+            <div className="mt-0.5 text-[11px] text-text-faint">{st("memoryGraph.enableHint")}</div>
           </div>
           <MiniSwitch
             checked={enabled}
             disabled={saving}
             onChange={(next) => void saveConfig({ enabled: next })}
-            aria-label="启用记忆图谱"
+            aria-label={st("memoryGraph.enableAria")}
           />
         </div>
         <div className={MG_DIVIDER} />
         <div className="flex items-center justify-between gap-4 py-2">
-          <div>默认展示范围</div>
+          <div>{st("memoryGraph.defaultScope")}</div>
           <select
             value={defaultScope}
             disabled={saving}
             onChange={(e) => void saveConfig({ default_scope: e.target.value as MemoryGraphScope })}
             className={MG_FIELD}
           >
-            <option value="avatar">分身</option>
-            <option value="meta">元智能体</option>
-            <option value="group">群聊</option>
+            <option value="avatar">{st("memoryGraph.scopeAvatar")}</option>
+            <option value="meta">{st("memoryGraph.scopeMeta")}</option>
+            <option value="group">{st("memoryGraph.scopeGroup")}</option>
           </select>
         </div>
         <div className={MG_DIVIDER} />
         <div className="flex items-center justify-between gap-4 py-2">
-          <div>自动 ingest</div>
+          <div>{st("memoryGraph.autoIngest")}</div>
           <MiniSwitch
             checked={ingestAuto}
             disabled={saving || !enabled}
             onChange={(next) => void saveConfig({ ingest_auto: next })}
-            aria-label="自动 ingest"
+            aria-label={st("memoryGraph.autoIngestAria")}
           />
         </div>
         <div className={MG_DIVIDER} />
         <div className="space-y-2 py-2">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div>保留策略</div>
-              <div className="mt-0.5 text-[11px] text-text-faint">自动清理超出条数/天数的 episode（0=不限）</div>
+              <div>{st("memoryGraph.retention")}</div>
+              <div className="mt-0.5 text-[11px] text-text-faint">{st("memoryGraph.retentionHint")}</div>
             </div>
             <MiniSwitch
               checked={retentionEnabled}
@@ -1305,12 +1324,12 @@ function MemoryGraphExplorerInner({
               onChange={(next) =>
                 void saveConfig({ retention: { enabled: next } })
               }
-              aria-label="启用自动清理"
+              aria-label={st("memoryGraph.autoCleanAria")}
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <label className="text-[11px] text-text-faint">
-              最多保留
+              {st("memoryGraph.maxKeep")}
               <input
                 type="number"
                 min={0}
@@ -1330,7 +1349,7 @@ function MemoryGraphExplorerInner({
               />
             </label>
             <label className="text-[11px] text-text-faint">
-              保留天数
+              {st("memoryGraph.keepDays")}
               <input
                 type="number"
                 min={0}
@@ -1351,12 +1370,12 @@ function MemoryGraphExplorerInner({
             </label>
           </div>
           <div className="flex items-center justify-between gap-4">
-            <div className="text-[11px] text-text-faint">ingest 后自动清理</div>
+            <div className="text-[11px] text-text-faint">{st("memoryGraph.cleanAfterIngest")}</div>
             <MiniSwitch
               checked={retentionOnIngest}
               disabled={saving || !enabled || !retentionEnabled}
               onChange={(next) => void saveConfig({ retention: { on_ingest: next } })}
-              aria-label="ingest 后自动清理"
+              aria-label={st("memoryGraph.cleanAfterIngest")}
             />
           </div>
           <div className="flex justify-end">
@@ -1366,27 +1385,30 @@ function MemoryGraphExplorerInner({
               disabled={!enabled || !groupId}
               onClick={() => void previewRetentionCleanup()}
             >
-              立即清理
+              {st("memoryGraph.cleanNow")}
             </Button>
           </div>
         </div>
         <div className={MG_DIVIDER} />
         <div className="space-y-2 py-2">
           <div>
-            <div>记忆构建模型</div>
+            <div>{st("memoryGraph.buildModel")}</div>
             <div className="mt-0.5 text-[11px] text-text-faint">
-              实体/关系抽取用 LLM，向量化用 Embedder；留空则跟随全局默认 provider
-              {defaultProvider ? `（当前默认：${defaultProvider}）` : ""}。
+              {st("memoryGraph.buildModelHint", {
+                current: defaultProvider ? st("memoryGraph.currentDefault", { provider: defaultProvider }) : "",
+              })}
             </div>
             {status?.models ? (
               <div className="mt-1 text-[11px] text-text-muted">
-                当前生效：抽取 {status.models.llm_provider}/{status.models.llm_model} · 向量化{" "}
-                {status.models.embedder_provider}/{status.models.embedder_model}
+                {st("memoryGraph.effective", {
+                  llm: `${status.models.llm_provider}/${status.models.llm_model}`,
+                  embed: `${status.models.embedder_provider}/${status.models.embedder_model}`,
+                })}
               </div>
             ) : null}
           </div>
           <div className="grid grid-cols-[64px_1fr_1.2fr] items-center gap-2">
-            <span className="text-[11px] text-text-faint">抽取 LLM</span>
+            <span className="text-[11px] text-text-faint">{st("memoryGraph.extractLlm")}</span>
             <select
               value={llmProvider}
               disabled={saving}
@@ -1400,7 +1422,7 @@ function MemoryGraphExplorerInner({
               }}
               className={MG_FIELD}
             >
-              <option value="">默认 provider</option>
+              <option value="">{st("memoryGraph.defaultProvider")}</option>
               {providerSelectOptions.map((p) => (
                 <option key={`llm-${p}`} value={p}>
                   {p}
@@ -1415,10 +1437,10 @@ function MemoryGraphExplorerInner({
               title={
                 llmProvider.trim()
                   ? undefined
-                  : "请先选择 provider，或在「模型服务」中配置可见模型"
+                  : st("memoryGraph.pickProviderFirst")
               }
             >
-              <option value="">模型名（留空用默认）</option>
+              <option value="">{st("memoryGraph.modelNamePh")}</option>
               {llmModelOptions.map((m) => (
                 <option key={`llm-model-${m}`} value={m}>
                   {m}
@@ -1426,13 +1448,13 @@ function MemoryGraphExplorerInner({
               ))}
               {llmProvider.trim() && llmModelOptions.length === 0 ? (
                 <option disabled value="__no_models">
-                  请先在「模型服务」添加可见模型
+                  {st("memoryGraph.addVisibleModels")}
                 </option>
               ) : null}
             </select>
           </div>
           <div className="grid grid-cols-[64px_1fr_1.2fr] items-center gap-2">
-            <span className="text-[11px] text-text-faint">向量化</span>
+            <span className="text-[11px] text-text-faint">{st("memoryGraph.embedLabel")}</span>
             <select
               value={embedProvider}
               disabled={saving}
@@ -1446,7 +1468,7 @@ function MemoryGraphExplorerInner({
               }}
               className={MG_FIELD}
             >
-              <option value="">默认 provider</option>
+              <option value="">{st("memoryGraph.defaultProvider")}</option>
               {providerSelectOptions.map((p) => (
                 <option key={`emb-${p}`} value={p}>
                   {p}
@@ -1461,10 +1483,10 @@ function MemoryGraphExplorerInner({
               title={
                 embedProvider.trim()
                   ? undefined
-                  : "请先选择 provider，或在「模型服务」中配置可见模型"
+                  : st("memoryGraph.pickProviderFirst")
               }
             >
-              <option value="">如 text-embedding-3-small（留空用默认）</option>
+              <option value="">{st("memoryGraph.embedPh")}</option>
               {embedModelOptions.map((m) => (
                 <option key={`emb-model-${m}`} value={m}>
                   {m}
@@ -1472,7 +1494,7 @@ function MemoryGraphExplorerInner({
               ))}
               {embedProvider.trim() && embedModelOptions.length === 0 ? (
                 <option disabled value="__no_models">
-                  请先在「模型服务」添加可见模型
+                  {st("memoryGraph.addVisibleModels")}
                 </option>
               ) : null}
             </select>
@@ -1485,14 +1507,14 @@ function MemoryGraphExplorerInner({
               className="rounded-md px-3 py-1.5 text-xs font-medium transition hover:opacity-90 disabled:opacity-50"
               style={{ background: "var(--ui-btn-primary-bg)", color: "var(--ui-btn-primary-text)" }}
             >
-              保存模型设置
+              {st("memoryGraph.saveModels")}
             </button>
           </div>
         </div>
         {configMsg ? (
           <>
             <div className={MG_DIVIDER} />
-            <div className={`py-1 text-xs ${configMsg === "已保存" ? "text-text-muted" : "text-status-error"}`}>
+            <div className={`py-1 text-xs ${configMsg === st("memoryGraph.saved") ? "text-text-muted" : "text-status-error"}`}>
               {configMsg}
             </div>
           </>
@@ -1506,12 +1528,15 @@ function MemoryGraphExplorerInner({
       apiBase={apiBase}
       apiToken={apiToken}
       avatarId={subjectAvatarIdForWorkspace}
-      title={`${scopeLabel(scope)}文本记忆`}
-      description={
-        scope === "meta"
-          ? "元智能体长期记忆（MEMORY.md）。全局用户偏好请在「显示 → 用户档案」维护。"
-          : "本主体 MEMORY.md，含本主体理解的用户偏好，可手动增删改。"
-      }
+      title={t("memoryList.titleScoped", {
+        scope:
+          scope === "avatar"
+            ? t("memoryList.scopeAvatar")
+            : scope === "group"
+              ? t("memoryList.scopeGroup")
+              : t("memoryList.scopeMeta"),
+      })}
+      description={scope === "meta" ? t("memoryList.descMeta") : t("memoryList.descSubject")}
     />
   );
 
@@ -1519,7 +1544,7 @@ function MemoryGraphExplorerInner({
     <>
       <Modal
         open={pendingBulkDelete != null}
-        title="确认删除 Episode"
+        title={st("memoryGraph.deleteEpisodeTitle")}
         backdropClassName="bg-black/70"
         panelClassName="w-full max-w-[min(92vw,480px)] bg-[var(--surface-base-fallback)]"
         onClose={() => {
@@ -1534,7 +1559,7 @@ function MemoryGraphExplorerInner({
               disabled={bulkDeleting}
               onClick={() => setPendingBulkDelete(null)}
             >
-              取消
+              {st("memoryGraph.cancel")}
             </Button>
             <Button
               type="button"
@@ -1543,27 +1568,27 @@ function MemoryGraphExplorerInner({
               disabled={bulkDeleting}
               onClick={() => void confirmBulkDelete()}
             >
-              {bulkDeleting ? "删除中…" : "删除"}
+              {bulkDeleting ? st("memoryGraph.deleting") : st("memoryGraph.delete")}
             </Button>
           </div>
         }
       >
         <p className="text-sm text-text-subtle">
-          将删除 {pendingBulkDelete?.ids.length ?? 0} 条 episode
+          {st("memoryGraph.deleteCount", { count: pendingBulkDelete?.ids.length ?? 0 })}
           {pendingBulkDelete && pendingBulkDelete.pinnedSkipped > 0
-            ? `（${pendingBulkDelete.pinnedSkipped} 条 pinned 将保留）`
+            ? st("memoryGraph.pinnedKept", { count: pendingBulkDelete.pinnedSkipped })
             : ""}
-          。此操作不可撤销。
+          {st("memoryGraph.irreversible")}
         </p>
         {bulkDeleting ? (
           <p className="mt-2 text-sm text-text-faint">
-            正在删除，请勿重复点击或退出。若条目触发图谱引擎缺陷会自动重建图谱库（已自动备份），最长约 1 分钟。
+            {st("memoryGraph.deletingHint")}
           </p>
         ) : null}
       </Modal>
       <Modal
         open={pendingRetentionRun != null}
-        title="确认立即清理"
+        title={st("memoryGraph.cleanTitle")}
         backdropClassName="bg-black/70"
         panelClassName="w-full max-w-[min(92vw,480px)] bg-[var(--surface-base-fallback)]"
         onClose={() => setPendingRetentionRun(null)}
@@ -1575,7 +1600,7 @@ function MemoryGraphExplorerInner({
               className="min-w-[76px] bg-surface-card-strong"
               onClick={() => setPendingRetentionRun(null)}
             >
-              取消
+              {st("memoryGraph.cancel")}
             </Button>
             <Button
               type="button"
@@ -1583,13 +1608,13 @@ function MemoryGraphExplorerInner({
               className="min-w-[76px]"
               onClick={() => void confirmRetentionCleanup()}
             >
-              执行清理
+              {st("memoryGraph.runClean")}
             </Button>
           </div>
         }
       >
         <p className="text-sm text-text-subtle">
-          按当前保留策略，将删除约 {pendingRetentionRun ?? 0} 条 episode（pinned 条目受保护）。
+          {st("memoryGraph.cleanConfirm", { count: pendingRetentionRun ?? 0 })}
         </p>
       </Modal>
     </>
@@ -1626,7 +1651,7 @@ function MemoryGraphExplorerInner({
         <MemoryGraphDetail node={selectedNode} edges={graph.edges} onDeleteEpisode={onDeleteEpisode} />
         {episodes.length > 0 ? (
           <div className="max-h-24 overflow-y-auto text-[10px]">
-            <div className="mb-1 font-medium text-text-faint">Episode 时间轴</div>
+            <div className="mb-1 font-medium text-text-faint">{st("memoryGraph.timeline")}</div>
             {episodes.map((ep) => (
               <button
                 key={ep.id}

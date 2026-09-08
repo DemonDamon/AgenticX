@@ -10,6 +10,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore, type Avatar, type ChatPane as ChatPaneState } from "../store";
 import { ChatPane } from "./ChatPane";
 import { PaneDivider } from "./PaneDivider";
@@ -80,12 +81,13 @@ function PaneTabStrip({
   activePaneId: string;
   onSelect: (paneId: string) => void;
 }) {
+  const { t } = useTranslation("common");
   const avatars = useAppStore((s) => s.avatars);
   return (
     <div
       className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-surface-base/80 px-2 backdrop-blur-sm"
       role="tablist"
-      aria-label="聊天窗格"
+      aria-label={t("chatPanes")}
     >
       {panes.map((pane) => {
         const active = pane.id === activePaneId;

@@ -4,6 +4,7 @@
  * 用系统应用打开。
  */
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { FileText, FolderOpen } from "lucide-react";
 import { mergeSubAgentOutputPaths } from "../../utils/subagent-output-files";
 import { previewBaseName } from "../workspace/workspace-preview-types";
@@ -29,6 +30,7 @@ function isMarkdownPath(path: string): boolean {
 }
 
 export function RunArtifactList({ apiBase, apiToken, sessionId, runId, resultFile, outputFiles }: Props) {
+  const { t } = useTranslation("workspace");
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
   const [previews, setPreviews] = useState<Record<string, PreviewState>>({});
 
@@ -43,14 +45,14 @@ export function RunArtifactList({ apiBase, apiToken, sessionId, runId, resultFil
         .then((data) => {
           setPreviews((prev) => ({
             ...prev,
-            [path]: data.ok ? { status: "ok", data } : { status: "error", error: data.error || "预览失败" },
+            [path]: data.ok ? { status: "ok", data } : { status: "error", error: data.error || t("runArtifact.previewFailed") },
           }));
         })
         .catch((err) => {
           setPreviews((prev) => ({ ...prev, [path]: { status: "error", error: String(err) } }));
         });
     },
-    [apiBase, apiToken, sessionId, runId, previews],
+    [apiBase, apiToken, sessionId, runId, previews, t],
   );
 
   const openInSystem = useCallback(async (path: string) => {
@@ -66,7 +68,7 @@ export function RunArtifactList({ apiBase, apiToken, sessionId, runId, resultFil
 
   return (
     <div className="flex flex-col gap-1.5 border-t border-border p-2.5">
-      <div className="px-0.5 text-[11px] font-medium text-text-muted">产物</div>
+      <div className="px-0.5 text-[11px] font-medium text-text-muted">{t("work.artifacts")}</div>
       {paths.map((path) => {
         const expanded = expandedPath === path;
         const preview = previews[path];
@@ -86,10 +88,10 @@ export function RunArtifactList({ apiBase, apiToken, sessionId, runId, resultFil
                 type="button"
                 className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary"
                 onClick={() => void openInSystem(path)}
-                title="用系统应用打开"
+                title={t("work.openInSystem")}
               >
                 <FolderOpen className="h-3 w-3" strokeWidth={1.5} />
-                打开
+                {t("work.open")}
               </button>
             </div>
             <div className="truncate px-2.5 pb-2 font-mono text-[10.5px] text-text-faint" title={path}>
@@ -98,12 +100,12 @@ export function RunArtifactList({ apiBase, apiToken, sessionId, runId, resultFil
             {expanded ? (
               <div className="max-h-64 overflow-y-auto border-t border-border px-2.5 py-2">
                 {!preview || preview.status === "loading" ? (
-                  <div className="text-[11px] text-text-faint">加载中…</div>
+                  <div className="text-[11px] text-text-faint">{t("runArtifact.loading")}</div>
                 ) : preview.status === "error" ? (
                   <div className="text-[11px] text-[var(--status-error)]">{preview.error}</div>
                 ) : preview.data.kind === "binary" ? (
                   <div className="text-[11px] text-text-muted">
-                    {preview.data.open_hint || "该文件不支持内联预览，请用系统应用打开"}
+                    {preview.data.open_hint || t("runArtifact.previewUnsupported")}
                   </div>
                 ) : preview.data.text != null ? (
                   isMarkdownPath(path) ? (
@@ -116,7 +118,7 @@ export function RunArtifactList({ apiBase, apiToken, sessionId, runId, resultFil
                 ) : null}
                 {preview?.status === "ok" && preview.data.kind === "text" && preview.data.truncated ? (
                   <div className="mt-1.5 text-[10.5px] text-[var(--status-warning)]">
-                    {preview.data.open_hint || "文件过大，已截断显示"}
+                    {preview.data.open_hint || t("runArtifact.previewTruncated")}
                   </div>
                 ) : null}
               </div>

@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { BookOpen, Loader2 } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import type { KBApi } from "./api";
 import { KB_FIELD_BASE } from "./kb-field-classes";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type Props = {
   api: KBApi;
@@ -11,6 +18,7 @@ type Props = {
 type WikiPage = { path: string; title: string; type: string };
 
 export function KnowledgeWikiPanel({ api }: Props) {
+  const { t } = useTranslation("settings");
   const [pages, setPages] = useState<WikiPage[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [preview, setPreview] = useState("");
@@ -70,20 +78,20 @@ export function KnowledgeWikiPanel({ api }: Props) {
     try {
       await api.savePurpose(purposeDraft);
       setPurpose(purposeDraft);
-      setSaveHint("已保存");
+      setSaveHint(st("knowledge.saved"));
     } catch (exc) {
-      setSaveHint(`保存失败：${String((exc as Error).message ?? exc)}`);
+      setSaveHint(st("knowledge.saveFailed", { reason: String((exc as Error).message ?? exc) }));
     }
   }
 
   return (
     <div className="space-y-3">
-      <Panel title="知识库意图 (purpose.md)" icon={<BookOpen className="h-4 w-4" />}>
+      <Panel title={st("knowledge.purposeTitle")} icon={<BookOpen className="h-4 w-4" />}>
         <textarea
           className={`min-h-[88px] w-full resize-y ${KB_FIELD_BASE}`}
           value={purposeDraft}
           onChange={(e) => setPurposeDraft(e.target.value)}
-          placeholder="描述此知识脑的目标与边界，供 Wiki 编译时使用…"
+          placeholder={st("knowledge.purposePh")}
         />
         <div className="mt-2 flex items-center gap-2">
           <button
@@ -92,22 +100,22 @@ export function KnowledgeWikiPanel({ api }: Props) {
             onClick={() => void savePurpose()}
             disabled={purposeDraft === purpose}
           >
-            保存意图
+            {st("knowledge.savePurpose")}
           </button>
           {saveHint ? <span className="text-xs text-text-muted">{saveHint}</span> : null}
         </div>
       </Panel>
 
-      <Panel title="Wiki 页面（只读）" icon={<BookOpen className="h-4 w-4" />}>
+      <Panel title={st("knowledge.wikiTitle")} icon={<BookOpen className="h-4 w-4" />}>
         {loading ? (
           <div className="flex items-center gap-2 py-6 text-xs text-text-muted">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> 加载 Wiki…
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> {st("knowledge.loadingWiki")}
           </div>
         ) : error ? (
           <p className="text-xs text-rose-300">{error}</p>
         ) : pages.length === 0 ? (
           <p className="py-4 text-xs text-text-muted">
-            尚无编译页。在配置中启用「Wiki 编译」并完成资料入库后会自动生成。
+            {st("knowledge.noWiki")}
           </p>
         ) : (
           <div className="flex min-h-[240px] gap-3">
@@ -131,7 +139,7 @@ export function KnowledgeWikiPanel({ api }: Props) {
             <div className="min-w-0 flex-1 overflow-auto rounded border border-border bg-surface-panel/30 p-2">
               {previewLoading ? (
                 <div className="flex items-center gap-2 text-xs text-text-muted">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> 读取页面…
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> {st("knowledge.readingPage")}
                 </div>
               ) : (
                 <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-text-primary">

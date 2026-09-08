@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
   Check,
@@ -16,6 +17,7 @@ import { createPortal } from "react-dom";
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from "react";
 import type { PaneTerminalTab, Taskspace, TaskspaceMountMode } from "../store";
 import { useAppStore } from "../store";
+import { i18n } from "../i18n/i18n";
 
 const EMPTY_TERMINAL_TABS: PaneTerminalTab[] = [];
 import { createResizeRafScheduler } from "../utils/resize-raf";
@@ -92,18 +94,18 @@ function mountModeBadge(mode?: TaskspaceMountMode): { label: string; className: 
   if (!mode) return null;
   if (mode === "reference") {
     return {
-      label: "引用",
+      label: i18n.t("mountMode.reference", { ns: "workspace" }),
       className: "bg-surface-hover text-text-faint",
     };
   }
   if (mode === "copy") {
     return {
-      label: "副本",
+      label: i18n.t("mountMode.copy", { ns: "workspace" }),
       className: "bg-surface-card-strong text-text-muted",
     };
   }
   return {
-    label: "直连",
+    label: i18n.t("mountMode.direct", { ns: "workspace" }),
     className: "bg-surface-hover text-rose-300",
   };
 }
@@ -198,9 +200,9 @@ function nodeKey(taskspaceId: string, relPath: string): string {
 
 function taskspaceReferenceLabel(taskspace: Taskspace): string {
   if (taskspace.id !== "default") {
-    return taskspace.label || taskspace.path.split(/[\\/]/).filter(Boolean).pop() || "工作区";
+    return taskspace.label || taskspace.path.split(/[\\/]/).filter(Boolean).pop() || i18n.t("workspace", { ns: "workspace" });
   }
-  return taskspace.path.split(/[\\/]/).filter(Boolean).pop() || taskspace.label || "默认工作区";
+  return taskspace.path.split(/[\\/]/).filter(Boolean).pop() || taskspace.label || i18n.t("defaultWorkspace", { ns: "workspace" });
 }
 
 function startWorkspaceEntryDrag(e: ReactDragEvent, entry: NearWorkspaceDragEntry) {
@@ -238,6 +240,7 @@ export function WorkspacePanel({
   onPreviewOpenRequestHandled,
   onEnsureSessionForWorkspace,
 }: Props) {
+  const { t } = useTranslation("workspace");
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
   const setActivePaneTerminalTab = useAppStore((s) => s.setActivePaneTerminalTab);
@@ -404,10 +407,10 @@ export function WorkspacePanel({
   }, [filePreview, taskspaces, activeTaskspace]);
 
   const revealInFileManagerLabel = useMemo(() => {
-    if (hostPlatform === "darwin") return "在访达中显示";
-    if (hostPlatform === "win32") return "在文件资源管理器中显示";
-    return "打开所在文件夹";
-  }, [hostPlatform]);
+    if (hostPlatform === "darwin") return t("reveal.darwin");
+    if (hostPlatform === "win32") return t("reveal.win32");
+    return t("reveal.linux");
+  }, [hostPlatform, t]);
 
   const filteredFiles = useMemo(() => {
     const q = fileSearchQuery.trim().toLowerCase();
@@ -498,7 +501,7 @@ export function WorkspacePanel({
     }
     const result = await window.agenticxDesktop.listTaskspaces(browseSessionId);
     if (!result.ok) {
-      setErrorText(result.error ?? "加载工作区失败");
+      setErrorText(result.error ?? t("panel.loadFailed"));
       setLoading(false);
       return undefined;
     }
@@ -517,7 +520,7 @@ export function WorkspacePanel({
     const result = await window.agenticxDesktop.listTaskspaceFiles({ sessionId: browseSessionId, taskspaceId, path: relPath });
     if (!result.ok) {
       if ((result.error ?? "").includes("session not found")) return;
-      setErrorText(result.error ?? "读取目录失败");
+      setErrorText(result.error ?? t("panel.readDirFailed"));
       return;
     }
     setEntriesByDir((prev) => ({ ...prev, [key]: result.files ?? [] }));
@@ -829,7 +832,7 @@ export function WorkspacePanel({
   const addTaskspace = async (pathValue: string, _labelValue: string) => {
     const path = pathValue.trim();
     if (!path) {
-      setErrorText("请填写要添加的文件或目录路径");
+      setErrorText(t("panel.pathRequired"));
       return;
     }
     setPendingMountMode("reference");
@@ -841,19 +844,19 @@ export function WorkspacePanel({
     const confirmResult =
       typeof desktop.confirmDialog === "function"
         ? await desktop.confirmDialog({
-            title: "确认移除工作区",
-            message: "确认移除该工作区吗？",
-            detail: "该操作仅移除关联，不会删除本地文件。",
-            confirmText: "移除",
-            cancelText: "取消",
+            title: t("panel.removeTitle"),
+            message: t("panel.removeMessage"),
+            detail: t("panel.removeDetail"),
+            confirmText: t("remove", { ns: "common" }),
+            cancelText: t("cancel", { ns: "common" }),
             destructive: true,
           })
-        : { ok: true, confirmed: window.confirm("确认移除该工作区吗？") };
+        : { ok: true, confirmed: window.confirm(t("panel.removeMessage")) };
     const confirmed = !!confirmResult.confirmed;
     if (!confirmed) return;
     const result = await desktop.removeTaskspace({ sessionId, taskspaceId });
     if (!result.ok) {
-      setErrorText(result.error ?? "移除工作区失败");
+      setErrorText(result.error ?? t("panel.removeFailed"));
       return;
     }
     await loadTaskspaces();
@@ -862,7 +865,7 @@ export function WorkspacePanel({
   const openTerminalForPath = (absPath: string, labelHint?: string) => {
     const p = (absPath || "").trim();
     if (!p) {
-      setErrorText("无法打开终端：目录路径无效");
+      setErrorText(t("panel.terminalInvalidPath"));
       return;
     }
     setErrorText("");
@@ -878,10 +881,10 @@ export function WorkspacePanel({
       const fallback = String(activeTaskspace?.path ?? taskspaces[0]?.path ?? "").trim();
       const cwd = candidate || fallback;
       if (!cwd) {
-        setErrorText("无法打开终端：未提供可用目录");
+        setErrorText(t("panel.terminalNoDir"));
         return;
       }
-      openTerminalForPath(cwd, "授权");
+      openTerminalForPath(cwd, t("authTerminal"));
     };
     window.addEventListener("agx:open-terminal", onOpenTerminalEvent as EventListener);
     return () => {
@@ -892,18 +895,18 @@ export function WorkspacePanel({
   const revealInFileManager = async (absPath: string) => {
     const p = (absPath || "").trim();
     if (!p) {
-      setErrorText("无法在文件管理器中显示：路径无效");
+      setErrorText(t("panel.revealInvalidPath"));
       return;
     }
     setErrorText("");
     const api = window.agenticxDesktop;
     if (typeof api.shellShowItemInFolder !== "function") {
-      setErrorText("当前客户端不支持在文件管理器中显示");
+      setErrorText(t("panel.revealUnsupported"));
       return;
     }
     const res = await api.shellShowItemInFolder(p);
     if (!res.ok) {
-      setErrorText(res.error ?? "无法在文件管理器中显示");
+      setErrorText(res.error ?? t("panel.revealFailed"));
     }
   };
 
@@ -911,18 +914,18 @@ export function WorkspacePanel({
     try {
       const picker = window.agenticxDesktop.chooseDirectory;
       if (typeof picker !== "function") {
-        setErrorText("当前客户端不支持目录选择，请重启桌面端后重试。");
+        setErrorText(t("panel.dirPickUnsupported"));
         return;
       }
       const picked = await picker();
       if (!picked.ok) {
         if (!picked.canceled) {
-          setErrorText(picked.error ?? "目录选择失败，请重试。");
+          setErrorText(picked.error ?? t("panel.dirPickFailed"));
         }
         return;
       }
       if (!picked.path) {
-        setErrorText("目录选择失败：未返回有效路径。");
+        setErrorText(t("panel.dirPickNoPath"));
         return;
       }
       setErrorText("");
@@ -932,7 +935,7 @@ export function WorkspacePanel({
         setNewLabel(bits[bits.length - 1] || "");
       }
     } catch (err) {
-      setErrorText(`目录选择失败：${String(err)}`);
+      setErrorText(t("panel.dirPickFailedWith", { error: String(err) }));
     }
   };
 
@@ -941,19 +944,19 @@ export function WorkspacePanel({
     try {
       const picker = window.agenticxDesktop.chooseDirectory;
       if (typeof picker !== "function") {
-        setErrorText("当前客户端不支持目录选择，请重启桌面端后重试。");
+        setErrorText(t("panel.dirPickUnsupported"));
         return;
       }
       const picked = await picker();
       if (!picked.ok || !picked.path) {
-        if (!picked.canceled) setErrorText(picked.error ?? "目录选择失败");
+        if (!picked.canceled) setErrorText(picked.error ?? t("panel.dirPickFailedShort"));
         return;
       }
       setPendingMountMode("reference");
       setPendingMountSources([picked.path]);
       setErrorText("");
     } catch (err) {
-      setErrorText(`目录选择失败：${String(err)}`);
+      setErrorText(t("panel.dirPickFailedWith", { error: String(err) }));
     }
   };
 
@@ -962,19 +965,19 @@ export function WorkspacePanel({
     try {
       const picker = window.agenticxDesktop.chooseFiles;
       if (typeof picker !== "function") {
-        setErrorText("当前客户端不支持文件选择，请完全重启桌面端后重试。");
+        setErrorText(t("panel.filePickUnsupported"));
         return;
       }
       const picked = await picker();
       if (!picked.ok || !picked.paths?.length) {
-        if (!picked.canceled) setErrorText(picked.error ?? "文件选择失败");
+        if (!picked.canceled) setErrorText(picked.error ?? t("panel.filePickFailed"));
         return;
       }
       setPendingMountMode("reference");
       setPendingMountSources(picked.paths);
       setErrorText("");
     } catch (err) {
-      setErrorText(`文件选择失败：${String(err)}`);
+      setErrorText(t("panel.filePickFailedWith", { error: String(err) }));
     }
   };
 
@@ -984,34 +987,34 @@ export function WorkspacePanel({
     const differ = window.agenticxDesktop.diffSessionWorkspaceCopy;
     const applier = window.agenticxDesktop.applySessionWorkspaceCopy;
     if (typeof differ !== "function" || typeof applier !== "function") {
-      setErrorText("当前客户端不支持副本回写，请完全重启桌面端后重试。");
+      setErrorText(t("panel.copyWritebackUnsupported"));
       return;
     }
     const diff = await differ({ sessionId: browseSessionId, name: entry.name });
     if (!diff.ok) {
-      setErrorText(diff.error || "查看副本改动失败");
+      setErrorText(diff.error || t("panel.copyDiffFailed"));
       return;
     }
     const changeCount =
       (diff.added?.length || 0) + (diff.modified?.length || 0) + (diff.deleted?.length || 0);
     const desktop = window.agenticxDesktop;
     const detailParts = [
-      `新增 ${diff.added?.length || 0} / 修改 ${diff.modified?.length || 0} / 删除 ${diff.deleted?.length || 0}`,
+      t("panel.copyDiffSummary", { added: diff.added?.length || 0, modified: diff.modified?.length || 0, deleted: diff.deleted?.length || 0 }),
     ];
     if (diff.source_drifted) {
-      detailParts.push("源路径在此期间也发生了变化，回写可能覆盖外部改动。");
+      detailParts.push(t("panel.copySourceDrifted"));
     }
     const confirmResult =
       typeof desktop.confirmDialog === "function"
         ? await desktop.confirmDialog({
-            title: "查看改动并回写",
+            title: t("panel.writebackTitle"),
             message:
               changeCount === 0
-                ? "副本相对基线没有可回写的改动。"
-                : `确认将副本改动回写到 ${diff.source_path || "源路径"}？`,
+                ? t("panel.writebackEmpty")
+                : t("panel.writebackConfirm", { path: diff.source_path || t("panel.writebackSourceFallback") }),
             detail: detailParts.join("\n"),
-            confirmText: diff.source_drifted ? "强制回写" : "回写",
-            cancelText: "取消",
+            confirmText: diff.source_drifted ? t("panel.forceWriteback") : t("panel.writeback"),
+            cancelText: t("cancel", { ns: "common" }),
             destructive: !!diff.source_drifted,
           })
         : { ok: true, confirmed: false };
@@ -1022,7 +1025,7 @@ export function WorkspacePanel({
       force: !!diff.source_drifted,
     });
     if (!applied.ok) {
-      setErrorText(applied.error || "回写失败");
+      setErrorText(applied.error || t("panel.writebackFailed"));
       return;
     }
     setErrorText("");
@@ -1032,7 +1035,7 @@ export function WorkspacePanel({
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) return;
     if (entry?.dangling) {
-      setErrorText("源已失效：链接目标不存在或不可访问");
+      setErrorText(t("panel.sourceDangling"));
       return;
     }
     if (activeTaskspaceId !== taskspaceId) {
@@ -1047,7 +1050,7 @@ export function WorkspacePanel({
           ? entry.source_path
           : absoluteTaskspacePath(ts?.path || "", relPath)) || "";
       if (!abs) {
-        setErrorText("无法解析文件路径");
+        setErrorText(t("panel.resolvePathFailed"));
         return;
       }
       setSelectedFilePath(relPath);
@@ -1058,13 +1061,13 @@ export function WorkspacePanel({
     const result = await window.agenticxDesktop.readTaskspaceFile({ sessionId: browseSessionId, taskspaceId, path: relPath });
     if (!result.ok) {
       if ((result.error ?? "").includes("session not found")) return;
-      setErrorText(result.error ?? "读取文件失败");
+      setErrorText(result.error ?? t("panel.readFileFailed"));
       return;
     }
     setSelectedFilePath(relPath);
     const preview = mapTaskspaceFileToWorkspacePreview(result, relPath, ts?.path);
     if (!preview) {
-      setErrorText(result.error ?? "读取文件失败");
+      setErrorText(result.error ?? t("panel.readFileFailed"));
       return;
     }
     setFilePreview(preview);
@@ -1103,11 +1106,11 @@ export function WorkspacePanel({
 
     const resolved = await window.agenticxDesktop.resolveLocalPath(absPath);
     if (resolved.ok && resolved.isDirectory && resolved.resolvedPath) {
-      setErrorText("引用目标应是文件，不是文件夹");
+      setErrorText(t("panel.quoteFileOnly"));
       return;
     }
     if (resolved.ok === false && resolved.error === "path not found") {
-      setErrorText("路径不存在");
+      setErrorText(t("panel.pathMissing"));
       return;
     }
 
@@ -1117,7 +1120,7 @@ export function WorkspacePanel({
         : absPath;
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) {
-      setErrorText("请先发送一条消息创建会话后再预览文件");
+      setErrorText(t("panel.previewNeedSession"));
       return;
     }
     let workspaces = taskspaces;
@@ -1129,7 +1132,7 @@ export function WorkspacePanel({
     if (!match) {
       const linker = window.agenticxDesktop.linkIntoSessionWorkspace;
       if (typeof linker !== "function") {
-        setErrorText(directPreview.error ?? "无法预览该文件（请完全重启桌面端）");
+        setErrorText(directPreview.error ?? t("panel.previewRestart"));
         return;
       }
       const linkResult = await linker({
@@ -1138,7 +1141,7 @@ export function WorkspacePanel({
         mode: "link",
       });
       if (!linkResult.ok) {
-        setErrorText(linkResult.error ?? directPreview.error ?? "无法预览该文件");
+        setErrorText(linkResult.error ?? directPreview.error ?? t("panel.previewFailed"));
         return;
       }
       const reloaded = await loadTaskspaces();
@@ -1162,7 +1165,7 @@ export function WorkspacePanel({
       }
     }
     if (!match) {
-      setErrorText(directPreview.error ?? "无法在工作区中定位该文件");
+      setErrorText(directPreview.error ?? t("panel.locateFailed"));
       return;
     }
     await openFile(match.taskspaceId, match.relPath);
@@ -1262,12 +1265,12 @@ export function WorkspacePanel({
                     style={{ paddingLeft }}
                     onClick={() => {
                       if (dangling) {
-                        setErrorText("源已失效：链接目标不存在或不可访问");
+                        setErrorText(t("panel.sourceDangling"));
                         return;
                       }
                       void toggleDir(taskspaceId, item.path);
                     }}
-                    title={dangling ? `${item.path}（源已失效）` : item.path}
+                    title={dangling ? t("panel.sourceDanglingTitle", { path: item.path }) : item.path}
                   >
                     <span className="inline-block w-3 shrink-0 text-center">{isExpanded ? "▾" : "▸"}</span>
                     <Folder className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.7} />
@@ -1278,7 +1281,7 @@ export function WorkspacePanel({
                       </span>
                     ) : null}
                     {dangling ? (
-                      <span className="ml-1 shrink-0 text-[10px] text-text-faint">源已失效</span>
+                      <span className="ml-1 shrink-0 text-[10px] text-text-faint">{t("panel.sourceDanglingBadge")}</span>
                     ) : null}
                   </button>
                   <button
@@ -1290,7 +1293,7 @@ export function WorkspacePanel({
                         label: item.name,
                       })
                     }
-                    title="引用到输入框"
+                    title={t("panel.quoteToInput")}
                   >
                     @
                   </button>
@@ -1333,7 +1336,7 @@ export function WorkspacePanel({
                       : "text-text-subtle"
                 }`}
                 style={{ paddingLeft: paddingLeft + 16 }}
-                title={dangling ? `${item.path}（源已失效）` : item.path}
+                title={dangling ? t("panel.sourceDanglingTitle", { path: item.path }) : item.path}
                 onClick={() => void openFile(taskspaceId, item.path, item)}
               >
                 <WorkspaceFileTypeIcon name={item.name} />
@@ -1344,13 +1347,13 @@ export function WorkspacePanel({
                   </span>
                 ) : null}
                 {dangling ? (
-                  <span className="ml-1 shrink-0 text-[10px] text-text-faint">源已失效</span>
+                  <span className="ml-1 shrink-0 text-[10px] text-text-faint">{t("panel.sourceDanglingBadge")}</span>
                 ) : null}
               </button>
               <button
                 className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
                 onClick={() => onPickFileForReference?.(taskspaceId, item.path)}
-                title="引用到输入框"
+                title={t("panel.quoteToInput")}
               >
                 @
               </button>
@@ -1359,7 +1362,7 @@ export function WorkspacePanel({
         })}
         {trunc?.truncated ? (
           <div className="px-2 py-1 text-[11px] text-text-faint">
-            仅显示前 {rows.length} 项（共 {trunc.totalSeen}）
+            {t("panel.truncatedHint", { shown: rows.length, total: trunc.totalSeen })}
           </div>
         ) : null}
       </>
@@ -1371,7 +1374,7 @@ export function WorkspacePanel({
   const addSameCwdTerminal = () => {
     const cwd = (activeTaskspace?.path ?? "").trim();
     if (!cwd) {
-      setErrorText("请先选择工作区或添加带目录的工作区");
+      setErrorText(t("panel.needWorkspace"));
       return;
     }
     addPaneTerminalTab(paneId, cwd, activeTaskspace?.label);
@@ -1405,7 +1408,7 @@ export function WorkspacePanel({
               </button>
             ) : (
               <div className="flex items-center gap-1.5 px-1 text-[13px] font-medium text-text-strong">
-                工作区
+                {t("workspace")}
               </div>
             )}
             {isSidebarEmbed ? (
@@ -1414,8 +1417,8 @@ export function WorkspacePanel({
                   ref={viewBtnRef}
                   type="button"
                   className="agx-topbar-btn !px-[5px]"
-                  title={viewMode === "list" ? "列表视图" : "树形视图"}
-                  aria-label="切换视图"
+                  title={viewMode === "list" ? t("panel.listView") : t("panel.treeView")}
+                  aria-label={t("panel.toggleView")}
                   onClick={() => {
                     const rect = viewBtnRef.current?.getBoundingClientRect();
                     if (rect) {
@@ -1436,8 +1439,8 @@ export function WorkspacePanel({
                   ref={moreBtnRef}
                   type="button"
                   className="agx-topbar-btn !px-[5px]"
-                  title="更多"
-                  aria-label="更多"
+                  title={t("panel.more")}
+                  aria-label={t("panel.more")}
                   onClick={() => {
                     const rect = moreBtnRef.current?.getBoundingClientRect();
                     if (rect) {
@@ -1458,7 +1461,7 @@ export function WorkspacePanel({
                     setErrorText("");
                     void refreshListAndActiveTaskspace();
                   }}
-                  title="刷新工作区列表与目录"
+                  title={t("panel.refreshList")}
                 >
                   <RefreshCw className="h-4 w-4" strokeWidth={1.8} />
                 </button>
@@ -1468,7 +1471,7 @@ export function WorkspacePanel({
                     setShowAddForm((prev) => !prev);
                     setErrorText("");
                   }}
-                  title="添加文件/文件夹到当前会话工作区"
+                  title={t("panel.addToSession")}
                 >
                   <FolderPlus className="h-4 w-4" strokeWidth={1.8} />
                 </button>
@@ -1479,7 +1482,7 @@ export function WorkspacePanel({
                     setErrorText("");
                     addSameCwdTerminal();
                   }}
-                  title="打开内嵌终端（当前选中的工作区目录）；也可右键工作区节点选「在此目录下打开终端」"
+                  title={t("panel.openEmbeddedTerminal")}
                 >
                   <Terminal className="h-4 w-4" strokeWidth={1.8} />
                 </button>
@@ -1487,7 +1490,7 @@ export function WorkspacePanel({
                   <button
                     className="agx-topbar-btn !px-[5px]"
                     onClick={onClose}
-                    title="关闭工作区面板"
+                    title={t("panel.closePanel")}
                   >
                     <PanelRight className="h-4 w-4" strokeWidth={1.8} />
                   </button>
@@ -1501,10 +1504,10 @@ export function WorkspacePanel({
                 type="search"
                 value={fileSearchQuery}
                 onChange={(e) => setFileSearchQuery(e.target.value)}
-                placeholder="搜索文件…"
+                placeholder={t("panel.searchFiles")}
                 autoComplete="off"
                 spellCheck={false}
-                aria-label="搜索工作区文件"
+                aria-label={t("panel.searchFilesAria")}
                 className="w-full rounded-md border border-border bg-surface-hover px-2 py-2 text-[13px] text-text-primary placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)] focus:outline-none focus:ring-1 focus:ring-[var(--ui-btn-primary-border,#3b82f6)]"
               />
             </div>
@@ -1515,15 +1518,15 @@ export function WorkspacePanel({
               style={!skipTintOverlay && tintColor ? { backgroundColor: tintColor } : undefined}
             >
               <div className="mb-2 flex items-center justify-between gap-2 text-[13px] font-medium text-text-subtle">
-                <span>添加到会话工作区</span>
+                <span>{t("panel.addToSessionTitle")}</span>
               </div>
               <div className="mb-2 text-[11px] leading-relaxed text-text-faint">
-                可选择引用（只读）、工作副本或直连原目录；不会挂载第二根目录。
+                {t("panel.addToSessionHint")}
               </div>
               <input
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
-                placeholder="目录绝对路径（可留空用默认）"
+                placeholder={t("panel.absPathPlaceholder")}
                 className="mb-1.5 w-full rounded border border-border bg-surface-hover px-2 py-1.5 text-[13px] text-text-primary outline-none focus:border-border-strong"
               />
               <div className="mb-1.5 flex justify-end">
@@ -1531,16 +1534,16 @@ export function WorkspacePanel({
                   type="button"
                   className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[13px] text-text-muted hover:bg-surface-hover"
                   onClick={() => void chooseDirectoryForTaskspace()}
-                  title="从系统目录中选择"
+                  title={t("panel.pickFromSystem")}
                 >
                   <Folder className="h-3.5 w-3.5" strokeWidth={1.8} />
-                  选择目录
+                  {t("panel.pickDirectory")}
                 </button>
               </div>
               <input
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
-                placeholder="显示名称（可选）"
+                placeholder={t("panel.displayNameOptional")}
                 className="mb-2 w-full rounded border border-border bg-surface-hover px-2 py-1.5 text-[13px] text-text-primary outline-none focus:border-border-strong"
               />
               <div className="flex items-center justify-end gap-1.5">
@@ -1552,7 +1555,7 @@ export function WorkspacePanel({
                     setNewLabel("");
                   }}
                 >
-                  取消
+                  {t("cancel", { ns: "common" })}
                 </button>
                 <button
                   className="rounded px-2 py-1 text-[13px] transition disabled:opacity-50"
@@ -1560,7 +1563,7 @@ export function WorkspacePanel({
                   disabled={adding}
                   onClick={() => void addTaskspace(newPath, newLabel)}
                 >
-                  {adding ? "添加中..." : "确认添加"}
+{adding ? t("panel.adding") : t("panel.confirmAdd")}
                 </button>
               </div>
             </div>
@@ -1583,9 +1586,9 @@ export function WorkspacePanel({
                 <FilePlus className="h-7 w-7" strokeWidth={1.5} />
               </div>
               <div className="space-y-1">
-                <div className="text-[14px] font-medium text-text-primary">当前会话工作区为空</div>
+                <div className="text-[14px] font-medium text-text-primary">{t("panel.sessionEmpty")}</div>
                 <div className="text-[12px] leading-relaxed text-text-faint">
-                  添加文件或文件夹时可选择引用 / 工作副本 / 直连（不挂第二根）
+                  {t("panel.sessionEmptyHint")}
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-2">
@@ -1594,14 +1597,14 @@ export function WorkspacePanel({
                   className="rounded-lg border border-border bg-surface-hover px-3.5 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-surface-card-strong"
                   onClick={() => void pickAndAttachFiles()}
                 >
-                  添加文件
+                  {t("panel.addFile")}
                 </button>
                 <button
                   type="button"
                   className="rounded-lg border border-border bg-surface-hover px-3.5 py-1.5 text-[13px] text-text-primary transition-colors hover:bg-surface-card-strong"
                   onClick={() => void pickAndAttachDirectory()}
                 >
-                  添加文件夹
+                  {t("panel.addFolder")}
                 </button>
               </div>
             </div>
@@ -1613,12 +1616,12 @@ export function WorkspacePanel({
           !defaultTaskspace &&
           !getBrowseSessionId() ? (
             <div className="px-2 py-4 text-[13px] text-text-faint">
-              选择或新建一个对话后，这里会显示工作区文件
+              {t("panel.needConversation")}
             </div>
           ) : null}
           {!showConversationEmpty && !loading && filteredFiles !== null ? (
             filteredFiles.length === 0 ? (
-              <div className="text-[13px] text-text-faint">无匹配文件</div>
+              <div className="text-[13px] text-text-faint">{t("panel.noMatch")}</div>
             ) : (
               filteredFiles.map(({ taskspaceId, file }) => {
                 const ts = taskspaces.find((t) => t.id === taskspaceId);
@@ -1661,7 +1664,7 @@ export function WorkspacePanel({
                   <button
                     className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
                     onClick={() => onPickFileForReference?.(taskspaceId, file.path)}
-                    title="引用到输入框"
+                    title={t("panel.quoteToInput")}
                   >
                     @
                   </button>
@@ -1672,7 +1675,7 @@ export function WorkspacePanel({
           ) : null}
           {!showConversationEmpty && !loading && filteredFiles === null && listViewFiles ? (
             listViewFiles.length === 0 ? (
-              <div className="px-1 py-2 text-[13px] text-text-faint">当前目录暂无文件</div>
+              <div className="px-1 py-2 text-[13px] text-text-faint">{t("panel.dirEmpty")}</div>
             ) : (
               listViewFiles.map(({ taskspaceId, file }) => (
                 <div key={`${taskspaceId}:${file.path}`} className="flex min-w-0 items-center gap-1">
@@ -1688,7 +1691,7 @@ export function WorkspacePanel({
                   <button
                     className="rounded px-1.5 py-0.5 text-xs text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
                     onClick={() => onPickFileForReference?.(taskspaceId, file.path)}
-                    title="引用到输入框"
+                    title={t("panel.quoteToInput")}
                   >
                     @
                   </button>
@@ -1713,14 +1716,14 @@ export function WorkspacePanel({
           <div
             className="group relative min-h-[14px] shrink-0 cursor-row-resize px-2 py-2 touch-none"
             onMouseDown={startResizeTerminal}
-            title="拖拽调整终端区域高度"
+            title={t("panel.resizeTerminal")}
           >
             <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-[var(--border-strong)] transition-all duration-200 group-hover:h-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
           </div>
 
           <div className="flex min-h-0 shrink-0 flex-col border-t border-border" style={{ height: safeTerminalHeight }}>
             <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
-              <span className="text-xs text-text-faint">终端</span>
+              <span className="text-xs text-text-faint">{t("panel.terminal")}</span>
               <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
                 {terminalTabs.map((tab) => (
                   <div key={tab.id} className="flex shrink-0 items-center gap-0.5">
@@ -1740,7 +1743,7 @@ export function WorkspacePanel({
                       type="button"
                       className="rounded px-1.5 py-0.5 text-xs text-text-faint hover:bg-surface-hover hover:text-rose-300"
                       onClick={() => removePaneTerminalTab(paneId, tab.id)}
-                      title="关闭终端"
+                      title={t("panel.closeTerminal")}
                     >
                       ×
                     </button>
@@ -1751,7 +1754,7 @@ export function WorkspacePanel({
                 type="button"
                 className="shrink-0 rounded bg-surface-hover px-2 py-1 text-[13px] text-text-muted hover:bg-surface-hover"
                 onClick={addSameCwdTerminal}
-                title="在当前工作区目录下新开终端"
+                title={t("panel.newTerminalHere")}
               >
                 +
               </button>
@@ -1787,7 +1790,7 @@ export function WorkspacePanel({
             ? ctxMenu.kind === "taskspace"
               ? [
                   {
-                    label: "引用到输入框",
+                    label: t("panel.quoteToInput"),
                     onSelect: () =>
                       onPickDirectoryForReference?.({
                         taskspaceId: ctxMenu.taskspace.id,
@@ -1800,25 +1803,25 @@ export function WorkspacePanel({
                     onSelect: () => {
                       const rootPath = (ctxMenu.taskspace.path || "").trim();
                       if (!rootPath) {
-                        setErrorText("该工作区没有可打开的磁盘路径");
+                        setErrorText(t("panel.noDiskPath"));
                         return;
                       }
                       void revealInFileManager(rootPath);
                     },
                   },
                   {
-                    label: "在此目录下打开终端",
+                    label: t("panel.openTerminalHere"),
                     onSelect: () => openTerminalForPath(ctxMenu.taskspace.path, ctxMenu.taskspace.label),
                   },
                   {
-                    label: "移除工作区",
+                    label: t("panel.removeWorkspace"),
                     danger: true,
                     onSelect: () => void removeTaskspace(ctxMenu.taskspace.id),
                   },
                 ]
               : [
                   {
-                    label: "引用到输入框",
+                    label: t("panel.quoteToInput"),
                     onSelect: () => {
                       if (ctxMenu.entry.type === "dir") {
                         onPickDirectoryForReference?.({
@@ -1842,7 +1845,7 @@ export function WorkspacePanel({
                     },
                   },
                   {
-                    label: "在此目录下打开终端",
+                    label: t("panel.openTerminalHere"),
                     onSelect: () => {
                       const cwd = terminalCwdForEntry(ctxMenu.taskspace, ctxMenu.entry);
                       openTerminalForPath(cwd, ctxMenu.entry.name);
@@ -1851,7 +1854,7 @@ export function WorkspacePanel({
                   ...(ctxMenu.entry.mount_mode === "copy"
                     ? [
                         {
-                          label: "查看改动并回写",
+                          label: t("panel.writebackTitle"),
                           onSelect: () => void applyCopyBack(ctxMenu.entry),
                         },
                       ]
@@ -1904,8 +1907,8 @@ export function WorkspacePanel({
             >
               {(
                 [
-                  { id: "list" as const, label: "列表视图", icon: List },
-                  { id: "tree" as const, label: "树形视图", icon: ListTree },
+                  { id: "list" as const, label: t("panel.listView"), icon: List },
+                  { id: "tree" as const, label: t("panel.treeView"), icon: ListTree },
                 ] as const
               ).map((item) => {
                 const Icon = item.icon;
@@ -1945,7 +1948,7 @@ export function WorkspacePanel({
                 onClick={() => void pickAndAttachFiles()}
               >
                 <FilePlus className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
-                <span>添加文件</span>
+                <span>{t("panel.addFile")}</span>
               </button>
               <button
                 type="button"
@@ -1953,7 +1956,7 @@ export function WorkspacePanel({
                 onClick={() => void pickAndAttachDirectory()}
               >
                 <FolderPlus className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
-                <span>添加文件夹</span>
+                <span>{t("panel.addFolder")}</span>
               </button>
               <button
                 type="button"
@@ -1965,7 +1968,7 @@ export function WorkspacePanel({
                 }}
               >
                 <RefreshCw className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
-                <span>刷新</span>
+                <span>{t("panel.refresh")}</span>
               </button>
             </div>,
             document.body

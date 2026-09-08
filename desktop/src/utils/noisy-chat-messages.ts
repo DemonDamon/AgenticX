@@ -1,20 +1,52 @@
 import type { Message } from "../store";
+import { i18n } from "../i18n/i18n";
 import { isWidgetFlowRetryNotice } from "./context-notice";
 import { isOrphanFormattedToolResultMessage } from "./orphan-formatted-tool";
 
-const NOISY_TOOL_STATUS_CONTENT = new Set([
-  "后台任务已完成",
-  "已发送中断请求",
-  "已中断任务",
-  "已中断当前生成",
-  "已中断上一轮生成，开始处理新消息",
-]);
-
-const CONFIRM_RECEIPT_SUFFIXES = [
-  "确认通过，继续执行",
-  "确认拒绝，执行终止",
-  "确认拒绝，已取消",
+const NOISY_TOOL_STATUS_KEYS = [
+  "notice.backgroundDone",
+  "notice.stopRequestSent",
+  "notice.taskInterrupted",
+  "notice.generationInterrupted",
+  "notice.prevTurnInterrupted",
 ] as const;
+
+const CONFIRM_RECEIPT_KEYS = [
+  "notice.approvedContinue",
+  "notice.rejectedStop",
+  "notice.rejectedCancelled",
+] as const;
+
+function localeValues(keys: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const lng of ["zh", "en"] as const) {
+    for (const key of keys) {
+      const value = String(i18n.t(key, { ns: "chat", lng }) ?? "").trim();
+      if (value) out.push(value);
+    }
+  }
+  return out;
+}
+
+function noisyToolStatusContent(): Set<string> {
+  return new Set([
+    "后台任务已完成",
+    "已发送中断请求",
+    "已中断任务",
+    "已中断当前生成",
+    "已中断上一轮生成，开始处理新消息",
+    ...localeValues(NOISY_TOOL_STATUS_KEYS),
+  ]);
+}
+
+function confirmReceiptSuffixes(): string[] {
+  return [
+    "确认通过，继续执行",
+    "确认拒绝，执行终止",
+    "确认拒绝，已取消",
+    ...localeValues(CONFIRM_RECEIPT_KEYS),
+  ];
+}
 
 /** Auto-approve / inline-confirm receipts — activity card owns the flash, not chat history. */
 export function isEphemeralConfirmReceiptMessage(
@@ -25,12 +57,16 @@ export function isEphemeralConfirmReceiptMessage(
   if ((message.toolName ?? "").trim()) return false;
   if ((message.toolCallId ?? "").trim()) return false;
   const normalized = normalizeNoisyToolStatusContent(String(message.content ?? ""));
-  return CONFIRM_RECEIPT_SUFFIXES.some(
-    (suffix) => normalized === suffix || normalized.endsWith(`：${suffix}`),
+  return confirmReceiptSuffixes().some(
+    (suffix) => normalized === suffix || normalized.endsWith(`：${suffix}`) || normalized.endsWith(`: ${suffix}`),
   );
 }
 
-const INTERRUPTED_ASSISTANT_PLACEHOLDERS = new Set(["（已中断）", "(已中断)"]);
+const INTERRUPTED_ASSISTANT_PLACEHOLDERS = new Set([
+  "（已中断）",
+  "(已中断)",
+  "(interrupted)",
+]);
 
 /** Strip leading status emoji so SSE rows like `❌ 已中断当前生成` match noisy filters. */
 export function normalizeNoisyToolStatusContent(content: string): string {
@@ -40,14 +76,19 @@ export function normalizeNoisyToolStatusContent(content: string): string {
     .trim();
 }
 
+function ephemeralStopTexts(): Set<string> {
+  return new Set([
+    "已中断当前生成",
+    "已中断任务",
+    "已发送中断请求",
+    ...localeValues(["notice.generationInterrupted", "notice.taskInterrupted", "notice.stopRequestSent"]),
+  ]);
+}
+
 /** Runtime STOP_MESSAGE / interrupt ack — UI uses turn_interrupted instead. */
 export function isEphemeralStopErrorText(text: string): boolean {
   const normalized = normalizeNoisyToolStatusContent(text);
-  return (
-    normalized === "已中断当前生成"
-    || normalized === "已中断任务"
-    || normalized === "已发送中断请求"
-  );
+  return ephemeralStopTexts().has(normalized);
 }
 
 /** Ephemeral meta tool rows that duplicate TurnInterruptionNoticeLine or add wrench noise. */
@@ -74,7 +115,7 @@ export function isNoisyToolStatusMessage(
   if (isEphemeralStopErrorText(content)) return true;
   if (!toolName && /^[✅🔧⚠️❌🗣]?\s*check_resources\b/i.test(content)) return true;
   if (toolName) return false;
-  return NOISY_TOOL_STATUS_CONTENT.has(normalized);
+  return noisyToolStatusContent().has(normalized);
 }
 
 /** Barge-in placeholder assistant rows — hidden in UI; turn_interrupted notice covers display. */
@@ -83,5 +124,7 @@ export function isInterruptedAssistantPlaceholder(
 ): boolean {
   if (message.role !== "assistant") return false;
   const text = String(message.content ?? "").trim();
-  return INTERRUPTED_ASSISTANT_PLACEHOLDERS.has(text);
+  if (INTERRUPTED_ASSISTANT_PLACEHOLDERS.has(text)) return true;
+  return text === i18n.t("notice.interruptedParen", { ns: "chat", lng: "zh" })
+    || text === i18n.t("notice.interruptedParen", { ns: "chat", lng: "en" });
 }

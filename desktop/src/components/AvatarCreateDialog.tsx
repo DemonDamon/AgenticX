@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
 import { AvatarToolPermissionDialog } from "./AvatarToolPermissionDialog";
 import { DefaultModelSelect } from "./DefaultModelSelect";
@@ -26,6 +27,8 @@ type Props = {
 
 type Mode = "manual" | "ai";
 export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }: Props) {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
   const [mode, setMode] = useState<Mode>("ai");
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
@@ -151,10 +154,10 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
           className="agx-avatar-create-dialog w-[440px] max-w-[95vw] rounded-xl border border-border p-5 shadow-2xl"
           style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
         >
-        <h3 className="mb-4 text-[16px] font-semibold text-text-primary">创建数字专家</h3>
+        <h3 className="mb-4 text-[16px] font-semibold text-text-primary">{t("avatarCreate.title")}</h3>
 
         <div className="mb-4 flex gap-1 rounded-lg bg-surface-card p-0.5">
-          {([["manual", "手动创建"], ["ai", "AI 创建"]] as const).map(([key, label]) => (
+          {([["manual", t("avatarCreate.manual")], ["ai", t("avatarCreate.ai")]] as const).map(([key, label]) => (
             <button
               key={key}
               className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium transition ${
@@ -173,59 +176,59 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
           <>
             <div className="space-y-3">
               <label className="block text-sm text-text-muted">
-                名称 <span className="text-rose-400">*</span>
+                {t("avatarCreate.name")} <span className="text-rose-400">*</span>
                 <input
                   className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="例：Coder、Researcher、Writer"
+                  placeholder={t("avatarCreate.namePlaceholder")}
                   autoFocus
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                角色
-                <input
+                {t("avatarCreate.role")}
+                <input>
                   className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
-                  placeholder="例：全栈开发工程师、数据分析师"
+                  placeholder={t("avatarCreate.rolePlaceholder")}
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                系统提示
-                <span className="ml-1 text-xs text-text-faint">(可选)</span>
+                {t("avatarCreate.systemPrompt")}
+                <span className="ml-1 text-xs text-text-faint">{t("avatarCreate.optional")}</span>
                 <textarea
                   className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   rows={3}
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
-                  placeholder="自定义角色行为指令..."
+                  placeholder={t("avatarCreate.systemPromptPlaceholder")}
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                简介
-                <span className="ml-1 text-xs text-text-faint">(可选，展示在分身卡片上)</span>
+                {t("avatarCreate.blurb")}
+                <span className="ml-1 text-xs text-text-faint">{t("avatarCreate.blurbHint")}</span>
                 <textarea
                   className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   rows={2}
                   value={blurb}
                   onChange={(e) => setBlurb(e.target.value)}
-                  placeholder="一两句话说明该分身能做什么，会展示在分身卡片上..."
+                  placeholder={t("avatarCreate.blurbPlaceholder")}
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                标签
-                <span className="ml-1 text-xs text-text-faint">(可选，逗号分隔，最多 8 个)</span>
+                {t("avatarCreate.tags")}
+                <span className="ml-1 text-xs text-text-faint">{t("avatarCreate.tagsHint")}</span>
                 <input
                   className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   value={tagsInput}
                   onChange={(e) => setTagsInput(e.target.value)}
-                  placeholder="例：PyTorch优化, 大模型运行框架, GPU性能调优"
+                  placeholder={t("avatarCreate.tagsPlaceholder")}
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                默认模型
-                <span className="ml-1 text-xs text-text-faint">(新建会话时使用)</span>
+                {t("avatarCreate.defaultModel")}
+                <span className="ml-1 text-xs text-text-faint">{t("avatarCreate.defaultModelHint")}</span>
                 <DefaultModelSelect
                   provider={defaultProvider}
                   model={defaultModel}
@@ -236,13 +239,13 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
                 />
               </label>
               <label className="block text-sm text-text-muted">
-                工作区目录
-                <span className="ml-1 text-xs text-text-faint">(可选)</span>
+                {t("avatarCreate.workspace")}
+                <span className="ml-1 text-xs text-text-faint">{t("avatarCreate.optional")}</span>
                 <input
                   className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   value={workspaceDir}
                   onChange={(e) => setWorkspaceDir(e.target.value)}
-                  placeholder="留空使用默认 ~/.agenticx/avatars/<id>/workspace"
+                  placeholder={t("avatarCreate.workspacePlaceholder")}
                 />
               </label>
 
@@ -251,7 +254,9 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
                 className="w-full rounded-md border border-border bg-surface-card px-3 py-2 text-left text-sm text-text-muted transition hover:bg-surface-hover"
                 onClick={() => setToolsDialogOpen(true)}
               >
-                工具权限（{customizedCount > 0 ? `已自定义 ${customizedCount} 项` : "继承全局默认"}）
+                {customizedCount > 0
+                  ? t("avatarCreate.toolsCustomized", { count: customizedCount })
+                  : t("avatarCreate.toolsInherit")}
               </button>
 
               <div className="rounded-md border border-border bg-surface-card">
@@ -264,18 +269,20 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
                     className={`h-4 w-4 shrink-0 text-text-faint transition-transform ${skillsSectionOpen ? "rotate-90" : ""}`}
                   />
                   <span>
-                    技能（{skillsCustomizedCount > 0 ? `已禁用 ${skillsCustomizedCount} 项` : "默认全部启用"}）
+                    {skillsCustomizedCount > 0
+                      ? t("avatarCreate.skillsDisabled", { count: skillsCustomizedCount })
+                      : t("avatarCreate.skillsAllEnabled")}
                   </span>
                 </button>
                 {skillsSectionOpen && (
                   <div className="space-y-2 border-t border-[var(--border-muted)] px-3 py-2">
                     <p className="text-[11px] text-text-faint">
-                      全局已在设置中禁用的技能不会列出。关闭表示该分身不使用对应技能。
+                      {t("avatarCreate.skillsHint")}
                     </p>
                     {loadingSkills ? (
-                      <div className="py-2 text-xs text-text-faint">加载中...</div>
+                      <div className="py-2 text-xs text-text-faint">{t("avatarCreate.loading")}</div>
                     ) : skillsItems.length === 0 ? (
-                      <div className="py-2 text-xs text-text-faint">暂无可配置技能。</div>
+                      <div className="py-2 text-xs text-text-faint">{t("avatarCreate.noSkills")}</div>
                     ) : (
                       <div className="max-h-[200px] divide-y divide-[var(--border-muted)] overflow-y-auto rounded-md border border-border bg-surface-card">
                         {skillsItems.map((skill) => {
@@ -302,7 +309,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
                                   });
                                 }}
                               >
-                                {disabled ? "已禁用" : "启用"}
+                                {disabled ? t("avatarCreate.skillOff") : t("avatarCreate.skillOn")}
                               </button>
                             </div>
                           );
@@ -318,14 +325,14 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
                 className="rounded-md border border-border px-4 py-1.5 text-sm text-text-subtle transition hover:bg-surface-hover"
                 onClick={resetAndClose}
               >
-                取消
+                {tCommon("cancel")}
               </button>
               <button
                 className="rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
                 disabled={busy || !name.trim()}
                 onClick={handleCreate}
               >
-                {busy ? "创建中..." : "创建"}
+                {busy ? t("avatarCreate.creating") : tCommon("create")}
               </button>
             </div>
           </>
@@ -333,13 +340,13 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
           <>
             <div className="space-y-3">
               <label className="block text-sm text-text-muted">
-                描述你想要的分身
+                {t("avatarCreate.describeAvatar")}
                 <textarea
                   className="mt-1 w-full resize-none rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   rows={4}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="描述分身的能力、性格和专长..."
+                  placeholder={t("avatarCreate.describePlaceholder")}
                   autoFocus
                 />
               </label>
@@ -354,14 +361,14 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
                 className="rounded-md border border-border px-4 py-1.5 text-sm text-text-subtle transition hover:bg-surface-hover"
                 onClick={resetAndClose}
               >
-                取消
+                {tCommon("cancel")}
               </button>
               <button
                 className="rounded-md bg-btnPrimary px-4 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-40"
                 disabled={!description.trim()}
                 onClick={handleCreateViaChat}
               >
-                开始创建
+                {t("avatarCreate.startCreate")}
               </button>
             </div>
           </>
@@ -371,7 +378,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
       <AvatarToolPermissionDialog
         open={toolsDialogOpen}
         mode="avatar"
-        title="新分身 · 工具权限"
+        title={t("avatarCreate.toolsTitle")}
         initialToolsEnabled={toolsEnabled}
         onClose={() => setToolsDialogOpen(false)}
         onSave={async (next) => {

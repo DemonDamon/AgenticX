@@ -8,7 +8,9 @@ import {
   type RefObject,
   type WheelEvent as ReactWheelEvent,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
+import { i18n } from "../../i18n/i18n";
 import {
   Check,
   Code2,
@@ -141,7 +143,7 @@ function previewKindLabel(kind: WorkspacePreview["kind"]): string {
     case "office":
       return "Office";
     case "video":
-      return "视频";
+      return i18n.t("preview.kindVideo", { ns: "workspace" });
     case "binary":
       return "Binary";
     default: {
@@ -255,6 +257,7 @@ function ImagePreviewBody({
   /** Trae-style floating zoom + grab-to-pan for panel layout. */
   enableZoom?: boolean;
 }) {
+  const { t } = useTranslation("workspace");
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -276,7 +279,7 @@ function ImagePreviewBody({
     const api = window.agenticxDesktop?.loadLocalImageDataUrl;
     if (typeof api !== "function") {
       setLoading(false);
-      setError("当前客户端不支持本地图片预览");
+      setError(i18n.t("preview.imageUnsupported", { ns: "workspace" }));
       return () => {
         cancelled = true;
       };
@@ -285,7 +288,7 @@ function ImagePreviewBody({
       .then((res) => {
         if (cancelled) return;
         if (!res.ok || !res.dataUrl) {
-          setError(res.error ?? "图片加载失败");
+          setError(res.error ?? i18n.t("preview.imageLoadFailed", { ns: "workspace" }));
           setDataUrl(null);
         } else {
           setDataUrl(res.dataUrl);
@@ -362,7 +365,7 @@ function ImagePreviewBody({
       <div className="flex h-full min-h-[220px] items-center justify-center bg-surface-base p-6">
         <div className="flex items-center gap-2 text-sm text-text-muted">
           <ImageIcon className="h-4 w-4 animate-pulse" strokeWidth={1.5} />
-          正在加载图片…
+          {t("preview.imageLoading")}
         </div>
       </div>
     );
@@ -371,14 +374,14 @@ function ImagePreviewBody({
   if (error || !dataUrl) {
     return (
       <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-4 bg-surface-base px-8 py-10 text-center">
-        <p className="text-sm text-rose-300">{error ?? "图片加载失败"}</p>
+        <p className="text-sm text-rose-300">{error ?? t("preview.imageLoadFailed")}</p>
         <div className="flex flex-wrap items-center justify-center gap-2">
           <button
             type="button"
             className="rounded-md border border-[var(--border-subtle)] bg-surface-popover px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
             onClick={onCopy}
           >
-            复制路径
+            {t("preview.copyPath")}
           </button>
           {onRevealInFileManager ? (
             <button
@@ -387,7 +390,7 @@ function ImagePreviewBody({
               onClick={() => onRevealInFileManager(absolutePath)}
             >
               <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.5} />
-              {revealInFileManagerLabel ?? "在文件管理器中显示"}
+              {revealInFileManagerLabel ?? t("revealGeneric")}
             </button>
           ) : null}
         </div>
@@ -426,7 +429,7 @@ function ImagePreviewBody({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onDoubleClick={resetView}
-        title="拖拽平移 · 滚轮缩放 · 双击还原"
+        title={t("preview.panZoomHint")}
       >
         <img
           src={dataUrl}
@@ -448,8 +451,8 @@ function ImagePreviewBody({
             type="button"
             className="flex h-7 w-7 items-center justify-center rounded-full text-text-muted hover:bg-surface-hover hover:text-text-strong"
             onClick={() => setZoom((z) => clampImagePreviewZoom(z - 25))}
-            title="缩小"
-            aria-label="缩小"
+            title={t("preview.zoomOut")}
+            aria-label={t("preview.zoomOut")}
           >
             <Minus className="h-3.5 w-3.5" strokeWidth={2} />
           </button>
@@ -460,8 +463,8 @@ function ImagePreviewBody({
             type="button"
             className="flex h-7 w-7 items-center justify-center rounded-full text-text-muted hover:bg-surface-hover hover:text-text-strong"
             onClick={() => setZoom((z) => clampImagePreviewZoom(z + 25))}
-            title="放大"
-            aria-label="放大"
+            title={t("preview.zoomIn")}
+            aria-label={t("preview.zoomIn")}
           >
             <Plus className="h-3.5 w-3.5" strokeWidth={2} />
           </button>
@@ -682,6 +685,7 @@ function TextualPreviewBody({
 }) {
   const showHtmlRender = !!renderHtml && viewMode === "preview" && !initialLineRange;
 
+  const { t } = useTranslation("workspace");
   const markdownContent = useMemo(() => {
     if (preview.kind !== "markdown") return "";
     const lower = preview.path.toLowerCase();
@@ -831,7 +835,7 @@ function TextualPreviewBody({
         value={editContent}
         onChange={(e) => onEditContentChange(e.target.value)}
         spellCheck={false}
-        aria-label={`编辑 ${previewBaseName(preview.path)}`}
+        aria-label={t("preview.editAria", { name: previewBaseName(preview.path) })}
       />
     );
   }
@@ -853,7 +857,7 @@ function TextualPreviewBody({
                 label:
                   selectionRange.startLine && selectionRange.endLine
                     ? `${previewBaseName(preview.path)} (${selectionRange.startLine}-${selectionRange.endLine})`
-                    : `${previewBaseName(preview.path)} (片段)`,
+                    : t("preview.snippetSuffix", { name: previewBaseName(preview.path) }),
               })
             }
           />
@@ -895,7 +899,7 @@ function TextualPreviewBody({
               label:
                 selectionRange.startLine && selectionRange.endLine
                   ? `${previewBaseName(preview.path)} (${selectionRange.startLine}-${selectionRange.endLine})`
-                  : `${previewBaseName(preview.path)} (片段)`,
+                  : t("preview.snippetSuffix", { name: previewBaseName(preview.path) }),
             })
           }
         />
@@ -927,6 +931,7 @@ export function WorkspaceFilePreview({
   onDirtyChange,
   onProvideRequestLeave,
 }: WorkspaceFilePreviewProps) {
+  const { t, i18n: i18nInst } = useTranslation("workspace");
   const isPanel = layout === "panel";
   const truncated =
     preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
@@ -950,7 +955,7 @@ export function WorkspaceFilePreview({
         size: textualPreview?.size ?? 0,
         initialLineRange,
       }),
-    [textualPreview, truncated, initialLineRange],
+    [textualPreview, truncated, initialLineRange, i18nInst.language],
   );
   const isEditableText = textualPreview != null && editBlockReason === null;
 
@@ -1051,7 +1056,7 @@ export function WorkspaceFilePreview({
     if (!textualPreview || !isDirty) return true;
     const api = window.agenticxDesktop?.writeLocalTextFile;
     if (!api) {
-      setSaveError("当前客户端不支持保存文件");
+      setSaveError(i18n.t("preview.saveUnsupported", { ns: "workspace" }));
       return false;
     }
     setSaving(true);
@@ -1065,9 +1070,9 @@ export function WorkspaceFilePreview({
       });
       if (!res.ok) {
         if (res.code === "STALE") {
-          setSaveError("文件已被外部修改，请关闭后重新打开");
+          setSaveError(i18n.t("preview.externallyModified", { ns: "workspace" }));
         } else {
-          setSaveError(res.error ?? "保存失败");
+          setSaveError(res.error ?? i18n.t("preview.saveFailed", { ns: "workspace" }));
         }
         return false;
       }
@@ -1087,14 +1092,14 @@ export function WorkspaceFilePreview({
   const handleSave = useCallback(async () => {
     if (!isEditableText || viewMode !== "edit") return;
     if (!isDirty) {
-      showSaveToast("已是最新");
+      showSaveToast(i18n.t("preview.alreadyLatest", { ns: "workspace" }));
       return;
     }
     const ok = await persistEditContent();
     if (ok) {
-      showSaveToast("已保存");
+      showSaveToast(i18n.t("preview.saved", { ns: "workspace" }));
     } else {
-      showSaveToast("保存失败");
+      showSaveToast(i18n.t("preview.saveFailed", { ns: "workspace" }));
     }
   }, [isDirty, isEditableText, persistEditContent, showSaveToast, viewMode]);
 
@@ -1140,7 +1145,7 @@ export function WorkspaceFilePreview({
   const handleDirtySaveAndLeave = useCallback(async () => {
     const ok = await persistEditContent();
     if (!ok) {
-      showSaveToast("保存失败");
+      showSaveToast(i18n.t("preview.saveFailed", { ns: "workspace" }));
       return;
     }
     finishLeave();
@@ -1170,7 +1175,7 @@ export function WorkspaceFilePreview({
     (forward: boolean) => {
       const query = sanitizeFindQuery(findText);
       if (isEmptyFindQuery(query)) {
-        setFindStatus("请输入查找内容");
+        setFindStatus(i18n.t("preview.findRequired", { ns: "workspace" }));
         return;
       }
 
@@ -1183,7 +1188,7 @@ export function WorkspaceFilePreview({
 
       const match = findTextMatch(editContent, query, Math.max(0, from), forward);
       if (!match) {
-        setFindStatus(`未找到「${formatFindQueryForDisplay(query)}」`);
+        setFindStatus(i18n.t("preview.notFound", { ns: "workspace", query: formatFindQueryForDisplay(query) }));
         return;
       }
       selectTextRange(match.start, match.end);
@@ -1191,9 +1196,9 @@ export function WorkspaceFilePreview({
       const actual = editContent.slice(match.start, match.end);
       setFindStatus(
         actual !== query
-          ? `（文档中为「${formatFindQueryForDisplay(actual)}」，共 ${total} 处）`
+          ? i18n.t("preview.findAlias", { ns: "workspace", actual: formatFindQueryForDisplay(actual), total })
           : total > 1
-            ? `共 ${total} 处`
+            ? i18n.t("preview.findCount", { ns: "workspace", total })
             : null
       );
     },
@@ -1203,7 +1208,7 @@ export function WorkspaceFilePreview({
   const runReplaceOne = useCallback(() => {
     const query = sanitizeFindQuery(findText);
     if (isEmptyFindQuery(query)) {
-      setFindStatus("请输入查找内容");
+      setFindStatus(i18n.t("preview.findRequired", { ns: "workspace" }));
       return;
     }
     const replacement = sanitizeReplaceText(replaceText);
@@ -1228,18 +1233,18 @@ export function WorkspaceFilePreview({
   const runReplaceAll = useCallback(() => {
     const query = sanitizeFindQuery(findText);
     if (isEmptyFindQuery(query)) {
-      setFindStatus("请输入查找内容");
+      setFindStatus(i18n.t("preview.findRequired", { ns: "workspace" }));
       return;
     }
     const replacement = sanitizeReplaceText(replaceText);
 
     const { result, count } = replaceAllOccurrences(editContent, query, replacement);
     if (count <= 0) {
-      setFindStatus(`未找到「${formatFindQueryForDisplay(query)}」`);
+      setFindStatus(i18n.t("preview.notFound", { ns: "workspace", query: formatFindQueryForDisplay(query) }));
       return;
     }
     setEditContent(result);
-    setFindStatus(`已替换 ${count} 处`);
+    setFindStatus(i18n.t("preview.replacedCount", { ns: "workspace", count }));
   }, [editContent, findText, replaceText, setEditContent]);
 
   const openFindBar = useCallback(
@@ -1310,9 +1315,9 @@ export function WorkspaceFilePreview({
 
   const focusLabel =
     initialLineRange && initialLineRange.start === initialLineRange.end
-      ? `第 ${initialLineRange.start} 行`
+      ? t("preview.lineSingle", { line: initialLineRange.start })
       : initialLineRange
-        ? `第 ${initialLineRange.start}–${initialLineRange.end} 行`
+        ? t("preview.lineRange", { start: initialLineRange.start, end: initialLineRange.end })
         : null;
 
   if (!isPanel && !anchor) {
@@ -1322,7 +1327,7 @@ export function WorkspaceFilePreview({
   const shell = (
       <div
         role="dialog"
-        aria-label={`预览 ${previewBaseName(preview.path)}`}
+        aria-label={t("preview.previewAria", { name: previewBaseName(preview.path) })}
         className={
           isPanel
             ? "flex h-full min-h-0 flex-col overflow-hidden bg-surface-panel"
@@ -1382,12 +1387,12 @@ export function WorkspaceFilePreview({
           {saveToast ? (
             <div
               className={`flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium ${
-                saveToast === "保存失败"
+                saveToast === t("preview.saveFailed")
                   ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
                   : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
               }`}
             >
-              {saveToast === "保存失败" ? (
+              {saveToast === t("preview.saveFailed") ? (
                 <X className="h-3 w-3 shrink-0" strokeWidth={2.5} />
               ) : (
                 <Check className="h-3 w-3 shrink-0" strokeWidth={2.5} />
@@ -1395,7 +1400,7 @@ export function WorkspaceFilePreview({
               {saveToast}
             </div>
           ) : saving ? (
-            <div className="shrink-0 text-[11px] text-text-muted">保存中…</div>
+            <div className="shrink-0 text-[11px] text-text-muted">{t("preview.saving")}</div>
           ) : null}
           {textualPreview != null && editBlockReason != null ? (
             <div
@@ -1411,7 +1416,7 @@ export function WorkspaceFilePreview({
                 type="button"
                 className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
                 onClick={() => setSourceCollapsed((prev) => !prev)}
-                title={sourceCollapsed ? "展开源码" : "折叠源码"}
+                title={sourceCollapsed ? t("preview.expandSource") : t("preview.collapseSource")}
                 aria-expanded={!sourceCollapsed}
               >
                 {sourceCollapsed ? (
@@ -1431,7 +1436,7 @@ export function WorkspaceFilePreview({
                       : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
                   }`}
                   onClick={() => setViewMode("preview")}
-                  title="渲染预览"
+                  title={t("preview.renderPreview")}
                   aria-pressed={viewMode === "preview"}
                 >
                   <Eye className="h-4 w-4" strokeWidth={1.5} />
@@ -1444,7 +1449,7 @@ export function WorkspaceFilePreview({
                       : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
                   }`}
                   onClick={() => setViewMode("edit")}
-                  title="查看源码"
+                  title={t("preview.viewSource")}
                   aria-pressed={viewMode === "edit"}
                 >
                   <Code2 className="h-4 w-4" strokeWidth={1.5} />
@@ -1462,7 +1467,7 @@ export function WorkspaceFilePreview({
                       : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
                   }`}
                   onClick={() => void switchToPreview()}
-                  title={isRenderablePreview ? "预览" : "只读"}
+                  title={isRenderablePreview ? t("preview.preview") : t("preview.readonly")}
                   aria-pressed={viewMode === "preview"}
                 >
                   <Eye className="h-4 w-4" strokeWidth={1.5} />
@@ -1475,7 +1480,7 @@ export function WorkspaceFilePreview({
                       : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
                   }`}
                   onClick={() => setViewMode("edit")}
-                  title={isRenderablePreview ? "编辑源码" : "编辑"}
+                  title={isRenderablePreview ? t("preview.editSource") : t("preview.edit")}
                   aria-pressed={viewMode === "edit"}
                 >
                   {isHtmlFile ? (
@@ -1491,7 +1496,7 @@ export function WorkspaceFilePreview({
                       className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong disabled:cursor-not-allowed disabled:opacity-40"
                       onClick={undo}
                       disabled={!canUndo}
-                      title="撤销 (⌘Z)"
+                      title={t("preview.undo")}
                     >
                       <Undo2 className="h-4 w-4" strokeWidth={1.5} />
                     </button>
@@ -1500,7 +1505,7 @@ export function WorkspaceFilePreview({
                       className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong disabled:cursor-not-allowed disabled:opacity-40"
                       onClick={redo}
                       disabled={!canRedo}
-                      title="重做 (⌘⇧Z)"
+                      title={t("preview.redo")}
                     >
                       <Redo2 className="h-4 w-4" strokeWidth={1.5} />
                     </button>
@@ -1518,7 +1523,7 @@ export function WorkspaceFilePreview({
                         }
                         openFindBar(true);
                       }}
-                      title="查找替换 (⌘F)"
+                      title={t("preview.findReplace")}
                       aria-pressed={findBarOpen}
                     >
                       <Search className="h-4 w-4" strokeWidth={1.5} />
@@ -1536,7 +1541,7 @@ export function WorkspaceFilePreview({
                 if (!source) return;
                 void window.agenticxDesktop?.copyLocalFileAs?.({ sourcePath: source });
               }}
-              title="另存为"
+              title={t("preview.saveAs")}
             >
               <Download className="h-4 w-4" strokeWidth={1.5} />
             </button>
@@ -1546,8 +1551,8 @@ export function WorkspaceFilePreview({
               onClick={handleCopyClick}
               title={
                 preview.kind === "text" || preview.kind === "markdown" || preview.kind === "code"
-                  ? "复制文件内容"
-                  : "复制路径"
+                  ? t("preview.copyContent")
+                  : t("preview.copyPath")
               }
             >
               {copied ? (
@@ -1561,7 +1566,7 @@ export function WorkspaceFilePreview({
               type="button"
               className="flex h-7 w-7 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
               onClick={requestClose}
-              title="关闭预览（Esc）"
+              title={t("preview.closeEsc")}
             >
               <X className="h-4 w-4" strokeWidth={1.5} />
             </button>
@@ -1593,13 +1598,13 @@ export function WorkspaceFilePreview({
                   setFindBarOpen(false);
                 }
               }}
-              placeholder="查找（支持多行，含前后换行）"
+              placeholder={t("preview.findPlaceholder")}
               autoCorrect="off"
               autoComplete="off"
               autoCapitalize="off"
               spellCheck={false}
               className="min-w-[120px] flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-surface-base px-2.5 py-1.5 font-mono text-xs leading-relaxed text-text-primary outline-none focus:border-cyan-500/50"
-              aria-label="查找内容"
+              aria-label={t("preview.findAria")}
             />
             <textarea
               rows={replaceInputRows}
@@ -1611,41 +1616,41 @@ export function WorkspaceFilePreview({
                   runReplaceOne();
                 }
               }}
-              placeholder="替换为（Shift+Enter 换行）"
+              placeholder={t("preview.replacePlaceholder")}
               autoCorrect="off"
               autoComplete="off"
               autoCapitalize="off"
               spellCheck={false}
               className="min-w-[120px] flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-surface-base px-2.5 py-1.5 font-mono text-xs leading-relaxed text-text-primary outline-none focus:border-cyan-500/50"
-              aria-label="替换内容"
+              aria-label={t("preview.replaceAria")}
             />
             <button
               type="button"
               className="rounded-md border border-[var(--border-subtle)] bg-surface-popover px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
               onClick={() => runFind(false)}
             >
-              上一个
+              {t("preview.findPrev")}
             </button>
             <button
               type="button"
               className="rounded-md border border-[var(--border-subtle)] bg-surface-popover px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
               onClick={() => runFind(true)}
             >
-              下一个
+              {t("preview.findNext")}
             </button>
             <button
               type="button"
               className="rounded-md border border-[var(--border-subtle)] bg-surface-popover px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
               onClick={runReplaceOne}
             >
-              替换
+              {t("preview.replace")}
             </button>
             <button
               type="button"
               className="rounded-md border border-[var(--border-subtle)] bg-surface-popover px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-surface-hover"
               onClick={runReplaceAll}
             >
-              全部替换
+              {t("preview.replaceAll")}
             </button>
             {findStatus ? (
               <span className="w-full text-[11px] text-text-muted">{findStatus}</span>
@@ -1720,21 +1725,21 @@ export function WorkspaceFilePreview({
         </div>
         {saveError ? (
           <div className="shrink-0 border-t border-border bg-rose-500/10 px-4 py-2 text-xs text-rose-300">
-            保存失败：{saveError}
+            {t("preview.saveFailedWith", { error: saveError })}
           </div>
         ) : isEditableText && viewMode === "edit" && isDirty && !saving ? (
           <div className="shrink-0 border-t border-border bg-surface-panel px-4 py-2 text-xs text-text-muted">
-            有未保存修改 · ⌘S 保存 · ⌘Z 撤销 · ⌘F 查找替换
+            {t("preview.dirtyHint")}
           </div>
         ) : null}
         {truncated ? (
           <div className="shrink-0 border-t border-border bg-amber-500/10 px-4 py-2 text-xs text-amber-500/90">
-            文件过大，已截断显示（{formatPreviewBytes(preview.size)}）。
+            {t("preview.truncatedHint", { size: formatPreviewBytes(preview.size) })}
           </div>
         ) : null}
         <Modal
           open={dirtyConfirmOpen}
-          title="有未保存修改"
+          title={t("preview.dirtyTitle")}
           onClose={() => {
             pendingLeaveRef.current = null;
             setDirtyConfirmOpen(false);
@@ -1743,7 +1748,7 @@ export function WorkspaceFilePreview({
           footer={
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={handleDirtyDiscardAndLeave}>
-                放弃修改
+                {t("preview.discard")}
               </Button>
               <Button
                 variant="ghost"
@@ -1752,7 +1757,7 @@ export function WorkspaceFilePreview({
                   setDirtyConfirmOpen(false);
                 }}
               >
-                取消
+                {t("cancel", { ns: "common" })}
               </Button>
               <Button
                 variant="primary"
@@ -1760,13 +1765,13 @@ export function WorkspaceFilePreview({
                   void handleDirtySaveAndLeave();
                 }}
               >
-                保存并关闭
+                {t("preview.saveAndClose")}
               </Button>
             </div>
           }
         >
           <p className="text-sm text-text-primary">
-            当前文件有未保存的修改，离开前请选择如何处理。
+            {t("preview.dirtyLeave")}
           </p>
         </Modal>
       </div>

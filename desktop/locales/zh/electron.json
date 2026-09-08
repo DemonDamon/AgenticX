@@ -1,0 +1,10 @@
+{
+  "menu": {
+    "settings": "设置"
+  },
+  "tray": {
+    "toggleWindow": "打开/隐藏窗口",
+    "settings": "设置",
+    "quit": "退出"
+  }
+}

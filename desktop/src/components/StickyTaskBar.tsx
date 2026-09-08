@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Circle, CircleCheck, Loader2 } from "lucide-react";
 import type { Message } from "../store";
 import {
@@ -35,12 +37,6 @@ interface StickyTaskBarProps {
  * Default: expanded when there is at least one in-progress / pending item;
  * auto-collapses once everything is done so it does not eat composer space.
  */
-const PHASE_LABEL: Record<HarnessPhase, string> = {
-  explore: "探索",
-  read: "读取",
-  author: "编写",
-};
-
 export function StickyTaskBar({
   messages,
   liveness = "idle",
@@ -52,6 +48,10 @@ export function StickyTaskBar({
   toolBudget,
   readFiles,
 }: StickyTaskBarProps) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
+  const phaseLabel = (p: HarnessPhase) =>
+    p === "explore" ? t("taskBar.phaseExplore") : p === "read" ? t("taskBar.phaseRead") : t("taskBar.phaseAuthor");
   const displayed = useMemo(
     () => resolveDisplayedTodoFromMessages(messages, liveness, executionState),
     [messages, liveness, executionState],
@@ -101,12 +101,12 @@ export function StickyTaskBar({
         onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-center gap-2 py-1.5 pl-4 pr-3 text-left transition hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.4)]"
         aria-expanded={expanded}
-        aria-label={expanded ? "收起任务列表" : "展开任务列表"}
+        aria-label={expanded ? t("taskBar.collapse") : t("taskBar.expand")}
       >
         <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
           <ListChecks className="h-4 w-4 text-[rgb(var(--theme-color-rgb,59,130,246))]" />
         </span>
-        <span className="text-[12px] font-semibold text-text-strong">任务进度</span>
+        <span className="text-[12px] font-semibold text-text-strong">{t("taskBar.title")}</span>
         <span
           className={
             allDone
@@ -118,13 +118,13 @@ export function StickyTaskBar({
         </span>
         {codeDevMode && phase ? (
           <span className="rounded bg-surface-panel px-1.5 py-0.5 text-[10px] text-text-muted">
-            相位: {PHASE_LABEL[phase]}
-            {toolBudget ? ` · 工具 ${toolBudget.used}/${toolBudget.total}` : ""}
-            {typeof readFiles === "number" ? ` · 已读 ${readFiles} 文件` : ""}
+            {t("taskBar.phase", { phase: phaseLabel(phase) })}
+            {toolBudget ? t("taskBar.tools", { used: toolBudget.used, total: toolBudget.total }) : ""}
+            {typeof readFiles === "number" ? t("taskBar.readFiles", { count: readFiles }) : ""}
           </span>
         ) : null}
         {liveness === "stalled" && silentSeconds > 0 ? (
-          <span className="text-[10px] text-amber-300/90">已 {silentSeconds}s 无响应</span>
+          <span className="text-[10px] text-amber-300/90">{t("taskBar.noResponse", { seconds: silentSeconds })}</span>
         ) : null}
         {liveness === "stalled" && onResume ? (
           <button
@@ -135,7 +135,7 @@ export function StickyTaskBar({
               onResume();
             }}
           >
-            恢复
+            {t("taskBar.resume")}
           </button>
         ) : null}
         {runIncomplete && onResume ? (
@@ -147,16 +147,16 @@ export function StickyTaskBar({
               onResume();
             }}
           >
-            继续
+            {t("taskBar.continue")}
           </button>
         ) : null}
         {runEnded ? (
           <span className="text-[10px] text-text-muted">
             {executionState === "interrupted"
-              ? "已中断"
+              ? t("taskBar.interrupted")
               : allDone
-                ? "已结束"
-                : "未完成"}
+                ? t("taskBar.ended")
+                : t("taskBar.incomplete")}
           </span>
         ) : null}
         {runEnded ? (
@@ -168,7 +168,7 @@ export function StickyTaskBar({
               setDismissed(true);
             }}
           >
-            关闭
+            {tCommon("close")}
           </button>
         ) : null}
         <span className="flex-1" />
@@ -187,7 +187,7 @@ export function StickyTaskBar({
                   : "text-cyan-400"
             }
           >
-            当前相位：{PHASE_LABEL[phase]}
+            {t("taskBar.currentPhase", { phase: phaseLabel(phase) })}
           </span>
         </div>
       ) : null}
@@ -225,10 +225,10 @@ export function StickyTaskBar({
                   {item.content}
                 </div>
                 {item.status === "in_progress" && liveness === "stalled" && silentSeconds > 0 ? (
-                  <div className="mt-0.5 text-[11px] text-amber-300/80">已 {silentSeconds}s 无响应</div>
+                  <div className="mt-0.5 text-[11px] text-amber-300/80">{t("taskBar.noResponse", { seconds: silentSeconds })}</div>
                 ) : null}
                 {executionState === "interrupted" && item.status === "pending" ? (
-                  <div className="mt-0.5 text-[11px] text-text-muted">任务已中断</div>
+                  <div className="mt-0.5 text-[11px] text-text-muted">{t("taskBar.taskInterrupted")}</div>
                 ) : null}
                 {item.status === "in_progress" && item.activeForm && item.activeForm !== item.content ? (
                   <div className="mt-0.5 text-[11px] text-[rgba(var(--theme-color-rgb,59,130,246),0.8)]">{item.activeForm}</div>

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../i18n/i18n";
 import { Users, X } from "lucide-react";
 import {
   bubbleKind,
   firstScreenAfterSeq,
   membersChanged,
-  statusLabel,
   upsertBySeq,
   visibleContent,
   type RoomMember,
@@ -29,7 +30,7 @@ function asRoom(raw: unknown): RoomSummary | null {
   if (typeof item.id !== "string") return null;
   return {
     id: item.id,
-    title: typeof item.title === "string" && item.title.trim() ? item.title : "未命名房间",
+    title: typeof item.title === "string" && item.title.trim() ? item.title : i18n.t("collab.unnamedRoom", { ns: "workspace" }),
     member_count: typeof item.member_count === "number" ? item.member_count : 0,
     last_seq: typeof item.last_seq === "number" ? item.last_seq : 0,
   };
@@ -43,7 +44,7 @@ function asMember(raw: unknown): RoomMember | null {
     id: item.id,
     member_type: typeof item.member_type === "string" ? item.member_type : "human",
     member_id: typeof item.member_id === "string" ? item.member_id : "",
-    display_name: typeof item.display_name === "string" ? item.display_name : "成员",
+    display_name: typeof item.display_name === "string" ? item.display_name : i18n.t("collab.member", { ns: "workspace" }),
     room_role: typeof item.room_role === "string" ? item.room_role : "member",
   };
 }
@@ -58,13 +59,14 @@ function asMessage(raw: unknown): RoomMessage | null {
     seq: item.seq,
     sender_type: typeof item.sender_type === "string" ? item.sender_type : "human",
     sender_id: typeof item.sender_id === "string" ? item.sender_id : "",
-    sender_name: typeof item.sender_name === "string" ? item.sender_name : "成员",
+    sender_name: typeof item.sender_name === "string" ? item.sender_name : i18n.t("collab.member", { ns: "workspace" }),
     content: typeof item.content === "string" ? item.content : "",
     created_at: typeof item.created_at === "string" ? item.created_at : undefined,
   };
 }
 
 export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Props) {
+  const { t } = useTranslation("workspace");
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [listBusy, setListBusy] = useState(false);
@@ -103,13 +105,13 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
       const res = await window.agenticxDesktop.collabRoomList();
       if (!res.ok) {
         setRooms([]);
-        setListError(res.error || "云房间服务暂时不可用");
+        setListError(res.error || i18n.t("collab.unavailable", { ns: "workspace" }));
         return;
       }
       setRooms((res.data?.rooms ?? []).map(asRoom).filter((item): item is RoomSummary => item != null));
     } catch {
       setRooms([]);
-      setListError("云房间服务暂时不可用");
+      setListError(i18n.t("collab.unavailable", { ns: "workspace" }));
     } finally {
       setListBusy(false);
     }
@@ -129,7 +131,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
       try {
         const detail = await window.agenticxDesktop.collabRoomGet(roomId);
         if (!detail.ok) {
-          setRoomError(detail.error || "云房间服务暂时不可用");
+          setRoomError(detail.error || i18n.t("collab.unavailable", { ns: "workspace" }));
           setStatus(detail.error === "你已被移出该房间" ? "revoked" : "error");
           return;
         }
@@ -147,7 +149,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
           limit: 200,
         });
         if (!history.ok) {
-          setRoomError(history.error || "云房间服务暂时不可用");
+          setRoomError(history.error || i18n.t("collab.unavailable", { ns: "workspace" }));
           setStatus("error");
           return;
         }
@@ -179,13 +181,13 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
         });
         const watch = await window.agenticxDesktop.collabRoomWatch(roomId);
         if (!watch.ok) {
-          setRoomError(watch.error || "云房间服务暂时不可用");
+          setRoomError(watch.error || i18n.t("collab.unavailable", { ns: "workspace" }));
           setStatus("error");
           return;
         }
         setStatus("live");
       } catch {
-        setRoomError("云房间服务暂时不可用");
+        setRoomError(i18n.t("collab.unavailable", { ns: "workspace" }));
         setStatus("error");
       }
     },
@@ -279,7 +281,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
       seq: Number.MAX_SAFE_INTEGER,
       sender_type: "human",
       sender_id: viewerUserId,
-      sender_name: "我",
+      sender_name: i18n.t("collab.me", { ns: "workspace" }),
       content: text,
     };
     setSending(true);
@@ -291,7 +293,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
       if (!res.ok) {
         setMessages((list) => list.filter((item) => item.id !== tempId));
         setDraft(text);
-        setSendError(res.error || "云房间服务暂时不可用");
+        setSendError(res.error || i18n.t("collab.unavailable", { ns: "workspace" }));
         return;
       }
       const server = asMessage(res.data?.message);
@@ -302,7 +304,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
     } catch {
       setMessages((list) => list.filter((item) => item.id !== tempId));
       setDraft(text);
-      setSendError("云房间服务暂时不可用");
+      setSendError(i18n.t("collab.unavailable", { ns: "workspace" }));
     } finally {
       setSending(false);
     }
@@ -314,7 +316,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
   const memberNames = members.map((item) => item.display_name).filter(Boolean);
   const revoked = status === "revoked";
   const isPage = variant === "page";
-  const title = isPage ? "多人协作" : "云房间";
+  const title = isPage ? t("collab.pageTitle") : t("collab.dialogTitle");
 
   const header = (
     <div
@@ -330,7 +332,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
             <h2 id="agx-collab-rooms-title" className="text-lg font-semibold tracking-tight text-text-strong">
               {title}
             </h2>
-            <p className="mt-1 text-sm text-text-muted">与同事在同一间云房间里实时对话。</p>
+            <p className="mt-1 text-sm text-text-muted">{t("collab.pageHint")}</p>
           </>
         ) : (
           <>
@@ -346,8 +348,8 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
           type="button"
           className="agx-topbar-btn !h-10 !w-10"
           onClick={onClose}
-          aria-label="关闭"
-          title="关闭"
+          aria-label={t("close", { ns: "common" })}
+          title={t("close", { ns: "common" })}
         >
           <X className="h-5 w-5" />
         </button>
@@ -358,28 +360,28 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
   const body = (
         <div className="flex min-h-0 min-w-0 flex-1">
           <aside className="flex w-[240px] shrink-0 flex-col border-r border-border bg-surface-base">
-            <div className="border-b border-border px-3 py-2 text-xs text-text-faint">房间列表</div>
+            <div className="border-b border-border px-3 py-2 text-xs text-text-faint">{t("collab.roomList")}</div>
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {listBusy ? <p className="px-2 py-3 text-sm text-text-faint">加载中…</p> : null}
+              {listBusy ? <p className="px-2 py-3 text-sm text-text-faint">{t("collab.loading")}</p> : null}
               {listError ? (
                 <div className="space-y-2 px-2 py-3">
-                  <p className="text-sm text-text-primary">{listError}</p>
+                  <p className="text-sm text-text-primary">{listError === NOT_LOGGED_IN ? t("collab.notLoggedIn") : listError}</p>
                   {notLoggedIn ? (
-                    <p className="text-xs text-text-faint">请先在设置里完成企业登录</p>
+                    <p className="text-xs text-text-faint">{t("collab.loginFirst")}</p>
                   ) : (
                     <button
                       type="button"
                       className="rounded-md border border-border bg-surface-card px-2 py-1 text-xs text-text-strong"
                       onClick={() => void loadRooms()}
                     >
-                      重试
+                      {t("retry", { ns: "common" })}
                     </button>
                   )}
                 </div>
               ) : null}
               {!listBusy && !listError && rooms.length === 0 ? (
                 <p className="px-2 py-3 text-sm leading-relaxed text-text-faint">
-                  还没有云房间。请在企业门户里创建或让同事把你加进来。
+                  {t("collab.emptyRooms")}
                 </p>
               ) : null}
               {rooms.map((item) => {
@@ -396,7 +398,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                     onClick={() => void openRoom(item.id)}
                   >
                     <div className="truncate text-sm font-medium">{item.title}</div>
-                    <div className="mt-0.5 text-[11px] text-text-faint">{item.member_count} 名成员</div>
+                    <div className="mt-0.5 text-[11px] text-text-faint">{t("collab.memberCount", { count: item.member_count })}</div>
                   </button>
                 );
               })}
@@ -406,11 +408,11 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
           <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface-base">
             {!activeRoomId ? (
               <div className="flex flex-1 items-center justify-center px-6 text-sm text-text-faint">
-                选择左侧房间开始对话
+                {t("collab.pickRoom")}
               </div>
             ) : revoked ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-                <p className="text-base font-medium text-text-strong">{statusLabel("revoked")}</p>
+                <p className="text-base font-medium text-text-strong">{t("collab.revoked")}</p>
                 <button
                   type="button"
                   className="rounded-md border border-border bg-surface-card px-3 py-1.5 text-sm text-text-strong"
@@ -422,18 +424,28 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                     setStatus("connecting");
                   }}
                 >
-                  返回房间列表
+                  {t("collab.backToList")}
                 </button>
               </div>
             ) : (
               <>
                 <div className="shrink-0 border-b border-border px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
-                    <h3 className="truncate text-sm font-semibold text-text-strong">{room?.title ?? "协作房间"}</h3>
-                    <span className="shrink-0 text-[11px] text-text-faint">{statusLabel(status)}</span>
+                    <h3 className="truncate text-sm font-semibold text-text-strong">{room?.title ?? t("collab.collabRoom")}</h3>
+                    <span className="shrink-0 text-[11px] text-text-faint">{
+                      status === "connecting"
+                        ? t("collab.statusConnecting")
+                        : status === "live"
+                          ? t("collab.statusLive")
+                          : status === "retrying"
+                            ? t("collab.statusRetrying")
+                            : status === "revoked"
+                              ? t("collab.revoked")
+                              : t("collab.unavailable")
+                    }</span>
                   </div>
                   <p className="mt-1 truncate text-[11px] text-text-faint">
-                    {members.length} 名成员
+                    {t("collab.memberCount", { count: members.length })}
                     {memberNames.length ? ` · ${memberNames.join("、")}` : ""}
                   </p>
                 </div>
@@ -462,7 +474,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                           ].join(" ")}
                         >
                           <div className="mb-1 text-[11px] text-text-faint">
-                            {kind === "meta" ? "Meta" : mine ? "我" : message.sender_name || "成员"}
+                            {kind === "meta" ? "Meta" : mine ? t("collab.me") : message.sender_name || t("collab.member")}
                           </div>
                           <div className="whitespace-pre-wrap break-words">{visibleContent(message.content)}</div>
                         </div>
@@ -482,7 +494,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                     className="min-w-0 flex-1 rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-primary outline-none"
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
-                    placeholder={sending ? "发送中…" : "输入消息，Enter 发送"}
+                    placeholder={sending ? t("collab.sending") : t("collab.inputPlaceholder")}
                     disabled={sending}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" && !event.shiftKey) {
@@ -496,7 +508,7 @@ export function CollabRoomPanel({ open = true, onClose, variant = "dialog" }: Pr
                     className="shrink-0 rounded-md border border-border bg-surface-card-strong px-3 py-2 text-sm text-text-strong disabled:opacity-50"
                     disabled={sending || !draft.trim()}
                   >
-                    发送
+                    {t("collab.send")}
                   </button>
                 </form>
                 {sendError ? <p className="px-3 pb-3 text-xs text-text-primary">{sendError}</p> : null}

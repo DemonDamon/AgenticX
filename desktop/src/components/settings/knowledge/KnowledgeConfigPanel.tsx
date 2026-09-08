@@ -1,5 +1,6 @@
 // Plan-Id: machi-kb-stage1-local-mvp
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AlertTriangle, BookOpen, Check, Eye, EyeOff, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Panel } from "../../ds/Panel";
@@ -7,6 +8,7 @@ import { SETTINGS_INTRO_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-ty
 import { SettingsSwitch } from "../SettingsSwitch";
 import type { KBApi, ParserStatus } from "./api";
 import {
+
   CHUNKING_STRATEGIES,
   EMBEDDING_PROVIDERS,
   RETRIEVAL_MODES,
@@ -17,6 +19,34 @@ import {
 import { KB_FIELD_BASE } from "./kb-field-classes";
 import { listKbEmbeddingModelOptions } from "../../../utils/embedding-model-options";
 import type { ProviderCatalogEntry } from "../../../utils/model-options";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
+function embedProviderLabel(id: string): string {
+  if (id === "ollama") return st("knowledge.provOllama");
+  if (id === "bailian") return st("knowledge.provBailian");
+  return EMBEDDING_PROVIDERS.find((p) => p.id === id)?.label ?? id;
+}
+
+function chunkStrategyLabel(id: string): string {
+  if (id === "recursive") return st("knowledge.chunkRecursive");
+  if (id === "contextual") return st("knowledge.chunkContextual");
+  return CHUNKING_STRATEGIES.find((s) => s.id === id)?.label ?? id;
+}
+
+function retrievalModeLabel(id: string): string {
+  const keys: Record<string, string> = {
+    vector: "knowledge.retVector",
+    bm25: "knowledge.retBm25",
+    hybrid: "knowledge.retHybrid",
+    hybrid_graph: "knowledge.retHybridGraph",
+  };
+  return keys[id] ? st(keys[id]) : id;
+}
+
 
 type Props = {
   api: KBApi;
@@ -38,6 +68,7 @@ export function KnowledgeConfigPanel({
   initialStats,
   providerCatalog = {},
 }: Props) {
+  const { t } = useTranslation("settings");
   const config = draft;
   const setConfig = (updater: KBConfig | ((prev: KBConfig) => KBConfig)) => {
     const next = typeof updater === "function" ? (updater as (p: KBConfig) => KBConfig)(draft) : updater;
@@ -70,7 +101,7 @@ export function KnowledgeConfigPanel({
   }, [api]);
 
   // Reset the inline test badge whenever embedding-relevant fields change,
-  // so users don't read a stale "有效 ✓" next to a key they just edited.
+  // so users don't read a stale st("knowledge.valid") next to a key they just edited.
   useEffect(() => {
     setTestStatus("idle");
     setTestMessage("");
@@ -90,11 +121,11 @@ export function KnowledgeConfigPanel({
       if (result.ok) {
         setTestStatus("ok");
         setTestMessage(
-          `维度 ${result.actual_dim} · 用时 ${result.latency_ms ?? "?"}ms`,
+          st("knowledge.dimLatency", { dim: result.actual_dim, ms: result.latency_ms ?? "?" }),
         );
       } else {
         setTestStatus("fail");
-        setTestMessage(result.error || `${result.stage ?? "unknown"} 阶段失败`);
+        setTestMessage(result.error || st("knowledge.stageFailed", { stage: result.stage ?? "unknown" }));
       }
     } catch (exc) {
       setTestStatus("fail");
@@ -193,29 +224,28 @@ export function KnowledgeConfigPanel({
     <div className="space-y-3">
       {rebuildRequired ? (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-          ⚠️ 嵌入模型或维度已变更，现有索引与新配置不一致，需要在「资料」页点「重建索引」后才能重新检索。
+          {st("knowledge.embedChanged")}
         </div>
       ) : null}
 
       {config.embedding.provider === "ollama" && ollamaStatus === "missing" ? (
         <div className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
-          未在本机 ({config.embedding.base_url || "http://localhost:11434"}) 检测到 Ollama 或模型
-          <code className="mx-1 rounded bg-rose-500/20 px-1 py-0.5">{config.embedding.model}</code>。
-          你可以继续保存（稍后启动 Ollama 即可），也可以切换到「OpenAI / SiliconFlow / Bailian」等在线 Provider。
+          {st("knowledge.ollamaMissing", { url: config.embedding.base_url || "http://localhost:11434" })}
+          <code className="mx-1 rounded bg-rose-500/20 px-1 py-0.5">{config.embedding.model}</code>
         </div>
       ) : null}
 
-      <Panel title="向量库">
+      <Panel title={st("knowledge.vectorStore")}>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Field label="后端">
+          <Field label={st("knowledge.backend")}>
             <input
               className={`w-full cursor-default opacity-90 ${KB_FIELD_BASE}`}
               value={config.vector_store.backend}
               readOnly
-              title="Stage-1 MVP 仅支持 Chroma"
+              title={st("knowledge.chromaOnly")}
             />
           </Field>
-          <Field label="存储路径">
+          <Field label={st("knowledge.storePath")}>
             <input
               className={`w-full ${KB_FIELD_BASE}`}
               value={config.vector_store.path}
@@ -224,7 +254,7 @@ export function KnowledgeConfigPanel({
               }
             />
           </Field>
-          <Field label="集合名">
+          <Field label={st("knowledge.collection")}>
             <input
               className={`w-full ${KB_FIELD_BASE}`}
               value={config.vector_store.collection}
@@ -236,7 +266,7 @@ export function KnowledgeConfigPanel({
         </div>
       </Panel>
 
-      <Panel title="嵌入模型">
+      <Panel title={st("knowledge.embedModel")}>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="Provider">
             <select
@@ -246,12 +276,12 @@ export function KnowledgeConfigPanel({
             >
               {EMBEDDING_PROVIDERS.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.label}
+                  {embedProviderLabel(p.id)}
                 </option>
               ))}
             </select>
           </Field>
-          <Field label="模型">
+          <Field label={st("knowledge.model")}>
             {embeddingModelOptions.length > 0 ? (
               <select
                 className={`w-full ${KB_FIELD_BASE}`}
@@ -273,17 +303,17 @@ export function KnowledgeConfigPanel({
                 onChange={(e) =>
                   patch("embedding", { ...config.embedding, model: e.target.value })
                 }
-                placeholder="请先在「模型服务」拉取并设为可见的嵌入模型"
+                placeholder={st("knowledge.embedModelPh")}
               />
             )}
             {embeddingModelOptions.length === 0 &&
             config.embedding.provider !== "ollama" ? (
               <p className="mt-1 text-[11px] text-text-faint">
-                在「模型服务」选择对应厂商，从 API 获取模型并将嵌入类模型设为可见后，此处会出现下拉选项。
+                {st("knowledge.embedModelHint")}
               </p>
             ) : null}
           </Field>
-          <Field label="向量维度">
+          <Field label={st("knowledge.dimension")}>
             <input
               type="number"
               className={`w-full ${KB_FIELD_BASE}`}
@@ -300,7 +330,7 @@ export function KnowledgeConfigPanel({
               className={`w-full ${KB_FIELD_BASE}`}
               value={config.embedding.base_url ?? ""}
               placeholder={
-                config.embedding.provider === "ollama" ? "http://localhost:11434" : "可选"
+                config.embedding.provider === "ollama" ? "http://localhost:11434" : st("knowledge.optional")
               }
               onChange={(e) =>
                 patch("embedding", {
@@ -324,8 +354,8 @@ export function KnowledgeConfigPanel({
                     }
                     placeholder={
                       config.embedding.provider === "ollama"
-                        ? "本地 Ollama 可留空"
-                        : "请粘贴百炼 / OpenAI / SiliconFlow 等在线服务的 API Key"
+                        ? st("knowledge.ollamaKeyOptional")
+                        : st("knowledge.onlineKeyPh")
                     }
                   />
                 </div>
@@ -342,15 +372,15 @@ export function KnowledgeConfigPanel({
                   }`}
                   disabled={testStatus === "checking"}
                   onClick={testConnectivity}
-                  title="发一条测试 embedding 请求，验证密钥、模型、维度是否可用"
+                  title={st("knowledge.probeTitle")}
                 >
                   {testStatus === "checking"
-                    ? "检测中…"
+                    ? st("knowledge.checking")
                     : testStatus === "ok"
-                    ? "有效 ✓"
+                    ? st("knowledge.valid")
                     : testStatus === "fail"
-                    ? "失败 ✗"
-                    : "检 测"}
+                    ? st("knowledge.failedMark")
+                    : st("knowledge.check")}
                 </button>
               </div>
               {testMessage ? (
@@ -371,12 +401,12 @@ export function KnowledgeConfigPanel({
         </div>
         {embeddingChanged ? (
           <p className="mt-3 text-xs text-text-subtle">
-            修改嵌入模型后，保存时将提示现有索引需要重建 —— 该操作不会自动删除向量库。
+            {st("knowledge.embedChangeHint")}
           </p>
         ) : null}
       </Panel>
 
-      <Panel title="切片策略">
+      <Panel title={st("knowledge.chunkStrategy")}>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <Field label="Strategy">
             <select
@@ -388,7 +418,7 @@ export function KnowledgeConfigPanel({
             >
               {CHUNKING_STRATEGIES.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.label}
+                  {chunkStrategyLabel(s.id)}
                 </option>
               ))}
             </select>
@@ -424,9 +454,9 @@ export function KnowledgeConfigPanel({
         </div>
       </Panel>
 
-      <Panel title="文件过滤">
+      <Panel title={st("knowledge.fileFilter")}>
         <div className="space-y-4">
-          <Field label="扩展名 · 逗号分隔">
+          <Field label={st("knowledge.extensions")}>
             <div className="flex items-start gap-2">
               <input
                 className={`min-w-0 flex-1 ${KB_FIELD_BASE}`}
@@ -450,14 +480,14 @@ export function KnowledgeConfigPanel({
                     extensions: [...defaultKBConfig().file_filters.extensions],
                   })
                 }
-                title="恢复 Near 内置的全量支持列表（含 LiteParse 覆盖的旧版 Office、表格、图片）"
+                title={st("knowledge.restoreExtTitle")}
               >
-                恢复默认
+                {st("knowledge.restoreDefault")}
               </button>
             </div>
           </Field>
           <ParserCapabilitySection parserStatus={parserStatus} />
-          <Field label="单文件上限 MB">
+          <Field label={st("knowledge.maxFileMb")}>
             <input
               type="number"
               className={`w-full ${KB_FIELD_BASE}`}
@@ -474,13 +504,12 @@ export function KnowledgeConfigPanel({
         </div>
       </Panel>
 
-      <Panel title="检索">
+      <Panel title={st("knowledge.retrieval")}>
         <p className={SETTINGS_INTRO_CLASS}>
-          对话侧的「智能 / 始终检索」在页面上方<strong className="font-medium text-text-primary">对话检索</strong>
-          中统一配置；此处仅配置本知识脑的索引与检索通道参数。
+          {st("knowledge.retrievalHint")}
         </p>
         <div className="space-y-4">
-          <Field label="默认 Top-K">
+          <Field label={st("knowledge.defaultTopK")}>
             <input
               type="number"
               className={`w-full ${KB_FIELD_BASE}`}
@@ -495,7 +524,7 @@ export function KnowledgeConfigPanel({
               }
             />
           </Field>
-          <Field label="检索通道">
+          <Field label={st("knowledge.retrievalChannel")}>
             <select
               className={`w-full ${KB_FIELD_BASE}`}
               value={config.retrieval.retrieval_mode ?? "vector"}
@@ -508,7 +537,7 @@ export function KnowledgeConfigPanel({
             >
               {RETRIEVAL_MODES.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.label}
+                  {retrievalModeLabel(m.id)}
                 </option>
               ))}
             </select>
@@ -530,7 +559,7 @@ export function KnowledgeConfigPanel({
                   }
                 />
               </Field>
-              <Field label="向量权重">
+              <Field label={st("knowledge.vectorWeight")}>
                 <input
                   type="number"
                   step="0.1"
@@ -545,7 +574,7 @@ export function KnowledgeConfigPanel({
                   }
                 />
               </Field>
-              <Field label="BM25 权重">
+              <Field label={st("knowledge.bm25Weight")}>
                 <input
                   type="number"
                   step="0.1"
@@ -563,18 +592,18 @@ export function KnowledgeConfigPanel({
             </div>
           )}
           <p className="text-[11px] leading-snug text-text-faint">
-            智能检索：由模型判断何时检索，包含你主动要求「查知识库」的场景；始终检索：每轮都先检索后再回答。
+            {st("knowledge.smartHint")}
           </p>
         </div>
       </Panel>
 
-      <Panel title="增强能力">
+      <Panel title={st("knowledge.enhanced")}>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <KbCapabilityTile
-            phase="入库后"
+            phase={st("knowledge.phaseIngest")}
             icon={BookOpen}
-            title="Wiki 编译"
-            description="资料入库完成后，自动生成结构化 Wiki 页"
+            title={st("knowledge.wikiCompile")}
+            description={st("knowledge.wikiCompileDesc")}
             enabled={config.wiki_compiler?.enabled ?? false}
             onChange={(enabled) =>
               setConfig({
@@ -584,10 +613,10 @@ export function KnowledgeConfigPanel({
             }
           />
           <KbCapabilityTile
-            phase="回答时"
+            phase={st("knowledge.phaseAnswer")}
             icon={Sparkles}
-            title="合成答案"
-            description="检索命中多段内容后，合并为一条带来源的回答"
+            title={st("knowledge.synthesis")}
+            description={st("knowledge.synthesisDesc")}
             enabled={config.synthesis?.enabled ?? false}
             onChange={(enabled) =>
               setConfig({
@@ -601,14 +630,14 @@ export function KnowledgeConfigPanel({
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         {dirty ? (
-          <span className="text-xs text-amber-500">· 有未保存的改动，请使用下方「保存」</span>
+          <span className="text-xs text-amber-500">{st("knowledge.unsaved")}</span>
         ) : null}
         <button
           type="button"
           className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text-subtle transition hover:bg-surface-hover hover:text-text-primary"
           onClick={reset}
         >
-          <RotateCcw className="h-3.5 w-3.5" /> 重置为默认
+          <RotateCcw className="h-3.5 w-3.5" /> {st("knowledge.resetDefaultBtn")}
         </button>
       </div>
     </div>
@@ -673,13 +702,13 @@ function ParserCapabilitySection({ parserStatus }: { parserStatus: ParserStatus 
 
   return (
     <div className="space-y-2">
-      <div className={SETTINGS_LABEL_CLASS}>解析能力</div>
+      <div className={SETTINGS_LABEL_CLASS}>{st("knowledge.parseAbility")}</div>
       <div className="overflow-hidden rounded-lg border border-border bg-surface-panel/60">
         <ParserCapabilityRow
-          title="内置解析器"
+          title={st("knowledge.builtinParser")}
           state="ok"
-          statusLabel="已就绪"
-          detail="纯文本、PDF、DOCX、PPTX、HTML、JSON、CSV、YAML"
+          statusLabel={st("knowledge.ready")}
+          detail={st("knowledge.builtinDetail")}
         />
         <ParserCapabilityDivider />
         <ParserCapabilityRow
@@ -687,19 +716,21 @@ function ParserCapabilitySection({ parserStatus }: { parserStatus: ParserStatus 
           state={liteparseLoading ? "loading" : liteparseOk ? "ok" : "warn"}
           statusLabel={
             liteparseLoading
-              ? "检测中"
+              ? st("knowledge.detecting")
               : liteparseOk
-                ? `已安装${parserStatus?.liteparse?.version ? ` v${parserStatus.liteparse.version}` : ""}`
-                : "未安装"
+                ? parserStatus?.liteparse?.version
+                  ? st("knowledge.installedVer", { version: parserStatus.liteparse.version })
+                  : st("knowledge.installed")
+                : st("knowledge.notInstalled")
           }
           detail={
             liteparseLoading ? (
-              "正在检测本机是否已安装 LiteParse…"
+              st("knowledge.liteparseDetecting")
             ) : liteparseOk ? (
-              "覆盖 .doc / .ppt / .xls / .xlsx 与图片 OCR"
+              st("knowledge.liteparseOk")
             ) : (
               <>
-                旧版 Office、表格与图片暂不可解析。安装：
+                {st("knowledge.liteparseMissing")}
                 <code className="ml-1 rounded bg-surface-hover px-1 py-0.5 text-[11px] text-text-primary">
                   {parserStatus?.install_hint || "npm i -g @llamaindex/liteparse"}
                 </code>
@@ -713,13 +744,13 @@ function ParserCapabilitySection({ parserStatus }: { parserStatus: ParserStatus 
             <ParserCapabilityRow
               title="LibreOffice"
               state={libreofficeOk ? "ok" : "warn"}
-              statusLabel={libreofficeOk ? "已安装" : "未安装"}
+              statusLabel={libreofficeOk ? st("knowledge.installed") : st("knowledge.notInstalled")}
               detail={
                 libreofficeOk ? (
-                  "LiteParse 解析 .doc / .ppt / .xls / .xlsx 时用于格式转换"
+                  st("knowledge.loHintOk")
                 ) : (
                   <>
-                    解析旧版 Office 与表格需要它。安装：
+                    {st("knowledge.loHintMissing")}
                     <code className="ml-1 rounded bg-surface-hover px-1 py-0.5 text-[11px] text-text-primary">
                       brew install --cask libreoffice
                     </code>
@@ -826,7 +857,7 @@ function ApiKeyInput({
       <button
         type="button"
         tabIndex={-1}
-        aria-label={visible ? "隐藏密钥" : "显示密钥"}
+        aria-label={visible ? st("knowledge.hideKey") : st("knowledge.showKey")}
         className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
         onClick={() => setVisible((v) => !v)}
       >

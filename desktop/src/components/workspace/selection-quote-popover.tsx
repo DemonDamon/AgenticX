@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 const POPUP_GAP = 6;
 /** Single-line「引用」pill — keep in sync with SelectionQuotePopover h-7. */
@@ -81,6 +82,7 @@ type SelectionQuotePopoverProps = {
 };
 
 export function SelectionQuotePopover({ anchor, onQuote }: SelectionQuotePopoverProps) {
+  const { t } = useTranslation("workspace");
   return createPortal(
     <button
       type="button"
@@ -89,7 +91,7 @@ export function SelectionQuotePopover({ anchor, onQuote }: SelectionQuotePopover
       onMouseDown={(event) => event.preventDefault()}
       onClick={onQuote}
     >
-      引用至当前对话
+      {t("preview.quoteToChat")}
     </button>,
     document.body
   );

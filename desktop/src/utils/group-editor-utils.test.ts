@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
+import { i18n } from "../i18n/i18n";
 import {
   extractUnknownAvatarIdFromError,
   getGroupSaveErrorMessage,
@@ -21,10 +22,7 @@ test("getGroupSaveErrorMessage: unknown avatar_id 返回友好提示", () => {
   const msg = getGroupSaveErrorMessage(
     'HTTP 400: {"detail":"unknown avatar_id: 8ba7ebdd7acc"}',
   );
-  assert.equal(
-    msg,
-    "检测到群成员里包含已失效分身，已自动过滤。请确认成员后再次保存。",
-  );
+  assert.equal(msg, i18n.t("groups.unknownAvatarFiltered", { ns: "sidebar" }));
 });
 
 test("getGroupSaveErrorMessage: 普通错误保留原文", () => {

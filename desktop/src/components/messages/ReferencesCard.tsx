@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight, ExternalLink, Search } from "lucide-react";
 import type { SearchReference } from "../../types/search-references";
 import { openSearchReference } from "../../utils/open-kb-reference";
@@ -18,20 +19,22 @@ function buildSummary(
   kbCount: number,
   webCount: number,
   queryCount: number,
+  t: (key: string, opts?: Record<string, unknown>) => string,
 ): string {
   if (kbCount > 0 && webCount === 0) {
-    return `找到了 ${kbCount} 篇知识库资料`;
+    return t("references.kbOnly", { count: kbCount });
   }
   if (kbCount > 0 && webCount > 0) {
-    return `参考 ${refCount} 篇资料（含知识库 ${kbCount} 篇）`;
+    return t("references.mixed", { count: refCount, kb: kbCount });
   }
   if (queryCount > 0) {
-    return `已检索 ${queryCount} 个关键词，参考 ${refCount} 篇资料`;
+    return t("references.withQueries", { queries: queryCount, count: refCount });
   }
-  return `参考 ${refCount} 篇资料`;
+  return t("references.generic", { count: refCount });
 }
 
 export function ReferencesCard({ references, searchedQueries }: Props) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
@@ -53,7 +56,7 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
 
   if (docCount === 0) return null;
 
-  const summary = buildSummary(docCount, kbGroups.length, webGroups.length, queryCount);
+  const summary = buildSummary(docCount, kbGroups.length, webGroups.length, queryCount, t);
 
   const renderKbList = (items: DocGroup[]) => (
     <ol
@@ -82,7 +85,7 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
               </span>
               {fragmentCount > 1 ? (
                 <span className="shrink-0 whitespace-nowrap text-[11px] text-text-faint">
-                  · {fragmentCount} 个片段
+                  {t("references.fragments", { count: fragmentCount })}
                 </span>
               ) : null}
             </button>
@@ -181,14 +184,14 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
               <>
                 {visibleKb.length > 0 ? (
                   <div className="space-y-1">
-                    <div className="text-[11px] font-medium tracking-wide text-text-faint">知识库</div>
+                    <div className="text-[11px] font-medium tracking-wide text-text-faint">{t("references.knowledgeBase")}</div>
                     {renderKbList(visibleKb)}
                   </div>
                 ) : null}
                 {visibleWeb.length > 0 ? (
                   <div className="space-y-1">
                     {visibleKb.length > 0 ? (
-                      <div className="text-[11px] font-medium tracking-wide text-text-faint">网络</div>
+                      <div className="text-[11px] font-medium tracking-wide text-text-faint">{t("references.web")}</div>
                     ) : null}
                     {renderWebList(visibleWeb)}
                   </div>
@@ -201,7 +204,7 @@ export function ReferencesCard({ references, searchedQueries }: Props) {
                 className="rounded-md px-1 py-0.5 text-[12px] text-[rgba(var(--theme-color-rgb,6,182,212),0.92)] transition-colors hover:bg-surface-hover/20 hover:text-[rgba(var(--theme-color-rgb,6,182,212),1)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,6,182,212),0.30)]"
                 onClick={() => setShowAll(true)}
               >
-                显示更多（+{hiddenCount}）
+                {t("references.showMore", { count: hiddenCount })}
               </button>
             ) : null}
           </div>

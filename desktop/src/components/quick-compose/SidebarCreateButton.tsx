@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { Bot, Hash, Plus } from "lucide-react";
 import { useAppStore } from "../../store";
 import { HoverTip } from "../ds/HoverTip";
@@ -7,6 +8,7 @@ import { HoverTip } from "../ds/HoverTip";
 const MENU_WIDTH = 168;
 
 export function SidebarCreateButton() {
+  const { t } = useTranslation("sidebar");
   const openQuickCompose = useAppStore((s) => s.openQuickCompose);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -64,7 +66,7 @@ export function SidebarCreateButton() {
               onClick={() => pick("expert")}
             >
               <Bot className="h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} aria-hidden />
-              新建专家
+              {t("compose.newExpert")}
             </button>
             <button
               type="button"
@@ -73,7 +75,7 @@ export function SidebarCreateButton() {
               onClick={() => pick("group")}
             >
               <Hash className="h-4 w-4 shrink-0 text-text-muted" strokeWidth={1.8} aria-hidden />
-              新建群聊
+              {t("compose.newGroup")}
             </button>
           </div>,
           document.body
@@ -82,12 +84,12 @@ export function SidebarCreateButton() {
 
   return (
     <>
-      <HoverTip label="新建">
+      <HoverTip label={t("compose.new")}>
         <button
           ref={btnRef}
           type="button"
           className="agx-topbar-btn agx-topbar-btn--icon-only"
-          aria-label="新建"
+          aria-label={t("compose.new")}
           aria-expanded={menuOpen}
           aria-haspopup="menu"
           data-quick-compose-trigger=""

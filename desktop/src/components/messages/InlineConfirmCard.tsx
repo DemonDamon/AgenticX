@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AlertCircle, Check, Clock, X } from "lucide-react";
 import type {
   ActionConfirmationDecision,
@@ -20,21 +21,24 @@ type Props = {
   ) => Promise<void> | void;
 };
 
-function statusLabel(confirmation: PendingActionConfirmation): string {
+function statusLabel(
+  confirmation: PendingActionConfirmation,
+  t: (key: string) => string,
+): string {
   switch (confirmation.status) {
     case "approved":
-      return "已确认";
+      return t("confirm.approved");
     case "rejected":
-      return "已取消";
+      return t("confirm.rejected");
     case "expired":
-      return "确认已失效";
+      return t("confirm.expired");
     case "resolving":
-      return "提交中…";
+      return t("confirm.resolving");
     case "uncertain":
-      return "请求可能已送达，请稍候观察";
+      return t("confirm.uncertain");
     case "pending":
     default:
-      return "待确认";
+      return t("confirm.pending");
   }
 }
 
@@ -43,6 +47,7 @@ export function InlineConfirmCard({
   groupChatRail = false,
   onResolve,
 }: Props) {
+  const { t } = useTranslation("chat");
   const titleId = useId();
   const shellClass = groupChatRail ? GROUP_INLINE_CARD_SHELL_CLASS : ASSISTANT_INLINE_CARD_SHELL_CLASS;
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -109,7 +114,7 @@ export function InlineConfirmCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
             {resolvedIcon}
-            <span>{statusLabel({ ...confirmation, status: effectiveStatus })}</span>
+            <span>{statusLabel({ ...confirmation, status: effectiveStatus }, t)}</span>
             {confirmation.source ? (
               <>
                 <span aria-hidden>·</span>
@@ -124,9 +129,9 @@ export function InlineConfirmCard({
         {effectiveStatus === "pending" && countdown ? (
           <div
             className="shrink-0 rounded-md border border-border/70 bg-surface-hover/60 px-2 py-1 font-mono text-[11px] tabular-nums text-text-muted"
-            aria-label={`剩余 ${countdown}`}
+            aria-label={t("confirm.remaining", { countdown })}
           >
-            剩余 {countdown}
+            {t("confirm.remaining", { countdown })}
           </div>
         ) : null}
       </div>
@@ -148,13 +153,13 @@ export function InlineConfirmCard({
 
       {effectiveStatus === "uncertain" ? (
         <p className="mt-2 text-[12px] text-status-warning">
-          请求可能已送达，请稍候观察；不要重复点击以免重复执行。
+          {t("confirm.uncertainHint")}
         </p>
       ) : null}
 
       {effectiveStatus === "expired" ? (
         <p className="mt-2 text-[12px] text-text-muted">
-          确认已失效，请让智能体重新生成。
+          {t("confirm.expiredHint")}
         </p>
       ) : null}
 
@@ -187,7 +192,7 @@ export function InlineConfirmCard({
             </button>
           </div>
           <p className="mt-2 text-[11px] leading-snug text-text-muted">
-            也可在输入框直接回复「确认」或「取消」
+            {t("confirm.composerHint")}
           </p>
         </>
       ) : null}

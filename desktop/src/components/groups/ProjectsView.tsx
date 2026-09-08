@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   BookOpen,
   Boxes,
@@ -14,7 +15,7 @@ import {
 import { MainViewShell } from "../ds/MainViewShell";
 import { useAppStore, type GroupChat } from "../../store";
 import { groupColorByIndex } from "../../utils/avatar-color";
-import { GROUP_TEMPLATES, type GroupTemplate } from "./group-templates";
+import { GROUP_TEMPLATES, groupTemplateI18nKey, type GroupTemplate } from "./group-templates";
 import { GroupEditorInline } from "./GroupEditorInline";
 import { GroupTemplateCreateDialog } from "./GroupTemplateCreateDialog";
 import {
@@ -49,6 +50,8 @@ const PROJECT_CARD_SELECTED =
   "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] bg-surface-card-strong ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 
 export function ProjectsView() {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
   const groups = useAppStore((s) => s.groups);
   const avatars = useAppStore((s) => s.avatars);
   const setAvatars = useAppStore((s) => s.setAvatars);
@@ -95,14 +98,14 @@ export function ProjectsView() {
     const confirmResult =
       typeof api.confirmDialog === "function"
         ? await api.confirmDialog({
-            title: "确认删除群聊",
-            message: `确定删除群聊「${group.name}」吗？`,
-            detail: "此操作不可恢复。",
-            confirmText: "删除",
-            cancelText: "取消",
+            title: t("groups.deleteTitle"),
+            message: t("groups.deleteMessage", { name: group.name }),
+            detail: t("groups.deleteIrreversible"),
+            confirmText: tCommon("delete"),
+            cancelText: tCommon("cancel"),
             destructive: true,
           })
-        : { ok: true, confirmed: window.confirm(`确定删除群聊「${group.name}」吗？此操作不可恢复。`) };
+        : { ok: true, confirmed: window.confirm(t("groups.deleteConfirm", { name: group.name })) };
     if (!confirmResult.confirmed) return;
     const groupPaneId = `group:${group.id}`;
     const groupPanes = panes.filter((item) => item.avatarId === groupPaneId);
@@ -153,9 +156,9 @@ export function ProjectsView() {
     <MainViewShell>
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-text-strong">专家群聊</h2>
+          <h2 className="text-lg font-semibold text-text-strong">{t("groups.title")}</h2>
           <p className="mt-1 text-sm text-text-muted">
-            把多个数字专家编成一个团队，协同完成复杂任务。
+            {t("groups.subtitle")}
           </p>
         </div>
         <button
@@ -167,18 +170,18 @@ export function ProjectsView() {
           }}
         >
           <Plus className="h-4 w-4" />
-          新建群聊
+          {t("groups.newGroup")}
         </button>
       </div>
 
       {/* My groups */}
       <section className="mb-8">
         <div className="mb-2 text-xs font-semibold uppercase tracking-[0.06em] text-text-subtle">
-          我的群聊
+          {t("groups.myGroups")}
         </div>
         {groups.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-text-muted">
-            还没有专家群聊，从下方模板或点「新建群聊」开始组建团队。
+            {t("groups.empty")}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -223,13 +226,13 @@ export function ProjectsView() {
                         {groupTitle}
                       </div>
                       <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-text-muted">
-                        {group.avatarIds.length} 个成员 · {memberNames}
+                        {t("groups.memberCount", { count: group.avatarIds.length, names: memberNames })}
                       </p>
                     </div>
                     <button
                       type="button"
                       className="shrink-0 rounded-md p-1 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
-                      aria-label="编辑群聊"
+                      aria-label={t("groups.editAria")}
                       onClick={(e) => {
                         e.stopPropagation();
                         setEditorState({ mode: "edit", group });
@@ -249,7 +252,7 @@ export function ProjectsView() {
       <section>
         <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.06em] text-text-subtle">
           <FolderKanban className="h-3.5 w-3.5" />
-          从模板组建团队
+          {t("groups.fromTemplate")}
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {GROUP_TEMPLATES.map((tpl) => {
@@ -265,9 +268,9 @@ export function ProjectsView() {
                   <Icon className="h-[18px] w-[18px] text-text-subtle" aria-hidden />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-text-strong">{tpl.name}</div>
+                  <div className="text-sm font-semibold text-text-strong">{t(groupTemplateI18nKey(tpl.id, "name"))}</div>
                   <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-text-muted">
-                    {tpl.description}
+                    {t(groupTemplateI18nKey(tpl.id, "description"))}
                   </p>
                 </div>
               </button>
@@ -304,7 +307,7 @@ export function ProjectsView() {
           key={selectedTemplate.id}
           template={selectedTemplate}
           initialGroupName={nextAvailableTemplateGroupName(
-            selectedTemplate.name,
+            t(groupTemplateI18nKey(selectedTemplate.id, "name")),
             groups.map((group) => group.name),
           )}
           onClose={() => setSelectedTemplate(null)}

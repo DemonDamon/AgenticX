@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 import { useAppStore } from "../store";
 import {
@@ -55,14 +56,14 @@ const CATEGORY_ORDER = [
   "messages",
 ];
 
-const CATEGORY_LABELS: Record<string, string> = {
-  system_prompt: "系统提示词",
-  tool_definitions: "工具定义",
-  skills: "技能",
-  connectors_and_mcp: "连接器及 MCP",
-  subagents: "子智能体",
-  summarized_conversation: "会话摘要",
-  messages: "对话消息",
+const CATEGORY_LABEL_KEYS: Record<string, string> = {
+  system_prompt: "contextUsage.systemPrompt",
+  tool_definitions: "contextUsage.toolDefinitions",
+  skills: "contextUsage.skills",
+  connectors_and_mcp: "contextUsage.connectors",
+  subagents: "contextUsage.subagents",
+  summarized_conversation: "contextUsage.summarized",
+  messages: "contextUsage.messages",
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -163,6 +164,7 @@ export function ContextUsageButton({
   apiToken: string;
   isStreaming?: boolean;
 }) {
+  const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const [usage, setUsage] = useState<ContextUsage | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -327,17 +329,17 @@ export function ContextUsageButton({
   const percent = visibleUsage?.percent ?? 0;
   const occupancyLine = visibleUsage
     ? `${formatOccupancyFullLabel(visibleUsage.percent)} · ${formatOccupancyTokenPair(visibleUsage.used_tokens, visibleUsage.max_tokens)}`
-    : "上下文用量";
+    : t("contextUsage.title");
   const hoverLabel = useMemo(() => {
     if (open) return "";
-    if (!sessionId) return "上下文用量（会话未就绪）";
+    if (!sessionId) return t("contextUsage.notReady");
     return occupancyLine;
-  }, [occupancyLine, open, sessionId]);
+  }, [occupancyLine, open, sessionId, t]);
 
   const ariaLabel = useMemo(() => {
-    if (!sessionId) return "上下文用量（会话未就绪）";
+    if (!sessionId) return t("contextUsage.notReady");
     return occupancyLine;
-  }, [occupancyLine, sessionId]);
+  }, [occupancyLine, sessionId, t]);
 
   const trigger = (
     <button
@@ -367,7 +369,7 @@ export function ContextUsageButton({
               style={{ left: panelPos.left, bottom: panelPos.bottom, width: panelPos.width }}
             >
               <div className="mb-2.5 flex items-center justify-between">
-                <span className="text-[13px] font-medium text-text-strong">上下文用量</span>
+                <span className="text-[13px] font-medium text-text-strong">{t("contextUsage.title")}</span>
                 <button
                   type="button"
                   className="flex h-5 w-5 items-center justify-center rounded text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
@@ -380,9 +382,9 @@ export function ContextUsageButton({
               </div>
 
               {loadFailed ? (
-                <div className="py-2 text-[12px] text-text-faint">加载失败，请稍后重试</div>
+                <div className="py-2 text-[12px] text-text-faint">{t("contextUsage.loadFailed")}</div>
               ) : !visibleUsage ? (
-                <div className="py-2 text-[12px] text-text-faint">加载中…</div>
+                <div className="py-2 text-[12px] text-text-faint">{t("contextUsage.loading")}</div>
               ) : (
                 <>
                   <div className="mb-2 flex items-baseline justify-between gap-3">
@@ -416,7 +418,7 @@ export function ContextUsageButton({
                           <span
                             className={`h-2.5 w-2.5 shrink-0 rounded-[3px] ${CATEGORY_COLORS[key]}`}
                           />
-                          <span className="truncate text-text-muted">{CATEGORY_LABELS[key]}</span>
+                          <span className="truncate text-text-muted">{t(CATEGORY_LABEL_KEYS[key] ?? key)}</span>
                         </div>
                         <span className="ml-3 tabular-nums text-text-faint">
                           {formatCategoryTokens(categoryTokens(visibleUsage.categories, key))}

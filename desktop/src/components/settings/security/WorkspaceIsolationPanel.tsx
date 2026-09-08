@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Panel } from "../../ds/Panel";
 import { SETTINGS_HINT_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
 import { SettingsDropdown } from "../../ds/SettingsDropdown";
@@ -10,7 +11,29 @@ import {
   type SandboxTier,
 } from "../../../utils/sandbox-status";
 
+const TIER_LABEL_KEY: Record<SandboxTier, string> = {
+  "read-only": "security.tierReadOnly",
+  "workspace-write": "security.tierWorkspace",
+  "danger-full-access": "security.tierDanger",
+};
+
+const TIER_DESC_KEY: Record<SandboxTier, string> = {
+  "read-only": "security.tierReadOnlyDesc",
+  "workspace-write": "security.tierWorkspaceDesc",
+  "danger-full-access": "security.tierDangerDesc",
+};
+
+const NOTICE_TEXT_KEY: Record<string, string> = {
+  "shell-read-full": "security.noticeShellFull",
+  "shell-read-none": "security.noticeShellNone",
+  "shell-read-unknown": "security.noticeShellUnknown",
+  "path-deny-full": "security.noticeDenyFull",
+  "path-deny-partial": "security.noticeDenyPartial",
+  "path-deny-unknown": "security.noticeDenyUnknown",
+};
+
 export function WorkspaceIsolationPanel() {
+  const { t } = useTranslation("settings");
   const apiToken = useAppStore((s) => s.apiToken);
   const backendUrl = useAppStore((s) => s.backendUrl);
   const [tier, setTier] = useState<SandboxTier>("workspace-write");
@@ -64,7 +87,7 @@ export function WorkspaceIsolationPanel() {
         if (!disposed) {
           setNotices(sandboxNotices({}));
           setMessageTone("err");
-          setMessage(e instanceof Error ? e.message : "读取工作区隔离状态失败。");
+          setMessage(e instanceof Error ? e.message : t("security.isolationLoadFailed"));
         }
       } finally {
         if (!disposed) setLoading(false);
@@ -74,7 +97,7 @@ export function WorkspaceIsolationPanel() {
     return () => {
       disposed = true;
     };
-  }, [fetchStatus]);
+  }, [fetchStatus, t]);
 
   const persistTier = async (next: SandboxTier) => {
     const prev = tier;
@@ -103,11 +126,11 @@ export function WorkspaceIsolationPanel() {
       }
       applyPayload(data);
       setMessageTone("ok");
-      setMessage("已保存工作区隔离档位。");
+      setMessage(t("security.isolationSaved"));
     } catch (e) {
       setTier(prev);
       setMessageTone("err");
-      setMessage(e instanceof Error ? e.message : "保存工作区隔离档位失败。");
+      setMessage(e instanceof Error ? e.message : t("security.isolationSaveFailed"));
     } finally {
       setBusy(false);
     }
@@ -116,22 +139,22 @@ export function WorkspaceIsolationPanel() {
   const current = SANDBOX_TIER_OPTIONS.find((option) => option.value === tier) ?? SANDBOX_TIER_OPTIONS[1]!;
 
   return (
-    <Panel title="工作区隔离">
+    <Panel title={t("security.isolationTitle")}>
       {loading ? (
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
+        <div className="py-2 text-sm text-text-faint">{t("security.loading")}</div>
       ) : (
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-6">
             <div className="min-w-0">
-              <div className={SETTINGS_LABEL_CLASS}>命令沙箱档位</div>
-              <p className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>{current.description}</p>
+              <div className={SETTINGS_LABEL_CLASS}>{t("security.sandboxTier")}</div>
+              <p className={`mt-0.5 ${SETTINGS_HINT_CLASS}`}>{t(TIER_DESC_KEY[current.value])}</p>
             </div>
             <SettingsDropdown
               value={tier}
-              displayLabel={current.label}
+              displayLabel={t(TIER_LABEL_KEY[current.value])}
               options={SANDBOX_TIER_OPTIONS.map((option) => ({
                 value: option.value,
-                label: option.label,
+                label: t(TIER_LABEL_KEY[option.value]),
               }))}
               onChange={(next) => void persistTier(normalizeSandboxTier(next))}
               disabled={busy}
@@ -148,7 +171,7 @@ export function WorkspaceIsolationPanel() {
                   notice.tone === "warn" ? "text-status-warning" : "text-text-faint"
                 }`}
               >
-                {notice.text}
+                {NOTICE_TEXT_KEY[notice.id] ? t(NOTICE_TEXT_KEY[notice.id]) : notice.text}
               </li>
             ))}
           </ul>

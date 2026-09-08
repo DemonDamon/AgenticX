@@ -6,6 +6,7 @@
  */
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import { formatModelOptionLabel } from "../../utils/model-display";
 import { avatarTintBg } from "../../utils/avatar-color";
@@ -51,6 +52,7 @@ function BadgeSpinner({ size = 12, dur = "0.85s" }: { size?: number; dur?: strin
 }
 
 function StatusPill({ status }: { status: string }) {
+  const { t } = useTranslation("chat");
   const meta = statusMeta(status);
   const color = TONE_COLOR_VAR[meta.tone];
   const spinning = status === "running" || status === "pending";
@@ -61,7 +63,7 @@ function StatusPill({ status }: { status: string }) {
       aria-live="polite"
     >
       {spinning ? <BadgeSpinner size={11} dur={status === "pending" ? "1.5s" : "0.85s"} /> : null}
-      {meta.label}
+      {t(meta.labelKey)}
     </span>
   );
 }
@@ -108,6 +110,7 @@ function ModelPill({ provider, model }: { provider?: string; model?: string }) {
 // ── Full 工牌浮层 ──────────────────────────────────────────────────────────
 
 function FullBadgeCard({ vm, anchorRect }: { vm: BadgeVM; anchorRect: DOMRect }) {
+  const { t } = useTranslation("chat");
   const tint = badgeTint(vm);
   const width = 300;
   const left = Math.min(Math.max(8, anchorRect.left), window.innerWidth - width - 8);
@@ -118,7 +121,7 @@ function FullBadgeCard({ vm, anchorRect }: { vm: BadgeVM; anchorRect: DOMRect })
       className="flex flex-col gap-2.5 rounded-xl border border-border bg-surface-panel p-3 shadow-xl backdrop-blur-xl"
       style={{ ...style, ...(tint ? { backgroundImage: `linear-gradient(${tint}, ${tint})` } : {}) }}
       role="dialog"
-      aria-label={`${vm.name} 工牌`}
+      aria-label={t("subagent.badgeAria", { name: vm.name })}
     >
       <div className="flex items-start gap-3">
         <div className="relative shrink-0">
@@ -166,6 +169,7 @@ export function AgentBadgeDrawerHeader({
   onCopy?: () => void;
   copyFeedback?: boolean;
 }) {
+  const { t } = useTranslation("chat");
   const tint = badgeTint(vm);
   return (
     <div
@@ -197,7 +201,7 @@ export function AgentBadgeDrawerHeader({
             className="agx-topbar-btn shrink-0 !px-2 !py-1 text-[11px]"
             onClick={onCopy}
           >
-            {copyFeedback ? "已复制" : "复制"}
+            {copyFeedback ? t("subagent.copied") : t("subagent.copy")}
           </button>
         ) : null}
       </div>

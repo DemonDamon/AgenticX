@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Avatar, GroupChat } from "../../store";
 import {
   extractUnknownAvatarIdFromError,
@@ -28,6 +29,8 @@ export function GroupEditorInline({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
   const [name, setName] = useState(initialGroup?.name ?? initialName ?? "");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     new Set(initialGroup?.avatarIds ?? initialAvatarIds ?? [])
@@ -50,7 +53,7 @@ export function GroupEditorInline({
     setSelectedIds(new Set(normalized.avatarIds));
     setSaveNotice({
       type: "warning",
-      text: `已自动移除 ${normalized.removedIds.length} 个失效成员，请点击保存同步群成员。`,
+      text: t("groups.removedInvalid", { count: normalized.removedIds.length }),
     });
   }, [selectedIds, validAvatarIds]);
 
@@ -66,7 +69,7 @@ export function GroupEditorInline({
 
   const handleSave = async () => {
     if (validAvatarIds.length === 0) {
-      setSaveNotice({ type: "error", text: "分身列表尚未加载完成，请稍后再保存。" });
+      setSaveNotice({ type: "error", text: t("groups.avatarsNotReady") });
       return;
     }
     const normalized = sanitizeGroupAvatarIds({
@@ -77,7 +80,7 @@ export function GroupEditorInline({
       setSelectedIds(new Set(normalized.avatarIds));
     }
     if (!name.trim() || normalized.avatarIds.length === 0) {
-      setSaveNotice({ type: "error", text: "请至少选择 1 个有效分身后再保存。" });
+      setSaveNotice({ type: "error", text: t("groups.needOneAvatar") });
       return;
     }
     setLoading(true);
@@ -92,7 +95,7 @@ export function GroupEditorInline({
         });
         if (result.ok) {
           onSaved();
-          setSaveNotice({ type: "success", text: "保存成功。" });
+          setSaveNotice({ type: "success", text: t("groups.saveSuccess") });
         } else {
           const staleId = extractUnknownAvatarIdFromError(result.error);
           if (staleId) {
@@ -129,7 +132,7 @@ export function GroupEditorInline({
     } catch (err) {
       setSaveNotice({
         type: "error",
-        text: err instanceof Error ? err.message : "保存失败，请稍后重试。",
+        text: err instanceof Error ? err.message : t("groups.saveFailed"),
       });
     } finally {
       setLoading(false);
@@ -146,22 +149,22 @@ export function GroupEditorInline({
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="mb-3 text-[15px] font-semibold text-white">
-          {initialGroup ? "编辑群聊" : "新建群聊"}
+          {initialGroup ? t("groups.editGroup") : t("groups.newGroup")}
         </h3>
 
-        <label className="mb-1 block text-xs text-text-subtle">群名称</label>
+        <label className="mb-1 block text-xs text-text-subtle">{t("groups.groupName")}</label>
         <input
           className="mb-3 w-full rounded-md border border-border bg-surface-card px-2.5 py-2 text-[13px] text-text-primary outline-none focus:border-border-strong"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="输入群聊名称"
+          placeholder={t("groups.groupNamePlaceholder")}
           autoFocus
         />
 
-        <label className="mb-1 block text-xs text-text-subtle">选择分身</label>
+        <label className="mb-1 block text-xs text-text-subtle">{t("groups.selectAvatars")}</label>
         <div className="mb-3 max-h-36 overflow-y-auto rounded-md border border-border bg-surface-card p-1.5">
           {avatars.length === 0 && (
-            <div className="py-2 text-center text-xs text-text-faint">暂无可用分身</div>
+            <div className="py-2 text-center text-xs text-text-faint">{t("groups.noAvatars")}</div>
           )}
           {avatars.map((a) => (
             <label
@@ -205,7 +208,7 @@ export function GroupEditorInline({
                   void onDelete(initialGroup.id);
                 }}
               >
-                删除群聊
+                {t("groups.deleteGroup")}
               </button>
             ) : null}
           </div>
@@ -215,7 +218,7 @@ export function GroupEditorInline({
               className="rounded-md px-3 py-1.5 text-[13px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
               onClick={onClose}
             >
-              取消
+              {tCommon("cancel")}
             </button>
             <button
               type="button"
@@ -223,7 +226,7 @@ export function GroupEditorInline({
               disabled={!name.trim() || selectedIds.size === 0 || loading}
               onClick={() => void handleSave()}
             >
-              {loading ? "保存中..." : initialGroup ? "保存" : "创建"}
+              {loading ? t("groups.saving") : initialGroup ? tCommon("save") : tCommon("create")}
             </button>
           </div>
         </div>

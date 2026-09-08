@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { QueuedMessage } from "../../store";
 import { QueuedMessageBubble } from "./QueuedMessageBubble";
 
@@ -10,6 +11,7 @@ type Props = {
 };
 
 export function MessageQueuePanel({ messages, onEdit, onRemove, onSendNow }: Props) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(true);
   if (messages.length === 0) return null;
 
@@ -35,9 +37,9 @@ export function MessageQueuePanel({ messages, onEdit, onRemove, onSendNow }: Pro
           <polyline points="6 9 12 15 18 9" />
         </svg>
         <span className="font-medium text-text-muted">
-          {messages.length} 条排队
+          {t("queue.count", { count: messages.length })}
         </span>
-        <span className="text-[10px] text-text-faint">Enter 再按一次立即发送</span>
+        <span className="text-[10px] text-text-faint">{t("queue.doubleEnterHint")}</span>
       </button>
       {expanded ? (
         <div className="flex flex-col">

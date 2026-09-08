@@ -2,6 +2,7 @@
  * Sub-Plan D — right-column drawer: badge header + activity timeline + artifacts.
  */
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { PanelRightClose } from "lucide-react";
 import type { SubAgent } from "../../store";
 import { AgentBadgeDrawerHeader } from "./AgentBadge";
@@ -39,6 +40,7 @@ export function SubAgentRunDrawer({
   onClose,
   tintColor,
 }: Props) {
+  const { t } = useTranslation("workspace");
   const [runRecord, setRunRecord] = useState<SubAgentRunRecord | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingRun, setLoadingRun] = useState(true);
@@ -75,7 +77,7 @@ export function SubAgentRunDrawer({
           onClose();
           return;
         }
-        setLoadError(errText || "无法加载 run 详情");
+        setLoadError(errText || t("subagentDrawer.loadFailed"));
         return;
       }
       if (resp.run) {
@@ -86,7 +88,7 @@ export function SubAgentRunDrawer({
     } finally {
       setLoadingRun(false);
     }
-  }, [apiBase, apiToken, sessionId, runId, liveSubAgent, onClose]);
+  }, [apiBase, apiToken, sessionId, runId, liveSubAgent, onClose, t]);
 
   useEffect(() => {
     void refreshRun();
@@ -103,12 +105,12 @@ export function SubAgentRunDrawer({
   const handleCopy = useCallback(() => {
     if (!badgeVm) return;
     const header = [
-      `智能体: ${badgeVm.name} (${badgeVm.runId})`,
-      `角色: ${badgeVm.role}`,
-      badgeVm.model ? `模型: ${badgeVm.model}` : "",
-      `状态: ${badgeVm.status}`,
-      badgeVm.resultSummary ? `产出: ${badgeVm.resultSummary}` : "",
-      badgeVm.resultFile ? `落盘: ${badgeVm.resultFile}` : "",
+      t("subagentDrawer.copyAgent", { name: badgeVm.name, id: badgeVm.runId }),
+      t("subagentDrawer.copyRole", { role: badgeVm.role }),
+      badgeVm.model ? t("subagentDrawer.copyModel", { model: badgeVm.model }) : "",
+      t("subagentDrawer.copyStatus", { status: badgeVm.status }),
+      badgeVm.resultSummary ? t("subagentDrawer.copyResult", { summary: badgeVm.resultSummary }) : "",
+      badgeVm.resultFile ? t("subagentDrawer.copyPath", { path: badgeVm.resultFile }) : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -116,7 +118,7 @@ export function SubAgentRunDrawer({
       setCopyFeedback(true);
       window.setTimeout(() => setCopyFeedback(false), 1500);
     });
-  }, [badgeVm]);
+  }, [badgeVm, t]);
 
   const resultFile = badgeVm?.resultFile ?? liveSubAgent?.resultFile;
   const outputFiles = badgeVm?.outputFiles ?? liveSubAgent?.outputFiles;
@@ -130,17 +132,17 @@ export function SubAgentRunDrawer({
       <div
         className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
         onMouseDown={onResizeStart}
-        title="拖拽调整落盘面板宽度"
+        title={t("subagentDrawer.resizeWidth")}
       >
         <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
       </div>
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-2">
-        <span className="text-xs text-text-subtle">子智能体落盘</span>
+        <span className="text-xs text-text-subtle">{t("subagentDrawer.title")}</span>
         <button
           type="button"
           className="agx-topbar-btn !px-[5px]"
           onClick={onClose}
-          title="关闭落盘面板"
+          title={t("subagentDrawer.close")}
         >
           <PanelRightClose className="h-[18px] w-[18px]" strokeWidth={1.8} />
         </button>

@@ -1,4 +1,5 @@
 import type { ChangeEvent } from "react";
+import { useTranslation } from "react-i18next";
 
 export type UnattendedConfig = {
   unattended_enabled: boolean;
@@ -16,19 +17,19 @@ type Props = {
 };
 
 export function UnattendedConfigSection({ value, onChange, disabled }: Props) {
+  const { t } = useTranslation("workspace");
   const set = (patch: Partial<UnattendedConfig>) => onChange({ ...value, ...patch });
 
   return (
     <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
-      <div className="text-sm font-semibold text-text-strong">无人值守完成任务</div>
+      <div className="text-sm font-semibold text-text-strong">{t("automation.unattendedTitle")}</div>
       <p className="mt-1 text-xs leading-relaxed text-text-muted">
-        全局开关开启后，可在会话中单独启用无人值守；Supervisor 在后台续跑（关窗后仍有效）。
-        仅对当前会话生效，不会替你回答新问题。与上方「自动续跑」配合：前者为前端在线 nudge，本项由后端接管。
+        {t("automation.unattendedHint")}
       </p>
 
       <div className="mt-3 rounded-md border border-border bg-surface-panel p-3">
         <label className="flex items-center justify-between gap-3">
-          <span className="text-sm font-medium text-text-primary">启用无人值守（全局）</span>
+          <span className="text-sm font-medium text-text-primary">{t("automation.unattendedEnable")}</span>
           <input
             type="checkbox"
             className="h-4 w-4 rounded border-border"
@@ -42,7 +43,7 @@ export function UnattendedConfigSection({ value, onChange, disabled }: Props) {
 
         <div className="mt-3 space-y-2">
           <div className="flex items-center gap-3">
-            <span className="w-36 shrink-0 text-xs text-text-muted">每会话最多续跑</span>
+            <span className="w-36 shrink-0 text-xs text-text-muted">{t("automation.maxContinuations")}</span>
             <input
               type="number"
               min={1}
@@ -60,7 +61,7 @@ export function UnattendedConfigSection({ value, onChange, disabled }: Props) {
             />
           </div>
           <div className="flex items-center gap-3">
-            <span className="w-36 shrink-0 text-xs text-text-muted">最长运行（小时）</span>
+            <span className="w-36 shrink-0 text-xs text-text-muted">{t("automation.maxHours")}</span>
             <input
               type="number"
               min={1}
@@ -85,7 +86,7 @@ export function UnattendedConfigSection({ value, onChange, disabled }: Props) {
               checked={value.unattended_auto_resume_interrupted}
               onChange={(e) => set({ unattended_auto_resume_interrupted: e.target.checked })}
             />
-            中断后自动续跑
+            {t("automation.resumeInterrupted")}
           </label>
           <label className="flex items-center gap-2 text-xs text-text-muted">
             <input
@@ -94,7 +95,7 @@ export function UnattendedConfigSection({ value, onChange, disabled }: Props) {
               checked={value.unattended_auto_resume_exhausted}
               onChange={(e) => set({ unattended_auto_resume_exhausted: e.target.checked })}
             />
-            工具轮次耗尽后自动续跑
+            {t("automation.resumeExhausted")}
           </label>
         </div>
       </div>

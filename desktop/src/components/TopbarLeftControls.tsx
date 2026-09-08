@@ -1,4 +1,5 @@
 import { Moon, PanelLeft, Sun } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store";
 import { GlobalSearchTrigger } from "./global-search/GlobalSearchTrigger";
 
@@ -9,17 +10,19 @@ type Props = {
 };
 
 export function ThemeToggleButton() {
+  const { t } = useTranslation("sidebar");
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const isDarkLike = theme === "dark" || theme === "dim";
+  const themeLabel = isDarkLike ? t("topbar.switchToLight") : t("topbar.switchToDark");
 
   return (
     <button
       type="button"
       className="agx-topbar-btn agx-topbar-btn--icon-only"
       onClick={() => setTheme(isDarkLike ? "light" : "dark")}
-      title={isDarkLike ? "切换到亮色" : "切换到暗色"}
-      aria-label={isDarkLike ? "切换到亮色" : "切换到暗色"}
+      title={themeLabel}
+      aria-label={themeLabel}
     >
       {isDarkLike ? (
         <Sun className="h-[18px] w-[18px]" strokeWidth={1.8} />

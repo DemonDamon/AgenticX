@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { i18n } from "../i18n/i18n";
 import {
   formatCompactTokens,
   formatTurnCacheHit,
@@ -13,6 +14,8 @@ import {
   sessionAccumulateFromUsageEvent,
 } from "./message-turn-meta";
 
+const t = i18n.getFixedT("zh", "chat");
+
 describe("message-turn-meta", () => {
   it("formats a turn usage label", () => {
     const usage = {
@@ -23,8 +26,8 @@ describe("message-turn-meta", () => {
       reasoningTokens: 0,
     };
     expect(formatTurnUsageCount(usage)).toBe("1,540");
-    expect(formatTurnUsageLabel(usage)).toBe("本轮消耗 1,540");
-    expect(formatTurnUsageTitle(usage)).toBe(
+    expect(formatTurnUsageLabel(usage, t)).toBe("本轮消耗 1,540");
+    expect(formatTurnUsageTitle(usage, t)).toBe(
       "本次请求输入 1,200 · 输出 340 · 缓存 80 · 命中 6.7%（80 / 1.2K）",
     );
   });
@@ -70,9 +73,9 @@ describe("message-turn-meta", () => {
         reasoningTokens: 0,
       }),
     ).toEqual({ percent: 94.1, cached: "404.0K", input: "429.4K" });
-    expect(formatTurnCacheHitLabel({ percent: 94.5 })).toBe("缓存 94.5%");
+    expect(formatTurnCacheHitLabel({ percent: 94.5 }, t)).toBe("缓存 94.5%");
     expect(
-      formatTurnCacheHitTip({ percent: 94.5, cached: "38.9K", input: "41.2K" }),
+      formatTurnCacheHitTip({ percent: 94.5, cached: "38.9K", input: "41.2K" }, t),
     ).toBe("本轮缓存命中 94.5%（38.9K / 41.2K）。越高说明重复上下文越多，不是窗口占用。");
     expect(
       formatTurnCacheHit({
@@ -93,7 +96,7 @@ describe("message-turn-meta", () => {
         outputTokens: 0,
         cachedTokens: 0,
         reasoningTokens: 0,
-      }),
+      }, t),
     ).toBe("");
   });
 

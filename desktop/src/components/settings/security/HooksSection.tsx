@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import { SettingsSwitch } from "../SettingsSwitch";
 import { useAppStore } from "../../../store";
 import { studioFetch } from "../../../utils/studio-fetch";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type CuratedHookItem = {
   name: string;
@@ -55,8 +62,8 @@ type ScanSummary = {
 const HOOK_PRIMARY_CONFIG_PATH = "~/.agenticx/hooks/";
 
 const HOOK_PRESETS: { key: string; label: string; path: string }[] = [
-  { key: "cursor_plugins", label: "Cursor 插件目录", path: "~/.cursor/plugins/" },
-  { key: "claude_plugins", label: "Claude 插件目录", path: "~/.claude/plugins/" },
+  { key: "cursor_plugins", label: st("security.srcCursorDir"), path: "~/.cursor/plugins/" },
+  { key: "claude_plugins", label: st("security.srcClaudeDir"), path: "~/.claude/plugins/" },
 ];
 
 function hookSourceBadge(source: string): { label: string; className: string } {
@@ -64,21 +71,21 @@ function hookSourceBadge(source: string): { label: string; className: string } {
   switch (source) {
     case "bundled":
     case "agenticx":
-      return { label: "内置", className: `${base} border-zinc-500/30 bg-zinc-500/10 text-zinc-400` };
+      return { label: st("security.srcBuiltin"), className: `${base} border-zinc-500/30 bg-zinc-500/10 text-zinc-400` };
     case "cursor":
       return { label: "Cursor", className: `${base} border-sky-500/30 bg-sky-500/10 text-sky-400` };
     case "claude":
       return { label: "Claude", className: `${base} border-orange-500/30 bg-orange-500/10 text-orange-400` };
     case "cursor_plugins":
-      return { label: "Cursor 插件", className: `${base} border-sky-500/30 bg-sky-500/10 text-sky-400` };
+      return { label: st("security.srcCursorPlugin"), className: `${base} border-sky-500/30 bg-sky-500/10 text-sky-400` };
     case "claude_plugins":
-      return { label: "Claude 插件", className: `${base} border-emerald-500/30 bg-emerald-500/10 text-emerald-400` };
+      return { label: st("security.srcClaudePlugin"), className: `${base} border-emerald-500/30 bg-emerald-500/10 text-emerald-400` };
     case "managed":
-      return { label: "用户", className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-400` };
+      return { label: st("security.srcUser"), className: `${base} border-purple-500/30 bg-purple-500/10 text-purple-400` };
     case "workspace":
-      return { label: "工作区", className: `${base} border-cyan-500/30 bg-cyan-500/10 text-cyan-400` };
+      return { label: st("security.srcWorkspace"), className: `${base} border-cyan-500/30 bg-cyan-500/10 text-cyan-400` };
     default:
-      return { label: "自定义", className: `${base} border-border bg-surface-panel text-text-faint` };
+      return { label: st("security.srcCustom"), className: `${base} border-border bg-surface-panel text-text-faint` };
   }
 }
 
@@ -86,13 +93,13 @@ function hookTypeBadge(hookType: string): { label: string; className: string } {
   const base = "shrink-0 rounded-full border px-1.5 text-[10px]";
   switch (hookType) {
     case "command":
-      return { label: "命令", className: `${base} border-amber-500/30 bg-amber-500/10 text-amber-400` };
+      return { label: st("security.kindCommand"), className: `${base} border-amber-500/30 bg-amber-500/10 text-amber-400` };
     case "http":
       return { label: "HTTP", className: `${base} border-blue-500/30 bg-blue-500/10 text-blue-400` };
     case "prompt":
-      return { label: "提示词", className: `${base} border-green-500/30 bg-green-500/10 text-green-400` };
+      return { label: st("security.kindPrompt"), className: `${base} border-green-500/30 bg-green-500/10 text-green-400` };
     case "agent":
-      return { label: "智能体", className: `${base} border-rose-500/30 bg-rose-500/10 text-rose-400` };
+      return { label: st("security.kindAgent"), className: `${base} border-rose-500/30 bg-rose-500/10 text-rose-400` };
     default:
       return { label: hookType, className: `${base} border-border bg-surface-panel text-text-faint` };
   }
@@ -108,6 +115,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export function HooksSection() {
+  const { t } = useTranslation("settings");
   const [curatedHooks, setCuratedHooks] = useState<CuratedHookItem[]>([]);
   const [importedHooks, setImportedHooks] = useState<ImportedHookItem[]>([]);
   const [scanSummary, setScanSummary] = useState<ScanSummary>({ raw_total: 0, deduped_total: 0, source_counts: {} });
@@ -150,7 +158,7 @@ export function HooksSection() {
         setImportedHooks([]);
         setScanPaths(hooksData.scan_paths ?? []);
         setHookError(
-          String(hooksData.error ?? hooksData.detail ?? `/api/hooks 请求失败（HTTP ${hooksRes.status || "unknown"}）`),
+          String(hooksData.error ?? hooksData.detail ?? st("security.hooksHttpFailed", { status: hooksRes.status || "unknown" })),
         );
       }
       if (settingsData.ok) {
@@ -158,13 +166,13 @@ export function HooksSection() {
         setCustomPaths(settingsData.custom_paths ?? []);
         setSettingsError("");
       } else {
-        setSettingsError(String(settingsData.error ?? settingsData.detail ?? "/api/hooks/settings 拉取失败"));
+        setSettingsError(String(settingsData.error ?? settingsData.detail ?? st("security.hooksSettingsFailed")));
       }
     } catch (err) {
       setCuratedHooks([]);
       setImportedHooks([]);
       setScanPaths([]);
-      setHookError(err instanceof Error ? err.message : "拉取 Hook 配置失败");
+      setHookError(err instanceof Error ? err.message : st("security.hooksLoadFailed"));
       setSettingsError("");
     } finally {
       setLoading(false);
@@ -225,7 +233,7 @@ export function HooksSection() {
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-8 text-sm text-text-subtle">
-        <Loader2 className="h-4 w-4 animate-spin" /> 正在加载钩子配置...
+        <Loader2 className="h-4 w-4 animate-spin" /> {st("security.hooksLoading")}
       </div>
     );
   }
@@ -233,7 +241,7 @@ export function HooksSection() {
   return (
     <div className="space-y-4">
       <div className="text-sm text-text-subtle">
-        钩子（Hooks）是智能体在执行的特定节点运行自定义脚本，可用于修改行为、执行策略或记录日志。
+        {st("security.hooksIntro")}
       </div>
 
       {hookError ? (
@@ -241,9 +249,9 @@ export function HooksSection() {
       ) : null}
 
       {/* Block A: 预置钩子 */}
-      <Panel title={`预置钩子 (${curatedHooks.length})`} collapsible>
+      <Panel title={st("security.curatedTitle", { count: curatedHooks.length })} collapsible>
         {curatedHooks.length === 0 ? (
-          <div className="py-3 text-center text-xs text-text-faint">暂无预置钩子</div>
+          <div className="py-3 text-center text-xs text-text-faint">{st("security.noCurated")}</div>
         ) : (
           <div className="divide-y divide-border">
             {curatedHooks.map((hook) => (
@@ -251,7 +259,7 @@ export function HooksSection() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-text-primary">{hook.name}</span>
-                    <span className="shrink-0 rounded-full border border-zinc-500/30 bg-zinc-500/10 px-1.5 text-[10px] text-zinc-400">内置</span>
+                    <span className="shrink-0 rounded-full border border-zinc-500/30 bg-zinc-500/10 px-1.5 text-[10px] text-zinc-400">{st("security.srcBuiltin")}</span>
                   </div>
                   <div className="mt-0.5 text-xs text-text-faint truncate">{hook.description}</div>
                   {hook.events?.length > 0 && (
@@ -266,7 +274,7 @@ export function HooksSection() {
                   checked={hook.enabled}
                   disabled={busy}
                   size="sm"
-                  aria-label={`启用 ${hook.name}`}
+                  aria-label={st("security.enableHookAria", { name: hook.name })}
                   onChange={(next) => toggleHookEnabled(hook.name, next)}
                 />
               </div>
@@ -277,16 +285,18 @@ export function HooksSection() {
 
       {/* Block B: 外部导入（默认折叠） */}
       <Panel
-        title={`外部导入钩子${scanSummary.deduped_total > 0 ? ` (${scanSummary.deduped_total} 条，去重自 ${scanSummary.raw_total} 条)` : ""}`}
+        title={scanSummary.deduped_total > 0
+          ? st("security.importedTitleCount", { deduped: scanSummary.deduped_total, raw: scanSummary.raw_total })
+          : st("security.importedTitle")}
         collapsible
         defaultCollapsed
       >
         <div className="space-y-3">
             <div className="space-y-2">
               {settingsError ? (
-                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">配置路径读取异常：{settingsError}</div>
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">{st("security.settingsPathError", { error: settingsError })}</div>
               ) : null}
-              <div className="text-xs text-text-faint">勾选预设路径可自动导入 Cursor / Claude Code 等工具的 Hooks。</div>
+              <div className="text-xs text-text-faint">{st("security.presetHint")}</div>
               {HOOK_PRESETS.map((preset) => {
                 const isOn = settings.preset_paths?.[preset.key]?.enabled !== false;
                 return (
@@ -299,19 +309,19 @@ export function HooksSection() {
               })}
               {customPaths.map((row, idx) => (
                 <div key={`hook-path-${idx}`} className="flex gap-2">
-                  <input className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm" value={row} placeholder="例如 /path/to/hooks/" onChange={(e) => setCustomPaths((prev) => prev.map((p, i) => (i === idx ? e.target.value : p)))} onBlur={() => persistCustomPaths(customPaths)} disabled={busy} />
-                  <button type="button" className="shrink-0 rounded-md border border-border p-2 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40" title="移除此路径" disabled={busy} onClick={() => { const next = customPaths.filter((_, i) => i !== idx); setCustomPaths(next); persistCustomPaths(next); }}>
+                  <input className="flex-1 rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm" value={row} placeholder={st("security.customPathPh")} onChange={(e) => setCustomPaths((prev) => prev.map((p, i) => (i === idx ? e.target.value : p)))} onBlur={() => persistCustomPaths(customPaths)} disabled={busy} />
+                  <button type="button" className="shrink-0 rounded-md border border-border p-2 text-text-subtle transition hover:bg-surface-hover hover:text-rose-400 disabled:opacity-40" title={st("security.removePath")} disabled={busy} onClick={() => { const next = customPaths.filter((_, i) => i !== idx); setCustomPaths(next); persistCustomPaths(next); }}>
                     <Trash2 className="h-4 w-4" aria-hidden />
                   </button>
                 </div>
               ))}
               <button type="button" className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-40" disabled={busy} onClick={() => setCustomPaths((prev) => [...prev, ""])}>
                 <Plus className="h-3.5 w-3.5" aria-hidden />
-                添加配置路径
+                {st("security.addConfigPath")}
               </button>
             </div>
             {importedHooks.length === 0 ? (
-              <div className="py-2 text-center text-xs text-text-faint">未发现外部钩子</div>
+              <div className="py-2 text-center text-xs text-text-faint">{st("security.noExternal")}</div>
             ) : (
               <div className="divide-y divide-border rounded-md border border-border">
                 {importedHooks.map((hook, idx) => {
@@ -327,13 +337,13 @@ export function HooksSection() {
                           <span className={srcBadge.className}>{srcBadge.label}</span>
                           <span className={typeBadge.className}>{typeBadge.label}</span>
                           {(hook.duplicate_count ?? 1) > 1 && (
-                            <span className="text-[10px] text-text-faint">x{hook.duplicate_count} 来自 {(hook.duplicate_sources ?? []).join(", ")}</span>
+                            <span className="text-[10px] text-text-faint">{st("security.dupFrom", { count: hook.duplicate_count, sources: (hook.duplicate_sources ?? []).join(", ") })}</span>
                           )}
                           {hook.usability === "needs_env" && (
-                            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-[10px] text-amber-300">需要外部环境</span>
+                            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-[10px] text-amber-300">{st("security.needsEnv")}</span>
                           )}
                         </div>
-                        <SettingsSwitch checked={hook.enabled} disabled={busy} size="sm" aria-label={`启用 ${hook.name}`} onChange={(next) => toggleHookEnabled(hook.name, next)} />
+                        <SettingsSwitch checked={hook.enabled} disabled={busy} size="sm" aria-label={st("security.enableHookAria", { name: hook.name })} onChange={(next) => toggleHookEnabled(hook.name, next)} />
                       </div>
                       {snippet && <div className="mt-1 truncate font-mono text-[11px] text-text-faint">{snippet}</div>}
                     </div>

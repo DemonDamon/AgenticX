@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AvatarSidebar } from "./components/AvatarSidebar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ClarificationDialog, type ClarificationAnswer } from "./components/ClarificationDialog";
@@ -21,6 +22,9 @@ import { filterDurablePanes, persistActivePaneId } from "./utils/compose-preview
 import { mapLoadedSessionMessage, type LoadedSessionMessage } from "./utils/session-message-map";
 import type { Message, ProviderEntry } from "./store";
 import { normalizeSessionTokens, useAppStore } from "./store";
+import { i18n } from "./i18n/i18n";
+import { LOCALE_STORAGE_KEY, isAppLocale } from "./i18n/locales";
+import { resolveAppLocale } from "./i18n/resolve-locale";
 import { stopSpeak } from "./voice/tts";
 import { VOICE_FOCUS_ENTRY_ENABLED } from "./voice/focus-mode-ui";
 import { matchKeybinding } from "./core/keybinding-manager";
@@ -287,6 +291,7 @@ async function requestSession(
 }
 
 export function App() {
+  const { t } = useTranslation("sidebar");
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
   const sessionId = useAppStore((s) => s.sessionId);
@@ -319,6 +324,7 @@ export function App() {
   const theme = useAppStore((s) => s.theme);
   const themeColor = useAppStore((s) => s.themeColor);
   const setTheme = useAppStore((s) => s.setTheme);
+  const setLocale = useAppStore((s) => s.setLocale);
   const setAgxAccount = useAppStore((s) => s.setAgxAccount);
   const chatStyle = useAppStore((s) => s.chatStyle);
   const setChatStyle = useAppStore((s) => s.setChatStyle);
@@ -416,10 +422,10 @@ export function App() {
       if (!detail?.folderPath) return;
       void addFolderToActiveWorkspace(detail.folderPath).then((result) => {
         if (result.ok) {
-          setGlobalSearchToastMessage("已添加至工作区");
+          setGlobalSearchToastMessage(i18n.t("workspaceAdded", { ns: "sidebar" }));
           setGlobalSearchToastVariant("default");
         } else {
-          setGlobalSearchToastMessage(result.error ?? "添加工作区失败");
+          setGlobalSearchToastMessage(result.error ?? i18n.t("workspaceAddFailed", { ns: "sidebar" }));
           setGlobalSearchToastVariant("warning");
         }
         setGlobalSearchToastOpen(true);
@@ -660,7 +666,7 @@ export function App() {
           await persistReconciledPaneModels();
 
           setGlobalSearchToastMessage(
-            `已移出 ${result.removed.length} 个未授权模型`,
+            i18n.t("removedUnauthorizedModels", { ns: "sidebar", count: result.removed.length }),
           );
           setGlobalSearchToastVariant("warning");
           setGlobalSearchToastOpen(true);
@@ -1206,25 +1212,25 @@ export function App() {
           });
           const currentAction =
             effectiveStatus === "awaiting_confirm"
-              ? existing?.currentAction || "等待你的确认"
+              ? existing?.currentAction || i18n.t("notice.waitingConfirm", { ns: "chat" })
               : effectiveStatus === "awaiting_input"
-                ? existing?.currentAction || "等待你的输入"
+                ? existing?.currentAction || i18n.t("notice.waitingInput", { ns: "chat" })
               : status === "completed"
               ? summaryText
-                ? "已完成（查看摘要）"
-                : "已完成"
+                ? i18n.t("notice.completedViewSummary", { ns: "chat" })
+                : i18n.t("notice.completed", { ns: "chat" })
               : status === "failed"
-                ? item.error_text || "执行异常"
+                ? item.error_text || i18n.t("notice.execError", { ns: "chat" })
                 : status === "cancelled"
-                  ? "已中断"
+                  ? i18n.t("notice.interrupted", { ns: "chat" })
                   : status === "paused"
-                    ? summaryText || item.error_text || "已暂停，可稍后继续"
-                  : "执行中";
+                    ? summaryText || item.error_text || i18n.t("notice.pausedContinue", { ns: "chat" })
+                  : i18n.t("notice.running", { ns: "chat" });
           const pendingConfirm =
             hasPendingConfirm
               ? {
                   requestId: String(item.pending_confirm!.request_id ?? ""),
-                  question: String(item.pending_confirm!.question ?? "是否确认执行？"),
+                  question: String(item.pending_confirm!.question ?? i18n.t("notice.confirmQuestion", { ns: "chat" })),
                   agentId: id,
                   sessionId: sid,
                   context: item.pending_confirm!.context,
@@ -1269,18 +1275,24 @@ export function App() {
             const emoji = effectiveStatus === "completed" ? "✅" : effectiveStatus === "paused" ? "⏸" : "❌";
             const statusLabel =
               effectiveStatus === "completed"
-                ? "已完成"
+                ? i18n.t("notice.completed", { ns: "chat" })
                 : effectiveStatus === "paused"
-                  ? "已暂停"
-                  : "执行失败";
+                  ? i18n.t("notice.paused", { ns: "chat" })
+                  : i18n.t("notice.execFailed", { ns: "chat" });
             const summaryBody = summaryText || (
               effectiveStatus === "failed"
-                ? (item.error_text || "未知错误")
+                ? (item.error_text || i18n.t("notice.unknownError", { ns: "chat" }))
                 : effectiveStatus === "paused"
-                  ? (item.error_text || "任务已暂停，可稍后继续")
-                  : "任务已结束"
+                  ? (item.error_text || i18n.t("notice.pausedTaskContinue", { ns: "chat" }))
+                  : i18n.t("notice.taskEnded", { ns: "chat" })
             );
-            const completionMsg = `${emoji} **子智能体 ${agentName} ${statusLabel}**\n\n${summaryBody}`;
+            const completionMsg = i18n.t("notice.subagentStatus", {
+              ns: "chat",
+              emoji,
+              name: agentName,
+              status: statusLabel,
+              summary: summaryBody,
+            });
             const store = useAppStore.getState();
             const matchingPane = resolvePaneForSession(sid, id);
             if (matchingPane) {
@@ -1321,11 +1333,11 @@ export function App() {
             addSubAgentEvent(id, { type: evtType || "event", content: text });
             if (evtType === "confirm_required") {
               const reqId = String(evtData.id ?? evtData.request_id ?? "");
-              const question = String(evtData.question ?? "是否确认执行？");
+              const question = String(evtData.question ?? i18n.t("notice.confirmQuestion", { ns: "chat" }));
               const confirmCtx = (evtData.context ?? undefined) as Record<string, unknown> | undefined;
               updateSubAgent(id, {
                 status: "awaiting_confirm",
-                currentAction: "等待你的确认",
+                currentAction: i18n.t("notice.waitingConfirm", { ns: "chat" }),
                 pendingConfirm: reqId
                   ? { requestId: reqId, question, agentId: id, sessionId: sid, context: confirmCtx }
                   : undefined,
@@ -1334,7 +1346,9 @@ export function App() {
               const approved = !!evtData.approved;
               updateSubAgent(id, {
                 status: approved ? "running" : "cancelled",
-                currentAction: approved ? "确认通过，继续执行" : "确认拒绝，已取消",
+                currentAction: approved
+                  ? i18n.t("notice.approvedContinue", { ns: "chat" })
+                  : i18n.t("notice.rejectedCancelled", { ns: "chat" }),
                 pendingConfirm: undefined,
               });
             }
@@ -1362,15 +1376,15 @@ export function App() {
       if (miss === 5) {
         addSubAgentEvent(item.id, {
           type: "sync",
-          content: "轮询暂未发现该任务，可能会话已切换或任务已归档，继续同步中",
+          content: i18n.t("notice.pollMissing", { ns: "chat" }),
         });
       } else if (miss === 10) {
         updateSubAgent(item.id, {
-          currentAction: "状态失联：后台暂未返回该任务，建议展开详情并重试同步",
+          currentAction: i18n.t("notice.lostSyncAction", { ns: "chat" }),
         });
         addSubAgentEvent(item.id, {
           type: "sync",
-          content: "连续轮询未找到后台记录，已标记为状态失联提示（不自动改写为完成/失败）",
+          content: i18n.t("notice.pollLost", { ns: "chat" }),
         });
       }
     }
@@ -1420,7 +1434,11 @@ export function App() {
           store.addPaneMessage(
             matchingPane.id,
             "tool",
-            `⚠️ 子智能体已结束，但 ${META_AGENT_DISPLAY_NAME} 自动汇报暂未成功。先给你直接结果：\n${lines}`,
+            i18n.t("notice.reportFailed", {
+              ns: "chat",
+              meta: META_AGENT_DISPLAY_NAME,
+              lines,
+            }),
             "meta"
           );
         };
@@ -1532,7 +1550,14 @@ export function App() {
               s.addPaneMessage(
                 p.id,
                 "tool",
-                `⚠️ 子智能体 ${it.agentName} 已${it.status === "completed" ? "完成" : "失败"}，但自动汇报触发失败。请手动询问一次进展。`,
+                i18n.t("notice.reportTriggerFailed", {
+                  ns: "chat",
+                  name: it.agentName,
+                  outcome:
+                    it.status === "completed"
+                      ? i18n.t("notice.outcomeDone", { ns: "chat" })
+                      : i18n.t("notice.outcomeFailed", { ns: "chat" }),
+                }),
                 "meta"
               );
             }
@@ -1604,6 +1629,37 @@ export function App() {
   }, [setTheme]);
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const layout = await window.agenticxDesktop.loadLayout();
+        const fromLayout = layout.ok ? layout.locale : undefined;
+        if (isAppLocale(fromLayout)) {
+          if (useAppStore.getState().locale !== fromLayout) {
+            setLocale(fromLayout);
+          }
+          return;
+        }
+        let stored: string | null = null;
+        try {
+          stored = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+        } catch {
+          stored = null;
+        }
+        if (isAppLocale(stored)) return;
+        let osTag = navigator.language;
+        try {
+          osTag = await window.agenticxDesktop.getSystemLocale();
+        } catch {
+          // renderer navigator.language fallback
+        }
+        setLocale(resolveAppLocale({ osTag: osTag || navigator.language }));
+      } catch {
+        // store init already used navigator.language
+      }
+    })();
+  }, [setLocale]);
+
+  useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     document.documentElement.setAttribute("data-theme-color", themeColor);
     void window.agenticxDesktop.syncTitleBarOverlay(theme);
@@ -1640,10 +1696,10 @@ export function App() {
     });
     const offTimeout = window.agenticxDesktop.onAgxAccountLoginTimeout(() => {
       void window.agenticxDesktop.confirmDialog({
-        title: "登录等待超时",
-        message: "未在有效时间内完成官网登录确认。请重新点击「登录」再试。",
-        detail: "错误代码 AGX-AUTH-201（向支持反馈时请一并提供）",
-        confirmText: "确定",
+        title: i18n.t("identity.loginTimeoutTitle", { ns: "sidebar" }),
+        message: i18n.t("identity.loginTimeoutMessage", { ns: "sidebar" }),
+        detail: i18n.t("identity.loginTimeoutDetail", { ns: "sidebar" }),
+        confirmText: i18n.t("ok", { ns: "common" }),
       });
     });
     return () => {
@@ -2062,9 +2118,9 @@ export function App() {
       followUpNote: string
     ) => {
       const source = ctx.sourceSessionId.trim();
-      if (!source) throw new Error("这条收藏缺少来源会话，无法转发");
+      if (!source) throw new Error(i18n.t("notice.missingFavoriteSource", { ns: "chat" }));
       const base = apiBase.replace(/\/$/, "");
-      if (!base) throw new Error("未连接 Studio");
+      if (!base) throw new Error(i18n.t("notice.studioDisconnected", { ns: "chat" }));
       const follow = followUpNote.trim();
       const defaultForwardFollowCue = "请阅读刚转发的聊天记录并继续回复。";
       const effectiveFollowNote = follow || defaultForwardFollowCue;
@@ -2087,7 +2143,7 @@ export function App() {
       });
       if (!resp.ok) {
         const text = await resp.text().catch(() => "");
-        throw new Error(text.slice(0, 200) || `转发失败 HTTP ${resp.status}`);
+        throw new Error(text.slice(0, 200) || i18n.t("notice.forwardFailed", { ns: "chat", status: resp.status }));
       }
       setActivePaneId(targetPaneId);
       const targetPaneMeta = useAppStore.getState().panes.find((p) => p.id === targetPaneId);
@@ -2159,7 +2215,10 @@ export function App() {
       const sid = String(payload.sessionId ?? "").trim();
       if (!sid) return null;
       const avatarId = `automation:${payload.taskId}`;
-      const paneTitle = `定时 · ${payload.taskName || "自动化任务"}`;
+      const paneTitle = i18n.t("automationPane", {
+        ns: "sidebar",
+        name: payload.taskName || i18n.t("automationTask", { ns: "sidebar" }),
+      });
       const state = useAppStore.getState();
       const existingByAvatar = state.panes.find((pane) => pane.avatarId === avatarId);
       if (existingByAvatar) {
@@ -2307,7 +2366,7 @@ export function App() {
           const avatarName = rawName
             ? resolveMetaDisplayName(rawName)
             : avatarId
-              ? "分身"
+              ? i18n.t("avatarFallback", { ns: "sidebar" })
               : META_AGENT_DISPLAY_NAME;
           const reusableMetaPane =
             !avatarId
@@ -2372,7 +2431,7 @@ export function App() {
         <VoiceFocusMode />
       ) : focusMode ? (
         <div className="flex h-full min-h-0 w-full items-center justify-center px-6 text-center text-sm text-[var(--text-danger,var(--destructive,#ef4444))]">
-          AgenticX 后端未就绪，无法进入灵巧语音模式。
+          {t("voiceBackendNotReady")}
         </div>
       ) : apiBase ? (
         <>
@@ -2436,7 +2495,7 @@ export function App() {
       <ConfirmDialog
         open={confirm.open}
         question={confirm.question}
-        sourceLabel={confirm.agentId === "meta" ? "主智能体" : `子智能体 ${confirm.agentId}`}
+        sourceLabel={confirm.agentId === "meta" ? t("metaAgent") : t("subAgent", { id: confirm.agentId })}
         diff={confirm.diff}
         context={confirm.context}
         defaultPolicy={defaultConfirmPolicyForStrategy(runMode)}
@@ -2473,7 +2532,7 @@ export function App() {
         prompt={clarification.prompt}
         options={clarification.options}
         allowFreeText={clarification.allowFreeText}
-        sourceLabel={clarification.agentId === "meta" ? "主智能体" : `子智能体 ${clarification.agentId}`}
+        sourceLabel={clarification.agentId === "meta" ? t("metaAgent") : t("subAgent", { id: clarification.agentId })}
         context={clarification.context}
         onSubmit={async (answer: ClarificationAnswer) => {
           closeClarification();

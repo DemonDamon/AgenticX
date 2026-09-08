@@ -5,6 +5,7 @@
  */
 
 import { artifactGlyph, FileTypeMark } from "../messages/artifact-glyph";
+import { useTranslation } from "react-i18next";
 import { artifactBaseName } from "../../utils/session-artifacts";
 import type { ArtifactChangeRow } from "../../utils/session-artifacts";
 
@@ -14,6 +15,7 @@ type Props = {
 };
 
 export function SessionChangeList({ rows, onOpenPath }: Props) {
+  const { t } = useTranslation("workspace");
   if (rows.length === 0) return null;
   const added = rows.reduce((sum, row) => sum + row.added, 0);
   const removed = rows.reduce((sum, row) => sum + row.removed, 0);
@@ -21,7 +23,7 @@ export function SessionChangeList({ rows, onOpenPath }: Props) {
   return (
     <div className="space-y-1">
       <div className="px-0.5 pb-1.5 text-[12px] text-text-muted">
-        文件变更{" "}
+        {t("work.fileChanges")}{" "}
         <span className="text-emerald-500">+{added}</span>{" "}
         <span className="text-rose-400">-{removed}</span>
       </div>

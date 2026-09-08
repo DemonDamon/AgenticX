@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Pause, AlertTriangle } from "lucide-react";
 import type { GraphNodeSnapshot } from "./graph-types";
@@ -31,6 +32,7 @@ function statusClasses(status: string): string {
 }
 
 export const GraphNodeView = memo(function GraphNodeView({ data, selected }: NodeProps) {
+  const { t } = useTranslation("workspace");
   const payload = data as GraphFlowNodeData;
   const node = payload.node;
   const status = String(node.status || "pending");
@@ -55,7 +57,7 @@ export const GraphNodeView = memo(function GraphNodeView({ data, selected }: Nod
             className="mt-0.5 truncate text-[11px]"
             style={{ color: "var(--text-subtle)" }}
           >
-            {isAgent ? "专家" : "任务"} · {status}
+            {isAgent ? t("graph.kindExpert") : t("graph.kindTask")} · {status}
           </div>
         </div>
         {status === "paused" ? (
@@ -64,7 +66,7 @@ export const GraphNodeView = memo(function GraphNodeView({ data, selected }: Nod
         {status === "blocked" ? (
           <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/15 px-1 text-[9px] text-amber-600 [html[data-theme=dark]_&]:text-amber-300 [html[data-theme=dim]_&]:text-amber-300">
             <AlertTriangle className="h-2.5 w-2.5" />
-            待你
+            {t("graph.awaitingYou")}
           </span>
         ) : null}
       </div>

@@ -1,4 +1,6 @@
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../i18n/i18n";
 import { Pencil, Trash2, Play, ChevronDown, FileText } from "lucide-react";
 import type { AutomationTask } from "./types";
 
@@ -41,28 +43,30 @@ function SettingsSwitch({
 
 function frequencyLabel(task: AutomationTask): string {
   const f = task.frequency;
-  const dayMap: Record<number, string> = { 1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "日" };
-  const daysStr = (days: number[]) => {
-    if (days.length === 7) return "每天";
-    if (days.length === 5 && [1, 2, 3, 4, 5].every((d) => days.includes(d))) return "工作日";
-    return days.map((d) => `周${dayMap[d]}`).join("、");
+  const ns = { ns: "workspace" };
+  const daysStr = (days: number[]): string => {
+    if (days.length === 7) return i18n.t("automation.everyDay", ns);
+    if (days.length === 5 && [1, 2, 3, 4, 5].every((d) => days.includes(d))) return i18n.t("automation.weekdays", ns);
+    const join = i18n.t("automation.weekdayJoin", ns);
+    return days.map((d) => i18n.t("automation.weekdayPrefix", { ...ns, day: i18n.t(`automation.weekday.${d}`, ns) })).join(join);
   };
   switch (f.type) {
     case "daily":
       return `${daysStr(f.days)} ${f.time}`;
     case "interval":
-      return `每 ${f.hours} 小时 · ${daysStr(f.days)}`;
+      return i18n.t("automation.intervalHours", { ...ns, hours: f.hours, days: daysStr(f.days) });
     case "once":
-      return `单次 ${f.date} ${f.time}`;
+      return i18n.t("automation.onceAt", { ...ns, date: f.date, time: f.time });
   }
 }
 
 function relativeTime(iso: string): string {
+  const ns = { ns: "workspace" };
   const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} 小时前`;
-  return `${Math.floor(diff / 86400_000)} 天前`;
+  if (diff < 60_000) return i18n.t("automation.justNow", ns);
+  if (diff < 3600_000) return i18n.t("automation.minutesAgo", { ...ns, count: Math.floor(diff / 60_000) });
+  if (diff < 86400_000) return i18n.t("automation.hoursAgo", { ...ns, count: Math.floor(diff / 3600_000) });
+  return i18n.t("automation.daysAgo", { ...ns, count: Math.floor(diff / 86400_000) });
 }
 
 /** Task rows: hover / expanded borders follow --theme-color-rgb. */
@@ -73,6 +77,7 @@ const TASK_ROW_EXPANDED =
   "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 
 export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props) {
+  const { t } = useTranslation("workspace");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [logByTask, setLogByTask] = useState<
@@ -113,8 +118,8 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
     return (
       <div className="flex flex-col items-center gap-2 py-8 text-center">
         <div className="text-3xl">📋</div>
-        <p className="text-sm text-text-muted">还没有自动化任务</p>
-        <p className="text-xs text-text-faint">从上方模板开始，或点击「添加任务」手动创建</p>
+        <p className="text-sm text-text-muted">{t("automation.empty")}</p>
+        <p className="text-xs text-text-faint">{t("automation.emptyHint")}</p>
       </div>
     );
   }
@@ -143,7 +148,7 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
               <div className="flex shrink-0 items-center gap-1.5">
                 <button
                   type="button"
-                  title="立即执行"
+                  title={t("automation.runNow")}
                   disabled={runningId === task.id}
                   className="rounded-md p-1 text-text-faint transition hover:bg-surface-panel hover:text-text-primary disabled:opacity-40"
                   onClick={() => handleRunNow(task)}
@@ -152,7 +157,7 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
                 </button>
                 <button
                   type="button"
-                  title="编辑"
+                  title={t("edit", { ns: "common" })}
                   className="rounded-md p-1 text-text-faint transition hover:bg-surface-panel hover:text-text-primary"
                   onClick={() => onEdit(task)}
                 >
@@ -160,15 +165,15 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
                 </button>
                 <button
                   type="button"
-                  title="删除"
+                  title={t("delete", { ns: "common" })}
                   className="rounded-md p-1 text-text-faint transition hover:bg-surface-panel hover:text-rose-400"
                   onClick={() => onDelete(task.id)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
                 <div className="flex items-center gap-1.5 pl-0.5">
-                  <span className="whitespace-nowrap text-[10px] text-text-faint" title="启用后按计划触发">
-                    启用
+                  <span className="whitespace-nowrap text-[10px] text-text-faint" title={t("automation.enableHint")}>
+                    {t("automation.enable")}
                   </span>
                   <SettingsSwitch
                     checked={task.enabled}
@@ -180,24 +185,24 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
             {expanded && (
               <div className="border-t border-border px-3 py-2 text-xs text-text-muted space-y-1">
                 <div className="line-clamp-3">
-                  <span className="text-text-faint">提示词：</span>{task.prompt}
+                  <span className="text-text-faint">{t("automation.promptLabel")}</span>{task.prompt}
                 </div>
                 {task.workspace && (
-                  <div><span className="text-text-faint">工作区：</span>{task.workspace}</div>
+                  <div><span className="text-text-faint">{t("automation.workspaceLabel")}</span>{task.workspace}</div>
                 )}
                 {task.provider && task.model ? (
                   <div>
-                    <span className="text-text-faint">执行模型：</span>
+                    <span className="text-text-faint">{t("automation.modelLabel")}</span>
                     {task.provider}/{task.model}
                   </div>
                 ) : null}
                 {task.lastRunAt && (
                   <div>
-                    <span className="text-text-faint">上次执行：</span>
+                    <span className="text-text-faint">{t("automation.lastRun")}</span>
                     {relativeTime(task.lastRunAt)}
                     {task.lastRunStatus && (
                       <span className={`ml-1 ${task.lastRunStatus === "success" ? "text-emerald-400" : "text-rose-400"}`}>
-                        ({task.lastRunStatus === "success" ? "成功" : "失败"})
+                        ({task.lastRunStatus === "success" ? t("automation.success") : t("automation.failed")})
                       </span>
                     )}
                     {task.lastRunStatus === "error" && task.lastRunError ? (
@@ -217,7 +222,7 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
                     onClick={() => void loadLog(task.id)}
                   >
                     <FileText className="h-3 w-3" />
-                    查看执行日志
+                    {t("automation.viewLogs")}
                   </button>
                   {logByTask[task.id]?.path ? (
                     <span className="truncate text-[10px] text-text-faint" title={logByTask[task.id].path}>
@@ -228,9 +233,9 @@ export function TaskList({ tasks, onToggle, onEdit, onDelete, onRunNow }: Props)
                 {logByTask[task.id] ? (
                   <div className="mt-1 max-h-52 overflow-y-auto rounded-md border border-border bg-surface-panel/60 p-2 font-mono text-[11px] leading-snug text-text-muted">
                     {logByTask[task.id].error ? (
-                      <div className="text-rose-400">读取日志失败：{logByTask[task.id].error}</div>
+                      <div className="text-rose-400">{t("automation.logReadFailed", { error: logByTask[task.id].error })}</div>
                     ) : logByTask[task.id].empty || logByTask[task.id].lines.length === 0 ? (
-                      <div className="text-text-faint">暂无日志（任务尚未执行过，或刚刚重建）。</div>
+                      <div className="text-text-faint">{t("automation.noLogs")}</div>
                     ) : (
                       logByTask[task.id].lines.map((ln, i) => (
                         <div key={i} className="whitespace-pre-wrap break-all">

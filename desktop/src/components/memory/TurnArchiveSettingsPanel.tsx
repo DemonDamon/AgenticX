@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Panel } from "../ds/Panel";
 import { SETTINGS_INTRO_CLASS, SETTINGS_LABEL_CLASS } from "../ds/settings-typography";
+import { i18n } from "../i18n/i18n";
 
 type TurnArchiveForm = {
   enabled: boolean;
@@ -75,6 +77,7 @@ function TaField({
 }
 
 export function TurnArchiveSettingsPanel() {
+  const { t } = useTranslation("settings");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<TurnArchiveForm>({ ...DEFAULTS });
@@ -111,10 +114,10 @@ export function TurnArchiveSettingsPanel() {
           setForm(loaded);
           setLastSaved(loaded);
         } else if (!disposed) {
-          setMessage(result?.error ? String(result.error) : "读取配置失败。");
+          setMessage(result?.error ? String(result.error) : String(i18n.t("memoryArchive.loadFailed", { ns: "settings" })));
         }
       } catch {
-        if (!disposed) setMessage("读取配置失败。");
+        if (!disposed) setMessage(String(i18n.t("memoryArchive.loadFailed", { ns: "settings" })));
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -135,56 +138,51 @@ export function TurnArchiveSettingsPanel() {
         const result = await window.agenticxDesktop.saveTurnArchiveConfig(next);
         if (!result?.ok) {
           setForm(lastSaved);
-          setMessage(result?.error ? String(result.error) : "保存失败。");
+          setMessage(result?.error ? String(result.error) : t("memoryArchive.saveFailed"));
           return;
         }
         setLastSaved(next);
-        setMessage("已保存。归档开关需新开对话后生效；召回参数下轮对话即生效。");
+        setMessage(t("memoryArchive.saved"));
       } catch (e) {
         setForm(lastSaved);
-        setMessage(e instanceof Error ? e.message : "保存失败。");
+        setMessage(e instanceof Error ? e.message : t("memoryArchive.saveFailed"));
       } finally {
         setSaving(false);
       }
     },
-    [form, lastSaved],
+    [form, lastSaved, t],
   );
 
   if (loading) {
     return (
-      <Panel title="对话轮次记忆">
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
+      <Panel title={t("memoryArchive.title")}>
+        <div className="py-2 text-sm text-text-faint">{t("memoryArchive.loading")}</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="对话轮次记忆" collapsible defaultCollapsed>
-      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
-        每轮对话结束后将 user/assistant 语义块写入本地记忆库，并在后续对话中按「相关度 × 新近度 × 访问强化」复合排序召回。
-        与 MEMORY.md 长期记忆、记忆图谱并行，不互相替换。写入{" "}
-        <code className="text-text-subtle">~/.agenticx/config.yaml</code> 的{" "}
-        <code className="text-text-subtle">memory.turn_archive</code>。
-      </p>
+    <Panel title={t("memoryArchive.title")} collapsible defaultCollapsed>
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>{t("memoryArchive.intro")}</p>
       <div className="space-y-0 text-sm text-text-subtle">
         {/* Enable row — no trailing divider for a lighter look */}
         <div className="flex items-center justify-between gap-4 py-2">
           <div className="min-w-0 flex-1">
-            <div className={SETTINGS_LABEL_CLASS}>启用对话轮次归档</div>
+            <div className={SETTINGS_LABEL_CLASS}>{t("memoryArchive.enable")}</div>
             <div className="mt-0.5 text-[11px] leading-relaxed text-text-faint">
-              默认关闭；开启后每轮结束异步写入 turns 索引
+              {t("memoryArchive.enableHint")}
             </div>
           </div>
           <MiniSwitch
             checked={form.enabled}
             disabled={saving}
             onChange={(next) => void save({ enabled: next })}
-            aria-label="启用对话轮次归档"
+            aria-label={t("memoryArchive.enableAria")}
           />
         </div>
 
         <div className="grid grid-cols-1 gap-3 py-2 md:grid-cols-2">
-          <TaField label="召回条数上限" hint="每轮注入系统提示的历史对话片段数">
+          <TaField label={t("memoryArchive.recallLimit")} hint={t("memoryArchive.recallLimitHint")}>
             <input
               type="number"
               min={1}
@@ -201,10 +199,10 @@ export function TurnArchiveSettingsPanel() {
                 else if (v !== lastSaved.recall_turns_limit) void save({ recall_turns_limit: v });
               }}
               className={`w-full tabular-nums ${TA_FIELD_BASE}`}
-              aria-label="召回条数上限"
+              aria-label={t("memoryArchive.recallLimit")}
             />
           </TaField>
-          <TaField label="新近度半衰期（天）" hint="越久远的轮次在排序中权重越低">
+          <TaField label={t("memoryArchive.halflife")} hint={t("memoryArchive.halflifeHint")}>
             <input
               type="number"
               min={0.1}
@@ -221,14 +219,14 @@ export function TurnArchiveSettingsPanel() {
                 else if (v !== lastSaved.halflife_days) void save({ halflife_days: v });
               }}
               className={`w-full tabular-nums ${TA_FIELD_BASE}`}
-              aria-label="新近度半衰期天数"
+              aria-label={t("memoryArchive.halflife")}
             />
           </TaField>
         </div>
 
-        <Panel title="高级参数" collapsible defaultCollapsed className="mt-3">
+        <Panel title={t("memoryArchive.advanced")} collapsible defaultCollapsed className="mt-3">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <TaField label="最小分块字数" hint="短于此长度的回复不单独归档">
+            <TaField label={t("memoryArchive.minChars")} hint={t("memoryArchive.minCharsHint")}>
               <input
                 type="number"
                 min={1}
@@ -244,10 +242,10 @@ export function TurnArchiveSettingsPanel() {
                   if (v !== lastSaved.min_chunk_chars) void save({ min_chunk_chars: v });
                 }}
                 className={`w-full tabular-nums ${TA_FIELD_BASE}`}
-                aria-label="最小分块字数"
+                aria-label={t("memoryArchive.minChars")}
               />
             </TaField>
-            <TaField label="每轮最大分块数" hint="单轮对话写入 turns 表的 chunk 上限">
+            <TaField label={t("memoryArchive.maxChunks")} hint={t("memoryArchive.maxChunksHint")}>
               <input
                 type="number"
                 min={1}
@@ -265,14 +263,14 @@ export function TurnArchiveSettingsPanel() {
                   if (v !== lastSaved.max_chunks_per_turn) void save({ max_chunks_per_turn: v });
                 }}
                 className={`w-full tabular-nums ${TA_FIELD_BASE}`}
-                aria-label="每轮最大分块数"
+                aria-label={t("memoryArchive.maxChunks")}
               />
             </TaField>
           </div>
         </Panel>
       </div>
       {message ? (
-        <div className={`mt-2 text-xs ${message.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
+        <div className={`mt-2 text-xs ${message === t("memoryArchive.saved") ? "text-text-muted" : "text-rose-400"}`}>
           {message}
         </div>
       ) : null}

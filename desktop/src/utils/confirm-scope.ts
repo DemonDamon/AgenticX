@@ -1,3 +1,4 @@
+import { i18n } from "../i18n/i18n";
 import { normalizeRunMode, type RunMode } from "../constants/confirm-strategy-options";
 
 function text(value: unknown): string {
@@ -61,14 +62,13 @@ export function canReuseConfirmPolicy(
  * 后端在受保护请求的 context 里带 `protected_reason`。这里优先用它，取不到才回退到
  * 本地镜像的一张表——理由的唯一出处在后端，risk 将来加一档不用记得同步改两处文案。
  */
-const LOCAL_PROTECTED_REASONS: Record<string, string> = {
-  high: "这条操作被标记为高风险",
-  destructive: "这条操作会删除或覆盖已有内容",
-  computer_use: "这条操作会读取或控制本机桌面",
-  non_whitelisted: "这条命令不在默认可直接执行的白名单里",
-  policy: "这条操作会改动技能或长期记忆等配置",
+const LOCAL_PROTECTED_REASON_KEYS: Record<string, string> = {
+  high: "protectedReasonHigh",
+  destructive: "protectedReasonDestructive",
+  computer_use: "protectedReasonComputerUse",
+  non_whitelisted: "protectedReasonNonWhitelisted",
+  policy: "protectedReasonPolicy",
 };
-const UNKNOWN_PROTECTED_REASON = "系统无法判定这步的风险，按受保护处理";
 
 export function protectedConfirmReason(
   context?: Record<string, unknown>,
@@ -76,7 +76,8 @@ export function protectedConfirmReason(
   if (!isProtectedConfirmContext(context)) return "";
   const fromBackend = text(context?.protected_reason);
   if (fromBackend) return fromBackend;
-  return LOCAL_PROTECTED_REASONS[text(context?.risk).toLowerCase()] ?? UNKNOWN_PROTECTED_REASON;
+  const key = LOCAL_PROTECTED_REASON_KEYS[text(context?.risk).toLowerCase()] ?? "protectedReasonUnknown";
+  return String(i18n.t(key, { ns: "common" }));
 }
 
 /**

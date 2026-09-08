@@ -1,3 +1,4 @@
+import { i18n } from "../../i18n/i18n";
 import { absoluteTaskspacePath } from "../../utils/workspace-file-path";
 import { officePreviewMime } from "./office-preview-kind";
 import { isWorkspaceVideoPath, workspaceVideoMime } from "./video-preview-kind";
@@ -157,7 +158,7 @@ export function mapTaskspaceFileToWorkspacePreview(
       absolutePath,
       size,
       mimeType,
-      message: "PDF 预览加载失败时，可在文件管理器中打开。",
+      message: i18n.t("preview.pdfOpenInManager", { ns: "workspace" }),
     };
   }
   if (previewKind === "office") {
@@ -167,7 +168,7 @@ export function mapTaskspaceFileToWorkspacePreview(
       absolutePath,
       size,
       mimeType,
-      message: "Office 预览加载失败时，可在文件管理器中打开。",
+      message: i18n.t("preview.officeOpenInManager", { ns: "workspace" }),
     };
   }
   if (previewKind === "video" || isWorkspaceVideoPath(path) || isWorkspaceVideoPath(absolutePath)) {
@@ -186,7 +187,7 @@ export function mapTaskspaceFileToWorkspacePreview(
       absolutePath,
       size,
       mimeType,
-      message: "该文件类型暂不支持预览。",
+      message: i18n.t("preview.typeUnsupported", { ns: "workspace" }),
     };
   }
 
@@ -269,7 +270,7 @@ export function mapSystemSearchPreviewToWorkspacePreview(
     absolutePath,
     size: 0,
     mimeType: "application/octet-stream",
-    message: result.content || result.error || "该文件类型暂不支持预览",
+    message: result.content || result.error || i18n.t("preview.typeUnsupportedShort", { ns: "workspace" }),
   };
 }
 
@@ -289,7 +290,7 @@ export async function loadAbsoluteFilePreview(
 
   const desktop = window.agenticxDesktop;
   if (!desktop?.systemSearchPreview) {
-    return { ok: false, error: "当前客户端不支持文件预览" };
+    return { ok: false, error: i18n.t("preview.clientNoPreview", { ns: "workspace" }) };
   }
 
   const base = previewBaseName(absolutePath);
@@ -319,7 +320,7 @@ export async function loadAbsoluteFilePreview(
           absolutePath,
           size: 0,
           mimeType: "application/pdf",
-          message: "PDF 预览加载失败时，可在文件管理器中打开。",
+          message: i18n.t("preview.pdfOpenInManager", { ns: "workspace" }),
         },
       };
     }
@@ -351,7 +352,7 @@ export async function loadAbsoluteFilePreview(
           absolutePath,
           size: 0,
           mimeType: officePreviewMime(lower),
-          message: "Office 预览加载失败时，可在文件管理器中打开。",
+          message: i18n.t("preview.officeOpenInManager", { ns: "workspace" }),
         },
       };
     }
@@ -360,7 +361,7 @@ export async function loadAbsoluteFilePreview(
       const mapped = mapSystemSearchPreviewToWorkspacePreview(absolutePath, direct);
       if (mapped) return { ok: true, preview: mapped };
     }
-    return { ok: false, error: direct.error || "无法预览该文件" };
+    return { ok: false, error: direct.error || i18n.t("preview.cannotPreview", { ns: "workspace" }) };
   } catch (err) {
     return { ok: false, error: String(err) };
   }

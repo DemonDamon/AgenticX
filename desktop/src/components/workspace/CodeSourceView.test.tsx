@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { i18n } from "../../i18n/i18n";
 import { CodeSourceView } from "./CodeSourceView";
 
 const GO = `package main
@@ -18,7 +19,7 @@ describe("CodeSourceView", () => {
     expect(html).toContain('data-preview-line="1"');
     expect(html).toContain('data-preview-line="3"');
     expect(html).toContain("agx-code-lineno");
-    expect(html).toContain("折叠此范围");
+    expect(html).toContain(i18n.t("preview.collapseRange", { ns: "workspace" }));
     expect(html).toContain("agx-code-line--added");
   });
 
@@ -30,7 +31,7 @@ describe("CodeSourceView", () => {
     expect(html).toContain('data-preview-line="3"');
     expect(html).toContain("agx-code-ellipsis");
     expect(html).not.toContain('data-preview-line="4"');
-    expect(html).toContain("展开此范围");
+    expect(html).toContain(i18n.t("preview.expandRange", { ns: "workspace" }));
   });
 
   it("does not draw an indent guide on the closing brace line", () => {

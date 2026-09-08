@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, MoreHorizontal, Plus, Sparkles, Star } from "lucide-react";
 import { MainViewShell } from "../ds/MainViewShell";
 import { useAppStore } from "../../store";
@@ -31,6 +32,8 @@ const GALLERY_CREATE_ACTIVE =
   "border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] text-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 
 export function AvatarGalleryView() {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
   const avatars = useAppStore((s) => s.avatars);
   const setAvatars = useAppStore((s) => s.setAvatars);
   const panes = useAppStore((s) => s.panes);
@@ -118,25 +121,7 @@ export function AvatarGalleryView() {
   };
 
   const handleCreateViaChat = (description: string) => {
-    const draft = [
-      "帮我创建一个数字分身。",
-      "",
-      "我的需求：",
-      description,
-      "",
-      "请根据需求设计这个分身。信息不足时，只追问会明显影响分身效果的关键问题；信息已经足够时，不要重复询问。",
-      "",
-      "创建前，请整理并展示以下方案：",
-      "- 名称",
-      "- 角色定位",
-      "- 简介",
-      "- 专长标签",
-      "- 工作方式与回答风格",
-      "- 必要的行为边界",
-      "",
-      "然后通过确认卡让我确认。只有确认后才能正式创建；如果我要求修改，请更新方案并再次确认。",
-    ].join("\n");
-    newMetaTask(draft);
+    newMetaTask(t("gallery.createDraft", { description }));
   };
 
   const handlePinToggle = async (avatarId: string) => {
@@ -155,14 +140,14 @@ export function AvatarGalleryView() {
     const confirmResult =
       typeof api.confirmDialog === "function"
         ? await api.confirmDialog({
-            title: "确认删除分身",
-            message: `确定删除分身「${avatar.name}」吗？`,
-            detail: "此操作不可恢复。",
-            confirmText: "删除",
-            cancelText: "取消",
+            title: t("gallery.deleteTitle"),
+            message: t("gallery.deleteMessage", { name: avatar.name }),
+            detail: t("gallery.deleteIrreversible"),
+            confirmText: tCommon("delete"),
+            cancelText: tCommon("cancel"),
             destructive: true,
           })
-        : { ok: true, confirmed: window.confirm(`确定删除分身「${avatar.name}」吗？此操作不可恢复。`) };
+        : { ok: true, confirmed: window.confirm(t("gallery.deleteConfirm", { name: avatar.name })) };
     if (!confirmResult.confirmed) return;
     panes.filter((item) => item.avatarId === avatarId).forEach((item) => removePane(item.id));
     if (activeAvatarId === avatarId) setActiveAvatarId(null);
@@ -181,9 +166,9 @@ export function AvatarGalleryView() {
       <div className="sticky top-0 z-10 -mx-6 -mt-6 mb-5 border-b border-border bg-surface-base px-6 pb-4 pt-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-text-strong">数字专家</h2>
+            <h2 className="text-lg font-semibold text-text-strong">{t("gallery.title")}</h2>
             <p className="mt-1 text-sm text-text-muted">
-              为你的团队召集专精专家；点击卡片可编辑设置，点「唤起」开始对话。
+              {t("gallery.subtitle")}
             </p>
           </div>
           <button
@@ -192,7 +177,7 @@ export function AvatarGalleryView() {
             onClick={() => setCreateOpen(true)}
           >
             <Plus className="h-4 w-4" />
-            新建专家
+            {t("gallery.newExpert")}
           </button>
         </div>
       </div>
@@ -200,22 +185,22 @@ export function AvatarGalleryView() {
       {!avatarsLoaded ? (
         <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-faint">
           <Loader2 className="h-4 w-4 animate-spin" />
-          正在加载专家…
+          {t("gallery.loading")}
         </div>
       ) : sortedAvatars.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-card text-text-faint">
             <Sparkles className="h-5 w-5" />
           </div>
-          <div className="text-[15px] font-semibold text-text-strong">还没有数字专家</div>
-          <p className="text-sm text-text-muted">创建属于你的数字专家，处理专精任务</p>
+          <div className="text-[15px] font-semibold text-text-strong">{t("gallery.emptyTitle")}</div>
+          <p className="text-sm text-text-muted">{t("gallery.emptyHint")}</p>
           <button
             type="button"
             className="mt-1 flex items-center gap-1.5 rounded-lg bg-btnPrimary px-3 py-2 text-[13px] font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
             onClick={() => setCreateOpen(true)}
           >
             <Plus className="h-4 w-4" />
-            新建专家
+            {t("gallery.newExpert")}
           </button>
         </div>
       ) : (
@@ -294,12 +279,12 @@ export function AvatarGalleryView() {
                       openMetaOrAvatarPane(avatar.id, avatar.name);
                     }}
                   >
-                    立即对话
+                    {t("gallery.startChat")}
                   </button>
                   <button
                     type="button"
                     className="shrink-0 rounded-md border border-border p-2 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
-                    aria-label="更多操作"
+                    aria-label={t("gallery.moreActions")}
                     onClick={(e) => {
                       e.stopPropagation();
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -318,7 +303,7 @@ export function AvatarGalleryView() {
             onClick={() => setCreateOpen(true)}
           >
             <Plus className="h-5 w-5" />
-            <span className="text-[13px] font-medium">创建专家</span>
+            <span className="text-[13px] font-medium">{t("gallery.createExpert")}</span>
           </button>
         </div>
       )}
@@ -338,14 +323,14 @@ export function AvatarGalleryView() {
               setSettingsAvatarId(id);
             }}
           >
-            设置
+            {tCommon("settings")}
           </button>
           <button
             type="button"
             className="w-full px-3 py-1.5 text-left text-[13px] text-text-muted transition hover:bg-surface-hover"
             onClick={() => void handlePinToggle(cardMenu.avatarId)}
           >
-            {avatars.find((a) => a.id === cardMenu.avatarId)?.pinned ? "取消关注" : "关注"}
+            {avatars.find((a) => a.id === cardMenu.avatarId)?.pinned ? t("gallery.unfollow") : t("gallery.follow")}
           </button>
           {avatars.find((a) => a.id === cardMenu.avatarId)?.workspaceDir ? (
             <button
@@ -357,7 +342,7 @@ export function AvatarGalleryView() {
                 if (dir) void window.agenticxDesktop.shellOpenPath(dir);
               }}
             >
-              打开文件夹
+              {t("gallery.openFolder")}
             </button>
           ) : null}
           <button
@@ -365,7 +350,7 @@ export function AvatarGalleryView() {
             className="w-full px-3 py-1.5 text-left text-[13px] text-rose-400 transition hover:bg-rose-500/10"
             onClick={() => void handleDelete(cardMenu.avatarId)}
           >
-            删除
+            {tCommon("delete")}
           </button>
         </div>
       )}

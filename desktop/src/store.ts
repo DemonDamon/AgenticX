@@ -27,6 +27,13 @@ import {
   type DesktopCapabilityLocks,
 } from "./utils/enterprise-capability-policy";
 import type { RunMode } from "./constants/confirm-strategy-options";
+import {
+  LOCALE_STORAGE_KEY,
+  isAppLocale,
+  type AppLocale,
+} from "./i18n/locales";
+import { resolveAppLocale } from "./i18n/resolve-locale";
+import { i18n } from "./i18n/i18n";
 
 export type { ContentBlock } from "./utils/content-blocks";
 
@@ -50,6 +57,7 @@ export type SubAgentStatus =
   | "cancelled";
 export type { RunMode } from "./constants/confirm-strategy-options";
 export type ThemeMode = "dark" | "light" | "dim";
+export type { AppLocale } from "./i18n/locales";
 export type ThemeColor = "blue" | "green" | "pink" | "yellow" | "white";
 export type ChatStyle = "im" | "terminal" | "clean";
 /** MCP 列表展示态（与 Studio `/api/mcp/servers` 对齐，近似 Cursor 绿/红/灰语义） */
@@ -563,6 +571,7 @@ type AppState = {
   focusExitScrollBottomPaneId: string | null;
   clearFocusExitScrollBottomPaneId: () => void;
   theme: ThemeMode;
+  locale: AppLocale;
   /** Near 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
   agxAccount: { loggedIn: boolean; email: string; displayName: string };
   chatStyle: ChatStyle;
@@ -666,6 +675,7 @@ type AppState = {
   exitFocusMode: () => void;
   toggleFocusMode: (paneId?: string) => void;
   setTheme: (theme: ThemeMode) => void;
+  setLocale: (locale: AppLocale) => void;
   setThemeColor: (color: ThemeColor) => void;
   setAgxAccount: (acct: { loggedIn: boolean; email: string; displayName: string }) => void;
   setChatStyle: (style: ChatStyle) => void;
@@ -961,6 +971,21 @@ const sessionMessageCache: Map<string, Message[]> = new Map();
 
 const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
 const THEME_STORAGE_KEY = "agx-theme";
+
+function loadLocale(): AppLocale | null {
+  try {
+    const saved = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (isAppLocale(saved)) return saved;
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
+
+function initialLocale(): AppLocale {
+  const osTag = typeof navigator !== "undefined" ? navigator.language : undefined;
+  return resolveAppLocale({ saved: loadLocale(), osTag });
+}
 const THEME_COLOR_STORAGE_KEY = "agx-theme-color";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
@@ -1145,6 +1170,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusModePaneId: null,
   focusExitScrollBottomPaneId: null,
   theme: loadTheme(),
+  locale: initialLocale(),
   themeColor: loadThemeColor(),
   agxAccount: { loggedIn: false, email: "", displayName: "" },
   chatStyle: loadChatStyle(),
@@ -1399,6 +1425,25 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore when not running inside Electron (e.g. unit tests)
       }
       return { theme };
+    }),
+  setLocale: (locale) =>
+    set(() => {
+      try {
+        window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+      } catch {
+        // ignore storage errors
+      }
+      try {
+        void window.agenticxDesktop.saveUiPrefs({ locale });
+      } catch {
+        // ignore when not running inside Electron (e.g. unit tests)
+      }
+      try {
+        void i18n.changeLanguage(locale);
+      } catch {
+        // ignore when i18n is not ready
+      }
+      return { locale };
     }),
   setThemeColor: (themeColor) =>
     set(() => {

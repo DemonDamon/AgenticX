@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as echarts from "echarts";
 import { Database, Maximize2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "../ds/Modal";
 import { ZoomableViewport } from "../ds/ZoomableViewport";
 import { buildStockChartOption } from "./stock-chart-options";
@@ -35,13 +36,14 @@ function instrumentChartPayload(
 }
 
 function QuoteMetrics({ snapshot }: { snapshot: ReturnType<typeof computeQuoteSnapshot> }) {
+  const { t } = useTranslation("chat");
   if (!snapshot) return null;
   const items = [
-    { label: "今开", value: formatStockPrice(snapshot.open) },
-    { label: "收盘", value: formatStockPrice(snapshot.price) },
-    { label: "最高", value: formatStockPrice(snapshot.high) },
-    { label: "最低", value: formatStockPrice(snapshot.low) },
-    { label: "成交量", value: formatVolumeCn(snapshot.volume) },
+    { label: t("stock.open"), value: formatStockPrice(snapshot.open) },
+    { label: t("stock.close"), value: formatStockPrice(snapshot.price) },
+    { label: t("stock.high"), value: formatStockPrice(snapshot.high) },
+    { label: t("stock.low"), value: formatStockPrice(snapshot.low) },
+    { label: t("stock.volume"), value: formatVolumeCn(snapshot.volume) },
   ];
   return (
     <div className="mt-3 grid grid-cols-5 gap-2 border-t border-border/60 pt-3">
@@ -64,6 +66,7 @@ export function StockChartWidget({
   showZoom = false,
   onZoom,
 }: Props) {
+  const { t } = useTranslation("chat");
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
   const [truncated, setTruncated] = useState(false);
@@ -151,7 +154,7 @@ export function StockChartWidget({
             type="button"
             onClick={onZoom}
             className="shrink-0 flex h-7 w-7 items-center justify-center rounded-md border border-border bg-[var(--surface-card)] text-text-faint transition hover:bg-[var(--surface-card-strong)] hover:text-text-subtle"
-            title="放大查看"
+            title={t("mermaid.expand")}
           >
             <Maximize2 size={14} />
           </button>
@@ -161,7 +164,7 @@ export function StockChartWidget({
       <QuoteMetrics snapshot={snapshot} />
 
       {truncated ? (
-        <div className="mt-2 text-[11px] text-amber-500/90">已收起早期数据，仅展示最近 500 条</div>
+        <div className="mt-2 text-[11px] text-amber-500/90">{t("stock.truncatedHint")}</div>
       ) : null}
 
       <div ref={ref} className="mt-3 w-full" style={{ height }} />
@@ -204,9 +207,14 @@ function WatchlistTabs({
 }
 
 function DataSourceBar({ payload }: { payload: StockChartPayload }) {
+  const { t } = useTranslation("chat");
   const label =
     payload.dataSourceLabel ||
-    (payload.attribution ? `获取数据 | ${payload.attribution.replace(/^数据来源：/, "")}` : "");
+    (payload.attribution
+      ? t("stock.fetchDataLabel", {
+          source: payload.attribution.replace(/^数据来源：/, ""),
+        })
+      : "");
   if (!label) return null;
   return (
     <div className="mb-3 flex items-center gap-1.5 text-[12px] text-text-muted">
@@ -217,6 +225,7 @@ function DataSourceBar({ payload }: { payload: StockChartPayload }) {
 }
 
 export function StockChartWidgetBlock({ payload }: { payload: StockChartPayload }) {
+  const { t } = useTranslation("chat");
   const [zoomOpen, setZoomOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const instruments = payload.instruments.length > 0 ? payload.instruments : [];
@@ -249,7 +258,7 @@ export function StockChartWidgetBlock({ payload }: { payload: StockChartPayload 
       </div>
       <Modal
         open={zoomOpen}
-        title={activeInstrument.name || activeInstrument.symbol || "查看图表"}
+        title={activeInstrument.name || activeInstrument.symbol || t("mermaid.viewChart")}
         onClose={() => setZoomOpen(false)}
         panelClassName="w-[92vw] max-w-5xl bg-surface-popover"
       >

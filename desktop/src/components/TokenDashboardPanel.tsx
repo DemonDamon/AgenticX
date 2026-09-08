@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { useAppStore, type ThemeMode, type TokenDashboardRange } from "../store";
 import { getProviderDisplayName, resolveProviderEntry } from "../utils/provider-display";
@@ -69,6 +70,8 @@ function applyDashboardPayload(
 }
 
 export function TokenDashboardPanel({ open, onClose }: Props) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
   const theme = useAppStore((s) => s.theme);
   const apiToken = useAppStore((s) => s.apiToken);
   const apiBase = useAppStore((s) => s.apiBase);
@@ -147,7 +150,7 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
     async function load() {
       const customIncomplete = range === "custom" && (!customParams?.from || !customParams?.to);
       if (customIncomplete) {
-        setErr("请选择自定义区间的开始与结束日期");
+        setErr(t("tokenDash.needCustomRange"));
         if (!hasMatchingCache) setBusy(true);
         else setRefreshing(true);
         try {
@@ -211,7 +214,7 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [open, range, customFrom, customTo, customParams?.from, customParams?.to, apiToken, resolveApiBase]);
+  }, [open, range, customFrom, customTo, customParams?.from, customParams?.to, apiToken, resolveApiBase, t]);
 
   const trendBars = useMemo(() => {
     const rows = [...daily];
@@ -251,14 +254,14 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
       >
         <div className="flex items-center justify-between border-b border-border bg-surface-base px-5 py-4">
           <h2 id="agx-token-dash-title" className="text-lg font-semibold tracking-tight text-[var(--text-strong)]">
-            Token 消耗看板
+            {t("tokenDash.title")}
           </h2>
           <button
             type="button"
             className="agx-topbar-btn !h-10 !w-10"
             onClick={onClose}
-            aria-label="关闭"
-            title="关闭"
+            aria-label={tCommon("close")}
+            title={tCommon("close")}
           >
             <X className="h-5 w-5" />
           </button>
@@ -270,8 +273,8 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
               {[
                 { label: "7D", value: fmtCompact(weekChip?.tokens ?? 0) },
                 { label: "30D", value: fmtCompact(monthChip?.tokens ?? 0) },
-                { label: "日均(估)", value: fmtCompact(avgDaily30) },
-                { label: "本月会话", value: fmtCompact(meta?.month_conversations ?? 0) },
+                { label: t("tokenDash.avgDaily"), value: fmtCompact(avgDaily30) },
+                { label: t("tokenDash.monthSessions"), value: fmtCompact(meta?.month_conversations ?? 0) },
               ].map((item, i) => (
                 <div key={item.label} className="rounded-lg border border-border bg-surface-card px-3 py-2.5">
                   <div className={`mb-2 h-0.5 w-7 rounded-full ${KPI_ACCENTS[i]}`}></div>
@@ -284,19 +287,19 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
             <div className="rounded-lg border border-border bg-surface-card p-3.5">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-xs uppercase tracking-wide text-[var(--text-primary)]">统计起始</div>
+                  <div className="text-xs uppercase tracking-wide text-[var(--text-primary)]">{t("tokenDash.statStart")}</div>
                   <div className="mt-1 truncate text-2xl font-bold tabular-nums tracking-tight text-[var(--text-strong)]">
                     {startedLabel}
                   </div>
                 </div>
                 <div className="shrink-0 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold tabular-nums text-emerald-400">
-                  {meta?.active_days_30d ?? 0}/30 天活跃
+                  {t("tokenDash.activeDays", { count: meta?.active_days_30d ?? 0 })}
                 </div>
               </div>
             </div>
 
             <div className="rounded-lg border border-border bg-surface-card p-3.5">
-              <div className="mb-3 text-sm font-medium text-[var(--text-strong)]">常用模型 Top 3</div>
+              <div className="mb-3 text-sm font-medium text-[var(--text-strong)]">{t("tokenDash.topModels")}</div>
               <ol className="space-y-3 text-sm">
                 {(topModels.length ? topModels : []).map((m, i) => (
                   <li key={m.model}>
@@ -314,12 +317,12 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
                     </div>
                   </li>
                 ))}
-                {!topModels.length ? <li className="font-medium text-[var(--text-primary)]">暂无数据</li> : null}
+                {!topModels.length ? <li className="font-medium text-[var(--text-primary)]">{t("tokenDash.noData")}</li> : null}
               </ol>
             </div>
 
             <div className="flex flex-col rounded-lg border border-border bg-surface-card p-3.5 md:flex-1">
-              <div className="mb-2 text-sm font-medium text-[var(--text-strong)]">趋势（当前区间 · 最多30日）</div>
+              <div className="mb-2 text-sm font-medium text-[var(--text-strong)]">{t("tokenDash.trend")}</div>
               <div className="flex h-16 items-end gap-0.5 overflow-x-auto rounded-md bg-surface-base px-2 py-2 md:flex-1">
                 {trendBars.map((r) => (
                   <div
@@ -350,7 +353,7 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
             {range === "custom" ? (
               <div className="flex flex-wrap items-center gap-3 text-sm font-medium text-[var(--text-primary)]">
                 <label className="flex items-center gap-2">
-                  从
+                  {t("tokenDash.from")}
                   <input
                     type="date"
                     className="rounded-md border border-border bg-surface-card px-3 py-2 text-base text-[var(--text-strong)] focus:outline-none focus:border-blue-500"
@@ -359,7 +362,7 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
                   />
                 </label>
                 <label className="flex items-center gap-2">
-                  到
+                  {t("tokenDash.to")}
                   <input
                     type="date"
                     className="rounded-md border border-border bg-surface-card px-3 py-2 text-base text-[var(--text-strong)] focus:outline-none focus:border-blue-500"
@@ -373,9 +376,9 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
             {err ? (
               <div className="rounded-lg bg-red-500/15 px-4 py-3 text-base text-status-error">{err}</div>
             ) : null}
-            {busy ? <div className="text-sm font-medium text-[var(--text-primary)]">加载中…</div> : null}
+            {busy ? <div className="text-sm font-medium text-[var(--text-primary)]">{t("tokenDash.loading")}</div> : null}
             {!busy && refreshing ? (
-              <div className="text-sm font-medium text-[var(--text-primary)]">正在刷新…</div>
+              <div className="text-sm font-medium text-[var(--text-primary)]">{t("tokenDash.refreshing")}</div>
             ) : null}
 
             <div className="rounded-xl border border-border bg-surface-card px-5 py-5">
@@ -421,13 +424,13 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
               <table className="w-full border-collapse text-left text-sm">
                 <thead className="sticky top-0 z-[1] border-b border-border bg-surface-base text-[var(--text-strong)]">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">日期</th>
-                    <th className="px-4 py-3 font-semibold">合计</th>
-                    <th className="px-4 py-3 font-semibold">输入</th>
-                    <th className="px-4 py-3 font-semibold">输出</th>
-                    <th className="px-4 py-3 font-semibold">缓存</th>
-                    {showReasoning && <th className="px-4 py-3 font-semibold">推理</th>}
-                    <th className="px-4 py-3 font-semibold">会话</th>
+                    <th className="px-4 py-3 font-semibold">{t("tokenDash.colDate")}</th>
+                    <th className="px-4 py-3 font-semibold">{t("tokenDash.colTotal")}</th>
+                    <th className="px-4 py-3 font-semibold">{t("tokenDash.colInput")}</th>
+                    <th className="px-4 py-3 font-semibold">{t("tokenDash.colOutput")}</th>
+                    <th className="px-4 py-3 font-semibold">{t("tokenDash.colCache")}</th>
+                    {showReasoning && <th className="px-4 py-3 font-semibold">{t("tokenDash.colReasoning")}</th>}
+                    <th className="px-4 py-3 font-semibold">{t("tokenDash.colSessions")}</th>
                   </tr>
                 </thead>
                 <tbody className="bg-surface-card">
@@ -445,7 +448,7 @@ export function TokenDashboardPanel({ open, onClose }: Props) {
                   {!dailyDesc.length ? (
                     <tr>
                       <td colSpan={6 + (showReasoning ? 1 : 0)} className="px-4 py-10 text-center text-base font-medium text-[var(--text-primary)]">
-                        暂无数据（新版启用后的用量才会入账）
+                        {t("tokenDash.emptyLedger")}
                       </td>
                     </tr>
                   ) : null}

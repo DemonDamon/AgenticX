@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../i18n/i18n";
 import { useAppStore, type Avatar, type Message } from "../../store";
 import { resolveCrewSlots } from "../../utils/group-member-activity";
 import { EMPTY_PANE_GRAPH_STATE } from "../graph/graph-types";
@@ -46,6 +48,7 @@ export function GroupMembersSummaryList({
   onSwitchModel?: (agentId: string) => void;
   onInterrupt?: (agentId: string) => void;
 }) {
+  const { t } = useTranslation("workspace");
   const groups = useAppStore((s) => s.groups);
   const setGroups = useAppStore((s) => s.setGroups);
   const group = groups.find((g) => g.id === groupId);
@@ -127,7 +130,7 @@ export function GroupMembersSummaryList({
   }, [slots]);
 
   if (!group) {
-    return <p className="text-xs text-text-faint">未找到该群配置，可在侧栏刷新群列表后重试。</p>;
+    return <p className="text-xs text-text-faint">{t("work.groupMissing")}</p>;
   }
 
   const persistMembers = async (nextAvatarIds: string[]) => {
@@ -144,13 +147,13 @@ export function GroupMembersSummaryList({
         avatar_ids: nextAvatarIds,
       });
       if (!res.ok) {
-        throw new Error(res.error || "更新群成员失败");
+        throw new Error(res.error || i18n.t("work.updateMembersFailed", { ns: "workspace" }));
       }
     } catch (err) {
       setGroups(
         groups.map((item) => (item.id === group.id ? { ...item, avatarIds: prevAvatarIds } : item)),
       );
-      setErrorText(err instanceof Error ? err.message : "更新群成员失败");
+      setErrorText(err instanceof Error ? err.message : i18n.t("work.updateMembersFailed", { ns: "workspace" }));
     } finally {
       setSaving(false);
     }
@@ -176,18 +179,18 @@ export function GroupMembersSummaryList({
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-text-faint">
-        本会话已执行 {executedCount}/{group.avatarIds.length}
+        {t("work.executedOf", { done: executedCount, total: group.avatarIds.length })}
       </p>
       {errorText ? <p className="text-[10px] text-rose-300">{errorText}</p> : null}
       {mode === "remove" ? (
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-rose-300">点击成员头像移出群聊</span>
+          <span className="text-[11px] text-rose-300">{t("work.clickToRemove")}</span>
           <button
             type="button"
             className="rounded px-2 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
             onClick={() => setMode("browse")}
           >
-            完成
+            {t("work.done")}
           </button>
         </div>
       ) : null}
@@ -210,11 +213,11 @@ export function GroupMembersSummaryList({
                 disabled={saving}
                 className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
                 style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-                title="添加成员"
+                title={t("work.addMember")}
               >
                 +
               </button>
-              <span className={`text-text-muted ${NAME_CLASS}`}>添加</span>
+              <span className={`text-text-muted ${NAME_CLASS}`}>{t("work.add")}</span>
             </div>
             <div className="flex w-[52px] flex-col items-center gap-1 text-center">
               <button
@@ -223,11 +226,11 @@ export function GroupMembersSummaryList({
                 disabled={saving || group.avatarIds.length === 0}
                 className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
                 style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-                title="移出成员"
+                title={t("work.removeMember")}
               >
                 −
               </button>
-              <span className={`text-text-muted ${NAME_CLASS}`}>移出</span>
+              <span className={`text-text-muted ${NAME_CLASS}`}>{t("work.remove")}</span>
             </div>
           </div>
         </>
@@ -242,7 +245,7 @@ export function GroupMembersSummaryList({
           </div>
           <span
             className={`w-full truncate text-text-muted ${NAME_CLASS}`}
-            title={`${metaLeaderLabel} · 群聊协调者`}
+            title={t("work.metaCoordinator", { name: metaLeaderLabel })}
           >
             {metaLeaderLabel}
           </span>
@@ -254,15 +257,15 @@ export function GroupMembersSummaryList({
           const activity = phaseById.get(id);
           const statusTitle = activity
             ? activity.phase === "replied"
-              ? `已回复 ${activity.replies} 次`
+              ? t("work.repliedTimes", { count: activity.replies })
               : activity.phase === "running"
-                ? "执行中"
+                ? t("work.running")
                 : activity.phase === "waiting"
-                  ? "等待确认"
+                  ? t("work.waitingConfirm")
                   : activity.phase === "failed"
-                    ? "执行失败"
-                    : "未执行"
-            : "未执行";
+                    ? t("work.runFailed")
+                    : t("work.notExecuted")
+            : t("work.notExecuted");
           return (
             <button
               key={id}
@@ -319,11 +322,11 @@ export function GroupMembersSummaryList({
             disabled={saving}
             className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
             style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-            title="添加成员"
+            title={t("work.addMember")}
           >
             +
           </button>
-          <span className={`text-text-muted ${NAME_CLASS}`}>添加</span>
+          <span className={`text-text-muted ${NAME_CLASS}`}>{t("work.add")}</span>
         </div>
         <div className="flex w-[52px] flex-col items-center gap-1 text-center">
           <button
@@ -332,11 +335,11 @@ export function GroupMembersSummaryList({
             disabled={saving || group.avatarIds.length === 0}
             className="flex shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-border text-xl font-light leading-none text-text-subtle transition hover:border-border-strong hover:bg-surface-hover hover:text-text-strong disabled:opacity-60"
             style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-            title="移出成员"
+            title={t("work.removeMember")}
           >
             −
           </button>
-          <span className={`text-text-muted ${NAME_CLASS}`}>移出</span>
+          <span className={`text-text-muted ${NAME_CLASS}`}>{t("work.remove")}</span>
         </div>
       </div>
       )}
@@ -351,9 +354,9 @@ export function GroupMembersSummaryList({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
-              <span className="text-sm font-semibold text-text-strong">添加群成员</span>
+              <span className="text-sm font-semibold text-text-strong">{t("work.addGroupMembers")}</span>
               <span className="text-xs text-text-faint">
-                {dialogChecked.size > 0 ? `已选 ${dialogChecked.size} 人` : ""}
+                {dialogChecked.size > 0 ? t("work.selectedPeople", { count: dialogChecked.size }) : ""}
               </span>
             </div>
 
@@ -364,7 +367,7 @@ export function GroupMembersSummaryList({
                     type="search"
                     value={dialogSearch}
                     onChange={(e) => setDialogSearch(e.target.value)}
-                    placeholder="搜索"
+                    placeholder={t("work.searchPlaceholder")}
                     autoFocus
                     className="w-full rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-faint focus:border-border-strong"
                   />
@@ -372,7 +375,7 @@ export function GroupMembersSummaryList({
                 <div className="min-h-0 flex-1 overflow-y-auto px-1">
                   {dialogCandidates.length === 0 ? (
                     <p className="px-3 py-4 text-center text-xs text-text-faint">
-                      {dialogSearch.trim() ? "无匹配结果" : "所有分身都已在群里"}
+                      {dialogSearch.trim() ? t("work.noMatch") : t("work.allInGroup")}
                     </p>
                   ) : (
                     <div className="flex flex-col">
@@ -427,11 +430,11 @@ export function GroupMembersSummaryList({
 
               <div className="flex w-[160px] shrink-0 flex-col bg-surface-card">
                 <div className="shrink-0 px-3 py-2">
-                  <span className="text-[11px] text-text-faint">已选成员</span>
+                  <span className="text-[11px] text-text-faint">{t("work.selectedMembers")}</span>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto px-2">
                   {dialogChecked.size === 0 ? (
-                    <p className="px-1 text-[11px] text-text-faint">勾选左侧分身</p>
+                    <p className="px-1 text-[11px] text-text-faint">{t("work.checkAvatars")}</p>
                   ) : (
                     <div className="flex flex-col gap-1.5">
                       {Array.from(dialogChecked).map((id) => {
@@ -483,7 +486,7 @@ export function GroupMembersSummaryList({
                 className="rounded-lg border border-border px-4 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                 onClick={() => setMode("browse")}
               >
-                取消
+                {t("cancel", { ns: "common" })}
               </button>
               <button
                 type="button"
@@ -491,7 +494,7 @@ export function GroupMembersSummaryList({
                 disabled={dialogChecked.size === 0 || saving}
                 onClick={handleDialogConfirm}
               >
-                添加{dialogChecked.size > 0 ? ` (${dialogChecked.size})` : ""}
+                {dialogChecked.size > 0 ? t("work.addWithCount", { count: dialogChecked.size }) : t("work.add")}
               </button>
             </div>
           </div>

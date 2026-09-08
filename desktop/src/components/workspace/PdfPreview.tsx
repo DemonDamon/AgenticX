@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { PreviewFallback } from "./PreviewFallback";
 import { dataUrlToArrayBuffer, loadLocalPreviewDataUrl } from "./preview-data";
@@ -41,6 +42,7 @@ export function PdfPreview({
   const pdfDocRef = useRef<PdfJsDoc | null>(null);
   const pageNumRef = useRef(1);
   const pageCountRef = useRef(0);
+  const { t } = useTranslation("workspace");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pageNum, setPageNum] = useState(1);
@@ -175,7 +177,7 @@ export function PdfPreview({
     return (
       <PreviewFallback
         title="PDF"
-        message={error ?? "PDF 预览失败；当前可在系统应用中打开。"}
+        message={error ?? t("preview.pdfFallback")}
         mimeType={mimeType}
         onCopyPath={onCopyPath}
         onRevealInFileManager={onRevealInFileManager}
@@ -195,7 +197,7 @@ export function PdfPreview({
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
         <div className="text-xs text-text-muted">
-          {loading ? "正在加载 PDF…" : `第 ${pageNum} / ${pageCount} 页`}
+          {loading ? t("preview.pdfLoading") : t("preview.pageOf", { page: pageNum, total: pageCount })}
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -206,7 +208,7 @@ export function PdfPreview({
               changePage(pageNum - 1);
               rootRef.current?.focus({ preventScroll: true });
             }}
-            title="上一页"
+            title={t("preview.prevPage")}
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -218,7 +220,7 @@ export function PdfPreview({
               changePage(pageNum + 1);
               rootRef.current?.focus({ preventScroll: true });
             }}
-            title="下一页"
+            title={t("preview.nextPage")}
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -227,7 +229,7 @@ export function PdfPreview({
             className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-40"
             disabled={loading}
             onClick={() => setScale((s) => Math.max(0.5, s - 0.15))}
-            title="缩小"
+            title={t("preview.zoomOut")}
           >
             <ZoomOut className="h-4 w-4" />
           </button>
@@ -236,7 +238,7 @@ export function PdfPreview({
             className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-40"
             disabled={loading}
             onClick={() => setScale((s) => Math.min(2.5, s + 0.15))}
-            title="放大"
+            title={t("preview.zoomIn")}
           >
             <ZoomIn className="h-4 w-4" />
           </button>
@@ -245,7 +247,7 @@ export function PdfPreview({
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
         {loading ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface-base text-sm text-text-muted">
-            正在加载 PDF…
+            {t("preview.pdfLoading")}
           </div>
         ) : null}
         <div className="agx-pdf-preview p-4">

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 type LoopReviewDimension = {
   key: string;
@@ -30,21 +31,6 @@ type Props = {
   onClose: () => void;
 };
 
-/** 证据状态展示文案（内部枚举仍为英文，后续可接 i18n） */
-const EVIDENCE_LABELS: Record<string, string> = {
-  missing: "缺失",
-  unobserved: "未观测",
-  present: "已存在",
-  wired: "已接入",
-  exercised: "已执行",
-  outcome_supported: "结果可证",
-  not_applicable: "不适用",
-};
-
-function evidenceLabel(evidence: string): string {
-  return EVIDENCE_LABELS[evidence] ?? evidence;
-}
-
 function isPositiveEvidence(evidence: string): boolean {
   return evidence === "outcome_supported" || evidence === "exercised";
 }
@@ -68,8 +54,12 @@ const TONE_TEXT: Record<"good" | "mid" | "warn", string> = {
 };
 
 export function LoopReviewCard({ sessionId, onClose }: Props) {
+  const { t } = useTranslation("chat");
   const [data, setData] = useState<LoopReviewData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const evidenceLabel = (evidence: string): string =>
+    t(`loopReview.evidence.${evidence}`, { defaultValue: evidence });
 
   useEffect(() => {
     let cancelled = false;
@@ -95,11 +85,11 @@ export function LoopReviewCard({ sessionId, onClose }: Props) {
       style={{ backgroundColor: "var(--surface-base-fallback, var(--surface-panel))" }}
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-        <div className="text-[13px] font-semibold text-text-strong">会话体检</div>
+        <div className="text-[13px] font-semibold text-text-strong">{t("loopReview.title")}</div>
         <button
           onClick={onClose}
           className="flex h-6 w-6 items-center justify-center rounded-md text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
-          aria-label="关闭"
+          aria-label={t("loopReview.close")}
         >
           ✕
         </button>
@@ -115,9 +105,7 @@ export function LoopReviewCard({ sessionId, onClose }: Props) {
         )}
 
         {!loading && !data && (
-          <div className="py-6 text-center text-[12px] text-text-muted">
-            本次会话暂无体检数据
-          </div>
+          <div className="py-6 text-center text-[12px] text-text-muted">{t("loopReview.noData")}</div>
         )}
 
         {!loading && data && (
@@ -159,7 +147,7 @@ export function LoopReviewCard({ sessionId, onClose }: Props) {
                     </div>
                     {capped && (
                       <div className="mt-0.5 text-[10px] text-text-faint">
-                        已按证据封顶（原始 {d.raw_score}）
+                        {t("loopReview.evidenceCapped", { rawScore: d.raw_score })}
                       </div>
                     )}
                   </div>
@@ -169,17 +157,23 @@ export function LoopReviewCard({ sessionId, onClose }: Props) {
 
             <div className="mt-4 border-t border-border pt-3">
               <div className="mb-2 text-[11px] font-medium text-text-muted">
-                体检发现（{data.findings.length}）
+                {t("loopReview.findingsTitle", { count: data.findings.length })}
               </div>
               {data.findings.length === 0 ? (
-                <div className="text-[12px] text-text-muted">未发现需要修复的问题</div>
+                <div className="text-[12px] text-text-muted">{t("loopReview.noFindings")}</div>
               ) : (
                 <div className="space-y-2.5">
                   {data.findings.map((f) => (
                     <div key={f.key} className="rounded-lg bg-surface-card px-2.5 py-2">
-                      <div className="text-[12px] text-text-strong">影响：{f.impact}</div>
-                      <div className="mt-1 text-[11px] text-text-muted">修复：{f.repair}</div>
-                      <div className="text-[11px] text-text-muted">验证：{f.verification}</div>
+                      <div className="text-[12px] text-text-strong">
+                        {t("loopReview.impact")}: {f.impact}
+                      </div>
+                      <div className="mt-1 text-[11px] text-text-muted">
+                        {t("loopReview.repair")}: {f.repair}
+                      </div>
+                      <div className="text-[11px] text-text-muted">
+                        {t("loopReview.verification")}: {f.verification}
+                      </div>
                     </div>
                   ))}
                 </div>

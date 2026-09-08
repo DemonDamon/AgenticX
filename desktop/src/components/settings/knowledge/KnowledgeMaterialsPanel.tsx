@@ -1,9 +1,16 @@
 // Plan-Id: machi-kb-stage1-local-mvp
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { FilePlus, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import type { KBApi } from "./api";
 import type { IngestJob, KBDocument, KBDocumentStatus } from "./types";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type Props = {
   api: KBApi;
@@ -22,6 +29,7 @@ type ActiveJob = {
 const POLL_INTERVAL_MS = 800;
 
 export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
+  const { t } = useTranslation("settings");
   const [documents, setDocuments] = useState<KBDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +47,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
       setDepsMissing(missing);
       setBackendDepsReady(missing.length === 0 && r.ok !== false);
     } catch {
-      setDepsMissing(["后端依赖检测失败"]);
+      setDepsMissing([st("knowledge.depsDetectFailed")]);
       setBackendDepsReady(false);
     }
   }, []);
@@ -56,7 +64,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
       // component unmounts. Re-hydrating `activeJobs` from the backend
       // lets the polling effect resume and restores the live progress
       // bar instead of getting stuck on the coarse persisted status
-      // (e.g. showing "排队中" while ingestion is actually at 70%).
+      // (e.g. showing st("knowledge.stQueued") while ingestion is actually at 70%).
       const [docs, jobs] = await Promise.all([
         api.listDocuments(),
         api.listJobs().catch(() => [] as IngestJob[]),
@@ -219,7 +227,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
 
   const disabledHint = !enabled ? (
     <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-      知识库当前未启用，请先到「配置」面板启用后再添加资料。
+      {st("knowledge.notEnabled")}
     </div>
   ) : null;
 
@@ -239,21 +247,19 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-200">
           {depsInstalledButStale ? (
             <>
-              <p className="font-medium">后端依赖已安装，但当前服务进程需要完全重启</p>
+              <p className="font-medium">{st("knowledge.restartNeededTitle")}</p>
               <p className="mt-1 text-[11px] leading-relaxed text-amber-100/90">
-                socksio 等依赖刚装好，但当前后端是在安装之前启动的，运行中的进程看不到新装的包。
-                请<strong>完全退出 Near（⌘Q）后重新打开</strong>，再对失败文件点右侧 ⟳ 重建索引即可，无需再次修复。
+                {st("knowledge.restartNeededBody")}
               </p>
             </>
           ) : (
             <>
               <p className="font-medium">
-                后端 Python 环境不完整
+                {st("knowledge.pyEnvIncomplete")}
                 {depsMissing.length > 0 ? `：${depsMissing.join("、")}` : ""}
               </p>
               <p className="mt-1 text-[11px] leading-relaxed text-amber-100/90">
-                向量化会走本机代理（如 SOCKS）；缺 socksio 时上传后才在「失败」里报错。请切换到本页左侧的「配置」子页，在页面最顶部点「一键修复」安装
-                agenticx[desktop-runtime]，再点「立即重启」；或对失败文件点右侧 ⟳ 重建索引。
+                {st("knowledge.pyEnvHint")}
               </p>
             </>
           )}
@@ -267,7 +273,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
       ) : null}
 
       <Panel
-        title="资料上传"
+        title={st("knowledge.uploadTitle")}
         actions={
           <button
             type="button"
@@ -275,7 +281,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
             onClick={() => void reload()}
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            刷新
+            {st("knowledge.refresh")}
           </button>
         }
       >
@@ -302,19 +308,19 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
             <FilePlus className="h-5 w-5 text-text-subtle" />
           )}
           <div className="mt-2 text-text-subtle">
-            拖拽文件到此处，或点击选择（支持 {extensions.join(", ") || "MD/TXT/PDF/DOC/DOCX/PPT/PPTX/XLS/XLSX/图片/HTML/JSON/CSV/YAML"}）
+            {st("knowledge.dropHint", { extensions: extensions.join(", ") || st("knowledge.dropHintDefault") })}
           </div>
         </div>
       </Panel>
 
-      <Panel title={`已加入资料 (${documents.length})`}>
+      <Panel title={st("knowledge.docsTitle", { count: documents.length })}>
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-text-subtle">
-            <Loader2 className="h-4 w-4 animate-spin" /> 加载中…
+            <Loader2 className="h-4 w-4 animate-spin" /> {st("knowledge.loading")}
           </div>
         ) : documents.length === 0 ? (
           <div className="text-sm text-text-subtle">
-            空。拖入一个 Markdown 文件即可开始第一次检索。
+            {st("knowledge.emptyDocs")}
           </div>
         ) : (
           <ul className="divide-y divide-border">
@@ -333,7 +339,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                       <span className={statusTagClass(status)}>{statusLabel(status)}</span>
                       {isRunning ? <span>{progressPercent}%</span> : null}
                       <span>{formatSize(doc.size_bytes)}</span>
-                      <span>片段: {doc.chunks}</span>
+                      <span>{st("knowledge.chunks", { count: doc.chunks })}</span>
                     </div>
                     <div
                       className="mt-1 min-w-0 truncate font-mono text-[11px] leading-snug text-text-faint"
@@ -347,10 +353,10 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                         {isDesktopRuntimeIngestError(doc.error) ? (
                           <p className="mt-1 text-amber-600 dark:text-amber-400">
                             {backendDepsReady === false
-                              ? "请到本页顶部的「知识库」设置，使用「一键修复」安装依赖后点「立即重启」，再对本文件点右侧 ⟳ 重建索引。"
+                              ? st("knowledge.reindexNeedRepair")
                               : backendDepsReady === true
-                                ? "依赖已安装；若刚修复过，当前后端进程可能在安装前启动，请完全退出并重启 Near（⌘Q）后再点右侧 ⟳ 重建索引。"
-                                : "正在检测后端依赖…"}
+                                ? st("knowledge.reindexNeedRestart")
+                                : st("knowledge.checkingDeps")}
                           </p>
                         ) : null}
                       </div>
@@ -377,7 +383,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                       className="rounded border border-border px-2 py-1 text-xs"
                       onClick={() => rebuild(doc.id)}
                       disabled={!enabled || Boolean(job)}
-                      title="重建索引"
+                      title={st("knowledge.reindexTitle")}
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
                     </button>
@@ -386,7 +392,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                       className="rounded border border-border px-2 py-1 text-xs text-rose-600"
                       onClick={() => remove(doc.id)}
                       disabled={Boolean(job)}
-                      title="删除"
+                      title={st("knowledge.deleteTitle")}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -415,13 +421,13 @@ function isDesktopRuntimeIngestError(text: string): boolean {
 
 function statusLabel(status: KBDocumentStatus): string {
   const map: Record<KBDocumentStatus, string> = {
-    queued: "排队中",
-    parsing: "解析中",
-    chunking: "切片中",
-    embedding: "向量化",
-    writing: "写入中",
-    done: "已索引",
-    failed: "失败",
+    queued: st("knowledge.stQueued"),
+    parsing: st("knowledge.stParsing"),
+    chunking: st("knowledge.stChunking"),
+    embedding: st("knowledge.stEmbedding"),
+    writing: st("knowledge.stWriting"),
+    done: st("knowledge.stDone"),
+    failed: st("knowledge.stFailed"),
   };
   return map[status] ?? status;
 }

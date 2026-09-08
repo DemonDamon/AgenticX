@@ -20,19 +20,19 @@ export const BADGE_HOVER_DELAY_MS = 280;
 
 export type BadgeStatusTone = "theme" | "success" | "error" | "warning" | "muted";
 
-/** 状态 → 语义色调 + 中文标签（与 `SubAgentStatusBadge` 语义对齐）。 */
-export const STATUS_TONE: Record<string, { tone: BadgeStatusTone; label: string }> = {
-  pending: { tone: "warning", label: "等待中" },
-  awaiting_confirm: { tone: "warning", label: "待确认" },
-  awaiting_input: { tone: "theme", label: "等待输入" },
-  running: { tone: "theme", label: "执行中" },
-  paused: { tone: "warning", label: "已暂停" },
-  completed: { tone: "success", label: "已完成" },
-  failed: { tone: "error", label: "失败" },
-  cancelled: { tone: "muted", label: "已中断" },
+/** 状态 → 语义色调 + 词典 key（与 `SubAgentStatusBadge` 语义对齐）。 */
+export const STATUS_TONE: Record<string, { tone: BadgeStatusTone; labelKey: string }> = {
+  pending: { tone: "warning", labelKey: "subagent.statusPending" },
+  awaiting_confirm: { tone: "warning", labelKey: "subagent.statusAwaitingConfirm" },
+  awaiting_input: { tone: "theme", labelKey: "subagent.statusAwaitingInput" },
+  running: { tone: "theme", labelKey: "subagent.statusRunning" },
+  paused: { tone: "warning", labelKey: "subagent.statusPaused" },
+  completed: { tone: "success", labelKey: "subagent.statusCompleted" },
+  failed: { tone: "error", labelKey: "subagent.statusFailed" },
+  cancelled: { tone: "muted", labelKey: "subagent.statusCancelled" },
 };
 
-export function statusMeta(status: string): { tone: BadgeStatusTone; label: string } {
+export function statusMeta(status: string): { tone: BadgeStatusTone; labelKey: string } {
   return STATUS_TONE[status] ?? STATUS_TONE.pending;
 }
 

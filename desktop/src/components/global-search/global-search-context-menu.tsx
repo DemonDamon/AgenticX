@@ -6,6 +6,11 @@ import {
 } from "./global-search-events";
 import { parentFolderPath } from "../../utils/chat-file-mention";
 import { useAppStore } from "../../store";
+import { i18n } from "../../i18n/i18n";
+
+function tSearch(key: string): string {
+  return i18n.t(key, { ns: "sidebar" });
+}
 
 type BuildMenuOptions = {
   item: GlobalSearchItem;
@@ -18,9 +23,9 @@ type BuildMenuOptions = {
 async function copyText(text: string, onToast: BuildMenuOptions["onToast"]): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
-    onToast("已复制");
+    onToast(tSearch("search.copied"));
   } catch {
-    onToast("复制失败", "warning");
+    onToast(tSearch("search.copyFailed"), "warning");
   }
 }
 
@@ -30,10 +35,10 @@ export function buildGlobalSearchContextMenuItems(options: BuildMenuOptions): Co
   const paneId = useAppStore.getState().activePaneId;
 
   const openItem: ContextMenuItem = {
-    label: "打开",
+    label: tSearch("search.open"),
     onSelect: () => {
       void window.agenticxDesktop.systemSearchOpen(item.path).then((resp) => {
-        if (!resp.ok) onToast(resp.error ?? "打开失败", "warning");
+        if (!resp.ok) onToast(resp.error ?? tSearch("search.openFailed"), "warning");
       });
     },
   };
@@ -42,42 +47,42 @@ export function buildGlobalSearchContextMenuItems(options: BuildMenuOptions): Co
     label: revealLabel,
     onSelect: () => {
       void window.agenticxDesktop.systemSearchReveal(item.path).then((resp) => {
-        if (!resp.ok) onToast(resp.error ?? "无法在文件管理器中显示", "warning");
+        if (!resp.ok) onToast(resp.error ?? tSearch("search.revealFailed"), "warning");
       });
     },
   };
 
   const copyPathItem: ContextMenuItem = {
-    label: "复制路径",
+    label: tSearch("search.copyPath"),
     onSelect: () => void copyText(item.path, onToast),
   };
 
   const copyNameItem: ContextMenuItem = {
-    label: "复制名称",
+    label: tSearch("search.copyName"),
     onSelect: () => void copyText(item.name, onToast),
   };
 
   const getInfoItem: ContextMenuItem = {
-    label: "显示简介",
+    label: tSearch("search.getInfo"),
     onSelect: () => {
       void window.agenticxDesktop.systemSearchGetInfo(item.path).then((resp) => {
         if (!resp.ok) {
-          onToast(resp.error ?? "无法显示简介", "warning");
+          onToast(resp.error ?? tSearch("search.getInfoFailed"), "warning");
           return;
         }
         if (hostPlatform !== "darwin") {
-          onToast("已在文件管理器中定位", "default");
+          onToast(tSearch("search.revealed"), "default");
         }
       });
     },
   };
 
   const openWithItem: ContextMenuItem = {
-    label: "用其他应用打开",
+    label: tSearch("search.openWith"),
     onSelect: () => {
       void window.agenticxDesktop.systemSearchOpenWith(item.path).then((resp) => {
         if (!resp.ok) {
-          onToast(resp.error ?? "无法打开", "warning");
+          onToast(resp.error ?? tSearch("search.cannotOpen"), "warning");
           return;
         }
         if (resp.hint) onToast(resp.hint, "default");
@@ -86,7 +91,7 @@ export function buildGlobalSearchContextMenuItems(options: BuildMenuOptions): Co
   };
 
   const addWorkspaceItem: ContextMenuItem = {
-    label: isFolder ? "添加至工作区" : "添加文件所在文件夹至工作区",
+    label: isFolder ? tSearch("search.addFolderToWorkspace") : tSearch("search.addParentToWorkspace"),
     onSelect: () => {
       const folderPath = isFolder ? item.path : parentFolderPath(item.path);
       dispatchGlobalSearchAddToWorkspace(folderPath);
@@ -95,10 +100,10 @@ export function buildGlobalSearchContextMenuItems(options: BuildMenuOptions): Co
   };
 
   const refCurrentItem: ContextMenuItem = {
-    label: "引用至当前对话",
+    label: tSearch("search.refCurrent"),
     onSelect: () => {
       if (!paneId) {
-        onToast("无激活窗格", "warning");
+        onToast(tSearch("search.noActivePane"), "warning");
         return;
       }
       dispatchGlobalSearchReferenceFile(paneId, item.path, "current");
@@ -107,10 +112,10 @@ export function buildGlobalSearchContextMenuItems(options: BuildMenuOptions): Co
   };
 
   const refNewItem: ContextMenuItem = {
-    label: "引用至新对话",
+    label: tSearch("search.refNew"),
     onSelect: () => {
       if (!paneId) {
-        onToast("无激活窗格", "warning");
+        onToast(tSearch("search.noActivePane"), "warning");
         return;
       }
       dispatchGlobalSearchReferenceFile(paneId, item.path, "new");

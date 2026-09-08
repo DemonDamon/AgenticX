@@ -1,7 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { Check, Loader2 } from "lucide-react";
 import { Modal } from "../../ds/Modal";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 const MonacoEditor = lazy(async () => {
   const mod = await import("@monaco-editor/react");
@@ -58,6 +65,7 @@ export function MCPJsonEditorModal({
   onLoad,
   onSave,
 }: Props) {
+  const { t } = useTranslation("settings");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [text, setText] = useState("");
@@ -87,9 +95,9 @@ export function MCPJsonEditorModal({
         if (r.ok) {
           setText(String(r.text || ""));
           setFormat(String(r.format || "json"));
-          if (r.parse_error) setMessage(`解析提示：${r.parse_error}`);
+          if (r.parse_error) setMessage(st("mcpRemote.parseHint", { error: r.parse_error }));
         } else {
-          setMessage(r.error || "读取失败");
+          setMessage(r.error || st("mcpRemote.readFailed"));
         }
       })
       .finally(() => {
@@ -142,10 +150,10 @@ export function MCPJsonEditorModal({
     try {
       const result = await onSave(selectedPath, text);
       if (result.ok) {
-        setMessage("保存成功");
-        showSaveToast("已保存");
+        setMessage(st("mcpRemote.saveOk"));
+        showSaveToast(st("mcpRemote.saved"));
       } else {
-        setMessage(result.error || "保存失败");
+        setMessage(result.error || st("mcpRemote.saveFailed"));
       }
     } finally {
       setSaving(false);
@@ -180,19 +188,19 @@ export function MCPJsonEditorModal({
         : null}
     <Modal
       open={open}
-      title="编辑 MCP 配置"
+      title={st("mcpRemote.editJsonTitle")}
       onClose={onClose}
       panelClassName="w-[min(1100px,96vw)] bg-surface-panel rounded-xl border border-border shadow-2xl"
       footer={(
         <div className="flex items-center justify-between gap-2">
-          <div className="text-[11px] text-text-faint">{message || (format === "json" ? "JSON 模式支持保存" : `${format} 仅预览`)}</div>
+          <div className="text-[11px] text-text-faint">{message || (format === "json" ? st("mcpRemote.jsonSavable") : st("mcpRemote.previewOnly", { format }))}</div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover"
               onClick={onClose}
             >
-              关闭
+              {st("mcpRemote.close")}
             </button>
             <button
               type="button"
@@ -202,7 +210,7 @@ export function MCPJsonEditorModal({
                 void doSave();
               }}
             >
-              {saving ? "保存中..." : "保存"}
+              {saving ? st("mcpRemote.saving") : st("mcpRemote.save")}
             </button>
           </div>
         </div>
@@ -226,7 +234,7 @@ export function MCPJsonEditorModal({
           {loading ? (
             <div className="flex h-full items-center justify-center text-sm text-text-faint">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              读取中...
+              {st("mcpRemote.reading")}
             </div>
           ) : format !== "json" ? (
             <textarea
@@ -236,7 +244,7 @@ export function MCPJsonEditorModal({
               readOnly
             />
           ) : (
-            <Suspense fallback={<div className="p-3 text-sm text-text-faint">加载编辑器中...</div>}>
+            <Suspense fallback={<div className="p-3 text-sm text-text-faint">{st("mcpRemote.loadingEditor")}</div>}>
               <MonacoEditor
                 height="100%"
                 language="json"

@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowUp } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { MessageUsage, ModelSelection } from "../../store";
 import { normalizeBareModelId } from "../../utils/model-display";
@@ -9,8 +10,6 @@ import {
   formatTurnModelLabel,
   formatTurnUsageSplit,
   formatTurnUsageTitle,
-  TURN_USAGE_MISSING_LABEL,
-  TURN_USAGE_MISSING_TITLE,
 } from "../../utils/message-turn-meta";
 import { HoverTip } from "../ds/HoverTip";
 
@@ -52,6 +51,7 @@ export function MessageTurnMeta({
   model?: string;
   modelSelection?: ModelSelection;
 }) {
+  const { t } = useTranslation("chat");
   const usageSplit = usage ? formatTurnUsageSplit(usage) : undefined;
   const cacheHit = usage ? formatTurnCacheHit(usage) : undefined;
   const bareModel = normalizeBareModelId(model ?? "");
@@ -68,21 +68,21 @@ export function MessageTurnMeta({
       className="inline-flex min-h-5 min-w-0 items-center select-none"
       title={
         usage
-          ? formatTurnUsageTitle(usage)
+          ? formatTurnUsageTitle(usage, t)
           : usageMissing
-            ? TURN_USAGE_MISSING_TITLE
+            ? t("usage.missingTitle")
             : undefined
       }
     >
       <TurnMetaRule kind="actions" lead={false} />
       {usageMissing ? (
         <span className="text-[13px] leading-none text-text-faint">
-          {TURN_USAGE_MISSING_LABEL}
+          {t("usage.missingLabel")}
         </span>
       ) : null}
       {usageSplit ? (
         <span className="inline-flex shrink-0 items-center gap-2.5 text-[13px] leading-none text-text-subtle">
-          <span className="sr-only">本轮消耗</span>
+          <span className="sr-only">{t("usage.turnCostSr")}</span>
           <span className="inline-flex items-center gap-1 tabular-nums">
             <TurnUsageArrow direction="in" />
             <span>{usageSplit.input}</span>
@@ -93,7 +93,7 @@ export function MessageTurnMeta({
           </span>
           {cacheHit ? (
             <HoverTip
-              label={formatTurnCacheHitTip(cacheHit)}
+              label={formatTurnCacheHitTip(cacheHit, t)}
               inline
               tooltipAlign="end"
               className="inline-flex items-center"
@@ -102,8 +102,8 @@ export function MessageTurnMeta({
                 data-turn-cache-hit=""
                 className="tabular-nums text-emerald-400 [html[data-theme=light]_&]:text-emerald-600"
               >
-                <span className="sr-only">本轮缓存命中 </span>
-                {formatTurnCacheHitLabel(cacheHit)}
+                <span className="sr-only">{t("usage.cacheHitSr")}</span>
+                {formatTurnCacheHitLabel(cacheHit, t)}
               </span>
             </HoverTip>
           ) : null}

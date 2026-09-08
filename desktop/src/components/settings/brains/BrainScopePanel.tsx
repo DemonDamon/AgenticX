@@ -1,8 +1,15 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Globe2, Lock, Users } from "lucide-react";
 import { useAppStore } from "../../../store";
 import type { createBrainsApi, BrainRecord } from "./api";
 import { BRAIN_SCOPE_GLOBAL_BADGE, BRAIN_SCOPE_PRIVATE_BADGE } from "./brainScopeUi";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type ScopeMode = "global" | "private";
 
@@ -20,17 +27,18 @@ type Props = {
 };
 
 function scopeLabel(scope: string): string {
-  return scope === "private" ? "分身专属" : "全局可见";
+  return scope === "private" ? st("brains.scopePrivateLong") : st("brains.scopeGlobalLong");
 }
 
 function typeLabel(type: string): string {
-  return type === "code" ? "代码库" : "文档库";
+  return type === "code" ? st("brains.typeCodeLong") : st("brains.typeDocsLong");
 }
 
 export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function BrainScopePanel(
   { brain, brainsApi, onUpdated, onDirtyChange },
   ref,
 ) {
+  const { t } = useTranslation("settings");
   const avatars = useAppStore((s) => s.avatars);
   const [scopeMode, setScopeMode] = useState<ScopeMode>(
     brain.scope === "private" ? "private" : "global",
@@ -69,7 +77,7 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
     setMsg(null);
     try {
       if (scopeMode === "private" && !ownerId.trim()) {
-        const err = "请选择所属分身";
+        const err = st("brains.pickOwnerRequired");
         setMsg(err);
         return { ok: false, error: err };
       }
@@ -77,7 +85,7 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
         scope: scopeMode,
         owner_avatar_id: scopeMode === "private" ? ownerId.trim() : null,
       });
-      setMsg("可见范围已更新");
+      setMsg(st("brains.scopeUpdated"));
       onUpdated();
       return { ok: true };
     } catch (exc) {
@@ -128,26 +136,26 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
             </span>
             {brain.enabled ? (
               <span className="rounded-full bg-[var(--brain-scope-enabled-bg)] px-2 py-0.5 text-[11px] text-[var(--brain-scope-enabled-fg)]">
-                已启用
+                {st("brains.enabled")}
               </span>
             ) : (
               <span className="rounded-full bg-[var(--brain-scope-type-bg)] px-2 py-0.5 text-[11px] text-[var(--brain-scope-type-fg)]">
-                已关闭
+                {st("brains.disabled")}
               </span>
             )}
           </div>
           <p className="text-xs leading-relaxed text-text-muted">
             {persistedScope === "global" ? (
               <>
-                <strong className="font-medium text-text-primary">Meta</strong> 默认可用；分身默认挂载全局脑，也可在分身设置中勾选挂载。
+                {st("brains.metaDefault")}
               </>
             ) : (
               <>
-                仅所属分身
+                {st("brains.ownerOnly")}
                 <strong className="mx-1 font-medium text-text-primary">
-                  {ownerName || persistedOwner || "（未指定）"}
+                  {ownerName || persistedOwner || st("brains.unspecified")}
                 </strong>
-                及其挂载策略可见；<strong className="font-medium text-text-primary">Meta 默认看不到</strong>。
+                {st("brains.ownerOnlyHint")}
               </>
             )}
           </p>
@@ -158,11 +166,11 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
 
       {isDefaultDocs ? (
         <div className="px-4 py-3 text-xs text-text-muted">
-          系统默认文档库固定为全局可见，不可改为分身专属。
+          {st("brains.systemFixedGlobal")}
         </div>
       ) : (
         <div className="space-y-3 px-4 py-3">
-          <div className="text-xs font-medium text-text-subtle">调整可见范围</div>
+          <div className="text-xs font-medium text-text-subtle">{st("brains.adjustScope")}</div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <button
               type="button"
@@ -176,10 +184,10 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
             >
               <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
                 <Globe2 className="h-4 w-4 text-[var(--brain-scope-global-icon)]" />
-                全局可见
+                {st("brains.scopeGlobalLong")}
               </div>
               <p className="mt-1 text-xs leading-snug text-text-muted">
-                Near（Meta）与分身均可检索；适合团队共享资料与代码库。
+                {st("brains.globalVisibleHint")}
               </p>
             </button>
             <button
@@ -194,10 +202,10 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
             >
               <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
                 <Lock className="h-4 w-4 text-[var(--brain-scope-private-icon)]" />
-                分身专属
+                {st("brains.scopePrivateLong")}
               </div>
               <p className="mt-1 text-xs leading-snug text-text-muted">
-                仅绑定的一个分身默认可见；Meta 不会自动挂载此脑。
+                {st("brains.privateVisibleHint")}
               </p>
             </button>
           </div>
@@ -206,7 +214,7 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
             <label className="block text-xs text-text-subtle">
               <span className="mb-1.5 flex items-center gap-1.5">
                 <Users className="h-3.5 w-3.5 text-text-muted" />
-                所属分身
+                {st("brains.owner")}
               </span>
               {avatars.length > 0 ? (
                 <select
@@ -215,7 +223,7 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
                   onChange={(e) => setOwnerId(e.target.value)}
                   disabled={busy}
                 >
-                  <option value="">请选择分身…</option>
+                  <option value="">{st("brains.pickAvatar")}</option>
                   {avatars.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}（{a.id.slice(0, 8)}…）
@@ -234,7 +242,7 @@ export const BrainScopePanel = forwardRef<BrainScopePanelHandle, Props>(function
             </label>
           ) : null}
 
-          {msg && !msg.includes("已更新") ? (
+          {msg && msg !== st("brains.scopeUpdated") ? (
             <p className="text-xs text-[var(--status-error)]">{msg}</p>
           ) : null}
         </div>

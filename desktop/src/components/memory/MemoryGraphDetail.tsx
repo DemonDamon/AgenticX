@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { GraphEdgeDTO, GraphNodeDTO } from "./memory-graph-types";
 
 type Props = {
@@ -7,10 +8,11 @@ type Props = {
 };
 
 export function MemoryGraphDetail({ node, edges, onDeleteEpisode }: Props) {
+  const { t } = useTranslation("settings");
   if (!node) {
     return (
       <div className="rounded-lg border border-border bg-surface-card p-3 text-xs text-text-faint">
-        点击节点查看摘要与时态信息
+        {t("memoryGraph.clickNode")}
       </div>
     );
   }
@@ -28,13 +30,13 @@ export function MemoryGraphDetail({ node, edges, onDeleteEpisode }: Props) {
       {node.summary ? <p className="whitespace-pre-wrap leading-relaxed">{node.summary}</p> : null}
       {(node.validAt || node.invalidAt) && (
         <div className="text-[10px] text-text-faint">
-          {node.validAt ? `生效 ${node.validAt}` : null}
-          {node.invalidAt ? ` · 失效 ${node.invalidAt}` : null}
+          {node.validAt ? t("memoryGraph.validAt", { time: node.validAt }) : null}
+          {node.invalidAt ? t("memoryGraph.invalidAt", { time: node.invalidAt }) : null}
         </div>
       )}
       {related.length > 0 ? (
         <div className="space-y-1 border-t border-[var(--border-muted)] pt-2">
-          <div className="text-[10px] font-medium text-text-faint">关联关系</div>
+          <div className="text-[10px] font-medium text-text-faint">{t("memoryGraph.related")}</div>
           {related.slice(0, 6).map((e) => (
             <div key={e.id} className={e.status === "invalidated" ? "text-text-faint line-through" : ""}>
               {e.label}
@@ -48,7 +50,7 @@ export function MemoryGraphDetail({ node, edges, onDeleteEpisode }: Props) {
           className="mt-2 rounded border border-rose-500/40 px-2 py-1 text-[11px] text-rose-400 hover:bg-rose-500/10"
           onClick={() => onDeleteEpisode(node.id)}
         >
-          删除此记忆片段
+          {t("memoryGraph.deleteEpisode")}
         </button>
       ) : null}
     </div>

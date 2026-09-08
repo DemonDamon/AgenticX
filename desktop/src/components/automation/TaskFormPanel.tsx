@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../i18n/i18n";
 import { X, FolderOpen, ChevronDown } from "lucide-react";
 import { FrequencyPicker } from "./FrequencyPicker";
 import type { AutomationTask, AutomationFrequency } from "./types";
@@ -32,6 +34,7 @@ function generateId(): string {
 }
 
 export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Props) {
+  const { t } = useTranslation("workspace");
   const [name, setName] = useState(initial?.name ?? "");
   const [prompt, setPrompt] = useState(initial?.prompt ?? "");
   const [workspace, setWorkspace] = useState(initial?.workspace ?? "");
@@ -83,9 +86,9 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
         return;
       }
       if (r?.canceled) return;
-      setWsHint(r?.error ? String(r.error) : "未选择目录");
+      setWsHint(r?.error ? String(r.error) : i18n.t("automation.noDirSelected", { ns: "workspace" }));
     } catch (e) {
-      setWsHint(e instanceof Error ? e.message : "选择目录失败");
+      setWsHint(e instanceof Error ? e.message : i18n.t("automation.pickDirFailed", { ns: "workspace" }));
     }
   }, []);
 
@@ -148,9 +151,9 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
         delete (task as { model?: string }).model;
       }
       const res = await onSave(task);
-      if (!res.ok) setSaveError(res.error?.trim() || "保存失败，请重试。");
+      if (!res.ok) setSaveError(res.error?.trim() || i18n.t("automation.saveFailedRetry", { ns: "workspace" }));
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "保存失败");
+      setSaveError(e instanceof Error ? e.message : i18n.t("automation.saveFailedShort", { ns: "workspace" }));
     } finally {
       setSaving(false);
     }
@@ -164,12 +167,12 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
       const res = await deleteAutomationTaskWithConfirm(editingId);
       if (res.cancelled) return;
       if (!res.ok) {
-        setSaveError(res.error?.trim() || "删除失败，请重试。");
+        setSaveError(res.error?.trim() || i18n.t("automation.deleteFailedRetry", { ns: "workspace" }));
         return;
       }
       await onAfterDelete?.();
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "删除失败");
+      setSaveError(e instanceof Error ? e.message : i18n.t("automation.deleteFailedShort", { ns: "workspace" }));
     } finally {
       setSaving(false);
     }
@@ -185,7 +188,7 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
           <h3 className="text-sm font-semibold text-text-strong">
-            {initial?.id?.trim() ? "编辑自动化任务" : "添加自动化任务"}
+            {initial?.id?.trim() ? t("automation.editTitle") : t("automation.addTitle")}
           </h3>
           <button
             type="button"
@@ -200,21 +203,21 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {/* Name */}
           <label className="block">
-            <span className="text-sm font-medium text-text-strong">名称</span>
+            <span className="text-sm font-medium text-text-strong">{t("automation.name")}</span>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="例如：每日 AI 新闻推送"
+              placeholder={t("automation.namePlaceholder")}
               className="mt-1 w-full rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-text-subtle focus:outline-none"
             />
           </label>
 
           {/* Workspace */}
           <div className="relative" ref={dropdownRef}>
-            <span className="text-sm font-medium text-text-strong">工作空间</span>
+            <span className="text-sm font-medium text-text-strong">{t("automation.workspace")}</span>
             <span className="ml-1 text-xs text-text-faint">
-              （可选；留空则保存为 ~/.agenticx/crontask/&lt;任务ID&gt;）
+              {t("automation.workspaceHint")}
             </span>
             <div className="mt-1 flex gap-2">
               <button
@@ -224,17 +227,17 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
               >
                 <FolderOpen className="h-3.5 w-3.5 shrink-0 text-text-faint" />
                 <span className={`min-w-0 flex-1 truncate ${workspace ? "text-text-primary" : "text-text-faint"}`}>
-                  {workspace || "从已添加工作区选择…"}
+                  {workspace || t("automation.pickWorkspace")}
                 </span>
                 <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-text-faint transition ${wsDropdown ? "rotate-180" : ""}`} />
               </button>
               <button
                 type="button"
-                title="在系统中浏览并选择文件夹"
+                title={t("automation.browseFolderTip")}
                 className="shrink-0 rounded-md border border-border bg-surface-card px-3 py-2 text-xs font-medium text-text-muted transition hover:border-text-faint hover:text-text-primary"
                 onClick={() => void pickWorkspaceFolder()}
               >
-                浏览文件夹
+                {t("automation.browseFolder")}
               </button>
             </div>
             {wsHint ? <p className="mt-1 text-xs text-rose-400">{wsHint}</p> : null}
@@ -243,7 +246,7 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
                 <div className="border-b border-border px-2 py-1.5">
                   <input
                     type="text"
-                    placeholder="搜索工作区..."
+                    placeholder={t("automation.searchWorkspace")}
                     value={wsFilter}
                     onChange={(e) => setWsFilter(e.target.value)}
                     className="w-full bg-transparent text-xs text-text-primary placeholder:text-text-faint focus:outline-none"
@@ -257,11 +260,11 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
                       className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-text-muted hover:bg-surface-card"
                       onClick={() => { setWorkspace(""); setWsDropdown(false); setWsFilter(""); }}
                     >
-                      清除选择
+                      {t("automation.clearSelection")}
                     </button>
                   )}
                   {filteredDirs.length === 0 ? (
-                    <div className="px-3 py-2 text-xs text-text-faint">暂无工作区</div>
+                    <div className="px-3 py-2 text-xs text-text-faint">{t("automation.noWorkspace")}</div>
                   ) : (
                     filteredDirs.map((d) => (
                       <button
@@ -285,16 +288,16 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
 
           {/* Per-task LLM */}
           <label className="block">
-            <span className="text-sm font-medium text-text-strong">执行模型</span>
+            <span className="text-sm font-medium text-text-strong">{t("automation.execModel")}</span>
             <span className="ml-1 text-xs text-text-faint">
-              （可选；不选则用 Studio 默认模型。每次触发会在新会话中执行。）
+              {t("automation.execModelHint")}
             </span>
             <select
               value={llmValue}
               onChange={(e) => setLlmValue(e.target.value)}
               className="mt-1 w-full rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-primary focus:border-text-subtle focus:outline-none"
             >
-              <option value="">默认（与主界面当前模型策略一致）</option>
+              <option value="">{t("automation.defaultModel")}</option>
               {llmOptions.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -302,18 +305,18 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
               ))}
             </select>
             {llmOptions.length === 0 ? (
-              <p className="mt-1 text-xs text-amber-400/90">请先在设置中配置 API Key 并启用模型，此处才会出现可选列表。</p>
+              <p className="mt-1 text-xs text-amber-400/90">{t("automation.needApiKey")}</p>
             ) : null}
           </label>
 
           {/* Prompt */}
           <label className="block">
-            <span className="text-sm font-medium text-text-strong">提示词</span>
+            <span className="text-sm font-medium text-text-strong">{t("automation.prompt")}</span>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={4}
-              placeholder="描述 Near 应该执行的任务..."
+              placeholder={t("automation.promptPlaceholder")}
               className="mt-1 w-full resize-y rounded-md border border-border bg-surface-card px-3 py-2 text-sm text-text-primary placeholder:text-text-faint focus:border-text-subtle focus:outline-none"
             />
           </label>
@@ -328,8 +331,8 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
               className="text-xs text-text-muted hover:text-text-primary transition"
               onClick={() => setDateRangeEnabled(!dateRangeEnabled)}
             >
-              {dateRangeEnabled ? "▾ 生效日期区间" : "▸ 生效日期区间"}
-              <span className="ml-1 text-text-faint">（可选，留空表示始终生效。）</span>
+              {dateRangeEnabled ? t("automation.dateRangeOn") : t("automation.dateRangeOff")}
+              <span className="ml-1 text-text-faint">{t("automation.dateRangeHint")}</span>
             </button>
             {dateRangeEnabled && (
               <div className="mt-2 flex items-center gap-2">
@@ -338,15 +341,15 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
                   value={dateStart}
                   onChange={(e) => setDateStart(e.target.value)}
                   className="rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm text-text-primary"
-                  placeholder="开始日期"
+                  placeholder={t("automation.startDate")}
                 />
-                <span className="text-xs text-text-faint">至</span>
+                <span className="text-xs text-text-faint">{t("automation.to")}</span>
                 <input
                   type="date"
                   value={dateEnd}
                   onChange={(e) => setDateEnd(e.target.value)}
                   className="rounded-md border border-border bg-surface-card px-2 py-1.5 text-sm text-text-primary"
-                  placeholder="结束日期"
+                  placeholder={t("automation.endDate")}
                 />
               </div>
             )}
@@ -368,7 +371,7 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
                 onClick={() => void handleDeleteClick()}
                 className="mr-auto rounded-md px-3 py-1.5 text-sm text-rose-400 transition hover:bg-rose-500/10 hover:text-rose-300 disabled:opacity-40 sm:mr-0"
               >
-                删除任务
+                {t("automation.deleteTask")}
               </button>
             ) : null}
             <button
@@ -377,7 +380,7 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
               disabled={saving}
               className="rounded-md px-4 py-1.5 text-sm text-text-muted transition hover:bg-surface-card hover:text-text-primary disabled:opacity-40"
             >
-              取消
+              {t("cancel", { ns: "common" })}
             </button>
             <button
               type="button"
@@ -385,7 +388,7 @@ export function TaskFormPanel({ initial, onSave, onCancel, onAfterDelete }: Prop
               onClick={() => void handleSave()}
               className="rounded-md bg-text-strong px-4 py-1.5 text-sm font-medium text-surface-panel transition hover:opacity-90 disabled:opacity-40"
             >
-              {saving ? "处理中…" : "保存"}
+              {saving ? t("automation.saving") : t("save", { ns: "common" })}
             </button>
           </div>
         </div>

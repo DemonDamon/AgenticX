@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { PreviewFallback } from "./PreviewFallback";
 import { dataUrlToArrayBuffer, loadLocalPreviewDataUrl } from "./preview-data";
@@ -23,6 +24,7 @@ export function PptxPreview({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [buffer, setBuffer] = useState<ArrayBuffer | null>(null);
+  const { t } = useTranslation("workspace");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pageNum, setPageNum] = useState(1);
@@ -154,7 +156,7 @@ export function PptxPreview({
   if (error) {
     return (
       <PreviewFallback
-        title="演示文稿"
+        title={t("preview.pptxTitle")}
         message={error}
         mimeType={mimeType}
         onCopyPath={onCopyPath}
@@ -175,7 +177,7 @@ export function PptxPreview({
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
         <div className="text-xs text-text-muted">
-          {loading ? "正在加载演示文稿…" : `第 ${pageNum} / ${pageCount} 页`}
+          {loading ? t("preview.pptxLoading") : t("preview.pageOf", { page: pageNum, total: pageCount })}
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -186,7 +188,7 @@ export function PptxPreview({
               changePage(pageNum - 1);
               rootRef.current?.focus({ preventScroll: true });
             }}
-            title="上一页"
+            title={t("preview.prevPage")}
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -198,7 +200,7 @@ export function PptxPreview({
               changePage(pageNum + 1);
               rootRef.current?.focus({ preventScroll: true });
             }}
-            title="下一页"
+            title={t("preview.nextPage")}
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -207,7 +209,7 @@ export function PptxPreview({
             className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-40"
             disabled={loading}
             onClick={() => changeZoom(zoom - 15)}
-            title="缩小"
+            title={t("preview.zoomOut")}
           >
             <ZoomOut className="h-4 w-4" />
           </button>
@@ -216,7 +218,7 @@ export function PptxPreview({
             className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-40"
             disabled={loading}
             onClick={() => changeZoom(zoom + 15)}
-            title="放大"
+            title={t("preview.zoomIn")}
           >
             <ZoomIn className="h-4 w-4" />
           </button>
@@ -225,7 +227,7 @@ export function PptxPreview({
       <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
         {loading ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface-base text-sm text-text-muted">
-            正在加载演示文稿…
+            {t("preview.pptxLoading")}
           </div>
         ) : null}
         <div className="flex min-h-full items-start justify-center p-4">

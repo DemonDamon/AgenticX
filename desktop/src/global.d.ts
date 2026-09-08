@@ -758,8 +758,13 @@ declare global {
         }>;
         activePaneId: string;
         theme?: string;
+        locale?: string;
       }>;
-      saveUiPrefs: (payload: { theme: "dark" | "light" | "dim" }) => Promise<{ ok: boolean; error?: string }>;
+      saveUiPrefs: (payload: {
+        theme?: "dark" | "light" | "dim";
+        locale?: "zh" | "en";
+      }) => Promise<{ ok: boolean; error?: string }>;
+      getSystemLocale: () => Promise<string>;
       saveLayout: (payload: {
         panes?: Array<{
           id: string;

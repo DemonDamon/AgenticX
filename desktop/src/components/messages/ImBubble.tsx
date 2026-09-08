@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
 import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus } from "lucide-react";
@@ -105,25 +106,27 @@ type Props = {
 };
 
 function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
+  const { t } = useTranslation("chat");
   return (
     <div
       className="inline-flex items-center gap-1.5 py-1.5 text-xs text-amber-300/90"
       aria-live="polite"
-      aria-label="任务已停滞"
+      aria-label={t("status.stalledAria")}
     >
       <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      <span>{silentSeconds > 0 ? `已停滞 ${silentSeconds}s` : "已停滞"}</span>
+      <span>{silentSeconds > 0 ? t("status.stalledSeconds", { seconds: silentSeconds }) : t("status.stalled")}</span>
     </div>
   );
 }
 
 /** Doubao-style 3-dot bouncing indicator for streaming gaps (reasoning done → tool call → first body token). */
 function StreamingDots({ compact = false }: { compact?: boolean }) {
+  const { t } = useTranslation("chat");
   return (
     <div
       className={`inline-flex items-center gap-1.5 ${compact ? "py-0" : "py-1.5"}`}
       aria-live="polite"
-      aria-label="正在处理"
+      aria-label={t("status.processingAria")}
     >
       <span
         className="h-1.5 w-1.5 rounded-full agx-dot-pulse"
@@ -232,11 +235,12 @@ export function ImBubble({
   lightboxGallery,
   afterBody,
 }: Props) {
+  const { t } = useTranslation("chat");
   void _senderAvatarVariant;
   void userAvatarUrl;
   const isUser = message.role === "user";
   const imageGallery = lightboxGallery ?? readyLightboxImages(message.blocks);
-  const displayName = isUser ? (userName || "我") : (assistantName || "AI");
+  const displayName = isUser ? (userName || t("actions.me")) : (assistantName || "AI");
   const isStreaming = message.id === "__stream__" || isGroupStreamMessageId(message.id);
   const isMetaPendingWork = !isUser && message.id === "typing-meta";
   const isGroupTyping =
@@ -507,7 +511,7 @@ export function ImBubble({
     keepActionsWhileBusy: showSenderIdentity,
   }) ? (
       <>
-        <HoverTip label="复制">
+        <HoverTip label={t("actions.copy")}>
           <button
             type="button"
             className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
@@ -517,23 +521,23 @@ export function ImBubble({
             <Copy size={14} strokeWidth={2} />
           </button>
         </HoverTip>
-        <HoverTip label="引用">
+        <HoverTip label={t("actions.quote")}>
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
             <Quote size={14} strokeWidth={2} />
           </button>
         </HoverTip>
-        <HoverTip label="收藏">
+        <HoverTip label={t("actions.favorite")}>
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
             <Bookmark size={14} strokeWidth={2} />
           </button>
         </HoverTip>
-        <HoverTip label="转发">
+        <HoverTip label={t("actions.forward")}>
           <button type="button" className="rounded p-1 hover:bg-surface-hover hover:text-text-strong" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
             <Forward size={14} strokeWidth={2} />
           </button>
         </HoverTip>
         {onRetryMessage ? (
-          <HoverTip label="重试">
+          <HoverTip label={t("actions.retry")}>
             <button
               type="button"
               className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
@@ -544,7 +548,7 @@ export function ImBubble({
             </button>
           </HoverTip>
         ) : null}
-        <HoverTip label="多选">
+        <HoverTip label={t("actions.select")}>
           <button
             type="button"
             className={`rounded p-1 hover:bg-surface-hover ${
@@ -622,7 +626,7 @@ export function ImBubble({
               : "border-text-faint bg-transparent text-transparent"
           }`}
           onClick={() => onToggleSelectMessage?.(message)}
-          aria-label={selected ? "取消选择消息" : "选择消息"}
+          aria-label={selected ? t("actions.unselectMessage") : t("actions.selectMessage")}
         >
           <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M3.5 8.5L6.5 11.5L12.5 4.5" />
@@ -762,7 +766,7 @@ export function ImBubble({
               <div className="agx-im-user-actions">
                 <div className="agx-im-user-actions-icons">
                   <MessageTimestamp ts={message.timestamp} align="right" />
-                  <HoverTip label="复制">
+                  <HoverTip label={t("actions.copy")}>
                     <button
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
@@ -771,23 +775,23 @@ export function ImBubble({
                       <Copy size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
-                  <HoverTip label="引用">
+                  <HoverTip label={t("actions.quote")}>
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runQuote}>
                       <Quote size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
-                  <HoverTip label="收藏">
+                  <HoverTip label={t("actions.favorite")}>
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runFavorite}>
                       <Bookmark size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
-                  <HoverTip label="转发">
+                  <HoverTip label={t("actions.forward")}>
                     <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={runForward}>
                       <Forward size={14} strokeWidth={2} />
                     </button>
                   </HoverTip>
                   {onEditMessage ? (
-                    <HoverTip label="修改">
+                    <HoverTip label={t("actions.edit")}>
                       <button
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
@@ -801,7 +805,7 @@ export function ImBubble({
                     </HoverTip>
                   ) : null}
                   {onRetryMessage ? (
-                    <HoverTip label="重试">
+                    <HoverTip label={t("actions.retry")}>
                       <button
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
@@ -811,7 +815,7 @@ export function ImBubble({
                       </button>
                     </HoverTip>
                   ) : null}
-                  <HoverTip label="多选" tooltipAlign="end">
+                  <HoverTip label={t("actions.select")} tooltipAlign="end">
                     <button
                       type="button"
                       className={
@@ -1022,7 +1026,7 @@ export function ImBubble({
             ) : null}
             {budgetIncompleteHint ? (
               <p className="-mt-0.5 mb-1 px-3 text-[11px] leading-relaxed text-text-faint">
-                此回复因会话预算上限被截停，未完成
+                {t("status.budgetCut")}
               </p>
             ) : null}
             {showAssistantFollowups && assistantIconButtons ? (
@@ -1067,21 +1071,21 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { void runCopy(); setMenuOpen(false); }}
           >
-            <Copy size={12} className="shrink-0 text-text-faint" />复制
+            <Copy size={12} className="shrink-0 text-text-faint" />{t("actions.copy")}
           </button>
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runQuote(); }}
           >
-            <Quote size={12} className="shrink-0 text-text-faint" />引用至当前对话
+            <Quote size={12} className="shrink-0 text-text-faint" />{t("actions.quoteToCurrent")}
           </button>
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runSelectAll(); }}
           >
-            <TextSelect size={12} className="shrink-0 text-text-faint" />全选
+            <TextSelect size={12} className="shrink-0 text-text-faint" />{t("actions.selectAll")}
           </button>
           <button
             className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-hover ${
@@ -1093,7 +1097,7 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runWebSearch(); }}
           >
-            <Search size={12} className="shrink-0 text-text-faint" />用网络搜索
+            <Search size={12} className="shrink-0 text-text-faint" />{t("actions.webSearch")}
           </button>
           {onQuoteToNewPane ? (
             <button
@@ -1101,7 +1105,7 @@ export function ImBubble({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => { setMenuOpen(false); runQuoteToNewPane(); }}
             >
-              <MessageSquarePlus size={12} className="shrink-0 text-text-faint" />引用至新对话
+              <MessageSquarePlus size={12} className="shrink-0 text-text-faint" />{t("actions.quoteToNew")}
             </button>
           ) : null}
           <button
@@ -1109,14 +1113,14 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runFavorite(); }}
           >
-            <Bookmark size={12} className="shrink-0 text-text-faint" />收藏
+            <Bookmark size={12} className="shrink-0 text-text-faint" />{t("actions.favorite")}
           </button>
           <button
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); runForward(); }}
           >
-            <Forward size={12} className="shrink-0 text-text-faint" />转发
+            <Forward size={12} className="shrink-0 text-text-faint" />{t("actions.forward")}
           </button>
           {onEditMessage ? (
             <button
@@ -1128,7 +1132,7 @@ export function ImBubble({
                 setIsEditing(true);
               }}
             >
-              <Pencil size={12} className="shrink-0 text-text-faint" />修改
+              <Pencil size={12} className="shrink-0 text-text-faint" />{t("actions.edit")}
             </button>
           ) : null}
           {onRetryMessage ? (
@@ -1137,7 +1141,7 @@ export function ImBubble({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => { setMenuOpen(false); onRetryMessage(message); }}
             >
-              <RotateCcw size={12} className="shrink-0 text-text-faint" />重试
+              <RotateCcw size={12} className="shrink-0 text-text-faint" />{t("actions.retry")}
             </button>
           ) : null}
           <button
@@ -1145,7 +1149,7 @@ export function ImBubble({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { setMenuOpen(false); onToggleSelectMessage?.(message); }}
           >
-            <LayoutList size={12} className="shrink-0 text-text-faint" />多选
+            <LayoutList size={12} className="shrink-0 text-text-faint" />{t("actions.select")}
           </button>
         </div>,
         document.body,

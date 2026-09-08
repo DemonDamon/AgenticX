@@ -1,4 +1,5 @@
 import { AlertTriangle, Copy } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { BudgetExceededInfo } from "../../utils/budget-exceeded";
 import { budgetExceededPercent } from "../../utils/budget-exceeded";
 
@@ -9,6 +10,7 @@ type Props = {
 };
 
 export function BudgetExceededCard({ info, onResumeInNewSession, onOpenSettings }: Props) {
+  const { t } = useTranslation("chat");
   const pct = budgetExceededPercent(info);
 
   const copySessionId = async () => {
@@ -30,10 +32,14 @@ export function BudgetExceededCard({ info, onResumeInNewSession, onOpenSettings 
               <div className="flex items-start gap-3 px-4 py-3">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" aria-hidden />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-medium text-text-strong">会话累计 token 已达上限</p>
+                  <p className="text-[15px] font-medium text-text-strong">{t("budget.title")}</p>
                   <p className="mt-1 text-xs text-text-muted">
-                    当前累计 {info.current.toLocaleString()} / 上限 {info.maxAllowed.toLocaleString()}（约 {pct}%，source=
-                    {info.source}）。无人值守续跑无法绕过此限制，建议新建会话续接此任务。
+                    {t("budget.body", {
+                      current: info.current.toLocaleString(),
+                      max: info.maxAllowed.toLocaleString(),
+                      pct,
+                      source: info.source,
+                    })}
                   </p>
 
                   <div className="mt-2.5 flex flex-wrap items-center gap-2">
@@ -42,14 +48,14 @@ export function BudgetExceededCard({ info, onResumeInNewSession, onOpenSettings 
                       onClick={onResumeInNewSession}
                       className="rounded-md bg-btnPrimary px-3 py-1 text-xs font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover"
                     >
-                      新建会话续接此任务
+                      {t("budget.newSession")}
                     </button>
                     <button
                       type="button"
                       onClick={() => onOpenSettings?.()}
                       className="rounded-md border border-border bg-surface-hover px-3 py-1 text-xs font-medium text-text-strong transition hover:bg-surface-card"
                     >
-                      调整预算上限
+                      {t("budget.adjust")}
                     </button>
                     {info.sessionId ? (
                       <button
@@ -58,7 +64,7 @@ export function BudgetExceededCard({ info, onResumeInNewSession, onOpenSettings 
                         className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-muted transition hover:text-text-strong"
                       >
                         <Copy className="h-3 w-3" aria-hidden />
-                        复制 session_id
+                        {t("budget.copySession")}
                       </button>
                     ) : null}
                   </div>

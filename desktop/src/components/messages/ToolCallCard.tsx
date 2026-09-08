@@ -1,6 +1,7 @@
 import type { Message } from "../../store";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
   ChevronRight,
@@ -74,28 +75,46 @@ const DECISION_TITLE_MAX = 48;
  * 于是「已取消」「自定义补充」「超时」全都掉进 fallback，卡片一直显示
  * "等待你确认" —— 用户明明已经答过了。
  */
-export function summarizeUserDecision(toolName: string, raw: string): string | null {
+type ChatTranslate = (key: string, options?: Record<string, unknown>) => string;
+
+export function summarizeUserDecision(
+  toolName: string,
+  raw: string,
+  t?: ChatTranslate,
+): string | null {
   const text = String(raw ?? "").trim();
   if (!text) return null;
 
   if (toolName === "request_action_confirmation") {
-    if (text.startsWith("[ACTION_CONFIRMED]")) return "已确认执行";
+    if (text.startsWith("[ACTION_CONFIRMED]")) return t ? t("tool.confirmed") : "已确认执行";
     if (text.startsWith("[ACTION_REJECTED]")) {
-      return text.includes("已取消执行") ? "已取消" : "未明确确认，已取消";
+      return text.includes("已取消执行")
+        ? t
+          ? t("tool.cancelled")
+          : "已取消"
+        : t
+          ? t("tool.notConfirmed")
+          : "未明确确认，已取消";
     }
-    if (text.startsWith("[ACTION_CONFIRMATION_EXPIRED]")) return "确认已失效";
-    if (text.startsWith("[ACTION_CONFIRMATION_SUSPENDED]")) return "无人值守，未确认";
+    if (text.startsWith("[ACTION_CONFIRMATION_EXPIRED]")) return t ? t("tool.expired") : "确认已失效";
+    if (text.startsWith("[ACTION_CONFIRMATION_SUSPENDED]")) {
+      return t ? t("tool.unattendedUnconfirmed") : "无人值守，未确认";
+    }
     return null;
   }
 
-  if (text.startsWith("[CLARIFICATION_TIMEOUT]")) return "未在时限内答复";
-  if (text.startsWith("[CLARIFICATION_PENDING]")) return "无人值守，未答复";
-  if (text.startsWith("用户未提供具体内容")) return "未作选择";
+  if (text.startsWith("[CLARIFICATION_TIMEOUT]")) return t ? t("tool.clarifyTimeout") : "未在时限内答复";
+  if (text.startsWith("[CLARIFICATION_PENDING]")) return t ? t("tool.clarifyPending") : "无人值守，未答复";
+  if (text.startsWith("用户未提供具体内容")) return t ? t("tool.noChoice") : "未作选择";
 
   // 正文形态：`用户选择：A；B` / `自定义补充：xxx` / 两者以 `；` 相连。
   const body = text.replace(/。+$/, "");
-  if (body.startsWith("用户选择：")) return clipDecision(`已选：${body.slice(5)}`);
-  if (body.startsWith("自定义补充：")) return clipDecision(`已补充：${body.slice(6)}`);
+  if (body.startsWith("用户选择：")) {
+    return clipDecision(t ? t("tool.selectedPrefix", { body: body.slice(5) }) : `已选：${body.slice(5)}`);
+  }
+  if (body.startsWith("自定义补充：")) {
+    return clipDecision(t ? t("tool.supplementedPrefix", { body: body.slice(6) }) : `已补充：${body.slice(6)}`);
+  }
   return null;
 }
 
@@ -103,11 +122,11 @@ function clipDecision(s: string): string {
   return s.length > DECISION_TITLE_MAX ? `${s.slice(0, DECISION_TITLE_MAX)}…` : s;
 }
 
-export function buildToolCardTitle(message: Message): string {
+export function buildToolCardTitle(message: Message, t?: ChatTranslate): string {
   const name = (message.toolName ?? "").trim();
   const args = message.toolArgs ?? {};
   if (name === "group_progress") {
-    return String(message.toolResultPreview || message.content || "群聊成员处理中").trim();
+    return String(message.toolResultPreview || message.content || (t ? t("tool.groupProgress") : "群聊成员处理中")).trim();
   }
   if (name === "file_read" || name === "file_write" || name === "file_edit") {
     const p = String(args.path ?? "").trim();
@@ -125,9 +144,11 @@ export function buildToolCardTitle(message: Message): string {
   // 澄清 / 确认行记的是用户自己的回答。标题直接给答案，而不是 "request_clarification"：
   // 关掉工具详情时这张卡默认是收起的，标题就是用户唯一能看到的一行。
   if (name === "request_clarification" || name === "request_action_confirmation") {
-    const decided = summarizeUserDecision(name, String(message.content ?? ""));
+    const decided = summarizeUserDecision(name, String(message.content ?? ""), t);
     if (decided) return decided;
-    return name === "request_action_confirmation" ? "等待你确认" : "等待你补充信息";
+    return name === "request_action_confirmation"
+      ? (t ? t("tool.waitingConfirm") : "等待你确认")
+      : (t ? t("tool.waitingClarify") : "等待你补充信息");
   }
   if (name === "mcp_call") {
     const tn = String(args.tool_name ?? "").trim();
@@ -137,14 +158,16 @@ export function buildToolCardTitle(message: Message): string {
   if (name === "video_understand") {
     const p = String(args.path ?? "").trim();
     const base = p ? p.split(/[\\/]/).pop() : "";
-    return base ? `理解视频 ${base}` : "理解视频";
+    return base
+      ? (t ? t("tool.understandVideoNamed", { name: base }) : `理解视频 ${base}`)
+      : (t ? t("tool.understandVideo") : "理解视频");
   }
   if (name === "show_widget") {
     const argTitle = String(args.title ?? "").trim();
     if (argTitle) return argTitle;
     const parsed = parseWidgetPayload(message.content);
     if (parsed?.title) return parsed.title;
-    return "可视化图表";
+    return t ? t("tool.chart") : "可视化图表";
   }
   if (name) return name;
   return extractToolSummary(message.content);
@@ -266,6 +289,7 @@ export function ToolCallCard({
   onToggleSelectMessage,
   onSkillManageApply,
 }: Props) {
+  const { t } = useTranslation("chat");
   const normalizedTerms = useMemo(() => normalizeHighlightTerms(highlightTerms), [highlightTerms]);
   const isHookBlocked = useMemo(() => isHookBlockedToolMessage(message), [message.content, message.toolStatus]);
   const widgetPayload = useMemo(() => {
@@ -286,7 +310,7 @@ export function ToolCallCard({
   const shouldForceExpand = forceExpand || matchedByHighlight || hasBashBgAuthUrls;
   const [expanded, setExpanded] = useState(shouldForceExpand);
 
-  const title = useMemo(() => buildToolCardTitle(message), [message]);
+  const title = useMemo(() => buildToolCardTitle(message, t), [message, t]);
   const longestShowWidgetPartialRef = useRef<PartialShowWidget | null>(null);
   const showWidgetPartial = useMemo(() => {
     if (toolName !== "show_widget") return null;
@@ -389,7 +413,7 @@ export function ToolCallCard({
       <div className="w-full min-w-0 px-4">
         <WidgetBlock
           payload={{
-            title: showWidgetPartial.title || "可视化图表",
+            title: showWidgetPartial.title || t("tool.chart"),
             widgetCode,
             loadingMessages: [],
             kind: "svg",
@@ -402,7 +426,7 @@ export function ToolCallCard({
   if (toolName === "show_widget" && showWidgetPartial && !showWidgetPartial.readyForPreview
     && (message.toolStatus === "running" || message.toolStatus === "pending")) {
     const statusLabel =
-      showWidgetPartial.widgetFormat === "mermaid" ? "正在编排图表…" : "正在绘制…";
+      showWidgetPartial.widgetFormat === "mermaid" ? t("tool.composingChart") : t("tool.drawing");
     return (
       <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
         {showWidgetPartial.title ? `${showWidgetPartial.title} · ` : ""}{statusLabel}
@@ -416,7 +440,7 @@ export function ToolCallCard({
   ) {
     return (
       <div className="w-full min-w-0 rounded border border-border bg-surface-card px-3 py-2 text-[12px] text-text-muted">
-        正在绘制…
+        {t("tool.drawing")}
       </div>
     );
   }
@@ -425,7 +449,7 @@ export function ToolCallCard({
   if (toolName === "show_widget" && /\[micro-compact tool=show_widget/i.test(message.content)) {
     return (
       <div className="w-full min-w-0 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
-        图表内容被上下文压缩截断，无法渲染。请重新生成或升级 Near 后重试本对话。
+        {t("tool.chartTruncated")}
       </div>
     );
   }
@@ -448,7 +472,7 @@ export function ToolCallCard({
     <span className="inline-flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
       <span className="min-w-0 truncate text-[13px] font-medium text-text-subtle">{title}</span>
       <span className="shrink-0 rounded-[4px] bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-400">
-        Hook 拦截
+        {t("tool.hookBlocked")}
       </span>
     </span>
   ) : status === "running" || status === "pending" ? (
@@ -460,7 +484,7 @@ export function ToolCallCard({
   const metaRight = toolIsActive ? (
     <Shimmer
       variant="status"
-      text={`运行中 · ${formatToolElapsedSeconds(liveElapsedSec)}`}
+      text={t("tool.running", { elapsed: formatToolElapsedSeconds(liveElapsedSec) })}
       className="shrink-0 whitespace-nowrap text-[12px] font-normal tabular-nums"
     />
   ) : null;
@@ -497,7 +521,7 @@ export function ToolCallCard({
           }`}
         >
           <div className="font-medium">
-            {skillManageError.code === "POLICY" ? "安全策略拦截" : "参数/状态校验失败"}
+            {skillManageError.code === "POLICY" ? t("tool.policyBlocked") : t("tool.validationFailed")}
           </div>
           {skillManageError.detail ? (
             <div className="mt-0.5 whitespace-pre-wrap break-words text-[11px] text-current/90">
@@ -509,7 +533,7 @@ export function ToolCallCard({
       {toolName === "bash_bg_start" && hasBashBgAuthUrls ? (
         <div className="rounded border border-border bg-surface-card px-2 py-2 text-[12px]">
           <div className="mb-1 flex items-center justify-between gap-2">
-            <span className="font-medium text-text-strong">需要授权/扫码</span>
+            <span className="font-medium text-text-strong">{t("tool.needAuth")}</span>
             <span
               className={`rounded px-1.5 py-0.5 text-[10px] ${
                 bashBgAuth?.status === "running"
@@ -519,7 +543,11 @@ export function ToolCallCard({
                     : "bg-surface-card-strong text-text-faint"
               }`}
             >
-              {bashBgAuth?.status === "running" ? "运行中" : bashBgAuth?.status === "exited" ? "已结束" : "未知"}
+              {bashBgAuth?.status === "running"
+                ? t("tool.statusRunning")
+                : bashBgAuth?.status === "exited"
+                  ? t("tool.statusExited")
+                  : t("tool.statusUnknown")}
             </span>
           </div>
           <div className="space-y-1.5">
@@ -537,13 +565,13 @@ export function ToolCallCard({
                   className="rounded border border-border px-1.5 py-0.5 text-[11px] text-text-subtle hover:bg-surface-card-strong"
                   onClick={() => void navigator.clipboard.writeText(url)}
                 >
-                  复制链接
+                  {t("tool.copyLink")}
                 </button>
               </div>
             ))}
           </div>
           <p className="mt-2 text-[11px] text-text-subtle">
-            请用飞书/对应 App 扫码或点击链接完成授权，完成后回到对话告诉我。
+            {t("tool.authHint")}
           </p>
           <button
             type="button"
@@ -560,7 +588,7 @@ export function ToolCallCard({
             }}
           >
             <Terminal className="h-3 w-3" />
-            在工作区终端打开
+            {t("tool.openInTerminal")}
           </button>
         </div>
       ) : null}
@@ -693,7 +721,7 @@ export function ToolCallCard({
               : "border-text-faint bg-transparent text-transparent"
           }`}
           onClick={() => onToggleSelectMessage?.(message)}
-          aria-label={selected ? "取消选择" : "选择此工具消息"}
+          aria-label={selected ? t("tool.unselect") : t("tool.selectTool")}
         >
           <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M3.5 8.5L6.5 11.5L12.5 4.5" />

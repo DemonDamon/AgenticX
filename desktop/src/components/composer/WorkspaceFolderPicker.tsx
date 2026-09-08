@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties } from "react";
 import { Check, ChevronDown, Folder, FolderPlus, X } from "lucide-react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import { useAttachWorkspaceSources } from "../../hooks/useAttachWorkspaceSources";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "../../utils/backend-scope";
@@ -347,6 +349,8 @@ export function useComposerWorkspaceFolders({
 }
 
 export function WorkspaceFolderPicker({ api }: { api: ComposerWorkspaceFoldersApi }) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [style, setStyle] = useState<CSSProperties>({});
   const [listMaxHeight, setListMaxHeight] = useState(220);
@@ -407,7 +411,7 @@ export function WorkspaceFolderPicker({ api }: { api: ComposerWorkspaceFoldersAp
       ? api.folders[0].path
       : api.folders.length > 1
         ? api.folders.map((folder) => folder.path).join("\n")
-        : "绑定工作目录，可添加多个";
+        : t("composer.bindFolders");
 
   const listItems = useMemo(() => {
     const items: RecentDir[] = [];
@@ -458,7 +462,7 @@ export function WorkspaceFolderPicker({ api }: { api: ComposerWorkspaceFoldersAp
           <button
             type="button"
             className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-text-faint hover:bg-surface-card hover:text-text-primary"
-            title="移除"
+            title={tCommon("remove")}
             onClick={(e) => {
               e.stopPropagation();
               setOpen(false);
@@ -482,7 +486,9 @@ export function WorkspaceFolderPicker({ api }: { api: ComposerWorkspaceFoldersAp
         >
           <FolderPlus className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
           <span className="truncate">
-            {api.folders.length > 1 ? `${api.folders.length} 个文件夹` : "选择文件夹（可选）"}
+            {api.folders.length > 1
+              ? t("composer.folderCount", { count: api.folders.length })
+              : t("composer.pickFolderOptional")}
           </span>
           <ChevronDown className="h-3 w-3 shrink-0 text-text-faint" strokeWidth={2} />
         </button>
@@ -497,7 +503,7 @@ export function WorkspaceFolderPicker({ api }: { api: ComposerWorkspaceFoldersAp
             >
               {listItems.length > 0 ? (
                 <>
-                  <div className="px-2.5 pb-1 pt-1.5 text-[11px] text-text-faint">最近</div>
+                  <div className="px-2.5 pb-1 pt-1.5 text-[11px] text-text-faint">{t("composer.recent")}</div>
                   <div
                     className="preview-scrollbar overflow-y-scroll pr-0.5"
                     style={{ maxHeight: listMaxHeight }}
@@ -536,7 +542,7 @@ export function WorkspaceFolderPicker({ api }: { api: ComposerWorkspaceFoldersAp
                 onClick={() => void chooseDirectory()}
               >
                 <FolderPlus className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.8} />
-                <span>选择文件夹</span>
+                <span>{t("composer.pickFolder")}</span>
               </button>
               {api.errorText ? (
                 <div className="px-2.5 py-1.5 text-[11px] text-rose-300">{api.errorText}</div>

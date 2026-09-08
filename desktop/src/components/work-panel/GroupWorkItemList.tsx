@@ -5,6 +5,8 @@
  */
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../i18n/i18n";
 import type { Avatar } from "../../store";
 import {
   workItemBlockerHint,
@@ -36,9 +38,9 @@ type Props = {
 };
 
 function ownerLabel(item: WorkItem, avatars: Avatar[], metaLeaderLabel: string): string {
-  if (item.owner_kind === "human") return "用户";
+  if (item.owner_kind === "human") return i18n.t("work.human", { ns: "workspace" });
   if (item.owner_kind === "meta") return metaLeaderLabel;
-  return avatars.find((a) => a.id === item.owner_id)?.name || item.owner_id || "分身";
+  return avatars.find((a) => a.id === item.owner_id)?.name || item.owner_id || i18n.t("work.avatar", { ns: "workspace" });
 }
 
 export function GroupWorkItemList({
@@ -52,6 +54,7 @@ export function GroupWorkItemList({
   onOpenOwner,
   onCreate,
 }: Props) {
+  const { t } = useTranslation("workspace");
   const [title, setTitle] = useState("");
   const [ownerKey, setOwnerKey] = useState("human:");
 
@@ -68,7 +71,7 @@ export function GroupWorkItemList({
     <div className="space-y-2">
       {errorText ? <div className="px-1 text-[11px] text-text-muted">{errorText}</div> : null}
       {items.length === 0 ? (
-        <div className="px-1 py-1 text-[12px] text-text-faint">暂无事项</div>
+        <div className="px-1 py-1 text-[12px] text-text-faint">{t("work.noItems")}</div>
       ) : (
         <ul className="space-y-0.5">
           {items.map((item) => {
@@ -115,7 +118,7 @@ export function GroupWorkItemList({
                       className="rounded px-1.5 py-0.5 text-[11px] bg-[var(--ui-btn-primary-bg)] text-[var(--ui-btn-primary-text)] hover:bg-[var(--ui-btn-primary-bg-hover,var(--ui-btn-primary-bg))]"
                       onClick={() => onAccept(item)}
                     >
-                      验收
+                      {t("work.accept")}
                     </button>
                   ) : null}
                   {actions.includes("pause") ? (
@@ -124,7 +127,7 @@ export function GroupWorkItemList({
                       className="text-[11px] text-text-muted hover:text-text-strong"
                       onClick={() => onPause(item)}
                     >
-                      暂停
+                      {t("work.pause")}
                     </button>
                   ) : null}
                   {actions.includes("resume") ? (
@@ -133,7 +136,7 @@ export function GroupWorkItemList({
                       className="text-[11px] text-text-muted hover:text-text-strong"
                       onClick={() => onResume(item)}
                     >
-                      恢复
+                      {t("work.resume")}
                     </button>
                   ) : null}
                 </div>
@@ -149,7 +152,7 @@ export function GroupWorkItemList({
           onKeyDown={(e) => {
             if (e.key === "Enter") submitCreate();
           }}
-          placeholder="事项标题"
+          placeholder={t("work.itemTitle")}
           className="min-w-0 flex-1 rounded border border-border bg-surface-card px-1.5 py-0.5 text-[12px] text-text-strong outline-none"
         />
         <select
@@ -157,7 +160,7 @@ export function GroupWorkItemList({
           onChange={(e) => setOwnerKey(e.target.value)}
           className="max-w-[7.5rem] appearance-none rounded border border-border bg-surface-card py-0.5 pl-1.5 pr-6 text-[11px] text-text-muted"
         >
-          <option value="human:">用户</option>
+          <option value="human:">{t("work.human")}</option>
           <option value="meta:__meta__">{metaLeaderLabel}</option>
           {avatars.map((av) => (
             <option key={av.id} value={`avatar:${av.id}`}>
@@ -170,7 +173,7 @@ export function GroupWorkItemList({
           className="rounded px-1.5 py-0.5 text-[11px] bg-[var(--ui-btn-primary-bg)] text-[var(--ui-btn-primary-text)] hover:bg-[var(--ui-btn-primary-bg-hover,var(--ui-btn-primary-bg))]"
           onClick={submitCreate}
         >
-          创建
+          {t("work.create")}
         </button>
       </div>
     </div>

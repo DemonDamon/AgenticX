@@ -1,8 +1,9 @@
-import {
-  RUN_MODE_CYCLE,
-  runModeLabel,
-  type RunMode,
-} from "../constants/confirm-strategy-options";
+import { type RunMode } from "../constants/confirm-strategy-options";
+import { i18n } from "../i18n/i18n";
+
+function tCmd(key: string, options?: Record<string, unknown>): string {
+  return i18n.t(key, { ns: "sidebar", ...options });
+}
 
 export type CommandCategory = "model" | "session" | "tools" | "view" | "settings" | "help";
 export type UserMode = "pro" | "lite";
@@ -47,7 +48,7 @@ export class CommandRegistry {
     const score = (cmd: Command): number => {
       const name = cmd.name.toLowerCase();
       const id = cmd.id.toLowerCase();
-      const desc = cmd.description.toLowerCase();
+      const desc = tCmd(cmd.description).toLowerCase();
       if (name === q || id === q) return 0;
       if (name.startsWith(q) || id.startsWith(q)) return 1;
       if (name.includes(q) || id.includes(q)) return 2;
@@ -79,7 +80,7 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
   registry.register({
     id: "model",
     name: "/model",
-    description: "切换当前模型",
+    description: "commands.model.description",
     category: "model",
     shortcut: "Alt+M",
     mode: "pro",
@@ -89,7 +90,7 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
   registry.register({
     id: "settings",
     name: "/settings",
-    description: "打开设置面板",
+    description: "commands.settings.description",
     category: "settings",
     shortcut: "Ctrl+,",
     mode: "both",
@@ -99,7 +100,7 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
   registry.register({
     id: "clear",
     name: "/clear",
-    description: "清空当前对话消息",
+    description: "commands.clear.description",
     category: "session",
     shortcut: "Ctrl+L",
     mode: "both",
@@ -110,54 +111,42 @@ export function createPhase1Registry(ctx: Phase1CommandContext): CommandRegistry
   registry.register({
     id: "help",
     name: "/help",
-    description: "显示可用命令说明",
+    description: "commands.help.description",
     category: "help",
     shortcut: "F1",
     mode: "both",
     icon: "?",
-    handler: () =>
-      ctx.addAssistantMessage(
-        [
-          "可用命令：",
-          "- /model：切换模型（Pro）",
-          "- /settings：打开设置",
-          "- /clear：清空对话",
-          "- /plan：切换计划模式（Pro）",
-          "- /confirm：切换运行模式",
-          "- /keybindings：查看快捷键",
-          "- /help：查看帮助",
-        ].join("\n")
-      ),
+    handler: () => ctx.addAssistantMessage(tCmd("commands.helpBody")),
   });
   registry.register({
     id: "plan",
     name: "/plan",
-    description: "切换计划模式（只规划，不执行）",
+    description: "commands.plan.description",
     category: "view",
     shortcut: "Ctrl+Shift+P",
     mode: "pro",
     icon: "P",
     handler: () => {
       const next = ctx.togglePlanMode();
-      ctx.addAssistantMessage(next ? "计划模式已开启：将只输出计划，不执行工具。" : "计划模式已关闭：恢复正常执行。");
+      ctx.addAssistantMessage(next ? tCmd("commands.planOn") : tCmd("commands.planOff"));
     },
   });
   registry.register({
     id: "confirm",
     name: "/confirm",
-    description: `循环切换运行模式（${RUN_MODE_CYCLE.map((mode) => runModeLabel(mode)).join(" / ")}）`,
+    description: "commands.confirm.description",
     category: "settings",
     mode: "both",
     icon: "A",
     handler: async () => {
       const mode = await ctx.cycleRunMode();
-      ctx.addAssistantMessage(`已切换运行模式为: ${runModeLabel(mode)}`);
+      ctx.addAssistantMessage(tCmd("commands.runModeSwitched", { mode: tCmd(`commands.runMode.${mode}`) }));
     },
   });
   registry.register({
     id: "keybindings",
     name: "/keybindings",
-    description: "查看当前快捷键列表",
+    description: "commands.keybindings.description",
     category: "help",
     shortcut: "Ctrl+/",
     mode: "both",

@@ -4,12 +4,14 @@
  */
 import { useState } from "react";
 import { AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   formatActivityElapsed,
   formatGroupToolLabel,
   stripTrailingStatusEllipsis,
   type GroupExpertActivity,
 } from "../../utils/group-expert-activity";
+import "../../i18n/i18n";
 import { HoverTip } from "../ds/HoverTip";
 import { Shimmer } from "../ds/Shimmer";
 import { ChatImAvatar } from "./ImBubble";
@@ -31,11 +33,12 @@ function WorkingEllipsis() {
   );
 }
 
-function toolStepLabel(toolName: string): string {
-  return formatGroupToolLabel(toolName) || "工具";
+function toolStepLabel(toolName: string, fallback: string): string {
+  return formatGroupToolLabel(toolName) || fallback;
 }
 
 export function GroupExpertActivityCard({ activity, now, defaultExpanded = false }: Props) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(defaultExpanded);
   const elapsed = formatActivityElapsed(activity.startedAt, now);
   const waiting = activity.phase === "waiting";
@@ -85,7 +88,7 @@ export function GroupExpertActivityCard({ activity, now, defaultExpanded = false
             />
           )}
           {hasSteps ? (
-            <HoverTip label="查看最近工具步骤">
+            <HoverTip label={t("groupActivity.viewRecentSteps")}>
               <button
                 type="button"
                 className="inline-flex h-5 w-5 items-center justify-center rounded text-text-faint hover:bg-surface-hover hover:text-text-strong"
@@ -104,9 +107,9 @@ export function GroupExpertActivityCard({ activity, now, defaultExpanded = false
         {expanded && hasSteps ? (
           <ul className="mt-2 space-y-2 border-t border-border/40 pt-2">
             {activity.toolSteps.map((step) => {
-              const label = toolStepLabel(step.toolName);
+              const label = toolStepLabel(step.toolName, t("tool.tool"));
               const running = step.phase !== "done";
-              const status = running ? "进行中" : "已完成";
+              const status = running ? t("groupActivity.statusRunning") : t("groupActivity.statusDone");
               const title = `${label} · ${status}`;
               return (
                 <li key={step.callId} className="min-w-0 text-[11px] leading-snug text-text-muted">

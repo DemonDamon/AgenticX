@@ -6,6 +6,10 @@ import { resolveMetaDisplayName } from "./display-name";
 import { isShowWidgetToolMessage, parseWidgetPayload } from "../components/messages/widget-preview";
 import { adaptSvgMarkupColors } from "./adapt-svg-theme";
 import { mermaidThemeFromApp, renderMermaidSvg } from "./mermaid-render";
+import { formatClock, formatDateTime } from "../i18n/format";
+import { htmlLangFor, type AppLocale } from "../i18n/locales";
+
+type PdfTranslate = (key: string, opts?: Record<string, unknown>) => string;
 
 const PDF_STYLES = `
   @page { margin: 16mm; }
@@ -161,8 +165,8 @@ export function expandSelectionForCompletePdfExport(
   return allVisible.filter((m) => includeIds.has(m.id));
 }
 
-function resolveSender(message: Message, userBubbleLabel: string): string {
-  if (message.role === "user") return userBubbleLabel.trim() || "我";
+function resolveSender(message: Message, userBubbleLabel: string, t?: PdfTranslate): string {
+  if (message.role === "user") return userBubbleLabel.trim() || (t ? t("actions.me") : "我");
   const raw = String(message.avatarName || message.agentId || "AI").trim();
   if (!raw) return "AI";
   return resolveMetaDisplayName(raw.toLowerCase() === "meta" ? null : raw);
@@ -174,22 +178,27 @@ function resolveSender(message: Message, userBubbleLabel: string): string {
  * interactive HTML / stock_chart fall back to a labeled placeholder. */
 async function widgetBlockHtml(
   message: Message,
-  opts: { appTheme: string; renderIndex: number },
+  opts: { appTheme: string; renderIndex: number; t?: PdfTranslate },
 ): Promise<string> {
+  const { t } = opts;
   const payload = parseWidgetPayload(message.content || "");
   if (!payload) {
-    return `<div class="widget-fallback">[图表内容解析失败，无法导出]</div>`;
+    const text = t ? t("share.widgetParseFailed") : "[图表内容解析失败，无法导出]";
+    return `<div class="widget-fallback">${escapeHtml(text)}</div>`;
   }
   if (payload.kind === "stock_chart") {
-    const title = escapeHtml(payload.title || "行情图表");
-    return `<div class="widget-fallback">[图表：${title}]（交互式行情图表暂不支持导出为静态图片，请在应用内查看）</div>`;
+    const rawTitle = payload.title || (t ? t("share.stockChartDefault") : "行情图表");
+    const fallback = t
+      ? t("share.stockChartFallback", { title: rawTitle })
+      : `[图表：${rawTitle}]（交互式行情图表暂不支持导出为静态图片，请在应用内查看）`;
+    return `<div class="widget-fallback">${escapeHtml(fallback)}</div>`;
   }
   const title = payload.title ? `<p class="widget-title">${escapeHtml(payload.title)}</p>` : "";
   if (payload.kind === "svg") {
     return `${title}<div class="widget-graphic">${adaptSvgMarkupColors(payload.widgetCode)}</div>`;
   }
   if (payload.kind === "mermaid") {
-    const chartTitle = escapeHtml(payload.title || "图表");
+    const chartTitle = payload.title || (t ? t("share.chartDefault") : "图表");
     try {
       const safeId = String(message.id || `idx${opts.renderIndex}`)
         .replace(/[^a-zA-Z0-9_-]/g, "_")
@@ -201,22 +210,25 @@ async function widgetBlockHtml(
       });
       return `${title}<div class="widget-graphic">${svg}</div>`;
     } catch {
-      return `${title}<div class="widget-fallback">[图表：${chartTitle}]（Mermaid 静态渲染失败，请在应用内查看）</div>`;
+      const fallback = t
+        ? t("share.mermaidFailed", { title: chartTitle })
+        : `[图表：${chartTitle}]（Mermaid 静态渲染失败，请在应用内查看）`;
+      return `${title}<div class="widget-fallback">${escapeHtml(fallback)}</div>`;
     }
   }
-  return `${title}<div class="widget-fallback">[图表基于交互脚本渲染，暂不支持导出为静态图片，请在应用内查看]</div>`;
+  const interactive = t
+    ? t("share.interactiveFallback")
+    : "[图表基于交互脚本渲染，暂不支持导出为静态图片，请在应用内查看]";
+  return `${title}<div class="widget-fallback">${escapeHtml(interactive)}</div>`;
 }
 
-function formatTime(timestamp?: number): string {
+function formatTime(timestamp: number | undefined, locale: AppLocale): string {
   if (!timestamp) return "";
-  return new Date(timestamp).toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatClock(timestamp, locale);
 }
 
-function formatExportDate(exportedAt: number): string {
-  return new Date(exportedAt).toLocaleString("zh-CN", {
+function formatExportDate(exportedAt: number, locale: AppLocale): string {
+  return formatDateTime(exportedAt, locale, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -267,28 +279,33 @@ export async function buildMessagesPdfHtml(args: {
   exportedAt: number;
   userBubbleLabel?: string;
   appTheme?: string;
+  locale?: AppLocale;
+  t?: PdfTranslate;
 }): Promise<string> {
   const {
     messages,
     sessionTitle,
     exportedAt,
-    userBubbleLabel = "我",
     appTheme = "dark",
+    locale = "zh",
+    t,
   } = args;
+  const userBubbleLabel = args.userBubbleLabel ?? (t ? t("actions.me") : "我");
   const exportable = messages.filter(isExportableMessage);
-  const title = escapeHtml(sessionTitle?.trim() || "对话记录");
-  const exportDate = escapeHtml(formatExportDate(exportedAt));
+  const title = escapeHtml(sessionTitle?.trim() || (t ? t("share.conversationRecord") : "对话记录"));
+  const exportDate = formatExportDate(exportedAt, locale);
+  const heading = t ? t("share.exportHeading") : "Near 对话记录";
 
   // Sequential await avoids Mermaid's global initialize() theme races across parallel renders.
   const rendered: string[] = [];
   for (let index = 0; index < exportable.length; index += 1) {
     const message = exportable[index]!;
     const isWidget = message.role === "tool";
-    const who = escapeHtml(resolveSender(message, userBubbleLabel));
-    const time = escapeHtml(formatTime(message.timestamp));
+    const who = escapeHtml(resolveSender(message, userBubbleLabel, t));
+    const time = escapeHtml(formatTime(message.timestamp, locale));
     const roleClass = isWidget ? "msg widget" : message.role === "user" ? "msg user" : "msg assistant";
     const body = isWidget
-      ? await widgetBlockHtml(message, { appTheme, renderIndex: index })
+      ? await widgetBlockHtml(message, { appTheme, renderIndex: index, t })
       : messageBodyHtml(message);
     const images = isWidget ? "" : attachmentImagesHtml(message.attachments);
     if (!body && !images) continue;
@@ -301,19 +318,24 @@ export async function buildMessagesPdfHtml(args: {
   }
 
   const count = rendered.length;
+  const resolvedMeta = escapeHtml(
+    t
+      ? t("share.exportMeta", { date: exportDate, count })
+      : `导出时间：${exportDate} · 共 ${count} 条消息`,
+  );
 
   return `<!doctype html>
-<html lang="zh-CN">
+<html lang="${htmlLangFor(locale)}">
 <head>
 <meta charset="utf-8">
-<title>Near 对话记录</title>
+<title>${escapeHtml(heading)}</title>
 <style>${WIDGET_THEME_VAR_DEFAULTS}${PDF_STYLES}</style>
 </head>
 <body>
 <header class="doc-header">
-  <h1>Near 对话记录</h1>
+  <h1>${escapeHtml(heading)}</h1>
   <p class="subtitle">${title}</p>
-  <p class="meta-line">导出时间：${exportDate} · 共 ${count} 条消息</p>
+  <p class="meta-line">${resolvedMeta}</p>
 </header>
 <main>${rendered.join("\n")}</main>
 </body>

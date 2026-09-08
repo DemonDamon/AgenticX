@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   /** Absolute local filesystem path parsed from a sandbox:/file: link. */
@@ -14,6 +15,7 @@ type Props = {
  * model-hallucinated links) are flagged inline.
  */
 export function ArtifactFileLink({ path, children, onRevealPath }: Props) {
+  const { t } = useTranslation("chat");
   const [state, setState] = useState<"idle" | "opening" | "failed">("idle");
   const resetTimerRef = useRef<number | null>(null);
 
@@ -64,16 +66,16 @@ export function ArtifactFileLink({ path, children, onRevealPath }: Props) {
       onClick={handleClick}
       title={
         state === "failed"
-          ? `产物链接无效：文件不存在（疑似模型生成的伪链接）\n${path}`
+          ? t("artifactLink.invalidTitle", { path })
           : path
       }
     >
       {children}
-      {state === "opening" ? <span className="text-text-faint">（打开中…）</span> : null}
+      {state === "opening" ? <span className="text-text-faint">{t("artifactLink.opening")}</span> : null}
       {state === "failed" ? (
         <span className="text-amber-300" role="alert">
           {" "}
-          ⚠ 文件不存在（疑似伪链接）
+          {t("artifactLink.notFound")}
         </span>
       ) : null}
     </a>

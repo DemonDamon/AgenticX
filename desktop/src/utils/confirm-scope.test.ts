@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { i18n } from "../i18n/i18n";
 import {
   NEVER_REUSABLE_CATEGORIES,
   buildConfirmApprovalKey,
@@ -94,9 +95,15 @@ describe("confirmation scope", () => {
       protectedConfirmReason({ risk: "high", protected_reason: "后端说的理由" }),
     ).toBe("后端说的理由");
 
-    expect(protectedConfirmReason({ risk: "non_whitelisted" })).toContain("白名单");
-    expect(protectedConfirmReason({ risk: "destructive" })).toContain("删除或覆盖");
-    expect(protectedConfirmReason({ risk: "computer_use" })).toContain("本机桌面");
+    expect(protectedConfirmReason({ risk: "non_whitelisted" })).toBe(
+      i18n.t("protectedReasonNonWhitelisted", { ns: "common" }),
+    );
+    expect(protectedConfirmReason({ risk: "destructive" })).toBe(
+      i18n.t("protectedReasonDestructive", { ns: "common" }),
+    );
+    expect(protectedConfirmReason({ risk: "computer_use" })).toBe(
+      i18n.t("protectedReasonComputerUse", { ns: "common" }),
+    );
 
     expect(protectedConfirmReason({})).not.toBe("");
     expect(protectedConfirmReason({ risk: "某个将来才有的档" })).not.toBe("");

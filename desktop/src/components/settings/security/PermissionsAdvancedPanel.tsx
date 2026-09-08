@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import { SettingsSwitch } from "../SettingsSwitch";
@@ -29,6 +30,7 @@ export const PermissionsAdvancedPanel = forwardRef<
   { showRulesGuide = false, highlightKey = 0 },
   ref,
 ) {
+  const { t } = useTranslation("settings");
   const [pathRules, setPathRules] = useState<PathRule[]>([]);
   const [deniedCommands, setDeniedCommands] = useState<string[]>([]);
   const [deniedTools, setDeniedTools] = useState<string[]>([]);
@@ -55,11 +57,11 @@ export const PermissionsAdvancedPanel = forwardRef<
 
   const filteredRegistryTools = useMemo(() => {
     const q = toolInsertFilter.trim().toLowerCase();
-    const rows = registryTools.filter((t) => t.name);
+    const rows = registryTools.filter((tool) => tool.name);
     if (!q) return rows;
-    return rows.filter((t) => {
-      const d = (t.description ?? "").toLowerCase();
-      return t.name.toLowerCase().includes(q) || d.includes(q) || (t.category ?? "").toLowerCase().includes(q);
+    return rows.filter((tool) => {
+      const d = (tool.description ?? "").toLowerCase();
+      return tool.name.toLowerCase().includes(q) || d.includes(q) || (tool.category ?? "").toLowerCase().includes(q);
     });
   }, [registryTools, toolInsertFilter]);
 
@@ -205,12 +207,12 @@ export const PermissionsAdvancedPanel = forwardRef<
 
   return (
     <>
-      <Panel title="定时任务 / 无人值守">
+      <Panel title={t("security.unattendedTitle")}>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="text-sm text-text-subtle">允许执行工作区内已存在的脚本</div>
+            <div className="text-sm text-text-subtle">{t("security.allowWorkspaceScripts")}</div>
             <p className="mt-1 text-xs leading-relaxed text-text-faint">
-              仅放行工作区内已存在的脚本；删除、关机、外发类操作仍会被拒绝。
+              {t("security.allowWorkspaceScriptsHint")}
             </p>
           </div>
           <SettingsSwitch
@@ -220,7 +222,7 @@ export const PermissionsAdvancedPanel = forwardRef<
               setUnattendedAllowWorkspaceScripts(next);
               void persist({ unattended_allow_workspace_scripts: next });
             }}
-            aria-label="允许执行工作区内已存在的脚本"
+            aria-label={t("security.allowWorkspaceScripts")}
           />
         </div>
       </Panel>
@@ -235,11 +237,9 @@ export const PermissionsAdvancedPanel = forwardRef<
       {showGuide ? (
         <SecurityRulesGuide onDismiss={() => setGuideDismissedKey(highlightKey)} />
       ) : null}
-      <Panel title="文件访问">
+      <Panel title={t("security.fileAccessTitle")}>
         <div className="text-xs leading-5 text-text-faint mb-2">
-          限制智能体读写哪些路径，支持 glob。例如拒绝 <code className="text-text-subtle">/etc/*</code>
-          ，或允许 <code className="text-text-subtle">~/Downloads/*.pdf</code>
-          。空着表示不额外限制，仍受上方工作区隔离约束。
+          {t("security.fileAccessHint")}
         </div>
         <div className="space-y-1.5">
           {pathRules.map((rule, idx) => (
@@ -267,8 +267,8 @@ export const PermissionsAdvancedPanel = forwardRef<
                   void persist({ path_rules: next });
                 }}
               >
-                <option value="allow">允许</option>
-                <option value="deny">拒绝</option>
+                <option value="allow">{t("security.allow")}</option>
+                <option value="deny">{t("security.deny")}</option>
               </select>
               <button
                 type="button"
@@ -291,15 +291,14 @@ export const PermissionsAdvancedPanel = forwardRef<
             onClick={() => setPathRules((prev) => [...prev, { pattern: "", allow: false }])}
           >
             <Plus className="h-3.5 w-3.5" aria-hidden />
-            添加路径规则
+            {t("security.addPathRule")}
           </button>
         </div>
       </Panel>
 
-      <Panel title="命令执行">
+      <Panel title={t("security.commandTitle")}>
         <div className="text-xs leading-5 text-text-faint mb-2">
-          按模式拦截 shell 命令，例如 <code className="text-text-subtle">rm -rf *</code>
-          。命中后直接拒绝，不再询问。不能用来把某条命令改成自动放行。
+          {t("security.commandHint")}
         </div>
         <div className="space-y-1.5">
           {deniedCommands.map((cmd, idx) => (
@@ -336,66 +335,63 @@ export const PermissionsAdvancedPanel = forwardRef<
             onClick={() => setDeniedCommands((prev) => [...prev, ""])}
           >
             <Plus className="h-3.5 w-3.5" aria-hidden />
-            添加命令模式
+            {t("security.addCommandPattern")}
           </button>
         </div>
       </Panel>
 
-      <Panel title="工具权限">
+      <Panel title={t("security.toolPermTitle")}>
         <div className="text-xs leading-5 text-text-faint mb-2">
-          拦截指定工具，不是加入自动执行。按工具名做匹配（例如 <code className="text-text-subtle">bash_exec</code>、
-          <code className="text-text-subtle">mcp_call</code>、<code className="text-text-subtle">file_*</code>
-          ）。命中后<strong className="text-text-primary">直接拒绝</strong>该工具调用，且<strong className="text-text-primary">不会</strong>再弹出执行确认。
-          工具名与<strong className="text-text-primary">设置 → 工具</strong>页预授权列表一致。
+          {t("security.toolPermHint")}
         </div>
         {registryTools.length > 0 ? (
           <details className="mb-3 rounded-md border border-border bg-surface-panel px-2 py-1.5">
             <summary className="cursor-pointer text-xs font-medium text-text-primary">
-              从已注册工具插入（共 {registryTools.length} 个）
+              {t("security.insertFromRegistry", { count: registryTools.length })}
             </summary>
             <div className="mt-2 space-y-2">
               <input
                 type="search"
                 className="w-full rounded-md border border-border bg-surface-card px-2 py-1 text-xs text-text-primary placeholder:text-text-faint"
-                placeholder="筛选工具名或描述…"
+                placeholder={t("security.filterToolsPh")}
                 value={toolInsertFilter}
                 disabled={busy}
                 onChange={(e) => setToolInsertFilter(e.target.value)}
-                aria-label="筛选工具列表"
+                aria-label={t("security.filterToolsAria")}
               />
               <div className="max-h-40 overflow-y-auto rounded border border-[var(--border-muted)] bg-surface-card p-1.5">
                 <div className="flex flex-wrap gap-1">
-                  {filteredRegistryTools.map((t) => (
+                  {filteredRegistryTools.map((tool) => (
                     <button
-                      key={t.name}
+                      key={tool.name}
                       type="button"
                       disabled={busy}
-                      title={t.description ? `${t.description.slice(0, 400)}` : t.name}
+                      title={tool.description ? `${tool.description.slice(0, 400)}` : tool.name}
                       className="rounded border border-border bg-surface-panel px-1.5 py-0.5 font-mono text-[11px] text-text-primary transition hover:bg-surface-hover hover:border-text-subtle disabled:opacity-40"
-                      onClick={() => appendDeniedTool(t.name)}
+                      onClick={() => appendDeniedTool(tool.name)}
                     >
-                      {t.name}
-                      {t.is_meta ? (
+                      {tool.name}
+                      {tool.is_meta ? (
                         <span className="ml-0.5 text-[9px] text-amber-400/90">meta</span>
                       ) : null}
                     </button>
                   ))}
                 </div>
                 {filteredRegistryTools.length === 0 ? (
-                  <div className="py-2 text-center text-[11px] text-text-faint">无匹配项，清空筛选试试</div>
+                  <div className="py-2 text-center text-[11px] text-text-faint">{t("security.noToolMatch")}</div>
                 ) : null}
               </div>
             </div>
           </details>
         ) : (
           <div className="mb-2 text-[11px] text-status-warning">
-            未能加载工具注册表（需后端在线）。仍可手动输入工具名；完整列表见设置 → 工具页。
+            {t("security.registryOffline")}
           </div>
         )}
         <datalist id="agx-studio-tool-names-datalist">
-          {registryTools.map((t) => (
-            <option key={t.name} value={t.name}>
-              {(t.description ?? "").slice(0, 80)}
+          {registryTools.map((tool) => (
+            <option key={tool.name} value={tool.name}>
+              {(tool.description ?? "").slice(0, 80)}
             </option>
           ))}
         </datalist>
@@ -410,7 +406,7 @@ export const PermissionsAdvancedPanel = forwardRef<
                 autoComplete="off"
                 disabled={busy}
                 onChange={(e) => {
-                  const next = deniedTools.map((t, i) => (i === idx ? e.target.value : t));
+                  const next = deniedTools.map((pat, i) => (i === idx ? e.target.value : pat));
                   setDeniedTools(next);
                 }}
                 onBlur={() => void persist({ denied_tools: deniedTools })}
@@ -436,7 +432,7 @@ export const PermissionsAdvancedPanel = forwardRef<
             onClick={() => setDeniedTools((prev) => [...prev, ""])}
           >
             <Plus className="h-3.5 w-3.5" aria-hidden />
-            添加工具模式
+            {t("security.addToolPattern")}
           </button>
         </div>
       </Panel>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Panel } from "../../ds/Panel";
 import { SettingsDropdown } from "../../ds/SettingsDropdown";
 import { SettingsSwitch } from "../SettingsSwitch";
@@ -7,6 +8,12 @@ import { buildGuardFixPrompt, type GuardFixScanItem } from "../../../utils/guard
 import { META_AGENT_DISPLAY_NAME } from "../../../constants/branding";
 import { useTrinityConfig } from "../trinity-config";
 import { SETTINGS_HINT_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type GuardScanItem = {
   skill_name: string;
@@ -73,10 +80,10 @@ function useSkillInstallPolicy() {
           setNonHighRiskAutoInstall(v);
           setLastSaved(v);
         } else if (!disposed) {
-          setMessage(result?.error ? String(result.error) : "读取技能安装策略失败。");
+          setMessage(result?.error ? String(result.error) : st("security.policyLoadFailed"));
         }
       } catch {
-        if (!disposed) setMessage("读取技能安装策略失败。");
+        if (!disposed) setMessage(st("security.policyLoadFailed"));
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -97,14 +104,14 @@ function useSkillInstallPolicy() {
       });
       if (!result?.ok) {
         setNonHighRiskAutoInstall(lastSaved);
-        setMessage(result?.error ? String(result.error) : "保存失败。");
+        setMessage(result?.error ? String(result.error) : st("security.saveFailed"));
         return;
       }
       setLastSaved(next);
-      setMessage("已保存。之后装扩展包或从 ClawHub 安装的技能时，是否跳过确认由本开关与安装前扫描结果一起决定（与后端共用同一份配置）。");
+      setMessage(st("security.policySaved"));
     } catch (e) {
       setNonHighRiskAutoInstall(lastSaved);
-      setMessage(e instanceof Error ? e.message : "保存失败。");
+      setMessage(e instanceof Error ? e.message : st("security.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -168,7 +175,7 @@ function useGuardSettings() {
           if (Array.isArray(result.ignored)) setIgnoredSkills(result.ignored);
         }
       } catch {
-        if (!disposed) setMessage("读取安全扫描配置失败。");
+        if (!disposed) setMessage(st("security.scanConfigLoadFailed"));
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -185,14 +192,14 @@ function useGuardSettings() {
     try {
       const result = await window.agenticxDesktop.putGuardSettings(next);
       if (!result?.ok) {
-        setMessage(result?.error ? String(result.error) : "保存失败。");
+        setMessage(result?.error ? String(result.error) : st("security.saveFailed"));
         return;
       }
       if (typeof result.version === "number") setVersion(result.version);
       if (result.scan_mode) setScanMode(result.scan_mode);
-      setMessage("已保存安全扫描配置。");
+      setMessage(st("security.scanConfigSaved"));
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败。");
+      setMessage(e instanceof Error ? e.message : st("security.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -204,7 +211,7 @@ function useGuardSettings() {
     try {
       const result = await window.agenticxDesktop.guardScanAll({});
       if (!result?.ok) {
-        setScanMsg(result?.error ? String(result.error) : "扫描失败。");
+        setScanMsg(result?.error ? String(result.error) : st("security.scanFailed"));
         return;
       }
       const rows = Array.isArray(result.results) ? result.results : [];
@@ -213,7 +220,7 @@ function useGuardSettings() {
       setScanned(true);
       void refreshSnapshotsFor(rows);
     } catch (e) {
-      setScanMsg(e instanceof Error ? e.message : "扫描失败。");
+      setScanMsg(e instanceof Error ? e.message : st("security.scanFailed"));
     } finally {
       setScanBusy(false);
     }
@@ -224,7 +231,7 @@ function useGuardSettings() {
       const meta = snapshotMap[item.skill_name];
       const base = item.base_dir?.trim();
       if (!base || !meta?.id) {
-        setRestoreMsg("无可用的修复前备份。");
+        setRestoreMsg(st("security.noBackup"));
         return;
       }
       setRestoreMsg("");
@@ -235,10 +242,10 @@ function useGuardSettings() {
           snapshot_id: meta.id,
         });
         if (!res?.ok) {
-          setRestoreMsg(res?.error ? String(res.error) : "恢复失败。");
+          setRestoreMsg(res?.error ? String(res.error) : st("security.restoreFailed"));
           return;
         }
-        setRestoreMsg(`已恢复到修复前备份（${formatGuardSnapshotTs(meta.ts)}）。`);
+        setRestoreMsg(st("security.restoredBackup", { ts: formatGuardSnapshotTs(meta.ts) }));
         const scan = await window.agenticxDesktop.guardScanAll({});
         if (scan?.ok) {
           const rows = Array.isArray(scan.results) ? scan.results : [];
@@ -247,7 +254,7 @@ function useGuardSettings() {
           void refreshSnapshotsFor(rows);
         }
       } catch (e) {
-        setRestoreMsg(e instanceof Error ? e.message : "恢复失败。");
+        setRestoreMsg(e instanceof Error ? e.message : st("security.restoreFailed"));
       } finally {
         setActionBusy(null);
       }
@@ -329,30 +336,41 @@ function useGuardSettings() {
 }
 
 const GUARD_PATTERN_LABELS: Record<string, string> = {
-  exfiltration_curl: "数据外泄（curl）",
-  exfiltration_wget: "数据外泄（wget）",
-  exfiltration_fetch_env: "读取环境变量并上传",
-  credential_ssh: "访问 SSH 密钥",
-  credential_dotenv: "引用 .env 文件",
-  credential_word: "涉及凭据/密码关键词",
-  prompt_ignore_previous: "提示词注入（忽略先前指令）",
-  prompt_system: "提示词注入（system prompt）",
-  prompt_system_tag: "提示词注入（<system> 标签）",
-  destructive_rm: "破坏性操作（rm -rf /）",
-  destructive_chmod: "破坏性操作（chmod 777）",
-  destructive_sql: "破坏性操作（DROP TABLE）",
-  curl_pipe_shell: "远程脚本管道执行",
-  reverse_shell: "反向 Shell",
-  invisible_unicode: "不可见 Unicode 字符",
-  suspicious_url: "可疑外发 URL",
-  typosquat_dependency: "疑似 typosquat 依赖",
-  dynamic_download_l2: "嵌套动态下载",
-  base64_decode_pipe: "Base64 解码后执行",
+  exfiltration_curl: st("skills.scan.patterns.exfiltration_curl"),
+  exfiltration_wget: st("skills.scan.patterns.exfiltration_wget"),
+  exfiltration_fetch_env: st("skills.scan.patterns.exfiltration_fetch_env"),
+  credential_ssh: st("skills.scan.patterns.credential_ssh"),
+  credential_dotenv: st("skills.scan.patterns.credential_dotenv"),
+  credential_word: st("skills.scan.patterns.credential_word"),
+  prompt_ignore_previous: st("skills.scan.patterns.prompt_ignore_previous"),
+  prompt_system: st("skills.scan.patterns.prompt_system"),
+  prompt_system_tag: st("skills.scan.patterns.prompt_system_tag"),
+  destructive_rm: st("skills.scan.patterns.destructive_rm"),
+  destructive_chmod: st("skills.scan.patterns.destructive_chmod"),
+  destructive_sql: st("skills.scan.patterns.destructive_sql"),
+  curl_pipe_shell: st("skills.scan.patterns.curl_pipe_shell"),
+  reverse_shell: st("skills.scan.patterns.reverse_shell"),
+  invisible_unicode: st("skills.scan.patterns.invisible_unicode"),
+  suspicious_url: st("skills.scan.patterns.suspicious_url"),
+  typosquat_dependency: st("skills.scan.patterns.typosquat_dependency"),
+  dynamic_download_l2: st("skills.scan.patterns.dynamic_download_l2"),
+  base64_decode_pipe: st("skills.scan.patterns.base64_decode_pipe"),
 };
 const GUARD_PATTERN_LABEL_HIGH_ENTROPY = "high_entropy_secret";
 
 function guardVerdictLabel(v: string): string {
-  return v === "dangerous" ? "高危" : v === "caution" ? "需注意" : "未见高危规则";
+  return v === "dangerous"
+    ? st("skills.scan.verdictDanger")
+    : v === "caution"
+      ? st("skills.scan.verdictCaution")
+      : st("skills.scan.verdictOk");
+}
+
+function msgStartsWithKey(msg: string, key: string, opts?: Record<string, unknown>): boolean {
+  const sample = st(key, opts);
+  const cut = sample.search(/[（(]/);
+  const prefix = (cut > 0 ? sample.slice(0, cut) : sample).trim();
+  return Boolean(prefix) && msg.startsWith(prefix);
 }
 
 function formatGuardSnapshotTs(ts: string): string {
@@ -399,11 +417,11 @@ function GuardScanResultCard({
         </span>
         {!item.can_fix ? (
           <span className="shrink-0 rounded-full border border-border bg-surface-panel px-1.5 text-[10px] text-text-faint">
-            外部
+            {st("security.external")}
           </span>
         ) : null}
         <span className="ml-auto text-[11px] text-text-faint">
-          {[item.grade ? `等级 ${item.grade}` : "", typeof item.score === "number" ? `${item.score} 分` : "", item.tier]
+          {[item.grade ? st("security.grade", { grade: item.grade }) : "", typeof item.score === "number" ? st("security.score", { score: item.score }) : "", item.tier]
             .filter(Boolean)
             .join(" · ")}
         </span>
@@ -418,7 +436,7 @@ function GuardScanResultCard({
               <span className="min-w-0">
                 {GUARD_PATTERN_LABELS[f.pattern_name] ||
                   (f.pattern_name === GUARD_PATTERN_LABEL_HIGH_ENTROPY
-                    ? "高熵可疑字符串"
+                    ? st("security.highEntropy")
                     : f.pattern_name)}
                 {f.matched_text ? (
                   <span className="text-text-faint">：「{f.matched_text.slice(0, 50)}」</span>
@@ -427,7 +445,7 @@ function GuardScanResultCard({
             </li>
           ))}
           {findings.length > 5 ? (
-            <li className="text-text-faint">… 另有 {findings.length - 5} 条</li>
+            <li className="text-text-faint">{st("security.moreFindings", { count: findings.length - 5 })}</li>
           ) : null}
         </ul>
       ) : null}
@@ -439,44 +457,44 @@ function GuardScanResultCard({
             disabled={busy || !onAiFix || aiFixDisabled}
             title={
               aiFixDisabled
-                ? "请先在技能配置页开启「允许助手改本地技能」"
-                : "委派元智能体新会话修复；写入前会展示 diff 供确认"
+                ? st("security.needEnableManage")
+                : st("security.aiFixHint")
             }
             onClick={onAiFix}
           >
-            AI 修复
+            {st("security.aiFix")}
           </button>
         ) : (
-          <span className="text-[11px] text-text-faint">外部来源只读，可禁用或忽略</span>
+          <span className="text-[11px] text-text-faint">{st("security.externalReadonly")}</span>
         )}
         {item.can_fix && hasSnapshot ? (
           <button
             type="button"
             className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300 transition hover:bg-amber-500/15 disabled:opacity-50"
             disabled={busy || !onRestore}
-            title="恢复到本次 AI 修复前自动保存的快照"
+            title={st("security.restoreBackupTitle")}
             onClick={onRestore}
           >
-            恢复备份
+            {st("security.restoreBackup")}
           </button>
         ) : null}
         <button
           type="button"
           className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
           disabled={busy}
-          title="模型不再加载该技能，文件保留"
+          title={st("security.disableTitle")}
           onClick={onDisable}
         >
-          禁用
+          {st("security.disable")}
         </button>
         <button
           type="button"
           className="rounded-md border border-border px-2.5 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
           disabled={busy}
-          title="后续扫描默认跳过该技能"
+          title={st("security.ignoreTitle")}
           onClick={onIgnore}
         >
-          忽略
+          {st("security.ignore")}
         </button>
       </div>
     </div>
@@ -508,6 +526,7 @@ function SettingsToggleCard(props: {
 }
 
 export function SkillGuardPanel() {
+  const { t } = useTranslation("settings");
   const { form } = useTrinityConfig();
   const {
     loading: policyLoading,
@@ -551,12 +570,12 @@ export function SkillGuardPanel() {
   const runGuardFixInMetaAgent = useCallback(
     async (item: GuardFixScanItem) => {
       if (!form.skill_manage_enabled) {
-        setGuardFixMsg("请先在技能配置页开启「允许助手改本地技能」，再使用 AI 修复。");
+        setGuardFixMsg(st("security.enableManageFirst"));
         return;
       }
       const prompt = buildGuardFixPrompt(item);
       if (!prompt.trim()) {
-        setGuardFixMsg("缺少技能目录，无法委派修复。");
+        setGuardFixMsg(st("security.missingSkillDir"));
         return;
       }
       setGuardFixMsg("");
@@ -578,12 +597,12 @@ export function SkillGuardPanel() {
               },
             }));
           } else if (snap?.error) {
-            setGuardFixMsg(`备份未创建（${snap.error}），仍将继续修复。`);
+            setGuardFixMsg(st("security.backupSkipped", { error: snap.error }));
           }
         }
         const created = await window.agenticxDesktop.createSession({});
         if (!created.ok || !created.session_id) {
-          setGuardFixMsg(created.error ?? "创建元智能体会话失败");
+          setGuardFixMsg(created.error ?? st("security.createMetaFailed"));
           return;
         }
         const sid = created.session_id;
@@ -601,45 +620,32 @@ export function SkillGuardPanel() {
 
   if (loading) {
     return (
-      <Panel title="技能安全">
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
+      <Panel title={st("security.skillGuardTitle")}>
+        <div className="py-2 text-sm text-text-faint">{st("security.loading")}</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="技能安全">
+    <Panel title={st("security.skillGuardTitle")}>
       <div className="space-y-3">
         <SettingsToggleCard
-          title="未见高危则自动装完"
-          description="安装前仍会跑一遍静态规则扫描并展示摘要；只有未命中高危规则时才可能一路装完，一旦命中高危必须你点确认。"
+          title={st("security.autoInstallTitle")}
+          description={st("security.autoInstallDesc")}
           checked={nonHighRiskAutoInstall}
           disabled={busy}
           onChange={(next) => void updatePolicy(next)}
         />
         <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
-          <div className={SETTINGS_LABEL_CLASS}>技能安全扫描</div>
+          <div className={SETTINGS_LABEL_CLASS}>{st("security.scanTitle")}</div>
           <div className={`mt-1 space-y-1 ${SETTINGS_HINT_CLASS}`}>
-            <p>
-              从技能市场、Bundle 或扩展安装前会<strong className="font-medium text-text-subtle">自动扫描</strong>
-              ，命中高危须你确认后才可安装。已安装的技能可用下方「扫描已安装技能」复查，逐个列出问题并给出处置选项。本页配置写入{" "}
-              <code className="text-text-subtle">~/.agenticx/config.yaml</code>，重启后生效。
-            </p>
-            <p>
-              <span className="text-text-subtle">引擎 v1</span>：经典正则规则，与历史版本行为一致。
-              <span className="text-text-subtle">引擎 v2</span>：YAML 规则库，按技能体量分级扫描，并给出 0–100
-              分与安全等级，规则更全（推荐）。
-            </p>
-            <p>
-              <span className="text-text-subtle">扫描模式</span>（仅 v2 对安装流程生效）：
-              <span className="text-text-subtle">快速</span>—主要检查 SKILL.md，跳过重项，最快；
-              <span className="text-text-subtle">标准</span>—按目录文件量自动选深度，默认推荐；
-              <span className="text-text-subtle">完整</span>—尽量扫全目录与依赖，更严、更慢。
-            </p>
+            <p>{st("security.scanIntro")}</p>
+            <p>{st("security.engineV1")} {st("security.engineV2")}</p>
+            <p>{st("security.scanModeHint")}</p>
           </div>
           <div className="mt-3 space-y-2">
             <div className="flex items-center justify-between gap-3">
-              <span className="shrink-0 text-xs text-text-muted">引擎版本</span>
+              <span className="shrink-0 text-xs text-text-muted">{st("security.engineVersion")}</span>
               <SettingsDropdown
                 value={String(guardVersion)}
                 displayLabel={`v${guardVersion}`}
@@ -655,23 +661,27 @@ export function SkillGuardPanel() {
               />
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="shrink-0 text-xs text-text-muted">扫描模式</span>
+              <span className="shrink-0 text-xs text-text-muted">{st("security.scanMode")}</span>
               <SettingsDropdown
                 value={scanMode}
                 displayLabel={
-                  scanMode === "quick" ? "快速" : scanMode === "full" ? "完整" : "标准"
+                  scanMode === "quick"
+                    ? st("security.modeQuick")
+                    : scanMode === "full"
+                      ? st("security.modeFull")
+                      : st("security.modeStandard")
                 }
                 options={[
-                  { value: "quick", label: "快速" },
-                  { value: "standard", label: "标准" },
-                  { value: "full", label: "完整" },
+                  { value: "quick", label: st("security.modeQuick") },
+                  { value: "standard", label: st("security.modeStandard") },
+                  { value: "full", label: st("security.modeFull") },
                 ]}
                 onChange={(v) => void saveGuard({ scan_mode: v })}
                 disabled={busy || guardVersion < 2}
                 size="compact"
                 menuPortal
                 className="w-[7rem] shrink-0"
-                title={guardVersion < 2 ? "仅引擎 v2 支持扫描模式" : undefined}
+                title={guardVersion < 2 ? st("security.modeV2Only") : undefined}
               />
             </div>
           </div>
@@ -682,28 +692,28 @@ export function SkillGuardPanel() {
               disabled={scanBusy}
               onClick={() => void runScanAll()}
             >
-              {scanBusy ? "扫描中…" : "扫描已安装技能"}
+              {scanBusy ? st("security.scanning") : st("security.scanInstalled")}
             </button>
             <span className="text-[11px] text-text-faint">
-              逐个技能扫描，仅列出有问题的。扫描只出报告，不会自动改动。
+              {st("security.scanInstalledHint")}
             </span>
           </div>
           {guardMessage ? (
-            <div className={`mt-2 text-xs ${guardMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}>
+            <div className={`mt-2 text-xs ${guardMessage === st("security.scanConfigSaved") ? "text-text-muted" : "text-rose-400"}`}>
               {guardMessage}
             </div>
           ) : null}
           {scanMsg ? <div className="mt-2 text-xs text-rose-400">{scanMsg}</div> : null}
           {guardFixMsg ? (
             <div
-              className={`mt-2 text-xs ${guardFixMsg.includes("技能配置页") || guardFixMsg.includes("备份未创建") ? "text-amber-400" : "text-rose-400"}`}
+              className={`mt-2 text-xs ${guardFixMsg === st("security.enableManageFirst") || guardFixMsg === st("security.needEnableManage") || msgStartsWithKey(guardFixMsg, "security.backupSkipped", { error: "" }) ? "text-amber-400" : "text-rose-400"}`}
             >
               {guardFixMsg}
             </div>
           ) : null}
           {restoreMsg ? (
             <div
-              className={`mt-2 text-xs ${restoreMsg.startsWith("已恢复") ? "text-emerald-400" : "text-rose-400"}`}
+              className={`mt-2 text-xs ${msgStartsWithKey(restoreMsg, "security.restoredBackup", { ts: "" }) ? "text-emerald-400" : "text-rose-400"}`}
             >
               {restoreMsg}
             </div>
@@ -711,7 +721,7 @@ export function SkillGuardPanel() {
           {scanned && !scanBusy ? (
             scanResults.length === 0 ? (
               <div className="mt-3 rounded-md border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-400">
-                未发现有风险的已安装技能。
+                {st("security.noRisky")}
               </div>
             ) : (
               <div className="mt-3 space-y-2">
@@ -741,7 +751,7 @@ export function SkillGuardPanel() {
           ) : null}
           {ignoredSkills.length > 0 ? (
             <div className="mt-3 border-t border-border pt-3">
-              <div className="text-[11px] text-text-faint">已忽略（不再扫出）：</div>
+              <div className="text-[11px] text-text-faint">{st("security.ignored")}</div>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {ignoredSkills.map((name) => (
                   <button
@@ -749,7 +759,7 @@ export function SkillGuardPanel() {
                     type="button"
                     className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-panel px-2 py-0.5 text-[11px] text-text-muted transition hover:text-text-primary disabled:opacity-50"
                     disabled={actionBusy === name}
-                    title="点击撤销忽略"
+                    title={st("security.undoIgnore")}
                     onClick={() => void unignoreSkill(name)}
                   >
                     {name}
@@ -763,7 +773,7 @@ export function SkillGuardPanel() {
       </div>
       {policyMessage ? (
         <div
-          className={`mt-2 text-xs ${policyMessage.startsWith("已保存") ? "text-text-muted" : "text-rose-400"}`}
+          className={`mt-2 text-xs ${policyMessage === st("security.policySaved") ? "text-text-muted" : "text-rose-400"}`}
         >
           {policyMessage}
         </div>

@@ -1,3 +1,4 @@
+import { i18n } from "../../i18n/i18n";
 import { WRITE_LOCAL_TEXT_MAX_BYTES } from "./workspace-edit-limits";
 import type { WorkspacePreviewLineRange } from "./workspace-preview-types";
 
@@ -15,15 +16,15 @@ export type EditGuardInput = {
  */
 export function getEditBlockReason(input: EditGuardInput): string | null {
   if (!input.hasTextualPreview) return null;
-  if (input.initialLineRange) return "行号聚焦模式下不可编辑";
+  if (input.initialLineRange) return i18n.t("preview.editGuard.lineFocus", { ns: "workspace" });
   if (input.truncated) {
-    return "文件过大已截断，为避免覆盖丢失内容，暂不可编辑";
+    return i18n.t("preview.editGuard.truncated", { ns: "workspace" });
   }
   if (input.content.includes("\uFFFD")) {
-    return "文件疑似非 UTF-8 编码，暂不可编辑";
+    return i18n.t("preview.editGuard.notUtf8", { ns: "workspace" });
   }
   if (input.size > WRITE_LOCAL_TEXT_MAX_BYTES) {
-    return "文件超过 512 KB 写入上限";
+    return i18n.t("preview.editGuard.oversize", { ns: "workspace" });
   }
   return null;
 }

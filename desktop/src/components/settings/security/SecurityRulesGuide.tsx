@@ -1,10 +1,12 @@
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   onDismiss?: () => void;
 };
 
 export function SecurityRulesGuide({ onDismiss }: Props) {
+  const { t } = useTranslation("settings");
   return (
     <div
       className="rounded-lg border border-[var(--ui-btn-primary-bg)]/35 bg-[var(--ui-btn-primary-bg)]/8 px-3 py-2.5"
@@ -12,15 +14,13 @@ export function SecurityRulesGuide({ onDismiss }: Props) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-medium text-text-primary">从这里改路径、命令和工具规则</div>
-          <p className="mt-1 text-xs leading-5 text-text-subtle">
-            上面的运行模式只决定会不会弹确认。要额外拦住某些文件、命令或工具，用下面三块。没有规则就不额外限制。改完立即生效。
-          </p>
+          <div className="text-sm font-medium text-text-primary">{t("security.rulesGuide.title")}</div>
+          <p className="mt-1 text-xs leading-5 text-text-subtle">{t("security.rulesGuide.body")}</p>
         </div>
         {onDismiss ? (
           <button
             type="button"
-            aria-label="关闭说明"
+            aria-label={t("security.rulesGuide.dismissAria")}
             className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-faint transition hover:bg-surface-hover hover:text-text-primary"
             onClick={onDismiss}
           >

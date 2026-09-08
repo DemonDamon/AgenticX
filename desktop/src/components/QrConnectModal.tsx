@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import QRCode from "qrcode";
 import { Loader2, X } from "lucide-react";
 
@@ -32,6 +33,8 @@ export function QrConnectModal({
   onClose,
   onBound,
 }: QrConnectModalProps) {
+  const { t } = useTranslation("workspace");
+  const { t: tCommon } = useTranslation("common");
   const [phase, setPhase] = useState<"idle" | "creating" | "ready" | "error">("idle");
   const [error, setError] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState("");
@@ -139,12 +142,12 @@ export function QrConnectModal({
 
   const statusLabel =
     status === "bound"
-      ? "已连接"
+      ? t("qrConnect.bound")
       : status === "expired"
-        ? "已过期"
+        ? t("qrConnect.expired")
         : status === "scanned"
-          ? "已扫码，请在 IM 中发送绑定指令"
-          : "请使用微信或系统相机扫码";
+          ? t("qrConnect.scanned")
+          : t("qrConnect.scanHint");
 
   if (!open) return null;
 
@@ -163,48 +166,48 @@ export function QrConnectModal({
           type="button"
           className="absolute right-3 top-3 rounded p-1 text-text-faint hover:bg-surface-hover hover:text-text-subtle"
           onClick={onClose}
-          aria-label="关闭"
+          aria-label={tCommon("close")}
         >
           <X className="h-4 w-4" />
         </button>
         <h2 id="qr-connect-title" className="pr-8 text-[16px] font-medium text-text-strong">
-          扫码连接 IM
+          {t("qrConnect.title")}
         </h2>
         <p className="mt-2 text-xs text-text-faint">
-          扫码后在手机页复制「绑定」整句，到飞书/企微机器人会话中发送。网关须在公网可访问。
+          {t("qrConnect.hint")}
         </p>
 
         {phase === "creating" && (
           <div className="mt-8 flex flex-col items-center gap-3 py-8">
             <Loader2 className="h-8 w-8 animate-spin text-text-faint" />
-            <span className="text-sm text-text-subtle">正在生成二维码…</span>
+            <span className="text-sm text-text-subtle">{t("qrConnect.generating")}</span>
           </div>
         )}
 
         {phase === "error" && (
           <div className="mt-4 rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-300">
-            {error || "创建会话失败"}
+            {error || t("qrConnect.createFailed")}
           </div>
         )}
 
         {phase === "ready" && qrDataUrl && (
           <div className="mt-4 flex flex-col items-center">
-            <img src={qrDataUrl} alt="连接二维码" className="rounded-lg border border-border bg-white p-2" />
+            <img src={qrDataUrl} alt={t("qrConnect.qrAlt")} className="rounded-lg border border-border bg-white p-2" />
             <p className="mt-3 text-center text-sm text-text-subtle">{statusLabel}</p>
             {bindingCode && (
               <p className="mt-1 text-center text-xs text-text-faint">
-                绑定码：<span className="font-mono text-text-muted">{bindingCode}</span>
+                {t("qrConnect.bindingCode")}<span className="font-mono text-text-muted">{bindingCode}</span>
               </p>
             )}
             <p className="mt-2 text-center text-xs text-amber-500/90">
               {leftSec > 0
-                ? `剩余 ${leftSec} 秒`
+                ? t("qrConnect.secondsLeft", { seconds: leftSec })
                 : status !== "bound"
-                  ? "可能已过期，可关闭后重试"
+                  ? t("qrConnect.maybeExpired")
                   : ""}
             </p>
             {status === "bound" && (
-              <p className="mt-2 text-center text-sm text-green-500">绑定成功，窗口将自动关闭</p>
+              <p className="mt-2 text-center text-sm text-green-500">{t("qrConnect.boundSuccess")}</p>
             )}
           </div>
         )}
@@ -216,7 +219,7 @@ export function QrConnectModal({
               className="rounded-md border border-border px-3 py-1.5 text-sm text-text-subtle hover:bg-surface-hover"
               onClick={() => void startSession()}
             >
-              重试
+              {tCommon("retry")}
             </button>
           )}
           <button
@@ -224,7 +227,7 @@ export function QrConnectModal({
             className="rounded-md border border-border px-3 py-1.5 text-sm text-text-subtle hover:bg-surface-hover"
             onClick={onClose}
           >
-            关闭
+            {tCommon("close")}
           </button>
         </div>
       </div>

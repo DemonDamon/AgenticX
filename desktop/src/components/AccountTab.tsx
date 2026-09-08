@@ -7,8 +7,10 @@ import {
   User as _User,
 } from "lucide-react";
 
+import { useTranslation } from "react-i18next";
 import { Button } from "./ds/Button";
 import { useAppStore } from "../store";
+import { i18n } from "../i18n/i18n";
 
 type IconProps = SVGAttributes<SVGSVGElement> & { className?: string };
 function safeLucide(icon: ComponentType<IconProps> | undefined, fallbackLabel: string): ComponentType<IconProps> {
@@ -26,63 +28,42 @@ const Building2 = safeLucide(_Building2, "building");
  */
 function formatAgxLoginInitError(raw: string): { message: string; detail?: string } {
   const code = (raw || "").trim();
-  const supportTail = (id: string) => `错误代码 ${id}（向支持反馈时请一并提供）`;
+  const t = (key: string, opts?: Record<string, unknown>) =>
+    String(i18n.t(key, { ns: "settings", ...opts }));
+  const supportTail = (id: string) => t("account.supportTail", { id });
 
   if (code === "database_not_configured") {
-    return {
-      message: "官网账号服务暂不可用，无法开始登录。请稍后再试；若多次出现，请联系 Near 支持。",
-      detail: supportTail("AGX-AUTH-101"),
-    };
+    return { message: t("account.errDatabase"), detail: supportTail("AGX-AUTH-101") };
   }
   if (code === "supabase_not_configured") {
-    return {
-      message: "账号系统暂不可用，无法开始登录。请稍后再试；若多次出现，请联系 Near 支持。",
-      detail: supportTail("AGX-AUTH-102"),
-    };
+    return { message: t("account.errSupabase"), detail: supportTail("AGX-AUTH-102") };
   }
   if (code.startsWith("init_http_")) {
-    return {
-      message: "网络或服务异常，无法开始登录。请检查网络后重试。",
-      detail: supportTail("AGX-AUTH-103"),
-    };
+    return { message: t("account.errNetwork"), detail: supportTail("AGX-AUTH-103") };
   }
   if (code === "database_schema_missing") {
-    return {
-      message: "账号服务尚未完成初始化，无法开始登录。请联系 Near 支持或稍后再试。",
-      detail: supportTail("AGX-AUTH-105"),
-    };
+    return { message: t("account.errSchema"), detail: supportTail("AGX-AUTH-105") };
   }
   if (code === "database_connection_failed") {
-    return {
-      message: "无法连接到账号数据库，请稍后再试；若多次出现，请联系 Near 支持。",
-      detail: supportTail("AGX-AUTH-106"),
-    };
+    return { message: t("account.errDbConn"), detail: supportTail("AGX-AUTH-106") };
   }
   if (code === "database_ssl_error") {
-    return {
-      message: "与账号服务的安全连接异常，请稍后再试；若多次出现，请联系 Near 支持。",
-      detail: supportTail("AGX-AUTH-107"),
-    };
+    return { message: t("account.errSsl"), detail: supportTail("AGX-AUTH-107") };
   }
   if (code === "database_auth_failed") {
-    return {
-      message: "账号数据库鉴权失败，服务暂不可用。请联系 Near 支持。",
-      detail: supportTail("AGX-AUTH-108"),
-    };
+    return { message: t("account.errDbAuth"), detail: supportTail("AGX-AUTH-108") };
   }
   if (code === "server_error") {
-    return {
-      message: "服务暂时繁忙，无法开始登录。请稍后再试。",
-      detail: supportTail("AGX-AUTH-104"),
-    };
+    return { message: t("account.errBusy"), detail: supportTail("AGX-AUTH-104") };
   }
   return {
-    message: "无法开始官网账号登录。请稍后再试。",
+    message: t("account.errGeneric"),
     detail: code ? supportTail(`AGX-AUTH-199 · ${code}`) : supportTail("AGX-AUTH-199"),
   };
 }
 
 export function AccountTab() {
+  const { t } = useTranslation("settings");
   // Global account state is hydrated in App.tsx; read here so Topbar and Settings stay in sync.
   const acct = useAppStore((s) => s.agxAccount);
   const setAgxAccount = useAppStore((s) => s.setAgxAccount);
@@ -129,13 +110,13 @@ export function AccountTab() {
       setEntWaiting(false);
       setEntBusy(false);
       setEntVerifyUrl("");
-      setEntError(String(payload.error || "企业登录未完成，请重试"));
+      setEntError(String(payload.error || i18n.t("account.entLoginIncomplete", { ns: "settings" })));
     });
     const offTimeout = window.agenticxDesktop.onEnterpriseLoginTimeout(() => {
       setEntWaiting(false);
       setEntBusy(false);
       setEntVerifyUrl("");
-      setEntError("等待授权超时，请重新发起登录");
+      setEntError(String(i18n.t("account.entAuthTimeout", { ns: "settings" })));
     });
     return () => {
       cancelled = true;
@@ -174,18 +155,18 @@ export function AccountTab() {
         const raw = typeof r.error === "string" ? r.error : "";
         const { message, detail } = formatAgxLoginInitError(raw);
         await window.agenticxDesktop.confirmDialog({
-          title: "无法开始登录",
+          title: t("account.cannotStartTitle"),
           message,
           detail,
-          confirmText: "确定",
+          confirmText: t("account.ok"),
         });
       }
     } catch (e) {
       setWaitingBrowser(false);
       await window.agenticxDesktop.confirmDialog({
-        title: "无法开始登录",
+        title: t("account.cannotStartTitle"),
         message: String(e),
-        confirmText: "确定",
+        confirmText: t("account.ok"),
       });
     } finally {
       setLoginBusy(false);
@@ -199,9 +180,9 @@ export function AccountTab() {
 
   const onLogout = async () => {
     const r = await window.agenticxDesktop.confirmDialog({
-      title: "退出官网账号",
-      message: "确定要清除本机已保存的 Near 官网登录状态吗？",
-      confirmText: "退出",
+      title: t("account.logoutOfficialTitle"),
+      message: t("account.logoutOfficialMsg"),
+      confirmText: t("account.logoutConfirm"),
       destructive: true,
     });
     if (!r.confirmed) return;
@@ -216,7 +197,7 @@ export function AccountTab() {
     try {
       const r = await window.agenticxDesktop.enterpriseLoginStart({ portalUrl: entPortalUrl });
       if (!r.ok) {
-        setEntError(r.error || "无法连接企业门户，请检查地址与网络");
+        setEntError(r.error || t("account.entConnectFailed"));
         return;
       }
       setEntVerifyUrl(String(r.verification_url ?? ""));
@@ -236,9 +217,9 @@ export function AccountTab() {
 
   const onEnterpriseLogout = async () => {
     const r = await window.agenticxDesktop.confirmDialog({
-      title: "退出企业账号",
-      message: "确定要清除本机已保存的企业登录状态吗？退出后将无法访问云房间。",
-      confirmText: "退出",
+      title: t("account.logoutEnterpriseTitle"),
+      message: t("account.logoutEnterpriseMsg"),
+      confirmText: t("account.logoutConfirm"),
       destructive: true,
     });
     if (!r.confirmed) return;
@@ -255,19 +236,15 @@ export function AccountTab() {
           <User className="size-4" />
         </div>
         <div>
-          <div className="text-[16px] font-semibold text-text-primary">Near 官网账号</div>
-          <p className="mt-1 text-xs text-text-subtle leading-relaxed">
-            与 <span className="font-mono text-[11px]">agxbuilder.com</span>{" "}
-            使用同一套账号。点击登录后将在系统浏览器中完成验证，本应用自动同步登录状态。
-            本功能依赖 Near 官网服务；若暂不可用，可能为服务维护或能力未开放，请稍后再试。
-          </p>
+          <div className="text-[16px] font-semibold text-text-primary">{t("account.officialTitle")}</div>
+          <p className="mt-1 text-xs text-text-subtle leading-relaxed">{t("account.officialIntro")}</p>
         </div>
       </div>
 
       {acct.loggedIn ? (
         <div className="rounded-lg border border-border bg-surface-card px-4 py-3 space-y-2">
-          <div className="text-xs text-text-subtle">当前已登录</div>
-          <div className="font-medium">{acct.displayName || acct.email || "（无显示名）"}</div>
+          <div className="text-xs text-text-subtle">{t("account.loggedIn")}</div>
+          <div className="font-medium">{acct.displayName || acct.email || t("account.noDisplayName")}</div>
           {acct.email ? <div className="text-xs text-text-subtle font-mono">{acct.email}</div> : null}
           <Button
             type="button"
@@ -276,22 +253,22 @@ export function AccountTab() {
             onClick={() => void onLogout()}
           >
             <LogOut className="size-3.5" />
-            退出登录
+            {t("account.logoutOfficial")}
           </Button>
         </div>
       ) : (
         <div className="rounded-lg border border-border bg-surface-card px-4 py-4 space-y-3">
           <p className="text-xs text-text-subtle">
-            点击下方按钮将在系统浏览器中打开官网登录页；完成后本窗口会自动更新状态。
+            {t("account.loginHint")}
           </p>
           {waitingBrowser ? (
             <div className="flex flex-col gap-2 rounded-md bg-surface-hover px-3 py-3">
               <div className="flex items-center gap-2 text-xs text-text-subtle">
                 <Loader2 className="size-4 animate-spin shrink-0" />
-                等待浏览器登录完成…
+                {t("account.waitingBrowser")}
               </div>
               <Button type="button" variant="ghost" className="text-xs py-1" onClick={() => void onCancelWait()}>
-                取消等待
+                {t("account.cancelWait")}
               </Button>
             </div>
           ) : (
@@ -307,7 +284,7 @@ export function AccountTab() {
               ) : (
                 <LogIn className="size-4" />
               )}
-              使用官网账号登录
+              {t("account.loginOfficial")}
             </Button>
           )}
         </div>
@@ -319,18 +296,15 @@ export function AccountTab() {
             <Building2 className="size-4" />
           </div>
           <div>
-            <div className="text-[16px] font-semibold text-text-primary">企业账号</div>
-            <p className="mt-1 text-xs text-text-subtle leading-relaxed">
-              登录企业门户后，即可在「云房间」里与同事协作。点击登录将在系统浏览器中完成授权，
-              授权通过后本窗口会自动更新状态。与上方官网账号相互独立。
-            </p>
+            <div className="text-[16px] font-semibold text-text-primary">{t("account.enterpriseTitle")}</div>
+            <p className="mt-1 text-xs text-text-subtle leading-relaxed">{t("account.enterpriseIntro")}</p>
           </div>
         </div>
 
         {entLoggedIn ? (
           <div className="mt-4 rounded-lg border border-border bg-surface-card px-4 py-3 space-y-2">
-            <div className="text-xs text-text-subtle">当前已登录</div>
-            <div className="font-medium">{entDisplayName || entEmail || "（无显示名）"}</div>
+            <div className="text-xs text-text-subtle">{t("account.loggedIn")}</div>
+            <div className="font-medium">{entDisplayName || entEmail || t("account.noDisplayName")}</div>
             {entEmail ? <div className="text-xs text-text-subtle font-mono">{entEmail}</div> : null}
             {entPortalUrl ? (
               <div className="text-xs text-text-subtle font-mono">{entPortalUrl}</div>
@@ -342,13 +316,13 @@ export function AccountTab() {
               onClick={() => void onEnterpriseLogout()}
             >
               <LogOut className="size-3.5" />
-              退出企业账号
+              {t("account.logoutEnterprise")}
             </Button>
           </div>
         ) : (
           <div className="mt-4 rounded-lg border border-border bg-surface-card px-4 py-4 space-y-3">
             <label className="block space-y-1.5">
-              <span className="text-xs text-text-subtle">企业门户地址</span>
+              <span className="text-xs text-text-subtle">{t("account.portalUrl")}</span>
               <input
                 type="text"
                 className="w-full rounded-md border border-border bg-surface-base px-3 py-2 text-sm text-text-primary outline-none"
@@ -363,11 +337,11 @@ export function AccountTab() {
               <div className="flex flex-col gap-2 rounded-md bg-surface-hover px-3 py-3">
                 <div className="flex items-center gap-2 text-xs text-text-subtle">
                   <Loader2 className="size-4 animate-spin shrink-0" />
-                  等待浏览器中完成授权…
+                  {t("account.waitingAuth")}
                 </div>
                 {entVerifyUrl ? (
                   <div className="text-xs text-text-subtle break-all">
-                    没有自动打开？
+                    {t("account.openManually")}
                     <a className="underline" href={entVerifyUrl} target="_blank" rel="noreferrer">
                       {entVerifyUrl}
                     </a>
@@ -379,7 +353,7 @@ export function AccountTab() {
                   className="text-xs py-1"
                   onClick={() => void onEnterpriseCancel()}
                 >
-                  取消等待
+                  {t("account.cancelWait")}
                 </Button>
               </div>
             ) : (
@@ -391,7 +365,7 @@ export function AccountTab() {
                 onClick={() => void onEnterpriseLogin()}
               >
                 {entBusy ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
-                登录企业账号
+                {t("account.loginEnterprise")}
               </Button>
             )}
 

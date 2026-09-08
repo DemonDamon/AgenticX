@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Bot, Loader2, Users } from "lucide-react";
 import { Modal } from "../ds/Modal";
 import {
@@ -7,7 +8,7 @@ import {
   type GroupTemplateCreationProgress,
   type GroupTemplateCreationResult,
 } from "./group-template-creation";
-import type { GroupTemplate } from "./group-templates";
+import { groupTemplateI18nKey, type GroupTemplate } from "./group-templates";
 
 type Props = {
   template: GroupTemplate;
@@ -22,6 +23,8 @@ export function GroupTemplateCreateDialog({
   onClose,
   onCreated,
 }: Props) {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
   const [groupName, setGroupName] = useState(initialGroupName);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<GroupTemplateCreationProgress | null>(null);
@@ -39,7 +42,7 @@ export function GroupTemplateCreateDialog({
       completed: current?.completed ?? 0,
       total: current?.total ?? template.members.length + 1,
       percent: current?.percent ?? 0,
-      message: "正在停止创建并清理本次新增分身…",
+      message: t("groups.stoppingCleanup"),
     }));
   };
 
@@ -66,7 +69,7 @@ export function GroupTemplateCreateDialog({
         return;
       }
       setProgress(null);
-      setError(caught instanceof Error ? caught.message : "团队创建失败，请稍后重试。");
+      setError(caught instanceof Error ? caught.message : t("groups.createFailed"));
     } finally {
       setBusy(false);
     }
@@ -75,7 +78,7 @@ export function GroupTemplateCreateDialog({
   return (
     <Modal
       open
-      title={`使用模板：${template.name}`}
+      title={t("groups.useTemplate", { name: t(groupTemplateI18nKey(template.id, "name")) })}
       onClose={handleCancel}
       panelClassName="w-[min(660px,95vw)] max-h-[calc(100vh-2rem)] overflow-hidden bg-surface-panel"
       footer={
@@ -85,7 +88,7 @@ export function GroupTemplateCreateDialog({
             className="rounded-md border border-border px-3 py-2 text-xs text-text-muted transition hover:bg-surface-hover hover:text-text-strong"
             onClick={handleCancel}
           >
-            {busy ? "取消创建" : "取消"}
+            {busy ? t("groups.cancelCreate") : tCommon("cancel")}
           </button>
           <button
             type="button"
@@ -94,27 +97,27 @@ export function GroupTemplateCreateDialog({
             onClick={() => void handleCreate()}
           >
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Users className="h-3.5 w-3.5" aria-hidden />}
-            {busy ? "创建中…" : `创建 ${template.members.length} 人团队`}
+            {busy ? t("groups.creating") : t("groups.createTeam", { count: template.members.length })}
           </button>
         </div>
       }
     >
       <div className="max-h-[calc(100vh-12rem)] space-y-4 overflow-y-auto pr-1">
         <div>
-          <p className="text-sm leading-relaxed text-text-muted">{template.description}</p>
+          <p className="text-sm leading-relaxed text-text-muted">{t(groupTemplateI18nKey(template.id, "description"))}</p>
           <div className="mt-3 rounded-lg border border-[rgba(var(--theme-color-rgb,59,130,246),0.28)] bg-[rgba(var(--theme-color-rgb,59,130,246),0.08)] px-3 py-2 text-xs leading-relaxed text-text-muted">
-            将创建 {template.members.length} 个全新分身并组成智能协作群聊，不会使用或修改你已有的分身。
+            {t("groups.existingAvatarsUntouched", { count: template.members.length })}
           </div>
         </div>
 
         <label className="block">
-          <span className="mb-1.5 block text-xs font-medium text-text-strong">团队名称</span>
+          <span className="mb-1.5 block text-xs font-medium text-text-strong">{t("groups.teamName")}</span>
           <input
             value={groupName}
             disabled={busy}
             autoFocus
             className="w-full rounded-lg border border-border bg-surface-card px-3 py-2.5 text-sm text-text-strong outline-none transition focus:border-border-strong disabled:opacity-60"
-            placeholder="输入团队名称"
+            placeholder={t("groups.teamNamePlaceholder")}
             onChange={(event) => setGroupName(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !busy) void handleCreate();
@@ -123,7 +126,7 @@ export function GroupTemplateCreateDialog({
         </label>
 
         <div>
-          <div className="mb-2 text-xs font-medium text-text-strong">模板成员</div>
+          <div className="mb-2 text-xs font-medium text-text-strong">{t("groups.templateMembers")}</div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {template.members.map((member) => (
               <div key={member.id} className="rounded-lg border border-border bg-surface-card p-3">

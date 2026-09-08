@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { PreviewFallback } from "./PreviewFallback";
+import { i18n } from "../../i18n/i18n";
 
 type VideoPreviewProps = {
   absolutePath: string;
@@ -16,6 +18,7 @@ export function VideoPreview({
   onRevealInFileManager,
   revealInFileManagerLabel,
 }: VideoPreviewProps) {
+  const { t } = useTranslation("workspace");
   const [src, setSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +31,7 @@ export function VideoPreview({
     const api = window.agenticxDesktop?.resolveLocalMediaUrl;
     if (typeof api !== "function") {
       setLoading(false);
-      setError("当前客户端不支持视频预览，请完全退出后重新打开应用。");
+      setError(i18n.t("preview.videoUnsupported", { ns: "workspace" }));
       return () => {
         cancelled = true;
       };
@@ -37,7 +40,7 @@ export function VideoPreview({
       .then((res) => {
         if (cancelled) return;
         if (!res.ok || !res.url) {
-          setError(res.error ?? "无法打开该视频");
+          setError(res.error ?? i18n.t("preview.videoOpenFailed", { ns: "workspace" }));
           return;
         }
         setSrc(res.url);
@@ -56,7 +59,7 @@ export function VideoPreview({
   if (error) {
     return (
       <PreviewFallback
-        title="视频"
+        title={t("preview.kindVideo")}
         message={error}
         mimeType={mimeType}
         onCopyPath={onCopyPath}
@@ -71,7 +74,7 @@ export function VideoPreview({
     <div className="flex h-full min-h-0 flex-col bg-surface-base">
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4">
         {loading || !src ? (
-          <div className="text-sm text-text-muted">正在打开视频…</div>
+          <div className="text-sm text-text-muted">{t("preview.videoOpening")}</div>
         ) : (
           <video
             key={src}
@@ -80,7 +83,7 @@ export function VideoPreview({
             preload="metadata"
             src={src}
             onError={() =>
-              setError("无法播放该视频。编码可能不受支持，可在系统应用中打开。")
+              setError(i18n.t("preview.videoPlayFailed", { ns: "workspace" }))
             }
           />
         )}

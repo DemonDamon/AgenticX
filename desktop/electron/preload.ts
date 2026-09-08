@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
   getApiAuthToken: async (): Promise<string> => ipcRenderer.invoke("get-api-auth-token"),
   platform: async (): Promise<string> => ipcRenderer.invoke("get-platform"),
+  getSystemLocale: async (): Promise<string> => ipcRenderer.invoke("get-system-locale"),
   syncTitleBarOverlay: async (theme: "dark" | "light" | "dim") =>
     ipcRenderer.invoke("sync-title-bar-overlay", theme) as Promise<{ ok: boolean; skipped?: boolean; error?: string }>,
   getConnectionMode: async (): Promise<"local" | "remote"> => ipcRenderer.invoke("get-connection-mode"),
@@ -322,7 +323,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   setSessionModel: async (payload: { sessionId: string; provider: string; model: string }) =>
     ipcRenderer.invoke("set-session-model", payload),
   loadLayout: async () => ipcRenderer.invoke("layout-get"),
-  saveUiPrefs: async (payload: { theme: "dark" | "light" | "dim" }) =>
+  saveUiPrefs: async (payload: { theme?: "dark" | "light" | "dim"; locale?: "zh" | "en" }) =>
     ipcRenderer.invoke("ui-prefs-set", payload) as Promise<{ ok: boolean; error?: string }>,
   saveLayout: async (payload: {
     panes?: Array<{

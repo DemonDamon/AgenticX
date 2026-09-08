@@ -1,3 +1,4 @@
+import type { AppLocale } from "../i18n/locales";
 import type { Message } from "../store";
 import { parseReasoningContent } from "../components/messages/reasoning-parser";
 import { messagePlainTextForClipboard } from "./markdown-copy-format";
@@ -101,7 +102,10 @@ export function buildShareImageTurns(messages: Message[]): ShareImageTurn[] {
   return out;
 }
 
-export function formatShareCardDate(at: number = Date.now()): string {
+export function formatShareCardDate(at: number = Date.now(), locale: AppLocale = "zh"): string {
   const d = new Date(at);
+  if (locale === "en") {
+    return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  }
   return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`;
 }

@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Eye, FolderOpen, ExternalLink } from "lucide-react";
 import { artifactGlyph, FileTypeMark } from "../messages/artifact-glyph";
 import {
@@ -31,6 +32,7 @@ export function SessionArtifactList({
   onHighlightHandled,
   onOpenPath,
 }: Props) {
+  const { t } = useTranslation("workspace");
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [sizeByPath, setSizeByPath] = useState<Record<string, number | null>>({});
   const [expanded, setExpanded] = useState(false);
@@ -154,23 +156,23 @@ export function SessionArtifactList({
                 type="button"
                 className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary"
                 onClick={() => openPath(path)}
-                title={inAppPreview ? "在 Near 内预览" : "用系统应用打开"}
+                title={inAppPreview ? t("work.previewInNear") : t("work.openInSystem")}
               >
                 {inAppPreview ? (
                   <Eye className="h-3 w-3" strokeWidth={1.5} />
                 ) : (
                   <ExternalLink className="h-3 w-3" strokeWidth={1.5} />
                 )}
-                {inAppPreview ? "预览" : "打开"}
+                {inAppPreview ? t("work.preview") : t("work.open")}
               </button>
               <button
                 type="button"
                 className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] text-text-muted hover:bg-surface-hover hover:text-text-primary"
                 onClick={() => void revealInFolder(path)}
-                title="在文件管理器中显示"
+                title={t("revealGeneric")}
               >
                 <FolderOpen className="h-3 w-3" strokeWidth={1.5} />
-                定位
+                {t("work.locate")}
               </button>
             </div>
             <div className="truncate px-2.5 pb-2 text-[10.5px] text-text-faint">{sizeLabel}</div>
@@ -183,7 +185,7 @@ export function SessionArtifactList({
           className="w-full rounded-md px-1.5 py-1 text-left text-[12px] text-text-muted transition hover:bg-surface-hover hover:text-text-primary"
           onClick={() => setExpanded((prev) => !prev)}
         >
-          {expanded ? "收起" : `显示更多（+${hiddenCount}）`}
+          {expanded ? t("work.collapse") : t("work.showMore", { count: hiddenCount })}
         </button>
       ) : null}
     </div>

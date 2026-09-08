@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { AtMentionCandidate } from "../utils/at-mention-display";
 import {
   atMentionIconTone,
@@ -88,6 +89,7 @@ function AtMentionRow({
   onActivate: (item: AtMentionCandidate) => void;
   onInsertDir: (item: FolderCandidate) => void;
 }) {
+  const { t } = useTranslation("chat");
   const primary = atMentionPrimaryText(item);
   const secondary = showPathHint ? atMentionSecondaryText(item) : "";
   const folder = isFolderCandidate(item);
@@ -119,12 +121,12 @@ function AtMentionRow({
         <>
           <button
             type="button"
-            title="把整个目录作为引用带入对话"
+            title={t("mention.insertDir")}
             className="shrink-0 rounded px-1.5 py-0.5 text-[11px] leading-[18px] text-text-faint opacity-60 outline-none transition hover:bg-surface-card-strong hover:text-text-primary group-hover:opacity-100 focus-visible:opacity-100"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onInsertDir(item)}
           >
-            引用
+            {t("mention.insertDirShort")}
           </button>
           <span className="shrink-0 pl-0.5 pr-0.5 text-text-faint">
             <Chevron />
@@ -144,6 +146,7 @@ export function AtMentionPicker({
   onInsertDir,
   onLeaveBrowse,
 }: Props) {
+  const { t } = useTranslation("chat");
   const { avatars, folders, files } = groupAtMentionCandidates(candidates);
   // Hairline dividers instead of group captions: icons already carry the type.
   const groups = [avatars, folders, files].filter((group) => group.length > 0);
@@ -159,12 +162,12 @@ export function AtMentionPicker({
     <div
       className="absolute bottom-full left-0 z-30 mb-2 w-max min-w-[248px] max-w-[min(100%,440px)] overflow-hidden rounded-xl border border-border bg-surface-panel shadow-[0_10px_32px_rgba(0,0,0,0.3)] backdrop-blur-xl"
       role="listbox"
-      aria-label="引用候选"
+      aria-label={t("mention.candidatesAria")}
     >
       {browse ? (
         <button
           type="button"
-          title="返回上一级"
+          title={t("mention.backUp")}
           className="flex w-full items-center gap-1.5 border-b border-border/60 px-2 py-1.5 text-left outline-none transition-colors hover:bg-surface-hover"
           onMouseDown={(e) => e.preventDefault()}
           onClick={onLeaveBrowse}
@@ -179,7 +182,7 @@ export function AtMentionPicker({
       ) : null}
       {candidates.length === 0 ? (
         <div className="px-3 py-2 text-[12px] leading-5 text-text-faint">
-          {browse ? "这个目录是空的" : `未找到匹配对象${query ? `：${query}` : ""}`}
+          {browse ? t("mention.dirEmpty") : query ? t("mention.noMatchQuery", { query }) : t("mention.noMatch")}
         </div>
       ) : (
         <div className="max-h-[268px] overflow-y-auto overscroll-contain">

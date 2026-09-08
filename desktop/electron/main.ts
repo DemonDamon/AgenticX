@@ -38,6 +38,7 @@ import http from "node:http";
 import https from "node:https";
 import yaml from "js-yaml";
 import { extract as extractTar } from "tar";
+import { isAppLocale, localeFromOsTag, type AppLocale } from "./app-locale";
 import {
   closeSplash,
   configureSplashLayoutThemeReader,
@@ -504,11 +505,16 @@ function normalizeLayoutTheme(raw: unknown): LayoutTheme | undefined {
   return raw === "light" || raw === "dark" || raw === "dim" ? raw : undefined;
 }
 
+function normalizeLayoutLocale(raw: unknown): AppLocale | undefined {
+  return isAppLocale(raw) ? raw : undefined;
+}
+
 type LayoutFile = {
   mainWindow?: LayoutBounds;
   panes?: LayoutPaneSnapshot[];
   activePaneId?: string;
   theme?: LayoutTheme;
+  locale?: AppLocale;
 };
 
 /** Disk read for the pane/window layout. Returns an empty object on any error
@@ -2527,7 +2533,17 @@ function pickFreePort(): Promise<number> {
   });
 }
 
-function buildMenuTemplate(): MenuItemConstructorOptions[] {
+function resolveMenuLocale(locale?: AppLocale): AppLocale {
+  return (
+    locale ??
+    normalizeLayoutLocale(loadLayoutData().locale) ??
+    localeFromOsTag(app.getLocale())
+  );
+}
+
+function buildMenuTemplate(locale?: AppLocale): MenuItemConstructorOptions[] {
+  const resolved = resolveMenuLocale(locale);
+  const settingsLabel = resolved === "en" ? "Settings" : "设置";
   if (process.platform === "darwin") {
     return [
       {
@@ -2535,7 +2551,7 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
         submenu: [
           { role: "about" },
           { type: "separator" },
-          { label: "设置", click: () => mainWindow?.webContents.send("open-settings") },
+          { label: settingsLabel, click: () => mainWindow?.webContents.send("open-settings") },
           { type: "separator" },
           { role: "quit" }
         ]
@@ -6766,6 +6782,39 @@ function createWindow(): void {
   });
 }
 
+function trayLabels(locale?: AppLocale): { toggleWindow: string; settings: string; quit: string } {
+  const en = resolveMenuLocale(locale) === "en";
+  return {
+    toggleWindow: en ? "Show/Hide Window" : "打开/隐藏窗口",
+    settings: en ? "Settings" : "设置",
+    quit: en ? "Quit" : "退出",
+  };
+}
+
+function applyTrayMenu(locale?: AppLocale): void {
+  if (!tray) return;
+  const labels = trayLabels(locale);
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: labels.toggleWindow,
+        click: () => {
+          if (!mainWindow) return;
+          if (mainWindow.isVisible()) {
+            mainWindow.hide();
+          } else {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        },
+      },
+      { label: labels.settings, click: () => mainWindow?.webContents.send("open-settings") },
+      { type: "separator" },
+      { label: labels.quit, click: () => app.quit() },
+    ]),
+  );
+}
+
 function createTray(): void {
   const isMac = process.platform === "darwin";
   const isWin = process.platform === "win32";
@@ -6782,24 +6831,7 @@ function createTray(): void {
     icon.setTemplateImage(true);
   }
   tray = new Tray(icon);
-  const menu = Menu.buildFromTemplate([
-    {
-      label: "打开/隐藏窗口",
-      click: () => {
-        if (!mainWindow) return;
-        if (mainWindow.isVisible()) {
-          mainWindow.hide();
-        } else {
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      }
-    },
-    { label: "设置", click: () => mainWindow?.webContents.send("open-settings") },
-    { type: "separator" },
-    { label: "退出", click: () => app.quit() }
-  ]);
-  tray.setContextMenu(menu);
+  applyTrayMenu();
   tray.on("click", () => {
     if (!mainWindow) return;
     if (mainWindow.isVisible()) {
@@ -7035,6 +7067,7 @@ function registerEarlyIpc(): void {
   });
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
+  ipcMain.handle("get-system-locale", async () => app.getLocale());
   ipcMain.handle("get-connection-mode", async () => getInjectedConnectionMode());
   ipcMain.handle("get-backend-scope-sync", async () => getInjectedBackendScope());
   ipcMain.handle("get-connection-mode-sync", async () => getInjectedConnectionMode());
@@ -8774,14 +8807,25 @@ function registerIpc(): void {
       panes: Array.isArray(data.panes) ? data.panes : [],
       activePaneId: typeof data.activePaneId === "string" ? data.activePaneId : "",
       theme: theme ?? "",
+      locale: normalizeLayoutLocale(data.locale) ?? "",
     };
   });
 
-  ipcMain.handle("ui-prefs-set", async (_event, payload: { theme?: unknown }) => {
+  ipcMain.handle("ui-prefs-set", async (_event, payload: { theme?: unknown; locale?: unknown }) => {
     try {
+      const patch: Partial<LayoutFile> = {};
       const theme = normalizeLayoutTheme(payload?.theme);
-      if (!theme) return { ok: false, error: "invalid theme" };
-      saveLayoutData({ theme });
+      if (theme) patch.theme = theme;
+      const locale = normalizeLayoutLocale(payload?.locale);
+      if (locale) patch.locale = locale;
+      if (!patch.theme && !patch.locale) return { ok: false, error: "invalid ui prefs" };
+      saveLayoutData(patch);
+      if (locale) {
+        if (process.platform === "darwin") {
+          Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate(locale)));
+        }
+        applyTrayMenu(locale);
+      }
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };

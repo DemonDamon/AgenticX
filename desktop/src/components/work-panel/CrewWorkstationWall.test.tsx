@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { CrewSlot } from "../../utils/group-member-activity";
+import { i18n } from "../../i18n/i18n";
 import { CrewWorkstationWall } from "./CrewWorkstationWall";
 
 function slot(partial: Partial<CrewSlot> & Pick<CrewSlot, "agentId" | "phase">): CrewSlot {
@@ -59,9 +60,9 @@ describe("CrewWorkstationWall", () => {
         onInterrupt={vi.fn()}
       />,
     );
-    expect(withCbs).toContain("追加指令");
-    expect(withCbs).toContain("换模型");
-    expect(withCbs).toContain("打断");
+    expect(withCbs).toContain(i18n.t("work.appendDirective", { ns: "workspace" }));
+    expect(withCbs).toContain(i18n.t("work.switchModel", { ns: "workspace" }));
+    expect(withCbs).toContain(i18n.t("work.interrupt", { ns: "workspace" }));
 
     const withoutCbs = renderToStaticMarkup(
       <CrewWorkstationWall
@@ -70,8 +71,8 @@ describe("CrewWorkstationWall", () => {
         metaLeaderLabel="Machi"
       />,
     );
-    expect(withoutCbs).not.toContain("追加指令");
-    expect(withoutCbs).not.toContain("换模型");
-    expect(withoutCbs).not.toContain("打断");
+    expect(withoutCbs).not.toContain(i18n.t("work.appendDirective", { ns: "workspace" }));
+    expect(withoutCbs).not.toContain(i18n.t("work.switchModel", { ns: "workspace" }));
+    expect(withoutCbs).not.toContain(i18n.t("work.interrupt", { ns: "workspace" }));
   });
 });
