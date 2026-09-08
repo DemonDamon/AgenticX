@@ -128,6 +128,16 @@ export type ChatCopy = {
   recover: {
     inProgress: (phase: string) => string;
   };
+  delivery: {
+    previewFile: string;
+    allFiles: string;
+    allFilesHint: string;
+    loading: string;
+    citations: string;
+    citationSources: (n: number) => string;
+    citationSourcesSr: (n: number) => string;
+    unusedSources: (n: number) => string;
+  };
 };
 
 const ZH: ChatCopy = {
@@ -256,6 +266,16 @@ const ZH: ChatCopy = {
   recover: {
     inProgress: (phase) => `深度调研进行中（${phase}）· 点击继续查看`,
   },
+  delivery: {
+    previewFile: "预览文件",
+    allFiles: "全部文件",
+    allFilesHint: "预览或者下载文件",
+    loading: "加载中…",
+    citations: "引用",
+    citationSources: (n) => `引用来源 ${n}`,
+    citationSourcesSr: (n) => `共 ${n} 个引用来源`,
+    unusedSources: (n) => `未纳入本次回答（${n}）`,
+  },
 };
 
 const EN: ChatCopy = {
@@ -383,6 +403,16 @@ const EN: ChatCopy = {
   },
   recover: {
     inProgress: (phase) => `Deep research in progress (${phase}) · Click to continue`,
+  },
+  delivery: {
+    previewFile: "Preview file",
+    allFiles: "All files",
+    allFilesHint: "Preview or download files",
+    loading: "Loading…",
+    citations: "Citations",
+    citationSources: (n) => `Citations ${n}`,
+    citationSourcesSr: (n) => `${n} citation sources`,
+    unusedSources: (n) => `Not used in this answer (${n})`,
   },
 };
 

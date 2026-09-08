@@ -303,6 +303,7 @@ function CitationSourcesChip({
   onOpen: () => void;
   className?: string;
 }) {
+  const copy = useChatCopy();
   return (
     <button
       type="button"
@@ -323,7 +324,7 @@ function CitationSourcesChip({
         .filter(Boolean)
         .join(" ")}
       data-testid="citation-sources-chip"
-      aria-label={`引用来源 ${sources.length}`}
+      aria-label={copy.delivery.citationSources(sources.length)}
     >
       <span className="flex items-center -space-x-1.5 transition-transform duration-200 ease-out group-hover/cite:scale-[1.04]">
         {sources.slice(0, 3).map((source, idx) => {
@@ -343,7 +344,7 @@ function CitationSourcesChip({
           );
         })}
       </span>
-      <span className="truncate font-medium">引用</span>
+      <span className="truncate font-medium">{copy.delivery.citations}</span>
     </button>
   );
 }

@@ -14,6 +14,12 @@ describe("getChatCopy", () => {
     expect(copy.interaction.auto).toBe("Auto");
     expect(copy.segments.searchWeb).toBe("Search web");
     expect(copy.segments.doneSuffix).toBe("Done");
+    expect(copy.delivery.previewFile).toBe("Preview file");
+    expect(copy.delivery.allFiles).toBe("All files");
+    expect(copy.delivery.allFilesHint).toBe("Preview or download files");
+    expect(copy.delivery.loading).toBe("Loading…");
+    expect(copy.delivery.citations).toBe("Citations");
+    expect(copy.delivery.previewFile).not.toMatch(CJK);
     expect(copy.messageActions.copy).not.toMatch(CJK);
     expect(copy.clarify.intro).not.toMatch(CJK);
   });

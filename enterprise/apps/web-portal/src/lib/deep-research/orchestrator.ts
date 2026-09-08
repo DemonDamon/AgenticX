@@ -2305,7 +2305,7 @@ export async function runDeepResearchTurn(
         // Build report content silently: accumulate into reportContentParts + run-store only.
         const titleBlock = `# ${sanitizeResearchTopic(outline.title)}\n\n`;
         reportContentParts.push(titleBlock);
-        const toc = renderTableOfContents(outline);
+        const toc = renderTableOfContents(outline, locale);
         reportContentParts.push(toc);
 
         const previousSummaries: string[] = [];
@@ -2536,7 +2536,7 @@ export async function runDeepResearchTurn(
         if (!summarySent && finalReportReady) {
           summaryInput.artifacts = producedArtifacts;
           summaryInput.deliveryPrefs = deliveryPrefs;
-          enqueueDelta(fallbackSummary(summaryInput));
+          enqueueDelta(fallbackSummary(summaryInput, locale));
           summarySent = true;
         }
 
@@ -2587,7 +2587,7 @@ export async function runDeepResearchTurn(
           try {
             if (!summarySent && wrapupFallback) {
               wrapupFallback.artifacts = producedArtifacts;
-              enqueueDelta(fallbackSummary(wrapupFallback));
+              enqueueDelta(fallbackSummary(wrapupFallback, locale));
             }
             enqueueDelta(`\n\n${DEEP_RESEARCH_WRAPUP_DEGRADED}`);
           } catch {

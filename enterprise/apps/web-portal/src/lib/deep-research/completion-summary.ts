@@ -4,7 +4,7 @@
  */
 
 import { stripThinkBlocks } from "./content-clean";
-import { languageDirective } from "./copy";
+import { deepResearchCopy, languageDirective, type PortalLocale } from "./copy";
 import {
   DEFAULT_DELIVERY_PREFS,
   primaryReportPathSuffix,
@@ -58,12 +58,16 @@ function truncate(text: string, max: number): string {
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
-function sectionList(outline: CompletionSummaryInput["outline"]): string {
+function sectionList(
+  outline: CompletionSummaryInput["outline"],
+  locale: PortalLocale,
+): string {
+  const copy = deepResearchCopy(locale);
   const titles = outline.sections
     .map((s) => sanitizeResearchTopic(s.title))
-    .filter((t) => t && t !== "调研报告");
+    .filter((t) => t && t !== "调研报告" && t !== copy.researchReportFallback);
   const capped = titles.slice(0, 8);
-  return capped.join("、") || "（未生成章节）";
+  return capped.join(locale === "en" ? ", " : "、") || copy.fallbackNoSections;
 }
 
 function escapeRegExp(raw: string): string {
@@ -77,7 +81,7 @@ export function artifactLinkLabel(artifact: CompletionSummaryArtifact): string {
     /\.(md|html|doc)$/i,
     "",
   );
-  let label = fromTitle && fromTitle !== "调研报告" ? fromTitle : fromPath;
+  let label = fromTitle && fromTitle !== "调研报告" && fromTitle !== "research report" ? fromTitle : fromPath;
   label = sanitizeResearchTopic(label)
     .replace(/\.(md|html|doc)$/i, "")
     .replace(/[\[\]\(\)]/g, "")
@@ -225,6 +229,7 @@ export function linkifyArtifactMentions(
 function polishSummary(
   text: string,
   artifacts: CompletionSummaryArtifact[],
+  locale: PortalLocale = "zh",
 ): string {
   let out = stripThinkBlocks(text ?? "").trim();
   out = stripSummaryMetaBlocks(out);
@@ -248,36 +253,41 @@ function polishSummary(
     primary?.id &&
     !new RegExp(`${ARTIFACT_HREF_PREFIX}${escapeRegExp(primary.id)}`).test(out)
   ) {
-    out = `${out}\n\n产物：\n- ${artifactMarkdownLink(primary)}`.trim();
+    const heading = deepResearchCopy(locale).fallbackArtifactsHeading;
+    out = `${out}\n\n${heading}\n- ${artifactMarkdownLink(primary)}`.trim();
   }
   return truncate(out, COMPLETION_SUMMARY_MAX_CHARS);
 }
 
-function cleanTopic(input: CompletionSummaryInput): string {
-  return sanitizeResearchTopic(input.topic || input.outline.title || "调研");
+function cleanTopic(input: CompletionSummaryInput, locale: PortalLocale = "zh"): string {
+  return sanitizeResearchTopic(
+    input.topic || input.outline.title || deepResearchCopy(locale).researchTopicFallback,
+  );
 }
 
 /** 极简兜底，不调模型。 */
-export function fallbackSummary(input: CompletionSummaryInput): string {
+export function fallbackSummary(
+  input: CompletionSummaryInput,
+  locale: PortalLocale = "zh",
+): string {
+  const copy = deepResearchCopy(locale);
   const prefs = input.deliveryPrefs ?? DEFAULT_DELIVERY_PREFS;
-  const topic = cleanTopic(input);
+  const topic = cleanTopic(input, locale);
   const lines: string[] = [];
-  lines.push(`🎉「${topic}」深度调研完成。`);
+  lines.push(copy.fallbackDone(topic));
   lines.push("");
   const s = input.stats;
-  lines.push(
-    `本次规划检索 ${s.queriesPlanned} 次、选用来源 ${s.sourcesSelected} 个、抓取正文 ${s.pagesFetched} 篇，共 ${s.citationCount} 个引用。`,
-  );
-  lines.push(`报告章节：${sectionList(input.outline)}。`);
+  lines.push(copy.fallbackStats(s));
+  lines.push(copy.fallbackSections(sectionList(input.outline, locale)));
   const withId = selectSummaryArtifacts(input.artifacts, prefs);
   if (withId.length > 0) {
     lines.push("");
-    lines.push("产物：");
+    lines.push(copy.fallbackArtifactsHeading);
     for (const a of withId) lines.push(`- ${artifactMarkdownLink(a)}`);
     lines.push("");
-    lines.push("完整正文请打开上方链接，或使用下方交付卡片。");
+    lines.push(copy.fallbackOpenFull);
   }
-  return polishSummary(lines.join("\n"), withId);
+  return polishSummary(lines.join("\n"), withId, locale);
 }
 
 /** LLM 生成；失败/空时回落到 fallbackSummary()。 */
@@ -287,7 +297,8 @@ export async function buildCompletionSummary(
 ): Promise<string> {
   const prefs = input.deliveryPrefs ?? DEFAULT_DELIVERY_PREFS;
   const summaryArtifacts = selectSummaryArtifacts(input.artifacts, prefs);
-  const topic = cleanTopic(input);
+  const locale = deps.locale === "en" ? "en" : "zh";
+  const topic = cleanTopic(input, locale);
   const s = input.stats;
   const sections = input.outline.sections
     .map((sec, i) => `${i + 1}. ${sanitizeResearchTopic(sec.title)}：${sec.brief}`)
@@ -315,18 +326,18 @@ export async function buildCompletionSummary(
       { role: "user", content: user },
     ]);
     const text = stripThinkBlocks(raw ?? "").trim();
-    if (!text) return fallbackSummary(input);
-    const polished = polishSummary(text, summaryArtifacts);
+    if (!text) return fallbackSummary(input, locale);
+    const polished = polishSummary(text, summaryArtifacts, locale);
     // If the model still dumped meta / left bare (artifact:id) (not a Markdown link), fall back.
     // Note: `[label](artifact:id)` also contains `(artifact:id)` — only treat as bare when not preceded by `]`.
     if (
       /【用户澄清】|【交付偏好】/.test(polished) ||
       /(?<!\])\(artifact:[A-Za-z0-9_-]+\)/.test(polished)
     ) {
-      return fallbackSummary(input);
+      return fallbackSummary(input, locale);
     }
     return polished;
   } catch {
-    return fallbackSummary(input);
+    return fallbackSummary(input, locale);
   }
 }

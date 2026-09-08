@@ -5,7 +5,7 @@
 
 import { parseLlmJson } from "./llm-json";
 import { parseChartSpec } from "./report-chart";
-import { languageDirective } from "./copy";
+import { deepResearchCopy, languageDirective } from "./copy";
 
 export const MIN_SECTIONS = 5;
 export const MAX_SECTIONS = 9;
@@ -327,8 +327,11 @@ export function sectionMeetsFormat(section: ReportSection, body: string): boolea
 }
 
 /** 由各节标题生成 Markdown 目录。 */
-export function renderTableOfContents(outline: ReportOutline): string {
-  const lines = ["## 目录", ""];
+export function renderTableOfContents(
+  outline: ReportOutline,
+  locale: "zh" | "en" = "zh",
+): string {
+  const lines = [`## ${deepResearchCopy(locale).tocHeading}`, ""];
   outline.sections.forEach((section, i) => {
     lines.push(`${i + 1}. ${section.title}`);
   });

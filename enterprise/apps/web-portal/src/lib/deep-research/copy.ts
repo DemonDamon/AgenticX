@@ -74,6 +74,31 @@ export function deepResearchCopy(locale: PortalLocale) {
       planApprovedContinue: "Plan confirmed. Continuing research.",
       planEditedContinue: "Continuing with the edited plan.",
       planSkippedContinue: "Skipped plan confirmation. Starting research.",
+      fallbackDone: (topic: string) => `🎉「${topic}」Deep research complete.`,
+      fallbackStats: (s: {
+        queriesPlanned: number;
+        sourcesSelected: number;
+        pagesFetched: number;
+        citationCount: number;
+      }) =>
+        `This run planned ${s.queriesPlanned} searches, used ${s.sourcesSelected} sources, read ${s.pagesFetched} pages, and collected ${s.citationCount} citations.`,
+      fallbackSections: (list: string) => `Report sections: ${list}.`,
+      fallbackNoSections: "(no sections generated)",
+      fallbackArtifactsHeading: "Deliverables:",
+      fallbackOpenFull:
+        "Open the link above for the full text, or use the delivery cards below.",
+      tocHeading: "Contents",
+      tocEmpty: "No contents",
+      sourcesHeading: "Sources",
+      sourcesEmpty: "No sources",
+      mindmapHeading: "Mind map",
+      topicGenerated: (topic: string, generatedAt: string) =>
+        `Topic: ${topic} · Generated ${generatedAt}`,
+      themeToggle: "Toggle light and dark",
+      statQueries: "Queries planned",
+      statLinks: "Links found",
+      statSources: "Sources used",
+      statPages: "Pages read",
     };
   }
   return {
@@ -139,6 +164,30 @@ export function deepResearchCopy(locale: PortalLocale) {
     planApprovedContinue: "已确认计划，继续执行研究。",
     planEditedContinue: "已按修改后的计划继续研究。",
     planSkippedContinue: "已跳过计划确认，直接开始研究。",
+    fallbackDone: (topic: string) => `🎉「${topic}」深度调研完成。`,
+    fallbackStats: (s: {
+      queriesPlanned: number;
+      sourcesSelected: number;
+      pagesFetched: number;
+      citationCount: number;
+    }) =>
+      `本次规划检索 ${s.queriesPlanned} 次、选用来源 ${s.sourcesSelected} 个、抓取正文 ${s.pagesFetched} 篇，共 ${s.citationCount} 个引用。`,
+    fallbackSections: (list: string) => `报告章节：${list}。`,
+    fallbackNoSections: "（未生成章节）",
+    fallbackArtifactsHeading: "产物：",
+    fallbackOpenFull: "完整正文请打开上方链接，或使用下方交付卡片。",
+    tocHeading: "目录",
+    tocEmpty: "无目录",
+    sourcesHeading: "来源",
+    sourcesEmpty: "暂无来源",
+    mindmapHeading: "思维导图",
+    topicGenerated: (topic: string, generatedAt: string) =>
+      `主题：${topic} · 生成于 ${generatedAt}`,
+    themeToggle: "明暗切换",
+    statQueries: "规划查询",
+    statLinks: "发现链接",
+    statSources: "选用来源",
+    statPages: "抓取正文",
   };
 }
 

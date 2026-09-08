@@ -3,6 +3,7 @@
  * No external npm markdown deps — small inline converter + Mermaid CDN with <pre> fallback.
  */
 
+import { deepResearchCopy, type PortalLocale } from "./copy";
 import type { Citation } from "./registry";
 import {
   chartSpecToGfmTable,
@@ -248,13 +249,18 @@ export function markdownToHtml(markdown: string): { html: string; toc: TocEntry[
   return { html: blocks.join("\n"), toc };
 }
 
-function renderStats(stats: HtmlReportInput["stats"]): string {
+function reportLocale(locale: HtmlReportInput["locale"]): PortalLocale {
+  return locale === "en" ? "en" : "zh";
+}
+
+function renderStats(stats: HtmlReportInput["stats"], locale: PortalLocale): string {
   if (!stats) return "";
+  const copy = deepResearchCopy(locale);
   const items = [
-    ["规划查询", stats.queriesPlanned],
-    ["发现链接", stats.urlsDiscovered],
-    ["选用来源", stats.sourcesSelected],
-    ["抓取正文", stats.pagesFetched],
+    [copy.statQueries, stats.queriesPlanned],
+    [copy.statLinks, stats.urlsDiscovered],
+    [copy.statSources, stats.sourcesSelected],
+    [copy.statPages, stats.pagesFetched],
   ] as const;
   return `<div class="stats">${items
     .map(
@@ -264,9 +270,10 @@ function renderStats(stats: HtmlReportInput["stats"]): string {
     .join("")}</div>`;
 }
 
-function renderSources(citations: Citation[]): string {
+function renderSources(citations: Citation[], locale: PortalLocale): string {
+  const copy = deepResearchCopy(locale);
   if (citations.length === 0) {
-    return `<section class="sources" id="sources"><h2>来源</h2><p class="muted">暂无来源</p></section>`;
+    return `<section class="sources" id="sources"><h2>${escapeHtml(copy.sourcesHeading)}</h2><p class="muted">${escapeHtml(copy.sourcesEmpty)}</p></section>`;
   }
   const items = citations
     .map((c) => {
@@ -274,14 +281,15 @@ function renderSources(citations: Citation[]): string {
       return `<li id="ref-${c.index}"><span class="ref-num">[${c.index}]</span> <a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.title || c.url)}</a><span class="ref-url">${escapeHtml(c.url)}</span></li>`;
     })
     .join("\n");
-  return `<section class="sources" id="sources"><h2>来源</h2><ol class="source-list">${items}</ol></section>`;
+  return `<section class="sources" id="sources"><h2>${escapeHtml(copy.sourcesHeading)}</h2><ol class="source-list">${items}</ol></section>`;
 }
 
-function renderMindmap(mermaid: string): string {
+function renderMindmap(mermaid: string, locale: PortalLocale): string {
   if (!mermaid.trim()) return "";
   const escaped = escapeHtml(mermaid);
+  const heading = escapeHtml(deepResearchCopy(locale).mindmapHeading);
   return `<section class="mindmap" id="mindmap">
-  <h2>思维导图</h2>
+  <h2>${heading}</h2>
   <div class="mermaid-wrap">
     <pre class="mermaid">${escaped}</pre>
     <pre class="mermaid-fallback" hidden>${escaped}</pre>
@@ -539,11 +547,13 @@ const REPORT_JS = `
 
 /** Returns a single-file self-contained HTML document. */
 export function renderHtmlReport(input: HtmlReportInput): string {
-  const title = input.title.trim() || input.topic.trim() || "调研报告";
+  const locale = reportLocale(input.locale);
+  const copy = deepResearchCopy(locale);
+  const title = input.title.trim() || input.topic.trim() || copy.researchReportFallback;
   const { html: bodyHtml, toc } = markdownToHtml(input.markdown);
   const tocHtml =
     toc.length === 0
-      ? `<li class="muted">无目录</li>`
+      ? `<li class="muted">${escapeHtml(copy.tocEmpty)}</li>`
       : toc
           .map((entry) => {
             const cls = entry.level >= 3 ? ` class="l3"` : "";
@@ -551,7 +561,7 @@ export function renderHtmlReport(input: HtmlReportInput): string {
           })
           .join("\n");
 
-  const mindmapBlock = renderMindmap(input.mindmapMermaid);
+  const mindmapBlock = renderMindmap(input.mindmapMermaid, locale);
   const bodyHasMermaid = /```mermaid\b/i.test(input.markdown);
   // ```chart 也可能翻译为 xychart-beta（走 Mermaid 渲染），此时同样必须注入 CDN。
   const bodyHasChart = /```chart\b/i.test(input.markdown);
@@ -573,7 +583,7 @@ ${REPORT_CSS}
 <body>
 <div class="layout">
   <aside class="sidebar" id="toc">
-    <h2>目录</h2>
+    <h2>${escapeHtml(copy.tocHeading)}</h2>
     <ul class="toc">
 ${tocHtml}
     </ul>
@@ -582,19 +592,19 @@ ${tocHtml}
     <div class="topbar">
       <div>
         <h1>${escapeHtml(title)}</h1>
-        <div class="meta">主题：${escapeHtml(input.topic || title)} · 生成于 ${escapeHtml(input.generatedAt)}</div>
+        <div class="meta">${escapeHtml(copy.topicGenerated(input.topic || title, input.generatedAt))}</div>
       </div>
-      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="明暗切换" title="明暗切换">
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="${escapeHtml(copy.themeToggle)}" title="${escapeHtml(copy.themeToggle)}">
         <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
         <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
       </button>
     </div>
-    ${renderStats(input.stats)}
+    ${renderStats(input.stats, locale)}
     <article class="article">
 ${bodyHtml}
     </article>
     ${mindmapBlock}
-    ${renderSources(input.citations)}
+    ${renderSources(input.citations, locale)}
   </main>
 </div>
 ${mermaidScript}

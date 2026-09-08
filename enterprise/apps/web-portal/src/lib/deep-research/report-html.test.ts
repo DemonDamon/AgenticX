@@ -187,6 +187,16 @@ describe("renderHtmlReport", () => {
     );
   });
 
+  it("uses English chrome when locale is en", () => {
+    const html = renderHtmlReport({ ...base, locale: "en" });
+    expect(html).toContain("<h2>Contents</h2>");
+    expect(html).not.toContain("<h2>目录</h2>");
+    expect(html).toContain("Topic:");
+    expect(html).toContain("<h2>Sources</h2>");
+    expect(html).toContain('aria-label="Toggle light and dark"');
+    expect(html).toContain('lang="en"');
+  });
+
   it("uses icon theme toggle instead of text pill", () => {
     const html = renderHtmlReport(base);
     expect(html).toContain('aria-label="明暗切换"');

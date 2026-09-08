@@ -23,4 +23,15 @@ describe("deepResearchCopy", () => {
       "I'll quickly search the latest public sources to calibrate the research premise.",
     );
   });
+
+  it("locks English fallback summary chrome", () => {
+    const copy = deepResearchCopy("en");
+    expect(copy.fallbackDone("Embodied AI")).toBe("🎉「Embodied AI」Deep research complete.");
+    expect(copy.fallbackArtifactsHeading).toBe("Deliverables:");
+    expect(copy.fallbackOpenFull).toBe(
+      "Open the link above for the full text, or use the delivery cards below.",
+    );
+    expect(copy.tocHeading).toBe("Contents");
+    expect(copy.sourcesHeading).toBe("Sources");
+  });
 });
