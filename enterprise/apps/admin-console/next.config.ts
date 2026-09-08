@@ -1,12 +1,17 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
+import path from "node:path";
 import enterprisePkg from "../../package.json";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
+const navPrefetchEnabled =
+  process.env.NODE_ENV === "production" ||
+  process.env.npm_lifecycle_event !== "dev:webpack";
 
 const config: NextConfig = {
   env: {
     NEXT_PUBLIC_ENTERPRISE_VERSION: enterprisePkg.version,
+    NEXT_PUBLIC_ADMIN_NAV_PREFETCH: navPrefetchEnabled ? "1" : "0",
   },
   transpilePackages: [
     "@agenticx/ui",
@@ -32,6 +37,9 @@ const config: NextConfig = {
       "@agenticx/ui",
       "@tanstack/react-table",
     ],
+  },
+  turbopack: {
+    root: path.resolve(process.cwd(), "../.."),
   },
 };
 
