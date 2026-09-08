@@ -28,6 +28,7 @@ import { resolveAppLocale } from "./i18n/resolve-locale";
 import { stopSpeak } from "./voice/tts";
 import { VOICE_FOCUS_ENTRY_ENABLED } from "./voice/focus-mode-ui";
 import { matchKeybinding } from "./core/keybinding-manager";
+import { normalizeTurnIntent, togglePlanIntent } from "./utils/turn-intent";
 import { META_AGENT_DISPLAY_NAME } from "./constants/branding";
 import { resolveMetaDisplayName } from "./utils/display-name";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "./utils/backend-scope";
@@ -94,6 +95,8 @@ type PersistedPaneState = {
     lastInput?: number;
     lastCached?: number;
   };
+  turnIntent?: "default" | "plan" | "isolate";
+  isolateActive?: boolean;
 };
 
 type PersistedWorkspaceState = {
@@ -223,6 +226,8 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
           lastInput: Number.isFinite(tokLastInput) && tokLastInput > 0 ? Math.floor(tokLastInput) : 0,
           lastCached: Number.isFinite(tokLastCached) && tokLastCached > 0 ? Math.floor(tokLastCached) : 0,
         },
+        turnIntent: normalizeTurnIntent(row.turnIntent),
+        isolateActive: row.isolateActive === true,
       };
     })
     .filter((item): item is PersistedPaneState => !!item);
@@ -317,8 +322,6 @@ export function App() {
   const setRunMode = useAppStore((s) => s.setRunMode);
   const mcpServers = useAppStore((s) => s.mcpServers);
   const setMcpServers = useAppStore((s) => s.setMcpServers);
-  const planMode = useAppStore((s) => s.planMode);
-  const setPlanMode = useAppStore((s) => s.setPlanMode);
   const focusMode = useAppStore((s) => s.focusMode);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const theme = useAppStore((s) => s.theme);
@@ -878,6 +881,8 @@ export function App() {
                 runDrawerRunId: null,
                 terminalTabs: [],
                 activeTerminalTabId: null,
+                turnIntent: normalizeTurnIntent(pane.turnIntent),
+                isolateActive: pane.isolateActive === true,
               })),
               activePaneId: nextActivePaneId,
             });
@@ -1084,6 +1089,8 @@ export function App() {
         runDrawerOpen: pane.runDrawerOpen,
         runDrawerRunId: pane.runDrawerRunId,
         sessionTokens: pane.sessionTokens,
+        turnIntent: normalizeTurnIntent(pane.turnIntent),
+        isolateActive: pane.isolateActive === true,
       })),
     };
     try {
@@ -1859,7 +1866,10 @@ export function App() {
       } else if (action === "toggle-mode") {
         // Lite 模式已废弃，快捷键不再切换；保留 case 分支避免命中 default。
       } else if (action === "toggle-plan-mode") {
-        setPlanMode(!planMode);
+        const state = useAppStore.getState();
+        const pane = state.panes.find((item) => item.id === state.activePaneId);
+        if (!pane || String(pane.avatarId ?? "").startsWith("group:")) return;
+        state.setPaneTurnIntent(pane.id, togglePlanIntent(pane.turnIntent ?? "default"));
       } else if (action === "toggle-focus-mode") {
         // 灵巧模式入口未成熟时 keybinding 已不注册；保留分支便于恢复后生效。
         // 快捷键场景：把当前 activePaneId 作为目标 pane 传给灵巧模式，
@@ -1879,8 +1889,6 @@ export function App() {
     clearMessages,
     setUserMode,
     setRunMode,
-    planMode,
-    setPlanMode,
     toggleFocusMode,
   ]);
 

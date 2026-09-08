@@ -42,6 +42,7 @@ from agenticx.cli.studio_skill import (
     skill_use as studio_skill_use,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
+from agenticx.runtime.plan_mode import turn_intent_denial_message
 from agenticx.memory.session_store import SessionStore
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.skills.guard import scan_skill, should_allow
@@ -496,7 +497,9 @@ def _session_workspace_root_sets(
     for root in read_only_roots:
         if str(root) not in seen_write:
             _push_read(root)
-    return read_roots, write_roots
+    from agenticx.runtime.isolate_run import apply_isolate_roots
+
+    return apply_isolate_roots(read_roots, write_roots, session)
 
 
 def _default_bash_cwd(session: Optional[StudioSession]) -> Optional[Path]:
@@ -3880,6 +3883,9 @@ def _resolve_workspace_path(
             resolved = _safe_resolve_path(raw_path)
         else:
             resolved = _safe_resolve_path(_workspace_root() / raw_path)
+        from agenticx.runtime.isolate_run import remap_path_into_isolate
+
+        resolved = remap_path_into_isolate(resolved, session)
         if _is_protected_path(resolved):
             raise ValueError(f"path is protected: {resolved}")
         _raise_if_path_denied(resolved, session)
@@ -3910,6 +3916,9 @@ def _resolve_workspace_path(
 
     if raw_path.is_absolute():
         resolved = _safe_resolve_path(raw_path)
+        from agenticx.runtime.isolate_run import remap_path_into_isolate
+
+        resolved = remap_path_into_isolate(resolved, session)
         if _is_protected_path(resolved):
             raise ValueError(f"path is protected: {resolved}")
         mapped = _map_virtual_reference_path(resolved, session)
@@ -9170,6 +9179,9 @@ async def dispatch_tool_async(
     policy_denial = tool_denied_by_session_permissions(name)
     if policy_denial:
         return f"ERROR: {policy_denial}"
+    intent_denial = turn_intent_denial_message(name, session)
+    if intent_denial:
+        return f"ERROR: {intent_denial}"
     path_denial = _dispatch_path_rule_denial(arguments, session)
     if path_denial:
         return f"ERROR: {path_denial}"

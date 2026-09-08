@@ -32,6 +32,8 @@ import {
   isAppLocale,
   type AppLocale,
 } from "./i18n/locales";
+import type { TurnIntent } from "./utils/turn-intent";
+import { normalizeTurnIntent } from "./utils/turn-intent";
 import { resolveAppLocale } from "./i18n/resolve-locale";
 import { i18n } from "./i18n/i18n";
 
@@ -213,6 +215,10 @@ export type ChatPane = {
   pendingQuote?: { messageId: string; body: string; label: string } | null;
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
+  /** + menu turn intent: default execute / plan first / isolated copy. */
+  turnIntent?: TurnIntent;
+  /** True after Multitask successfully created a worktree for this pane. */
+  isolateActive?: boolean;
   /** True while messages are being fetched after a session switch (shows skeleton). */
   loadingMessages?: boolean;
   /** Absolute index of the earliest loaded row in the full session snapshot (0 = full load). */
@@ -807,6 +813,8 @@ type AppState = {
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
+  setPaneTurnIntent: (paneId: string, intent: TurnIntent) => void;
+  setPaneIsolateActive: (paneId: string, active: boolean) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
   prependPaneMessages: (paneId: string, messages: Message[]) => void;
   setPaneLoadingMessages: (paneId: string, loading: boolean) => void;
@@ -2290,6 +2298,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId ? { ...pane, sessionMode: mode } : pane
+      ),
+    })),
+  setPaneTurnIntent: (paneId, intent) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, turnIntent: normalizeTurnIntent(intent) } : pane,
+      ),
+    })),
+  setPaneIsolateActive: (paneId, active) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, isolateActive: active } : pane,
       ),
     })),
   setPaneMessages: (paneId, messages) =>

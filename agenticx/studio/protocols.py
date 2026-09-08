@@ -62,6 +62,10 @@ class ChatRequest(BaseModel):
     reasoning_effort: Optional[str] = None
     # DeepSeek V4 thinking switch; None leaves session unset (runtime defaults on).
     thinking_enabled: Optional[bool] = None
+    # Desktop + menu turn intent: plan first, wait for confirm before acting.
+    plan_mode: Optional[bool] = False
+    # Desktop + menu Multitask: write in an isolated git worktree this turn.
+    isolate_run: Optional[bool] = False
 
 
 class ContinueRequest(BaseModel):

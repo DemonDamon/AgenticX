@@ -56,6 +56,9 @@ import { VOICE_FOCUS_ENTRY_ENABLED } from "../voice/focus-mode-ui";
 import { VoicePttOverlay } from "./VoicePttOverlay";
 import { RunLocationPicker } from "./composer/RunLocationPicker";
 import { RunModePicker } from "./composer/RunModePicker";
+import { ComposerModeMenu, COMPOSER_MODE_MENU_ID } from "./composer/ComposerModeMenu";
+import { TurnIntentChip } from "./composer/TurnIntentChip";
+import { togglePlanIntent, type TurnIntent } from "../utils/turn-intent";
 import {
   useComposerWorkspaceFolders,
   WorkspaceFolderPicker,
@@ -686,11 +689,13 @@ function NewTopicButton({
 /** 「更多操作」+ 按钮：仅承载当前消息的附件与能力，不混入会话级操作。 */
 function ComposerMoreActionsButton({
   onPickFile,
+  renderMode,
   renderSkillPicker,
   renderKbRetrieval,
   renderConnectors,
 }: {
   onPickFile: () => void;
+  renderMode?: () => ReactNode;
   renderSkillPicker: () => ReactNode;
   renderKbRetrieval: () => ReactNode;
   renderConnectors: () => ReactNode;
@@ -723,6 +728,7 @@ function ComposerMoreActionsButton({
         "agx-skill-picker-dropdown",
         "agx-kb-retrieval-mode-menu",
         "agx-connectors-menu-dropdown",
+        COMPOSER_MODE_MENU_ID,
       ];
       for (const id of flyoutIds) {
         const el = document.getElementById(id);
@@ -773,6 +779,7 @@ function ComposerMoreActionsButton({
               </svg>
               <span className="flex-1">{t("composer.addFile")}</span>
             </button>
+            {renderMode?.()}
             {renderSkillPicker()}
             {renderKbRetrieval()}
             {renderConnectors()}
@@ -2802,6 +2809,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const clearPaneMessages = useAppStore((s) => s.clearPaneMessages);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
+  const setPaneTurnIntent = useAppStore((s) => s.setPaneTurnIntent);
+  const setPaneIsolateActive = useAppStore((s) => s.setPaneIsolateActive);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const prependPaneMessages = useAppStore((s) => s.prependPaneMessages);
   const setPaneMessagePaging = useAppStore((s) => s.setPaneMessagePaging);
@@ -3207,6 +3216,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [pendingForwardMessages, setPendingForwardMessages] = useState<ForwardPendingMessage[]>([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
+  const [isolateBusy, setIsolateBusy] = useState(false);
   const [attachToastMessage, setAttachToastMessage] = useState(() =>
     i18n.t("attachment.visionUnsupported", { ns: "chat" }),
   );
@@ -9842,6 +9852,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         );
         body.retrieval_mode = kbMode;
       }
+      if ((pane.turnIntent ?? "default") === "plan") body.plan_mode = true;
+      if ((pane.turnIntent ?? "default") === "isolate" || pane.isolateActive) body.isolate_run = true;
       if (isGroupPane && targetAgentId === "meta") {
         body.group_id = groupChatId;
         body.mentioned_avatar_ids = mentionedAvatarIds;
@@ -11663,9 +11675,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const archived = Number(payload.data?.archived_tool_calls ?? 0) || 0;
               setContextLoopStats({ round, tool_result_tokens_session: toolSession, archived_tool_calls: archived });
             }
+            if (payload.type === "isolate") {
+              setPaneIsolateActive(pane.id, Boolean(payload.data?.active));
+            }
             if (payload.type === "error") {
               setStallWait(null);
               const errText = String(payload.data?.text ?? "未知错误");
+              if (String(payload.data?.error ?? "") === "not_git") {
+                setPaneTurnIntent(pane.id, "default");
+                setPaneIsolateActive(pane.id, false);
+                setAttachToastMessage(t("composer.modeMultitaskNeedGit"));
+                setAttachToastOpen(true);
+                continue;
+              }
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
               if (
@@ -13159,6 +13181,62 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ) : null}
             </div>
           ) : null}
+          {!isGroupPane && !isAutomationTaskPane && pane.isolateActive ? (
+            <div className="mb-2 flex justify-center px-3">
+              <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-1.5 text-[12px] text-text-muted">
+                <span>{t("composer.isolateWorking")}</span>
+                <button
+                  type="button"
+                  disabled={isolateBusy}
+                  className="rounded px-2 py-0.5 text-text-primary transition-colors hover:bg-surface-hover disabled:opacity-50"
+                  onClick={() => {
+                    const sid = String(pane.sessionId ?? "").trim();
+                    if (!sid || !apiBase) return;
+                    setIsolateBusy(true);
+                    void fetch(`${apiBase.replace(/\/$/, "")}/api/sessions/${encodeURIComponent(sid)}/isolate/discard`, {
+                      method: "POST",
+                      headers: { "x-agx-desktop-token": apiToken },
+                    })
+                      .then(async (res) => {
+                        const data = (await res.json().catch(() => ({}))) as { ok?: boolean };
+                        if (res.ok && data.ok) {
+                          setPaneIsolateActive(pane.id, false);
+                          setPaneTurnIntent(pane.id, "default");
+                        }
+                      })
+                      .finally(() => setIsolateBusy(false));
+                  }}
+                >
+                  {t("composer.isolateDiscard")}
+                </button>
+                <button
+                  type="button"
+                  disabled={isolateBusy}
+                  className="rounded px-2 py-0.5 text-white disabled:opacity-50"
+                  style={{ background: "var(--ui-btn-primary-bg)" }}
+                  onClick={() => {
+                    const sid = String(pane.sessionId ?? "").trim();
+                    if (!sid || !apiBase) return;
+                    setIsolateBusy(true);
+                    void fetch(`${apiBase.replace(/\/$/, "")}/api/sessions/${encodeURIComponent(sid)}/isolate/adopt`, {
+                      method: "POST",
+                      headers: { "x-agx-desktop-token": apiToken },
+                    })
+                      .then(async (res) => {
+                        const data = (await res.json().catch(() => ({}))) as { ok?: boolean };
+                        if (res.ok && data.ok) {
+                          setPaneIsolateActive(pane.id, false);
+                          setPaneTurnIntent(pane.id, "default");
+                        }
+                      })
+                      .finally(() => setIsolateBusy(false));
+                  }}
+                >
+                  {t("composer.isolateAdopt")}
+                </button>
+              </div>
+            </div>
+          ) : null}
           <div
             className={`agx-pane-composer-shell mx-auto min-w-0 w-full ${
               workExpandedLayout ? "max-w-none" : "max-w-4xl"
@@ -13590,6 +13668,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   void createNewTopic(true);
                   return;
                 }
+                if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
+                  if (!isGroupPane && !isAutomationTaskPane) {
+                    e.preventDefault();
+                    setPaneTurnIntent(pane.id, togglePlanIntent(pane.turnIntent ?? "default"));
+                  }
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   if (atOpen && atCandidates.length > 0) {
                     e.preventDefault();
@@ -13668,7 +13753,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             />
             {!composerHasText && quoteTargets.length === 0 ? (
               <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[15px] text-text-faint">
-                {t("composer.placeholder")}
+                {pane.turnIntent === "plan"
+                  ? t("composer.placeholderPlan")
+                  : t("composer.placeholder")}
               </div>
             ) : null}
             </div>
@@ -13699,6 +13786,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 />
                 <ComposerMoreActionsButton
                   onPickFile={() => fileInputRef.current?.click()}
+                  renderMode={
+                    isGroupPane || isAutomationTaskPane
+                      ? undefined
+                      : () => (
+                          <ComposerModeMenu
+                            intent={pane.turnIntent ?? "default"}
+                            onIntentChange={(next: TurnIntent) => setPaneTurnIntent(pane.id, next)}
+                          />
+                        )
+                  }
                   renderSkillPicker={() => (
                     <SkillPickerButton apiBase={apiBase} apiToken={apiToken} onSelect={handleSkillSelect} embedded />
                   )}
@@ -13717,6 +13814,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     <ConnectorsMenuButton sessionId={pane.sessionId} embedded />
                   )}
                 />
+                {!isGroupPane && !isAutomationTaskPane && (pane.turnIntent === "plan" || pane.turnIntent === "isolate") ? (
+                  <TurnIntentChip
+                    intent={pane.turnIntent}
+                    onClear={() => setPaneTurnIntent(pane.id, "default")}
+                  />
+                ) : null}
                 <RunModePicker />
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}

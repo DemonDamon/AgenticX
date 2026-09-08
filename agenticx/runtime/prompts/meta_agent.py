@@ -30,6 +30,8 @@ from agenticx.runtime.context_file_budget import (
 )
 from agenticx.llms.provider_display import build_provider_catalog_block, format_model_option_label, resolve_provider_config
 from agenticx.workspace.loader import load_subject_workspace_context
+from agenticx.runtime.plan_mode import build_turn_intent_block as _build_turn_intent_block
+from agenticx.runtime.isolate_run import build_isolate_block as _build_isolate_block
 
 
 MAX_WORKSPACE_BLOCK_CHARS = 1800
@@ -1041,6 +1043,8 @@ def build_meta_agent_system_prompt(
         f"{lsp_context}"
         f"{_tail_state_block if include_volatile else ''}"
         f"{_build_user_profile_block(user_nickname, user_preference)}"
+        f"{_build_turn_intent_block(session)}"
+        f"{_build_isolate_block(session)}"
     )
     if not include_volatile:
         stash_volatile_sections(

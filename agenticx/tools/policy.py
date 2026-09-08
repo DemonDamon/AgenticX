@@ -250,6 +250,7 @@ class PlanModeLayer:
         "file_read", "grep", "glob", "web_search", "web_fetch",
         "liteparse", "skill_list", "skill_use", "session_search",
         "memory_search", "mcp_list", "todo_list", "scratchpad_read",
+        "knowledge_search", "code_search",
     })
 
     def evaluate(self, tool_name: str, *, is_read_only: bool = False, **_kw: object) -> Optional[PolicyAction]:

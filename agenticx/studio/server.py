@@ -2739,6 +2739,47 @@ def create_studio_app() -> FastAPI:
         session = managed.studio_session
         active_avatar_id = str(getattr(managed, "avatar_id", "") or "").strip()
         is_automation_session = active_avatar_id.startswith("automation:")
+        from agenticx.runtime.plan_mode import apply_turn_intent_to_session, filter_tools_for_turn_intent
+
+        setattr(session, "session_id", payload.session_id)
+        from agenticx.runtime.isolate_run import ensure_isolate
+
+        _iso_requested = bool(getattr(payload, "isolate_run", False))
+        if is_automation_session or str(getattr(payload, "group_id", "") or "").strip():
+            _iso_requested = False
+        apply_turn_intent_to_session(
+            session,
+            plan_mode=bool(getattr(payload, "plan_mode", False)),
+            is_automation=is_automation_session,
+            isolate_run=_iso_requested,
+        )
+        _iso = ensure_isolate(
+            session,
+            isolate_run=_iso_requested,
+            is_automation=is_automation_session,
+        )
+        if _iso.get("error") == "not_git":
+            async def _not_git_stream() -> AsyncGenerator[str, None]:
+                err = SseEvent(
+                    type="error",
+                    data={
+                        "error": "not_git",
+                        "text": "Multitask needs a git workspace",
+                    },
+                )
+                yield f"data: {json.dumps(err.model_dump(), ensure_ascii=False)}\n\n"
+                yield 'data: {"type":"done","data":{"reason":"not_git"}}\n\n'
+
+            return StreamingResponse(
+                _not_git_stream(),
+                media_type="text/event-stream",
+                headers=_STREAMING_SSE_HEADERS,
+            )
+        if _iso.get("active"):
+            try:
+                manager.incremental_persist(payload.session_id)
+            except Exception:
+                pass
         turn_is_unattended = bool(getattr(payload, "unattended_run", False)) or is_automation_session
         try:
             from agenticx.runtime.prompts.code_mode import ensure_code_dev_workflow_skill
@@ -3647,8 +3688,12 @@ def create_studio_app() -> FastAPI:
             avatar_tools_enabled=avatar_tools_enabled,
             global_tools_enabled=global_tools_enabled,
         )
+        effective_tools = filter_tools_for_turn_intent(effective_tools, session)
 
         async def _event_stream() -> AsyncGenerator[str, None]:
+            if _iso.get("active"):
+                iso_evt = SseEvent(type="isolate", data={"active": True})
+                yield f"data: {json.dumps(iso_evt.model_dump(), ensure_ascii=False)}\n\n"
             runtime_task: "asyncio.Task[None] | None" = None
             meta_done = False
             saw_final = False
@@ -4531,6 +4576,9 @@ def create_studio_app() -> FastAPI:
             avatar_tools_enabled=loop_avatar_tools_enabled,
             global_tools_enabled=_load_global_tools_policy(),
         )
+        from agenticx.runtime.plan_mode import filter_tools_for_turn_intent as _filter_loop_turn_intent
+
+        loop_tools = _filter_loop_turn_intent(loop_tools, session)
         setattr(
             session,
             "bound_avatar_id",
@@ -5978,6 +6026,46 @@ def create_studio_app() -> FastAPI:
         if not ok:
             raise HTTPException(status_code=404, detail="session not found")
         return {"ok": True, "session_id": session_id, "provider": provider, "model": model}
+
+    @app.post("/api/sessions/{session_id}/isolate/adopt")
+    async def adopt_session_isolate(
+        session_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        from agenticx.runtime.isolate_run import adopt_isolate
+
+        result = adopt_isolate(managed.studio_session)
+        try:
+            manager.incremental_persist(session_id)
+        except Exception:
+            pass
+        if not result.get("ok"):
+            return {"ok": False, "error": str(result.get("error") or "adopt_failed")}
+        return {"ok": True, "isolate": None}
+
+    @app.post("/api/sessions/{session_id}/isolate/discard")
+    async def discard_session_isolate(
+        session_id: str,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        managed = manager.get(session_id, touch=False)
+        if managed is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        from agenticx.runtime.isolate_run import discard_isolate
+
+        result = discard_isolate(managed.studio_session)
+        try:
+            manager.incremental_persist(session_id)
+        except Exception:
+            pass
+        if not result.get("ok"):
+            return {"ok": False, "error": str(result.get("error") or "discard_failed")}
+        return {"ok": True, "isolate": None}
 
     @app.post("/api/sessions/{session_id}/pin")
     async def pin_session(
