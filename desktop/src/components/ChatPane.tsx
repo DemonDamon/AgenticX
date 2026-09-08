@@ -406,7 +406,7 @@ import {
   lookupComposerRefPath,
   resolveReferenceSourcePath,
 } from "../utils/chat-file-mention";
-import { absoluteTaskspacePath } from "../utils/workspace-file-path";
+import { absoluteTaskspacePath, canonicalizeArtifactPreviewPath } from "../utils/workspace-file-path";
 import {
   composerAcceptsDragTypes,
   decodeNearWorkspaceDragEntry,
@@ -5628,42 +5628,61 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ...(request.lineRange ? { lineRange: request.lineRange } : {}),
             };
       if (!normalized.absolutePath) return;
+      const sid = String(pane.sessionId || "").trim();
+      const taskspaces = sid
+        ? (useAppStore.getState().preloadedTaskspacesBySessionId[sid] ?? [])
+        : [];
+      const absolutePath = canonicalizeArtifactPreviewPath(normalized.absolutePath, taskspaces);
+      if (!absolutePath) return;
 
-      // Open the WorkPanel shell only — never switch to「工作区」file-tree tab.
-      // File browsing lives in left-nav「文件管理」; previews are Trae-style tabs.
-      if (!pane.taskspacePanelOpen) {
-        openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
-      }
+      const openResolved = (path: string) => {
+        // Open the WorkPanel shell only — never switch to「工作区」file-tree tab.
+        // File browsing lives in left-nav「文件管理」; previews are Trae-style tabs.
+        if (!pane.taskspacePanelOpen) {
+          openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
+        }
 
-      if (isInAppHtmlPreviewPath(normalized.absolutePath)) {
-        void (async () => {
-          const prepared = await loadPreparedHtmlSrcDoc(normalized.absolutePath);
-          if (prepared.ok) {
-            setWorkPanelFocus({
-              kind: "browser",
-              url: pathToFileUrl(normalized.absolutePath),
-              title: artifactBaseName(normalized.absolutePath) || "HTML",
-              srcDoc: prepared.srcDoc,
-            });
-            return;
-          }
-          setWorkPanelFocus({
-            kind: "preview",
-            absolutePath: normalized.absolutePath,
-            title: artifactBaseName(normalized.absolutePath),
-          });
-        })();
+        if (isInAppHtmlPreviewPath(path)) {
+          void (async () => {
+            const prepared = await loadPreparedHtmlSrcDoc(path);
+            if (prepared.ok) {
+              setWorkPanelFocus({
+                kind: "browser",
+                url: pathToFileUrl(path),
+                title: artifactBaseName(path) || "HTML",
+                srcDoc: prepared.srcDoc,
+              });
+              return;
+            }
+            // Missing/unreadable HTML must not become an ENOENT preview tab.
+          })();
+          return;
+        }
+
+        setWorkPanelFocus({
+          kind: "preview",
+          absolutePath: path,
+          title: artifactBaseName(path),
+          ...(normalized.lineRange ? { lineRange: normalized.lineRange } : {}),
+        });
+      };
+
+      const stat = window.agenticxDesktop?.statLocalPath;
+      if (!stat) {
+        openResolved(absolutePath);
         return;
       }
-
-      setWorkPanelFocus({
-        kind: "preview",
-        absolutePath: normalized.absolutePath,
-        title: artifactBaseName(normalized.absolutePath),
-        ...(normalized.lineRange ? { lineRange: normalized.lineRange } : {}),
-      });
+      void (async () => {
+        try {
+          const info = await stat(absolutePath);
+          if (!info?.ok) return;
+        } catch {
+          return;
+        }
+        openResolved(absolutePath);
+      })();
     },
-    [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel],
+    [pane.id, pane.sessionId, pane.taskspacePanelOpen, paneWidth, openSidePanel],
   );
 
   /** Left-sidebar file-manage → Trae WorkPanel preview tab on the right. */
@@ -5687,8 +5706,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
 
   const revealFileInTaskspace = useCallback(async (absPath: string) => {
-    const path = String(absPath || "").trim();
-    if (!path) return;
+    const raw = String(absPath || "").trim();
+    if (!raw) return;
+    const sid = String(pane.sessionId || "").trim();
+    const taskspaces = sid
+      ? (useAppStore.getState().preloadedTaskspacesBySessionId[sid] ?? [])
+      : [];
+    const path = canonicalizeArtifactPreviewPath(raw, taskspaces);
+    const stat = window.agenticxDesktop?.statLocalPath;
+    if (stat) {
+      try {
+        const info = await stat(path);
+        if (!info?.ok) return;
+      } catch {
+        return;
+      }
+    }
 
     if (!pane.taskspacePanelOpen) {
       openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
@@ -5762,7 +5795,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const result = await reveal(path);
       if (!result.ok) console.warn("[ChatPane] reveal file failed:", result.error);
     }
-  }, [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel, openWorkspaceFilePreview]);
+  }, [pane.id, pane.sessionId, pane.taskspacePanelOpen, paneWidth, openSidePanel, openWorkspaceFilePreview]);
 
   const openWorkPanelSummary = useCallback(
     (section: "artifacts" | "changes") => {
@@ -6725,10 +6758,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     );
     artifactPendingOpenRef.current = false;
     if (!primary) return;
-    const key = `${pane.sessionId}:${lastId}:${primary}`;
+    const sid = String(pane.sessionId || "").trim();
+    const taskspaces = sid
+      ? (useAppStore.getState().preloadedTaskspacesBySessionId[sid] ?? [])
+      : [];
+    const collapsed = canonicalizeArtifactPreviewPath(primary, taskspaces);
+    const key = `${pane.sessionId}:${lastId}:${collapsed}`;
     if (artifactAutoOpenKeyRef.current === key) return;
     artifactAutoOpenKeyRef.current = key;
-    openWorkspaceFilePreview(primary);
+    const stat = window.agenticxDesktop?.statLocalPath;
+    if (!stat) {
+      openWorkspaceFilePreview(collapsed);
+      return;
+    }
+    void (async () => {
+      try {
+        const info = await stat(collapsed);
+        if (!info?.ok) return;
+      } catch {
+        return;
+      }
+      openWorkspaceFilePreview(collapsed);
+    })();
   }, [
     sessionBusy,
     isStreamingCurrentSession,

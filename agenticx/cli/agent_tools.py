@@ -597,8 +597,34 @@ def _session_default_workspace_roots(session: Optional[StudioSession]) -> List[P
 
 
 def _session_mount_aliases(session: Optional[StudioSession]) -> dict[str, tuple[Path, str]]:
-    """Map ``.agx-mounts.json`` display names to ``(source_path, mode)``."""
+    """Map taskspace id/label and ``.agx-mounts.json`` names to ``(source_path, mode)``.
+
+    Taskspace ids (including ``default``) are registered first so a mount with the
+    same display name cannot hide the virtual workspace root.
+    """
     aliases: dict[str, tuple[Path, str]] = {}
+    taskspaces = getattr(session, "taskspaces", None) if session is not None else None
+    items = [item for item in taskspaces if isinstance(item, dict)] if isinstance(taskspaces, list) else []
+    label_counts: dict[str, int] = {}
+    for item in items:
+        label = str(item.get("label") or "").strip()
+        if label and "/" not in label and "\\" not in label:
+            label_counts[label] = label_counts.get(label, 0) + 1
+    for item in items:
+        ts_id = str(item.get("id") or "").strip()
+        raw_path = str(item.get("path") or item.get("source_path") or "").strip()
+        mode = str(item.get("mount_mode") or "link").strip().lower() or "link"
+        if not raw_path:
+            continue
+        try:
+            src = Path(raw_path).expanduser().resolve(strict=False)
+        except Exception:
+            continue
+        if ts_id:
+            aliases.setdefault(ts_id, (src, mode))
+        label = str(item.get("label") or "").strip()
+        if label and "/" not in label and "\\" not in label and label_counts.get(label) == 1:
+            aliases.setdefault(label, (src, mode))
     for root in _session_default_workspace_roots(session):
         for mount in _load_default_workspace_mounts(root):
             name = str(mount.get("name") or "").strip()
@@ -639,6 +665,29 @@ def _map_virtual_reference_path(
             continue
         return mapped, mode
     return None
+
+
+def _resolve_prefixed_workspace_relpath(
+    raw_path: Path, session: Optional[StudioSession]
+) -> Optional[tuple[Path, str]]:
+    """If the first relative segment is a taskspace/mount alias, map to that root."""
+    if raw_path.is_absolute():
+        return None
+    parts = tuple(part for part in raw_path.parts if part not in {".", ""})
+    if not parts or parts[0] == "..":
+        return None
+    hit = _session_mount_aliases(session).get(parts[0])
+    if hit is None:
+        return None
+    source_root, mode = hit
+    rest = Path(*parts[1:]) if len(parts) > 1 else Path()
+    resolved = _safe_resolve_path(source_root / rest) if rest.parts else _safe_resolve_path(source_root)
+    if resolved != source_root and not _is_path_under_root(resolved, source_root):
+        return None
+    mapped = _map_virtual_reference_path(resolved, session)
+    if mapped is not None:
+        return mapped
+    return resolved, mode
 
 
 def _is_path_under_root(candidate: Path, root: Path) -> bool:
@@ -3881,8 +3930,15 @@ def _resolve_workspace_path(
     if _desktop_unrestricted_fs_enabled():
         if raw_path.is_absolute():
             resolved = _safe_resolve_path(raw_path)
+            mapped = _map_virtual_reference_path(resolved, session)
+            if mapped is not None:
+                resolved = mapped[0]
         else:
-            resolved = _safe_resolve_path(_workspace_root() / raw_path)
+            prefixed = _resolve_prefixed_workspace_relpath(raw_path, session)
+            if prefixed is not None:
+                resolved = prefixed[0]
+            else:
+                resolved = _safe_resolve_path(_workspace_root() / raw_path)
         from agenticx.runtime.isolate_run import remap_path_into_isolate
 
         resolved = remap_path_into_isolate(resolved, session)
@@ -3949,25 +4005,22 @@ def _resolve_workspace_path(
             )
         raise ValueError(_format_escape(resolved))
 
-    parts = raw_path.parts
-    if parts and parts[0] not in {".", ".."}:
-        hit = _session_mount_aliases(session).get(parts[0])
-        if hit is not None:
-            source_root, mount_mode = hit
-            rest = Path(*parts[1:]) if len(parts) > 1 else Path()
-            resolved = _safe_resolve_path(source_root / rest) if rest.parts else source_root
-            if _is_protected_path(resolved):
-                raise ValueError(f"path is protected: {resolved}")
-            if resolved != source_root and not _is_path_under_root(resolved, source_root):
-                raise ValueError(_format_escape(resolved))
-            if for_write and mount_mode == "reference":
+    prefixed = _resolve_prefixed_workspace_relpath(raw_path, session)
+    if prefixed is not None:
+        resolved, mount_mode = prefixed
+        from agenticx.runtime.isolate_run import remap_path_into_isolate
+
+        resolved = remap_path_into_isolate(resolved, session)
+        if _is_protected_path(resolved):
+            raise ValueError(f"path is protected: {resolved}")
+        if for_write and mount_mode == "reference":
+            raise ValueError(_format_readonly_reference(resolved))
+        if for_write and not _under_any_root(resolved, write_roots):
+            if _under_any_root(resolved, read_roots):
                 raise ValueError(_format_readonly_reference(resolved))
-            if for_write and not _under_any_root(resolved, write_roots):
-                if _under_any_root(resolved, read_roots):
-                    raise ValueError(_format_readonly_reference(resolved))
-                raise ValueError(_format_escape(resolved))
-            _raise_if_path_denied(resolved, session)
-            return resolved
+            raise ValueError(_format_escape(resolved))
+        _raise_if_path_denied(resolved, session)
+        return resolved
 
     if pick_existing:
         for root in roots:

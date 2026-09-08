@@ -545,7 +545,10 @@ def _build_taskspaces_context(taskspaces: list[dict[str, str]] | None) -> str:
         "若侧栏选中了某一工作区标签，该轮对话会以该标签对应路径为最高优先。"
         "问「文件夹有啥」时：一次 list_files(\".\") 即可作答，不要再 list 默认工作区，"
         "也不要用 bash_exec ls 复核。引用目录的子路径用「挂载名/相对路径」或上面的 source_path，"
-        "禁止拼「默认工作区路径/挂载名/...」。\n"
+        "禁止拼「默认工作区路径/挂载名/...」。"
+        "相对路径写默认工作区时用 `mario-game/index.html` 或上面列出的绝对路径；"
+        "不要把 default/ 当成子目录再拼。"
+        "若写出 `default/…`，运行时会把它当成默认工作区根。\n"
     )
     return "\n".join(lines) + "\n"
 

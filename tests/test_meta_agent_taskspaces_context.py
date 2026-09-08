@@ -26,6 +26,7 @@ def test_build_taskspaces_context_includes_paths_and_labels() -> None:
     assert "禁止" in block and "$HOME" in block
     assert "默认工作区" in block
     assert "一次 list_files" in block
+    assert "不要把 default/ 当成子目录再拼" in block
 
 
 def test_build_taskspaces_context_includes_reference_mounts(tmp_path: Path) -> None:

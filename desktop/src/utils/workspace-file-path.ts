@@ -135,3 +135,102 @@ export function findTaskspaceForAbsPath(
   }
   return best ? { taskspaceId: best.taskspaceId, relPath: best.relPath } : null;
 }
+
+export type TaskspacePathHint = {
+  id?: string;
+  label?: string;
+  path?: string;
+};
+
+/** Taskspace ids plus unique labels; always includes ``default``. */
+export function virtualTaskspacePrefixNames(taskspaces?: TaskspacePathHint[]): string[] {
+  const names = new Set<string>(["default"]);
+  const labelCounts = new Map<string, number>();
+  for (const ts of taskspaces ?? []) {
+    const id = String(ts.id || "").trim();
+    if (id) names.add(id);
+    const label = String(ts.label || "").trim();
+    if (label && !label.includes("/")) {
+      labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+    }
+  }
+  for (const [label, count] of labelCounts) {
+    if (count === 1) names.add(label);
+  }
+  return [...names];
+}
+
+/**
+ * Fold ``{workspaceRoot}/{id|label}/rest`` to ``{workspaceRoot}/rest`` (one layer).
+ * Root must match; a bare ``default`` segment elsewhere is left alone.
+ */
+export function collapseVirtualTaskspacePrefix(
+  absPath: string,
+  workspaceRoot: string,
+  prefixNames: string[],
+): string {
+  const abs = normalizePath(absPath);
+  const root = normalizePath(workspaceRoot);
+  if (!abs || !root) return String(absPath || "").trim();
+  const prefix = `${root}/`;
+  if (!abs.startsWith(prefix)) return abs;
+  const rest = abs.slice(prefix.length);
+  const slash = rest.indexOf("/");
+  if (slash < 0) return abs;
+  const name = rest.slice(0, slash);
+  const tail = rest.slice(slash + 1);
+  if (!tail) return abs;
+  const names = new Set((prefixNames || []).map((n) => String(n || "").trim()).filter(Boolean));
+  if (!names.has(name)) return abs;
+  return `${root}/${tail}`;
+}
+
+const TASKSPACE_ABS_RE = /^(.*\/\.agenticx\/taskspaces\/[^/]+)\/([^/]+)(?:\/(.*))?$/;
+
+export function inferTaskspaceWorkspaceRoot(
+  absPath: string,
+): { root: string; prefixNames: string[] } | null {
+  const abs = normalizePath(absPath);
+  const match = abs.match(TASKSPACE_ABS_RE);
+  if (!match) return null;
+  const sidRoot = String(match[1] || "").trim();
+  const name = String(match[2] || "").trim();
+  if (!sidRoot || !name) return null;
+  const root = `${sidRoot}/${name}`;
+  const prefixNames = name === "default" ? ["default"] : [name, "default"];
+  return { root, prefixNames };
+}
+
+export function canonicalizeArtifactPreviewPath(
+  absPath: string,
+  taskspaces?: TaskspacePathHint[],
+): string {
+  const raw = String(absPath || "").trim();
+  if (!raw) return raw;
+  const inferred = inferTaskspaceWorkspaceRoot(raw);
+  if (inferred) {
+    const names = new Set([...inferred.prefixNames, ...virtualTaskspacePrefixNames(taskspaces)]);
+    return collapseVirtualTaskspacePrefix(raw, inferred.root, [...names]);
+  }
+  let out = normalizePath(raw) || raw;
+  for (const ts of taskspaces ?? []) {
+    const root = String(ts.path || "").trim();
+    if (!root) continue;
+    out = collapseVirtualTaskspacePrefix(out, root, virtualTaskspacePrefixNames(taskspaces));
+  }
+  return out;
+}
+
+/** Prefer the collapsed path when it exists; never return a missing candidate. */
+export function selectOpenableArtifactPath(
+  rawPath: string,
+  exists: (path: string) => boolean,
+  taskspaces?: TaskspacePathHint[],
+): string | null {
+  const raw = String(rawPath || "").trim();
+  if (!raw) return null;
+  const collapsed = canonicalizeArtifactPreviewPath(raw, taskspaces);
+  if (exists(collapsed)) return collapsed;
+  if (collapsed !== raw && exists(raw)) return raw;
+  return null;
+}
