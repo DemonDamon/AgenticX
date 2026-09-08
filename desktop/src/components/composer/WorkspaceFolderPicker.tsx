@@ -3,7 +3,6 @@ import type { CSSProperties } from "react";
 import { Check, ChevronDown, Folder, FolderPlus, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import { useAttachWorkspaceSources } from "../../hooks/useAttachWorkspaceSources";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "../../utils/backend-scope";

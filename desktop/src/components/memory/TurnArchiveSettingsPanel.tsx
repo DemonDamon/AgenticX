@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Panel } from "../ds/Panel";
 import { SETTINGS_INTRO_CLASS, SETTINGS_LABEL_CLASS } from "../ds/settings-typography";
-import { i18n } from "../i18n/i18n";
 
 type TurnArchiveForm = {
   enabled: boolean;
@@ -114,10 +113,10 @@ export function TurnArchiveSettingsPanel() {
           setForm(loaded);
           setLastSaved(loaded);
         } else if (!disposed) {
-          setMessage(result?.error ? String(result.error) : String(i18n.t("memoryArchive.loadFailed", { ns: "settings" })));
+          setMessage(result?.error ? String(result.error) : t("memoryArchive.loadFailed"));
         }
       } catch {
-        if (!disposed) setMessage(String(i18n.t("memoryArchive.loadFailed", { ns: "settings" })));
+        if (!disposed) setMessage(t("memoryArchive.loadFailed"));
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -126,7 +125,7 @@ export function TurnArchiveSettingsPanel() {
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [t]);
 
   const save = useCallback(
     async (patch: Partial<TurnArchiveForm>) => {

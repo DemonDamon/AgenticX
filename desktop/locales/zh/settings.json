@@ -237,6 +237,20 @@
     "vendorNamePh": "例如 OpenAI",
     "vendorType": "服务厂商类型",
     "openaiCompat": "OpenAI 兼容",
+    "unknownVendor": "未知厂商",
+    "legacyVendor": "历史厂商",
+    "vendors": {
+      "openai": "OpenAI",
+      "anthropic": "Anthropic",
+      "volcengine": "火山引擎",
+      "bailian": "阿里云百炼",
+      "zhipu": "智谱开放平台",
+      "qianfan": "百度千帆",
+      "minimax": "MiniMax",
+      "kimi": "月之暗面",
+      "deepseek": "DeepSeek",
+      "ollama": "Ollama"
+    },
     "ollamaHint": "Ollama 直连（如局域网 11434）；API 地址勿带 /v1。侧栏已有内置「Ollama」时可改那边，此处用于第二实例或自定义名称。",
     "openaiHint": "OpenAI 兼容接口（含多数中转 / 网关）；保存设置后写入配置。",
     "modelId": "模型 ID",
@@ -1503,6 +1517,7 @@
     "loading": "加载…",
     "pickOrCreate": "选择或新建一个知识脑",
     "systemDefault": "系统默认",
+    "defaultDocsName": "默认文档库",
     "enableCodeAria": "启用此代码脑",
     "enableDocsAria": "启用此文档库",
     "delete": "删除",
@@ -1594,7 +1609,14 @@
     "loading": "正在加载数据源…",
     "freeTitle": "开箱即用（免费/无需凭证）",
     "credTitle": "需要凭证 / 依赖 MCP",
-    "notEnabled": "数据源未启用或不存在"
+    "notEnabled": "数据源未启用或不存在",
+    "names": {
+      "akshare": "AkShare（免费行情）",
+      "world_bank": "World Bank（宏观指标）",
+      "imf": "IMF DataMapper（宏观指标）",
+      "tushare": "Tushare Pro（经 MCP 桥接）",
+      "ifind": "同花顺 iFinD（需企业授权）"
+    }
   },
   "memoryArchive": {
     "title": "对话轮次记忆",

@@ -16,6 +16,12 @@ function statusDotClass(status: DataSourceInfo["status"], enabled: boolean): str
   return "bg-rose-400";
 }
 
+const CATALOG_NAME_KEYS = new Set(["akshare", "world_bank", "imf", "tushare", "ifind"]);
+
+function dataSourceTitle(item: DataSourceInfo, t: (key: string) => string): string {
+  return CATALOG_NAME_KEYS.has(item.name) ? t(`dataSources.names.${item.name}`) : item.displayName;
+}
+
 function statusLabel(item: DataSourceInfo, t: (key: string) => string): string {
   if (!item.enabled) return t("dataSources.disabled");
   switch (item.status) {
@@ -65,7 +71,7 @@ export function DataSourceCard({ item, onToggle, onTest, onOpenMcp }: Props) {
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-text-strong">{item.displayName}</span>
+            <span className="text-sm font-medium text-text-strong">{dataSourceTitle(item, t)}</span>
             <span className="text-[10px] text-text-faint">{item.domain}</span>
           </div>
           <p className="mt-0.5 text-[11px] text-text-subtle">{statusLabel(item, t)}</p>

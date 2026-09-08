@@ -187,7 +187,7 @@ export function AvatarCreateDialog({ open, onClose, onCreate, onCreateViaChat }:
               </label>
               <label className="block text-sm text-text-muted">
                 {t("avatarCreate.role")}
-                <input>
+                <input
                   className="mt-1 w-full rounded-md border border-border bg-surface-panel px-3 py-2 text-sm"
                   value={role}
                   onChange={(e) => setRole(e.target.value)}

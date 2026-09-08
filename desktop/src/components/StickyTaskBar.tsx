@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useTranslation } from "react-i18next";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, Circle, CircleCheck, Loader2 } from "lucide-react";
 import type { Message } from "../store";
 import {

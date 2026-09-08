@@ -237,6 +237,20 @@
     "vendorNamePh": "e.g. OpenAI",
     "vendorType": "Vendor type",
     "openaiCompat": "OpenAI-compatible",
+    "unknownVendor": "Unknown vendor",
+    "legacyVendor": "Legacy vendor",
+    "vendors": {
+      "openai": "OpenAI",
+      "anthropic": "Anthropic",
+      "volcengine": "Volcengine",
+      "bailian": "Alibaba Cloud Bailian",
+      "zhipu": "Zhipu AI",
+      "qianfan": "Baidu Qianfan",
+      "minimax": "MiniMax",
+      "kimi": "Moonshot AI",
+      "deepseek": "DeepSeek",
+      "ollama": "Ollama"
+    },
     "ollamaHint": "Direct Ollama (e.g. LAN 11434); do not put /v1 on the API URL. Use the built-in Ollama row for the first instance; this is for a second instance or a custom name.",
     "openaiHint": "OpenAI-compatible API (including most gateways). Written when you save settings.",
     "modelId": "Model ID",
@@ -1503,6 +1517,7 @@
     "loading": "Loading…",
     "pickOrCreate": "Select or create a brain",
     "systemDefault": "System default",
+    "defaultDocsName": "Default document library",
     "enableCodeAria": "Enable this code brain",
     "enableDocsAria": "Enable this document library",
     "delete": "Delete",
@@ -1594,7 +1609,14 @@
     "loading": "Loading data sources…",
     "freeTitle": "Ready to use (free / no credentials)",
     "credTitle": "Needs credentials / MCP",
-    "notEnabled": "Data source is disabled or missing"
+    "notEnabled": "Data source is disabled or missing",
+    "names": {
+      "akshare": "AkShare (free market data)",
+      "world_bank": "World Bank (macro indicators)",
+      "imf": "IMF DataMapper (macro indicators)",
+      "tushare": "Tushare Pro (via MCP bridge)",
+      "ifind": "Tonghuashun iFinD (requires enterprise authorization)"
+    }
   },
   "memoryArchive": {
     "title": "Turn memory",

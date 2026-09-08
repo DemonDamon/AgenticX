@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { Brain, Loader2, Plus, Trash2 } from "lucide-react";
 import { useAppStore } from "../../../store";
 import { createBrainsApi, type BrainRecord } from "./api";
+import { displayBrainName } from "./brain-display";
 import { KnowledgeConfigPanel } from "../knowledge/KnowledgeConfigPanel";
 import { KnowledgeMaterialsPanel } from "../knowledge/KnowledgeMaterialsPanel";
 import { KnowledgeDebugPanel } from "../knowledge/KnowledgeDebugPanel";
@@ -274,7 +275,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
 
   const handleDelete = async () => {
     if (!selectedId) return;
-    if (!window.confirm(st("brains.deleteConfirm", { name: selected?.name ?? "" }))) return;
+    if (!window.confirm(st("brains.deleteConfirm", { name: selected ? displayBrainName(selected) : "" }))) return;
     try {
       await brainsApi.remove(selectedId);
       setSelectedId(null);
@@ -337,7 +338,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
                   >
                     <div className="flex items-center gap-1.5 font-medium">
                       <Brain className="h-3.5 w-3.5 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                      <span className="min-w-0 flex-1 truncate">{displayBrainName(b)}</span>
                       <span
                         className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-medium ring-1 ${
                           selectedId === b.id ? "ring-white/20 bg-white/15" : badge.className
@@ -373,7 +374,7 @@ export const BrainsSettings = forwardRef<BrainsSettingsHandle>(function BrainsSe
               <div className="shrink-0 px-4 pt-4 pb-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-medium text-text-primary">
-                    {selected.name}
+                    {displayBrainName(selected)}
                     {selected.id === "default_docs" ? (
                       <span className="ml-2 text-xs font-normal text-text-muted">{st("brains.systemDefault")}</span>
                     ) : null}

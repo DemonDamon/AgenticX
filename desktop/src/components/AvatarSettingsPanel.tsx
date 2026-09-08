@@ -6,6 +6,7 @@ import { avatarBgClass, avatarFgClass, AVATAR_PALETTE, AVATAR_COLOR_SWATCH, norm
 import type { AvatarPaletteKey } from "../utils/avatar-color";
 import { DefaultModelSelect } from "./DefaultModelSelect";
 import { i18n } from "../i18n/i18n";
+import { displayBrainName } from "./settings/brains/brain-display";
 
 function st(key: string, opts?: Record<string, unknown>): string {
   return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
@@ -626,7 +627,7 @@ export function AvatarSettingsPanel(props: Props) {
                           }}
                         />
                         <span>
-                          {b.name} <span className="text-text-faint">({b.type})</span>
+                          {displayBrainName(b)} <span className="text-text-faint">({b.type})</span>
                         </span>
                       </label>
                     ))}
