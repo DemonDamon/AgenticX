@@ -458,6 +458,20 @@ describe("collectSessionArtifactPaths — successful write only", () => {
     expect(collectSessionArtifactPaths(messages)).toEqual([p]);
   });
 
+  it("skips redirect targets from failed bash_exec calls", () => {
+    const p = "/Users/damon/.agenticx/taskspaces/session/default/game/index.html";
+    const messages: Message[] = [
+      toolMsg({
+        id: "bash-err",
+        toolName: "bash_exec",
+        toolStatus: "error",
+        toolArgs: { command: `cat > ${p} <<'EOF'\n<html></html>\nEOF` },
+        content: "工具 'bash_exec' 不在当前允许列表中，已拒绝执行。",
+      }),
+    ];
+    expect(collectSessionArtifactPaths(messages)).toEqual([]);
+  });
+
   it("still collects when toolStatus is undefined and body is OK: edited", () => {
     const p = "/Users/damon/x/a.txt";
     const messages: Message[] = [

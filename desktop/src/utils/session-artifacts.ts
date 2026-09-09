@@ -620,12 +620,15 @@ export function collectSessionArtifactPaths(
         extractOkWritePaths(String(message.content || ""), paths, seen);
         extractOkWritePaths(String(message.toolResultPreview || ""), paths, seen);
       } else if (toolName === "bash_exec") {
-        const command = String(message.toolArgs?.command ?? "").trim();
-        if (command) extractBashRedirectPaths(command, paths, seen);
-        extractJsonOutputArtifactPaths(String(message.content || ""), paths, seen);
-        extractJsonOutputArtifactPaths(String(message.toolResultPreview || ""), paths, seen);
-        extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
-        extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
+        // A denied/failed command never produced its redirect target.
+        if (!isFailedWriteToolMessage(message)) {
+          const command = String(message.toolArgs?.command ?? "").trim();
+          if (command) extractBashRedirectPaths(command, paths, seen);
+          extractJsonOutputArtifactPaths(String(message.content || ""), paths, seen);
+          extractJsonOutputArtifactPaths(String(message.toolResultPreview || ""), paths, seen);
+          extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
+          extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
+        }
       } else if (toolName === "wb_bridge_send" || toolName === "wb_bridge_describe") {
         extractWbBridgeWrittenPaths(String(message.content || ""), paths, seen);
         extractWbBridgeWrittenPaths(String(message.toolResultPreview || ""), paths, seen);
