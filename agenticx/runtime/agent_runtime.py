@@ -68,6 +68,10 @@ from agenticx.runtime.events import (
 )
 from agenticx.runtime.hooks import HookRegistry
 from agenticx.runtime.loop_detector import LoopDetector
+from agenticx.runtime.plan_mode import (
+    plan_mode_retry_limit_reached,
+    turn_intent_denial_message,
+)
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
@@ -3630,6 +3634,7 @@ class AgentRuntime:
         completed_tool_names: set[str] = set()
         last_tool_outcome: ToolTurnOutcome = "unknown"
         confirmation_spam_count = 0
+        plan_mode_restricted_attempts = 0
         rounds_without_todo = 0
         # Turn-level counter for reasoning-only rounds (model emitted < Mattis> but no
         # visible body and no tool_call). Capped at 1 to avoid infinite nudge loops.
@@ -5709,7 +5714,11 @@ class AgentRuntime:
                     _record_tool_turn_outcome("failed")
                     continue
                 if tool_name not in allowed_tool_names:
-                    if is_tool_pending_next_round(
+                    intent_denial = turn_intent_denial_message(tool_name, session)
+                    if intent_denial:
+                        denied_message = intent_denial
+                        plan_mode_restricted_attempts += 1
+                    elif is_tool_pending_next_round(
                         ts_ctx,
                         tool_name,
                         allowed_tool_names=allowed_tool_names,
@@ -5773,6 +5782,21 @@ class AgentRuntime:
                         agent_id=agent_id,
                     )
                     _record_tool_turn_outcome("failed")
+                    if intent_denial and plan_mode_retry_limit_reached(plan_mode_restricted_attempts):
+                        terminal_text = (
+                            "当前处于计划模式，文件写入和命令执行被有意禁用，本轮没有创建或修改任何文件。"
+                            "模型连续尝试执行受限工具，运行时已停止本轮，避免继续无效重试。"
+                            "请重新发送规划需求，或直接发送“执行”在默认模式下开始实施。"
+                        )
+                        yield await self._finish_terminal_reply(
+                            session,
+                            clean_body=terminal_text,
+                            usage_metadata=_usage_for_terminal(),
+                            terminal_reason="plan_mode_tool_violation",
+                            agent_id=agent_id,
+                            is_system_trigger=_is_system_trigger,
+                        )
+                        return
                     continue
                 hook_outcome = await self.hooks.run_before_tool_call(tool_name, arguments, session)
                 if hook_outcome.blocked:

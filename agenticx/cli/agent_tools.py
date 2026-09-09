@@ -42,6 +42,10 @@ from agenticx.cli.studio_skill import (
     skill_use as studio_skill_use,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
+from agenticx.runtime.plan_artifacts import (
+    create_plan_artifact,
+    update_plan_artifact,
+)
 from agenticx.runtime.plan_mode import turn_intent_denial_message
 from agenticx.memory.session_store import SessionStore
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
@@ -1695,6 +1699,79 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["repo"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plan_create",
+            "description": (
+                "Create the approved implementation plan as a durable Markdown artifact under "
+                "the active project's .agenticx/plans directory. Use exactly once for a multi-step "
+                "implementation request in Plan mode; do not use for simple questions."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "overview": {"type": "string"},
+                    "todos": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 20,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                },
+                                "content": {"type": "string", "maxLength": 300},
+                            },
+                            "required": ["id", "content"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "body_markdown": {
+                        "type": "string",
+                        "description": (
+                            "Self-contained implementation plan with exact files, anchors, "
+                            "behavior, risks, scope boundaries, and executable acceptance tests."
+                        ),
+                    },
+                },
+                "required": ["name", "overview", "todos", "body_markdown"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plan_update",
+            "description": (
+                "Atomically update lifecycle or todo status in an existing project-local Plan. "
+                "During Build, call start first, then mark each todo in_progress and completed."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plan_id": {"type": "string"},
+                    "plan_path": {"type": "string"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["start", "set_todo", "cancel"],
+                    },
+                    "todo_id": {"type": "string"},
+                    "todo_status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "completed", "cancelled"],
+                    },
+                    "outcome": {"type": "string"},
+                },
+                "required": ["plan_id", "plan_path", "action"],
                 "additionalProperties": False,
             },
         },
@@ -9358,6 +9435,10 @@ async def dispatch_tool_async(
             return await _tool_skill_manage(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "skill_import_repo":
             return _tool_skill_import_repo(arguments, session)
+        if name == "plan_create":
+            return create_plan_artifact(session, arguments)
+        if name == "plan_update":
+            return update_plan_artifact(session, arguments)
         if name == "todo_write":
             return _tool_todo_write(arguments, session)
         if name == "scratchpad_write":

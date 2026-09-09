@@ -58,7 +58,15 @@ import { RunLocationPicker } from "./composer/RunLocationPicker";
 import { RunModePicker } from "./composer/RunModePicker";
 import { ComposerModeMenu, COMPOSER_MODE_MENU_ID } from "./composer/ComposerModeMenu";
 import { TurnIntentChip } from "./composer/TurnIntentChip";
-import { togglePlanIntent, type TurnIntent } from "../utils/turn-intent";
+import {
+  resolveRequestTurnIntent,
+  togglePlanIntent,
+  type TurnIntent,
+} from "../utils/turn-intent";
+import {
+  NEAR_PLAN_BUILD_REQUEST,
+  type PlanArtifactPayload,
+} from "../utils/plan-artifact";
 import {
   useComposerWorkspaceFolders,
   WorkspaceFolderPicker,
@@ -8212,6 +8220,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               noBubbleBorder={reactFlat}
               toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
               onRevealPath={(path) => void revealFileInTaskspace(path)}
+              onViewPlan={(path) => openWorkspaceFilePreview(path)}
+              onBuildPlan={(plan) => {
+                window.dispatchEvent(
+                  new CustomEvent(NEAR_PLAN_BUILD_REQUEST, {
+                    detail: { paneId: pane.id, sessionId: pane.sessionId, plan },
+                  }),
+                );
+              }}
               onOpenAllArtifacts={() => openWorkPanelSummary("artifacts")}
               onOpenAllChanges={() => openWorkPanelSummary("changes")}
               onOpenFileReference={(request) => openFileReferencePreview(request)}
@@ -8986,6 +9002,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       skipInterrupt?: boolean;
       queueDrain?: boolean;
       lockedSessionId?: string;
+      turnIntentOverride?: TurnIntent;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => Promise<void>>(
@@ -9077,6 +9094,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       skipInterrupt?: boolean;
       queueDrain?: boolean;
       lockedSessionId?: string;
+      turnIntentOverride?: TurnIntent;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => {
@@ -9903,8 +9921,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         );
         body.retrieval_mode = kbMode;
       }
-      if ((pane.turnIntent ?? "default") === "plan") body.plan_mode = true;
-      if ((pane.turnIntent ?? "default") === "isolate" || pane.isolateActive) body.isolate_run = true;
+      const requestTurnIntent = resolveRequestTurnIntent(
+        pane.turnIntent ?? "default",
+        options?.turnIntentOverride,
+      );
+      if (requestTurnIntent === "plan") body.plan_mode = true;
+      if (requestTurnIntent === "isolate" || pane.isolateActive) body.isolate_run = true;
       if (isGroupPane && targetAgentId === "meta") {
         body.group_id = groupChatId;
         body.mentioned_avatar_ids = mentionedAvatarIds;
@@ -12063,6 +12085,37 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   };
 
   sendChatRef.current = sendChat;
+
+  useEffect(() => {
+    const onBuildPlan = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        paneId?: string;
+        sessionId?: string;
+        plan?: PlanArtifactPayload;
+      }>).detail;
+      const plan = detail?.plan;
+      if (String(detail?.paneId ?? "") !== pane.id) return;
+      const sessionId = String(detail?.sessionId ?? "").trim();
+      if (!plan || !sessionId || sessionId !== String(pane.sessionId ?? "").trim()) return;
+      const instruction = [
+        "[PLAN_BUILD]",
+        `Implement the approved Plan ${plan.plan_id} at ${plan.path}.`,
+        "Read the Plan file before changing code.",
+        `Call plan_update with action=\"start\", plan_id=\"${plan.plan_id}\", and plan_path=\"${plan.path}\" before implementation.`,
+        "Before each Todo, mark it in_progress with plan_update. Mark it completed only after its verification passes.",
+        "Do not create a replacement Plan. Stay within the Plan's scope boundaries.",
+      ].join("\n");
+      void sendChatRef.current(instruction, {
+        lockedSessionId: sessionId,
+        suppressUserEcho: true,
+        skipUserHistory: true,
+        forceSend: true,
+        turnIntentOverride: "default",
+      });
+    };
+    window.addEventListener(NEAR_PLAN_BUILD_REQUEST, onBuildPlan);
+    return () => window.removeEventListener(NEAR_PLAN_BUILD_REQUEST, onBuildPlan);
+  }, [pane.id, pane.sessionId]);
 
   const forwardAutoReply = useAppStore((s) => s.forwardAutoReply);
   useEffect(() => {

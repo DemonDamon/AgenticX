@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { applyTurnIntentToggle, normalizeTurnIntent, togglePlanIntent } from "./turn-intent";
+import {
+  applyTurnIntentToggle,
+  normalizeTurnIntent,
+  resolveRequestTurnIntent,
+  togglePlanIntent,
+} from "./turn-intent";
 
 describe("turn-intent", () => {
   it("normalizes unknown values to default", () => {
@@ -24,5 +29,11 @@ describe("turn-intent", () => {
     expect(togglePlanIntent("default")).toBe("plan");
     expect(togglePlanIntent("plan")).toBe("default");
     expect(togglePlanIntent("isolate")).toBe("plan");
+  });
+
+  it("keeps the pane preference unless a request explicitly overrides it", () => {
+    expect(resolveRequestTurnIntent("plan")).toBe("plan");
+    expect(resolveRequestTurnIntent("plan", "default")).toBe("default");
+    expect(resolveRequestTurnIntent("isolate", "default")).toBe("default");
   });
 });

@@ -57,6 +57,11 @@ import { MarkdownContext } from "./markdown-components";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
 import { HistoricalSubAgentClusterCard } from "../subagent";
+import { PlanArtifactCard } from "./PlanArtifactCard";
+import {
+  parsePlanArtifactToolResult,
+  type PlanArtifactPayload,
+} from "../../utils/plan-artifact";
 import type {
   ActionConfirmationDecision,
   PendingActionConfirmation,
@@ -140,6 +145,8 @@ type Props = {
   onOpenAllArtifacts?: () => void;
   /** Open WorkPanel「变更」for the session write/edit list. */
   onOpenAllChanges?: () => void;
+  onViewPlan?: (path: string) => void;
+  onBuildPlan?: (plan: PlanArtifactPayload) => void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -369,6 +376,8 @@ export function MessageRenderer({
   onResolveActionConfirmation,
   onOpenAllArtifacts,
   onOpenAllChanges,
+  onViewPlan,
+  onBuildPlan,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const resolvedReferences = useMemo(() => {
@@ -530,6 +539,21 @@ export function MessageRenderer({
     }
     if (message.toolName === "group_progress") {
       return <GroupProgressLine message={message} />;
+    }
+    if ((message.toolName ?? "").trim() === "plan_update") {
+      return null;
+    }
+    if ((message.toolName ?? "").trim() === "plan_create") {
+      const plan = parsePlanArtifactToolResult(message.content);
+      if (plan) {
+        return (
+          <PlanArtifactCard
+            initialPlan={plan}
+            onViewPlan={onViewPlan}
+            onBuildPlan={onBuildPlan}
+          />
+        );
+      }
     }
     if (message.noticeKind === "budget_exceeded" || /Token budget exceeded/i.test(String(message.content ?? ""))) {
       const current = Number(message.budgetCurrent);

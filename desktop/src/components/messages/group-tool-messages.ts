@@ -12,6 +12,8 @@ function canGroupToolMessage(message: Message): boolean {
   if ((message.toolName ?? "").trim() === "group_progress") return false;
   // Inline widgets render in the message body, not inside TurnToolGroupCard.
   if ((message.toolName ?? "").trim() === "show_widget") return false;
+  // Durable Plan artifacts own a standalone interactive card.
+  if (["plan_create", "plan_update"].includes((message.toolName ?? "").trim())) return false;
   // Clarification cards must render as standalone interactive rows, not nested ToolCallCards.
   if (message.clarificationPrompt) return false;
   // Action confirmation cards must also stay standalone (never fold into TurnToolGroupCard).

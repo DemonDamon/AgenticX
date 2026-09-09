@@ -23,6 +23,19 @@
     "monthDay": "{{month}}月{{day}}日",
     "note": "附加说明"
   },
+  "planCard": {
+    "created": "已创建计划",
+    "building": "正在实施计划",
+    "completed": "计划已完成",
+    "cancelled": "计划已取消",
+    "view": "查看计划",
+    "build": "开始实施",
+    "invalidFile": "计划文件格式无效",
+    "loadFailed": "无法读取计划：{{error}}",
+    "readTimeout": "读取计划超时",
+    "startTimeout": "实施未开始，请重试",
+    "startFailed": "无法开始实施"
+  },
   "clarify": {
     "title": "需要你的输入",
     "skip": "跳过（按默认推进）",

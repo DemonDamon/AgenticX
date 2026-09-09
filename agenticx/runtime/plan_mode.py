@@ -15,8 +15,6 @@ TURN_INTENT_ALLOWED_TOOLS = {
     "web_search",
     "web_fetch",
     "liteparse",
-    "skill_list",
-    "skill_use",
     "session_search",
     "memory_search",
     "mcp_list",
@@ -24,13 +22,24 @@ TURN_INTENT_ALLOWED_TOOLS = {
     "scratchpad_read",
     "knowledge_search",
     "code_search",
+    "plan_create",
+    "plan_update",
 }
 
 _PLAN_MODE_BLOCK = (
     "## Plan mode\n"
-    "You are in plan mode. Research with read-only tools only.\n"
-    "Do not edit files, run commands, delegate, install, or take any other "
-    "side-effecting action.\n"
+    "Plan mode is a planning preference, not a requirement to create a plan for every message.\n"
+    "For simple questions, explanations, or requests that do not require implementation, answer normally.\n"
+    "For a multi-step implementation or behavior-change request, inspect only what is needed, then call "
+    "plan_create exactly once with a self-contained plan. Do not merely paste a temporary plan into chat.\n"
+    "After plan_create succeeds, tell the user the plan is ready and wait for the Build action.\n"
+    "Use plan_update only to revise an existing project-local Plan artifact.\n"
+    "Use read-only tools only when they are necessary to understand existing code.\n"
+    "Except for plan_create and plan_update, do not edit files, run commands, delegate, install, "
+    "or take any other side-effecting action.\n"
+    "Do not search for skills or activate skills as a workaround for unavailable tools.\n"
+    "Do not claim that code or files were created, and do not tell the user to change "
+    "permissions: write tools are intentionally unavailable in this mode.\n"
     "Return a concrete plan: goal, steps, risks, and what you will not do.\n"
     "Wait for the user to confirm before executing.\n"
 )
@@ -89,9 +98,16 @@ def turn_intent_denial_message(tool_name: str, session: Any) -> str | None:
     if is_turn_intent_tool_allowed(tool_name):
         return None
     return (
-        f"plan mode cannot run {tool_name}. "
-        "Use read-only tools only, then wait for the user to leave this mode."
+        f"Plan mode intentionally cannot run {tool_name}. "
+        "Do not claim that code or files were created. Do not search for skills or "
+        "ask the user to change permissions. Stop trying to execute and return the "
+        "requested plan now."
     )
+
+
+def plan_mode_retry_limit_reached(restricted_attempts: int) -> bool:
+    """Stop a plan turn after the model ignores two explicit execution denials."""
+    return restricted_attempts >= 2
 
 
 def build_turn_intent_block(session: Any) -> str:

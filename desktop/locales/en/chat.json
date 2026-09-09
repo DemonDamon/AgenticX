@@ -23,6 +23,19 @@
     "monthDay": "{{month}}/{{day}}",
     "note": "Note"
   },
+  "planCard": {
+    "created": "Created Plan",
+    "building": "Building Plan",
+    "completed": "Plan Completed",
+    "cancelled": "Plan Cancelled",
+    "view": "View Plan",
+    "build": "Build",
+    "invalidFile": "Invalid Plan file",
+    "loadFailed": "Could not load Plan: {{error}}",
+    "readTimeout": "Timed out while reading the Plan",
+    "startTimeout": "Build did not start. Try again.",
+    "startFailed": "Could not start Build"
+  },
   "clarify": {
     "title": "Your input is needed",
     "skip": "Skip (continue with defaults)",

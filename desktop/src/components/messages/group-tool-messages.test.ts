@@ -86,6 +86,16 @@ test("actionConfirmation tool rows stay ungrouped", () => {
   }
 });
 
+test("Plan artifact tools stay ungrouped for the standalone Plan card", () => {
+  const rows = groupConsecutiveToolMessages([
+    toolMessage("t1", "done"),
+    toolMessage("plan", "done", "plan_create"),
+    toolMessage("t2", "done"),
+  ]);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1]?.kind, "message");
+});
+
 test("auto-approve confirm receipts are dropped from grouped chat rows", () => {
   const receipt: Message = {
     id: "receipt-1",

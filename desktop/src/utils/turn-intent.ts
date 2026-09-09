@@ -19,3 +19,11 @@ export function applyTurnIntentToggle(
 export function togglePlanIntent(current: TurnIntent): TurnIntent {
   return current === "plan" ? "default" : "plan";
 }
+
+/** A one-off request override (for example Build) must not mutate the pane preference. */
+export function resolveRequestTurnIntent(
+  paneIntent: TurnIntent,
+  override?: TurnIntent,
+): TurnIntent {
+  return override ?? paneIntent;
+}

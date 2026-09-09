@@ -56,6 +56,30 @@ class _AlwaysToolLLM:
         yield ""
 
 
+class _AlwaysRestrictedWriteLLM:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        return _FakeResponse(
+            "trying to write",
+            [
+                {
+                    "id": f"call-plan-write-{self.calls}",
+                    "type": "function",
+                    "function": {
+                        "name": "file_write",
+                        "arguments": {"path": "/tmp/game.html", "content": "<html />"},
+                    },
+                }
+            ],
+        )
+
+    def stream(self, *_args, **_kwargs):
+        yield ""
+
+
 class _AlwaysStatusQueryLLM:
     def invoke(self, *_args, **_kwargs):
         return _FakeResponse(
@@ -173,6 +197,36 @@ def test_runtime_max_rounds_emits_error(monkeypatch) -> None:
     events = __import__("asyncio").run(_collect(runtime, StudioSession(), "loop"))
     assert all(e["agent_id"] == "meta" for e in events)
     assert events[-1]["type"] == EventType.ERROR.value
+
+
+def test_plan_mode_stops_after_two_restricted_tool_attempts() -> None:
+    llm = _AlwaysRestrictedWriteLLM()
+    runtime = AgentRuntime(llm, _ApproveGate(), max_tool_rounds=20)
+    session = StudioSession()
+    session.plan_mode = True
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "file_read",
+                "description": "Read a file",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    async def _run() -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        async for event in runtime.run_turn("做一个小游戏", session, tools=tools):
+            items.append({"type": event.type, "data": event.data, "agent_id": event.agent_id})
+        return items
+
+    events = __import__("asyncio").run(_run())
+
+    assert llm.calls == 2
+    assert events[-1]["type"] == EventType.FINAL.value
+    assert events[-1]["data"]["terminal_reason"] == "plan_mode_tool_violation"
+    assert "没有创建或修改任何文件" in events[-1]["data"]["text"]
 
 
 def test_runtime_text_only_emits_tokens_then_final() -> None:

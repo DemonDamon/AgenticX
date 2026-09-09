@@ -248,9 +248,9 @@ class PlanModeLayer:
     active: bool = False
     read_only_tools: set = field(default_factory=lambda: {
         "file_read", "grep", "glob", "web_search", "web_fetch",
-        "liteparse", "skill_list", "skill_use", "session_search",
+        "liteparse", "session_search",
         "memory_search", "mcp_list", "todo_list", "scratchpad_read",
-        "knowledge_search", "code_search",
+        "knowledge_search", "code_search", "plan_create", "plan_update",
     })
 
     def evaluate(self, tool_name: str, *, is_read_only: bool = False, **_kw: object) -> Optional[PolicyAction]:
