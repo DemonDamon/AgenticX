@@ -22,6 +22,12 @@ class _FakeResponse:
         self.tool_calls = tool_calls
 
 
+def test_subagent_message_stream_treats_paused_as_terminal() -> None:
+    from agenticx.studio.server import SUBAGENT_MESSAGE_TERMINAL_TYPES
+
+    assert "subagent_paused" in SUBAGENT_MESSAGE_TERMINAL_TYPES
+
+
 class _TextLLM:
     def invoke(self, *_args, **_kwargs):
         return _FakeResponse("done", [])

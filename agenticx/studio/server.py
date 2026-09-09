@@ -362,6 +362,11 @@ def _runtime_event_to_sse_lines(event: RuntimeEvent) -> list[str]:
     return lines
 
 
+SUBAGENT_MESSAGE_TERMINAL_TYPES = frozenset(
+    {"subagent_completed", "subagent_error", "subagent_paused"}
+)
+
+
 def _buffered_event_to_sse_lines(buffered: BufferedEvent) -> list[str]:
     """Serialize a hub-buffered event with monotonic SSE ``id:`` for reattach replay."""
     if buffered.event is None:
@@ -3123,7 +3128,6 @@ def create_studio_app() -> FastAPI:
                     )
                     yield f"data: {json.dumps(ack.model_dump(), ensure_ascii=False)}\n\n"
 
-                    terminal_types = {"subagent_completed", "subagent_error"}
                     while True:
                         if await request.is_disconnected():
                             break
@@ -3136,7 +3140,7 @@ def create_studio_app() -> FastAPI:
                             continue
                         for line in _runtime_event_to_sse_lines(event):
                             yield line
-                        if event.type in terminal_types:
+                        if event.type in SUBAGENT_MESSAGE_TERMINAL_TYPES:
                             break
                 except Exception as exc:
                     err = SseEvent(type="error", data={"agent_id": target_agent_id, "text": f"子智能体通信异常: {exc}"})

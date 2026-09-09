@@ -351,6 +351,9 @@ class ManagedSession:
     avatar_id: Optional[str] = None
     avatar_name: Optional[str] = None
     session_name: Optional[str] = None
+    session_kind: Optional[str] = None
+    delegation_id: Optional[str] = None
+    parent_owner_session_id: Optional[str] = None
     pinned: bool = False
     archived: bool = False
     taskspaces: list[dict[str, str]] = field(default_factory=list)
@@ -2319,6 +2322,10 @@ class SessionManager:
             managed.avatar_name = (
                 None if raw_name is None else (str(raw_name).strip() or None)
             )
+        for field_name in ("session_kind", "delegation_id", "parent_owner_session_id"):
+            raw_value = metadata.get(field_name)
+            if raw_value is not None:
+                setattr(managed, field_name, str(raw_value).strip() or None)
         if "execution_state" in metadata:
             raw_state = str(metadata.get("execution_state", "idle")).strip().lower()
             if raw_state in ("idle", "running", "interrupted", "failed"):
@@ -2429,6 +2436,11 @@ class SessionManager:
                     "session_name": getattr(managed_ref, "session_name", None),
                     "avatar_id": getattr(managed_ref, "avatar_id", None),
                     "avatar_name": getattr(managed_ref, "avatar_name", None),
+                    "session_kind": getattr(managed_ref, "session_kind", None),
+                    "delegation_id": getattr(managed_ref, "delegation_id", None),
+                    "parent_owner_session_id": getattr(
+                        managed_ref, "parent_owner_session_id", None
+                    ),
                     "created_at": metadata_created_at,
                     "updated_at": metadata_updated_at,
                     "last_activity_at": last_activity_at,

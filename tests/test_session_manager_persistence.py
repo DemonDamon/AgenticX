@@ -230,6 +230,9 @@ def test_restore_managed_metadata_restores_avatar_binding(tmp_path: Path) -> Non
     managed = manager.create(session_id=sid)
     managed.avatar_id = "avatar-restore-test"
     managed.avatar_name = "Restore A"
+    managed.session_kind = "delegation"
+    managed.delegation_id = "dlg-restore"
+    managed.parent_owner_session_id = "meta-restore"
     managed.studio_session.chat_history = [
         {"id": "u1", "role": "user", "content": "hello"},
     ]
@@ -243,6 +246,9 @@ def test_restore_managed_metadata_restores_avatar_binding(tmp_path: Path) -> Non
     assert loaded is not None
     assert loaded.avatar_id == "avatar-restore-test"
     assert loaded.avatar_name == "Restore A"
+    assert loaded.session_kind == "delegation"
+    assert loaded.delegation_id == "dlg-restore"
+    assert loaded.parent_owner_session_id == "meta-restore"
 
 
 def test_taskspace_apis_can_lazy_restore_session(tmp_path: Path) -> None:

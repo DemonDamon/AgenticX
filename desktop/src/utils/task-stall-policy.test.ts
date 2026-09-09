@@ -354,6 +354,25 @@ describe("shouldTriggerIncompleteEndStall", () => {
       shouldTriggerIncompleteEndStall("idle", false, messages, CHANNEL_C_GRACE_MS, true),
     ).toBe(false);
   });
+
+  it("does not mark a controlled status-query terminal reply incomplete", () => {
+    const messages: Message[] = [
+      msg({ id: "u1", role: "user", content: "看下执行进度" }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        content: "本轮状态已查询过一次。若子智能体仍运行，我会在完成事件到达后主动汇报。",
+        metadata: {
+          turn_terminal: true,
+          terminal_reason: "status_query_repeat",
+        },
+      }),
+    ];
+
+    expect(
+      shouldTriggerIncompleteEndStall("idle", false, messages, CHANNEL_C_GRACE_MS, true),
+    ).toBe(false);
+  });
 });
 
 describe("sessionMessagesHydrated", () => {

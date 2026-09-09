@@ -2316,6 +2316,30 @@ _TRUNCATED_FINAL_NUDGE_HINT = (
 )
 
 
+def _is_pure_shell_wait_command(command: str) -> bool:
+    """Return True only for a standalone shell sleep/wait command."""
+    normalized = str(command or "").strip()
+    if not normalized:
+        return False
+    return bool(
+        re.fullmatch(
+            r"(?:sleep(?:\s+\d+(?:\.\d+)?[smhd]?)?|wait(?:\s+%\d+)?)\s*;?",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _session_has_running_delegation(session: Any) -> bool:
+    manager = getattr(session, "_session_manager", None)
+    sessions = getattr(manager, "_sessions", None) or {}
+    for managed in sessions.values():
+        task = getattr(managed, "_delegation_task", None)
+        if task is not None and not task.done():
+            return True
+    return False
+
+
 def _sanitize_structured_assistant_text(text: str, allowed_tool_names: set[str]) -> str:
     """Extract user-facing content from model-emitted JSON wrappers.
 
@@ -5243,6 +5267,32 @@ class AgentRuntime:
                     synced_session_message_count = len(session.agent_messages)
                     continue
 
+                if (
+                    str(agent_id or "").startswith("dlg-")
+                    and not parsed.visible_body.strip()
+                    and reason_only_retry >= 1
+                    and not _is_system_trigger
+                ):
+                    pause_text = (
+                        "委派连续只输出思考内容，未给出可见回复或下一步工具调用。"
+                        "任务已暂停，可补充指令后继续。"
+                    )
+                    await self.hooks.run_on_agent_end(pause_text, session)
+                    yield RuntimeEvent(
+                        type=EventType.SUBAGENT_PAUSED.value,
+                        data={
+                            "agent_id": agent_id,
+                            "round": round_idx,
+                            "max_rounds": self.max_tool_rounds,
+                            "text": pause_text,
+                            "executed_tools": list(dict.fromkeys(executed_tool_names))[-10:],
+                            "detector": "reasoning_only_stall",
+                            "retryable": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    return
+
                 if not _is_system_trigger and truncated_final_retry < 1:
                     truncation_signal = detect_suspected_truncated_final(
                         visible_body=parsed.visible_body,
@@ -5797,6 +5847,62 @@ class AgentRuntime:
                             is_system_trigger=_is_system_trigger,
                         )
                         return
+                    continue
+                command = str(arguments.get("command", "") or "")
+                if (
+                    agent_id == "meta"
+                    and tool_name in {"bash_exec", "bash_bg_start"}
+                    and _is_pure_shell_wait_command(command)
+                    and _session_has_running_delegation(session)
+                ):
+                    blocked_message = (
+                        "【已阻止】分身委派已在后台运行，Meta 不应通过 shell sleep/wait "
+                        "阻塞当前对话。请结束本轮并等待后台完成事件主动汇报。"
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": blocked_message,
+                        }
+                    )
+                    session.agent_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": blocked_message,
+                        }
+                    )
+                    synced_session_message_count = len(session.agent_messages)
+                    if not _is_system_trigger:
+                        session.chat_history.append(
+                            {
+                                "role": "tool",
+                                "content": blocked_message,
+                                "tool_call_id": tool_call_id,
+                                "tool_name": tool_name,
+                                "tool_args": arguments,
+                                "tool_status": "error",
+                            }
+                        )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={
+                            "name": tool_name,
+                            "result": blocked_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    _record_tool_turn_outcome("failed")
                     continue
                 hook_outcome = await self.hooks.run_before_tool_call(tool_name, arguments, session)
                 if hook_outcome.blocked:

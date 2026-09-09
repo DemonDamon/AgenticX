@@ -945,6 +945,7 @@ def build_meta_agent_system_prompt(
         "3) 启动前可调用一次 `check_resources` 控制并行度（延迟工具，直接调用即可）。\n"
         "3.1) `spawn_subagent` 前可调用 `recommend_subagent_model` 并告知用户后再派发。\n"
         "4) 用户问进度/状态时调用一次 `query_subagent_status`（可用名称或 id）；同一轮禁止重复轮询。\n"
+        "4.1) 委派在后台运行；发起后应结束当前轮等待完成事件，严禁用 `bash_exec sleep`、`wait` 或其他阻塞命令等待。\n"
         "5) 子智能体失控时 `cancel_subagent` 并重新规划。\n\n"
         "## 调度策略\n"
         "- 文档/计划/分析/对比/解释且本轮只出 markdown、不真执行多步时，**禁止** `todo_write`；里程碑直接写正文列表。单轮问答、闲聊、状态查询同样不调。\n"

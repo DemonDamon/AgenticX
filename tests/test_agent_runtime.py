@@ -100,6 +100,42 @@ class _AlwaysStatusQueryLLM:
         yield ""
 
 
+class _SleepThenFinalLLM:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return _FakeResponse(
+                "waiting",
+                [
+                    {
+                        "id": "call-sleep",
+                        "type": "function",
+                        "function": {
+                            "name": "bash_exec",
+                            "arguments": {"command": "sleep 90"},
+                        },
+                    }
+                ],
+            )
+        return _FakeResponse("委派任务正在后台运行。", [])
+
+    def stream(self, *_args, **_kwargs):
+        yield ""
+
+
+class _ReasoningOnlyLLM:
+    def invoke(self, *_args, **_kwargs):
+        response = _FakeResponse("<think>继续分析代码结构</think>", [])
+        response.reasoning_content = "继续分析代码结构"
+        return response
+
+    def stream(self, *_args, **_kwargs):
+        yield ""
+
+
 class _TextOnlyLLM:
     def invoke(self, *_args, **_kwargs):
         # Empty invoke text forces the stream fallback path (TOKEN chunks then FINAL).
@@ -975,3 +1011,76 @@ def test_runtime_can_replace_active_llm_after_fallback() -> None:
     assert runtime._reload_llm_for_session(StudioSession()) is True
     assert runtime.llm is replacement
     assert runtime.compactor.llm is replacement
+
+
+def test_meta_blocks_pure_shell_sleep_while_delegation_running(monkeypatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    dispatched: list[str] = []
+
+    async def _fake_dispatch(name, *_args, **_kwargs):
+        dispatched.append(name)
+        return "unexpected"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    running = SimpleNamespace(
+        _delegation_task=SimpleNamespace(done=lambda: False),
+    )
+    session = StudioSession()
+    session._session_manager = SimpleNamespace(_sessions={"avatar-session": running})
+    runtime = AgentRuntime(_SleepThenFinalLLM(), _ApproveGate())
+
+    async def _run():
+        return [
+            event
+            async for event in runtime.run_turn(
+                "让分身执行",
+                session,
+                agent_id="meta",
+            )
+        ]
+
+    events = asyncio.run(_run())
+
+    assert "bash_exec" not in dispatched
+    assert any(
+        event.type == EventType.TOOL_RESULT.value
+        and "后台完成事件" in str(event.data.get("result", ""))
+        for event in events
+    )
+
+
+def test_shell_wait_guard_does_not_match_business_commands() -> None:
+    from agenticx.runtime.agent_runtime import _is_pure_shell_wait_command
+
+    assert _is_pure_shell_wait_command("sleep 90") is True
+    assert _is_pure_shell_wait_command("wait") is True
+    assert _is_pure_shell_wait_command("python build.py --label sleep") is False
+    assert _is_pure_shell_wait_command("echo sleep 90") is False
+
+
+def test_delegation_reasoning_only_stall_pauses_early() -> None:
+    import asyncio
+
+    session = StudioSession()
+    runtime = AgentRuntime(_ReasoningOnlyLLM(), _ApproveGate(), max_tool_rounds=20)
+
+    async def _run():
+        return [
+            event
+            async for event in runtime.run_turn(
+                "执行委派任务",
+                session,
+                agent_id="dlg-reasoning",
+            )
+        ]
+
+    events = asyncio.run(_run())
+    paused = next(event for event in events if event.type == EventType.SUBAGENT_PAUSED.value)
+
+    assert paused.data["detector"] == "reasoning_only_stall"
+    assert paused.data["retryable"] is True
+    assert int(paused.data["round"]) < 20

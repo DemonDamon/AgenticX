@@ -1819,48 +1819,26 @@ def _find_or_create_avatar_session(
     session_manager: Any,
     avatar_id: str,
     avatar_config: Any,
+    *,
+    delegation_id: str = "",
+    owner_session_id: str = "",
+    task: str = "",
 ) -> Any:
-    """Find active avatar session, or create one using avatar defaults."""
+    """Create an isolated avatar session for one new delegation."""
     target_id = str(avatar_id or "").strip()
     if not target_id:
         raise ValueError("avatar_id is required")
-
-    sessions_dict = getattr(session_manager, "_sessions", None) or {}
-    best = None
-    best_updated = 0.0
-    for managed in sessions_dict.values():
-        if getattr(managed, "archived", False):
-            continue
-        if str(getattr(managed, "avatar_id", "")).strip() != target_id:
-            continue
-        updated = float(getattr(managed, "updated_at", 0) or 0)
-        if best is None or updated > best_updated:
-            best = managed
-            best_updated = updated
-    if best is not None:
-        return best
-
-    try:
-        rows = session_manager.list_sessions(avatar_id=target_id)
-    except Exception:
-        rows = []
-    if isinstance(rows, list):
-        for row in rows:
-            if not isinstance(row, dict) or row.get("archived"):
-                continue
-            sid = str(row.get("session_id", "")).strip()
-            if not sid:
-                continue
-            managed = session_manager.get(sid, touch=False)
-            if managed is not None:
-                return managed
 
     provider_name = str(getattr(avatar_config, "default_provider", "") or "").strip() or None
     model_name = str(getattr(avatar_config, "default_model", "") or "").strip() or None
     managed = session_manager.create(provider=provider_name, model=model_name)
     managed.avatar_id = target_id
     managed.avatar_name = str(getattr(avatar_config, "name", "") or "").strip() or target_id
-    managed.session_name = managed.avatar_name
+    task_title = " ".join(str(task or "").split())
+    managed.session_name = f"[委派] {task_title[:40]}" if task_title else managed.avatar_name
+    managed.session_kind = "delegation"
+    managed.delegation_id = str(delegation_id or "").strip() or None
+    managed.parent_owner_session_id = str(owner_session_id or "").strip() or None
     managed.updated_at = time.time()
 
     session = managed.studio_session
@@ -1875,6 +1853,23 @@ def _find_or_create_avatar_session(
     setattr(session, "_owner_session_id", managed.session_id)
     session_manager.persist(managed.session_id)
     return managed
+
+
+def _find_running_avatar_delegation(session_manager: Any, avatar_id: str) -> Any:
+    """Return the loaded session currently executing a delegation for this avatar."""
+    target_id = str(avatar_id or "").strip()
+    if not target_id:
+        return None
+    sessions_dict = getattr(session_manager, "_sessions", None) or {}
+    for managed in sessions_dict.values():
+        if getattr(managed, "archived", False):
+            continue
+        if str(getattr(managed, "avatar_id", "") or "").strip() != target_id:
+            continue
+        task = getattr(managed, "_delegation_task", None)
+        if task is not None and not task.done():
+            return managed
+    return None
 
 
 def _extract_recent_assistant_text(session: Any) -> str:
@@ -3475,9 +3470,8 @@ async def dispatch_meta_tool_async(
         if not isinstance(scratchpad, dict):
             return json.dumps({"ok": False, "error": "session scratchpad unavailable"}, ensure_ascii=False)
 
-        avatar_managed = _find_or_create_avatar_session(session_manager, avatar_id, avatar)
-
-        existing_task = getattr(avatar_managed, "_delegation_task", None)
+        avatar_managed = _find_running_avatar_delegation(session_manager, avatar_id)
+        existing_task = getattr(avatar_managed, "_delegation_task", None) if avatar_managed is not None else None
         existing_info = getattr(avatar_managed, "_delegation_info", None)
         if existing_task is not None and not existing_task.done():
             existing_dlg_id = ""
@@ -3498,6 +3492,19 @@ async def dispatch_meta_tool_async(
             )
 
         delegation_id = f"dlg-{uuid.uuid4().hex[:8]}"
+        owner_session_id = str(
+            getattr(session, "_owner_session_id", "")
+            or getattr(team_manager, "owner_session_id", "")
+            or ""
+        ).strip()
+        avatar_managed = _find_or_create_avatar_session(
+            session_manager,
+            avatar_id,
+            avatar,
+            delegation_id=delegation_id,
+            owner_session_id=owner_session_id,
+            task=task,
+        )
         cancel_event = asyncio.Event()
         meta_provider = str(getattr(session, "provider_name", "") or "").strip()
         meta_model = str(getattr(session, "model_name", "") or "").strip()
@@ -3580,11 +3587,7 @@ async def dispatch_meta_tool_async(
             {
                 "delegation_id": delegation_id,
                 "task": task,
-                "from_session": str(
-                    getattr(session, "_owner_session_id", "")
-                    or getattr(team_manager, "owner_session_id", "")
-                    or ""
-                ).strip(),
+                "from_session": owner_session_id,
                 "status": "running",
                 "started_at": time.time(),
                 "avatar_id": avatar_id,
