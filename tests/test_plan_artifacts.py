@@ -203,6 +203,28 @@ def test_update_rejects_plan_owned_by_another_session(tmp_path: Path) -> None:
         )
 
 
+def test_plan_mode_cannot_start_build_lifecycle(tmp_path: Path) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    session = _session(workspace)
+    created = _payload(plan_artifacts.create_plan_artifact(session, _create_args()))
+    session.plan_mode = True
+
+    with pytest.raises(ValueError, match="Build execution"):
+        plan_artifacts.update_plan_artifact(
+            session,
+            {
+                "plan_id": created["plan_id"],
+                "plan_path": created["path"],
+                "action": "start",
+            },
+        )
+
+    persisted = plan_artifacts.read_plan_artifact(created["path"])
+    assert persisted.status == "ready"
+    assert all(todo.status == "pending" for todo in persisted.todos)
+
+
 def test_update_preserves_unknown_frontmatter_fields(tmp_path: Path) -> None:
     workspace = tmp_path / "project"
     workspace.mkdir()

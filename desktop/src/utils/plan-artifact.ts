@@ -22,6 +22,12 @@ export type PlanArtifactPayload = {
   outcome?: string;
 };
 
+export type PlanArtifactMessage = {
+  role?: string;
+  toolName?: string;
+  content?: unknown;
+};
+
 export const NEAR_PLAN_BUILD_REQUEST = "near:plan-build-request";
 
 const TODO_STATUSES = new Set<PlanTodoStatus>([
@@ -117,6 +123,44 @@ export function parsePlanMarkdown(markdown: string, path: string): PlanArtifactP
   } catch {
     return null;
   }
+}
+
+export function isNaturalLanguagePlanBuildRequest(rawText: string): boolean {
+  const normalized = String(rawText ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[。！!]+$/g, "")
+    .replace(/\s+/g, " ");
+  if (!normalized || normalized.length > 80) return false;
+  if (/[?？]/.test(normalized) || /(?:吗|么|呢)$/.test(normalized)) return false;
+  if (/(?:不要|别|先不|暂不|不必|稍等|等等|don't|do not|not yet|wait)/i.test(normalized)) {
+    return false;
+  }
+  const command = normalized.replace(/^(?:好的?|可以|行|ok(?:ay)?)[,，\s]*/i, "");
+  return [
+    /^(?:开始|继续|执行|实施|开工)(?:\s*(?:build|构建|执行|实施|开发|干活))?(?:\s*(?:这个|当前|该)?计划)?(?:吧|了)?$/i,
+    /^(?:按|照|按照)(?:这个|当前|该)?计划(?:开始|继续)?(?:执行|实施|开发|构建|build)(?:吧|了)?$/i,
+    /^(?:start|continue|resume|run|execute)(?:\s+the)?\s+(?:build|implementation|plan)$/i,
+    /^build(?:\s+it)?$/i,
+  ].some((pattern) => pattern.test(command));
+}
+
+export function findLatestPlanArtifact(
+  messages: readonly PlanArtifactMessage[],
+  sessionId?: string,
+): PlanArtifactPayload | null {
+  const expectedSessionId = String(sessionId ?? "").trim();
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "tool") continue;
+    const toolName = String(message.toolName ?? "").trim();
+    if (toolName !== "plan_create" && toolName !== "plan_update") continue;
+    const plan = parsePlanArtifactToolResult(message.content);
+    if (!plan) continue;
+    if (expectedSessionId && plan.session_id !== expectedSessionId) continue;
+    return plan;
+  }
+  return null;
 }
 
 export function derivePlanProgress(plan: PlanArtifactPayload): {

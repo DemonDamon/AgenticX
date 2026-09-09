@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   derivePlanProgress,
+  findLatestPlanArtifact,
+  isNaturalLanguagePlanBuildRequest,
   parsePlanArtifactToolResult,
   parsePlanMarkdown,
   type PlanArtifactPayload,
@@ -66,5 +68,39 @@ todos:
       ],
     });
     expect(progress).toEqual({ completed: 1, total: 2, percent: 50 });
+  });
+
+  it("recognizes concise natural-language Build confirmations", () => {
+    expect(isNaturalLanguagePlanBuildRequest("好的，开始build吧")).toBe(true);
+    expect(isNaturalLanguagePlanBuildRequest("开始执行这个计划")).toBe(true);
+    expect(isNaturalLanguagePlanBuildRequest("继续")).toBe(true);
+    expect(isNaturalLanguagePlanBuildRequest("Start the build")).toBe(true);
+  });
+
+  it("does not treat plan feedback, questions, or negation as Build", () => {
+    expect(isNaturalLanguagePlanBuildRequest("把跳跃高度再改一下")).toBe(false);
+    expect(isNaturalLanguagePlanBuildRequest("计划改了吗？")).toBe(false);
+    expect(isNaturalLanguagePlanBuildRequest("先不要开始 build")).toBe(false);
+    expect(isNaturalLanguagePlanBuildRequest("可以开始了吗")).toBe(false);
+  });
+
+  it("finds the latest session-owned Plan snapshot including building plans", () => {
+    const building = {
+      ...payload,
+      action: "updated",
+      status: "building",
+      todos: [
+        { id: "one", content: "First task", status: "in_progress" },
+        { id: "two", content: "Second task", status: "pending" },
+      ],
+    } satisfies PlanArtifactPayload;
+    const messages = [
+      { role: "tool", toolName: "plan_create", content: JSON.stringify(payload) },
+      { role: "assistant", content: "Plan ready" },
+      { role: "tool", toolName: "plan_update", content: JSON.stringify(building) },
+    ];
+
+    expect(findLatestPlanArtifact(messages, "session-1")).toEqual(building);
+    expect(findLatestPlanArtifact(messages, "another-session")).toBeNull();
   });
 });

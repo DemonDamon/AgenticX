@@ -64,6 +64,8 @@ import {
   type TurnIntent,
 } from "../utils/turn-intent";
 import {
+  findLatestPlanArtifact,
+  isNaturalLanguagePlanBuildRequest,
   NEAR_PLAN_BUILD_REQUEST,
   type PlanArtifactPayload,
 } from "../utils/plan-artifact";
@@ -9921,9 +9923,23 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         );
         body.retrieval_mode = kbMode;
       }
+      const paneTurnIntent = pane.turnIntent ?? "default";
+      const currentPlanMessages =
+        useAppStore.getState().panes.find((item) => item.id === pane.id)?.messages
+        ?? pane.messages
+        ?? [];
+      const latestPlan = findLatestPlanArtifact(currentPlanMessages, requestSessionId);
+      const naturalLanguagePlanBuild =
+        !isContinuation
+        && !options?.turnIntentOverride
+        && paneTurnIntent === "plan"
+        && !isGroupPane
+        && targetAgentId === "meta"
+        && isNaturalLanguagePlanBuildRequest(text)
+        && (latestPlan?.status === "ready" || latestPlan?.status === "building");
       const requestTurnIntent = resolveRequestTurnIntent(
-        pane.turnIntent ?? "default",
-        options?.turnIntentOverride,
+        paneTurnIntent,
+        naturalLanguagePlanBuild ? "default" : options?.turnIntentOverride,
       );
       if (requestTurnIntent === "plan") body.plan_mode = true;
       if (requestTurnIntent === "isolate" || pane.isolateActive) body.isolate_run = true;

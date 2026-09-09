@@ -264,6 +264,11 @@ def update_plan_artifact(session: Any, arguments: dict[str, Any]) -> str:
         raise ValueError("Plan belongs to another session")
 
     action = str(arguments.get("action") or "").strip()
+    if getattr(session, "plan_mode", False) and action in {"start", "set_todo"}:
+        raise ValueError(
+            "Plan lifecycle execution requires Build execution; "
+            "Plan mode cannot start or advance implementation"
+        )
     if action == "start":
         if plan.status not in {"completed", "cancelled"}:
             plan.status = "building"
