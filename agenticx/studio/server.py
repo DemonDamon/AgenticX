@@ -4674,6 +4674,9 @@ def create_studio_app() -> FastAPI:
         session_id: str = Query(...),
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
+        from agenticx.runtime.subagent_runs.resolver import list_resolved_runs
+        from agenticx.runtime.subagent_runs.store import SubAgentRunStoreReadError
+
         _check_token(x_agx_desktop_token)
         managed = manager.get(session_id, touch=False)
         if managed is None:
@@ -4684,82 +4687,20 @@ def create_studio_app() -> FastAPI:
                 all_sids[:10],
             )
             raise HTTPException(status_code=404, detail="session not found")
-        if managed.team_manager is None:
-            registry_count = len(AgentTeamManager._registry)
-            logger.warning(
-                "[subagents/status] sid=%s tm=None registry_managers=%d",
+        try:
+            rows = list_resolved_runs(
                 session_id,
-                registry_count,
+                session_manager=manager,
+                team_manager=managed.team_manager,
+                include_legacy=False,
             )
-            global_rows = AgentTeamManager.collect_global_statuses(session_id=session_id)
-            if global_rows:
-                logger.warning(
-                    "[subagents/status] sid=%s tm=None fallback global=%d",
-                    session_id,
-                    len(global_rows),
-                )
-                return {"ok": True, "subagents": global_rows}
-            return {"ok": True, "subagents": []}
-        logger.info(
-            "[subagents/status] sid=%s tm=%s agents=%s tasks=%s",
-            session_id,
-            id(managed.team_manager),
-            list(managed.team_manager._agents.keys()),
-            {k: (not v.done()) for k, v in managed.team_manager._tasks.items()},
-        )
-        status_payload = managed.team_manager.get_status_with_task_fallback()
-        if (
-            isinstance(status_payload, dict)
-            and status_payload.get("ok")
-            and not (status_payload.get("subagents") or [])
-        ):
-            global_rows = AgentTeamManager.collect_global_statuses(session_id=session_id)
-            if global_rows:
-                logger.warning(
-                    "[subagents/status] sid=%s local empty, fallback global=%d",
-                    session_id,
-                    len(global_rows),
-                )
-                status_payload = {"ok": True, "subagents": global_rows}
-
-        if not isinstance(status_payload, dict):
-            status_payload = {"ok": True, "subagents": []}
-        rows = status_payload.get("subagents") or []
-        if not isinstance(rows, list):
-            rows = []
-        known_ids = {str(r.get("agent_id", "")) for r in rows if isinstance(r, dict)}
-        for _sid, _managed in manager._sessions.items():
-            info = getattr(_managed, "_delegation_info", None)
-            if not isinstance(info, dict):
-                continue
-            dlg_id = str(info.get("delegation_id", "")).strip()
-            if not dlg_id or dlg_id in known_ids:
-                continue
-            if _sid == session_id:
-                continue
-            from_session = str(info.get("from_session", "")).strip()
-            if not from_session or from_session != session_id:
-                continue
-            task_obj = getattr(_managed, "_delegation_task", None)
-            is_running = task_obj is not None and not task_obj.done()
-            dlg_status = str(info.get("status", "")).strip()
-            if is_running:
-                dlg_status = "running"
-            elif not dlg_status:
-                dlg_status = "completed" if (task_obj is not None and task_obj.done()) else "unknown"
-            rows.append({
-                "agent_id": dlg_id,
-                "name": str(info.get("avatar_name", "")).strip() or str(getattr(_managed, "avatar_name", "")).strip() or dlg_id,
-                "role": "delegated avatar",
-                "task": str(info.get("task", "")).strip(),
-                "status": dlg_status,
-                "result_summary": str(info.get("summary", "")).strip() if dlg_status in ("completed", "failed") else None,
-                "error_text": str(info.get("error", "")).strip() if dlg_status == "failed" else None,
-                "delegation": True,
-                "avatar_session_id": str(info.get("avatar_session_id", _sid)).strip(),
-            })
-        status_payload["subagents"] = rows
-        return status_payload
+        except SubAgentRunStoreReadError as exc:
+            return {
+                "ok": False,
+                "error": "subagent_run_store_read_failed",
+                "detail": str(exc),
+            }
+        return {"ok": True, "subagents": rows, "count": len(rows)}
 
     @app.post("/api/subagent/retry")
     async def retry_subagent(

@@ -102,8 +102,34 @@ def test_running_delegation_is_found_across_avatar_sessions() -> None:
     running = manager.create()
     running.avatar_id = "avatar-1"
     running._delegation_task = SimpleNamespace(done=lambda: False)
-    running._delegation_info = {"delegation_id": "dlg-running"}
+    running._delegation_info = {
+        "delegation_id": "dlg-running",
+        "from_session": "owner-a",
+    }
 
-    found = meta_tools._find_running_avatar_delegation(manager, "avatar-1")
+    found = meta_tools._find_running_avatar_delegation(
+        manager,
+        "avatar-1",
+        owner_session_id="owner-a",
+    )
 
     assert found is running
+
+
+def test_running_delegation_lookup_isolated_by_owner_session() -> None:
+    manager = _FakeSessionManager()
+    other_owner = manager.create()
+    other_owner.avatar_id = "avatar-1"
+    other_owner._delegation_task = SimpleNamespace(done=lambda: False)
+    other_owner._delegation_info = {
+        "delegation_id": "dlg-owner-b",
+        "from_session": "owner-b",
+    }
+
+    found = meta_tools._find_running_avatar_delegation(
+        manager,
+        "avatar-1",
+        owner_session_id="owner-a",
+    )
+
+    assert found is None
