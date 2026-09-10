@@ -225,6 +225,7 @@ import {
   shouldShowStopButton,
   type SessionExecutionState,
 } from "../utils/streaming-stop-policy";
+import { queuedMessagesForSession } from "../utils/pending-message-queue";
 import { shouldApplyScrollPinFromEvent, shouldPinScrollOnUserSend } from "../utils/chat-scroll-pin";
 import {
   TURN_INTERRUPTED_TOAST,
@@ -2846,7 +2847,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [pane.messages],
   );
   const toolRoundBudget = 60;
-  const queuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
+  const paneQueuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
+  const queuedMessages = useMemo(
+    () => queuedMessagesForSession(paneQueuedMessages, pane.sessionId),
+    [pane.sessionId, paneQueuedMessages],
+  );
   const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
   const takePendingMessage = useAppStore((s) => s.takePendingMessage);
   const removePendingMessage = useAppStore((s) => s.removePendingMessage);
@@ -13854,7 +13859,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     executionState: sessionExecutionState,
                     currentSessionId: sid,
                   });
-                  const queue = useAppStore.getState().pendingMessages[paneId] ?? [];
+                  const queue = queuedMessagesForSession(
+                    useAppStore.getState().pendingMessages[paneId] ?? [],
+                    sid,
+                  );
 
                   if (streamActive) {
                     const sendQueuedNow =
