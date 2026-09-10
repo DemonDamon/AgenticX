@@ -273,16 +273,19 @@ body {
   line-height: inherit;
 }
 
-/* 固定操作图标行高，flex gap 从行盒顶/底计量 */
+/* 固定操作图标行高，flex gap 从行盒顶/底计量；窄宽度只裁切、不换行 */
 .agx-assistant-action-icons {
   min-height: 1.25rem; /* h-5 */
   /* | 到模型名首字的视觉距离；1/2/3 段都用这一档 */
   --turn-rule-gutter: 10px;
+  overflow: hidden;
 }
 
 /* 行上 gap-0.5=2px，按钮 20px / 图标 14px 各留 3px。补齐后图标墨水到 | 也是 10px */
 .agx-assistant-action-icons > [data-turn-meta] {
   margin-left: calc(var(--turn-rule-gutter) - 2px - 3px);
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* 13px + 半透明描边会落在半像素上，暗底发糊；钉到偶数尺寸并去掉多余 padding */
@@ -291,6 +294,7 @@ body {
   width: 1.25rem;
   height: 1.25rem;
   padding: 0;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
 }

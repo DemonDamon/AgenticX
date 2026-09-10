@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  ASSISTANT_ACTION_ICON_ROW_CLASS,
   ASSISTANT_TIMELINE_PX,
   getAssistantActionOffsetClass,
   getAssistantActionStyle,
@@ -32,4 +33,11 @@ test("assistant action style uses the configured visual rail", () => {
 test("assistant action offset class is intentionally empty so style wins", () => {
   assert.equal(getAssistantActionOffsetClass(), "");
   assert.equal(getAssistantActionOffsetClass({ inReActRow: true }), "");
+});
+
+test("assistant action icon row stays a single clipped line", () => {
+  assert.match(ASSISTANT_ACTION_ICON_ROW_CLASS, /\bflex-nowrap\b/);
+  assert.match(ASSISTANT_ACTION_ICON_ROW_CLASS, /\boverflow-hidden\b/);
+  assert.match(ASSISTANT_ACTION_ICON_ROW_CLASS, /\bmin-w-0\b/);
+  assert.doesNotMatch(ASSISTANT_ACTION_ICON_ROW_CLASS, /\bflex-wrap\b/);
 });

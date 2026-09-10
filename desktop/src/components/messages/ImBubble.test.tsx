@@ -307,4 +307,36 @@ describe("ImBubble assistant protocol boundary", () => {
     expect(cardIdx).toBeGreaterThan(rowIdx);
     expect(iconsIdx).toBeGreaterThan(cardIdx);
   });
+
+  it("keeps copy/usage and follow-up chips on a single clipped action line", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "followup-squeeze",
+          role: "assistant",
+          content: "分析完毕。",
+          suggestedQuestions: ["帮我估算100MW训练集群在内蒙古vs长三角的年度成本差"],
+          usage: {
+            inputTokens: 1100,
+            outputTokens: 200,
+            cachedTokens: 1038,
+            reasoningTokens: 0,
+            totalTokens: 1300,
+          },
+          model: "kimi-k2.6",
+        }}
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onFavoriteMessage={() => {}}
+        onFollowupClick={() => {}}
+      />,
+    );
+
+    expect(html).toMatch(/class="[^"]*agx-assistant-action-icons[^"]*\bflex-nowrap\b[^"]*"/);
+    expect(html).toMatch(/class="[^"]*agx-assistant-action-icons[^"]*\boverflow-hidden\b[^"]*"/);
+    expect(html).not.toMatch(/class="[^"]*agx-assistant-action-icons[^"]*\bflex-wrap\b[^"]*"/);
+    expect(html).toContain("agx-followup-chip");
+    expect(html).toContain("帮我估算100MW训练集群在内蒙古vs长三角的年度成本差");
+    expect(html).toContain("缓存");
+  });
 });

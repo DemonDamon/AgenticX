@@ -23,6 +23,8 @@ describe("MessageTurnMeta", () => {
     expect(html).toContain("缓存 94.0%");
     expect(html).toContain("本轮缓存命中");
     expect(html).toContain("data-turn-cache-hit");
+    expect(html).toContain("data-turn-usage-counts");
+    expect(html).toContain("data-turn-model-cluster");
     expect(html).toContain("leading-5");
     expect(html).toContain("overflow-x-hidden");
     expect(html).toContain("data-turn-model-chip");
