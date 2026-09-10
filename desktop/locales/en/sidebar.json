@@ -128,6 +128,7 @@
     "addParentToWorkspace": "Add parent folder to workspace",
     "refCurrent": "Cite in current chat",
     "refNew": "Cite in new chat",
+    "referenceAdded": "Added as a read-only reference",
     "noActivePane": "No active pane"
   },
   "history": {

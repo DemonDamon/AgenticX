@@ -49,3 +49,21 @@ def test_atomic_snapshot_writes_and_cleanup(manager: SessionManager, tmp_path: P
 
     tmp_files = list(Path(manager._sessions_root).rglob("*.agx.tmp"))
     assert not tmp_files
+
+
+def test_context_refs_restore_binary_document_as_read_only_reference(
+    manager: SessionManager, tmp_path: Path
+) -> None:
+    sid = "binary-ref"
+    document = tmp_path / "manual.docx"
+    document.write_bytes(b"PK\x03\x04\xff\xfe")
+    source = manager.create(session_id=sid).studio_session
+    source.context_files = {str(document): "parsed body"}
+    manager._save_context_refs(sid, source)
+
+    restored = manager.create(session_id="restored").studio_session
+    manager._load_context_refs(sid, restored)
+
+    assert restored.context_files == {
+        str(document): f"[文件引用] {document}",
+    }

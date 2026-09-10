@@ -7,6 +7,7 @@ export const GLOBAL_SEARCH_REFERENCE_FILE = "near:global-search:reference-file";
 export const GLOBAL_SEARCH_WORKSPACE_ADDED = "near:global-search:workspace-added";
 
 export type GlobalSearchAddToWorkspaceDetail = {
+  paneId: string;
   folderPath: string;
 };
 
@@ -24,10 +25,17 @@ export function closeGlobalSearch(): void {
   window.dispatchEvent(new CustomEvent(GLOBAL_SEARCH_CLOSE_EVENT));
 }
 
-export function dispatchGlobalSearchAddToWorkspace(folderPath: string): void {
+export function createGlobalSearchWorkspaceDetail(
+  paneId: string,
+  folderPath: string,
+): GlobalSearchAddToWorkspaceDetail {
+  return { paneId, folderPath };
+}
+
+export function dispatchGlobalSearchAddToWorkspace(paneId: string, folderPath: string): void {
   window.dispatchEvent(
     new CustomEvent<GlobalSearchAddToWorkspaceDetail>(GLOBAL_SEARCH_ADD_TO_WORKSPACE, {
-      detail: { folderPath },
+      detail: createGlobalSearchWorkspaceDetail(paneId, folderPath),
     })
   );
 }

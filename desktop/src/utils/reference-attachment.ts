@@ -14,10 +14,39 @@ export type FileReferenceOpenRequest = {
   lineRange?: { start: number; end: number };
 };
 
+export type ComposerReferenceToken = {
+  sourcePath?: string;
+  label?: string;
+};
+
 function basename(path: string): string {
   const norm = path.replace(/\\/g, "/");
   const idx = norm.lastIndexOf("/");
   return idx >= 0 ? norm.slice(idx + 1) : norm;
+}
+
+function isAbsoluteFilesystemPath(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+/**
+ * Build explicit read-reference placeholders from composer chips.
+ *
+ * Reading the live chip DOM at send time avoids dropping a grant when React
+ * attachment state has not committed yet. Plain text that merely looks like
+ * an absolute @path never enters this helper and therefore grants nothing.
+ */
+export function buildContextFilePlaceholderPayload(
+  tokens: readonly ComposerReferenceToken[],
+): Record<string, string> {
+  const payload: Record<string, string> = {};
+  for (const token of tokens) {
+    const sourcePath = String(token.sourcePath || "").trim();
+    if (!sourcePath || !isAbsoluteFilesystemPath(sourcePath)) continue;
+    const label = String(token.label || "").trim() || basename(sourcePath);
+    payload[sourcePath] = `[文件引用] ${label}`;
+  }
+  return payload;
 }
 
 export function buildContextFileKeyFromAttachment(

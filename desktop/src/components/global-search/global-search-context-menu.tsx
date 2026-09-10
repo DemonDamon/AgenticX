@@ -93,8 +93,12 @@ export function buildGlobalSearchContextMenuItems(options: BuildMenuOptions): Co
   const addWorkspaceItem: ContextMenuItem = {
     label: isFolder ? tSearch("search.addFolderToWorkspace") : tSearch("search.addParentToWorkspace"),
     onSelect: () => {
+      if (!paneId) {
+        onToast(tSearch("search.noActivePane"), "warning");
+        return;
+      }
       const folderPath = isFolder ? item.path : parentFolderPath(item.path);
-      dispatchGlobalSearchAddToWorkspace(folderPath);
+      dispatchGlobalSearchAddToWorkspace(paneId, folderPath);
       onClosePanel();
     },
   };
@@ -107,6 +111,7 @@ export function buildGlobalSearchContextMenuItems(options: BuildMenuOptions): Co
         return;
       }
       dispatchGlobalSearchReferenceFile(paneId, item.path, "current");
+      onToast(tSearch("search.referenceAdded"));
       onClosePanel();
     },
   };
@@ -119,6 +124,7 @@ export function buildGlobalSearchContextMenuItems(options: BuildMenuOptions): Co
         return;
       }
       dispatchGlobalSearchReferenceFile(paneId, item.path, "new");
+      onToast(tSearch("search.referenceAdded"));
       onClosePanel();
     },
   };

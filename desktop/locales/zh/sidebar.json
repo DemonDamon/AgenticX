@@ -128,6 +128,7 @@
     "addParentToWorkspace": "添加文件所在文件夹至工作区",
     "refCurrent": "引用至当前对话",
     "refNew": "引用至新对话",
+    "referenceAdded": "已作为只读引用添加",
     "noActivePane": "无激活窗格"
   },
   "history": {

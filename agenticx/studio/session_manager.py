@@ -2614,8 +2614,11 @@ class SessionManager:
         for fpath in paths:
             if not isinstance(fpath, str) or not os.path.isfile(fpath):
                 continue
-            with open(fpath, "r", encoding="utf-8") as fh:
-                session.context_files[fpath] = fh.read()
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    session.context_files[fpath] = fh.read()
+            except UnicodeDecodeError:
+                session.context_files[fpath] = f"[文件引用] {fpath}"
 
     @staticmethod
     def _user_ts_before(raw: list[dict], start_index: int) -> int:

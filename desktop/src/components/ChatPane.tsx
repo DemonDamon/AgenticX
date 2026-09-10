@@ -307,6 +307,7 @@ import {
 } from "../utils/assistant-output";
 import {
   buildContextFileKeyFromAttachment,
+  buildContextFilePlaceholderPayload,
   canonicalizeUserReferenceMentions,
   findReferenceAttachmentMeta,
   isWorkspaceReferenceAttachment,
@@ -403,8 +404,10 @@ import {
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "../utils/backend-scope";
 import {
+  GLOBAL_SEARCH_ADD_TO_WORKSPACE,
   GLOBAL_SEARCH_REFERENCE_FILE,
   GLOBAL_SEARCH_WORKSPACE_ADDED,
+  type GlobalSearchAddToWorkspaceDetail,
   type GlobalSearchReferenceFileDetail,
 } from "./global-search/global-search-events";
 import {
@@ -9128,6 +9131,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       snippetContent: file.snippetContent,
       htmlElementRef: file.htmlElementRef,
     }));
+    const composerReferencePlaceholders = buildContextFilePlaceholderPayload(
+      Array.from(
+        composerRef.current?.querySelectorAll<HTMLElement>('[data-ref-token="1"]') ?? [],
+      ).map((token) => ({
+        sourcePath: token.getAttribute("data-source-path") || "",
+        label: token.getAttribute("data-ref-name") || token.textContent || "",
+      })),
+    );
     const rawUserAttachments: MessageAttachment[] =
       retryAttachments && retryAttachments.length > 0
         ? retryAttachments.map((item) => ({ ...item }))
@@ -9961,6 +9972,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         const skillSlugs = [...new Set(skillSlugMatches.map((m) => m.replace("@skill://", "")))];
         if (skillSlugs.length > 0) body.skill_slugs = skillSlugs;
       }
+      const contextFilePayload: Record<string, string> = {
+        ...routedAttachmentNames,
+        ...composerReferencePlaceholders,
+      };
       if (sendAttachments.length > 0) {
         const imageInputs = sendAttachments
           .filter((file) => !!file.dataUrl && file.mimeType.startsWith("image/"))
@@ -9979,7 +9994,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (imageInputs.length > 0) {
           body.image_inputs = imageInputs;
         }
-        const contextFilePayload: Record<string, string> = routedAttachmentNames;
         for (const file of sendAttachments) {
           const key = buildContextFileKeyFromAttachment(file);
           if (!key) continue;
@@ -10009,9 +10023,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             contextFilePayload[key] = `[附件] ${file.name}`;
           }
         }
-        if (Object.keys(contextFilePayload).length > 0) {
-          body.context_files = contextFilePayload;
-        }
+      }
+      if (Object.keys(contextFilePayload).length > 0) {
+        body.context_files = contextFilePayload;
       }
       try {
         const routingDecision = decideAttachmentRouting({
@@ -12304,6 +12318,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
 
   useEffect(() => {
+    const onAddWorkspace = (event: Event) => {
+      const detail = (event as CustomEvent<GlobalSearchAddToWorkspaceDetail>).detail;
+      if (!detail || detail.paneId !== pane.id || !detail.folderPath) return;
+      composerWorkspace.requestAttach([detail.folderPath]);
+    };
     const onReference = (event: Event) => {
       const detail = (event as CustomEvent<GlobalSearchReferenceFileDetail>).detail;
       if (!detail || detail.paneId !== pane.id) return;
@@ -12314,13 +12333,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (!detail?.paneId || detail.paneId !== pane.id) return;
       setTaskspaceAutoRefreshKey((k) => k + 1);
     };
+    window.addEventListener(GLOBAL_SEARCH_ADD_TO_WORKSPACE, onAddWorkspace);
     window.addEventListener(GLOBAL_SEARCH_REFERENCE_FILE, onReference);
     window.addEventListener(GLOBAL_SEARCH_WORKSPACE_ADDED, onWorkspaceAdded);
     return () => {
+      window.removeEventListener(GLOBAL_SEARCH_ADD_TO_WORKSPACE, onAddWorkspace);
       window.removeEventListener(GLOBAL_SEARCH_REFERENCE_FILE, onReference);
       window.removeEventListener(GLOBAL_SEARCH_WORKSPACE_ADDED, onWorkspaceAdded);
     };
-  }, [insertGlobalSearchFileReference, pane.id]);
+  }, [composerWorkspace.requestAttach, insertGlobalSearchFileReference, pane.id]);
 
   const maxTaskspaceWidth =
     paneWidth > 0

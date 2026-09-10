@@ -1,4 +1,5 @@
-import { Check } from "lucide-react";
+import { useState } from "react";
+import { Check, ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { TaskspaceMountMode } from "../../store";
@@ -28,6 +29,10 @@ export function MountModeDialog({
 }: Props) {
   const { t } = useTranslation("chat");
   const { t: tCommon } = useTranslation("common");
+  const [advancedOpen, setAdvancedOpen] = useState(mode === "link");
+  const visibleOptions = advancedOpen
+    ? OPTIONS
+    : OPTIONS.filter((option) => option.id !== "link");
   return createPortal(
     <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-md rounded-xl border border-border bg-surface-base p-4 shadow-2xl">
@@ -36,7 +41,7 @@ export function MountModeDialog({
           {sources.length === 1 ? sources[0] : t("composer.mountPaths", { count: sources.length })}
         </div>
         <div className="space-y-2">
-          {OPTIONS.map((opt) => {
+          {visibleOptions.map((opt) => {
             const active = mode === opt.id;
             const danger = "danger" in opt && opt.danger;
             const desc =
@@ -81,6 +86,18 @@ export function MountModeDialog({
               </button>
             );
           })}
+          <button
+            type="button"
+            className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[12px] text-text-faint hover:bg-surface-hover hover:text-text-muted"
+            onClick={() => setAdvancedOpen((open) => !open)}
+            aria-expanded={advancedOpen}
+          >
+            <ChevronDown
+              className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
+              strokeWidth={1.8}
+            />
+            <span>{t("composer.mountAdvanced")}</span>
+          </button>
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <button
