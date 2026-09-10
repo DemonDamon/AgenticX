@@ -573,6 +573,25 @@
     "effectExternalWrite": "External write",
     "effectUnknown": "Unknown effect",
     "effectUnknownHint": "The ledger cannot determine whether this step wrote data. Treat it with caution.",
+    "chain": "Causal chain",
+    "chainSteps": "{{count}} steps",
+    "chainInferred": "{{count}} inferred",
+    "chainEmpty": "No prior cause could be traced",
+    "chainCopy": "Copy this chain",
+    "chainCopied": "Causal chain copied",
+    "chainCopyFailed": "Failed to copy the causal chain",
+    "chainLegend": "Solid links come from ledger fields. Dashed links are inferred for this view and are not written back to the run record.",
+    "chainKind": {
+      "recorded": "Recorded",
+      "inferred": "Inferred"
+    },
+    "chainReason": {
+      "parent_event": "Parent event",
+      "tool_call_id": "Tool-call pairing",
+      "wait_pair": "Confirmation / clarification pairing",
+      "path_in_tool_input": "Path appeared in tool input",
+      "failed_result_to_error": "Error after a failed result"
+    },
     "cannotBranch": "This node cannot be branched",
     "branchFromBefore": "Branch from before this step",
     "branchRequestedStep": "Requested step",

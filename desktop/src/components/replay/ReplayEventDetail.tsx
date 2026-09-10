@@ -1,6 +1,8 @@
 import { ExternalLink, FileText, GitBranch, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { formatToolDisplayName } from "../messages/tool-display-name";
+import { ReplayCausalChain } from "./ReplayCausalChain";
+import type { CausalChain } from "./replay-causal-chain";
 import { formatReplayEventLabel } from "./replay-event-label";
 import type { ReplayPayloadDisplay } from "./replay-payload";
 import type { EffectClass, ReplayEvent } from "./replay-types";
@@ -16,6 +18,10 @@ type Props = {
   canBranch?: boolean;
   branchDisabledReason?: string;
   onBranchFromStep?: (event: ReplayEvent) => void;
+  chain?: CausalChain | null;
+  chainEvents?: ReplayEvent[];
+  onCopyChain?: (markdown: string) => Promise<void>;
+  onSelectChainEvent?: (eventId: string) => void;
 };
 
 function payloadString(payload: Record<string, unknown> | undefined, keys: string[]): string {
@@ -45,6 +51,10 @@ export function ReplayEventDetail({
   canBranch = false,
   branchDisabledReason,
   onBranchFromStep,
+  chain,
+  chainEvents,
+  onCopyChain,
+  onSelectChainEvent,
 }: Props) {
   const { t } = useTranslation("workspace");
   if (!event) {
@@ -100,6 +110,14 @@ export function ReplayEventDetail({
           </p>
         ) : null}
       </div>
+      {chain && chain.eventIds.length > 0 ? (
+        <ReplayCausalChain
+          chain={chain}
+          events={chainEvents ?? []}
+          onCopyChain={onCopyChain}
+          onSelectChainEvent={onSelectChainEvent}
+        />
+      ) : null}
       {payloadText ? (
         <details className="mt-3 rounded-md bg-surface-panel">
           <summary className="cursor-pointer px-2 py-1.5 text-[10px] text-text-muted hover:text-text-strong">

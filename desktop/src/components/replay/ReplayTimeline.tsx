@@ -69,6 +69,8 @@ type Props = {
   onTogglePlay: () => void;
   onStep: (direction: -1 | 1) => void;
   onShowMore?: () => void;
+  chainEventIds?: ReadonlySet<string>;
+  inferredToEventIds?: ReadonlySet<string>;
 };
 
 function durationForEvent(event: ReplayEvent, spans: ReplaySpan[]): number | null {
@@ -110,6 +112,8 @@ export function ReplayTimeline({
   onTogglePlay,
   onStep,
   onShowMore,
+  chainEventIds,
+  inferredToEventIds,
 }: Props) {
   const { t } = useTranslation("workspace");
   const cursorEvents = useMemo(
@@ -172,19 +176,22 @@ export function ReplayTimeline({
           const duration = durationForEvent(event, projection.spans);
           const span = spanForEvent(event, projection.spans);
           const isProblem = event.type === "error" || event.type === "ledger_gap";
+          const inChain = chainEventIds?.has(event.eventId) === true;
+          const inferredTo = inferredToEventIds?.has(event.eventId) === true;
+          const dimmed = Boolean(chainEventIds && chainEventIds.size > 0 && !inChain);
           return (
             <button
               key={event.eventId}
               type="button"
               aria-label={t("replay.stepAria", { seq: event.seq })}
               aria-current={current ? "step" : undefined}
-              className={`grid w-full grid-cols-[42px_66px_minmax(62px,90px)_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 text-left transition ${
+              className={`relative grid w-full grid-cols-[42px_66px_minmax(62px,90px)_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 text-left transition ${
                 selected
                   ? "bg-surface-card-strong"
                   : current
                     ? "bg-surface-card"
                   : "hover:bg-surface-hover"
-              }`}
+              }${dimmed ? " opacity-40" : ""}`}
               onClick={() => onSelect(event.eventId)}
               onKeyDown={(keyboardEvent) => {
                 if ([" ", "Spacebar", "Home", "End", "ArrowLeft", "ArrowRight"].includes(
@@ -194,6 +201,16 @@ export function ReplayTimeline({
                 }
               }}
             >
+              {inChain ? (
+                <span
+                  aria-hidden
+                  className={`absolute inset-y-0 left-0 w-0.5 ${
+                    inferredTo
+                      ? "border-l-2 border-dashed border-status-warning"
+                      : "bg-text-strong"
+                  }`}
+                />
+              ) : null}
               <span className="font-mono text-[10px] text-text-faint">#{event.seq}</span>
               <span className="font-mono text-[10px] text-text-faint">
                 {t("replay.relativeTime", { time: formatDuration(event.ts - firstTs) })}

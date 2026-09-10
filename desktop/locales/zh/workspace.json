@@ -573,6 +573,25 @@
     "effectExternalWrite": "外部写入",
     "effectUnknown": "未知副作用",
     "effectUnknownHint": "账本无法确定该步骤是否产生写入，请谨慎判断。",
+    "chain": "因果链",
+    "chainSteps": "{{count}} 步",
+    "chainInferred": "{{count}} 处推断",
+    "chainEmpty": "没有可追溯的前因",
+    "chainCopy": "复制这条链",
+    "chainCopied": "已复制因果链",
+    "chainCopyFailed": "复制因果链失败",
+    "chainLegend": "实线来自账本字段；虚线是本次打开时推算的，不会写回运行记录。",
+    "chainKind": {
+      "recorded": "已记录",
+      "inferred": "推断"
+    },
+    "chainReason": {
+      "parent_event": "父事件",
+      "tool_call_id": "工具调用配对",
+      "wait_pair": "确认 / 澄清配对",
+      "path_in_tool_input": "路径出现在工具参数",
+      "failed_result_to_error": "失败结果之后的错误"
+    },
     "cannotBranch": "该节点不可分叉",
     "branchFromBefore": "从此前分叉",
     "branchRequestedStep": "请求步骤",

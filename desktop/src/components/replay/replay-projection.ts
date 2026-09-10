@@ -64,7 +64,7 @@ function stableEvents(events: ReplayEvent[]): { events: ReplayEvent[]; warnings:
   return { events: kept, warnings };
 }
 
-function failedToolResult(event: ReplayEvent): boolean {
+export function failedToolResult(event: ReplayEvent): boolean {
   const payloadStatus = typeof event.payload?.status === "string" ? event.payload.status : "";
   return payloadStatus === "failed"
     || payloadStatus === "error"

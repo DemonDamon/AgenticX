@@ -411,6 +411,40 @@ describe("replay mounted behavior", () => {
     expect(useReplayStore.getState().getPane("pane-b").selectedEventId).toBeNull();
   });
 
+  it("dims timeline rows outside the selected causal chain", async () => {
+    const events: ReplayEvent[] = [
+      { ...replayEvent(1), type: "round_started", title: "round_started" },
+      {
+        ...replayEvent(2),
+        type: "tool_call",
+        title: "bash_exec",
+        toolCallId: "call-1",
+      },
+      {
+        ...replayEvent(3),
+        type: "tool_result",
+        title: "bash_exec",
+        toolCallId: "call-1",
+        parentEventId: "event-2",
+      },
+    ];
+    vi.mocked(listReplayRuns).mockResolvedValue(runsResponse([run]));
+    vi.mocked(listReplayEvents).mockResolvedValue(eventsPage(events));
+
+    render(panel());
+    await flushEffects();
+    act(() => useReplayStore.getState().seek("pane-a", 3));
+    fireEvent.click(screen.getByRole("button", { name: "回放步骤 #3" }));
+
+    expect(screen.getByRole("button", { name: "回放步骤 #1" }).className)
+      .toContain("opacity-40");
+    expect(screen.getByText("因果链")).toBeTruthy();
+    expect(screen.getByText(/已记录/)).toBeTruthy();
+    expect(vi.mocked(listReplayEvents).mock.calls.every((call) => (
+      call[3]?.includePayload !== true
+    ))).toBe(true);
+  });
+
   it("renders precomputed bounded payload text with an honest truncation notice", () => {
     const payloadDisplay = buildReplayPayloadDisplay({
       output: "x".repeat(32 * 1024 * 1024),

@@ -11,6 +11,7 @@ import {
   listReplayEvents,
   listReplayRuns,
 } from "./replay-api";
+import { buildCausalChain } from "./replay-causal-chain";
 import { ReplayControls } from "./ReplayControls";
 import { ReplayEventDetail } from "./ReplayEventDetail";
 import { projectReplay } from "./replay-projection";
@@ -370,6 +371,20 @@ export function RunReplayPanel({
   const selectedEvent = effectiveReplay.events.find(
     (event) => event.eventId === effectiveReplay.selectedEventId,
   ) ?? null;
+  const selectedChain = useMemo(() => {
+    if (!selectedEvent) return null;
+    return buildCausalChain(effectiveReplay.events, selectedEvent.eventId);
+  }, [effectiveReplay.events, selectedEvent]);
+  const chainEventIds = selectedChain && selectedChain.eventIds.length > 0
+    ? new Set(selectedChain.eventIds)
+    : undefined;
+  const inferredToEventIds = selectedChain
+    ? new Set(
+      selectedChain.hops
+        .filter((hop) => hop.kind === "inferred")
+        .map((hop) => hop.toEventId),
+    )
+    : undefined;
 
   useEffect(() => {
     const targetKey = focusTarget
@@ -649,6 +664,8 @@ export function RunReplayPanel({
             }}
             onStep={(direction) => useReplayStore.getState().step(paneId, direction)}
             onShowMore={() => useReplayStore.getState().showMoreEvents(paneId)}
+            chainEventIds={chainEventIds}
+            inferredToEventIds={inferredToEventIds}
           />
           <ReplayEventDetail
             event={selectedEvent}
@@ -668,6 +685,14 @@ export function RunReplayPanel({
               setBranchError(null);
               setBranchStage("validate");
               setBranchEvent(event);
+            }}
+            chain={selectedChain}
+            chainEvents={effectiveReplay.events}
+            onCopyChain={(markdown) => navigator.clipboard.writeText(markdown)}
+            onSelectChainEvent={(eventId) => {
+              const target = effectiveReplay.events.find((item) => item.eventId === eventId);
+              useReplayStore.getState().selectEvent(paneId, eventId);
+              if (target) useReplayStore.getState().seek(paneId, target.seq);
             }}
           />
         </div>

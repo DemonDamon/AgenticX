@@ -261,6 +261,61 @@ describe("replay UI", () => {
     expect(detail).not.toContain("<details open");
   });
 
+  it("shows a recorded causal chain in event detail", () => {
+    const call = { ...event(1), type: "tool_call", title: "bash_exec" };
+    const result = {
+      ...event(2),
+      type: "tool_result",
+      title: "bash_exec",
+      parentEventId: "event-1",
+    };
+    const detail = render(
+      <ReplayEventDetail
+        event={result}
+        payloadLoading={false}
+        payloadError={null}
+        onLoadPayload={() => {}}
+        chain={{
+          targetEventId: "event-2",
+          eventIds: ["event-1", "event-2"],
+          hops: [{
+            fromEventId: "event-1",
+            toEventId: "event-2",
+            kind: "recorded",
+            reason: "parent_event",
+          }],
+          inferredCount: 0,
+        }}
+        chainEvents={[call, result]}
+      />,
+    );
+
+    expect(detail).toContain("因果链");
+    expect(detail).toContain("已记录");
+  });
+
+  it("shows an empty causal chain message when there are no hops", () => {
+    const isolated = { ...event(1), type: "round_started" };
+    const detail = render(
+      <ReplayEventDetail
+        event={isolated}
+        payloadLoading={false}
+        payloadError={null}
+        onLoadPayload={() => {}}
+        chain={{
+          targetEventId: isolated.eventId,
+          eventIds: [isolated.eventId],
+          hops: [],
+          inferredCount: 0,
+        }}
+        chainEvents={[isolated]}
+      />,
+    );
+
+    expect(detail).toContain("没有可追溯的前因");
+    expect(detail).not.toContain("复制这条链");
+  });
+
   it("keeps branch action visible but disabled with a localized reason", () => {
     const detail = render(
       <ReplayEventDetail
