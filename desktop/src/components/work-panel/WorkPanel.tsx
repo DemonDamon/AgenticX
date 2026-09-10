@@ -30,7 +30,7 @@ import {
   RefreshCw,
   Share2,
   Terminal as TerminalIcon,
-  BarChart3,
+  CirclePlay,
   X,
 } from "lucide-react";
 import { useAppStore, type Avatar, type ChatPane, type Message, type PaneTerminalTab, type SubAgent } from "../../store";
@@ -1800,7 +1800,7 @@ export function WorkPanel({
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
               onClick={openTimelineTab}
             >
-              <BarChart3 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
+              <CirclePlay className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
               {t("work.tabTimeline")}
             </button>
             <button
@@ -1855,7 +1855,7 @@ export function WorkPanel({
     },
     {
       key: "timeline",
-      icon: <BarChart3 className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      icon: <CirclePlay className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
       title: t("work.tabTimeline"),
       subtitle: t("work.subtitleTimeline"),
       onClick: openTimelineTab,
@@ -1998,7 +1998,7 @@ export function WorkPanel({
             }`}
             onClick={() => setActiveKind("timeline")}
           >
-            <BarChart3 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <CirclePlay className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
             <span className="truncate">{t("work.tabTimeline")}</span>
             <span
               role="button"
