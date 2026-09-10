@@ -68,6 +68,7 @@ from agenticx.llms.provider_resolver import ProviderResolver, effective_session_
 from agenticx.llms.sampling_params import provider_raw_enabled_for_fallback
 from agenticx.runtime import AgentRuntime, AutoSuspendClarifyGate, RiskAwareAutoConfirmGate
 from agenticx.runtime.auto_solve import AutoSolveMode
+from agenticx.runtime.checkpoint import CheckpointStore
 from agenticx.runtime.events import EventType, RuntimeEvent, normalize_tool_sse_payload
 from agenticx.runtime.loop_controller import LoopController
 from agenticx.cli.agent_tools import (
@@ -77,6 +78,7 @@ from agenticx.cli.agent_tools import (
     merge_computer_use_tools_into,
 )
 from agenticx.runtime.meta_tools import META_LEADER_LABEL_SCRATCH_KEY, visible_meta_agent_tools
+from agenticx.runtime.replay_ledger.recorder import ReplayLedgerRecorder, recorder_for_session
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.prompts.meta_agent import _build_taskspaces_context, build_meta_agent_system_prompt
 from agenticx.runtime.group_router import (
@@ -117,6 +119,7 @@ from agenticx.studio.session_manager import (
 )
 from agenticx.tools.mcp_hub import MCPHub
 from agenticx.studio.kb.routes import register_kb_routes
+from agenticx.studio.run_replay_routes import register_run_replay_routes
 from agenticx.studio.code_index.routes import register_code_index_routes
 from agenticx.brain.routes import register_brain_routes
 from agenticx.studio.voice_endpoints import register_voice_endpoints
@@ -1409,6 +1412,12 @@ def create_studio_app() -> FastAPI:
 
     _verify_desktop_token = _check_token
 
+    register_run_replay_routes(
+        app,
+        manager=manager,
+        check_token=_check_token,
+        desktop_token=desktop_token,
+    )
     register_voice_endpoints(app, manager=manager, check_token=_check_token)
 
     from agenticx.memory.graph.routes import register_memory_graph_routes
@@ -3560,6 +3569,11 @@ def create_studio_app() -> FastAPI:
         def _mid_turn_persist_cb() -> None:
             manager.incremental_persist(payload.session_id)
 
+        run_recorder: ReplayLedgerRecorder | None = recorder_for_session(
+            manager,
+            payload.session_id,
+            agent_id=str(getattr(managed, "avatar_id", "") or "meta"),
+        )
         try:
             runtime = AgentRuntime(
                 llm,
@@ -3570,6 +3584,8 @@ def create_studio_app() -> FastAPI:
                 clarify_gate=meta_clarify_gate,
                 is_unattended=turn_is_unattended,
                 llm_factory=_resolve_llm,
+                checkpoint_store=CheckpointStore(),
+                run_recorder=run_recorder,
             )
         except TypeError:
             runtime = AgentRuntime(
@@ -4540,6 +4556,11 @@ def create_studio_app() -> FastAPI:
                 agent_id,
                 unattended=loop_is_unattended,
             )
+        loop_recorder: ReplayLedgerRecorder | None = recorder_for_session(
+            manager,
+            session_id,
+            agent_id=str(getattr(managed, "avatar_id", "") or "meta"),
+        )
         try:
             runtime = AgentRuntime(
                 llm,
@@ -4549,6 +4570,8 @@ def create_studio_app() -> FastAPI:
                 mid_turn_persist=_loop_persist_cb,
                 clarify_gate=_resolve_clarify_gate(managed, "meta", is_automation=loop_is_unattended),
                 is_unattended=loop_is_unattended,
+                checkpoint_store=CheckpointStore(),
+                run_recorder=loop_recorder,
             )
         except TypeError:
             runtime = AgentRuntime(

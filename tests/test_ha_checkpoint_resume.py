@@ -32,6 +32,7 @@ from agenticx.runtime.checkpoint import (
     resume_interrupted_enabled,
 )
 from agenticx.runtime.confirm import AsyncConfirmGate
+from agenticx.runtime.replay_ledger import ReplayLedgerStore, ReplayRunRecord
 from agenticx.studio.session_manager import SessionManager
 from agenticx.studio.storage.factory import get_sync_storage
 from agenticx.studio.storage.local_file import LocalFileBackend
@@ -72,6 +73,20 @@ def test_checkpoint_store_roundtrip_local(tmp_path: Path) -> None:
     assert loaded.created_at > 0
     store.clear("s1")
     assert store.load("s1") is None
+
+
+def test_checkpoint_roundtrip_preserves_replay_run_id(tmp_path: Path) -> None:
+    store = _local_store(tmp_path)
+    store.save(
+        AgentCheckpoint(
+            session_id="s-run",
+            turn_id="t-run",
+            run_id="replay-run-1",
+        )
+    )
+    loaded = store.load("s-run")
+    assert loaded is not None
+    assert loaded.run_id == "replay-run-1"
 
 
 def test_checkpoint_store_roundtrip_redis() -> None:
@@ -387,6 +402,58 @@ async def test_resume_from_checkpoint(tmp_path: Path, monkeypatch: pytest.Monkey
     managed = manager.get(sid, touch=False)
     assert managed is not None
     assert managed.execution_state == "idle"
+
+
+async def test_default_resume_runner_continues_existing_replay_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = SessionManager()
+    manager._sessions_root = str(tmp_path / "sessions")
+    managed = manager.create(session_id="resume-ledger-session")
+    managed.avatar_id = "avatar-resume"
+    managed.studio_session.avatar_id = "avatar-resume"
+    replay_store = ReplayLedgerStore(Path(manager._sessions_root))
+    replay_store.open_run(
+        ReplayRunRecord(
+            run_id="existing-replay-run",
+            session_id=managed.session_id,
+            turn_id="existing-turn",
+            agent_id="avatar-resume",
+            status="running",
+            created_at=1.0,
+            updated_at=1.0,
+        )
+    )
+    checkpoint = AgentCheckpoint(
+        session_id=managed.session_id,
+        turn_id="existing-turn",
+        run_id="existing-replay-run",
+        round_idx=2,
+    )
+
+    from agenticx.llms import provider_resolver
+    from agenticx.runtime import agent_runtime
+
+    monkeypatch.setattr(provider_resolver.ProviderResolver, "resolve", lambda **_: _TextOnlyLLM())
+    captured: Dict[str, Any] = {}
+    original_runtime = agent_runtime.AgentRuntime
+
+    class _CapturingRuntime(original_runtime):
+        def __init__(self, *args, **kwargs):
+            captured["recorder"] = kwargs.get("run_recorder")
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(agent_runtime, "AgentRuntime", _CapturingRuntime)
+    assert await manager._default_resume_runner(managed.session_id, managed, checkpoint)
+    recorder = captured["recorder"]
+    assert recorder.resume_run_id == "existing-replay-run"
+    assert recorder.agent_id == "avatar-resume"
+    runs = replay_store.list_runs(managed.session_id)
+    assert len(runs) == 1
+    events, _ = replay_store.read_events("existing-replay-run")
+    assert any(event.type == "run_resumed" for event in events)
+    assert {event.agent_id for event in events} == {"avatar-resume"}
+    assert [event.seq for event in events] == list(range(1, len(events) + 1))
 
 
 async def test_resume_skips_sessions_without_checkpoint(

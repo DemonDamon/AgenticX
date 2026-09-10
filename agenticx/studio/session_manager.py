@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.runtime.replay_ledger.recorder import recorder_for_session
+from agenticx.runtime.replay_ledger.store import ReplayLedgerStore
 from agenticx.runtime.usage_metadata import hydrate_legacy_message_usage
 from agenticx.runtime.usage_store import get_usage_store
 from agenticx.runtime.assistant_output import (
@@ -1223,6 +1225,12 @@ class SessionManager:
             mid_turn_persist=_persist_cb,
             clarify_gate=managed.clarify_gate,
             checkpoint_store=CheckpointStore(),
+            run_recorder=recorder_for_session(
+                self,
+                session_id,
+                agent_id=str(getattr(managed, "avatar_id", "") or "meta"),
+                resume_run_id=getattr(checkpoint, "run_id", None),
+            ),
         )
         hub = managed.event_hub or self.get_event_hub(session_id)
         start_round = max(1, int(getattr(checkpoint, "round_idx", 0)) + 1)
@@ -1233,6 +1241,7 @@ class SessionManager:
             persist_user_message=False,
             usage_session_id=session_id,
             usage_avatar_id=getattr(managed, "avatar_id", None),
+            resume_turn_id=getattr(checkpoint, "turn_id", None),
         ):
             if hub is not None:
                 try:
@@ -1272,6 +1281,11 @@ class SessionManager:
                 managed.team_manager.shutdown_now()
             # MCP hub is global; do NOT kill child processes on session delete.
         purged = self._purge_session_state(sid)
+        if purged:
+            try:
+                ReplayLedgerStore(Path(self._sessions_root)).delete_session_runs(sid)
+            except Exception:
+                _log.warning("replay ledger cleanup failed session=%s", sid, exc_info=True)
         if managed is not None and not existed_in_persistence:
             return True
         return purged and existed_in_persistence
