@@ -23,6 +23,8 @@ type Props = {
   metaLeaderLabel?: string;
   selectedAgentId?: string | null;
   onSelectAgent?: (agentId: string) => void;
+  /** Ledger-backed replay hides live spans once the durable event arrives. */
+  excludeCallIds?: ReadonlySet<string>;
 };
 
 type MemberGroup = {
@@ -57,6 +59,7 @@ export function ExecutionTimeline({
   metaLeaderLabel = "Machi",
   selectedAgentId = null,
   onSelectAgent,
+  excludeCallIds,
 }: Props) {
   const { t } = useTranslation("workspace");
   const toolStepsByNode = useGraphRunStore(
@@ -77,7 +80,8 @@ export function ExecutionTimeline({
         agentId,
         label: isMeta ? metaLeaderLabel : avatar?.name || agentId.slice(0, 8),
         color: avatar?.color,
-        spans: deriveToolSpans(toolStepsByNode[nodeId] ?? []),
+        spans: deriveToolSpans(toolStepsByNode[nodeId] ?? [])
+          .filter((span) => !excludeCallIds?.has(span.callId)),
       });
     }
     for (const nodeId of Object.keys(toolStepsByNode)) {
@@ -89,11 +93,12 @@ export function ExecutionTimeline({
         agentId,
         label: avatar?.name || agentId.slice(0, 8),
         color: avatar?.color,
-        spans: deriveToolSpans(toolStepsByNode[nodeId] ?? []),
+        spans: deriveToolSpans(toolStepsByNode[nodeId] ?? [])
+          .filter((span) => !excludeCallIds?.has(span.callId)),
       });
     }
     return out;
-  }, [agentIds, avatarById, metaLeaderLabel, toolStepsByNode]);
+  }, [agentIds, avatarById, excludeCallIds, metaLeaderLabel, toolStepsByNode]);
 
   const allSpans = useMemo(() => groups.flatMap((g) => g.spans), [groups]);
   const hasRunning = useMemo(() => allSpans.some((s) => s.running), [allSpans]);

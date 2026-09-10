@@ -37,7 +37,7 @@ import { useAppStore, type Avatar, type ChatPane, type Message, type PaneTermina
 import { i18n } from "../../i18n/i18n";
 import { WorkspacePanel } from "../WorkspacePanel";
 import { RunGraphPanel } from "../graph/RunGraphPanel";
-import { ExecutionTimeline } from "../graph/ExecutionTimeline";
+import { RunReplayPanel } from "../replay/RunReplayPanel";
 import { GroupMembersSummaryList } from "./GroupMembersSummaryList";
 import {
   loadAbsoluteFilePreview,
@@ -808,6 +808,7 @@ export function WorkPanel({
   const apiBase = useAppStore((s) => s.apiBase);
   const addPane = useAppStore((s) => s.addPane);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
+  const openRunDrawer = useAppStore((s) => s.openRunDrawer);
   const panes = useAppStore((s) => s.panes);
   const [workItems, setWorkItems] = useState<WorkItem[]>([]);
   const [workItemError, setWorkItemError] = useState("");
@@ -2490,11 +2491,16 @@ export function WorkPanel({
         ) : null}
 
         {hasAnyTab && activeKind === "timeline" && timelineTabOpen ? (
-          <ExecutionTimeline
+          <RunReplayPanel
             paneId={paneId}
+            sessionId={sessionId}
+            apiBase={apiBase}
+            apiToken={apiToken}
             agentIds={timelineAgentIds}
             avatarById={timelineAvatarById}
             metaLeaderLabel={metaLeaderLabel}
+            onOpenSubagentRun={(runId) => openRunDrawer(paneId, runId)}
+            onOpenArtifact={(path) => openLocalFilePreview(path)}
           />
         ) : null}
 
