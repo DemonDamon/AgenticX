@@ -422,6 +422,40 @@ def test_context_file_allowlist_does_not_override_protected(
         at._resolve_workspace_path(str(ssh_key), session, for_write=False)
 
 
+def test_stage_context_file_copies_only_exact_reference_into_hidden_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGX_DESKTOP_UNRESTRICTED_FS", raising=False)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source_dir = tmp_path / "external"
+    source_dir.mkdir()
+    source = source_dir / "report.docx"
+    source.write_bytes(b"PK\x03\x04document")
+    sibling = source_dir / "secret.docx"
+    sibling.write_bytes(b"secret")
+    monkeypatch.setenv("AGX_WORKSPACE_ROOT", str(workspace))
+    session = StudioSession()
+    session.workspace_dir = str(workspace)
+    session.taskspaces = [
+        {"id": "default", "label": "默认工作区", "path": str(workspace), "mount_mode": "link"},
+    ]
+    session.context_files = {str(source): "[文件引用] report.docx"}
+
+    result = at._tool_stage_context_file({"path": str(source)}, session)
+    payload = json.loads(result)
+
+    assert payload["ok"] is True
+    staged = Path(payload["path"])
+    assert staged.read_bytes() == source.read_bytes()
+    assert staged.parent == workspace / ".agenticx" / "context-files"
+    source.write_bytes(b"PK\x03\x04updateme")
+    refreshed = json.loads(at._tool_stage_context_file({"path": str(source)}, session))
+    assert Path(refreshed["path"]).read_bytes() == source.read_bytes()
+    denied = at._tool_stage_context_file({"path": str(sibling)}, session)
+    assert denied.startswith("ERROR: path escapes workspace")
+
+
 def _default_session(ws: Path) -> StudioSession:
     session = StudioSession()
     session.workspace_dir = str(ws)

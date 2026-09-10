@@ -995,6 +995,28 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "stage_context_file",
+            "description": (
+                "Copy one explicitly attached/read-only context file into a hidden session workspace "
+                "location. Use this before bash/Python needs raw binary access to a referenced PDF, "
+                "DOCX, archive, or image. The source stays unchanged and sibling files remain denied."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Exact absolute path from context_files.",
+                    },
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "code_outline",
             "description": (
                 "Return class/function signatures and one-line docstrings for code files "
@@ -5464,6 +5486,59 @@ def _autoheal_skill_md_after_write(path: Path, base_msg: str) -> str:
         return base_msg
 
 
+def _tool_stage_context_file(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession] = None,
+) -> str:
+    if session is None:
+        return "ERROR: session is required"
+    try:
+        source = _resolve_workspace_path(
+            str(arguments.get("path", "")),
+            session,
+            pick_existing=True,
+        )
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    if not source.is_file():
+        return f"ERROR: not a file: {source}"
+
+    _read_roots, write_roots = _session_workspace_root_sets(session)
+    if not write_roots:
+        return "ERROR: no writable workspace configured"
+    preferred = _safe_resolve_path(Path(str(session.workspace_dir or "")))
+    workspace = (
+        preferred
+        if any(_is_path_under_root(preferred, root) for root in write_roots)
+        else write_roots[0]
+    )
+    target_dir = workspace / ".agenticx" / "context-files"
+    digest = hashlib.sha256(str(source).encode("utf-8")).hexdigest()[:12]
+    target = target_dir / f"{digest}-{source.name}"
+    staged_tmp: Optional[Path] = None
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=".stage-", dir=str(target_dir))
+        os.close(fd)
+        staged_tmp = Path(tmp_name)
+        shutil.copy2(source, staged_tmp)
+        os.replace(staged_tmp, target)
+    except OSError as exc:
+        return f"ERROR: failed to stage context file: {exc}"
+    finally:
+        if staged_tmp is not None and staged_tmp.exists():
+            staged_tmp.unlink(missing_ok=True)
+    return json.dumps(
+        {
+            "ok": True,
+            "path": str(target),
+            "source_path": str(source),
+            "source_unchanged": True,
+        },
+        ensure_ascii=False,
+    )
+
+
 async def _tool_file_write(
     arguments: Dict[str, Any],
     session: StudioSession,
@@ -9385,6 +9460,8 @@ async def dispatch_tool_async(
             return _tool_code_outline(arguments, session)
         if name == "file_read":
             return _tool_file_read(arguments, session)
+        if name == "stage_context_file":
+            return _tool_stage_context_file(arguments, session)
         if name == "file_write":
             return await _tool_file_write(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "file_edit":

@@ -17,6 +17,7 @@ from agenticx.runtime.team_manager import AgentTeamManager
 _LOG = logging.getLogger(__name__)
 
 _TEXT_PREVIEW_MAX_BYTES = 32 * 1024
+_TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _BINARY_PREVIEW_KINDS = {
     ".png",
     ".jpg",
@@ -274,6 +275,8 @@ def _apply_memory_overrides(
     *,
     summary_only: bool,
 ) -> None:
+    if str(record.status or "").strip() in _TERMINAL_RUN_STATUSES:
+        return
     mem_updated = float(memory.get("updated_at", 0) or 0)
     record_updated = float(record.updated_at or 0)
     mem_status = str(memory.get("status", "") or "")

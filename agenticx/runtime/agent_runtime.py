@@ -1200,6 +1200,8 @@ def _build_attached_files_hint(session: StudioSession) -> str:
         "\n\n[已附文件]\n"
         + "\n".join(lines)
         + "\n上述文件内容已在 system prompt 的 context_files 节中给出，请直接阅读并基于其回答。"
+        + "\n若必须用 bash/Python 处理 PDF、DOCX、压缩包或图片的原始二进制，"
+        + "先调用 stage_context_file(path) 获取工作区副本；不要直接绕过只读边界。"
     )
 
 

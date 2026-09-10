@@ -236,7 +236,9 @@ def test_smoke_subagent_review_cold_restart(
     assert detail.get("run", {}).get("run_id") == run_ids[1]
 
 
-def test_smoke_subagent_merge_running_memory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_smoke_subagent_terminal_record_rejects_stale_running_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     owner_sid = "merge-session"
     store = SubAgentRunStore(owner_sid)
@@ -261,9 +263,9 @@ def test_smoke_subagent_merge_running_memory(tmp_path: Path, monkeypatch: pytest
             "recent_events": [{"type": "note", "title": "working"}],
         },
     )
-    assert merged.get("status") == "running"
-    assert merged.get("result_summary") == "live progress"
-    assert merged.get("recent_events")
+    assert merged.get("status") == "completed"
+    assert merged.get("result_summary") != "live progress"
+    assert not merged.get("recent_events")
 
 
 def test_smoke_subagent_empty_session_clusters(client: TestClient) -> None:

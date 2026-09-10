@@ -1117,4 +1117,30 @@ describe("session deliverable selection", () => {
       `${outputDir}/assets/image_002.png`,
     ]);
   });
+
+  it("recognizes an audited output heading and drops unrelated example files", () => {
+    const output =
+      "/Users/damon/.agenticx/taskspaces/session/default/脱敏输出/可研报告-脱敏.md";
+    const messages: Message[] = [
+      assistantMsg({
+        id: "final-audited",
+        content: [
+          "## 产出文件（已验证）",
+          "",
+          `\`${output}\``,
+          "",
+          "- 内容脱敏校验通过",
+        ].join("\n"),
+      }),
+    ];
+
+    expect(
+      selectSessionDeliverablePaths(messages, [
+        "/tmp/doc1.pdf",
+        "/tmp/example.docx",
+        output,
+      ]),
+    ).toEqual([output]);
+    expect(collectTurnArtifactPaths(messages, "final-audited")).toEqual([output]);
+  });
 });

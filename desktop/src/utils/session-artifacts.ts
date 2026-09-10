@@ -36,9 +36,9 @@ const LABELED_SAVE_PATH_RE = new RegExp(
  * Bare「路径」must be a label (`路径：`), not prose like「管理 ~/.codewiki/… 路径」.
  */
 const SAVE_CUE_LINE_RE =
-  /(?:保存路径|路径\s*[：:]|已保存(?:至|到)?|saved\s+to|written\s+to|report\s+saved\s+to|file\s+saved\s+to)/i;
+  /(?:产出文件|保存路径|路径\s*[：:]|已保存(?:至|到)?|saved\s+to|written\s+to|report\s+saved\s+to|file\s+saved\s+to)/i;
 const EXPLICIT_ARTIFACT_MANIFEST_RE =
-  /(?:产物(?:位于|在)|\|\s*产物\s*\||(?:deliverables?|artifacts?)\s+(?:at|in)\b)/i;
+  /(?:产出文件|产物(?:位于|在)|\|\s*产物\s*\||(?:deliverables?|artifacts?)\s+(?:at|in)\b)/i;
 
 const INLINE_ABS_PATH_RE = new RegExp(`\`?${ABS_PATH_BODY}\`?`, "g");
 
