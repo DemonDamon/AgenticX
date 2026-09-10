@@ -2,6 +2,11 @@ import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, us
 import { useTranslation } from "react-i18next";
 import { i18n } from "../i18n/i18n";
 import { formatClock } from "../i18n/format";
+import {
+  createPaneTextSender,
+  registerPaneTextSender,
+} from "../chat/send-text-to-pane";
+import { replayFocusForBranchLineage } from "./replay/branch-lineage-navigation";
 import { createPortal } from "react-dom";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent, CSSProperties, RefObject } from "react";
 import {
@@ -8242,6 +8247,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               onOpenAllChanges={() => openWorkPanelSummary("changes")}
               onOpenFileReference={(request) => openFileReferencePreview(request)}
               onOpenSubAgentRun={openSubAgentDetailFromCluster}
+              onOpenBranchSource={(lineage) => {
+                let replayFocus: WorkPanelFocus;
+                try {
+                  replayFocus = replayFocusForBranchLineage(lineage);
+                } catch {
+                  setStallHintToast(t("replay.sourceEventUnavailable"));
+                  return;
+                }
+                setPaneSessionId(pane.id, lineage.parentSessionId);
+                if (!pane.taskspacePanelOpen) {
+                  openWorkspaceSidebarForPane(
+                    pane.id,
+                    paneRef.current?.clientWidth ?? paneWidth,
+                    openSidePanel,
+                  );
+                }
+                setWorkPanelFocus(replayFocus);
+              }}
               assistantName={imAssistantName}
               assistantAvatarUrl={imAssistantAvatarUrl}
               userName={imUserName}
@@ -9014,6 +9037,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       lockedSessionId?: string;
       turnIntentOverride?: TurnIntent;
       continuation?: { reason: ContinueReason; source: ContinueSource };
+      propagateError?: boolean;
     }
   ) => Promise<void>>(
     async () => {}
@@ -12019,6 +12043,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         addPaneMessageIfSessionActive(pane.id, "tool", `❌ 请求失败: ${String(error)}`, "meta");
       }
+      if (options?.propagateError) throw error;
     } finally {
       // Safety net for malformed/aborted streams. The normal completion path
       // already drains this before FINAL, so this is an idempotent no-op there.
@@ -12120,6 +12145,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   };
 
   sendChatRef.current = sendChat;
+
+  useEffect(() => registerPaneTextSender(
+    pane.id,
+    createPaneTextSender(
+      (text) => sendChatRef.current(text, { propagateError: true }),
+      setComposerText,
+    ),
+  ), [pane.id, setComposerText]);
 
   useEffect(() => {
     const onBuildPlan = (event: Event) => {

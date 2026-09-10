@@ -23,6 +23,7 @@ export type ReplayRun = {
   createdAt: number;
   completedAt?: number;
   eventCount: number;
+  branchCount?: number;
   completeness: "complete" | "partial";
   parentRunId?: string;
   forkedFromEventId?: string;
@@ -43,6 +44,8 @@ export type ReplayEvent = {
   effectClass: EffectClass;
   branchable: boolean;
   unbranchableReason?: string;
+  checkpointRef?: string;
+  workspaceRef?: string;
   payload?: Record<string, unknown>;
   payloadPreviewText?: string;
   payloadPreviewTruncated?: boolean;
@@ -196,6 +199,7 @@ function normalizeRun(value: unknown, warnings: string[]): ReplayRun | null {
     createdAt: epochMs(raw.created_at),
     ...(completedAt !== null ? { completedAt: epochMs(completedAt) } : {}),
     eventCount: Math.max(0, Math.trunc(finiteNumber(raw.event_count) ?? 0)),
+    branchCount: Math.max(0, Math.trunc(finiteNumber(raw.branch_count) ?? 0)),
     completeness,
     ...(optionalText(raw.parent_run_id) ? { parentRunId: optionalText(raw.parent_run_id) } : {}),
     ...(optionalText(raw.forked_from_event_id)
@@ -255,6 +259,12 @@ function normalizeEvent(value: unknown, warnings: string[]): ReplayEvent | null 
     branchable: raw.branchable === true,
     ...(optionalText(raw.unbranchable_reason)
       ? { unbranchableReason: optionalText(raw.unbranchable_reason) }
+      : {}),
+    ...(optionalText(raw.checkpoint_ref)
+      ? { checkpointRef: optionalText(raw.checkpoint_ref) }
+      : {}),
+    ...(optionalText(raw.workspace_ref)
+      ? { workspaceRef: optionalText(raw.workspace_ref) }
       : {}),
     ...(resolved
       ? {

@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.runtime.isolate_run import save_isolate_state
+from agenticx.runtime.replay_ledger.contracts import ContextCheckpoint
 from agenticx.runtime.replay_ledger.recorder import recorder_for_session
 from agenticx.runtime.replay_ledger.store import ReplayLedgerStore
 from agenticx.runtime.usage_metadata import hydrate_legacy_message_usage
@@ -1280,12 +1282,11 @@ class SessionManager:
             if managed.team_manager is not None:
                 managed.team_manager.shutdown_now()
             # MCP hub is global; do NOT kill child processes on session delete.
+        try:
+            ReplayLedgerStore(Path(self._sessions_root)).delete_session_runs(sid)
+        except Exception:
+            _log.warning("replay ledger cleanup failed session=%s", sid, exc_info=True)
         purged = self._purge_session_state(sid)
-        if purged:
-            try:
-                ReplayLedgerStore(Path(self._sessions_root)).delete_session_runs(sid)
-            except Exception:
-                _log.warning("replay ledger cleanup failed session=%s", sid, exc_info=True)
         if managed is not None and not existed_in_persistence:
             return True
         return purged and existed_in_persistence
@@ -1636,6 +1637,73 @@ class SessionManager:
         forked.studio_session.artifacts = deepcopy(source.studio_session.artifacts or {})
         forked.updated_at = time.time()
         self._persist_session_state(forked.session_id, forked.studio_session)
+        return forked
+
+    def fork_session_from_checkpoint(
+        self,
+        *,
+        source_session_id: str,
+        target_session_id: str,
+        checkpoint: ContextCheckpoint,
+        lineage: dict[str, Any],
+        workspace_state: dict[str, str],
+        provider: str | None,
+        model: str | None,
+    ) -> ManagedSession:
+        """Create a persisted session from an immutable replay checkpoint."""
+        source = self.get(source_session_id, touch=False)
+        if source is None:
+            raise ValueError("source_session_not_found")
+        forked = self.create(
+            provider=provider,
+            model=model,
+            session_id=target_session_id,
+        )
+        forked.avatar_id = source.avatar_id
+        forked.avatar_name = source.avatar_name
+        forked.session_name = self._build_fork_name(source.session_name)
+        session = forked.studio_session
+        session.agent_messages = deepcopy(checkpoint.agent_messages)
+        session.chat_history = deepcopy(checkpoint.chat_history)
+        session.context_files = deepcopy(checkpoint.context_files)
+        session.scratchpad = deepcopy(checkpoint.scratchpad)
+        session.scratchpad["run_branch_lineage"] = deepcopy(lineage)
+        session.artifacts = {
+            Path(path): deepcopy(value)
+            for path, value in checkpoint.artifacts.items()
+        }
+        session.session_mode = checkpoint.session_mode
+        session.todo_manager.load_payload(deepcopy(checkpoint.todo_items))
+        forked.taskspaces = deepcopy(checkpoint.taskspaces)
+        setattr(session, "active_taskspace_id", checkpoint.active_taskspace_id)
+        if workspace_state:
+            save_isolate_state(session, workspace_state)
+            session.workspace_dir = workspace_state.get("worktree")
+            for taskspace in forked.taskspaces:
+                if taskspace.get("id") == checkpoint.active_taskspace_id:
+                    taskspace["path"] = workspace_state.get(
+                        "worktree", taskspace.get("path", "")
+                    )
+        session.chat_history.append(
+            {
+                "role": "system",
+                "content": "",
+                "system_notice": True,
+                "metadata": {
+                    "branch_lineage": {
+                        "parent_session_id": lineage["parent_session_id"],
+                        "parent_run_id": lineage["parent_run_id"],
+                        "requested_seq": lineage["source_seq"],
+                        "restored_seq": lineage["resolved_checkpoint_seq"],
+                        "source_event_id": lineage["source_event_id"],
+                    }
+                },
+            }
+        )
+        forked.updated_at = time.time()
+        if not self._persist_session_state(forked.session_id, session):
+            self.delete(forked.session_id)
+            raise RuntimeError("branch_session_persist_failed")
         return forked
 
     def archive_sessions_before(self, session_id: str, avatar_id: str | None = None) -> int:

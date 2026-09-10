@@ -494,7 +494,8 @@ def test_orphan_tool_result_marks_run_partial_and_unbranchable(tmp_path: Path) -
         session=StudioSession(),
     )
 
-    result_event = store.read_events(run_id)[0][-1]
+    rows, _ = store.read_events(run_id)
+    result_event = next(row for row in rows if row.type == "tool_result")
     record = store.get_run(run_id)
     assert record is not None
     assert record.completeness == "partial"
@@ -502,6 +503,70 @@ def test_orphan_tool_result_marks_run_partial_and_unbranchable(tmp_path: Path) -
     assert result_event.parent_event_id is None
     assert result_event.branchable is False
     assert result_event.unbranchable_reason == "orphan_tool_result"
+    assert rows[-1].type == "ledger_gap"
+
+
+def test_checkpoint_failure_marks_gap_and_blocks_later_stable_boundaries(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store, recorder = _recorder(tmp_path)
+    run_id = recorder.start_turn(turn_id="turn-gap", user_input="work")
+    session = StudioSession()
+    monkeypatch.setattr(
+        "agenticx.runtime.replay_ledger.recorder.capture_git_workspace_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("snapshot failed")),
+    )
+
+    recorder._append("assistant_output_completed", session=session)
+    recorder._append("assistant_output_completed", session=session)
+
+    rows, _ = store.read_events(run_id)
+    assert [row.type for row in rows[-3:]] == [
+        "assistant_output_completed",
+        "ledger_gap",
+        "assistant_output_completed",
+    ]
+    assert rows[-3].unbranchable_reason == "context_checkpoint_failed"
+    assert rows[-1].branchable is False
+    assert rows[-1].checkpoint_ref is None
+    assert rows[-1].unbranchable_reason == "ledger_gap"
+    record = store.get_run(run_id)
+    assert record is not None
+    assert record.completeness == "partial"
+
+
+def test_resume_partial_run_inherits_after_gap(tmp_path: Path) -> None:
+    store = ReplayLedgerStore(tmp_path)
+    store.open_run(
+        ReplayRunRecord(
+            run_id="partial-run",
+            session_id="session-r",
+            turn_id="turn-r",
+            agent_id="meta",
+            status="running",
+            created_at=1.0,
+            updated_at=1.0,
+            completeness="partial",
+            gap_reason="previous_append_failed",
+        )
+    )
+    recorder = ReplayLedgerRecorder(
+        store=store,
+        session_id="session-r",
+        agent_id="meta",
+        provider="test",
+        model="test-model",
+        resume_run_id="partial-run",
+    )
+
+    recorder.start_turn(turn_id="turn-r", user_input="resume")
+    recorder._append("assistant_output_completed", session=StudioSession())
+
+    rows, _ = store.read_events("partial-run")
+    assert rows[0].type == "ledger_gap"
+    assert rows[-1].unbranchable_reason == "ledger_gap"
+    assert rows[-1].checkpoint_ref is None
 
 
 async def test_recorder_failure_does_not_change_runtime_final() -> None:

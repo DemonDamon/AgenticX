@@ -41,6 +41,7 @@ describe("replay response normalization", () => {
         status: "future_status",
         created_at: 10,
         event_count: 3,
+        branch_count: 2,
         completeness: "complete",
       }],
     });
@@ -49,6 +50,7 @@ describe("replay response normalization", () => {
       runId: "run-1",
       status: "interrupted",
       createdAt: 10_000,
+      branchCount: 2,
     });
     expect(result.parseWarnings).toContain("run run-1: unknown status future_status");
   });
@@ -229,6 +231,14 @@ describe("replay projection", () => {
     ]);
 
     expect(projection.stats.subagents).toBe(2);
+  });
+
+  it("does not miscount run resume markers as branches", () => {
+    const projection = projectReplay([
+      event(1, "run_resumed", { payload: { parent_run_id: "run-parent" } }),
+    ]);
+
+    expect(projection.stats.branches).toBe(0);
   });
 
   it("deduplicates event ids and reports duplicate sequences", () => {

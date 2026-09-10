@@ -394,13 +394,47 @@ def test_blob_write_tolerates_unsupported_directory_fsync(
     assert store.read_blob("run-a", blob_ref) == {"durable": True}
 
 
-def test_delete_session_runs_removes_only_target_session(tmp_path: Path) -> None:
+def test_delete_session_runs_removes_only_target_session(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     store = ReplayLedgerStore(tmp_path)
     store.open_run(_record("session-a", "run-a"))
     store.open_run(_record("session-b", "run-b"))
+    cleanup_calls: list[tuple[str, Path]] = []
+
+    def cleanup_refs(session_id: str, *, sessions_root: Path) -> None:
+        assert (tmp_path / "session-a" / "runs").exists()
+        cleanup_calls.append((session_id, sessions_root))
+
+    monkeypatch.setattr(
+        replay_store_module.workspace_snapshot,
+        "delete_snapshot_refs",
+        cleanup_refs,
+    )
     store.delete_session_runs("session-a")
+    assert cleanup_calls == [("session-a", tmp_path)]
     assert store.get_run("run-a") is None
     assert store.get_run("run-b") is not None
+
+
+def test_delete_session_runs_logs_ref_cleanup_failure_and_still_deletes_session(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+) -> None:
+    store = ReplayLedgerStore(tmp_path)
+    store.open_run(_record("session-a", "run-a"))
+    monkeypatch.setattr(
+        replay_store_module.workspace_snapshot,
+        "delete_snapshot_refs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("ref cleanup failed")),
+    )
+
+    store.delete_session_runs("session-a")
+
+    assert store.get_run("run-a") is None
+    assert "snapshot ref cleanup failed for session session-a" in caplog.text
 
 
 @pytest.mark.parametrize(

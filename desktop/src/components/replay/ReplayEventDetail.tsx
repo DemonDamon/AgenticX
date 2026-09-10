@@ -13,6 +13,9 @@ type Props = {
   onLoadPayload: (event: ReplayEvent) => void;
   onOpenArtifact?: (path: string) => void;
   onOpenSubagentRun?: (runId: string) => void;
+  canBranch?: boolean;
+  branchDisabledReason?: string;
+  onBranchFromStep?: (event: ReplayEvent) => void;
 };
 
 function payloadString(payload: Record<string, unknown> | undefined, keys: string[]): string {
@@ -39,6 +42,9 @@ export function ReplayEventDetail({
   onLoadPayload,
   onOpenArtifact,
   onOpenSubagentRun,
+  canBranch = false,
+  branchDisabledReason,
+  onBranchFromStep,
 }: Props) {
   const { t } = useTranslation("workspace");
   if (!event) {
@@ -146,10 +152,24 @@ export function ReplayEventDetail({
           {t("replay.openSubagent")}
         </button>
       ) : null}
-      {!event.branchable ? (
+      {onBranchFromStep ? (
+        <button
+          type="button"
+          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-2 text-[11px] text-[var(--ui-btn-primary-text)] hover:bg-[var(--ui-btn-primary-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+          disabled={!canBranch}
+          onClick={() => onBranchFromStep(event)}
+        >
+          <GitBranch aria-hidden className="h-3.5 w-3.5" />
+          {t("replay.branchFromBefore", "从此前分叉")}
+        </button>
+      ) : null}
+      {!canBranch && branchDisabledReason ? (
         <div className="mt-3 rounded-md bg-surface-hover px-2 py-1.5 text-[9px] text-text-faint">
           {t("replay.cannotBranch")}
-          {event.unbranchableReason ? ` · ${event.unbranchableReason}` : ""}
+          {" · "}
+          {t(`replay.branchReason.${branchDisabledReason}`, {
+            defaultValue: branchDisabledReason,
+          })}
         </div>
       ) : null}
     </aside>

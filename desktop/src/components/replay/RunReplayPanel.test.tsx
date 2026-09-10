@@ -5,6 +5,7 @@ import { i18n } from "../../i18n/i18n";
 import { getReplayExport, listReplayEvents, ReplayApiError } from "./replay-api";
 import {
   copyReplayReview,
+  resolveBranchAvailability,
   RunReplayPanel,
   shouldLoadAllReplayPages,
 } from "./RunReplayPanel";
@@ -77,6 +78,9 @@ describe("replay API client", () => {
         ts: 1,
         type: "tool_call",
         agent_id: "meta",
+        branchable: true,
+        checkpoint_ref: "checkpoint-a",
+        workspace_ref: "workspace-a",
       }],
       next_seq: 1,
       has_more: true,
@@ -94,6 +98,10 @@ describe("replay API client", () => {
     expect(String(url)).toContain("types=tool_call%2Cerror");
     expect(new Headers(init?.headers).get("x-agx-desktop-token")).toBe("secret");
     expect(result).toMatchObject({ nextSeq: 1, hasMore: true });
+    expect(result.events[0]).toMatchObject({
+      checkpointRef: "checkpoint-a",
+      workspaceRef: "workspace-a",
+    });
   });
 
   it("surfaces backend 403 detail instead of returning an empty list", async () => {
@@ -251,6 +259,43 @@ describe("replay UI", () => {
 
     expect(detail).toContain("<details");
     expect(detail).not.toContain("<details open");
+  });
+
+  it("keeps branch action visible but disabled with a localized reason", () => {
+    const detail = render(
+      <ReplayEventDetail
+        event={{ ...event(2), unbranchableReason: "not_git_isolate" }}
+        payloadLoading={false}
+        payloadError={null}
+        onLoadPayload={() => {}}
+        canBranch={false}
+        branchDisabledReason="not_git_isolate"
+        onBranchFromStep={() => {}}
+      />,
+    );
+
+    expect(detail).toContain("从此前分叉");
+    expect(detail).toContain("当前会话不在 Git 隔离工作区");
+    expect(detail).toContain("disabled");
+  });
+
+  it("requires a complete run and checkpoint ref for local branch preview", () => {
+    const selected = { ...event(2), type: "tool_call" };
+    const missingCheckpoint = {
+      ...event(1),
+      type: "tool_result",
+      branchable: true,
+    };
+    expect(resolveBranchAvailability(
+      { ...run, completeness: "complete" },
+      [missingCheckpoint, selected],
+      selected,
+    )).toMatchObject({ event: null, reason: "checkpoint_unavailable" });
+    expect(resolveBranchAvailability(
+      { ...run, completeness: "partial" },
+      [{ ...missingCheckpoint, checkpointRef: "cp-1" }, selected],
+      selected,
+    )).toMatchObject({ event: null, reason: "run_incomplete" });
   });
 
   it("never renders events after cursor while retaining the global scrubber range", () => {

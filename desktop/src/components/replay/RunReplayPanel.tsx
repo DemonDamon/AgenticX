@@ -1,7 +1,8 @@
 import { AlertTriangle, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Avatar } from "../../store";
+import { useAppStore, type Avatar } from "../../store";
+import { sendTextToPane } from "../../chat/send-text-to-pane";
 import { ExecutionTimeline } from "../graph/ExecutionTimeline";
 import { EMPTY_PANE_GRAPH_STATE } from "../graph/graph-types";
 import { useGraphRunStore } from "../graph/useGraphRun";
@@ -17,6 +18,15 @@ import { useReplayStore } from "./replay-store";
 import { ReplaySummaryBar } from "./ReplaySummaryBar";
 import { ReplayTimeline } from "./ReplayTimeline";
 import type { ReplayEvent, ReplayRun } from "./replay-types";
+import {
+  BranchFromStepDialog,
+  type BranchProgressStage,
+} from "./BranchFromStepDialog";
+import {
+  createRunBranch,
+  RunBranchRequestError,
+  type BranchEffectWarning,
+} from "./branch-client";
 
 type Props = {
   paneId: string;
@@ -26,6 +36,7 @@ type Props = {
   avatarById: Map<string, Avatar>;
   agentIds: string[];
   metaLeaderLabel: string;
+  focusTarget?: { runId: string; eventId: string };
   onOpenSubagentRun?: (runId: string) => void;
   onOpenArtifact?: (path: string) => void;
 };
@@ -80,6 +91,59 @@ function isAbortError(error: unknown): boolean {
     : error instanceof Error && error.name === "AbortError";
 }
 
+export function resolveBranchPreview(
+  events: ReplayEvent[],
+  selected: ReplayEvent,
+): ReplayEvent | null {
+  const latestGap = events
+    .filter((event) => event.type === "ledger_gap" && event.seq <= selected.seq)
+    .reduce((highest, event) => Math.max(highest, event.seq), 0);
+  const upperSeq = selected.type === "tool_call" ? selected.seq - 1 : selected.seq;
+  return [...events]
+    .filter((event) => (
+      event.seq > latestGap
+      && event.seq <= upperSeq
+      && event.branchable
+      && Boolean(event.checkpointRef)
+    ))
+    .sort((left, right) => right.seq - left.seq)[0] ?? null;
+}
+
+export function resolveBranchAvailability(
+  run: ReplayRun,
+  events: ReplayEvent[],
+  selected: ReplayEvent,
+): { event: ReplayEvent | null; reason: string | null } {
+  if (run.completeness !== "complete") {
+    return { event: null, reason: "run_incomplete" };
+  }
+  if (!TERMINAL_REPLAY_STATUSES.has(run.status)) {
+    return { event: null, reason: "source_session_running" };
+  }
+  const resolved = resolveBranchPreview(events, selected);
+  if (resolved) return { event: resolved, reason: null };
+  const latestGap = events
+    .filter((event) => event.type === "ledger_gap" && event.seq <= selected.seq)
+    .reduce((highest, event) => Math.max(highest, event.seq), 0);
+  const upperSeq = selected.type === "tool_call" ? selected.seq - 1 : selected.seq;
+  const candidates = [...events]
+    .filter((event) => event.seq > latestGap && event.seq <= upperSeq)
+    .sort((left, right) => right.seq - left.seq);
+  const missingCheckpoint = candidates.find(
+    (event) => event.branchable && !event.checkpointRef,
+  );
+  if (missingCheckpoint) return { event: null, reason: "checkpoint_unavailable" };
+  const unavailable = candidates.find(
+    (event) => Boolean(event.checkpointRef) && Boolean(event.unbranchableReason),
+  );
+  return {
+    event: null,
+    reason: unavailable?.unbranchableReason
+      ?? selected.unbranchableReason
+      ?? "no_stable_checkpoint",
+  };
+}
+
 export async function copyReplayReview(
   apiBase: string,
   apiToken: string,
@@ -99,6 +163,7 @@ export function RunReplayPanel({
   avatarById,
   agentIds,
   metaLeaderLabel,
+  focusTarget,
   onOpenSubagentRun,
   onOpenArtifact,
 }: Props) {
@@ -117,8 +182,14 @@ export function RunReplayPanel({
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [payloadLoadingId, setPayloadLoadingId] = useState<string | null>(null);
   const [payloadErrors, setPayloadErrors] = useState<ReplayPayloadErrors>({});
+  const [branchEvent, setBranchEvent] = useState<ReplayEvent | null>(null);
+  const [branchSubmitting, setBranchSubmitting] = useState(false);
+  const [branchStage, setBranchStage] = useState<BranchProgressStage>("validate");
+  const [branchError, setBranchError] = useState<{ code: string; detail: string } | null>(null);
   const copyFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const auxiliaryControllers = useRef<Set<AbortController>>(new Set());
+  const locatingTarget = useRef<string | null>(null);
+  const appliedTarget = useRef<string | null>(null);
 
   useEffect(() => {
     useReplayStore.getState().resetPane(paneId);
@@ -147,8 +218,13 @@ export function RunReplayPanel({
         const sorted = [...response.runs].sort((a, b) => b.createdAt - a.createdAt);
         setRuns(sorted);
         setLegacy(response.legacy);
-        setListError(null);
+        const targetMissing = focusTarget?.runId
+          && !sorted.some((run) => run.runId === focusTarget.runId);
+        setListError(targetMissing ? t("replay.sourceRunUnavailable") : null);
         setSelectedRunId((current) => {
+          if (focusTarget?.runId && sorted.some((run) => run.runId === focusTarget.runId)) {
+            return focusTarget.runId;
+          }
           if (sorted.some((run) => run.runId === current)) return current;
           return preferredRun(sorted)?.runId ?? "";
         });
@@ -171,7 +247,7 @@ export function RunReplayPanel({
       window.clearInterval(timer);
       controller?.abort();
     };
-  }, [apiBase, apiToken, paneId, sessionId]);
+  }, [apiBase, apiToken, focusTarget?.runId, paneId, sessionId, t]);
 
   const selectedRunBelongsToSession = runs.some(
     (run) => run.runId === selectedRunId && run.sessionId === sessionId,
@@ -294,6 +370,66 @@ export function RunReplayPanel({
   const selectedEvent = effectiveReplay.events.find(
     (event) => event.eventId === effectiveReplay.selectedEventId,
   ) ?? null;
+
+  useEffect(() => {
+    const targetKey = focusTarget
+      ? `${sessionId}:${focusTarget.runId}:${focusTarget.eventId}`
+      : null;
+    if (
+      !targetKey
+      || appliedTarget.current === targetKey
+      || locatingTarget.current === targetKey
+      || selectedRunId !== focusTarget?.runId
+      || effectiveReplay.runId !== focusTarget.runId
+      || effectiveReplay.loading
+    ) return;
+    locatingTarget.current = targetKey;
+    let disposed = false;
+    void (async () => {
+      while (!disposed) {
+        const state = useReplayStore.getState().getPane(paneId);
+        const target = state.events.find(
+          (event) => event.eventId === focusTarget.eventId,
+        );
+        if (target) {
+          useReplayStore.getState().selectEvent(paneId, target.eventId);
+          appliedTarget.current = targetKey;
+          return;
+        }
+        if (!state.hasMore) {
+          useReplayStore.getState().setError(
+            paneId,
+            t("replay.sourceEventUnavailable"),
+          );
+          appliedTarget.current = targetKey;
+          return;
+        }
+        const before = `${state.nextSeq}:${state.events.length}`;
+        await useReplayStore.getState().loadNextPage(paneId);
+        const after = useReplayStore.getState().getPane(paneId);
+        if (`${after.nextSeq}:${after.events.length}` === before) {
+          return;
+        }
+      }
+    })().finally(() => {
+      if (locatingTarget.current === targetKey) locatingTarget.current = null;
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [
+    effectiveReplay.loading,
+    effectiveReplay.runId,
+    focusTarget,
+    paneId,
+    selectedRunId,
+    sessionId,
+    t,
+  ]);
+  const branchAvailability = selectedEvent && selectedRun
+    ? resolveBranchAvailability(selectedRun, effectiveReplay.events, selectedEvent)
+    : { event: null, reason: "no_stable_checkpoint" };
+  const resolvedBranchEvent = branchAvailability.event;
   const firstSeq = effectiveReplay.events[0]?.seq ?? 0;
   const lastSeq = effectiveReplay.events.at(-1)?.seq ?? firstSeq;
   const firstTs = effectiveReplay.events[0]?.ts ?? 0;
@@ -435,7 +571,10 @@ export function RunReplayPanel({
         <ReplaySummaryBar
           runs={sessionRuns}
           selectedRunId={selectedRun.runId}
-          stats={projection.stats}
+          stats={{
+            ...projection.stats,
+            branches: selectedRun.branchCount ?? projection.stats.branches,
+          }}
           summarizing={summarizing}
           onSelectRun={(runId) => {
             useReplayStore.getState().resetPane(paneId);
@@ -521,6 +660,15 @@ export function RunReplayPanel({
             onLoadPayload={(event) => void loadPayload(event)}
             onOpenArtifact={onOpenArtifact}
             onOpenSubagentRun={onOpenSubagentRun}
+            canBranch={Boolean(
+              selectedRun && resolvedBranchEvent,
+            )}
+            branchDisabledReason={branchAvailability.reason ?? undefined}
+            onBranchFromStep={(event) => {
+              setBranchError(null);
+              setBranchStage("validate");
+              setBranchEvent(event);
+            }}
           />
         </div>
       )}
@@ -536,6 +684,119 @@ export function RunReplayPanel({
           </button>
         </div>
       ) : null}
+      <BranchFromStepDialog
+        open={branchEvent !== null}
+        requestedSeq={branchEvent?.seq ?? 0}
+        resolvedSeq={branchEvent
+          ? resolveBranchPreview(effectiveReplay.events, branchEvent)?.seq ?? 0
+          : 0}
+        skippedToolCount={branchEvent
+          ? effectiveReplay.events.filter(
+            (event) => event.type === "tool_call" && event.seq < branchEvent.seq,
+          ).length
+          : 0}
+        workspaceStatus={branchEvent
+          ? resolveBranchPreview(effectiveReplay.events, branchEvent)?.unbranchableReason
+            ?? "git_isolate_ready"
+          : ""}
+        warnings={(branchEvent
+          ? effectiveReplay.events
+            .filter((event) => (
+              event.type === "tool_call"
+              && event.seq <= (
+                resolveBranchPreview(effectiveReplay.events, branchEvent)?.seq ?? 0
+              )
+              && (
+                event.effectClass === "external_write"
+                || event.effectClass === "unknown"
+              )
+            ))
+            .reduce<BranchEffectWarning[]>((warnings, event) => {
+              const toolName = event.title || "unknown_tool";
+              const current = warnings.find(
+                (warning) => warning.effectClass === event.effectClass
+                  && warning.toolName === toolName,
+              );
+              if (current) current.count += 1;
+              else warnings.push({
+                effectClass: event.effectClass as BranchEffectWarning["effectClass"],
+                toolName,
+                count: 1,
+              });
+              return warnings;
+            }, [])
+          : [])}
+        submitting={branchSubmitting}
+        stage={branchStage}
+        error={branchError}
+        onCancel={() => {
+          if (!branchSubmitting) setBranchEvent(null);
+        }}
+        onSubmit={async ({ instruction, provider, model }) => {
+          if (!branchEvent || !selectedRun) return;
+          const localPreview = resolveBranchAvailability(
+            selectedRun,
+            effectiveReplay.events,
+            branchEvent,
+          );
+          if (!localPreview.event) {
+            setBranchError({
+              code: localPreview.reason ?? "no_stable_checkpoint",
+              detail: t(`replay.branchReason.${localPreview.reason ?? "no_stable_checkpoint"}`),
+            });
+            setBranchStage("validate");
+            return;
+          }
+          setBranchSubmitting(true);
+          setBranchError(null);
+          setBranchStage("restore");
+          try {
+            const result = await createRunBranch(
+              apiBase,
+              apiToken,
+              selectedRun.runId,
+              {
+                sourceEventId: branchEvent.eventId,
+                instruction,
+                provider,
+                model,
+              },
+            );
+            setBranchStage("open_session");
+            const store = useAppStore.getState();
+            const sourcePane = store.panes.find((pane) => pane.id === paneId);
+            const newPaneId = store.addPane(
+              sourcePane?.avatarId ?? null,
+              sourcePane?.avatarName ?? metaLeaderLabel,
+              result.sessionId,
+            );
+            if (result.provider && result.model) {
+              store.setPaneModel(newPaneId, result.provider, result.model);
+            }
+            store.setActivePaneId(newPaneId);
+            setBranchStage("send_instruction");
+            await sendTextToPane(newPaneId, result.instruction);
+            setBranchEvent(null);
+          } catch (error) {
+            setBranchError(
+              error instanceof RunBranchRequestError
+                ? {
+                    code: error.code,
+                    detail: t(`replay.branchReason.${error.code.replaceAll(":", "_")}`, {
+                      defaultValue: error.message,
+                    }),
+                  }
+                : {
+                    code: "branch_create_failed",
+                    detail: error instanceof Error ? error.message : String(error),
+                  },
+            );
+          } finally {
+            setBranchSubmitting(false);
+            setBranchStage("validate");
+          }
+        }}
+      />
     </div>
   );
 }

@@ -79,7 +79,11 @@ function runsResponse(runs: ReplayRun[]): ReplayRunsResponse {
   return { runs, legacy: false, parseWarnings: [] };
 }
 
-function panel(sessionId = "session-1", paneId = "pane-a") {
+function panel(
+  sessionId = "session-1",
+  paneId = "pane-a",
+  focusTarget?: { runId: string; eventId: string },
+) {
   return (
     <I18nextProvider i18n={i18n}>
       <RunReplayPanel
@@ -90,6 +94,7 @@ function panel(sessionId = "session-1", paneId = "pane-a") {
         avatarById={new Map()}
         agentIds={["meta"]}
         metaLeaderLabel="Meta Test"
+        focusTarget={focusTarget}
       />
     </I18nextProvider>
   );
@@ -167,6 +172,36 @@ describe("replay mounted behavior", () => {
     view.unmount();
     await vi.advanceTimersByTimeAsync(4_000);
     expect(listReplayRuns).toHaveBeenCalledTimes(2);
+  });
+
+  it("loads pages until a lineage source event is selected", async () => {
+    const running = { ...run, status: "running" as const, eventCount: 101 };
+    vi.mocked(listReplayRuns).mockResolvedValue(runsResponse([running]));
+    vi.mocked(listReplayEvents)
+      .mockResolvedValueOnce(eventsPage(
+        [replayEvent(1)],
+        "running",
+        true,
+        101,
+      ))
+      .mockResolvedValueOnce(eventsPage(
+        [replayEvent(101)],
+        "running",
+        false,
+        101,
+      ));
+
+    render(panel(
+      "session-1",
+      "pane-lineage",
+      { runId: "run-1", eventId: "event-101" },
+    ));
+    await flushEffects();
+    await flushEffects();
+
+    expect(listReplayEvents).toHaveBeenCalledTimes(2);
+    expect(useReplayStore.getState().getPane("pane-lineage").selectedEventId)
+      .toBe("event-101");
   });
 
   it("lets a run-list request exceed multiple ticks without aborting or duplicating it", async () => {

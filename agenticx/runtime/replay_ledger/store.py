@@ -9,6 +9,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -18,6 +19,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
+
+import agenticx.runtime.replay_ledger.workspace_snapshot as workspace_snapshot
 
 try:
     import fcntl
@@ -30,12 +33,15 @@ except ImportError:
     msvcrt = None
 
 from agenticx.runtime.replay_ledger.contracts import (
+    ContextCheckpoint,
     RUN_STATUSES,
     ReplayRunRecord,
     RunEvent,
     validate_ledger_id,
 )
 from agenticx.studio.storage.factory import _default_sessions_root
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -509,6 +515,68 @@ class ReplayLedgerStore:
                 pass
             return None
 
+    def write_checkpoint(
+        self,
+        run_id: str,
+        checkpoint: ContextCheckpoint,
+    ) -> str:
+        """Write and count one content-addressed context checkpoint."""
+        digest = self.write_blob(run_id, checkpoint.to_dict())
+        run_dir = self._find_run_dir(run_id)
+        if run_dir is None:
+            raise ValueError(f"unknown run_id: {run_id}")
+        with self._locked(run_dir, run_id):
+            record = self._load_record(run_dir / "run.json")
+            if record is None:
+                raise ValueError(f"unknown run_id: {run_id}")
+            record.checkpoint_count += 1
+            self._write_json_atomic(run_dir / "run.json", record.to_dict())
+        return digest
+
+    def read_checkpoint(
+        self,
+        run_id: str,
+        checkpoint_ref: str,
+    ) -> ContextCheckpoint | None:
+        """Read and validate one context checkpoint."""
+        value = self.read_blob(run_id, checkpoint_ref)
+        if not isinstance(value, dict):
+            return None
+        try:
+            return ContextCheckpoint.from_dict(value)
+        except (TypeError, ValueError):
+            return None
+
+    def mark_branchable(
+        self,
+        run_id: str,
+        seq: int,
+    ) -> ReplayRunRecord:
+        """Persist the newest branchable sequence for run summaries."""
+        run_dir = self._find_run_dir(run_id)
+        if run_dir is None:
+            raise ValueError(f"unknown run_id: {run_id}")
+        with self._locked(run_dir, run_id):
+            record = self._load_record(run_dir / "run.json")
+            if record is None:
+                raise ValueError(f"unknown run_id: {run_id}")
+            record.last_branchable_seq = max(record.last_branchable_seq, int(seq))
+            self._write_json_atomic(run_dir / "run.json", record.to_dict())
+            return record
+
+    def increment_branch_count(self, run_id: str) -> ReplayRunRecord:
+        """Record one successfully persisted direct child branch."""
+        run_dir = self._find_run_dir(run_id)
+        if run_dir is None:
+            raise ValueError(f"unknown run_id: {run_id}")
+        with self._locked(run_dir, run_id):
+            record = self._load_record(run_dir / "run.json")
+            if record is None:
+                raise ValueError(f"unknown run_id: {run_id}")
+            record.branch_count += 1
+            self._write_json_atomic(run_dir / "run.json", record.to_dict())
+            return record
+
     def delete_session_runs(self, session_id: str) -> None:
         """Delete only the replay subtree owned by a session."""
         normalized_session_id = validate_ledger_id(session_id, "session_id")
@@ -518,6 +586,17 @@ class ReplayLedgerStore:
             if runs_root.exists()
             else set()
         )
+        try:
+            workspace_snapshot.delete_snapshot_refs(
+                normalized_session_id,
+                sessions_root=self.sessions_root,
+            )
+        except Exception:
+            logger.warning(
+                "snapshot ref cleanup failed for session %s",
+                normalized_session_id,
+                exc_info=True,
+            )
         if runs_root.exists():
             shutil.rmtree(runs_root)
         with _SHARED_STATE_GUARD:

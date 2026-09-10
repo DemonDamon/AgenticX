@@ -3213,6 +3213,7 @@ class AgentRuntime:
                     turn_id=self._current_turn_id,
                     user_input=user_input,
                     history_metadata=history_user_metadata,
+                    session=session,
                 )
             except Exception:
                 logger.warning("replay recorder start failed; continuing without ledger", exc_info=True)

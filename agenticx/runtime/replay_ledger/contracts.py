@@ -86,6 +86,9 @@ class ReplayRunRecord:
     model: str | None = None
     event_count: int = 0
     last_seq: int = 0
+    checkpoint_count: int = 0
+    last_branchable_seq: int = 0
+    branch_count: int = 0
     completeness: str = "complete"
     gap_reason: str | None = None
     schema_version: int = SCHEMA_VERSION
@@ -130,8 +133,89 @@ class ReplayRunRecord:
             model=str(data.get("model", "") or "").strip() or None,
             event_count=max(0, int(data.get("event_count", 0) or 0)),
             last_seq=max(0, int(data.get("last_seq", 0) or 0)),
+            checkpoint_count=max(0, int(data.get("checkpoint_count", 0) or 0)),
+            last_branchable_seq=max(0, int(data.get("last_branchable_seq", 0) or 0)),
+            branch_count=max(0, int(data.get("branch_count", 0) or 0)),
             completeness=completeness,
             gap_reason=str(data.get("gap_reason", "") or "").strip() or None,
+            schema_version=int(
+                data.get("schema_version", SCHEMA_VERSION) or SCHEMA_VERSION
+            ),
+        )
+
+
+@dataclass
+class WorkspaceSnapshotRef:
+    """Reference to an immutable Git tree captured for a stable boundary."""
+
+    mode: str
+    branchable: bool
+    tree_oid: str | None = None
+    base_sha: str | None = None
+    repo_root: str | None = None
+    ref_name: str | None = None
+    reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the workspace reference."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "WorkspaceSnapshotRef":
+        """Deserialize a workspace reference."""
+        return cls(
+            mode=str(data.get("mode", "none") or "none"),
+            branchable=bool(data.get("branchable", False)),
+            tree_oid=str(data.get("tree_oid", "") or "").strip() or None,
+            base_sha=str(data.get("base_sha", "") or "").strip() or None,
+            repo_root=str(data.get("repo_root", "") or "").strip() or None,
+            ref_name=str(data.get("ref_name", "") or "").strip() or None,
+            reason=str(data.get("reason", "") or "").strip() or None,
+        )
+
+
+@dataclass
+class ContextCheckpoint:
+    """Content-addressed logical state at one provider-safe boundary."""
+
+    agent_messages: list[dict[str, Any]]
+    chat_history: list[dict[str, Any]]
+    context_files: dict[str, str]
+    taskspaces: list[dict[str, str]]
+    active_taskspace_id: str | None
+    scratchpad: dict[str, Any]
+    artifacts: dict[str, Any]
+    todo_items: list[dict[str, Any]]
+    provider: str | None
+    model: str | None
+    session_mode: str
+    system_prompt_sha256: str
+    workspace_ref: str | None
+    schema_version: int = SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the checkpoint."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ContextCheckpoint":
+        """Deserialize a checkpoint."""
+        return cls(
+            agent_messages=list(data.get("agent_messages") or []),
+            chat_history=list(data.get("chat_history") or []),
+            context_files=dict(data.get("context_files") or {}),
+            taskspaces=list(data.get("taskspaces") or []),
+            active_taskspace_id=(
+                str(data.get("active_taskspace_id") or "").strip() or None
+            ),
+            scratchpad=dict(data.get("scratchpad") or {}),
+            artifacts=dict(data.get("artifacts") or {}),
+            todo_items=list(data.get("todo_items") or []),
+            provider=str(data.get("provider") or "").strip() or None,
+            model=str(data.get("model") or "").strip() or None,
+            session_mode=str(data.get("session_mode") or "daily_office"),
+            system_prompt_sha256=str(data.get("system_prompt_sha256") or "").strip(),
+            workspace_ref=str(data.get("workspace_ref") or "").strip() or None,
             schema_version=int(
                 data.get("schema_version", SCHEMA_VERSION) or SCHEMA_VERSION
             ),

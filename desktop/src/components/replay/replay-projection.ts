@@ -190,9 +190,7 @@ export function summarizeRun(events: ReplayEvent[]): ReplayStats {
     toolCalls: events.filter((event) => event.type === "tool_call").length,
     errors: events.filter((event) => ERROR_TYPES.has(event.type)).length,
     subagents: new Set(subagentIds).size,
-    branches: events.filter((event) =>
-      event.type === "run_resumed" && typeof event.payload?.parent_run_id === "string"
-    ).length,
+    branches: 0,
   };
 }
 

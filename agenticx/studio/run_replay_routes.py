@@ -12,8 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, Header, HTTPException, Query, Response
+from pydantic import BaseModel, Field
 
 from agenticx.runtime.replay_ledger import EVENT_TYPES, ReplayLedgerStore, RunEvent
+from agenticx.runtime.replay_ledger.branch_service import (
+    BranchService,
+    BranchServiceError,
+)
 from agenticx.runtime.replay_ledger.contracts import validate_ledger_id
 from agenticx.runtime.replay_ledger.export import export_run_json, export_run_markdown
 from agenticx.runtime.subagent_runs import SubAgentRunStore
@@ -21,6 +26,15 @@ from agenticx.runtime.subagent_runs import SubAgentRunStore
 
 MAX_EXPORT_EVENTS = 10_000
 MAX_EXPORT_RESOLVED_BYTES = 32 * 1024 * 1024
+
+
+class CreateRunBranchRequest(BaseModel):
+    """Validated request for branching a completed replay run."""
+
+    source_event_id: str = Field(min_length=1, max_length=128)
+    instruction: str = Field(min_length=1, max_length=20_000)
+    provider: str | None = Field(default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=256)
 
 
 def _nested_subagent_runs(
@@ -239,5 +253,35 @@ def register_run_replay_routes(
             redact=redact,
         )
         return Response(content=content, media_type="text/markdown; charset=utf-8")
+
+    @router.post("/api/runs/{run_id}/branches")
+    def create_run_branch(
+        run_id: str,
+        request: CreateRunBranchRequest,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        check_token(x_agx_desktop_token)
+        safe_run_id = _validated_id(run_id, "run_id")
+        try:
+            return BranchService(store=_store(), manager=manager).create_branch(
+                source_run_id=safe_run_id,
+                source_event_id=request.source_event_id,
+                instruction=request.instruction,
+                provider=request.provider,
+                model=request.model,
+            )
+        except BranchServiceError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={"code": exc.code, "detail": exc.detail},
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "branch_create_failed",
+                    "detail": "branch creation failed",
+                },
+            ) from exc
 
     app.include_router(router)
