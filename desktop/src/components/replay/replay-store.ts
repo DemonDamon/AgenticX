@@ -538,17 +538,12 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     clearPlaybackTimer(paneId);
     set((store) => {
       const current = store.byPane[paneId] ?? freshState();
-      const selected = current.events.find((event) => event.eventId === eventId);
       return {
         byPane: {
           ...store.byPane,
           [paneId]: {
             ...current,
             selectedEventId: eventId,
-            cursorSeq: selected?.seq ?? current.cursorSeq,
-            renderLimit: selected
-              ? renderLimitForCursor(current.events, selected.seq, current.renderLimit)
-              : current.renderLimit,
             playing: false,
           },
         },

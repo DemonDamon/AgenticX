@@ -200,8 +200,10 @@ describe("replay mounted behavior", () => {
     await flushEffects();
 
     expect(listReplayEvents).toHaveBeenCalledTimes(2);
-    expect(useReplayStore.getState().getPane("pane-lineage").selectedEventId)
-      .toBe("event-101");
+    expect(useReplayStore.getState().getPane("pane-lineage")).toMatchObject({
+      selectedEventId: "event-101",
+      cursorSeq: 101,
+    });
   });
 
   it("lets a run-list request exceed multiple ticks without aborting or duplicating it", async () => {
@@ -409,6 +411,32 @@ describe("replay mounted behavior", () => {
 
     expect(useReplayStore.getState().getPane("pane-a").selectedEventId).toBe("event-2");
     expect(useReplayStore.getState().getPane("pane-b").selectedEventId).toBeNull();
+  });
+
+  it("keeps later timeline rows visible when selecting an earlier step", async () => {
+    vi.mocked(listReplayRuns).mockResolvedValue(runsResponse([
+      { ...run, eventCount: 3 },
+    ]));
+    vi.mocked(listReplayEvents).mockResolvedValue(eventsPage([
+      replayEvent(1),
+      replayEvent(2),
+      replayEvent(3),
+    ]));
+    render(panel());
+    await flushEffects();
+    act(() => useReplayStore.getState().seek("pane-a", 3));
+
+    fireEvent.click(screen.getByRole("button", { name: "回放步骤 #2" }));
+
+    expect(useReplayStore.getState().getPane("pane-a")).toMatchObject({
+      cursorSeq: 3,
+      selectedEventId: "event-2",
+    });
+    expect(screen.getByRole("button", { name: "回放步骤 #3" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "回放步骤 #3" }).getAttribute("aria-current"))
+      .toBe("step");
+    expect(screen.getByRole("button", { name: "回放步骤 #2" }).className)
+      .toContain("bg-surface-card-strong");
   });
 
   it("dims timeline rows outside the selected causal chain", async () => {

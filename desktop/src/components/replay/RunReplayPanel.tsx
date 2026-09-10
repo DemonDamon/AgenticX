@@ -408,6 +408,7 @@ export function RunReplayPanel({
         );
         if (target) {
           useReplayStore.getState().selectEvent(paneId, target.eventId);
+          useReplayStore.getState().seek(paneId, target.seq);
           appliedTarget.current = targetKey;
           return;
         }
@@ -690,9 +691,7 @@ export function RunReplayPanel({
             chainEvents={effectiveReplay.events}
             onCopyChain={(markdown) => navigator.clipboard.writeText(markdown)}
             onSelectChainEvent={(eventId) => {
-              const target = effectiveReplay.events.find((item) => item.eventId === eventId);
               useReplayStore.getState().selectEvent(paneId, eventId);
-              if (target) useReplayStore.getState().seek(paneId, target.seq);
             }}
           />
         </div>

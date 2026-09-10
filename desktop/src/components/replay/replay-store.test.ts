@@ -137,6 +137,23 @@ describe("replay pane store", () => {
     expect(useReplayStore.getState().getPane("pane-a").cursorSeq).toBe(2);
   });
 
+  it("selects a step without moving the playback cursor", async () => {
+    await useReplayStore.getState().openRun(
+      "pane-a",
+      "session-1",
+      "run-1",
+      async () => page([event(1), event(2), event(3)]),
+    );
+    useReplayStore.getState().seek("pane-a", 3);
+    useReplayStore.getState().selectEvent("pane-a", "event-2");
+
+    expect(useReplayStore.getState().getPane("pane-a")).toMatchObject({
+      cursorSeq: 3,
+      selectedEventId: "event-2",
+      playing: false,
+    });
+  });
+
   it("clears a selected future detail when the cursor seeks behind it", async () => {
     await useReplayStore.getState().openRun(
       "pane-a",
@@ -209,6 +226,7 @@ describe("replay pane store", () => {
     useReplayStore.getState().setSpeed("pane-a", 2);
     useReplayStore.getState().setFilters("pane-a", new Set(["error"]));
     useReplayStore.getState().selectEvent("pane-a", "event-2");
+    useReplayStore.getState().seek("pane-a", 2);
     useReplayStore.getState().closeTab("pane-a");
 
     await useReplayStore.getState().openRun(
