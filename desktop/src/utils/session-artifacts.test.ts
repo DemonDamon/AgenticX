@@ -26,6 +26,7 @@ import {
   looksLikeDirectoryPath,
   pathToFileUrl,
   preferAnimatedPreviewImages,
+  selectSessionDeliverablePaths,
 } from "./session-artifacts";
 
 function toolMsg(partial: Partial<Message> & Pick<Message, "id" | "content">): Message {
@@ -1059,5 +1060,61 @@ describe("default workspace listing → 任务产物", () => {
       }),
     ).toBe(false);
     expect(isWalkableWorkspaceArtifactDir({ name: "output", type: "dir" })).toBe(true);
+    expect(isWalkableWorkspaceArtifactDir({ name: "docxenv", type: "dir" })).toBe(false);
+    expect(isWalkableWorkspaceArtifactDir({ name: "venv", type: "dir" })).toBe(false);
+  });
+
+  it("skips virtual-environment files from nested workspace listings", () => {
+    expect(
+      collectWorkspaceListingArtifactPaths({
+        workspaceRoot: root,
+        entries: [
+          { name: "pyvenv.cfg", type: "file", path: "docxenv/pyvenv.cfg" },
+          { name: "activate.fish", type: "file", path: "docxenv/bin/activate.fish" },
+          { name: "report.md", type: "file", path: "output/report.md" },
+        ],
+      }),
+    ).toEqual([`${root}/output/report.md`]);
+  });
+});
+
+describe("session deliverable selection", () => {
+  it("uses the final handoff list instead of helper scripts and virtualenv internals", () => {
+    const outputDir = "/Users/damon/myWork/project/脱敏输出";
+    const messages: Message[] = [
+      toolMsg({
+        id: "helper",
+        toolName: "bash_exec",
+        toolArgs: { command: "cat > /tmp/session/default/convert.py <<'EOF'" },
+        content: "exit_code=0",
+      }),
+      assistantMsg({
+        id: "final",
+        content: [
+          `完成。产物在 \`${outputDir}/\`：`,
+          "",
+          "| 产物 | 路径 |",
+          "|---|---|",
+          "| 脱敏 Markdown | `脱敏输出/可研-脱敏.md` |",
+          "| 图片 | `脱敏输出/assets/image_001.png`、`image_002.png` |",
+        ].join("\n"),
+      }),
+    ];
+
+    expect(
+      selectSessionDeliverablePaths(messages, [
+        "/tmp/session/default/convert.py",
+        "/tmp/session/default/docxenv/pyvenv.cfg",
+      ]),
+    ).toEqual([
+      `${outputDir}/可研-脱敏.md`,
+      `${outputDir}/assets/image_001.png`,
+      `${outputDir}/assets/image_002.png`,
+    ]);
+    expect(collectTurnArtifactPaths(messages, "final")).toEqual([
+      `${outputDir}/可研-脱敏.md`,
+      `${outputDir}/assets/image_001.png`,
+      `${outputDir}/assets/image_002.png`,
+    ]);
   });
 });

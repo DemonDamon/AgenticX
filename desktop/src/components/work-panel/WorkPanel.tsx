@@ -66,6 +66,7 @@ import {
   isInAppHtmlPreviewPath,
   looksLikeDirectoryPath,
   pathToFileUrl,
+  selectSessionDeliverablePaths,
 } from "../../utils/session-artifacts";
 import { collectFileChangeHighlight } from "../../utils/session-change-highlights";
 import {
@@ -935,13 +936,15 @@ export function WorkPanel({
   );
 
   const artifactPaths = useMemo(
-    () =>
-      collectSessionArtifactPaths(
+    () => {
+      const candidates = collectSessionArtifactPaths(
         paneMessages,
         subAgents,
         [...extraArtifactPaths, ...diskArtifactPaths],
         sessionId,
-      ),
+      );
+      return selectSessionDeliverablePaths(paneMessages, candidates);
+    },
     [paneMessages, subAgents, extraArtifactPaths, diskArtifactPaths, sessionId],
   );
 
