@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import pytest
+
 from agenticx.cli.studio import StudioSession
 from agenticx.runtime import AgentRuntime, ConfirmGate, EventType
 from agenticx.runtime.agent_runtime import _chat_history_append_deduped
@@ -220,6 +222,101 @@ def test_runtime_event_flow_tool_confirm_result_final(monkeypatch) -> None:
     assert checkpoints[-1][-1]["role"] == "assistant"
     assert checkpoints[-1][-1]["content"] == "done"
     assert checkpoints[-1][-1]["metadata"]["turn_terminal"] is True
+
+
+async def test_runtime_tool_result_keeps_full_ledger_only_result(
+    monkeypatch,
+) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    class _ReadThenFinalLLM(_ToolThenFinalLLM):
+        def invoke(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(
+                    "need tool",
+                    [
+                        {
+                            "id": "call-read",
+                            "type": "function",
+                            "function": {
+                                "name": "list_files",
+                                "arguments": {"path": ".", "limit": 1},
+                            },
+                        }
+                    ],
+                )
+            return _FakeResponse("done", [])
+
+    full_result = "r" * 5001
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return full_result
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    runtime = AgentRuntime(_ReadThenFinalLLM(), _ApproveGate())
+    events = [
+        event
+        async for event in runtime.run_turn("do it", StudioSession())
+    ]
+    result_event = next(
+        event for event in events if event.type == EventType.TOOL_RESULT.value
+    )
+
+    assert result_event.private_data["raw_result"] == full_result
+    assert result_event.private_data["tool_status"] == "completed"
+    assert result_event.data["result"] != full_result
+
+
+@pytest.mark.parametrize(
+    ("raw_result", "expected_status"),
+    [
+        ('{"ok":false,"error":"denied"}', "error"),
+        ("ERROR: tool failed", "error"),
+        ("CANCELLED: user stopped", "cancelled"),
+        ("[ACTION_REJECTED] user declined", "cancelled"),
+    ],
+)
+async def test_runtime_tool_result_private_status_uses_existing_classification(
+    monkeypatch,
+    raw_result: str,
+    expected_status: str,
+) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    class _ReadThenFinalLLM(_ToolThenFinalLLM):
+        def invoke(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(
+                    "need tool",
+                    [
+                        {
+                            "id": "call-status",
+                            "type": "function",
+                            "function": {
+                                "name": "list_files",
+                                "arguments": {"path": ".", "limit": 1},
+                            },
+                        }
+                    ],
+                )
+            return _FakeResponse("done", [])
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return raw_result
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    runtime = AgentRuntime(_ReadThenFinalLLM(), _ApproveGate())
+    result_events = [
+        event
+        async for event in runtime.run_turn("do it", StudioSession())
+        if event.type == EventType.TOOL_RESULT.value
+    ]
+    result_event = result_events[0]
+
+    assert result_event.private_data["raw_result"] == raw_result
+    assert result_event.private_data["tool_status"] == expected_status
 
 
 def test_runtime_max_rounds_emits_error(monkeypatch) -> None:

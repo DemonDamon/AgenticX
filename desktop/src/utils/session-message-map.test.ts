@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapLoadedSessionMessage } from "./session-message-map";
+import { mapLoadedSessionMessage, parseBranchLineage } from "./session-message-map";
 
 describe("mapLoadedSessionMessage turn usage", () => {
   it("maps persisted usage and model onto the Message", () => {
@@ -40,5 +40,34 @@ describe("mapLoadedSessionMessage turn usage", () => {
     );
     expect(mapped.usage).toBeUndefined();
     expect(mapped.modelSelection).toBeUndefined();
+  });
+});
+
+describe("branch lineage messages", () => {
+  it("recognizes persisted branch lineage metadata", () => {
+    const mapped = mapLoadedSessionMessage(
+      {
+        role: "system",
+        content: "",
+        metadata: {
+          branch_lineage: {
+            parent_session_id: "source-session",
+            parent_run_id: "run-a",
+            requested_seq: 101,
+            restored_seq: 100,
+            source_event_id: "event-101",
+          },
+        },
+      },
+      "child-session",
+      0,
+    );
+    expect(parseBranchLineage(mapped.metadata)).toEqual({
+      parentSessionId: "source-session",
+      parentRunId: "run-a",
+      requestedSeq: 101,
+      restoredSeq: 100,
+      sourceEventId: "event-101",
+    });
   });
 });

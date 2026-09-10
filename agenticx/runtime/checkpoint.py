@@ -47,6 +47,7 @@ class AgentCheckpoint(BaseModel):
 
     session_id: str
     turn_id: str
+    run_id: Optional[str] = None
     round_idx: int = 0
     status: Literal["in_progress", "awaiting_confirm", "completed"] = "in_progress"
     pending_tool_calls: list[dict] = Field(default_factory=list)

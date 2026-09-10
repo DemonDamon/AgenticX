@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -277,6 +278,158 @@ def test_smoke_subagent_empty_session_clusters(client: TestClient) -> None:
     body = resp.json()
     assert body.get("ok") is True
     assert body.get("clusters") == []
+
+
+def _create_api_session(client: TestClient) -> str:
+    response = client.get("/api/session")
+    assert response.status_code == 200
+    return str(response.json()["session_id"])
+
+
+def _seed_delegate_run(owner_session_id: str, run_id: str) -> None:
+    SubAgentRunStore(owner_session_id).open_run(
+        run_id=run_id,
+        kind="delegate",
+        name="Coder",
+        role="Engineer",
+        task="write report",
+        status="completed",
+        avatar_id="avatar-1",
+        avatar_session_id="avatar-session-1",
+    )
+
+
+def test_subagents_status_includes_cold_start_delegate_from_ledger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    owner_id = _create_api_session(client)
+    _seed_delegate_run(owner_id, "dlg-cold-api")
+
+    body = client.get(
+        "/api/subagents/status",
+        params={"session_id": owner_id},
+    ).json()
+
+    assert body["ok"] is True
+    assert [row["agent_id"] for row in body["subagents"]] == ["dlg-cold-api"]
+    assert body["subagents"][0]["source"] == "ledger"
+
+
+def test_subagents_status_deduplicates_live_delegate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    owner_id = _create_api_session(client)
+    _seed_delegate_run(owner_id, "dlg-dedup-api")
+    session_manager = client.app.state.session_manager
+    session_manager._sessions["avatar-session-1"] = SimpleNamespace(
+        archived=False,
+        session_id="avatar-session-1",
+        avatar_id="avatar-1",
+        avatar_name="Coder",
+        updated_at=9999999999.0,
+        _delegation_info={
+            "delegation_id": "dlg-dedup-api",
+            "from_session": owner_id,
+            "status": "running",
+            "updated_at": 9999999999.0,
+        },
+    )
+
+    body = client.get(
+        "/api/subagents/status",
+        params={"session_id": owner_id},
+    ).json()
+
+    assert [row["agent_id"] for row in body["subagents"]] == ["dlg-dedup-api"]
+
+
+def test_subagents_status_keeps_owner_session_isolation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    owner_id = _create_api_session(client)
+    other_id = _create_api_session(client)
+    _seed_delegate_run(other_id, "dlg-other-api")
+
+    body = client.get(
+        "/api/subagents/status",
+        params={"session_id": owner_id},
+    ).json()
+
+    assert body["subagents"] == []
+
+
+def test_subagents_status_count_matches_unique_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    owner_id = _create_api_session(client)
+    _seed_delegate_run(owner_id, "dlg-count-a")
+    _seed_delegate_run(owner_id, "dlg-count-b")
+
+    body = client.get(
+        "/api/subagents/status",
+        params={"session_id": owner_id},
+    ).json()
+
+    assert body["count"] == len(body["subagents"]) == 2
+
+
+def test_subagents_status_reports_corrupt_index(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    owner_id = _create_api_session(client)
+    store = SubAgentRunStore(owner_id)
+    store.root.mkdir(parents=True, exist_ok=True)
+    (store.root / "index.json").write_text("{broken", encoding="utf-8")
+
+    body = client.get(
+        "/api/subagents/status",
+        params={"session_id": owner_id},
+    ).json()
+
+    assert body["ok"] is False
+    assert body["error"] == "subagent_run_store_read_failed"
+    assert body["detail"] == "sub-agent run index is unreadable"
+    assert str(store.root) not in str(body)
+
+
+def test_subagents_status_reports_corrupt_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    owner_id = _create_api_session(client)
+    _seed_delegate_run(owner_id, "corrupt-record-api")
+    store = SubAgentRunStore(owner_id)
+    (store.root / "corrupt-record-api.json").write_text(
+        "{broken",
+        encoding="utf-8",
+    )
+
+    body = client.get(
+        "/api/subagents/status",
+        params={"session_id": owner_id},
+    ).json()
+
+    assert body["ok"] is False
+    assert body["error"] == "subagent_run_store_read_failed"
+    assert body["detail"] == "sub-agent run record is unreadable"
+    assert str(store.root) not in str(body)
 
 
 def test_resolve_artifact_path_rejects_non_whitelist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

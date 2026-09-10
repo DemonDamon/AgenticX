@@ -66,6 +66,11 @@ import type {
   ActionConfirmationDecision,
   PendingActionConfirmation,
 } from "../../utils/action-confirmation";
+import { BranchLineageCard } from "../replay/BranchLineageCard";
+import {
+  parseBranchLineage,
+  type BranchLineage,
+} from "../../utils/session-message-map";
 
 type Props = {
   message: Message;
@@ -147,6 +152,7 @@ type Props = {
   onOpenAllChanges?: () => void;
   onViewPlan?: (path: string) => void;
   onBuildPlan?: (plan: PlanArtifactPayload) => void;
+  onOpenBranchSource?: (lineage: BranchLineage) => void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -378,6 +384,7 @@ export function MessageRenderer({
   onOpenAllChanges,
   onViewPlan,
   onBuildPlan,
+  onOpenBranchSource,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const resolvedReferences = useMemo(() => {
@@ -406,6 +413,15 @@ export function MessageRenderer({
     const fromTurn = collectTurnLightboxImages(patched, displayMessage.id);
     return fromTurn.length > 0 ? fromTurn : readyLightboxImages(displayMessage.blocks);
   }, [displayMessage, allMessages]);
+  const branchLineage = parseBranchLineage(message.metadata);
+  if (branchLineage) {
+    return (
+      <BranchLineageCard
+        lineage={branchLineage}
+        onOpenSource={onOpenBranchSource}
+      />
+    );
+  }
   if (message.systemNotice) {
     const text = String(message.content ?? "").trim();
     if (!text) return null;

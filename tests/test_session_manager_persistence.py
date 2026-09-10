@@ -6,12 +6,15 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
 from agenticx.memory.session_store import SessionStore
+from agenticx.runtime.replay_ledger import ReplayLedgerStore
+from agenticx.runtime.replay_ledger.contracts import ContextCheckpoint
 from agenticx.studio import session_manager as session_manager_module
 from agenticx.studio.session_manager import SessionManager
 
@@ -56,6 +59,93 @@ def test_session_manager_restores_and_persists(tmp_path: Path) -> None:
     assert restored.get("k2") == "v2"
     assert manager.delete(sid) is True
     assert store._load_scratchpad_sync(sid) == {}
+
+
+def test_branch_checkpoint_fork_is_prefix_exact_source_immutable_and_cold_durable(
+    tmp_path: Path,
+) -> None:
+    store = SessionStore(tmp_path / "sessions.sqlite")
+    sessions_root = tmp_path / "sessions"
+    manager = SessionManager()
+    manager._session_store = store
+    manager._sessions_root = str(sessions_root)
+    source = manager.create(session_id="source-session")
+    source.studio_session.agent_messages = [
+        {"role": "user", "content": "start"},
+        {"role": "assistant", "content": "tool 101", "tool_calls": [{"id": "101"}]},
+        {"role": "tool", "tool_call_id": "101", "content": "must not copy"},
+    ]
+    source.studio_session.chat_history = [
+        {"id": "u1", "role": "user", "content": "start"},
+        {"id": "a101", "role": "assistant", "content": "tool 101"},
+    ]
+    assert manager.persist("source-session") is True
+    source_path = sessions_root / "source-session" / "agent_messages.json"
+    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    checkpoint = ContextCheckpoint(
+        agent_messages=[{"role": "user", "content": "start"}],
+        chat_history=[{"id": "u1", "role": "user", "content": "start"}],
+        context_files={},
+        taskspaces=[],
+        active_taskspace_id=None,
+        scratchpad={},
+        artifacts={},
+        todo_items=[],
+        provider="provider-a",
+        model="model-a",
+        session_mode="code_dev",
+        system_prompt_sha256="0" * 64,
+        workspace_ref=None,
+    )
+    lineage = {
+        "parent_session_id": "source-session",
+        "parent_run_id": "parent-run",
+        "source_event_id": "event-101",
+        "source_seq": 101,
+        "resolved_checkpoint_event_id": "event-100",
+        "resolved_checkpoint_seq": 100,
+    }
+
+    child = manager.fork_session_from_checkpoint(
+        source_session_id="source-session",
+        target_session_id="child-session",
+        checkpoint=checkpoint,
+        lineage=lineage,
+        workspace_state={},
+        provider=None,
+        model=None,
+    )
+
+    assert child.studio_session.agent_messages == checkpoint.agent_messages
+    assert "101" not in json.dumps(
+        child.studio_session.agent_messages,
+        ensure_ascii=False,
+    )
+    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == source_hash
+    assert child.studio_session.chat_history[-1]["metadata"]["branch_lineage"] == {
+        "parent_session_id": "source-session",
+        "parent_run_id": "parent-run",
+        "requested_seq": 101,
+        "restored_seq": 100,
+        "source_event_id": "event-101",
+    }
+    assert all(
+        "branch_lineage" not in row.get("metadata", {})
+        for row in child.studio_session.agent_messages
+    )
+
+    fresh = SessionManager()
+    fresh._session_store = store
+    fresh._sessions_root = str(sessions_root)
+    restored = fresh.get("child-session", touch=False)
+    assert restored is not None
+    assert restored.studio_session.scratchpad["run_branch_lineage"] == lineage
+    assert (
+        restored.studio_session.chat_history[-1]["metadata"]["branch_lineage"][
+            "source_event_id"
+        ]
+        == "event-101"
+    )
 
 
 def test_persist_keeps_final_reply_with_nested_scratchpad(tmp_path: Path) -> None:
@@ -386,7 +476,10 @@ def test_apply_avatar_binding_does_not_pull_global_taskspaces(tmp_path: Path) ->
     assert rows_after and rows_after[0]["id"] == "default"
 
 
-def test_delete_purges_persistence_and_removes_from_listing(tmp_path: Path) -> None:
+def test_delete_purges_persistence_and_removes_from_listing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     store = SessionStore(tmp_path / "sessions.sqlite")
     sessions_root = tmp_path / "sessions"
     taskspaces_root = tmp_path / "taskspaces"
@@ -406,9 +499,26 @@ def test_delete_purges_persistence_and_removes_from_listing(tmp_path: Path) -> N
     fresh._session_store = store  # test override
     fresh._sessions_root = str(sessions_root)
     fresh._taskspaces_root = str(taskspaces_root)
+    cleanup_calls: list[str] = []
+    original_cleanup = ReplayLedgerStore.delete_session_runs
+
+    def cleanup_before_purge(
+        replay_store: ReplayLedgerStore,
+        session_id: str,
+    ) -> None:
+        assert (sessions_root / session_id).exists()
+        cleanup_calls.append(session_id)
+        original_cleanup(replay_store, session_id)
+
+    monkeypatch.setattr(
+        ReplayLedgerStore,
+        "delete_session_runs",
+        cleanup_before_purge,
+    )
 
     # Simulate deletion from a history list item that is not yet loaded in memory.
     assert fresh.delete(sid) is True
+    assert cleanup_calls == [sid]
     assert fresh.get(sid, touch=False) is None
     assert sid not in {row["session_id"] for row in fresh.list_sessions()}
 

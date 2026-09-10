@@ -37,7 +37,8 @@ import { useAppStore, type Avatar, type ChatPane, type Message, type PaneTermina
 import { i18n } from "../../i18n/i18n";
 import { WorkspacePanel } from "../WorkspacePanel";
 import { RunGraphPanel } from "../graph/RunGraphPanel";
-import { ExecutionTimeline } from "../graph/ExecutionTimeline";
+import { replayFocusTargetForSession } from "../replay/branch-lineage-navigation";
+import { RunReplayPanel } from "../replay/RunReplayPanel";
 import { GroupMembersSummaryList } from "./GroupMembersSummaryList";
 import {
   loadAbsoluteFilePreview,
@@ -452,7 +453,12 @@ export type WorkPanelFocus =
     }
   /** Run Graph God-View tab (same shell as browser / summary). */
   | { kind: "graph" }
-  | { kind: "timeline" }
+  | {
+      kind: "timeline";
+      sessionId?: string;
+      runId?: string;
+      eventId?: string;
+    }
   | null;
 
 type BrowserHistoryEntry = {
@@ -764,6 +770,11 @@ export function WorkPanel({
   const [workspaceTabOpen, setWorkspaceTabOpen] = useState(false);
   const [graphTabOpen, setGraphTabOpen] = useState(false);
   const [timelineTabOpen, setTimelineTabOpen] = useState(false);
+  const [timelineFocusTarget, setTimelineFocusTarget] = useState<{
+    sessionId: string;
+    runId: string;
+    eventId: string;
+  } | null>(null);
   const paneForGraph = useAppStore(
     (s) => s.panes.find((p) => p.id === paneId) ?? null,
   );
@@ -808,6 +819,7 @@ export function WorkPanel({
   const apiBase = useAppStore((s) => s.apiBase);
   const addPane = useAppStore((s) => s.addPane);
   const setActivePaneId = useAppStore((s) => s.setActivePaneId);
+  const openRunDrawer = useAppStore((s) => s.openRunDrawer);
   const panes = useAppStore((s) => s.panes);
   const [workItems, setWorkItems] = useState<WorkItem[]>([]);
   const [workItemError, setWorkItemError] = useState("");
@@ -1411,6 +1423,13 @@ export function WorkPanel({
     } else if (focusRequest.kind === "timeline") {
       setTimelineTabOpen(true);
       setActiveKind("timeline");
+      if (focusRequest.sessionId && focusRequest.runId && focusRequest.eventId) {
+        setTimelineFocusTarget({
+          sessionId: focusRequest.sessionId,
+          runId: focusRequest.runId,
+          eventId: focusRequest.eventId,
+        });
+      }
     }
     onFocusRequestHandled?.();
   }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab]);
@@ -2490,11 +2509,20 @@ export function WorkPanel({
         ) : null}
 
         {hasAnyTab && activeKind === "timeline" && timelineTabOpen ? (
-          <ExecutionTimeline
+          <RunReplayPanel
             paneId={paneId}
+            sessionId={sessionId}
+            apiBase={apiBase}
+            apiToken={apiToken}
             agentIds={timelineAgentIds}
             avatarById={timelineAvatarById}
             metaLeaderLabel={metaLeaderLabel}
+            focusTarget={replayFocusTargetForSession(
+              timelineFocusTarget,
+              sessionId,
+            )}
+            onOpenSubagentRun={(runId) => openRunDrawer(paneId, runId)}
+            onOpenArtifact={(path) => openLocalFilePreview(path)}
           />
         ) : null}
 

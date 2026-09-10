@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -24,6 +26,10 @@ from agenticx.runtime.subagent_runs.contracts import (
 _LOG = logging.getLogger(__name__)
 
 
+class SubAgentRunStoreReadError(RuntimeError):
+    """Identify unreadable persisted run-store data."""
+
+
 class SubAgentRunStore:
     """Disk-backed run store for spawn/delegation timeline and artifacts.
 
@@ -36,6 +42,8 @@ class SubAgentRunStore:
     _max_activity_entries = 500
     _activity_keep_head = 50
     _activity_keep_tail = 400
+    _root_locks: Dict[str, threading.RLock] = {}
+    _root_locks_guard = threading.Lock()
 
     def __init__(self, owner_session_id: Optional[str]) -> None:
         self.owner_session_id = str(owner_session_id or "").strip()
@@ -50,7 +58,12 @@ class SubAgentRunStore:
         else:
             self._root = Path.home() / ".agenticx" / "subagent_runs"
         self._index_file = self._root / "index.json"
-        self._lock = threading.RLock()
+        root_key = str(self._root.resolve(strict=False))
+        with self._root_locks_guard:
+            self._lock = self._root_locks.setdefault(
+                root_key,
+                threading.RLock(),
+            )
 
     @property
     def root(self) -> Path:
@@ -561,15 +574,16 @@ class SubAgentRunStore:
             data.setdefault("owner_session_id", self.owner_session_id)
             data.setdefault("clusters", {})
             data.setdefault("runs", {})
+            if not isinstance(data["clusters"], dict):
+                raise ValueError("index clusters is not a dict")
+            if not isinstance(data["runs"], dict):
+                raise ValueError("index runs is not a dict")
             return data
         except Exception as exc:
             _LOG.warning("[subagent_runs] failed to load index %s: %s", self._index_file, exc)
-            return {
-                "schema_version": SCHEMA_VERSION,
-                "owner_session_id": self.owner_session_id,
-                "clusters": {},
-                "runs": {},
-            }
+            raise SubAgentRunStoreReadError(
+                "sub-agent run index is unreadable"
+            ) from exc
 
     def _load_record_from_file(self, path: Path) -> Optional[RunRecord]:
         if not path.exists():
@@ -577,17 +591,40 @@ class SubAgentRunStore:
         try:
             payload = json.loads(path.read_text("utf-8"))
             if not isinstance(payload, dict):
-                return None
-            return RunRecord.from_dict(payload)
+                raise ValueError("run record is not a dict")
+            record = RunRecord.from_dict(payload)
+            if not record.run_id:
+                raise ValueError("run record has no run_id")
+            return record
         except Exception as exc:
             _LOG.warning("[subagent_runs] failed to load record %s: %s", path, exc)
-            return None
+            raise SubAgentRunStoreReadError(
+                "sub-agent run record is unreadable"
+            ) from exc
 
     @staticmethod
     def _write_json(path: Path, payload: Dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+        fd, temp_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
         )
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(
+                    payload,
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
 

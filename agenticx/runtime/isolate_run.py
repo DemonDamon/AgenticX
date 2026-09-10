@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -136,12 +137,17 @@ def _candidate_start_paths(session: Any) -> list[Path]:
     return out
 
 
-def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _git(
+    cwd: Path,
+    *args: str,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(cwd), *args],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
 
 
@@ -217,7 +223,11 @@ def apply_isolate_roots(
                     mapped = worktree
                 else:
                     mapped = worktree / resolved.relative_to(repo)
-            if mapped == repo or _path_under(mapped, repo) and not _path_under(mapped, worktree):
+            if (
+                mapped == repo
+                or _path_under(mapped, repo)
+                and not _path_under(mapped, worktree)
+            ):
                 mapped = worktree
             key = str(mapped)
             if key in seen:
@@ -326,7 +336,9 @@ def adopt_isolate(session: Any) -> dict[str, Any]:
     return {"ok": True, "isolate": None}
 
 
-def ensure_isolate(session: Any, *, isolate_run: bool, is_automation: bool) -> dict[str, Any]:
+def ensure_isolate(
+    session: Any, *, isolate_run: bool, is_automation: bool
+) -> dict[str, Any]:
     if is_automation:
         existing = load_isolate_state(session)
         if existing is not None:
@@ -374,7 +386,15 @@ def ensure_isolate(session: Any, *, isolate_run: bool, is_automation: bool) -> d
         discard_isolate(session)
         try:
             subprocess.run(
-                ["git", "-C", str(git_root), "worktree", "remove", "--force", str(dest)],
+                [
+                    "git",
+                    "-C",
+                    str(git_root),
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(dest),
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -393,6 +413,80 @@ def ensure_isolate(session: Any, *, isolate_run: bool, is_automation: bool) -> d
     }
     save_isolate_state(session, state)
     return {"active": True, **state}
+
+
+def create_isolate_from_tree(
+    *,
+    repo_root: Path,
+    base_sha: str,
+    tree_oid: str,
+    target_session_id: str,
+) -> dict[str, str]:
+    """Create a new isolate whose dirty working state matches a verified tree."""
+    safe_session = _safe_slug(target_session_id, "session")
+    run_id = uuid.uuid4().hex
+    destination = isolate_base_dir() / safe_session / run_id
+    branch = f"agx-branch/{safe_session[:16]}-{run_id[:8]}"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    stage = "worktree_add"
+    try:
+        _git(
+            repo_root,
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            str(destination),
+            base_sha,
+        )
+        stage = "read_tree"
+        _git(destination, "read-tree", "--reset", "-u", tree_oid)
+        stage = "reset_mixed"
+        _git(destination, "reset", "--mixed", base_sha)
+        stage = "verify_tree"
+        index_fd, index_name = tempfile.mkstemp(prefix="agx-replay-index-")
+        os.close(index_fd)
+        Path(index_name).unlink(missing_ok=True)
+        try:
+            env = dict(os.environ)
+            env["GIT_INDEX_FILE"] = index_name
+            _git(destination, "read-tree", base_sha, env=env)
+            _git(destination, "add", "-A", "--", ":/", env=env)
+            verified = _git(destination, "write-tree", env=env).stdout.strip()
+        finally:
+            Path(index_name).unlink(missing_ok=True)
+        if verified != tree_oid:
+            raise RuntimeError("restored tree verification mismatch")
+        return {
+            "run_id": run_id,
+            "repo_root": str(repo_root.resolve(strict=True)),
+            "worktree": str(destination.resolve(strict=True)),
+            "branch": branch,
+            "start_sha": base_sha,
+        }
+    except Exception as exc:
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "worktree",
+                "remove",
+                "--force",
+                str(destination),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_root), "branch", "-D", branch],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        shutil.rmtree(destination, ignore_errors=True)
+        raise RuntimeError(f"workspace_restore_failed:{stage}") from exc
 
 
 def build_isolate_block(session: Any) -> str:

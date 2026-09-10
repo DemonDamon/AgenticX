@@ -17,6 +17,40 @@ import {
 } from "./assistant-output";
 import { sanitizeLoadedBlocks } from "./content-blocks";
 
+export type BranchLineage = {
+  parentSessionId: string;
+  parentRunId: string;
+  requestedSeq: number;
+  restoredSeq: number;
+  sourceEventId?: string;
+};
+
+export function parseBranchLineage(
+  metadata: Record<string, unknown> | undefined,
+): BranchLineage | null {
+  const raw = metadata?.branch_lineage;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  const parentSessionId = String(row.parent_session_id ?? "").trim();
+  const parentRunId = String(row.parent_run_id ?? "").trim();
+  const requestedSeq = Number(row.requested_seq);
+  const restoredSeq = Number(row.restored_seq);
+  if (
+    !parentSessionId
+    || !parentRunId
+    || !Number.isInteger(requestedSeq)
+    || !Number.isInteger(restoredSeq)
+  ) return null;
+  const sourceEventId = String(row.source_event_id ?? "").trim();
+  return {
+    parentSessionId,
+    parentRunId,
+    requestedSeq,
+    restoredSeq,
+    ...(sourceEventId ? { sourceEventId } : {}),
+  };
+}
+
 function parseSubAgentClusterAnchor(meta: Record<string, unknown> | undefined): Message["subAgentCluster"] {
   const raw = meta?.subagent_cluster;
   if (!raw || typeof raw !== "object") return undefined;
@@ -173,7 +207,7 @@ function imageAttachmentsFromVisualRow(raw: unknown): MessageAttachment[] | unde
 
 export type LoadedSessionMessage = {
   id?: string;
-  role: MsgRole;
+  role: MsgRole | "system";
   content: string;
   agent_id?: string;
   avatar_name?: string;
@@ -201,6 +235,7 @@ export type LoadedSessionMessage = {
   attachments?: unknown;
   visual_attachments?: unknown;
   metadata?: Record<string, unknown>;
+  system_notice?: boolean;
   tool_call_id?: string;
   tool_name?: string;
   tool_args?: Record<string, unknown>;
@@ -265,7 +300,7 @@ export function mapLoadedSessionMessage(
       : undefined;
   const mapped: Message = {
     id,
-    role: item.role,
+    role: item.role === "system" ? "tool" : item.role,
     content: injectRow && !rawContent.trim() ? "" : rawContent,
     ownerSessionId: String(ownerSessionId ?? idPrefix ?? "").trim() || undefined,
     agentId,
@@ -289,6 +324,7 @@ export function mapLoadedSessionMessage(
         : undefined,
     attachments: normalizeReferenceAttachments(mergedAttachments),
     metadata,
+    systemNotice: item.system_notice === true,
     subAgentCluster: parseSubAgentClusterAnchor(metadata),
   };
   if (item.role === "assistant") {

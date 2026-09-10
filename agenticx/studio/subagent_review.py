@@ -11,13 +11,17 @@ import mimetypes
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from agenticx.runtime.subagent_runs import ActivityEntry, RunRecord, SubAgentRunStore
+from agenticx.runtime.subagent_runs import (
+    ActivityEntry,
+    RunRecord,
+    SubAgentRunStore,
+    apply_live_overrides,
+)
 from agenticx.runtime.team_manager import AgentTeamManager
 
 _LOG = logging.getLogger(__name__)
 
 _TEXT_PREVIEW_MAX_BYTES = 32 * 1024
-_TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _BINARY_PREVIEW_KINDS = {
     ".png",
     ".jpg",
@@ -76,7 +80,7 @@ def run_record_to_member_summary(
         "output_files": list(record.output_files or []),
     }
     if memory:
-        _apply_memory_overrides(summary, record, memory, summary_only=True)
+        apply_live_overrides(summary, record, memory, summary_only=True)
     return summary
 
 
@@ -87,7 +91,7 @@ def merge_run_record_with_memory(
     """Merge persisted run record with in-memory live status when fresher."""
     payload = record.to_dict()
     if memory:
-        _apply_memory_overrides(payload, record, memory, summary_only=False)
+        apply_live_overrides(payload, record, memory, summary_only=False)
     return payload
 
 
@@ -266,47 +270,3 @@ def _looks_text_file(path: Path) -> bool:
         ".sh",
         ".sql",
     }
-
-
-def _apply_memory_overrides(
-    target: Dict[str, Any],
-    record: RunRecord,
-    memory: Dict[str, Any],
-    *,
-    summary_only: bool,
-) -> None:
-    if str(record.status or "").strip() in _TERMINAL_RUN_STATUSES:
-        return
-    mem_updated = float(memory.get("updated_at", 0) or 0)
-    record_updated = float(record.updated_at or 0)
-    mem_status = str(memory.get("status", "") or "")
-    active = {"running", "pending"}
-    should_override = mem_status in active or mem_updated >= record_updated
-    if not should_override:
-        return
-
-    for key in (
-        "status",
-        "result_summary",
-        "error_text",
-        "updated_at",
-        "provider",
-        "model",
-        "avatar_id",
-        "badge_seq",
-        "cluster_id",
-        "name",
-        "role",
-    ):
-        if key in memory and memory.get(key) is not None:
-            target[key] = memory[key]
-
-    if summary_only:
-        return
-
-    for key in ("output_files", "result_file"):
-        if memory.get(key):
-            target[key] = memory[key]
-    recent = memory.get("recent_events")
-    if isinstance(recent, list) and recent:
-        target["recent_events"] = recent[-20:]
