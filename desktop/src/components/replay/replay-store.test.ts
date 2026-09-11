@@ -455,6 +455,7 @@ describe("replay pane store", () => {
       async () => ({ ...page(events), run: { ...page(events).run, status: "completed" } }),
     );
 
+    useReplayStore.getState().setSpeed("pane-a", 2);
     await useReplayStore.getState().enterPresentation("pane-a");
     expect(useReplayStore.getState().getPane("pane-a")).toMatchObject({
       presenting: true,
@@ -501,6 +502,7 @@ describe("replay pane store", () => {
       "run-1",
       async () => ({ ...page(events), run: { ...page(events).run, status: "completed" } }),
     );
+    useReplayStore.getState().setSpeed("pane-a", 2);
     await useReplayStore.getState().enterPresentation("pane-a");
 
     await vi.advanceTimersByTimeAsync(150);
@@ -512,6 +514,38 @@ describe("replay pane store", () => {
 
     useReplayStore.getState().finishPresentationStream("pane-a");
     expect(useReplayStore.getState().getPane("pane-a").cursorSeq).toBe(4);
+  });
+
+  it("opens a merged session ledger and can present it", async () => {
+    useReplayStore.getState().openSession(
+      "pane-a",
+      "session-1",
+      {
+        runId: "__session__",
+        sessionId: "session-1",
+        turnId: "session",
+        agentId: "meta",
+        status: "completed",
+        createdAt: 1_000,
+        eventCount: 2,
+        completeness: "complete",
+      },
+      [
+        { ...event(1), type: "user_message" },
+        { ...event(2), type: "assistant_output_completed" },
+      ],
+    );
+    expect(useReplayStore.getState().getPane("pane-a")).toMatchObject({
+      runId: "__session__",
+      sessionId: "session-1",
+      hasMore: false,
+    });
+    useReplayStore.getState().setSpeed("pane-a", 1);
+    await useReplayStore.getState().enterPresentation("pane-a");
+    expect(useReplayStore.getState().getPane("pane-a")).toMatchObject({
+      presenting: true,
+      speed: 1,
+    });
   });
 
   it("clears presenting when the replay tab closes", async () => {

@@ -231,7 +231,12 @@ import {
   type SessionExecutionState,
 } from "../utils/streaming-stop-policy";
 import { queuedMessagesForSession } from "../utils/pending-message-queue";
-import { shouldApplyScrollPinFromEvent, shouldPinScrollOnUserSend } from "../utils/chat-scroll-pin";
+import {
+  chatListFollowRows,
+  shouldApplyScrollPinFromEvent,
+  shouldPinScrollOnPresentationEnter,
+  shouldPinScrollOnUserSend,
+} from "../utils/chat-scroll-pin";
 import {
   TURN_INTERRUPTED_TOAST,
   isTurnInterruptionNoticeMessage,
@@ -3969,6 +3974,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     };
   }, [paneId, flushJumpToBottomFab, syncJumpToBottomFab, scrollListToBottom]);
 
+  const replayPresentingPrevRef = useRef(false);
+  useLayoutEffect(() => {
+    const wasPresenting = replayPresentingPrevRef.current;
+    replayPresentingPrevRef.current = replayPresenting;
+    if (shouldPinScrollOnPresentationEnter(wasPresenting, replayPresenting)) {
+      pinChatListToLatestTurn();
+    }
+  }, [replayPresenting, pinChatListToLatestTurn]);
+
+  const listFollowRows = chatListFollowRows(replayPresenting, visibleMessages, renderMessages);
   useLayoutEffect(() => {
     if (autoScrollPinnedRef.current) {
       scrollListToBottom();
@@ -3984,7 +3999,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     // FAB only — do not recompute pin here. Layout is often still short of the
     // true bottom when a new user bubble mounts, and that used to unpin us.
     syncJumpToBottomFab();
-  }, [visibleMessages, streamedAssistantText, scrollListToBottom, syncJumpToBottomFab]);
+  }, [listFollowRows, streamedAssistantText, scrollListToBottom, syncJumpToBottomFab]);
 
   const highlightJumpKeyRef = useRef<string>("");
   useEffect(() => {

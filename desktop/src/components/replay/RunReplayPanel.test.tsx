@@ -180,6 +180,18 @@ describe("replay UI", () => {
     expect(noSessionEn).toContain("Send your first message");
     expect(partial).toContain("记录不完整");
     expect(partial).not.toContain("<select");
+
+    const sessionPlay = render(
+      <ReplaySummaryBar
+        runs={[run, { ...run, runId: "run / 2", createdAt: 2_000, completeness: "complete" }]}
+        selectedRunId={run.runId}
+        stats={{ durationMs: 1_000, rounds: 1, toolCalls: 2, errors: 0, subagents: 0, branches: 0 }}
+        summarizing={false}
+        onSelectRun={() => {}}
+      />,
+    );
+    expect(sessionPlay).toContain("整段会话");
+    expect(sessionPlay).toContain("<select");
   });
 
   it("renders controls and 500 timeline rows without React key warnings", () => {

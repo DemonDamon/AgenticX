@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { shouldApplyScrollPinFromEvent, shouldPinScrollOnUserSend } from "./chat-scroll-pin";
+import {
+  chatListFollowRows,
+  shouldApplyScrollPinFromEvent,
+  shouldPinScrollOnPresentationEnter,
+  shouldPinScrollOnUserSend,
+} from "./chat-scroll-pin";
 
 describe("shouldPinScrollOnUserSend", () => {
   it("pins a normal composer send", () => {
@@ -36,5 +41,23 @@ describe("shouldApplyScrollPinFromEvent", () => {
 
   it("ignores programmatic scroll so a just-pinned send is not unpinned", () => {
     expect(shouldApplyScrollPinFromEvent(true)).toBe(false);
+  });
+});
+
+describe("chatListFollowRows", () => {
+  it("follows the sliced presentation rows, not the unchanged full session", () => {
+    const live = [{ id: "full" }];
+    const presented = [{ id: "turn-1" }];
+    expect(chatListFollowRows(false, live, presented)).toBe(live);
+    expect(chatListFollowRows(true, live, presented)).toBe(presented);
+  });
+});
+
+describe("shouldPinScrollOnPresentationEnter", () => {
+  it("re-pins only when presentation starts", () => {
+    expect(shouldPinScrollOnPresentationEnter(false, true)).toBe(true);
+    expect(shouldPinScrollOnPresentationEnter(true, true)).toBe(false);
+    expect(shouldPinScrollOnPresentationEnter(true, false)).toBe(false);
+    expect(shouldPinScrollOnPresentationEnter(false, false)).toBe(false);
   });
 });

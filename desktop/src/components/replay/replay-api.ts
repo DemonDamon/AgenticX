@@ -101,6 +101,41 @@ export async function getReplayRun(
   return normalizeReplayRunResponse(await response.json() as unknown);
 }
 
+export async function listAllReplayEvents(
+  apiBase: string,
+  apiToken: string,
+  runId: string,
+  options: RequestOptions = {},
+): Promise<{ run: ReplayRun; events: ReplayEventsResponse["events"]; parseWarnings: string[] }> {
+  const events: ReplayEventsResponse["events"] = [];
+  const seen = new Set<string>();
+  const parseWarnings: string[] = [];
+  let afterSeq = 0;
+  let run: ReplayRun | undefined;
+  while (true) {
+    const page = await listReplayEvents(apiBase, apiToken, runId, {
+      afterSeq,
+      limit: 100,
+      includePayload: false,
+      signal: options.signal,
+    });
+    run = page.run;
+    parseWarnings.push(...page.parseWarnings);
+    for (const event of page.events) {
+      if (seen.has(event.eventId)) continue;
+      seen.add(event.eventId);
+      events.push(event);
+    }
+    if (!page.hasMore || events.length >= page.run.eventCount) break;
+    if (page.nextSeq <= afterSeq) break;
+    afterSeq = page.nextSeq;
+  }
+  if (!run) {
+    throw new ReplayApiError(`Replay request failed (empty events for ${runId})`, 404);
+  }
+  return { run, events, parseWarnings };
+}
+
 export async function listReplayEvents(
   apiBase: string,
   apiToken: string,

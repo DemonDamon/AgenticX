@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { formatDuration } from "../graph/span-derive";
+import { canOfferSessionPlay, SESSION_PLAY_ID } from "./replay-session-play";
 import type { ReplayRun, ReplayStats } from "./replay-types";
 
 type Props = {
@@ -31,8 +32,12 @@ export function ReplaySummaryBar({
 }: Props) {
   const { t, i18n } = useTranslation("workspace");
   const locale = replayIntlLocale(i18n.resolvedLanguage || i18n.language);
-  const selected = runs.find((run) => run.runId === selectedRunId) ?? runs[0];
-  if (!selected) return null;
+  const sessionPlay = selectedRunId === SESSION_PLAY_ID;
+  const offerSessionPlay = canOfferSessionPlay(runs);
+  const selected = sessionPlay
+    ? undefined
+    : runs.find((run) => run.runId === selectedRunId) ?? runs[0];
+  if (!sessionPlay && !selected) return null;
   const metrics = [
     [t("replay.duration"), formatDuration(stats.durationMs)],
     [t("replay.rounds"), stats.rounds],
@@ -51,9 +56,12 @@ export function ReplaySummaryBar({
             <select
               aria-label={t("replay.runPicker")}
               className="h-7 max-w-[210px] appearance-none rounded-md border border-border bg-surface-card py-1 pl-2 pr-7 text-[11px] text-text-strong outline-none focus:border-border-strong"
-              value={selected.runId}
+              value={sessionPlay ? SESSION_PLAY_ID : selected!.runId}
               onChange={(event) => onSelectRun(event.target.value)}
             >
+              {offerSessionPlay ? (
+                <option value={SESSION_PLAY_ID}>{t("replay.sessionPlay")}</option>
+              ) : null}
               {runs.map((run) => (
                 <option key={run.runId} value={run.runId}>
                   {t(`replay.${run.status}`)} · {new Date(run.createdAt).toLocaleString(locale)}
@@ -66,11 +74,11 @@ export function ReplaySummaryBar({
             />
           </label>
         ) : (
-          <span className={`text-[11px] font-medium ${statusTone(selected.status)}`}>
-            {t(`replay.${selected.status}`)}
+          <span className={`text-[11px] font-medium ${statusTone(selected!.status)}`}>
+            {t(`replay.${selected!.status}`)}
           </span>
         )}
-        {selected.completeness === "partial" ? (
+        {selected?.completeness === "partial" ? (
           <span className="rounded-full bg-status-warning/10 px-2 py-0.5 text-[10px] text-status-warning">
             {t("replay.recordPartial")}
           </span>

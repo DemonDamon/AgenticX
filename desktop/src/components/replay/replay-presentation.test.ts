@@ -6,6 +6,7 @@ import {
   nextPresentationBeat,
   presentationAssistantStreamMs,
   presentationDwellMs,
+  presentationSpeedForEnter,
   previousPresentationBeat,
   projectPresentedMessage,
   revealPresentedAssistantText,
@@ -87,6 +88,13 @@ describe("presentation beats", () => {
     expect(presentationDwellMs("tool_call", 1)).toBe(400);
     expect(presentationDwellMs("error", 1)).toBe(1_500);
     expect(presentationDwellMs("assistant_output_completed", "instant")).toBe(80);
+  });
+
+  it("keeps the chosen presentation speed instead of forcing 2x", () => {
+    expect(presentationSpeedForEnter(1)).toBe(1);
+    expect(presentationSpeedForEnter(2)).toBe(2);
+    expect(presentationSpeedForEnter("instant")).toBe("instant");
+    expect(presentationSpeedForEnter(0.5)).toBe(1);
   });
 
   it("sizes assistant typewriter by character count, not the 600ms beat dwell", () => {

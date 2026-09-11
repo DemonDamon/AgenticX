@@ -8,6 +8,7 @@ import {
   isPresentationBeat,
   nextPresentationBeat,
   presentationDwellMs,
+  presentationSpeedForEnter,
   previousPresentationBeat,
 } from "./replay-presentation";
 import type {
@@ -51,6 +52,12 @@ type ReplayStore = {
     runId: string,
     loader: PageLoader,
   ) => Promise<void>;
+  openSession: (
+    paneId: string,
+    sessionId: string,
+    run: ReplayRun,
+    events: ReplayEvent[],
+  ) => void;
   appendPage: (paneId: string, page: ReplayEventsResponse) => void;
   loadNextPage: (paneId: string) => Promise<void>;
   loadAllPages: (paneId: string) => Promise<void>;
@@ -384,6 +391,25 @@ function scheduleNext(paneId: string): void {
 export const useReplayStore = create<ReplayStore>((set, get) => ({
   byPane: {},
   getPane: (paneId) => get().byPane[paneId] ?? EMPTY_REPLAY_STATE,
+  openSession: (paneId, sessionId, run, events) => {
+    clearPlaybackTimer(paneId);
+    abortFetch(paneId);
+    requestVersions.set(paneId, (requestVersions.get(paneId) ?? 0) + 1);
+    pageLoaders.delete(paneId);
+    pageLoadPromises.delete(paneId);
+    eventIndexForPane(paneId, run.runId, events);
+    const next: ReplayPlaybackState = {
+      ...freshState(),
+      sessionId,
+      runId: run.runId,
+      run,
+      events,
+      cursorSeq: events[0]?.seq ?? 0,
+      hasMore: false,
+      nextSeq: events.at(-1)?.seq ?? 0,
+    };
+    set((store) => ({ byPane: { ...store.byPane, [paneId]: next } }));
+  },
   openRun: async (paneId, sessionId, runId, loader) => {
     clearPlaybackTimer(paneId);
     abortFetch(paneId);
@@ -587,7 +613,7 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
           ...latest,
           presenting: true,
           playing: true,
-          speed: 2,
+          speed: presentationSpeedForEnter(latest.speed),
           cursorSeq: firstSeq,
           selectedEventId: null,
         },

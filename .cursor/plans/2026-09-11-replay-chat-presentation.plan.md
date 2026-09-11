@@ -20,7 +20,7 @@ Plan-Id: 2026-09-11-replay-chat-presentation
 - Modify: `desktop/src/components/replay/replay-store.ts`（`presenting`、`enterPresentation` / `exitPresentation`、演示节拍调度）
 - Modify: `desktop/src/components/replay/ReplayControls.tsx`
 - Modify: `desktop/src/components/replay/RunReplayPanel.tsx`
-- Modify: `desktop/src/components/ChatPane.tsx`（仅 `renderMessages` 切片、输入锁、演示条）
+- Modify: `desktop/src/components/ChatPane.tsx`（仅 `renderMessages` 切片、输入锁、演示条、演示跟滚）
 - Modify: `desktop/locales/{zh,en}/workspace.json`
 
 ## In scope / Out of scope

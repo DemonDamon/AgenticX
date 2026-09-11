@@ -96,6 +96,12 @@ export function previousPresentationBeat<T extends { seq: number; type: string }
   ));
 }
 
+const PRESENTATION_SPEEDS = new Set<ReplaySpeed>([1, 2, "instant"]);
+
+export function presentationSpeedForEnter(current: ReplaySpeed): ReplaySpeed {
+  return PRESENTATION_SPEEDS.has(current) ? current : 1;
+}
+
 export function presentationDwellMs(type: string, speed: ReplaySpeed): number {
   if (speed === "instant") return INSTANT_DWELL_MS;
   const base = DWELL_MS[type] ?? DEFAULT_DWELL_MS;

@@ -8,11 +8,19 @@ import { EMPTY_PANE_GRAPH_STATE } from "../graph/graph-types";
 import { useGraphRunStore } from "../graph/useGraphRun";
 import {
   getReplayExport,
+  listAllReplayEvents,
   listReplayEvents,
   listReplayRuns,
 } from "./replay-api";
 import { buildCausalChain } from "./replay-causal-chain";
 import { bindMessagesToRun, canEnterPresentation } from "./replay-presentation";
+import {
+  isSessionPlayId,
+  mergeSessionReplay,
+  presentableSessionRuns,
+  retainReplaySelection,
+  SESSION_PLAY_ID,
+} from "./replay-session-play";
 import { ReplayControls } from "./ReplayControls";
 import { ReplayEventDetail } from "./ReplayEventDetail";
 import { projectReplay } from "./replay-projection";
@@ -80,13 +88,6 @@ export function shouldLoadAllReplayPages(
   blocked: boolean,
 ): boolean {
   return TERMINAL_REPLAY_STATUSES.has(status) && hasMore && !blocked;
-}
-
-function preferredRun(runs: ReplayRun[]): ReplayRun | undefined {
-  const sorted = [...runs].sort((a, b) => b.createdAt - a.createdAt);
-  return sorted.find((run) => run.status === "running")
-    ?? sorted.find((run) => run.status === "completed")
-    ?? sorted[0];
 }
 
 function isAbortError(error: unknown): boolean {
@@ -225,13 +226,9 @@ export function RunReplayPanel({
         const targetMissing = focusTarget?.runId
           && !sorted.some((run) => run.runId === focusTarget.runId);
         setListError(targetMissing ? t("replay.sourceRunUnavailable") : null);
-        setSelectedRunId((current) => {
-          if (focusTarget?.runId && sorted.some((run) => run.runId === focusTarget.runId)) {
-            return focusTarget.runId;
-          }
-          if (sorted.some((run) => run.runId === current)) return current;
-          return preferredRun(sorted)?.runId ?? "";
-        });
+        setSelectedRunId((current) => (
+          retainReplaySelection(current, sorted, focusTarget?.runId)
+        ));
       } catch (error) {
         if (!disposed && !isAbortError(error)) {
           setListError(error instanceof Error ? error.message : String(error));
@@ -253,9 +250,14 @@ export function RunReplayPanel({
     };
   }, [apiBase, apiToken, focusTarget?.runId, paneId, sessionId, t]);
 
-  const selectedRunBelongsToSession = runs.some(
+  const sessionPlaySelected = isSessionPlayId(selectedRunId);
+  const selectedRunBelongsToSession = !sessionPlaySelected && runs.some(
     (run) => run.runId === selectedRunId && run.sessionId === sessionId,
   );
+  const sessionPlaylist = presentableSessionRuns(
+    runs.filter((run) => run.sessionId === sessionId),
+  );
+  const sessionLoadKey = sessionPlaylist.map((run) => `${run.runId}:${run.eventCount}`).join("|");
 
   useEffect(() => {
     if (
@@ -279,27 +281,69 @@ export function RunReplayPanel({
     );
   }, [apiBase, apiToken, paneId, selectedRunBelongsToSession, selectedRunId, sessionId]);
 
+  useEffect(() => {
+    if (!sessionPlaySelected || !sessionId || !apiBase || sessionPlaylist.length < 2) return;
+    let disposed = false;
+    const controller = new AbortController();
+    auxiliaryControllers.current.add(controller);
+    void (async () => {
+      try {
+        const parts = [];
+        for (const run of sessionPlaylist) {
+          const loaded = await listAllReplayEvents(apiBase, apiToken, run.runId, {
+            signal: controller.signal,
+          });
+          parts.push({ run: loaded.run, events: loaded.events });
+        }
+        if (disposed) return;
+        const merged = mergeSessionReplay(parts);
+        useReplayStore.getState().openSession(paneId, sessionId, merged.run, merged.events);
+      } catch (error) {
+        if (disposed || isAbortError(error)) return;
+        useReplayStore.getState().setError(
+          paneId,
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        auxiliaryControllers.current.delete(controller);
+      }
+    })();
+    return () => {
+      disposed = true;
+      controller.abort();
+      auxiliaryControllers.current.delete(controller);
+    };
+  }, [apiBase, apiToken, paneId, sessionLoadKey, sessionPlaySelected, sessionId]);
+
   const effectiveReplay = replay ?? useReplayStore.getState().getPane(paneId);
   const sessionRuns = runs.filter((run) => run.sessionId === sessionId);
   const listedSelectedRun = sessionRuns.find((run) => run.runId === selectedRunId);
-  const selectedRun = effectiveReplay.run?.runId === selectedRunId
-    && effectiveReplay.run.sessionId === sessionId
+  const selectedRun = sessionPlaySelected && effectiveReplay.runId === SESSION_PLAY_ID
     ? effectiveReplay.run
-    : listedSelectedRun ?? null;
+    : effectiveReplay.run?.runId === selectedRunId
+      && effectiveReplay.run.sessionId === sessionId
+      ? effectiveReplay.run
+      : listedSelectedRun ?? null;
   const paneMessages = useAppStore((store) => (
     store.panes.find((pane) => pane.id === paneId)?.messages ?? EMPTY_PANE_MESSAGES
   ));
+  const sessionAssembling = sessionPlaySelected && effectiveReplay.runId !== SESSION_PLAY_ID;
   const presentationGate = useMemo(() => {
+    if (sessionPlaySelected && sessionAssembling) {
+      return { ok: false as const, reason: "session_loading" as const };
+    }
     const binding = bindMessagesToRun(paneMessages, effectiveReplay.events);
     return canEnterPresentation(selectedRun, binding);
-  }, [effectiveReplay.events, paneMessages, selectedRun]);
+  }, [effectiveReplay.events, paneMessages, selectedRun, sessionAssembling, sessionPlaySelected]);
   const presentBlockedReason = presentationGate.reason === "running"
     ? t("replay.presentRunning")
     : presentationGate.reason === "unaligned"
       ? t("replay.presentUnaligned")
       : presentationGate.reason === "no_run"
         ? t("replay.presentNoRun")
-        : undefined;
+        : presentationGate.reason === "session_loading"
+          ? t("replay.presentSessionLoading")
+          : undefined;
 
   useEffect(() => {
     if (
@@ -473,11 +517,13 @@ export function RunReplayPanel({
   const hasUncommittedGraphSteps = Object.values(graphSteps).some(
     (steps) => steps.some((step) => !ledgerToolCallIds.has(step.callId)),
   );
-  const summarizing = selectedRun !== null && TERMINAL_REPLAY_STATUSES.has(selectedRun.status) && (
-    effectiveReplay.runId !== selectedRun.runId
-    || effectiveReplay.loading
-    || effectiveReplay.loadingMore
-    || effectiveReplay.hasMore
+  const summarizing = sessionAssembling || (
+    selectedRun !== null && TERMINAL_REPLAY_STATUSES.has(selectedRun.status) && (
+      effectiveReplay.runId !== selectedRun.runId
+      || effectiveReplay.loading
+      || effectiveReplay.loadingMore
+      || effectiveReplay.hasMore
+    )
   );
 
   const loadMore = useCallback(async () => {
@@ -520,7 +566,7 @@ export function RunReplayPanel({
   }, [apiBase, apiToken, effectiveReplay.payloadCache, paneId, payloadLoadingId, t]);
 
   const copyReview = useCallback(async () => {
-    if (!selectedRunId || copying) return;
+    if (!selectedRunId || copying || sessionPlaySelected) return;
     setCopying(true);
     setCopyFeedback(null);
     if (copyFeedbackTimer.current) clearTimeout(copyFeedbackTimer.current);
@@ -546,7 +592,7 @@ export function RunReplayPanel({
       auxiliaryControllers.current.delete(controller);
       if (!controller.signal.aborted) setCopying(false);
     }
-  }, [apiBase, apiToken, copying, selectedRunId, t]);
+  }, [apiBase, apiToken, copying, selectedRunId, sessionPlaySelected, t]);
 
   if (!sessionId) {
     return (
@@ -600,13 +646,13 @@ export function RunReplayPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-panel">
-      {selectedRun ? (
+      {sessionRuns.length > 0 ? (
         <ReplaySummaryBar
           runs={sessionRuns}
-          selectedRunId={selectedRun.runId}
+          selectedRunId={sessionPlaySelected ? SESSION_PLAY_ID : (selectedRun?.runId ?? selectedRunId)}
           stats={{
             ...projection.stats,
-            branches: selectedRun.branchCount ?? projection.stats.branches,
+            branches: selectedRun?.branchCount ?? projection.stats.branches,
           }}
           summarizing={summarizing}
           onSelectRun={(runId) => {
@@ -631,7 +677,15 @@ export function RunReplayPanel({
         onStep={(direction) => useReplayStore.getState().step(paneId, direction)}
         onSpeedChange={(speed) => useReplayStore.getState().setSpeed(paneId, speed)}
         onFiltersChange={(filters) => useReplayStore.getState().setFilters(paneId, filters)}
-        onCopy={() => void copyReview()}
+        onCopy={() => {
+          if (sessionPlaySelected) {
+            setCopyFeedback(t("replay.presentSessionCopyDisabled"));
+            if (copyFeedbackTimer.current) clearTimeout(copyFeedbackTimer.current);
+            copyFeedbackTimer.current = setTimeout(() => setCopyFeedback(null), 1_600);
+            return;
+          }
+          void copyReview();
+        }}
         presenting={effectiveReplay.presenting}
         canPresent={presentationGate.ok}
         presentBlockedReason={presentBlockedReason}
@@ -670,7 +724,7 @@ export function RunReplayPanel({
           />
         </div>
       ) : null}
-      {effectiveReplay.loading ? (
+      {effectiveReplay.loading || sessionAssembling ? (
         <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-[11px] text-text-faint">
           <LoaderCircle aria-hidden className="h-4 w-4 animate-spin" />
           {t("replay.loading")}
@@ -709,7 +763,7 @@ export function RunReplayPanel({
             onOpenArtifact={onOpenArtifact}
             onOpenSubagentRun={onOpenSubagentRun}
             canBranch={Boolean(
-              selectedRun && resolvedBranchEvent,
+              selectedRun && resolvedBranchEvent && !sessionPlaySelected,
             )}
             branchDisabledReason={branchAvailability.reason ?? undefined}
             onBranchFromStep={(event) => {
