@@ -4,6 +4,7 @@ import {
   type ReplayPayloadDisplay,
 } from "./replay-payload";
 import {
+  assistantTextStreamBeatType,
   isPresentationBeat,
   nextPresentationBeat,
   presentationDwellMs,
@@ -61,6 +62,7 @@ type ReplayStore = {
   pause: (paneId: string) => void;
   enterPresentation: (paneId: string) => Promise<void>;
   exitPresentation: (paneId: string) => void;
+  finishPresentationStream: (paneId: string) => void;
   seek: (paneId: string, seq: number) => void;
   step: (paneId: string, direction: -1 | 1) => void;
   selectEvent: (paneId: string, eventId: string | null) => void;
@@ -230,6 +232,7 @@ function mergeEvents(
 function schedulePresentingNext(paneId: string): void {
   const state = useReplayStore.getState().getPane(paneId);
   if (!state.playing || !state.presenting || state.events.length === 0) return;
+  if (assistantTextStreamBeatType(state.events, state.cursorSeq)) return;
   const next = nextPresentationBeat(state.events, state.cursorSeq);
   if (!next) {
     if (state.hasMore) {
@@ -603,6 +606,32 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
         },
       };
     });
+  },
+  finishPresentationStream: (paneId) => {
+    const latest = get().getPane(paneId);
+    if (!latest.playing || !latest.presenting) return;
+    if (!assistantTextStreamBeatType(latest.events, latest.cursorSeq)) return;
+    clearPlaybackTimer(paneId);
+    const target = nextPresentationBeat(latest.events, latest.cursorSeq);
+    if (!target) {
+      if (latest.hasMore) {
+        void get().loadNextPage(paneId).then(() => scheduleNext(paneId));
+        return;
+      }
+      get().pause(paneId);
+      return;
+    }
+    set((store) => ({
+      byPane: {
+        ...store.byPane,
+        [paneId]: {
+          ...latest,
+          cursorSeq: target.seq,
+          renderLimit: renderLimitForCursor(latest.events, target.seq, latest.renderLimit),
+        },
+      },
+    }));
+    scheduleNext(paneId);
   },
   seek: (paneId, seq) => {
     clearPlaybackTimer(paneId);

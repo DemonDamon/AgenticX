@@ -68,6 +68,13 @@ const DWELL_MS: Record<string, number> = {
 
 const DEFAULT_DWELL_MS = 400;
 const INSTANT_DWELL_MS = 80;
+const ASSISTANT_MS_PER_CHAR_1X = 36;
+const ASSISTANT_STREAM_CAP_MS: Record<ReplaySpeed, number> = {
+  0.5: 36_000,
+  1: 24_000,
+  2: 16_000,
+  instant: 6_000,
+};
 
 export function isPresentationBeat(type: string): boolean {
   return PRESENTATION_BEATS.has(type);
@@ -95,6 +102,31 @@ export function presentationDwellMs(type: string, speed: ReplaySpeed): number {
   return Math.max(80, Math.round(base / speed));
 }
 
+export function presentationAssistantStreamMs(charCount: number, speed: ReplaySpeed): number {
+  const floor = presentationDwellMs("assistant_output_completed", speed);
+  const count = Math.max(0, charCount);
+  const msPerChar = speed === "instant"
+    ? 8
+    : Math.max(8, Math.round(ASSISTANT_MS_PER_CHAR_1X / speed));
+  const typed = count * msPerChar;
+  return Math.min(ASSISTANT_STREAM_CAP_MS[speed], Math.max(floor, typed));
+}
+
+export function revealedAssistantCharCount(
+  charCount: number,
+  elapsedMs: number,
+  durationMs: number,
+): number {
+  if (charCount <= 0) return 0;
+  if (durationMs <= 0) return elapsedMs > 0 ? charCount : 0;
+  if (elapsedMs <= 0) return 0;
+  if (elapsedMs >= durationMs) return charCount;
+  return Math.min(
+    charCount,
+    Math.max(1, Math.ceil((charCount * elapsedMs) / durationMs)),
+  );
+}
+
 export function revealPresentedAssistantText(
   full: string,
   elapsedMs: number,
@@ -105,10 +137,7 @@ export function revealPresentedAssistantText(
   if (elapsedMs <= 0) return "";
   if (elapsedMs >= durationMs) return full;
   const chars = Array.from(full);
-  const count = Math.min(
-    chars.length,
-    Math.max(1, Math.ceil((chars.length * elapsedMs) / durationMs)),
-  );
+  const count = revealedAssistantCharCount(chars.length, elapsedMs, durationMs);
   return chars.slice(0, count).join("");
 }
 

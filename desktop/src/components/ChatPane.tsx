@@ -3433,7 +3433,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   // Render-only list: inline the sub-agent cluster card into the conversation
   // flow (like the clarification card). Kept separate from `visibleMessages` so
   // selection/counts/last-assistant logic never sees the synthetic anchor row.
-  const replayPresentation = useReplayPresentation(paneId);
+  const presentationBase = useMemo(
+    () => (isGroupPane ? visibleMessages : injectLiveSubAgentClusterAnchors(visibleMessages)),
+    [isGroupPane, visibleMessages],
+  );
+  const replayPresentation = useReplayPresentation(paneId, presentationBase);
   const replayPresenting = Boolean(
     replayPresentation.presenting
     && pane.sessionId
@@ -3441,7 +3445,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
   const renderMessages = useMemo(
     () => {
-      const base = isGroupPane ? visibleMessages : injectLiveSubAgentClusterAnchors(visibleMessages);
+      const base = presentationBase;
       if (!replayPresenting) return base;
       const binding = bindMessagesToRun(base, replayPresentation.events);
       return sliceMessagesForPresentation(
@@ -3457,14 +3461,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       );
     },
     [
-      isGroupPane,
       replayPresenting,
       replayPresentation.cursorSeq,
       replayPresentation.events,
       replayPresentation.streamElapsedMs,
       replayPresentation.streamDurationMs,
       replayPresentation.streamSnapFull,
-      visibleMessages,
+      presentationBase,
     ]
   );
   const groupedVisibleMessages = useMemo(

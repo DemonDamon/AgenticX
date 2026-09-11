@@ -488,6 +488,32 @@ describe("replay pane store", () => {
     expect(useReplayStore.getState().getPane("pane-b").presenting).toBe(false);
   });
 
+  it("holds the assistant text beat until finishPresentationStream", async () => {
+    const events = [
+      { ...event(1), type: "user_message" },
+      { ...event(2), type: "assistant_output_started" },
+      { ...event(3), type: "assistant_output_completed" },
+      { ...event(4), type: "run_completed" },
+    ];
+    await useReplayStore.getState().openRun(
+      "pane-a",
+      "session-1",
+      "run-1",
+      async () => ({ ...page(events), run: { ...page(events).run, status: "completed" } }),
+    );
+    await useReplayStore.getState().enterPresentation("pane-a");
+
+    await vi.advanceTimersByTimeAsync(150);
+    expect(useReplayStore.getState().getPane("pane-a").cursorSeq).toBe(2);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(useReplayStore.getState().getPane("pane-a").cursorSeq).toBe(3);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(useReplayStore.getState().getPane("pane-a").cursorSeq).toBe(3);
+
+    useReplayStore.getState().finishPresentationStream("pane-a");
+    expect(useReplayStore.getState().getPane("pane-a").cursorSeq).toBe(4);
+  });
+
   it("clears presenting when the replay tab closes", async () => {
     const events = [
       { ...event(1), type: "user_message" },

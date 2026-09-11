@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   assistantTextStreamBeatType,
-  presentationDwellMs,
+  bindMessagesToRun,
+  presentationAssistantStreamMs,
+  revealedAssistantCharCount,
+  type PresentationMessage,
 } from "./replay-presentation";
 import { useReplayStore } from "./replay-store";
 import type { ReplayEvent } from "./replay-types";
 
 const IDLE_EVENTS: ReplayEvent[] = [];
+const IDLE_MESSAGES: PresentationMessage[] = [];
 
-export function useReplayPresentation(paneId: string): {
+export function useReplayPresentation(
+  paneId: string,
+  messages: readonly PresentationMessage[] = IDLE_MESSAGES,
+): {
   presenting: boolean;
   cursorSeq: number;
   events: ReplayEvent[];
@@ -35,8 +42,18 @@ export function useReplayPresentation(paneId: string): {
   const streamBeatType = useMemo(() => (
     presenting ? assistantTextStreamBeatType(events, cursorSeq) : ""
   ), [presenting, events, cursorSeq]);
+  const streamCharCount = useMemo(() => {
+    if (!presenting || !streamBeatType) return 0;
+    const binding = bindMessagesToRun(messages, events);
+    const message = messages.find((item) => (
+      item.role === "assistant"
+      && !item.systemNotice
+      && binding.completeSeq.get(item.id) === cursorSeq
+    ));
+    return message ? Array.from(message.content ?? "").length : 0;
+  }, [presenting, streamBeatType, messages, events, cursorSeq]);
   const streamDurationMs = streamBeatType
-    ? presentationDwellMs(streamBeatType, speed)
+    ? presentationAssistantStreamMs(streamCharCount, speed)
     : 0;
   const [streamElapsedMs, setStreamElapsedMs] = useState(0);
 
@@ -46,27 +63,34 @@ export function useReplayPresentation(paneId: string): {
       return;
     }
     if (!playing) return;
-    const duration = presentationDwellMs(streamBeatType, speed);
+    const duration = presentationAssistantStreamMs(streamCharCount, speed);
     const startedAt = performance.now();
-    let lastBucket = -1;
+    let lastCount = -1;
     let raf = 0;
+    let finished = false;
     const tick = (now: number) => {
       const elapsed = Math.min(duration, now - startedAt);
-      const bucket = Math.floor(elapsed / 32);
-      if (bucket !== lastBucket) {
-        lastBucket = bucket;
+      const count = revealedAssistantCharCount(streamCharCount, elapsed, duration);
+      if (count !== lastCount) {
+        lastCount = count;
         setStreamElapsedMs(elapsed);
       }
       if (elapsed < duration) {
         raf = requestAnimationFrame(tick);
-      } else {
-        setStreamElapsedMs(duration);
+        return;
       }
+      setStreamElapsedMs(duration);
+      if (finished) return;
+      finished = true;
+      useReplayStore.getState().finishPresentationStream(paneId);
     };
     setStreamElapsedMs(0);
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [presenting, playing, streamBeatType, cursorSeq, speed]);
+    return () => {
+      finished = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [presenting, playing, streamBeatType, cursorSeq, speed, streamCharCount, paneId]);
 
   return {
     presenting,

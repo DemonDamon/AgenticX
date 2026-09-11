@@ -4,6 +4,7 @@ import {
   bindMessagesToRun,
   canEnterPresentation,
   nextPresentationBeat,
+  presentationAssistantStreamMs,
   presentationDwellMs,
   previousPresentationBeat,
   projectPresentedMessage,
@@ -86,6 +87,13 @@ describe("presentation beats", () => {
     expect(presentationDwellMs("tool_call", 1)).toBe(400);
     expect(presentationDwellMs("error", 1)).toBe(1_500);
     expect(presentationDwellMs("assistant_output_completed", "instant")).toBe(80);
+  });
+
+  it("sizes assistant typewriter by character count, not the 600ms beat dwell", () => {
+    expect(presentationAssistantStreamMs(1, 2)).toBe(600);
+    expect(presentationAssistantStreamMs(684, 2)).toBe(684 * 18);
+    expect(presentationAssistantStreamMs(400, 1)).toBe(400 * 36);
+    expect(presentationAssistantStreamMs(684, 2)).toBeGreaterThan(8_000);
   });
 });
 
