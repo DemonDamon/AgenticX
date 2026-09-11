@@ -98,7 +98,7 @@ export function previousPresentationBeat<T extends { seq: number; type: string }
   ));
 }
 
-const PRESENTATION_SPEEDS = new Set<ReplaySpeed>([1, 2, "instant"]);
+const PRESENTATION_SPEEDS = new Set<ReplaySpeed>([0.5, 1, 2, "instant"]);
 
 export function presentationSpeedForEnter(current: ReplaySpeed): ReplaySpeed {
   return PRESENTATION_SPEEDS.has(current) ? current : 1;

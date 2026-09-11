@@ -29,7 +29,6 @@ type Props = {
 
 const FILTERS: ReplayFilter[] = ["all", "tool", "agent", "wait", "error", "artifact"];
 const SPEEDS: ReplaySpeed[] = [0.5, 1, 2, "instant"];
-const PRESENT_SPEEDS: ReplaySpeed[] = [1, 2, "instant"];
 
 export function ReplayControls({
   playing,
@@ -127,7 +126,7 @@ export function ReplayControls({
               onSpeedChange(value === "instant" ? "instant" : Number(value) as 0.5 | 1 | 2);
             }}
           >
-            {(presenting ? PRESENT_SPEEDS : SPEEDS).map((item) => (
+            {SPEEDS.map((item) => (
               <option key={String(item)} value={String(item)}>
                 {item === "instant" ? t("replay.instant") : `${item}×`}
               </option>

@@ -94,7 +94,7 @@ describe("presentation beats", () => {
     expect(presentationSpeedForEnter(1)).toBe(1);
     expect(presentationSpeedForEnter(2)).toBe(2);
     expect(presentationSpeedForEnter("instant")).toBe("instant");
-    expect(presentationSpeedForEnter(0.5)).toBe(1);
+    expect(presentationSpeedForEnter(0.5)).toBe(0.5);
   });
 
   it("sizes assistant typewriter by character count, not the 600ms beat dwell", () => {
