@@ -145,25 +145,30 @@ describe("bindMessagesToRun + slice", () => {
     expect(done.toolStatus).toBe("done");
     const writing = projectPresentedMessage(messages[4], binding, 6);
     expect(writing.content).toBe("");
+    expect(writing.presentationHoldDeliverables).toBe(true);
     const mid = projectPresentedMessage(messages[4], binding, 7, {
       elapsedMs: 300,
       durationMs: 1_200,
     });
     expect(mid.content).toBe("昇腾 ");
     expect(mid.blocks).toBeUndefined();
+    expect(mid.presentationHoldDeliverables).toBe(true);
     const finished = projectPresentedMessage(messages[4], binding, 7, {
       elapsedMs: 1_200,
       durationMs: 1_200,
     });
     expect(finished.content).toBe("昇腾 950DT 表格");
+    expect(finished.presentationHoldDeliverables).toBeUndefined();
     const after = projectPresentedMessage(messages[4], binding, 8);
     expect(after.content).toBe("昇腾 950DT 表格");
+    expect(after.presentationHoldDeliverables).toBeUndefined();
     const stepped = projectPresentedMessage(messages[4], binding, 7, {
       elapsedMs: 0,
       durationMs: 1_200,
       snapFull: true,
     });
     expect(stepped.content).toBe("昇腾 950DT 表格");
+    expect(stepped.presentationHoldDeliverables).toBeUndefined();
   });
 
   it("reveals assistant text by elapsed ratio and only streams on the text beat", () => {

@@ -335,6 +335,8 @@ export type Message = {
   subAgentCluster?: SubAgentClusterAnchor;
   /** Ordered text/image blocks for inline generated images. */
   blocks?: ContentBlock[];
+  /** Render-only presentation flag; never persist. */
+  presentationHoldDeliverables?: boolean;
 };
 
 export type SubAgentClusterAnchor = {

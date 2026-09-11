@@ -9,6 +9,8 @@ export type PresentationMessage = {
   toolStatus?: string;
   systemNotice?: boolean;
   blocks?: unknown;
+  /** Render-only: hide turn deliverable cards until this assistant row finishes typing. */
+  presentationHoldDeliverables?: boolean;
 };
 
 export type PresentationBinding = {
@@ -344,7 +346,7 @@ export function projectPresentedMessage<T extends PresentationMessage>(
     return message;
   }
   if (cursorSeq < completed) {
-    return { ...message, content: "", blocks: undefined };
+    return { ...message, content: "", blocks: undefined, presentationHoldDeliverables: true };
   }
   if (cursorSeq > completed || stream?.snapFull) {
     return message;
@@ -357,6 +359,7 @@ export function projectPresentedMessage<T extends PresentationMessage>(
     ...message,
     content: revealed,
     blocks: finished ? message.blocks : undefined,
+    presentationHoldDeliverables: finished ? undefined : true,
   };
 }
 

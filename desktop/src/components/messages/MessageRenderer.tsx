@@ -252,7 +252,11 @@ function assistantHandoff(
     onOpenAllChanges?: () => void;
   },
 ): { paths: string[]; card: ReactNode } {
-  if (message.role !== "assistant" || isStreamingAssistantId(message.id)) {
+  if (
+    message.role !== "assistant"
+    || isStreamingAssistantId(message.id)
+    || message.presentationHoldDeliverables
+  ) {
     return { paths: [], card: null };
   }
   const paths = collectTurnArtifactPaths(allMessages, message.id);
@@ -393,6 +397,7 @@ export function MessageRenderer({
   }, [message, allMessages]);
   const displayMessage = useMemo(() => {
     if (message.role !== "assistant") return message;
+    if (message.presentationHoldDeliverables) return message;
     const resolvedBlocks = resolveAssistantBlocks(message, allMessages);
     const withBlocks =
       resolvedBlocks && resolvedBlocks !== message.blocks
