@@ -26,6 +26,12 @@ export type PresentationGate = {
   reason?: "running" | "no_run" | "unaligned";
 };
 
+export type PresentationTextStream = {
+  elapsedMs: number;
+  durationMs: number;
+  snapFull?: boolean;
+};
+
 const PRESENTATION_BEATS = new Set([
   "user_message",
   "assistant_output_started",
@@ -87,6 +93,42 @@ export function presentationDwellMs(type: string, speed: ReplaySpeed): number {
   if (speed === "instant") return INSTANT_DWELL_MS;
   const base = DWELL_MS[type] ?? DEFAULT_DWELL_MS;
   return Math.max(80, Math.round(base / speed));
+}
+
+export function revealPresentedAssistantText(
+  full: string,
+  elapsedMs: number,
+  durationMs: number,
+): string {
+  if (!full) return "";
+  if (durationMs <= 0) return elapsedMs > 0 ? full : "";
+  if (elapsedMs <= 0) return "";
+  if (elapsedMs >= durationMs) return full;
+  const chars = Array.from(full);
+  const count = Math.min(
+    chars.length,
+    Math.max(1, Math.ceil((chars.length * elapsedMs) / durationMs)),
+  );
+  return chars.slice(0, count).join("");
+}
+
+export function assistantTextStreamBeatType(
+  events: readonly { seq: number; type: string }[],
+  cursorSeq: number,
+): "assistant_output_completed" | "assistant_output_started" | "" {
+  const current = [...events].reverse().find((item) => item.seq <= cursorSeq);
+  if (!current || current.seq !== cursorSeq) return "";
+  if (current.type === "assistant_output_completed") return "assistant_output_completed";
+  if (current.type !== "assistant_output_started") return "";
+  const nextStart = events.find((item) => (
+    item.type === "assistant_output_started" && item.seq > cursorSeq
+  ));
+  const hasCompleted = events.some((item) => (
+    item.type === "assistant_output_completed"
+    && item.seq > cursorSeq
+    && (nextStart === undefined || item.seq < nextStart.seq)
+  ));
+  return hasCompleted ? "" : "assistant_output_started";
 }
 
 export function canEnterPresentation(
@@ -252,6 +294,7 @@ export function projectPresentedMessage<T extends PresentationMessage>(
   message: T,
   binding: PresentationBinding,
   cursorSeq: number,
+  stream?: PresentationTextStream,
 ): T {
   const started = binding.startedSeq.get(message.id);
   const completed = binding.completeSeq.get(message.id);
@@ -259,14 +302,27 @@ export function projectPresentedMessage<T extends PresentationMessage>(
     return { ...message, toolStatus: "running" };
   }
   if (
-    isChatAssistant(message)
-    && started !== undefined
-    && completed !== undefined
-    && cursorSeq < completed
+    !isChatAssistant(message)
+    || started === undefined
+    || completed === undefined
   ) {
+    return message;
+  }
+  if (cursorSeq < completed) {
     return { ...message, content: "", blocks: undefined };
   }
-  return message;
+  if (cursorSeq > completed || stream?.snapFull) {
+    return message;
+  }
+  const elapsedMs = stream?.elapsedMs ?? 0;
+  const durationMs = stream?.durationMs ?? 0;
+  const revealed = revealPresentedAssistantText(message.content ?? "", elapsedMs, durationMs);
+  const finished = durationMs > 0 && elapsedMs >= durationMs;
+  return {
+    ...message,
+    content: revealed,
+    blocks: finished ? message.blocks : undefined,
+  };
 }
 
 export function sliceMessagesForPresentation<T extends PresentationMessage>(
@@ -274,6 +330,7 @@ export function sliceMessagesForPresentation<T extends PresentationMessage>(
   binding: PresentationBinding,
   cursorSeq: number,
   runLastSeq: number,
+  stream?: PresentationTextStream,
 ): T[] {
   return messages.flatMap((message) => {
     if (binding.prefixIds.has(message.id)) return [message];
@@ -283,6 +340,6 @@ export function sliceMessagesForPresentation<T extends PresentationMessage>(
     }
     const reveal = binding.revealSeq.get(message.id);
     if (reveal === undefined || reveal > cursorSeq) return [];
-    return [projectPresentedMessage(message, binding, cursorSeq)];
+    return [projectPresentedMessage(message, binding, cursorSeq, stream)];
   });
 }

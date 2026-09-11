@@ -3449,6 +3449,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         binding,
         replayPresentation.cursorSeq,
         replayPresentation.events.at(-1)?.seq ?? 0,
+        {
+          elapsedMs: replayPresentation.streamElapsedMs,
+          durationMs: replayPresentation.streamDurationMs,
+          snapFull: replayPresentation.streamSnapFull,
+        },
       );
     },
     [
@@ -3456,6 +3461,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       replayPresenting,
       replayPresentation.cursorSeq,
       replayPresentation.events,
+      replayPresentation.streamElapsedMs,
+      replayPresentation.streamDurationMs,
+      replayPresentation.streamSnapFull,
       visibleMessages,
     ]
   );

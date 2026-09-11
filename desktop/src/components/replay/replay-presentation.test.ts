@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  assistantTextStreamBeatType,
   bindMessagesToRun,
   canEnterPresentation,
   nextPresentationBeat,
   presentationDwellMs,
   previousPresentationBeat,
   projectPresentedMessage,
+  revealPresentedAssistantText,
   sliceMessagesForPresentation,
 } from "./replay-presentation";
 import type { ReplayEvent, ReplayRun } from "./replay-types";
@@ -119,7 +121,7 @@ describe("bindMessagesToRun + slice", () => {
       .toEqual(["prev-user", "prev-asst", "cur-user", "cur-tool", "cur-asst"]);
   });
 
-  it("shows a calling tool card until the result beat, and an empty assistant until completed", () => {
+  it("shows a calling tool card until the result beat, and streams assistant text on the completed beat", () => {
     const binding = bindMessagesToRun(messages, events);
     const calling = projectPresentedMessage(messages[3], binding, 3);
     expect(calling.toolStatus).toBe("running");
@@ -127,8 +129,39 @@ describe("bindMessagesToRun + slice", () => {
     expect(done.toolStatus).toBe("done");
     const writing = projectPresentedMessage(messages[4], binding, 6);
     expect(writing.content).toBe("");
-    const finished = projectPresentedMessage(messages[4], binding, 7);
+    const mid = projectPresentedMessage(messages[4], binding, 7, {
+      elapsedMs: 300,
+      durationMs: 1_200,
+    });
+    expect(mid.content).toBe("昇腾 ");
+    expect(mid.blocks).toBeUndefined();
+    const finished = projectPresentedMessage(messages[4], binding, 7, {
+      elapsedMs: 1_200,
+      durationMs: 1_200,
+    });
     expect(finished.content).toBe("昇腾 950DT 表格");
+    const after = projectPresentedMessage(messages[4], binding, 8);
+    expect(after.content).toBe("昇腾 950DT 表格");
+    const stepped = projectPresentedMessage(messages[4], binding, 7, {
+      elapsedMs: 0,
+      durationMs: 1_200,
+      snapFull: true,
+    });
+    expect(stepped.content).toBe("昇腾 950DT 表格");
+  });
+
+  it("reveals assistant text by elapsed ratio and only streams on the text beat", () => {
+    expect(revealPresentedAssistantText("你好世界", 0, 1_000)).toBe("");
+    expect(revealPresentedAssistantText("你好世界", 250, 1_000)).toBe("你");
+    expect(revealPresentedAssistantText("你好世界", 500, 1_000)).toBe("你好");
+    expect(revealPresentedAssistantText("你好世界", 1_000, 1_000)).toBe("你好世界");
+    expect(assistantTextStreamBeatType(events, 6)).toBe("");
+    expect(assistantTextStreamBeatType(events, 7)).toBe("assistant_output_completed");
+    expect(assistantTextStreamBeatType([
+      event(1, "user_message"),
+      event(2, "assistant_output_started"),
+      event(3, "run_completed"),
+    ], 2)).toBe("assistant_output_started");
   });
 
   it("holds unmatched in-run rows until the last seq", () => {

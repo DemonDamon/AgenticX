@@ -73,7 +73,7 @@ flowchart LR
 | 聊天对象 | 对齐键 | 揭示时机 |
 |---|---|---|
 | 用户句 | 这次 run 内按出现顺序对齐 `user_message` | 该事件的 `seq` |
-| 助手正文 | 这次 run 内按出现顺序对齐 `assistant_output_*` | 开始写：`assistant_output_started`；整段表格/结论：`assistant_output_completed` |
+| 助手正文 | 这次 run 内按出现顺序对齐 `assistant_output_*` | 开始写：`assistant_output_started`；`assistant_output_completed` 当拍按正文比例揭开（时长=该拍停顿） |
 | 工具卡 | `toolCallId` ↔ `tool_call` / `tool_result` | 卡出现：`tool_call`；完成态：`tool_result` |
 | 确认 / 澄清 | 同 agent、成对 required/response | 对应事件 `seq` |
 | 子智能体簇 | 已有 cluster / `toolCallId` | `subagent_started` / `subagent_completed` |
@@ -81,7 +81,7 @@ flowchart LR
 
 对不上、又落在这次 run 时间窗里的消息：先藏，游标到这次 run 最后一条事件时一次性露出。不对齐键做模糊猜测，不造假气泡。若进入前对不上任何用户句或助手句，拒绝进入演示。
 
-助手正文在 `assistant_output_completed` 整段出现，允许很短淡入。账本没有逐 token，不假装打字机。
+助手正文在 `assistant_output_completed` 当拍按字符比例揭开，时长等于该拍停顿（1× 1200ms / 2× 600ms / 即时 80ms）。账本没有逐 token，只切已落盘的 `content`，不改 ledger。暂停停在当前揭开进度；点选步进落到该拍且尚未开钟时直接显示全文。
 
 ## 演示节拍
 
