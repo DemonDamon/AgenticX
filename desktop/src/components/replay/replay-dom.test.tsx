@@ -413,6 +413,25 @@ describe("replay mounted behavior", () => {
     expect(useReplayStore.getState().getPane("pane-b").selectedEventId).toBeNull();
   });
 
+  it("shows a disabled presentation control when the chat cannot align to the run", async () => {
+    const events: ReplayEvent[] = [
+      { ...replayEvent(1), type: "user_message", title: "查参数" },
+      { ...replayEvent(2), type: "tool_call" },
+    ];
+    vi.mocked(listReplayRuns).mockResolvedValue(runsResponse([
+      { ...run, status: "completed", eventCount: 2 },
+    ]));
+    vi.mocked(listReplayEvents).mockResolvedValue(eventsPage(events, "completed"));
+
+    render(panel());
+    await flushEffects();
+
+    const present = screen.getByRole("button", { name: "演示" });
+    expect(present.getAttribute("disabled")).not.toBeNull();
+    fireEvent.click(present);
+    expect(useReplayStore.getState().getPane("pane-a").presenting).toBe(false);
+  });
+
   it("keeps later timeline rows visible when selecting an earlier step", async () => {
     vi.mocked(listReplayRuns).mockResolvedValue(runsResponse([
       { ...run, eventCount: 3 },

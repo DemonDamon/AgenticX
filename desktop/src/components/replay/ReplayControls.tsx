@@ -21,10 +21,15 @@ type Props = {
   onSpeedChange: (speed: ReplaySpeed) => void;
   onFiltersChange: (filters: Set<ReplayFilter>) => void;
   onCopy: () => void;
+  presenting?: boolean;
+  canPresent?: boolean;
+  presentBlockedReason?: string;
+  onTogglePresent?: () => void;
 };
 
 const FILTERS: ReplayFilter[] = ["all", "tool", "agent", "wait", "error", "artifact"];
 const SPEEDS: ReplaySpeed[] = [0.5, 1, 2, "instant"];
+const PRESENT_SPEEDS: ReplaySpeed[] = [1, 2, "instant"];
 
 export function ReplayControls({
   playing,
@@ -39,6 +44,10 @@ export function ReplayControls({
   onSpeedChange,
   onFiltersChange,
   onCopy,
+  presenting = false,
+  canPresent = false,
+  presentBlockedReason,
+  onTogglePresent,
 }: Props) {
   const { t } = useTranslation("workspace");
   const toggleFilter = (filter: ReplayFilter) => {
@@ -90,6 +99,23 @@ export function ReplayControls({
         >
           <SkipForward aria-hidden className="h-3.5 w-3.5" />
         </button>
+        {onTogglePresent ? (
+          <button
+            type="button"
+            className={`${buttonClass} ${
+              presenting
+                ? "bg-status-warning/15 text-status-warning"
+                : "bg-surface-card-strong text-text-strong"
+            }`}
+            aria-label={presenting ? t("replay.exitPresent") : t("replay.present")}
+            aria-pressed={presenting}
+            disabled={!presenting && !canPresent}
+            title={!presenting && presentBlockedReason ? presentBlockedReason : undefined}
+            onClick={onTogglePresent}
+          >
+            {presenting ? t("replay.exitPresent") : t("replay.present")}
+          </button>
+        ) : null}
         <label className="ml-1">
           <span className="sr-only">{t("replay.speed")}</span>
           <select
@@ -101,7 +127,7 @@ export function ReplayControls({
               onSpeedChange(value === "instant" ? "instant" : Number(value) as 0.5 | 1 | 2);
             }}
           >
-            {SPEEDS.map((item) => (
+            {(presenting ? PRESENT_SPEEDS : SPEEDS).map((item) => (
               <option key={String(item)} value={String(item)}>
                 {item === "instant" ? t("replay.instant") : `${item}×`}
               </option>

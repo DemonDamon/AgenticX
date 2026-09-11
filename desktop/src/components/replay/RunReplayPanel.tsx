@@ -1,7 +1,7 @@
 import { AlertTriangle, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore, type Avatar } from "../../store";
+import { useAppStore, type Avatar, type Message } from "../../store";
 import { sendTextToPane } from "../../chat/send-text-to-pane";
 import { ExecutionTimeline } from "../graph/ExecutionTimeline";
 import { EMPTY_PANE_GRAPH_STATE } from "../graph/graph-types";
@@ -12,6 +12,7 @@ import {
   listReplayRuns,
 } from "./replay-api";
 import { buildCausalChain } from "./replay-causal-chain";
+import { bindMessagesToRun, canEnterPresentation } from "./replay-presentation";
 import { ReplayControls } from "./ReplayControls";
 import { ReplayEventDetail } from "./ReplayEventDetail";
 import { projectReplay } from "./replay-projection";
@@ -63,6 +64,8 @@ export function payloadErrorForEvent(
 ): string | null {
   return eventId ? errors[eventId] ?? null : null;
 }
+
+const EMPTY_PANE_MESSAGES: Message[] = [];
 
 const TERMINAL_REPLAY_STATUSES = new Set<ReplayRun["status"]>([
   "completed",
@@ -283,6 +286,20 @@ export function RunReplayPanel({
     && effectiveReplay.run.sessionId === sessionId
     ? effectiveReplay.run
     : listedSelectedRun ?? null;
+  const paneMessages = useAppStore((store) => (
+    store.panes.find((pane) => pane.id === paneId)?.messages ?? EMPTY_PANE_MESSAGES
+  ));
+  const presentationGate = useMemo(() => {
+    const binding = bindMessagesToRun(paneMessages, effectiveReplay.events);
+    return canEnterPresentation(selectedRun, binding);
+  }, [effectiveReplay.events, paneMessages, selectedRun]);
+  const presentBlockedReason = presentationGate.reason === "running"
+    ? t("replay.presentRunning")
+    : presentationGate.reason === "unaligned"
+      ? t("replay.presentUnaligned")
+      : presentationGate.reason === "no_run"
+        ? t("replay.presentNoRun")
+        : undefined;
 
   useEffect(() => {
     if (
@@ -593,6 +610,7 @@ export function RunReplayPanel({
           }}
           summarizing={summarizing}
           onSelectRun={(runId) => {
+            useReplayStore.getState().exitPresentation(paneId);
             useReplayStore.getState().resetPane(paneId);
             setSelectedRunId(runId);
           }}
@@ -614,7 +632,19 @@ export function RunReplayPanel({
         onSpeedChange={(speed) => useReplayStore.getState().setSpeed(paneId, speed)}
         onFiltersChange={(filters) => useReplayStore.getState().setFilters(paneId, filters)}
         onCopy={() => void copyReview()}
+        presenting={effectiveReplay.presenting}
+        canPresent={presentationGate.ok}
+        presentBlockedReason={presentBlockedReason}
+        onTogglePresent={() => {
+          if (effectiveReplay.presenting) useReplayStore.getState().exitPresentation(paneId);
+          else void useReplayStore.getState().enterPresentation(paneId);
+        }}
       />
+      {effectiveReplay.presenting && selectedRun?.completeness === "partial" ? (
+        <div className="mx-3 mt-2 rounded-md bg-status-warning/10 px-2 py-1.5 text-[10px] text-status-warning">
+          {t("replay.presentPartial")}
+        </div>
+      ) : null}
       {effectiveReplay.error ? (
         <div className="mx-3 mt-2 flex items-start gap-1.5 rounded-md bg-status-error/10 px-2 py-1.5 text-[10px] text-status-error">
           <AlertTriangle aria-hidden className="mt-0.5 h-3 w-3 shrink-0" />

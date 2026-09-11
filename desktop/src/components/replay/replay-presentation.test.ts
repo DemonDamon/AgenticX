@@ -1,0 +1,150 @@
+import { describe, expect, it } from "vitest";
+import {
+  bindMessagesToRun,
+  canEnterPresentation,
+  nextPresentationBeat,
+  presentationDwellMs,
+  previousPresentationBeat,
+  projectPresentedMessage,
+  sliceMessagesForPresentation,
+} from "./replay-presentation";
+import type { ReplayEvent, ReplayRun } from "./replay-types";
+
+function event(
+  seq: number,
+  type: string,
+  overrides: Partial<ReplayEvent> = {},
+): ReplayEvent {
+  return {
+    eventId: `event-${seq}`,
+    runId: "run-1",
+    seq,
+    ts: 1_000 + seq * 10,
+    type,
+    agentId: "meta",
+    title: type,
+    summary: "",
+    effectClass: "none",
+    branchable: false,
+    ...overrides,
+  };
+}
+
+function run(status: ReplayRun["status"] = "completed"): ReplayRun {
+  return {
+    runId: "run-1",
+    sessionId: "session-1",
+    turnId: "turn-1",
+    agentId: "meta",
+    status,
+    createdAt: 1_000,
+    completedAt: 2_000,
+    eventCount: 4,
+    completeness: "complete",
+  };
+}
+
+function msg(
+  id: string,
+  role: string,
+  content = "",
+  extras: Record<string, unknown> = {},
+) {
+  return { id, role, content, ...extras };
+}
+
+describe("presentation beats", () => {
+  const events = [
+    event(1, "run_started"),
+    event(2, "user_message"),
+    event(3, "round_started"),
+    event(4, "tool_call", { toolCallId: "call-1" }),
+    event(5, "tool_progress", { toolCallId: "call-1" }),
+    event(6, "context_stats"),
+    event(7, "tool_result", { toolCallId: "call-1" }),
+    event(8, "assistant_output_completed"),
+    event(9, "run_completed"),
+  ];
+
+  it("skips progress and stats when finding the next beat", () => {
+    expect(nextPresentationBeat(events, 4)?.seq).toBe(7);
+    expect(nextPresentationBeat(events, 7)?.seq).toBe(8);
+    expect(nextPresentationBeat(events, 9)).toBeUndefined();
+  });
+
+  it("steps back to the previous beat", () => {
+    expect(previousPresentationBeat(events, 7)?.seq).toBe(4);
+    expect(previousPresentationBeat(events, 2)).toBeUndefined();
+  });
+
+  it("uses beat dwell, not wall-clock, and halves assistant text at 2x", () => {
+    expect(presentationDwellMs("assistant_output_completed", 1)).toBe(1_200);
+    expect(presentationDwellMs("assistant_output_completed", 2)).toBe(600);
+    expect(presentationDwellMs("user_message", 1)).toBe(300);
+    expect(presentationDwellMs("tool_call", 1)).toBe(400);
+    expect(presentationDwellMs("error", 1)).toBe(1_500);
+    expect(presentationDwellMs("assistant_output_completed", "instant")).toBe(80);
+  });
+});
+
+describe("bindMessagesToRun + slice", () => {
+  const events = [
+    event(1, "run_started"),
+    event(2, "user_message", { title: "查参数", payload: { text: "查参数" } }),
+    event(3, "tool_call", { toolCallId: "call-1" }),
+    event(4, "tool_progress", { toolCallId: "call-1" }),
+    event(5, "tool_result", { toolCallId: "call-1" }),
+    event(6, "assistant_output_started"),
+    event(7, "assistant_output_completed"),
+    event(8, "run_completed"),
+  ];
+
+  const messages = [
+    msg("prev-user", "user", "上一轮问题"),
+    msg("prev-asst", "assistant", "上一轮回答"),
+    msg("cur-user", "user", "查参数"),
+    msg("cur-tool", "tool", "ok", { toolCallId: "call-1", toolStatus: "done" }),
+    msg("cur-asst", "assistant", "昇腾 950DT 表格"),
+    msg("next-user", "user", "下一轮"),
+  ];
+
+  it("keeps earlier turns, reveals the current run by seq, and hides later turns", () => {
+    const binding = bindMessagesToRun(messages, events);
+    expect(binding.canPresent).toBe(true);
+    expect(sliceMessagesForPresentation(messages, binding, 2, 8).map((item) => item.id))
+      .toEqual(["prev-user", "prev-asst", "cur-user"]);
+    expect(sliceMessagesForPresentation(messages, binding, 5, 8).map((item) => item.id))
+      .toEqual(["prev-user", "prev-asst", "cur-user", "cur-tool"]);
+    expect(sliceMessagesForPresentation(messages, binding, 8, 8).map((item) => item.id))
+      .toEqual(["prev-user", "prev-asst", "cur-user", "cur-tool", "cur-asst"]);
+  });
+
+  it("shows a calling tool card until the result beat, and an empty assistant until completed", () => {
+    const binding = bindMessagesToRun(messages, events);
+    const calling = projectPresentedMessage(messages[3], binding, 3);
+    expect(calling.toolStatus).toBe("running");
+    const done = projectPresentedMessage(messages[3], binding, 5);
+    expect(done.toolStatus).toBe("done");
+    const writing = projectPresentedMessage(messages[4], binding, 6);
+    expect(writing.content).toBe("");
+    const finished = projectPresentedMessage(messages[4], binding, 7);
+    expect(finished.content).toBe("昇腾 950DT 表格");
+  });
+
+  it("holds unmatched in-run rows until the last seq", () => {
+    const extra = [...messages.slice(0, 5), msg("orphan", "assistant", "对不上的旁注")];
+    const binding = bindMessagesToRun(extra, events);
+    expect(sliceMessagesForPresentation(extra, binding, 7, 8).map((item) => item.id))
+      .not.toContain("orphan");
+    expect(sliceMessagesForPresentation(extra, binding, 8, 8).map((item) => item.id))
+      .toContain("orphan");
+  });
+
+  it("refuses a running run or a chat that cannot align a user/assistant row", () => {
+    const binding = bindMessagesToRun(messages, events);
+    expect(canEnterPresentation(run("running"), binding).ok).toBe(false);
+    expect(canEnterPresentation(run("completed"), binding).ok).toBe(true);
+    expect(canEnterPresentation(run("completed"), bindMessagesToRun([], events)).ok).toBe(false);
+    expect(canEnterPresentation(run("failed"), binding).ok).toBe(true);
+  });
+});

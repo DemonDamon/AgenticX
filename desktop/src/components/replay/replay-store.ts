@@ -3,6 +3,12 @@ import {
   buildReplayPayloadDisplay,
   type ReplayPayloadDisplay,
 } from "./replay-payload";
+import {
+  isPresentationBeat,
+  nextPresentationBeat,
+  presentationDwellMs,
+  previousPresentationBeat,
+} from "./replay-presentation";
 import type {
   ReplayEvent,
   ReplayEventsResponse,
@@ -20,6 +26,7 @@ export type ReplayPlaybackState = {
   cursorSeq: number;
   selectedEventId: string | null;
   playing: boolean;
+  presenting: boolean;
   speed: ReplaySpeed;
   filters: Set<ReplayFilter>;
   loading: boolean;
@@ -52,6 +59,8 @@ type ReplayStore = {
   setFilters: (paneId: string, filters: Set<ReplayFilter>) => void;
   play: (paneId: string) => void;
   pause: (paneId: string) => void;
+  enterPresentation: (paneId: string) => Promise<void>;
+  exitPresentation: (paneId: string) => void;
   seek: (paneId: string, seq: number) => void;
   step: (paneId: string, direction: -1 | 1) => void;
   selectEvent: (paneId: string, eventId: string | null) => void;
@@ -75,6 +84,7 @@ const EMPTY_REPLAY_STATE: ReplayPlaybackState = {
   cursorSeq: 0,
   selectedEventId: null,
   playing: false,
+  presenting: false,
   speed: 1,
   filters: new Set<ReplayFilter>(["all"]),
   loading: false,
@@ -217,10 +227,68 @@ function mergeEvents(
   return next;
 }
 
+function schedulePresentingNext(paneId: string): void {
+  const state = useReplayStore.getState().getPane(paneId);
+  if (!state.playing || !state.presenting || state.events.length === 0) return;
+  const next = nextPresentationBeat(state.events, state.cursorSeq);
+  if (!next) {
+    if (state.hasMore) {
+      void useReplayStore.getState().loadNextPage(paneId).then(() => scheduleNext(paneId));
+      return;
+    }
+    const current = [...state.events].reverse().find((event) => event.seq <= state.cursorSeq);
+    const hold = current && isPresentationBeat(current.type)
+      ? presentationDwellMs(current.type, state.speed)
+      : 0;
+    playbackTimers.set(paneId, { kind: "timer", id: setTimeout(() => {
+      const latest = useReplayStore.getState().getPane(paneId);
+      if (!latest.playing || !latest.presenting) return;
+      if (nextPresentationBeat(latest.events, latest.cursorSeq)) {
+        scheduleNext(paneId);
+        return;
+      }
+      useReplayStore.getState().pause(paneId);
+    }, hold) });
+    return;
+  }
+  const current = [...state.events].reverse().find((event) => event.seq <= state.cursorSeq);
+  const delay = current && isPresentationBeat(current.type) && current.seq === state.cursorSeq
+    ? presentationDwellMs(current.type, state.speed)
+    : 0;
+  playbackTimers.set(paneId, { kind: "timer", id: setTimeout(() => {
+    const latest = useReplayStore.getState().getPane(paneId);
+    if (!latest.playing || !latest.presenting) return;
+    const target = nextPresentationBeat(latest.events, latest.cursorSeq);
+    if (!target) {
+      if (latest.hasMore) {
+        void useReplayStore.getState().loadNextPage(paneId).then(() => scheduleNext(paneId));
+      } else {
+        useReplayStore.getState().pause(paneId);
+      }
+      return;
+    }
+    useReplayStore.setState((store) => ({
+      byPane: {
+        ...store.byPane,
+        [paneId]: {
+          ...latest,
+          cursorSeq: target.seq,
+          renderLimit: renderLimitForCursor(latest.events, target.seq, latest.renderLimit),
+        },
+      },
+    }));
+    scheduleNext(paneId);
+  }, delay) });
+}
+
 function scheduleNext(paneId: string): void {
   clearPlaybackTimer(paneId);
   const state = useReplayStore.getState().getPane(paneId);
   if (!state.playing || state.events.length === 0) return;
+  if (state.presenting) {
+    schedulePresentingNext(paneId);
+    return;
+  }
   const nextIndex = state.events.findIndex((event) => event.seq > state.cursorSeq);
   if (nextIndex < 0) {
     if (state.hasMore) {
@@ -501,6 +569,41 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
       return { byPane: { ...store.byPane, [paneId]: { ...current, playing: false } } };
     });
   },
+  enterPresentation: async (paneId) => {
+    const current = get().getPane(paneId);
+    if (!current.run || current.run.status === "running") return;
+    if (current.hasMore) await get().loadAllPages(paneId);
+    const latest = get().getPane(paneId);
+    if (!latest.run || latest.run.status === "running" || latest.events.length === 0) return;
+    clearPlaybackTimer(paneId);
+    const firstSeq = latest.events[0]?.seq ?? 0;
+    set((store) => ({
+      byPane: {
+        ...store.byPane,
+        [paneId]: {
+          ...latest,
+          presenting: true,
+          playing: true,
+          speed: 2,
+          cursorSeq: firstSeq,
+          selectedEventId: null,
+        },
+      },
+    }));
+    scheduleNext(paneId);
+  },
+  exitPresentation: (paneId) => {
+    clearPlaybackTimer(paneId);
+    set((store) => {
+      const current = store.byPane[paneId] ?? freshState();
+      return {
+        byPane: {
+          ...store.byPane,
+          [paneId]: { ...current, presenting: false, playing: false },
+        },
+      };
+    });
+  },
   seek: (paneId, seq) => {
     clearPlaybackTimer(paneId);
     set((store) => {
@@ -523,15 +626,19 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
   step: (paneId, direction) => {
     const current = get().getPane(paneId);
     if (current.events.length === 0) return;
-    const target = direction === 1
-      ? current.events.find((event) => event.seq > current.cursorSeq)
-      : (() => {
-          for (let index = current.events.length - 1; index >= 0; index -= 1) {
-            const candidate = current.events[index];
-            if (candidate && candidate.seq < current.cursorSeq) return candidate;
-          }
-          return undefined;
-        })();
+    const target = current.presenting
+      ? direction === 1
+        ? nextPresentationBeat(current.events, current.cursorSeq)
+        : previousPresentationBeat(current.events, current.cursorSeq)
+      : direction === 1
+        ? current.events.find((event) => event.seq > current.cursorSeq)
+        : (() => {
+            for (let index = current.events.length - 1; index >= 0; index -= 1) {
+              const candidate = current.events[index];
+              if (candidate && candidate.seq < current.cursorSeq) return candidate;
+            }
+            return undefined;
+          })();
     if (target) get().seek(paneId, target.seq);
   },
   selectEvent: (paneId, eventId) => {
@@ -601,7 +708,13 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     set((store) => {
       const current = store.byPane[paneId];
       if (!current) return store;
-      const next = { ...current, playing: false, loading: false, loadingMore: false };
+      const next = {
+        ...current,
+        playing: false,
+        presenting: false,
+        loading: false,
+        loadingMore: false,
+      };
       cacheState(next);
       return { byPane: { ...store.byPane, [paneId]: next } };
     });

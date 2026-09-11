@@ -440,4 +440,67 @@ describe("replay pane store", () => {
     expect(state.runId).toBe("run-new");
     expect(state.events.map((item) => item.seq)).toEqual([900]);
   });
+
+  it("presents a completed run by beats and does not seek on a running run", async () => {
+    const events = [
+      { ...event(1), type: "run_started" },
+      { ...event(2), type: "user_message" },
+      { ...event(3), type: "tool_progress" },
+      { ...event(4), type: "tool_call" },
+    ];
+    await useReplayStore.getState().openRun(
+      "pane-a",
+      "session-1",
+      "run-1",
+      async () => ({ ...page(events), run: { ...page(events).run, status: "completed" } }),
+    );
+
+    await useReplayStore.getState().enterPresentation("pane-a");
+    expect(useReplayStore.getState().getPane("pane-a")).toMatchObject({
+      presenting: true,
+      playing: true,
+      speed: 2,
+      cursorSeq: 1,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useReplayStore.getState().getPane("pane-a").cursorSeq).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(149);
+    expect(useReplayStore.getState().getPane("pane-a").cursorSeq).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useReplayStore.getState().getPane("pane-a").cursorSeq).toBe(4);
+
+    useReplayStore.getState().exitPresentation("pane-a");
+    expect(useReplayStore.getState().getPane("pane-a")).toMatchObject({
+      presenting: false,
+      playing: false,
+      cursorSeq: 4,
+    });
+
+    await useReplayStore.getState().openRun(
+      "pane-b",
+      "session-1",
+      "run-2",
+      async () => page(events, "run-2"),
+    );
+    await useReplayStore.getState().enterPresentation("pane-b");
+    expect(useReplayStore.getState().getPane("pane-b").presenting).toBe(false);
+  });
+
+  it("clears presenting when the replay tab closes", async () => {
+    const events = [
+      { ...event(1), type: "user_message" },
+      { ...event(2), type: "tool_call" },
+    ];
+    await useReplayStore.getState().openRun(
+      "pane-a",
+      "session-1",
+      "run-1",
+      async () => ({ ...page(events), run: { ...page(events).run, status: "completed" } }),
+    );
+    await useReplayStore.getState().enterPresentation("pane-a");
+    useReplayStore.getState().closeTab("pane-a");
+    expect(useReplayStore.getState().getPane("pane-a").presenting).toBe(false);
+  });
 });

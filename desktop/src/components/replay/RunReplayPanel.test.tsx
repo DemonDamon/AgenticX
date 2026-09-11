@@ -200,6 +200,25 @@ describe("replay UI", () => {
         onCopy={() => {}}
       />,
     );
+    const presentControls = render(
+      <ReplayControls
+        playing={false}
+        speed={2}
+        filters={new Set(["all"])}
+        canStepBack={false}
+        canStepForward
+        copying={false}
+        copyFeedback={null}
+        onTogglePlay={() => {}}
+        onStep={() => {}}
+        onSpeedChange={() => {}}
+        onFiltersChange={() => {}}
+        onCopy={() => {}}
+        presenting={false}
+        canPresent
+        onTogglePresent={() => {}}
+      />,
+    );
     const timeline = render(
       <ReplayTimeline
         events={Array.from({ length: 500 }, (_, index) => event(index + 1))}
@@ -218,6 +237,8 @@ describe("replay UI", () => {
     );
 
     expect(controls).toContain("复制回顾");
+    expect(controls).not.toContain("演示");
+    expect(presentControls).toContain("演示");
     expect(timeline).toContain("#500");
     expect(consoleError).not.toHaveBeenCalled();
   });

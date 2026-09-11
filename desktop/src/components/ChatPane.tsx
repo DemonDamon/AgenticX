@@ -324,6 +324,12 @@ import { isLikelyTextFile } from "../utils/text-attachment";
 import { isViewImageInjectMessage } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
+import {
+  bindMessagesToRun,
+  sliceMessagesForPresentation,
+} from "./replay/replay-presentation";
+import { useReplayPresentation } from "./replay/useReplayPresentation";
+import { useReplayStore } from "./replay/replay-store";
 import { maxContinuationRound } from "../utils/continuation-notice";
 import {
   shouldDropDuplicateUserSend,
@@ -2790,6 +2796,7 @@ type AtCandidate = AtMentionCandidate;
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
   const { t } = useTranslation("chat");
+  const { t: tw } = useTranslation("workspace");
   const locale = useAppStore((s) => s.locale);
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
   const paneSortableListeners = usePaneSortableHandle();
@@ -3426,9 +3433,31 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   // Render-only list: inline the sub-agent cluster card into the conversation
   // flow (like the clarification card). Kept separate from `visibleMessages` so
   // selection/counts/last-assistant logic never sees the synthetic anchor row.
+  const replayPresentation = useReplayPresentation(paneId);
+  const replayPresenting = Boolean(
+    replayPresentation.presenting
+    && pane.sessionId
+    && replayPresentation.sessionId === pane.sessionId,
+  );
   const renderMessages = useMemo(
-    () => (isGroupPane ? visibleMessages : injectLiveSubAgentClusterAnchors(visibleMessages)),
-    [isGroupPane, visibleMessages]
+    () => {
+      const base = isGroupPane ? visibleMessages : injectLiveSubAgentClusterAnchors(visibleMessages);
+      if (!replayPresenting) return base;
+      const binding = bindMessagesToRun(base, replayPresentation.events);
+      return sliceMessagesForPresentation(
+        base,
+        binding,
+        replayPresentation.cursorSeq,
+        replayPresentation.events.at(-1)?.seq ?? 0,
+      );
+    },
+    [
+      isGroupPane,
+      replayPresenting,
+      replayPresentation.cursorSeq,
+      replayPresentation.events,
+      visibleMessages,
+    ]
   );
   const groupedVisibleMessages = useMemo(
     () => groupConsecutiveToolMessages(renderMessages),
@@ -9132,6 +9161,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => {
+    if (useReplayStore.getState().getPane(paneId).presenting) return;
     const continuation = options?.continuation;
     const isContinuation = !!continuation;
     const composerDisplayText = buildComposerDisplayText();
@@ -13416,6 +13446,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
             </div>
           ) : null}
+          {replayPresenting ? (
+            <div
+              role="status"
+              className="mx-auto mb-2 flex w-full max-w-4xl items-center justify-between gap-2 rounded-md bg-status-warning/10 px-3 py-1.5 text-[11px] text-status-warning"
+            >
+              <span>{tw("replay.presentingBanner")}</span>
+              <button
+                type="button"
+                className="rounded-md px-2 py-0.5 text-[11px] text-status-warning hover:bg-status-warning/15"
+                onClick={() => useReplayStore.getState().exitPresentation(paneId)}
+              >
+                {tw("replay.exitPresent")}
+              </button>
+            </div>
+          ) : null}
           <div
             className={`agx-pane-composer-shell mx-auto min-w-0 w-full ${
               workExpandedLayout ? "max-w-none" : "max-w-4xl"
@@ -13721,7 +13766,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
               <div
                 ref={composerRef}
-              contentEditable
+              contentEditable={!replayPresenting}
               suppressContentEditableWarning
               onInput={() => {
                 syncQuoteTargetsFromComposer();
@@ -13837,6 +13882,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 syncComposerFromValue(extractComposerSendText());
               }}
               onKeyDown={(e) => {
+                if (replayPresenting) {
+                  e.preventDefault();
+                  return;
+                }
                 const isImeComposing =
                   e.nativeEvent.isComposing ||
                   imeComposingRef.current ||
@@ -14064,6 +14113,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   recording={recording}
                   transcribing={voiceTranscribing}
                   onSend={() => {
+                    if (replayPresenting) return;
                     lastComposerEnterAtRef.current = 0;
                     void sendChat(extractComposerSendText());
                   }}
