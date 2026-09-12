@@ -173,7 +173,7 @@ export function ReplayEventDetail({
       {onBranchFromStep ? (
         <button
           type="button"
-          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-2 text-[11px] text-[var(--ui-btn-primary-text)] hover:bg-[var(--ui-btn-primary-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-2 text-[11px] font-medium text-[var(--ui-btn-primary-text)] shadow-none transition-[background-color,box-shadow,opacity] hover:bg-[var(--ui-btn-primary-bg-hover)] hover:shadow-[0_0_0_1px_var(--ui-btn-primary-border)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-[var(--ui-btn-primary-bg)] disabled:hover:opacity-75"
           disabled={!canBranch}
           onClick={() => onBranchFromStep(event)}
         >

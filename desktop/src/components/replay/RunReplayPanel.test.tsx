@@ -365,6 +365,8 @@ describe("replay UI", () => {
     expect(detail).toContain("恢复到此步骤");
     expect(detail).toContain("当前会话不在 Git 隔离工作区");
     expect(detail).toContain("disabled");
+    expect(detail).toContain("hover:bg-[var(--ui-btn-primary-bg-hover)]");
+    expect(detail).not.toContain("hover:bg-[var(--ui-btn-primary-hover)]");
   });
 
   it("requires a complete run and checkpoint ref for local branch preview", () => {
