@@ -337,6 +337,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   }) => ipcRenderer.invoke("layout-set", payload),
   forkSession: async (payload: { sessionId: string }) =>
     ipcRenderer.invoke("fork-session", payload),
+  continueFromMessage: async (payload: { sessionId: string; messageId: string }) =>
+    ipcRenderer.invoke("continue-from-message", payload),
   archiveSessions: async (payload: { sessionId: string; avatarId?: string | null }) =>
     ipcRenderer.invoke("archive-sessions", payload),
   listTaskspaces: async (sessionId: string) =>

@@ -137,6 +137,9 @@
     "selectAll": "Select all",
     "webSearch": "Web search",
     "quoteToNew": "Quote in a new chat",
+    "continueFrom": "Continue from here",
+    "continueLineage": "Continued from \"{{source}}\" · sharing the current workspace",
+    "continueOpenSource": "Open source session",
     "reanswer": "Retry with another model",
     "reanswerAt": "@Switch model",
     "pickReanswerModel": "Choose a model to retry",
@@ -536,7 +539,9 @@
     "unattendedSaveFailed": "Could not save the unattended switch",
     "busyForChat": "This agent is still running. Chat opens when it finishes.",
     "bgTaskDone": "Background task finished",
-    "turnInterrupted": "This turn was interrupted. Syncing status…"
+    "turnInterrupted": "This turn was interrupted. Syncing status…",
+    "continueUnsupported": "Continue from here is not supported in this build",
+    "continueFailed": "Could not continue from here: {{detail}}"
   },
   "md": {
     "zoom": "Zoom",

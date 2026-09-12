@@ -6076,6 +6076,42 @@ def create_studio_app() -> FastAPI:
             "session_name": managed.session_name,
         }
 
+    @app.post("/api/sessions/{session_id}/continue-from")
+    async def continue_session_from_message(
+        session_id: str,
+        payload: dict,
+        x_agx_desktop_token: str | None = Header(default=None),
+    ) -> dict:
+        _check_token(x_agx_desktop_token)
+        from agenticx.studio.conversation_continue import ConversationContinueError
+
+        message_id = str((payload or {}).get("message_id", "") or "").strip()
+        if not message_id:
+            raise HTTPException(status_code=400, detail="message_id is required")
+        try:
+            forked = manager.continue_session_from_message(session_id, message_id)
+        except ConversationContinueError as exc:
+            if exc.code in {"session_not_found", "message_not_found"}:
+                raise HTTPException(status_code=404, detail=exc.code)
+            if exc.code == "source_session_running":
+                raise HTTPException(status_code=409, detail=exc.code)
+            raise HTTPException(status_code=400, detail=exc.code)
+        lineage = (forked.studio_session.scratchpad or {}).get(
+            "conversation_lineage", {}
+        )
+        workspace_mode = "shared_current"
+        if isinstance(lineage, dict) and lineage.get("workspace_mode"):
+            workspace_mode = str(lineage.get("workspace_mode"))
+        return {
+            "ok": True,
+            "session_id": forked.session_id,
+            "avatar_id": forked.avatar_id,
+            "session_name": forked.session_name,
+            "parent_session_id": session_id,
+            "source_message_id": message_id,
+            "workspace_mode": workspace_mode,
+        }
+
     @app.post("/api/sessions/archive-before")
     async def archive_sessions_before(
         payload: dict,

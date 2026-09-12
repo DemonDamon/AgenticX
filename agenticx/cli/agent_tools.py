@@ -9368,6 +9368,139 @@ def _resolve_group_id(session: "StudioSession", arg_group_id: str | None) -> str
     return gid or "default"
 
 
+_SHARED_WRITE_ISOLATE_OPTION = "创建隔离副本"
+_SHARED_WRITE_SHARED_OPTION = "继续共用当前工作区"
+_SHARED_WRITE_CANCEL_OPTION = "取消"
+
+
+async def _maybe_guard_shared_workspace_write(
+    name: str,
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    clarify_gate: Optional[ClarifyGate] = None,
+    emit_event: Optional[Any] = None,
+    is_unattended: bool = False,
+) -> Optional[str]:
+    """First-write guard for conversation branches on a shared workspace.
+
+    Returns an ERROR string to stop the tool, or None to let it run.
+    """
+    from agenticx.studio.conversation_continue import (
+        mark_shared_write_prompted,
+        should_prompt_shared_write,
+    )
+
+    try:
+        from agenticx.runtime.replay_ledger.effects import classify_tool_effect
+        effect = classify_tool_effect(str(name or ""), dict(arguments or {}))
+    except Exception:
+        effect = ""
+    if not should_prompt_shared_write(session, name, effect):
+        return None
+
+    scratchpad = getattr(session, "scratchpad", None)
+    lineage = (
+        scratchpad.get("conversation_lineage")
+        if isinstance(scratchpad, dict)
+        else None
+    )
+    if not isinstance(lineage, dict):
+        return None
+
+    if is_unattended or isinstance(clarify_gate, AutoSuspendClarifyGate):
+        mark_shared_write_prompted(session)
+        return None
+
+    # Non-git workspaces cannot offer an isolate copy — shared/cancel only.
+    from agenticx.runtime.isolate_run import find_git_root
+
+    workspace_dir = str(getattr(session, "workspace_dir", None) or "").strip()
+    git_root = None
+    if workspace_dir:
+        try:
+            git_root = find_git_root(Path(workspace_dir).expanduser())
+        except Exception:
+            git_root = None
+    can_isolate = git_root is not None
+    options = (
+        [_SHARED_WRITE_ISOLATE_OPTION, _SHARED_WRITE_SHARED_OPTION, _SHARED_WRITE_CANCEL_OPTION]
+        if can_isolate
+        else [_SHARED_WRITE_SHARED_OPTION, _SHARED_WRITE_CANCEL_OPTION]
+    )
+    prompt = (
+        "这是从历史消息继续出来的新分支，与源会话共用当前工作区。"
+        "本次工具要写入本地文件，请选择：创建隔离副本（后续写入只影响副本），"
+        "继续共用当前工作区（之后不再询问），或取消本次写入。"
+        if can_isolate
+        else "这是从历史消息继续出来的新分支，与源会话共用当前工作区。"
+        "当前不是 git 工作区，无法创建隔离副本；请选择继续共用当前工作区（之后不再询问），或取消本次写入。"
+    )
+    payload_context: Dict[str, Any] = {
+        "kind": "shared_workspace_write",
+        "request_id": str(uuid.uuid4()),
+        "tool": str(name or ""),
+    }
+    gate = clarify_gate or AsyncClarifyGate()
+    emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
+    if emit_prompt:
+        await emit_event(
+            {
+                "type": "clarification_required",
+                "data": {
+                    "id": payload_context["request_id"],
+                    "prompt": prompt,
+                    "options": options,
+                    "decisions": [],
+                    "allow_free_text": True,
+                    "context": payload_context,
+                },
+            }
+        )
+    answer = await gate.request_clarification(
+        prompt,
+        options=options,
+        allow_free_text=True,
+        context=payload_context,
+    )
+    if emit_prompt:
+        await emit_event(
+            {
+                "type": "clarification_response",
+                "data": {
+                    "id": payload_context["request_id"],
+                    "answer": answer,
+                },
+            }
+        )
+    if not isinstance(answer, dict):
+        return "ERROR: 用户取消了本次写入（从历史消息继续的新分支与源会话共用工作区）。"
+    if answer.get("__suspended__"):
+        mark_shared_write_prompted(session)
+        return None
+    if answer.get("__timeout__"):
+        return "ERROR: 用户未在时限内回复，本次写入已取消（从历史消息继续的新分支与源会话共用工作区）。"
+    selected = list(answer.get("selected_options", []) or [])
+    choice = str(selected[0] or "").strip() if selected else ""
+    if choice == _SHARED_WRITE_ISOLATE_OPTION and can_isolate:
+        from agenticx.runtime.isolate_run import ensure_isolate
+
+        try:
+            state = ensure_isolate(session, isolate_run=True, is_automation=False)
+        except Exception as exc:
+            return f"ERROR: 创建隔离副本失败，本次写入已取消：{exc}"
+        if not isinstance(state, dict) or not state.get("active"):
+            reason = str((state or {}).get("error", "unknown") or "unknown")
+            return f"ERROR: 创建隔离副本失败（{reason}），本次写入已取消。请改用只读工具或让用户先把工作区建成 git 仓库。"
+        lineage["workspace_mode"] = "isolated"
+        lineage["shared_write_prompted"] = True
+        return None
+    if choice == _SHARED_WRITE_SHARED_OPTION:
+        mark_shared_write_prompted(session)
+        return None
+    return "ERROR: 用户取消了本次写入（从历史消息继续的新分支与源会话共用工作区）。"
+
+
 async def dispatch_tool_async(
     name: str,
     arguments: Dict[str, Any],
@@ -9390,6 +9523,16 @@ async def dispatch_tool_async(
     path_denial = _dispatch_path_rule_denial(arguments, session)
     if path_denial:
         return f"ERROR: {path_denial}"
+    shared_write_block = await _maybe_guard_shared_workspace_write(
+        name,
+        arguments,
+        session,
+        clarify_gate=clarify_gate,
+        emit_event=event_callback,
+        is_unattended=is_unattended,
+    )
+    if shared_write_block:
+        return shared_write_block
     arguments = _repair_malformed_file_tool_arguments(name, arguments)
     required = _TOOL_REQUIRED_PARAMS.get(name)
     if required and not arguments:

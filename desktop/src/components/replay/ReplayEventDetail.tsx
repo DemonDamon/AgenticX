@@ -178,7 +178,7 @@ export function ReplayEventDetail({
           onClick={() => onBranchFromStep(event)}
         >
           <GitBranch aria-hidden className="h-3.5 w-3.5" />
-          {t("replay.branchFromBefore", "从此前分叉")}
+          {t("replay.branchFromBefore", "恢复到此步骤")}
         </button>
       ) : null}
       {!canBranch && branchDisabledReason ? (

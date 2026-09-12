@@ -8896,6 +8896,27 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("continue-from-message", async (_event, payload: { sessionId: string; messageId: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const mid = String(payload?.messageId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    if (!mid) return { ok: false, error: "messageId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/continue-from`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({ message_id: mid }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
   ipcMain.handle("archive-sessions", async (_event, payload: { sessionId: string; avatarId?: string | null }) => {
     const sid = String(payload?.sessionId || "").trim();
     const avatarId = String(payload?.avatarId || "").trim();

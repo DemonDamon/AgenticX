@@ -602,8 +602,8 @@
       "path_in_tool_input": "路径出现在工具参数",
       "failed_result_to_error": "失败结果之后的错误"
     },
-    "cannotBranch": "该节点不可分叉",
-    "branchFromBefore": "从此前分叉",
+    "cannotBranch": "该步骤无法恢复",
+    "branchFromBefore": "恢复到此步骤",
     "branchRequestedStep": "请求步骤",
     "branchRestoredStep": "实际恢复步骤",
     "branchExternalWarning": "外部副作用不会回滚",

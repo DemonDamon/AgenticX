@@ -776,6 +776,7 @@ declare global {
         activePaneId?: string;
       }) => Promise<{ ok: boolean; error?: string }>;
       forkSession: (payload: { sessionId: string }) => Promise<{ ok: boolean; session_id?: string; session_name?: string; error?: string }>;
+      continueFromMessage: (payload: { sessionId: string; messageId: string }) => Promise<{ ok: boolean; session_id?: string; session_name?: string; workspace_mode?: string; error?: string; detail?: string }>;
       archiveSessions: (payload: { sessionId: string; avatarId?: string | null }) => Promise<{ ok: boolean; archived_count?: number; error?: string }>;
       listTaskspaces: (sessionId: string) => Promise<{ ok: boolean; workspaces: TaskspaceItem[]; error?: string }>;
       addTaskspace: (payload: { sessionId: string; path?: string; label?: string }) => Promise<{ ok: boolean; workspace?: TaskspaceItem; error?: string }>;

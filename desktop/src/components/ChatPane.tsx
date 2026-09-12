@@ -3045,6 +3045,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     Record<string, { active: boolean; text: string; provider: string; model: string }>
   >({});
   const retryInFlightRef = useRef<Record<string, boolean>>({});
+  const continueInFlightRef = useRef(false);
   /** Live-reattach (FR-4): per-session abort controllers for read-only reattach streams. */
   const reattachControllersRef = useRef<Record<string, AbortController>>({});
   /** Debounce timers for mid-reattach group disk merges (keyed by session id). */
@@ -7704,6 +7705,66 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     window.setTimeout(() => composerRef.current?.focus(), 50);
   }, [pane.sessionId, stopCurrentRun]);
 
+  const continueFromMessage = useCallback(
+    async (msg: Message) => {
+      if (msg.role !== "user" && msg.role !== "assistant") return;
+      if (isGroupPane || isAutomationTaskPane) return;
+      const sid = (pane.sessionId || "").trim();
+      const mid = (msg.id || "").trim();
+      if (!sid || !mid) return;
+      if (
+        mid === "__stream__" ||
+        mid.startsWith("typing-") ||
+        isGroupStreamMessageId(mid)
+      ) return;
+      if (continueInFlightRef.current) return;
+      continueInFlightRef.current = true;
+      try {
+        const api = window.agenticxDesktop as unknown as {
+          continueFromMessage?: (payload: {
+            sessionId: string;
+            messageId: string;
+          }) => Promise<{
+            ok: boolean;
+            session_id?: string;
+            error?: string;
+            detail?: string;
+          }>;
+        };
+        if (typeof api.continueFromMessage !== "function") {
+          setStallHintToast(t("toast.continueUnsupported"));
+          return;
+        }
+        const result = await api.continueFromMessage({
+          sessionId: sid,
+          messageId: mid,
+        });
+        if (!result?.ok || !result.session_id) {
+          const detail = String(
+            result?.error || result?.detail || t("tool.statusUnknown"),
+          ).slice(0, 160);
+          setStallHintToast(t("toast.continueFailed", { detail }));
+          return;
+        }
+        const newPaneId = addPane(pane.avatarId, pane.avatarName, result.session_id);
+        setActivePaneId(newPaneId);
+      } finally {
+        continueInFlightRef.current = false;
+      }
+    },
+    [
+      addPane,
+      isAutomationTaskPane,
+      isGroupPane,
+      pane.avatarId,
+      pane.avatarName,
+      pane.sessionId,
+      setActivePaneId,
+      setStallHintToast,
+      t,
+    ],
+  );
+
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
     if (!sid) return;
@@ -8252,6 +8313,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (row.kind === "message") {
         const message = row.message;
         const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
+        const canContinueFromMessage =
+          (message.role === "user" || message.role === "assistant") &&
+          !isStreamingCurrentSession &&
+          !isGroupPane &&
+          !isAutomationTaskPane &&
+          !message.systemNotice &&
+          message.id !== "__stream__" &&
+          !message.id.startsWith("typing-") &&
+          !isGroupStreamMessageId(message.id);
         const isSelecting = selectedMessageIds.size > 0;
         const rowSelectable = isSelecting && !reactCol;
         const isSelected = selectedMessageIds.has(message.id);
@@ -8364,6 +8434,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }}
               onFavoriteMessage={favoriteMessage}
               onForwardMessage={forwardOneMessage}
+              onContinueFromMessage={
+                canContinueFromMessage ? continueFromMessage : undefined
+              }
+              onOpenConversationSource={(lineage) => {
+                setPaneSessionId(pane.id, lineage.parentSessionId);
+              }}
               onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
               onEditMessage={canRetryThisUserMessage ? editUserMessage : undefined}
               onToggleSelectMessage={toggleSelectMessage}
@@ -8842,7 +8918,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
+  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {

@@ -602,8 +602,8 @@
       "path_in_tool_input": "Path appeared in tool input",
       "failed_result_to_error": "Error after a failed result"
     },
-    "cannotBranch": "This node cannot be branched",
-    "branchFromBefore": "Branch from before this step",
+    "cannotBranch": "This step cannot be restored",
+    "branchFromBefore": "Restore to this step",
     "branchRequestedStep": "Requested step",
     "branchRestoredStep": "Restored stable step",
     "branchExternalWarning": "External side effects are not rolled back",

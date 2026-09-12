@@ -51,6 +51,33 @@ export function parseBranchLineage(
   };
 }
 
+export type ConversationLineage = {
+  parentSessionId: string;
+  sourceMessageId: string;
+  workspaceMode: string;
+  sharedWritePrompted?: boolean;
+};
+
+export function parseConversationLineage(
+  metadata: Record<string, unknown> | undefined,
+): ConversationLineage | null {
+  const raw = metadata?.conversation_lineage;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  if (String(row.kind ?? "") !== "conversation") return null;
+  const parentSessionId = String(row.parent_session_id ?? "").trim();
+  const sourceMessageId = String(row.source_message_id ?? "").trim();
+  if (!parentSessionId || !sourceMessageId) return null;
+  return {
+    parentSessionId,
+    sourceMessageId,
+    workspaceMode: String(row.workspace_mode ?? "shared_current"),
+    ...(typeof row.shared_write_prompted === "boolean"
+      ? { sharedWritePrompted: row.shared_write_prompted }
+      : {}),
+  };
+}
+
 function parseSubAgentClusterAnchor(meta: Record<string, unknown> | undefined): Message["subAgentCluster"] {
   const raw = meta?.subagent_cluster;
   if (!raw || typeof raw !== "object") return undefined;

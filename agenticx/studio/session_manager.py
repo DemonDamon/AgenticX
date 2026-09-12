@@ -1639,6 +1639,75 @@ class SessionManager:
         self._persist_session_state(forked.session_id, forked.studio_session)
         return forked
 
+    def continue_session_from_message(
+        self, session_id: str, message_id: str
+    ) -> ManagedSession:
+        """Create a dialogue branch sliced at ``message_id`` (shared workspace).
+
+        Unlike :meth:`fork_session`, only the transcript prefix is copied and
+        the isolate state is always dropped so two sessions never share one
+        ``isolate_json`` worktree.
+        """
+        from agenticx.studio.conversation_continue import (
+            ConversationContinueError,
+            build_conversation_lineage,
+            slice_transcript_for_continue,
+        )
+
+        source = self._sessions.get(session_id)
+        if source is None:
+            raise ConversationContinueError("session_not_found")
+        if self.active_runs > 0:
+            raise ConversationContinueError("source_session_running")
+        target = str(message_id or "").strip()
+        if not target:
+            raise ConversationContinueError("message_not_found")
+        chat_prefix, agent_prefix = slice_transcript_for_continue(
+            getattr(source.studio_session, "chat_history", None) or [],
+            getattr(source.studio_session, "agent_messages", None) or [],
+            target,
+        )
+        forked = self.create(
+            provider=source.studio_session.provider_name,
+            model=source.studio_session.model_name,
+        )
+        forked.avatar_id = source.avatar_id
+        forked.avatar_name = source.avatar_name
+        forked.session_name = self._build_fork_name(source.session_name)
+        forked.studio_session.workspace_dir = source.studio_session.workspace_dir
+        forked.studio_session.chat_history = chat_prefix
+        forked.studio_session.agent_messages = agent_prefix
+        forked.studio_session.context_files = deepcopy(
+            source.studio_session.context_files or {}
+        )
+        scratchpad = deepcopy(source.studio_session.scratchpad or {})
+        scratchpad.pop("isolate_json", None)
+        scratchpad.pop("run_branch_lineage", None)
+        forked.studio_session.scratchpad = scratchpad
+        forked.studio_session.scratchpad["conversation_lineage"] = (
+            build_conversation_lineage(source.session_id, target)
+        )
+        forked.studio_session.artifacts = deepcopy(
+            source.studio_session.artifacts or {}
+        )
+        forked.studio_session.chat_history.append(
+            {
+                "role": "system",
+                "content": "",
+                "system_notice": True,
+                "metadata": {
+                    "conversation_lineage": deepcopy(
+                        forked.studio_session.scratchpad["conversation_lineage"]
+                    ),
+                },
+            }
+        )
+        forked.updated_at = time.time()
+        if not self._persist_session_state(forked.session_id, forked.studio_session):
+            self.delete(forked.session_id)
+            raise ConversationContinueError("branch_session_persist_failed")
+        return forked
+
     def fork_session_from_checkpoint(
         self,
         *,

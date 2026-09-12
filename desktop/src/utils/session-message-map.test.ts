@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mapLoadedSessionMessage, parseBranchLineage } from "./session-message-map";
+import {
+  mapLoadedSessionMessage,
+  parseBranchLineage,
+  parseConversationLineage,
+} from "./session-message-map";
 
 describe("mapLoadedSessionMessage turn usage", () => {
   it("maps persisted usage and model onto the Message", () => {
@@ -69,5 +73,42 @@ describe("branch lineage messages", () => {
       restoredSeq: 100,
       sourceEventId: "event-101",
     });
+  });
+});
+
+describe("conversation lineage messages", () => {
+  it("recognizes persisted conversation lineage metadata", () => {
+    const mapped = mapLoadedSessionMessage(
+      {
+        role: "system",
+        content: "",
+        metadata: {
+          conversation_lineage: {
+            kind: "conversation",
+            parent_session_id: "source-session",
+            source_message_id: "a1",
+            workspace_mode: "shared_current",
+            shared_write_prompted: false,
+          },
+        },
+      },
+      "child-session",
+      0,
+    );
+    expect(parseConversationLineage(mapped.metadata)).toEqual({
+      parentSessionId: "source-session",
+      sourceMessageId: "a1",
+      workspaceMode: "shared_current",
+      sharedWritePrompted: false,
+    });
+  });
+
+  it("rejects branch lineage rows without conversation kind", () => {
+    expect(
+      parseConversationLineage({
+        branch_lineage: { parent_session_id: "s" },
+      }),
+    ).toBeNull();
+    expect(parseConversationLineage(undefined)).toBeNull();
   });
 });

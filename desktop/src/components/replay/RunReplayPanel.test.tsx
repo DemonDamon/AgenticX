@@ -362,7 +362,7 @@ describe("replay UI", () => {
       />,
     );
 
-    expect(detail).toContain("从此前分叉");
+    expect(detail).toContain("恢复到此步骤");
     expect(detail).toContain("当前会话不在 Git 隔离工作区");
     expect(detail).toContain("disabled");
   });
