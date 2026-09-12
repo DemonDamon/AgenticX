@@ -18,11 +18,12 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 | **接通真实模型** | [development/local-dev.md#接通真实模型](./development/local-dev.md) · [gateway/runtime-config.md](./gateway/runtime-config.md) |
 | **发布 / 测试策略** | [gateway/policy-engine.md](./gateway/policy-engine.md) · [api/admin-console.md#策略规则中心](./api/admin-console.md) |
 | **看 Token 用量** | [api/admin-console.md#计量](./api/admin-console.md) · `/metering` 页面 |
+| **Key Pool / PAT** | [gateway/keypool-pat-overview.md](./gateway/keypool-pat-overview.md) · [gateway/api-tokens.md](./gateway/api-tokens.md) |
+| **MCP 托管** | [gateway/mcp-hosting-overview.md](./gateway/mcp-hosting-overview.md) · [runbooks/mcp-hosting.md](./runbooks/mcp-hosting.md) |
 | 配 SSO | [runbooks/sso-oidc-setup.md](./runbooks/sso-oidc-setup.md) |
 | 配策略 / 插件 | [plugin-protocol/README.md](./plugin-protocol/README.md) · [gateway/policy-engine.md](./gateway/policy-engine.md) |
 | 部署到 Vercel + 外部 Gateway | [deployment/README.md](./deployment/README.md) |
 | 给客户做定制 | [guides/enterprise-customers-collaboration.md](./guides/enterprise-customers-collaboration.md) |
-| 登录密码 / 改 env 不生效 | [development/local-dev.md#密码与登录env-vs-postgres](./development/local-dev.md#密码与登录env-vs-postgres) · [troubleshooting#登录与-iam](./development/troubleshooting.md#登录与-iam) |
 | 排障 | [development/troubleshooting.md](./development/troubleshooting.md) · [runbooks/postgres-ddl-lock-waiting.md](./runbooks/postgres-ddl-lock-waiting.md) |
 
 ---
@@ -33,6 +34,10 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 
 - [overview.md](./architecture/overview.md) — 组件拓扑、Monorepo 结构、技术栈
 - [data-flow.md](./architecture/data-flow.md) — 聊天、策略、审计、计量数据流
+- [cache-and-pricing.md](./architecture/cache-and-pricing.md) — L1/L2 缓存与计费归一
+- [mcp-hosting.md](./architecture/mcp-hosting.md) — 网关内 MCP Host
+- [protocol-translation.md](./architecture/protocol-translation.md) — OpenAI pivot 协议转换
+- [plugin-runtime.md](./architecture/plugin-runtime.md) — 规则包 / 工具包运行时
 
 ### 应用与模块
 
@@ -53,6 +58,9 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 - [gateway/overview.md](./gateway/overview.md) — 路由、Channel 中继、配额、审计
 - [gateway/policy-engine.md](./gateway/policy-engine.md) — 三通道策略评估
 - [gateway/runtime-config.md](./gateway/runtime-config.md) — Provider / 配额 / 快照 PG 化
+- [gateway/keypool-pat-overview.md](./gateway/keypool-pat-overview.md) — Key 轮转、配额选择、PAT
+- [gateway/api-tokens.md](./gateway/api-tokens.md) — `agx-pat-` 创建与吊销
+- [gateway/mcp-hosting-overview.md](./gateway/mcp-hosting-overview.md) — MCP 托管总览
 
 ### 数据与权限
 
@@ -74,12 +82,18 @@ Enterprise 是企业级大模型应用一体化平台，由 **员工前台（web
 - [testing/README.md](./testing/README.md) — E2E、视觉巡检、压测脚本
 - [../scripts/README.md](../scripts/README.md) — 脚本参数详解
 
+### 可观测性
+
+- [observability/README.md](./observability/README.md) — Prometheus `/metrics` 与 Grafana 模板
+
 ### 部署与运维（已有）
 
-- [deployment/README.md](./deployment/README.md) — Vercel + 外部 Gateway
+- [deployment/README.md](./deployment/README.md) — Docker 自托管 或 Vercel + 外部 Gateway
+- [deployment/local-selfhost.md](./deployment/local-selfhost.md)
 - [deployment/vercel-env-checklist.md](./deployment/vercel-env-checklist.md)
 - [deployment/supabase-migration-guide.md](./deployment/supabase-migration-guide.md)
-- [runbooks/](./runbooks/) — SSO、审计回灌、策略回滚、PostgreSQL DDL 锁等待、Channel 中继、隧道 demo
+- [runbooks/](./runbooks/) — SSO、审计回灌、策略回滚、PostgreSQL DDL 锁等待、Channel 中继、MCP 托管、隧道 demo
+- [perf-baselines/README.md](./perf-baselines/README.md) — 只存档手工压测摘要，仓库没有历史基线数字
 
 ### 决策记录
 
