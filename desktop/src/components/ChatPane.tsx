@@ -305,6 +305,7 @@ import {
 import { resolveReferencesForAssistant } from "../utils/turn-reference-context";
 import { reattachSessionStreamUrl, parseSseFrame } from "../utils/session-reattach";
 import {
+  continueMessageIdForRequest,
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
@@ -7710,13 +7711,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (msg.role !== "user" && msg.role !== "assistant") return;
       if (isGroupPane || isAutomationTaskPane) return;
       const sid = (pane.sessionId || "").trim();
-      const mid = (msg.id || "").trim();
-      if (!sid || !mid) return;
+      const rawId = (msg.id || "").trim();
+      if (!sid || !rawId) return;
       if (
-        mid === "__stream__" ||
-        mid.startsWith("typing-") ||
-        isGroupStreamMessageId(mid)
+        rawId === "__stream__" ||
+        rawId.startsWith("typing-") ||
+        isGroupStreamMessageId(rawId)
       ) return;
+      const mid = continueMessageIdForRequest(sid, pane.messages, msg);
+      if (!mid) return;
       if (continueInFlightRef.current) return;
       continueInFlightRef.current = true;
       try {
@@ -7748,6 +7751,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         }
         const newPaneId = addPane(pane.avatarId, pane.avatarName, result.session_id);
         setActivePaneId(newPaneId);
+        useAppStore.getState().bumpSessionCatalogRevision();
+        window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
       } finally {
         continueInFlightRef.current = false;
       }
@@ -7758,6 +7763,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       isGroupPane,
       pane.avatarId,
       pane.avatarName,
+      pane.messages,
       pane.sessionId,
       setActivePaneId,
       setStallHintToast,
@@ -8437,9 +8443,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               onContinueFromMessage={
                 canContinueFromMessage ? continueFromMessage : undefined
               }
-              onOpenConversationSource={(lineage) => {
-                setPaneSessionId(pane.id, lineage.parentSessionId);
-              }}
               onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
               onEditMessage={canRetryThisUserMessage ? editUserMessage : undefined}
               onToggleSelectMessage={toggleSelectMessage}

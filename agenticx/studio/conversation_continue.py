@@ -6,8 +6,12 @@ Author: Damon Li
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from typing import Any, Sequence
+
+# Desktop loaded ids: "{sessionId}-i{index}" or "{sessionId}-i{index}-{storedId}".
+_DESKTOP_LOADED_ID = re.compile(r"-i(\d+)(?:-(?P<stored>.+))?$")
 
 
 class ConversationContinueError(RuntimeError):
@@ -31,6 +35,60 @@ def _id_of(item: Any) -> str:
     return str(item.get("id", "") or "").strip()
 
 
+def _client_turn_id_of(item: Any) -> str:
+    if not isinstance(item, dict):
+        return ""
+    meta = item.get("metadata")
+    if not isinstance(meta, dict):
+        return ""
+    return str(meta.get("client_turn_id", "") or "").strip()
+
+
+def _find_by_token(chat: Sequence[dict[str, Any]], token: str) -> int:
+    target = str(token or "").strip()
+    if not target:
+        return -1
+    for pos, item in enumerate(chat):
+        if _id_of(item) == target:
+            return pos
+    for pos, item in enumerate(chat):
+        if _client_turn_id_of(item) == target:
+            return pos
+    return -1
+
+
+def resolve_continue_cut_index(
+    chat_history: Sequence[dict[str, Any]] | None,
+    message_id: str,
+) -> int:
+    """Locate the cut row for a Desktop or persisted message locator.
+
+    Real sessions usually have no top-level ``id``. Desktop live bubbles use a
+    random uid; reloaded bubbles use ``{sessionId}-i{index}``.
+    """
+    target = str(message_id or "").strip()
+    if not target:
+        raise ConversationContinueError("message_not_found")
+    chat = [item for item in (chat_history or []) if isinstance(item, dict)]
+
+    idx = _find_by_token(chat, target)
+    if idx >= 0:
+        return idx
+
+    loaded = _DESKTOP_LOADED_ID.search(target)
+    if loaded:
+        stored = str(loaded.group("stored") or "").strip()
+        if stored:
+            idx = _find_by_token(chat, stored)
+            if idx >= 0:
+                return idx
+        index = int(loaded.group(1))
+        if 0 <= index < len(chat):
+            return index
+
+    raise ConversationContinueError("message_not_found")
+
+
 def slice_transcript_for_continue(
     chat_history: Sequence[dict[str, Any]] | None,
     agent_messages: Sequence[dict[str, Any]] | None,
@@ -38,25 +96,16 @@ def slice_transcript_for_continue(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Slice ``(chat_history, agent_messages)`` up to and including ``message_id``.
 
-    Rules (frozen by plan):
-    - chat cut point is the first row whose ``id`` equals ``message_id``.
+    Rules:
+    - chat cut point is resolved by ``id``, then ``metadata.client_turn_id``,
+      then Desktop ``{sessionId}-i{index}`` locators (history often has no id).
     - tool rows are not valid cut points.
     - agent_messages align by user-turn count, keeping the cut round's full
       tool chain when the cut point is an assistant row.
     """
-    target = str(message_id or "").strip()
-    if not target:
-        raise ConversationContinueError("message_not_found")
     chat = [dict(item) for item in (chat_history or []) if isinstance(item, dict)]
     agents = [dict(item) for item in (agent_messages or []) if isinstance(item, dict)]
-
-    idx = -1
-    for pos, item in enumerate(chat):
-        if _id_of(item) == target:
-            idx = pos
-            break
-    if idx < 0:
-        raise ConversationContinueError("message_not_found")
+    idx = resolve_continue_cut_index(chat, message_id)
 
     cut_role = _role_of(chat[idx])
     if cut_role == "tool":

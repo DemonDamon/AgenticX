@@ -136,6 +136,8 @@
     "filterAll": "All",
     "empty": "None",
     "emptyPinned": "No pinned chats",
+    "expandChildren": "Expand child sessions",
+    "collapseChildren": "Collapse child sessions",
     "loading": "Loading…",
     "deleteTitle": "Delete conversations",
     "deleteSelected": "Delete the {{count}} selected conversations?",

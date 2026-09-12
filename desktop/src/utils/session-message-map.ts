@@ -58,6 +58,40 @@ export type ConversationLineage = {
   sharedWritePrompted?: boolean;
 };
 
+const DESKTOP_LOADED_MESSAGE_ID = /-i(\d+)(?:-(.+))?$/;
+
+function isEphemeralContinueId(id: string): boolean {
+  return id === "__stream__" || id.startsWith("typing-") || id.startsWith("__group_stream__");
+}
+
+export type ContinueLocatorMessage = {
+  id: string;
+  role?: string;
+  systemNotice?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export function continueMessageIdForRequest(
+  sessionId: string,
+  messages: ContinueLocatorMessage[],
+  message: ContinueLocatorMessage,
+): string {
+  const sid = String(sessionId || "").trim();
+  const mid = String(message.id || "").trim();
+  if (DESKTOP_LOADED_MESSAGE_ID.test(mid)) return mid;
+  const clientTurnId = String(message.metadata?.client_turn_id ?? "").trim();
+  if (clientTurnId) return clientTurnId;
+  const persistable = messages.filter((row) => {
+    if (row.systemNotice) return false;
+    const id = String(row.id || "").trim();
+    if (!id || isEphemeralContinueId(id)) return false;
+    return row.role === "user" || row.role === "assistant" || row.role === "tool";
+  });
+  const idx = persistable.findIndex((row) => row.id === message.id);
+  if (idx >= 0 && sid) return `${sid}-i${idx}`;
+  return mid;
+}
+
 export function parseConversationLineage(
   metadata: Record<string, unknown> | undefined,
 ): ConversationLineage | null {

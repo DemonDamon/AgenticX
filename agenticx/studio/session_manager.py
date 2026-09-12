@@ -1305,7 +1305,7 @@ class SessionManager:
             if not self._session_has_listable_chat_history(hist):
                 continue
             seen_session_ids.add(sid)
-            result.append({
+            listed = {
                 "session_id": sid,
                 "avatar_id": getattr(managed, "avatar_id", None),
                 "avatar_name": getattr(managed, "avatar_name", None),
@@ -1323,7 +1323,11 @@ class SessionManager:
                     getattr(managed.studio_session, "session_mode", None)
                 ),
                 **_harness_list_fields(managed.studio_session),
-            })
+            }
+            parent_sid = self._conversation_parent_session_id(managed.studio_session)
+            if parent_sid:
+                listed["parent_session_id"] = parent_sid
+            result.append(listed)
         for row in self._list_persisted_sessions(avatar_id=avatar_id):
             sid = str(row.get("session_id", "")).strip()
             if not sid or sid in seen_session_ids:
@@ -1673,7 +1677,8 @@ class SessionManager:
         )
         forked.avatar_id = source.avatar_id
         forked.avatar_name = source.avatar_name
-        forked.session_name = self._build_fork_name(source.session_name)
+        source_name = str(source.session_name or "").strip()
+        forked.session_name = source_name or None
         forked.studio_session.workspace_dir = source.studio_session.workspace_dir
         forked.studio_session.chat_history = chat_prefix
         forked.studio_session.agent_messages = agent_prefix
@@ -1689,18 +1694,6 @@ class SessionManager:
         )
         forked.studio_session.artifacts = deepcopy(
             source.studio_session.artifacts or {}
-        )
-        forked.studio_session.chat_history.append(
-            {
-                "role": "system",
-                "content": "",
-                "system_notice": True,
-                "metadata": {
-                    "conversation_lineage": deepcopy(
-                        forked.studio_session.scratchpad["conversation_lineage"]
-                    ),
-                },
-            }
         )
         forked.updated_at = time.time()
         if not self._persist_session_state(forked.session_id, forked.studio_session):
@@ -2604,6 +2597,9 @@ class SessionManager:
                     ),
                     **_harness_list_fields(session),
                 }
+                parent_sid = self._conversation_parent_session_id(session)
+                if parent_sid:
+                    metadata["parent_session_id"] = parent_sid
                 self._session_store._save_session_summary_sync(
                     session_id,
                     summary,
@@ -3268,6 +3264,46 @@ class SessionManager:
             return "Fork Chat"
         return f"{text} (Fork)"
 
+    @staticmethod
+    def _conversation_parent_session_id(session: Any) -> str:
+        from agenticx.studio.conversation_continue import get_conversation_lineage
+
+        lineage = get_conversation_lineage(session)
+        if not isinstance(lineage, dict):
+            return ""
+        if str(lineage.get("kind", "") or "") != "conversation":
+            return ""
+        return str(lineage.get("parent_session_id", "") or "").strip()
+
+    def _resolve_listed_parent_session_id(
+        self, session_id: str, metadata: dict[str, Any] | None
+    ) -> str:
+        meta = metadata if isinstance(metadata, dict) else {}
+        parent = str(meta.get("parent_session_id", "") or "").strip()
+        if parent:
+            return parent
+        # Persist already writes parent_session_id into listing metadata. A
+        # populated summary without that field is an ordinary session — do not
+        # open SQLite per row to re-read scratchpad (N extra connects on every
+        # sidebar refresh).
+        if meta:
+            return ""
+        sid = str(session_id or "").strip()
+        if not sid:
+            return ""
+        try:
+            scratch = self._session_store._load_scratchpad_sync(sid)
+        except Exception:
+            return ""
+        if not isinstance(scratch, dict):
+            return ""
+        lineage = scratch.get("conversation_lineage")
+        if not isinstance(lineage, dict):
+            return ""
+        if str(lineage.get("kind", "") or "") != "conversation":
+            return ""
+        return str(lineage.get("parent_session_id", "") or "").strip()
+
     def _to_float(self, value: Any, fallback: float) -> float:
         try:
             parsed = float(value)
@@ -3345,22 +3381,24 @@ class SessionManager:
                 derived = self._derive_session_name_from_disk_messages(sid)
                 if derived:
                     sess_nm = derived
-            rows.append(
-                {
-                    "session_id": sid,
-                    "avatar_id": metadata.get("avatar_id"),
-                    "avatar_name": metadata.get("avatar_name"),
-                    "session_name": sess_nm,
-                    "updated_at": updated_at,
-                    "created_at": created_at,
-                    "last_activity_at": last_activity_at,
-                    "pinned": bool(metadata.get("pinned", False)),
-                    "archived": bool(metadata.get("archived", False)),
-                    "execution_state": str(metadata.get("execution_state", "idle") or "idle"),
-                    "provider": str(metadata.get("provider", "") or ""),
-                    "model": str(metadata.get("model", "") or ""),
-                }
-            )
+            listed = {
+                "session_id": sid,
+                "avatar_id": metadata.get("avatar_id"),
+                "avatar_name": metadata.get("avatar_name"),
+                "session_name": sess_nm,
+                "updated_at": updated_at,
+                "created_at": created_at,
+                "last_activity_at": last_activity_at,
+                "pinned": bool(metadata.get("pinned", False)),
+                "archived": bool(metadata.get("archived", False)),
+                "execution_state": str(metadata.get("execution_state", "idle") or "idle"),
+                "provider": str(metadata.get("provider", "") or ""),
+                "model": str(metadata.get("model", "") or ""),
+            }
+            parent_sid = self._resolve_listed_parent_session_id(sid, metadata)
+            if parent_sid:
+                listed["parent_session_id"] = parent_sid
+            rows.append(listed)
         known = {str(row.get("session_id", "")) for row in rows}
         skip_dirs = known | sqlite_skip
         root = Path(self._sessions_root)
@@ -3403,21 +3441,23 @@ class SessionManager:
                     derived = self._derive_session_name_from_disk_messages(sid)
                     if derived:
                         sess_nm = derived
-                rows.append(
-                    {
-                        "session_id": sid,
-                        "avatar_id": av_norm,
-                        "avatar_name": av_name,
-                        "session_name": sess_nm,
-                        "updated_at": mtime,
-                        "created_at": mtime,
-                        "pinned": False,
-                        "archived": False,
-                        "execution_state": str(fs_meta.get("execution_state", "idle") or "idle"),
-                        "provider": str(fs_meta.get("provider", "") or ""),
-                        "model": str(fs_meta.get("model", "") or ""),
-                    }
-                )
+                listed = {
+                    "session_id": sid,
+                    "avatar_id": av_norm,
+                    "avatar_name": av_name,
+                    "session_name": sess_nm,
+                    "updated_at": mtime,
+                    "created_at": mtime,
+                    "pinned": False,
+                    "archived": False,
+                    "execution_state": str(fs_meta.get("execution_state", "idle") or "idle"),
+                    "provider": str(fs_meta.get("provider", "") or ""),
+                    "model": str(fs_meta.get("model", "") or ""),
+                }
+                parent_sid = self._resolve_listed_parent_session_id(sid, fs_meta)
+                if parent_sid:
+                    listed["parent_session_id"] = parent_sid
+                rows.append(listed)
         return rows
 
     def _purge_session_state(self, session_id: str) -> bool:

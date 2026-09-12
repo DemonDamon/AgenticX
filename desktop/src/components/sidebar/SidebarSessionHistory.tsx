@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   Archive,
   ChevronDown,
+  ChevronRight,
   GitBranch,
   ListChecks,
   ListFilter,
@@ -39,7 +40,10 @@ import {
   SIDEBAR_HISTORY_PAGE_SIZE,
   activeAvatarIdForSidebarRow,
   applySidebarSessionHistoryHints,
-  bucketSidebarHistoryRows,
+  bucketSidebarHistoryNodes,
+  flattenSidebarHistoryNodes,
+  includeContinueSearchAncestors,
+  nestContinueSessionRows,
   findPaneForSidebarSession,
   formatSidebarRelativeTime,
   getSidebarSessionActivityTs,
@@ -50,6 +54,7 @@ import {
   sidebarLoopReviewFetchIds,
   sidebarSessionHasRenderableMessages,
   sidebarSessionLabel,
+  type SidebarHistoryNode,
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
 import { HoverTip } from "../ds/HoverTip";
@@ -167,6 +172,7 @@ export function SidebarSessionHistory() {
     sessionId: string;
     paneId: string;
   } | null>(null);
+  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(() => new Set());
   const filterBtnRef = useRef<HTMLButtonElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -391,17 +397,25 @@ export function SidebarSessionHistory() {
     return ids;
   }, [wechatBoundId, feishuBoundId]);
 
-  const filteredForBuckets = useMemo(
-    () =>
-      sessionsWithHints.filter(
-        (row) => matchesSidebarAvatarFilter(row, avatarFilter) && rowMatchesSearch(row)
-      ),
-    [sessionsWithHints, avatarFilter, rowMatchesSearch]
+  const filteredForBuckets = useMemo(() => {
+    const avatarFiltered = sessionsWithHints.filter((row) =>
+      matchesSidebarAvatarFilter(row, avatarFilter)
+    );
+    if (!searchQuery.trim()) return avatarFiltered;
+    const matched = new Set(
+      avatarFiltered.filter((row) => rowMatchesSearch(row)).map((row) => row.session_id)
+    );
+    return includeContinueSearchAncestors(avatarFiltered, matched);
+  }, [sessionsWithHints, avatarFilter, rowMatchesSearch, searchQuery]);
+
+  const historyTree = useMemo(
+    () => nestContinueSessionRows(filteredForBuckets),
+    [filteredForBuckets]
   );
 
   const buckets = useMemo(
-    () => bucketSidebarHistoryRows(filteredForBuckets, specialIds),
-    [filteredForBuckets, specialIds]
+    () => bucketSidebarHistoryNodes(historyTree, specialIds),
+    [historyTree, specialIds]
   );
 
   const chronological = useMemo(
@@ -409,17 +423,17 @@ export function SidebarSessionHistory() {
     [buckets.today, buckets.earlier]
   );
   const visibleChrono = chronological.slice(0, visibleLimit);
-  const todayVisible = visibleChrono.filter((r) => buckets.today.includes(r));
-  const earlierVisible = visibleChrono.filter((r) => buckets.earlier.includes(r));
+  const todayVisible = visibleChrono.filter((node) => buckets.today.includes(node));
+  const earlierVisible = visibleChrono.filter((node) => buckets.earlier.includes(node));
   const hasMore = chronological.length > visibleLimit;
   const historyEmptyHint = historyReady ? t("history.empty") : t("history.loading");
   const pinnedEmptyHint = historyReady ? t("history.emptyPinned") : t("history.loading");
   const visibleLoopReviewKey = [
     wechatRow?.session_id,
     feishuRow?.session_id,
-    ...buckets.pinned.map((row) => row.session_id),
-    ...todayVisible.map((row) => row.session_id),
-    ...earlierVisible.map((row) => row.session_id),
+    ...flattenSidebarHistoryNodes(buckets.pinned).map((row) => row.session_id),
+    ...flattenSidebarHistoryNodes(todayVisible).map((row) => row.session_id),
+    ...flattenSidebarHistoryNodes(earlierVisible).map((row) => row.session_id),
   ]
     .filter((id): id is string => Boolean(id))
     .join("\n");
@@ -460,8 +474,12 @@ export function SidebarSessionHistory() {
     const map = new Map<string, SidebarSessionRow>();
     if (wechatRow) map.set(wechatRow.session_id, wechatRow);
     if (feishuRow) map.set(feishuRow.session_id, feishuRow);
-    for (const row of buckets.pinned) map.set(row.session_id, row);
-    for (const row of chronological) map.set(row.session_id, row);
+    for (const row of flattenSidebarHistoryNodes(buckets.pinned)) {
+      map.set(row.session_id, row);
+    }
+    for (const row of flattenSidebarHistoryNodes(chronological)) {
+      map.set(row.session_id, row);
+    }
     return Array.from(map.values());
   }, [wechatRow, feishuRow, buckets.pinned, chronological]);
 
@@ -477,6 +495,33 @@ export function SidebarSessionHistory() {
     const pane = panes.find((p) => p.id === activePaneId);
     return String(pane?.sessionId ?? "").trim();
   }, [panes, activePaneId]);
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const byId = new Map(sessionsWithHints.map((row) => [row.session_id, row]));
+    const ancestors: string[] = [];
+    let current = byId.get(activeSessionId);
+    let guard = 0;
+    while (current && guard < 16) {
+      const parent = String(current.parent_session_id ?? "").trim();
+      if (!parent || !byId.has(parent)) break;
+      ancestors.push(parent);
+      current = byId.get(parent);
+      guard += 1;
+    }
+    if (ancestors.length === 0) return;
+    setCollapsedParents((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of ancestors) {
+        if (next.has(id)) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [activeSessionId, sessionsWithHints]);
 
   const toggleSection = (key: keyof CollapseState) => {
     setCollapse((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -945,11 +990,50 @@ export function SidebarSessionHistory() {
     }
   };
 
-  const renderRow = (row: SidebarSessionRow) => {
+  const toggleParentExpanded = (sessionId: string) => {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
+
+  const renderHistoryNode = (node: SidebarHistoryNode, depth = 0) => {
+    const expanded = !collapsedParents.has(node.row.session_id);
+    const hasChildren = node.children.length > 0;
+    return (
+      <div key={node.row.session_id}>
+        {renderRow(node.row, {
+          depth,
+          hasChildren,
+          expanded,
+          onToggleExpanded: () => toggleParentExpanded(node.row.session_id),
+        })}
+        {expanded && hasChildren
+          ? node.children.map((child) => renderHistoryNode(child, depth + 1))
+          : null}
+      </div>
+    );
+  };
+
+  const renderRow = (
+    row: SidebarSessionRow,
+    opts?: {
+      depth?: number;
+      hasChildren?: boolean;
+      expanded?: boolean;
+      onToggleExpanded?: () => void;
+    },
+  ) => {
+    const depth = Math.max(0, opts?.depth ?? 0);
+    const nestedChild = depth > 0;
+    const hasChildren = Boolean(opts?.hasChildren);
+    const expanded = Boolean(opts?.expanded);
     const active = row.session_id === activeSessionId;
     const chip = resolveSidebarAvatarChipName(row, avatarNameById);
     const stripeColor = resolveSidebarChipStripeColor(row.avatar_id, avatars);
-    const title = sidebarSessionLabel(row);
+    const title = sidebarSessionLabel(row, { nestedChild });
     const checked = selectedSessionIds.includes(row.session_id);
     const relative = formatSidebarRelativeTime(getSidebarSessionActivityTs(row));
     const menuOpen = moreMenu?.sessionId === row.session_id;
@@ -962,9 +1046,10 @@ export function SidebarSessionHistory() {
     return (
       <div
         key={row.session_id}
-        className={`group/row flex w-full items-center gap-1 rounded-md px-2 py-1.5 transition-colors ${
+        className={`group/row flex w-full items-center gap-1 rounded-md py-1.5 pr-2 transition-colors ${
           active || checked || menuOpen ? "bg-surface-hover" : "hover:bg-surface-hover"
         }`}
+        style={{ paddingLeft: 8 + depth * 14 }}
       >
         {selectMode ? (
           <input
@@ -978,6 +1063,9 @@ export function SidebarSessionHistory() {
         ) : null}
         {isEditing ? (
           <>
+            {nestedChild ? (
+              <GitBranch aria-hidden className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={1.8} />
+            ) : (
             <span
               className="relative shrink-0 overflow-hidden rounded px-1.5 py-px pl-2 text-[10px] font-medium leading-tight text-text-primary bg-surface-card"
               title={chip}
@@ -989,6 +1077,7 @@ export function SidebarSessionHistory() {
               />
               {chip}
             </span>
+            )}
             <input
               ref={renameInputRef}
               value={editingName}
@@ -1035,6 +1124,29 @@ export function SidebarSessionHistory() {
                   : t("history.ariaPlain", { chip, title })
             }
           >
+            {hasChildren ? (
+              <span
+                role="button"
+                tabIndex={-1}
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-text-faint hover:text-text-strong"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  opts?.onToggleExpanded?.();
+                }}
+                aria-label={expanded ? t("history.collapseChildren") : t("history.expandChildren")}
+              >
+                {expanded ? (
+                  <ChevronDown aria-hidden className="h-3 w-3" />
+                ) : (
+                  <ChevronRight aria-hidden className="h-3 w-3" />
+                )}
+              </span>
+            ) : (
+              <span className="w-4 shrink-0" aria-hidden />
+            )}
+            {nestedChild ? (
+              <GitBranch aria-hidden className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={1.8} />
+            ) : (
             <span
               className="relative shrink-0 overflow-hidden rounded px-1.5 py-px pl-2 text-[10px] font-medium leading-tight text-text-primary bg-surface-card"
             >
@@ -1045,6 +1157,7 @@ export function SidebarSessionHistory() {
               />
               {chip}
             </span>
+            )}
             {isRunning ? (
               <span
                 className="flex h-4 w-4 shrink-0 items-center justify-center text-text-muted"
@@ -1367,7 +1480,7 @@ export function SidebarSessionHistory() {
             {buckets.pinned.length === 0 ? (
               <div className="px-2 py-1 text-[11px] text-text-faint">{pinnedEmptyHint}</div>
             ) : (
-              buckets.pinned.map((row) => renderRow(row))
+              buckets.pinned.map((node) => renderHistoryNode(node))
             )}
           </div>
         )}
@@ -1379,7 +1492,7 @@ export function SidebarSessionHistory() {
             {todayVisible.length === 0 ? (
               <div className="px-2 py-1 text-[11px] text-text-faint">{historyEmptyHint}</div>
             ) : (
-              todayVisible.map((row) => renderRow(row))
+              todayVisible.map((node) => renderHistoryNode(node))
             )}
           </div>
         )}
@@ -1391,7 +1504,7 @@ export function SidebarSessionHistory() {
             {earlierVisible.length === 0 ? (
               <div className="px-2 py-1 text-[11px] text-text-faint">{historyEmptyHint}</div>
             ) : (
-              earlierVisible.map((row) => renderRow(row))
+              earlierVisible.map((node) => renderHistoryNode(node))
             )}
           </div>
         )}

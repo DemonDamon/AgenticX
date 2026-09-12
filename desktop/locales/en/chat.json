@@ -138,8 +138,6 @@
     "webSearch": "Web search",
     "quoteToNew": "Quote in a new chat",
     "continueFrom": "Continue from here",
-    "continueLineage": "Continued from \"{{source}}\" · sharing the current workspace",
-    "continueOpenSource": "Open source session",
     "reanswer": "Retry with another model",
     "reanswerAt": "@Switch model",
     "pickReanswerModel": "Choose a model to retry",

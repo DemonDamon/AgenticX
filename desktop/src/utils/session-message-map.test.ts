@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  continueMessageIdForRequest,
   mapLoadedSessionMessage,
   parseBranchLineage,
   parseConversationLineage,
@@ -110,5 +111,46 @@ describe("conversation lineage messages", () => {
       }),
     ).toBeNull();
     expect(parseConversationLineage(undefined)).toBeNull();
+  });
+});
+
+describe("continueMessageIdForRequest", () => {
+  const sid = "4d3ece4b-9ef0-4298-9a69-e34f6546442d";
+
+  it("keeps a loaded session index id", () => {
+    const assistant = {
+      id: `${sid}-i1`,
+      role: "assistant" as const,
+      content: "你好，团长。我在。",
+    };
+    expect(continueMessageIdForRequest(sid, [
+      { id: `${sid}-i0`, role: "user", content: "你好" },
+      assistant,
+    ], assistant)).toBe(`${sid}-i1`);
+  });
+
+  it("sends client_turn_id for a live user bubble", () => {
+    const user = {
+      id: "live-uid-user",
+      role: "user" as const,
+      content: "你好",
+      metadata: { client_turn_id: "44f4e8df-791b-4a94-bd55-75b5bec7a71e" },
+    };
+    expect(continueMessageIdForRequest(sid, [
+      user,
+      { id: "live-uid-assistant", role: "assistant", content: "你好，团长。我在。" },
+    ], user)).toBe("44f4e8df-791b-4a94-bd55-75b5bec7a71e");
+  });
+
+  it("synthesizes session-iN for a live assistant bubble", () => {
+    const assistant = {
+      id: "live-uid-assistant",
+      role: "assistant" as const,
+      content: "你好，团长。我在。",
+    };
+    expect(continueMessageIdForRequest(sid, [
+      { id: "live-uid-user", role: "user", content: "你好" },
+      assistant,
+    ], assistant)).toBe(`${sid}-i1`);
   });
 });

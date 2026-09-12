@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   activeAvatarIdForSidebarRow,
   applySidebarSessionHistoryHints,
+  bucketSidebarHistoryNodes,
   bucketSidebarHistoryRows,
+  includeContinueSearchAncestors,
+  flattenSidebarHistoryNodes,
+  nestContinueSessionRows,
   findPaneForSidebarSession,
   formatSidebarRelativeTime,
   matchesSidebarAvatarFilter,
@@ -202,5 +206,128 @@ describe("sidebar-session-history utils", () => {
       "d",
     ]);
     expect(sidebarLoopReviewFetchIds(["a", "c"], already)).toEqual([]);
+  });
+
+  it("nests continue-from children under the parent session", () => {
+    const now = Date.now() / 1000;
+    const rows = normalizeSidebarSessionRows([
+      {
+        session_id: "parent",
+        avatar_id: null,
+        session_name: "你好",
+        updated_at: now - 120,
+      },
+      {
+        session_id: "child",
+        avatar_id: null,
+        session_name: "你好 (Fork)",
+        updated_at: now,
+        parent_session_id: "parent",
+      },
+      {
+        session_id: "other",
+        avatar_id: null,
+        session_name: "别的",
+        updated_at: now - 30,
+      },
+    ]);
+    const tree = nestContinueSessionRows(rows);
+    expect(tree.map((node) => node.row.session_id)).toEqual(["other", "parent"]);
+    const parent = tree.find((node) => node.row.session_id === "parent");
+    expect(parent?.children.map((node) => node.row.session_id)).toEqual(["child"]);
+    expect(sidebarSessionLabel(parent!.children[0]!.row, { nestedChild: true })).toBe("你好");
+    const nodes = bucketSidebarHistoryNodes(tree, new Set(), now);
+    expect(nodes.today.map((node) => node.row.session_id)).toEqual(["other", "parent"]);
+    expect(nodes.today.find((node) => node.row.session_id === "parent")?.children).toHaveLength(1);
+  });
+
+  it("nests continue-from grandchildren under the child session", () => {
+    const now = Date.now() / 1000;
+    const rows = normalizeSidebarSessionRows([
+      {
+        session_id: "parent",
+        avatar_id: null,
+        session_name: "你好",
+        updated_at: now - 180,
+      },
+      {
+        session_id: "child",
+        avatar_id: null,
+        session_name: "你好",
+        updated_at: now - 60,
+        parent_session_id: "parent",
+      },
+      {
+        session_id: "grandchild",
+        avatar_id: null,
+        session_name: "你好",
+        updated_at: now,
+        parent_session_id: "child",
+      },
+    ]);
+    const tree = nestContinueSessionRows(rows);
+    expect(tree.map((node) => node.row.session_id)).toEqual(["parent"]);
+    expect(tree[0]?.children.map((node) => node.row.session_id)).toEqual(["child"]);
+    expect(tree[0]?.children[0]?.children.map((node) => node.row.session_id)).toEqual([
+      "grandchild",
+    ]);
+    expect(flattenSidebarHistoryNodes(tree).map((row) => row.session_id)).toEqual([
+      "parent",
+      "child",
+      "grandchild",
+    ]);
+    const nodes = bucketSidebarHistoryNodes(tree, new Set(), now);
+    expect(nodes.today.map((node) => node.row.session_id)).toEqual(["parent"]);
+  });
+
+  it("keeps a matching child visible by bringing its parent into search results", () => {
+    const rows = normalizeSidebarSessionRows([
+      {
+        session_id: "parent",
+        avatar_id: null,
+        session_name: "源会话",
+        updated_at: 10,
+      },
+      {
+        session_id: "child",
+        avatar_id: null,
+        session_name: "续写分支",
+        updated_at: 20,
+        parent_session_id: "parent",
+      },
+    ]);
+    const kept = includeContinueSearchAncestors(rows, new Set(["child"]));
+    expect(kept.map((row) => row.session_id).sort()).toEqual(["child", "parent"]);
+  });
+
+  it("keeps the full ancestor path when a grandchild matches search", () => {
+    const rows = normalizeSidebarSessionRows([
+      {
+        session_id: "parent",
+        avatar_id: null,
+        session_name: "源会话",
+        updated_at: 10,
+      },
+      {
+        session_id: "child",
+        avatar_id: null,
+        session_name: "一层",
+        updated_at: 20,
+        parent_session_id: "parent",
+      },
+      {
+        session_id: "grandchild",
+        avatar_id: null,
+        session_name: "二层专题",
+        updated_at: 30,
+        parent_session_id: "child",
+      },
+    ]);
+    const kept = includeContinueSearchAncestors(rows, new Set(["grandchild"]));
+    expect(kept.map((row) => row.session_id).sort()).toEqual([
+      "child",
+      "grandchild",
+      "parent",
+    ]);
   });
 });

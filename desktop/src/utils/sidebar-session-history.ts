@@ -19,6 +19,12 @@ export type SidebarSessionRow = {
   provider?: string;
   model?: string;
   session_mode?: "code_dev" | "daily_office";
+  parent_session_id?: string | null;
+};
+
+export type SidebarHistoryNode = {
+  row: SidebarSessionRow;
+  children: SidebarHistoryNode[];
 };
 
 export type SidebarSessionHistoryHint = {
@@ -61,8 +67,14 @@ function isPlaceholderSessionTitle(name: string): boolean {
   return false;
 }
 
-export function sidebarSessionLabel(item: Pick<SidebarSessionRow, "session_id" | "session_name">): string {
-  const raw = sanitizeSessionDisplayText(item.session_name || "").trim();
+export function sidebarSessionLabel(
+  item: Pick<SidebarSessionRow, "session_id" | "session_name">,
+  opts?: { nestedChild?: boolean },
+): string {
+  let raw = sanitizeSessionDisplayText(item.session_name || "").trim();
+  if (opts?.nestedChild) {
+    raw = raw.replace(/\s*\(Fork\)\s*$/i, "").trim();
+  }
   if (raw && !isPlaceholderSessionTitle(raw)) return raw;
   const compact = item.session_id.replace(/-/g, "");
   const hint = compact.slice(0, 8);
@@ -123,6 +135,10 @@ export function normalizeSidebarSessionRows(input: unknown): SidebarSessionRow[]
         row.session_mode === "code_dev" || row.session_mode === "daily_office"
           ? row.session_mode
           : undefined,
+      parent_session_id: (() => {
+        const parent = String(row.parent_session_id ?? "").trim();
+        return parent || undefined;
+      })(),
     });
   }
   return sortSidebarSessionRows(rows);
@@ -269,6 +285,135 @@ export function bucketSidebarHistoryRows(
     else earlier.push(row);
   }
   return { pinned, today, earlier };
+}
+
+export function nestContinueSessionRows(
+  rows: readonly SidebarSessionRow[],
+): SidebarHistoryNode[] {
+  const list = [...rows];
+  const nodes = new Map<string, SidebarHistoryNode>();
+  for (const row of list) {
+    nodes.set(row.session_id, { row, children: [] });
+  }
+
+  const wouldCycle = (childId: string, parentId: string): boolean => {
+    let current = nodes.get(parentId);
+    let guard = 0;
+    while (current && guard < 16) {
+      if (current.row.session_id === childId) return true;
+      const next = String(current.row.parent_session_id ?? "").trim();
+      current = next ? nodes.get(next) : undefined;
+      guard += 1;
+    }
+    return false;
+  };
+
+  const attached = new Set<string>();
+  for (const row of list) {
+    const parent = String(row.parent_session_id ?? "").trim();
+    if (!parent || parent === row.session_id || !nodes.has(parent)) continue;
+    if (wouldCycle(row.session_id, parent)) continue;
+    nodes.get(parent)!.children.push(nodes.get(row.session_id)!);
+    attached.add(row.session_id);
+  }
+
+  const sortChildren = (items: SidebarHistoryNode[]) => {
+    items.sort((a, b) => {
+      const aTs = Number(a.row.created_at ?? a.row.updated_at ?? 0);
+      const bTs = Number(b.row.created_at ?? b.row.updated_at ?? 0);
+      if (aTs !== bTs) return aTs - bTs;
+      return a.row.session_id.localeCompare(b.row.session_id);
+    });
+    for (const item of items) sortChildren(item.children);
+  };
+
+  const roots = list
+    .filter((row) => !attached.has(row.session_id))
+    .map((row) => nodes.get(row.session_id)!);
+  for (const root of roots) sortChildren(root.children);
+  return roots;
+}
+
+export function flattenSidebarHistoryNodes(
+  nodes: readonly SidebarHistoryNode[],
+): SidebarSessionRow[] {
+  const out: SidebarSessionRow[] = [];
+  const walk = (node: SidebarHistoryNode) => {
+    out.push(node.row);
+    for (const child of node.children) walk(child);
+  };
+  for (const node of nodes) walk(node);
+  return out;
+}
+
+export function sidebarTreeActivityTs(node: SidebarHistoryNode): number {
+  return Math.max(
+    getSidebarSessionActivityTs(node.row),
+    ...node.children.map((child) => sidebarTreeActivityTs(child)),
+  );
+}
+
+export type SidebarHistoryNodeBuckets = {
+  pinned: SidebarHistoryNode[];
+  today: SidebarHistoryNode[];
+  earlier: SidebarHistoryNode[];
+};
+
+export function bucketSidebarHistoryNodes(
+  nodes: readonly SidebarHistoryNode[],
+  specialIds: ReadonlySet<string>,
+  nowSec = Date.now() / 1000,
+): SidebarHistoryNodeBuckets {
+  const todayStart = startOfLocalDay(new Date(nowSec * 1000));
+  const pinned: SidebarHistoryNode[] = [];
+  const today: SidebarHistoryNode[] = [];
+  const earlier: SidebarHistoryNode[] = [];
+  for (const node of nodes) {
+    if (specialIds.has(node.row.session_id)) continue;
+    if (node.row.pinned) {
+      pinned.push(node);
+      continue;
+    }
+    if (sidebarTreeActivityTs(node) >= todayStart) today.push(node);
+    else earlier.push(node);
+  }
+  return { pinned, today, earlier };
+}
+
+export function includeContinueSearchAncestors(
+  rows: readonly SidebarSessionRow[],
+  matched: ReadonlySet<string>,
+): SidebarSessionRow[] {
+  const byId = new Map(rows.map((row) => [row.session_id, row]));
+  const keep = new Set(matched);
+  for (const id of [...keep]) {
+    let current = byId.get(id);
+    let guard = 0;
+    while (current && guard < 16) {
+      const parent = String(current.parent_session_id ?? "").trim();
+      if (!parent || !byId.has(parent)) break;
+      keep.add(parent);
+      current = byId.get(parent);
+      guard += 1;
+    }
+  }
+  const childrenByParent = new Map<string, string[]>();
+  for (const row of rows) {
+    const parent = String(row.parent_session_id ?? "").trim();
+    if (!parent) continue;
+    const bucket = childrenByParent.get(parent) ?? [];
+    bucket.push(row.session_id);
+    childrenByParent.set(parent, bucket);
+  }
+  const addDescendants = (id: string) => {
+    for (const childId of childrenByParent.get(id) ?? []) {
+      if (keep.has(childId)) continue;
+      keep.add(childId);
+      addDescendants(childId);
+    }
+  };
+  for (const id of matched) addDescendants(id);
+  return rows.filter((row) => keep.has(row.session_id));
 }
 
 /** Filter key: `"all"` | `"__meta__"` | avatar_id | `group:<id>` */

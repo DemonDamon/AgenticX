@@ -138,8 +138,6 @@
     "webSearch": "网页搜索",
     "quoteToNew": "引用到新对话",
     "continueFrom": "从这里继续",
-    "continueLineage": "从「{{source}}」继续 · 共用当前工作区",
-    "continueOpenSource": "打开源会话",
     "reanswer": "换模型回答",
     "reanswerAt": "@换模型",
     "pickReanswerModel": "选择模型重新回答",

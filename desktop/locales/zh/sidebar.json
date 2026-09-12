@@ -136,6 +136,8 @@
     "filterAll": "全部",
     "empty": "暂无",
     "emptyPinned": "暂无置顶",
+    "expandChildren": "展开子会话",
+    "collapseChildren": "收起子会话",
     "loading": "加载中…",
     "deleteTitle": "确认删除会话",
     "deleteSelected": "确认删除已选择的 {{count}} 个会话？",

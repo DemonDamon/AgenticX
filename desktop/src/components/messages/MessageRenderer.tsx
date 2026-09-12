@@ -67,12 +67,9 @@ import type {
   PendingActionConfirmation,
 } from "../../utils/action-confirmation";
 import { BranchLineageCard } from "../replay/BranchLineageCard";
-import { ContinueLineageCard } from "./ContinueLineageCard";
 import {
   parseBranchLineage,
-  parseConversationLineage,
   type BranchLineage,
-  type ConversationLineage,
 } from "../../utils/session-message-map";
 
 type Props = {
@@ -157,7 +154,6 @@ type Props = {
   onBuildPlan?: (plan: PlanArtifactPayload) => void;
   onOpenBranchSource?: (lineage: BranchLineage) => void;
   onContinueFromMessage?: (message: Message) => void;
-  onOpenConversationSource?: (lineage: ConversationLineage) => void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -395,7 +391,6 @@ export function MessageRenderer({
   onBuildPlan,
   onOpenBranchSource,
   onContinueFromMessage,
-  onOpenConversationSource,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const resolvedReferences = useMemo(() => {
@@ -431,15 +426,6 @@ export function MessageRenderer({
       <BranchLineageCard
         lineage={branchLineage}
         onOpenSource={onOpenBranchSource}
-      />
-    );
-  }
-  const conversationLineage = parseConversationLineage(message.metadata);
-  if (conversationLineage) {
-    return (
-      <ContinueLineageCard
-        lineage={conversationLineage}
-        onOpenSource={onOpenConversationSource}
       />
     );
   }

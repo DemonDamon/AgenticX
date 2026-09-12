@@ -94,6 +94,47 @@ def test_slice_rejects_tool_rows_and_unknown_ids() -> None:
     assert exc.value.code == "message_not_found"
 
 
+def _persisted_session_without_ids() -> tuple[list[dict], list[dict]]:
+    """Shape of ~/.agenticx/sessions/<id>/messages.json: no top-level id."""
+    chat = [
+        {
+            "role": "user",
+            "content": "你好",
+            "metadata": {"client_turn_id": "44f4e8df-791b-4a94-bd55-75b5bec7a71e"},
+            "timestamp": 1789203156168,
+        },
+        {
+            "role": "assistant",
+            "content": "你好，团长。我在。",
+            "timestamp": 1789203158939,
+        },
+    ]
+    agents = [
+        {"role": "user", "content": "你好", "metadata": {"client_turn_id": "44f4e8df-791b-4a94-bd55-75b5bec7a71e"}},
+        {"role": "assistant", "content": "你好，团长。我在。"},
+    ]
+    return chat, agents
+
+
+def test_slice_resolves_desktop_loaded_index_when_history_has_no_id() -> None:
+    chat, agents = _persisted_session_without_ids()
+    sid = "4d3ece4b-9ef0-4298-9a69-e34f6546442d"
+    chat_prefix, agent_prefix = slice_transcript_for_continue(
+        chat, agents, f"{sid}-i1"
+    )
+    assert [row["role"] for row in chat_prefix] == ["user", "assistant"]
+    assert [row["content"] for row in agent_prefix] == ["你好", "你好，团长。我在。"]
+
+
+def test_slice_resolves_client_turn_id_when_history_has_no_id() -> None:
+    chat, agents = _persisted_session_without_ids()
+    chat_prefix, agent_prefix = slice_transcript_for_continue(
+        chat, agents, "44f4e8df-791b-4a94-bd55-75b5bec7a71e"
+    )
+    assert [row["role"] for row in chat_prefix] == ["user"]
+    assert [row["content"] for row in agent_prefix] == ["你好"]
+
+
 def test_continue_session_drops_isolate_and_slices() -> None:
     manager = SessionManager()
     source = manager.create(session_id="continue-source")
@@ -108,7 +149,7 @@ def test_continue_session_drops_isolate_and_slices() -> None:
 
     forked = manager.continue_session_from_message("continue-source", "a1")
 
-    assert [row.get("id") for row in forked.studio_session.chat_history[:-1]] == [
+    assert [row.get("id") for row in forked.studio_session.chat_history] == [
         "u1",
         "a1",
     ]
@@ -122,9 +163,16 @@ def test_continue_session_drops_isolate_and_slices() -> None:
     assert lineage["parent_session_id"] == "continue-source"
     assert lineage["source_message_id"] == "a1"
     assert lineage["workspace_mode"] == "shared_current"
-    assert forked.studio_session.chat_history[-1]["metadata"][
-        "conversation_lineage"
-    ] == lineage
+    assert not any(row.get("system_notice") for row in forked.studio_session.chat_history)
+    source.session_name = "你好"
+    named = manager.continue_session_from_message("continue-source", "a1")
+    assert named.session_name == "你好"
+    listed = next(
+        row
+        for row in manager.list_sessions()
+        if row.get("session_id") == named.session_id
+    )
+    assert listed.get("parent_session_id") == "continue-source"
     # Source stays intact.
     assert len(source.studio_session.chat_history) == 6
 
@@ -336,3 +384,33 @@ def test_shared_write_guard_hides_isolate_when_not_git(
     )
     assert result is None
     assert gate.calls and "创建隔离副本" not in gate.calls[0]["options"]
+
+
+def test_listed_parent_skips_scratchpad_when_metadata_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = SessionManager()
+
+    def _boom(_sid: str) -> dict:
+        raise AssertionError("listing must not load scratchpad per session")
+
+    monkeypatch.setattr(manager._session_store, "_load_scratchpad_sync", _boom)
+    assert manager._resolve_listed_parent_session_id("s1", {"session_name": "你好"}) == ""
+    assert (
+        manager._resolve_listed_parent_session_id(
+            "s1", {"parent_session_id": "parent-1"}
+        )
+        == "parent-1"
+    )
+
+    monkeypatch.setattr(
+        manager._session_store,
+        "_load_scratchpad_sync",
+        lambda _sid: {
+            "conversation_lineage": {
+                "kind": "conversation",
+                "parent_session_id": "parent-2",
+            }
+        },
+    )
+    assert manager._resolve_listed_parent_session_id("s1", {}) == "parent-2"
