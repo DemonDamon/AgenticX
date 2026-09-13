@@ -117,3 +117,17 @@ enterprise/apps/gateway/.runtime/
 enterprise/apps/web-portal/.runtime/
 enterprise/.runtime/
 .dataset/
+
+# harness comparison lab: 只忽略密钥与运行时产物，脚本/文档/图表入库
+harness-lab/.env
+harness-lab/.cache/
+harness-lab/.config/
+harness-lab/.hermes/
+harness-lab/.local-share/
+harness-lab/.state/
+harness-lab/__pycache__/
+harness-lab/harbor/
+harness-lab/jobs/
+harness-lab/logs/
+harness-lab/registry-local.json
+harness-lab/*.log

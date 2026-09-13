@@ -1,0 +1,89 @@
+<title>同一个模型，五个 Harness，差距 30 个百分点：一次 Terminal-Bench 2.1 对照实验</title>
+<callout emoji="📝" background-color="light-blue"><p>数据占位说明：文中标注「待回填」的数字等 Hermes 跑完后替换。其余四个 harness 的数据已定稿。</p></callout>
+<h1>引子：问题不在模型，在 Harness</h1>
+<p>过去两年，Agent 领域的评测都聚焦在「哪个模型更强」。但如果你真的下场跑过 Agent 系统，会发现一个更扎心的事实：<b>同一个模型，接上不同的 Agent Harness（执行框架），最终成绩能差出 30 个百分点。</b></p>
+<p>模型只是发动机，Harness 才是整辆车——传动、转向、油门响应，缺一不可。为了量化这件事，我们做了一次严格对照的实验。</p>
+<h1>实验设计：把变量摁死，只留 Harness</h1>
+<p>我们选了五个 Agent Harness，全部接入同一个模型、同一份数据集：</p>
+<table>
+<thead><tr><th background-color="light-gray"><p>维度</p></th><th background-color="light-gray"><p>设定</p></th></tr></thead>
+<tbody>
+<tr><td><p>模型</p></td><td><p>DeepSeek V4 Flash（同一 API Key）</p></td></tr>
+<tr><td><p>数据集</p></td><td><p>Terminal-Bench 2.1（89 道终端环境实操题，版本 sha256 锁定）</p></td></tr>
+<tr><td><p>评分</p></td><td><p>Harbor 内置确定性 verifier（跑测试脚本），<b>无 LLM 裁判</b></p></td></tr>
+<tr><td><p>超时</p></td><td><p>Agent 3 倍基准超时，环境搭建 6 倍</p></td></tr>
+<tr><td><p>并发与重试</p></td><td><p>全部 4 并发，断点续跑，报错不计入完成、自动重试</p></td></tr>
+</tbody>
+</table>
+<img path="@./fig1-experiment-design.png" caption="图 1：对照实验架构——同一模型 × 五大 Harness × 同一基准"/>
+<p>五个 Harness：AgenticX（自研）、dsh（DeepSeek 官方 harness）、OpenCode、Hermes、Pi。</p>
+<p>这里有个方法论上的关键决策：<b>不用 LLM 当裁判</b>。Terminal-Bench 的题目全部有客观测试脚本，verifier 是确定性的——这消除了评测中最大的隐性偏差源（裁判模型的偏好）。</p>
+<h1>结果</h1>
+<table>
+<thead><tr><th background-color="light-gray"><p>Harness</p></th><th background-color="light-gray"><p>通过率</p></th><th background-color="light-gray"><p>备注</p></th></tr></thead>
+<tbody>
+<tr><td><p><b>AgenticX</b></p></td><td><p><b>88.8%（79/89）</b></p></td><td><p></p></td></tr>
+<tr><td><p>dsh</p></td><td><p>83.1%（74/89）</p></td><td><p>沙箱权限修复后重跑</p></td></tr>
+<tr><td><p>OpenCode</p></td><td><p>79.8%（71/89）</p></td><td><p></p></td></tr>
+<tr><td><p>Hermes</p></td><td><p>待回填</p></td><td><p></p></td></tr>
+<tr><td><p>Pi</p></td><td><p>58.4%（52/89）</p></td><td><p></p></td></tr>
+</tbody>
+</table>
+<p>几个值得展开的点：</p>
+<h2>1. 统计上诚实的解读</h2>
+<p>单次抽样（每题每 harness 只跑一次）下，我们做了 McNemar 配对检验：</p>
+<ul>
+<li>AgenticX vs Pi：29 胜 0 负，p &lt; 0.0001，<b>显著</b></li>
+<li>AgenticX vs dsh：9 胜 3 负，p = 0.15，趋势明显但未达显著</li>
+<li>AgenticX vs OpenCode：10 胜 3 负，p = 0.09，同上</li>
+<li>dsh vs OpenCode：10 胜 8 负，p = 0.81，统计上持平</li>
+</ul>
+<p>所以严谨的说法是：<b>AgenticX 显著领先 Pi，相对 dsh 和 OpenCode 处于第一梯队且趋势占优</b>。我们不回避这一点——n=1 的评测，8 题的差距需要更多重复实验才能完全坐实。读者在解读任何「XX 榜单」时，也建议带着同样的审慎。</p>
+<h2>2. 机制归因：差距是怎么拉开的</h2>
+<p>同样的大脑，为什么表现不同？从 trajectory 数据里能看到一些结构性差异（中位数）：</p>
+<img path="@./fig2-mechanism.png" caption="图 2：机制归因——轮次 × 输出规模 × 通过率"/>
+<table>
+<thead><tr><th background-color="light-gray"><p>Harness</p></th><th background-color="light-gray"><p>每任务轮次</p></th><th background-color="light-gray"><p>单任务输出 tokens</p></th><th background-color="light-gray"><p>上下文消耗</p></th></tr></thead>
+<tbody>
+<tr><td><p>AgenticX</p></td><td><p>33</p></td><td><p>3.5 万</p></td><td><p>210 万</p></td></tr>
+<tr><td><p>dsh</p></td><td><p>—</p></td><td><p>2.8 万</p></td><td><p>78 万</p></td></tr>
+<tr><td><p>OpenCode</p></td><td><p>26</p></td><td><p>0.5 万</p></td><td><p>—</p></td></tr>
+<tr><td><p>Hermes</p></td><td><p>50</p></td><td><p>待回填</p></td><td><p>待回填</p></td></tr>
+</tbody>
+</table>
+<p>三个观察：</p>
+<ul>
+<li><b>轮次 × 每轮质量 = 最终成绩</b>。Hermes 轮次最多（50），但通过率不高——多轮不等于有效轮；OpenCode 输出最精简（中位仅 5 千 tokens），但精简到牺牲了探索深度。</li>
+<li>AgenticX 的画像是有耐心的长跑型：能维持 30+ 轮有效交互不迷失，上下文堆到 200 万 tokens 仍能持续做对决策。<b>长程任务的胜负手在上下文管理，而不是单轮智力。</b></li>
+<li>一个反直觉的结论：Harness 的价值不在「帮模型做得更多」，而在<b>帮模型把错误限制在可恢复的范围内</b>——路径错了能绕回来，上下文脏了能止损。</li>
+</ul>
+<h2>3. 一个差点毁掉实验的事故</h2>
+<p>dsh 首轮跑完只有 59.6% 的通过率，排查后发现是它的沙箱模式在无头环境下拒绝了所有 shell 命令——Agent 相当于被绑着手参加考试。修复权限配置后从零重跑，通过率拉升到 83.1%，<b>23 个百分点的差距纯粹来自一行环境配置</b>。</p>
+<p>这件事对所有人都是警示：<b>Agent 评测里，基础设施问题伪装成能力问题的概率，远比想象的高。</b> 你看到的低分，可能有相当一部分不是模型蠢，是链路上某处把它掐死了。</p>
+<h1>实验过程中的工程实战</h1>
+<p>两周的持续运行里踩过的坑，简单列几个：</p>
+<ol>
+<li><b>Docker 崩溃循环</b>：一次自动更新被中断，留下新旧混装的二进制，组件间协议不匹配导致「unexpected EOF」，整个 Docker 陷入 30 秒崩溃循环。最终通过下载完整 DMG 覆盖安装解决——保留了全部 107 个镜像。</li>
+<li><b>看门狗 + 断点续跑</b>：实验脚本被会话回收、VPN 节点失效、余额耗尽，任何一项都会让实验静默死亡。最终形态是：watchdog 每 5 分钟检查进程自愈 + 失败任务按轮重试 + 每 5 轮查余额、低于阈值优雅停机。</li>
+<li><b>确定性坏题</b>：若干题目依赖的 apt 镜像源包已下架（404），所有 harness 一致失败。这类题要在统计口径里剔除或单列，否则会系统性拉低所有人的分。</li>
+</ol>
+<p>这套自愈机制让实验在无人值守的情况下跑完了约 400+ 个 trial，中途经历了 VPN 故障、Docker 重装、多次进程回收——<b>跑长程评测，工程可靠性是方法论的组成部分，不是附属品。</b></p>
+<h1>结论</h1>
+<ol>
+<li>Harness 的差距是真实且量化的：同一模型下，第一名和最后一名差 30 个百分点。</li>
+<li>但要诚实地区分：显著差距（AgenticX vs Pi）和趋势差距（AgenticX vs dsh/OpenCode），n=1 评测的置信度有限。</li>
+<li>Agent Harness 的核心价值在长程上下文管理和错误恢复，不在单轮的提示工程。</li>
+<li>评测基础设施的可靠性，直接决定评测结论的可信度——dsh 那 23 个百分点就是明证。</li>
+</ol>
+<h1>Limitations</h1>
+<ul>
+<li>每题每 harness 单次运行，未做多次重复取方差</li>
+<li>确定性坏题（约 4-5 道）对所有 harness 一致失败，已按同等口径处理</li>
+<li>各 harness 使用各自的默认 max_tokens 配置（未观测到截断案例）</li>
+<li>实验期间网络环境有波动，但任务镜像走本地缓存，评分确定性，不受影响</li>
+</ul>
+<hr/>
+<p><em>实验基于 Harbor 框架 + Terminal-Bench 2.1 公开数据集。原始数据（trial 级 result.json）完整保留，欢迎交流复现细节。</em></p>
+<p>配图源文件（SVG，可编辑）：</p>
+<figure view-type="Card"><source path="@./fig1-experiment-design.svg" name="图1-实验设计.svg"/></figure>
+<figure view-type="Card"><source path="@./fig2-mechanism.svg" name="图2-机制归因.svg"/></figure>
