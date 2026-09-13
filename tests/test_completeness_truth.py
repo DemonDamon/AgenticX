@@ -322,6 +322,30 @@ def test_invoke_xml_negative_long_tutorial() -> None:
     assert _messages_last_turn_promised_action_without_followthrough(messages) is False
 
 
+def test_search_deferral_stub_without_tool_calls_is_deferred() -> None:
+    messages = [
+        {"role": "user", "content": "ExampleAgent 是哪个厂商"},
+        {
+            "role": "assistant",
+            "content": "团长，我先联网查证一下，避免凭印象误导。",
+            "reasoning": "用户问 ExampleAgent 是哪个厂商的。我需要联网查证，不能编造。",
+        },
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is True
+
+
+def test_search_deferral_stub_negative_when_tools_follow() -> None:
+    messages = [
+        {"role": "user", "content": "ExampleAgent 是哪个厂商"},
+        {"role": "tool", "content": "ok", "tool_name": "web_search"},
+        {
+            "role": "assistant",
+            "content": "团长，我先联网查证一下，避免凭印象误导。",
+        },
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is False
+
+
 def test_invoke_xml_negative_when_tool_calls_present() -> None:
     messages = [
         {"role": "user", "content": "ExampleAgent 是哪个厂商"},

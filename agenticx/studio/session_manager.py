@@ -35,6 +35,7 @@ from agenticx.runtime.assistant_output import (
 from agenticx.runtime.truncated_final import (
     ACTION_INTENT_RE,
     detect_suspected_truncated_final,
+    is_search_deferral_stub,
 )
 from agenticx.runtime.agent_runtime import (
     _has_inline_tool_markup,
@@ -275,6 +276,13 @@ def _messages_last_turn_promised_action_without_followthrough(
         not _turn_has_any_tool_row(tail)
         and _has_inline_tool_markup(body)
         and len(_strip_inline_tool_markup(body)) < 220
+    ):
+        return True
+
+    # Path F: short "I'll look it up" stub, no tool rows this turn.
+    if not _turn_has_any_tool_row(tail) and is_search_deferral_stub(
+        visible_body=body,
+        reasoning_text=reasoning,
     ):
         return True
 

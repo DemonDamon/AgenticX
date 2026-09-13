@@ -75,7 +75,10 @@ from agenticx.runtime.plan_mode import (
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
-from agenticx.runtime.truncated_final import detect_suspected_truncated_final
+from agenticx.runtime.truncated_final import (
+    detect_suspected_truncated_final,
+    is_search_deferral_stub,
+)
 from agenticx.runtime.usage_metadata import (
     add_usage_dicts,
     empty_usage_dict,
@@ -3795,6 +3798,7 @@ class AgentRuntime:
         reasoning_before_nudge = ""
         reasoning_only_protocol_errors: list[str] = []
         setattr(session, "_empty_tool_calls_retry_used", False)
+        setattr(session, "_search_deferral_retry_used", False)
 
         def _record_tool_turn_outcome(
             outcome: ToolTurnOutcome,
@@ -5251,6 +5255,41 @@ class AgentRuntime:
                         "max_rounds": self.max_tool_rounds,
                         "auto_retry": True,
                         "reason": "unparsed_inline_tool_markup",
+                    },
+                    agent_id=agent_id,
+                )
+                continue
+            if (
+                not tool_calls
+                and is_search_deferral_stub(
+                    visible_body=ac_clean,
+                    reasoning_text=(parsed.reasoning or _nonstream_reasoning or ""),
+                )
+                and not getattr(session, "_search_deferral_retry_used", False)
+            ):
+                setattr(session, "_search_deferral_retry_used", True)
+                hint = (
+                    "[系统通知] 上一轮只回复了「先查证/先搜索」的开场白，没有发出任何 tool_call。"
+                    "请立即用原生 function calling 调用合适的检索工具（例如 web_search），"
+                    "拿到结果后再回答用户；不要再次只说要去查。"
+                )
+                visible = str(ac_clean or "").strip() or " "
+                messages.append({"role": "assistant", "content": visible})
+                messages.append({"role": "system", "content": hint})
+                session.agent_messages.append({"role": "assistant", "content": visible})
+                session.agent_messages.append({"role": "system", "content": hint})
+                logger.info(
+                    "search_deferral_stub session=%s round=%s",
+                    getattr(session, "session_id", ""),
+                    round_idx,
+                )
+                yield RuntimeEvent(
+                    type=EventType.ROUND_END.value,
+                    data={
+                        "round": round_idx,
+                        "max_rounds": self.max_tool_rounds,
+                        "auto_retry": True,
+                        "reason": "search_deferral_stub",
                     },
                     agent_id=agent_id,
                 )
