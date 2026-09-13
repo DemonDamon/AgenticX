@@ -4,6 +4,7 @@ import * as React from "react";
 import type { DeepResearchEvent } from "@agenticx/core-api";
 import { Button } from "@agenticx/ui";
 import { parseClarifyResumeResponse } from "../../utils/deep-research-clarify-resume";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 
 type ClarifyEvent = Extract<DeepResearchEvent, { type: "clarify" }>;
 
@@ -89,6 +90,7 @@ export function DeepResearchClarifyCard({
   disabled,
   onSubmitted,
 }: DeepResearchClarifyCardProps) {
+  const copy = useChatCopy();
   const clarifyEvents = React.useMemo(
     () => events.filter((e): e is ClarifyEvent => e.type === "clarify"),
     [events],
@@ -168,17 +170,17 @@ export function DeepResearchClarifyCard({
       }
       setCollapsed(true);
     } catch {
-      setError("提交失败，请稍后重试");
+      setError(copy.clarify.submitFailed);
     } finally {
       setSubmitting(false);
     }
   };
 
   const statusLabel = showInteractive
-    ? "等待确认"
+    ? copy.timeline.waitingConfirm
     : effectivelyTimedOut && !hasSavedAnswers
-      ? "超时后按默认假设继续"
-      : "已收集信息";
+      ? copy.timeline.timedOutDefault
+      : copy.timeline.collectedInfo;
 
   return (
     <div
@@ -191,7 +193,7 @@ export function DeepResearchClarifyCard({
         onClick={() => setCollapsed((v) => !v)}
       >
         <IconMessageCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className="text-sm font-medium text-foreground">询问工具</span>
+        <span className="text-sm font-medium text-foreground">{copy.timeline.askTool}</span>
         <span className="text-sm text-muted-foreground">| {statusLabel}</span>
         <IconChevronDown
           className={[
@@ -206,8 +208,7 @@ export function DeepResearchClarifyCard({
           {showInteractive ? (
             <>
               <p className="mb-3 text-sm leading-5 text-muted-foreground">
-                我先快速确认一下调研方向，然后开始系统检索。每题可多选；请在 5
-                分钟内确认；超时将按默认假设继续。
+                {copy.clarify.intro}
               </p>
               <div className="space-y-3">
                 {clarifyEvents.map((q) => {
@@ -219,7 +220,7 @@ export function DeepResearchClarifyCard({
                         {q.step}/{q.total} · {q.question}
                       </span>
                       <span className="shrink-0 text-xs font-normal text-muted-foreground">
-                        {multiSelect ? "可多选" : "请选一个"}
+                        {multiSelect ? copy.clarify.multiSelect : copy.clarify.selectOne}
                       </span>
                     </div>
                     <div
@@ -254,7 +255,7 @@ export function DeepResearchClarifyCard({
                     {q.allowCustom ? (
                       <input
                         className="mt-2 w-full rounded-md border border-border/70 bg-background px-2 py-1.5 text-sm"
-                        placeholder="其他（可选，可与上方选项组合）"
+                        placeholder={copy.clarify.customPlaceholder}
                         value={custom[q.questionId] ?? ""}
                         disabled={disabled || submitting}
                         onChange={(e) => {
@@ -276,7 +277,7 @@ export function DeepResearchClarifyCard({
                   disabled={disabled || submitting}
                   onClick={() => void submit(true)}
                 >
-                  跳过
+                  {copy.clarify.skip}
                 </Button>
                 <Button
                   type="button"
@@ -284,7 +285,7 @@ export function DeepResearchClarifyCard({
                   disabled={disabled || submitting}
                   onClick={() => void submit(false)}
                 >
-                  确认并继续
+                  {copy.clarify.confirmContinue}
                 </Button>
               </div>
             </>
@@ -295,7 +296,7 @@ export function DeepResearchClarifyCard({
                   <div className="text-sm leading-5 text-foreground">{row.question}</div>
                   <div className="mt-0.5 pl-2 text-sm leading-5 text-muted-foreground">
                     {row.answer ||
-                      (effectivelyTimedOut ? "（未回答，已按默认假设继续）" : "—")}
+                      (effectivelyTimedOut ? copy.clarify.unansweredDefault : "—")}
                   </div>
                 </div>
               ))}

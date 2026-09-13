@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import type { QueuedMessage } from "../../store";
 
 type Props = {
@@ -11,6 +12,8 @@ type Props = {
 };
 
 export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove, onSendNow }: Props) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(msg.text);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -55,13 +58,13 @@ export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove, onSen
               className="rounded-md px-2 py-0.5 text-[11px] text-cyan-400 transition hover:bg-surface-hover"
               onClick={handleSave}
             >
-              保存
+              {tCommon("save")}
             </button>
             <button
               className="rounded-md px-2 py-0.5 text-[11px] text-text-faint transition hover:bg-surface-hover hover:text-text-muted"
               onClick={() => { setDraft(msg.text); setEditing(false); }}
             >
-              取消
+              {tCommon("cancel")}
             </button>
           </div>
         </div>
@@ -72,11 +75,13 @@ export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove, onSen
               <span className="shrink-0 text-[10px] text-text-faint">#{index + 1}</span>
               <p className="min-w-0 truncate text-[13px] leading-5 text-text-subtle">{msg.text}</p>
               {msg.attachments.length > 0 ? (
-                <span className="shrink-0 text-[10px] text-text-faint">· {msg.attachments.length} 个附件</span>
+                <span className="shrink-0 text-[10px] text-text-faint">
+                  · {t("queue.attachments", { count: msg.attachments.length })}
+                </span>
               ) : null}
               {total > 1 && index === 0 ? (
                 <span className="shrink-0 rounded-full bg-surface-hover px-1.5 py-0.5 text-[9px] text-text-faint">
-                  下一个
+                  {t("queue.next")}
                 </span>
               ) : null}
             </div>
@@ -85,7 +90,7 @@ export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove, onSen
             <button
               className="rounded-md p-1 transition hover:bg-surface-hover hover:text-text-strong"
               onClick={() => setEditing(true)}
-              title="编辑"
+              title={t("actions.edit")}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
@@ -95,7 +100,7 @@ export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove, onSen
               <button
                 className="rounded-md p-1 transition hover:bg-surface-hover hover:text-cyan-400"
                 onClick={() => onSendNow(msg.id)}
-                title="立即发送（中断当前生成）"
+                title={t("queue.sendNowInterrupt")}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 19V5M5 12l7-7 7 7" />
@@ -105,7 +110,7 @@ export function QueuedMessageBubble({ msg, index, total, onEdit, onRemove, onSen
             <button
               className="rounded-md p-1 transition hover:bg-surface-hover hover:text-rose-400"
               onClick={() => onRemove(msg.id)}
-              title="移除"
+              title={tCommon("remove")}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 6 6 18M6 6l12 12" />

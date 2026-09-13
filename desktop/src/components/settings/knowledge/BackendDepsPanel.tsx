@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AlertTriangle, CheckCircle2, Loader2, RotateCw, Wrench } from "lucide-react";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type Diag = {
   ok: boolean;
@@ -20,11 +27,11 @@ type RepairPhase =
 
 const PHASE_LABEL: Record<RepairPhase, string> = {
   idle: "",
-  "creating-venv": "创建虚拟环境…",
-  "upgrading-pip": "升级 pip…",
-  installing: "安装知识库与文档解析依赖（可能耗时数分钟）…",
-  done: "修复完成",
-  error: "修复失败",
+  "creating-venv": st("knowledge.repairCreatingVenv"),
+  "upgrading-pip": st("knowledge.repairUpgradingPip"),
+  installing: st("knowledge.repairInstalling"),
+  done: st("knowledge.repairDone"),
+  error: st("knowledge.repairError"),
 };
 
 /**
@@ -33,6 +40,7 @@ const PHASE_LABEL: Record<RepairPhase, string> = {
  * ~/.agenticx/.venv. Only renders a banner when there is a problem.
  */
 export function BackendDepsPanel() {
+  const { t } = useTranslation("settings");
   const [diag, setDiag] = useState<Diag | null>(null);
   const [busy, setBusy] = useState(false);
   const [repairing, setRepairing] = useState(false);
@@ -120,26 +128,26 @@ export function BackendDepsPanel() {
         <div className="min-w-0 flex-1">
           {phase === "done" ? (
             <p className="text-xs font-medium text-emerald-300">
-              后端依赖已修复，请完全退出并重启 Near 使其生效。
+              {st("knowledge.repairRestart")}
             </p>
           ) : (
             <>
               <p className="text-xs font-medium text-amber-200">
-                知识库/文档解析所需的后端依赖缺失
+                {st("knowledge.depsMissing")}
                 {missing.length > 0 ? `：${missing.join("、")}` : ""}
               </p>
               {diag?.pythonPath ? (
                 <p className="mt-0.5 break-all text-[11px] text-text-subtle">
-                  当前后端 Python：{diag.pythonPath}
+                  {st("knowledge.pythonPath", { path: diag.pythonPath })}
                 </p>
               ) : null}
               {diag?.usingBundled ? (
                 <p className="mt-0.5 text-[11px] text-text-subtle">
-                  检测到内嵌后端但依赖检查失败，通常表示安装包损坏，建议重新安装应用。
+                  {st("knowledge.embeddedBroken")}
                 </p>
               ) : (
                 <p className="mt-0.5 text-[11px] text-text-subtle">
-                  点击修复将创建 ~/.agenticx/.venv 并安装 agenticx[desktop-runtime]（含 chromadb、PDF 解析、SOCKS 代理 socksio 等）。
+                  {st("knowledge.repairHint")}
                 </p>
               )}
             </>
@@ -163,7 +171,7 @@ export function BackendDepsPanel() {
             ) : (
               <Wrench className="h-3.5 w-3.5" />
             )}
-            {repairing ? "修复中…" : needsRestart ? "立即重启" : "一键修复"}
+            {repairing ? st("knowledge.repairing") : needsRestart ? st("knowledge.restartNow") : st("knowledge.oneClickRepair")}
           </button>
         ) : null}
       </div>

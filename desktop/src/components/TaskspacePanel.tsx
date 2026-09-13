@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type { Taskspace } from "../store";
 import { formatTaskspaceAddError } from "../utils/taskspace-errors";
 import { createResizeRafScheduler } from "../utils/resize-raf";
@@ -49,6 +50,8 @@ export function TaskspacePanel({
   onPickFileForReference,
   autoRefreshKey,
 }: Props) {
+  const { t } = useTranslation("workspace");
+  const { t: tCommon } = useTranslation("common");
   const [taskspaces, setTaskspaces] = useState<Taskspace[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState("");
@@ -74,7 +77,7 @@ export function TaskspacePanel({
     setLoading(true);
     const result = await window.agenticxDesktop.listTaskspaces(sessionId);
     if (!result.ok) {
-      setErrorText(result.error ?? "加载 Taskspace 失败");
+      setErrorText(result.error ?? t("taskspace.loadFailed"));
       setLoading(false);
       return;
     }
@@ -93,7 +96,7 @@ export function TaskspacePanel({
     const result = await window.agenticxDesktop.listTaskspaceFiles({ sessionId, taskspaceId, path: relPath });
     if (!result.ok) {
       if ((result.error ?? "").includes("session not found")) return;
-      setErrorText(result.error ?? "读取目录失败");
+      setErrorText(result.error ?? t("taskspace.readDirFailed"));
       return;
     }
     setEntriesByDir((prev) => ({ ...prev, [key]: result.files ?? [] }));
@@ -203,19 +206,19 @@ export function TaskspacePanel({
     const confirmResult =
       typeof desktop.confirmDialog === "function"
         ? await desktop.confirmDialog({
-            title: "确认移除 Taskspace",
-            message: "确认移除该 Taskspace 吗？",
-            detail: "该操作仅移除关联，不会删除本地文件。",
-            confirmText: "移除",
-            cancelText: "取消",
+            title: t("taskspace.removeTitle"),
+            message: t("taskspace.removeMessage"),
+            detail: t("taskspace.removeDetail"),
+            confirmText: tCommon("remove"),
+            cancelText: tCommon("cancel"),
             destructive: true,
           })
-        : { ok: true, confirmed: window.confirm("确认移除该 Taskspace 吗？") };
+        : { ok: true, confirmed: window.confirm(t("taskspace.removeMessage")) };
     const confirmed = !!confirmResult.confirmed;
     if (!confirmed) return;
     const result = await desktop.removeTaskspace({ sessionId, taskspaceId });
     if (!result.ok) {
-      setErrorText(result.error ?? "移除 Taskspace 失败");
+      setErrorText(result.error ?? t("taskspace.removeFailed"));
       return;
     }
     await loadTaskspaces();
@@ -225,18 +228,18 @@ export function TaskspacePanel({
     try {
       const picker = window.agenticxDesktop.chooseDirectory;
       if (typeof picker !== "function") {
-        setErrorText("当前客户端不支持目录选择，请重启桌面端后重试。");
+        setErrorText(t("taskspace.dirPickUnsupported"));
         return;
       }
       const picked = await picker();
       if (!picked.ok) {
         if (!picked.canceled) {
-          setErrorText(picked.error ?? "目录选择失败，请重试。");
+          setErrorText(picked.error ?? t("taskspace.dirPickFailed"));
         }
         return;
       }
       if (!picked.path) {
-        setErrorText("目录选择失败：未返回有效路径。");
+        setErrorText(t("taskspace.dirPickNoPath"));
         return;
       }
       setErrorText("");
@@ -246,7 +249,7 @@ export function TaskspacePanel({
         setNewLabel(bits[bits.length - 1] || "");
       }
     } catch (err) {
-      setErrorText(`目录选择失败：${String(err)}`);
+      setErrorText(t("taskspace.dirPickFailedWith", { error: String(err) }));
     }
   };
 
@@ -255,7 +258,7 @@ export function TaskspacePanel({
     const result = await window.agenticxDesktop.readTaskspaceFile({ sessionId, taskspaceId, path: relPath });
     if (!result.ok) {
       if ((result.error ?? "").includes("session not found")) return;
-      setErrorText(result.error ?? "读取文件失败");
+      setErrorText(result.error ?? t("taskspace.readFileFailed"));
       return;
     }
     setSelectedFilePath(relPath);
@@ -339,7 +342,7 @@ export function TaskspacePanel({
           <button
             className="rounded px-1 py-0.5 text-[10px] text-text-faint hover:bg-surface-hover hover:text-cyan-300"
             onClick={() => onPickFileForReference?.(item.path)}
-            title="引用到输入框"
+            title={t("taskspace.quoteToInput")}
           >
             @
           </button>
@@ -384,9 +387,9 @@ export function TaskspacePanel({
             setErrorText("");
             void refreshListAndActiveTaskspace();
           }}
-          title="刷新 Taskspace 列表与目录"
+          title={t("taskspace.refreshTitle")}
         >
-          刷新
+          {t("taskspace.refresh")}
         </button>
         <button
           className="rounded bg-surface-hover px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
@@ -394,17 +397,17 @@ export function TaskspacePanel({
             setShowAddForm((prev) => !prev);
             setErrorText("");
           }}
-          title="新增 Taskspace"
+          title={t("taskspace.addTitle")}
         >
           +
         </button>
         {showAddForm ? (
           <div className="absolute right-2 top-10 z-10 w-[280px] rounded-md border border-border bg-surface-panel p-2 shadow-2xl">
-            <div className="mb-1 text-[11px] text-text-subtle">新增 Taskspace</div>
+            <div className="mb-1 text-[11px] text-text-subtle">{t("taskspace.addTitle")}</div>
             <input
               value={newPath}
               onChange={(e) => setNewPath(e.target.value)}
-              placeholder="目录绝对路径（可留空用默认）"
+              placeholder={t("taskspace.absPathPlaceholder")}
               className="mb-1 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-cyan-500/50"
             />
             <div className="mb-1 flex justify-end">
@@ -412,15 +415,15 @@ export function TaskspacePanel({
                 type="button"
                 className="rounded border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover"
                 onClick={() => void chooseDirectoryForTaskspace()}
-                title="从系统目录中选择"
+                title={t("taskspace.pickFromSystem")}
               >
-                选择目录...
+                {t("taskspace.pickDirectory")}
               </button>
             </div>
             <input
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
-              placeholder="显示名称（可选）"
+              placeholder={t("taskspace.displayNameOptional")}
               className="mb-2 w-full rounded border border-border bg-surface-panel px-2 py-1 text-[11px] text-text-primary outline-none focus:border-cyan-500/50"
             />
             <div className="flex items-center justify-end gap-1">
@@ -432,7 +435,7 @@ export function TaskspacePanel({
                   setNewLabel("");
                 }}
               >
-                取消
+                {tCommon("cancel")}
               </button>
               <button
                 className="rounded px-2 py-1 text-[11px] transition-colors disabled:opacity-50"
@@ -440,26 +443,26 @@ export function TaskspacePanel({
                 disabled={adding}
                 onClick={() => void addTaskspace(newPath, newLabel)}
               >
-                {adding ? "添加中..." : "确认添加"}
+                {adding ? t("taskspace.adding") : t("taskspace.confirmAdd")}
               </button>
             </div>
           </div>
         ) : null}
       </div>
       <div className="flex-1 overflow-y-auto border-b border-border px-2 py-2">
-        {loading ? <div className="text-xs text-text-faint">加载中...</div> : null}
-        {!loading && !activeTaskspace ? <div className="text-xs text-text-faint">暂无 Taskspace</div> : null}
+        {loading ? <div className="text-xs text-text-faint">{t("taskspace.loading")}</div> : null}
+        {!loading && !activeTaskspace ? <div className="text-xs text-text-faint">{t("taskspace.empty")}</div> : null}
         {!loading && activeTaskspace ? renderDir(activeTaskspace.id, ".", 0) : null}
       </div>
       <div
         className="group relative min-h-[14px] shrink-0 cursor-row-resize px-2 py-2 touch-none"
         onMouseDown={startResizePreview}
-        title="拖拽调整代码预览高度"
+        title={t("taskspace.resizePreview")}
       >
         <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-[var(--border-strong)] transition-all duration-200 group-hover:h-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
       </div>
       <div className="flex shrink-0 flex-col px-2 py-2" style={{ height: previewHeight }}>
-        <div className="mb-1 truncate text-xs text-text-faint">{selectedFilePath || "文件预览"}</div>
+        <div className="mb-1 truncate text-xs text-text-faint">{selectedFilePath || t("taskspace.filePreview")}</div>
         <pre className="min-h-0 flex-1 overflow-auto rounded bg-surface-panel p-2 text-[11px] leading-5">
           <code
             className={`language-${detectLanguage(selectedFilePath)}`}
@@ -467,7 +470,7 @@ export function TaskspacePanel({
           />
         </pre>
         {preview?.truncated ? (
-          <div className="pt-1 text-[10px] text-amber-300">文件过大，已截断显示（{preview.size} bytes）。</div>
+          <div className="pt-1 text-[10px] text-amber-300">{t("taskspace.truncated", { size: preview.size })}</div>
         ) : null}
         {errorText ? <div className="pt-1 text-[10px] text-rose-300">{errorText}</div> : null}
       </div>

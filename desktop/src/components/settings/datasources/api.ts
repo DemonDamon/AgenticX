@@ -1,4 +1,5 @@
 import { studioFetch } from "../../../utils/studio-fetch";
+import { i18n } from "../../../i18n/i18n";
 import type { DataSourceInfo } from "./types";
 
 type RawStatusItem = {
@@ -77,7 +78,7 @@ export async function testDataSource(
     body: JSON.stringify({ name }),
   });
   if (resp.status === 404) {
-    return { ok: false, detail: "数据源未启用或不存在" };
+    return { ok: false, detail: String(i18n.t("dataSources.notEnabled", { ns: "settings" })) };
   }
   if (!resp.ok) {
     const text = await resp.text();

@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { FileText, FolderOpen, History, LayoutGrid } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { GlobalSearchCategory } from "../../hooks/useGlobalSearch";
 
 export type SearchSuggestion = {
@@ -28,7 +29,7 @@ const THEME_ICON_GLYPH_SM = "h-3.5 w-3.5 text-[rgb(var(--theme-color-rgb))]";
 const SUGGESTION_CARDS: SuggestionCard[] = [
   {
     id: "documents",
-    title: "搜文档",
+    title: "search.searchDocuments",
     icon: FileText,
     items: [
       { label: "README", query: "readme", category: "documents" },
@@ -38,7 +39,7 @@ const SUGGESTION_CARDS: SuggestionCard[] = [
   },
   {
     id: "folders",
-    title: "搜文件夹",
+    title: "search.searchFolders",
     icon: FolderOpen,
     items: [
       { label: "Desktop", query: "Desktop", category: "folders" },
@@ -48,7 +49,7 @@ const SUGGESTION_CARDS: SuggestionCard[] = [
   },
   {
     id: "applications",
-    title: "搜应用软件",
+    title: "search.searchApps",
     icon: LayoutGrid,
     items: [
       { label: "微信", query: "微信", category: "applications" },
@@ -71,6 +72,7 @@ export function GlobalSearchIdleView({
   onClearHistory,
   onPickSuggestion,
 }: Props) {
+  const { t } = useTranslation("sidebar");
   return (
     <div>
       {history.length > 0 ? (
@@ -80,14 +82,14 @@ export function GlobalSearchIdleView({
               <span className={THEME_ICON_BOX}>
                 <History className={THEME_ICON_GLYPH_SM} strokeWidth={2} />
               </span>
-              最近搜索
+              {t("search.recent")}
             </div>
             <button
               type="button"
               className="text-[11px] text-text-faint transition hover:text-text-subtle"
               onClick={onClearHistory}
             >
-              清空
+              {t("search.clear")}
             </button>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -105,7 +107,7 @@ export function GlobalSearchIdleView({
         </div>
       ) : null}
 
-      <div className="mb-3 text-[13px] font-semibold text-text-strong">尝试搜索以下内容</div>
+      <div className="mb-3 text-[13px] font-semibold text-text-strong">{t("search.trySearch")}</div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {SUGGESTION_CARDS.map((card) => {
@@ -116,7 +118,7 @@ export function GlobalSearchIdleView({
                 <span className={THEME_ICON_BOX}>
                   <Icon className={THEME_ICON_GLYPH} strokeWidth={2} />
                 </span>
-                <span className="text-[13px] font-semibold text-text-strong">{card.title}</span>
+                <span className="text-[13px] font-semibold text-text-strong">{t(card.title)}</span>
               </div>
               <ul className="flex flex-col gap-0.5">
                 {card.items.map((item) => (
@@ -137,7 +139,7 @@ export function GlobalSearchIdleView({
       </div>
 
       <p className="mt-3 text-center text-[11px] text-text-faint">
-        支持文件名与路径匹配 · 右键结果可添加工作区或引用到对话
+        {t("search.hint")}
       </p>
     </div>
   );

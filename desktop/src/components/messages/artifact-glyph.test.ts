@@ -22,6 +22,17 @@ describe("artifactGlyph", () => {
     expect(txt.tint).toBe("#6F8CFF");
   });
 
+  it("maps office, image, and archive suffixes to distinct kinds", () => {
+    expect(artifactGlyph("deck.pptx").kind).toBe("slide");
+    expect(artifactGlyph("notes.docx").kind).toBe("doc");
+    expect(artifactGlyph("budget.xlsx").kind).toBe("sheet");
+    expect(artifactGlyph("report.pdf").kind).toBe("pdf");
+    expect(artifactGlyph("photo.jpeg").kind).toBe("image");
+    expect(artifactGlyph("bundle.zip").kind).toBe("archive");
+    expect(artifactGlyph("events.jsonl").kind).toBe("data");
+    expect(artifactGlyph("fix.patch").kind).toBe("code");
+  });
+
   it("uses a sky-blue folded-sheet swatch for markdown, not the old amber tile", () => {
     const md = artifactGlyph("/tmp/notes.md");
     expect(md.kind).toBe("md");

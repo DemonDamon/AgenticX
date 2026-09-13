@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, CloudDownload, Copy, FolderOpen } from "lucide-react";
 import { HoverTip } from "../ds/HoverTip";
 import { artifactGlyph, FileTypeMark } from "./artifact-glyph";
@@ -62,6 +63,7 @@ export function TurnArtifactCard({
   artifactCount,
   changeCount,
 }: Props) {
+  const { t } = useTranslation("chat");
   const ordered = orderTurnArtifactsForCard(paths);
   const [expanded, setExpanded] = useState(false);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
@@ -154,7 +156,7 @@ export function TurnArtifactCard({
                 }`}
                 title={path}
                 onClick={() => (onOpenPath ? onOpenPath(path) : undefined)}
-                aria-label={`预览 ${name}`}
+                aria-label={t("artifact.preview", { name })}
               >
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center">
                   <FileTypeMark kind={kind} />
@@ -169,11 +171,11 @@ export function TurnArtifactCard({
                 </span>
               </button>
               <div className="flex shrink-0 items-center">
-                <TileAction label={`另存为 ${name}`} onClick={() => void saveAs(path)}>
+                <TileAction label={t("artifact.saveAs", { name })} onClick={() => void saveAs(path)}>
                   <CloudDownload className="h-[16px] w-[16px]" strokeWidth={1.5} />
                 </TileAction>
                 <TileAction
-                  label={copied ? "已复制路径" : `复制路径 ${name}`}
+                  label={copied ? t("artifact.copiedPath") : t("artifact.copyPath", { name })}
                   onClick={() => void copyPath(path)}
                 >
                   {copied ? (
@@ -182,7 +184,7 @@ export function TurnArtifactCard({
                     <Copy className="h-[16px] w-[16px]" strokeWidth={1.5} />
                   )}
                 </TileAction>
-                <TileAction label={`在访达中显示 ${name}`} onClick={() => void revealInFolder(path)}>
+                <TileAction label={t("artifact.reveal", { name })} onClick={() => void revealInFolder(path)}>
                   <FolderOpen className="h-[16px] w-[16px]" strokeWidth={1.5} />
                 </TileAction>
               </div>
@@ -198,7 +200,7 @@ export function TurnArtifactCard({
               className="inline-flex items-center gap-0.5 rounded-md py-0.5 text-[12px] text-text-muted transition-[color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-text-primary active:scale-[0.98]"
               onClick={onOpenAllArtifacts}
             >
-              查看所有产物 ({artifactCount ?? ordered.length})
+              {t("artifact.viewAllArtifacts", { count: artifactCount ?? ordered.length })}
               <ChevronRight className="h-3 w-3" strokeWidth={2} />
             </button>
           ) : null}
@@ -208,7 +210,7 @@ export function TurnArtifactCard({
               className="inline-flex items-center gap-0.5 rounded-md py-0.5 text-[12px] text-text-muted transition-[color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-text-primary active:scale-[0.98]"
               onClick={onOpenAllChanges}
             >
-              查看所有变更 ({changeCount ?? ordered.length})
+              {t("artifact.viewAllChanges", { count: changeCount ?? ordered.length })}
               <ChevronRight className="h-3 w-3" strokeWidth={2} />
             </button>
           ) : null}
@@ -219,7 +221,7 @@ export function TurnArtifactCard({
           className="mt-1.5 rounded-md px-0.5 py-0.5 text-left text-[11.5px] text-text-muted transition-[color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-text-primary active:scale-[0.98]"
           onClick={() => setExpanded((prev) => !prev)}
         >
-          {expanded ? "收起产物" : `查看全部 ${ordered.length} 个产物`}
+          {expanded ? t("artifact.collapse") : t("artifact.viewAllCount", { count: ordered.length })}
         </button>
       ) : null}
     </div>

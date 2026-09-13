@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
@@ -27,15 +28,15 @@ type Props = {
 
 type StatusTone = "success" | "error" | "warning" | "theme" | "muted";
 
-const statusMap: Record<string, { label: string; tone: StatusTone }> = {
-  pending: { label: "等待中", tone: "warning" },
-  awaiting_confirm: { label: "待确认", tone: "warning" },
-  awaiting_input: { label: "等待输入", tone: "theme" },
-  running: { label: "执行中", tone: "theme" },
-  paused: { label: "已暂停", tone: "warning" },
-  completed: { label: "已完成", tone: "success" },
-  failed: { label: "失败", tone: "error" },
-  cancelled: { label: "已中断", tone: "muted" },
+const statusMap: Record<string, { labelKey: string; tone: StatusTone }> = {
+  pending: { labelKey: "subagent.statusPending", tone: "warning" },
+  awaiting_confirm: { labelKey: "subagent.statusAwaitingConfirm", tone: "warning" },
+  awaiting_input: { labelKey: "subagent.statusAwaitingInput", tone: "theme" },
+  running: { labelKey: "subagent.statusRunning", tone: "theme" },
+  paused: { labelKey: "subagent.statusPaused", tone: "warning" },
+  completed: { labelKey: "subagent.statusCompleted", tone: "success" },
+  failed: { labelKey: "subagent.statusFailed", tone: "error" },
+  cancelled: { labelKey: "subagent.statusCancelled", tone: "muted" },
 };
 
 const STATUS_PILL_CLASS: Record<StatusTone, string> = {
@@ -251,6 +252,7 @@ function ConfirmWithCountdown({
   agentId: string;
   onConfirmResolve?: (agentId: string, approved: boolean) => void;
 }) {
+  const { t } = useTranslation("chat");
   const [remaining, setRemaining] = useState(AUTO_CONFIRM_SECONDS);
   const resolvedRef = useRef(false);
 
@@ -292,9 +294,9 @@ function ConfirmWithCountdown({
   return (
     <div className="mb-2 rounded-md border border-[color-mix(in_srgb,var(--status-warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_10%,transparent)] p-2">
       <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-[11px] font-medium text-[var(--status-warning)]">需要你的确认</span>
+        <span className="text-[11px] font-medium text-[var(--status-warning)]">{t("subagent.needsConfirm")}</span>
         <span className="text-[10px] text-text-muted">
-          {remaining}s 后自动通过
+          {t("subagent.autoApproveIn", { seconds: remaining })}
         </span>
       </div>
       <div className="mb-2 max-h-20 overflow-y-auto whitespace-pre-wrap text-xs text-text-primary">
@@ -312,13 +314,13 @@ function ConfirmWithCountdown({
           className="inline-flex items-center gap-1 rounded-md bg-[var(--ui-btn-primary-bg)] px-3 py-1 text-[11px] font-medium text-[var(--ui-btn-primary-text)] transition hover:opacity-90"
           onClick={handleApprove}
         >
-          通过
+          {t("subagent.approve")}
         </button>
         <button
           className={`inline-flex items-center gap-1 rounded-md px-3 py-1 text-[11px] font-medium transition text-[var(--status-error)] opacity-75 hover:bg-[color-mix(in_srgb,var(--status-error)_8%,transparent)] hover:opacity-100`}
           onClick={handleDeny}
         >
-          拒绝
+          {t("subagent.deny")}
         </button>
       </div>
     </div>
@@ -341,6 +343,7 @@ function SubAgentModelPicker({
   model?: string;
   onChange: (provider: string, model: string) => void;
 }) {
+  const { t } = useTranslation("chat");
   const settings = useAppStore((s) => s.settings.providers);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -350,11 +353,11 @@ function SubAgentModelPicker({
   const currentProvider = (provider ?? "").trim();
   const currentModel = (model ?? "").trim();
   const label = useMemo(() => {
-    if (!currentModel) return "选择模型";
+    if (!currentModel) return t("subagent.pickModel");
     if (!currentProvider) return currentModel;
-    if (!isModelSelectable(currentProvider, currentModel, settings)) return "选择模型";
+    if (!isModelSelectable(currentProvider, currentModel, settings)) return t("subagent.pickModel");
     return formatModelOptionLabel(currentProvider, currentModel, settings[currentProvider]);
-  }, [currentModel, currentProvider, settings]);
+  }, [currentModel, currentProvider, settings, t]);
 
   const syncPanelPosition = useCallback(() => {
     const el = anchorRef.current;
@@ -399,7 +402,7 @@ function SubAgentModelPicker({
               style={panelStyle}
             >
               {options.length === 0 ? (
-                <div className="px-3 py-2 text-center text-[11px] text-text-muted">请先在设置中配置模型</div>
+                <div className="px-3 py-2 text-center text-[11px] text-text-muted">{t("subagent.configureModels")}</div>
               ) : (
                 options.map((opt) => {
                   const isActive = opt.provider === currentProvider && opt.model === currentModel;
@@ -530,8 +533,9 @@ function MetaBlockCollapseButton({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation("chat");
   return (
-    <MetaBlockIconButton label={expanded ? "收起" : "展开"} active={expanded} onClick={onToggle}>
+    <MetaBlockIconButton label={expanded ? t("subagent.collapse") : t("subagent.expand")} active={expanded} onClick={onToggle}>
       <CollapseToggleIcon expanded={expanded} />
     </MetaBlockIconButton>
   );
@@ -572,6 +576,7 @@ function SubAgentMetaBlock({
 
 /** 任务指令块：与「最终摘要」共用同一套元数据卡片结构 */
 function TaskInstructionBlock({ agentId, task }: { agentId: string; task: string }) {
+  const { t } = useTranslation("chat");
   const updateSubAgent = useAppStore((s) => s.updateSubAgent);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -602,22 +607,22 @@ function TaskInstructionBlock({ agentId, task }: { agentId: string; task: string
 
   return (
     <SubAgentMetaBlock
-      title="详细指令"
+      title={t("subagent.instruction")}
       tone="theme"
       scrollable={!expanded && !editing}
       headerActions={
         <>
-          <MetaBlockIconButton label="复制指令" onClick={handleCopy}>
+          <MetaBlockIconButton label={t("subagent.copyInstruction")} onClick={handleCopy}>
             <CopyIcon copied={copied} />
           </MetaBlockIconButton>
           {editing ? (
             <>
-              <MetaBlockIconButton label="保存修改" active onClick={handleSave}>
+              <MetaBlockIconButton label={t("subagent.saveEdit")} active onClick={handleSave}>
                 <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 text-[var(--status-success)]" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 8l3.5 3.5L13 4.5" />
                 </svg>
               </MetaBlockIconButton>
-              <MetaBlockIconButton label="放弃修改" onClick={handleDiscard}>
+              <MetaBlockIconButton label={t("subagent.discardEdit")} onClick={handleDiscard}>
                 <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 text-text-muted" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 4l8 8M12 4l-8 8" />
                 </svg>
@@ -625,7 +630,7 @@ function TaskInstructionBlock({ agentId, task }: { agentId: string; task: string
             </>
           ) : (
             <MetaBlockIconButton
-              label="编辑指令"
+              label={t("subagent.editInstruction")}
               active={false}
               onClick={() => { setEditValue(task); setEditing(true); }}
             >
@@ -690,6 +695,7 @@ function OutputFilesBlock({
   sessionId?: string;
   runId: string;
 }) {
+  const { t } = useTranslation("chat");
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
   const canPreview = Boolean(sessionId && apiBase && apiToken);
@@ -719,19 +725,19 @@ function OutputFilesBlock({
         .then((data) => {
           setPreviews((prev) => ({
             ...prev,
-            [path]: data.ok ? { status: "ok", data } : { status: "error", error: data.error || "预览失败" },
+            [path]: data.ok ? { status: "ok", data } : { status: "error", error: data.error || t("subagent.previewFailed") },
           }));
         })
         .catch((err) => {
           setPreviews((prev) => ({ ...prev, [path]: { status: "error", error: String(err) } }));
         });
     },
-    [apiBase, apiToken, canPreview, sessionId, runId, previews],
+    [apiBase, apiToken, canPreview, sessionId, runId, previews, t],
   );
 
   return (
     <SubAgentMetaBlock
-      title="产出文件"
+      title={t("subagent.outputs")}
       tone="theme"
       scrollable={!blockExpanded}
       headerActions={
@@ -750,7 +756,7 @@ function OutputFilesBlock({
                   <button
                     type="button"
                     className="text-left text-text-muted underline underline-offset-2 hover:text-text-primary"
-                    title={`打开文件夹：${dirPath}`}
+                    title={t("subagent.openFolder", { path: dirPath })}
                     onClick={() => void openFolder(dirPath)}
                   >
                     {dirPath}/
@@ -759,7 +765,7 @@ function OutputFilesBlock({
                 <button
                   type="button"
                   className="text-left text-[var(--kb-citation-fg)] underline underline-offset-2 hover:opacity-80"
-                  title={`预览：${path}`}
+                  title={t("subagent.preview", { path })}
                   onClick={() => togglePreview(path)}
                 >
                   {fileName || previewBaseName(path)}
@@ -768,12 +774,12 @@ function OutputFilesBlock({
               {expanded ? (
                 <div className="mt-1.5 max-h-56 overflow-y-auto rounded-md border border-[color-mix(in_srgb,rgb(var(--theme-color-rgb))_15%,transparent)] bg-surface-card px-2 py-1.5">
                   {!preview || preview.status === "loading" ? (
-                    <div className="text-[11px] text-text-faint">加载中…</div>
+                    <div className="text-[11px] text-text-faint">{t("subagent.loading")}</div>
                   ) : preview.status === "error" ? (
                     <div className="text-[11px] text-[var(--status-error)]">{preview.error}</div>
                   ) : preview.data.kind === "binary" ? (
                     <div className="text-[11px] text-text-muted">
-                      {preview.data.open_hint || "该文件不支持内联预览，请在文件夹中打开"}
+                      {preview.data.open_hint || t("subagent.previewUnsupported")}
                     </div>
                   ) : preview.data.text != null ? (
                     isMarkdownPath(path) ? (
@@ -786,7 +792,7 @@ function OutputFilesBlock({
                   ) : null}
                   {preview?.status === "ok" && preview.data.kind === "text" && preview.data.truncated ? (
                     <div className="mt-1 text-[10.5px] text-[var(--status-warning)]">
-                      {preview.data.open_hint || "文件过大，已截断显示"}
+                      {preview.data.open_hint || t("subagent.previewTruncated")}
                     </div>
                   ) : null}
                 </div>
@@ -895,9 +901,21 @@ const DEFAULT_EVENT_META = {
   label: "事件",
 };
 
-function getEventMeta(type: string) {
+const EVENT_LABEL_KEY: Record<string, string> = {
+  tool_call: "subagent.eventToolCall",
+  tool_result: "subagent.eventToolResult",
+  message: "subagent.eventMessage",
+  status: "subagent.eventStatus",
+  error: "subagent.eventError",
+  output: "subagent.eventOutput",
+  reasoning: "subagent.eventReasoning",
+  final: "subagent.eventFinal",
+};
+
+function getEventMeta(type: string, t: (key: string) => string) {
   const key = type.toLowerCase().replace(/[^a-z_]/g, "");
-  return EVENT_META[key] ?? DEFAULT_EVENT_META;
+  const base = EVENT_META[key] ?? DEFAULT_EVENT_META;
+  return { ...base, label: t(EVENT_LABEL_KEY[key] ?? "subagent.eventDefault") };
 }
 
 /** 把 ms 时间戳格式化为 HH:MM:SS */
@@ -1009,8 +1027,9 @@ function parseEventContent(_type: string, rawContent: string): ParsedEventConten
 
 /** 单条事件行，content 超出 100 字符时折叠 */
 function TimelineEvent({ evt }: { evt: { id: string; type: string; content: string; ts: number } }) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
-  const meta = getEventMeta(evt.type);
+  const meta = getEventMeta(evt.type, t);
   const parsed = useMemo(() => parseEventContent(evt.type, evt.content), [evt.type, evt.content]);
   const LIMIT = evt.type === "reasoning" ? 60 : 100;
   const isLong = parsed.body.length > LIMIT;
@@ -1058,7 +1077,7 @@ function TimelineEvent({ evt }: { evt: { id: string; type: string; content: stri
                 className="ml-1 text-[10px] text-[var(--kb-citation-fg)] underline-offset-2 hover:underline"
                 onClick={() => setExpanded((v) => !v)}
               >
-                {expanded ? "收起" : "展开"}
+                {expanded ? t("subagent.collapse") : t("subagent.expand")}
               </button>
             ) : null}
           </p>
@@ -1106,6 +1125,7 @@ function ActivityTimeline({
   onCopyDetails: () => void;
   copyFeedback: boolean;
 }) {
+  const { t } = useTranslation("chat");
   const listRef = useRef<HTMLDivElement>(null);
   const visible = useMemo(() => denoiseEvents(events), [events]);
   const isLive = isSubAgentLiveStatus(agentStatus);
@@ -1120,9 +1140,9 @@ function ActivityTimeline({
       {/* header */}
       <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
         <span className="text-[11px] font-medium text-text-muted">
-          活动日志
+          {t("subagent.activityLog")}
           {visible.length > 0 ? (
-            <span className="ml-1.5 font-mono text-[10px] text-text-faint opacity-60">{visible.length} 步</span>
+            <span className="ml-1.5 font-mono text-[10px] text-text-faint opacity-60">{t("notice.stepCount", { count: visible.length })}</span>
           ) : null}
         </span>
         <button
@@ -1130,7 +1150,7 @@ function ActivityTimeline({
           className="rounded px-1.5 py-0.5 text-[10px] text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
           onClick={onCopyDetails}
         >
-          {copyFeedback ? "已复制 ✓" : "复制"}
+          {copyFeedback ? t("subagent.copied") : t("subagent.copy")}
         </button>
       </div>
 
@@ -1139,7 +1159,7 @@ function ActivityTimeline({
         <div className="border-b border-border px-3 py-2">
           <div className="mb-1 flex items-center gap-1.5">
             <ArcSpinner size={10} />
-            <span className="text-[10px] font-medium text-[var(--kb-citation-fg)]">实时流</span>
+            <span className="text-[10px] font-medium text-[var(--kb-citation-fg)]">{t("subagent.liveStream")}</span>
           </div>
           {(() => {
             // Strip <think>/<redacted_thinking> wrappers before display so raw tags never show.
@@ -1167,7 +1187,7 @@ function ActivityTimeline({
         }}
       >
         {visible.length === 0 ? (
-          <div className="py-4 text-center text-[11px] text-text-faint">暂无活动记录</div>
+          <div className="py-4 text-center text-[11px] text-text-faint">{t("subagent.noActivity")}</div>
         ) : (
           visible.map((evt) => <TimelineEvent key={evt.id} evt={evt} />)
         )}
@@ -1186,12 +1206,14 @@ export function SubAgentCard({
   onConfirmResolve,
   selected = false,
 }: Props) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
   // 整卡折叠：把指令/结果/进度/操作按钮等正文整体收起，只留标题一行 —— 已完成的
   // 任务默认收起以减少列表视觉噪音；执行中默认展开，方便随时查看进度与中断。
   const [collapsed, setCollapsed] = useState(subAgent.status === "completed");
-  const status = useMemo(() => statusMap[subAgent.status] ?? statusMap.pending, [subAgent.status]);
+  const status = useMemo(() => statusMap[subAgent.status] ?? statusMap.pending!, [subAgent.status]);
+  const statusLabel = t(status.labelKey);
   const outputPaths = useMemo(
     () =>
       resolveSubAgentOutputPaths(subAgent.resultSummary, {
@@ -1203,12 +1225,12 @@ export function SubAgentCard({
   const artifactSessionId = subAgent.sessionId || parentSessionId || "";
   const handleCopyDetails = useCallback(() => {
     const header = [
-      `智能体: ${subAgent.name} (${subAgent.id})`,
-      `角色: ${subAgent.role}`,
-      `任务: ${subAgent.task}`,
-      `状态: ${status.label}`,
-      subAgent.resultSummary ? `产出结果: ${subAgent.resultSummary}` : "",
-      subAgent.resultFile ? `落盘路径: ${subAgent.resultFile}` : "",
+      t("subagent.copyHeaderAgent", { name: subAgent.name, id: subAgent.id }),
+      t("subagent.copyHeaderRole", { role: subAgent.role }),
+      t("subagent.copyHeaderTask", { task: subAgent.task }),
+      t("subagent.copyHeaderStatus", { status: statusLabel }),
+      subAgent.resultSummary ? t("subagent.copyHeaderResult", { summary: subAgent.resultSummary }) : "",
+      subAgent.resultFile ? t("subagent.copyHeaderPath", { path: subAgent.resultFile }) : "",
     ].filter(Boolean).join("\n");
     const events = subAgent.events
       .slice()
@@ -1219,7 +1241,7 @@ export function SubAgentCard({
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 1500);
     });
-  }, [subAgent, status.label]);
+  }, [subAgent, statusLabel, t]);
 
   const canCancel =
     subAgent.status === "running" || subAgent.status === "pending" || subAgent.status === "awaiting_confirm" || subAgent.status === "awaiting_input";
@@ -1243,7 +1265,7 @@ export function SubAgentCard({
             type="button"
             className="flex min-w-0 items-center gap-1.5 text-left"
             onClick={() => setCollapsed((v) => !v)}
-            title={collapsed ? "展开整卡" : "折叠整卡"}
+            title={collapsed ? t("subagent.expandCard") : t("subagent.collapseCard")}
           >
             <svg
               viewBox="0 0 14 14"
@@ -1276,7 +1298,7 @@ export function SubAgentCard({
         </div>
         <SubAgentStatusBadge
           agentStatus={subAgent.status}
-          label={status.label}
+          label={statusLabel}
         />
       </div>
 
@@ -1291,14 +1313,14 @@ export function SubAgentCard({
             />
           ) : subAgent.status === "awaiting_confirm" ? (
             <div className="mb-2 rounded-md border border-[color-mix(in_srgb,var(--status-warning)_35%,transparent)] bg-[color-mix(in_srgb,var(--status-warning)_10%,transparent)] p-2 text-xs text-[var(--status-warning)]">
-              等待确认中… 请查看弹窗或稍候
+              {t("subagent.waitingConfirmPopup")}
             </div>
           ) : null}
           {subAgent.status === "awaiting_input" ? (
             <div className="mb-2 rounded-md border border-[var(--ui-btn-primary-border)] bg-[rgba(var(--theme-color-rgb),0.08)] p-2 text-xs text-[var(--kb-citation-fg)]">
               {subAgent.pendingClarification?.prompt
-                ? `等待你的输入：${subAgent.pendingClarification.prompt}`
-                : "等待你的输入… 请查看弹窗"}
+                ? t("subagent.waitingInputNamed", { prompt: subAgent.pendingClarification.prompt })
+                : t("subagent.waitingInputPopup")}
             </div>
           ) : null}
           {outputPaths.length > 0 ? (
@@ -1324,10 +1346,10 @@ export function SubAgentCard({
               aria-pressed={selected}
               title={
                 selected
-                  ? "结束与该子智能体的对话，切回 Meta"
+                  ? t("subagent.chatCloseHint")
                   : chatBlocked
-                    ? "任务执行中，完成后才能进入对话"
-                    : "向该子智能体发送消息"
+                    ? t("subagent.chatBusyHint")
+                    : t("subagent.chatOpenHint")
               }
               onClick={() => onChat(subAgent.id)}
             >
@@ -1336,7 +1358,7 @@ export function SubAgentCard({
                   ? <path d="M2 2l10 10M12 2L2 12" />
                   : <><path d="M2 9.5C2 10.33 2.67 11 3.5 11H10l2 2V4.5C12 3.67 11.33 3 10.5 3h-7C2.67 3 2 3.67 2 4.5v5z" /></>}
               </svg>
-              {selected ? "关闭对话" : "对话"}
+              {selected ? t("subagent.closeChat") : t("subagent.chat")}
             </button>
 
             {/* 展开/收起详情 — neutral */}
@@ -1347,7 +1369,7 @@ export function SubAgentCard({
               <svg viewBox="0 0 14 14" fill="none" className={`h-3 w-3 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 5l4 4 4-4" />
               </svg>
-              {expanded ? "收起" : "详情"}
+              {expanded ? t("subagent.collapse") : t("subagent.details")}
             </button>
 
             {/* 分隔线 */}
@@ -1362,7 +1384,7 @@ export function SubAgentCard({
               <svg viewBox="0 0 14 14" fill="none" className="h-3 w-3 shrink-0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="8" height="8" rx="1" />
               </svg>
-              中断
+              {t("subagent.interrupt")}
             </button>
 
             {/* 重试 — success ghost */}
@@ -1375,7 +1397,7 @@ export function SubAgentCard({
                 <path d="M11 7A4 4 0 013.27 4.27" />
                 <path d="M3 2v3h3" />
               </svg>
-              重试
+              {t("subagent.retry")}
             </button>
           </div>
 

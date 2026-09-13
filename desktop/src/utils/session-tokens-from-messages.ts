@@ -13,9 +13,9 @@ export function sessionTokensFromMessages(
   for (const row of messages) {
     const usage = row.usage;
     if (!usage) continue;
-    const inp = Number(usage.inputTokens) || 0;
-    const out = Number(usage.outputTokens) || 0;
-    const hit = Number(usage.cachedTokens) || 0;
+    const inp = Number(usage.turnInputTokens ?? usage.inputTokens) || 0;
+    const out = Number(usage.turnOutputTokens ?? usage.outputTokens) || 0;
+    const hit = Number(usage.turnCachedTokens ?? usage.cachedTokens) || 0;
     if (inp <= 0 && out <= 0 && hit <= 0) continue;
     input += Math.max(0, Math.floor(inp));
     output += Math.max(0, Math.floor(out));

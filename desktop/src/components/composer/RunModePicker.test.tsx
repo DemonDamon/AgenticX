@@ -9,6 +9,7 @@ import {
   runModePanelStyle,
 } from "./RunModePicker";
 import { SECURITY_RULES_FOCUS } from "../../settings-tab";
+import { i18n } from "../../i18n/i18n";
 
 const mocks = vi.hoisted(() => ({
   setRunMode: vi.fn(),
@@ -57,15 +58,15 @@ describe("RunModePicker", () => {
     const html = renderToStaticMarkup(
       <RunModeMenu mode="ask" onSelect={() => {}} onCustomize={onCustomize} />,
     );
-    expect(html).toContain("自定义");
-    expect(html).toContain("拦截指定路径、命令或工具");
+    expect(html).toContain(i18n.t("composer.customize", { ns: "chat" }));
+    expect(html).toContain(i18n.t("composer.customizeHint", { ns: "chat" }));
     // 自定义不是第四个运行模式，只是入口，不能混进可选中的档位里。
     expect((html.match(/role="option"/g) ?? []).length).toBe(3);
   });
 
   it("does not render the custom entry when no handler is provided", () => {
     const html = renderToStaticMarkup(<RunModeMenu mode="ask" onSelect={() => {}} />);
-    expect(html).not.toContain("拦截指定路径、命令或工具");
+    expect(html).not.toContain(i18n.t("composer.customizeHint", { ns: "chat" }));
   });
 
   it("applies a non-auto mode without asking", async () => {

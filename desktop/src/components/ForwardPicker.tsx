@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, Search, X } from "lucide-react";
 import type { Avatar, GroupChat } from "../store";
 import { useAppStore } from "../store";
 import { META_AGENT_DISPLAY_NAME } from "../constants/branding";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import { i18n } from "../i18n/i18n";
 
 /** Resolved on confirm: either an existing session or avatar/group/meta to wake via createSession. */
 export type ForwardConfirmPayload =
@@ -65,10 +67,12 @@ function formatRelativeSessionTime(updatedAt: number): string {
   const startOfThat = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const dayDiff = Math.round((startOfToday - startOfThat) / 86_400_000);
   const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  if (dayDiff === 0) return `今天 ${hm}`;
-  if (dayDiff === 1) return `昨天 ${hm}`;
-  if (dayDiff === 2) return `前天 ${hm}`;
-  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (dayDiff === 0) return i18n.t("forward.today", { ns: "chat", time: hm });
+  if (dayDiff === 1) return i18n.t("forward.yesterday", { ns: "chat", time: hm });
+  if (dayDiff === 2) return i18n.t("forward.dayBefore", { ns: "chat", time: hm });
+  if (d.getFullYear() === now.getFullYear()) {
+    return i18n.t("forward.monthDay", { ns: "chat", month: d.getMonth() + 1, day: d.getDate() });
+  }
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
 }
 
@@ -103,6 +107,8 @@ export function ForwardPicker({
   onClose,
   onConfirm,
 }: ForwardPickerProps) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
   const metaAvatarUrl = useAppStore((s) => s.metaAvatarUrl);
   const [sessionSearch, setSessionSearch] = useState("");
   const [selectedTargetKey, setSelectedTargetKey] = useState<string | null>(null);
@@ -132,7 +138,7 @@ export function ForwardPicker({
     const metaRow: ForwardTargetItem = {
       key: "meta",
       title: META_AGENT_DISPLAY_NAME,
-      subtitle: "主智能体",
+      subtitle: t("forward.metaSubtitle"),
       avatarUrl: metaAvatarUrl.trim() || DEFAULT_META_AVATAR_URL,
       avatarContextId: "",
       kind: "meta",
@@ -141,7 +147,7 @@ export function ForwardPicker({
     const avatarRows: ForwardTargetItem[] = avatars.map((avatar) => ({
       key: `avatar:${avatar.id}`,
       title: avatar.name,
-      subtitle: "专家",
+      subtitle: t("forward.expertSubtitle"),
       avatarUrl: avatar.avatarUrl || undefined,
       avatarContextId: avatar.id,
       kind: "expert",
@@ -150,13 +156,13 @@ export function ForwardPicker({
     const groupRows: ForwardTargetItem[] = groups.map((group) => ({
       key: `group:${group.id}`,
       title: group.name,
-      subtitle: "群聊",
+      subtitle: t("forward.groupSubtitle"),
       avatarContextId: `group:${group.id}`,
       kind: "group",
       newPayload: { type: "group", groupId: group.id, displayName: group.name, forceNewSession: true },
     }));
     return [metaRow, ...avatarRows, ...groupRows];
-  }, [avatars, groups, metaAvatarUrl]);
+  }, [avatars, groups, metaAvatarUrl, t]);
 
   const primaryTargets = useMemo(
     () => targetItems.filter((item) => item.kind !== "group"),
@@ -207,7 +213,7 @@ export function ForwardPicker({
       .then((result) => {
         if (cancelled) return;
         if (!result.ok) {
-          setSessionsError("读取历史会话失败，请稍后重试");
+          setSessionsError(t("forward.loadFailed"));
           return;
         }
         const isMetaTarget = selectedTarget.key === "meta";
@@ -225,7 +231,7 @@ export function ForwardPicker({
             const sid = String(row.session_id || "").trim();
             return {
               key: `session:${sid}`,
-              title: String(row.session_name || "").trim() || "未命名会话",
+              title: String(row.session_name || "").trim() || t("forward.unnamedSession"),
               subtitle: formatRelativeSessionTime(Number(row.updated_at || 0)),
               sessionId: sid,
               payload: {
@@ -239,7 +245,7 @@ export function ForwardPicker({
         setSessionRows(rows);
       })
       .catch(() => {
-        if (!cancelled) setSessionsError("读取历史会话失败，请稍后重试");
+        if (!cancelled) setSessionsError(t("forward.loadFailed"));
       })
       .finally(() => {
         if (!cancelled) setSessionsLoading(false);
@@ -247,7 +253,7 @@ export function ForwardPicker({
     return () => {
       cancelled = true;
     };
-  }, [currentSessionId, open, selectedTarget]);
+  }, [currentSessionId, open, selectedTarget, t]);
 
   const sessionQuery = sessionSearch.trim().toLowerCase();
   const filteredSessionRows = sessionQuery
@@ -342,13 +348,13 @@ export function ForwardPicker({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="relative px-5 pb-3 pt-4">
-          <div className="pr-8 text-[15px] font-semibold text-text-strong">转发到</div>
-          <div className="mt-1 text-xs text-text-faint">选择一个对象，再决定新会话或继续历史会话</div>
+          <div className="pr-8 text-[15px] font-semibold text-text-strong">{t("forward.title")}</div>
+          <div className="mt-1 text-xs text-text-faint">{t("forward.subtitle")}</div>
           <button
             type="button"
             onClick={onClose}
             className="absolute right-4 top-4 rounded-md p-1 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
-            aria-label="关闭"
+            aria-label={tCommon("close")}
           >
             <X className="h-4 w-4" strokeWidth={1.75} />
           </button>
@@ -357,7 +363,7 @@ export function ForwardPicker({
         <div className="grid min-h-0 flex-1 grid-cols-[230px_minmax(0,1fr)] overflow-hidden border-t border-border">
           {/* Left: targets */}
           <div className="min-h-0 overflow-y-auto border-r border-border px-2 py-3">
-            <div className="mb-1.5 px-2 text-[11px] font-medium tracking-wide text-text-faint">对象</div>
+            <div className="mb-1.5 px-2 text-[11px] font-medium tracking-wide text-text-faint">{t("forward.targets")}</div>
             <div className="space-y-0.5">
               {primaryTargets.length > 0 ? primaryTargets.map(renderTargetRow) : null}
               {groupTargets.length > 0 ? (
@@ -367,7 +373,7 @@ export function ForwardPicker({
                 </>
               ) : null}
               {targetItems.length === 0 ? (
-                <div className="px-2 text-xs text-text-faint">暂无可用目标</div>
+                <div className="px-2 text-xs text-text-faint">{t("forward.noTargets")}</div>
               ) : null}
             </div>
           </div>
@@ -390,7 +396,7 @@ export function ForwardPicker({
                   "[html[data-theme=dark]_&]:bg-white/[0.06] [html[data-theme=dim]_&]:bg-white/[0.06] " +
                   "focus:ring-2 focus:ring-[rgba(var(--theme-color-rgb),0.28)]"
                 }
-                placeholder="搜索历史会话"
+                placeholder={t("forward.searchSessions")}
               />
             </div>
 
@@ -398,7 +404,7 @@ export function ForwardPicker({
               {selectedTarget
                 ? renderSessionChoice({
                     key: `new:${selectedTarget.key}`,
-                    title: "在新会话中继续",
+                    title: t("forward.continueNew"),
                     active: newSessionActive,
                     onClick: () => setSelectedPayload(selectedTarget.newPayload),
                   })
@@ -408,7 +414,7 @@ export function ForwardPicker({
                 <div className="my-1.5 border-t border-border" />
               ) : null}
 
-              {sessionsLoading ? <div className="px-3 py-2 text-xs text-text-faint">正在加载历史会话...</div> : null}
+              {sessionsLoading ? <div className="px-3 py-2 text-xs text-text-faint">{t("forward.loadingSessions")}</div> : null}
               {!sessionsLoading && sessionsError ? (
                 <div className="px-3 py-2 text-xs text-amber-500">{sessionsError}</div>
               ) : null}
@@ -424,14 +430,14 @@ export function ForwardPicker({
                   )
                 : null}
               {!sessionsLoading && !sessionsError && selectedTarget && sessionRows.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-text-faint">该目标暂无可继续的历史会话</div>
+                <div className="px-3 py-2 text-xs text-text-faint">{t("forward.noSessions")}</div>
               ) : null}
               {!sessionsLoading &&
               !sessionsError &&
               selectedTarget &&
               sessionRows.length > 0 &&
               filteredSessionRows.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-text-faint">没有匹配的历史会话</div>
+                <div className="px-3 py-2 text-xs text-text-faint">{t("forward.noMatch")}</div>
               ) : null}
             </div>
           </div>
@@ -441,7 +447,7 @@ export function ForwardPicker({
           <input
             value={followUpNote}
             onChange={(e) => setFollowUpNote(e.target.value)}
-            placeholder="补充一句说明（选填）"
+            placeholder={t("forward.followUpPlaceholder")}
             className={
               "h-9 min-w-0 flex-1 rounded-[10px] border-0 bg-black/[0.04] px-3 text-[13px] text-text-primary outline-none " +
               "placeholder:text-text-faint " +
@@ -454,7 +460,7 @@ export function ForwardPicker({
             className="shrink-0 px-2 py-1.5 text-[13px] text-text-faint transition hover:text-text-strong"
             onClick={onClose}
           >
-            取消
+            {tCommon("cancel")}
           </button>
           <button
             type="button"
@@ -473,7 +479,7 @@ export function ForwardPicker({
               }
             }}
           >
-            {submitting ? "转发中..." : "确认转发"}
+            {submitting ? t("forward.submitting") : t("forward.confirm")}
           </button>
         </div>
       </div>

@@ -495,10 +495,13 @@ export function resolveSilenceTier(
 export function resolveSilenceTierLabel(
   tier: SilenceTier,
   silentSeconds: number,
+  t?: (key: string, options?: Record<string, unknown>) => string,
 ): string {
-  if (tier === "thinking") return "正在思考…";
-  if (tier === "slow") return `模型响应较慢（已等 ${silentSeconds}s）`;
-  return `可能已卡住（已等 ${silentSeconds}s）`;
+  if (tier === "thinking") return t ? t("silence.thinking") : "正在思考…";
+  if (tier === "slow") {
+    return t ? t("silence.slow", { seconds: silentSeconds }) : `模型响应较慢（已等 ${silentSeconds}s）`;
+  }
+  return t ? t("silence.stuck", { seconds: silentSeconds }) : `可能已卡住（已等 ${silentSeconds}s）`;
 }
 
 export function resolveSessionHealth(

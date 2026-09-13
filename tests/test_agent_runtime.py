@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import pytest
+
 from agenticx.cli.studio import StudioSession
 from agenticx.runtime import AgentRuntime, ConfirmGate, EventType
 from agenticx.runtime.agent_runtime import _chat_history_append_deduped
@@ -56,6 +58,30 @@ class _AlwaysToolLLM:
         yield ""
 
 
+class _AlwaysRestrictedWriteLLM:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        return _FakeResponse(
+            "trying to write",
+            [
+                {
+                    "id": f"call-plan-write-{self.calls}",
+                    "type": "function",
+                    "function": {
+                        "name": "file_write",
+                        "arguments": {"path": "/tmp/game.html", "content": "<html />"},
+                    },
+                }
+            ],
+        )
+
+    def stream(self, *_args, **_kwargs):
+        yield ""
+
+
 class _AlwaysStatusQueryLLM:
     def invoke(self, *_args, **_kwargs):
         return _FakeResponse(
@@ -71,6 +97,42 @@ class _AlwaysStatusQueryLLM:
                 }
             ],
         )
+
+    def stream(self, *_args, **_kwargs):
+        yield ""
+
+
+class _SleepThenFinalLLM:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, *_args, **_kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return _FakeResponse(
+                "waiting",
+                [
+                    {
+                        "id": "call-sleep",
+                        "type": "function",
+                        "function": {
+                            "name": "bash_exec",
+                            "arguments": {"command": "sleep 90"},
+                        },
+                    }
+                ],
+            )
+        return _FakeResponse("委派任务正在后台运行。", [])
+
+    def stream(self, *_args, **_kwargs):
+        yield ""
+
+
+class _ReasoningOnlyLLM:
+    def invoke(self, *_args, **_kwargs):
+        response = _FakeResponse("<think>继续分析代码结构</think>", [])
+        response.reasoning_content = "继续分析代码结构"
+        return response
 
     def stream(self, *_args, **_kwargs):
         yield ""
@@ -162,6 +224,101 @@ def test_runtime_event_flow_tool_confirm_result_final(monkeypatch) -> None:
     assert checkpoints[-1][-1]["metadata"]["turn_terminal"] is True
 
 
+async def test_runtime_tool_result_keeps_full_ledger_only_result(
+    monkeypatch,
+) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    class _ReadThenFinalLLM(_ToolThenFinalLLM):
+        def invoke(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(
+                    "need tool",
+                    [
+                        {
+                            "id": "call-read",
+                            "type": "function",
+                            "function": {
+                                "name": "list_files",
+                                "arguments": {"path": ".", "limit": 1},
+                            },
+                        }
+                    ],
+                )
+            return _FakeResponse("done", [])
+
+    full_result = "r" * 5001
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return full_result
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    runtime = AgentRuntime(_ReadThenFinalLLM(), _ApproveGate())
+    events = [
+        event
+        async for event in runtime.run_turn("do it", StudioSession())
+    ]
+    result_event = next(
+        event for event in events if event.type == EventType.TOOL_RESULT.value
+    )
+
+    assert result_event.private_data["raw_result"] == full_result
+    assert result_event.private_data["tool_status"] == "completed"
+    assert result_event.data["result"] != full_result
+
+
+@pytest.mark.parametrize(
+    ("raw_result", "expected_status"),
+    [
+        ('{"ok":false,"error":"denied"}', "error"),
+        ("ERROR: tool failed", "error"),
+        ("CANCELLED: user stopped", "cancelled"),
+        ("[ACTION_REJECTED] user declined", "cancelled"),
+    ],
+)
+async def test_runtime_tool_result_private_status_uses_existing_classification(
+    monkeypatch,
+    raw_result: str,
+    expected_status: str,
+) -> None:
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    class _ReadThenFinalLLM(_ToolThenFinalLLM):
+        def invoke(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return _FakeResponse(
+                    "need tool",
+                    [
+                        {
+                            "id": "call-status",
+                            "type": "function",
+                            "function": {
+                                "name": "list_files",
+                                "arguments": {"path": ".", "limit": 1},
+                            },
+                        }
+                    ],
+                )
+            return _FakeResponse("done", [])
+
+    async def _fake_dispatch(*_args, **_kwargs):
+        return raw_result
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    runtime = AgentRuntime(_ReadThenFinalLLM(), _ApproveGate())
+    result_events = [
+        event
+        async for event in runtime.run_turn("do it", StudioSession())
+        if event.type == EventType.TOOL_RESULT.value
+    ]
+    result_event = result_events[0]
+
+    assert result_event.private_data["raw_result"] == raw_result
+    assert result_event.private_data["tool_status"] == expected_status
+
+
 def test_runtime_max_rounds_emits_error(monkeypatch) -> None:
     from agenticx.runtime import agent_runtime as runtime_module
 
@@ -173,6 +330,36 @@ def test_runtime_max_rounds_emits_error(monkeypatch) -> None:
     events = __import__("asyncio").run(_collect(runtime, StudioSession(), "loop"))
     assert all(e["agent_id"] == "meta" for e in events)
     assert events[-1]["type"] == EventType.ERROR.value
+
+
+def test_plan_mode_stops_after_two_restricted_tool_attempts() -> None:
+    llm = _AlwaysRestrictedWriteLLM()
+    runtime = AgentRuntime(llm, _ApproveGate(), max_tool_rounds=20)
+    session = StudioSession()
+    session.plan_mode = True
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "file_read",
+                "description": "Read a file",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+
+    async def _run() -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        async for event in runtime.run_turn("做一个小游戏", session, tools=tools):
+            items.append({"type": event.type, "data": event.data, "agent_id": event.agent_id})
+        return items
+
+    events = __import__("asyncio").run(_run())
+
+    assert llm.calls == 2
+    assert events[-1]["type"] == EventType.FINAL.value
+    assert events[-1]["data"]["terminal_reason"] == "plan_mode_tool_violation"
+    assert "没有创建或修改任何文件" in events[-1]["data"]["text"]
 
 
 def test_runtime_text_only_emits_tokens_then_final() -> None:
@@ -921,3 +1108,76 @@ def test_runtime_can_replace_active_llm_after_fallback() -> None:
     assert runtime._reload_llm_for_session(StudioSession()) is True
     assert runtime.llm is replacement
     assert runtime.compactor.llm is replacement
+
+
+def test_meta_blocks_pure_shell_sleep_while_delegation_running(monkeypatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from agenticx.runtime import agent_runtime as runtime_module
+
+    dispatched: list[str] = []
+
+    async def _fake_dispatch(name, *_args, **_kwargs):
+        dispatched.append(name)
+        return "unexpected"
+
+    monkeypatch.setattr(runtime_module, "dispatch_tool_async", _fake_dispatch)
+    running = SimpleNamespace(
+        _delegation_task=SimpleNamespace(done=lambda: False),
+    )
+    session = StudioSession()
+    session._session_manager = SimpleNamespace(_sessions={"avatar-session": running})
+    runtime = AgentRuntime(_SleepThenFinalLLM(), _ApproveGate())
+
+    async def _run():
+        return [
+            event
+            async for event in runtime.run_turn(
+                "让分身执行",
+                session,
+                agent_id="meta",
+            )
+        ]
+
+    events = asyncio.run(_run())
+
+    assert "bash_exec" not in dispatched
+    assert any(
+        event.type == EventType.TOOL_RESULT.value
+        and "后台完成事件" in str(event.data.get("result", ""))
+        for event in events
+    )
+
+
+def test_shell_wait_guard_does_not_match_business_commands() -> None:
+    from agenticx.runtime.agent_runtime import _is_pure_shell_wait_command
+
+    assert _is_pure_shell_wait_command("sleep 90") is True
+    assert _is_pure_shell_wait_command("wait") is True
+    assert _is_pure_shell_wait_command("python build.py --label sleep") is False
+    assert _is_pure_shell_wait_command("echo sleep 90") is False
+
+
+def test_delegation_reasoning_only_stall_pauses_early() -> None:
+    import asyncio
+
+    session = StudioSession()
+    runtime = AgentRuntime(_ReasoningOnlyLLM(), _ApproveGate(), max_tool_rounds=20)
+
+    async def _run():
+        return [
+            event
+            async for event in runtime.run_turn(
+                "执行委派任务",
+                session,
+                agent_id="dlg-reasoning",
+            )
+        ]
+
+    events = asyncio.run(_run())
+    paused = next(event for event in events if event.type == EventType.SUBAGENT_PAUSED.value)
+
+    assert paused.data["detector"] == "reasoning_only_stall"
+    assert paused.data["retryable"] is True
+    assert int(paused.data["round"]) < 20

@@ -57,10 +57,20 @@ import { MarkdownContext } from "./markdown-components";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import type { FileReferenceOpenRequest } from "../../utils/reference-attachment";
 import { HistoricalSubAgentClusterCard } from "../subagent";
+import { PlanArtifactCard } from "./PlanArtifactCard";
+import {
+  parsePlanArtifactToolResult,
+  type PlanArtifactPayload,
+} from "../../utils/plan-artifact";
 import type {
   ActionConfirmationDecision,
   PendingActionConfirmation,
 } from "../../utils/action-confirmation";
+import { BranchLineageCard } from "../replay/BranchLineageCard";
+import {
+  parseBranchLineage,
+  type BranchLineage,
+} from "../../utils/session-message-map";
 
 type Props = {
   message: Message;
@@ -140,6 +150,10 @@ type Props = {
   onOpenAllArtifacts?: () => void;
   /** Open WorkPanel「变更」for the session write/edit list. */
   onOpenAllChanges?: () => void;
+  onViewPlan?: (path: string) => void;
+  onBuildPlan?: (plan: PlanArtifactPayload) => void;
+  onOpenBranchSource?: (lineage: BranchLineage) => void;
+  onContinueFromMessage?: (message: Message) => void;
 };
 
 function extractPathFromToolResult(msg: string): string {
@@ -239,7 +253,11 @@ function assistantHandoff(
     onOpenAllChanges?: () => void;
   },
 ): { paths: string[]; card: ReactNode } {
-  if (message.role !== "assistant" || isStreamingAssistantId(message.id)) {
+  if (
+    message.role !== "assistant"
+    || isStreamingAssistantId(message.id)
+    || message.presentationHoldDeliverables
+  ) {
     return { paths: [], card: null };
   }
   const paths = collectTurnArtifactPaths(allMessages, message.id);
@@ -369,6 +387,10 @@ export function MessageRenderer({
   onResolveActionConfirmation,
   onOpenAllArtifacts,
   onOpenAllChanges,
+  onViewPlan,
+  onBuildPlan,
+  onOpenBranchSource,
+  onContinueFromMessage,
 }: Props) {
   const chatStyle = useAppStore((s) => s.chatStyle);
   const resolvedReferences = useMemo(() => {
@@ -377,6 +399,7 @@ export function MessageRenderer({
   }, [message, allMessages]);
   const displayMessage = useMemo(() => {
     if (message.role !== "assistant") return message;
+    if (message.presentationHoldDeliverables) return message;
     const resolvedBlocks = resolveAssistantBlocks(message, allMessages);
     const withBlocks =
       resolvedBlocks && resolvedBlocks !== message.blocks
@@ -397,6 +420,15 @@ export function MessageRenderer({
     const fromTurn = collectTurnLightboxImages(patched, displayMessage.id);
     return fromTurn.length > 0 ? fromTurn : readyLightboxImages(displayMessage.blocks);
   }, [displayMessage, allMessages]);
+  const branchLineage = parseBranchLineage(message.metadata);
+  if (branchLineage) {
+    return (
+      <BranchLineageCard
+        lineage={branchLineage}
+        onOpenSource={onOpenBranchSource}
+      />
+    );
+  }
   if (message.systemNotice) {
     const text = String(message.content ?? "").trim();
     if (!text) return null;
@@ -495,6 +527,7 @@ export function MessageRenderer({
         onQuoteMessage={onQuoteMessage}
         onWebSearchMessage={onWebSearchMessage}
         onQuoteToNewPane={onQuoteToNewPane}
+        onContinueFromMessage={onContinueFromMessage}
         onFavoriteMessage={onFavoriteMessage}
         onToggleSelectMessage={onToggleSelectMessage}
         onForwardMessage={onForwardMessage}
@@ -530,6 +563,21 @@ export function MessageRenderer({
     }
     if (message.toolName === "group_progress") {
       return <GroupProgressLine message={message} />;
+    }
+    if ((message.toolName ?? "").trim() === "plan_update") {
+      return null;
+    }
+    if ((message.toolName ?? "").trim() === "plan_create") {
+      const plan = parsePlanArtifactToolResult(message.content);
+      if (plan) {
+        return (
+          <PlanArtifactCard
+            initialPlan={plan}
+            onViewPlan={onViewPlan}
+            onBuildPlan={onBuildPlan}
+          />
+        );
+      }
     }
     if (message.noticeKind === "budget_exceeded" || /Token budget exceeded/i.test(String(message.content ?? ""))) {
       const current = Number(message.budgetCurrent);

@@ -1,5 +1,12 @@
 import { ChevronDown, Link2, RefreshCw, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type DiscoverServer = {
   name: string;
@@ -29,6 +36,7 @@ type Props = {
 };
 
 export function MCPDiscoveryPanel({ loading, hits, onRefresh, onImport, onLinkOnly, onOpenPath }: Props) {
+  const { t } = useTranslation("settings");
   const [menuBrand, setMenuBrand] = useState<string | null>(null);
   const sortedHits = useMemo(
     () => [...hits].sort((a, b) => Number(b.exists) - Number(a.exists) || a.display_name.localeCompare(b.display_name)),
@@ -38,7 +46,7 @@ export function MCPDiscoveryPanel({ loading, hits, onRefresh, onImport, onLinkOn
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-xs text-text-faint">自动扫描常见 AI 工具的 MCP 配置路径。</div>
+        <div className="text-xs text-text-faint">{st("mcpRemote.scanHint")}</div>
         <button
           type="button"
           className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover"
@@ -46,12 +54,12 @@ export function MCPDiscoveryPanel({ loading, hits, onRefresh, onImport, onLinkOn
           disabled={loading}
         >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          重新扫描
+          {st("mcpRemote.rescan")}
         </button>
       </div>
 
       {sortedHits.length === 0 ? (
-        <div className="rounded-md border border-border bg-surface-panel px-3 py-4 text-sm text-text-faint">暂无扫描结果。</div>
+        <div className="rounded-md border border-border bg-surface-panel px-3 py-4 text-sm text-text-faint">{st("mcpRemote.noScan")}</div>
       ) : (
         <div className="space-y-2">
           {sortedHits.map((hit) => (
@@ -60,15 +68,15 @@ export function MCPDiscoveryPanel({ loading, hits, onRefresh, onImport, onLinkOn
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-text-muted">
                     {hit.display_name}
-                    <span className="ml-2 text-[11px] text-text-faint">{hit.server_count} 个服务</span>
+                    <span className="ml-2 text-[11px] text-text-faint">{st("mcpRemote.serverCount", { count: hit.server_count })}</span>
                   </div>
                   <div className="truncate text-[11px] text-text-faint">{hit.path}</div>
                   {!hit.exists ? (
-                    <div className="mt-1 text-[11px] text-amber-400">未找到</div>
+                    <div className="mt-1 text-[11px] text-amber-400">{st("mcpRemote.notFound")}</div>
                   ) : hit.parse_ok ? (
-                    <div className="mt-1 text-[11px] text-emerald-400">可读取</div>
+                    <div className="mt-1 text-[11px] text-emerald-400">{st("mcpRemote.readable")}</div>
                   ) : (
-                    <div className="mt-1 text-[11px] text-rose-400">解析失败：{hit.parse_error || "未知错误"}</div>
+                    <div className="mt-1 text-[11px] text-rose-400">{st("mcpRemote.parseFailed", { error: hit.parse_error || st("mcpRemote.unknownError") })}</div>
                   )}
                 </div>
                 <div className="relative flex shrink-0 items-center gap-1">
@@ -79,7 +87,7 @@ export function MCPDiscoveryPanel({ loading, hits, onRefresh, onImport, onLinkOn
                     disabled={!hit.exists || hit.format === "detect-only"}
                   >
                     <Upload className="h-3.5 w-3.5" />
-                    导入
+                    {st("mcpRemote.import")}
                   </button>
                   <button
                     type="button"
@@ -100,7 +108,7 @@ export function MCPDiscoveryPanel({ loading, hits, onRefresh, onImport, onLinkOn
                         }}
                       >
                         <Link2 className="h-3.5 w-3.5" />
-                        仅链接
+                        {st("mcpRemote.linkOnly")}
                       </button>
                       <button
                         type="button"
@@ -111,7 +119,7 @@ export function MCPDiscoveryPanel({ loading, hits, onRefresh, onImport, onLinkOn
                           void onOpenPath(hit.path);
                         }}
                       >
-                        打开文件
+                        {st("mcpRemote.openFile")}
                       </button>
                     </div>
                   ) : null}

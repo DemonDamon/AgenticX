@@ -68,14 +68,22 @@ from agenticx.runtime.events import (
 )
 from agenticx.runtime.hooks import HookRegistry
 from agenticx.runtime.loop_detector import LoopDetector
+from agenticx.runtime.plan_mode import (
+    plan_mode_retry_limit_reached,
+    turn_intent_denial_message,
+)
 from agenticx.runtime.llm_retry import LLMRetryPolicy, _classify_error
 from agenticx.runtime.subagent_runs import SubAgentRunStore
 from agenticx.runtime.token_budget import BudgetLevel, TokenBudgetGuard
-from agenticx.runtime.truncated_final import detect_suspected_truncated_final
+from agenticx.runtime.truncated_final import (
+    detect_suspected_truncated_final,
+    is_search_deferral_stub,
+)
 from agenticx.runtime.usage_metadata import (
     add_usage_dicts,
     empty_usage_dict,
     normalize_stream_usage,
+    request_usage_for_message,
     usage_dict_has_counts,
     usage_metadata_from_llm_response,
 )
@@ -1195,6 +1203,8 @@ def _build_attached_files_hint(session: StudioSession) -> str:
         "\n\n[已附文件]\n"
         + "\n".join(lines)
         + "\n上述文件内容已在 system prompt 的 context_files 节中给出，请直接阅读并基于其回答。"
+        + "\n若必须用 bash/Python 处理 PDF、DOCX、压缩包或图片的原始二进制，"
+        + "先调用 stage_context_file(path) 获取工作区副本；不要直接绕过只读边界。"
     )
 
 
@@ -1818,6 +1828,23 @@ _GLM_TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*([A-Za-z0-9_./-]+)\s*(.*?)\s*</tool_call>",
     re.IGNORECASE | re.DOTALL,
 )
+_INVOKE_BLOCK_RE = re.compile(
+    r"<\s*invoke\s+name\s*=\s*[\"']([A-Za-z0-9_./-]+)[\"']\s*>"
+    r"(.*?)"
+    r"</\s*invoke\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_INVOKE_PARAM_RE = re.compile(
+    r"<\s*parameter\s+name\s*=\s*[\"']([^\"']+)[\"']\s*>"
+    r"(.*?)"
+    r"</\s*parameter\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_INLINE_TOOL_MARKUP_RE = re.compile(
+    r"<\s*(?:[\w.-]+:)?tool_call\b[^>]*>[\s\S]*?</\s*(?:[\w.-]+:)?tool_call\s*>"
+    r"|<\s*invoke\b[^>]*>[\s\S]*?</\s*invoke\s*>",
+    re.IGNORECASE,
+)
 _GLM_ARG_KEY_OPEN = "<arg_key>"
 _GLM_ARG_VALUE_CLOSE = "</arg_value>"
 _GLM_ARG_CANONICAL_SPLIT_RE = re.compile(
@@ -1958,6 +1985,25 @@ def _extract_inline_tool_call(
         args = _normalize_file_tool_arg_aliases(name, args)
         return {"name": name, "arguments": args}
 
+    # Vendor invoke/parameter dialect (often wrapped in *:tool_call).
+    for inv in _INVOKE_BLOCK_RE.finditer(text):
+        name = str(inv.group(1) or "").strip()
+        if name not in allowed_tool_names:
+            continue
+        args: Dict[str, Any] = {}
+        for param in _INVOKE_PARAM_RE.finditer(inv.group(2) or ""):
+            key = str(param.group(1) or "").strip()
+            raw = str(param.group(2) or "").strip()
+            if not key:
+                continue
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = raw
+            args[key] = parsed
+        args = _normalize_file_tool_arg_aliases(name, args)
+        return {"name": name, "arguments": args}
+
     # Find the first allowed tool call anywhere in the snippet.
     # This supports wrappers such as print(check_resources()).
     tool_name: Optional[str] = None
@@ -1984,6 +2030,23 @@ def _extract_inline_tool_call(
         "name": tool_name,
         "arguments": _normalize_file_tool_arg_aliases(tool_name, args_obj),
     }
+
+
+def _strip_inline_tool_markup(text: str) -> str:
+    """Remove invoke / tool_call XML wrappers from visible assistant text."""
+    cleaned = _INLINE_TOOL_MARKUP_RE.sub("", str(text or ""))
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def _has_inline_tool_markup(text: str) -> bool:
+    """True when assistant text still contains invoke or tool_call markup."""
+    return bool(_INLINE_TOOL_MARKUP_RE.search(str(text or "")))
+
+
+def _has_unexecuted_inline_tool_markup(text: str) -> bool:
+    """True when raw text has invoke or GLM tool_call blocks that need recovery."""
+    raw = str(text or "")
+    return bool(_INVOKE_BLOCK_RE.search(raw) or _GLM_TOOL_CALL_RE.search(raw))
 
 
 _THINK_OPEN_TAG = chr(60) + "think" + chr(62)
@@ -2311,6 +2374,30 @@ _TRUNCATED_FINAL_NUDGE_HINT = (
 )
 
 
+def _is_pure_shell_wait_command(command: str) -> bool:
+    """Return True only for a standalone shell sleep/wait command."""
+    normalized = str(command or "").strip()
+    if not normalized:
+        return False
+    return bool(
+        re.fullmatch(
+            r"(?:sleep(?:\s+\d+(?:\.\d+)?[smhd]?)?|wait(?:\s+%\d+)?)\s*;?",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _session_has_running_delegation(session: Any) -> bool:
+    manager = getattr(session, "_session_manager", None)
+    sessions = getattr(manager, "_sessions", None) or {}
+    for managed in sessions.values():
+        task = getattr(managed, "_delegation_task", None)
+        if task is not None and not task.done():
+            return True
+    return False
+
+
 def _sanitize_structured_assistant_text(text: str, allowed_tool_names: set[str]) -> str:
     """Extract user-facing content from model-emitted JSON wrappers.
 
@@ -2440,6 +2527,38 @@ def _tool_result_ok_flag(result: Any) -> Optional[bool]:
         return None
     flag = parsed.get("ok")
     return flag if isinstance(flag, bool) else None
+
+
+def _tool_result_status(
+    result: Any,
+    *,
+    explicit_status: Any = None,
+    is_error: bool = False,
+) -> str:
+    """Normalize existing tool-result signals for durable replay metadata."""
+    text = str(result or "")
+    head = text.lstrip()
+    if head.startswith(
+        (
+            "CANCELLED:",
+            "[ACTION_REJECTED]",
+            "[ACTION_CONFIRMATION_EXPIRED]",
+            "[ACTION_CONFIRMATION_SUSPENDED]",
+        )
+    ):
+        return "cancelled"
+    normalized = str(explicit_status or "").strip().lower()
+    if normalized in {"cancelled", "canceled"}:
+        return "cancelled"
+    if is_error or normalized in {"error", "failed", "failure"}:
+        return "error"
+    ok_flag = _tool_result_ok_flag(result)
+    if ok_flag is False:
+        return "error"
+    outcome = _classify_tool_turn_outcome("", text)
+    if outcome == "failed":
+        return "error"
+    return "completed"
 
 
 def _build_loop_halt_success_digest(session: StudioSession, *, max_items: int = 20) -> str:
@@ -2594,7 +2713,12 @@ async def _eager_knowledge_search_events(
         blocked_message = hook_outcome.reason or f"工具 {tool_name} 被策略阻止。"
         yield RuntimeEvent(
             type=EventType.TOOL_RESULT.value,
-            data={"name": tool_name, "result": blocked_message, "tool_call_id": tool_call_id},
+            data={
+                "name": tool_name,
+                "result": blocked_message,
+                "tool_call_id": tool_call_id,
+                "is_error": True,
+            },
             agent_id=agent_id,
         )
         return
@@ -2672,6 +2796,10 @@ async def _eager_knowledge_search_events(
         type=EventType.TOOL_RESULT.value,
         data=_tool_result_data,
         agent_id=agent_id,
+        private_data={
+            "raw_result": raw_result,
+            "tool_status": _tool_result_status(raw_result),
+        },
     )
     runtime._tools_since_persist += 1
     runtime._maybe_mid_turn_persist()
@@ -2695,11 +2823,13 @@ class AgentRuntime:
         is_unattended: bool = False,
         llm_factory: Optional[Callable[[], Any]] = None,
         checkpoint_store: Optional[Any] = None,
+        run_recorder: Optional[Any] = None,
     ) -> None:
         self.llm = llm
         self._llm_factory = llm_factory
         self.confirm_gate = confirm_gate
         self._checkpoint_store = checkpoint_store
+        self._run_recorder = run_recorder
         self._current_turn_id: str = ""
         self._checkpoint_created_at: float = 0.0
         self.clarify_gate = clarify_gate
@@ -2868,6 +2998,10 @@ class AgentRuntime:
                 AgentCheckpoint(
                     session_id=session_id,
                     turn_id=self._current_turn_id,
+                    run_id=str(
+                        getattr(self._run_recorder, "current_run_id", "") or ""
+                    )
+                    or None,
                     round_idx=max(0, int(round_idx)),
                     status=status,
                     pending_tool_calls=[
@@ -3051,6 +3185,14 @@ class AgentRuntime:
                     hist_usage["total_tokens"] = (
                         hist_usage["input_tokens"] + hist_usage["output_tokens"]
                     )
+                for key in (
+                    "turn_input_tokens",
+                    "turn_output_tokens",
+                    "turn_cached_tokens",
+                    "turn_total_tokens",
+                ):
+                    if int(usage_metadata.get(key, 0) or 0) > 0:
+                        hist_usage[key] = int(usage_metadata.get(key, 0) or 0)
                 if usage_dict_has_counts(hist_usage):
                     hist["usage"] = hist_usage
             _chat_history_append_deduped(session.chat_history, hist)
@@ -3104,6 +3246,7 @@ class AgentRuntime:
         usage_session_id: Optional[str] = None,
         usage_avatar_id: Optional[str] = None,
         resume_start_round: int = 1,
+        resume_turn_id: Optional[str] = None,
     ) -> AsyncGenerator[RuntimeEvent, None]:
         """Public entry: wraps the turn with crash-recovery checkpoint lifecycle.
 
@@ -3114,38 +3257,31 @@ class AgentRuntime:
         checkpoint so a restarted process can resume the turn.
         """
         store = self._checkpoint_store
-        if store is None:
-            async for event in self._run_turn_inner(
-                user_input,
-                session,
-                should_stop,
-                agent_id=agent_id,
-                tools=tools,
-                system_prompt=system_prompt,
-                user_message_content=user_message_content,
-                history_user_attachments=history_user_attachments,
-                history_user_metadata=history_user_metadata,
-                history_user_content=history_user_content,
-                history_quoted_content=history_quoted_content,
-                history_quoted_message_id=history_quoted_message_id,
-                persist_user_message=persist_user_message,
-                usage_session_id=usage_session_id,
-                usage_avatar_id=usage_avatar_id,
-                resume_start_round=resume_start_round,
-            ):
-                yield event
-            return
-
-        from agenticx.runtime.checkpoint import AgentCheckpoint
-
         session_id = str(getattr(session, "session_id", "") or "").strip()
-        self._current_turn_id = store.new_turn_id()
+        self._current_turn_id = str(resume_turn_id or "").strip() or (
+            store.new_turn_id() if store is not None else uuid.uuid4().hex
+        )
         self._checkpoint_created_at = time.time()
+        recorder = self._run_recorder
+        if recorder is not None:
+            try:
+                recorder.start_turn(
+                    turn_id=self._current_turn_id,
+                    user_input=user_input,
+                    history_metadata=history_user_metadata,
+                    session=session,
+                )
+            except Exception:
+                logger.warning("replay recorder start failed; continuing without ledger", exc_info=True)
+                recorder = None
         start_round = max(1, int(resume_start_round))
-        if session_id:
+        if store is not None and session_id:
             self._write_run_checkpoint(session, round_idx=start_round - 1)
         saw_final = False
+        saw_error = False
+        saw_stop = False
         normal_end = False
+        current_round: int | None = None
         inner = self._run_turn_inner(
             user_input,
             session,
@@ -3166,12 +3302,43 @@ class AgentRuntime:
         )
         try:
             async for event in inner:
+                if getattr(event, "type", None) == EventType.ROUND_START.value:
+                    current_round = int((getattr(event, "data", None) or {}).get("round", 0) or 0) or None
                 if getattr(event, "type", None) == EventType.FINAL.value:
                     saw_final = True
+                if getattr(event, "type", None) == EventType.ERROR.value:
+                    saw_error = True
+                    event_text = str((getattr(event, "data", None) or {}).get("text", "") or "")
+                    if event_text == STOP_MESSAGE:
+                        saw_stop = True
+                if recorder is not None:
+                    try:
+                        recorder.observe(event, session=session, round_idx=current_round)
+                    except Exception:
+                        logger.warning(
+                            "replay recorder observe failed; continuing agent turn",
+                            exc_info=True,
+                        )
+                        recorder = None
                 yield event
             normal_end = True
         finally:
-            if session_id and (normal_end or saw_final):
+            if recorder is not None:
+                try:
+                    if saw_final:
+                        recorder.finish("completed")
+                    elif normal_end and saw_stop:
+                        recorder.finish("interrupted")
+                    elif normal_end and saw_error:
+                        recorder.finish("failed")
+                    else:
+                        recorder.finish("interrupted")
+                except Exception:
+                    logger.warning(
+                        "replay recorder finish failed; preserving agent result",
+                        exc_info=True,
+                    )
+            if store is not None and session_id and (normal_end or saw_final):
                 store.clear(session_id)
             try:
                 await inner.aclose()
@@ -3225,6 +3392,12 @@ class AgentRuntime:
             reset_turn_references(session)
         except Exception:
             pass
+        try:
+            from agenticx.observability.correlation import bind_correlation_from_session
+
+            bind_correlation_from_session(session)
+        except Exception:
+            pass
         # Reset per-turn exploratory tracking so each turn starts with a
         # fresh "schema discovery" budget.
         self._recent_exploratory_fps.clear()
@@ -3236,6 +3409,12 @@ class AgentRuntime:
         full_tool_pool: list[Dict[str, Any]] = list(
             studio_tools_for_session(session) if tools is None else tools
         )
+        try:
+            from agenticx.ops.tools import merge_ops_tools_into
+
+            full_tool_pool = merge_ops_tools_into(full_tool_pool)
+        except Exception:
+            pass
         from agenticx.runtime.context_budget import maybe_compact_meta_turn_context
         from agenticx.runtime.tool_search import (
             auto_load_deferred_tool,
@@ -3609,6 +3788,7 @@ class AgentRuntime:
         completed_tool_names: set[str] = set()
         last_tool_outcome: ToolTurnOutcome = "unknown"
         confirmation_spam_count = 0
+        plan_mode_restricted_attempts = 0
         rounds_without_todo = 0
         # Turn-level counter for reasoning-only rounds (model emitted < Mattis> but no
         # visible body and no tool_call). Capped at 1 to avoid infinite nudge loops.
@@ -3618,6 +3798,7 @@ class AgentRuntime:
         reasoning_before_nudge = ""
         reasoning_only_protocol_errors: list[str] = []
         setattr(session, "_empty_tool_calls_retry_used", False)
+        setattr(session, "_search_deferral_retry_used", False)
 
         def _record_tool_turn_outcome(
             outcome: ToolTurnOutcome,
@@ -3698,6 +3879,17 @@ class AgentRuntime:
             )
 
         turn_usage = empty_usage_dict()
+        last_round_usage = empty_usage_dict()
+
+        def _usage_for_terminal() -> dict[str, Any] | None:
+            row = request_usage_for_message(last_round_usage, turn_usage)
+            if not row:
+                return None
+            out: dict[str, Any] = dict(row)
+            out["model"] = model_name
+            out["provider"] = provider_name
+            return out
+
         for round_idx in range(max(1, int(resume_start_round)), self.max_tool_rounds + 1):
             if await _check_should_stop():
                 yield RuntimeEvent(type=EventType.ERROR.value, data={"text": STOP_MESSAGE}, agent_id=agent_id)
@@ -3876,6 +4068,7 @@ class AgentRuntime:
                 try:
                     from agenticx.runtime.tool_search import (
                         estimate_schema_tokens,
+                        resolve_apply_threshold,
                         should_apply_tool_search,
                     )
 
@@ -3884,17 +4077,21 @@ class AgentRuntime:
                     if ts_ctx.resolved_applied is not None:
                         _ts_applied = bool(ts_ctx.resolved_applied)
                     else:
+                        _ts_apply_gate = ts_ctx.apply_threshold
+                        if _ts_apply_gate is None:
+                            _ts_apply_gate = resolve_apply_threshold(ts_ctx.config)
                         _ts_applied = should_apply_tool_search(
                             ts_ctx.config,
                             full_pool_schema_tokens=_ts_before,
                             tool_search_allowed=ts_ctx.tool_search_allowed,
-                            effective_threshold=ts_ctx.effective_threshold,
+                            effective_threshold=_ts_apply_gate,
                             prev_applied=ts_ctx.prev_applied,
                         )
                     _ts_mode = str(ts_ctx.config.normalized().mode)
                     _ts_loaded = len(ts_ctx.state.loaded_ids)
                     _ts_candidates = len(ts_ctx.catalog.descriptors)
                     _ts_threshold = int(ts_ctx.effective_threshold or 0)
+                    _ts_apply_threshold = int(getattr(ts_ctx, "apply_threshold", None) or 0)
                     _ts_strategy = str(ts_ctx.config.normalized().threshold_strategy)
                     _ts_latched = bool(
                         ts_ctx.prev_applied is not None and ts_ctx.prev_applied == _ts_applied
@@ -3907,6 +4104,7 @@ class AgentRuntime:
                     _ts_loaded = 0
                     _ts_candidates = 0
                     _ts_threshold = 0
+                    _ts_apply_threshold = 0
                     _ts_strategy = "adaptive"
                     _ts_latched = False
                 context_payload = {
@@ -3931,6 +4129,7 @@ class AgentRuntime:
                     "tool_search_schema_tokens_sent": int(_ts_sent),
                     "tool_search_schema_tokens_saved": max(0, int(_ts_before) - int(_ts_sent)),
                     "tool_search_effective_threshold": int(_ts_threshold),
+                    "tool_search_apply_threshold": int(_ts_apply_threshold),
                     "tool_search_threshold_strategy": str(_ts_strategy),
                     "tool_search_decision_latched": bool(_ts_latched),
                 }
@@ -4406,6 +4605,7 @@ class AgentRuntime:
                 turn_usage = add_usage_dicts(turn_usage, _round_usage)
                 self.token_budget.record(_round_usage)
                 if _round_usage:
+                    last_round_usage = dict(_round_usage)
                     usage_snapshot = dict(_round_usage)
 
                     async def _persist_usage_row() -> None:
@@ -5025,6 +5225,75 @@ class AgentRuntime:
                             },
                         }
                     ]
+                    ac_clean = _strip_inline_tool_markup(ac_clean)
+                    response_text = ac_clean
+            if (
+                not tool_calls
+                and _has_unexecuted_inline_tool_markup(response_text)
+                and not getattr(session, "_inline_markup_retry_used", False)
+            ):
+                setattr(session, "_inline_markup_retry_used", True)
+                hint = (
+                    "[系统通知] 上一轮把工具写成了正文 XML（invoke / tool_call），运行时无法执行。"
+                    "请立即用原生 function calling 重新发出同一个工具调用，补全 required 参数；"
+                    "不要再把 XML 写进用户可见正文。"
+                )
+                visible = _strip_inline_tool_markup(ac_clean) or " "
+                messages.append({"role": "assistant", "content": visible})
+                messages.append({"role": "system", "content": hint})
+                session.agent_messages.append({"role": "assistant", "content": visible})
+                session.agent_messages.append({"role": "system", "content": hint})
+                logger.info(
+                    "unparsed_inline_tool_markup session=%s round=%s",
+                    getattr(session, "session_id", ""),
+                    round_idx,
+                )
+                yield RuntimeEvent(
+                    type=EventType.ROUND_END.value,
+                    data={
+                        "round": round_idx,
+                        "max_rounds": self.max_tool_rounds,
+                        "auto_retry": True,
+                        "reason": "unparsed_inline_tool_markup",
+                    },
+                    agent_id=agent_id,
+                )
+                continue
+            if (
+                not tool_calls
+                and is_search_deferral_stub(
+                    visible_body=ac_clean,
+                    reasoning_text=(parsed.reasoning or _nonstream_reasoning or ""),
+                )
+                and not getattr(session, "_search_deferral_retry_used", False)
+            ):
+                setattr(session, "_search_deferral_retry_used", True)
+                hint = (
+                    "[系统通知] 上一轮只回复了「先查证/先搜索」的开场白，没有发出任何 tool_call。"
+                    "请立即用原生 function calling 调用合适的检索工具（例如 web_search），"
+                    "拿到结果后再回答用户；不要再次只说要去查。"
+                )
+                visible = str(ac_clean or "").strip() or " "
+                messages.append({"role": "assistant", "content": visible})
+                messages.append({"role": "system", "content": hint})
+                session.agent_messages.append({"role": "assistant", "content": visible})
+                session.agent_messages.append({"role": "system", "content": hint})
+                logger.info(
+                    "search_deferral_stub session=%s round=%s",
+                    getattr(session, "session_id", ""),
+                    round_idx,
+                )
+                yield RuntimeEvent(
+                    type=EventType.ROUND_END.value,
+                    data={
+                        "round": round_idx,
+                        "max_rounds": self.max_tool_rounds,
+                        "auto_retry": True,
+                        "reason": "search_deferral_stub",
+                    },
+                    agent_id=agent_id,
+                )
+                continue
             model_finish_reason = _response_finish_reason(response)
             _fr = str(model_finish_reason or "").strip().lower()
             if (
@@ -5197,6 +5466,32 @@ class AgentRuntime:
                     session.agent_messages.append({"role": "system", "content": _REASONING_ONLY_NUDGE_HINT})
                     synced_session_message_count = len(session.agent_messages)
                     continue
+
+                if (
+                    str(agent_id or "").startswith("dlg-")
+                    and not parsed.visible_body.strip()
+                    and reason_only_retry >= 1
+                    and not _is_system_trigger
+                ):
+                    pause_text = (
+                        "委派连续只输出思考内容，未给出可见回复或下一步工具调用。"
+                        "任务已暂停，可补充指令后继续。"
+                    )
+                    await self.hooks.run_on_agent_end(pause_text, session)
+                    yield RuntimeEvent(
+                        type=EventType.SUBAGENT_PAUSED.value,
+                        data={
+                            "agent_id": agent_id,
+                            "round": round_idx,
+                            "max_rounds": self.max_tool_rounds,
+                            "text": pause_text,
+                            "executed_tools": list(dict.fromkeys(executed_tool_names))[-10:],
+                            "detector": "reasoning_only_stall",
+                            "retryable": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    return
 
                 if not _is_system_trigger and truncated_final_retry < 1:
                     truncation_signal = detect_suspected_truncated_final(
@@ -5433,33 +5728,28 @@ class AgentRuntime:
                 except Exception:
                     pass
 
-                _um = (
-                    dict(turn_usage)
-                    if usage_dict_has_counts(turn_usage)
-                    else usage_metadata_from_llm_response(response)
-                )
-                _usage_payload: dict[str, Any] | None = None
-                if _um and usage_dict_has_counts(_um):
-                    _usage_payload = {
-                        **{
-                            key: int(_um.get(key, 0) or 0)
-                            for key in (
-                                "input_tokens",
-                                "output_tokens",
-                                "cached_tokens",
-                                "reasoning_tokens",
-                                "total_tokens",
-                            )
-                        },
-                        "model": model_name,
-                        "provider": provider_name,
-                        "cache_mode": latest_cache_telemetry.get("cache_mode", "disabled"),
-                        "cache_breakpoints": int(latest_cache_telemetry.get("cache_breakpoints", 0) or 0),
-                        "cache_eligible_chars": int(latest_cache_telemetry.get("cache_eligible_chars", 0) or 0),
-                        "cache_hit_chars": int(latest_cache_telemetry.get("cache_hit_chars", 0) or 0),
-                        "cache_hit_rate": float(latest_cache_telemetry.get("cache_hit_rate", 0.0) or 0.0),
-                        "cache_saved_tokens_est": int(latest_cache_telemetry.get("cache_saved_tokens_est", 0) or 0),
-                    }
+                _usage_payload = _usage_for_terminal()
+                if _usage_payload is None:
+                    recovered = usage_metadata_from_llm_response(response)
+                    _usage_payload = request_usage_for_message(recovered, recovered)
+                    if _usage_payload is not None:
+                        _usage_payload["model"] = model_name
+                        _usage_payload["provider"] = provider_name
+                if _usage_payload is not None:
+                    _usage_payload.update(
+                        {
+                            "cache_mode": latest_cache_telemetry.get("cache_mode", "disabled"),
+                            "cache_breakpoints": int(latest_cache_telemetry.get("cache_breakpoints", 0) or 0),
+                            "cache_eligible_chars": int(
+                                latest_cache_telemetry.get("cache_eligible_chars", 0) or 0
+                            ),
+                            "cache_hit_chars": int(latest_cache_telemetry.get("cache_hit_chars", 0) or 0),
+                            "cache_hit_rate": float(latest_cache_telemetry.get("cache_hit_rate", 0.0) or 0.0),
+                            "cache_saved_tokens_est": int(
+                                latest_cache_telemetry.get("cache_saved_tokens_est", 0) or 0
+                            ),
+                        }
+                    )
 
                 yield await self._finish_terminal_reply(
                     session,
@@ -5674,7 +5964,11 @@ class AgentRuntime:
                     _record_tool_turn_outcome("failed")
                     continue
                 if tool_name not in allowed_tool_names:
-                    if is_tool_pending_next_round(
+                    intent_denial = turn_intent_denial_message(tool_name, session)
+                    if intent_denial:
+                        denied_message = intent_denial
+                        plan_mode_restricted_attempts += 1
+                    elif is_tool_pending_next_round(
                         ts_ctx,
                         tool_name,
                         allowed_tool_names=allowed_tool_names,
@@ -5738,6 +6032,77 @@ class AgentRuntime:
                         agent_id=agent_id,
                     )
                     _record_tool_turn_outcome("failed")
+                    if intent_denial and plan_mode_retry_limit_reached(plan_mode_restricted_attempts):
+                        terminal_text = (
+                            "当前处于计划模式，文件写入和命令执行被有意禁用，本轮没有创建或修改任何文件。"
+                            "模型连续尝试执行受限工具，运行时已停止本轮，避免继续无效重试。"
+                            "请重新发送规划需求，或直接发送“执行”在默认模式下开始实施。"
+                        )
+                        yield await self._finish_terminal_reply(
+                            session,
+                            clean_body=terminal_text,
+                            usage_metadata=_usage_for_terminal(),
+                            terminal_reason="plan_mode_tool_violation",
+                            agent_id=agent_id,
+                            is_system_trigger=_is_system_trigger,
+                        )
+                        return
+                    continue
+                command = str(arguments.get("command", "") or "")
+                if (
+                    agent_id == "meta"
+                    and tool_name in {"bash_exec", "bash_bg_start"}
+                    and _is_pure_shell_wait_command(command)
+                    and _session_has_running_delegation(session)
+                ):
+                    blocked_message = (
+                        "【已阻止】分身委派已在后台运行，Meta 不应通过 shell sleep/wait "
+                        "阻塞当前对话。请结束本轮并等待后台完成事件主动汇报。"
+                    )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_CALL.value,
+                        data={"name": tool_name, "arguments": arguments, "tool_call_id": tool_call_id},
+                        agent_id=agent_id,
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": blocked_message,
+                        }
+                    )
+                    session.agent_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
+                            "content": blocked_message,
+                        }
+                    )
+                    synced_session_message_count = len(session.agent_messages)
+                    if not _is_system_trigger:
+                        session.chat_history.append(
+                            {
+                                "role": "tool",
+                                "content": blocked_message,
+                                "tool_call_id": tool_call_id,
+                                "tool_name": tool_name,
+                                "tool_args": arguments,
+                                "tool_status": "error",
+                            }
+                        )
+                    yield RuntimeEvent(
+                        type=EventType.TOOL_RESULT.value,
+                        data={
+                            "name": tool_name,
+                            "result": blocked_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
+                        agent_id=agent_id,
+                    )
+                    _record_tool_turn_outcome("failed")
                     continue
                 hook_outcome = await self.hooks.run_before_tool_call(tool_name, arguments, session)
                 if hook_outcome.blocked:
@@ -5785,7 +6150,12 @@ class AgentRuntime:
                     )
                     yield RuntimeEvent(
                         type=EventType.TOOL_RESULT.value,
-                        data={"name": tool_name, "result": blocked_message, "tool_call_id": tool_call_id},
+                        data={
+                            "name": tool_name,
+                            "result": blocked_message,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     _record_tool_turn_outcome("failed")
@@ -5816,7 +6186,12 @@ class AgentRuntime:
                         synced_session_message_count = len(session.agent_messages)
                         yield RuntimeEvent(
                             type=EventType.TOOL_RESULT.value,
-                            data={"name": tool_name, "result": budget_msg, "tool_call_id": tool_call_id},
+                            data={
+                                "name": tool_name,
+                                "result": budget_msg,
+                                "tool_call_id": tool_call_id,
+                                "is_error": True,
+                            },
                             agent_id=agent_id,
                         )
                         if agent_id == "meta":
@@ -5827,7 +6202,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
-                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
+                                usage_metadata=_usage_for_terminal(),
                                 terminal_reason="status_query_budget",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -5864,7 +6239,12 @@ class AgentRuntime:
                         synced_session_message_count = len(session.agent_messages)
                         yield RuntimeEvent(
                             type=EventType.TOOL_RESULT.value,
-                            data={"name": tool_name, "result": cooldown_msg, "tool_call_id": tool_call_id},
+                            data={
+                                "name": tool_name,
+                                "result": cooldown_msg,
+                                "tool_call_id": tool_call_id,
+                                "is_error": True,
+                            },
                             agent_id=agent_id,
                         )
                         if agent_id == "meta":
@@ -5875,7 +6255,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
-                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
+                                usage_metadata=_usage_for_terminal(),
                                 terminal_reason="status_query_cooldown",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -5908,7 +6288,12 @@ class AgentRuntime:
                         synced_session_message_count = len(session.agent_messages)
                         yield RuntimeEvent(
                             type=EventType.TOOL_RESULT.value,
-                            data={"name": tool_name, "result": throttled_once, "tool_call_id": tool_call_id},
+                            data={
+                                "name": tool_name,
+                                "result": throttled_once,
+                                "tool_call_id": tool_call_id,
+                                "is_error": True,
+                            },
                             agent_id=agent_id,
                         )
                         if agent_id == "meta":
@@ -5919,7 +6304,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
-                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
+                                usage_metadata=_usage_for_terminal(),
                                 terminal_reason="status_query_repeat",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -5972,7 +6357,12 @@ class AgentRuntime:
                         synced_session_message_count = len(session.agent_messages)
                         yield RuntimeEvent(
                             type=EventType.TOOL_RESULT.value,
-                            data={"name": tool_name, "result": throttled, "tool_call_id": tool_call_id},
+                            data={
+                                "name": tool_name,
+                                "result": throttled,
+                                "tool_call_id": tool_call_id,
+                                "is_error": True,
+                            },
                             agent_id=agent_id,
                         )
                         if agent_id == "meta":
@@ -5983,7 +6373,7 @@ class AgentRuntime:
                             yield await self._finish_terminal_reply(
                                 session,
                                 clean_body=final_text,
-                                usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
+                                usage_metadata=_usage_for_terminal(),
                                 terminal_reason="status_query_throttled",
                                 agent_id=agent_id,
                                 is_system_trigger=_is_system_trigger,
@@ -6043,7 +6433,12 @@ class AgentRuntime:
                         )
                     yield RuntimeEvent(
                         type=EventType.TOOL_RESULT.value,
-                        data={"name": tool_name, "result": skip_text, "tool_call_id": tool_call_id},
+                        data={
+                            "name": tool_name,
+                            "result": skip_text,
+                            "tool_call_id": tool_call_id,
+                            "is_error": True,
+                        },
                         agent_id=agent_id,
                     )
                     for ev in iter_content_block_end_events(
@@ -6243,12 +6638,8 @@ class AgentRuntime:
                 }
                 # schema 探索：同一工具连续失败但 error 内容不同，认知上仍在推进
                 EXPLORATORY_TOOLS = {"mcp_call", "list_mcps", "mcp_connect"}
-                result_head = result.lstrip()[:80] if isinstance(result, str) else ""
-                is_error_result = isinstance(result, str) and (
-                    result_head.startswith("ERROR:")
-                    or result_head.startswith("❌")
-                    or result_head.startswith("⚠️")
-                )
+                result_status = _tool_result_status(result)
+                is_error_result = result_status == "error"
                 logical_progress = (
                     tool_name in PROGRESS_TOOLS
                     and isinstance(result, str)
@@ -6371,6 +6762,10 @@ class AgentRuntime:
                     type=EventType.TOOL_RESULT.value,
                     data=_tool_result_data,
                     agent_id=agent_id,
+                    private_data={
+                        "raw_result": raw_result,
+                        "tool_status": result_status,
+                    },
                 )
                 for ev in iter_content_block_end_events(
                     tool_name,
@@ -6469,7 +6864,7 @@ class AgentRuntime:
                     yield await self._finish_terminal_reply(
                         session,
                         clean_body=summary_text,
-                        usage_metadata=dict(turn_usage) if usage_dict_has_counts(turn_usage) else None,
+                        usage_metadata=_usage_for_terminal(),
                         terminal_reason="loop_halt",
                         agent_id=agent_id,
                         is_system_trigger=_is_system_trigger,

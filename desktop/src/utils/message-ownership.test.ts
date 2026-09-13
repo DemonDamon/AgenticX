@@ -13,9 +13,15 @@ describe("messageBelongsToSession", () => {
     expect(messageBelongsToSession({ ownerSessionId: "A" }, "B")).toBe(false);
   });
 
-  it("hides untagged messages when pane is bound to a session", () => {
+  it("hides untagged assistants/tools when pane is bound to a session", () => {
     expect(messageBelongsToSession({}, "B")).toBe(false);
     expect(messageBelongsToSession({ ownerSessionId: "" }, "B")).toBe(false);
+    expect(messageBelongsToSession({ role: "assistant" }, "B")).toBe(false);
+  });
+
+  it("shows an untagged user echo in the bound session", () => {
+    expect(messageBelongsToSession({ role: "user" }, "B")).toBe(true);
+    expect(messageBelongsToSession({ role: "user", ownerSessionId: "" }, "B")).toBe(true);
   });
 
   it("when pane has no bound session, hides rows bound to any real session", () => {
@@ -51,5 +57,74 @@ describe("visibleMessagesForSession", () => {
   it("when no session bound, keeps only unbound rows", () => {
     const out = visibleMessagesForSession(msgs, "");
     expect(out.map((m) => m.id)).toEqual(["3"]);
+  });
+
+  it("keeps an untagged user echo while the pane is bound", () => {
+    const out = visibleMessagesForSession(
+      [
+        { id: "u", role: "user", content: "刚才解析到哪了" },
+        { id: "a", role: "assistant", content: "进度", ownerSessionId: "S" },
+      ],
+      "S",
+    );
+    expect(out.map((m) => m.id)).toEqual(["u", "a"]);
+  });
+
+  it("keeps two same-text user turns that have different client_turn_id", () => {
+    const out = visibleMessagesForSession(
+      [
+        {
+          id: "u1",
+          role: "user",
+          content: "刚才解析到哪了?",
+          ownerSessionId: "S",
+          metadata: { client_turn_id: "turn-1" },
+        },
+        {
+          id: "u2",
+          role: "user",
+          content: "刚才解析到哪了?",
+          ownerSessionId: "S",
+          metadata: { client_turn_id: "turn-2" },
+        },
+        {
+          id: "a1",
+          role: "assistant",
+          content: "第一轮进度",
+          ownerSessionId: "S",
+        },
+        {
+          id: "a2",
+          role: "assistant",
+          content: "第二轮进度",
+          ownerSessionId: "S",
+        },
+      ],
+      "S",
+    );
+    expect(out.map((m) => m.id)).toEqual(["u1", "u2", "a1", "a2"]);
+  });
+
+  it("still collapses an optimistic user row that races a disk copy of the same turn", () => {
+    const out = visibleMessagesForSession(
+      [
+        {
+          id: "optimistic",
+          role: "user",
+          content: "刚才解析到哪了?",
+          ownerSessionId: "S",
+          metadata: { client_turn_id: "turn-1" },
+        },
+        {
+          id: "disk",
+          role: "user",
+          content: "刚才解析到哪了?",
+          ownerSessionId: "S",
+          metadata: { client_turn_id: "turn-1" },
+        },
+      ],
+      "S",
+    );
+    expect(out.map((m) => m.id)).toEqual(["disk"]);
   });
 });

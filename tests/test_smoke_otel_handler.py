@@ -136,6 +136,65 @@ class TestOTelCallbackHandlerWithMockOTel:
         # 验证活跃 Span 被追踪
         assert len(handler._active_task_spans) == 1
     
+    def test_on_task_start_applies_session_correlation(self):
+        from agenticx.observability.correlation import bind_correlation, reset_correlation
+        from agenticx.observability.otel import OTelCallbackHandler, OTelConfig
+
+        config = OTelConfig(enabled=True)
+        handler = OTelCallbackHandler(config=config)
+        mock_span = MagicMock()
+        mock_span.get_span_context.return_value = MagicMock(span_id=12345, trace_id=67890)
+        mock_tracer = MagicMock()
+        mock_tracer.start_span.return_value = mock_span
+        handler._tracer = mock_tracer
+
+        tokens = bind_correlation(session_id="sess-h")
+        try:
+            handler.on_task_start(MockAgent(), MockTask())
+        finally:
+            reset_correlation(tokens)
+
+        hits = sum(
+            1
+            for c in mock_span.set_attribute.call_args_list
+            if c.args[:2] == ("agenticx.session.id", "sess-h")
+        )
+        assert hits >= 1
+
+        handler2 = OTelCallbackHandler(config=config)
+        mock_span2 = MagicMock()
+        mock_span2.get_span_context.return_value = MagicMock(span_id=1, trace_id=2)
+        mock_tracer2 = MagicMock()
+        mock_tracer2.start_span.return_value = mock_span2
+        handler2._tracer = mock_tracer2
+        reset_correlation()
+        handler2.on_task_start(MockAgent(), MockTask())
+        keys = [c.args[0] for c in mock_span2.set_attribute.call_args_list if c.args]
+        assert "agenticx.session.id" not in keys
+
+    def test_on_llm_and_tool_apply_session_correlation(self):
+        from agenticx.observability.correlation import bind_correlation, reset_correlation
+        from agenticx.observability.otel import OTelCallbackHandler, OTelConfig
+
+        config = OTelConfig(enabled=True)
+        handler = OTelCallbackHandler(config=config)
+        mock_span = MagicMock()
+        mock_span.get_span_context.return_value = MagicMock(span_id=11111, trace_id=22222)
+        mock_tracer = MagicMock()
+        mock_tracer.start_span.return_value = mock_span
+        handler._tracer = mock_tracer
+        tokens = bind_correlation(session_id="sess-h")
+        try:
+            handler.on_llm_call("test prompt", "gpt-4", {"agent_id": "agent-001", "task_id": "task-001"})
+            handler.on_tool_start("calculator", {"arg1": "value1"})
+        finally:
+            reset_correlation(tokens)
+
+        calls = mock_span.set_attribute.call_args_list
+        assert calls.count(("agenticx.session.id", "sess-h")) >= 2 or sum(
+            1 for c in calls if c.args[:2] == ("agenticx.session.id", "sess-h")
+        ) >= 2
+
     def test_on_task_end_closes_span(self):
         """测试 task_end 关闭 Span"""
         from agenticx.observability.otel import OTelCallbackHandler, OTelConfig

@@ -100,6 +100,19 @@ describe("renderTableOfContents / buildSectionMessages", () => {
     expect(toc).toContain("2. B");
   });
 
+  it("renders English TOC heading when locale is en", () => {
+    const outline = parseOutlineJson(
+      JSON.stringify({
+        title: "T",
+        sections: [{ id: "s1", title: "Core Conclusions", brief: "a" }],
+      }),
+      "T",
+    );
+    const toc = renderTableOfContents(outline, "en");
+    expect(toc).toContain("## Contents");
+    expect(toc).not.toContain("## 目录");
+  });
+
   it("includes evidence and previous summaries in section messages", () => {
     const outline = parseOutlineJson(
       JSON.stringify({

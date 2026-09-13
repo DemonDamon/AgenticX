@@ -25,23 +25,31 @@ export function setCachedReasoningDuration(text: string, seconds: number): void 
   }
 }
 
+type ChatTranslate = (key: string, options?: Record<string, unknown>) => string;
+
 export function formatReasoningTitle(options: {
   streaming: boolean;
   elapsedSeconds: number;
   hasReliableDuration: boolean;
+  t?: ChatTranslate;
 }): string {
+  const { t } = options;
   // Streaming mirrors tool-group meta "运行中 · 1s" (same · + elapsed shape).
   // Completed keeps the sentence form shown after the turn settles.
   if (options.streaming) {
     if (options.hasReliableDuration && options.elapsedSeconds >= 1) {
-      return `思考中 · ${options.elapsedSeconds}s`;
+      return t
+        ? t("reasoning.thinkingElapsed", { elapsed: `${options.elapsedSeconds}s` })
+        : `思考中 · ${options.elapsedSeconds}s`;
     }
-    return "思考中 · …";
+    return t ? t("reasoning.thinking") : "思考中 · …";
   }
   if (options.hasReliableDuration) {
-    return `思考了 ${options.elapsedSeconds} 秒`;
+    return t
+      ? t("reasoning.thoughtSeconds", { seconds: options.elapsedSeconds })
+      : `思考了 ${options.elapsedSeconds} 秒`;
   }
-  return "思考过程";
+  return t ? t("reasoning.thought") : "思考过程";
 }
 
 export function measureReasoningSeconds(startedAt: number, finishedAt: number): number {

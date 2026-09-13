@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Typed events for the canonical async FC ReAct agent stream.
 
-Minimal event union (<=6 kinds) for FastAPI SSE, observability, and arun/astream
+Typed event union (7 kinds) for FastAPI SSE, observability, and arun/astream
 consistency. Consumed by ``react_agent_async.ReActAgent.astream``.
 
 Author: Damon Li
@@ -19,6 +19,7 @@ EventType = Literal[
     "tool_result",
     "final",
     "error",
+    "interrupted",
 ]
 
 
@@ -79,6 +80,17 @@ class ErrorEvent:
     recoverable: bool = False
 
 
+@dataclass
+class InterruptedEvent:
+    """Run stopped before producing a final output; carries resumable state."""
+
+    type: Literal["interrupted"] = "interrupted"
+    reason: Literal["user_stop", "cancelled"] = "user_stop"
+    messages: List[Dict[str, Any]] = field(default_factory=list)
+    iteration: int = 0
+    run_id: str = ""
+
+
 AgentEvent = Union[
     TokenEvent,
     ReasoningEvent,
@@ -86,4 +98,5 @@ AgentEvent = Union[
     ToolResultEvent,
     FinalEvent,
     ErrorEvent,
+    InterruptedEvent,
 ]

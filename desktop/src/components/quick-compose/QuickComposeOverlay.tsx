@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { Plus, X } from "lucide-react";
 import { useAppStore, type Avatar, type GroupChat } from "../../store";
 import { usePaneNavigation } from "../../hooks/usePaneNavigation";
@@ -10,7 +11,6 @@ import { isSessionAvatarMatch, pickMostRecentSessionId } from "../../utils/group
 import {
   buildSuggestions,
   composeEnterHint,
-  composePlaceholder,
   consumeCommaInput,
   formatGroupDisplayName,
   previewTarget,
@@ -85,6 +85,8 @@ function GroupGlyph({ members }: { members: Avatar[] }) {
 }
 
 export function QuickComposeOverlay() {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
   const intent = useAppStore((s) => s.quickComposeIntent);
   const closeQuickCompose = useAppStore((s) => s.closeQuickCompose);
   const avatars = useAppStore((s) => s.avatars);
@@ -133,7 +135,14 @@ export function QuickComposeOverlay() {
   );
 
   const highlighted = suggestions[highlight] ?? null;
-  const enterHint = composeEnterHint(highlighted?.kind, chips.length, query);
+  const enterHintKey = composeEnterHint(highlighted?.kind, chips.length, query);
+  const enterHint = enterHintKey === "创建" ? t("compose.create") : t("compose.open");
+  const placeholder =
+    chips.length > 0
+      ? t("compose.addAnotherExpert")
+      : intent === "group"
+        ? t("compose.searchOrAddExpert")
+        : t("compose.searchOrCreateExpert");
 
   useEffect(() => {
     if (!intent) return;
@@ -296,7 +305,7 @@ export function QuickComposeOverlay() {
         created_by: "manual",
       });
       if (!result.ok || !result.avatar) {
-        throw new Error(result.error || "创建专家失败");
+        throw new Error(result.error || t("compose.createExpertFailed"));
       }
       const mapped = mapCreatedAvatar(result.avatar);
       setAvatars([...useAppStore.getState().avatars.filter((item) => item.id !== mapped.id), mapped]);
@@ -307,7 +316,7 @@ export function QuickComposeOverlay() {
       );
       return mapped;
     },
-    [setAvatars],
+    [setAvatars, t],
   );
 
   const persistGroup = useCallback(
@@ -323,7 +332,7 @@ export function QuickComposeOverlay() {
         validAvatarIds: validIds,
       });
       if (normalized.avatarIds.length === 0) {
-        throw new Error("请至少添加 1 位专家后再创建群聊。");
+        throw new Error(t("compose.needOneExpert"));
       }
       const name = formatGroupDisplayName(
         normalized.avatarIds.map((id) => useAppStore.getState().avatars.find((item) => item.id === id)?.name ?? id),
@@ -334,7 +343,7 @@ export function QuickComposeOverlay() {
         routing: "intelligent",
       });
       if (!result.ok || !result.group) {
-        throw new Error(result.error || "创建群聊失败");
+        throw new Error(result.error || t("compose.createGroupFailed"));
       }
       const group: GroupChat = {
         id: result.group.id,
@@ -346,7 +355,7 @@ export function QuickComposeOverlay() {
       window.dispatchEvent(new CustomEvent("agenticx:groups:changed"));
       return group;
     },
-    [persistCreatedAvatar, setGroups],
+    [persistCreatedAvatar, setGroups, t],
   );
 
   const finish = useCallback(async (suggestion: ComposeSuggestion | null = highlighted) => {
@@ -401,7 +410,7 @@ export function QuickComposeOverlay() {
       openGroupPane(group);
       closeQuickCompose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "创建失败，请稍后重试。");
+      setError(err instanceof Error ? err.message : t("compose.createFailed"));
     } finally {
       setBusy(false);
     }
@@ -497,7 +506,7 @@ export function QuickComposeOverlay() {
           >
             <ul className="max-h-[320px] overflow-y-auto py-1" role="listbox">
               {suggestions.length === 0 ? (
-                <li className="px-3 py-2 text-[13px] text-text-faint">输入名称以创建专家</li>
+                <li className="px-3 py-2 text-[13px] text-text-faint">{t("compose.typeNameToCreate")}</li>
               ) : (
                 suggestions.map((row, index) => {
                   const active = index === highlight;
@@ -538,7 +547,7 @@ export function QuickComposeOverlay() {
                           />
                         )}
                         <span className="min-w-0 truncate">
-                          {row.kind === "create" ? `创建「${row.name}」` : row.name}
+                          {row.kind === "create" ? t("compose.createNamed", { name: row.name }) : row.name}
                         </span>
                       </button>
                     </li>
@@ -547,13 +556,13 @@ export function QuickComposeOverlay() {
               )}
             </ul>
             <div className="flex justify-end gap-1.5 border-t border-border px-2.5 py-1.5">
-              <kbd className="rounded-md bg-surface-card px-1.5 py-0.5 text-[10px] text-text-faint">Tab 添加</kbd>
+              <kbd className="rounded-md bg-surface-card px-1.5 py-0.5 text-[10px] text-text-faint">{t("compose.tabAdd")}</kbd>
               <button
                 type="button"
                 className="rounded-md bg-surface-card px-1.5 py-0.5 text-[10px] text-text-faint hover:text-text-strong"
                 onClick={() => void finish()}
               >
-                ↵ {busy ? "创建中…" : enterHint}
+                ↵ {busy ? t("compose.creating") : enterHint}
               </button>
             </div>
           </div>,
@@ -564,7 +573,7 @@ export function QuickComposeOverlay() {
   return (
     <div ref={rootRef} className="shrink-0 border-b border-border bg-surface-base px-4 py-2.5">
       <div className="flex items-start gap-2">
-        <span className="mt-1 shrink-0 text-[13px] text-text-muted">收件人：</span>
+        <span className="mt-1 shrink-0 text-[13px] text-text-muted">{t("compose.recipients")}</span>
         <div ref={barRef} className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           {chips.map((chip) => (
             <span
@@ -585,7 +594,7 @@ export function QuickComposeOverlay() {
               <button
                 type="button"
                 className="rounded-full p-0.5 text-text-faint hover:text-text-strong"
-                aria-label={`移除 ${chip.name}`}
+                aria-label={t("compose.removeNamed", { name: chip.name })}
                 onClick={() => applyChips(chips.filter((item) => item !== chip))}
               >
                 <X className="h-3 w-3" strokeWidth={2} />
@@ -605,9 +614,9 @@ export function QuickComposeOverlay() {
             }}
             onFocus={() => setDropdownOpen(true)}
             onKeyDown={onKeyDown}
-            placeholder={composePlaceholder(intent, chips.length)}
+            placeholder={placeholder}
             className="min-w-[160px] flex-1 bg-transparent py-1 text-[13px] text-text-strong outline-none placeholder:text-text-faint"
-            aria-label="搜索或创建专家"
+            aria-label={t("compose.searchOrCreateExpert")}
             autoComplete="off"
             spellCheck={false}
           />
@@ -615,7 +624,7 @@ export function QuickComposeOverlay() {
         <button
           type="button"
           className="mt-0.5 rounded-md p-1 text-text-faint hover:bg-surface-hover hover:text-text-strong"
-          aria-label="取消"
+          aria-label={tCommon("cancel")}
           onClick={cancel}
         >
           <X className="h-4 w-4" strokeWidth={1.8} />

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, Pause, Play, Ban } from "lucide-react";
 import {
   SELECTION_RULE_PRESETS,
@@ -27,6 +28,8 @@ export function GraphInterveneDock({
   onPauseRun,
   onResumeRun,
 }: Props) {
+  const { t } = useTranslation("workspace");
+  const { t: tCommon } = useTranslation("common");
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"directive" | "rule">("directive");
   const selectedIds = useMemo(() => selectedNodes.map((n) => n.id), [selectedNodes]);
@@ -44,25 +47,25 @@ export function GraphInterveneDock({
   }, [selectedNodes]);
 
   const sendDirective = async () => {
-    const t = text.trim();
-    if (!t || taskOrAgentIds.length === 0) return;
-    const op = classifyDirectiveText(t);
+    const trimmed = text.trim();
+    if (!trimmed || taskOrAgentIds.length === 0) return;
+    const op = classifyDirectiveText(trimmed);
     await onIntervene(
       buildInterveneBody(op, version, {
         nodeIds: taskOrAgentIds,
-        payload: { text: t },
+        payload: { text: trimmed },
       }),
     );
     setText("");
   };
 
   const sendRule = async (ruleText: string) => {
-    const t = ruleText.trim();
-    if (!t) return;
+    const trimmed = ruleText.trim();
+    if (!trimmed) return;
     await onIntervene(
       buildInterveneBody("selection_rule", version, {
         nodeIds: taskOrAgentIds,
-        payload: { text: t, node_ids: taskOrAgentIds },
+        payload: { text: trimmed, node_ids: taskOrAgentIds },
       }),
     );
     setText("");
@@ -92,7 +95,7 @@ export function GraphInterveneDock({
             onClick={() => setMode("directive")}
             aria-pressed={mode === "directive"}
           >
-            指令
+            {t("graph.dockDirective")}
           </button>
           <button
             type="button"
@@ -104,7 +107,7 @@ export function GraphInterveneDock({
             onClick={() => setMode("rule")}
             aria-pressed={mode === "rule"}
           >
-            对选中下规则
+            {t("graph.dockRule")}
           </button>
         </div>
         <div className="ml-auto flex items-center gap-1.5">
@@ -114,9 +117,9 @@ export function GraphInterveneDock({
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[13px] font-medium text-text-strong hover:bg-surface-hover"
               disabled={busy}
               onClick={() => void onResumeRun()}
-              title="恢复整图"
+              title={t("graph.resumeGraph")}
             >
-              <Play className="h-3.5 w-3.5" strokeWidth={2} /> 恢复
+              <Play className="h-3.5 w-3.5" strokeWidth={2} /> {t("graph.resume")}
             </button>
           ) : (
             <button
@@ -124,9 +127,9 @@ export function GraphInterveneDock({
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[13px] font-medium text-text-strong hover:bg-surface-hover"
               disabled={busy}
               onClick={() => void onPauseRun()}
-              title="暂停整图"
+              title={t("graph.pauseGraph")}
             >
-              <Pause className="h-3.5 w-3.5" strokeWidth={2} /> 暂停
+              <Pause className="h-3.5 w-3.5" strokeWidth={2} /> {t("graph.pause")}
             </button>
           )}
           <button
@@ -134,16 +137,16 @@ export function GraphInterveneDock({
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[13px] font-medium text-rose-500 hover:bg-surface-hover [html[data-theme=dark]_&]:text-rose-400 [html[data-theme=dim]_&]:text-rose-400"
             disabled={busy || taskOrAgentIds.length === 0}
             onClick={() => void cancelSelected()}
-            title="取消选中节点"
+            title={t("graph.cancelSelected")}
           >
-            <Ban className="h-3.5 w-3.5" strokeWidth={2} /> 取消
+            <Ban className="h-3.5 w-3.5" strokeWidth={2} /> {tCommon("cancel")}
           </button>
         </div>
       </div>
 
       {selectedIds.length === 0 ? (
         <p className="text-[13px] leading-relaxed text-text-subtle">
-          点击节点后可注入指令，或框选后下规则。
+          {t("graph.dockEmpty")}
         </p>
       ) : mode === "rule" ? (
         <div className="space-y-2">
@@ -155,18 +158,19 @@ export function GraphInterveneDock({
                 className="rounded-full border border-border px-2.5 py-1 text-[12px] font-medium text-text-strong hover:bg-surface-hover"
                 disabled={busy}
                 onClick={() => {
-                  setText(p.text);
-                  void sendRule(p.text);
+                  const ruleText = t(`graph.intervene.${p.id}`);
+                  setText(ruleText);
+                  void sendRule(ruleText);
                 }}
               >
-                {p.label}
+                {t(`graph.rules.${p.id}`)}
               </button>
             ))}
           </div>
           <div className="flex gap-1.5">
             <input
               className="min-w-0 flex-1 rounded-md border border-border bg-surface-base px-2.5 py-1.5 text-[13px] text-text-strong outline-none placeholder:text-text-subtle focus:border-[var(--ui-btn-primary-bg)]"
-              placeholder="自定义规则…"
+              placeholder={t("graph.customRulePlaceholder")}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
@@ -183,7 +187,7 @@ export function GraphInterveneDock({
               disabled={busy || !text.trim()}
               onClick={() => void sendRule(text)}
             >
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "应用"}
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("graph.apply")}
             </button>
           </div>
         </div>
@@ -191,7 +195,7 @@ export function GraphInterveneDock({
         <div className="flex gap-1.5">
           <input
             className="min-w-0 flex-1 rounded-md border border-border bg-surface-base px-2.5 py-1.5 text-[13px] text-text-strong outline-none placeholder:text-text-subtle focus:border-[var(--ui-btn-primary-bg)]"
-            placeholder="给该专家加一句指令，或说「xxx 不用做了」"
+            placeholder={t("graph.directivePlaceholder")}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -208,7 +212,7 @@ export function GraphInterveneDock({
             disabled={busy || !text.trim() || taskOrAgentIds.length === 0}
             onClick={() => void sendDirective()}
           >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "发送"}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("graph.send")}
           </button>
         </div>
       )}

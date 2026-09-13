@@ -44,20 +44,21 @@ def test_ac2_get_current_time_facts_matches_local_clock() -> None:
 
 
 @pytest.mark.parametrize(
-    "rel_path,min_count",
+    "rel_path,needle,min_count",
     [
-        ("agenticx/runtime/prompts/meta_agent.py", 1),
-        ("agenticx/studio/server.py", 2),
-        ("agenticx/runtime/meta_tools.py", 1),
-        ("agenticx/runtime/team_manager.py", 1),
-        ("agenticx/runtime/group_router.py", 1),
+        # Meta 走 AgentRuntime 的 <session-context> 尾部时钟，静态块用无日期版保前缀缓存。
+        ("agenticx/runtime/prompts/meta_agent.py", "build_current_time_rules_block", 1),
+        ("agenticx/studio/server.py", "build_current_time_block", 2),
+        ("agenticx/runtime/meta_tools.py", "build_current_time_block", 1),
+        ("agenticx/runtime/team_manager.py", "build_current_time_block", 1),
+        ("agenticx/runtime/group_router.py", "build_current_time_block", 1),
     ],
 )
 def test_ac3_prompt_entrypoints_inject_current_time_block(
-    rel_path: str, min_count: int
+    rel_path: str, needle: str, min_count: int
 ) -> None:
     text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
-    assert text.count("build_current_time_block") >= min_count
+    assert text.count(needle) >= min_count
 
 
 def test_ac4_web_search_capability_block_has_hard_exception() -> None:

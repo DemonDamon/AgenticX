@@ -2,6 +2,7 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 import type { MessageAttachment } from "../store";
 import {
+  buildContextFilePlaceholderPayload,
   canonicalizeUserReferenceMentions,
   findReferenceAttachmentMeta,
   inferComposerRefLabel,
@@ -207,5 +208,27 @@ test("stableAttachmentSetKey resolves a directory alias to its persisted source 
   assert.equal(
     stableAttachmentSetKey([composerDirectory]),
     stableAttachmentSetKey([persistedDirectory]),
+  );
+});
+
+test("buildContextFilePlaceholderPayload grants only explicit composer reference tokens", () => {
+  assert.deepEqual(
+    buildContextFilePlaceholderPayload([
+      {
+        sourcePath: "/Users/demo/Downloads/manual.docx",
+        label: "manual.docx",
+      },
+      {
+        sourcePath: "",
+        label: "missing-path.pdf",
+      },
+      {
+        sourcePath: "../relative/secret.txt",
+        label: "secret.txt",
+      },
+    ]),
+    {
+      "/Users/demo/Downloads/manual.docx": "[文件引用] manual.docx",
+    },
   );
 });

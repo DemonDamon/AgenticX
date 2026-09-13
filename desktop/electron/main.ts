@@ -10,6 +10,8 @@ import {
   powerSaveBlocker,
   screen,
   session,
+  net as electronNet,
+  protocol,
   shell,
   Tray
 } from "electron";
@@ -36,6 +38,7 @@ import http from "node:http";
 import https from "node:https";
 import yaml from "js-yaml";
 import { extract as extractTar } from "tar";
+import { isAppLocale, localeFromOsTag, type AppLocale } from "./app-locale";
 import {
   closeSplash,
   configureSplashLayoutThemeReader,
@@ -93,6 +96,18 @@ import {
 } from "./session-messages-disk";
 import { writeLocalTextFileAtomic } from "./write-local-text-file";
 import {
+  previewLimitExceededMessage,
+  previewMaxBytesForHost,
+} from "./preview-file-limit";
+import {
+  LOCAL_MEDIA_SCHEME,
+  LOCAL_MEDIA_SCHEME_PRIVILEGES,
+  buildLocalMediaUrl,
+  localVideoMime,
+  parseLocalMediaPath,
+  resolveAllowedLocalVideoFile,
+} from "./local-media-protocol";
+import {
   applySessionWorkspaceCopy,
   copySourceIntoWorkspace,
   createWorkspaceLink,
@@ -133,6 +148,8 @@ import {
   readBodyWithLimit,
   wecomNpmPlatformPackage,
 } from "./native-connectors-core";
+
+protocol.registerSchemesAsPrivileged([...LOCAL_MEDIA_SCHEME_PRIVILEGES]);
 
 /** Node fetch honors HTTP_PROXY; localhost cc-bridge POSTs then fail (e.g. 502) and PTY input never reaches Claude. */
 function ccBridgeUrlIsLoopback(urlStr: string): boolean {
@@ -332,6 +349,7 @@ type AgxConfig = {
   };
   automation?: { prevent_sleep?: boolean };
   skills?: { non_high_risk_auto_install?: boolean };
+  ops?: Record<string, unknown>;
   /** Meta-agent default workspace root (supports ~); mirrors config.yaml workspace_dir */
   workspace_dir?: string;
   enterprise?: {
@@ -487,11 +505,16 @@ function normalizeLayoutTheme(raw: unknown): LayoutTheme | undefined {
   return raw === "light" || raw === "dark" || raw === "dim" ? raw : undefined;
 }
 
+function normalizeLayoutLocale(raw: unknown): AppLocale | undefined {
+  return isAppLocale(raw) ? raw : undefined;
+}
+
 type LayoutFile = {
   mainWindow?: LayoutBounds;
   panes?: LayoutPaneSnapshot[];
   activePaneId?: string;
   theme?: LayoutTheme;
+  locale?: AppLocale;
 };
 
 /** Disk read for the pane/window layout. Returns an empty object on any error
@@ -1492,6 +1515,13 @@ function loadAgxConfig(): AgxConfig {
 function saveAgxConfig(cfg: AgxConfig): void {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, yaml.dump(cfg, { lineWidth: -1 }), "utf-8");
+}
+
+function readOpsToolsEnabled(cfg: AgxConfig): boolean {
+  const raw = cfg.ops;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return true;
+  if (raw.tools_enabled === undefined) return true;
+  return Boolean(raw.tools_enabled);
 }
 
 function loadSoulFile(pathName: string): string {
@@ -2503,7 +2533,17 @@ function pickFreePort(): Promise<number> {
   });
 }
 
-function buildMenuTemplate(): MenuItemConstructorOptions[] {
+function resolveMenuLocale(locale?: AppLocale): AppLocale {
+  return (
+    locale ??
+    normalizeLayoutLocale(loadLayoutData().locale) ??
+    localeFromOsTag(app.getLocale())
+  );
+}
+
+function buildMenuTemplate(locale?: AppLocale): MenuItemConstructorOptions[] {
+  const resolved = resolveMenuLocale(locale);
+  const settingsLabel = resolved === "en" ? "Settings" : "设置";
   if (process.platform === "darwin") {
     return [
       {
@@ -2511,7 +2551,7 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
         submenu: [
           { role: "about" },
           { type: "separator" },
-          { label: "设置", click: () => mainWindow?.webContents.send("open-settings") },
+          { label: settingsLabel, click: () => mainWindow?.webContents.send("open-settings") },
           { type: "separator" },
           { role: "quit" }
         ]
@@ -2829,6 +2869,10 @@ function findAgxBinaryOnPath(augmentedPath: string): string | null {
 async function checkAgxCli(): Promise<boolean> {
   const augmentedPath = buildAugmentedPath();
   const binaryPath = findAgxBinaryOnPath(augmentedPath);
+  // After `pip install -e .` the first `agx --version` can exceed 40s (full
+  // package import). The old 30s probe then killed the process and reported
+  // "agx not found" even though the executable was on the augmented PATH.
+  if (binaryPath) return true;
 
   return new Promise((resolve) => {
     const proc = spawnAgx(binaryPath, ["--version"], {
@@ -2886,6 +2930,8 @@ async function startStudioServe(): Promise<void> {
     AGX_SKILL_MANAGE: trinity.skill_manage_enabled ? "1" : "0",
     AGX_LEARNING_NUDGE_INTERVAL: String(trinity.learning_nudge_interval),
     AGX_LEARNING_MIN_TOOL_CALLS: String(trinity.learning_min_tool_calls),
+    // Override leftover shell exports so Settings → 工具 → 调查取证 wins.
+    AGENTICX_OPS_TOOLS: readOpsToolsEnabled(cfg) ? "1" : "0",
   };
 
   const agxResolved = findAgxBinaryOnPath(augmentedPath);
@@ -6736,6 +6782,39 @@ function createWindow(): void {
   });
 }
 
+function trayLabels(locale?: AppLocale): { toggleWindow: string; settings: string; quit: string } {
+  const en = resolveMenuLocale(locale) === "en";
+  return {
+    toggleWindow: en ? "Show/Hide Window" : "打开/隐藏窗口",
+    settings: en ? "Settings" : "设置",
+    quit: en ? "Quit" : "退出",
+  };
+}
+
+function applyTrayMenu(locale?: AppLocale): void {
+  if (!tray) return;
+  const labels = trayLabels(locale);
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: labels.toggleWindow,
+        click: () => {
+          if (!mainWindow) return;
+          if (mainWindow.isVisible()) {
+            mainWindow.hide();
+          } else {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        },
+      },
+      { label: labels.settings, click: () => mainWindow?.webContents.send("open-settings") },
+      { type: "separator" },
+      { label: labels.quit, click: () => app.quit() },
+    ]),
+  );
+}
+
 function createTray(): void {
   const isMac = process.platform === "darwin";
   const isWin = process.platform === "win32";
@@ -6752,24 +6831,7 @@ function createTray(): void {
     icon.setTemplateImage(true);
   }
   tray = new Tray(icon);
-  const menu = Menu.buildFromTemplate([
-    {
-      label: "打开/隐藏窗口",
-      click: () => {
-        if (!mainWindow) return;
-        if (mainWindow.isVisible()) {
-          mainWindow.hide();
-        } else {
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      }
-    },
-    { label: "设置", click: () => mainWindow?.webContents.send("open-settings") },
-    { type: "separator" },
-    { label: "退出", click: () => app.quit() }
-  ]);
-  tray.setContextMenu(menu);
+  applyTrayMenu();
   tray.on("click", () => {
     if (!mainWindow) return;
     if (mainWindow.isVisible()) {
@@ -7005,6 +7067,7 @@ function registerEarlyIpc(): void {
   });
   ipcMain.handle("get-api-auth-token", async () => getStudioToken());
   ipcMain.handle("get-platform", async () => process.platform);
+  ipcMain.handle("get-system-locale", async () => app.getLocale());
   ipcMain.handle("get-connection-mode", async () => getInjectedConnectionMode());
   ipcMain.handle("get-backend-scope-sync", async () => getInjectedBackendScope());
   ipcMain.handle("get-connection-mode-sync", async () => getInjectedConnectionMode());
@@ -7256,7 +7319,10 @@ function registerEarlyIpc(): void {
   // a misleading empty list during the cold-start window (issue #11).
   ipcMain.handle("list-sessions", async (_event, avatarId?: string) => {
     try {
-      await waitForStudio();
+      // Align with waitServeReady: a 30s barrier returns {ok:false, sessions:[]}
+      // while `agx serve` is still importing after an editable install, and the
+      // sidebar then paints an empty history until the next 5s poll.
+      await waitForStudio(getServeStartupTimeoutMs());
       const params = avatarId ? `?avatar_id=${encodeURIComponent(avatarId)}` : "";
       const resp = await fetch(`${getStudioUrl()}/api/sessions${params}`, {
         headers: { "x-agx-desktop-token": getStudioToken() },
@@ -8741,14 +8807,25 @@ function registerIpc(): void {
       panes: Array.isArray(data.panes) ? data.panes : [],
       activePaneId: typeof data.activePaneId === "string" ? data.activePaneId : "",
       theme: theme ?? "",
+      locale: normalizeLayoutLocale(data.locale) ?? "",
     };
   });
 
-  ipcMain.handle("ui-prefs-set", async (_event, payload: { theme?: unknown }) => {
+  ipcMain.handle("ui-prefs-set", async (_event, payload: { theme?: unknown; locale?: unknown }) => {
     try {
+      const patch: Partial<LayoutFile> = {};
       const theme = normalizeLayoutTheme(payload?.theme);
-      if (!theme) return { ok: false, error: "invalid theme" };
-      saveLayoutData({ theme });
+      if (theme) patch.theme = theme;
+      const locale = normalizeLayoutLocale(payload?.locale);
+      if (locale) patch.locale = locale;
+      if (!patch.theme && !patch.locale) return { ok: false, error: "invalid ui prefs" };
+      saveLayoutData(patch);
+      if (locale) {
+        if (process.platform === "darwin") {
+          Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate(locale)));
+        }
+        applyTrayMenu(locale);
+      }
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -8808,6 +8885,27 @@ function registerIpc(): void {
       const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/fork`, {
         method: "POST",
         headers: { "x-agx-desktop-token": getStudioToken() },
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 300)}` };
+      }
+      return await resp.json();
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("continue-from-message", async (_event, payload: { sessionId: string; messageId: string }) => {
+    const sid = String(payload?.sessionId || "").trim();
+    const mid = String(payload?.messageId || "").trim();
+    if (!sid) return { ok: false, error: "sessionId is required" };
+    if (!mid) return { ok: false, error: "messageId is required" };
+    try {
+      const resp = await fetch(`${getStudioUrl()}/api/sessions/${encodeURIComponent(sid)}/continue-from`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-agx-desktop-token": getStudioToken() },
+        body: JSON.stringify({ message_id: mid }),
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => "");
@@ -9379,6 +9477,7 @@ function registerIpc(): void {
         ...readUnattendedRuntime(raw),
         ...readTokenBudgetRuntime(raw),
         live_reattach_enabled: Boolean(raw.live_reattach_enabled ?? false),
+        ops_tools_enabled: readOpsToolsEnabled(cfg),
       };
     } catch (err) {
       return {
@@ -9408,6 +9507,7 @@ function registerIpc(): void {
         max_tokens_per_session: 500_000,
         max_tokens_per_turn: 100_000,
         live_reattach_enabled: false,
+        ops_tools_enabled: true,
       };
     }
   });
@@ -9581,6 +9681,14 @@ function registerIpc(): void {
         if (prevTs.threshold_strategy === undefined) prevTs.threshold_strategy = "adaptive";
         if (prevTs.context_budget_ratio === undefined) prevTs.context_budget_ratio = 0.05;
         merged.tool_search = prevTs;
+      }
+      if (p.ops_tools_enabled !== undefined) {
+        const prevOps =
+          root.ops && typeof root.ops === "object" && !Array.isArray(root.ops)
+            ? { ...(root.ops as Record<string, unknown>) }
+            : {};
+        prevOps.tools_enabled = Boolean(p.ops_tools_enabled);
+        root.ops = prevOps;
       }
       root.runtime = merged;
       saveAgxConfig(cfg);
@@ -12002,12 +12110,12 @@ function registerIpc(): void {
     },
   );
 
-  const PREVIEW_MAX_BYTES = 25 * 1024 * 1024;
   const PREVIEW_FILE_MIME_BY_EXT: Record<string, string> = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xls": "application/vnd.ms-excel",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   };
 
   ipcMain.handle("load-local-file-data-url", async (_event, inputPath: string) => {
@@ -12021,8 +12129,9 @@ function registerIpc(): void {
       if (stat.isDirectory()) {
         return { ok: false, error: "path is a directory" };
       }
-      if (stat.size > PREVIEW_MAX_BYTES) {
-        return { ok: false, error: `file exceeds preview limit (${PREVIEW_MAX_BYTES} bytes)` };
+      const previewMaxBytes = previewMaxBytesForHost();
+      if (stat.size > previewMaxBytes) {
+        return { ok: false, error: previewLimitExceededMessage(previewMaxBytes) };
       }
       const ext = path.extname(normalized).toLowerCase();
       const mime = PREVIEW_FILE_MIME_BY_EXT[ext];
@@ -12035,6 +12144,31 @@ function registerIpc(): void {
         dataUrl: `data:${mime};base64,${buf.toString("base64")}`,
         mime,
         size: stat.size,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("resolve-local-media-url", async (_event, inputPath: string) => {
+    try {
+      const resolved = resolveAllowedLocalVideoFile(String(inputPath || ""), {
+        normalizePath: normalizeLocalFsPath,
+        isFile: (absolutePath) => {
+          try {
+            return fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile();
+          } catch {
+            return false;
+          }
+        },
+      });
+      if (!resolved) {
+        return { ok: false, error: "video preview not allowed" };
+      }
+      return {
+        ok: true,
+        url: buildLocalMediaUrl(resolved),
+        mime: localVideoMime(resolved),
       };
     } catch (err) {
       return { ok: false, error: String(err) };
@@ -12322,6 +12456,22 @@ if (!gotTheLock) {
 
   app.whenReady().then(async () => {
     try {
+      protocol.handle(LOCAL_MEDIA_SCHEME, (request) => {
+        const resolved = resolveAllowedLocalVideoFile(parseLocalMediaPath(request.url), {
+          normalizePath: normalizeLocalFsPath,
+          isFile: (absolutePath) => {
+            try {
+              return fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile();
+            } catch {
+              return false;
+            }
+          },
+        });
+        if (!resolved) {
+          return new Response("forbidden", { status: 403 });
+        }
+        return electronNet.fetch(pathToFileURL(resolved).href);
+      });
       logProxyConfig();
       if (process.platform === "win32" || process.platform === "linux") {
         Menu.setApplicationMenu(null);

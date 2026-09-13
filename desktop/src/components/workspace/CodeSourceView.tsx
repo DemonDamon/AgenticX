@@ -12,6 +12,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
 } from "react";
+import { useTranslation } from "react-i18next";
 import Prism from "prismjs";
 import "./preview-prism-setup";
 import {
@@ -109,6 +110,7 @@ export function CodeSourceView({
   codeRef,
   foldAll = false,
 }: Props) {
+  const { t } = useTranslation("workspace");
   const language = previewLanguageFromPath(path);
   const rootRef = useRef<HTMLPreElement | null>(null);
   const assignRef = (node: HTMLPreElement | null) => {
@@ -221,8 +223,8 @@ export function CodeSourceView({
                   type="button"
                   className="agx-code-fold"
                   aria-expanded={!isFolded}
-                  aria-label={isFolded ? "展开此范围" : "折叠此范围"}
-                  title={isFolded ? "展开此范围" : "折叠此范围"}
+                  aria-label={isFolded ? t("preview.expandRange") : t("preview.collapseRange")}
+                  title={isFolded ? t("preview.expandRange") : t("preview.collapseRange")}
                   onClick={(event) => toggleFold(lineNo, event)}
                 >
                   <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
@@ -252,7 +254,7 @@ export function CodeSourceView({
                 <button
                   type="button"
                   className="agx-code-ellipsis"
-                  title="点击展开此范围"
+                  title={t("preview.clickExpandRange")}
                   onClick={(event) => toggleFold(lineNo, event)}
                 >
                   …

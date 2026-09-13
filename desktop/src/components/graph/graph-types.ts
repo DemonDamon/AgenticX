@@ -305,8 +305,9 @@ export function layoutGraphNodes(
   return out;
 }
 
-export const SELECTION_RULE_PRESETS = [
-  { id: "fast", label: "快速出结论", text: "快速出结论，先收敛为一版可交付结论。" },
-  { id: "draft", label: "先做一版", text: "先做一版，不必完美，优先可评审草稿。" },
-  { id: "no-at", label: "停止互相 @", text: "停止互相 @，各自输出结论后由 Meta 汇总。" },
-] as const;
+/** Preset ids for selection_rule interventions; labels under graph.rules.*, body under graph.intervene.* */
+export const SELECTION_RULE_PRESET_IDS = ["fast", "draft", "no-at"] as const;
+export type SelectionRulePresetId = (typeof SELECTION_RULE_PRESET_IDS)[number];
+
+export const SELECTION_RULE_PRESETS: ReadonlyArray<{ id: SelectionRulePresetId }> =
+  SELECTION_RULE_PRESET_IDS.map((id) => ({ id }));

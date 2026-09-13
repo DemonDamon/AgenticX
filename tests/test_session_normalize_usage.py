@@ -79,3 +79,30 @@ def test_normalize_messages_accepts_auto_selection() -> None:
         ]
     )
     assert rows[0]["model_selection"] == "auto"
+
+
+def test_normalize_messages_keeps_turn_usage_split() -> None:
+    manager = SessionManager()
+    rows = manager._normalize_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "ok",
+                "usage": {
+                    "input_tokens": 27111,
+                    "output_tokens": 345,
+                    "cached_tokens": 26112,
+                    "reasoning_tokens": 0,
+                    "total_tokens": 27456,
+                    "turn_input_tokens": 78821,
+                    "turn_output_tokens": 666,
+                    "turn_cached_tokens": 62848,
+                    "turn_total_tokens": 79487,
+                },
+            }
+        ]
+    )
+    usage = rows[0]["usage"]
+    assert usage["input_tokens"] == 27111
+    assert usage["turn_input_tokens"] == 78821
+    assert usage["turn_output_tokens"] == 666

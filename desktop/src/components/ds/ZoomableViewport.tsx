@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, type ReactNode, type WheelEvent, type MouseEvent } from "react";
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { HoverTip } from "./HoverTip";
 
 type Props = {
@@ -20,6 +21,7 @@ const STEP = 0.25;
  * 通过固定宽度舞台承载内容后整体做 CSS transform 缩放。
  */
 export function ZoomableViewport({ children, stageWidth = 900, viewportHeight = "75vh" }: Props) {
+  const { t } = useTranslation("chat");
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -89,7 +91,7 @@ export function ZoomableViewport({ children, stageWidth = 900, viewportHeight = 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-center gap-1">
-        <HoverTip label="缩小">
+        <HoverTip label={t("mermaid.zoomOut")}>
           <button
             type="button"
             onClick={zoomOut}
@@ -103,7 +105,7 @@ export function ZoomableViewport({ children, stageWidth = 900, viewportHeight = 
           {pct}%
         </span>
 
-        <HoverTip label="放大">
+        <HoverTip label={t("mermaid.zoomIn")}>
           <button
             type="button"
             onClick={zoomIn}
@@ -113,7 +115,7 @@ export function ZoomableViewport({ children, stageWidth = 900, viewportHeight = 
           </button>
         </HoverTip>
 
-        <HoverTip label="还原（双击也可还原）">
+        <HoverTip label={t("zoom.reset")}>
           <button
             type="button"
             onClick={reset}
@@ -123,7 +125,7 @@ export function ZoomableViewport({ children, stageWidth = 900, viewportHeight = 
           </button>
         </HoverTip>
 
-        <span className="ml-2 text-[11px] text-text-faint">滚轮缩放 · 拖拽平移 · 双击还原</span>
+        <span className="ml-2 text-[11px] text-text-faint">{t("zoom.hint")}</span>
       </div>
 
       <div

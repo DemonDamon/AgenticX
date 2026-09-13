@@ -22,6 +22,12 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from agenticx.cli.config_manager import ConfigManager
+from agenticx.runtime.isolate_run import save_isolate_state
+from agenticx.runtime.replay_ledger.contracts import ContextCheckpoint
+from agenticx.runtime.replay_ledger.recorder import recorder_for_session
+from agenticx.runtime.replay_ledger.store import ReplayLedgerStore
+from agenticx.runtime.usage_metadata import hydrate_legacy_message_usage
+from agenticx.runtime.usage_store import get_usage_store
 from agenticx.runtime.assistant_output import (
     parse_assistant_output,
     sanitize_suggested_questions,
@@ -29,6 +35,11 @@ from agenticx.runtime.assistant_output import (
 from agenticx.runtime.truncated_final import (
     ACTION_INTENT_RE,
     detect_suspected_truncated_final,
+    is_search_deferral_stub,
+)
+from agenticx.runtime.agent_runtime import (
+    _has_inline_tool_markup,
+    _strip_inline_tool_markup,
 )
 from agenticx.studio.chat_attachments import materialize_message_lists_image_uploads
 from agenticx.workspace.loader import (
@@ -260,6 +271,21 @@ def _messages_last_turn_promised_action_without_followthrough(
     ):
         return True
 
+    # Path E: leftover invoke/tool_call XML in a short assistant body, no tool rows.
+    if (
+        not _turn_has_any_tool_row(tail)
+        and _has_inline_tool_markup(body)
+        and len(_strip_inline_tool_markup(body)) < 220
+    ):
+        return True
+
+    # Path F: short "I'll look it up" stub, no tool rows this turn.
+    if not _turn_has_any_tool_row(tail) and is_search_deferral_stub(
+        visible_body=body,
+        reasoning_text=reasoning,
+    ):
+        return True
+
     return False
 
 
@@ -349,6 +375,9 @@ class ManagedSession:
     avatar_id: Optional[str] = None
     avatar_name: Optional[str] = None
     session_name: Optional[str] = None
+    session_kind: Optional[str] = None
+    delegation_id: Optional[str] = None
+    parent_owner_session_id: Optional[str] = None
     pinned: bool = False
     archived: bool = False
     taskspaces: list[dict[str, str]] = field(default_factory=list)
@@ -399,6 +428,7 @@ _PREVIEW_KIND_CODE = "code"
 _PREVIEW_KIND_IMAGE = "image"
 _PREVIEW_KIND_PDF = "pdf"
 _PREVIEW_KIND_OFFICE = "office"
+_PREVIEW_KIND_VIDEO = "video"
 _PREVIEW_KIND_BINARY = "binary"
 
 _MARKDOWN_EXTS = frozenset({".md", ".markdown", ".mdx", ".mmd"})
@@ -425,6 +455,7 @@ _CODE_EXTS = frozenset(
 _IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico"})
 _PDF_EXTS = frozenset({".pdf"})
 _OFFICE_EXTS = frozenset({".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"})
+_VIDEO_EXTS = frozenset({".mp4", ".m4v", ".mov", ".webm"})
 
 _MIME_BY_EXT: dict[str, str] = {
     ".md": "text/markdown",
@@ -461,6 +492,10 @@ _MIME_BY_EXT: dict[str, str] = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".ppt": "application/vnd.ms-powerpoint",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
 }
 
 
@@ -486,6 +521,8 @@ def _guess_preview_kind(path: Path, mime_type: str) -> str:
         return _PREVIEW_KIND_PDF
     if ext in _OFFICE_EXTS:
         return _PREVIEW_KIND_OFFICE
+    if ext in _VIDEO_EXTS:
+        return _PREVIEW_KIND_VIDEO
     if mime_type.startswith("text/"):
         return _PREVIEW_KIND_TEXT
     if mime_type in ("application/json", "application/xml", "application/javascript"):
@@ -502,7 +539,7 @@ def classify_taskspace_file(path: Path) -> dict[str, Any]:
     mime_type = _guess_preview_mime(path)
     preview_kind = _guess_preview_kind(path, mime_type)
     is_binary = not _is_textual_preview_kind(preview_kind)
-    # Desktop WorkspaceFilePreview renders text/image plus PDF/Office (pdf.js / docx).
+    # Desktop WorkspaceFilePreview renders text/image plus PDF/Office/video.
     preview_supported = preview_kind in (
         _PREVIEW_KIND_TEXT,
         _PREVIEW_KIND_MARKDOWN,
@@ -510,6 +547,7 @@ def classify_taskspace_file(path: Path) -> dict[str, Any]:
         _PREVIEW_KIND_IMAGE,
         _PREVIEW_KIND_PDF,
         _PREVIEW_KIND_OFFICE,
+        _PREVIEW_KIND_VIDEO,
     )
     return {
         "mime_type": mime_type,
@@ -1209,6 +1247,12 @@ class SessionManager:
             mid_turn_persist=_persist_cb,
             clarify_gate=managed.clarify_gate,
             checkpoint_store=CheckpointStore(),
+            run_recorder=recorder_for_session(
+                self,
+                session_id,
+                agent_id=str(getattr(managed, "avatar_id", "") or "meta"),
+                resume_run_id=getattr(checkpoint, "run_id", None),
+            ),
         )
         hub = managed.event_hub or self.get_event_hub(session_id)
         start_round = max(1, int(getattr(checkpoint, "round_idx", 0)) + 1)
@@ -1219,6 +1263,7 @@ class SessionManager:
             persist_user_message=False,
             usage_session_id=session_id,
             usage_avatar_id=getattr(managed, "avatar_id", None),
+            resume_turn_id=getattr(checkpoint, "turn_id", None),
         ):
             if hub is not None:
                 try:
@@ -1257,6 +1302,10 @@ class SessionManager:
             if managed.team_manager is not None:
                 managed.team_manager.shutdown_now()
             # MCP hub is global; do NOT kill child processes on session delete.
+        try:
+            ReplayLedgerStore(Path(self._sessions_root)).delete_session_runs(sid)
+        except Exception:
+            _log.warning("replay ledger cleanup failed session=%s", sid, exc_info=True)
         purged = self._purge_session_state(sid)
         if managed is not None and not existed_in_persistence:
             return True
@@ -1276,7 +1325,7 @@ class SessionManager:
             if not self._session_has_listable_chat_history(hist):
                 continue
             seen_session_ids.add(sid)
-            result.append({
+            listed = {
                 "session_id": sid,
                 "avatar_id": getattr(managed, "avatar_id", None),
                 "avatar_name": getattr(managed, "avatar_name", None),
@@ -1294,7 +1343,11 @@ class SessionManager:
                     getattr(managed.studio_session, "session_mode", None)
                 ),
                 **_harness_list_fields(managed.studio_session),
-            })
+            }
+            parent_sid = self._conversation_parent_session_id(managed.studio_session)
+            if parent_sid:
+                listed["parent_session_id"] = parent_sid
+            result.append(listed)
         for row in self._list_persisted_sessions(avatar_id=avatar_id):
             sid = str(row.get("session_id", "")).strip()
             if not sid or sid in seen_session_ids:
@@ -1610,6 +1663,131 @@ class SessionManager:
         self._persist_session_state(forked.session_id, forked.studio_session)
         return forked
 
+    def continue_session_from_message(
+        self, session_id: str, message_id: str
+    ) -> ManagedSession:
+        """Create a dialogue branch sliced at ``message_id`` (shared workspace).
+
+        Unlike :meth:`fork_session`, only the transcript prefix is copied and
+        the isolate state is always dropped so two sessions never share one
+        ``isolate_json`` worktree.
+        """
+        from agenticx.studio.conversation_continue import (
+            ConversationContinueError,
+            build_conversation_lineage,
+            slice_transcript_for_continue,
+        )
+
+        source = self._sessions.get(session_id)
+        if source is None:
+            raise ConversationContinueError("session_not_found")
+        if self.active_runs > 0:
+            raise ConversationContinueError("source_session_running")
+        target = str(message_id or "").strip()
+        if not target:
+            raise ConversationContinueError("message_not_found")
+        chat_prefix, agent_prefix = slice_transcript_for_continue(
+            getattr(source.studio_session, "chat_history", None) or [],
+            getattr(source.studio_session, "agent_messages", None) or [],
+            target,
+        )
+        forked = self.create(
+            provider=source.studio_session.provider_name,
+            model=source.studio_session.model_name,
+        )
+        forked.avatar_id = source.avatar_id
+        forked.avatar_name = source.avatar_name
+        source_name = str(source.session_name or "").strip()
+        forked.session_name = source_name or None
+        forked.studio_session.workspace_dir = source.studio_session.workspace_dir
+        forked.studio_session.chat_history = chat_prefix
+        forked.studio_session.agent_messages = agent_prefix
+        forked.studio_session.context_files = deepcopy(
+            source.studio_session.context_files or {}
+        )
+        scratchpad = deepcopy(source.studio_session.scratchpad or {})
+        scratchpad.pop("isolate_json", None)
+        scratchpad.pop("run_branch_lineage", None)
+        forked.studio_session.scratchpad = scratchpad
+        forked.studio_session.scratchpad["conversation_lineage"] = (
+            build_conversation_lineage(source.session_id, target)
+        )
+        forked.studio_session.artifacts = deepcopy(
+            source.studio_session.artifacts or {}
+        )
+        forked.updated_at = time.time()
+        if not self._persist_session_state(forked.session_id, forked.studio_session):
+            self.delete(forked.session_id)
+            raise ConversationContinueError("branch_session_persist_failed")
+        return forked
+
+    def fork_session_from_checkpoint(
+        self,
+        *,
+        source_session_id: str,
+        target_session_id: str,
+        checkpoint: ContextCheckpoint,
+        lineage: dict[str, Any],
+        workspace_state: dict[str, str],
+        provider: str | None,
+        model: str | None,
+    ) -> ManagedSession:
+        """Create a persisted session from an immutable replay checkpoint."""
+        source = self.get(source_session_id, touch=False)
+        if source is None:
+            raise ValueError("source_session_not_found")
+        forked = self.create(
+            provider=provider,
+            model=model,
+            session_id=target_session_id,
+        )
+        forked.avatar_id = source.avatar_id
+        forked.avatar_name = source.avatar_name
+        forked.session_name = self._build_fork_name(source.session_name)
+        session = forked.studio_session
+        session.agent_messages = deepcopy(checkpoint.agent_messages)
+        session.chat_history = deepcopy(checkpoint.chat_history)
+        session.context_files = deepcopy(checkpoint.context_files)
+        session.scratchpad = deepcopy(checkpoint.scratchpad)
+        session.scratchpad["run_branch_lineage"] = deepcopy(lineage)
+        session.artifacts = {
+            Path(path): deepcopy(value)
+            for path, value in checkpoint.artifacts.items()
+        }
+        session.session_mode = checkpoint.session_mode
+        session.todo_manager.load_payload(deepcopy(checkpoint.todo_items))
+        forked.taskspaces = deepcopy(checkpoint.taskspaces)
+        setattr(session, "active_taskspace_id", checkpoint.active_taskspace_id)
+        if workspace_state:
+            save_isolate_state(session, workspace_state)
+            session.workspace_dir = workspace_state.get("worktree")
+            for taskspace in forked.taskspaces:
+                if taskspace.get("id") == checkpoint.active_taskspace_id:
+                    taskspace["path"] = workspace_state.get(
+                        "worktree", taskspace.get("path", "")
+                    )
+        session.chat_history.append(
+            {
+                "role": "system",
+                "content": "",
+                "system_notice": True,
+                "metadata": {
+                    "branch_lineage": {
+                        "parent_session_id": lineage["parent_session_id"],
+                        "parent_run_id": lineage["parent_run_id"],
+                        "requested_seq": lineage["source_seq"],
+                        "restored_seq": lineage["resolved_checkpoint_seq"],
+                        "source_event_id": lineage["source_event_id"],
+                    }
+                },
+            }
+        )
+        forked.updated_at = time.time()
+        if not self._persist_session_state(forked.session_id, session):
+            self.delete(forked.session_id)
+            raise RuntimeError("branch_session_persist_failed")
+        return forked
+
     def archive_sessions_before(self, session_id: str, avatar_id: str | None = None) -> int:
         target = self._sessions.get(session_id)
         if target is None:
@@ -1634,7 +1812,7 @@ class SessionManager:
     def get_messages(self, session_id: str) -> list[dict]:
         """Return normalized chat messages for session."""
         raw = self._get_raw_messages_list(session_id)
-        return self._normalize_messages(raw)
+        return self._normalize_messages_for_api(session_id, raw)
 
     def _get_raw_messages_list(self, session_id: str) -> list[dict]:
         """Return raw chat_history rows before normalization."""
@@ -1732,7 +1910,12 @@ class SessionManager:
                     last_user_abs_index=last_user,
                 )
                 return {
-                    "messages": self._normalize_messages(window),
+                    "messages": self._normalize_messages_for_api(
+                        session_id,
+                        window,
+                        raw_full=raw_full,
+                        start_index=abs_start,
+                    ),
                     "start_index": abs_start,
                     "total_count": total_count,
                     "has_older": abs_start > 0,
@@ -1773,7 +1956,12 @@ class SessionManager:
             window = raw
 
         return {
-            "messages": self._normalize_messages(window),
+            "messages": self._normalize_messages_for_api(
+                session_id,
+                window,
+                raw_full=raw,
+                start_index=start_index,
+            ),
             "start_index": start_index,
             "total_count": total_count,
             "has_older": start_index > 0,
@@ -2226,7 +2414,9 @@ class SessionManager:
                         self._storage.save_messages(session_id, messages)
                     except Exception:
                         pass
-                session.chat_history = self._normalize_messages(messages)
+                session.chat_history = self._normalize_messages_for_api(
+                    session_id, messages
+                )
         except Exception:
             pass
 
@@ -2296,6 +2486,10 @@ class SessionManager:
             managed.avatar_name = (
                 None if raw_name is None else (str(raw_name).strip() or None)
             )
+        for field_name in ("session_kind", "delegation_id", "parent_owner_session_id"):
+            raw_value = metadata.get(field_name)
+            if raw_value is not None:
+                setattr(managed, field_name, str(raw_value).strip() or None)
         if "execution_state" in metadata:
             raw_state = str(metadata.get("execution_state", "idle")).strip().lower()
             if raw_state in ("idle", "running", "interrupted", "failed"):
@@ -2406,6 +2600,11 @@ class SessionManager:
                     "session_name": getattr(managed_ref, "session_name", None),
                     "avatar_id": getattr(managed_ref, "avatar_id", None),
                     "avatar_name": getattr(managed_ref, "avatar_name", None),
+                    "session_kind": getattr(managed_ref, "session_kind", None),
+                    "delegation_id": getattr(managed_ref, "delegation_id", None),
+                    "parent_owner_session_id": getattr(
+                        managed_ref, "parent_owner_session_id", None
+                    ),
                     "created_at": metadata_created_at,
                     "updated_at": metadata_updated_at,
                     "last_activity_at": last_activity_at,
@@ -2418,6 +2617,9 @@ class SessionManager:
                     ),
                     **_harness_list_fields(session),
                 }
+                parent_sid = self._conversation_parent_session_id(session)
+                if parent_sid:
+                    metadata["parent_session_id"] = parent_sid
                 self._session_store._save_session_summary_sync(
                     session_id,
                     summary,
@@ -2579,8 +2781,61 @@ class SessionManager:
         for fpath in paths:
             if not isinstance(fpath, str) or not os.path.isfile(fpath):
                 continue
-            with open(fpath, "r", encoding="utf-8") as fh:
-                session.context_files[fpath] = fh.read()
+            try:
+                with open(fpath, "r", encoding="utf-8") as fh:
+                    session.context_files[fpath] = fh.read()
+            except UnicodeDecodeError:
+                session.context_files[fpath] = f"[文件引用] {fpath}"
+
+    @staticmethod
+    def _user_ts_before(raw: list[dict], start_index: int) -> int:
+        start = max(0, int(start_index or 0))
+        for idx in range(start - 1, -1, -1):
+            item = raw[idx]
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("role") or "") != "user":
+                continue
+            try:
+                return int(item.get("timestamp") or 0)
+            except (TypeError, ValueError):
+                return 0
+        return 0
+
+    def _normalize_messages_for_api(
+        self,
+        session_id: str,
+        messages: list[dict],
+        *,
+        raw_full: list[dict] | None = None,
+        start_index: int = 0,
+    ) -> list[dict]:
+        rows = self._normalize_messages(messages)
+        initial_user_ts = 0
+        if start_index > 0 and raw_full:
+            initial_user_ts = self._user_ts_before(raw_full, start_index)
+        self._hydrate_legacy_usage(
+            session_id, rows, initial_user_ts=initial_user_ts
+        )
+        return rows
+
+    def _hydrate_legacy_usage(
+        self,
+        session_id: str,
+        rows: list[dict],
+        *,
+        initial_user_ts: int = 0,
+    ) -> None:
+        sid = str(session_id or "").strip()
+        if not sid or not rows:
+            return
+        try:
+            events = get_usage_store().list_session_events_sync(sid)
+        except Exception:
+            return
+        hydrate_legacy_message_usage(
+            rows, events, initial_user_ts=initial_user_ts
+        )
 
     def _normalize_messages(self, messages: list[dict]) -> list[dict]:
         max_data_url = 8_000_000
@@ -2620,6 +2875,10 @@ class SessionManager:
                     "cached_tokens",
                     "reasoning_tokens",
                     "total_tokens",
+                    "turn_input_tokens",
+                    "turn_output_tokens",
+                    "turn_cached_tokens",
+                    "turn_total_tokens",
                 ):
                     try:
                         usage_out[usage_key] = max(0, int(raw_usage.get(usage_key, 0) or 0))
@@ -3025,6 +3284,46 @@ class SessionManager:
             return "Fork Chat"
         return f"{text} (Fork)"
 
+    @staticmethod
+    def _conversation_parent_session_id(session: Any) -> str:
+        from agenticx.studio.conversation_continue import get_conversation_lineage
+
+        lineage = get_conversation_lineage(session)
+        if not isinstance(lineage, dict):
+            return ""
+        if str(lineage.get("kind", "") or "") != "conversation":
+            return ""
+        return str(lineage.get("parent_session_id", "") or "").strip()
+
+    def _resolve_listed_parent_session_id(
+        self, session_id: str, metadata: dict[str, Any] | None
+    ) -> str:
+        meta = metadata if isinstance(metadata, dict) else {}
+        parent = str(meta.get("parent_session_id", "") or "").strip()
+        if parent:
+            return parent
+        # Persist already writes parent_session_id into listing metadata. A
+        # populated summary without that field is an ordinary session — do not
+        # open SQLite per row to re-read scratchpad (N extra connects on every
+        # sidebar refresh).
+        if meta:
+            return ""
+        sid = str(session_id or "").strip()
+        if not sid:
+            return ""
+        try:
+            scratch = self._session_store._load_scratchpad_sync(sid)
+        except Exception:
+            return ""
+        if not isinstance(scratch, dict):
+            return ""
+        lineage = scratch.get("conversation_lineage")
+        if not isinstance(lineage, dict):
+            return ""
+        if str(lineage.get("kind", "") or "") != "conversation":
+            return ""
+        return str(lineage.get("parent_session_id", "") or "").strip()
+
     def _to_float(self, value: Any, fallback: float) -> float:
         try:
             parsed = float(value)
@@ -3102,22 +3401,24 @@ class SessionManager:
                 derived = self._derive_session_name_from_disk_messages(sid)
                 if derived:
                     sess_nm = derived
-            rows.append(
-                {
-                    "session_id": sid,
-                    "avatar_id": metadata.get("avatar_id"),
-                    "avatar_name": metadata.get("avatar_name"),
-                    "session_name": sess_nm,
-                    "updated_at": updated_at,
-                    "created_at": created_at,
-                    "last_activity_at": last_activity_at,
-                    "pinned": bool(metadata.get("pinned", False)),
-                    "archived": bool(metadata.get("archived", False)),
-                    "execution_state": str(metadata.get("execution_state", "idle") or "idle"),
-                    "provider": str(metadata.get("provider", "") or ""),
-                    "model": str(metadata.get("model", "") or ""),
-                }
-            )
+            listed = {
+                "session_id": sid,
+                "avatar_id": metadata.get("avatar_id"),
+                "avatar_name": metadata.get("avatar_name"),
+                "session_name": sess_nm,
+                "updated_at": updated_at,
+                "created_at": created_at,
+                "last_activity_at": last_activity_at,
+                "pinned": bool(metadata.get("pinned", False)),
+                "archived": bool(metadata.get("archived", False)),
+                "execution_state": str(metadata.get("execution_state", "idle") or "idle"),
+                "provider": str(metadata.get("provider", "") or ""),
+                "model": str(metadata.get("model", "") or ""),
+            }
+            parent_sid = self._resolve_listed_parent_session_id(sid, metadata)
+            if parent_sid:
+                listed["parent_session_id"] = parent_sid
+            rows.append(listed)
         known = {str(row.get("session_id", "")) for row in rows}
         skip_dirs = known | sqlite_skip
         root = Path(self._sessions_root)
@@ -3160,21 +3461,23 @@ class SessionManager:
                     derived = self._derive_session_name_from_disk_messages(sid)
                     if derived:
                         sess_nm = derived
-                rows.append(
-                    {
-                        "session_id": sid,
-                        "avatar_id": av_norm,
-                        "avatar_name": av_name,
-                        "session_name": sess_nm,
-                        "updated_at": mtime,
-                        "created_at": mtime,
-                        "pinned": False,
-                        "archived": False,
-                        "execution_state": str(fs_meta.get("execution_state", "idle") or "idle"),
-                        "provider": str(fs_meta.get("provider", "") or ""),
-                        "model": str(fs_meta.get("model", "") or ""),
-                    }
-                )
+                listed = {
+                    "session_id": sid,
+                    "avatar_id": av_norm,
+                    "avatar_name": av_name,
+                    "session_name": sess_nm,
+                    "updated_at": mtime,
+                    "created_at": mtime,
+                    "pinned": False,
+                    "archived": False,
+                    "execution_state": str(fs_meta.get("execution_state", "idle") or "idle"),
+                    "provider": str(fs_meta.get("provider", "") or ""),
+                    "model": str(fs_meta.get("model", "") or ""),
+                }
+                parent_sid = self._resolve_listed_parent_session_id(sid, fs_meta)
+                if parent_sid:
+                    listed["parent_session_id"] = parent_sid
+                rows.append(listed)
         return rows
 
     def _purge_session_state(self, session_id: str) -> bool:

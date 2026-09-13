@@ -1,4 +1,5 @@
 import { FileText } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { SearchReference } from "../../types/search-references";
 import { formatReferenceSnippet } from "../../utils/reference-snippet";
 import { openSearchReference } from "../../utils/open-kb-reference";
@@ -18,6 +19,7 @@ function fileIconLabel(title: string): string {
 }
 
 export function CitationPopover({ references }: Props) {
+  const { t } = useTranslation("chat");
   const primary = references[0];
   if (!primary) return null;
   const isKb = primary.source === "kb" || primary.url.startsWith("agx://kb/");
@@ -50,7 +52,7 @@ export function CitationPopover({ references }: Props) {
           )}
         </div>
       ) : (
-        <p className="text-[12px] text-text-faint">暂无摘录</p>
+        <p className="text-[12px] text-text-faint">{t("citation.noSnippet")}</p>
       )}
       <div className="my-2.5 h-px bg-border-subtle" />
       <button
@@ -79,7 +81,9 @@ export function CitationPopover({ references }: Props) {
           {primary.title}
         </span>
         {references.length > 1 ? (
-          <span className="shrink-0 text-[11px] text-text-faint">{references.length} 个片段</span>
+          <span className="shrink-0 text-[11px] text-text-faint">
+            {t("citation.fragmentCount", { count: references.length })}
+          </span>
         ) : null}
       </button>
     </div>

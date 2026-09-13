@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import { i18n } from "../i18n/i18n";
 import type { TaskspaceMountMode } from "../store";
 import { useAppStore } from "../store";
 import { isPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
+
+function ct(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "chat", ...(opts ?? {}) }));
+}
 
 export type AttachWorkspaceSourcesOptions = {
   paneId: string;
@@ -46,7 +51,7 @@ export function useAttachWorkspaceSources({
           !!paneAvatarId && (paneAvatarId.startsWith("group:") || paneAvatarId.startsWith("automation:"));
         if (isGroupOrAutomationPane) {
           setAdding(false);
-          onError("会话正在初始化，请稍候再试");
+          onError(ct("composer.sessionInitWait"));
           return false;
         }
         if (isPaneAwaitingFreshSession(paneId)) {
@@ -55,18 +60,18 @@ export function useAttachWorkspaceSources({
               const ensured = await onEnsureSessionForWorkspace();
               if (!ensured) {
                 setAdding(false);
-                onError("创建会话失败，无法添加工作区");
+                onError(ct("composer.createSessionFailed"));
                 return false;
               }
               effectiveSessionId = ensured;
             } catch (err) {
               setAdding(false);
-              onError(`创建会话失败：${String(err)}`);
+              onError(ct("composer.createSessionFailedWithError", { error: String(err) }));
               return false;
             }
           } else {
             setAdding(false);
-            onError("请先发送一条消息，再添加工作区目录");
+            onError(ct("composer.sendFirstThenAdd"));
             return false;
           }
         } else {
@@ -77,14 +82,14 @@ export function useAttachWorkspaceSources({
             const created = await window.agenticxDesktop.createSession(createPayload);
             if (!created.ok || !created.session_id) {
               setAdding(false);
-              onError(created.error ?? "创建会话失败，无法添加工作区");
+              onError(created.error ?? ct("composer.createSessionFailed"));
               return false;
             }
             effectiveSessionId = created.session_id;
             setPaneSessionId(paneId, effectiveSessionId);
           } catch (err) {
             setAdding(false);
-            onError(`创建会话失败：${String(err)}`);
+            onError(ct("composer.createSessionFailedWithError", { error: String(err) }));
             return false;
           }
         }
@@ -92,7 +97,7 @@ export function useAttachWorkspaceSources({
       const linker = window.agenticxDesktop.linkIntoSessionWorkspace;
       if (typeof linker !== "function") {
         setAdding(false);
-        onError("当前客户端不支持添加到工作区，请完全重启桌面端后重试。");
+        onError(ct("composer.clientNoLink"));
         return false;
       }
       const result = await linker({
@@ -107,15 +112,15 @@ export function useAttachWorkspaceSources({
       if (!result.ok || linked === 0 || failed.length > 0) {
         const firstFail = failed[0] || cleaned[0] || "";
         const winHint =
-          hostPlatform === "win32" && mode === "link"
-            ? "创建直连需要开启 Windows 开发者模式或以管理员身份运行。"
-            : "";
-        onError(
-          result.error ||
-            (failed.length > 0
-              ? `添加失败 ${failed.length} 项：${firstFail}${winHint ? `。${winHint}` : ""}`
-              : `添加到工作区失败${winHint ? `：${winHint}` : ""}`),
-        );
+          hostPlatform === "win32" && mode === "link" ? ct("composer.winDevModeHint") : "";
+        const fallback = winHint
+          ? failed.length > 0
+            ? ct("composer.addFailedCountHint", { count: failed.length, path: firstFail, hint: winHint })
+            : ct("composer.addWorkspaceFailedHint", { hint: winHint })
+          : failed.length > 0
+            ? ct("composer.addFailedCount", { count: failed.length, path: firstFail })
+            : ct("composer.addWorkspaceFailed");
+        onError(result.error || fallback);
         return false;
       }
       onError("");
@@ -144,13 +149,13 @@ export function useAttachWorkspaceSources({
       const confirmResult =
         typeof desktop.confirmDialog === "function"
           ? await desktop.confirmDialog({
-              title: "确认直连原目录",
-              message: "agent 的改动会直接写入所选路径。",
+              title: ct("composer.directMountTitle"),
+              message: ct("composer.directMountMessage"),
               detail: sourcePreview
-                ? `目标：${sourcePreview}\n此操作不可自动撤销。`
-                : "此操作不可自动撤销。",
-              confirmText: "确认直连",
-              cancelText: "取消",
+                ? ct("composer.directMountDetail", { path: sourcePreview })
+                : ct("composer.directMountDetailEmpty"),
+              confirmText: ct("composer.directMountConfirm"),
+              cancelText: ct("composer.cancel"),
               destructive: true,
             })
           : { ok: true, confirmed: false };

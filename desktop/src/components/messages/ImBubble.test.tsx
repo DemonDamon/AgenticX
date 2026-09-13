@@ -230,6 +230,21 @@ describe("ChatImAvatar", () => {
 
 // Ported-ref: fix/glm-stream-common-finalization@5bf63d3e
 describe("ImBubble assistant protocol boundary", () => {
+  it("does not render a trailing group-control FINAL token", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "leaked-control-token",
+          role: "assistant",
+          content: "字段已补进协议。 FINAL",
+          avatarName: "后端·北辰",
+        }}
+      />,
+    );
+    expect(html).toContain("字段已补进协议。");
+    expect(html).not.toContain("FINAL");
+  });
+
   it("does not render an unclosed followups tail from historical messages", () => {
     const raw =
       "全部修复完成。\n\n粒子间距离 < 120px 时自动连线。\n\n<followups>粒子动画太卡了怎么优化\n待办事项能不能按分类筛选\n背景粒子颜色能不能换成其他配色";
@@ -291,5 +306,55 @@ describe("ImBubble assistant protocol boundary", () => {
     expect(rowIdx).toBeGreaterThan(-1);
     expect(cardIdx).toBeGreaterThan(rowIdx);
     expect(iconsIdx).toBeGreaterThan(cardIdx);
+  });
+
+  it("keeps copy/usage and follow-up chips on a single clipped action line", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "followup-squeeze",
+          role: "assistant",
+          content: "分析完毕。",
+          suggestedQuestions: ["帮我估算100MW训练集群在内蒙古vs长三角的年度成本差"],
+          usage: {
+            inputTokens: 1100,
+            outputTokens: 200,
+            cachedTokens: 1038,
+            reasoningTokens: 0,
+            totalTokens: 1300,
+          },
+          model: "kimi-k2.6",
+        }}
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onFavoriteMessage={() => {}}
+        onFollowupClick={() => {}}
+      />,
+    );
+
+    expect(html).toMatch(/class="[^"]*agx-assistant-action-icons[^"]*\bflex-nowrap\b[^"]*"/);
+    expect(html).toMatch(/class="[^"]*agx-assistant-action-icons[^"]*\boverflow-hidden\b[^"]*"/);
+    expect(html).not.toMatch(/class="[^"]*agx-assistant-action-icons[^"]*\bflex-wrap\b[^"]*"/);
+    expect(html).toContain("agx-followup-chip");
+    expect(html).toContain("帮我估算100MW训练集群在内蒙古vs长三角的年度成本差");
+    expect(html).toContain("缓存");
+  });
+
+  it("shows continue-in-new-task on assistant actions only", () => {
+    const continueMark = "M12 12.5c.6-4.4 4.8-6.6 8.2-4.2";
+    const assistant = renderToStaticMarkup(
+      <ImBubble
+        message={{ id: "a-continue", role: "assistant", content: "模型回复" }}
+        onContinueFromMessage={() => {}}
+      />,
+    );
+    const user = renderToStaticMarkup(
+      <ImBubble
+        message={{ id: "u-continue", role: "user", content: "飞书mcp" }}
+        onContinueFromMessage={() => {}}
+      />,
+    );
+    expect(assistant).toContain(continueMark);
+    expect(user).not.toContain(continueMark);
   });
 });

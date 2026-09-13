@@ -299,6 +299,19 @@ def register_kb_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=404, detail=f"job {job_id} not found")
         return {"ok": True, "job": job.to_dict()}
 
+    @app.post("/api/kb/jobs/{job_id}/cancel")
+    async def cancel_kb_job(job_id: str) -> Dict[str, Any]:
+        manager = KBManager.instance()
+        if manager.jobs.get(job_id) is None:
+            raise HTTPException(status_code=404, detail=f"job {job_id} not found")
+        try:
+            job, already_terminal = manager.jobs.request_cancel(job_id, manager.runtime)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"job {job_id} not found") from None
+        if already_terminal:
+            raise HTTPException(status_code=409, detail="job already finished")
+        return {"ok": True, "job": job.to_dict()}
+
     # ------------------------------ search ------------------------------- #
 
     @app.post("/api/kb/search")

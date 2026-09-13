@@ -15,6 +15,35 @@ ACTION_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+SEARCH_DEFER_STUB_MAX_CHARS = 220
+
+_SEARCH_DEFER_STUB_RE = re.compile(
+    r"(?:我先|让我先|我来|让我).{0,16}(?:联网|上网|搜索|检索|查证|查一下|搜一下|核实)"
+    r"|先(?:去)?(?:联网|上网).{0,8}(?:查|搜)"
+    r"|联网查证|上网[查搜]"
+    r"|(?:need to|have to|i'?ll|let me).{0,28}(?:search|look\s*up|verify|check).{0,16}(?:web|online)?"
+    r"|search\s+the\s+web",
+    re.IGNORECASE,
+)
+
+_SEARCH_DEFER_ALREADY_DONE_RE = re.compile(r"(?:查|搜)了|(?:查|搜)到了?|结论是|厂商是")
+
+
+def is_search_deferral_stub(*, visible_body: str, reasoning_text: str = "") -> bool:
+    """True when the model only promised a lookup and did not start answering."""
+    body = str(visible_body or "").strip()
+    if not body or len(body) >= SEARCH_DEFER_STUB_MAX_CHARS:
+        return False
+    if _SEARCH_DEFER_ALREADY_DONE_RE.search(body):
+        return False
+    if _SEARCH_DEFER_STUB_RE.search(body):
+        return True
+    reasoning = str(reasoning_text or "").strip()
+    if reasoning and _SEARCH_DEFER_STUB_RE.search(reasoning):
+        return bool(re.search(r"我先|让我先|稍等|正在|马上|避免凭印象", body))
+    return False
+
+
 # Explicit vendor "hit max tokens" reasons — always continue once.
 _LENGTH_FINISH_REASONS = frozenset(
     {

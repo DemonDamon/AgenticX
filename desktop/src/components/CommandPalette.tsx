@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Command } from "../core/command-registry";
 
 type Props = {
@@ -11,6 +12,7 @@ type Props = {
 };
 
 export function CommandPalette({ open, query, commands, onQueryChange, onExecute, onClose }: Props) {
+  const { t } = useTranslation("sidebar");
   const [selectedIdx, setSelectedIdx] = useState(0);
 
   useEffect(() => {
@@ -44,12 +46,12 @@ export function CommandPalette({ open, query, commands, onQueryChange, onExecute
               }
             }}
             className="w-full bg-transparent text-sm text-text-primary outline-none placeholder:text-text-faint"
-            placeholder="输入命令，例如 model / settings / clear"
+            placeholder={t("commandPalette.placeholder")}
           />
         </div>
         <div className="max-h-64 overflow-y-auto py-1">
           {commands.length === 0 ? (
-            <div className="px-3 py-6 text-center text-xs text-text-faint">没有匹配的命令</div>
+            <div className="px-3 py-6 text-center text-xs text-text-faint">{t("commandPalette.empty")}</div>
           ) : (
             commands.map((cmd, idx) => (
               <button
@@ -65,7 +67,7 @@ export function CommandPalette({ open, query, commands, onQueryChange, onExecute
                   </span>
                   <div className="min-w-0">
                     <div className="truncate font-medium">{cmd.name}</div>
-                    <div className="truncate text-xs text-text-faint">{cmd.description}</div>
+                    <div className="truncate text-xs text-text-faint">{t(cmd.description)}</div>
                   </div>
                 </div>
                 <div className="ml-2 shrink-0 text-right">

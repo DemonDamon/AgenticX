@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { ForwardedHistoryCard as ForwardedHistoryCardData } from "../../store";
 
 type Props = {
@@ -6,6 +7,7 @@ type Props = {
 };
 
 export function ForwardedHistoryCard({ history, onOpen }: Props) {
+  const { t } = useTranslation("chat");
   const preview = history.items.slice(0, 2);
   return (
     <button
@@ -16,7 +18,7 @@ export function ForwardedHistoryCard({ history, onOpen }: Props) {
       <div className="break-words text-[15px] font-medium text-text-strong [overflow-wrap:anywhere]">{history.title}</div>
       {history.note ? (
         <div className="mt-1 break-words rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-200 [overflow-wrap:anywhere]">
-          附加说明：{history.note}
+          {t("forwarded.notePrefix", { note: history.note })}
         </div>
       ) : null}
       <div className="mt-2 space-y-1">
@@ -29,7 +31,9 @@ export function ForwardedHistoryCard({ history, onOpen }: Props) {
           </div>
         ))}
       </div>
-      <div className="mt-2 border-t border-border pt-1.5 text-right text-xs text-cyan-300">聊天记录 ▸</div>
+      <div className="mt-2 border-t border-border pt-1.5 text-right text-xs text-cyan-300">
+        {t("forwarded.openHistory")}
+      </div>
     </button>
   );
 }

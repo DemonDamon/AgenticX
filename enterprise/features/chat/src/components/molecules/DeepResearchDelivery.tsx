@@ -12,6 +12,7 @@ import {
   isPrimaryDeliveryArtifactPath,
 } from "./deep-research-delivery-prefs";
 import { collectDeepResearchDeliveryArtifacts } from "./deep-research-segments";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 
 export type DeepResearchDeliveryProps = {
   deepResearch: ChatMessageDeepResearch;
@@ -41,6 +42,7 @@ function IconFolder({ className }: { className?: string }) {
 }
 
 function AllFilesCard({ onOpen }: { onOpen?: () => void }) {
+  const copy = useChatCopy();
   return (
     <button
       type="button"
@@ -53,10 +55,10 @@ function AllFilesCard({ onOpen }: { onOpen?: () => void }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[14px] font-medium leading-5 text-foreground">
-          全部文件
+          {copy.delivery.allFiles}
         </span>
         <span className="mt-0.5 block truncate text-[12px] leading-4 text-muted-foreground">
-          预览或者下载文件
+          {copy.delivery.allFilesHint}
         </span>
       </span>
     </button>

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useAppStore } from "../store";
+import { queuedMessagesForSession } from "./pending-message-queue";
 
 describe("pending message queue session isolation", () => {
   const paneId = "pane-test";
@@ -51,6 +52,16 @@ describe("pending message queue session isolation", () => {
     expect(removed).toBeUndefined();
     const remainingIds = (useAppStore.getState().pendingMessages[paneId] ?? []).map((m) => m.id);
     expect(remainingIds).toEqual(["m1", "m2", "m3"]);
+  });
+
+  it("shows only the queue owned by the active session", () => {
+    const queue = useAppStore.getState().pendingMessages[paneId] ?? [];
+    expect(queuedMessagesForSession(queue, "sess-a").map((item) => item.id)).toEqual([
+      "m1",
+      "m3",
+    ]);
+    expect(queuedMessagesForSession(queue, "sess-b").map((item) => item.id)).toEqual(["m2"]);
+    expect(queuedMessagesForSession(queue, "")).toEqual([]);
   });
 
   it("mimics session switch auto-send without cross-session leak", () => {

@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
+import { i18n } from "../i18n/i18n";
 import { SidebarAccountBar } from "./SidebarAccountBar";
 import { Topbar } from "./Topbar";
 import { TopbarLeftControls } from "./TopbarLeftControls";
@@ -23,6 +24,21 @@ vi.mock("../store", () => ({
 }));
 
 describe("sidebar account chrome", () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("zh");
+  });
+
+  it("switches account chrome to English", async () => {
+    await i18n.changeLanguage("en");
+    const html = renderToStaticMarkup(<SidebarAccountBar />);
+    expect(html).toContain("Switch to light");
+    expect(html).toContain("Token usage");
+    expect(html).toContain('aria-label="Settings"');
+    expect(html).not.toContain("切换到亮色");
+    expect(html).not.toContain("Token 消耗看板");
+    expect(html).not.toContain('aria-label="设置"');
+  });
+
   it("docks theme, token, and settings next to the identity pill", () => {
     const html = renderToStaticMarkup(<SidebarAccountBar />);
     expect(html).toContain("Damon");

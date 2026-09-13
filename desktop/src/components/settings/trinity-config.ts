@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { i18n } from "../../i18n/i18n";
 
 export type TrinityConfigForm = {
   skill_protocol: boolean;
@@ -41,20 +42,18 @@ async function promptNearRestartAfterTrinitySave(
   let message: string;
   if ("skill_manage_enabled" in patch) {
     message = patch.skill_manage_enabled
-      ? "「允许助手改本地技能」已开启。需完全退出 Near（⌘Q）后重新打开，模型才能调用 skill_manage 修改 ~/.agenticx/skills/ 下的技能。"
-      : "「允许助手改本地技能」已关闭。需重启 Near 后，后端才会禁止 skill_manage。";
+      ? String(i18n.t("commonSettings.trinitySkillManageOn", { ns: "settings" }))
+      : String(i18n.t("commonSettings.trinitySkillManageOff", { ns: "settings" }));
   } else {
-    message =
-      "智能体三件套设置已保存。需完全退出 Near（⌘Q）后重新打开，内置助手才会加载新配置。";
+    message = String(i18n.t("commonSettings.trinitySaved", { ns: "settings" }));
   }
 
   const restartDlg = await window.agenticxDesktop.confirmDialog({
-    title: "需要重启 Near",
+    title: String(i18n.t("commonSettings.needRestartTitle", { ns: "settings" })),
     message,
-    detail:
-      "内置 agx serve 仅在启动时注入相关环境变量；不重启则当前对话里 skill_manage 等能力仍按旧设置运行。",
-    confirmText: "立即重启",
-    cancelText: "稍后手动重启",
+    detail: String(i18n.t("commonSettings.trinityRestartDetail", { ns: "settings" })),
+    confirmText: String(i18n.t("commonSettings.restartNow", { ns: "settings" })),
+    cancelText: String(i18n.t("commonSettings.restartLater", { ns: "settings" })),
   });
   if (restartDlg.confirmed && window.agenticxDesktop.appRelaunch) {
     await window.agenticxDesktop.appRelaunch();
@@ -95,10 +94,10 @@ export function useTrinityConfig() {
           setForm(loaded);
           setLastSaved(loaded);
         } else if (!disposed) {
-          setMessage(result?.error ? String(result.error) : "读取配置失败。");
+          setMessage(result?.error ? String(result.error) : String(i18n.t("commonSettings.loadConfigFailed", { ns: "settings" })));
         }
       } catch {
-        if (!disposed) setMessage("读取配置失败。");
+        if (!disposed) setMessage(String(i18n.t("commonSettings.loadConfigFailed", { ns: "settings" })));
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -116,17 +115,17 @@ export function useTrinityConfig() {
       const result = await window.agenticxDesktop.saveTrinityConfig(next);
       if (!result?.ok) {
         setForm(lastSaved);
-        setMessage(result?.error ? String(result.error) : "保存失败。");
+        setMessage(result?.error ? String(result.error) : String(i18n.t("commonSettings.saveFailed", { ns: "settings" })));
         return;
       }
       setLastSaved(next);
       const relaunched = await promptNearRestartAfterTrinitySave(patch);
       if (!relaunched) {
-        setMessage("已保存。完全退出 Near（⌘Q）后重新打开生效。");
+        setMessage(String(i18n.t("commonSettings.trinitySavedInline", { ns: "settings" })));
       }
     } catch (e) {
       setForm(lastSaved);
-      setMessage(e instanceof Error ? e.message : "保存失败。");
+      setMessage(e instanceof Error ? e.message : String(i18n.t("commonSettings.saveFailed", { ns: "settings" })));
     } finally {
       setSaving(false);
     }

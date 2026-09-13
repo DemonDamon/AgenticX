@@ -37,6 +37,7 @@ from .contracts import (
     EmbeddingSpec,
     IngestReport,
     KBConfig,
+    KBCancelled,
     KBDocument,
     KBDocumentStatus,
     KBError,
@@ -785,6 +786,19 @@ class KBRuntime:
             logger.warning("Failed to purge ingest cache for %s: %s", doc_id, exc)
         return True
 
+    def mark_document_cancelled(self, doc_id: str, message: str = "已取消") -> None:
+        """Mark a registered document as cancelled without treating it as a failure."""
+
+        doc = self._registry.get(doc_id)
+        if doc is None:
+            return
+        updated = replace(
+            doc,
+            status=KBDocumentStatus.CANCELLED,
+            error=message,
+        )
+        self._registry.upsert(updated)
+
     def clear_all(self) -> None:
         self._registry.clear()
         with self._lock:
@@ -810,6 +824,7 @@ class KBRuntime:
         doc_id: str,
         *,
         progress_cb=None,
+        cancel_event=None,
     ) -> IngestReport:
         """Full synchronous ingest pipeline for one registered document.
 
@@ -847,22 +862,26 @@ class KBRuntime:
                 except Exception as exc:  # pragma: no cover - purely informational
                     logger.debug("progress callback failed: %s", exc)
 
-        # Incremental cache: skip re-embed when source + chunking + embedding unchanged.
-        if (
-            doc.status == KBDocumentStatus.DONE
-            and doc.chunks > 0
-            and self._ingest_cache_store().is_hit(doc.id, self._config, doc.source_path)
-        ):
-            _report(KBDocumentStatus.DONE, f"skipped unchanged source ({doc.chunks} chunks cached)")
-            report.success = 1
-            return report
-
         try:
+            _raise_if_cancelled(cancel_event)
+
+            # Incremental cache: skip re-embed when source + chunking + embedding unchanged.
+            if (
+                doc.status == KBDocumentStatus.DONE
+                and doc.chunks > 0
+                and self._ingest_cache_store().is_hit(doc.id, self._config, doc.source_path)
+            ):
+                _report(KBDocumentStatus.DONE, f"skipped unchanged source ({doc.chunks} chunks cached)")
+                report.success = 1
+                return report
+
             _report(KBDocumentStatus.PARSING, "reading document")
-            text = _read_document_text(doc.source_path)
+            _raise_if_cancelled(cancel_event)
+            text = _read_document_text(doc.source_path, cancel_event=cancel_event)
             if not text.strip():
                 raise KBError("Document produced empty text after parsing")
 
+            _raise_if_cancelled(cancel_event)
             _report(KBDocumentStatus.CHUNKING, "splitting into chunks")
             chunks = _chunk_text(
                 text=text,
@@ -874,6 +893,7 @@ class KBRuntime:
                 raise KBError("No chunks produced")
 
             chunk_texts = [c["text"] for c in chunks]
+            _raise_if_cancelled(cancel_event)
             _report(
                 KBDocumentStatus.EMBEDDING,
                 f"embedding 0/{len(chunk_texts)} chunks",
@@ -887,6 +907,7 @@ class KBRuntime:
                     f"embedding {done}/{total} chunks",
                     stage_progress=(done / total) if total > 0 else 1.0,
                 ),
+                cancel_event=cancel_event,
             )
             if any(len(v) != self._config.embedding.dim for v in embeddings):
                 actual = {len(v) for v in embeddings}
@@ -894,6 +915,7 @@ class KBRuntime:
                     f"Embedding dim mismatch: expected {self._config.embedding.dim}, got {sorted(actual)}"
                 )
 
+            _raise_if_cancelled(cancel_event)
             _report(KBDocumentStatus.WRITING, "writing to vector store")
             self._store().delete_by_document(doc.id)  # rebuild-safe replace
             ids = [f"{doc.id}::{c['chunk_index']:06d}" for c in chunks]
@@ -959,6 +981,18 @@ class KBRuntime:
                 self._save_state()
             report.success = 1
             _report(KBDocumentStatus.DONE, f"indexed {len(chunks)} chunks")
+            return report
+
+        except KBCancelled as exc:
+            logger.info("ingest cancelled for %s", doc_id)
+            cancelled = replace(
+                doc,
+                status=KBDocumentStatus.CANCELLED,
+                error=str(exc) or "已取消",
+            )
+            self._registry.upsert(cancelled)
+            report.cancelled = 1
+            _report(KBDocumentStatus.CANCELLED, "已取消")
             return report
 
         except Exception as exc:
@@ -1221,7 +1255,7 @@ def _libreoffice_available() -> bool:
     return libreoffice_available()
 
 
-def _read_with_liteparse(path: Path) -> str:
+def _read_with_liteparse(path: Path, *, cancel_event=None) -> str:
     """Run LiteParse via the shared extractor and translate errors to KBError."""
     from agenticx.tools.document_text import (
         DocumentTextError,
@@ -1230,14 +1264,18 @@ def _read_with_liteparse(path: Path) -> str:
     )
 
     async def _run() -> str:
-        return await shared_read_with_liteparse(
-            path,
-            require_libreoffice=path.suffix.lower() in LIBREOFFICE_REQUIRED_EXTS,
-        )
+        kwargs = {
+            "require_libreoffice": path.suffix.lower() in LIBREOFFICE_REQUIRED_EXTS,
+        }
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
+        return await shared_read_with_liteparse(path, **kwargs)
 
     try:
         text = asyncio.run(_run())
     except DocumentTextError as exc:
+        if exc.code == "cancelled":
+            raise KBCancelled("已取消") from exc
         message = exc.user_message
         if exc.code == "libreoffice_missing" and "重建该条索引" not in message:
             message = (
@@ -1253,13 +1291,23 @@ def _read_with_liteparse(path: Path) -> str:
     return text
 
 
-def _read_document_text(source_path: str) -> str:
+def _raise_if_cancelled(cancel_event) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise KBCancelled("已取消")
+
+
+def _read_document_text(source_path: str, *, cancel_event=None) -> str:
     """Read a file into plain text via the shared document extractor."""
     from agenticx.tools.document_text import DocumentTextError, read_document_text_sync
 
     try:
-        return read_document_text_sync(Path(source_path).expanduser())
+        return read_document_text_sync(
+            Path(source_path).expanduser(),
+            cancel_event=cancel_event,
+        )
     except DocumentTextError as exc:
+        if exc.code == "cancelled":
+            raise KBCancelled("已取消") from exc
         message = exc.user_message
         if exc.code == "libreoffice_missing" and "重建该条索引" not in message:
             message = (
@@ -1399,6 +1447,7 @@ def _embed_texts_with_progress(
     texts: List[str],
     *,
     progress_cb=None,
+    cancel_event=None,
 ) -> List[List[float]]:
     """Embed texts in batches and report incremental progress.
 
@@ -1420,6 +1469,7 @@ def _embed_texts_with_progress(
     done = 0
     vectors: List[List[float]] = []
     for i in range(0, total, batch_size):
+        _raise_if_cancelled(cancel_event)
         batch = texts[i : i + batch_size]
         vectors.extend(_embed_texts(provider, batch))
         done += len(batch)

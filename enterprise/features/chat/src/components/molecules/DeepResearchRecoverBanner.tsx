@@ -3,9 +3,10 @@
 import * as React from "react";
 import {
   fetchActiveDeepResearchRuns,
-  phaseLabelZh,
+  phaseLabel,
   type ActiveDeepResearchRun,
 } from "../../utils/deep-research-active-run";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 
 export type DeepResearchRecoverBannerProps = {
   sessionId: string | null | undefined;
@@ -29,7 +30,7 @@ function hasVisibleRun(
 ): boolean {
   if (!visibleRunIds) return false;
   if (visibleRunIds instanceof Set) return visibleRunIds.has(runId);
-  return visibleRunIds.includes(runId);
+  return Array.isArray(visibleRunIds) && visibleRunIds.includes(runId);
 }
 
 /**
@@ -42,6 +43,7 @@ export function DeepResearchRecoverBanner({
   visibleRunIds,
   suppressWhileStreaming = false,
 }: DeepResearchRecoverBannerProps) {
+  const copy = useChatCopy();
   const [run, setRun] = React.useState<ActiveDeepResearchRun | null>(null);
 
   React.useEffect(() => {
@@ -79,7 +81,7 @@ export function DeepResearchRecoverBanner({
   if (suppressWhileStreaming) return null;
   if (hasVisibleRun(run.runId, visibleRunIds)) return null;
 
-  const label = `深度调研进行中（${phaseLabelZh(run.phase)}）· 点击继续查看`;
+  const label = copy.recover.inProgress(phaseLabel(run.phase, copy));
 
   return (
     <button

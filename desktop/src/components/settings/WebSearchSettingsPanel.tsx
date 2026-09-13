@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import { Panel } from "../ds/Panel";
 import { SETTINGS_INTRO_CLASS, SETTINGS_LABEL_CLASS } from "../ds/settings-typography";
@@ -23,11 +24,11 @@ const DEFAULT_CONFIG: WebSearchConfig = {
 const WEB_SEARCH_MAX_RESULTS_CAP = 50;
 
 const PROVIDERS: { id: string; label: string; needsKey: boolean }[] = [
-  { id: "duckduckgo", label: "DuckDuckGo（免密钥）", needsKey: false },
+  { id: "duckduckgo", label: "DuckDuckGo", needsKey: false },
   { id: "bocha", label: "Bocha AI", needsKey: true },
   { id: "tavily", label: "Tavily", needsKey: true },
   { id: "serper", label: "Serper (Google)", needsKey: true },
-  { id: "google", label: "Google 自定义搜索 (CSE)", needsKey: true },
+  { id: "google", label: "Google CSE", needsKey: true },
   { id: "bing", label: "Bing Web Search API", needsKey: true },
 ];
 
@@ -57,6 +58,7 @@ function webSearchConfigsEqual(a: WebSearchConfig, b: WebSearchConfig): boolean 
 }
 
 export function WebSearchSettingsPanel() {
+  const { t } = useTranslation("settings");
   const apiToken = useAppStore((s) => s.apiToken);
   const apiBase = useAppStore((s) => s.apiBase);
   const [loading, setLoading] = useState(true);
@@ -97,11 +99,11 @@ export function WebSearchSettingsPanel() {
       setApiKeyInput("");
       setCxInput("");
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "加载失败");
+      setMessage(e instanceof Error ? e.message : t("webSearch.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [headers, resolveApiBase]);
+  }, [headers, resolveApiBase, t]);
 
   useEffect(() => {
     void load();
@@ -144,10 +146,10 @@ export function WebSearchSettingsPanel() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       setApiKeyInput("");
       setCxInput("");
-      setMessage("已保存。");
+      setMessage(t("webSearch.saved"));
       await load();
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败");
+      setMessage(e instanceof Error ? e.message : t("webSearch.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -165,12 +167,12 @@ export function WebSearchSettingsPanel() {
       });
       const body = (await resp.json()) as { ok?: boolean; error?: string | null; hits?: unknown[] };
       if (body.ok && body.hits && body.hits.length > 0) {
-        setMessage("连通性正常，已返回示例结果。");
+        setMessage(t("webSearch.testOk"));
       } else {
-        setMessage(body.error || "未返回结果，请检查密钥或网络。");
+        setMessage(body.error || t("webSearch.testEmpty"));
       }
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "测试失败");
+      setMessage(e instanceof Error ? e.message : t("webSearch.testFailed"));
     } finally {
       setTesting(false);
     }
@@ -178,21 +180,17 @@ export function WebSearchSettingsPanel() {
 
   if (loading) {
     return (
-      <Panel title="联网搜索">
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
+      <Panel title={t("webSearch.title")}>
+        <div className="py-2 text-sm text-text-faint">{t("webSearch.loading")}</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="联网搜索">
-      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
-        内置 <code className="text-text-subtle">web_search</code> 工具默认开启（DuckDuckGo 免密钥）。切换为 Bocha / Tavily
-        等时需填写 API Key；配置由本机 Studio 写入{" "}
-        <code className="text-text-subtle">~/.agenticx/config.yaml</code>。
-      </p>
+    <Panel title={t("webSearch.title")}>
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>{t("webSearch.intro")}</p>
       <div className="flex items-center justify-between gap-4">
-        <span className={SETTINGS_LABEL_CLASS}>默认开启联网搜索能力</span>
+        <span className={SETTINGS_LABEL_CLASS}>{t("webSearch.enable")}</span>
         <button
           type="button"
           role="switch"
@@ -213,7 +211,7 @@ export function WebSearchSettingsPanel() {
         </button>
       </div>
       <label className={`mt-3 block ${SETTINGS_LABEL_CLASS}`}>
-        默认搜索引擎
+        {t("webSearch.defaultEngine")}
         <select
           className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
           value={draft.default_provider}
@@ -224,13 +222,13 @@ export function WebSearchSettingsPanel() {
         >
           {PROVIDERS.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.label}
+              {p.id === "duckduckgo" ? t("webSearch.providerDdg") : p.id === "google" ? t("webSearch.providerGoogle") : p.label}
             </option>
           ))}
         </select>
       </label>
       <label className={`mt-3 block ${SETTINGS_LABEL_CLASS}`}>
-        单次最大返回结果数
+        {t("webSearch.maxResults")}
         <input
           type="number"
           min={1}
@@ -261,7 +259,7 @@ export function WebSearchSettingsPanel() {
               setApiKeyInput(e.target.value);
               setMessage("");
             }}
-            placeholder="填写新密钥以更新；留空则保留已保存密钥"
+            placeholder={t("webSearch.keyPh")}
           />
         </label>
       ) : null}
@@ -276,7 +274,7 @@ export function WebSearchSettingsPanel() {
               setCxInput(e.target.value);
               setMessage("");
             }}
-            placeholder="填写新 cx 以更新；留空则保留已保存值"
+            placeholder={t("webSearch.cxPh")}
           />
         </label>
       ) : null}
@@ -287,7 +285,7 @@ export function WebSearchSettingsPanel() {
           onClick={() => void runTest()}
           className="rounded-md border border-border bg-surface-panel px-3 py-1.5 text-sm text-text-primary disabled:opacity-50"
         >
-          {testing ? "测试中…" : "测试连通"}
+          {testing ? t("webSearch.testing") : t("webSearch.testConn")}
         </button>
         <button
           type="button"
@@ -295,7 +293,7 @@ export function WebSearchSettingsPanel() {
           onClick={() => void persist()}
           className="rounded-md bg-btnPrimary px-3 py-1.5 text-sm font-medium text-btnPrimary-text transition hover:bg-btnPrimary-hover disabled:opacity-50"
         >
-          {saving ? "保存中…" : "保存"}
+          {saving ? t("webSearch.saving") : t("webSearch.save")}
         </button>
       </div>
       {message ? <div className="mt-2 text-xs text-text-muted">{message}</div> : null}
@@ -304,6 +302,7 @@ export function WebSearchSettingsPanel() {
 }
 
 export function SuggestedQuestionsSettingsPanel() {
+  const { t } = useTranslation("settings");
   const apiToken = useAppStore((s) => s.apiToken);
   const apiBase = useAppStore((s) => s.apiBase);
   const [loading, setLoading] = useState(true);
@@ -354,9 +353,9 @@ export function SuggestedQuestionsSettingsPanel() {
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       setEnabled(next);
-      setMessage("已保存。");
+      setMessage(t("webSearch.saved"));
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败");
+      setMessage(e instanceof Error ? e.message : t("webSearch.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -364,19 +363,17 @@ export function SuggestedQuestionsSettingsPanel() {
 
   if (loading) {
     return (
-      <Panel title="推荐追问">
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
+      <Panel title={t("webSearch.suggestTitle")}>
+        <div className="py-2 text-sm text-text-faint">{t("webSearch.loading")}</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="推荐追问">
-      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>
-        关闭后模型不再输出推荐追问块；历史消息已保存的推荐仍可点击。
-      </p>
+    <Panel title={t("webSearch.suggestTitle")}>
+      <p className={`mb-3 ${SETTINGS_INTRO_CLASS}`}>{t("webSearch.suggestIntro")}</p>
       <div className="flex items-center justify-between gap-4">
-        <span className={SETTINGS_LABEL_CLASS}>在助手回复下方显示推荐问题</span>
+        <span className={SETTINGS_LABEL_CLASS}>{t("webSearch.showSuggest")}</span>
         <button
           type="button"
           role="switch"

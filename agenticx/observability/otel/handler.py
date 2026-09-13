@@ -122,6 +122,14 @@ class OTelCallbackHandler(BaseCallbackHandler):
                 "请运行: pip install agenticx[otel]"
             )
     
+    def _apply_correlation(self, span: Any) -> None:
+        try:
+            from agenticx.observability.correlation import apply_correlation_attributes
+
+            apply_correlation_attributes(span)
+        except Exception:
+            return
+
     def _get_span_key(self, agent_id: Optional[str], task_id: Optional[str]) -> str:
         """生成 Span 键（用于追踪活跃 Span）"""
         return f"{agent_id or 'unknown'}:{task_id or 'unknown'}"
@@ -210,6 +218,7 @@ class OTelCallbackHandler(BaseCallbackHandler):
         span.set_attribute(AiObservationAttributes.AGENTICX_TASK_ID, task_id)
         span.set_attribute(AiObservationAttributes.AGENTICX_TASK_DESCRIPTION, task_desc)
         span.set_attribute("agent.name", agent_name)
+        self._apply_correlation(span)
         
         self._active_task_spans[span_key] = span
         
@@ -298,6 +307,7 @@ class OTelCallbackHandler(BaseCallbackHandler):
         
         # 可选：记录 prompt 长度（不记录内容，保护隐私）
         span.set_attribute("gen_ai.prompt.length", len(prompt))
+        self._apply_correlation(span)
         
         self._active_llm_spans[llm_key] = span
         
@@ -412,6 +422,7 @@ class OTelCallbackHandler(BaseCallbackHandler):
         span.set_attribute(AiObservationAttributes.AI_OPERATION_TYPE, AiOperationType.TOOL_CALL.value)
         span.set_attribute(AiObservationAttributes.AGENTICX_TOOL_NAME, tool_name)
         span.set_attribute("tool.args_count", len(tool_args))
+        self._apply_correlation(span)
         
         self._active_tool_spans[tool_key] = span
         

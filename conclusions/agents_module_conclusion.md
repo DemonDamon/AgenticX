@@ -31,13 +31,15 @@ agenticx/agents/
 **关键组件**：
 - `ReActAgent` 类：核心循环
   - `astream(query, history)`：运行 FC 循环并产出类型化 `AgentEvent` 事件流（作为唯一事实来源 NFR-4）
+  - `aresume(state)`：从 `RunState` / `RunStateStore` 崩溃续跑（依赖 `agenticx.reliability`）
   - `arun(query, history)`：聚合 `astream` 为 `ReActResult`
   - `run(query, history)`：同步便捷封装，在已有事件循环中调用时明确报错引导改用 `arun`
   - `add_tool()` / `stop()`：动态注册工具 / 请求优雅中断
   - 工具调度：`asyncio.gather` + `run_in_executor` 并行执行同一轮的多个 `tool_calls`（避免 `BaseTool._is_running` 串行化）
   - 可选注入：`compactor`（上下文压缩）、`offloader`（超阈值工具结果落盘并回填占位符，依赖 `core.offload`）、`loop_detector`（`runtime.loop_detector.LoopDetector`，循环检测后注入 nudge system 消息）
 - `ReActResult` 数据类：`success` / `output` / `error` / `messages`（历史进出）/ `iterations` / `events`
-- 取消语义：透传 `asyncio.CancelledError`，并在事件流中产出不可恢复 `ErrorEvent`
+- 取消语义：透传 `asyncio.CancelledError`，并在事件流中产出 `InterruptedEvent`（可续跑）
+- 可选耐久：`run_store` / `call_ledger` 为 keyword-only，默认关闭时行为与无持久化时一致
 
 **业务逻辑**：作为对外 SDK 的「一等公民」ReAct 原语，覆盖原生工具调用、流式可观测、循环检测、上下文压缩/卸载等能力，且与产品运行时解耦，便于在 FastAPI SSE、嵌入式集成等场景复用。
 
@@ -45,9 +47,9 @@ agenticx/agents/
 
 ### AgentEvent 事件类型 (agent_events.py, 新增)
 
-**文件功能**：为规范 ReActAgent 流式输出定义最小化（≤6 类）的类型化事件联合，服务于 FastAPI SSE、可观测性与 `arun`/`astream` 一致性。
+**文件功能**：为规范 ReActAgent 流式输出定义类型化事件联合（7 类），服务于 FastAPI SSE、可观测性与 `arun`/`astream`/`aresume` 一致性。
 
-**关键组件**：`TokenEvent`（文本增量）、`ReasoningEvent`（一次推理/模型调用迭代起点）、`ToolCallEvent`（模型请求工具调用）、`ToolResultEvent`（工具执行结果）、`FinalEvent`（终态：最终产出 + 消息历史 + 迭代数）、`ErrorEvent`（可恢复/终态错误）；`AgentEvent = Union[...]`。
+**关键组件**：`TokenEvent`（文本增量）、`ReasoningEvent`（一次推理/模型调用迭代起点）、`ToolCallEvent`（模型请求工具调用）、`ToolResultEvent`（工具执行结果）、`FinalEvent`（终态：最终产出 + 消息历史 + 迭代数）、`ErrorEvent`（可恢复/终态错误）、`InterruptedEvent`（中断且可续跑）；`AgentEvent = Union[...]`。
 
 **依赖关系**：被 `react_agent_async.ReActAgent.astream` 消费。
 

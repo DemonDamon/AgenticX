@@ -8,6 +8,8 @@
  *   rendering) but return structured items for a dedicated UI block.
  */
 
+import { i18n } from "../../i18n/i18n";
+
 export type SourceAttributionKind = "verified" | "inference" | "hypothesis" | "other";
 
 export type SourceAttributionItem = {
@@ -43,25 +45,27 @@ const KEY_CITATIONS_HEADING_RE =
 
 const KIND_PATTERNS: Array<{
   kind: SourceAttributionKind;
-  label: string;
   re: RegExp;
 }> = [
   {
     kind: "verified",
-    label: "已验证",
     re: /^(?:已验证数据|已验证|Verified)\s*[：:]\s*(.+)$/iu,
   },
   {
     kind: "inference",
-    label: "合理推测",
     re: /^(?:合理推测|推测|Inference)\s*[：:]\s*(.+)$/iu,
   },
   {
     kind: "hypothesis",
-    label: "纯假设",
     re: /^(?:纯假设|假设|Hypothesis)\s*[：:]\s*(.+)$/iu,
   },
 ];
+
+/** UI label for a parsed attribution kind (i18n). */
+export function getSourceAttributionKindLabel(kind: SourceAttributionKind): string {
+  if (kind === "other") return "";
+  return i18n.t(`sourceAttribution.${kind}`, { ns: "chat" });
+}
 
 const LIST_ITEM_RE =
   /^(?:>\s*){0,3}(?:-\s|\*\s|\d+\.\s)(?:\[(\d+)\]\s*)?(.+?)\s*$/u;
@@ -102,7 +106,11 @@ function parseLegendRow(rawLine: string): ParsedLegendRow | null {
     if (m?.[1]) {
       return {
         citationId: id,
-        attribution: { kind: rule.kind, label: rule.label, text: m[1].trim() },
+        attribution: {
+          kind: rule.kind,
+          label: getSourceAttributionKindLabel(rule.kind),
+          text: m[1].trim(),
+        },
         text: m[1].trim(),
       };
     }

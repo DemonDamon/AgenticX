@@ -90,9 +90,53 @@ def interrupted_closers_enabled() -> bool:
     return _resolve_bool("AGX_INTERRUPTED_CLOSERS", "runtime.interrupted_closers", True)
 
 
+RELIABILITY_POSTURES = ("strict", "legacy")
+
+
+def _config_str(key: str) -> Optional[str]:
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        cfg = ConfigManager.get_value(key)
+        if isinstance(cfg, str) and cfg.strip():
+            return cfg.strip().lower()
+    except Exception:
+        pass
+    return None
+
+
+def reliability_posture() -> str:
+    """``AGX_RELIABILITY_POSTURE`` / ``reliability.posture``. Default ``"strict"``.
+
+    ``strict``  — durability failures abort the current turn and surface to the
+                  user; this is the posture the reliability benchmark measures.
+    ``legacy``  — pre-2026-09 behaviour: durability failures are logged and the
+                  run continues. Kept as an explicit escape hatch, not a default.
+
+    An unrecognised value falls back to ``"strict"`` (fail-closed on config
+    typos too — a misspelled posture must not silently weaken durability).
+    """
+    raw = os.environ.get("AGX_RELIABILITY_POSTURE", "").strip().lower()
+    if raw not in RELIABILITY_POSTURES:
+        raw = _config_str("reliability.posture") or ""
+    if raw not in RELIABILITY_POSTURES:
+        return "strict"
+    return raw
+
+
 def persist_fail_closed_enabled() -> bool:
-    """``AGX_PERSIST_FAIL_CLOSED`` / ``runtime.persist_fail_closed``. Default False."""
-    return _resolve_bool("AGX_PERSIST_FAIL_CLOSED", "runtime.persist_fail_closed", False)
+    """``AGX_PERSIST_FAIL_CLOSED`` / ``runtime.persist_fail_closed``.
+
+    Default follows ``reliability_posture()``: True under ``strict`` (the new
+    default), False under ``legacy``. The dedicated env var / config key still
+    wins when set, so an operator can pin this single behaviour without moving
+    the whole posture.
+    """
+    return _resolve_bool(
+        "AGX_PERSIST_FAIL_CLOSED",
+        "runtime.persist_fail_closed",
+        reliability_posture() == "strict",
+    )
 
 
 def fresh_round_loop_enabled() -> bool:

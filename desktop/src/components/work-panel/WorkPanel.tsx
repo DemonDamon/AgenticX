@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   useCallback,
   useEffect,
@@ -29,13 +30,15 @@ import {
   RefreshCw,
   Share2,
   Terminal as TerminalIcon,
-  BarChart3,
+  CirclePlay,
   X,
 } from "lucide-react";
 import { useAppStore, type Avatar, type ChatPane, type Message, type PaneTerminalTab, type SubAgent } from "../../store";
+import { i18n } from "../../i18n/i18n";
 import { WorkspacePanel } from "../WorkspacePanel";
 import { RunGraphPanel } from "../graph/RunGraphPanel";
-import { ExecutionTimeline } from "../graph/ExecutionTimeline";
+import { replayFocusTargetForSession } from "../replay/branch-lineage-navigation";
+import { RunReplayPanel } from "../replay/RunReplayPanel";
 import { GroupMembersSummaryList } from "./GroupMembersSummaryList";
 import {
   loadAbsoluteFilePreview,
@@ -64,6 +67,7 @@ import {
   isInAppHtmlPreviewPath,
   looksLikeDirectoryPath,
   pathToFileUrl,
+  selectSessionDeliverablePaths,
 } from "../../utils/session-artifacts";
 import { collectFileChangeHighlight } from "../../utils/session-change-highlights";
 import {
@@ -81,14 +85,24 @@ import { SessionArtifactList } from "./SessionArtifactList";
 import { SessionChangeList } from "./SessionChangeList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { SessionTodoList } from "./SessionTodoList";
+import { GroupWorkItemList } from "./GroupWorkItemList";
 import {
   applyPinnedAutoExpand,
   contentDrivenOpenSections,
   exclusiveOpenSections,
   type SummarySectionId,
 } from "./summary-sections";
+import {
+  createWorkItem,
+  fetchWorkItems,
+  postWorkItemAction,
+  workItemRequestError,
+  type WorkItem,
+} from "../../utils/work-items";
 import { collectSessionReferences } from "../../utils/session-references";
 import { resolveWorkPanelTodoFromMessages } from "../../utils/task-stall-policy";
+import { latestRunningWbBridgeProgress } from "../../utils/wb-bridge-ui";
+import type { ParsedTodo } from "../TodoUpdateCard";
 import {
   ensureArtifactTaskspacesForSession,
   startPersistedArtifactPathResync,
@@ -128,12 +142,13 @@ function ensureInAppBrowserOpenIpc(): void {
   });
 }
 
-function browserTitleFromUrl(nextUrl: string, fallback = "浏览器"): string {
+function browserTitleFromUrl(nextUrl: string, fallback?: string): string {
+  const resolvedFallback = fallback ?? i18n.t("work.browser", { ns: "workspace" });
   try {
-    if (nextUrl === "about:blank") return "新标签页";
-    return new URL(nextUrl).hostname || new URL(nextUrl).pathname.split("/").pop() || fallback;
+    if (nextUrl === "about:blank") return i18n.t("work.newTab", { ns: "workspace" });
+    return new URL(nextUrl).hostname || new URL(nextUrl).pathname.split("/").pop() || resolvedFallback;
   } catch {
-    return fallback;
+    return resolvedFallback;
   }
 }
 
@@ -438,7 +453,12 @@ export type WorkPanelFocus =
     }
   /** Run Graph God-View tab (same shell as browser / summary). */
   | { kind: "graph" }
-  | { kind: "timeline" }
+  | {
+      kind: "timeline";
+      sessionId?: string;
+      runId?: string;
+      eventId?: string;
+    }
   | null;
 
 type BrowserHistoryEntry = {
@@ -724,6 +744,7 @@ export function WorkPanel({
   onCrewSwitchModel,
   onCrewInterrupt,
 }: Props) {
+  const { t } = useTranslation("workspace");
   const isGroupPane = Boolean(groupId);
   const addPaneTerminalTab = useAppStore((s) => s.addPaneTerminalTab);
   const removePaneTerminalTab = useAppStore((s) => s.removePaneTerminalTab);
@@ -749,6 +770,11 @@ export function WorkPanel({
   const [workspaceTabOpen, setWorkspaceTabOpen] = useState(false);
   const [graphTabOpen, setGraphTabOpen] = useState(false);
   const [timelineTabOpen, setTimelineTabOpen] = useState(false);
+  const [timelineFocusTarget, setTimelineFocusTarget] = useState<{
+    sessionId: string;
+    runId: string;
+    eventId: string;
+  } | null>(null);
   const paneForGraph = useAppStore(
     (s) => s.panes.find((p) => p.id === paneId) ?? null,
   );
@@ -782,12 +808,21 @@ export function WorkPanel({
   // Empty zones stay collapsed by default; content arrival auto-expands (Trae-style).
   const [openSections, setOpenSections] = useState<Record<SummarySectionId, boolean>>({
     todo: false,
+    workitems: false,
     artifacts: false,
     changes: false,
     spawns: false,
     refs: false,
     members: false,
   });
+  const apiToken = useAppStore((s) => s.apiToken);
+  const apiBase = useAppStore((s) => s.apiBase);
+  const addPane = useAppStore((s) => s.addPane);
+  const setActivePaneId = useAppStore((s) => s.setActivePaneId);
+  const openRunDrawer = useAppStore((s) => s.openRunDrawer);
+  const panes = useAppStore((s) => s.panes);
+  const [workItems, setWorkItems] = useState<WorkItem[]>([]);
+  const [workItemError, setWorkItemError] = useState("");
   const [extraArtifactPaths, setExtraArtifactPaths] = useState<string[]>([]);
   /**
    * Paths from on-disk session files. `messages.json` is the full chat history;
@@ -830,14 +865,98 @@ export function WorkPanel({
     });
   }, [sessionId, summaryTabOpen, autoRefreshKey]);
 
+  const reloadWorkItems = useCallback(async () => {
+    if (!groupId || !apiBase) return;
+    try {
+      const rows = await fetchWorkItems(groupId, apiToken, apiBase);
+      setWorkItems(rows);
+      setWorkItemError("");
+    } catch (e) {
+      setWorkItemError(workItemRequestError(e));
+    }
+  }, [groupId, apiToken, apiBase]);
+
+  useEffect(() => {
+    if (!isGroupPane || !summaryTabOpen) return;
+    void reloadWorkItems();
+    const t = window.setInterval(() => void reloadWorkItems(), 5000);
+    return () => window.clearInterval(t);
+  }, [isGroupPane, summaryTabOpen, reloadWorkItems]);
+
+  const runWorkItemAction = useCallback(
+    async (item: WorkItem, action: "accept" | "pause" | "resume") => {
+      if (!groupId || !apiBase) return;
+      try {
+        const next = await postWorkItemAction(
+          groupId,
+          item.id,
+          apiToken,
+          action,
+          item.version,
+          apiBase,
+        );
+        setWorkItems((prev) => prev.map((row) => (row.id === next.id ? next : row)));
+        setWorkItemError("");
+      } catch (e) {
+        const code = e instanceof Error ? (e as Error & { code?: string }).code : "";
+        if (code === "conflict") {
+          await reloadWorkItems();
+          setWorkItemError(t("work.workItemChanged"));
+          return;
+        }
+        setWorkItemError(workItemRequestError(e));
+      }
+    },
+    [groupId, apiBase, apiToken, reloadWorkItems],
+  );
+
+  const runCreateWorkItem = useCallback(
+    async (input: { title: string; owner_kind: WorkItem["owner_kind"]; owner_id: string }) => {
+      if (!groupId || !apiBase) return;
+      try {
+        const created = await createWorkItem(groupId, apiToken, input, apiBase);
+        setWorkItems((prev) => [...prev, created]);
+        setWorkItemError("");
+      } catch (e) {
+        setWorkItemError(workItemRequestError(e));
+      }
+    },
+    [groupId, apiBase, apiToken],
+  );
+
+  const openWorkItemOwner = useCallback(
+    (item: WorkItem) => {
+      if (item.owner_kind === "human") return;
+      if (item.owner_kind === "meta" || item.owner_id === "__meta__") {
+        const existing = panes.find((p) => !p.avatarId || p.avatarId === "__meta__");
+        if (existing) {
+          setActivePaneId(existing.id);
+          return;
+        }
+        addPane(null, metaLeaderLabel, "");
+        return;
+      }
+      const existing = panes.find((p) => p.avatarId === item.owner_id);
+      if (existing) {
+        setActivePaneId(existing.id);
+        return;
+      }
+      const name = avatarList.find((a) => a.id === item.owner_id)?.name || item.owner_id;
+      addPane(item.owner_id, name, "");
+    },
+    [addPane, avatarList, metaLeaderLabel, panes, setActivePaneId],
+  );
+
   const artifactPaths = useMemo(
-    () =>
-      collectSessionArtifactPaths(
+    () => {
+      const candidates = collectSessionArtifactPaths(
         paneMessages,
         subAgents,
         [...extraArtifactPaths, ...diskArtifactPaths],
         sessionId,
-      ),
+      );
+      return selectSessionDeliverablePaths(paneMessages, candidates);
+    },
     [paneMessages, subAgents, extraArtifactPaths, diskArtifactPaths, sessionId],
   );
 
@@ -933,14 +1052,33 @@ export function WorkPanel({
    * - 用户已发下一轮且尚未新 todo_write：清空旧清单（刷新），勿把完成态打回空心圆
    * - 新一轮写出新 todo_write：整栏替换为新清单
    */
-  const sessionTodo = useMemo(
-    () => resolveWorkPanelTodoFromMessages(paneMessages, todoLiveness, todoExecutionState),
-    [paneMessages, todoLiveness, todoExecutionState],
-  );
+  const sessionTodo = useMemo(() => {
+    const real = resolveWorkPanelTodoFromMessages(
+      paneMessages,
+      todoLiveness,
+      todoExecutionState,
+    );
+    if (real) return real;
+    const wbLine = latestRunningWbBridgeProgress(paneMessages);
+    if (!wbLine) return null;
+    const delegated: ParsedTodo = {
+      items: [
+        {
+          status: "in_progress",
+          content: i18n.t("work.delegating", { ns: "workspace" }),
+          activeForm: wbLine,
+        },
+      ],
+      completed: 0,
+      total: 1,
+    };
+    return delegated;
+  }, [paneMessages, todoLiveness, todoExecutionState]);
   const hasSessionTodo = !!sessionTodo;
   const overviewOpenSections = () =>
     contentDrivenOpenSections({
       todo: hasSessionTodo,
+      workitems: isGroupPane && workItems.length > 0,
       artifacts: presentArtifactPaths.length > 0,
       changes: changeRows.length > 0,
       spawns: subAgents.length > 0,
@@ -1032,7 +1170,7 @@ export function WorkPanel({
     const path = String(absPathRaw || "").trim();
     if (!path) return;
     const mode = nextPreviewHighlightMode(highlightMode);
-    const title = String(titleHint || "").trim() || artifactBaseName(path) || "预览";
+    const title = String(titleHint || "").trim() || artifactBaseName(path) || t("work.preview");
     const existing = previewTabs.find((t) => t.absolutePath === path);
     if (existing) {
       setPreviewTabs((prev) =>
@@ -1232,7 +1370,7 @@ export function WorkPanel({
         const title =
           String(focusRequest.title || "").trim() ||
           artifactBaseName(fileUrlToLocalPath(focusUrl) || focusUrl) ||
-          "浏览器";
+          i18n.t("work.browser", { ns: "workspace" });
         const nextId = uid();
         const entry = browserEntry(focusUrl, title, focusSrcDoc);
         setBrowserTabs((prev) => {
@@ -1285,6 +1423,13 @@ export function WorkPanel({
     } else if (focusRequest.kind === "timeline") {
       setTimelineTabOpen(true);
       setActiveKind("timeline");
+      if (focusRequest.sessionId && focusRequest.runId && focusRequest.eventId) {
+        setTimelineFocusTarget({
+          sessionId: focusRequest.sessionId,
+          runId: focusRequest.runId,
+          eventId: focusRequest.eventId,
+        });
+      }
     }
     onFocusRequestHandled?.();
   }, [focusRequest, onFocusRequestHandled, paneId, setActivePaneTerminalTab]);
@@ -1301,6 +1446,17 @@ export function WorkPanel({
       applyPinnedAutoExpand(prev, "members", isGroupPane, pinnedSummarySectionRef.current),
     );
   }, [isGroupPane, pinnedSummarySection]);
+
+  useEffect(() => {
+    setOpenSections((prev) =>
+      applyPinnedAutoExpand(
+        prev,
+        "workitems",
+        isGroupPane && workItems.length > 0,
+        pinnedSummarySectionRef.current,
+      ),
+    );
+  }, [isGroupPane, workItems.length, pinnedSummarySection]);
 
   useEffect(() => {
     setOpenSections((prev) =>
@@ -1440,7 +1596,7 @@ export function WorkPanel({
     const id = uid();
     const tab = createBrowserTab({
       id,
-      title: "新标签页",
+      title: i18n.t("work.newTab", { ns: "workspace" }),
       url: "about:blank",
       draftUrl: "",
     });
@@ -1540,7 +1696,7 @@ export function WorkPanel({
     setBrowserTabs((prev) =>
       prev.map((t) => {
         if (t.id !== tabId) return t;
-        const title = browserTitleFromUrl(nextUrl, t.title || "浏览器");
+        const title = browserTitleFromUrl(nextUrl, t.title || i18n.t("work.browser", { ns: "workspace" }));
         return pushBrowserHistory(t, browserEntry(nextUrl, title, null));
       }),
     );
@@ -1613,7 +1769,7 @@ export function WorkPanel({
               onClick={openSummaryTab}
             >
               <ListTodo className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              任务摘要
+              {t("work.tabSummary")}
             </button>
             <button
               type="button"
@@ -1621,7 +1777,7 @@ export function WorkPanel({
               onClick={openChangesTab}
             >
               <FileDiff className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              变更
+              {t("work.tabChanges")}
             </button>
             <button
               type="button"
@@ -1629,7 +1785,7 @@ export function WorkPanel({
               onClick={openBrowserTab}
             >
               <Globe className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              浏览器
+              {t("work.tabBrowser")}
             </button>
             <button
               type="button"
@@ -1637,15 +1793,15 @@ export function WorkPanel({
               onClick={openGraphTab}
             >
               <Share2 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              运行图
+              {t("work.tabGraph")}
             </button>
             <button
               type="button"
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-strong hover:bg-surface-hover"
               onClick={openTimelineTab}
             >
-              <BarChart3 className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              执行时间线
+              <CirclePlay className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
+              {t("work.tabTimeline")}
             </button>
             <button
               type="button"
@@ -1653,7 +1809,7 @@ export function WorkPanel({
               onClick={openTerminalTab}
             >
               <TerminalIcon className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              终端
+              {t("work.tabTerminal")}
             </button>
             <button
               type="button"
@@ -1661,7 +1817,7 @@ export function WorkPanel({
               onClick={openWorkspaceTab}
             >
               <FolderOpen className="h-4 w-4 text-text-subtle" strokeWidth={1.7} />
-              工作区
+              {t("work.tabWorkspace")}
             </button>
           </div>,
           document.body
@@ -1672,53 +1828,53 @@ export function WorkPanel({
     {
       key: "summary",
       icon: <ListTodo className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
-      title: "任务摘要",
-      subtitle: "查看任务执行进展、产物汇总及关联信息",
+      title: t("work.tabSummary"),
+      subtitle: t("work.subtitleSummary"),
       onClick: openSummaryTab,
     },
     {
       key: "changes",
       icon: <FileDiff className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
-      title: "变更",
-      subtitle: "查看本会话写入或编辑的文件",
+      title: t("work.tabChanges"),
+      subtitle: t("work.subtitleChanges"),
       onClick: openChangesTab,
     },
     {
       key: "browser",
       icon: <Globe className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
-      title: "浏览器",
-      subtitle: "浏览及调试网页",
+      title: t("work.tabBrowser"),
+      subtitle: t("work.subtitleBrowser"),
       onClick: openBrowserTab,
     },
     {
       key: "graph",
       icon: <Share2 className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
-      title: "运行图",
-      subtitle: "任务拆解时观察分工与依赖，并做注入 / 改派干预",
+      title: t("work.tabGraph"),
+      subtitle: t("work.subtitleGraph"),
       onClick: openGraphTab,
     },
     {
       key: "timeline",
-      icon: <BarChart3 className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
-      title: "执行时间线",
-      subtitle: "按时间轴查看各成员的工具执行过程",
+      icon: <CirclePlay className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
+      title: t("work.tabTimeline"),
+      subtitle: t("work.subtitleTimeline"),
       onClick: openTimelineTab,
     },
     {
       key: "terminal",
       icon: <TerminalIcon className="h-5 w-5 shrink-0 text-text-subtle" strokeWidth={1.6} />,
-      title: "终端",
-      subtitle: "运行命令及脚本",
+      title: t("work.tabTerminal"),
+      subtitle: t("work.subtitleTerminal"),
       onClick: openTerminalTab,
     },
   ];
 
   const summaryPillLabel =
     pinnedSummarySection === "changes"
-      ? "变更"
+      ? t("work.tabChanges")
       : pinnedSummarySection === "artifacts"
-        ? "任务产物"
-        : "任务摘要";
+        ? t("work.artifacts")
+        : t("work.tabSummary");
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-panel">
@@ -1733,7 +1889,7 @@ export function WorkPanel({
             }`}
             onClick={() => setActiveKind("summary")}
           >
-            <HoverTip label={`关闭${summaryPillLabel}`}>
+            <HoverTip label={t("work.closeTab", { label: summaryPillLabel })}>
               <span
                 role="button"
                 tabIndex={0}
@@ -1749,7 +1905,7 @@ export function WorkPanel({
                     closeSummaryTab();
                   }
                 }}
-                aria-label={`关闭${summaryPillLabel}`}
+                aria-label={t("work.closeTab", { label: summaryPillLabel })}
               >
                 <X className="h-3 w-3 stroke-[2] group-hover/close:stroke-[3]" />
               </span>
@@ -1769,7 +1925,7 @@ export function WorkPanel({
             onClick={() => setActiveKind("workspace")}
           >
             <FolderOpen className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-            <span className="truncate">工作区</span>
+            <span className="truncate">{t("work.tabWorkspace")}</span>
             <span
               role="button"
               tabIndex={0}
@@ -1791,7 +1947,7 @@ export function WorkPanel({
                   }
                 }
               }}
-              aria-label="关闭工作区标签"
+              aria-label={t("work.closeWorkspaceTab")}
             >
               <X className="h-3 w-3" strokeWidth={2} />
             </span>
@@ -1809,7 +1965,7 @@ export function WorkPanel({
             onClick={() => setActiveKind("graph")}
           >
             <Share2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-            <span className="truncate">运行图</span>
+            <span className="truncate">{t("work.tabGraph")}</span>
             <span
               role="button"
               tabIndex={0}
@@ -1825,7 +1981,7 @@ export function WorkPanel({
                   closeGraphTab();
                 }
               }}
-              aria-label="关闭运行图标签"
+              aria-label={t("work.closeGraphTab")}
             >
               <X className="h-3 w-3" strokeWidth={2} />
             </span>
@@ -1842,8 +1998,8 @@ export function WorkPanel({
             }`}
             onClick={() => setActiveKind("timeline")}
           >
-            <BarChart3 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-            <span className="truncate">执行时间线</span>
+            <CirclePlay className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
+            <span className="truncate">{t("work.tabTimeline")}</span>
             <span
               role="button"
               tabIndex={0}
@@ -1859,7 +2015,7 @@ export function WorkPanel({
                   closeTimelineTab();
                 }
               }}
-              aria-label="关闭执行时间线标签"
+              aria-label={t("work.closeTimelineTab")}
             >
               <X className="h-3 w-3" strokeWidth={2} />
             </span>
@@ -1903,7 +2059,7 @@ export function WorkPanel({
                   }
                 }
               }}
-              aria-label="关闭终端标签"
+              aria-label={t("work.closeTerminalTab")}
             >
               <X className="h-3 w-3" strokeWidth={2} />
             </span>
@@ -1941,7 +2097,7 @@ export function WorkPanel({
                   closeBrowserTab(tab.id);
                 }
               }}
-              aria-label="关闭浏览器标签"
+              aria-label={t("work.closeBrowserTab")}
             >
               <X className="h-3 w-3" strokeWidth={2} />
             </span>
@@ -1977,7 +2133,7 @@ export function WorkPanel({
                   closePreviewTab(tab.id);
                 }
               }}
-              aria-label="关闭预览标签"
+              aria-label={t("work.closePreviewTab")}
             >
               <X className="h-3 w-3" strokeWidth={2} />
             </span>
@@ -1988,8 +2144,8 @@ export function WorkPanel({
           ref={plusBtnRef}
           type="button"
           className="agx-topbar-btn !px-[5px]"
-          title="打开任务摘要 / 变更 / 浏览器 / 运行图 / 执行时间线 / 终端 / 工作区"
-          aria-label="新建工作台标签"
+          title={t("work.newTabTip")}
+          aria-label={t("work.newWorkbenchTab")}
           onClick={openPlusMenu}
         >
           <Plus className="h-[16px] w-[16px]" strokeWidth={1.8} />
@@ -1998,13 +2154,13 @@ export function WorkPanel({
         <div className="flex-1" />
 
         {onToggleExpand ? (
-          <HoverTip label={expanded ? "恢复面板宽度" : "展开面板"}>
+          <HoverTip label={expanded ? t("work.restoreWidth") : t("work.expandPanel")}>
             <button
               type="button"
               className={`agx-topbar-btn !px-[5px] ${expanded ? "agx-topbar-btn--active" : ""}`}
               onClick={onToggleExpand}
-              title={expanded ? "恢复面板宽度" : "展开面板"}
-              aria-label={expanded ? "恢复面板宽度" : "展开面板"}
+              title={expanded ? t("work.restoreWidth") : t("work.expandPanel")}
+              aria-label={expanded ? t("work.restoreWidth") : t("work.expandPanel")}
               aria-pressed={expanded}
             >
               {expanded ? (
@@ -2016,13 +2172,13 @@ export function WorkPanel({
           </HoverTip>
         ) : null}
 
-        <HoverTip label="隐藏工具面板">
+        <HoverTip label={t("work.hideTools")}>
           <button
             type="button"
             className="agx-topbar-btn !px-[5px]"
             onClick={onClose}
-            title="隐藏工具面板"
-            aria-label="隐藏工具面板"
+            title={t("work.hideTools")}
+            aria-label={t("work.hideTools")}
           >
             <PanelRight className="h-[18px] w-[18px]" strokeWidth={1.8} />
           </button>
@@ -2034,7 +2190,7 @@ export function WorkPanel({
       <div className="min-h-0 flex-1 overflow-hidden">
         {!hasAnyTab ? (
           <div className="flex h-full flex-col px-8 pt-16">
-            <div className="text-[15px] text-text-faint">从这里开始</div>
+            <div className="text-[15px] text-text-faint">{t("work.startHere")}</div>
             <div className="mt-6 flex max-w-[360px] flex-col gap-5">
               {startEntries.map((entry) => (
                 <button
@@ -2060,7 +2216,7 @@ export function WorkPanel({
           <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
             <Section
               id="todo"
-              title="待办"
+              title={t("work.todos")}
               count={sessionTodo?.total ?? 0}
               open={openSections.todo}
               onToggle={toggleSection}
@@ -2068,17 +2224,40 @@ export function WorkPanel({
               {!sessionTodo ? (
                 <EmptyBlock
                   icon={<CheckSquare className="h-9 w-9" strokeWidth={1.3} />}
-                  title="暂无待办"
-                  subtitle="复杂任务的进展会显示在这里"
+                  title={t("work.emptyTodos")}
+                  subtitle={t("work.emptyTodosHint")}
                 />
               ) : (
                 <SessionTodoList todo={sessionTodo} />
               )}
             </Section>
 
+            {isGroupPane && groupId ? (
+              <Section
+                id="workitems"
+                title={t("work.items")}
+                count={workItems.length}
+                open={openSections.workitems}
+                onToggle={toggleSection}
+              >
+                <GroupWorkItemList
+                  groupId={groupId}
+                  items={workItems}
+                  avatars={avatarList}
+                  metaLeaderLabel={metaLeaderLabel}
+                  errorText={workItemError}
+                  onAccept={(item) => void runWorkItemAction(item, "accept")}
+                  onPause={(item) => void runWorkItemAction(item, "pause")}
+                  onResume={(item) => void runWorkItemAction(item, "resume")}
+                  onOpenOwner={openWorkItemOwner}
+                  onCreate={(input) => void runCreateWorkItem(input)}
+                />
+              </Section>
+            ) : null}
+
             <Section
               id="artifacts"
-              title="任务产物"
+              title={t("work.artifacts")}
               count={presentArtifactPaths.length}
               open={openSections.artifacts}
               onToggle={toggleSection}
@@ -2086,8 +2265,8 @@ export function WorkPanel({
               {presentArtifactPaths.length === 0 ? (
                 <EmptyBlock
                   icon={<Boxes className="h-9 w-9" strokeWidth={1.3} />}
-                  title="暂无产物"
-                  subtitle="任务完成后，生成的文件将展示在这里"
+                  title={t("work.emptyArtifacts")}
+                  subtitle={t("work.emptyArtifactsHint")}
                 />
               ) : (
                 <SessionArtifactList
@@ -2116,7 +2295,7 @@ export function WorkPanel({
 
             <Section
               id="changes"
-              title="变更"
+              title={t("work.tabChanges")}
               count={changeRows.length}
               open={openSections.changes}
               onToggle={toggleSection}
@@ -2124,8 +2303,8 @@ export function WorkPanel({
               {changeRows.length === 0 ? (
                 <EmptyBlock
                   icon={<FileText className="h-9 w-9" strokeWidth={1.3} />}
-                  title="暂无变更"
-                  subtitle="本会话写入或编辑的文件会显示在这里"
+                  title={t("work.emptyChanges")}
+                  subtitle={t("work.emptyChangesHint")}
                 />
               ) : (
                 <SessionChangeList
@@ -2151,7 +2330,7 @@ export function WorkPanel({
 
             <Section
               id="refs"
-              title="参考信息"
+              title={t("work.references")}
               count={
                 referenceBundle.isEmpty
                   ? undefined
@@ -2163,8 +2342,8 @@ export function WorkPanel({
               {referenceBundle.isEmpty ? (
                 <EmptyBlock
                   icon={<FileCode2 className="h-9 w-9" strokeWidth={1.3} />}
-                  title="暂无参考"
-                  subtitle="任务执行中调用的技能与参考网页会显示在这里"
+                  title={t("work.emptyRefs")}
+                  subtitle={t("work.emptyRefsHint")}
                 />
               ) : (
                 <SessionReferenceList
@@ -2177,7 +2356,7 @@ export function WorkPanel({
             {isGroupPane && groupId ? (
               <Section
                 id="members"
-                title="成员"
+                title={t("work.members")}
                 count={1 + groupAvatarIds.length}
                 open={openSections.members}
                 onToggle={toggleSection}
@@ -2200,7 +2379,7 @@ export function WorkPanel({
 
             <Section
               id="spawns"
-              title="子智能体"
+              title={t("work.subagents")}
               count={subAgents.length}
               open={openSections.spawns}
               onToggle={toggleSection}
@@ -2208,8 +2387,8 @@ export function WorkPanel({
               {subAgents.length === 0 ? (
                 <EmptyBlock
                   icon={<Bot className="h-9 w-9" strokeWidth={1.3} />}
-                  title="暂无子智能体"
-                  subtitle="派生子智能体后会显示在这里"
+                  title={t("work.emptySubagents")}
+                  subtitle={t("work.emptySubagentsHint")}
                 />
               ) : (
                 <div className="space-y-2">
@@ -2237,16 +2416,16 @@ export function WorkPanel({
             {!activePreview ? (
               <EmptyBlock
                 icon={<FileText className="h-9 w-9" strokeWidth={1.3} />}
-                title="暂无预览"
-                subtitle="从任务产物打开文件以预览"
+                title={t("work.emptyPreview")}
+                subtitle={t("work.emptyPreviewHint")}
               />
             ) : activePreview.loading ? (
               <div className="flex h-full items-center justify-center text-[13px] text-text-muted">
-                正在加载预览…
+                {t("work.previewLoading")}
               </div>
             ) : activePreview.error || !activePreview.preview ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-                <p className="text-[13px] text-rose-300">{activePreview.error || "预览失败"}</p>
+                <p className="text-[13px] text-rose-300">{activePreview.error || t("work.previewFailed")}</p>
                 <p className="max-w-sm truncate font-mono text-[11px] text-text-faint" title={activePreview.absolutePath}>
                   {activePreview.absolutePath}
                 </p>
@@ -2289,7 +2468,7 @@ export function WorkPanel({
                 onRevealInFileManager={(abs) => {
                   void window.agenticxDesktop?.shellShowItemInFolder?.(abs);
                 }}
-                revealInFileManagerLabel="在文件管理器中显示"
+                revealInFileManagerLabel={t("revealGeneric")}
               />
             )}
           </div>
@@ -2330,11 +2509,20 @@ export function WorkPanel({
         ) : null}
 
         {hasAnyTab && activeKind === "timeline" && timelineTabOpen ? (
-          <ExecutionTimeline
+          <RunReplayPanel
             paneId={paneId}
+            sessionId={sessionId}
+            apiBase={apiBase}
+            apiToken={apiToken}
             agentIds={timelineAgentIds}
             avatarById={timelineAvatarById}
             metaLeaderLabel={metaLeaderLabel}
+            focusTarget={replayFocusTargetForSession(
+              timelineFocusTarget,
+              sessionId,
+            )}
+            onOpenSubagentRun={(runId) => openRunDrawer(paneId, runId)}
+            onOpenArtifact={(path) => openLocalFilePreview(path)}
           />
         ) : null}
 
@@ -2343,8 +2531,8 @@ export function WorkPanel({
             {terminalTabs.length === 0 ? (
               <EmptyBlock
                 icon={<TerminalIcon className="h-9 w-9" strokeWidth={1.3} />}
-                title="暂无终端"
-                subtitle="点击 + 打开终端"
+                title={t("work.emptyTerminal")}
+                subtitle={t("work.emptyTerminalHint")}
               />
             ) : (
               terminalTabs.map((tab) =>
@@ -2397,19 +2585,19 @@ export function WorkPanel({
                 return (
                   <>
                     {navBtn({
-                      label: "后退",
+                      label: t("work.back"),
                       disabled: !canBack,
                       onClick: () => goBrowserBack(activeBrowser.id),
                       children: <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.8} />,
                     })}
                     {navBtn({
-                      label: "前进",
+                      label: t("work.forward"),
                       disabled: !canForward,
                       onClick: () => goBrowserForward(activeBrowser.id),
                       children: <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />,
                     })}
                     {navBtn({
-                      label: "刷新",
+                      label: t("work.reload"),
                       disabled: false,
                       onClick: () => refreshBrowser(activeBrowser.id),
                       children: <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />,
@@ -2425,7 +2613,7 @@ export function WorkPanel({
                     prev.map((t) => (t.id === activeBrowser.id ? { ...t, draftUrl: value } : t))
                   );
                 }}
-                placeholder="输入网址，回车打开"
+                placeholder={t("work.urlPlaceholder")}
                 className="min-w-0 flex-1 rounded-md border border-border bg-surface-hover px-2 py-1 text-[12px] text-text-strong outline-none placeholder:text-text-faint focus:border-[var(--ui-btn-primary-border,#3b82f6)]"
                 spellCheck={false}
                 autoComplete="off"
@@ -2466,8 +2654,8 @@ export function WorkPanel({
             ) : (
               <EmptyBlock
                 icon={<Globe className="h-9 w-9" strokeWidth={1.3} />}
-                title="新标签页"
-                subtitle="在上方地址栏输入网址后回车"
+                title={t("work.emptyBrowser")}
+                subtitle={t("work.emptyBrowserHint")}
               />
             )}
           </div>

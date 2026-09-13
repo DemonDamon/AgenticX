@@ -1,5 +1,6 @@
 import type { ChatMessageDeepResearch, DeepResearchEvent } from "@agenticx/core-api";
 import type { LaneSource } from "./deep-research-lane-sources";
+import { getChatCopy, type ChatCopy } from "../../i18n/chat-copy";
 
 export type ResearchStepKind =
   | "phase"
@@ -22,23 +23,23 @@ export type ResearchStep = {
   sources?: LaneSource[];
 };
 
-function phaseTitle(phase: string, message: string): string {
+function phaseTitle(phase: string, message: string, copy: ChatCopy): string {
   if (message?.trim()) return message.trim();
   switch (phase) {
     case "recon":
-      return "侦查最新现状";
+      return copy.phases.reconFallback;
     case "clarify":
-      return "确认调研方向";
+      return copy.phases.clarifyFallback;
     case "plan":
-      return "规划研究路径";
+      return copy.phases.planFallback;
     case "lanes":
-      return "并行检索";
+      return copy.phases.lanesFallback;
     case "reflect":
-      return "复盘信息缺口";
+      return copy.phases.reflectFallback;
     case "synthesize":
-      return "综合分析";
+      return copy.phases.synthesizeFallback;
     case "done":
-      return "研究完成";
+      return copy.phases.doneFallback;
     default:
       return phase;
   }
@@ -52,6 +53,7 @@ export function buildDeepResearchSteps(
   events: DeepResearchEvent[],
   status?: ChatMessageDeepResearch["status"],
   clarifyAnswers?: Record<string, string>,
+  copy: ChatCopy = getChatCopy("zh"),
 ): ResearchStep[] {
   const steps: ResearchStep[] = [];
   const laneMap = new Map<
@@ -83,7 +85,7 @@ export function buildDeepResearchSteps(
             steps.push({
               id: `phase-clarify-${steps.length}`,
               kind: "phase",
-              title: phaseTitle(event.phase, event.message),
+              title: phaseTitle(event.phase, event.message, copy),
               status:
                 status === "awaiting_clarify" || status === "running" ? "running" : "done",
               detailLines: [],
@@ -94,7 +96,7 @@ export function buildDeepResearchSteps(
         steps.push({
           id: `phase-${event.phase}-${steps.length}`,
           kind: "phase",
-          title: phaseTitle(event.phase, event.message),
+          title: phaseTitle(event.phase, event.message, copy),
           status:
             event.phase === "done"
               ? "done"
@@ -192,12 +194,12 @@ export function buildDeepResearchSteps(
     steps.unshift({
       id: "clarify-panel-summary",
       kind: "clarify",
-      title: clarifyDone ? "询问工具" : "询问工具",
+      title: copy.timeline.askTool,
       subtitle: sawClarifyTimeout
-        ? "超时后按默认假设继续"
+        ? copy.timeline.timedOutDefault
         : clarifyDone
-          ? "已收集信息"
-          : "等待确认",
+          ? copy.timeline.collectedInfo
+          : copy.timeline.waitingConfirm,
       status: clarifyDone ? "done" : "running",
       detailLines: answered,
     });
@@ -209,10 +211,10 @@ export function buildDeepResearchSteps(
     .map(([laneId, lane]) => ({
       id: `lane-${laneId}`,
       kind: "lane" as const,
-      title: "搜索网页",
+      title: copy.segments.searchWeb,
       subtitle:
         typeof lane.sources === "number"
-          ? `${lane.title} · ${lane.sources} 个结果`
+          ? copy.segments.resultsCount(lane.title, lane.sources)
           : lane.title,
       status: lane.status,
       detailLines: lane.detailLines,
@@ -223,7 +225,7 @@ export function buildDeepResearchSteps(
   // Insert lanes before synthesize / final artifact / done.
   const insertAt = steps.findIndex(
     (s) =>
-      (s.kind === "phase" && (s.title.includes("综合") || s.title.includes("完成"))) ||
+      (s.kind === "phase" && (s.title.includes("综合") || s.title.includes("完成") || /synthes|complete/i.test(s.title))) ||
       s.kind === "artifact",
   );
   if (insertAt < 0) {
@@ -235,7 +237,7 @@ export function buildDeepResearchSteps(
   // Mark earlier running phases as done once later work exists.
   if (laneSteps.length > 0 || status === "completed") {
     for (const step of steps) {
-      if (step.kind === "phase" && step.status === "running" && !step.title.includes("综合")) {
+      if (step.kind === "phase" && step.status === "running" && !step.title.includes("综合") && !/synthes/i.test(step.title)) {
         step.status = "done";
       }
     }

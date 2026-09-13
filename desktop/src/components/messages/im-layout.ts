@@ -111,9 +111,13 @@ export const ASSISTANT_ACTION_RHYTHM_STACK_CLASS = `agx-assistant-action-rhythm 
 /** Icon row + optional follow-up chips below assistant body (inside rhythm stack). */
 export const ASSISTANT_ACTION_BLOCK_CLASS = `flex min-w-0 flex-col ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS} self-stretch`;
 
-/** Block-level copy/quote row (fixed height so gaps measure consistently). */
+/**
+ * Copy/quote + turn-meta stay on one 20px line. `flex-wrap` + `h-5` used to
+ * overflow the usage/cache text onto follow-up chips in a squeezed pane.
+ * `min-w-0 overflow-hidden` lets the row clip instead of painting over chips.
+ */
 export const ASSISTANT_ACTION_ICON_ROW_CLASS =
-  "agx-assistant-action-icons group flex h-5 w-fit max-w-full flex-wrap items-center gap-0.5 text-text-muted";
+  "agx-assistant-action-icons group flex h-5 w-fit min-w-0 max-w-full flex-nowrap items-center gap-0.5 overflow-hidden text-text-muted";
 
 /**
  * ReAct block tail: last body row + icon row + follow-up chips share one flex column

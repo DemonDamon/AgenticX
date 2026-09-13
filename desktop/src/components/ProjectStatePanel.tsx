@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, FolderGit2, RefreshCw, FileText, ListChecks } from "lucide-react";
 
 /**
@@ -71,6 +72,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function ProjectStatePanel(props: Props): JSX.Element {
+  const { t } = useTranslation("workspace");
   const { apiBaseUrl, apiToken, sessionId, defaultWorkspaceRoot, refreshIntervalMs = 0 } = props;
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [activeRoot, setActiveRoot] = useState<string | undefined>(defaultWorkspaceRoot);
@@ -151,7 +153,7 @@ export function ProjectStatePanel(props: Props): JSX.Element {
     <div className="flex h-full w-full flex-col gap-3 overflow-hidden bg-surface-base p-3 text-sm">
       <div className="flex items-center gap-2">
         <FolderGit2 className="h-4 w-4 text-text-muted" />
-        <span className="text-text-strong">项目级 Harness</span>
+        <span className="text-text-strong">{t("projectState.title")}</span>
         <button
           type="button"
           className="ml-auto inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-text-muted hover:bg-surface-card-strong"
@@ -163,7 +165,7 @@ export function ProjectStatePanel(props: Props): JSX.Element {
           ) : (
             <RefreshCw className="h-3 w-3" />
           )}
-          <span>刷新</span>
+          <span>{t("projectState.refresh")}</span>
         </button>
       </div>
 
@@ -187,7 +189,7 @@ export function ProjectStatePanel(props: Props): JSX.Element {
           ))}
         </div>
       ) : (
-        <div className="text-text-muted">未发现 .agx/project；在 feature_loop 模式下让 agent 调用 project_init 奠基。</div>
+        <div className="text-text-muted">{t("projectState.noProjects")}</div>
       )}
 
       {error && (
@@ -201,9 +203,14 @@ export function ProjectStatePanel(props: Props): JSX.Element {
           <section className="flex flex-col gap-2 rounded-md border border-surface-card-strong bg-surface-card p-3">
             <div className="flex items-center gap-2 text-text-strong">
               <ListChecks className="h-4 w-4" />
-              <span>功能清单</span>
+              <span>{t("projectState.featureList")}</span>
               <span className="ml-auto text-xs text-text-muted">
-                已交付 {status.counts.committed}/{status.counts.total} · 已验证 {status.counts.verified} · 待办 {status.counts.pending}
+                {t("projectState.stats", {
+                  committed: status.counts.committed,
+                  total: status.counts.total,
+                  verified: status.counts.verified,
+                  pending: status.counts.pending,
+                })}
               </span>
             </div>
             <ul className="flex flex-col gap-1">
@@ -225,7 +232,7 @@ export function ProjectStatePanel(props: Props): JSX.Element {
                 </li>
               ))}
               {!sortedFeatures.length && (
-                <li className="text-text-muted">feature_list.json 为空 — 等待 Initializer 阶段。</li>
+                <li className="text-text-muted">{t("projectState.emptyFeatures")}</li>
               )}
             </ul>
             <div className="mt-1 text-xs text-text-muted">
@@ -248,11 +255,14 @@ export function ProjectStatePanel(props: Props): JSX.Element {
               <FileText className="h-4 w-4" />
               <span>progress.md</span>
               <span className="ml-auto text-xs text-text-muted">
-                pass {status.status.verify_pass_count} / fail {status.status.verify_fail_count}
+                {t("projectState.verifyStats", {
+                  pass: status.status.verify_pass_count,
+                  fail: status.status.verify_fail_count,
+                })}
               </span>
             </div>
             <pre className="min-h-[12rem] flex-1 overflow-auto whitespace-pre-wrap rounded bg-surface-base p-2 font-mono text-xs text-text-muted">
-              {progress.length ? progress.join("\n") : "(empty)"}
+              {progress.length ? progress.join("\n") : t("projectState.emptyProgress")}
             </pre>
           </section>
         </div>

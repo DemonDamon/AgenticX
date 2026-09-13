@@ -63,7 +63,12 @@ _GROUP_CONTROL_PLANE_CONTRACT = (
     "- 工具过程由系统状态卡展示，正文不要写“正在调用工具 / 已回答 / 等待追问”。\n"
     "- 未实际调用 web_search 时，禁止声称已经上网检索或「查了一圈 / 搜了多个来源」。\n"
     "- 长代码、长报告、详细表格优先写入群工作区，最终只给摘要和产物；用户明确要求全文贴群时例外。\n"
-    "- FINAL 表示本轮结束，禁止以“稍等 / 等我回复 / 我去处理”作为 FINAL。\n"
+    "- 本轮结束时直接给出结论，不要在正文写出 FINAL 或 __SKIP__。\n"
+    "- 禁止以“稍等 / 等我回复 / 我去处理”结束本轮。\n"
+)
+_TRAILING_FINAL_RE = re.compile(
+    r"(?:(?:\s+|(?<=[。．.！!？?]))(?:\*\*)?FINAL(?:\*\*)?\.?)+$",
+    re.IGNORECASE,
 )
 
 
@@ -129,8 +134,8 @@ def _group_turn_image_blocks(
 
 
 _EXECUTION_TURN_INSTRUCTION = (
-    "这是执行请求。你必须在本轮使用必要工具实际推进；FINAL 只能汇报本轮已经发生的事实。\n"
-    "禁止以“我去处理 / 稍等 / 等我回复 / 后续给你”结束本轮。"
+    "这是执行请求。你必须在本轮使用必要工具实际推进；结束时只汇报本轮已经发生的事实。\n"
+    "禁止以“我去处理 / 稍等 / 等我回复 / 后续给你”结束本轮。不要在正文写出 FINAL。"
 )
 _DEFERRED_PROMISE_REPLACEMENT = (
     "本轮没有产生实际执行记录，不能让你继续空等。请重试，或明确指定要执行的专家。"
@@ -419,6 +424,14 @@ def _normalize_reply_text(text: str) -> str:
     return " ".join(str(text or "").split())
 
 
+def _strip_visible_final_marker(text: str) -> str:
+    """Drop a trailing control-plane FINAL token so it never reaches the bubble."""
+    raw = str(text or "")
+    if re.fullmatch(r"(?:\*\*)?FINAL(?:\*\*)?", raw.strip(), flags=re.IGNORECASE):
+        return ""
+    return _TRAILING_FINAL_RE.sub("", raw).rstrip()
+
+
 def _looks_like_execution_request(text: str) -> bool:
     """Heuristic: user is asking someone to actually do work this turn."""
     normalized = " ".join(str(text or "").lower().split())
@@ -604,14 +617,34 @@ def _strip_disabled_web_search_tools(tools: Sequence[Dict[str, Any]]) -> list[Di
     ]
 
 
+GROUP_MEMBER_BLOCKED_TOOLS = frozenset({
+    "delegate_to_avatar",
+    "spawn_subagent",
+    "create_avatar",
+    "schedule_task",
+    "cancel_scheduled_task",
+    "list_scheduled_tasks",
+    "work_item_upsert",
+})
+
+
 def _group_chat_tools() -> Sequence[Dict[str, Any]]:
-    blocked = {"delegate_to_avatar"}
     tools = [
         tool
         for tool in STUDIO_TOOLS
-        if tool.get("function", {}).get("name") not in blocked
+        if tool.get("function", {}).get("name") not in GROUP_MEMBER_BLOCKED_TOOLS
     ]
     return _strip_disabled_web_search_tools(tools)
+
+
+def _auto_dispatch_owner_blocked(group_id: str, owner_id: str) -> str:
+    try:
+        from agenticx.runtime.work_items import get_work_item_store
+
+        return get_work_item_store().dispatch_blocked_reason(group_id, owner_id)
+    except Exception:
+        return ""
+
 
 
 _GROUP_MEMBER_RUNTIME_FLAG_ATTRS = (
@@ -1330,6 +1363,40 @@ class GroupChatRouter:
         # For user-directed without explicit @: broadcast all.
         return valid_members
 
+    def _filter_dispatch_targets(
+        self,
+        *,
+        group_id: str,
+        targets: Sequence[str],
+        mentioned_avatar_ids: Sequence[str],
+    ) -> tuple[list[str], list[GroupReply]]:
+        """Return (run_ids, progress_skips). Never drops __meta__."""
+        mentioned = {str(x).strip() for x in mentioned_avatar_ids if str(x).strip()}
+        run_ids: list[str] = []
+        skips: list[GroupReply] = []
+        for target in targets:
+            tid = str(target or "").strip()
+            if not tid:
+                continue
+            if tid == META_LEADER_AGENT_ID:
+                run_ids.append(tid)
+                continue
+            reason = _auto_dispatch_owner_blocked(group_id, tid)
+            if reason and tid not in mentioned:
+                av = self.avatar_registry.get_avatar(tid)
+                name = str(getattr(av, "name", "") or tid) if av else tid
+                skips.append(
+                    self._progress_reply(
+                        agent_id=tid,
+                        avatar_name=name,
+                        avatar_url="",
+                        text="事项已暂停或前置未验收，本轮不自动开跑。需要的话直接 @ 我。",
+                    )
+                )
+                continue
+            run_ids.append(tid)
+        return run_ids, skips
+
     @staticmethod
     def _extract_text(response: Any) -> str:
         content = getattr(response, "content", response)
@@ -1626,7 +1693,7 @@ class GroupChatRouter:
             temperature=0.2,
             max_tokens=group_meta_reply_max_tokens(),
         )
-        final_text = text.strip()
+        final_text = _strip_visible_final_marker(text.strip())
         if not final_text:
             _log.warning(
                 "group_router: meta PM reply empty after retry; emitting no-output notice"
@@ -1745,7 +1812,7 @@ class GroupChatRouter:
             "## 群共享工作区\n"
             f"- 当前工作目录：{getattr(base_session, 'workspace_dir', None) or ''}\n"
             "- 需要交付长文、代码、数据时写入该目录或已绑定 taskspace。\n"
-            "- FINAL 只需给 1–3 句结论；系统会自动把本轮新增/修改文件显示为产物芯片。\n"
+            "- 结论只需 1–3 句；系统会自动把本轮新增/修改文件显示为产物芯片。不要在正文写 FINAL。\n"
             "- 不要伪造路径，不要把未写成的文件说成已交付。\n"
             "- 用户明确要求全文贴群时，按用户要求直接回答。\n"
             f"{str(extra_instruction or '').strip()}\n"
@@ -1753,6 +1820,14 @@ class GroupChatRouter:
             f"## 最近群聊上下文\n{dialogue_context}\n"
         )
         system_prompt = _append_context_files_block(system_prompt, local_session)
+        try:
+            from agenticx.runtime.work_items import build_work_items_prompt_block
+
+            wi_block = build_work_items_prompt_block(group_id)
+            if wi_block:
+                system_prompt = f"{system_prompt}\n{wi_block}"
+        except Exception:
+            pass
         # Graph Runtime interventions queued on the owner session scratchpad.
         try:
             from agenticx.runtime.graph.intervene import consume_graph_directives
@@ -1792,6 +1867,20 @@ class GroupChatRouter:
         )
         graph_run_id = self._graph_run_id_of(base_session)
         graph_node_id = self._graph_node_id_for_agent(avatar_id)
+        try:
+            from agenticx.runtime.work_items import get_work_item_store
+
+            store = get_work_item_store()
+            for item in store.list_items(group_id):
+                if (
+                    item.owner_id == avatar_id
+                    and item.status == "open"
+                    and store.blockers_accepted(group_id, item)
+                ):
+                    store.mark_in_progress(group_id, item.id, expected_version=item.version)
+                    break
+        except Exception:
+            pass
         if progress_queue is not None:
             progress_queue.put_nowait(
                 self._progress_reply(
@@ -1895,7 +1984,9 @@ class GroupChatRouter:
                     if tool_name == "web_search":
                         successful_web_search = True
             if event.type == EventType.FINAL.value:
-                final_text = str(event.data.get("text", "") or "").strip()
+                final_text = _strip_visible_final_marker(
+                    str(event.data.get("text", "") or "").strip()
+                )
             elif event.type == EventType.ERROR.value:
                 error_text = str(event.data.get("text", "") or "").strip()
         artifact_after = scan_artifact_snapshot(local_session.taskspaces)
@@ -1922,6 +2013,17 @@ class GroupChatRouter:
         artifacts = _group_artifacts_from_paths(
             changed_artifact_paths(artifact_before, artifact_after)
         )
+        if artifacts:
+            try:
+                from agenticx.runtime.work_items import submit_owner_delivery
+
+                submit_owner_delivery(
+                    group_id,
+                    avatar_id,
+                    [item.source_path for item in artifacts],
+                )
+            except Exception:
+                pass
         reply = GroupReply(
             agent_id=avatar_id,
             avatar_name=avatar_name,
@@ -2059,6 +2161,13 @@ class GroupChatRouter:
         responded_this_turn: set[str],
     ) -> AsyncGenerator[GroupReply, None]:
         candidates = [str(x).strip() for x in valid_members if str(x).strip()]
+        candidates, broadcast_skips = self._filter_dispatch_targets(
+            group_id=group_id,
+            targets=candidates,
+            mentioned_avatar_ids=[],
+        )
+        for skip in broadcast_skips:
+            yield skip
         context.clear_active_thread()
         if candidates:
             for ge in self._project_h2a_fanout(
@@ -2414,6 +2523,13 @@ class GroupChatRouter:
             if not candidates:
                 candidates = valid_members[: group_open_floor_max_speakers()]
             candidates = candidates[: group_open_floor_max_speakers()]
+            candidates, floor_skips = self._filter_dispatch_targets(
+                group_id=group_id,
+                targets=candidates,
+                mentioned_avatar_ids=list(mention_set),
+            )
+            for skip in floor_skips:
+                yield skip
             if candidates:
                 for ge in self._project_h2a_fanout(
                     base_session=base_session,
@@ -2525,6 +2641,13 @@ class GroupChatRouter:
             primary_targets = [x for x in primary_targets if x in explicit]
         else:
             primary_targets = primary_targets[:1]
+        primary_targets, route_skips = self._filter_dispatch_targets(
+            group_id=group_id,
+            targets=primary_targets,
+            mentioned_avatar_ids=list(mention_set),
+        )
+        for skip in route_skips:
+            yield skip
         # H2A fan-out: project human→agent MESSAGE edges for God-View.
         if primary_targets:
             for ge in self._project_h2a_fanout(
@@ -2951,6 +3074,23 @@ class GroupChatRouter:
             else:
                 av = self.avatar_registry.get_avatar(avatar_id)
                 ty_name = str(getattr(av, "name", "") or avatar_id) if av else avatar_id
+            run_ids, wf_skips = self._filter_dispatch_targets(
+                group_id=group_id,
+                targets=[avatar_id],
+                mentioned_avatar_ids=[],
+            )
+            for skip in wf_skips:
+                yield skip
+            if not run_ids:
+                event_bus.publish(WorkforceEvent(
+                    action=WorkforceAction.TASK_FAILED,
+                    task_id=node.id,
+                    agent_id=avatar_id,
+                    data={"error": "dispatch_blocked"},
+                ))
+                async for r in _drain_relay():
+                    yield r
+                return
             yield self._typing_event(avatar_id, ty_name)
 
             subtask_input = desc
@@ -3169,6 +3309,13 @@ class GroupChatRouter:
             mentioned_avatar_ids=resolved_mentions,
             scratchpad=scratchpad,
         )
+        targets, dispatch_skips = self._filter_dispatch_targets(
+            group_id=group_id,
+            targets=targets,
+            mentioned_avatar_ids=resolved_mentions,
+        )
+        for skip in dispatch_skips:
+            yield skip
         if not targets:
             return
 

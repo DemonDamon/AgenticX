@@ -3,6 +3,7 @@
 import * as React from "react";
 import type { DeepResearchEvent } from "@agenticx/core-api";
 import { displayDeliveryFileName } from "./deep-research-delivery-prefs";
+import { useChatCopy } from "../../i18n/ChatLocaleProvider";
 
 type ArtifactEvent = Extract<DeepResearchEvent, { type: "artifact" }>;
 
@@ -56,6 +57,7 @@ function fileNameFromArtifact(artifact: ArtifactEvent): string {
 }
 
 export function DeepResearchArtifactCard({ artifact, onPreview }: DeepResearchArtifactCardProps) {
+  const copy = useChatCopy();
   return (
     <button
       type="button"
@@ -71,7 +73,7 @@ export function DeepResearchArtifactCard({ artifact, onPreview }: DeepResearchAr
           {fileNameFromArtifact(artifact)}
         </span>
         <span className="mt-0.5 block truncate text-[12px] leading-4 text-muted-foreground">
-          预览文件
+          {copy.delivery.previewFile}
         </span>
       </span>
     </button>

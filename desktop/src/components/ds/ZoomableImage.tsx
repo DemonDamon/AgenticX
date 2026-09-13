@@ -8,6 +8,7 @@ import {
   type SyntheticEvent,
 } from "react";
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { HoverTip } from "./HoverTip";
 
 type Props = {
@@ -30,6 +31,7 @@ function clampUserScale(scale: number): number {
  * 默认 100% = 适应容器完整显示；双击还原至适应模式。
  */
 export function ZoomableImage({ src, alt, maxHeight = "68vh" }: Props) {
+  const { t } = useTranslation("chat");
   const [fitScale, setFitScale] = useState(1);
   const [userScale, setUserScale] = useState(1);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
@@ -142,7 +144,7 @@ export function ZoomableImage({ src, alt, maxHeight = "68vh" }: Props) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-center gap-1">
-        <HoverTip label="缩小">
+        <HoverTip label={t("mermaid.zoomOut")}>
           <button
             type="button"
             onClick={zoomOut}
@@ -156,7 +158,7 @@ export function ZoomableImage({ src, alt, maxHeight = "68vh" }: Props) {
           {pct}%
         </span>
 
-        <HoverTip label="放大">
+        <HoverTip label={t("mermaid.zoomIn")}>
           <button
             type="button"
             onClick={zoomIn}
@@ -166,7 +168,7 @@ export function ZoomableImage({ src, alt, maxHeight = "68vh" }: Props) {
           </button>
         </HoverTip>
 
-        <HoverTip label="还原（双击图片也可还原）">
+        <HoverTip label={t("zoom.resetImage")}>
           <button
             type="button"
             onClick={reset}
@@ -176,7 +178,7 @@ export function ZoomableImage({ src, alt, maxHeight = "68vh" }: Props) {
           </button>
         </HoverTip>
 
-        <span className="ml-2 text-[11px] text-text-faint">滚轮缩放 · 拖拽平移 · 双击还原</span>
+        <span className="ml-2 text-[11px] text-text-faint">{t("zoom.hint")}</span>
       </div>
 
       <div

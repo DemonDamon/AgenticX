@@ -14,14 +14,14 @@ describe("team template UI contract", () => {
     expect(projects).toContain("<GroupTemplateCreateDialog");
     expect(projects).not.toContain("matchTemplateAvatarIds");
     expect(projects).not.toContain("memberRoleHints");
-    expect(customEditor).toContain("新建群聊");
+    expect(customEditor).toContain("groups.newGroup");
   });
 
   it("states that existing avatars are untouched and keeps cancellation available", () => {
     const dialog = readSource("GroupTemplateCreateDialog.tsx");
 
-    expect(dialog).toContain("不会使用或修改你已有的分身");
-    expect(dialog).toContain("取消创建");
+    expect(dialog).toContain("groups.existingAvatarsUntouched");
+    expect(dialog).toContain("groups.cancelCreate");
     expect(dialog).toContain("shouldCancel: () => cancelRequestedRef.current");
   });
 });

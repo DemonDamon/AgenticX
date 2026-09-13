@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Message, SubAgent } from "../../store";
 import { useAppStore } from "../../store";
 import {
@@ -36,15 +37,17 @@ function liveMembersForAnchor(subAgents: SubAgent[], sessionId: string | undefin
 }
 
 function DegradedClusterCard({ title }: { title: string }) {
+  const { t } = useTranslation("chat");
   return (
     <div className="rounded-xl border border-border bg-surface-card px-3 py-2.5 text-[12px] text-text-muted">
       <div className="font-medium text-text-strong">{title}</div>
-      <div className="mt-1 text-[11px] text-text-faint">历史子智能体集群明细暂不可用。</div>
+      <div className="mt-1 text-[11px] text-text-faint">{t("subagent.historyClusterUnavailable")}</div>
     </div>
   );
 }
 
 export function HistoricalSubAgentClusterCard({ anchor, sessionId, onOpenRun }: Props) {
+  const { t } = useTranslation("chat");
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
   const subAgents = useAppStore((s) => s.subAgents);
@@ -85,13 +88,13 @@ export function HistoricalSubAgentClusterCard({ anchor, sessionId, onOpenRun }: 
     return orderByAnchorRunIds(mergeBadgeVMs(persisted, live), anchor.runIds);
   }, [anchor.runIds, cluster, sessionId, subAgents]);
 
-  const title = anchor.title || cluster?.title || `Agent 蜂群 · ${anchor.runIds.length} 个并行任务`;
+  const title = anchor.title || cluster?.title || t("subagent.swarmTitle", { count: anchor.runIds.length });
   if (members.length === 0) {
     return failed ? (
       <DegradedClusterCard title={title} />
     ) : (
       <div className="rounded-xl border border-border bg-surface-card px-3 py-2.5 text-[12px] text-text-faint">
-        正在恢复历史子智能体集群…
+        {t("subagent.restoringHistoryCluster")}
       </div>
     );
   }

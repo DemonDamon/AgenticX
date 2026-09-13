@@ -32,7 +32,11 @@ from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.runtime.prompts.current_time import build_current_time_block
 from agenticx.runtime.team_manager import AgentTeamManager
 from agenticx.runtime.events import EventType
-from agenticx.runtime.subagent_runs import SubAgentRunStore
+from agenticx.runtime.subagent_runs import (
+    SubAgentRunStore,
+    list_resolved_runs,
+    resolve_run,
+)
 from agenticx.workspace.loader import (
     DAILY_MEMORY_TEMPLATE,
     append_daily_memory,
@@ -807,6 +811,41 @@ _META_ONLY_TOOLS: List[Dict[str, Any]] = [
                 },
                 "required": ["name", "members"],
                 "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "work_item_upsert",
+            "description": (
+                "创建或更新当前群的事项（组织后台）。"
+                "action=create|update|submit|attach|cancel。"
+                "不能验收、不能暂停、不能恢复；那是用户按钮。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "update", "submit", "attach", "cancel"],
+                    },
+                    "item_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "owner_id": {
+                        "type": "string",
+                        "description": "群成员 avatar_id；空表示用户负责",
+                    },
+                    "owner_kind": {
+                        "type": "string",
+                        "enum": ["human", "avatar", "meta"],
+                    },
+                    "definition_of_done": {"type": "string"},
+                    "artifact_paths": {"type": "array", "items": {"type": "string"}},
+                    "blocked_by": {"type": "array", "items": {"type": "string"}},
+                    "expected_version": {"type": "integer"},
+                },
+                "required": ["action"],
             },
         },
     },
@@ -1784,48 +1823,26 @@ def _find_or_create_avatar_session(
     session_manager: Any,
     avatar_id: str,
     avatar_config: Any,
+    *,
+    delegation_id: str = "",
+    owner_session_id: str = "",
+    task: str = "",
 ) -> Any:
-    """Find active avatar session, or create one using avatar defaults."""
+    """Create an isolated avatar session for one new delegation."""
     target_id = str(avatar_id or "").strip()
     if not target_id:
         raise ValueError("avatar_id is required")
-
-    sessions_dict = getattr(session_manager, "_sessions", None) or {}
-    best = None
-    best_updated = 0.0
-    for managed in sessions_dict.values():
-        if getattr(managed, "archived", False):
-            continue
-        if str(getattr(managed, "avatar_id", "")).strip() != target_id:
-            continue
-        updated = float(getattr(managed, "updated_at", 0) or 0)
-        if best is None or updated > best_updated:
-            best = managed
-            best_updated = updated
-    if best is not None:
-        return best
-
-    try:
-        rows = session_manager.list_sessions(avatar_id=target_id)
-    except Exception:
-        rows = []
-    if isinstance(rows, list):
-        for row in rows:
-            if not isinstance(row, dict) or row.get("archived"):
-                continue
-            sid = str(row.get("session_id", "")).strip()
-            if not sid:
-                continue
-            managed = session_manager.get(sid, touch=False)
-            if managed is not None:
-                return managed
 
     provider_name = str(getattr(avatar_config, "default_provider", "") or "").strip() or None
     model_name = str(getattr(avatar_config, "default_model", "") or "").strip() or None
     managed = session_manager.create(provider=provider_name, model=model_name)
     managed.avatar_id = target_id
     managed.avatar_name = str(getattr(avatar_config, "name", "") or "").strip() or target_id
-    managed.session_name = managed.avatar_name
+    task_title = " ".join(str(task or "").split())
+    managed.session_name = f"[委派] {task_title[:40]}" if task_title else managed.avatar_name
+    managed.session_kind = "delegation"
+    managed.delegation_id = str(delegation_id or "").strip() or None
+    managed.parent_owner_session_id = str(owner_session_id or "").strip() or None
     managed.updated_at = time.time()
 
     session = managed.studio_session
@@ -1840,6 +1857,34 @@ def _find_or_create_avatar_session(
     setattr(session, "_owner_session_id", managed.session_id)
     session_manager.persist(managed.session_id)
     return managed
+
+
+def _find_running_avatar_delegation(
+    session_manager: Any,
+    avatar_id: str,
+    *,
+    owner_session_id: str,
+) -> Any:
+    """Return this owner's loaded delegation session for an avatar."""
+    target_id = str(avatar_id or "").strip()
+    target_owner_id = str(owner_session_id or "").strip()
+    if not target_id or not target_owner_id:
+        return None
+    sessions_dict = getattr(session_manager, "_sessions", None) or {}
+    for managed in sessions_dict.values():
+        if getattr(managed, "archived", False):
+            continue
+        if str(getattr(managed, "avatar_id", "") or "").strip() != target_id:
+            continue
+        info = getattr(managed, "_delegation_info", None)
+        if not isinstance(info, dict):
+            continue
+        if str(info.get("from_session", "") or "").strip() != target_owner_id:
+            continue
+        task = getattr(managed, "_delegation_task", None)
+        if task is not None and not task.done():
+            return managed
+    return None
 
 
 def _extract_recent_assistant_text(session: Any) -> str:
@@ -2810,6 +2855,11 @@ async def dispatch_meta_tool_async(
 
     if name == "cancel_subagent":
         requested_id = str(arguments.get("agent_id", "")).strip()
+        current_owner_id = str(
+            getattr(session, "_owner_session_id", "")
+            or getattr(team_manager, "owner_session_id", "")
+            or ""
+        ).strip()
         result = await team_manager.cancel_subagent(requested_id)
         if result.get("ok"):
             return json.dumps(result, ensure_ascii=False)
@@ -2827,11 +2877,75 @@ async def dispatch_meta_tool_async(
                     delegation_id = str(info.get("delegation_id", "")).strip()
                     if delegation_id != requested_id:
                         continue
+                    delegation_owner_id = str(
+                        info.get("from_session", "") or ""
+                    ).strip()
+                    if (
+                        not current_owner_id
+                        or delegation_owner_id != current_owner_id
+                    ):
+                        continue
                     cancel_evt = getattr(managed, "_delegation_cancel_event", None)
                     if isinstance(cancel_evt, asyncio.Event):
                         cancel_evt.set()
-                        info["status"] = "cancelled"
-                        info["cancelled_at"] = time.time()
+                    delegation_task = getattr(managed, "_delegation_task", None)
+                    if isinstance(delegation_task, asyncio.Task) and not delegation_task.done():
+                        delegation_task.cancel()
+                    cancelled_at = time.time()
+                    info["status"] = "cancelled"
+                    info["cancelled_at"] = cancelled_at
+                    info["updated_at"] = cancelled_at
+                    if current_owner_id:
+                        try:
+                            run_store = SubAgentRunStore(current_owner_id)
+                            record = run_store.get_run(requested_id)
+                            if record is None:
+                                run_store.open_run(
+                                    run_id=requested_id,
+                                    kind="delegate",
+                                    name=str(
+                                        info.get("avatar_name", "")
+                                        or getattr(managed, "avatar_name", "")
+                                        or requested_id
+                                    ),
+                                    role=str(info.get("role", "") or "delegated avatar"),
+                                    task=str(info.get("task", "") or ""),
+                                    status=str(info.get("status_before_cancel", "") or "running"),
+                                    avatar_id=str(
+                                        info.get("avatar_id", "")
+                                        or getattr(managed, "avatar_id", "")
+                                    ),
+                                    avatar_session_id=str(
+                                        info.get("avatar_session_id", "")
+                                        or getattr(managed, "session_id", "")
+                                    ),
+                                    source_tool_call_id=str(
+                                        info.get("source_tool_call_id", "") or ""
+                                    ),
+                                    started_at=float(info.get("started_at", 0) or cancelled_at),
+                                )
+                            run_store.update_status(
+                                requested_id,
+                                status="cancelled",
+                                completed_at=cancelled_at,
+                            )
+                        except Exception as exc:
+                            _meta_log.warning(
+                                "[cancel] delegation ledger update failed: %s",
+                                exc,
+                            )
+                            return json.dumps(
+                                {
+                                    "ok": False,
+                                    "partial": True,
+                                    "cancelled": True,
+                                    "agent_id": requested_id,
+                                    "status": "cancelled",
+                                    "error": "ledger_update_failed",
+                                    "message": "delegation cancelled but run ledger update failed",
+                                },
+                                ensure_ascii=False,
+                            )
                     return json.dumps(
                         {
                             "ok": True,
@@ -2854,123 +2968,35 @@ async def dispatch_meta_tool_async(
 
     if name == "query_subagent_status":
         requested_id = str(arguments.get("agent_id", "")).strip() or None
-        owner_session_id = getattr(team_manager, "owner_session_id", None)
-        active_tasks = {tid: (not t.done()) for tid, t in team_manager._tasks.items()}
-        agent_keys = list(team_manager._agents.keys())
-        archived_keys = list(team_manager._archived_agents.keys())
-
-        # --- Fallback 1: session._team_manager might be a different instance ---
-        session_tm = getattr(session, "_team_manager", None) if session else None
-        if session_tm is not None and session_tm is not team_manager:
-            _meta_log.warning(
-                "[dispatch] MISMATCH: tool tm=%s (agents=%s) vs session._tm=%s (agents=%s archived=%s)",
-                id(team_manager), agent_keys,
-                id(session_tm),
-                list(session_tm._agents.keys()),
-                list(session_tm._archived_agents.keys()),
-            )
-            stm_status = session_tm.get_status()
-            stm_rows = stm_status.get("subagents", [])
-            if stm_rows and not agent_keys and not archived_keys:
-                _meta_log.warning("[dispatch] using session._team_manager as primary (has %d agents)", len(stm_rows))
-                team_manager = session_tm
-                owner_session_id = getattr(team_manager, "owner_session_id", None)
-                active_tasks = {tid: (not t.done()) for tid, t in team_manager._tasks.items()}
-                agent_keys = list(team_manager._agents.keys())
-                archived_keys = list(team_manager._archived_agents.keys())
-
-        _meta_log.info(
-            "[dispatch] query_subagent_status: tm=%s agents=%s archived=%s tasks=%s sid=%s",
-            id(team_manager),
-            list(team_manager._agents.keys()),
-            list(team_manager._archived_agents.keys()),
-            active_tasks,
-            owner_session_id,
-        )
-        result = team_manager.get_status_with_task_fallback(requested_id)
-        if requested_id and not result.get("ok"):
-            global_hit = AgentTeamManager.lookup_global_status(
+        owner_session_id = str(
+            getattr(session, "_owner_session_id", "")
+            or getattr(team_manager, "owner_session_id", "")
+            or ""
+        ).strip()
+        session_manager = getattr(session, "_session_manager", None) if session else None
+        if requested_id:
+            row = resolve_run(
+                owner_session_id,
                 requested_id,
-                session_id=owner_session_id,
+                session_manager=session_manager,
+                team_manager=team_manager,
+                include_legacy=False,
             )
-            if global_hit is not None:
-                _meta_log.warning("[dispatch] fallback global hit for agent_id=%s", requested_id)
-                result = {"ok": True, "subagent": global_hit}
-
-        # --- Avatar session fallback ---
-        # If still not found, check SessionManager for an active avatar session
-        if requested_id and not result.get("ok") and session is not None:
-            sm = getattr(session, "_session_manager", None)
-            if sm is not None:
-                avatar_hit = _lookup_avatar_session_status(sm, requested_id)
-                if avatar_hit is not None:
-                    _meta_log.info("[dispatch] avatar session fallback hit for '%s'", requested_id)
-                    result = {"ok": True, "subagent": avatar_hit}
-        if result.get("ok") and requested_id is None:
-            rows = result.get("subagents", [])
-            if isinstance(rows, list):
-                # --- Fallback 2: global registry ---
-                if not rows:
-                    global_rows = AgentTeamManager.collect_global_statuses(
-                        session_id=owner_session_id,
-                    )
-                    if global_rows:
-                        _meta_log.warning("[dispatch] fallback to global statuses, count=%d", len(global_rows))
-                        result["subagents"] = global_rows
-                        rows = global_rows
-
-                # --- Fallback 3: scratchpad subagent_result:: entries ---
-                if not rows and session is not None:
-                    scratchpad = getattr(session, "scratchpad", None) or {}
-                    synth_rows: List[Dict[str, Any]] = []
-                    for key, value in scratchpad.items():
-                        if not key.startswith("subagent_result::"):
-                            continue
-                        agent_id_from_key = key.split("::", 1)[1]
-                        synth_rows.append({
-                            "agent_id": agent_id_from_key,
-                            "name": agent_id_from_key,
-                            "status": "completed",
-                            "result_summary": str(value)[:500],
-                            "source": "scratchpad_fallback",
-                        })
-                    if synth_rows:
-                        _meta_log.warning("[dispatch] fallback to scratchpad, count=%d", len(synth_rows))
-                        result["subagents"] = synth_rows
-                        rows = synth_rows
-
-                # --- Fallback 4: chat_history summary entries ---
-                if not rows and session is not None:
-                    chat_history = getattr(session, "chat_history", None) or []
-                    summary_rows: List[Dict[str, Any]] = []
-                    for msg in reversed(chat_history):
-                        content = str(msg.get("content", ""))
-                        if not content.startswith("子智能体汇总:"):
-                            continue
-                        summary_rows.append({
-                            "agent_id": "unknown",
-                            "name": "子智能体",
-                            "status": "completed",
-                            "result_summary": content[len("子智能体汇总:"):].strip()[:500],
-                            "source": "chat_history_fallback",
-                        })
-                        if len(summary_rows) >= 10:
-                            break
-                    if summary_rows:
-                        _meta_log.warning("[dispatch] fallback to chat_history summaries, count=%d", len(summary_rows))
-                        result["subagents"] = summary_rows
-                        rows = summary_rows
-
-                running_tasks = sum(1 for running in active_tasks.values() if running)
-                if not rows and running_tasks > 0:
-                    _meta_log.error(
-                        "[dispatch] BUG: empty status while tasks running. tm=%s sid=%s tasks=%s agents=%s archived=%s",
-                        id(team_manager),
-                        owner_session_id,
-                        active_tasks,
-                        list(team_manager._agents.keys()),
-                        list(team_manager._archived_agents.keys()),
-                    )
+            if row is not None:
+                return json.dumps({"ok": True, "subagent": row}, ensure_ascii=False)
+            if not owner_session_id:
+                local_result = team_manager.get_status_with_task_fallback(requested_id)
+                if local_result.get("ok"):
+                    return json.dumps(local_result, ensure_ascii=False)
+        else:
+            rows = list_resolved_runs(
+                owner_session_id,
+                session_manager=session_manager,
+                team_manager=team_manager,
+                include_legacy=False,
+            )
+            if rows:
+                result = {"ok": True, "subagents": rows}
                 result["summary"] = {
                     "total": len(rows),
                     "running": sum(1 for item in rows if item.get("status") == "running"),
@@ -2979,6 +3005,66 @@ async def dispatch_meta_tool_async(
                     "failed": sum(1 for item in rows if item.get("status") == "failed"),
                     "cancelled": sum(1 for item in rows if item.get("status") == "cancelled"),
                 }
+                return json.dumps(result, ensure_ascii=False)
+            if not owner_session_id:
+                local_result = team_manager.get_status_with_task_fallback()
+                local_rows = local_result.get("subagents", [])
+                if local_result.get("ok") and local_rows:
+                    return json.dumps(local_result, ensure_ascii=False)
+
+        legacy_rows: List[Dict[str, Any]] = []
+        if session is not None:
+            scratchpad = getattr(session, "scratchpad", None) or {}
+            legacy_by_id: Dict[str, Dict[str, Any]] = {}
+            for key, value in scratchpad.items():
+                if not key.startswith(("subagent_result::", "delegation_result::")):
+                    continue
+                legacy_id = key.split("::", 1)[1]
+                if requested_id and legacy_id != requested_id:
+                    continue
+                legacy_by_id[legacy_id] = {
+                    "run_id": legacy_id,
+                    "agent_id": legacy_id,
+                    "name": legacy_id,
+                    "status": "completed",
+                    "result_summary": str(value)[:500],
+                    "source": "legacy_fallback",
+                }
+            legacy_rows = list(legacy_by_id.values())
+            if not legacy_rows and not requested_id:
+                chat_history = getattr(session, "chat_history", None) or []
+                for msg in reversed(chat_history):
+                    content = str(msg.get("content", ""))
+                    if not content.startswith("子智能体汇总:"):
+                        continue
+                    legacy_rows.append(
+                        {
+                            "run_id": "unknown",
+                            "agent_id": "unknown",
+                            "name": "子智能体",
+                            "status": "completed",
+                            "result_summary": content[len("子智能体汇总:") :].strip()[:500],
+                            "source": "legacy_fallback",
+                        }
+                    )
+                    if len(legacy_rows) >= 10:
+                        break
+        if requested_id:
+            result = (
+                {"ok": True, "subagent": legacy_rows[0]}
+                if legacy_rows
+                else {"ok": False, "error": "not_found"}
+            )
+        else:
+            result = {"ok": True, "subagents": legacy_rows}
+            result["summary"] = {
+                "total": len(legacy_rows),
+                "running": 0,
+                "pending": 0,
+                "completed": len(legacy_rows),
+                "failed": 0,
+                "cancelled": 0,
+            }
         return json.dumps(result, ensure_ascii=False)
 
     if name == "check_resources":
@@ -3440,9 +3526,17 @@ async def dispatch_meta_tool_async(
         if not isinstance(scratchpad, dict):
             return json.dumps({"ok": False, "error": "session scratchpad unavailable"}, ensure_ascii=False)
 
-        avatar_managed = _find_or_create_avatar_session(session_manager, avatar_id, avatar)
-
-        existing_task = getattr(avatar_managed, "_delegation_task", None)
+        owner_session_id = str(
+            getattr(session, "_owner_session_id", "")
+            or getattr(team_manager, "owner_session_id", "")
+            or ""
+        ).strip()
+        avatar_managed = _find_running_avatar_delegation(
+            session_manager,
+            avatar_id,
+            owner_session_id=owner_session_id,
+        )
+        existing_task = getattr(avatar_managed, "_delegation_task", None) if avatar_managed is not None else None
         existing_info = getattr(avatar_managed, "_delegation_info", None)
         if existing_task is not None and not existing_task.done():
             existing_dlg_id = ""
@@ -3463,6 +3557,14 @@ async def dispatch_meta_tool_async(
             )
 
         delegation_id = f"dlg-{uuid.uuid4().hex[:8]}"
+        avatar_managed = _find_or_create_avatar_session(
+            session_manager,
+            avatar_id,
+            avatar,
+            delegation_id=delegation_id,
+            owner_session_id=owner_session_id,
+            task=task,
+        )
         cancel_event = asyncio.Event()
         meta_provider = str(getattr(session, "provider_name", "") or "").strip()
         meta_model = str(getattr(session, "model_name", "") or "").strip()
@@ -3473,6 +3575,49 @@ async def dispatch_meta_tool_async(
                 meta_provider = str(routed.get("provider", "")).strip()
                 meta_model = str(routed.get("model", "")).strip()
         meta_display_name = _meta_display_name_for_delegation(session, scratchpad)
+        source_tool_call_id = str(arguments.get("__tool_call_id", "") or "").strip()
+        started_at = time.time()
+        setattr(
+            avatar_managed,
+            "_delegation_info",
+            {
+                "delegation_id": delegation_id,
+                "task": task,
+                "from_session": owner_session_id,
+                "status": "pending",
+                "started_at": started_at,
+                "updated_at": started_at,
+                "avatar_id": avatar_id,
+                "avatar_name": str(avatar.name or ""),
+                "avatar_session_id": avatar_managed.session_id,
+                "source_tool_call_id": source_tool_call_id,
+            },
+        )
+        SubAgentRunStore(owner_session_id).open_run(
+            run_id=delegation_id,
+            kind="delegate",
+            name=str(avatar.name or "") or delegation_id,
+            role=str(avatar.role or "") or "delegated avatar",
+            task=task,
+            status="pending",
+            provider=meta_provider,
+            model=meta_model,
+            persona=str(avatar.system_prompt or ""),
+            avatar_id=avatar_id,
+            avatar_session_id=avatar_managed.session_id,
+            source_tool_call_id=source_tool_call_id,
+            started_at=started_at,
+            detail_refs={
+                "avatar_messages_path": str(
+                    Path.home()
+                    / ".agenticx"
+                    / "sessions"
+                    / str(avatar_managed.session_id)
+                    / "messages.json"
+                ),
+                "scratchpad_key": f"delegation_result::{delegation_id}",
+            },
+        )
 
         async def _delegation_wrapper() -> None:
             try:
@@ -3539,24 +3684,6 @@ async def dispatch_meta_tool_async(
         background_task = asyncio.create_task(_delegation_wrapper())
         setattr(avatar_managed, "_delegation_task", background_task)
         setattr(avatar_managed, "_delegation_cancel_event", cancel_event)
-        setattr(
-            avatar_managed,
-            "_delegation_info",
-            {
-                "delegation_id": delegation_id,
-                "task": task,
-                "from_session": str(
-                    getattr(session, "_owner_session_id", "")
-                    or getattr(team_manager, "owner_session_id", "")
-                    or ""
-                ).strip(),
-                "status": "running",
-                "started_at": time.time(),
-                "avatar_id": avatar_id,
-                "avatar_name": str(avatar.name or ""),
-                "avatar_session_id": avatar_managed.session_id,
-            },
-        )
         avatar_managed.updated_at = time.time()
         session_manager.persist(avatar_managed.session_id)
 
@@ -3980,4 +4107,122 @@ async def dispatch_meta_tool_async(
                 payload["preflight"] = preflight_payload
             return json.dumps(payload, ensure_ascii=False)
 
+    if name == "work_item_upsert":
+        return _dispatch_work_item_upsert(arguments, session=session)
+
     return json.dumps({"ok": False, "error": f"unknown meta tool: {name}"}, ensure_ascii=False)
+
+
+def _session_group_id(session: Optional["StudioSession"]) -> str:
+    if session is None:
+        return ""
+    for attr in ("avatar_id", "bound_avatar_id"):
+        aid = str(getattr(session, attr, "") or "").strip()
+        if aid.startswith("group:"):
+            return aid[len("group:") :].strip()
+    return ""
+
+
+def _dispatch_work_item_upsert(
+    arguments: Dict[str, Any],
+    *,
+    session: Optional["StudioSession"] = None,
+) -> str:
+    from agenticx.avatar.group_chat import GroupChatRegistry
+    from agenticx.runtime.work_items import WorkItemError, get_work_item_store
+
+    gid = _session_group_id(session)
+    if not gid:
+        return json.dumps(
+            {"ok": False, "error": "work_item_upsert 只能在群聊会话使用"},
+            ensure_ascii=False,
+        )
+    action = str((arguments or {}).get("action") or "").strip()
+    if action not in {"create", "update", "submit", "attach", "cancel"}:
+        return json.dumps({"ok": False, "error": "unsupported action"}, ensure_ascii=False)
+    store = get_work_item_store()
+
+    def _expected_version() -> int:
+        raw = (arguments or {}).get("expected_version")
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            raise WorkItemError("expected_version required", status_code=400)
+
+    try:
+        if action == "create":
+            cfg = GroupChatRegistry().get_group(gid)
+            allowed = set(cfg.avatar_ids) if cfg is not None else set()
+            item = store.create_item(
+                gid,
+                title=str((arguments or {}).get("title") or ""),
+                owner_kind=str((arguments or {}).get("owner_kind") or "human"),
+                owner_id=str((arguments or {}).get("owner_id") or ""),
+                definition_of_done=str((arguments or {}).get("definition_of_done") or ""),
+                blocked_by=list((arguments or {}).get("blocked_by") or []),
+                allowed_owner_ids=allowed,
+            )
+            return json.dumps({"ok": True, "item": item.to_dict()}, ensure_ascii=False)
+        item_id = str((arguments or {}).get("item_id") or "").strip()
+        if not item_id:
+            raise WorkItemError("item_id required", status_code=400)
+        expected = _expected_version()
+        if action == "update":
+            kwargs: Dict[str, Any] = {}
+            if "title" in (arguments or {}):
+                kwargs["title"] = arguments.get("title")
+            if "definition_of_done" in (arguments or {}):
+                kwargs["definition_of_done"] = arguments.get("definition_of_done")
+            if "artifact_paths" in (arguments or {}):
+                kwargs["artifact_paths"] = list(arguments.get("artifact_paths") or [])
+            if "blocked_by" in (arguments or {}):
+                kwargs["blocked_by"] = list(arguments.get("blocked_by") or [])
+            if "owner_kind" in (arguments or {}):
+                kwargs["owner_kind"] = arguments.get("owner_kind")
+            if "owner_id" in (arguments or {}):
+                kwargs["owner_id"] = arguments.get("owner_id")
+            cfg = GroupChatRegistry().get_group(gid)
+            item = store.patch_item(
+                gid,
+                item_id,
+                expected_version=expected,
+                allow_status=False,
+                allowed_owner_ids=set(cfg.avatar_ids) if cfg is not None else None,
+                **kwargs,
+            )
+            return json.dumps({"ok": True, "item": item.to_dict()}, ensure_ascii=False)
+        if action == "submit":
+            paths = (arguments or {}).get("artifact_paths")
+            item = store.submit(
+                gid,
+                item_id,
+                expected_version=expected,
+                artifact_paths=list(paths) if paths is not None else None,
+            )
+            return json.dumps({"ok": True, "item": item.to_dict()}, ensure_ascii=False)
+        if action == "attach":
+            incoming = [
+                str(x).strip()
+                for x in ((arguments or {}).get("artifact_paths") or [])
+                if str(x).strip()
+            ]
+            current = store.get_item(gid, item_id)
+            if current is None:
+                raise WorkItemError("work item not found", status_code=404)
+            merged = list(dict.fromkeys([*current.artifact_paths, *incoming]))
+            item = store.patch_item(
+                gid,
+                item_id,
+                expected_version=expected,
+                artifact_paths=merged,
+                allow_status=False,
+            )
+            return json.dumps({"ok": True, "item": item.to_dict()}, ensure_ascii=False)
+        item = store.cancel(gid, item_id, expected_version=expected)
+        return json.dumps({"ok": True, "item": item.to_dict()}, ensure_ascii=False)
+    except WorkItemError as exc:
+        return json.dumps(
+            {"ok": False, "error": str(exc), "status_code": exc.status_code},
+            ensure_ascii=False,
+        )
+

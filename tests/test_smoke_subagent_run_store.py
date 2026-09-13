@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import threading
 import types
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
 
+import agenticx.runtime.subagent_runs.store as run_store_module
 from agenticx.cli.studio import StudioSession
 from agenticx.runtime import agent_runtime
 from agenticx.runtime import meta_tools
@@ -104,6 +108,14 @@ class _FakeAvatarConfig:
 class _FakeSessionManager:
     def persist(self, _: str) -> None:
         return None
+
+
+class _DispatchSession(_FakeStudioSession):
+    def __init__(self, session_manager: Any) -> None:
+        super().__init__()
+        self.scratchpad: Dict[str, Any] = {}
+        self._session_manager = session_manager
+        self._owner_session_id = "meta-session-1"
 
 
 class _FakeCompletedRuntime:
@@ -239,6 +251,194 @@ def test_smoke_subagent_run_store_append_fault_tolerant(tmp_path, monkeypatch: p
     asyncio.run(_run())
 
 
+def test_subagent_run_store_instances_share_owner_root_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    first = SubAgentRunStore("shared-owner")
+    second = SubAgentRunStore("shared-owner")
+
+    assert first._lock is second._lock
+
+
+def test_multi_instance_concurrent_open_preserves_all_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    stores = [
+        SubAgentRunStore("concurrent-open-owner"),
+        SubAgentRunStore("concurrent-open-owner"),
+    ]
+    locks_are_shared = stores[0]._lock is stores[1]._lock
+    barrier = threading.Barrier(2)
+    load_counts: dict[int, int] = {}
+    counts_lock = threading.Lock()
+    original_load_index = SubAgentRunStore._load_index
+
+    def _synchronized_load_index(store: SubAgentRunStore) -> Dict[str, Any]:
+        payload = original_load_index(store)
+        thread_id = threading.get_ident()
+        with counts_lock:
+            count = load_counts.get(thread_id, 0)
+            load_counts[thread_id] = count + 1
+        if not locks_are_shared and count == 0:
+            barrier.wait(timeout=5)
+        return payload
+
+    monkeypatch.setattr(
+        SubAgentRunStore,
+        "_load_index",
+        _synchronized_load_index,
+    )
+
+    def _open(index: int) -> None:
+        stores[index].open_run(
+            run_id=f"concurrent-open-{index}",
+            kind="delegate",
+            name=f"Worker {index}",
+            role="worker",
+            task="concurrent task",
+            status="pending",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(_open, range(2)))
+
+    assert {
+        record.run_id
+        for record in SubAgentRunStore("concurrent-open-owner").list_runs()
+    } == {"concurrent-open-0", "concurrent-open-1"}
+
+
+def test_multi_instance_concurrent_cancel_and_close_preserve_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    owner_id = "concurrent-close-owner"
+    run_id = "concurrent-close-run"
+    SubAgentRunStore(owner_id).open_run(
+        run_id=run_id,
+        kind="delegate",
+        name="Worker",
+        role="worker",
+        task="concurrent task",
+        status="pending",
+    )
+    stores = [SubAgentRunStore(owner_id), SubAgentRunStore(owner_id)]
+    locks_are_shared = stores[0]._lock is stores[1]._lock
+    barrier = threading.Barrier(2)
+    load_counts: dict[int, int] = {}
+    counts_lock = threading.Lock()
+    original_load_record = SubAgentRunStore._load_record_from_file
+
+    def _synchronized_load_record(
+        store: SubAgentRunStore,
+        path: Path,
+    ) -> Any:
+        record = original_load_record(store, path)
+        thread_id = threading.get_ident()
+        with counts_lock:
+            count = load_counts.get(thread_id, 0)
+            load_counts[thread_id] = count + 1
+        if not locks_are_shared and count == 0:
+            barrier.wait(timeout=5)
+        return record
+
+    monkeypatch.setattr(
+        SubAgentRunStore,
+        "_load_record_from_file",
+        _synchronized_load_record,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                stores[0].update_status,
+                run_id,
+                status="cancelled",
+            ),
+            executor.submit(
+                stores[1].close_run,
+                run_id,
+                status="completed",
+            ),
+        ]
+        for future in futures:
+            assert future.result() is not None
+
+    record = SubAgentRunStore(owner_id).get_run(run_id)
+    assert record is not None
+    statuses = [item["status"] for item in record.status_history]
+    assert "cancelled" in statuses
+    assert "completed" in statuses
+
+
+def test_subagent_run_store_json_writes_use_atomic_replace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    replaced_targets: list[Path] = []
+    original_replace = os.replace
+
+    def _recording_replace(source: Any, target: Any) -> None:
+        replaced_targets.append(Path(target))
+        original_replace(source, target)
+
+    monkeypatch.setattr(os, "replace", _recording_replace)
+
+    store = SubAgentRunStore("atomic-owner")
+    store.open_run(
+        run_id="atomic-run",
+        kind="delegate",
+        name="Worker",
+        role="worker",
+        task="atomic task",
+        status="pending",
+    )
+
+    assert store.root / "atomic-run.json" in replaced_targets
+    assert store.root / "index.json" in replaced_targets
+    assert list(store.root.glob("*.tmp")) == []
+
+
+def test_existing_corrupt_index_raises_read_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = SubAgentRunStore("corrupt-index-owner")
+    store.root.mkdir(parents=True, exist_ok=True)
+    (store.root / "index.json").write_text("{broken", encoding="utf-8")
+
+    with pytest.raises(run_store_module.SubAgentRunStoreReadError):
+        store.list_runs()
+
+
+def test_existing_corrupt_record_raises_read_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = SubAgentRunStore("corrupt-record-owner")
+    store.open_run(
+        run_id="corrupt-record",
+        kind="delegate",
+        name="Worker",
+        role="worker",
+        task="test task",
+        status="running",
+    )
+    (store.root / "corrupt-record.json").write_text("{broken", encoding="utf-8")
+
+    with pytest.raises(run_store_module.SubAgentRunStoreReadError):
+        store.list_runs()
+
+
 def test_smoke_subagent_run_store_delegate_detail_ref(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(meta_tools, "ProviderResolver", types.SimpleNamespace(resolve=lambda **_: object()))
@@ -277,6 +477,93 @@ def test_smoke_subagent_run_store_delegate_detail_ref(tmp_path, monkeypatch: pyt
     detail_path = str(record.detail_refs.get("avatar_messages_path", "")).strip()
     assert detail_path
     assert Path(detail_path).exists()
+
+
+def test_delegate_dispatch_opens_pending_run_before_background_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    gate = asyncio.Event()
+    avatar_managed = _FakeAvatarManaged()
+    session_manager = _FakeSessionManager()
+    session = _DispatchSession(session_manager)
+    avatar_config = _FakeAvatarConfig()
+
+    class _FakeAvatarRegistry:
+        def get_avatar(self, avatar_id: str) -> Any:
+            return avatar_config if avatar_id == avatar_config.id else None
+
+    async def _run_after_release(**kwargs: Any) -> None:
+        await gate.wait()
+        info = getattr(kwargs["avatar_managed"], "_delegation_info")
+        SubAgentRunStore(info["from_session"]).open_run(
+            run_id=kwargs["delegation_id"],
+            kind="delegate",
+            name=avatar_config.name,
+            role=avatar_config.role,
+            task=kwargs["task"],
+            status="running",
+            avatar_id=avatar_config.id,
+            avatar_session_id=avatar_managed.session_id,
+            source_tool_call_id=info["source_tool_call_id"],
+        )
+
+    monkeypatch.setattr(
+        "agenticx.avatar.registry.AvatarRegistry",
+        _FakeAvatarRegistry,
+    )
+    monkeypatch.setattr(
+        meta_tools,
+        "_find_running_avatar_delegation",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        meta_tools,
+        "_find_or_create_avatar_session",
+        lambda *_args, **_kwargs: avatar_managed,
+    )
+    monkeypatch.setattr(
+        meta_tools,
+        "_run_delegation_in_avatar_session",
+        _run_after_release,
+    )
+
+    async def _run() -> None:
+        manager = AgentTeamManager(
+            llm_factory=lambda: _QuickTextLLM(),
+            base_session=StudioSession(),
+            owner_session_id="meta-session-1",
+        )
+        raw = await meta_tools.dispatch_meta_tool_async(
+            "delegate_to_avatar",
+            {
+                "avatar_id": "avatar-1",
+                "task": "write report",
+                "__tool_call_id": "call-delegate-1",
+            },
+            team_manager=manager,
+            session=session,
+        )
+        payload = json.loads(raw)
+        run_id = payload["delegation_id"]
+        store = SubAgentRunStore("meta-session-1")
+        pending = store.get_run(run_id)
+        assert pending is not None
+        assert pending.kind == "delegate"
+        assert pending.status == "pending"
+        assert pending.avatar_session_id == avatar_managed.session_id
+
+        gate.set()
+        await getattr(avatar_managed, "_delegation_task")
+        running = store.get_run(run_id)
+        assert running is not None
+        assert [item["status"] for item in running.status_history] == [
+            "pending",
+            "running",
+        ]
+
+    asyncio.run(_run())
 
 
 def test_smoke_subagent_cluster_anchor_updates_without_duplicate(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

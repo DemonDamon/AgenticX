@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AlertCircle, Check, ChevronUp, Clock, Send } from "lucide-react";
 import type { ClarificationDecision, PendingClarification } from "../../store";
 import { buildClarificationAnswerText, inferClarificationDecisions, toggleDecisionSelection, type ClarificationAnswer } from "../../utils/clarification-notice";
@@ -51,6 +52,8 @@ export function ClarificationCard({
   onSkip,
   groupChatRail = false,
 }: Props) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
   const shellClass = groupChatRail ? GROUP_INLINE_CARD_SHELL_CLASS : ASSISTANT_INLINE_CARD_SHELL_CLASS;
   const opts = useMemo(
     () => (prompt.options ?? []).filter((o) => typeof o === "string" && o.trim().length > 0),
@@ -177,7 +180,7 @@ export function ClarificationCard({
     // No backend hook AND no fallback: nothing we can do. Bail honestly.
     if (!onSubmitAnswer && !onReply) {
       setSubmitting(false);
-      setError("无法提交（未连接后端），请重试或刷新。");
+      setError(t("clarify.submitFailed"));
       return;
     }
 
@@ -194,16 +197,14 @@ export function ClarificationCard({
         setAnswered(answer);
       } else {
         // Clear business failure (e.g. 404 already-resolved). Don't pretend success.
-        setError("该提问已被处理或已失效，无需再次提交。");
+        setError(t("clarify.alreadyResolved"));
       }
     } catch (e: unknown) {
       // Network error: the request may have reached the backend. Don't let the
       // user blindly retry (that would 404 if the gate already resolved).
       setMaybeSent(true);
-      const msg = e instanceof Error ? e.message : "网络错误";
-      setError(
-        `${msg}。请求可能已送达后端，请勿立即重试——稍候观察智能体是否继续，或刷新会话查看状态。`,
-      );
+      const msg = e instanceof Error ? e.message : t("clarify.networkError");
+      setError(t("clarify.maybeSent", { message: msg }));
     } finally {
       setSubmitting(false);
     }
@@ -222,11 +223,11 @@ export function ClarificationCard({
       Promise.resolve(onSubmitAnswer(prompt.requestId, empty))
         .then((ok) => {
           if (ok) setAnswered(empty);
-          else setError("跳过请求未被接受，请稍后重试。");
+          else setError(t("clarify.skipRejected"));
         })
         .catch(() => {
           setMaybeSent(true);
-          setError("跳过请求网络错误，可能已送达。请稍候观察智能体是否继续。");
+          setError(t("clarify.skipNetwork"));
         })
         .finally(() => setSubmitting(false));
       return;
@@ -256,7 +257,7 @@ export function ClarificationCard({
         }}
       >
         <Clock className="h-3.5 w-3.5" />
-        <span>有待确认的决策（点击展开）</span>
+        <span>{t("clarify.pendingMinimized")}</span>
         <span className="ml-1 truncate text-[10px] text-text-faint">
           · {prompt.prompt.slice(0, 32)}…
         </span>
@@ -271,12 +272,12 @@ export function ClarificationCard({
       <div className={`${shellClass} overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-surface-card text-sm`}>
         <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-text-muted">
           <Check className="h-3.5 w-3.5 text-[var(--ui-btn-primary-bg)]" />
-          <span>已回复</span>
-          {suspended && <span className="ml-auto text-amber-300/70">（无人值守会话）</span>}
+          <span>{t("clarify.replied")}</span>
+          {suspended && <span className="ml-auto text-amber-300/70">{t("clarify.unattendedSession")}</span>}
         </div>
         <div className="px-3 pb-2 text-[13px] text-text-strong">{answerText}</div>
         <div className="px-3 pb-2.5 text-[11px] text-text-faint">
-          智能体已收到你的选择，将在同一回合内继续执行。
+          {t("clarify.receivedHint")}
         </div>
       </div>
     );
@@ -286,14 +287,14 @@ export function ClarificationCard({
   if (suspended) {
     return (
       <div className={`${shellClass} rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200`}>
-        无人值守会话已向你发起提问，当前已挂起。回来后可点击「回复」继续。
+        {t("clarify.suspendedHint")}
         {onReply && (
           <button
             type="button"
             className="ml-2 underline decoration-dotted hover:text-amber-100"
             onClick={() => onReply(prompt)}
           >
-            回复
+            {t("clarify.reply")}
           </button>
         )}
       </div>
@@ -305,7 +306,7 @@ export function ClarificationCard({
     <div
       className={`${shellClass} overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-surface-card text-sm`}
       role="dialog"
-      aria-label="需要你的输入"
+      aria-label={t("clarify.needsInput")}
     >
       {/* Header — no hard divider; rely on spacing + subtle tint */}
       <div className="flex items-center justify-between bg-surface-card-strong/20 px-3 py-2">
@@ -313,7 +314,7 @@ export function ClarificationCard({
           <span className="flex h-5 w-5 items-center justify-center text-[var(--ui-btn-primary-bg)]">
             <ClarificationGlyph className="h-4 w-4" />
           </span>
-          需要你的输入
+          {t("clarify.needsInput")}
         </div>
         <div className="flex items-center gap-1">
           {onReply && (
@@ -322,15 +323,15 @@ export function ClarificationCard({
               onClick={() => onReply(prompt)}
               className="rounded px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong"
             >
-              对话框回复
+              {t("clarify.dialogReply")}
             </button>
           )}
           <button
             type="button"
             onClick={() => setMinimized(true)}
             className="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text-strong"
-            title="稍后处理"
-            aria-label="收起"
+            title={t("clarify.later")}
+            aria-label={t("clarify.collapse")}
           >
             <ChevronUp className="h-3.5 w-3.5" />
           </button>
@@ -345,7 +346,7 @@ export function ClarificationCard({
 
         {contextSnapshot.length > 0 && (
           <div className="mt-2 rounded-md bg-surface-panel/40 px-2.5 py-2 text-[11px] text-text-muted">
-            <div className="mb-1 text-[10px] uppercase tracking-[0.4px] text-text-faint">当前方案快照</div>
+            <div className="mb-1 text-[10px] uppercase tracking-[0.4px] text-text-faint">{t("clarify.snapshot")}</div>
             <div className="space-y-0.5">
               {contextSnapshot.map(([key, value]) => (
                 <div key={key}>
@@ -366,11 +367,11 @@ export function ClarificationCard({
               <div key={decision.id}>
                 <div className="flex items-baseline gap-1.5 text-[11px] font-medium text-text-muted">
                   <span className="shrink-0 rounded bg-surface-panel px-1.5 py-0.5 text-[10px] text-text-faint">
-                    决策 {idx + 1}
+                    {t("clarify.decisionN", { n: idx + 1 })}
                   </span>
                   <span className="text-text-strong/90">{decision.question}</span>
                   {isMultiple && (
-                    <span className="shrink-0 text-[10px] font-normal text-text-faint">可多选</span>
+                    <span className="shrink-0 text-[10px] font-normal text-text-faint">{t("clarify.multiSelect")}</span>
                   )}
                 </div>
                 <div
@@ -408,13 +409,13 @@ export function ClarificationCard({
                       className="mb-1 block text-[10px] text-text-faint"
                       htmlFor={`clarify-custom-${decision.id}`}
                     >
-                      自定义回复
+                      {t("clarify.customReply")}
                     </label>
                     <textarea
                       id={`clarify-custom-${decision.id}`}
                       value={customByDecision[decision.id] ?? ""}
                       onChange={(e) => setDecisionCustom(decision.id, e.target.value)}
-                      placeholder="选项都不合适时，在此说明你的具体想法…"
+                      placeholder={t("clarify.customPlaceholder")}
                       rows={2}
                       disabled={submitting}
                       className="w-full resize-y rounded-lg border border-[var(--border-muted)] bg-surface-card px-2.5 py-1.5 text-xs leading-snug text-text-primary outline-none transition-colors placeholder:text-xs placeholder:text-text-faint hover:border-[var(--border-subtle)] focus:border-[var(--ui-btn-primary-bg)]/40 disabled:opacity-50"
@@ -429,10 +430,10 @@ export function ClarificationCard({
           opts.length > 0 && (
             <>
               <div className="mt-2 flex items-center justify-between gap-2">
-                <div className="text-[10px] uppercase tracking-[0.5px] text-text-faint">推荐选项</div>
-                <div className="text-[10px] text-text-faint">可多选</div>
+                <div className="text-[10px] uppercase tracking-[0.5px] text-text-faint">{t("clarify.recommended")}</div>
+                <div className="text-[10px] text-text-faint">{t("clarify.multiSelect")}</div>
               </div>
-              <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="推荐选项">
+              <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label={t("clarify.recommended")}>
                 {opts.map((opt) => {
                   const isOn = selectedFlat.has(opt);
                   return (
@@ -477,7 +478,7 @@ export function ClarificationCard({
                 }}
                 className="h-3.5 w-3.5 accent-[var(--ui-btn-primary-bg)]"
               />
-              自定义回复
+              {t("clarify.customReply")}
             </label>
             {customOpen && (
               <textarea
@@ -486,7 +487,7 @@ export function ClarificationCard({
                   setCustomText(e.target.value);
                   setError(null);
                 }}
-                placeholder="补充你的具体想法…"
+                placeholder={t("clarify.customPlaceholderShort")}
                 rows={3}
                 className="mt-1.5 w-full resize-y rounded-lg border border-[var(--border-muted)] bg-surface-card px-2.5 py-1.5 text-xs leading-snug text-text-primary outline-none transition-colors placeholder:text-xs placeholder:text-text-faint hover:border-[var(--border-subtle)] focus:border-[var(--ui-btn-primary-bg)]/40"
               />
@@ -507,7 +508,7 @@ export function ClarificationCard({
                 onClick={handleRetry}
                 className="underline decoration-dotted hover:text-red-200"
               >
-                重试
+                {tCommon("retry")}
               </button>
             )}
           </div>
@@ -519,9 +520,9 @@ export function ClarificationCard({
         <div className="text-[11px] text-text-faint">
           {groupedMode
             ? hasMultipleDecision
-              ? "完成每项决策后提交 · 标记为可多选的决策可组合选择"
-              : "完成每项决策后提交"
-            : "可多选 · 提交后同一回合继续 · 不会打断其他窗格"}
+              ? t("clarify.submitHintGroupedMulti")
+              : t("clarify.submitHintGrouped")
+            : t("clarify.submitHintFlat")}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -530,7 +531,7 @@ export function ClarificationCard({
             disabled={submitting}
             className="rounded px-2 py-1 text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
           >
-            跳过（按默认推进）
+            {t("clarify.skipDefault")}
           </button>
           <button
             type="button"
@@ -547,12 +548,12 @@ export function ClarificationCard({
             {submitting ? (
               <>
                 <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/60 border-t-transparent" />
-                提交中
+                {t("clarify.submitting")}
               </>
             ) : (
               <>
                 <Send className="h-3.5 w-3.5" />
-                提交决策
+                {t("clarify.submitDecision")}
               </>
             )}
           </button>

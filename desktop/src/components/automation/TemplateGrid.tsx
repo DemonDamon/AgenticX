@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { AUTOMATION_TEMPLATES } from "./templates";
+import { useTranslation } from "react-i18next";
 import type { AutomationTemplate } from "./types";
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -36,10 +37,11 @@ const TEMPLATE_CARD_IDLE =
   "border-border hover:border-[rgba(var(--theme-color-rgb,59,130,246),0.35)] focus-visible:border-[rgba(var(--theme-color-rgb,59,130,246),0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(var(--theme-color-rgb,59,130,246),0.22)]";
 
 export function TemplateGrid({ onSelect }: Props) {
+  const { t } = useTranslation("workspace");
   return (
     <div className="space-y-2">
       <div className="text-xs font-semibold uppercase tracking-[0.06em] text-text-subtle">
-        从模板快速创建
+        {t("automation.fromTemplate")}
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {AUTOMATION_TEMPLATES.map((tpl) => {
@@ -55,9 +57,9 @@ export function TemplateGrid({ onSelect }: Props) {
                 <Icon className="h-4 w-4 text-text-subtle" aria-hidden />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-text-strong">{tpl.name}</div>
+                <div className="text-sm font-medium text-text-strong">{t(`automation.templates.${tpl.id}.name`)}</div>
                 <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-text-muted">
-                  {tpl.description}
+                  {t(`automation.templates.${tpl.id}.description`)}
                 </p>
               </div>
             </button>

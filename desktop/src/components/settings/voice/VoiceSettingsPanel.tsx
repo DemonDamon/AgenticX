@@ -1,10 +1,12 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Eye, EyeOff } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import { SETTINGS_HINT_CLASS, SETTINGS_INTRO_CLASS, SETTINGS_LABEL_CLASS } from "../../ds/settings-typography";
 import { META_AGENT_DISPLAY_NAME } from "../../../constants/branding";
 import { studioFetch } from "../../../utils/studio-fetch";
 import {
+
   formatPttShortcutLabel,
   listPttShortcutPresets,
   loadPttShortcutPreset,
@@ -12,6 +14,12 @@ import {
   type PttShortcutPreset,
 } from "../../../voice/ptt-config";
 import { useAppStore } from "../../../store";
+import { i18n } from "../../../i18n/i18n";
+
+function st(key: string, opts?: Record<string, unknown>): string {
+  return String(i18n.t(key, { ns: "settings", ...(opts ?? {}) }));
+}
+
 
 type VoiceForm = {
   provider: string;
@@ -82,7 +90,7 @@ function isMaskedServerSecret(s: unknown): boolean {
 function isSecretDraftSentinel(t: string): boolean {
   const s = t.trim();
   if (!s) return true;
-  if (s.includes("密钥已保存在本机配置")) return true;
+  if (s.includes("密钥已保存在本机配置") || s.includes("Key is saved in local config")) return true;
   if (isMaskedServerSecret(s)) return true;
   if (s.startsWith("••")) return true;
   return false;
@@ -129,7 +137,7 @@ function SecretInput({
       <button
         type="button"
         tabIndex={-1}
-        aria-label={visible ? "隐藏密钥" : "显示密钥"}
+        aria-label={visible ? st("voice.hideKey") : st("voice.showKey")}
         className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-text-faint transition hover:bg-surface-hover hover:text-text-subtle"
         onClick={() => setVisible((v) => !v)}
       >
@@ -141,6 +149,7 @@ function SecretInput({
 
 /** 灵巧模式语音：Realtime Provider、凭证与麦克风选择（服务端落盘 ~/.agenticx/config.yaml `voice:`） */
 export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function VoiceSettingsPanel(_props, ref) {
+  const { t } = useTranslation("settings");
   const apiBase = useAppStore((s) => s.apiBase);
   const apiToken = useAppStore((s) => s.apiToken);
 
@@ -206,7 +215,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
         openai_realtime: {
           api_key:
             typeof oa.api_key === "string" && oa.api_key.trim().length > 0
-              ? `•••••• (${SECRET_SAVED_HINT_CN})`
+              ? `•••••• (${st("voice.secretSavedHint")})`
               : "",
           base_url: String(oa.base_url || "https://api.openai.com"),
           model: String(oa.model || "gpt-4o-realtime-preview"),
@@ -217,11 +226,11 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
           app_id: normalizeAppIdFromApi(db.app_id ?? ""),
           access_key:
             typeof db.access_key === "string" && db.access_key.trim().length > 0
-              ? `•••••• (${SECRET_SAVED_HINT_CN})`
+              ? `•••••• (${st("voice.secretSavedHint")})`
               : "",
           secret_key:
             typeof db.secret_key === "string" && db.secret_key.trim().length > 0
-              ? `•••••• (${SECRET_SAVED_HINT_CN})`
+              ? `•••••• (${st("voice.secretSavedHint")})`
               : "",
           api_app_key: String(db.api_app_key || "PlgvMymc7f3tQnJ6"),
           resource_id: String(db.resource_id || "volc.speech.dialog"),
@@ -234,7 +243,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
         input_device_id: String(v.input_device_id || ""),
       });
     } catch (e) {
-      setPanelMsg(e instanceof Error ? e.message : "加载失败");
+      setPanelMsg(e instanceof Error ? e.message : st("voice.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -246,7 +255,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
 
   const persistVoice = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
     if (loadingRef.current) {
-      return { ok: false, error: "语音设置仍在加载，请稍后在窗口底部再点「退出」。" };
+      return { ok: false, error: st("voice.stillLoading") };
     }
     setPanelMsg("");
     setProbeMsg("");
@@ -289,10 +298,10 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       await load();
-      setPanelMsg("已与窗口底部「退出」一并写入本机配置（realtime 计费见云厂商控制台）。");
+      setPanelMsg(st("voice.savedWithExit"));
       return { ok: true };
     } catch (e) {
-      const err = e instanceof Error ? e.message : "保存失败";
+      const err = e instanceof Error ? e.message : st("voice.saveFailed");
       setPanelMsg(err);
       return { ok: false, error: err };
     }
@@ -303,7 +312,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
   const test = async () => {
     setTesting(true);
     const provider = draft.provider.includes("doubao") ? "doubao" : "openai";
-    setProbeMsg(provider === "doubao" ? "正在握手 wss://openspeech.bytedance.com …" : "正在测试 OpenAI Realtime 连通性 …");
+    setProbeMsg(provider === "doubao" ? st("voice.probingDoubao") : st("voice.probingOpenai"));
     try {
       const resp = await studioFetch("/api/voice/realtime/probe", {
         method: "POST",
@@ -315,17 +324,17 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
       try {
         body = (await resp.json()) as typeof body;
       } catch {
-        setProbeMsg(`HTTP ${resp.status}: 响应不是合法 JSON`);
+        setProbeMsg(st("voice.badJson", { status: resp.status }));
         return;
       }
       if (!resp.ok && !body.error && !body.detail) {
         setProbeMsg(`HTTP ${resp.status}`);
         return;
       }
-      if (body.ok) setProbeMsg(`✅ ${body.detail || "连通性检查通过"}`);
-      else setProbeMsg(`❌ ${body.error || body.detail || "连通性校验未通过"}`);
+      if (body.ok) setProbeMsg(`✅ ${body.detail || st("voice.probeOk")}`);
+      else setProbeMsg(`❌ ${body.error || body.detail || st("voice.probeFail")}`);
     } catch (e) {
-      setProbeMsg(`❌ ${e instanceof Error ? e.message : "测试失败"}`);
+      setProbeMsg(`❌ ${e instanceof Error ? e.message : st("voice.testFailed")}`);
     } finally {
       setTesting(false);
     }
@@ -333,19 +342,16 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
 
   if (loading) {
     return (
-      <Panel title="语音">
-        <div className="py-2 text-sm text-text-faint">加载中…</div>
+      <Panel title={st("voice.title")}>
+        <div className="py-2 text-sm text-text-faint">{st("voice.loading")}</div>
       </Panel>
     );
   }
 
   return (
-    <Panel title="语音">
+    <Panel title={st("voice.title")}>
       <p className={`mb-4 ${SETTINGS_INTRO_CLASS}`}>
-        灵巧模式胶囊走 Meta-Agent（Near）：对话轮次归档到当前元智能体会话，`metadata.source = voice-focus`。
-        实时链路按使用量计费——OpenAI Realtime 与豆包/火山均需自备账号与密钥。国内调用 OpenAI 需自行配置可访问代理的{" "}
-        <code className="text-text-subtle">base_url</code>。请使用窗口<strong>底部</strong>的「退出」将本页写入{" "}
-        <code className="text-text-subtle">~/.agenticx/config.yaml</code>（本页不再提供重复保存按钮）。
+        {st("voice.intro")}
       </p>
 
       {panelMsg ? (
@@ -354,7 +360,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
 
       <div className="space-y-3 text-sm text-text-muted">
         <fieldset className="space-y-2">
-          <legend className={SETTINGS_LABEL_CLASS}>服务供应商</legend>
+          <legend className={SETTINGS_LABEL_CLASS}>{st("voice.provider")}</legend>
           <label className="flex cursor-pointer items-center gap-2">
             <input
               type="radio"
@@ -363,7 +369,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               onChange={() => setDraft((d) => ({ ...d, provider: "openai_realtime" }))}
               className="accent-[rgb(var(--theme-color-rgb,16,185,129))]"
             />
-            OpenAI Realtime（WebRTC，经本机后端换 SDP）
+            {st("voice.openaiRealtime")}
           </label>
           <label className="flex cursor-pointer items-center gap-2">
             <input
@@ -373,12 +379,12 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               onChange={() => setDraft((d) => ({ ...d, provider: "doubao_realtime" }))}
               className="accent-[rgb(var(--theme-color-rgb,16,185,129))]"
             />
-            豆包实时语音（火山 RTC 协议，经由 Studio WebSocket 桥接）
+            {st("voice.doubaoRealtime")}
           </label>
         </fieldset>
 
         <fieldset className="space-y-2 rounded-md border border-border p-3">
-          <legend className="px-1 text-xs text-text-subtle">高级 / 工具范围</legend>
+          <legend className="px-1 text-xs text-text-subtle">{st("voice.advancedTools")}</legend>
           <label className="flex cursor-pointer items-center gap-2">
             <input
               type="checkbox"
@@ -391,15 +397,15 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               }
               className="accent-[rgb(var(--theme-color-rgb,16,185,129))]"
             />
-            在电话模式中启用写盘 / 执行 / 委派类工具（不推荐）
+            {st("voice.enableWriteTools")}
           </label>
           <p className={SETTINGS_HINT_CLASS}>
-            默认仅开放只读与检索类工具；开启后会注入全量工具 schema，但涉及确认的高风险工具在电话模式仍会被自动拒绝。
+            {st("voice.writeToolsHint")}
           </p>
         </fieldset>
 
         <div>
-          <div className={`mb-1 ${SETTINGS_LABEL_CLASS}`}>麦克风</div>
+          <div className={`mb-1 ${SETTINGS_LABEL_CLASS}`}>{st("voice.mic")}</div>
           <select
             className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
             value={draft.input_device_id || "default"}
@@ -410,7 +416,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               }))
             }
           >
-            <option value="default">系统默认输入</option>
+            <option value="default">{st("voice.systemDefaultInput")}</option>
             {devices.map((d) => (
               <option key={d.deviceId} value={d.deviceId}>
                 {d.label || d.deviceId}
@@ -422,14 +428,14 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
             className="mt-2 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:bg-surface-hover"
             onClick={() => void refreshDevices()}
           >
-            刷新设备列表
+            {st("voice.refreshDevices")}
           </button>
         </div>
 
         <fieldset className="space-y-2 rounded-md border border-border p-3">
-          <legend className={`px-1 ${SETTINGS_LABEL_CLASS}`}>聊天输入 · 按住说话</legend>
+          <legend className={`px-1 ${SETTINGS_LABEL_CLASS}`}>{st("voice.pttLegend")}</legend>
           <label className={`block ${SETTINGS_LABEL_CLASS}`}>
-            快捷键
+            {st("voice.shortcut")}
             <select
               className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
               value={pttShortcutPreset}
@@ -447,9 +453,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
             </select>
           </label>
           <p className={SETTINGS_HINT_CLASS}>
-            按住快捷键开始说话，松开后把识别文字写入输入框草稿（不自动发送）。默认{" "}
-            <span className="text-text-muted">{formatPttShortcutLabel("ctrl+space")}</span>
-            。macOS 的 Fn 键无法在应用内捕获，请改用组合键。
+            {st("voice.pttHint", { shortcut: formatPttShortcutLabel("ctrl+space") })}
           </p>
         </fieldset>
 
@@ -457,15 +461,15 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
           <div className="space-y-2 border-t border-border pt-3">
             <div className={SETTINGS_LABEL_CLASS}>OpenAI Realtime</div>
             <label className="block">
-              API 密钥
+              {st("voice.apiKey")}
               <SecretInput
-                placeholder="仅在覆盖时填写；留空保持不变"
+                placeholder={st("voice.apiKeyPh")}
                 value={draft.openai_realtime.api_key}
                 onChange={(api_key) => setDraft((d) => ({ ...d, openai_realtime: { ...d.openai_realtime, api_key } }))}
               />
             </label>
             <label className="block">
-              API 地址
+              {st("voice.apiBase")}
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.openai_realtime.base_url}
@@ -473,7 +477,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              模型
+              {st("voice.model")}
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.openai_realtime.model}
@@ -481,7 +485,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              音色
+              {st("voice.voice")}
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.openai_realtime.voice}
@@ -489,7 +493,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              会话指令（可选）
+              {st("voice.instructions")}
               <textarea
                 rows={4}
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
@@ -505,12 +509,12 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
           </div>
         ) : (
           <div className="space-y-2 border-t border-border pt-3">
-            <div className={SETTINGS_LABEL_CLASS}>豆包 / 火山</div>
+            <div className={SETTINGS_LABEL_CLASS}>{st("voice.doubaoTitle")}</div>
             <p className="text-xs text-amber-500">
-              豆包模式下，语音采集走实时链路，工具执行（含 MCP/CLI）由本地 Meta 运行时桥接处理；若系统语音不可用，将仅返回文本结果。
+              {st("voice.doubaoHint")}
             </p>
             <label className="block">
-              应用 ID
+              {st("voice.appId")}
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.app_id}
@@ -523,9 +527,9 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              访问密钥
+              {st("voice.accessKey")}
               <SecretInput
-                placeholder="仅在覆盖时填写"
+                placeholder={st("voice.accessKeyPh")}
                 value={draft.doubao_realtime.access_key}
                 onChange={(access_key) =>
                   setDraft((d) => ({
@@ -536,9 +540,9 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              密钥（可选）
+              {st("voice.secretOptional")}
               <SecretInput
-                placeholder="部分账号需要填写"
+                placeholder={st("voice.secretPh")}
                 value={draft.doubao_realtime.secret_key}
                 onChange={(secret_key) =>
                   setDraft((d) => ({
@@ -549,9 +553,9 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              API 应用密钥
+              {st("voice.apiAppKey")}
               <SecretInput
-                placeholder="仅在覆盖时填写"
+                placeholder={st("voice.accessKeyPh")}
                 value={draft.doubao_realtime.api_app_key}
                 onChange={(api_app_key) =>
                   setDraft((d) => ({
@@ -562,7 +566,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              资源 ID
+              {st("voice.resourceId")}
               <input
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.resource_id}
@@ -575,7 +579,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              模型版本
+              {st("voice.modelVersion")}
               <select
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1.5 text-sm text-text-primary"
                 value={draft.doubao_realtime.model}
@@ -586,17 +590,17 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
                   }))
                 }
               >
-                <option value="1.2.1.1">O2.0（1.2.1.1）— 精品音色 + bot_name/system_role/speaking_style</option>
-                <option value="2.2.0.0">SC2.0（2.2.0.0）— 克隆音色（saturn_/S_）+ 角色扮演</option>
+                <option value="1.2.1.1">{st("voice.modelO")}</option>
+                <option value="2.2.0.0">{st("voice.modelSc")}</option>
               </select>
               <span className={`mt-1 block ${SETTINGS_HINT_CLASS}`}>
-                文档 §1.1：必传 dialog.extra.model；O 系列适配精品音色，SC 系列适配克隆音色，请勿混用。
+                {st("voice.modelHint")}
               </span>
             </label>
             <label className="block">
-              音色
+              {st("voice.voice")}
               <input
-                placeholder="如 zh_female_vv_jupiter_bigtts / saturn_xxx / S_xxx"
+                placeholder={st("voice.voicePh")}
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.voice_type}
                 onChange={(e) =>
@@ -608,7 +612,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              角色称呼（仅 O 版本生效，≤20 字）
+              {st("voice.botName")}
               <input
                 maxLength={20}
                 placeholder="Near"
@@ -623,10 +627,10 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              背景人设（仅 O 版本生效）
+              {st("voice.systemRole")}
               <textarea
                 rows={3}
-                placeholder='例如："你是一个理性、克制、技术导向的开发者助手。"'
+                placeholder={st("voice.systemRolePh")}
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.system_role}
                 onChange={(e) =>
@@ -638,10 +642,10 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               />
             </label>
             <label className="block">
-              口吻（仅 O 版本生效）
+              {st("voice.speakingStyle")}
               <textarea
                 rows={2}
-                placeholder='例如："你说话简洁、就事论事，不寒暄。"'
+                placeholder={st("voice.speakingStylePh")}
                 className="mt-1 w-full rounded-md border border-border bg-surface-panel px-2 py-1 text-sm text-text-primary"
                 value={draft.doubao_realtime.speaking_style}
                 onChange={(e) =>
@@ -663,7 +667,7 @@ export const VoiceSettingsPanel = forwardRef<VoiceSettingsPanelHandle>(function 
               onClick={() => void test()}
               className="rounded-md border border-border px-4 py-1.5 text-sm text-text-muted hover:bg-surface-hover"
             >
-              {testing ? "测试中…" : "测试连通性"}
+              {testing ? st("voice.testing") : st("voice.testConn")}
             </button>
           </div>
           {probeMsg ? (

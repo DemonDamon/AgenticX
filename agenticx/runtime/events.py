@@ -7,7 +7,7 @@ Author: Damon Li
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from collections.abc import Iterator
 from typing import Any, Dict, List, Optional
@@ -62,6 +62,30 @@ class RuntimeEvent:
     type: str
     data: Dict[str, Any]
     agent_id: str = "meta"
+    private_data: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Populate ledger-only tool metadata without changing public data."""
+        if self.type != EventType.TOOL_RESULT.value or self.private_data:
+            return
+        result = next(
+            (
+                self.data[key]
+                for key in ("result", "content", "text")
+                if key in self.data
+            ),
+            None,
+        )
+        status = str(self.data.get("tool_status", "") or "").strip().lower()
+        is_error = (
+            bool(self.data.get("is_error"))
+            or status in {"error", "failed", "failure"}
+            or str(result or "").startswith("ERROR:")
+        )
+        self.private_data = {
+            "raw_result": result,
+            "tool_status": "error" if is_error else "completed",
+        }
 
 
 IMAGE_PRODUCING_TOOL_NAMES = frozenset({"generate_image", "show_images"})

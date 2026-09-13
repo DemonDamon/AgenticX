@@ -23,6 +23,7 @@ import {
   SelectValue,
   toast,
 } from "@agenticx/ui";
+import { useTranslations } from "next-intl";
 
 type ComplianceConfig = {
   tenantId: string;
@@ -34,6 +35,9 @@ type ComplianceConfig = {
 };
 
 export default function CompliancePage() {
+  const t = useTranslations("pages.admin.compliance");
+  const tc = useTranslations("common");
+  const ts = useTranslations("shell");
   const [config, setConfig] = useState<ComplianceConfig | null>(null);
   const [dataResidency, setDataResidency] = useState("");
   const [crossBorderAction, setCrossBorderAction] = useState<ComplianceConfig["crossBorderAction"]>("allow");
@@ -71,11 +75,11 @@ export default function CompliancePage() {
         }),
       });
       const payload = (await res.json()) as { message?: string };
-      if (!res.ok) throw new Error(payload.message ?? "save failed");
-      toast.success("合规设置已保存");
+      if (!res.ok) throw new Error(payload.message ?? t("toastSaveFailed"));
+      toast.success(t("toastSaved"));
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存失败");
+      toast.error(e instanceof Error ? e.message : t("toastSaveFailed"));
     } finally {
       setSaving(false);
     }
@@ -83,20 +87,17 @@ export default function CompliancePage() {
 
   return (
     <div className="space-y-6 p-6">
-      <PageHeader
-        title="合规与数据驻留"
-        description="配置租户数据域、跨境流动策略与审计日志留存（链式不可篡改 + 可导出归档）。"
-      />
+      <PageHeader title={t("title")} description={t("description")} />
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href="/dashboard">控制台</Link>
+              <Link href="/dashboard">{ts("adminLabel")}</Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <BreadcrumbPage>合规留存</BreadcrumbPage>
+            <BreadcrumbPage>{t("breadcrumbPage")}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
@@ -104,29 +105,29 @@ export default function CompliancePage() {
       <Card>
         <CardContent className="grid gap-4 pt-6 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="dataResidency">数据驻留域（如 cn / us / eu）</Label>
+            <Label htmlFor="dataResidency">{t("dataResidency")}</Label>
             <Input
               id="dataResidency"
               value={dataResidency}
               onChange={(e) => setDataResidency(e.target.value)}
-              placeholder="留空表示不强制驻留判定"
+              placeholder={t("dataResidencyPlaceholder")}
             />
           </div>
           <div className="space-y-2">
-            <Label>跨境命中动作</Label>
+            <Label>{t("crossBorderAction")}</Label>
             <Select value={crossBorderAction} onValueChange={(v) => setCrossBorderAction(v as ComplianceConfig["crossBorderAction"])}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="allow">放行并审计打标</SelectItem>
-                <SelectItem value="require_approval">待审批（占位，记录后拒绝）</SelectItem>
-                <SelectItem value="block">拦截</SelectItem>
+                <SelectItem value="allow">{t("actionAllow")}</SelectItem>
+                <SelectItem value="require_approval">{t("actionApproval")}</SelectItem>
+                <SelectItem value="block">{t("actionBlock")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="retention">审计留存年限（HIPAA 式，默认 6 年）</Label>
+            <Label htmlFor="retention">{t("retentionYears")}</Label>
             <Input
               id="retention"
               type="number"
@@ -139,7 +140,7 @@ export default function CompliancePage() {
           <div className="flex items-end gap-2">
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={appendOnly} onChange={(e) => setAppendOnly(e.target.checked)} />
-              仅追加（哈希链不可篡改）
+              {t("appendOnly")}
             </label>
           </div>
         </CardContent>
@@ -147,13 +148,15 @@ export default function CompliancePage() {
 
       <div className="flex items-center gap-3">
         <Button onClick={() => void save()} disabled={saving}>
-          {saving ? "保存中…" : "保存"}
+          {saving ? t("saving") : tc("actions.save")}
         </Button>
         {config?.updatedAt ? (
-          <span className="text-xs text-muted-foreground">上次更新：{config.updatedAt}</span>
+          <span className="text-xs text-muted-foreground">
+            {t("lastUpdated")} {config.updatedAt}
+          </span>
         ) : null}
         <Link href="/audit" className="text-sm text-primary hover:underline">
-          查看跨境审计 →
+          {t("viewCrossBorderAudit")}
         </Link>
       </div>
     </div>

@@ -42,6 +42,11 @@ from agenticx.cli.studio_skill import (
     skill_use as studio_skill_use,
 )
 from agenticx.llms.provider_resolver import ProviderResolver
+from agenticx.runtime.plan_artifacts import (
+    create_plan_artifact,
+    update_plan_artifact,
+)
+from agenticx.runtime.plan_mode import turn_intent_denial_message
 from agenticx.memory.session_store import SessionStore
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.skills.guard import scan_skill, should_allow
@@ -496,7 +501,9 @@ def _session_workspace_root_sets(
     for root in read_only_roots:
         if str(root) not in seen_write:
             _push_read(root)
-    return read_roots, write_roots
+    from agenticx.runtime.isolate_run import apply_isolate_roots
+
+    return apply_isolate_roots(read_roots, write_roots, session)
 
 
 def _default_bash_cwd(session: Optional[StudioSession]) -> Optional[Path]:
@@ -594,8 +601,34 @@ def _session_default_workspace_roots(session: Optional[StudioSession]) -> List[P
 
 
 def _session_mount_aliases(session: Optional[StudioSession]) -> dict[str, tuple[Path, str]]:
-    """Map ``.agx-mounts.json`` display names to ``(source_path, mode)``."""
+    """Map taskspace id/label and ``.agx-mounts.json`` names to ``(source_path, mode)``.
+
+    Taskspace ids (including ``default``) are registered first so a mount with the
+    same display name cannot hide the virtual workspace root.
+    """
     aliases: dict[str, tuple[Path, str]] = {}
+    taskspaces = getattr(session, "taskspaces", None) if session is not None else None
+    items = [item for item in taskspaces if isinstance(item, dict)] if isinstance(taskspaces, list) else []
+    label_counts: dict[str, int] = {}
+    for item in items:
+        label = str(item.get("label") or "").strip()
+        if label and "/" not in label and "\\" not in label:
+            label_counts[label] = label_counts.get(label, 0) + 1
+    for item in items:
+        ts_id = str(item.get("id") or "").strip()
+        raw_path = str(item.get("path") or item.get("source_path") or "").strip()
+        mode = str(item.get("mount_mode") or "link").strip().lower() or "link"
+        if not raw_path:
+            continue
+        try:
+            src = Path(raw_path).expanduser().resolve(strict=False)
+        except Exception:
+            continue
+        if ts_id:
+            aliases.setdefault(ts_id, (src, mode))
+        label = str(item.get("label") or "").strip()
+        if label and "/" not in label and "\\" not in label and label_counts.get(label) == 1:
+            aliases.setdefault(label, (src, mode))
     for root in _session_default_workspace_roots(session):
         for mount in _load_default_workspace_mounts(root):
             name = str(mount.get("name") or "").strip()
@@ -636,6 +669,29 @@ def _map_virtual_reference_path(
             continue
         return mapped, mode
     return None
+
+
+def _resolve_prefixed_workspace_relpath(
+    raw_path: Path, session: Optional[StudioSession]
+) -> Optional[tuple[Path, str]]:
+    """If the first relative segment is a taskspace/mount alias, map to that root."""
+    if raw_path.is_absolute():
+        return None
+    parts = tuple(part for part in raw_path.parts if part not in {".", ""})
+    if not parts or parts[0] == "..":
+        return None
+    hit = _session_mount_aliases(session).get(parts[0])
+    if hit is None:
+        return None
+    source_root, mode = hit
+    rest = Path(*parts[1:]) if len(parts) > 1 else Path()
+    resolved = _safe_resolve_path(source_root / rest) if rest.parts else _safe_resolve_path(source_root)
+    if resolved != source_root and not _is_path_under_root(resolved, source_root):
+        return None
+    mapped = _map_virtual_reference_path(resolved, session)
+    if mapped is not None:
+        return mapped
+    return resolved, mode
 
 
 def _is_path_under_root(candidate: Path, root: Path) -> bool:
@@ -851,7 +907,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "description": (
                 "Start an interactive or long-running shell command in background without timeout kill. "
                 "Use for QR/auth/login commands that wait for user actions. Returns job_id, first-screen output, "
-                "and extracted auth URLs."
+                "and extracted auth URLs. "
+                "转述 auth_urls 给用户完成扫码/授权；确认完成前最多每 15-30 秒 bash_bg_poll 一次，"
+                "禁止高频轮询，禁止此时 bash_bg_stop。需要键入用 bash_bg_input；确认完成后再 poll 读 exit_code，不得谎报成功。"
             ),
             "parameters": {
                 "type": "object",
@@ -928,6 +986,28 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "path": {"type": "string", "description": "File path."},
                     "start_line": {"type": "integer", "description": "Start line (1-based)."},
                     "end_line": {"type": "integer", "description": "End line (inclusive)."},
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stage_context_file",
+            "description": (
+                "Copy one explicitly attached/read-only context file into a hidden session workspace "
+                "location. Use this before bash/Python needs raw binary access to a referenced PDF, "
+                "DOCX, archive, or image. The source stays unchanged and sibling files remain denied."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Exact absolute path from context_files.",
+                    },
                 },
                 "required": ["path"],
                 "additionalProperties": False,
@@ -1092,7 +1172,14 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "Send a user turn to an existing CC bridge session. In headless mode it waits for result/timeout; "
                 "in visible_tui mode it only writes input to PTY and returns immediately (no final result inference). "
                 "Requires bridge at cc_bridge.url (default 127.0.0.1:9742) and matching bearer token. "
-                "Afterward confirm any expected files with file_read or bash_exec test -f."
+                "Afterward confirm any expected files with file_read or bash_exec test -f. "
+                "可见模式强约束：返回 mode=visible_tui 且 interactive=true 时任务已投递到交互终端；"
+                "禁止 bash_exec 轮询 cc-bridge 日志、禁止重复 cc_bridge_send 追问进度、禁止擅自 cc_bridge_stop；"
+                "直接向用户报告已投递并等待终端交互。 "
+                "证据门禁：parsed_response 为空、ok=false 或仅有 tail/log 时不得称分析完成，只能汇报状态、阻塞原因与下一步。 "
+                "模式路由：headless 走 /message，visible_tui 走 /write。"
+                "若返回 write is only for visible_tui，工具层至多纠偏一次（可能出现 mode_corrected）；"
+                "禁止在同一失败点连续多次重试。"
             ),
             "parameters": {
                 "type": "object",
@@ -1177,7 +1264,15 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "127.0.0.1:9743 (token from AGX_WB_BRIDGE_TOKEN or ~/.agenticx/config.yaml "
                 "wb_bridge.token). Studio autostarts loopback `agx wb-bridge serve` if needed. "
                 "Do NOT start serve via bash/bash_bg (sandbox cannot import agenticx). "
-                "Then wb_bridge_send with the returned session_id."
+                "Then wb_bridge_send with the returned session_id. "
+                "IMPORTANT unattended contract: permission_mode=default (the API default) will "
+                "pause on Write/Bash approval and this bridge has NO approval channel "
+                "(cc_bridge_permission belongs to the Claude Code bridge and does not work "
+                "here). For any task that writes files or runs commands without a human "
+                "watching, pass permission_mode=acceptEdits (file edits only) or "
+                "dontAsk / bypassPermissions (edits + commands). Use default/plan only for "
+                "read-only or planning turns. The create response returns unattended_ok and a "
+                "hint field; read them."
             ),
             "parameters": {
                 "type": "object",
@@ -1196,7 +1291,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                             "plan",
                             "auto",
                         ],
-                        "description": "Session-level --permission-mode. Invalid values fall back to default.",
+                        "description": (
+                            "Session-level --permission-mode. Invalid values fall back to default. "
+                            "default/plan are NOT usable for unattended write/exec tasks: they stall on an "
+                            "approval prompt that this bridge cannot answer."
+                        ),
                     },
                 },
                 "required": [],
@@ -1211,7 +1310,16 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "description": (
                 "Send a user turn to an existing WB bridge session and wait for result/timeout. "
                 "Requires bridge at wb_bridge.url (default 127.0.0.1:9743) and matching bearer token. "
-                "Studio autostarts loopback serve if needed. Do NOT use bash to start serve."
+                "Studio autostarts loopback serve if needed. Do NOT use bash to start serve. "
+                "Returns status = success | blocked | error | exited | running, plus "
+                "usage_totals, observed_tools and next_action. On status=running the turn is "
+                "STILL EXECUTING: poll wb_bridge_describe with the same session_id and never "
+                "resend the same instruction (a resend while a turn is in flight is rejected "
+                "with HTTP 409). On status=blocked the session hit a permission prompt: check "
+                "observed_tools first, because side effects before the block are already "
+                "committed on disk, then start a NEW session with an unattended "
+                "permission_mode instead of resending. Pass idempotency_key to make a retry "
+                "safe: an identical key is not re-dispatched."
             ),
             "parameters": {
                 "type": "object",
@@ -1220,7 +1328,17 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "text": {"type": "string", "description": "User prompt to send."},
                     "wait_seconds": {
                         "type": "number",
-                        "description": "Seconds to wait for a result/success line (default 180).",
+                        "description": (
+                            "Seconds to wait for this turn to end (default 180). Pass 0 to dispatch and "
+                            "return immediately, then poll wb_bridge_describe."
+                        ),
+                    },
+                    "idempotency_key": {
+                        "type": "string",
+                        "description": (
+                            "Optional retry-safety token. Reusing the key of the current or "
+                            "last turn returns that turn's snapshot instead of re-dispatching."
+                        ),
                     },
                 },
                 "required": ["session_id", "text"],
@@ -1250,7 +1368,13 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "name": "wb_bridge_describe",
             "description": (
                 "Describe one WB bridge session by session_id. Studio autostarts loopback serve "
-                "if needed. Do NOT start serve via bash."
+                "if needed. Do NOT start serve via bash. "
+                "Returns live turn state, last tool activity, observed_tools, cumulative token "
+                "usage and terminal kind. Do NOT try to read ~/.agenticx/logs/wb-bridge/*.log "
+                "from bash: the agent workspace sandbox blocks it and describe already carries "
+                "the same data. Also returns written_paths (absolute files from Write/Edit this "
+                "turn). Treat written_paths plus result_text as delivery evidence; do not "
+                "bash_exec or file_read the WB cwd or /tmp to verify."
             ),
             "parameters": {
                 "type": "object",
@@ -1268,12 +1392,22 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
             "name": "wb_bridge_stop",
             "description": (
                 "Stop a WB bridge session. Studio autostarts loopback serve if needed. "
-                "Do NOT start serve via bash."
+                "Do NOT start serve via bash. "
+                "This terminates the child process immediately. If a turn is still running "
+                "(turn_state=running), in-flight file writes may be incomplete. The tool "
+                "refuses to stop a running turn unless force=true."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "session_id": {"type": "string"},
+                    "force": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, terminate even when turn_state=running. "
+                            "Default false: return a warning and do not kill the child."
+                        ),
+                    },
                 },
                 "required": ["session_id"],
                 "additionalProperties": False,
@@ -1587,6 +1721,79 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     },
                 },
                 "required": ["repo"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plan_create",
+            "description": (
+                "Create the approved implementation plan as a durable Markdown artifact under "
+                "the active project's .agenticx/plans directory. Use exactly once for a multi-step "
+                "implementation request in Plan mode; do not use for simple questions."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "overview": {"type": "string"},
+                    "todos": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 20,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                },
+                                "content": {"type": "string", "maxLength": 300},
+                            },
+                            "required": ["id", "content"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "body_markdown": {
+                        "type": "string",
+                        "description": (
+                            "Self-contained implementation plan with exact files, anchors, "
+                            "behavior, risks, scope boundaries, and executable acceptance tests."
+                        ),
+                    },
+                },
+                "required": ["name", "overview", "todos", "body_markdown"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plan_update",
+            "description": (
+                "Atomically update lifecycle or todo status in an existing project-local Plan. "
+                "During Build, call start first, then mark each todo in_progress and completed."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plan_id": {"type": "string"},
+                    "plan_path": {"type": "string"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["start", "set_todo", "cancel"],
+                    },
+                    "todo_id": {"type": "string"},
+                    "todo_status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "completed", "cancelled"],
+                    },
+                    "outcome": {"type": "string"},
+                },
+                "required": ["plan_id", "plan_path", "action"],
                 "additionalProperties": False,
             },
         },
@@ -1940,7 +2147,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "lsp_goto_definition",
-            "description": "Jump to symbol definition at given file position.",
+            "description": (
+                "Jump to symbol definition at given file position. "
+                "理解函数/类来源时优先用本工具，不要先 grep。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1957,7 +2167,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "lsp_find_references",
-            "description": "Find all references to a symbol at given file position.",
+            "description": (
+                "Find all references to a symbol at given file position. "
+                "重构前评估影响面时优先用本工具。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1974,7 +2187,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "lsp_hover",
-            "description": "Get type info and documentation for a symbol at given file position.",
+            "description": (
+                "Get type info and documentation for a symbol at given file position. "
+                "判断 API 参数/返回值时优先用本工具。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1991,7 +2207,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "lsp_diagnostics",
-            "description": "Get lint/type diagnostics for a file or all opened files.",
+            "description": (
+                "Get lint/type diagnostics for a file or all opened files. "
+                "改动代码后验证质量时调用；首次调用可能需要几秒启动语言服务器。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -2011,7 +2230,10 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "The user can also view, edit and manage the task in the sidebar '定时' section. "
                 "Before calling this tool: if the task runs Python scripts, prepare the runtime under the task root only — "
                 "the root is the user-provided workspace if set, else ~/.agenticx/crontask/<task_id>/. "
-                "Create <task_root>/.venv, pip install there, smoke-run with <task_root>/.venv/bin/python, and reference that path in instruction."
+                "Create <task_root>/.venv, pip install there, smoke-run with <task_root>/.venv/bin/python, and reference that path in instruction. "
+                "名称 + 频率/时间/日期 + instruction + workspace 齐了必须同一轮直接调用；"
+                "禁止先说“我先加载某个 skill/脚本”。除非用户明确要求复用 skill 源码，"
+                "不要先 file_read ~/.cursor/skills/* 大文件。"
             ),
             "parameters": {
                 "type": "object",
@@ -2396,7 +2618,9 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "Pass direct image http(s) URLs from web_fetch [discovered_images] "
                 "or obvious image CDN links. Do not pass HTML gallery pages. "
                 "This is display-only: the current model does not need vision. "
-                "Never tell the user the bubble cannot render images."
+                "Never tell the user the bubble cannot render images. "
+                "不要图集 HTML；不要选 URL 含 /ops/、/avatar/、/banner/ 或边长 ≤160 的运营位。"
+                "不要用 generate_image 画公众人物照片。"
             ),
             "parameters": {
                 "type": "object",
@@ -2737,6 +2961,9 @@ def _code_search_tool_defs() -> List[Dict[str, Any]]:
 def studio_tools_for_session(session: Optional[StudioSession] = None) -> List[Dict[str, Any]]:
     """Studio/Meta tool list with optional code_search when mounted code brains exist."""
     tools = merge_computer_use_tools_into(list(STUDIO_TOOLS))
+    from agenticx.ops.tools import merge_ops_tools_into
+
+    tools = merge_ops_tools_into(tools)
     try:
         from agenticx.brain.mount import session_has_mounted_code_brains
 
@@ -3802,8 +4029,18 @@ def _resolve_workspace_path(
     if _desktop_unrestricted_fs_enabled():
         if raw_path.is_absolute():
             resolved = _safe_resolve_path(raw_path)
+            mapped = _map_virtual_reference_path(resolved, session)
+            if mapped is not None:
+                resolved = mapped[0]
         else:
-            resolved = _safe_resolve_path(_workspace_root() / raw_path)
+            prefixed = _resolve_prefixed_workspace_relpath(raw_path, session)
+            if prefixed is not None:
+                resolved = prefixed[0]
+            else:
+                resolved = _safe_resolve_path(_workspace_root() / raw_path)
+        from agenticx.runtime.isolate_run import remap_path_into_isolate
+
+        resolved = remap_path_into_isolate(resolved, session)
         if _is_protected_path(resolved):
             raise ValueError(f"path is protected: {resolved}")
         _raise_if_path_denied(resolved, session)
@@ -3834,6 +4071,9 @@ def _resolve_workspace_path(
 
     if raw_path.is_absolute():
         resolved = _safe_resolve_path(raw_path)
+        from agenticx.runtime.isolate_run import remap_path_into_isolate
+
+        resolved = remap_path_into_isolate(resolved, session)
         if _is_protected_path(resolved):
             raise ValueError(f"path is protected: {resolved}")
         mapped = _map_virtual_reference_path(resolved, session)
@@ -3864,25 +4104,22 @@ def _resolve_workspace_path(
             )
         raise ValueError(_format_escape(resolved))
 
-    parts = raw_path.parts
-    if parts and parts[0] not in {".", ".."}:
-        hit = _session_mount_aliases(session).get(parts[0])
-        if hit is not None:
-            source_root, mount_mode = hit
-            rest = Path(*parts[1:]) if len(parts) > 1 else Path()
-            resolved = _safe_resolve_path(source_root / rest) if rest.parts else source_root
-            if _is_protected_path(resolved):
-                raise ValueError(f"path is protected: {resolved}")
-            if resolved != source_root and not _is_path_under_root(resolved, source_root):
-                raise ValueError(_format_escape(resolved))
-            if for_write and mount_mode == "reference":
+    prefixed = _resolve_prefixed_workspace_relpath(raw_path, session)
+    if prefixed is not None:
+        resolved, mount_mode = prefixed
+        from agenticx.runtime.isolate_run import remap_path_into_isolate
+
+        resolved = remap_path_into_isolate(resolved, session)
+        if _is_protected_path(resolved):
+            raise ValueError(f"path is protected: {resolved}")
+        if for_write and mount_mode == "reference":
+            raise ValueError(_format_readonly_reference(resolved))
+        if for_write and not _under_any_root(resolved, write_roots):
+            if _under_any_root(resolved, read_roots):
                 raise ValueError(_format_readonly_reference(resolved))
-            if for_write and not _under_any_root(resolved, write_roots):
-                if _under_any_root(resolved, read_roots):
-                    raise ValueError(_format_readonly_reference(resolved))
-                raise ValueError(_format_escape(resolved))
-            _raise_if_path_denied(resolved, session)
-            return resolved
+            raise ValueError(_format_escape(resolved))
+        _raise_if_path_denied(resolved, session)
+        return resolved
 
     if pick_existing:
         for root in roots:
@@ -5249,6 +5486,59 @@ def _autoheal_skill_md_after_write(path: Path, base_msg: str) -> str:
         return base_msg
 
 
+def _tool_stage_context_file(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession] = None,
+) -> str:
+    if session is None:
+        return "ERROR: session is required"
+    try:
+        source = _resolve_workspace_path(
+            str(arguments.get("path", "")),
+            session,
+            pick_existing=True,
+        )
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    if not source.is_file():
+        return f"ERROR: not a file: {source}"
+
+    _read_roots, write_roots = _session_workspace_root_sets(session)
+    if not write_roots:
+        return "ERROR: no writable workspace configured"
+    preferred = _safe_resolve_path(Path(str(session.workspace_dir or "")))
+    workspace = (
+        preferred
+        if any(_is_path_under_root(preferred, root) for root in write_roots)
+        else write_roots[0]
+    )
+    target_dir = workspace / ".agenticx" / "context-files"
+    digest = hashlib.sha256(str(source).encode("utf-8")).hexdigest()[:12]
+    target = target_dir / f"{digest}-{source.name}"
+    staged_tmp: Optional[Path] = None
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=".stage-", dir=str(target_dir))
+        os.close(fd)
+        staged_tmp = Path(tmp_name)
+        shutil.copy2(source, staged_tmp)
+        os.replace(staged_tmp, target)
+    except OSError as exc:
+        return f"ERROR: failed to stage context file: {exc}"
+    finally:
+        if staged_tmp is not None and staged_tmp.exists():
+            staged_tmp.unlink(missing_ok=True)
+    return json.dumps(
+        {
+            "ok": True,
+            "path": str(target),
+            "source_path": str(source),
+            "source_unchanged": True,
+        },
+        ensure_ascii=False,
+    )
+
+
 async def _tool_file_write(
     arguments: Dict[str, Any],
     session: StudioSession,
@@ -6148,6 +6438,15 @@ async def _tool_wb_bridge_http(
     if err:
         return f"ERROR: {err}"
     token = wb_bridge_token()
+    from agenticx.wb_bridge.process import ensure_wb_bridge_protocol
+    from agenticx.wb_bridge.settings import probe_wb_bridge as _probe_wb
+
+    _ok, ensure_detail = ensure_wb_bridge_protocol(base, token)
+    if ensure_detail.startswith("recycled") or ensure_detail.startswith("started"):
+        for _ in range(40):
+            await asyncio.sleep(0.4)
+            if _probe_wb(url=base, token=token).get("reachable"):
+                break
     headers = {"Authorization": f"Bearer {token}"}
     url = f"{base}{path}"
     client_kwargs = _cc_bridge_http_client_kwargs(base, timeout_sec)
@@ -6235,12 +6534,17 @@ async def _tool_wb_bridge_send(arguments: Dict[str, Any], session: StudioSession
         wait_f = float(wait)
     except (TypeError, ValueError):
         wait_f = 180.0
-    wait_f = max(1.0, min(3600.0, wait_f))
+    wait_f = max(0.0, min(3600.0, wait_f))
+    body: Dict[str, Any] = {"text": text, "wait_seconds": wait_f}
+    idem = str(arguments.get("idempotency_key", "") or "").strip()
+    if not idem:
+        idem = f"{sid}:{hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]}"
+    body["idempotency_key"] = idem[:200]
     return await _tool_wb_bridge_http(
         session,
         "POST",
         f"/v1/sessions/{sid}/message",
-        {"text": text, "wait_seconds": wait_f},
+        body,
         timeout_sec=wait_f + 45.0,
     )
 
@@ -6261,6 +6565,21 @@ async def _tool_wb_bridge_stop(arguments: Dict[str, Any], session: StudioSession
     sid = str(arguments.get("session_id", "") or "").strip()
     if not sid:
         return "ERROR: session_id required"
+    force = bool(arguments.get("force", False))
+    if not force:
+        desc = await _tool_wb_bridge_http(
+            session, "GET", f"/v1/sessions/{sid}", None, timeout_sec=15.0
+        )
+        if not desc.startswith("ERROR:"):
+            try:
+                row = json.loads(desc)
+            except (TypeError, ValueError):
+                row = {}
+            if isinstance(row, dict) and row.get("turn_state") == "running":
+                return (
+                    "ERROR: turn is still running; in-flight file writes may be incomplete. "
+                    "Pass force=true to stop anyway, or wait and poll wb_bridge_describe."
+                )
     return await _tool_wb_bridge_http(session, "DELETE", f"/v1/sessions/{sid}", None, timeout_sec=30.0)
 
 
@@ -9049,6 +9368,139 @@ def _resolve_group_id(session: "StudioSession", arg_group_id: str | None) -> str
     return gid or "default"
 
 
+_SHARED_WRITE_ISOLATE_OPTION = "创建隔离副本"
+_SHARED_WRITE_SHARED_OPTION = "继续共用当前工作区"
+_SHARED_WRITE_CANCEL_OPTION = "取消"
+
+
+async def _maybe_guard_shared_workspace_write(
+    name: str,
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    clarify_gate: Optional[ClarifyGate] = None,
+    emit_event: Optional[Any] = None,
+    is_unattended: bool = False,
+) -> Optional[str]:
+    """First-write guard for conversation branches on a shared workspace.
+
+    Returns an ERROR string to stop the tool, or None to let it run.
+    """
+    from agenticx.studio.conversation_continue import (
+        mark_shared_write_prompted,
+        should_prompt_shared_write,
+    )
+
+    try:
+        from agenticx.runtime.replay_ledger.effects import classify_tool_effect
+        effect = classify_tool_effect(str(name or ""), dict(arguments or {}))
+    except Exception:
+        effect = ""
+    if not should_prompt_shared_write(session, name, effect):
+        return None
+
+    scratchpad = getattr(session, "scratchpad", None)
+    lineage = (
+        scratchpad.get("conversation_lineage")
+        if isinstance(scratchpad, dict)
+        else None
+    )
+    if not isinstance(lineage, dict):
+        return None
+
+    if is_unattended or isinstance(clarify_gate, AutoSuspendClarifyGate):
+        mark_shared_write_prompted(session)
+        return None
+
+    # Non-git workspaces cannot offer an isolate copy — shared/cancel only.
+    from agenticx.runtime.isolate_run import find_git_root
+
+    workspace_dir = str(getattr(session, "workspace_dir", None) or "").strip()
+    git_root = None
+    if workspace_dir:
+        try:
+            git_root = find_git_root(Path(workspace_dir).expanduser())
+        except Exception:
+            git_root = None
+    can_isolate = git_root is not None
+    options = (
+        [_SHARED_WRITE_ISOLATE_OPTION, _SHARED_WRITE_SHARED_OPTION, _SHARED_WRITE_CANCEL_OPTION]
+        if can_isolate
+        else [_SHARED_WRITE_SHARED_OPTION, _SHARED_WRITE_CANCEL_OPTION]
+    )
+    prompt = (
+        "这是从历史消息继续出来的新分支，与源会话共用当前工作区。"
+        "本次工具要写入本地文件，请选择：创建隔离副本（后续写入只影响副本），"
+        "继续共用当前工作区（之后不再询问），或取消本次写入。"
+        if can_isolate
+        else "这是从历史消息继续出来的新分支，与源会话共用当前工作区。"
+        "当前不是 git 工作区，无法创建隔离副本；请选择继续共用当前工作区（之后不再询问），或取消本次写入。"
+    )
+    payload_context: Dict[str, Any] = {
+        "kind": "shared_workspace_write",
+        "request_id": str(uuid.uuid4()),
+        "tool": str(name or ""),
+    }
+    gate = clarify_gate or AsyncClarifyGate()
+    emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
+    if emit_prompt:
+        await emit_event(
+            {
+                "type": "clarification_required",
+                "data": {
+                    "id": payload_context["request_id"],
+                    "prompt": prompt,
+                    "options": options,
+                    "decisions": [],
+                    "allow_free_text": True,
+                    "context": payload_context,
+                },
+            }
+        )
+    answer = await gate.request_clarification(
+        prompt,
+        options=options,
+        allow_free_text=True,
+        context=payload_context,
+    )
+    if emit_prompt:
+        await emit_event(
+            {
+                "type": "clarification_response",
+                "data": {
+                    "id": payload_context["request_id"],
+                    "answer": answer,
+                },
+            }
+        )
+    if not isinstance(answer, dict):
+        return "ERROR: 用户取消了本次写入（从历史消息继续的新分支与源会话共用工作区）。"
+    if answer.get("__suspended__"):
+        mark_shared_write_prompted(session)
+        return None
+    if answer.get("__timeout__"):
+        return "ERROR: 用户未在时限内回复，本次写入已取消（从历史消息继续的新分支与源会话共用工作区）。"
+    selected = list(answer.get("selected_options", []) or [])
+    choice = str(selected[0] or "").strip() if selected else ""
+    if choice == _SHARED_WRITE_ISOLATE_OPTION and can_isolate:
+        from agenticx.runtime.isolate_run import ensure_isolate
+
+        try:
+            state = ensure_isolate(session, isolate_run=True, is_automation=False)
+        except Exception as exc:
+            return f"ERROR: 创建隔离副本失败，本次写入已取消：{exc}"
+        if not isinstance(state, dict) or not state.get("active"):
+            reason = str((state or {}).get("error", "unknown") or "unknown")
+            return f"ERROR: 创建隔离副本失败（{reason}），本次写入已取消。请改用只读工具或让用户先把工作区建成 git 仓库。"
+        lineage["workspace_mode"] = "isolated"
+        lineage["shared_write_prompted"] = True
+        return None
+    if choice == _SHARED_WRITE_SHARED_OPTION:
+        mark_shared_write_prompted(session)
+        return None
+    return "ERROR: 用户取消了本次写入（从历史消息继续的新分支与源会话共用工作区）。"
+
+
 async def dispatch_tool_async(
     name: str,
     arguments: Dict[str, Any],
@@ -9065,9 +9517,22 @@ async def dispatch_tool_async(
     policy_denial = tool_denied_by_session_permissions(name)
     if policy_denial:
         return f"ERROR: {policy_denial}"
+    intent_denial = turn_intent_denial_message(name, session)
+    if intent_denial:
+        return f"ERROR: {intent_denial}"
     path_denial = _dispatch_path_rule_denial(arguments, session)
     if path_denial:
         return f"ERROR: {path_denial}"
+    shared_write_block = await _maybe_guard_shared_workspace_write(
+        name,
+        arguments,
+        session,
+        clarify_gate=clarify_gate,
+        emit_event=event_callback,
+        is_unattended=is_unattended,
+    )
+    if shared_write_block:
+        return shared_write_block
     arguments = _repair_malformed_file_tool_arguments(name, arguments)
     required = _TOOL_REQUIRED_PARAMS.get(name)
     if required and not arguments:
@@ -9138,6 +9603,8 @@ async def dispatch_tool_async(
             return _tool_code_outline(arguments, session)
         if name == "file_read":
             return _tool_file_read(arguments, session)
+        if name == "stage_context_file":
+            return _tool_stage_context_file(arguments, session)
         if name == "file_write":
             return await _tool_file_write(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "file_edit":
@@ -9188,6 +9655,10 @@ async def dispatch_tool_async(
             return await _tool_skill_manage(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "skill_import_repo":
             return _tool_skill_import_repo(arguments, session)
+        if name == "plan_create":
+            return create_plan_artifact(session, arguments)
+        if name == "plan_update":
+            return update_plan_artifact(session, arguments)
         if name == "todo_write":
             return _tool_todo_write(arguments, session)
         if name == "scratchpad_write":
@@ -9218,6 +9689,15 @@ async def dispatch_tool_async(
             return await _tool_memory_search(arguments, session)
         if name == "memory_forget":
             return await _tool_memory_forget(arguments, session)
+        if name in {"get_trace", "get_logs", "get_recent_changes", "get_session_review", "get_umodel", "sync_changeplane", "get_trace_parity", "get_channel_slo"}:
+            from agenticx.ops.tools import dispatch_ops_tool, ops_tools_enabled
+
+            if not ops_tools_enabled():
+                return (
+                    "ERROR: ops tools disabled. Enable them in Settings → 工具 → 调查取证, "
+                    "or set AGENTICX_OPS_TOOLS=1"
+                )
+            return await asyncio.to_thread(dispatch_ops_tool, name, arguments, session)
         if name == "knowledge_search":
             return await asyncio.to_thread(_tool_knowledge_search, arguments, session)
         if name == "knowledge_synthesize":

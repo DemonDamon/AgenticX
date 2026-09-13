@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { LogIn, LogOut, User } from "lucide-react";
 import { DEFAULT_META_AVATAR_URL } from "../constants/meta-avatar";
 import { useAppStore } from "../store";
@@ -14,15 +15,18 @@ function resolveIdentityLabel(opts: {
   userNickname: string;
   displayName: string;
   email: string;
+  fallback: string;
 }): string {
   const nickname = opts.userNickname.trim();
   if (nickname) return nickname;
   const account = (opts.displayName || opts.email).trim();
   if (account) return account;
-  return "我";
+  return opts.fallback;
 }
 
 export function AccountIdentityControl({ variant, menuPlacement, className = "" }: Props) {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
   const openSettings = useAppStore((s) => s.openSettings);
   const agxAccount = useAppStore((s) => s.agxAccount);
   const setAgxAccount = useAppStore((s) => s.setAgxAccount);
@@ -41,6 +45,7 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
     userNickname,
     displayName: agxAccount.displayName,
     email: agxAccount.email,
+    fallback: t("identity.me"),
   });
   const onLoginClick = async () => {
     if (loginBusy) return;
@@ -50,17 +55,17 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
       const r = await window.agenticxDesktop.agxAccountLoginStart();
       if (!r.ok) {
         await window.agenticxDesktop.confirmDialog({
-          title: "无法开始登录",
-          message: "未能开始官网账号登录，请稍后再试。",
-          detail: typeof r.error === "string" && r.error ? `错误：${r.error}` : undefined,
-          confirmText: "确定",
+          title: t("identity.loginFailedTitle"),
+          message: t("identity.loginFailedMessage"),
+          detail: typeof r.error === "string" && r.error ? t("identity.errorDetail", { error: r.error }) : undefined,
+          confirmText: tCommon("ok"),
         });
       }
     } catch (err) {
       await window.agenticxDesktop.confirmDialog({
-        title: "无法开始登录",
+        title: t("identity.loginFailedTitle"),
         message: String(err),
-        confirmText: "确定",
+        confirmText: tCommon("ok"),
       });
     } finally {
       setLoginBusy(false);
@@ -70,9 +75,9 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
   const onLogoutClick = async () => {
     setUserMenuOpen(false);
     const r = await window.agenticxDesktop.confirmDialog({
-      title: "退出官网账号",
-      message: "确定要清除本机已保存的 Near 官网登录状态吗？",
-      confirmText: "退出",
+      title: t("identity.logoutTitle"),
+      message: t("identity.logoutMessage"),
+      confirmText: t("identity.logoutConfirm"),
       destructive: true,
     });
     if (!r.confirmed) return;
@@ -179,7 +184,7 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
                   strokeWidth={2}
                 />
                 <span className="flex-1 text-[13px] font-medium leading-none text-text-strong">
-                  {loginBusy ? "登录中..." : "登录官网账号"}
+                  {loginBusy ? t("identity.loggingIn") : t("identity.loginOfficial")}
                 </span>
               </button>
             ) : null}
@@ -192,7 +197,7 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
                 className="h-[15px] w-[15px] shrink-0 text-text-muted group-hover:text-text-strong"
                 strokeWidth={2}
               />
-              <span className="flex-1 text-[13px] font-medium leading-none text-text-strong">查看账号</span>
+              <span className="flex-1 text-[13px] font-medium leading-none text-text-strong">{t("identity.viewAccount")}</span>
             </button>
             {agxAccount.loggedIn ? (
               <button
@@ -201,7 +206,7 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
                 onClick={() => void onLogoutClick()}
               >
                 <LogOut className="h-[15px] w-[15px] shrink-0 text-rose-400" strokeWidth={2} />
-                <span className="flex-1 text-[13px] font-medium leading-none text-rose-400">退出登录</span>
+                <span className="flex-1 text-[13px] font-medium leading-none text-rose-400">{t("identity.logout")}</span>
               </button>
             ) : null}
           </div>,
@@ -217,7 +222,7 @@ export function AccountIdentityControl({ variant, menuPlacement, className = "" 
         className={triggerClass}
         onClick={onTriggerClick}
         disabled={loginBusy}
-        aria-label="账号菜单"
+        aria-label={t("identity.menuAria")}
         aria-expanded={userMenuOpen}
       >
         {avatar}

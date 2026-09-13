@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../i18n/i18n";
 import { createPortal } from "react-dom";
 import { ChevronRight, ExternalLink, Link2, Loader2, SquareArrowOutUpRight } from "lucide-react";
 
@@ -48,6 +50,7 @@ type NativeId = "tencent-meeting" | "tapd" | "github" | "feishu" | "wecom" | "qq
  * - 「选择更多连接器」jumps to Settings → 连接器 marketplace (same as「管理」).
  */
 export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
+  const { t } = useTranslation("workspace");
   const mcpServers = useAppStore((state) => state.mcpServers);
   const setMcpServers = useAppStore((state) => state.setMcpServers);
   const globalSessionId = useAppStore((state) => state.sessionId);
@@ -150,13 +153,14 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
   useEffect(() => {
     void refreshTmeet();
     return window.agenticxDesktop.onNativeConnectorTmeetProgress(({ phase }) => {
+      const ns = { ns: "workspace" as const };
       const labels: Record<string, string> = {
-        installing: "首次使用，正在下载腾讯会议 CLI…",
-        opening_browser: "正在打开授权页面…",
-        waiting: "等待扫码授权…",
-        success: "授权成功",
-        disconnected: "已断开",
-        error: "授权未完成",
+        installing: i18n.t("connectors.tmeetInstalling", ns),
+        opening_browser: i18n.t("connectors.tmeetOpening", ns),
+        waiting: i18n.t("connectors.tmeetWaiting", ns),
+        success: i18n.t("connectors.tmeetSuccess", ns),
+        disconnected: i18n.t("connectors.tmeetDisconnected", ns),
+        error: i18n.t("connectors.tmeetError", ns),
       };
       if (labels[phase]) setTmeetPhase(labels[phase]);
       if (phase === "success" || phase === "disconnected" || phase === "error") {
@@ -286,15 +290,15 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
   const connectTencentMeeting = async () => {
     if (pendingId) return;
     setPendingId("tencent-meeting");
-    setTmeetPhase("准备扫码授权…");
+    setTmeetPhase(i18n.t("connectors.tmeetPreparing", { ns: "workspace" }));
     try {
       const result = await window.agenticxDesktop.nativeConnectorTmeetLogin();
       await refreshTmeet();
       if (!result.ok || !result.connected) {
-        showToast(result.error || "腾讯会议授权未完成");
+        showToast(result.error || i18n.t("connectors.tmeetIncomplete", { ns: "workspace" }));
         return;
       }
-      showToast("腾讯会议已连接");
+      showToast(i18n.t("connectors.tmeetConnected", { ns: "workspace" }));
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error));
     } finally {
@@ -366,11 +370,11 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
 
   const handleTapdConnect = async () => {
     if (!tapdToken.trim()) {
-      setTapdError("请填写 TAPD Personal Access Token");
+      setTapdError(i18n.t("connectors.tapdTokenRequired", { ns: "workspace" }));
       return;
     }
     if (!effectiveSessionId) {
-      setTapdError("当前会话尚未就绪，请稍后重试");
+      setTapdError(i18n.t("connectors.sessionNotReady", { ns: "workspace" }));
       return;
     }
     setPendingId("tapd");
@@ -381,13 +385,13 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
         accessToken: tapdToken,
       });
       if (!result.ok) {
-        setTapdError(result.error || "TAPD 连接失败");
+        setTapdError(result.error || i18n.t("connectors.tapdFailed", { ns: "workspace" }));
         return;
       }
       setTapdToken("");
       setTapdModalOpen(false);
       await refreshMcp();
-      showToast("TAPD 已连接");
+      showToast(i18n.t("connectors.tapdConnected", { ns: "workspace" }));
     } catch (error) {
       setTapdError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -398,7 +402,7 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
   const handleConnectClick = (id: ConnectorId) => {
     if (pendingId) return;
     if (nativeConnectorAvailability(id) !== "available") {
-      showToast("该连接器暂未开放");
+      showToast(i18n.t("connectors.notOpen", { ns: "workspace" }));
       return;
     }
     if (id === "tencent-meeting") {
@@ -431,7 +435,7 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
       goToSettings();
       return;
     }
-    showToast("该连接器暂未开放");
+    showToast(i18n.t("connectors.notOpen", { ns: "workspace" }));
   };
 
   const handleToggle = (id: NativeId, next: boolean) => {
@@ -482,19 +486,19 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
             className="fixed z-[9999] flex flex-col overflow-hidden rounded-xl border border-border bg-surface-panel shadow-xl backdrop-blur-md"
           >
             <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
-              <span className="text-[12px] font-semibold text-text-strong">连接器</span>
+              <span className="text-[12px] font-semibold text-text-strong">{t("connectors.title")}</span>
               <button
                 type="button"
                 className="text-[11px] text-text-faint transition hover:text-text-strong"
                 onClick={goToSettings}
               >
-                管理
+                {t("connectors.manage")}
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
               {visibleConnectors.length === 0 ? (
                 <div className="px-2 py-4 text-center text-[12px] text-text-faint">
-                  暂无已连接的连接器
+                  {t("connectors.empty")}
                 </div>
               ) : (
                 visibleConnectors.map((item) => {
@@ -520,7 +524,7 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
                         <SettingsSwitch
                           checked
                           size="sm"
-                          aria-label={`断开 ${item.name}`}
+                          aria-label={t("connectors.disconnectAria", { name: item.name })}
                           onChange={(next) => handleToggle(item.id as NativeId, next)}
                         />
                       ) : (
@@ -530,7 +534,7 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
                           onClick={() => handleConnectClick(item.id)}
                         >
                           <Link2 className="h-3.5 w-3.5" aria-hidden />
-                          连接
+                          {t("connectors.connect")}
                         </button>
                       )}
                     </div>
@@ -545,7 +549,7 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
                 onClick={goToSettings}
               >
                 <SquareArrowOutUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                选择更多连接器
+                {t("connectors.chooseMore")}
               </button>
             </div>
             {pendingId === "tencent-meeting" && tmeetPhase ? (
@@ -564,14 +568,14 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
       type="button"
       role="menuitem"
       className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
-      aria-label="连接器"
+      aria-label={t("connectors.title")}
       aria-expanded={open}
       onClick={handleOpen}
     >
       <Link2 className="h-[15px] w-[15px] shrink-0 text-text-muted" aria-hidden />
-      <span className="flex-1">连接器</span>
+      <span className="flex-1">{t("connectors.title")}</span>
       {connectedIds.length > 0 ? (
-        <span className="text-[11px] text-text-faint">已连接 {connectedIds.length}</span>
+        <span className="text-[11px] text-text-faint">{t("connectors.connectedCount", { count: connectedIds.length })}</span>
       ) : null}
       <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
     </button>
@@ -584,8 +588,8 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
       className={`relative flex h-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition hover:bg-surface-hover hover:text-text-strong ${
         connectedIds.length > 0 ? "min-w-[2rem] px-1" : "w-7"
       }`}
-      title={connectedIds.length > 0 ? `已连接：${connectedLabel}` : "连接器"}
-      aria-label={connectedIds.length > 0 ? `已连接的连接器：${connectedLabel}` : "连接器"}
+      title={connectedIds.length > 0 ? t("connectors.connectedWith", { names: connectedLabel }) : t("connectors.title")}
+      aria-label={connectedIds.length > 0 ? t("connectors.connectedAria", { names: connectedLabel }) : t("connectors.title")}
       aria-expanded={open}
       onClick={handleOpen}
     >
@@ -617,7 +621,7 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
       {embedded ? (
         embeddedRow
       ) : connectedIds.length > 0 ? (
-        <HoverTip label={`已连接：${connectedLabel}`}>{toolbarButton}</HoverTip>
+        <HoverTip label={t("connectors.connectedWith", { names: connectedLabel })}>{toolbarButton}</HoverTip>
       ) : (
         toolbarButton
       )}
@@ -625,7 +629,7 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
 
       <Modal
         open={tapdModalOpen}
-        title="连接 TAPD"
+        title={t("connectors.connectTapd")}
         onClose={pendingId === "tapd" ? undefined : () => setTapdModalOpen(false)}
         panelClassName="w-[min(480px,94vw)] bg-surface-panel"
         footer={
@@ -636,7 +640,7 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
               disabled={pendingId === "tapd"}
               onClick={() => setTapdModalOpen(false)}
             >
-              取消
+              {t("cancel", { ns: "common" })}
             </button>
             <button
               type="button"
@@ -644,24 +648,24 @@ export function ConnectorsMenuButton({ sessionId, embedded = false }: Props) {
               disabled={pendingId === "tapd" || !tapdToken.trim()}
               onClick={() => void handleTapdConnect()}
             >
-              {pendingId === "tapd" ? "连接中…" : "保存并连接"}
+              {pendingId === "tapd" ? t("connectors.connecting") : t("connectors.saveAndConnect")}
             </button>
           </div>
         }
       >
         <div className="space-y-3">
-          <p className="text-sm text-text-muted">输入 TAPD Personal Access Token 以连接需求与缺陷管理。</p>
+          <p className="text-sm text-text-muted">{t("connectors.tapdHint")}</p>
           <button
             type="button"
             className="inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-text-strong"
             onClick={() => void window.agenticxDesktop.openExternal("https://open.tapd.cn/")}
           >
-            如何获取 Token？
+            {t("connectors.howToGetToken")}
             <ExternalLink className="h-3.5 w-3.5" aria-hidden />
           </button>
           <label className="block space-y-1.5">
             <span className="text-xs font-medium text-text-strong">
-              Personal Access Token <span className="text-rose-400">*</span>
+              {t("connectors.patLabel")} <span className="text-rose-400">*</span>
             </span>
             <input
               type="password"

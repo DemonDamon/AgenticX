@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { ImageContentBlock } from "../../utils/content-blocks";
 import { readyLightboxImages } from "../../utils/content-blocks";
@@ -38,9 +39,10 @@ function openExternalUrl(url: string) {
 }
 
 export function InlineImageLoadFailedNotice({ sourceUrl }: { sourceUrl?: string }) {
+  const { t } = useTranslation("chat");
   return (
     <p className="my-1 text-[13px] leading-relaxed text-text-faint">
-      图片无法加载
+      {t("image.loadFailed")}
       {sourceUrl ? (
         <>
           {" "}
@@ -51,11 +53,11 @@ export function InlineImageLoadFailedNotice({ sourceUrl }: { sourceUrl?: string 
   );
 }
 
-function sourceHostLabel(url: string): string {
+function sourceHostLabel(url: string, fallback: string): string {
   try {
-    return new URL(url).hostname.replace(/^www\./, "") || "来源";
+    return new URL(url).hostname.replace(/^www\./, "") || fallback;
   } catch {
-    return "来源";
+    return fallback;
   }
 }
 
@@ -63,6 +65,7 @@ const lightboxNavBtnClass =
   "pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-black/15 bg-[var(--surface-popover)] text-text-strong shadow-[0_2px_10px_rgba(0,0,0,0.28)] hover:bg-[color-mix(in_srgb,var(--surface-popover)_82%,var(--text-strong)_18%)]";
 
 function SourceLink({ href, children }: { href: string; children?: React.ReactNode }) {
+  const { t } = useTranslation("chat");
   return (
     <a
       href={href}
@@ -73,12 +76,13 @@ function SourceLink({ href, children }: { href: string; children?: React.ReactNo
         openExternalUrl(href);
       }}
     >
-      {children ?? "来源"}
+      {children ?? t("image.source")}
     </a>
   );
 }
 
 export function InlineImageBlock({ block, gallery }: Props) {
+  const { t } = useTranslation("chat");
   const [now, setNow] = useState(() => Date.now());
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -147,7 +151,7 @@ export function InlineImageBlock({ block, gallery }: Props) {
       >
         <Shimmer
           variant="status"
-          text={`${remote ? "加载图片中" : "生成图片中"}… ${elapsedLabel(block.startedAt, now)}`}
+          text={`${remote ? t("image.loading") : t("image.generating")}… ${elapsedLabel(block.startedAt, now)}`}
           className="text-[13px]"
         />
       </div>
@@ -157,7 +161,7 @@ export function InlineImageBlock({ block, gallery }: Props) {
   if (block.status === "error") {
     return (
       <p className="my-1 text-[13px] leading-relaxed text-text-faint">
-        {block.error?.trim() || "图片生成失败"}
+        {block.error?.trim() || t("image.generateFailed")}
         {block.source_url ? (
           <>
             {" "}
@@ -169,13 +173,13 @@ export function InlineImageBlock({ block, gallery }: Props) {
   }
 
   if (block.status === "cancelled") {
-    return <p className="my-1 text-[13px] leading-relaxed text-text-faint">已取消</p>;
+    return <p className="my-1 text-[13px] leading-relaxed text-text-faint">{t("image.cancelled")}</p>;
   }
 
   const src = blockSrc(block);
   const activeSrc = blockSrc(active);
   if (!src) {
-    return <p className="my-1 text-[13px] leading-relaxed text-text-faint">图片路径无效</p>;
+    return <p className="my-1 text-[13px] leading-relaxed text-text-faint">{t("image.invalidPath")}</p>;
   }
 
   if (loadError) {
@@ -189,8 +193,8 @@ export function InlineImageBlock({ block, gallery }: Props) {
         {block.alt && block.source_url ? <span>，</span> : null}
         {block.source_url ? (
           <>
-            来源：
-            <SourceLink href={block.source_url}>{sourceHostLabel(block.source_url)}</SourceLink>
+            {t("image.sourcePrefix")}
+            <SourceLink href={block.source_url}>{sourceHostLabel(block.source_url, t("image.source"))}</SourceLink>
           </>
         ) : null}
       </p>
@@ -213,7 +217,7 @@ export function InlineImageBlock({ block, gallery }: Props) {
             ? "group block max-w-[280px] overflow-hidden rounded-xl border border-border bg-surface-panel text-left"
             : "group my-1 block w-full min-w-0 overflow-hidden rounded-xl border border-border bg-surface-panel text-left"
         }
-        title={block.alt || "点击查看原图"}
+        title={block.alt || t("image.viewOriginal")}
         onClick={() => setOpen(true)}
       >
         <img
@@ -235,8 +239,8 @@ export function InlineImageBlock({ block, gallery }: Props) {
         open={open}
         title={
           canNavigate
-            ? `${active.alt || "图片预览"}  ${activeIndex + 1}/${lightboxItems.length}`
-            : active.alt || "图片预览"
+            ? `${active.alt || t("image.preview")}  ${activeIndex + 1}/${lightboxItems.length}`
+            : active.alt || t("image.preview")
         }
         onClose={() => setOpen(false)}
         panelClassName="w-[90vw] max-w-4xl bg-surface-popover"
@@ -252,7 +256,7 @@ export function InlineImageBlock({ block, gallery }: Props) {
             <div className="pointer-events-none absolute inset-x-0 bottom-0 top-8 z-10 flex items-center justify-between px-2">
               <button
                 type="button"
-                aria-label="上一张"
+                aria-label={t("image.prev")}
                 className={lightboxNavBtnClass}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -264,7 +268,7 @@ export function InlineImageBlock({ block, gallery }: Props) {
               </button>
               <button
                 type="button"
-                aria-label="下一张"
+                aria-label={t("image.next")}
                 className={lightboxNavBtnClass}
                 onClick={(event) => {
                   event.stopPropagation();

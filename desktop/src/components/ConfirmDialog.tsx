@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "./ds/Button";
 import { Modal } from "./ds/Modal";
 import { CONFIRM_DIALOG_POLICY_OPTIONS } from "../constants/confirm-strategy-options";
@@ -35,7 +36,14 @@ export function ConfirmDialog({
   onApprove,
   onReject,
 }: Props) {
+  const { t } = useTranslation("common");
   const [policy, setPolicy] = useState<ConfirmPolicy>("ask-every-time");
+  const policyLabel = (value: ConfirmPolicy) =>
+    value === "ask-every-time"
+      ? t("policyAskEveryTime")
+      : value === "use-allowlist"
+        ? t("policyUseAllowlist")
+        : t("policyRunEverything");
   const protectedRequest = isProtectedConfirmContext(context);
   const lockToOnce = !canReuseConfirmPolicy(context);
   const protectedReason = protectedConfirmReason(context);
@@ -51,19 +59,19 @@ export function ConfirmDialog({
   return (
     <Modal
       open={open}
-      title="需要确认"
+      title={t("needConfirm")}
       footer={(
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => onReject(policy)}>
-            取消
+            {t("cancel")}
           </Button>
           <Button variant="primary" onClick={() => onApprove(policy)}>
-            确认执行
+            {t("confirmExecute")}
           </Button>
         </div>
       )}
     >
-        {sourceLabel ? <p className="mb-1 text-xs text-text-subtle">来源：{sourceLabel}</p> : null}
+        {sourceLabel ? <p className="mb-1 text-xs text-text-subtle">{t("source", { label: sourceLabel })}</p> : null}
         <p className="mb-3 break-words text-sm text-text-primary">{renderInlineBold(question)}</p>
         {diff ? (
           <pre className="mb-4 max-h-48 overflow-auto rounded-md border border-border bg-surface-panel p-3 text-xs text-text-strong">
@@ -72,11 +80,12 @@ export function ConfirmDialog({
         ) : null}
 
         <div className="mb-3 rounded-md border border-border bg-surface-card p-3 text-xs text-text-muted">
-          <div className="mb-2 font-medium text-text-primary">本次确认策略</div>
+          <div className="mb-2 font-medium text-text-primary">{t("confirmPolicy")}</div>
           {lockToOnce && protectedRequest ? (
             <p className="mb-2 rounded bg-amber-500/10 px-2 py-1.5 leading-5 text-[var(--status-warning)]">
-              {autoModeInterrupted ? "已选全部允许，但这一步仍需确认：" : "这是受保护操作："}
-              {protectedReason}。只能逐次确认，不能加入同类允许或自动执行。
+              {autoModeInterrupted ? t("protectedAutoInterrupted") : t("protectedOperation")}
+              {protectedReason}
+              {t("protectedOnceOnly")}
             </p>
           ) : null}
           {policyOptions.map((option) => (
@@ -90,7 +99,7 @@ export function ConfirmDialog({
                   option.value === "run-everything" ? "accent-amber-500" : "accent-emerald-500"
                 }`}
               />
-              {option.label}
+              {policyLabel(option.value)}
             </label>
           ))}
         </div>

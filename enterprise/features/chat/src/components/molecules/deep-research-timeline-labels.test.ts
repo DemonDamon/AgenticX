@@ -29,6 +29,6 @@ describe("deep research timeline labels", () => {
 
   it("empty events list is a no-op for callers (component contract)", () => {
     const events: DeepResearchEvent[] = [];
-    expect(events.map(labelForDeepResearchEvent)).toEqual([]);
+    expect(events.map((event) => labelForDeepResearchEvent(event))).toEqual([]);
   });
 });

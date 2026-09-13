@@ -1,3 +1,5 @@
+import { i18n } from "../i18n/i18n";
+
 type SanitizeGroupAvatarIdsInput = {
   requestedIds: Iterable<string>;
   validAvatarIds: Iterable<string>;
@@ -33,9 +35,9 @@ export function sanitizeGroupAvatarIds(
 
 export function getGroupSaveErrorMessage(error?: string): string {
   const raw = String(error ?? "").trim();
-  if (!raw) return "保存失败，请稍后重试。";
+  if (!raw) return String(i18n.t("groups.saveFailed", { ns: "sidebar" }));
   if (extractUnknownAvatarIdFromError(raw)) {
-    return "检测到群成员里包含已失效分身，已自动过滤。请确认成员后再次保存。";
+    return String(i18n.t("groups.unknownAvatarFiltered", { ns: "sidebar" }));
   }
   return raw;
 }

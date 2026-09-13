@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { Copy, Download, X } from "lucide-react";
 import { marked } from "marked";
 import { toPng } from "html-to-image";
-import type { Message } from "../store";
+import { useAppStore, type Message } from "../store";
+import { formatClock } from "../i18n/format";
+import type { AppLocale } from "../i18n/locales";
 import { buildShareImageTurns, formatShareCardDate } from "../utils/share-image-model";
 import {
   hydrateShareImageTurns,
@@ -28,10 +31,8 @@ function assistantMarkdownHtml(text: string): string {
   return html.replace(/<pre>/g, '<pre class="agx-chat-prism">');
 }
 
-function fileStamp(now: number): string {
-  return new Date(now)
-    .toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
-    .replace(":", "-");
+function fileStamp(now: number, locale: AppLocale): string {
+  return formatClock(now, locale).replace(":", "-");
 }
 
 /** Opaque page surface — `bg-surface-card` is a translucent overlay and composites to white in PNG. */
@@ -102,13 +103,16 @@ export function ShareImagePreviewModal({
   onClose,
   onToast,
 }: ShareImagePreviewModalProps) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
+  const locale = useAppStore((s) => s.locale);
   const shareCardRef = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState<"copy" | "download" | null>(null);
   const [error, setError] = useState("");
   const [exportedAt, setExportedAt] = useState(() => Date.now());
   const [hydrated, setHydrated] = useState<HydratedShareTurn[] | null>(null);
   const turns = useMemo(() => buildShareImageTurns(messages), [messages]);
-  const dateLabel = formatShareCardDate(exportedAt);
+  const dateLabel = formatShareCardDate(exportedAt, locale);
   const graphicsReady = hydrated !== null;
 
   useEffect(() => {
@@ -147,7 +151,7 @@ export function ShareImagePreviewModal({
     async (mode: "copy" | "download") => {
       const el = shareCardRef.current;
       if (!el || !graphicsReady) {
-        setError("栅格化失败：卡片未就绪");
+        setError(t("share.rasterNotReady"));
         return;
       }
       setBusy(mode);
@@ -157,31 +161,31 @@ export function ShareImagePreviewModal({
         const desktop = window.agenticxDesktop;
         if (mode === "copy") {
           if (!desktop?.copyPngToClipboard) {
-            throw new Error("当前环境不支持复制图片");
+            throw new Error(t("share.copyUnsupported"));
           }
           const res = await desktop.copyPngToClipboard(buf);
-          if (!res.ok) throw new Error(res.error || "复制失败");
-          onToast("已复制图片");
+          if (!res.ok) throw new Error(res.error || t("share.copyFailed"));
+          onToast(t("share.copiedImage"));
         } else {
           if (!desktop?.downloadPngToDownloads) {
-            throw new Error("当前环境不支持下载图片");
+            throw new Error(t("share.downloadUnsupported"));
           }
-          const slug = (sessionTitle || "对话").replace(/[\\/:*?"<>|]/g, "_").slice(0, 32);
+          const slug = (sessionTitle || t("share.conversation")).replace(/[\\/:*?"<>|]/g, "_").slice(0, 32);
           const res = await desktop.downloadPngToDownloads({
             buffer: buf,
-            defaultFileName: `Near对话_${slug}_${fileStamp(Date.now())}.png`,
+            defaultFileName: `${t("share.filePrefix")}_${slug}_${fileStamp(Date.now(), locale)}.png`,
           });
-          if (!res.ok) throw new Error(res.error || "下载失败");
-          onToast(res.path ? `已保存到 ${res.path}` : "已保存图片");
+          if (!res.ok) throw new Error(res.error || t("share.downloadFailed"));
+          onToast(res.path ? t("share.savedTo", { path: res.path }) : t("share.savedImage"));
         }
       } catch (e) {
         const raw = e instanceof Error ? e.message : String(e);
-        setError(raw.startsWith("栅格化失败") ? raw : `栅格化失败：${raw.slice(0, 120)}`);
+        setError(raw === t("share.rasterNotReady") ? raw : t("share.rasterFailed", { detail: raw.slice(0, 120) }));
       } finally {
         setBusy(null);
       }
     },
-    [graphicsReady, onToast, sessionTitle],
+    [graphicsReady, locale, onToast, sessionTitle, t],
   );
 
   if (!open) return null;
@@ -193,11 +197,11 @@ export function ShareImagePreviewModal({
         style={{ backgroundColor: "var(--surface-popover)" }}
       >
         <div className="flex items-center justify-between px-5 py-3">
-          <h3 className="text-sm font-semibold text-text-strong">分享图片预览</h3>
+          <h3 className="text-sm font-semibold text-text-strong">{t("share.previewTitle")}</h3>
           <button
             type="button"
             className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
-            aria-label="关闭"
+            aria-label={tCommon("close")}
             onClick={onClose}
           >
             <X className="h-4 w-4" />
@@ -210,13 +214,13 @@ export function ShareImagePreviewModal({
               className="w-full rounded-2xl px-8 py-7 text-text-strong"
               style={{ backgroundColor: "var(--surface-base-fallback)" }}
             >
-              <div className="text-[20px] font-semibold">分享对话</div>
+              <div className="text-[20px] font-semibold">{t("share.shareConversation")}</div>
               <div className="mt-1.5 text-[13px] text-text-muted">{dateLabel}</div>
-              <div className="mt-0.5 text-[13px] text-text-muted">内容由 AI 生成，不能完全保障真实</div>
+              <div className="mt-0.5 text-[13px] text-text-muted">{t("share.aiDisclaimer")}</div>
               <div className="mt-5 border-t border-border pt-5">
                 <div className="flex flex-col gap-4">
                   {!hydrated ? (
-                    <div className="py-6 text-center text-[13px] text-text-muted">正在渲染图表…</div>
+                    <div className="py-6 text-center text-[13px] text-text-muted">{t("share.renderingCharts")}</div>
                   ) : (
                     hydrated.map((turn, idx) =>
                       turn.kind === "user" ? (
@@ -282,7 +286,7 @@ export function ShareImagePreviewModal({
             onClick={() => void runCapture("copy")}
           >
             <Copy className="h-3.5 w-3.5" />
-            {busy === "copy" ? "复制中…" : "复制图片"}
+            {busy === "copy" ? t("share.copying") : t("share.copyImage")}
           </button>
           <button
             type="button"
@@ -295,7 +299,7 @@ export function ShareImagePreviewModal({
             onClick={() => void runCapture("download")}
           >
             <Download className="h-3.5 w-3.5" />
-            {busy === "download" ? "保存中…" : "下载图片"}
+            {busy === "download" ? t("share.saving") : t("share.downloadImage")}
           </button>
         </div>
       </div>

@@ -1,14 +1,17 @@
 import { ArrowDown, ArrowUp } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { MessageUsage, ModelSelection } from "../../store";
 import { normalizeBareModelId } from "../../utils/model-display";
 import {
+  formatTurnCacheHit,
+  formatTurnCacheHitLabel,
+  formatTurnCacheHitTip,
   formatTurnModelLabel,
   formatTurnUsageSplit,
   formatTurnUsageTitle,
-  TURN_USAGE_MISSING_LABEL,
-  TURN_USAGE_MISSING_TITLE,
 } from "../../utils/message-turn-meta";
+import { HoverTip } from "../ds/HoverTip";
 
 function TurnMetaRule({
   kind,
@@ -48,7 +51,9 @@ export function MessageTurnMeta({
   model?: string;
   modelSelection?: ModelSelection;
 }) {
+  const { t } = useTranslation("chat");
   const usageSplit = usage ? formatTurnUsageSplit(usage) : undefined;
+  const cacheHit = usage ? formatTurnCacheHit(usage) : undefined;
   const bareModel = normalizeBareModelId(model ?? "");
   const modelLabel = formatTurnModelLabel(model, modelSelection);
   const isAuto = modelSelection === "auto" && Boolean(bareModel);
@@ -57,48 +62,84 @@ export function MessageTurnMeta({
   // without usage is a real gap worth surfacing.
   const usageMissing = !usageSplit && Boolean(bareModel);
 
+  const modelChip = modelLabel ? (
+    <span
+      data-turn-model-chip=""
+      className="inline-flex min-h-5 min-w-0 max-w-[13rem] items-center gap-1 rounded-md bg-surface-card-strong px-1 text-[13px] leading-5 text-text-subtle"
+      title={modelLabel}
+    >
+      {isAuto ? <span className="shrink-0 text-text-faint">auto</span> : null}
+      <span className="min-w-0 overflow-x-hidden text-ellipsis whitespace-nowrap leading-5">
+        {bareModel}
+      </span>
+    </span>
+  ) : null;
+
   return (
     <span
       data-turn-meta=""
-      className="inline-flex h-5 min-w-0 items-center select-none"
+      className="inline-flex min-h-5 min-w-0 items-center overflow-hidden select-none"
       title={
         usage
-          ? formatTurnUsageTitle(usage)
+          ? formatTurnUsageTitle(usage, t)
           : usageMissing
-            ? TURN_USAGE_MISSING_TITLE
+            ? t("usage.missingTitle")
             : undefined
       }
     >
       <TurnMetaRule kind="actions" lead={false} />
       {usageMissing ? (
         <span className="text-[13px] leading-none text-text-faint">
-          {TURN_USAGE_MISSING_LABEL}
+          {t("usage.missingLabel")}
         </span>
       ) : null}
       {usageSplit ? (
-        <span className="inline-flex shrink-0 items-center gap-2.5 text-[13px] leading-none text-text-subtle">
-          <span className="sr-only">本轮消耗</span>
-          <span className="inline-flex items-center gap-1 tabular-nums">
-            <TurnUsageArrow direction="in" />
-            <span>{usageSplit.input}</span>
+        <span className="inline-flex min-w-0 items-center gap-2.5 overflow-hidden text-[13px] leading-none text-text-subtle">
+          <span className="sr-only">{t("usage.turnCostSr")}</span>
+          <span
+            data-turn-usage-counts=""
+            className="inline-flex shrink-0 items-center gap-2.5"
+          >
+            <span className="inline-flex items-center gap-1 tabular-nums">
+              <TurnUsageArrow direction="in" />
+              <span>{usageSplit.input}</span>
+            </span>
+            <span className="inline-flex items-center gap-1 tabular-nums">
+              <TurnUsageArrow direction="out" />
+              <span>{usageSplit.output}</span>
+            </span>
           </span>
-          <span className="inline-flex items-center gap-1 tabular-nums">
-            <TurnUsageArrow direction="out" />
-            <span>{usageSplit.output}</span>
-          </span>
+          {cacheHit ? (
+            <span className="min-w-0 overflow-hidden">
+              <HoverTip
+                label={formatTurnCacheHitTip(cacheHit, t)}
+                inline
+                tooltipAlign="end"
+                className="inline-flex items-center"
+              >
+                <span
+                  data-turn-cache-hit=""
+                  className="whitespace-nowrap tabular-nums text-emerald-400 [html[data-theme=light]_&]:text-emerald-600"
+                >
+                  <span className="sr-only">{t("usage.cacheHitSr")}</span>
+                  {formatTurnCacheHitLabel(cacheHit, t)}
+                </span>
+              </HoverTip>
+            </span>
+          ) : null}
         </span>
       ) : null}
-      {modelLabel && (usageSplit || usageMissing) ? <TurnMetaRule kind="model" /> : null}
-      {modelLabel ? (
+      {modelChip && (usageSplit || usageMissing) ? (
         <span
-          data-turn-model-chip=""
-          className="inline-flex h-5 min-w-0 max-w-[13rem] items-center gap-1 truncate rounded-md bg-surface-card-strong pr-1 text-[13px] leading-none text-text-subtle"
-          title={modelLabel}
+          data-turn-model-cluster=""
+          className="inline-flex min-w-0 items-center overflow-hidden"
         >
-          {isAuto ? <span className="shrink-0 text-text-faint">auto</span> : null}
-          <span className="truncate">{bareModel}</span>
+          <TurnMetaRule kind="model" />
+          {modelChip}
         </span>
-      ) : null}
+      ) : (
+        modelChip
+      )}
     </span>
   );
 }

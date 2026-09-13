@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { SubAgent } from "../store";
 import { SubAgentCard } from "./SubAgentCard";
 
@@ -24,6 +25,7 @@ export function SubAgentPanel({
   onModelChange,
   onConfirmResolve,
 }: Props) {
+  const { t } = useTranslation("chat");
   const running = subAgents.filter((item) => item.status === "running").length;
   const done = subAgents.filter((item) => item.status === "completed").length;
   const pending = subAgents.filter((item) => item.status === "pending").length;
@@ -36,24 +38,24 @@ export function SubAgentPanel({
     >
       <div className="flex h-11 items-center justify-between border-b border-border px-3">
         <button className="rounded px-2 py-1 text-xs text-text-muted hover:bg-surface-hover" onClick={onToggle}>
-          {open ? "收起" : "队列"}
+          {open ? t("subagent.panelCollapse") : t("subagent.panelQueue")}
         </button>
-        {open ? <span className="text-xs text-text-faint">Team</span> : null}
+        {open ? <span className="text-xs text-text-faint">{t("subagent.team")}</span> : null}
       </div>
 
       {open ? (
         <div className="flex h-[calc(100%-44px)] flex-col">
           <div className="border-b border-border px-3 py-2 text-xs text-text-faint">
-            <span className="mr-2">运行 {running}</span>
-            <span className="mr-2">完成 {done}</span>
-            <span className="mr-2">等待 {pending}</span>
-            <span className="mr-2">待确认 {awaitingConfirm}</span>
-            <span>待输入 {awaitingInput}</span>
+            <span className="mr-2">{t("subagent.runningCount", { count: running })}</span>
+            <span className="mr-2">{t("subagent.doneCount", { count: done })}</span>
+            <span className="mr-2">{t("subagent.pendingCount", { count: pending })}</span>
+            <span className="mr-2">{t("subagent.awaitingConfirmCount", { count: awaitingConfirm })}</span>
+            <span>{t("subagent.awaitingInputCount", { count: awaitingInput })}</span>
           </div>
           <div className="flex-1 space-y-2 overflow-y-auto p-2">
             {subAgents.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border p-3 text-xs text-text-faint">
-                暂无子智能体
+                {t("subagent.empty")}
               </div>
             ) : (
               subAgents.map((subAgent) => (

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Archive,
   ChevronDown,
+  ChevronRight,
   GitBranch,
   ListChecks,
   ListFilter,
@@ -38,7 +40,10 @@ import {
   SIDEBAR_HISTORY_PAGE_SIZE,
   activeAvatarIdForSidebarRow,
   applySidebarSessionHistoryHints,
-  bucketSidebarHistoryRows,
+  bucketSidebarHistoryNodes,
+  flattenSidebarHistoryNodes,
+  includeContinueSearchAncestors,
+  nestContinueSessionRows,
   findPaneForSidebarSession,
   formatSidebarRelativeTime,
   getSidebarSessionActivityTs,
@@ -46,8 +51,10 @@ import {
   normalizeSidebarSessionRows,
   parseDesktopBoundSessionId,
   resolveSidebarAvatarChipName,
+  sidebarLoopReviewFetchIds,
   sidebarSessionHasRenderableMessages,
   sidebarSessionLabel,
+  type SidebarHistoryNode,
   type SidebarSessionRow,
 } from "../../utils/sidebar-session-history";
 import { HoverTip } from "../ds/HoverTip";
@@ -118,6 +125,8 @@ function resolveSidebarChipStripeColor(
 }
 
 export function SidebarSessionHistory() {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
   const avatars = useAppStore((s) => s.avatars);
   const groups = useAppStore((s) => s.groups);
   const panes = useAppStore((s) => s.panes);
@@ -141,6 +150,7 @@ export function SidebarSessionHistory() {
   const setMainView = useAppStore((s) => s.setMainView);
 
   const [sessions, setSessions] = useState<SidebarSessionRow[]>([]);
+  const [historyReady, setHistoryReady] = useState(false);
   const [feishuBoundId, setFeishuBoundId] = useState("");
   const [wechatBoundId, setWechatBoundId] = useState("");
   const [collapse, setCollapse] = useState<CollapseState>(() => loadCollapse());
@@ -162,11 +172,13 @@ export function SidebarSessionHistory() {
     sessionId: string;
     paneId: string;
   } | null>(null);
+  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(() => new Set());
   const filterBtnRef = useRef<HTMLButtonElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const fetchedLoopReviewRef = useRef<Set<string>>(new Set());
   const [filterMenuPos, setFilterMenuPos] = useState<{ left: number; top: number } | null>(null);
 
   const avatarNameById = useMemo(() => {
@@ -178,7 +190,7 @@ export function SidebarSessionHistory() {
 
   const filterOptions = useMemo(() => {
     const opts: Array<{ id: string; label: string }> = [
-      { id: "all", label: "全部" },
+      { id: "all", label: t("history.filterAll") },
       { id: "__meta__", label: META_AGENT_DISPLAY_NAME },
     ];
     for (const a of avatars) {
@@ -188,10 +200,10 @@ export function SidebarSessionHistory() {
       opts.push({ id: `group:${g.id}`, label: g.name });
     }
     return opts;
-  }, [avatars, groups]);
+  }, [avatars, groups, t]);
 
   const filterLabel =
-    filterOptions.find((o) => o.id === avatarFilter)?.label ?? "全部";
+    filterOptions.find((o) => o.id === avatarFilter)?.label ?? t("history.filterAll");
 
   const loadSessions = useCallback(async () => {
     try {
@@ -208,26 +220,11 @@ export function SidebarSessionHistory() {
             clearSessionHistoryHint(row.session_id);
           }
         }
-        // Best-effort batch fetch of loop-review scores; failures stay silent.
-        // Sessions without tool observations carry no real signal — their score
-        // is a floor imposed by missing evidence, so we show no badge at all.
-        void Promise.allSettled(
-          rows.map(async (row) => {
-            const r = await window.agenticxDesktop.getSessionLoopReview(row.session_id);
-            return r.ok && r.review && r.review.observations_available !== false
-              ? { id: row.session_id, score: r.review.overall }
-              : null;
-          }),
-        ).then((results) => {
-          const next: Record<string, number> = {};
-          for (const res of results) {
-            if (res.status === "fulfilled" && res.value) next[res.value.id] = res.value.score;
-          }
-          setLoopReviewScores(next);
-        });
       }
     } catch (err) {
       console.warn("[SidebarSessionHistory] listSessions failed", err);
+    } finally {
+      setHistoryReady(true);
     }
   }, [clearSessionHistoryHint]);
 
@@ -400,17 +397,25 @@ export function SidebarSessionHistory() {
     return ids;
   }, [wechatBoundId, feishuBoundId]);
 
-  const filteredForBuckets = useMemo(
-    () =>
-      sessionsWithHints.filter(
-        (row) => matchesSidebarAvatarFilter(row, avatarFilter) && rowMatchesSearch(row)
-      ),
-    [sessionsWithHints, avatarFilter, rowMatchesSearch]
+  const filteredForBuckets = useMemo(() => {
+    const avatarFiltered = sessionsWithHints.filter((row) =>
+      matchesSidebarAvatarFilter(row, avatarFilter)
+    );
+    if (!searchQuery.trim()) return avatarFiltered;
+    const matched = new Set(
+      avatarFiltered.filter((row) => rowMatchesSearch(row)).map((row) => row.session_id)
+    );
+    return includeContinueSearchAncestors(avatarFiltered, matched);
+  }, [sessionsWithHints, avatarFilter, rowMatchesSearch, searchQuery]);
+
+  const historyTree = useMemo(
+    () => nestContinueSessionRows(filteredForBuckets),
+    [filteredForBuckets]
   );
 
   const buckets = useMemo(
-    () => bucketSidebarHistoryRows(filteredForBuckets, specialIds),
-    [filteredForBuckets, specialIds]
+    () => bucketSidebarHistoryNodes(historyTree, specialIds),
+    [historyTree, specialIds]
   );
 
   const chronological = useMemo(
@@ -418,16 +423,63 @@ export function SidebarSessionHistory() {
     [buckets.today, buckets.earlier]
   );
   const visibleChrono = chronological.slice(0, visibleLimit);
-  const todayVisible = visibleChrono.filter((r) => buckets.today.includes(r));
-  const earlierVisible = visibleChrono.filter((r) => buckets.earlier.includes(r));
+  const todayVisible = visibleChrono.filter((node) => buckets.today.includes(node));
+  const earlierVisible = visibleChrono.filter((node) => buckets.earlier.includes(node));
   const hasMore = chronological.length > visibleLimit;
+  const historyEmptyHint = historyReady ? t("history.empty") : t("history.loading");
+  const pinnedEmptyHint = historyReady ? t("history.emptyPinned") : t("history.loading");
+  const visibleLoopReviewKey = [
+    wechatRow?.session_id,
+    feishuRow?.session_id,
+    ...flattenSidebarHistoryNodes(buckets.pinned).map((row) => row.session_id),
+    ...flattenSidebarHistoryNodes(todayVisible).map((row) => row.session_id),
+    ...flattenSidebarHistoryNodes(earlierVisible).map((row) => row.session_id),
+  ]
+    .filter((id): id is string => Boolean(id))
+    .join("\n");
+
+  useEffect(() => {
+    const visibleLoopReviewIds = visibleLoopReviewKey
+      ? visibleLoopReviewKey.split("\n")
+      : [];
+    const targets = sidebarLoopReviewFetchIds(
+      visibleLoopReviewIds,
+      fetchedLoopReviewRef.current,
+    );
+    if (targets.length === 0) return;
+    for (const id of targets) fetchedLoopReviewRef.current.add(id);
+    let cancelled = false;
+    void Promise.allSettled(
+      targets.map(async (id) => {
+        const r = await window.agenticxDesktop.getSessionLoopReview(id);
+        return r.ok && r.review && r.review.observations_available !== false
+          ? { id, score: r.review.overall }
+          : null;
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      const next: Record<string, number> = {};
+      for (const res of results) {
+        if (res.status === "fulfilled" && res.value) next[res.value.id] = res.value.score;
+      }
+      if (Object.keys(next).length === 0) return;
+      setLoopReviewScores((prev) => ({ ...prev, ...next }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [visibleLoopReviewKey]);
 
   const selectableRows = useMemo(() => {
     const map = new Map<string, SidebarSessionRow>();
     if (wechatRow) map.set(wechatRow.session_id, wechatRow);
     if (feishuRow) map.set(feishuRow.session_id, feishuRow);
-    for (const row of buckets.pinned) map.set(row.session_id, row);
-    for (const row of chronological) map.set(row.session_id, row);
+    for (const row of flattenSidebarHistoryNodes(buckets.pinned)) {
+      map.set(row.session_id, row);
+    }
+    for (const row of flattenSidebarHistoryNodes(chronological)) {
+      map.set(row.session_id, row);
+    }
     return Array.from(map.values());
   }, [wechatRow, feishuRow, buckets.pinned, chronological]);
 
@@ -443,6 +495,33 @@ export function SidebarSessionHistory() {
     const pane = panes.find((p) => p.id === activePaneId);
     return String(pane?.sessionId ?? "").trim();
   }, [panes, activePaneId]);
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const byId = new Map(sessionsWithHints.map((row) => [row.session_id, row]));
+    const ancestors: string[] = [];
+    let current = byId.get(activeSessionId);
+    let guard = 0;
+    while (current && guard < 16) {
+      const parent = String(current.parent_session_id ?? "").trim();
+      if (!parent || !byId.has(parent)) break;
+      ancestors.push(parent);
+      current = byId.get(parent);
+      guard += 1;
+    }
+    if (ancestors.length === 0) return;
+    setCollapsedParents((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of ancestors) {
+        if (next.has(id)) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [activeSessionId, sessionsWithHints]);
 
   const toggleSection = (key: keyof CollapseState) => {
     setCollapse((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -488,17 +567,17 @@ export function SidebarSessionHistory() {
     const confirmResult =
       typeof api.confirmDialog === "function"
         ? await api.confirmDialog({
-            title: "确认删除会话",
-            message: `确认删除已选择的 ${targets.length} 个会话？`,
-            detail: "删除后不可恢复。",
-            confirmText: "删除",
-            cancelText: "取消",
+            title: t("history.deleteTitle"),
+            message: t("history.deleteSelected", { count: targets.length }),
+            detail: t("history.deleteIrreversible"),
+            confirmText: tCommon("delete"),
+            cancelText: tCommon("cancel"),
             destructive: true,
           })
         : {
             ok: true,
             confirmed: window.confirm(
-              `确认删除已选择的 ${targets.length} 个会话？删除后不可恢复。`
+              t("history.deleteSelectedConfirm", { count: targets.length })
             ),
           };
     if (!confirmResult.confirmed) return;
@@ -555,7 +634,7 @@ export function SidebarSessionHistory() {
           );
           return normalizeSidebarSessionRows([...curr, ...toRestore]);
         });
-        window.alert(`有 ${failed.length} 个会话删除失败，已自动保留。你可以再次尝试删除。`);
+        window.alert(t("history.deletePartialFail", { count: failed.length }));
       }
       const failedSet = new Set(failed);
       const successfullyDeleted = targets.filter((sid) => !failedSet.has(sid));
@@ -779,14 +858,14 @@ export function SidebarSessionHistory() {
     const confirmResult =
       typeof api.confirmDialog === "function"
         ? await api.confirmDialog({
-            title: "确认删除会话",
-            message: "确认删除该会话？",
-            detail: "删除后不可恢复。",
-            confirmText: "删除",
-            cancelText: "取消",
+            title: t("history.deleteTitle"),
+            message: t("history.deleteOne"),
+            detail: t("history.deleteIrreversible"),
+            confirmText: tCommon("delete"),
+            cancelText: tCommon("cancel"),
             destructive: true,
           })
-        : { ok: true, confirmed: window.confirm("确认删除该会话？删除后不可恢复。") };
+        : { ok: true, confirmed: window.confirm(t("history.deleteOneConfirm")) };
     if (!confirmResult.confirmed) return;
     const result = await api.deleteSession(row.session_id);
     if (!result.ok) return;
@@ -893,12 +972,12 @@ export function SidebarSessionHistory() {
       const confirmResult =
         typeof api.confirmDialog === "function"
           ? await api.confirmDialog({
-              title: "归档此前会话",
-              message: "确认归档当前会话之前的历史会话吗？",
-              confirmText: "归档",
-              cancelText: "取消",
+              title: t("history.archiveTitle"),
+              message: t("history.archiveMessage"),
+              confirmText: tCommon("archive"),
+              cancelText: tCommon("cancel"),
             })
-          : { ok: true, confirmed: window.confirm("确认归档当前会话之前的历史会话吗？") };
+          : { ok: true, confirmed: window.confirm(t("history.archiveConfirm")) };
       if (!confirmResult.confirmed) return;
       const result = await api.archiveSessions({
         sessionId: row.session_id,
@@ -911,11 +990,50 @@ export function SidebarSessionHistory() {
     }
   };
 
-  const renderRow = (row: SidebarSessionRow) => {
+  const toggleParentExpanded = (sessionId: string) => {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
+
+  const renderHistoryNode = (node: SidebarHistoryNode, depth = 0) => {
+    const expanded = !collapsedParents.has(node.row.session_id);
+    const hasChildren = node.children.length > 0;
+    return (
+      <div key={node.row.session_id}>
+        {renderRow(node.row, {
+          depth,
+          hasChildren,
+          expanded,
+          onToggleExpanded: () => toggleParentExpanded(node.row.session_id),
+        })}
+        {expanded && hasChildren
+          ? node.children.map((child) => renderHistoryNode(child, depth + 1))
+          : null}
+      </div>
+    );
+  };
+
+  const renderRow = (
+    row: SidebarSessionRow,
+    opts?: {
+      depth?: number;
+      hasChildren?: boolean;
+      expanded?: boolean;
+      onToggleExpanded?: () => void;
+    },
+  ) => {
+    const depth = Math.max(0, opts?.depth ?? 0);
+    const nestedChild = depth > 0;
+    const hasChildren = Boolean(opts?.hasChildren);
+    const expanded = Boolean(opts?.expanded);
     const active = row.session_id === activeSessionId;
     const chip = resolveSidebarAvatarChipName(row, avatarNameById);
     const stripeColor = resolveSidebarChipStripeColor(row.avatar_id, avatars);
-    const title = sidebarSessionLabel(row);
+    const title = sidebarSessionLabel(row, { nestedChild });
     const checked = selectedSessionIds.includes(row.session_id);
     const relative = formatSidebarRelativeTime(getSidebarSessionActivityTs(row));
     const menuOpen = moreMenu?.sessionId === row.session_id;
@@ -928,9 +1046,10 @@ export function SidebarSessionHistory() {
     return (
       <div
         key={row.session_id}
-        className={`group/row flex w-full items-center gap-1 rounded-md px-2 py-1.5 transition-colors ${
+        className={`group/row flex w-full items-center gap-1 rounded-md py-1.5 pr-2 transition-colors ${
           active || checked || menuOpen ? "bg-surface-hover" : "hover:bg-surface-hover"
         }`}
+        style={{ paddingLeft: 8 + depth * 14 }}
       >
         {selectMode ? (
           <input
@@ -938,12 +1057,15 @@ export function SidebarSessionHistory() {
             className="h-3.5 w-3.5 shrink-0 accent-[rgb(var(--theme-color-rgb,59,130,246))]"
             checked={checked}
             onChange={() => toggleSelectSession(row.session_id)}
-            title="点击勾选"
-            aria-label={`选择 ${title}`}
+            title={t("history.clickToSelect")}
+            aria-label={t("history.selectNamed", { title })}
           />
         ) : null}
         {isEditing ? (
           <>
+            {nestedChild ? (
+              <GitBranch aria-hidden className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={1.8} />
+            ) : (
             <span
               className="relative shrink-0 overflow-hidden rounded px-1.5 py-px pl-2 text-[10px] font-medium leading-tight text-text-primary bg-surface-card"
               title={chip}
@@ -955,6 +1077,7 @@ export function SidebarSessionHistory() {
               />
               {chip}
             </span>
+            )}
             <input
               ref={renameInputRef}
               value={editingName}
@@ -970,7 +1093,7 @@ export function SidebarSessionHistory() {
                 }
               }}
               className="min-w-0 flex-1 rounded border border-border bg-surface-card px-1.5 py-0.5 text-[12px] text-text-primary outline-none focus:border-[rgba(var(--theme-color-rgb,59,130,246),0.55)]"
-              aria-label="重命名会话"
+              aria-label={t("history.renameSession")}
             />
           </>
         ) : (
@@ -986,21 +1109,44 @@ export function SidebarSessionHistory() {
             }}
             title={
               selectMode
-                ? "点击勾选"
+                ? t("history.clickToSelect")
                 : isRunning
-                  ? `${chip} · ${title} · 正在生成`
+                  ? t("history.titleGenerating", { chip, title })
                   : isInterrupted
-                    ? `${chip} · ${title} · 已中断`
-                    : `${chip} · ${title}`
+                    ? t("history.titleInterrupted", { chip, title })
+                    : t("history.titlePlain", { chip, title })
             }
             aria-label={
               isRunning
-                ? `${chip} ${title} · 正在生成`
+                ? t("history.ariaGenerating", { chip, title })
                 : isInterrupted
-                  ? `${chip} ${title} · 已中断`
-                  : `${chip} ${title}`
+                  ? t("history.ariaInterrupted", { chip, title })
+                  : t("history.ariaPlain", { chip, title })
             }
           >
+            {hasChildren ? (
+              <span
+                role="button"
+                tabIndex={-1}
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-text-faint hover:text-text-strong"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  opts?.onToggleExpanded?.();
+                }}
+                aria-label={expanded ? t("history.collapseChildren") : t("history.expandChildren")}
+              >
+                {expanded ? (
+                  <ChevronDown aria-hidden className="h-3 w-3" />
+                ) : (
+                  <ChevronRight aria-hidden className="h-3 w-3" />
+                )}
+              </span>
+            ) : (
+              <span className="w-4 shrink-0" aria-hidden />
+            )}
+            {nestedChild ? (
+              <GitBranch aria-hidden className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={1.8} />
+            ) : (
             <span
               className="relative shrink-0 overflow-hidden rounded px-1.5 py-px pl-2 text-[10px] font-medium leading-tight text-text-primary bg-surface-card"
             >
@@ -1011,11 +1157,12 @@ export function SidebarSessionHistory() {
               />
               {chip}
             </span>
+            )}
             {isRunning ? (
               <span
                 className="flex h-4 w-4 shrink-0 items-center justify-center text-text-muted"
-                title="正在生成"
-                aria-label="正在生成"
+                title={t("history.generating")}
+                aria-label={t("history.generating")}
               >
                 <SessionGeneratingDots />
               </span>
@@ -1023,9 +1170,9 @@ export function SidebarSessionHistory() {
             {isInterrupted && !isRunning ? (
               <span
                 className="inline-flex shrink-0 rounded-sm px-1 py-px text-[10px] font-medium leading-tight text-amber-300"
-                title="该会话已收到中断请求"
+                title={t("history.interruptedHint")}
               >
-                已中断
+                {t("history.interrupted")}
               </span>
             ) : null}
             <span className="min-w-0 flex-1 truncate">{title}</span>
@@ -1045,8 +1192,8 @@ export function SidebarSessionHistory() {
                       ? "text-text-muted"
                       : "text-amber-400"
                 }`}
-                title={`会话体检 ${loopScore} / 100 · 点击查看`}
-                aria-label={`会话体检 ${loopScore}`}
+                title={t("history.loopReview", { score: loopScore })}
+                aria-label={t("history.loopReviewAria", { score: loopScore })}
               >
                 {loopScore}
               </span>
@@ -1067,7 +1214,7 @@ export function SidebarSessionHistory() {
                 menuOpen ? "flex" : "hidden group-hover/row:flex"
               }`}
             >
-              <HoverTip label="更多">
+              <HoverTip label={tCommon("more")}>
                 <button
                   type="button"
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-card hover:text-text-strong"
@@ -1075,12 +1222,12 @@ export function SidebarSessionHistory() {
                     e.stopPropagation();
                     openMoreMenu(row, e.currentTarget);
                   }}
-                  aria-label="更多"
+                  aria-label={tCommon("more")}
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.8} />
                 </button>
               </HoverTip>
-              <HoverTip label="在新标签页打开">
+              <HoverTip label={t("history.openInNewTab")}>
                 <button
                   type="button"
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted transition-[color,transform,background-color] duration-100 ease-out hover:bg-surface-card hover:text-text-strong active:scale-[0.96]"
@@ -1088,12 +1235,12 @@ export function SidebarSessionHistory() {
                     e.stopPropagation();
                     openSessionInNewPane(row);
                   }}
-                  aria-label="在新标签页打开"
+                  aria-label={t("history.openInNewTab")}
                 >
                   <SquareArrowOutUpRight className="h-3.5 w-3.5" strokeWidth={1.8} />
                 </button>
               </HoverTip>
-              <HoverTip label="文件管理">
+              <HoverTip label={t("history.fileManage")}>
                 <button
                   type="button"
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-card hover:text-text-strong"
@@ -1101,7 +1248,7 @@ export function SidebarSessionHistory() {
                     e.stopPropagation();
                     void openFileManage(row);
                   }}
-                  aria-label="文件管理"
+                  aria-label={t("history.fileManage")}
                 >
                   <ListTree className="h-3.5 w-3.5" strokeWidth={1.8} />
                 </button>
@@ -1164,7 +1311,7 @@ export function SidebarSessionHistory() {
       >
       <div className="flex items-center gap-1 px-2 pb-1 pt-2">
         <div className="min-w-0 flex-1 truncate px-1 text-[11px] font-medium text-text-faint">
-          历史对话
+          {t("history.title")}
         </div>
         {!selectMode ? (
           <>
@@ -1176,8 +1323,8 @@ export function SidebarSessionHistory() {
                 setSelectedSessionIds([]);
                 setFilterOpen(false);
               }}
-              title="多选会话"
-              aria-label="多选会话"
+              title={t("history.multiSelect")}
+              aria-label={t("history.multiSelect")}
             >
               <ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} />
             </button>
@@ -1190,8 +1337,8 @@ export function SidebarSessionHistory() {
                   : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
               }`}
               onClick={openFilterMenu}
-              title={`筛选历史（当前：${filterLabel}）`}
-              aria-label="筛选历史对话"
+              title={t("history.filterTitle", { label: filterLabel })}
+              aria-label={t("history.filterAria")}
             >
               <ListFilter className="h-3.5 w-3.5" strokeWidth={1.75} />
             </button>
@@ -1209,8 +1356,8 @@ export function SidebarSessionHistory() {
                   return next;
                 });
               }}
-              title="搜索历史对话"
-              aria-label="搜索历史对话"
+              title={t("history.searchTitle")}
+              aria-label={t("history.searchAria")}
             >
               <Search className="h-3.5 w-3.5" strokeWidth={1.75} />
             </button>
@@ -1222,9 +1369,9 @@ export function SidebarSessionHistory() {
               className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-surface-hover hover:text-text-strong disabled:opacity-50"
               onClick={toggleSelectAll}
               disabled={batchDeleting || selectableIds.length === 0}
-              title="全选或取消全选"
+              title={t("history.selectAllToggle")}
             >
-              {allSelectableSelected ? "取消全选" : "全选"}
+              {allSelectableSelected ? t("history.deselectAll") : t("history.selectAll")}
             </button>
             <button
               type="button"
@@ -1233,13 +1380,15 @@ export function SidebarSessionHistory() {
               disabled={batchDeleting || selectedSessionIds.length === 0}
               title={
                 selectedSessionIds.length > 0
-                  ? `删除 ${selectedSessionIds.length} 个会话`
-                  : "先勾选会话"
+                  ? t("history.deleteCount", { count: selectedSessionIds.length })
+                  : t("history.selectFirst")
               }
             >
               {batchDeleting
-                ? "删除中..."
-                : `删除${selectedSessionIds.length > 0 ? ` (${selectedSessionIds.length})` : ""}`}
+                ? t("history.deleting")
+                : selectedSessionIds.length > 0
+                  ? t("history.deleteWithCount", { count: selectedSessionIds.length })
+                  : tCommon("delete")}
             </button>
             <button
               type="button"
@@ -1249,9 +1398,9 @@ export function SidebarSessionHistory() {
                 setSelectedSessionIds([]);
               }}
               disabled={batchDeleting}
-              title="取消多选"
+              title={t("history.cancelSelect")}
             >
-              取消
+              {tCommon("cancel")}
             </button>
           </>
         )}
@@ -1273,7 +1422,7 @@ export function SidebarSessionHistory() {
                 setSearchQuery("");
               }
             }}
-            placeholder="搜索会话..."
+            placeholder={t("history.searchPlaceholder")}
             className="w-full rounded-md border border-[color:var(--border-muted)] bg-surface-card px-2 py-1 text-[12px] text-text-primary outline-none placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb,59,130,246),0.45)]"
           />
         </div>
@@ -1281,11 +1430,11 @@ export function SidebarSessionHistory() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-3">
         {/* WeChat IM */}
-        {sectionHeader("wechat", "微信 IM", {
+        {sectionHeader("wechat", t("history.wechatIm"), {
           accentClass: "text-[#25D366]",
           badge: wechatBoundId
             ? {
-                text: "已绑定",
+                text: t("history.bound"),
                 className: "bg-[rgba(37,211,102,0.15)] text-[#25D366]",
               }
             : undefined,
@@ -1296,18 +1445,18 @@ export function SidebarSessionHistory() {
               renderRow(wechatRow)
             ) : (
               <div className="px-2 py-1 text-[11px] text-text-faint">
-                {wechatBoundId && searchQuery.trim() ? "无匹配" : "未绑定会话"}
+                {wechatBoundId && searchQuery.trim() ? t("history.noMatch") : t("history.unbound")}
               </div>
             )}
           </div>
         )}
 
         {/* Feishu IM */}
-        {sectionHeader("feishu", "飞书 IM", {
+        {sectionHeader("feishu", t("history.feishuIm"), {
           accentClass: "text-[#3370FF]",
           badge: feishuBoundId
             ? {
-                text: "已绑定",
+                text: t("history.bound"),
                 className: "bg-[rgba(51,112,255,0.15)] text-[#3370FF]",
               }
             : undefined,
@@ -1318,44 +1467,44 @@ export function SidebarSessionHistory() {
               renderRow(feishuRow)
             ) : (
               <div className="px-2 py-1 text-[11px] text-text-faint">
-                {feishuBoundId && searchQuery.trim() ? "无匹配" : "未绑定会话"}
+                {feishuBoundId && searchQuery.trim() ? t("history.noMatch") : t("history.unbound")}
               </div>
             )}
           </div>
         )}
 
         {/* Pinned */}
-        {sectionHeader("pinned", "PINNED")}
+        {sectionHeader("pinned", t("history.pinned"))}
         {!collapse.pinned && (
           <div className="mb-1">
             {buckets.pinned.length === 0 ? (
-              <div className="px-2 py-1 text-[11px] text-text-faint">暂无置顶</div>
+              <div className="px-2 py-1 text-[11px] text-text-faint">{pinnedEmptyHint}</div>
             ) : (
-              buckets.pinned.map((row) => renderRow(row))
+              buckets.pinned.map((node) => renderHistoryNode(node))
             )}
           </div>
         )}
 
         {/* Today */}
-        {sectionHeader("today", "今天")}
+        {sectionHeader("today", t("history.today"))}
         {!collapse.today && (
           <div className="mb-1">
             {todayVisible.length === 0 ? (
-              <div className="px-2 py-1 text-[11px] text-text-faint">暂无</div>
+              <div className="px-2 py-1 text-[11px] text-text-faint">{historyEmptyHint}</div>
             ) : (
-              todayVisible.map((row) => renderRow(row))
+              todayVisible.map((node) => renderHistoryNode(node))
             )}
           </div>
         )}
 
         {/* Earlier */}
-        {sectionHeader("earlier", "更早")}
+        {sectionHeader("earlier", t("history.earlier"))}
         {!collapse.earlier && (
           <div className="mb-1">
             {earlierVisible.length === 0 ? (
-              <div className="px-2 py-1 text-[11px] text-text-faint">暂无</div>
+              <div className="px-2 py-1 text-[11px] text-text-faint">{historyEmptyHint}</div>
             ) : (
-              earlierVisible.map((row) => renderRow(row))
+              earlierVisible.map((node) => renderHistoryNode(node))
             )}
           </div>
         )}
@@ -1366,7 +1515,7 @@ export function SidebarSessionHistory() {
             className="mx-2 mt-1 w-[calc(100%-1rem)] rounded-md px-2 py-1.5 text-left text-[12px] text-[rgb(var(--theme-color-rgb,59,130,246))] hover:bg-surface-hover"
             onClick={() => setVisibleLimit((n) => n + SIDEBAR_HISTORY_PAGE_SIZE)}
           >
-            显示更多
+            {t("history.showMore")}
           </button>
         ) : null}
       </div>
@@ -1427,23 +1576,23 @@ export function SidebarSessionHistory() {
             >
               {(
                 [
-                  { id: "rename" as const, label: "重命名", icon: Pencil, danger: false },
+                  { id: "rename" as const, label: t("history.rename"), icon: Pencil, danger: false },
                   {
                     id: "toggle_pin" as const,
-                    label: moreMenuRow.pinned ? "取消置顶" : "置顶",
+                    label: moreMenuRow.pinned ? t("history.unpin") : t("history.pin"),
                     icon: Pin,
                     danger: false,
                   },
-                  { id: "file_manage" as const, label: "文件管理", icon: ListTree, danger: false },
-                  { id: "fork" as const, label: "分叉会话", icon: GitBranch, danger: false },
+                  { id: "file_manage" as const, label: t("history.fileManage"), icon: ListTree, danger: false },
+                  { id: "fork" as const, label: t("history.fork"), icon: GitBranch, danger: false },
                   ...(!isAutomationPaneAvatarId(moreMenuRow.avatar_id)
                     ? [
                         {
                           id: "toggle_feishu_binding" as const,
                           label:
                             feishuBoundId === moreMenuRow.session_id
-                              ? "取消绑定飞书"
-                              : "绑定为飞书会话",
+                              ? t("history.unbindFeishu")
+                              : t("history.bindFeishu"),
                           icon: MessageSquare,
                           danger: false,
                         },
@@ -1451,15 +1600,15 @@ export function SidebarSessionHistory() {
                           id: "toggle_wechat_binding" as const,
                           label:
                             wechatBoundId === moreMenuRow.session_id
-                              ? "取消绑定微信"
-                              : "绑定为微信会话",
+                              ? t("history.unbindWechat")
+                              : t("history.bindWechat"),
                           icon: Smartphone,
                           danger: false,
                         },
                       ]
                     : []),
-                  { id: "archive_prior" as const, label: "归档此前会话", icon: Archive, danger: false },
-                  { id: "delete" as const, label: "删除会话", icon: Trash2, danger: true },
+                  { id: "archive_prior" as const, label: t("history.archivePrior"), icon: Archive, danger: false },
+                  { id: "delete" as const, label: t("history.deleteSession"), icon: Trash2, danger: true },
                 ]
               ).map((item) => {
                 const Icon = item.icon;

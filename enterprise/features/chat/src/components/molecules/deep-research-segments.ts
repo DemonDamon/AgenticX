@@ -1,6 +1,7 @@
 import type { ChatMessageDeepResearch, DeepResearchEvent } from "@agenticx/core-api";
 import type { ResearchStep } from "./deep-research-steps";
 import type { LaneSource } from "./deep-research-lane-sources";
+import { getChatCopy, type ChatCopy } from "../../i18n/chat-copy";
 
 export type DeepResearchSegment =
   | { kind: "narrative"; id: string; text: string }
@@ -47,11 +48,11 @@ type LaneDraft = {
   sourceList?: LaneSource[];
 };
 
-function laneToStep(lane: LaneDraft): ResearchStep {
+function laneToStep(lane: LaneDraft, copy: ChatCopy): ResearchStep {
   return {
     id: `lane-${lane.laneId}`,
     kind: "lane",
-    title: "搜索网页",
+    title: copy.segments.searchWeb,
     // The always-visible metric chips carry the counts; a "· N 个结果" suffix
     // would only compete with them for the truncated subtitle line.
     subtitle: lane.title,
@@ -68,28 +69,37 @@ export function finalizeToolsCardTitle(
   title: string,
   stepCount: number,
   settled: boolean,
+  copy: ChatCopy = getChatCopy("zh"),
 ): string {
-  const raw = title.trim() || "正在并行检索…";
+  const raw = title.trim() || copy.segments.parallelSearching;
   if (!settled) return raw;
 
   let next = raw
     .replace(/[，,]?\s*正在并行检索…?\s*$/u, "")
     .replace(/正在并行检索…?/gu, "")
+    .replace(/[,-]?\s*searching in parallel…?\s*$/i, "")
+    .replace(/searching in parallel…?/gi, "")
     .trim();
 
   if (!next) {
-    return `已完成 ${stepCount} 条调研车道检索`;
+    return copy.segments.completedLanes(stepCount);
   }
   if (/已拆解/.test(next)) {
     next = next.replace(/已拆解/, "已完成");
     if (!/检索/.test(next)) next = `${next}检索`;
     return next;
   }
+  if (/^Broke down\b/i.test(next)) {
+    return next.replace(/^Broke down/i, "Completed");
+  }
   if (next.startsWith("正在")) {
     return `已${next.replace(/^正在/u, "").replace(/…+$/u, "")}`;
   }
-  if (!/完成|已完成|结束/.test(next)) {
-    return `${next} · 已完成`;
+  if (/^(Scanning|Checking|Planning|Drafting|Writing|Synthesizing|Topic cold-start|Reviewing)\b/i.test(next)) {
+    return next.replace(/…+$/u, "");
+  }
+  if (!/完成|已完成|结束|complete|completed|done/i.test(next)) {
+    return `${next} · ${copy.segments.doneSuffix}`;
   }
   return next;
 }
@@ -98,10 +108,13 @@ export function finalizeToolsCardTitle(
  * Past-tense title for a finished phase row, so a completed step never keeps
  * reading "正在撰写…" next to a check mark.
  */
-export function completedPhaseTitle(title: string): string {
+export function completedPhaseTitle(
+  title: string,
+  copy: ChatCopy = getChatCopy("zh"),
+): string {
   const raw = title.trim().replace(/…+$/u, "");
   if (!raw) return title.trim();
-  if (raw === "正在综合分析") return "已完成综合分析";
+  if (raw === "正在综合分析" || raw === "Synthesizing") return copy.segments.finishedSynthesis;
   if (raw.startsWith("正在")) return `已${raw.replace(/^正在/u, "")}`;
   return raw;
 }
@@ -131,13 +144,14 @@ export function collectDeepResearchDeliveryArtifacts(
 export function buildDeepResearchSegments(
   events: DeepResearchEvent[],
   status?: ChatMessageDeepResearch["status"],
+  copy: ChatCopy = getChatCopy("zh"),
 ): DeepResearchSegment[] {
   const segments: DeepResearchSegment[] = [];
   let clarifyPushed = false;
   const clarifyChatRounds = new Set<number>();
   let planPushed = false;
   let planVisibility: "hidden" | "preview" | "editable" | "chat_editable" = "hidden";
-  let toolsTitle = "正在并行检索…";
+  let toolsTitle = copy.segments.parallelSearching;
   let toolsId = "tools-1";
   let lanes = new Map<string, LaneDraft>();
   let seq = 0;
@@ -157,7 +171,7 @@ export function buildDeepResearchSegments(
         continue;
       }
       step.status = "done";
-      step.title = completedPhaseTitle(step.title);
+      step.title = completedPhaseTitle(step.title, copy);
     }
   };
 
@@ -169,7 +183,7 @@ export function buildDeepResearchSegments(
     segments.push({
       kind: "tools",
       id: writeId,
-      title: running ? "正在撰写报告…" : `已完成报告撰写 · ${writeSteps.length} 步`,
+      title: running ? copy.segments.writingReport : copy.segments.finishedWriting(writeSteps.length),
       steps: writeSteps,
     });
     wroteCard = true;
@@ -191,12 +205,12 @@ export function buildDeepResearchSegments(
     }
     const steps = [...lanes.values()]
       .sort((a, b) => a.index - b.index)
-      .map(laneToStep);
+      .map((lane) => laneToStep(lane, copy));
     const allSettled = steps.every((s) => s.status === "done" || s.status === "failed");
     segments.push({
       kind: "tools",
       id: toolsId,
-      title: finalizeToolsCardTitle(toolsTitle, steps.length, allSettled || runTerminal),
+      title: finalizeToolsCardTitle(toolsTitle, steps.length, allSettled || runTerminal, copy),
       steps,
     });
     lanes = new Map();
@@ -274,7 +288,7 @@ export function buildDeepResearchSegments(
         }
         if (event.phase === "lanes" || event.phase === "reflect") {
           flushCards();
-          toolsTitle = event.message || (event.phase === "reflect" ? "复盘信息缺口…" : "正在并行检索…");
+          toolsTitle = event.message || (event.phase === "reflect" ? copy.phases.reflectFallback + "…" : copy.segments.parallelSearching);
           break;
         }
         if (event.phase === "synthesize") {
@@ -283,7 +297,7 @@ export function buildDeepResearchSegments(
           writeSteps.push({
             id: `synthesize-step-${seq++}`,
             kind: "phase",
-            title: event.message?.trim() || "综合分析",
+            title: event.message?.trim() || copy.phases.synthesizeFallback,
             status: "running",
             detailLines: [],
           });
@@ -298,7 +312,7 @@ export function buildDeepResearchSegments(
           const message = event.message?.trim() || "";
           const plainSuccess =
             status === "completed" &&
-            (message === "" || message === "深度研究完成");
+            (message === "" || message === "深度研究完成" || message === "Deep research complete");
           if (!(wroteCard && plainSuccess)) {
             segments.push({
               kind: "status",
@@ -325,7 +339,12 @@ export function buildDeepResearchSegments(
         segments.push({
           kind: "stats",
           id: `stats-${seq++}`,
-          label: `检索式 ${event.queriesPlanned} 条 · 发现 ${event.urlsDiscovered} 个来源 · 采用 ${event.sourcesSelected} 个 · 读取正文 ${event.pagesFetched} 篇`,
+          label: copy.segments.stats({
+            queriesPlanned: event.queriesPlanned,
+            urlsDiscovered: event.urlsDiscovered,
+            sourcesSelected: event.sourcesSelected,
+            pagesFetched: event.pagesFetched,
+          }),
         });
         break;
       }
@@ -336,7 +355,7 @@ export function buildDeepResearchSegments(
           index: event.index,
           total: event.total,
           status: "running",
-          detailLines: [`调研子问题：${event.title}`],
+          detailLines: [copy.segments.researchQuestion(event.title)],
         });
         break;
       }
@@ -358,7 +377,7 @@ export function buildDeepResearchSegments(
         lane.status = event.status === "ok" ? "done" : "failed";
         if (event.artifactPath) {
           lane.artifactPath = event.artifactPath;
-          lane.detailLines.push(`备忘：${event.artifactPath}`);
+          lane.detailLines.push(copy.segments.memo(event.artifactPath));
         }
         break;
       }
@@ -408,7 +427,10 @@ export function deepResearchNeedsTrailingActivity(
  * Label for the pre-segment spinner. `clarify` / `plan` phases produce no segment,
  * so their message is the only progress signal the user can get in that window.
  */
-export function deepResearchWaitingLabel(events: DeepResearchEvent[]): string {
+export function deepResearchWaitingLabel(
+  events: DeepResearchEvent[],
+  copy: ChatCopy = getChatCopy("zh"),
+): string {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i];
     if (event?.type === "phase") {
@@ -416,7 +438,7 @@ export function deepResearchWaitingLabel(events: DeepResearchEvent[]): string {
       if (message) return message;
     }
   }
-  return "正在启动深度研究…";
+  return copy.segments.startingResearch;
 }
 
 /** Legacy content deltas that used to leak into the report body. */
@@ -430,6 +452,10 @@ const LEGACY_NARRATIVE_LINES = [
   "检索阶段完成，数据已足够。现在进入综合分析与报告撰写。",
   "发现 1 处信息缺口，正在补充检索。",
   "证据交叉验证充分，未发现需要补搜的缺口。",
+  "I'll quickly search the latest public sources to calibrate the research premise.",
+  "Context is calibrated. Confirm the research direction next.",
+  "Retrieval is complete and the evidence is sufficient. Moving on to synthesis and the report.",
+  "Cross-checks look sufficient; no follow-up search needed.",
 ];
 
 /** Strip progress sentences from assistant content so only the final report remains. */

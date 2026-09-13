@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Message } from "../../store";
 import { Check, ChevronDown, ChevronRight, Wrench } from "lucide-react";
 import { buildToolCardTitle, ToolCallCard } from "./ToolCallCard";
@@ -6,7 +7,7 @@ import type { ReactNode } from "react";
 import { isTodoUpdateToolMessage } from "./MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import { REACT_RAIL_ICON_TILE_STYLE, REACT_RAIL_TITLE_CLASS } from "./im-layout";
-import { isToolGroupInProgress } from "./group-tool-messages";
+import { isToolGroupCancelled, isToolGroupInProgress } from "./group-tool-messages";
 import {
   formatToolElapsedSeconds,
   useLiveToolElapsedSeconds,
@@ -55,10 +56,11 @@ function ToolNameChip({ name }: { name: string }) {
 }
 
 function CompletedToolSummary({ messages }: { messages: Message[] }) {
+  const { t } = useTranslation("chat");
   const parts = sortedToolCounts(messages);
   return (
     <span className={`inline-flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 ${REACT_RAIL_TITLE_CLASS}`}>
-      <span className="shrink-0">已调用 {messages.length} 次工具</span>
+      <span className="shrink-0">{t("tool.calledCount", { count: messages.length })}</span>
       {parts.length > 0 ? (
         <>
           <span className="shrink-0 text-text-faint" aria-hidden>
@@ -67,7 +69,7 @@ function CompletedToolSummary({ messages }: { messages: Message[] }) {
           {parts.map(([name, count], index) => (
             <span key={name} className="inline-flex min-w-0 items-center">
               {index > 0 ? <span className="shrink-0 text-text-faint mr-1.5">，</span> : null}
-              <span className="shrink-0 tabular-nums mr-1.5">{count} 次</span>
+              <span className="shrink-0 tabular-nums mr-1.5">{t("tool.times", { count })}</span>
               <ToolNameChip name={name} />
             </span>
           ))}
@@ -89,6 +91,7 @@ export function TurnToolGroupCard({
   holdProgress = false,
   onSkillManageApply,
 }: Props) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   // todo_write snapshots are owned by StickyTaskBar; never nest TodoUpdateCard here.
   const visibleMessages = useMemo(
@@ -105,6 +108,10 @@ export function TurnToolGroupCard({
     () => isToolGroupInProgress(visibleMessages) || holdProgress,
     [holdProgress, visibleMessages],
   );
+  const endedCancelled = useMemo(
+    () => !holdProgress && isToolGroupCancelled(visibleMessages),
+    [holdProgress, visibleMessages],
+  );
   const activeTools = useMemo(
     () =>
       visibleMessages.filter(
@@ -118,7 +125,7 @@ export function TurnToolGroupCard({
     Boolean(activeTool),
     activeTool?.toolElapsedSec,
   );
-  const activeToolTitle = activeTool ? buildToolCardTitle(activeTool) : "工具";
+  const activeToolTitle = activeTool ? buildToolCardTitle(activeTool, t) : t("tool.tool");
 
   // Group may consist solely of todo_write (hidden); do not render an empty shell.
   if (visibleMessages.length === 0) return null;
@@ -146,6 +153,10 @@ export function TurnToolGroupCard({
             >
               <Wrench className="h-2.5 w-2.5" strokeWidth={2.45} />
             </span>
+          ) : endedCancelled ? (
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-surface-hover text-text-faint">
+              <Wrench className="h-2.5 w-2.5" strokeWidth={2.45} />
+            </span>
           ) : (
             <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]">
               <Check className="h-2.5 w-2.5 text-[var(--theme-color-text)]" strokeWidth={2.45} />
@@ -155,8 +166,8 @@ export function TurnToolGroupCard({
         <span className="flex min-w-0 items-center gap-1.5">
           {inProgress ? (
             <span className={`min-w-0 truncate ${REACT_RAIL_TITLE_CLASS}`}>
-              调用 {activeToolTitle}
-              {activeTools.length > 1 ? ` 等 ${activeTools.length} 个工具` : ""}
+              {t("tool.calling", { title: activeToolTitle })}
+              {activeTools.length > 1 ? t("tool.andMoreTools", { count: activeTools.length }) : ""}
             </span>
           ) : (
             <CompletedToolSummary messages={visibleMessages} />
@@ -164,9 +175,13 @@ export function TurnToolGroupCard({
           {activeTool ? (
             <Shimmer
               variant="status"
-              text={`运行中 · ${formatToolElapsedSeconds(liveElapsedSec)}`}
+              text={t("tool.running", { elapsed: formatToolElapsedSeconds(liveElapsedSec) })}
               className="shrink-0 whitespace-nowrap text-[12px] font-normal tabular-nums"
             />
+          ) : endedCancelled ? (
+            <span className="shrink-0 whitespace-nowrap text-[12px] font-normal text-text-faint">
+              {t("tool.cancelled")}
+            </span>
           ) : null}
         </span>
         {expanded ? (

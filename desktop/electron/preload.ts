@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   },
   getApiAuthToken: async (): Promise<string> => ipcRenderer.invoke("get-api-auth-token"),
   platform: async (): Promise<string> => ipcRenderer.invoke("get-platform"),
+  getSystemLocale: async (): Promise<string> => ipcRenderer.invoke("get-system-locale"),
   syncTitleBarOverlay: async (theme: "dark" | "light" | "dim") =>
     ipcRenderer.invoke("sync-title-bar-overlay", theme) as Promise<{ ok: boolean; skipped?: boolean; error?: string }>,
   getConnectionMode: async (): Promise<"local" | "remote"> => ipcRenderer.invoke("get-connection-mode"),
@@ -291,6 +292,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     tool_search_auto_schema_token_threshold?: number;
     tool_search_threshold_strategy?: "adaptive" | "manual";
     tool_search_context_budget_ratio?: number;
+    ops_tools_enabled?: boolean;
   }) =>
     ipcRenderer.invoke("save-runtime-config", payload),
   searchSessions: async (payload: { q: string; avatarId?: string }) => {
@@ -321,7 +323,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   setSessionModel: async (payload: { sessionId: string; provider: string; model: string }) =>
     ipcRenderer.invoke("set-session-model", payload),
   loadLayout: async () => ipcRenderer.invoke("layout-get"),
-  saveUiPrefs: async (payload: { theme: "dark" | "light" | "dim" }) =>
+  saveUiPrefs: async (payload: { theme?: "dark" | "light" | "dim"; locale?: "zh" | "en" }) =>
     ipcRenderer.invoke("ui-prefs-set", payload) as Promise<{ ok: boolean; error?: string }>,
   saveLayout: async (payload: {
     panes?: Array<{
@@ -335,6 +337,8 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   }) => ipcRenderer.invoke("layout-set", payload),
   forkSession: async (payload: { sessionId: string }) =>
     ipcRenderer.invoke("fork-session", payload),
+  continueFromMessage: async (payload: { sessionId: string; messageId: string }) =>
+    ipcRenderer.invoke("continue-from-message", payload),
   archiveSessions: async (payload: { sessionId: string; avatarId?: string | null }) =>
     ipcRenderer.invoke("archive-sessions", payload),
   listTaskspaces: async (sessionId: string) =>
@@ -888,6 +892,7 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
       error?: string;
     }>,
   loadLocalFileDataUrl: async (path: string) => ipcRenderer.invoke("load-local-file-data-url", path),
+  resolveLocalMediaUrl: async (path: string) => ipcRenderer.invoke("resolve-local-media-url", path),
   installFromRegistry: async (args: {
     source: string;
     name: string;

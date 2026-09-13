@@ -1,4 +1,12 @@
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../i18n/i18n";
+import { formatClock } from "../i18n/format";
+import {
+  createPaneTextSender,
+  registerPaneTextSender,
+} from "../chat/send-text-to-pane";
+import { replayFocusForBranchLineage } from "./replay/branch-lineage-navigation";
 import { createPortal } from "react-dom";
 import type { ErrorInfo, ReactNode, MouseEvent as ReactMouseEvent, CSSProperties, RefObject } from "react";
 import {
@@ -53,6 +61,19 @@ import { VOICE_FOCUS_ENTRY_ENABLED } from "../voice/focus-mode-ui";
 import { VoicePttOverlay } from "./VoicePttOverlay";
 import { RunLocationPicker } from "./composer/RunLocationPicker";
 import { RunModePicker } from "./composer/RunModePicker";
+import { ComposerModeMenu, COMPOSER_MODE_MENU_ID } from "./composer/ComposerModeMenu";
+import { TurnIntentChip } from "./composer/TurnIntentChip";
+import {
+  resolveRequestTurnIntent,
+  togglePlanIntent,
+  type TurnIntent,
+} from "../utils/turn-intent";
+import {
+  findLatestPlanArtifact,
+  isNaturalLanguagePlanBuildRequest,
+  NEAR_PLAN_BUILD_REQUEST,
+  type PlanArtifactPayload,
+} from "../utils/plan-artifact";
 import {
   useComposerWorkspaceFolders,
   WorkspaceFolderPicker,
@@ -209,7 +230,13 @@ import {
   shouldShowStopButton,
   type SessionExecutionState,
 } from "../utils/streaming-stop-policy";
-import { shouldApplyScrollPinFromEvent, shouldPinScrollOnUserSend } from "../utils/chat-scroll-pin";
+import { queuedMessagesForSession } from "../utils/pending-message-queue";
+import {
+  chatListFollowRows,
+  shouldApplyScrollPinFromEvent,
+  shouldPinScrollOnPresentationEnter,
+  shouldPinScrollOnUserSend,
+} from "../utils/chat-scroll-pin";
 import {
   TURN_INTERRUPTED_TOAST,
   isTurnInterruptionNoticeMessage,
@@ -255,7 +282,10 @@ import {
   type ContinueReason,
   type ContinueSource,
 } from "../utils/session-continue";
-import { mergeSessionMessagesTail } from "../utils/session-message-merge";
+import {
+  mergeSessionMessagesTail,
+  retainUnpersistedLiveUserTurns,
+} from "../utils/session-message-merge";
 import {
   buildPendingToolFallback,
   buildDeferredToolResultResolution,
@@ -278,10 +308,11 @@ import {
 import { resolveReferencesForAssistant } from "../utils/turn-reference-context";
 import { reattachSessionStreamUrl, parseSseFrame } from "../utils/session-reattach";
 import {
+  continueMessageIdForRequest,
   mapLoadedSessionMessage,
   type LoadedSessionMessage,
 } from "../utils/session-message-map";
-import { parseMessageUsage } from "../utils/message-turn-meta";
+import { parseMessageUsage, sessionAccumulateFromUsageEvent } from "../utils/message-turn-meta";
 import { sessionTokensFromMessages } from "../utils/session-tokens-from-messages";
 import {
   assistantVisibleBodyForUi,
@@ -291,6 +322,7 @@ import {
 } from "../utils/assistant-output";
 import {
   buildContextFileKeyFromAttachment,
+  buildContextFilePlaceholderPayload,
   canonicalizeUserReferenceMentions,
   findReferenceAttachmentMeta,
   isWorkspaceReferenceAttachment,
@@ -301,6 +333,12 @@ import { isLikelyTextFile } from "../utils/text-attachment";
 import { isViewImageInjectMessage } from "../utils/view-image-inject";
 import { resolveSessionTailForSwitch, invalidateSessionTail } from "../utils/session-tail-cache";
 import { visibleMessagesForSession } from "../utils/message-ownership";
+import {
+  bindMessagesToRun,
+  sliceMessagesForPresentation,
+} from "./replay/replay-presentation";
+import { useReplayPresentation } from "./replay/useReplayPresentation";
+import { useReplayStore } from "./replay/replay-store";
 import { maxContinuationRound } from "../utils/continuation-notice";
 import {
   shouldDropDuplicateUserSend,
@@ -345,9 +383,15 @@ import {
   type CcBridgeSessionModeHint,
 } from "../utils/cc-bridge-ui";
 import {
+  formatWbBridgeLiveSnapshot,
   formatWbBridgeSendToolResult,
   wbBridgeSendToolProgressLabel,
 } from "../utils/wb-bridge-ui";
+import {
+  startWbBridgeProgressPoll,
+  stopAllWbBridgeProgressPolls,
+  stopWbBridgeProgressPoll,
+} from "../utils/wb-bridge-progress";
 import type { AutomationTask } from "./automation/types";
 import { parseReasoningContent } from "./messages/reasoning-parser";
 import {
@@ -381,8 +425,10 @@ import {
 import { getRememberedSessionForAvatar } from "../utils/avatar-last-session";
 import { readScopedLocalStorage, writeScopedLocalStorage } from "../utils/backend-scope";
 import {
+  GLOBAL_SEARCH_ADD_TO_WORKSPACE,
   GLOBAL_SEARCH_REFERENCE_FILE,
   GLOBAL_SEARCH_WORKSPACE_ADDED,
+  type GlobalSearchAddToWorkspaceDetail,
   type GlobalSearchReferenceFileDetail,
 } from "./global-search/global-search-events";
 import {
@@ -394,7 +440,7 @@ import {
   lookupComposerRefPath,
   resolveReferenceSourcePath,
 } from "../utils/chat-file-mention";
-import { absoluteTaskspacePath } from "../utils/workspace-file-path";
+import { absoluteTaskspacePath, canonicalizeArtifactPreviewPath } from "../utils/workspace-file-path";
 import {
   composerAcceptsDragTypes,
   decodeNearWorkspaceDragEntry,
@@ -429,7 +475,6 @@ const SESSION_UNATTENDED_STORAGE_KEY = "agx-session-unattended-v1";
 
 /** Shown in the user bubble and sent as user_input when sending attachments without typed text (API min_length=1). */
 const ATTACHMENT_ONLY_USER_PROMPT = "（见附件，请结合附件回答。）";
-const VISION_UNSUPPORTED_TOAST = "模型不支持该文件类型";
 function resolveQuoteBody(message: Message, selectedText?: string): string {
   const sel = selectedText?.trim() ?? "";
   if (sel.length > 0) return sel;
@@ -554,11 +599,11 @@ function shellSingleQuote(input: string): string {
 const EMPTY_QUEUE: QueuedMessage[] = [];
 const KB_RETRIEVAL_MODE_OPTIONS: {
   value: "auto" | "always";
-  label: string;
-  hint: string;
+  labelKey: string;
+  hintKey: string;
 }[] = [
-  { value: "auto", label: "智能检索", hint: "由模型判断何时查知识库" },
-  { value: "always", label: "始终检索", hint: "回答前优先检索知识库" },
+  { value: "auto", labelKey: "kb.auto", hintKey: "kb.autoHint" },
+  { value: "always", labelKey: "kb.always", hintKey: "kb.alwaysHint" },
 ];
 
 /** 多分窗下仅看窗口宽度不可靠：按单窗格可视宽度切换到「侧栏抽屉」模式（对齐左侧主导航 overlay，不并排挤压会话区）。 */
@@ -678,15 +723,18 @@ function NewTopicButton({
 /** 「更多操作」+ 按钮：仅承载当前消息的附件与能力，不混入会话级操作。 */
 function ComposerMoreActionsButton({
   onPickFile,
+  renderMode,
   renderSkillPicker,
   renderKbRetrieval,
   renderConnectors,
 }: {
   onPickFile: () => void;
+  renderMode?: () => ReactNode;
   renderSkillPicker: () => ReactNode;
   renderKbRetrieval: () => ReactNode;
   renderConnectors: () => ReactNode;
 }) {
+  const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const [panelPos, setPanelPos] = useState<{ bottom: number; left: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -714,6 +762,7 @@ function ComposerMoreActionsButton({
         "agx-skill-picker-dropdown",
         "agx-kb-retrieval-mode-menu",
         "agx-connectors-menu-dropdown",
+        COMPOSER_MODE_MENU_ID,
       ];
       for (const id of flyoutIds) {
         const el = document.getElementById(id);
@@ -748,7 +797,7 @@ function ComposerMoreActionsButton({
             style={{ bottom: panelPos.bottom, left: panelPos.left, transformOrigin: "bottom left" }}
             className="agx-menu-pop fixed z-[9999] flex w-56 flex-col gap-0.5 rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
             role="menu"
-            aria-label="更多操作"
+            aria-label={t("composer.moreActions")}
           >
             <button
               type="button"
@@ -762,8 +811,9 @@ function ComposerMoreActionsButton({
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px] shrink-0 text-text-muted">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
               </svg>
-              <span className="flex-1">添加文件</span>
+              <span className="flex-1">{t("composer.addFile")}</span>
             </button>
+            {renderMode?.()}
             {renderSkillPicker()}
             {renderKbRetrieval()}
             {renderConnectors()}
@@ -778,7 +828,7 @@ function ComposerMoreActionsButton({
         <button
           type="button"
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-strong transition hover:bg-surface-hover"
-          aria-label="更多操作"
+          aria-label={t("composer.moreActions")}
           aria-expanded={open}
           onClick={toggleOpen}
         >
@@ -813,6 +863,7 @@ interface SkillPickerButtonProps {
 const SKILL_DROPDOWN_WIDTH = 288; // w-72
 
 function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: SkillPickerButtonProps) {
+  const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [skills, setSkills] = useState<SkillItem[]>([]);
@@ -906,7 +957,7 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
                 ref={searchRef}
                 type="text"
                 className="w-full rounded-lg border border-border bg-surface-card px-2.5 py-1.5 text-[12px] text-text-strong outline-none placeholder:text-text-faint focus:border-[rgba(var(--theme-color-rgb,59,130,246),0.55)]"
-                placeholder="搜索技能…"
+                placeholder={t("skill.search")}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
@@ -916,10 +967,10 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-1">
               {loading ? (
-                <div className="px-3 py-4 text-center text-[11px] text-text-faint">加载中…</div>
+                <div className="px-3 py-4 text-center text-[11px] text-text-faint">{t("skill.loading")}</div>
               ) : filtered.length === 0 ? (
                 <div className="px-3 py-4 text-center text-[11px] text-text-faint">
-                  {query ? `未找到"${query}"相关技能` : "暂无可用技能"}
+                  {query ? t("skill.noMatch", { query }) : t("skill.none")}
                 </div>
               ) : (
                 filtered.map((skill) => (
@@ -962,12 +1013,12 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
           type="button"
           role="menuitem"
           className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
-          aria-label="技能"
+          aria-label={t("skill.label")}
           aria-expanded={open}
           onClick={open ? handleClose : handleOpen}
         >
           <SkillPuzzleIcon className="h-[15px] w-[15px] shrink-0 text-text-muted" />
-          <span className="flex-1">技能</span>
+          <span className="flex-1">{t("skill.label")}</span>
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
         </button>
         {dropdown}
@@ -977,12 +1028,12 @@ function SkillPickerButton({ apiBase, apiToken, onSelect, embedded = false }: Sk
 
   return (
     <>
-      <HoverTip label="引用技能 · 注入 Skill 上下文">
+      <HoverTip label={t("skill.quoteHint")}>
         <button
           ref={btnRef}
           type="button"
           className={iconBtn}
-          aria-label="引用技能"
+          aria-label={t("skill.quote")}
           onClick={open ? handleClose : handleOpen}
         >
           <SkillPuzzleIcon className="h-[15px] w-[15px]" />
@@ -1026,7 +1077,7 @@ class HistoryPanelBoundary extends Component<
             className="rounded px-3 py-2 text-xs text-text-subtle hover:bg-surface-hover hover:text-text-strong"
             onClick={() => this.setState({ hasError: false, retryCount: 0 })}
           >
-            历史面板出错，点击重试
+            {i18n.t("history.errorRetry", { ns: "chat" })}
           </button>
         </div>
       );
@@ -1223,6 +1274,7 @@ function clampFixedPopoverTop(top: number, height: number, margin = PANE_MODEL_P
 }
 
 function PaneModelPicker({ paneId }: { paneId: string }) {
+  const { t } = useTranslation("chat");
   const settings = useAppStore((s) => s.settings);
   const pickerLock = modelPickerLock(useAppStore((s) => s.attachmentRoutingLock));
   const setPaneModel = useAppStore((s) => s.setPaneModel);
@@ -1334,12 +1386,12 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     return formatModelDisplayParts(currentProvider, currentModel, settings.providers[currentProvider]);
   }, [currentSelectable, currentModel, currentProvider, settings.providers]);
   const currentLabel = useMemo(() => {
-    if (!currentModel) return "未选模型";
+    if (!currentModel) return t("model.unselected");
     if (!currentProvider) return currentModel;
-    if (!currentSelectable) return "未选模型";
+    if (!currentSelectable) return t("model.unselected");
     const entry = settings.providers[currentProvider];
     return formatModelOptionLabel(currentProvider, currentModel, entry);
-  }, [currentModel, currentProvider, currentSelectable, settings.providers]);
+  }, [currentModel, currentProvider, currentSelectable, settings.providers, t]);
 
   const syncPanelPosition = useCallback(() => {
     const el = anchorRef.current;
@@ -1532,8 +1584,8 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
               <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
                 {options.length === 0 ? (
                   <div className="px-3 py-4 text-center text-[12px] leading-relaxed text-text-muted">
-                    还没有可用模型
-                    <span className="mt-1 block text-[11px] text-text-subtle">请先在设置中配置服务商</span>
+                    {t("model.noneAvailable")}
+                    <span className="mt-1 block text-[11px] text-text-subtle">{t("model.configureProviderFirst")}</span>
                   </div>
                 ) : (
                   groups.map((group, groupIndex) => {
@@ -1569,7 +1621,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                         {!isCollapsed ? (
                           group.items.length === 0 ? (
                             <div className="px-2.5 py-2 text-[12px] text-text-faint">
-                              暂无可见模型，请在设置中添加
+                              {t("model.noVisible")}
                             </div>
                           ) : (
                             group.items.map((opt) => {
@@ -1635,7 +1687,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                   }}
                 >
                   <SquarePen className="h-3.5 w-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
-                  配置模型
+                  {t("model.configure")}
                 </button>
               </div>
             </div>
@@ -1664,17 +1716,17 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                   {hoverBlurb.description}
                 </div>
                 <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-border pt-2.5 text-[11px]">
-                  <span className="text-text-muted">{hoverBlurb.metaLabel}</span>
+                  <span className="text-text-muted">{t("model.channel")}</span>
                   <span className="truncate font-medium text-text-strong">{hoverBlurb.metaValue}</span>
                 </div>
                 {showDeepSeekThinking ? (
                   <div className="relative mt-2 border-t border-border pt-2">
                     <div className="flex w-full items-center justify-between gap-3 text-[11px]">
-                      <span className="text-text-muted">思考模式</span>
+                      <span className="text-text-muted">{t("model.thinkingMode")}</span>
                       <SettingsSwitch
                         checked={paneThinkingEnabled}
                         size="sm"
-                        aria-label="思考模式"
+                        aria-label={t("model.thinkingMode")}
                         onChange={(next) => {
                           setPaneThinkingEnabled(paneId, next);
                           if (!next) setEffortMenuOpen(false);
@@ -1691,9 +1743,9 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                             setEffortMenuOpen((v) => !v);
                           }}
                         >
-                          <span className="text-text-muted">思考强度</span>
+                          <span className="text-text-muted">{t("model.thinkingEffort")}</span>
                           <span className="inline-flex items-center gap-0.5 font-medium text-text-strong">
-                            {labelForDeepSeekReasoningEffort(paneDeepSeekEffort)}
+                            {labelForDeepSeekReasoningEffort(paneDeepSeekEffort, t)}
                             <ChevronRight
                               className={`h-3 w-3 text-text-muted transition-transform ${
                                 effortMenuOpen ? "rotate-90" : ""
@@ -1723,7 +1775,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                                     setEffortMenuOpen(false);
                                   }}
                                 >
-                                  <span>{opt.label}</span>
+                                  <span>{labelForDeepSeekReasoningEffort(opt.value, t)}</span>
                                   {active ? (
                                     <Check className="h-3 w-3 text-status-success" strokeWidth={2.5} />
                                   ) : null}
@@ -1745,9 +1797,9 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                         setEffortMenuOpen((v) => !v);
                       }}
                     >
-                      <span className="text-text-muted">思考强度</span>
+                      <span className="text-text-muted">{t("model.thinkingEffort")}</span>
                       <span className="inline-flex items-center gap-0.5 font-medium text-text-strong">
-                        {labelForKimiReasoningEffort(paneReasoningEffort)}
+                        {labelForKimiReasoningEffort(paneReasoningEffort, t)}
                         <ChevronRight
                           className={`h-3 w-3 text-text-muted transition-transform ${
                             effortMenuOpen ? "rotate-90" : ""
@@ -1777,7 +1829,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                                 setEffortMenuOpen(false);
                               }}
                             >
-                              <span>{opt.label}</span>
+                              <span>{labelForKimiReasoningEffort(opt.value, t)}</span>
                               {active ? (
                                 <Check className="h-3 w-3 text-status-success" strokeWidth={2.5} />
                               ) : null}
@@ -1815,6 +1867,7 @@ function PaneKnowledgeRetrievalModeSwitch({
   onNewSessionDefaultChange?: (mode: KbRetrievalMode) => void;
   embedded?: boolean;
 }) {
+  const { t } = useTranslation("chat");
   const resolveApiBase = useCallback(async () => {
     const base = String(apiBase ?? "").trim();
     if (base) return base.replace(/\/+$/, "");
@@ -1912,8 +1965,9 @@ function PaneKnowledgeRetrievalModeSwitch({
     [mode, paneId, saving, sessionId],
   );
 
-  const activeLabel =
-    KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.label ?? "智能检索";
+  const activeLabel = t(
+    KB_RETRIEVAL_MODE_OPTIONS.find((opt) => opt.value === mode)?.labelKey ?? "kb.auto",
+  );
 
   // Portal to document.body — composer toolbar has overflow-hidden and would clip
   // an absolute dropdown.
@@ -1931,7 +1985,7 @@ function PaneKnowledgeRetrievalModeSwitch({
             }}
             className="fixed z-[9999] w-[200px] overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
             role="listbox"
-            aria-label="知识库检索模式"
+            aria-label={t("kb.modeAria")}
           >
             {KB_RETRIEVAL_MODE_OPTIONS.map((opt) => {
               const isActive = mode === opt.value;
@@ -1963,9 +2017,9 @@ function PaneKnowledgeRetrievalModeSwitch({
                         isActive ? "text-text-strong" : "text-text-standard"
                       }`}
                     >
-                      {opt.label}
+                      {t(opt.labelKey)}
                     </span>
-                    <span className="text-[11px] leading-none text-text-faint">{opt.hint}</span>
+                    <span className="text-[11px] leading-none text-text-faint">{t(opt.hintKey)}</span>
                   </span>
                   <span className="flex w-4 shrink-0 justify-end">
                     {isActive ? (
@@ -1989,7 +2043,7 @@ function PaneKnowledgeRetrievalModeSwitch({
           role="menuitem"
           className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-text-standard transition-colors hover:bg-surface-hover"
           disabled={saving}
-          aria-label="知识库检索"
+          aria-label={t("kb.retrieval")}
           aria-expanded={open}
           onClick={() => (open ? setOpen(false) : openMenu(true))}
         >
@@ -1998,7 +2052,7 @@ function PaneKnowledgeRetrievalModeSwitch({
           ) : (
             <Radar className="h-[15px] w-[15px] shrink-0 text-text-muted" strokeWidth={2} aria-hidden />
           )}
-          <span className="flex-1">知识库检索</span>
+          <span className="flex-1">{t("kb.retrieval")}</span>
           <span className="text-[11px] text-text-faint">{activeLabel}</span>
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-faint" aria-hidden />
         </button>
@@ -2010,14 +2064,14 @@ function PaneKnowledgeRetrievalModeSwitch({
   return (
     <>
       <div ref={rootRef as unknown as RefObject<HTMLDivElement>} className="relative">
-        <HoverTip label={`知识库检索模式：${activeLabel}`}>
+        <HoverTip label={t("kb.modeNamed", { label: activeLabel })}>
           <button
             type="button"
             className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition hover:bg-surface-hover hover:text-text-strong ${
               open ? "bg-surface-hover text-text-strong" : "text-text-muted"
             }`}
             disabled={saving}
-            aria-label="知识库检索模式"
+            aria-label={t("kb.modeAria")}
             aria-expanded={open}
             onClick={() => (open ? setOpen(false) : openMenu())}
           >
@@ -2081,6 +2135,7 @@ function ActionCircleButton({
   onMic,
   onStop,
 }: ActionCircleButtonProps) {
+  const { t } = useTranslation("chat");
   let onClick: () => void;
   let title: string;
   let icon: ReactNode;
@@ -2088,29 +2143,29 @@ function ActionCircleButton({
 
   if (streaming && hasInput) {
     onClick = onSend;
-    title = "排队发送";
+    title = t("send.queue");
     icon = <SendIcon />;
     filled = true;
   } else if (streaming) {
     onClick = onStop;
-    title = "中断生成";
+    title = t("send.interrupt");
     icon = <StopIcon />;
     filled = true;
   } else if (hasInput) {
     onClick = onSend;
-    title = "发送";
+    title = t("send.send");
     icon = <SendIcon />;
     filled = true;
   } else if (transcribing) {
     onClick = onMic;
-    title = "识别中";
+    title = t("send.transcribing");
     icon = (
       <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
     );
     filled = false;
   } else if (recording) {
     onClick = onMic;
-    title = "停止录音";
+    title = t("send.stopRecording");
     icon = (
       <span className="flex gap-0.5 items-end h-4">
         {[0, 1, 2, 3].map((i) => (
@@ -2129,7 +2184,7 @@ function ActionCircleButton({
     filled = false;
   } else {
     onClick = onMic;
-    title = "语音输入";
+    title = t("send.voice");
     icon = <MicIcon />;
     filled = false;
   }
@@ -2228,6 +2283,7 @@ function ComposerFileGlyph({ kind }: { kind: ReturnType<typeof composerFileIconK
 
 /** Trae Work–style composer attachment chip (matches sent-message AttachmentCard). */
 function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) {
+  const { t } = useTranslation("chat");
   const isImage = !!file.dataUrl && file.mimeType.startsWith("image/");
   const isReferenceToken = !!file.referenceToken;
   const pathHint =
@@ -2238,11 +2294,11 @@ function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () =
   const secondary = isReferenceToken
     ? pathHint
       ? `@ ${pathHint}`
-      : "@ 文件引用"
+      : t("attachment.fileRef")
     : file.status === "parsing"
-      ? "解析中..."
+      ? t("attachment.parsing")
       : file.status === "error"
-        ? file.errorText || "解析失败"
+        ? file.errorText || t("attachment.parseFailed")
         : ext;
 
   return (
@@ -2300,7 +2356,7 @@ function AttachmentChip({ file, onRemove }: { file: AttachedFile; onRemove: () =
             : "bg-surface-panel text-text-muted hover:bg-surface-hover hover:text-text-primary"
         }`}
         onClick={onRemove}
-        title="移除附件"
+        title={t("attachment.remove")}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3 w-3">
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -2496,6 +2552,10 @@ function formatToolResultMessage(toolNameRaw: unknown, resultRaw: unknown, provi
     if (formatted) {
       return { content: formatted, silent: false };
     }
+  }
+  if (toolName === "wb_bridge_describe") {
+    const formatted = formatWbBridgeSendToolResult(resultText);
+    if (formatted) return { content: formatted, silent: false };
   }
   if (toolName === "query_subagent_status") {
     if (/【已阻止】/.test(resultText)) {
@@ -2744,6 +2804,9 @@ function resolveReadyAttachment(
 type AtCandidate = AtMentionCandidate;
 
 export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarification, onSubmitClarification }: Props) {
+  const { t } = useTranslation("chat");
+  const { t: tw } = useTranslation("workspace");
+  const locale = useAppStore((s) => s.locale);
   const pane = useAppStore((s) => s.panes.find((item) => item.id === paneId) ?? FALLBACK_PANE);
   const paneSortableListeners = usePaneSortableHandle();
   const panes = useAppStore((s) => s.panes);
@@ -2781,6 +2844,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const clearPaneMessages = useAppStore((s) => s.clearPaneMessages);
   const setPaneSessionId = useAppStore((s) => s.setPaneSessionId);
   const setPaneSessionMode = useAppStore((s) => s.setPaneSessionMode);
+  const setPaneTurnIntent = useAppStore((s) => s.setPaneTurnIntent);
+  const setPaneIsolateActive = useAppStore((s) => s.setPaneIsolateActive);
   const setPaneMessages = useAppStore((s) => s.setPaneMessages);
   const prependPaneMessages = useAppStore((s) => s.prependPaneMessages);
   const setPaneMessagePaging = useAppStore((s) => s.setPaneMessagePaging);
@@ -2803,7 +2868,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     [pane.messages],
   );
   const toolRoundBudget = 60;
-  const queuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
+  const paneQueuedMessages = useAppStore((s) => s.pendingMessages[paneId] ?? EMPTY_QUEUE);
+  const queuedMessages = useMemo(
+    () => queuedMessagesForSession(paneQueuedMessages, pane.sessionId),
+    [pane.sessionId, paneQueuedMessages],
+  );
   const enqueuePaneMessage = useAppStore((s) => s.enqueuePaneMessage);
   const takePendingMessage = useAppStore((s) => s.takePendingMessage);
   const removePendingMessage = useAppStore((s) => s.removePendingMessage);
@@ -2820,6 +2889,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     kbNewSessionDefaultRef.current = mode;
     setKbGlobalDefaultMode(mode);
     setCachedGlobalKbRetrievalMode(mode);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopAllWbBridgeProgressPolls();
+    };
   }, []);
 
   useEffect(() => {
@@ -2894,8 +2969,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const attachmentRoutingLock = useAppStore((s) => s.attachmentRoutingLock);
   const setAttachmentRoutingLock = useAppStore((s) => s.setAttachmentRoutingLock);
   const [routingNotice, setRoutingNotice] = useState<RoutingModelRef | null>(null);
-  const userBubbleLabel = useMemo(() => userNickname.trim() || "我", [userNickname]);
-  const groupChatUserLabel = useMemo(() => userNickname.trim() || "用户", [userNickname]);
+  const userBubbleLabel = useMemo(() => userNickname.trim() || t("actions.me"), [userNickname, t]);
+  const groupChatUserLabel = useMemo(() => userNickname.trim() || t("actions.user"), [userNickname, t]);
   const isGroupPane = Boolean(pane?.avatarId?.startsWith("group:"));
   /** 元智能体窗格：顶栏已展示当前模型，气泡内不再重复展示模型徽章 */
   const isMachiMetaPane = pane.avatarId === null;
@@ -2950,8 +3025,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     };
   }, [pane?.avatarId, pane?.avatarName, avatars, metaAvatarUrl]);
   const newTopicLabel = useMemo(
-    () => newTopicTriggerLabel({ displayName: paneAvatarMeta.name, isGroup: isGroupPane }),
-    [isGroupPane, paneAvatarMeta.name],
+    () => newTopicTriggerLabel({ displayName: paneAvatarMeta.name, isGroup: isGroupPane, t }),
+    [isGroupPane, paneAvatarMeta.name, t],
   );
   const [composerHasText, setComposerHasText] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -2974,6 +3049,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     Record<string, { active: boolean; text: string; provider: string; model: string }>
   >({});
   const retryInFlightRef = useRef<Record<string, boolean>>({});
+  const continueInFlightRef = useRef(false);
   /** Live-reattach (FR-4): per-session abort controllers for read-only reattach streams. */
   const reattachControllersRef = useRef<Record<string, AbortController>>({});
   /** Debounce timers for mid-reattach group disk merges (keyed by session id). */
@@ -2997,6 +3073,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [stallTick, setStallTick] = useState(0);
   const [bgCompleteToast, setBgCompleteToast] = useState(false);
   const [stallHintToast, setStallHintToast] = useState("");
+  const [continueCreatingToast, setContinueCreatingToast] = useState(false);
   const [stallRejectReason, setStallRejectReason] = useState("");
   const [resumeInFlight, setResumeInFlight] = useState(false);
   const resumeInFlightRef = useRef<Record<string, boolean>>({});
@@ -3180,7 +3257,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [pendingForwardMessages, setPendingForwardMessages] = useState<ForwardPendingMessage[]>([]);
   const [contextFiles, setContextFiles] = useState<Record<string, AttachedFile>>({});
   const [attachToastOpen, setAttachToastOpen] = useState(false);
-  const [attachToastMessage, setAttachToastMessage] = useState(VISION_UNSUPPORTED_TOAST);
+  const [isolateBusy, setIsolateBusy] = useState(false);
+  const [attachToastMessage, setAttachToastMessage] = useState(() =>
+    i18n.t("attachment.visionUnsupported", { ns: "chat" }),
+  );
   const [visionFallback, setVisionFallback] = useState<VisionFallbackInfo>({ available: false });
   const fallbackHintedRef = useRef<string>("");
 
@@ -3202,7 +3282,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const boundSessionIdRef = useRef<{ feishu: string; wechat: string }>({ feishu: "", wechat: "" });
   const ccBridgeVisibleLaunchGuardRef = useRef<Map<string, number>>(new Map());
   const ccBridgeTailGuardRef = useRef<Map<string, number>>(new Map());
-  const wbBridgeServeLaunchGuardRef = useRef<Map<string, number>>(new Map());
   /** Last resolved bridge session mode (cc_bridge_start), not global Settings radio. */
   const ccBridgeLastSessionModeRef = useRef<CcBridgeSessionModeHint>("");
   const [wechatDesktopBound, setWechatDesktopBound] = useState(false);
@@ -3352,7 +3431,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     () =>
       // Cross-session ownership invariant: never render a row that belongs to a
       // different session, even if a stray write landed in this pane's array
-      // during a session switch. Untagged (legacy / in-flight) rows still show.
+      // during a session switch. Untagged user echoes still show; untagged
+      // assistants/tools stay hidden.
       visibleMessagesForSession(pane?.messages ?? [], pane?.sessionId).filter((item) => {
         if (isGroupPane) return true;
         if (item.role === "assistant" && isThinkingPlaceholderText(item.content || "")) return false;
@@ -3365,9 +3445,42 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   // Render-only list: inline the sub-agent cluster card into the conversation
   // flow (like the clarification card). Kept separate from `visibleMessages` so
   // selection/counts/last-assistant logic never sees the synthetic anchor row.
-  const renderMessages = useMemo(
+  const presentationBase = useMemo(
     () => (isGroupPane ? visibleMessages : injectLiveSubAgentClusterAnchors(visibleMessages)),
-    [isGroupPane, visibleMessages]
+    [isGroupPane, visibleMessages],
+  );
+  const replayPresentation = useReplayPresentation(paneId, presentationBase);
+  const replayPresenting = Boolean(
+    replayPresentation.presenting
+    && pane.sessionId
+    && replayPresentation.sessionId === pane.sessionId,
+  );
+  const renderMessages = useMemo(
+    () => {
+      const base = presentationBase;
+      if (!replayPresenting) return base;
+      const binding = bindMessagesToRun(base, replayPresentation.events);
+      return sliceMessagesForPresentation(
+        base,
+        binding,
+        replayPresentation.cursorSeq,
+        replayPresentation.events.at(-1)?.seq ?? 0,
+        {
+          elapsedMs: replayPresentation.streamElapsedMs,
+          durationMs: replayPresentation.streamDurationMs,
+          snapFull: replayPresentation.streamSnapFull,
+        },
+      );
+    },
+    [
+      replayPresenting,
+      replayPresentation.cursorSeq,
+      replayPresentation.events,
+      replayPresentation.streamElapsedMs,
+      replayPresentation.streamDurationMs,
+      replayPresentation.streamSnapFull,
+      presentationBase,
+    ]
   );
   const groupedVisibleMessages = useMemo(
     () => groupConsecutiveToolMessages(renderMessages),
@@ -3681,12 +3794,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             result.messages as LoadedSessionMessage[],
             currentSid
           );
+          const latest =
+            useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? current;
+          const retained = retainUnpersistedLiveUserTurns(latest, merged);
           const changed =
-            merged.length !== current.length ||
-            String(merged[merged.length - 1]?.content ?? "") !==
-              String(current[current.length - 1]?.content ?? "");
+            retained.length !== latest.length ||
+            String(retained[retained.length - 1]?.content ?? "") !==
+              String(latest[latest.length - 1]?.content ?? "");
           if (!changed) return;
-          setPaneMessages(pane.id, merged);
+          setPaneMessages(pane.id, retained);
           // 全量合并后内存已覆盖完整磁盘历史，复位分页游标，避免顶部
           // 「加载更早消息」按旧 oldestLoadedIndex 拉取与内存同 id 的行。
           if (livePane?.hasOlderMessages || (livePane?.oldestLoadedIndex ?? 0) > 0) {
@@ -3868,6 +3984,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     };
   }, [paneId, flushJumpToBottomFab, syncJumpToBottomFab, scrollListToBottom]);
 
+  const replayPresentingPrevRef = useRef(false);
+  useLayoutEffect(() => {
+    const wasPresenting = replayPresentingPrevRef.current;
+    replayPresentingPrevRef.current = replayPresenting;
+    if (shouldPinScrollOnPresentationEnter(wasPresenting, replayPresenting)) {
+      pinChatListToLatestTurn();
+    }
+  }, [replayPresenting, pinChatListToLatestTurn]);
+
+  const listFollowRows = chatListFollowRows(replayPresenting, visibleMessages, renderMessages);
   useLayoutEffect(() => {
     if (autoScrollPinnedRef.current) {
       scrollListToBottom();
@@ -3883,7 +4009,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     // FAB only — do not recompute pin here. Layout is often still short of the
     // true bottom when a new user bubble mounts, and that used to unpin us.
     syncJumpToBottomFab();
-  }, [visibleMessages, streamedAssistantText, scrollListToBottom, syncJumpToBottomFab]);
+  }, [listFollowRows, streamedAssistantText, scrollListToBottom, syncJumpToBottomFab]);
 
   const highlightJumpKeyRef = useRef<string>("");
   useEffect(() => {
@@ -4436,97 +4562,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       for (let i = 0; i < 20; i += 1) {
         const latestPane = useAppStore.getState().panes.find((item) => item.id === pane.id);
         if (!latestPane) return;
-        const writeRes = await window.agenticxDesktop.terminalWriteByTab({
-          tabId: terminalTabId,
-          data: `${launchCmd}\n`,
-        });
-        if (writeRes?.ok) return;
-        await sleep(180);
-      }
-    },
-    [
-      pane.id,
-      pane.sessionId,
-      pane.activeTaskspaceId,
-      apiBase,
-      apiToken,
-      setActiveTaskspace,
-      openSidePanel,
-      addPaneTerminalTab,
-      paneWidth,
-    ]
-  );
-
-  const triggerWbBridgeServeTerminal = useCallback(
-    async (toolCallKey: string) => {
-      if (!pane.sessionId) return;
-      const now = Date.now();
-      const last = wbBridgeServeLaunchGuardRef.current.get(toolCallKey) ?? 0;
-      if (now - last < 20_000) return;
-      wbBridgeServeLaunchGuardRef.current.set(toolCallKey, now);
-      if (wbBridgeServeLaunchGuardRef.current.size > 32) {
-        const cutoff = now - 120_000;
-        for (const [k, ts] of wbBridgeServeLaunchGuardRef.current.entries()) {
-          if (ts < cutoff) wbBridgeServeLaunchGuardRef.current.delete(k);
-        }
-      }
-
-      const wsResp = await window.agenticxDesktop.listTaskspaces(pane.sessionId);
-      if (!wsResp.ok || !Array.isArray(wsResp.workspaces) || wsResp.workspaces.length === 0) return;
-      const activeWorkspace =
-        (pane.activeTaskspaceId
-          ? wsResp.workspaces.find((item) => item.id === pane.activeTaskspaceId)
-          : undefined) ?? wsResp.workspaces[0];
-      if (!activeWorkspace?.path) return;
-      if (!pane.activeTaskspaceId || pane.activeTaskspaceId !== activeWorkspace.id) {
-        setActiveTaskspace(pane.id, activeWorkspace.id);
-      }
-
-      openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
-      addPaneTerminalTab(pane.id, activeWorkspace.path, "wb-bridge");
-
-      let bridgeUrl = "http://127.0.0.1:9743";
-      try {
-        const headers: Record<string, string> = {};
-        if (apiToken) headers["x-agx-desktop-token"] = apiToken;
-        const res = await fetch(`${apiBase}/api/wb-bridge/config`, { headers });
-        const text = await res.text();
-        const data = text ? JSON.parse(text) : {};
-        const parsedUrl = typeof data?.url === "string" ? data.url.trim() : "";
-        if (parsedUrl) bridgeUrl = parsedUrl;
-      } catch {
-        // keep fallback URL
-      }
-
-      let launchCmd =
-        'lsof -nP -iTCP:9743 -sTCP:LISTEN >/dev/null 2>&1 && echo "[wb-bridge] already listening on 127.0.0.1:9743" || agx wb-bridge serve --host 127.0.0.1 --port 9743';
-      try {
-        const parsed = new URL(bridgeUrl);
-        const host = (parsed.hostname || "").trim();
-        const lowerHost = host.toLowerCase();
-        const loopback = lowerHost === "127.0.0.1" || lowerHost === "localhost" || lowerHost === "::1";
-        const parsedPort = parsed.port ? Number(parsed.port) : parsed.protocol === "https:" ? 443 : 80;
-        const safePort = Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : 9743;
-        if (loopback) {
-          launchCmd = [
-            `lsof -nP -iTCP:${safePort} -sTCP:LISTEN >/dev/null 2>&1`,
-            `&& echo "[wb-bridge] already listening on ${host || "127.0.0.1"}:${safePort}"`,
-            `|| agx wb-bridge serve --host ${shellSingleQuote(host || "127.0.0.1")} --port ${safePort}`,
-          ].join(" ");
-        } else {
-          launchCmd = `echo "[wb-bridge] configured remote URL: ${bridgeUrl}. Skip local autostart."`;
-        }
-      } catch {
-        // keep fallback launch command
-      }
-
-      const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
-      const latestPane = useAppStore.getState().panes.find((item) => item.id === pane.id);
-      const terminalTabId = latestPane?.activeTerminalTabId;
-      if (!terminalTabId) return;
-      for (let i = 0; i < 20; i += 1) {
-        const paneNow = useAppStore.getState().panes.find((item) => item.id === pane.id);
-        if (!paneNow) return;
         const writeRes = await window.agenticxDesktop.terminalWriteByTab({
           tabId: terminalTabId,
           data: `${launchCmd}\n`,
@@ -5681,42 +5716,61 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ...(request.lineRange ? { lineRange: request.lineRange } : {}),
             };
       if (!normalized.absolutePath) return;
+      const sid = String(pane.sessionId || "").trim();
+      const taskspaces = sid
+        ? (useAppStore.getState().preloadedTaskspacesBySessionId[sid] ?? [])
+        : [];
+      const absolutePath = canonicalizeArtifactPreviewPath(normalized.absolutePath, taskspaces);
+      if (!absolutePath) return;
 
-      // Open the WorkPanel shell only — never switch to「工作区」file-tree tab.
-      // File browsing lives in left-nav「文件管理」; previews are Trae-style tabs.
-      if (!pane.taskspacePanelOpen) {
-        openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
-      }
+      const openResolved = (path: string) => {
+        // Open the WorkPanel shell only — never switch to「工作区」file-tree tab.
+        // File browsing lives in left-nav「文件管理」; previews are Trae-style tabs.
+        if (!pane.taskspacePanelOpen) {
+          openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
+        }
 
-      if (isInAppHtmlPreviewPath(normalized.absolutePath)) {
-        void (async () => {
-          const prepared = await loadPreparedHtmlSrcDoc(normalized.absolutePath);
-          if (prepared.ok) {
-            setWorkPanelFocus({
-              kind: "browser",
-              url: pathToFileUrl(normalized.absolutePath),
-              title: artifactBaseName(normalized.absolutePath) || "HTML",
-              srcDoc: prepared.srcDoc,
-            });
-            return;
-          }
-          setWorkPanelFocus({
-            kind: "preview",
-            absolutePath: normalized.absolutePath,
-            title: artifactBaseName(normalized.absolutePath),
-          });
-        })();
+        if (isInAppHtmlPreviewPath(path)) {
+          void (async () => {
+            const prepared = await loadPreparedHtmlSrcDoc(path);
+            if (prepared.ok) {
+              setWorkPanelFocus({
+                kind: "browser",
+                url: pathToFileUrl(path),
+                title: artifactBaseName(path) || "HTML",
+                srcDoc: prepared.srcDoc,
+              });
+              return;
+            }
+            // Missing/unreadable HTML must not become an ENOENT preview tab.
+          })();
+          return;
+        }
+
+        setWorkPanelFocus({
+          kind: "preview",
+          absolutePath: path,
+          title: artifactBaseName(path),
+          ...(normalized.lineRange ? { lineRange: normalized.lineRange } : {}),
+        });
+      };
+
+      const stat = window.agenticxDesktop?.statLocalPath;
+      if (!stat) {
+        openResolved(absolutePath);
         return;
       }
-
-      setWorkPanelFocus({
-        kind: "preview",
-        absolutePath: normalized.absolutePath,
-        title: artifactBaseName(normalized.absolutePath),
-        ...(normalized.lineRange ? { lineRange: normalized.lineRange } : {}),
-      });
+      void (async () => {
+        try {
+          const info = await stat(absolutePath);
+          if (!info?.ok) return;
+        } catch {
+          return;
+        }
+        openResolved(absolutePath);
+      })();
     },
-    [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel],
+    [pane.id, pane.sessionId, pane.taskspacePanelOpen, paneWidth, openSidePanel],
   );
 
   /** Left-sidebar file-manage → Trae WorkPanel preview tab on the right. */
@@ -5740,8 +5794,22 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
 
   const revealFileInTaskspace = useCallback(async (absPath: string) => {
-    const path = String(absPath || "").trim();
-    if (!path) return;
+    const raw = String(absPath || "").trim();
+    if (!raw) return;
+    const sid = String(pane.sessionId || "").trim();
+    const taskspaces = sid
+      ? (useAppStore.getState().preloadedTaskspacesBySessionId[sid] ?? [])
+      : [];
+    const path = canonicalizeArtifactPreviewPath(raw, taskspaces);
+    const stat = window.agenticxDesktop?.statLocalPath;
+    if (stat) {
+      try {
+        const info = await stat(path);
+        if (!info?.ok) return;
+      } catch {
+        return;
+      }
+    }
 
     if (!pane.taskspacePanelOpen) {
       openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
@@ -5815,7 +5883,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const result = await reveal(path);
       if (!result.ok) console.warn("[ChatPane] reveal file failed:", result.error);
     }
-  }, [pane.id, pane.taskspacePanelOpen, paneWidth, openSidePanel, openWorkspaceFilePreview]);
+  }, [pane.id, pane.sessionId, pane.taskspacePanelOpen, paneWidth, openSidePanel, openWorkspaceFilePreview]);
 
   const openWorkPanelSummary = useCallback(
     (section: "artifacts" | "changes") => {
@@ -5903,17 +5971,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       });
       const data = (await res.json().catch(() => null)) as { already_saved?: boolean } | null;
       if (!res.ok || !data) {
-        setFavoriteToastMsg("收藏失败，请稍后重试");
+        setFavoriteToastMsg(t("toast.favoriteFailed"));
         setFavoriteToastOpen(true);
         return;
       }
-      setFavoriteToastMsg(data.already_saved ? "已收藏过" : "已收藏");
+      setFavoriteToastMsg(data.already_saved ? t("toast.alreadyFavorited") : t("toast.favorited"));
       setFavoriteToastOpen(true);
     } catch {
-      setFavoriteToastMsg("收藏失败，请稍后重试");
+      setFavoriteToastMsg(t("toast.favoriteFailed"));
       setFavoriteToastOpen(true);
     }
-  }, [apiBase, apiToken, pane.sessionId]);
+  }, [apiBase, apiToken, pane.sessionId, t]);
 
   const toggleSelectMessage = useCallback((message: Message) => {
     setSelectedMessageIds((prev) => {
@@ -6034,7 +6102,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         });
         if (!resp.ok) {
           const text = await resp.text().catch(() => "");
-          throw new Error(text.slice(0, 200) || `转发失败 HTTP ${resp.status}`);
+          throw new Error(text.slice(0, 200) || i18n.t("notice.forwardFailed", { ns: "chat", status: resp.status }));
         }
         setActivePaneId(targetPaneId);
         const targetPaneMeta = useAppStore.getState().panes.find((p) => p.id === targetPaneId);
@@ -6106,36 +6174,38 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       );
       const html = await buildMessagesPdfHtml({
         messages: messagesForExport,
-        sessionTitle: paneAvatarMeta.name || pane?.avatarName || "对话记录",
+        sessionTitle: paneAvatarMeta.name || pane?.avatarName || t("share.conversationRecord"),
         exportedAt: now,
         userBubbleLabel,
         appTheme: document.documentElement.getAttribute("data-theme") || "dark",
+        locale,
+        t,
       });
-      const stamp = new Date(now)
-        .toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
-        .replace(":", "-");
-      const sessionSlug = (paneAvatarMeta.name || pane?.avatarName || "对话")
+      const stamp = formatClock(now, locale).replace(":", "-");
+      const sessionSlug = (paneAvatarMeta.name || pane?.avatarName || t("share.conversation"))
         .replace(/[\\/:*?"<>|]/g, "_")
         .slice(0, 32);
       const res = await window.agenticxDesktop.exportMessagesPdf({
         html,
-        defaultFileName: `Near对话_${sessionSlug}_${stamp}.pdf`,
+        defaultFileName: `${t("share.filePrefix")}_${sessionSlug}_${stamp}.pdf`,
       });
       if (res.canceled) return;
       if (res.ok && res.path) {
-        setStallHintToast(`已保存到 ${res.path}`);
+        setStallHintToast(t("share.savedTo", { path: res.path }));
         setSelectedMessageIds(new Set());
       } else {
-        setStallHintToast(`导出失败：${res.error || "未知错误"}`);
+        setStallHintToast(t("share.exportFailed", { detail: res.error || t("tool.statusUnknown") }));
       }
     } catch (e) {
-      setStallHintToast(`导出失败：${String(e).slice(0, 120)}`);
+      setStallHintToast(t("share.exportFailed", { detail: String(e).slice(0, 120) }));
     }
   }, [
+    locale,
     pane?.avatarName,
     paneAvatarMeta.name,
     selectedMessages,
     setSelectedMessageIds,
+    t,
     userBubbleLabel,
     visibleMessages,
   ]);
@@ -6145,44 +6215,39 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     if (exportable.length === 0) return;
     const merged = exportable
       .map((message) => {
-        const name = message.role === "user" ? "我" : message.avatarName || message.agentId || "AI";
-        const time = message.timestamp
-          ? new Date(message.timestamp).toLocaleTimeString("zh-CN", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : "";
+        const name = message.role === "user" ? t("actions.me") : message.avatarName || message.agentId || "AI";
+        const time = message.timestamp ? formatClock(message.timestamp, locale) : "";
         return `[${name}]${time ? ` ${time}` : ""}\n${messagePlainTextForClipboard(message)}`;
       })
       .join("\n\n");
     try {
       await navigator.clipboard.writeText(merged);
-      setStallHintToast("已复制文本");
+      setStallHintToast(t("share.copiedText"));
     } catch {
-      setStallHintToast("复制失败");
+      setStallHintToast(t("share.copyFailed"));
     }
-  }, [selectedMessages, userBubbleLabel, visibleMessages]);
+  }, [locale, selectedMessages, t, userBubbleLabel, visibleMessages]);
 
   const deleteSelectedMessages = useCallback(async () => {
     if (selectedMessages.length === 0 || !apiBase || !pane.sessionId) return;
     const desktop = window.agenticxDesktop;
     const deleteLabel =
       selectedTurnCount > 0
-        ? `确认删除已选中的 ${selectedTurnCount} 轮对话？`
-        : `确认删除已选中的 ${selectedMessages.length} 条消息？`;
+        ? t("delete.turns", { count: selectedTurnCount })
+        : t("delete.messages", { count: selectedMessages.length });
     const confirmResult =
       typeof desktop.confirmDialog === "function"
         ? await desktop.confirmDialog({
-            title: "确认删除消息",
+            title: t("delete.title"),
             message: deleteLabel,
-            detail: "删除后不可恢复。",
-            confirmText: "删除",
-            cancelText: "取消",
+            detail: t("delete.irreversible"),
+            confirmText: t("delete.confirm"),
+            cancelText: t("delete.cancel"),
             destructive: true,
           })
         : {
             ok: true,
-            confirmed: window.confirm(`${deleteLabel}删除后不可恢复。`),
+            confirmed: window.confirm(`${deleteLabel}${t("delete.irreversible")}`),
           };
     if (!confirmResult.confirmed) return;
     try {
@@ -6234,6 +6299,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     selectedMessages,
     selectedTurnCount,
     setPaneMessages,
+    t,
   ]);
 
   const reloadSessionFromDisk = useCallback(
@@ -6277,8 +6343,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         ) {
           return;
         }
-        const currentMsgs = livePane?.messages ?? [];
-        if (lastTurnHasCompletedAssistantReply(currentMsgs)) return;
         const result = await window.agenticxDesktop.loadSessionMessages(sid);
         if (!result.ok || !Array.isArray(result.messages)) return;
         const latestSid = String(
@@ -6288,10 +6352,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (sessionStreamStateRef.current[sid]?.active) return;
         const current =
           useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
-        const mapped = result.messages.map((item, midx) =>
-          mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
+        // Merge — never raw-replace. A disk snapshot taken before composer
+        // persist used to wipe the just-sent user bubbles while SSE assistants
+        // stayed; switching sessions reloaded the later disk copy and "fixed" it.
+        const merged = retainUnpersistedLiveUserTurns(
+          current,
+          mergeSessionMessagesTail(
+            current,
+            result.messages as LoadedSessionMessage[],
+            sid,
+          ),
         );
-        const enriched = enrichDiskMessagesWithInMemoryReferences(current, mapped);
+        const enriched = enrichDiskMessagesWithInMemoryReferences(current, merged);
         const differs =
           enriched.length !== current.length ||
           String(enriched[enriched.length - 1]?.content ?? "") !==
@@ -6693,12 +6765,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
 
   const currentModelLabel = useMemo(() => {
-    if (!chatModel) return "未选模型";
+    if (!chatModel) return t("model.unselected");
     if (!chatProvider) return chatModel;
-    if (!isModelSelectable(chatProvider, chatModel, settings.providers)) return "未选模型";
+    if (!isModelSelectable(chatProvider, chatModel, settings.providers)) return t("model.unselected");
     const entry = settings.providers[chatProvider];
     return formatModelOptionLabel(chatProvider, chatModel, entry);
-  }, [chatModel, chatProvider, settings.providers]);
+  }, [chatModel, chatProvider, settings.providers, t]);
 
   const silentSeconds = useMemo(() => {
     void stallTick;
@@ -6780,10 +6852,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     );
     artifactPendingOpenRef.current = false;
     if (!primary) return;
-    const key = `${pane.sessionId}:${lastId}:${primary}`;
+    const sid = String(pane.sessionId || "").trim();
+    const taskspaces = sid
+      ? (useAppStore.getState().preloadedTaskspacesBySessionId[sid] ?? [])
+      : [];
+    const collapsed = canonicalizeArtifactPreviewPath(primary, taskspaces);
+    const key = `${pane.sessionId}:${lastId}:${collapsed}`;
     if (artifactAutoOpenKeyRef.current === key) return;
     artifactAutoOpenKeyRef.current = key;
-    openWorkspaceFilePreview(primary);
+    const stat = window.agenticxDesktop?.statLocalPath;
+    if (!stat) {
+      openWorkspaceFilePreview(collapsed);
+      return;
+    }
+    void (async () => {
+      try {
+        const info = await stat(collapsed);
+        if (!info?.ok) return;
+      } catch {
+        return;
+      }
+      openWorkspaceFilePreview(collapsed);
+    })();
   }, [
     sessionBusy,
     isStreamingCurrentSession,
@@ -7041,7 +7131,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       writeScopedLocalStorage(SESSION_UNATTENDED_STORAGE_KEY, JSON.stringify(map));
       setSessionUnattended(next);
     } catch {
-      setStallHintToast("无人值守开关保存失败");
+      setStallHintToast(t("toast.unattendedSaveFailed"));
     }
   }, [apiBase, apiToken, pane.sessionId, pane.messages, sessionUnattended, detectTrailingUnattendedStop]);
 
@@ -7066,18 +7156,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
         ).trim();
         if (latestSid !== sid) return false;
+        // Load can outlive a new composer send. If a foreground stream started
+        // while we were on disk, do not clobber its optimistic user echo.
+        if (!opts?.allowDuringStream && sessionStreamStateRef.current[sid]?.active) return false;
         const current = useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
-        const merged = mergeSessionMessagesTail(
+        const merged = retainUnpersistedLiveUserTurns(
           current,
-          msgs.messages as LoadedSessionMessage[],
-          sid
+          mergeSessionMessagesTail(
+            current,
+            msgs.messages as LoadedSessionMessage[],
+            sid
+          ),
         );
+        const latest =
+          useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? current;
+        const retained = retainUnpersistedLiveUserTurns(latest, merged);
         const changed =
-          merged.length !== current.length ||
-          String(merged[merged.length - 1]?.content ?? "") !==
-            String(current[current.length - 1]?.content ?? "");
+          retained.length !== latest.length ||
+          String(retained[retained.length - 1]?.content ?? "") !==
+            String(latest[latest.length - 1]?.content ?? "");
         if (changed) {
-          setPaneMessages(pane.id, merged);
+          setPaneMessages(pane.id, retained);
           recordProgressActivity();
         }
         return changed;
@@ -7216,6 +7315,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
     }
 
+    // Do not list `syncStreamingUiForCurrentSession` as a dep — it closes over
+    // `pane.messages` and would re-run this session-enter effect on every
+    // echo, then reconcile from a stale disk snapshot and hide the query.
     syncStreamingUiForCurrentSession();
 
     if (!sid) {
@@ -7267,7 +7369,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     pane.id,
     pane.sessionId,
     pane.avatarId,
-    syncStreamingUiForCurrentSession,
   ]);
 
   useEffect(() => {
@@ -7412,6 +7513,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     userStoppedSessionRef.current[sid] = true;
     setRunGuardSessionId(sid);
     setStallState("none");
+    useAppStore.getState().cancelInFlightPaneTools(pane.id, sid);
 
     // Commit visible partial BEFORE wiping overlay / aborting SSE. Lite ChatView
     // already does this; Pro previously only reloaded partial after session switch.
@@ -7629,6 +7731,76 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     await stopCurrentRun();
     window.setTimeout(() => composerRef.current?.focus(), 50);
   }, [pane.sessionId, stopCurrentRun]);
+
+  const continueFromMessage = useCallback(
+    async (msg: Message) => {
+      if (msg.role !== "assistant") return;
+      if (isGroupPane || isAutomationTaskPane) return;
+      const sid = (pane.sessionId || "").trim();
+      const rawId = (msg.id || "").trim();
+      if (!sid || !rawId) return;
+      if (
+        rawId === "__stream__" ||
+        rawId.startsWith("typing-") ||
+        isGroupStreamMessageId(rawId)
+      ) return;
+      const mid = continueMessageIdForRequest(sid, pane.messages, msg);
+      if (!mid) return;
+      if (continueInFlightRef.current) return;
+      continueInFlightRef.current = true;
+      let showTimer: number | undefined;
+      try {
+        showTimer = window.setTimeout(() => setContinueCreatingToast(true), 160);
+        const api = window.agenticxDesktop as unknown as {
+          continueFromMessage?: (payload: {
+            sessionId: string;
+            messageId: string;
+          }) => Promise<{
+            ok: boolean;
+            session_id?: string;
+            error?: string;
+            detail?: string;
+          }>;
+        };
+        if (typeof api.continueFromMessage !== "function") {
+          setStallHintToast(t("toast.continueUnsupported"));
+          return;
+        }
+        const result = await api.continueFromMessage({
+          sessionId: sid,
+          messageId: mid,
+        });
+        if (!result?.ok || !result.session_id) {
+          const detail = String(
+            result?.error || result?.detail || t("tool.statusUnknown"),
+          ).slice(0, 160);
+          setStallHintToast(t("toast.continueFailed", { detail }));
+          return;
+        }
+        const newPaneId = addPane(pane.avatarId, pane.avatarName, result.session_id);
+        setActivePaneId(newPaneId);
+        useAppStore.getState().bumpSessionCatalogRevision();
+        window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
+      } finally {
+        if (showTimer !== undefined) window.clearTimeout(showTimer);
+        setContinueCreatingToast(false);
+        continueInFlightRef.current = false;
+      }
+    },
+    [
+      addPane,
+      isAutomationTaskPane,
+      isGroupPane,
+      pane.avatarId,
+      pane.avatarName,
+      pane.messages,
+      pane.sessionId,
+      setActivePaneId,
+      setContinueCreatingToast,
+      setStallHintToast,
+      t,
+    ],
+  );
 
   useEffect(() => {
     const sid = (pane.sessionId || "").trim();
@@ -8086,7 +8258,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         // 任务仍在执行时禁止切入对话（与 togglePaneSubAgentChat 的拦截语义一致）；
         // 明细已写入 store，用户仍可在 Spawns 列看到实时状态，只是不能切到对话态。
         if (isSubAgentLiveStatus(hydrated.status)) {
-          setStallHintToast("该智能体任务执行中，完成后才能进入对话");
+          setStallHintToast(t("toast.busyForChat"));
           return;
         }
         setWorkPanelFocus({ kind: "summary" });
@@ -8129,7 +8301,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     // 任务仍在执行（含等待确认/等待输入）时禁止切入对话：避免上下文被轻易打断；
     // 提醒用户等任务完成后再进入。不影响「关闭对话」（上方已提前 return）。
     if (sub && isSubAgentLiveStatus(sub.status)) {
-      setStallHintToast("该智能体任务执行中，完成后才能进入对话");
+      setStallHintToast(t("toast.busyForChat"));
       return;
     }
     // 选中成员时打开工作台「任务摘要」，子智能体卡片在展开面板内展示。
@@ -8178,6 +8350,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (row.kind === "message") {
         const message = row.message;
         const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
+        const canContinueFromMessage =
+          message.role === "assistant" &&
+          !isStreamingCurrentSession &&
+          !isGroupPane &&
+          !isAutomationTaskPane &&
+          !message.systemNotice &&
+          message.id !== "__stream__" &&
+          !message.id.startsWith("typing-") &&
+          !isGroupStreamMessageId(message.id);
         const isSelecting = selectedMessageIds.size > 0;
         const rowSelectable = isSelecting && !reactCol;
         const isSelected = selectedMessageIds.has(message.id);
@@ -8197,7 +8378,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 className="absolute -top-1 left-0 z-10 flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[10px] text-text-muted shadow-sm opacity-0 transition-opacity group-hover/sel:opacity-100 hover:!opacity-100 hover:bg-surface-hover hover:text-text-strong"
                 onClick={() => selectUpTo(message)}
               >
-                ↓ 选择到这里
+                {t("layout.selectUpToHere")}
               </button>
             )}
             <MessageRenderer
@@ -8216,10 +8397,36 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               noBubbleBorder={reactFlat}
               toolCardOmitLeadingSpacer={message.role === "tool" && reactCol}
               onRevealPath={(path) => void revealFileInTaskspace(path)}
+              onViewPlan={(path) => openWorkspaceFilePreview(path)}
+              onBuildPlan={(plan) => {
+                window.dispatchEvent(
+                  new CustomEvent(NEAR_PLAN_BUILD_REQUEST, {
+                    detail: { paneId: pane.id, sessionId: pane.sessionId, plan },
+                  }),
+                );
+              }}
               onOpenAllArtifacts={() => openWorkPanelSummary("artifacts")}
               onOpenAllChanges={() => openWorkPanelSummary("changes")}
               onOpenFileReference={(request) => openFileReferencePreview(request)}
               onOpenSubAgentRun={openSubAgentDetailFromCluster}
+              onOpenBranchSource={(lineage) => {
+                let replayFocus: WorkPanelFocus;
+                try {
+                  replayFocus = replayFocusForBranchLineage(lineage);
+                } catch {
+                  setStallHintToast(t("replay.sourceEventUnavailable"));
+                  return;
+                }
+                setPaneSessionId(pane.id, lineage.parentSessionId);
+                if (!pane.taskspacePanelOpen) {
+                  openWorkspaceSidebarForPane(
+                    pane.id,
+                    paneRef.current?.clientWidth ?? paneWidth,
+                    openSidePanel,
+                  );
+                }
+                setWorkPanelFocus(replayFocus);
+              }}
               assistantName={imAssistantName}
               assistantAvatarUrl={imAssistantAvatarUrl}
               userName={imUserName}
@@ -8244,7 +8451,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 setWorkPanelFocus({
                   kind: "browser",
                   url: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
-                  title: `搜索：${q}`,
+                  title: t("layout.searchTitle", { query: q }),
                 });
               }}
               onQuoteToNewPane={(msg, selectedText) => {
@@ -8264,6 +8471,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }}
               onFavoriteMessage={favoriteMessage}
               onForwardMessage={forwardOneMessage}
+              onContinueFromMessage={
+                canContinueFromMessage ? continueFromMessage : undefined
+              }
               onRetryMessage={canRetryThisUserMessage ? retryUserMessage : undefined}
               onEditMessage={canRetryThisUserMessage ? editUserMessage : undefined}
               onToggleSelectMessage={toggleSelectMessage}
@@ -8310,7 +8520,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               className="absolute -top-1 left-0 z-10 flex items-center gap-1 rounded-full border border-border bg-surface-card px-2 py-0.5 text-[10px] text-text-muted shadow-sm opacity-0 transition-opacity group-hover/sel:opacity-100 hover:!opacity-100 hover:bg-surface-hover hover:text-text-strong"
               onClick={() => selectUpTo(anchorMessage)}
             >
-              ↓ 选择到这里
+              {t("layout.selectUpToHere")}
             </button>
           )}
           <TurnToolGroupCard
@@ -8385,7 +8595,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                           : "border-text-faint bg-transparent text-transparent"
                       }`}
                       onClick={() => toggleSelectBlock(workMessages)}
-                      aria-label={blockAnySelected ? "取消选择回复块" : "选择回复块"}
+                      aria-label={blockAnySelected ? t("actions.unselectBlock") : t("actions.selectBlock")}
                     >
                       <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M3.5 8.5L6.5 11.5L12.5 4.5" />
@@ -8420,7 +8630,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
                       const renderReActBlockActionIcons = () => (
                         <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={reactActionStyle}>
-                          <HoverTip label="复制">
+                          <HoverTip label={t("actions.copy")}>
                             <button
                               type="button"
                               className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
@@ -8432,7 +8642,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                           </HoverTip>
                           {lastAssistantInBlock ? (
                             <>
-                              <HoverTip label="引用">
+                              <HoverTip label={t("actions.quote")}>
                                 <button
                                   type="button"
                                   className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
@@ -8447,7 +8657,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                                   <Quote size={14} strokeWidth={2} />
                                 </button>
                               </HoverTip>
-                              <HoverTip label="收藏">
+                              <HoverTip label={t("actions.favorite")}>
                                 <button
                                   type="button"
                                   className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
@@ -8457,7 +8667,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                                   <Bookmark size={14} strokeWidth={2} />
                                 </button>
                               </HoverTip>
-                              <HoverTip label="转发">
+                              <HoverTip label={t("actions.forward")}>
                                 <button
                                   type="button"
                                   className="rounded p-1 hover:bg-surface-hover hover:text-text-strong"
@@ -8469,7 +8679,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                               </HoverTip>
                             </>
                           ) : null}
-                          <HoverTip label="多选">
+                          <HoverTip label={t("actions.select")}>
                             <button
                               type="button"
                               className={`rounded p-1 hover:bg-surface-hover ${
@@ -8742,7 +8952,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       )}
     </>
     );
-  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
+  }, [activityClockNow, autoNudgeCount, budgetExceededInfo, chatStyle, copyMessage, copyReActBlock, currentModelLabel, exhaustedRounds, favoriteMessage, forwardOneMessage, groupChatUserLabel, groupExpertActivities, groupStreamText, groupTyping, groupedVisibleMessages, handleSubmitClarification, openSubAgentDetailFromCluster, hideStreamOverlayAsDuplicate, isGroupPane, isRunGuardCurrentSession, isStreamingCurrentSession, lastAssistantMessageId, midTurnStreamActivity, openFileReferencePreview, pane.historySearchTerms, pane.messages, pane.sessionId, paneAvatarMeta, paneId, readyAttachments.length, resolveGroupInlineConfirm, resolveGroupSender, resolveQuoteBody, resumeCurrentTask, resumeInFlight, resumeWithModel, revealFileInTaskspace, openWorkPanelSummary, retryUserMessage, continueFromMessage, selectUpTo, selectedMessageIds, sendFollowupChip, sessionBusy, sessionWorkInProgress, addQuoteTarget, showInlineAssistantModelBadge, silentSeconds, stallModelOptions, stallRejectReason, stallRuntimeConfig.stall_auto_nudge_max_per_session, stallState, stopCurrentRun, streamTextForCurrentSession, streamingModel, toggleSelectBlock, toggleSelectMessage, topLevelRowsIm, userAvatarUrl, userBubbleLabel, widgetFlowRewriting]);
 
   const removeAttachment = useCallback((key: string) => {
     setContextFiles((prev) => {
@@ -8756,7 +8966,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     isKnownNonVisionChatModel(chatProvider, chatModel) && !visionFallback.available;
   const notifyImageAttach = () => {
     if (visionAttachBlocked) {
-      setAttachToastMessage(VISION_UNSUPPORTED_TOAST);
+      setAttachToastMessage(t("attachment.visionUnsupported"));
       setAttachToastOpen(true);
       return;
     }
@@ -8764,7 +8974,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       const key = `${paneId}:${chatProvider}/${chatModel}`;
       if (fallbackHintedRef.current !== key) {
         fallbackHintedRef.current = key;
-        setAttachToastMessage(`当前模型不支持看图，将由 ${visionFallback.label || "视觉模型"} 解读图片`);
+        setAttachToastMessage(
+          t("attachment.visionFallback", {
+            label: visionFallback.label || t("attachment.visionFallbackDefault"),
+          }),
+        );
         setAttachToastOpen(true);
       }
     }
@@ -8986,7 +9200,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       skipInterrupt?: boolean;
       queueDrain?: boolean;
       lockedSessionId?: string;
+      turnIntentOverride?: TurnIntent;
       continuation?: { reason: ContinueReason; source: ContinueSource };
+      propagateError?: boolean;
     }
   ) => Promise<void>>(
     async () => {}
@@ -9077,9 +9293,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       skipInterrupt?: boolean;
       queueDrain?: boolean;
       lockedSessionId?: string;
+      turnIntentOverride?: TurnIntent;
       continuation?: { reason: ContinueReason; source: ContinueSource };
     }
   ) => {
+    if (useReplayStore.getState().getPane(paneId).presenting) return;
     const continuation = options?.continuation;
     const isContinuation = !!continuation;
     const composerDisplayText = buildComposerDisplayText();
@@ -9108,6 +9326,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       snippetContent: file.snippetContent,
       htmlElementRef: file.htmlElementRef,
     }));
+    const composerReferencePlaceholders = buildContextFilePlaceholderPayload(
+      Array.from(
+        composerRef.current?.querySelectorAll<HTMLElement>('[data-ref-token="1"]') ?? [],
+      ).map((token) => ({
+        sourcePath: token.getAttribute("data-source-path") || "",
+        label: token.getAttribute("data-ref-name") || token.textContent || "",
+      })),
+    );
     const rawUserAttachments: MessageAttachment[] =
       retryAttachments && retryAttachments.length > 0
         ? retryAttachments.map((item) => ({ ...item }))
@@ -9306,6 +9532,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       } catch (err) {
         console.warn("[ChatPane] barge-in interrupt failed:", err);
       }
+      useAppStore.getState().cancelInFlightPaneTools(pane.id, requestSessionId);
       const prevAbort = sessionAbortControllersRef.current[requestSessionId];
       if (prevAbort) {
         try {
@@ -9421,53 +9648,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         text: messageText,
         at: now,
       };
-    }
-
-    // Re-sending the same user text after a completed turn (input box, not the retry
-    // button) must truncate the prior assistant/tool tail and strip [compacted] blocks;
-    // otherwise run_turn proactive compaction re-summarizes the old answer into context.
-    if (
-      !isContinuation &&
-      !skipUserHistory &&
-      !options?.suppressUserEcho &&
-      messageText.length > 0 &&
-      requestSessionId
-    ) {
-      const currentMsgs =
-        useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? pane.messages ?? [];
-      let implicitRetryIdx = -1;
-      for (let i = currentMsgs.length - 1; i >= 0; i -= 1) {
-        const row = currentMsgs[i];
-        if (!row || row.role !== "user" || row.content !== messageText) continue;
-        if (hasTrailingTurnMessages(currentMsgs, i)) {
-          implicitRetryIdx = i;
-          break;
-        }
-      }
-      if (implicitRetryIdx >= 0) {
-        const userOccurrence = countUserOccurrenceThrough(
-          currentMsgs,
-          implicitRetryIdx,
-          messageText
-        );
-        const remainingImplicit = currentMsgs.slice(0, implicitRetryIdx + 1);
-        setPaneMessages(pane.id, remainingImplicit);
-        useAppStore.getState().replacePaneTokens(pane.id, sessionTokensFromMessages(remainingImplicit));
-        const ok = await truncateSessionAtUserMessage(
-          requestSessionId,
-          messageText,
-          "after",
-          userOccurrence,
-          true
-        );
-        if (!ok) {
-          await reloadSessionFromDisk(requestSessionId);
-          releaseSendLock();
-          return;
-        }
-        suppressUserEcho = true;
-        skipUserHistory = true;
-      }
     }
 
     const selectedIsPaneSubagent =
@@ -9627,6 +9807,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     >();
     streamTextRef.current = "";
     const abortController = new AbortController();
+    const wbBridgeLivePollKeys = new Set<string>();
     sessionAbortControllersRef.current[requestSessionId] = abortController;
     if ((pane.sessionId || "").trim() === requestSessionId) {
       abortRef.current = abortController;
@@ -9902,6 +10083,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         );
         body.retrieval_mode = kbMode;
       }
+      const paneTurnIntent = pane.turnIntent ?? "default";
+      const currentPlanMessages =
+        useAppStore.getState().panes.find((item) => item.id === pane.id)?.messages
+        ?? pane.messages
+        ?? [];
+      const latestPlan = findLatestPlanArtifact(currentPlanMessages, requestSessionId);
+      const naturalLanguagePlanBuild =
+        !isContinuation
+        && !options?.turnIntentOverride
+        && paneTurnIntent === "plan"
+        && !isGroupPane
+        && targetAgentId === "meta"
+        && isNaturalLanguagePlanBuildRequest(text)
+        && (latestPlan?.status === "ready" || latestPlan?.status === "building");
+      const requestTurnIntent = resolveRequestTurnIntent(
+        paneTurnIntent,
+        naturalLanguagePlanBuild ? "default" : options?.turnIntentOverride,
+      );
+      if (requestTurnIntent === "plan") body.plan_mode = true;
+      if (requestTurnIntent === "isolate" || pane.isolateActive) body.isolate_run = true;
       if (isGroupPane && targetAgentId === "meta") {
         body.group_id = groupChatId;
         body.mentioned_avatar_ids = mentionedAvatarIds;
@@ -9920,6 +10121,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         const skillSlugs = [...new Set(skillSlugMatches.map((m) => m.replace("@skill://", "")))];
         if (skillSlugs.length > 0) body.skill_slugs = skillSlugs;
       }
+      const contextFilePayload: Record<string, string> = {
+        ...routedAttachmentNames,
+        ...composerReferencePlaceholders,
+      };
       if (sendAttachments.length > 0) {
         const imageInputs = sendAttachments
           .filter((file) => !!file.dataUrl && file.mimeType.startsWith("image/"))
@@ -9938,7 +10143,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (imageInputs.length > 0) {
           body.image_inputs = imageInputs;
         }
-        const contextFilePayload: Record<string, string> = routedAttachmentNames;
         for (const file of sendAttachments) {
           const key = buildContextFileKeyFromAttachment(file);
           if (!key) continue;
@@ -9968,9 +10172,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             contextFilePayload[key] = `[附件] ${file.name}`;
           }
         }
-        if (Object.keys(contextFilePayload).length > 0) {
-          body.context_files = contextFilePayload;
-        }
+      }
+      if (Object.keys(contextFilePayload).length > 0) {
+        body.context_files = contextFilePayload;
       }
       try {
         const routingDecision = decideAttachmentRouting({
@@ -10716,9 +10920,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   currentAction: ccBridgeSendToolProgressLabel(sec, ccBridgeLastSessionModeRef.current),
                 });
               } else if (name === "wb_bridge_send") {
-                updateSubAgent(eventAgentId, {
-                  currentAction: wbBridgeSendToolProgressLabel(sec),
-                });
+                if (!wbBridgeLivePollKeys.has(progressCallId)) {
+                  updateSubAgent(eventAgentId, {
+                    currentAction: wbBridgeSendToolProgressLabel(sec),
+                  });
+                }
               } else {
                 updateSubAgent(eventAgentId, {
                   currentAction: Number.isFinite(sec) ? `${name} 执行中… (${sec}s)` : `${name} 执行中…`,
@@ -10791,11 +10997,25 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
               if (
                 eventAgentId === "meta" &&
-                (toolNameStr === "wb_bridge_start" || toolNameStr === "wb_bridge_send")
+                toolNameStr === "wb_bridge_send" &&
+                toolCallId &&
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                  String(toolArgs.session_id ?? ""),
+                )
               ) {
-                const callKey =
-                  toolCallId || `${requestSessionId || "session"}:${toolNameStr}`;
-                void triggerWbBridgeServeTerminal(callKey);
+                wbBridgeLivePollKeys.add(toolCallId);
+                startWbBridgeProgressPoll({
+                  key: toolCallId,
+                  sessionId: String(toolArgs.session_id),
+                  apiBase,
+                  apiToken,
+                  onSnapshot: (snap) => {
+                    updatePaneToolMessageForSession(toolCallId, {
+                      toolStatus: "running",
+                      content: formatWbBridgeLiveSnapshot(snap),
+                    });
+                  },
+                });
               }
               // Filter out internal housekeeping tools that add no user-visible signal
               const SILENT_TOOLS = new Set(["check_resources"]);
@@ -10922,6 +11142,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "tool_result") {
               const toolName = String(payload.data?.name ?? payload.data?.tool_name ?? "");
+              if (toolName === "wb_bridge_send") {
+                const resultCallId = String(
+                  payload.data?.tool_call_id ?? payload.data?.id ?? "",
+                ).trim();
+                if (resultCallId) {
+                  stopWbBridgeProgressPoll(resultCallId);
+                  wbBridgeLivePollKeys.delete(resultCallId);
+                }
+              }
               if (SEARCH_REFERENCE_TOOLS.has(toolName)) {
                 const accumulated = accumulateReferenceTurn(
                   pendingReferences,
@@ -11657,11 +11886,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             }
             if (payload.type === "token_usage") {
               const parsed = parseMessageUsage(payload.data);
-              const inp = parsed?.inputTokens ?? 0;
-              const out = parsed?.outputTokens ?? 0;
-              const cached = parsed?.cachedTokens ?? 0;
-              if (inp > 0 || out > 0 || cached > 0) {
-                useAppStore.getState().accumulatePaneTokens(pane.id, inp, out, cached);
+              const billed = parsed
+                ? sessionAccumulateFromUsageEvent(payload.data, parsed)
+                : { input: 0, output: 0, cached: 0 };
+              if (billed.input > 0 || billed.output > 0 || billed.cached > 0) {
+                useAppStore.getState().accumulatePaneTokens(
+                  pane.id,
+                  billed.input,
+                  billed.output,
+                  billed.cached,
+                );
               }
               if (parsed) {
                 pendingTurnUsage = parsed;
@@ -11693,9 +11927,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               const archived = Number(payload.data?.archived_tool_calls ?? 0) || 0;
               setContextLoopStats({ round, tool_result_tokens_session: toolSession, archived_tool_calls: archived });
             }
+            if (payload.type === "isolate") {
+              setPaneIsolateActive(pane.id, Boolean(payload.data?.active));
+            }
             if (payload.type === "error") {
               setStallWait(null);
               const errText = String(payload.data?.text ?? "未知错误");
+              if (String(payload.data?.error ?? "") === "not_git") {
+                setPaneTurnIntent(pane.id, "default");
+                setPaneIsolateActive(pane.id, false);
+                setAttachToastMessage(t("composer.modeMultitaskNeedGit"));
+                setAttachToastOpen(true);
+                continue;
+              }
               const severity = String(payload.data?.severity ?? "").trim();
               const detector = String(payload.data?.detector ?? "").trim();
               if (
@@ -11759,6 +12003,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 // (hook-block / not-loaded / permission deny all share tool_call_id).
                 const errToolCallId = String(payload.data?.tool_call_id ?? "").trim();
                 if (errToolCallId) {
+                  stopWbBridgeProgressPoll(errToolCallId);
+                  wbBridgeLivePollKeys.delete(errToolCallId);
                   const merged = updatePaneToolMessageForSession(errToolCallId, {
                     content: errText,
                     toolStatus: "error",
@@ -11904,7 +12150,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       ) {
         // Backend persists turn_interrupted to messages.json; toast is ephemeral.
         // Group turns complete via `done` / `group_reply` and must not hit this path.
-        setStallHintToast(TURN_INTERRUPTED_TOAST);
+        setStallHintToast(t("toast.turnInterrupted"));
         await mergeTailFromDisk(requestSessionId);
       }
     } catch (error) {
@@ -11917,6 +12163,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         addPaneMessageIfSessionActive(pane.id, "tool", `❌ 请求失败: ${String(error)}`, "meta");
       }
+      if (options?.propagateError) throw error;
     } finally {
       // Safety net for malformed/aborted streams. The normal completion path
       // already drains this before FINAL, so this is an idempotent no-op there.
@@ -11997,6 +12244,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         void mergeTailFromDisk(requestSessionId);
       }
 
+      stopAllWbBridgeProgressPolls();
       if (abortRef.current === abortController) {
         abortRef.current = null;
       }
@@ -12017,6 +12265,45 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   };
 
   sendChatRef.current = sendChat;
+
+  useEffect(() => registerPaneTextSender(
+    pane.id,
+    createPaneTextSender(
+      (text) => sendChatRef.current(text, { propagateError: true }),
+      setComposerText,
+    ),
+  ), [pane.id, setComposerText]);
+
+  useEffect(() => {
+    const onBuildPlan = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        paneId?: string;
+        sessionId?: string;
+        plan?: PlanArtifactPayload;
+      }>).detail;
+      const plan = detail?.plan;
+      if (String(detail?.paneId ?? "") !== pane.id) return;
+      const sessionId = String(detail?.sessionId ?? "").trim();
+      if (!plan || !sessionId || sessionId !== String(pane.sessionId ?? "").trim()) return;
+      const instruction = [
+        "[PLAN_BUILD]",
+        `Implement the approved Plan ${plan.plan_id} at ${plan.path}.`,
+        "Read the Plan file before changing code.",
+        `Call plan_update with action=\"start\", plan_id=\"${plan.plan_id}\", and plan_path=\"${plan.path}\" before implementation.`,
+        "Before each Todo, mark it in_progress with plan_update. Mark it completed only after its verification passes.",
+        "Do not create a replacement Plan. Stay within the Plan's scope boundaries.",
+      ].join("\n");
+      void sendChatRef.current(instruction, {
+        lockedSessionId: sessionId,
+        suppressUserEcho: true,
+        skipUserHistory: true,
+        forceSend: true,
+        turnIntentOverride: "default",
+      });
+    };
+    window.addEventListener(NEAR_PLAN_BUILD_REQUEST, onBuildPlan);
+    return () => window.removeEventListener(NEAR_PLAN_BUILD_REQUEST, onBuildPlan);
+  }, [pane.id, pane.sessionId]);
 
   const forwardAutoReply = useAppStore((s) => s.forwardAutoReply);
   useEffect(() => {
@@ -12189,6 +12476,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   );
 
   useEffect(() => {
+    const onAddWorkspace = (event: Event) => {
+      const detail = (event as CustomEvent<GlobalSearchAddToWorkspaceDetail>).detail;
+      if (!detail || detail.paneId !== pane.id || !detail.folderPath) return;
+      composerWorkspace.requestAttach([detail.folderPath]);
+    };
     const onReference = (event: Event) => {
       const detail = (event as CustomEvent<GlobalSearchReferenceFileDetail>).detail;
       if (!detail || detail.paneId !== pane.id) return;
@@ -12199,13 +12491,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (!detail?.paneId || detail.paneId !== pane.id) return;
       setTaskspaceAutoRefreshKey((k) => k + 1);
     };
+    window.addEventListener(GLOBAL_SEARCH_ADD_TO_WORKSPACE, onAddWorkspace);
     window.addEventListener(GLOBAL_SEARCH_REFERENCE_FILE, onReference);
     window.addEventListener(GLOBAL_SEARCH_WORKSPACE_ADDED, onWorkspaceAdded);
     return () => {
+      window.removeEventListener(GLOBAL_SEARCH_ADD_TO_WORKSPACE, onAddWorkspace);
       window.removeEventListener(GLOBAL_SEARCH_REFERENCE_FILE, onReference);
       window.removeEventListener(GLOBAL_SEARCH_WORKSPACE_ADDED, onWorkspaceAdded);
     };
-  }, [insertGlobalSearchFileReference, pane.id]);
+  }, [composerWorkspace.requestAttach, insertGlobalSearchFileReference, pane.id]);
 
   const maxTaskspaceWidth =
     paneWidth > 0
@@ -12810,10 +13104,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           role="status"
           className="pointer-events-auto absolute inset-x-0 top-3 z-[70] mx-auto w-full max-w-md rounded-xl border border-border bg-surface-card px-4 py-3 shadow-lg"
         >
-          <div className="text-sm font-medium text-text-primary">已切换到私有部署模型</div>
+          <div className="text-sm font-medium text-text-primary">{t("routing.switchedPrivate")}</div>
           <p className="mt-1 text-xs leading-5 text-text-subtle">
-            {routingLockReason(routingNotice)}
-            本会话后续对话都会留在这个模型上。
+            {routingLockReason(routingNotice, t)}
+            {t("routing.stayOnModel")}
           </p>
           <div className="mt-2.5 flex items-center justify-between gap-3">
             <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-faint">
@@ -12824,14 +13118,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   if (event.target.checked) dismissRoutingNotice();
                 }}
               />
-              不再显示此提示
+              {t("routing.dontShowAgain")}
             </label>
             <button
               type="button"
               className="rounded-lg bg-surface-hover px-3 py-1 text-xs text-text-standard transition-colors hover:bg-surface-card-strong"
               onClick={() => setRoutingNotice(null)}
             >
-              知道了
+              {t("routing.gotIt")}
             </button>
           </div>
         </div>
@@ -12858,7 +13152,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               <span
                 className="inline-flex cursor-grab touch-none items-center active:cursor-grabbing"
                 {...paneSortableListeners}
-                title="拖拽以调整窗格顺序"
+                title={t("toolbar.reorderPane")}
               >
                 <GripVertical
                   className="h-4 w-4 shrink-0 text-text-faint opacity-50 hover:opacity-90"
@@ -12873,7 +13167,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 {(pane.sessionId || "").trim() ? (
                   <span
                     className="select-all font-mono text-[9px] font-normal leading-snug text-text-faint"
-                    title="会话 ID（便于排查）"
+                    title={t("toolbar.sessionIdHint")}
                   >
                     {(pane.sessionId || "").trim()}
                   </span>
@@ -12886,13 +13180,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     className="inline-flex shrink-0 items-center rounded-sm px-1 py-px text-[9px] font-medium leading-tight"
                     style={{ backgroundColor: "rgba(37,211,102,0.15)", color: "#25D366" }}
                   >
-                    微信
+                    {t("toolbar.wechat")}
                   </span>
                 )}
               </div>
               {pane.contextInherited ? (
                 <div className="flex items-center gap-1.5 truncate text-[10px] text-text-faint">
-                  <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">已继承</span>
+                  <span className="rounded bg-emerald-500/20 px-1 text-emerald-400">{t("toolbar.inherited")}</span>
                 </div>
               ) : null}
             </div>
@@ -12903,7 +13197,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               <div
                 className="flex h-8 items-center gap-1 rounded-lg border border-border bg-surface-card px-1.5 shadow-sm"
                 role="search"
-                aria-label="会话内搜索"
+                aria-label={t("find.aria")}
               >
                 <Search className="ml-0.5 h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.8} />
                 <input
@@ -12924,9 +13218,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       closeSessionFind();
                     }
                   }}
-                  placeholder="搜索…"
+                  placeholder={t("find.placeholder")}
                   className="w-[112px] bg-transparent text-[12px] text-text-strong outline-none placeholder:text-text-faint"
-                  aria-label="在当前会话中搜索"
+                  aria-label={t("find.inSession")}
                 />
                 <span className="min-w-[2.25rem] shrink-0 text-center text-[11px] tabular-nums text-text-faint">
                   {sessionFindQuery.trim()
@@ -12940,8 +13234,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   className="rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-30"
                   disabled={sessionFindMatchCount <= 0}
                   onClick={() => stepSessionFindMatch(-1)}
-                  title="上一个匹配"
-                  aria-label="上一个匹配"
+                  title={t("find.prev")}
+                  aria-label={t("find.prev")}
                 >
                   <ChevronUp className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
@@ -12950,8 +13244,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   className="rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong disabled:opacity-30"
                   disabled={sessionFindMatchCount <= 0}
                   onClick={() => stepSessionFindMatch(1)}
-                  title="下一个匹配"
-                  aria-label="下一个匹配"
+                  title={t("find.next")}
+                  aria-label={t("find.next")}
                 >
                   <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
@@ -12959,8 +13253,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   type="button"
                   className="rounded p-0.5 text-text-faint transition hover:bg-surface-hover hover:text-text-strong"
                   onClick={closeSessionFind}
-                  title="关闭搜索"
-                  aria-label="关闭搜索"
+                  title={t("find.close")}
+                  aria-label={t("find.close")}
                 >
                   <X className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
@@ -12972,10 +13266,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 onClick={openSessionFind}
                 title={
                   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
-                    ? "会话内搜索 (⌘F)"
-                    : "会话内搜索 (Ctrl+F)"
+                    ? t("find.titleMac")
+                    : t("find.titleWin")
                 }
-                aria-label="会话内搜索"
+                aria-label={t("find.aria")}
               >
                 <Search className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
@@ -12985,8 +13279,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 type="button"
                 className="agx-topbar-btn !px-[5px]"
                 onClick={() => setAvatarSettingsOpen(true)}
-                title="分身设置"
-                aria-label="打开分身设置"
+                title={t("toolbar.avatarSettings")}
+                aria-label={t("toolbar.openAvatarSettings")}
               >
                 <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
@@ -12996,8 +13290,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 type="button"
                 className="agx-topbar-btn !px-[5px]"
                 onClick={() => toggleFocusMode(pane.id)}
-                title="灵巧模式 · 实时语音 (⇧⌘F)"
-                aria-label="进入灵巧模式"
+                title={t("toolbar.focusMode")}
+                aria-label={t("toolbar.enterFocusMode")}
               >
                 <PhoneCall className="h-[18px] w-[18px]" strokeWidth={1.8} />
               </button>
@@ -13006,17 +13300,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ref={historyButtonRef}
               className={`agx-topbar-btn !px-[5px] ${pane.historyOpen ? "agx-topbar-btn--active" : ""}`}
               onClick={toggleHistorySidePanel}
-              title="本会话提问导航"
+              title={t("toolbar.historyNav")}
             >
               <History className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
-            <HoverTip label="工作台 · ⌘⌃B">
+            <HoverTip label={t("toolbar.workbenchShortcut")}>
               <button
                 type="button"
                 className={`agx-topbar-btn !px-[5px] ${workspacePanelOpen ? "agx-topbar-btn--active" : ""}`}
                 onClick={toggleWorkspaceSidePanel}
-                title="工作台"
-                aria-label="工作台"
+                title={t("toolbar.workbench")}
+                aria-label={t("toolbar.workbench")}
                 aria-pressed={workspacePanelOpen}
               >
                 <PanelRight className="h-[18px] w-[18px]" strokeWidth={1.8} />
@@ -13025,7 +13319,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             <button
               className="agx-topbar-btn !px-[5px] hover:text-status-error"
               onClick={closePaneAndCleanupEmptySession}
-              title="关闭窗格"
+              title={t("toolbar.closePane")}
             >
               <X className="h-[18px] w-[18px]" strokeWidth={1.8} />
             </button>
@@ -13042,17 +13336,17 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           >
           {!pane.sessionId && (isGroupPane || isAutomationTaskPane) ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-text-faint">
-              <span className="animate-pulse">正在初始化会话...</span>
+              <span className="animate-pulse">{t("empty.initSession")}</span>
               <button
                 className="rounded-md border border-border px-3 py-1.5 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
                 onClick={() => void initSession(false)}
               >
-                重试
+                {t("empty.retry")}
               </button>
             </div>
           ) : pane.loadingMessages && pane.sessionId ? (
             <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col justify-center gap-4 px-2 py-6">
-              <div className="text-center text-xs text-text-faint animate-pulse">正在加载会话…</div>
+              <div className="text-center text-xs text-text-faint animate-pulse">{t("empty.loadingSession")}</div>
               <div className="flex flex-col gap-3">
                 {[0, 1, 2].map((row) => (
                   <div key={row} className="flex animate-pulse gap-2.5">
@@ -13070,14 +13364,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               {pane.loadingOlderMessages || (pane.hasOlderMessages && (pane.oldestLoadedIndex ?? 0) > 0) ? (
                 <div className="flex justify-center py-2">
                   {pane.loadingOlderMessages ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-text-faint" aria-label="加载更早消息" />
+                    <Loader2 className="h-4 w-4 animate-spin text-text-faint" aria-label={t("empty.loadOlderAria")} />
                   ) : (
                     <button
                       type="button"
                       className="text-[11px] text-text-faint transition hover:text-text-subtle"
                       onClick={() => void loadOlderSessionMessages()}
                     >
-                      向上滚动加载更早消息
+                      {t("empty.loadOlder")}
                     </button>
                   )}
                 </div>
@@ -13103,12 +13397,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     setWorkPanelFocus({ kind: "graph" });
                   }}
                 >
-                  打开运行图
+                  {t("misc.openRunGraph")}
                 </button>
                 <button
                   type="button"
                   className="shrink-0 rounded p-1 text-text-faint hover:bg-surface-hover"
-                  aria-label="关闭提示"
+                  aria-label={t("misc.closeHint")}
                   onClick={() => setDebateNudgeText("")}
                 >
                   <X className="h-3.5 w-3.5" />
@@ -13126,13 +13420,26 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           />
           </div>
 
+          {continueCreatingToast ? (
+            <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center">
+              <div
+                className="inline-flex items-center gap-2 rounded-full bg-neutral-950 px-3.5 py-2 text-[13px] font-medium text-white shadow-[0_8px_28px_rgba(0,0,0,0.28)]"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-white/30 border-t-white" />
+                {t("toast.continueCreating")}
+              </div>
+            </div>
+          ) : null}
+
           {showJumpToBottomFab ? (
             <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-30 flex justify-center">
               <button
                 type="button"
                 className="pointer-events-auto flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface-card-strong/95 text-text-strong shadow-lg backdrop-blur-sm transition hover:bg-surface-hover"
-                aria-label="回到底部"
-                title="回到底部"
+                aria-label={t("toolbar.jumpBottom")}
+                title={t("toolbar.jumpBottom")}
                 onClick={() => {
                   pinChatListToLatestTurn();
                 }}
@@ -13180,10 +13487,81 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
               {isAutomationTaskPane && automationTaskErrorHint ? (
                 <div className="max-w-md rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-left text-[11px] leading-relaxed text-rose-200/95">
-                  <div className="mb-1 font-medium text-rose-300">上次定时执行失败</div>
+                  <div className="mb-1 font-medium text-rose-300">{t("empty.automationFailed")}</div>
                   {automationTaskErrorHint}
                 </div>
               ) : null}
+            </div>
+          ) : null}
+          {!isGroupPane && !isAutomationTaskPane && pane.isolateActive ? (
+            <div className="mb-2 flex justify-center px-3">
+              <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-1.5 text-[12px] text-text-muted">
+                <span>{t("composer.isolateWorking")}</span>
+                <button
+                  type="button"
+                  disabled={isolateBusy}
+                  className="rounded px-2 py-0.5 text-text-primary transition-colors hover:bg-surface-hover disabled:opacity-50"
+                  onClick={() => {
+                    const sid = String(pane.sessionId ?? "").trim();
+                    if (!sid || !apiBase) return;
+                    setIsolateBusy(true);
+                    void fetch(`${apiBase.replace(/\/$/, "")}/api/sessions/${encodeURIComponent(sid)}/isolate/discard`, {
+                      method: "POST",
+                      headers: { "x-agx-desktop-token": apiToken },
+                    })
+                      .then(async (res) => {
+                        const data = (await res.json().catch(() => ({}))) as { ok?: boolean };
+                        if (res.ok && data.ok) {
+                          setPaneIsolateActive(pane.id, false);
+                          setPaneTurnIntent(pane.id, "default");
+                        }
+                      })
+                      .finally(() => setIsolateBusy(false));
+                  }}
+                >
+                  {t("composer.isolateDiscard")}
+                </button>
+                <button
+                  type="button"
+                  disabled={isolateBusy}
+                  className="rounded px-2 py-0.5 text-white disabled:opacity-50"
+                  style={{ background: "var(--ui-btn-primary-bg)" }}
+                  onClick={() => {
+                    const sid = String(pane.sessionId ?? "").trim();
+                    if (!sid || !apiBase) return;
+                    setIsolateBusy(true);
+                    void fetch(`${apiBase.replace(/\/$/, "")}/api/sessions/${encodeURIComponent(sid)}/isolate/adopt`, {
+                      method: "POST",
+                      headers: { "x-agx-desktop-token": apiToken },
+                    })
+                      .then(async (res) => {
+                        const data = (await res.json().catch(() => ({}))) as { ok?: boolean };
+                        if (res.ok && data.ok) {
+                          setPaneIsolateActive(pane.id, false);
+                          setPaneTurnIntent(pane.id, "default");
+                        }
+                      })
+                      .finally(() => setIsolateBusy(false));
+                  }}
+                >
+                  {t("composer.isolateAdopt")}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {replayPresenting ? (
+            <div
+              role="status"
+              className="mx-auto mb-2 flex w-full max-w-4xl items-center justify-between gap-2 rounded-md bg-status-warning/10 px-3 py-1.5 text-[11px] text-status-warning"
+            >
+              <span>{tw("replay.presentingBanner")}</span>
+              <button
+                type="button"
+                className="rounded-md px-2 py-0.5 text-[11px] text-status-warning hover:bg-status-warning/15"
+                onClick={() => useReplayStore.getState().exitPresentation(paneId)}
+              >
+                {tw("replay.exitPresent")}
+              </button>
             </div>
           ) : null}
           <div
@@ -13205,7 +13583,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           {bgCompleteToast ? (
             <div className="pointer-events-none mb-1 flex justify-center">
               <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200">
-                后台任务已完成
+                {t("toast.bgTaskDone")}
               </div>
             </div>
           ) : null}
@@ -13218,24 +13596,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) : null}
           {selectedSubAgent ? (
             <div className="mb-1 inline-flex items-center gap-2 rounded border border-border bg-surface-card px-2 py-0.5 text-xs text-text-muted">
-              对话目标: {selectedSubAgent}
+              {t("subagent.talkTo", { name: selectedSubAgent })}
               <button
                 className="rounded px-1 hover:bg-surface-hover"
                 onClick={() => setSelectedSubAgent(null)}
               >
-                切回 Meta
+                {t("subagent.switchToMeta")}
               </button>
             </div>
           ) : null}
           {selectedMessageIds.size > 0 ? (
             <div className="mb-1.5 flex items-center gap-1 rounded-2xl border border-transparent bg-surface-card px-3 py-2 text-xs text-text-muted">
-              <span className="mr-1 shrink-0">已多选 {selectedTurnCount} 轮</span>
+              <span className="mr-1 shrink-0">{t("delete.selectedTurns", { count: selectedTurnCount })}</span>
               <button
                 type="button"
                 className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
                 onClick={forwardSelectedMessages}
               >
-                转发
+                {t("actions.forward")}
               </button>
               <button
                 ref={shareBtnRef}
@@ -13245,28 +13623,28 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 aria-haspopup="menu"
                 onClick={() => setShareMenuOpen((open) => !open)}
               >
-                分享
+                {t("misc.share")}
               </button>
               <button
                 type="button"
                 className="rounded-xl px-2 py-1 text-rose-300 transition-colors hover:bg-surface-hover"
                 onClick={() => void deleteSelectedMessages()}
               >
-                删除
+                {t("delete.confirm")}
               </button>
               <button
                 type="button"
                 className="rounded-xl px-2 py-1 text-text-strong transition-colors hover:bg-surface-hover"
                 onClick={() => setSelectedMessageIds(new Set())}
               >
-                取消
+                {t("delete.cancel")}
               </button>
               {shareMenuOpen && shareBtnRef.current
                 ? createPortal(
                     <div
                       ref={shareMenuRef}
                       role="menu"
-                      aria-label="分享"
+                      aria-label={t("misc.share")}
                       className="agx-menu-pop fixed z-[9999] flex min-w-[148px] flex-col gap-0.5 rounded-xl border border-border bg-surface-panel p-1.5 shadow-xl backdrop-blur-xl"
                       style={{
                         left: shareBtnRef.current.getBoundingClientRect().left,
@@ -13282,7 +13660,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                           void shareSelectedAsText();
                         }}
                       >
-                        复制文本
+                        {t("share.copyText")}
                       </button>
                       <button
                         type="button"
@@ -13293,7 +13671,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                           setShareImageOpen(true);
                         }}
                       >
-                        分享为图片
+                        {t("share.asImage")}
                       </button>
                       <button
                         type="button"
@@ -13304,7 +13682,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                           void exportSelectedMessagesToPdf();
                         }}
                       >
-                        保存为 PDF
+                        {t("share.asPdf")}
                       </button>
                     </div>,
                     document.body,
@@ -13324,11 +13702,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 {[
                   !isAutomationTaskPane ? currentModelLabel : null,
                   sessionExecutionState === "running"
-                    ? "运行中"
+                    ? t("status.running")
                     : stallState === "stall" && stallReason === "incomplete"
-                      ? "未完成"
+                      ? t("status.incomplete")
                       : sessionWorkInProgress
-                        ? "处理中"
+                        ? t("status.processing")
                         : null,
                   // An ended-incomplete turn is not "running" — suppress the silence
                   // timer so it never reads as "still processing / no response".
@@ -13336,8 +13714,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   sessionExecutionState === "running" &&
                   !(stallState === "stall" && stallReason === "incomplete")
                     ? silenceTier === "thinking"
-                      ? "正在思考…"
-                      : resolveSilenceTierLabel(silenceTier, silentSeconds)
+                      ? t("status.thinking")
+                      : resolveSilenceTierLabel(silenceTier, silentSeconds, t)
                     : null,
                   lastToolProgress?.name
                     ? `${lastToolProgress.name}${lastToolProgress.sec > 0 ? ` ${lastToolProgress.sec}s` : ""}`
@@ -13355,7 +13733,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       : "bg-surface-panel/75 text-text-muted"
                   }`}
                 >
-                  健康度：{sessionHealth === "stuck" ? "卡住" : "偏慢"}
+                  {t("status.health", {
+                    label: sessionHealth === "stuck" ? t("status.healthStuck") : t("status.healthSlow"),
+                  })}
                 </span>
               ) : null}
               {contextLoopStats ? (
@@ -13366,7 +13746,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               ) : null}
               {sessionUnattended && unattendedGlobalEnabled && !budgetExceededInfo ? (
                 <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-violet-200 [html[data-theme=light]_&]:bg-violet-500/15 [html[data-theme=light]_&]:text-violet-900">
-                  无人值守 · 续跑 {unattendedContinueCount}/{unattendedMaxContinuations}
+                  {t("status.unattendedContinue", {
+                    count: unattendedContinueCount,
+                    max: unattendedMaxContinuations,
+                  })}
                 </span>
               ) : null}
               {budgetExceededInfo ? (
@@ -13375,7 +13758,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   onClick={() => resumeInNewSessionRef.current()}
                   className="rounded-full bg-rose-500/15 px-2 py-0.5 text-rose-200 transition hover:bg-rose-500/25"
                 >
-                  已达预算上限 · 续跑无效
+                  {t("status.budgetCap")}
                 </button>
               ) : null}
               {unattendedGlobalEnabled ? (
@@ -13388,11 +13771,11 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       : "bg-surface-panel/75 text-text-muted hover:text-text-strong"
                   }`}
                 >
-                  {sessionUnattended ? "本会话无人值守：开" : "本会话无人值守：关"}
+                  {sessionUnattended ? t("status.unattendedOn") : t("status.unattendedOff")}
                 </button>
               ) : null}
               {!isStreamingCurrentSession && sessionExecutionState === "running" ? (
-                <span className="text-amber-300/90">后台运行中</span>
+                <span className="text-amber-300/90">{t("status.backgroundRunning")}</span>
               ) : null}
             </div>
           )}
@@ -13407,13 +13790,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     : "border-border bg-surface-panel/80 text-text-muted"
                 }`}
               >
-                <span>{resolveSilenceTierLabel(silenceTier, silentSeconds)}</span>
+                <span>{resolveSilenceTierLabel(silenceTier, silentSeconds, t)}</span>
                 <button
                   type="button"
                   className="rounded-full bg-surface-hover px-2 py-0.5 transition hover:bg-surface-card-strong"
                   onClick={() => void resumeCurrentTask()}
                 >
-                  立即重试
+                  {t("status.retryNow")}
                 </button>
                 <button
                   type="button"
@@ -13423,14 +13806,14 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     if (fb) void resumeWithModel(fb.provider, fb.model);
                   }}
                 >
-                  换模型
+                  {t("status.switchModel")}
                 </button>
                 <button
                   type="button"
                   className="rounded-full bg-surface-hover px-2 py-0.5 transition hover:bg-surface-card-strong"
                   onClick={() => void stopCurrentRun()}
                 >
-                  停止
+                  {t("status.stop")}
                 </button>
                 {silenceTier === "stuck" ? (
                   <button
@@ -13438,7 +13821,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-100 transition hover:bg-amber-500/30"
                     onClick={() => void takeoverSession()}
                   >
-                    我来接管
+                    {t("status.takeover")}
                   </button>
                 ) : null}
               </div>
@@ -13464,13 +13847,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             <div className="relative">
               <div className="pointer-events-none absolute right-3 top-2 z-10 flex items-center gap-2">
                 {composerExpanded ? (
-                  <span className="text-xs text-text-faint">↩ 键可用于换行</span>
+                  <span className="text-xs text-text-faint">{t("composer.newlineHint")}</span>
                 ) : null}
                 <button
                   type="button"
                   className="pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-xl text-text-faint/55 outline-none transition hover:bg-surface-hover hover:text-text-strong focus:outline-none focus-visible:bg-surface-hover focus-visible:text-text-strong"
-                  aria-label={composerExpanded ? "收起输入区" : "展开输入区"}
-                  title={composerExpanded ? "收起输入区（Enter 发送）" : "展开输入区（Enter 换行）"}
+                  aria-label={composerExpanded ? t("composer.collapseInput") : t("composer.expandInput")}
+                  title={composerExpanded ? t("composer.collapseInputHint") : t("composer.expandInputHint")}
                   onClick={() => setComposerExpanded((prev) => !prev)}
                 >
                   {composerExpanded ? (
@@ -13486,7 +13869,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               </div>
               <div
                 ref={composerRef}
-              contentEditable
+              contentEditable={!replayPresenting}
               suppressContentEditableWarning
               onInput={() => {
                 syncQuoteTargetsFromComposer();
@@ -13602,6 +13985,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 syncComposerFromValue(extractComposerSendText());
               }}
               onKeyDown={(e) => {
+                if (replayPresenting) {
+                  e.preventDefault();
+                  return;
+                }
                 const isImeComposing =
                   e.nativeEvent.isComposing ||
                   imeComposingRef.current ||
@@ -13610,6 +13997,13 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
                   e.preventDefault();
                   void createNewTopic(true);
+                  return;
+                }
+                if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
+                  if (!isGroupPane && !isAutomationTaskPane) {
+                    e.preventDefault();
+                    setPaneTurnIntent(pane.id, togglePlanIntent(pane.turnIntent ?? "default"));
+                  }
                   return;
                 }
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -13650,7 +14044,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     executionState: sessionExecutionState,
                     currentSessionId: sid,
                   });
-                  const queue = useAppStore.getState().pendingMessages[paneId] ?? [];
+                  const queue = queuedMessagesForSession(
+                    useAppStore.getState().pendingMessages[paneId] ?? [],
+                    sid,
+                  );
 
                   if (streamActive) {
                     const sendQueuedNow =
@@ -13690,7 +14087,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             />
             {!composerHasText && quoteTargets.length === 0 ? (
               <div className="agx-pane-composer-placeholder pointer-events-none absolute left-4 top-4 text-[15px] text-text-faint">
-                发消息...
+                {pane.turnIntent === "plan"
+                  ? t("composer.placeholderPlan")
+                  : t("composer.placeholder")}
               </div>
             ) : null}
             </div>
@@ -13721,6 +14120,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 />
                 <ComposerMoreActionsButton
                   onPickFile={() => fileInputRef.current?.click()}
+                  renderMode={
+                    isGroupPane || isAutomationTaskPane
+                      ? undefined
+                      : () => (
+                          <ComposerModeMenu
+                            intent={pane.turnIntent ?? "default"}
+                            onIntentChange={(next: TurnIntent) => setPaneTurnIntent(pane.id, next)}
+                          />
+                        )
+                  }
                   renderSkillPicker={() => (
                     <SkillPickerButton apiBase={apiBase} apiToken={apiToken} onSelect={handleSkillSelect} embedded />
                   )}
@@ -13739,6 +14148,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                     <ConnectorsMenuButton sessionId={pane.sessionId} embedded />
                   )}
                 />
+                {!isGroupPane && !isAutomationTaskPane && (pane.turnIntent === "plan" || pane.turnIntent === "isolate") ? (
+                  <TurnIntentChip
+                    intent={pane.turnIntent}
+                    onClear={() => setPaneTurnIntent(pane.id, "default")}
+                  />
+                ) : null}
                 <RunModePicker />
               </div>
               {/* ── Team mode action bar (routing="team" only) ─────────── */}
@@ -13747,7 +14162,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   <div className="flex items-center gap-1 mr-1">
                     <button
                       className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-text-faint transition hover:bg-indigo-500/10 hover:text-indigo-400"
-                      title="插入任务到队列"
+                      title={t("composer.insertTaskHint")}
                       onClick={() => {
                         const taskDesc = extractComposerText().trim();
                         if (taskDesc) {
@@ -13758,19 +14173,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
                         <path d="M12 5v14M5 12h14" />
                       </svg>
-                      <span className="hidden sm:inline">插入任务</span>
+                      <span className="hidden sm:inline">{t("composer.insertTask")}</span>
                     </button>
                     {isStreamingCurrentSession ? (
                       <button
                         className="flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] text-amber-400 transition hover:bg-amber-500/10"
-                        title="暂停团队任务"
+                        title={t("composer.pauseTeamHint")}
                         onClick={() => void sendGroupTeamAction("pause")}
                       >
                         <svg viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
                           <rect x="6" y="4" width="4" height="16" />
                           <rect x="14" y="4" width="4" height="16" />
                         </svg>
-                        <span className="hidden sm:inline">暂停</span>
+                        <span className="hidden sm:inline">{t("composer.pauseTeam")}</span>
                       </button>
                     ) : null}
                   </div>
@@ -13801,6 +14216,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   recording={recording}
                   transcribing={voiceTranscribing}
                   onSend={() => {
+                    if (replayPresenting) return;
                     lastComposerEnterAtRef.current = 0;
                     void sendChat(extractComposerSendText());
                   }}
@@ -13833,7 +14249,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           ) ? (
             <div className="mt-1.5 flex justify-center px-0.5">
               <p className="select-none text-[11px] leading-none text-text-faint">
-                内容由 AI 生成，请核实重要信息
+                {t("composer.disclaimer")}
               </p>
             </div>
           ) : null}
@@ -13877,7 +14293,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             <div
               className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
               onMouseDown={startResizeTaskspace}
-              title="拖拽调整工作台面板宽度"
+              title={t("layout.resizeWorkbench")}
             >
               <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
             </div>
@@ -13910,7 +14326,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               } catch {
                 /* ignore */
               }
-              const label = (payload.title || host || "网页").trim().slice(0, 48);
+              const label = (payload.title || host || t("layout.webPage")).trim().slice(0, 48);
               addQuoteTarget(
                 {
                   id: `web-${crypto.randomUUID()}`,
@@ -13929,12 +14345,12 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   pane.id,
                   paneRef.current?.clientWidth ?? paneWidth,
                   openSidePanel,
-                );
+                  );
               }
               setWorkPanelFocus({
                 kind: "browser",
                 url: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
-                title: `搜索：${q}`,
+                title: t("layout.searchTitle", { query: q }),
               });
             }}
             previewOpenRequest={pendingWorkspacePreviewRequest}
@@ -13983,7 +14399,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           <div
             className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
             onMouseDown={startResizeHistory}
-            title="拖拽调整记忆图谱面板宽度"
+            title={t("layout.resizeMemoryGraph")}
           >
             <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
           </div>
@@ -14020,7 +14436,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                 <div
                   className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
                   onMouseDown={startResizeTaskspace}
-                  title="拖拽调整工作台面板宽度"
+                  title={t("layout.resizeWorkbench")}
                 >
                   <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
                 </div>
@@ -14053,7 +14469,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   } catch {
                     /* ignore */
                   }
-                  const label = (payload.title || host || "网页").trim().slice(0, 48);
+                  const label = (payload.title || host || t("layout.webPage")).trim().slice(0, 48);
                   addQuoteTarget(
                     {
                       id: `web-${crypto.randomUUID()}`,
@@ -14077,7 +14493,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   setWorkPanelFocus({
                     kind: "browser",
                     url: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
-                    title: `搜索：${q}`,
+                    title: t("layout.searchTitle", { query: q }),
                   });
                 }}
                 previewOpenRequest={pendingWorkspacePreviewRequest}
@@ -14134,7 +14550,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               <div
                 className="group absolute -left-[3px] top-0 z-20 h-full w-2 cursor-col-resize"
                 onMouseDown={startResizeHistory}
-                title="拖拽调整记忆图谱面板宽度"
+                title={t("layout.resizeMemoryGraph")}
               >
                 <div className="mx-auto h-full w-px bg-[var(--border-strong)] transition-all duration-200 group-hover:w-[2px] group-hover:bg-[var(--ui-btn-primary-bg)]" />
               </div>
@@ -14182,7 +14598,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       <ShareImagePreviewModal
         open={shareImageOpen}
         messages={messagesForShareExport(selectedMessages, visibleMessages)}
-        sessionTitle={paneAvatarMeta.name || pane?.avatarName || "对话记录"}
+        sessionTitle={paneAvatarMeta.name || pane?.avatarName || t("share.conversationRecord")}
         userBubbleLabel={userBubbleLabel}
         onClose={() => setShareImageOpen(false)}
         onToast={(msg) => setStallHintToast(msg)}

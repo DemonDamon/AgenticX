@@ -1,12 +1,15 @@
+import { useTranslation } from "react-i18next";
+
 export function ShortcutHints() {
+  const { t } = useTranslation("sidebar");
   return (
     <div className="mt-2 text-[11px] text-text-faint">
-      <span className="mr-3">Ctrl/Cmd+K 全局搜索</span>
-      <span className="mr-3">Ctrl+, 设置</span>
-      <span className="mr-3">Ctrl+L 清空</span>
-      <span className="mr-3">Ctrl+Shift+M 切换模式</span>
-      <span className="mr-3">Ctrl+Shift+P 计划模式</span>
-      <span>Alt+↑/↓ 历史</span>
+      <span className="mr-3">{t("shortcuts.search")}</span>
+      <span className="mr-3">{t("shortcuts.settings")}</span>
+      <span className="mr-3">{t("shortcuts.clear")}</span>
+      <span className="mr-3">{t("shortcuts.switchMode")}</span>
+      <span className="mr-3">{t("shortcuts.planMode")}</span>
+      <span>{t("shortcuts.history")}</span>
     </div>
   );
 }

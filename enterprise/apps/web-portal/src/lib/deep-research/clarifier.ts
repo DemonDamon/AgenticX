@@ -3,6 +3,7 @@
  */
 
 import { extractJsonText } from "./llm-json";
+import { languageDirective } from "./copy";
 import {
   defaultFocusOptions,
   looksOpenEndedResearchQuery,
@@ -33,6 +34,7 @@ export type ClarifierDeps = {
   reconBrief?: string;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  locale?: "zh" | "en";
 };
 
 const CLARIFIER_SYSTEM = [
@@ -45,15 +47,21 @@ const CLARIFIER_SYSTEM = [
   "下方检索现状只用于校准事实（禁止断言『尚未发布/不存在』），不能因为已经搜到资料就跳过澄清。",
 ].join("");
 
-export function defaultOpenEndedClarification(userQuery: string): ClarifierResult {
+export function defaultOpenEndedClarification(
+  userQuery: string,
+  locale: "zh" | "en" = "zh",
+): ClarifierResult {
   const topic = truncateTopic(userQuery);
   return {
     needed: true,
     questions: [
       {
         id: "q_focus",
-        question: `关于「${topic}」，你更想了解哪些方向？（可多选）`,
-        options: defaultFocusOptions(userQuery),
+        question:
+          locale === "en"
+            ? `Which aspects of “${topic}” do you want to focus on? (multi-select)`
+            : `关于「${topic}」，你更想了解哪些方向？（可多选）`,
+        options: defaultFocusOptions(userQuery, locale),
         allowCustom: true,
       },
     ],
@@ -134,9 +142,10 @@ function extractCompletionText(payload: unknown): string {
 
 export async function proposeClarification(deps: ClarifierDeps): Promise<ClarifierResult> {
   const fetchImpl = deps.fetchImpl ?? fetch;
+  const locale = deps.locale === "en" ? "en" : "zh";
   const { tools: _t, tool_choice: _tc, stream: _s, ...rest } = deps.body;
   const openEndedFallback = looksOpenEndedResearchQuery(deps.userQuery)
-    ? defaultOpenEndedClarification(deps.userQuery)
+    ? defaultOpenEndedClarification(deps.userQuery, locale)
     : ({ needed: false } as ClarifierResult);
 
   try {
@@ -147,7 +156,7 @@ export async function proposeClarification(deps: ClarifierDeps): Promise<Clarifi
         ...rest,
         stream: false,
         messages: [
-          { role: "system", content: CLARIFIER_SYSTEM },
+          { role: "system", content: `${CLARIFIER_SYSTEM}\n${languageDirective(locale)}` },
           ...(deps.todayLine ? [{ role: "system" as const, content: deps.todayLine }] : []),
           ...(deps.reconBrief ? [{ role: "system" as const, content: deps.reconBrief }] : []),
           { role: "user", content: deps.userQuery },

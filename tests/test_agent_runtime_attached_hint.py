@@ -47,6 +47,7 @@ def test_build_attached_files_hint_lists_readable_text_files() -> None:
     assert "对.md" in hint
     assert "/Users/damon/.agenticx/taskspaces/sid/default/attachments/对.md" in hint
     assert "context_files" in hint
+    assert "stage_context_file" in hint
 
 
 def test_build_attached_files_hint_empty_when_no_readable_entries() -> None:

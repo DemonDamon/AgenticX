@@ -1,5 +1,5 @@
 "use client";
-import { adminFetch } from "../../lib/admin-client-auth";
+import { adminFetch, adminFetchOrTimeout } from "../../lib/admin-client-auth";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -40,6 +40,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Copy, FileWarning, Filter, Inbox, RefreshCcw, Search, ShieldAlert, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
+import { auditListLoadPolicy } from "./audit-list-load";
 
 type QueryResult = {
   total: number;
@@ -82,7 +83,7 @@ function AuditPageContent() {
   const [model, setModel] = useState("");
   const [policyHit, setPolicyHit] = useState("");
   const [crossBorderOnly, setCrossBorderOnly] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [tracePanel, setTracePanel] = useState<TracePanelState>({ status: "idle" });
 
   const [chainFull, setChainFull] = useState<{
@@ -94,10 +95,19 @@ function AuditPageContent() {
     verified?: number;
     legacy_unverified?: number;
   } | null>(null);
+  const [chainVerifyState, setChainVerifyState] = useState<"idle" | "pending" | "done" | "failed">("idle");
 
   const loadChainVerify = useCallback(async () => {
+    setChainVerifyState("pending");
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 10_000);
     try {
-      const response = await adminFetch("/api/audit/chain-verify");
+      const response = await adminFetch("/api/audit/chain-verify", { signal: controller.signal });
+      if (!response.ok) {
+        setChainFull(null);
+        setChainVerifyState("failed");
+        return;
+      }
       const payload = (await response.json()) as {
         data?: {
           valid: boolean;
@@ -109,30 +119,47 @@ function AuditPageContent() {
           legacy_unverified?: number;
         };
       };
-      setChainFull(payload.data ?? null);
+      if (!payload.data) {
+        setChainFull(null);
+        setChainVerifyState("failed");
+        return;
+      }
+      setChainFull(payload.data);
+      setChainVerifyState("done");
     } catch {
       setChainFull(null);
+      setChainVerifyState("failed");
+    } finally {
+      window.clearTimeout(timer);
     }
   }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await adminFetch("/api/audit/query", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          trace_id: traceId || undefined,
-          session_id: sessionId || undefined,
-          user_id: userId || undefined,
-          model: model || undefined,
-          policy_hit: policyHit || undefined,
-          cross_border: crossBorderOnly ? true : undefined,
-        }),
-      });
+      const response = await adminFetchOrTimeout(
+        "/api/audit/query",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            trace_id: traceId || undefined,
+            session_id: sessionId || undefined,
+            user_id: userId || undefined,
+            model: model || undefined,
+            policy_hit: policyHit || undefined,
+            cross_border: crossBorderOnly ? true : undefined,
+          }),
+        },
+        15_000,
+      );
       const payload = (await response.json()) as { code?: string; data?: QueryResult; message?: string };
+      if (!response.ok) {
+        throw new Error(payload.message || t("toast.loadFailed"));
+      }
       const data = payload.data;
-      setItems(data?.items ?? []);
+      const items = data?.items ?? [];
+      setItems(items);
       setChainValid(data?.chain_valid ?? true);
       setChainError(
         data?.chain_valid
@@ -142,9 +169,17 @@ function AuditPageContent() {
               reason: data?.chain_error_reason,
             }
       );
-      await loadChainVerify();
+      const policy = auditListLoadPolicy(items.length);
+      if (policy.immediateChain) {
+        setChainFull(policy.immediateChain);
+        setChainVerifyState("done");
+      } else if (policy.requestFullChainVerify) {
+        setChainFull(null);
+        void loadChainVerify();
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("toast.loadFailed"));
+      setChainVerifyState("failed");
     } finally {
       setLoading(false);
     }
@@ -263,7 +298,7 @@ function AuditPageContent() {
       },
       {
         accessorKey: "cross_border",
-        header: "跨境",
+        header: t("columns.crossBorder"),
         cell: ({ row }) =>
           row.original.cross_border ? (
             <Badge variant="warning" className="font-mono text-[10px]">
@@ -305,7 +340,7 @@ function AuditPageContent() {
     if (userId) list.push({ id: "user", label: `${t("filterLabels.user")}${userId}`, onRemove: () => setUserId("") });
     if (model) list.push({ id: "model", label: `${t("filterLabels.model")}${model}`, onRemove: () => setModel("") });
     if (policyHit) list.push({ id: "policy", label: `${t("filterLabels.policy")}${policyHit}`, onRemove: () => setPolicyHit("") });
-    if (crossBorderOnly) list.push({ id: "cross", label: "仅跨境", onRemove: () => setCrossBorderOnly(false) });
+    if (crossBorderOnly) list.push({ id: "cross", label: t("filterLabels.cross"), onRemove: () => setCrossBorderOnly(false) });
     return list;
   }, [traceId, sessionId, userId, model, policyHit, crossBorderOnly, t]);
 
@@ -324,11 +359,17 @@ function AuditPageContent() {
         : `${t("description.chainFail")}${chainFull.reason ? `（${chainFull.reason}）` : ""}`;
       return `${prefix} ${chainPart} · ${t("description.scanned", { count: chainFull.scanned ?? 0 })}`;
     }
-    if (chainValid) {
+    if (chainVerifyState === "pending") {
       return `${prefix} ${t("description.chainLoading")}`;
     }
+    if (chainVerifyState === "failed") {
+      return `${prefix} ${t("description.chainUnavailable")}`;
+    }
+    if (chainValid) {
+      return prefix;
+    }
     return `${prefix} ${t("description.pageChainFail")}${chainError?.reason ? `（${chainError.reason}）` : ""}`;
-  }, [items.length, chainFull, chainValid, chainError, t]);
+  }, [items.length, chainFull, chainValid, chainError, chainVerifyState, t]);
 
   return (
     <div className="space-y-5">
@@ -466,7 +507,7 @@ function AuditPageContent() {
                         checked={crossBorderOnly}
                         onChange={(e) => setCrossBorderOnly(e.target.checked)}
                       />
-                      仅跨境流动事件
+                      {t("filterCrossBorder")}
                     </label>
                     <div className="flex items-center justify-between gap-2">
                       <Button
@@ -645,7 +686,7 @@ function AuditPageContent() {
                     <DetailField label={t("detail.toolsCalled")} value={selected.tools_called?.join(", ") || selected.mcp_tool_name || "—"} />
                     <DetailField label={t("detail.toolStatus")} value={selected.mcp_status ?? "—"} />
                     <DetailField
-                      label="数据域 → 上游"
+                      label={t("detail.dataRegion")}
                       value={
                         selected.cross_border
                           ? `${selected.src_region ?? "?"} → ${selected.dst_region ?? "?"} (${selected.residency_rule ?? "cross_border"})`

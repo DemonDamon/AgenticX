@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { i18n } from "../../i18n/i18n";
 import { SessionChangeList } from "./SessionChangeList";
 
 describe("SessionChangeList", () => {
@@ -12,7 +13,7 @@ describe("SessionChangeList", () => {
         ]}
       />,
     );
-    expect(html).toContain("文件变更");
+    expect(html).toContain(i18n.t("work.fileChanges", { ns: "workspace" }));
     expect(html).toContain("+8");
     expect(html).toContain("-1");
     expect(html).toContain("a.txt");

@@ -755,6 +755,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			DepartmentID:   identity.DepartmentID,
 			SessionID:      identity.SessionID,
 			TraceID:        identity.TraceID,
+			DeploymentID:   identity.DeploymentID,
 			ClientType:     "web-portal",
 			ClientIP:       r.RemoteAddr,
 			Model:          req.Model,
@@ -783,6 +784,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			DepartmentID: identity.DepartmentID,
 			SessionID:    identity.SessionID,
 			TraceID:      identity.TraceID,
+			DeploymentID: identity.DeploymentID,
 			ClientType:   "web-portal",
 			ClientIP:     r.RemoteAddr,
 			Model:        req.Model,
@@ -888,6 +890,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 				DepartmentID: identity.DepartmentID,
 				SessionID:    identity.SessionID,
 				TraceID:      identity.TraceID,
+				DeploymentID: identity.DeploymentID,
 				ClientType:   "web-portal",
 				ClientIP:     r.RemoteAddr,
 				Provider:     decision.Provider,
@@ -936,6 +939,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		DepartmentID:      identity.DepartmentID,
 		SessionID:         identity.SessionID,
 		TraceID:           identity.TraceID,
+		DeploymentID:      identity.DeploymentID,
 		ClientType:        "web-portal",
 		ClientIP:          r.RemoteAddr,
 		Provider:          decision.Provider,
@@ -1027,6 +1031,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 			DepartmentID: identity.DepartmentID,
 			SessionID:    identity.SessionID,
 			TraceID:      identity.TraceID,
+			DeploymentID: identity.DeploymentID,
 			ClientType:   "web-portal",
 			ClientIP:     r.RemoteAddr,
 			Model:        req.Model,
@@ -1083,6 +1088,7 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		DepartmentID: identity.DepartmentID,
 		SessionID:    identity.SessionID,
 		TraceID:      identity.TraceID,
+		DeploymentID: identity.DeploymentID,
 		ClientType:   "web-portal",
 		ClientIP:     r.RemoteAddr,
 		Provider:     decision.Provider,
@@ -1195,6 +1201,7 @@ func (s *Server) handleStream(
 				DepartmentID:  identity.DepartmentID,
 				SessionID:     identity.SessionID,
 				TraceID:       identity.TraceID,
+				DeploymentID:  identity.DeploymentID,
 				ClientType:    "web-portal",
 				ClientIP:      r.RemoteAddr,
 				Provider:      decision.Provider,
@@ -1306,6 +1313,7 @@ func (s *Server) handleStream(
 		DepartmentID:    identity.DepartmentID,
 		SessionID:       identity.SessionID,
 		TraceID:         identity.TraceID,
+		DeploymentID:    identity.DeploymentID,
 		ClientType:      "web-portal",
 		ClientIP:        r.RemoteAddr,
 		Provider:        decision.Provider,
@@ -1463,6 +1471,7 @@ type requestIdentity struct {
 	TraceID       string
 	TraceStep     int
 	TraceStage    string
+	DeploymentID  string
 }
 
 func (s *Server) quotaContext(identity requestIdentity, model string) quota.RequestContext {

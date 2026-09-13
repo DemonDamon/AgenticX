@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Message } from "../../store";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 
@@ -9,6 +10,8 @@ type Props = {
 };
 
 export function SkillPatchPreviewCard({ message, payload, onApply }: Props) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
   const [selectedTarget, setSelectedTarget] = useState<number | null>(null);
   const [armed, setArmed] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
@@ -17,32 +20,36 @@ export function SkillPatchPreviewCard({ message, payload, onApply }: Props) {
   const canApply = !requiresTarget || selectedTarget !== null;
   const riskLabel = useMemo(() => {
     const verdict = String(payload.risk?.verdict ?? "").toLowerCase();
-    if (verdict === "dangerous") return "高风险";
-    if (verdict === "caution") return "需警惕";
-    if (verdict === "safe") return "安全";
-    return "未知";
-  }, [payload.risk?.verdict]);
+    if (verdict === "dangerous") return t("skillPatch.riskDangerous");
+    if (verdict === "caution") return t("skillPatch.riskCaution");
+    if (verdict === "safe") return t("skillPatch.riskSafe");
+    return t("skillPatch.riskUnknown");
+  }, [payload.risk?.verdict, t]);
 
   return (
     <div className="space-y-2 rounded-lg border border-border bg-surface-card px-3 py-2 text-[12px] text-text-subtle">
       <div className="flex flex-wrap items-center gap-2">
         <span className="rounded bg-surface-hover px-1.5 py-0.5">skill patch preview</span>
-        {payload.strategy ? <span>策略: {payload.strategy}</span> : null}
-        {typeof payload.match_count === "number" ? <span>命中: {payload.match_count}</span> : null}
+        {payload.strategy ? <span>{t("skillPatch.strategy")}: {payload.strategy}</span> : null}
+        {typeof payload.match_count === "number" ? (
+          <span>{t("skillPatch.matchCount")}: {payload.match_count}</span>
+        ) : null}
       </div>
       {payload.risk ? (
         <div className="rounded border border-border bg-surface-hover px-2 py-1">
-          <div>风险: {riskLabel}</div>
+          <div>{t("skillPatch.risk")}: {riskLabel}</div>
           {payload.risk.reason ? <div className="mt-0.5 break-words text-text-faint">{payload.risk.reason}</div> : null}
           {payload.risk.findings && payload.risk.findings.length > 0 ? (
-            <div className="mt-1 break-words text-text-faint">命中: {payload.risk.findings.slice(0, 5).join(", ")}</div>
+            <div className="mt-1 break-words text-text-faint">
+              {t("skillPatch.matchCount")}: {payload.risk.findings.slice(0, 5).join(", ")}
+            </div>
           ) : null}
         </div>
       ) : null}
 
       {ranges.length > 0 ? (
         <div className="space-y-1">
-          <div className="text-text-muted">候选目标</div>
+          <div className="text-text-muted">{t("skillPatch.candidateTargets")}</div>
           <div className="space-y-1">
             {ranges.map((r, i) => (
               <button
@@ -55,7 +62,13 @@ export function SkillPatchPreviewCard({ message, payload, onApply }: Props) {
                 }`}
                 onClick={() => setSelectedTarget(i)}
               >
-                #{i} 行 {r.start_line}-{r.end_line} (pos {r.start}-{r.end})
+                {t("skillPatch.targetRow", {
+                  index: i,
+                  startLine: r.start_line,
+                  endLine: r.end_line,
+                  posStart: r.start,
+                  posEnd: r.end,
+                })}
               </button>
             ))}
           </div>
@@ -69,7 +82,7 @@ export function SkillPatchPreviewCard({ message, payload, onApply }: Props) {
             className="rounded border border-border bg-surface-hover px-2 py-0.5 text-[11px] text-text-strong"
             onClick={() => setShowDiff((v) => !v)}
           >
-            {showDiff ? "收起 diff" : "展开 diff"}
+            {showDiff ? t("skillPatch.collapseDiff") : t("skillPatch.expandDiff")}
           </button>
           {showDiff ? (
             <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded border border-border bg-black/20 p-2 text-[11px] leading-relaxed text-text-faint">
@@ -87,7 +100,7 @@ export function SkillPatchPreviewCard({ message, payload, onApply }: Props) {
             onClick={() => setArmed(true)}
             disabled={!canApply}
           >
-            准备应用
+            {t("skillPatch.prepareApply")}
           </button>
         ) : (
           <>
@@ -97,19 +110,19 @@ export function SkillPatchPreviewCard({ message, payload, onApply }: Props) {
               onClick={() => onApply?.(message, payload, requiresTarget ? selectedTarget : null)}
               disabled={!canApply}
             >
-              确认应用
+              {t("skillPatch.confirmApply")}
             </button>
             <button
               type="button"
               className="rounded border border-border bg-surface-hover px-2 py-1 text-[11px] text-text-subtle"
               onClick={() => setArmed(false)}
             >
-              取消
+              {tCommon("cancel")}
             </button>
           </>
         )}
         {requiresTarget && selectedTarget === null ? (
-          <span className="text-[11px] text-amber-400">请先选择目标片段</span>
+          <span className="text-[11px] text-amber-400">{t("skillPatch.selectTargetFirst")}</span>
         ) : null}
       </div>
     </div>

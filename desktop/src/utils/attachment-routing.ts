@@ -156,8 +156,13 @@ export function decideAttachmentRouting(input: {
 }
 
 /** 锁定后给用户看的理由。选择器灰掉时 hover / 点击都用它。 */
-export function routingLockReason(target: RoutingModelRef): string {
-  return `本会话包含文档附件，已锁定到「${target.label}」（私有部署）。文档内容不会离开这台部署。`;
+export function routingLockReason(
+  target: RoutingModelRef,
+  t?: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  return t
+    ? t("routing.lockReason", { label: target.label })
+    : `本会话包含文档附件，已锁定到「${target.label}」（私有部署）。文档内容不会离开这台部署。`;
 }
 
 /**

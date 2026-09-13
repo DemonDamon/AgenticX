@@ -21,6 +21,7 @@ import {
   type OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { useTranslation } from "react-i18next";
 import { META_AGENT_DISPLAY_NAME } from "../../constants/branding";
 import { useAppStore, type Avatar } from "../../store";
 import { isMetaLeaderAgentId, resolveMetaDisplayName } from "../../utils/display-name";
@@ -125,6 +126,7 @@ function CanvasInner({
   onIntervene,
   onRequestForceReassign,
 }: Props) {
+  const { t } = useTranslation("workspace");
   // Bind to app theme (dark/dim/light), not OS prefers-color-scheme —
   // otherwise a dark RF canvas can render with light-theme dark text.
   const appTheme = useAppStore((s) => s.theme);
@@ -280,9 +282,9 @@ function CanvasInner({
         >
           {(
             [
-              ["pause", "暂停节点"],
-              ["resume", "恢复节点"],
-              ["cancel_node", "取消节点"],
+              ["pause", t("graph.pauseNode")],
+              ["resume", t("graph.resumeNode")],
+              ["cancel_node", t("graph.cancelNode")],
             ] as const
           ).map(([op, label]) => (
             <button
@@ -307,9 +309,9 @@ function CanvasInner({
             type="button"
             className="block w-full px-3 py-1.5 text-left text-[12px] text-text-faint"
             disabled
-            title="即将推出"
+            title={t("graph.comingSoon")}
           >
-            更多干预（即将推出）
+            {t("graph.moreComingSoon")}
           </button>
         </div>
       ) : null}

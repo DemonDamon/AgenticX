@@ -8,36 +8,9 @@
 
 ## 1. 聊天 completions 主链路
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant U as 用户浏览器
-    participant P as web-portal API
-    participant G as apps/gateway
-    participant Pol as policy-engine
-    participant Up as 上游 LLM
-    participant DB as PostgreSQL
+![聊天请求过网关](/docs/svg/ent-chat-seq-zh.svg?v=2)
 
-    U->>P: POST /api/chat/completions<br/>(JWT cookie + model + messages)
-    P->>P: 校验 session<br/>组装 OpenAI body
-    P->>G: 转发至 GATEWAY_COMPLETIONS_URL
-    G->>G: 解析 JWT → tenant/dept/user/session
-    G->>DB: quota.Tracker 检查配额
-    G->>Pol: 请求阶段评估 (keyword/regex/pii)
-    alt action=block
-        Pol-->>G: 命中
-        G-->>P: 业务错误（非模型拒答）
-        P-->>U: 合规拦截 UI
-    else 放行/redact
-        G->>Up: 调用 OpenAI 兼容上游
-        Up-->>G: response / SSE stream
-        G->>Pol: 响应/流式阶段二次评估
-        G->>DB: audit (JSONL + gateway_audit_events)
-        G->>DB: metering (usage_records)
-        G-->>P: completions / SSE
-        P-->>U: 渲染
-    end
-```
+*示意图：portal 转发到网关后做配额与策略，拦截返回业务错误，放行才打上游并写审计 / 计量。*
 
 ### Portal 侧会话持久化
 
@@ -52,14 +25,9 @@ Gateway 只负责推理、策略、审计、计量。
 
 ## 2. 模型可见性
 
-```mermaid
-flowchart LR
-    admin["admin-console<br/>/admin/models"] -->|CRUD| providers[("enterprise_runtime_<br/>model_providers")]
-    admin -->|可见模型分配| visible[("enterprise_runtime_<br/>user_visible_models")]
-    portal["web-portal<br/>GET /api/me/models"] -->|按 JWT 过滤| visible
-    portal --> ui["ChatWorkspace<br/>模型下拉"]
-    gateway["apps/gateway"] -. /api/internal/providers .-> providers
-```
+![可见模型与可调用上游](/docs/svg/ent-visibility-zh.svg?v=2)
+
+*示意图：Admin 写 provider 与可见模型表；portal 按 JWT 过滤下拉；网关另读可调用上游。*
 
 Gateway 侧通过 internal API 或 PG 读取 provider 配置（含 `api_key_cipher` 解密），与 portal 可见性**独立**：portal 控制「用户能看到哪些 model id」，gateway 控制「哪些 upstream 可调用」。
 
@@ -67,15 +35,9 @@ Gateway 侧通过 internal API 或 PG 读取 provider 配置（含 `api_key_ciph
 
 ## 3. 策略发布流
 
-```mermaid
-flowchart LR
-    draft["policy_rules<br/>status=draft"] -->|POST /api/policy/publish| publish[/发布/]
-    publish --> events[("policy_publish_events")]
-    publish --> snap[("enterprise_runtime_<br/>policy_snapshots")]
-    snap -->|远程 URL 或本地文件| gateway["apps/gateway<br/>policy-engine 热加载"]
-    note["⚠️ 仅 status=active<br/>进入快照"]:::n
-    classDef n fill:#fef3c7,stroke:#f59e0b
-```
+![策略发布进快照](/docs/svg/ent-policy-publish-zh.svg?v=2)
+
+*示意图：只有 status=active 的规则进入快照，网关按远程 URL 或本地文件热加载。*
 
 **注意**：`blocked=true` 仅当 action 为 **block**；warn/redact 可有 hits 但不拦截。
 
@@ -85,14 +47,9 @@ flowchart LR
 
 ## 4. 审计双写
 
-```mermaid
-flowchart LR
-    llmCall["Gateway 每次 LLM 调用"] -->|必须成功| jsonl[("JSONL<br/>apps/gateway/<br/>.runtime/audit/")]
-    llmCall -->|best-effort| pg[("gateway_audit_events")]
-    pg -.->|失败| pending[(".pg-pending")]
-    boot["进程启动"] -->|回灌窗口 GATEWAY_AUDIT_BACKFILL_DAYS=7| pending
-    pending --> pg
-```
+![审计双写](/docs/svg/ent-audit-dual-zh.svg?v=2)
+
+*示意图：JSONL 必须成功；Postgres 尽力而为，失败进 .pg-pending，启动时回灌。*
 
 admin-console `/audit` 查询走 PG `PgAuditStore`，可见域依赖 scope：
 
@@ -106,12 +63,9 @@ IAM 管理操作审计在**另一张表** `audit_events`，与 gateway 审计分
 
 ## 5. Token 计量
 
-```mermaid
-flowchart LR
-    bill["Gateway billing 结算"] --> usage[("usage_records<br/>tenant/dept/user/<br/>provider/model/time_bucket")]
-    usage --> admin["admin-console /metering<br/>查询 + 导出"]
-    bill -. SSE/usage .-> chip["portal 顶栏<br/>token chip"]
-```
+![Token 计量](/docs/svg/ent-metering-zh.svg?v=2)
+
+*示意图：网关结算写入 usage_records；管理台查询导出；portal 可用 SSE 显示 token chip。*
 
 配额：`enterprise_runtime_token_quotas` → gateway `quota.Tracker`。当前以**租户级**为主；部门/用户级 TPM 需独立规划。
 
@@ -121,13 +75,9 @@ flowchart LR
 
 启用 `GATEWAY_CHANNEL_REGISTRY=on` 时：
 
-```mermaid
-flowchart LR
-    admin["admin CRUD<br/>gateway_channels"] -->|/api/internal/channels<br/>~5s 轮询| reg["channel.Registry"]
-    reg --> picker["Picker<br/>权重/优先级/亲和"]
-    picker --> relay["relay.Executor<br/>失败重试"]
-    relay --> adaptor["adaptor 工厂"] --> upstream(["上游"])
-```
+![Channel 中继](/docs/svg/ent-channel-zh.svg?v=2)
+
+*示意图：Admin 写 Channel，网关约 5s 轮询，Picker 挑选后由 Executor 重试上游。*
 
 详见 [runbooks/gateway-channel-relay.md](../runbooks/gateway-channel-relay.md)。
 
@@ -135,22 +85,9 @@ flowchart LR
 
 ## 7. SSO 登录流（OIDC 示例）
 
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant P as portal /auth
-    participant IdP as 企业 IdP
-    participant DB as PostgreSQL
+![OIDC 登录](/docs/svg/ent-sso-zh.svg?v=2)
 
-    U->>P: 点击 SSO 按钮
-    P->>U: 302 → GET /api/auth/sso/oidc/start
-    U->>IdP: authorize
-    IdP-->>U: 回调 → /api/auth/sso/oidc/callback?code=...
-    U->>P: callback
-    P->>IdP: token endpoint 换 token
-    P->>DB: JIT 用户 upsert + 写 auth_refresh_sessions
-    P-->>U: Set-Cookie + redirect /workspace
-```
+*示意图：点 SSO → start → IdP authorize → callback 换 token → JIT upsert 后写 cookie。*
 
 Admin 侧镜像路由在 `:3001`，Provider CRUD 在 `/settings/sso` + `/api/admin/sso/providers/*`。
 

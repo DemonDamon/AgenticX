@@ -117,6 +117,7 @@ enterprise/apps/gateway/.runtime/
 enterprise/apps/web-portal/.runtime/
 enterprise/.runtime/
 .dataset/
+deploy/observability/pours/
 
 # harness comparison lab: 只忽略密钥与运行时产物，脚本/文档/图表入库
 harness-lab/.env

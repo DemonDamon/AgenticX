@@ -3,6 +3,7 @@ import { test } from "vitest";
 
 import type { Message } from "../../store";
 import {
+  isToolGroupCancelled,
   isToolGroupInProgress,
   shouldHoldToolGroupProgress,
   groupConsecutiveToolMessages,
@@ -32,6 +33,24 @@ test("isToolGroupInProgress is true while any tool row is running", () => {
     ]),
     true,
   );
+});
+
+test("isToolGroupCancelled is true only after in-flight rows are cancelled", () => {
+  assert.equal(
+    isToolGroupCancelled([
+      toolMessage("t1", "done"),
+      toolMessage("t2", "running"),
+    ]),
+    false,
+  );
+  assert.equal(
+    isToolGroupCancelled([
+      toolMessage("t1", "done"),
+      toolMessage("t2", "cancelled"),
+    ]),
+    true,
+  );
+  assert.equal(isToolGroupCancelled([toolMessage("t1", "done")]), false);
 });
 
 test("shouldHoldToolGroupProgress bridges the gap between sequential tool calls", () => {
@@ -84,6 +103,16 @@ test("actionConfirmation tool rows stay ungrouped", () => {
   if (rows[1]?.kind === "message") {
     assert.equal(rows[1].message.id, "confirm-1");
   }
+});
+
+test("Plan artifact tools stay ungrouped for the standalone Plan card", () => {
+  const rows = groupConsecutiveToolMessages([
+    toolMessage("t1", "done"),
+    toolMessage("plan", "done", "plan_create"),
+    toolMessage("t2", "done"),
+  ]);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1]?.kind, "message");
 });
 
 test("auto-approve confirm receipts are dropped from grouped chat rows", () => {

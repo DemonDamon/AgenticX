@@ -6,6 +6,7 @@
  */
 
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { BookOpen, Library } from "lucide-react";
 import type { SessionReferenceBundle } from "../../utils/session-references";
 import { openSearchReference } from "../../utils/open-kb-reference";
@@ -74,13 +75,14 @@ function openWeb(ref: SearchReference, onOpenWebUrl?: Props["onOpenWebUrl"]) {
 }
 
 export function SessionReferenceList({ bundle, onOpenWebUrl }: Props) {
+  const { t } = useTranslation("workspace");
   if (bundle.isEmpty) return null;
 
   return (
     <div className="space-y-0.5">
       {bundle.skills.length > 0 ? (
         <div>
-          <SubHeader>技能</SubHeader>
+          <SubHeader>{t("work.skills")}</SubHeader>
           <div className="space-y-0.5">
             {bundle.skills.map((skill) => (
               <RefRow
@@ -95,7 +97,7 @@ export function SessionReferenceList({ bundle, onOpenWebUrl }: Props) {
 
       {bundle.webGroups.length > 0 ? (
         <div>
-          <SubHeader>联网搜索</SubHeader>
+          <SubHeader>{t("work.webSearch")}</SubHeader>
           <div className="space-y-0.5">
             {bundle.webGroups.map((group) => {
               const ref = group.primary;
@@ -122,7 +124,7 @@ export function SessionReferenceList({ bundle, onOpenWebUrl }: Props) {
 
       {bundle.kbGroups.length > 0 ? (
         <div>
-          <SubHeader>知识库</SubHeader>
+          <SubHeader>{t("work.knowledge")}</SubHeader>
           <div className="space-y-0.5">
             {bundle.kbGroups.map((group) => {
               const ref = group.primary;

@@ -1,0 +1,10 @@
+apiVersion: foundry.signoz.io/v1
+kind: Casting
+metadata:
+  name: agenticx-default-box
+spec:
+  deployment:
+    flavor: compose
+    mode: docker
+  metastore:
+    kind: sqlite

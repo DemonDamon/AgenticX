@@ -132,6 +132,24 @@
           "loadFailed": "Failed to load"
         }
       },
+      "compliance": {
+        "title": "Compliance and Data Residency",
+        "description": "Configure tenant data regions, cross-border flow policy, and audit log retention (append-only hash chain + exportable archive).",
+        "breadcrumbPage": "Compliance retention",
+        "dataResidency": "Data residency region (e.g. cn / us / eu)",
+        "dataResidencyPlaceholder": "Leave blank to skip mandatory residency checks",
+        "crossBorderAction": "Cross-border hit action",
+        "actionAllow": "Allow and mark in audit",
+        "actionApproval": "Require approval (placeholder — record then deny)",
+        "actionBlock": "Block",
+        "retentionYears": "Audit retention years (HIPAA-style, default 6)",
+        "appendOnly": "Append-only (hash chain cannot be tampered)",
+        "saving": "Saving…",
+        "lastUpdated": "Last updated:",
+        "viewCrossBorderAudit": "View cross-border audit →",
+        "toastSaved": "Compliance settings saved",
+        "toastSaveFailed": "Save failed"
+      },
       "capabilities": {
         "title": "Capability Packs",
         "description": "Register skills and MCP servers, then assign packs to everyone, a department, a group, or specific people.",
@@ -705,7 +723,7 @@
         "edit": "Edit",
         "name": "Name",
         "nameRequired": "Name is required",
-        "description": "Description",
+        "descriptionField": "Description",
         "noDescription": "No description",
         "members": "Members",
         "noUsers": "No users yet",
@@ -1107,6 +1125,7 @@
           "chainPartial": "Compatibility verification passed ({count} legacy rows not recomputable)",
           "chainFail": "Full chain verification failed",
           "chainLoading": "Full chain verification loading…",
+          "chainUnavailable": "Full chain verification unavailable",
           "pageChainFail": "Page chain verification failed",
           "scanned": "Scanned {count} rows"
         },
@@ -1121,6 +1140,7 @@
         "filterUserId": "User ID",
         "filterModel": "Model",
         "filterPolicy": "Policy hit",
+        "filterCrossBorder": "Cross-border events only",
         "clearFilters": "Clear",
         "applyFilters": "Apply filters",
         "emptyLoadingTitle": "Loading...",
@@ -1133,6 +1153,7 @@
           "event": "Event",
           "user": "User",
           "model": "Model",
+          "crossBorder": "Cross-border",
           "policy": "Policy hits"
         },
         "compliant": "Compliant",
@@ -1177,6 +1198,7 @@
           "responseSummary": "Response summary",
           "toolsCalled": "Tools called",
           "toolStatus": "Tool status",
+          "dataRegion": "Data region → upstream",
           "noPolicyTitle": "No policy hits",
           "noPolicyDescription": "This event is compliant"
         },
@@ -1185,7 +1207,8 @@
           "session": "Session: ",
           "user": "User: ",
           "model": "Model: ",
-          "policy": "Policy: "
+          "policy": "Policy: ",
+          "cross": "Cross-border only"
         },
         "toast": {
           "loadFailed": "Failed to load",

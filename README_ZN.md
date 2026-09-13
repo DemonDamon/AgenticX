@@ -703,6 +703,7 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **AgentKit SDK** | [volcengine/agentkit-sdk-python](https://github.com/volcengine/agentkit-sdk-python) | 智能体部署与 Skill 打包 |
 | **AgentRun SDK** | [Serverless-Devs/agentrun-sdk-python](https://github.com/Serverless-Devs/agentrun-sdk-python) | Serverless 智能体运行时模式 |
 | **AgentScope** | [agentscope-ai/agentscope](https://github.com/agentscope-ai/agentscope) | 多智能体通信与流水线设计 |
+| **AgentTeams** | [agentscope-ai/AgentTeams](https://github.com/agentscope-ai/AgentTeams) | 人可见的问责与持久事项卷宗 |
 | **Agno** | [agno-agi/agno](https://github.com/agno-agi/agno) | 轻量级智能体框架设计 |
 | **Better Harness** | [QoderAI/better-harness](https://github.com/QoderAI/better-harness) | 会话回环体检的证据分级（Present / Wired / Exercised / Outcome-supported） |
 | **Camel** | [camel-ai/camel](https://github.com/camel-ai/camel) | 角色扮演智能体与社会模拟 |
@@ -729,6 +730,7 @@ AgenticX 的诞生，离不开开源社区无数优秀项目的滋养。我们�
 | **MobileAgent** | [X-PLUG/MobileAgent](https://github.com/X-PLUG/MobileAgent) | 多智能体移动 GUI 自动化 |
 | **Model Context Protocol** | [modelcontextprotocol/modelcontextprotocol](https://github.com/modelcontextprotocol/modelcontextprotocol) | LLM 工具/资源标准化协议 |
 | **NVIDIA NemoClaw** | [NVIDIA/NemoClaw](https://github.com/NVIDIA/NemoClaw) | GPU 加速智能体插件系统 |
+| **OpenBot** | [CopilotKit/openbot](https://github.com/CopilotKit/openbot) | 先决策后执行且审计不可缺席、能力目录与安全边界分离、可观看的动作表面 |
 | **OpenClaw** | [openclaw/openclaw](https://github.com/openclaw/openclaw) | 开放式桌面智能体平台与扩展生态 |
 | **OpenSandbox** | [alibaba/OpenSandbox](https://github.com/alibaba/OpenSandbox) | 容器化代码沙箱 |
 | **OpenShell** | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Rust 高性能安全智能体 Shell |

@@ -40,7 +40,9 @@ def test_maybe_compact_meta_turn_context_shrinks_full_meta_prompt() -> None:
     session.provider_name = "custom_openai_v"
     session.model_name = "Qwen3-32B"
     full_prompt = build_meta_agent_system_prompt(session, mode="interactive", taskspaces=[])
-    assert len(full_prompt) > 40_000
+    # 2026-09 prompt diet（技能目录短摘要 + 日期/模型服务目录移出静态块）之前这里 >40K；
+    # 节食后约 20K，语义门槛改为「全量必须明显大于精简版」，不再绑绝对字符数。
+    assert len(full_prompt) > len(build_compact_meta_system_prompt(session))
     compact_prompt, compact_tools, notice = maybe_compact_meta_turn_context(
         session,
         system_prompt=full_prompt,

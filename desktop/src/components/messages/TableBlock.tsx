@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useContext, useRef, useState } from "react";
 import { Copy, Check, Download, FileText } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { HoverTip } from "../ds/HoverTip";
 import { MarkdownContext } from "./markdown-components";
 import {
@@ -17,6 +18,7 @@ type Props = {
 };
 
 export function TableBlock({ children, className, ...rest }: Props & Record<string, unknown>) {
+  const { t } = useTranslation("chat");
   const { isStreaming } = useContext(MarkdownContext);
   const tableRef = useRef<HTMLTableElement>(null);
   const [copied, setCopied] = useState<"tsv" | "md" | null>(null);
@@ -60,10 +62,10 @@ export function TableBlock({ children, className, ...rest }: Props & Record<stri
     <div className="flex w-full justify-center">
       <div className="agx-table-block group/table my-2 w-fit max-w-full overflow-hidden rounded-xl border border-border bg-surface-panel">
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-surface-hover/50 px-3 text-xs text-text-faint">
-        <span className="text-[11px] font-medium tracking-wide text-text-muted">表格</span>
+        <span className="text-[11px] font-medium tracking-wide text-text-muted">{t("table.label")}</span>
         {!isStreaming && (
           <div className="flex items-center gap-1 text-text-faint">
-            <HoverTip label="复制表格">
+            <HoverTip label={t("table.copyTable")}>
               <button
                 type="button"
                 onClick={() => void handleCopyTsv()}
@@ -72,7 +74,7 @@ export function TableBlock({ children, className, ...rest }: Props & Record<stri
                 {copied === "tsv" ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
               </button>
             </HoverTip>
-            <HoverTip label="复制 Markdown">
+            <HoverTip label={t("table.copyMarkdown")}>
               <button
                 type="button"
                 onClick={() => void handleCopyMarkdown()}
@@ -81,7 +83,7 @@ export function TableBlock({ children, className, ...rest }: Props & Record<stri
                 {copied === "md" ? <Check size={12} className="text-green-500" /> : <FileText size={12} />}
               </button>
             </HoverTip>
-            <HoverTip label="下载 CSV">
+            <HoverTip label={t("table.downloadCsv")}>
               <button
                 type="button"
                 onClick={handleDownload}

@@ -1,4 +1,6 @@
-/** 内置厂商展示名（配置 key 仍为英文 id）；自定义厂商用 entry.displayName */
+import { i18n } from "../i18n/i18n";
+
+/** Built-in vendor labels use i18n; custom vendors keep entry.displayName as-is. */
 
 /** 品牌专属颜色（纯色背景用于 logo 头像）；未匹配的自定义厂商按名称 hash 取色 */
 const PROVIDER_BRAND_COLOR: Record<string, string> = {
@@ -55,19 +57,6 @@ const BUILTIN_PROVIDER_IDS = new Set([
   "deepseek",
   "ollama",
 ]);
-
-const PROVIDER_DISPLAY_NAME: Record<string, string> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  volcengine: "火山引擎",
-  bailian: "阿里云百炼",
-  zhipu: "智谱开放平台",
-  qianfan: "百度千帆",
-  minimax: "MiniMax",
-  kimi: "月之暗面",
-  deepseek: "DeepSeek",
-  ollama: "Ollama",
-};
 
 export type ProviderInterfaceKind = "openai" | "ollama";
 
@@ -184,23 +173,32 @@ export function resolveProviderEntry(
   return undefined;
 }
 
+function vendorLabel(id: string): string {
+  return String(i18n.t(`provider.vendors.${id}`, { ns: "settings" }));
+}
+
 export function getProviderDisplayName(
   providerId: string,
   entry?: ProviderDisplayEntry | null,
 ): string {
   const pid = (providerId ?? "").trim();
-  if (!pid || pid === "(unknown)") return "未知厂商";
+  if (!pid || pid === "(unknown)") {
+    return String(i18n.t("provider.unknownVendor", { ns: "settings" }));
+  }
   const custom = entry?.displayName?.trim();
-  if (custom) return custom;
+  if (custom && isProviderDisplayNameEditable(pid, entry)) {
+    return custom;
+  }
   if (pid === "openai") {
     const baseUrl = (entry?.baseUrl ?? "").trim();
     if (baseUrl && !isOfficialOpenAIBase(baseUrl)) {
-      return "OpenAI 兼容";
+      return String(i18n.t("provider.openaiCompat", { ns: "settings" }));
     }
   }
-  if (PROVIDER_DISPLAY_NAME[pid]) return PROVIDER_DISPLAY_NAME[pid];
+  if (BUILTIN_PROVIDER_IDS.has(pid)) return vendorLabel(pid);
+  if (custom) return custom;
   if (pid.startsWith("custom_openai_") || pid.startsWith("custom_ollama_")) {
-    return "历史厂商";
+    return String(i18n.t("provider.legacyVendor", { ns: "settings" }));
   }
   return pid;
 }

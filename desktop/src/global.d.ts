@@ -694,6 +694,7 @@ declare global {
         max_tokens_per_session?: number;
         max_tokens_per_turn?: number;
         live_reattach_enabled?: boolean;
+        ops_tools_enabled?: boolean;
         error?: string;
       }>;
       saveRuntimeConfig: (payload: {
@@ -720,6 +721,7 @@ declare global {
         unattended_stall_continue_after_seconds?: number;
         unattended_auto_resume_exhausted?: boolean;
         unattended_auto_resume_interrupted?: boolean;
+        ops_tools_enabled?: boolean;
       }) => Promise<{ ok: boolean; error?: string }>;
       searchSessions: (payload: { q: string; avatarId?: string }) => Promise<{
         ok: boolean;
@@ -756,8 +758,13 @@ declare global {
         }>;
         activePaneId: string;
         theme?: string;
+        locale?: string;
       }>;
-      saveUiPrefs: (payload: { theme: "dark" | "light" | "dim" }) => Promise<{ ok: boolean; error?: string }>;
+      saveUiPrefs: (payload: {
+        theme?: "dark" | "light" | "dim";
+        locale?: "zh" | "en";
+      }) => Promise<{ ok: boolean; error?: string }>;
+      getSystemLocale: () => Promise<string>;
       saveLayout: (payload: {
         panes?: Array<{
           id: string;
@@ -769,6 +776,7 @@ declare global {
         activePaneId?: string;
       }) => Promise<{ ok: boolean; error?: string }>;
       forkSession: (payload: { sessionId: string }) => Promise<{ ok: boolean; session_id?: string; session_name?: string; error?: string }>;
+      continueFromMessage: (payload: { sessionId: string; messageId: string }) => Promise<{ ok: boolean; session_id?: string; session_name?: string; workspace_mode?: string; error?: string; detail?: string }>;
       archiveSessions: (payload: { sessionId: string; avatarId?: string | null }) => Promise<{ ok: boolean; archived_count?: number; error?: string }>;
       listTaskspaces: (sessionId: string) => Promise<{ ok: boolean; workspaces: TaskspaceItem[]; error?: string }>;
       addTaskspace: (payload: { sessionId: string; path?: string; label?: string }) => Promise<{ ok: boolean; workspace?: TaskspaceItem; error?: string }>;
@@ -792,7 +800,7 @@ declare global {
         truncated?: boolean;
         size?: number;
         mime_type?: string;
-        preview_kind?: "text" | "markdown" | "code" | "image" | "pdf" | "office" | "binary";
+        preview_kind?: "text" | "markdown" | "code" | "image" | "pdf" | "office" | "video" | "binary";
         is_binary?: boolean;
         preview_supported?: boolean;
         error?: string;
@@ -1498,6 +1506,12 @@ declare global {
         dataUrl?: string;
         mime?: string;
         size?: number;
+        error?: string;
+      }>;
+      resolveLocalMediaUrl: (path: string) => Promise<{
+        ok: boolean;
+        url?: string;
+        mime?: string;
         error?: string;
       }>;
       installFromRegistry: (args: {

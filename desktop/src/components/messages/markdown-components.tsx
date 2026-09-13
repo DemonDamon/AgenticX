@@ -3,6 +3,7 @@ import type { Element as HastElement, ElementContent } from "hast";
 import type { HTMLAttributes, ReactElement, ReactNode } from "react";
 import { Children, Fragment, isValidElement } from "react";
 import { useEffect, useMemo, useState, createContext, useContext } from "react";
+import { useTranslation } from "react-i18next";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -227,6 +228,7 @@ function MarkdownImage({
   alt?: string;
   title?: string;
 }) {
+  const { t } = useTranslation("chat");
   const { markdownFilePath, documentImage } = useContext(MarkdownContext);
   const [open, setOpen] = useState(false);
   const [resolvedSrc, setResolvedSrc] = useState("");
@@ -266,7 +268,7 @@ function MarkdownImage({
     const loadImage = desktop?.loadLocalImageDataUrl;
     const loadText = desktop?.readLocalTextFile;
     if (!loadImage) {
-      setLoadError("当前运行环境无法读取本地图片");
+      setLoadError(t("md.localReadUnavailable"));
       return () => {
         alive = false;
       };
@@ -292,7 +294,7 @@ function MarkdownImage({
         setResolvedSrc(res.dataUrl);
         return;
       }
-      setLoadError(res?.error || textError || "本地图片读取失败");
+      setLoadError(res?.error || textError || t("md.localReadFailed"));
     })();
 
     return () => {
@@ -300,7 +302,7 @@ function MarkdownImage({
     };
   }, [effectiveSrc, isSvg, normalizedSrc]);
 
-  if (!normalizedSrc) return <span className="text-text-faint">[图片地址为空]</span>;
+  if (!normalizedSrc) return <span className="text-text-faint">{t("md.emptySrc")}</span>;
 
   const thumbClass =
     documentImage || isSvg
@@ -310,13 +312,13 @@ function MarkdownImage({
   const previewBody = isLoadingLocal
     ? (
         <div className="flex min-h-[120px] items-center justify-center px-4 py-8 text-sm text-text-muted">
-          正在加载图片…
+          {t("md.loading")}
         </div>
       )
     : loadError
       ? (
           <div className="px-4 py-6 text-center text-sm text-rose-300">
-            图片预览失败：{loadError}
+            {t("md.previewFailed", { error: loadError })}
             {effectiveSrc ? (
               <div className="mt-1 text-[11px] text-text-faint">{effectiveSrc}</div>
             ) : null}
@@ -329,11 +331,11 @@ function MarkdownImage({
               alt={alt || "image"}
               className={`${thumbClass} transition group-hover:scale-[1.01]`}
               loading="lazy"
-              onError={() => setLoadError("图片渲染失败")}
+              onError={() => setLoadError(t("md.renderFailed"))}
             />
           )
         : (
-            <div className="px-4 py-6 text-center text-sm text-text-faint">图片地址无效</div>
+            <div className="px-4 py-6 text-center text-sm text-text-faint">{t("md.invalidSrc")}</div>
           );
 
   return (
@@ -343,24 +345,24 @@ function MarkdownImage({
         className={`group my-1 block overflow-hidden rounded-xl border border-border bg-surface-panel text-left ${
           documentImage || isSvg ? "w-full" : ""
         }`}
-        title={title || alt || "点击查看原图"}
+        title={title || alt || t("md.viewOriginal")}
         onClick={() => setOpen(true)}
       >
         {previewBody}
         <div className="px-2 py-1 text-[11px] text-text-faint">
-          {loadError ? `图片预览失败：${loadError}` : alt || title || "图片预览"}
+          {loadError ? t("md.previewFailed", { error: loadError }) : alt || title || t("md.preview")}
         </div>
       </button>
       <Modal
         open={open}
-        title={alt || title || "图片预览"}
+        title={alt || title || t("md.preview")}
         onClose={() => setOpen(false)}
         panelClassName="w-[90vw] max-w-4xl bg-surface-popover"
       >
         {displaySrc ? (
           <ZoomableImage src={displaySrc} alt={alt || "image"} maxHeight="70vh" />
         ) : (
-          <div className="py-8 text-center text-sm text-text-muted">图片地址无效</div>
+          <div className="py-8 text-center text-sm text-text-muted">{t("md.invalidSrc")}</div>
         )}
       </Modal>
     </>
@@ -384,6 +386,7 @@ function CodeBlockComponent({
   wrapClass: string;
   rest: any;
 }) {
+  const { t } = useTranslation("chat");
   const { isStreaming, onQuoteText } = useContext(MarkdownContext);
   const [expanded, setExpanded] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -406,7 +409,7 @@ function CodeBlockComponent({
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-border bg-surface-hover/50 px-3 text-xs text-text-faint transition">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[11px] uppercase tracking-wider">{lang || "text"}</span>
-          <HoverTip label={expanded ? "收起" : "展开"}>
+          <HoverTip label={expanded ? t("md.collapse") : t("md.expand")}>
             <button
               type="button"
               className="flex items-center justify-center rounded p-0.5 hover:bg-surface-hover hover:text-text-strong"
@@ -418,7 +421,7 @@ function CodeBlockComponent({
         </div>
         {!isStreaming && (
           <div className="flex items-center gap-1 text-text-faint transition-opacity">
-            <HoverTip label="复制">
+            <HoverTip label={t("actions.copy")}>
               <button
                 type="button"
                 onClick={handleCopy}
@@ -428,7 +431,7 @@ function CodeBlockComponent({
               </button>
             </HoverTip>
             {onQuoteText && (
-              <HoverTip label="引用">
+              <HoverTip label={t("actions.quote")}>
                 <button
                   type="button"
                   onClick={() => onQuoteText(text)}
@@ -438,7 +441,7 @@ function CodeBlockComponent({
                 </button>
               </HoverTip>
             )}
-            <HoverTip label="放大查看">
+            <HoverTip label={t("md.zoom")}>
               <button
                 type="button"
                 onClick={() => setFullscreen(true)}
@@ -461,7 +464,7 @@ function CodeBlockComponent({
           </pre>
         </div>
       )}
-      <Modal open={fullscreen} title={`查看代码 (${lang || "text"})`} onClose={() => setFullscreen(false)} panelClassName="max-w-4xl w-[90vw] bg-surface-panel">
+      <Modal open={fullscreen} title={`${t("md.viewCode")} (${lang || "text"})`} onClose={() => setFullscreen(false)} panelClassName="max-w-4xl w-[90vw] bg-surface-panel">
         <div className="max-h-[75vh] overflow-auto rounded-lg text-[14px]">
           <pre {...rest} className={wrapClass} style={{ margin: 0, padding: 0, background: "transparent", border: "none" }}>
             {html ? (

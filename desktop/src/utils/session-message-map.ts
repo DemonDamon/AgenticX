@@ -17,6 +17,101 @@ import {
 } from "./assistant-output";
 import { sanitizeLoadedBlocks } from "./content-blocks";
 
+export type BranchLineage = {
+  parentSessionId: string;
+  parentRunId: string;
+  requestedSeq: number;
+  restoredSeq: number;
+  sourceEventId?: string;
+};
+
+export function parseBranchLineage(
+  metadata: Record<string, unknown> | undefined,
+): BranchLineage | null {
+  const raw = metadata?.branch_lineage;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  const parentSessionId = String(row.parent_session_id ?? "").trim();
+  const parentRunId = String(row.parent_run_id ?? "").trim();
+  const requestedSeq = Number(row.requested_seq);
+  const restoredSeq = Number(row.restored_seq);
+  if (
+    !parentSessionId
+    || !parentRunId
+    || !Number.isInteger(requestedSeq)
+    || !Number.isInteger(restoredSeq)
+  ) return null;
+  const sourceEventId = String(row.source_event_id ?? "").trim();
+  return {
+    parentSessionId,
+    parentRunId,
+    requestedSeq,
+    restoredSeq,
+    ...(sourceEventId ? { sourceEventId } : {}),
+  };
+}
+
+export type ConversationLineage = {
+  parentSessionId: string;
+  sourceMessageId: string;
+  workspaceMode: string;
+  sharedWritePrompted?: boolean;
+};
+
+const DESKTOP_LOADED_MESSAGE_ID = /-i(\d+)(?:-(.+))?$/;
+
+function isEphemeralContinueId(id: string): boolean {
+  return id === "__stream__" || id.startsWith("typing-") || id.startsWith("__group_stream__");
+}
+
+export type ContinueLocatorMessage = {
+  id: string;
+  role?: string;
+  systemNotice?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export function continueMessageIdForRequest(
+  sessionId: string,
+  messages: ContinueLocatorMessage[],
+  message: ContinueLocatorMessage,
+): string {
+  const sid = String(sessionId || "").trim();
+  const mid = String(message.id || "").trim();
+  if (DESKTOP_LOADED_MESSAGE_ID.test(mid)) return mid;
+  const clientTurnId = String(message.metadata?.client_turn_id ?? "").trim();
+  if (clientTurnId) return clientTurnId;
+  const persistable = messages.filter((row) => {
+    if (row.systemNotice) return false;
+    const id = String(row.id || "").trim();
+    if (!id || isEphemeralContinueId(id)) return false;
+    return row.role === "user" || row.role === "assistant" || row.role === "tool";
+  });
+  const idx = persistable.findIndex((row) => row.id === message.id);
+  if (idx >= 0 && sid) return `${sid}-i${idx}`;
+  return mid;
+}
+
+export function parseConversationLineage(
+  metadata: Record<string, unknown> | undefined,
+): ConversationLineage | null {
+  const raw = metadata?.conversation_lineage;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  if (String(row.kind ?? "") !== "conversation") return null;
+  const parentSessionId = String(row.parent_session_id ?? "").trim();
+  const sourceMessageId = String(row.source_message_id ?? "").trim();
+  if (!parentSessionId || !sourceMessageId) return null;
+  return {
+    parentSessionId,
+    sourceMessageId,
+    workspaceMode: String(row.workspace_mode ?? "shared_current"),
+    ...(typeof row.shared_write_prompted === "boolean"
+      ? { sharedWritePrompted: row.shared_write_prompted }
+      : {}),
+  };
+}
+
 function parseSubAgentClusterAnchor(meta: Record<string, unknown> | undefined): Message["subAgentCluster"] {
   const raw = meta?.subagent_cluster;
   if (!raw || typeof raw !== "object") return undefined;
@@ -173,7 +268,7 @@ function imageAttachmentsFromVisualRow(raw: unknown): MessageAttachment[] | unde
 
 export type LoadedSessionMessage = {
   id?: string;
-  role: MsgRole;
+  role: MsgRole | "system";
   content: string;
   agent_id?: string;
   avatar_name?: string;
@@ -201,6 +296,7 @@ export type LoadedSessionMessage = {
   attachments?: unknown;
   visual_attachments?: unknown;
   metadata?: Record<string, unknown>;
+  system_notice?: boolean;
   tool_call_id?: string;
   tool_name?: string;
   tool_args?: Record<string, unknown>;
@@ -265,7 +361,7 @@ export function mapLoadedSessionMessage(
       : undefined;
   const mapped: Message = {
     id,
-    role: item.role,
+    role: item.role === "system" ? "tool" : item.role,
     content: injectRow && !rawContent.trim() ? "" : rawContent,
     ownerSessionId: String(ownerSessionId ?? idPrefix ?? "").trim() || undefined,
     agentId,
@@ -289,6 +385,7 @@ export function mapLoadedSessionMessage(
         : undefined,
     attachments: normalizeReferenceAttachments(mergedAttachments),
     metadata,
+    systemNotice: item.system_notice === true,
     subAgentCluster: parseSubAgentClusterAnchor(metadata),
   };
   if (item.role === "assistant") {

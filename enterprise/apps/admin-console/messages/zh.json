@@ -132,6 +132,24 @@
           "loadFailed": "加载失败"
         }
       },
+      "compliance": {
+        "title": "合规与数据驻留",
+        "description": "配置租户数据域、跨境流动策略与审计日志留存（链式不可篡改 + 可导出归档）。",
+        "breadcrumbPage": "合规留存",
+        "dataResidency": "数据驻留域（如 cn / us / eu）",
+        "dataResidencyPlaceholder": "留空表示不强制驻留判定",
+        "crossBorderAction": "跨境命中动作",
+        "actionAllow": "放行并审计打标",
+        "actionApproval": "待审批（占位，记录后拒绝）",
+        "actionBlock": "拦截",
+        "retentionYears": "审计留存年限（HIPAA 式，默认 6 年）",
+        "appendOnly": "仅追加（哈希链不可篡改）",
+        "saving": "保存中…",
+        "lastUpdated": "上次更新：",
+        "viewCrossBorderAudit": "查看跨境审计 →",
+        "toastSaved": "合规设置已保存",
+        "toastSaveFailed": "保存失败"
+      },
       "capabilities": {
         "title": "能力包",
         "description": "登记 Skill 与 MCP，打成能力包后分配给全员、部门、用户组或指定人。",
@@ -705,7 +723,7 @@
         "edit": "编辑",
         "name": "名称",
         "nameRequired": "请填写名称",
-        "description": "说明",
+        "descriptionField": "说明",
         "noDescription": "没有说明",
         "members": "成员",
         "noUsers": "还没有用户",
@@ -1107,6 +1125,7 @@
           "chainPartial": "全表链兼容校验通过（{count} 条历史记录未重算）",
           "chainFail": "全表链校验失败",
           "chainLoading": "全表链校验加载中…",
+          "chainUnavailable": "全表链校验不可用",
           "pageChainFail": "当前页链校验失败",
           "scanned": "已扫 {count} 行"
         },
@@ -1121,6 +1140,7 @@
         "filterUserId": "用户 ID",
         "filterModel": "模型",
         "filterPolicy": "策略命中",
+        "filterCrossBorder": "仅跨境流动事件",
         "clearFilters": "清空",
         "applyFilters": "应用筛选",
         "emptyLoadingTitle": "加载中...",
@@ -1133,6 +1153,7 @@
           "event": "事件",
           "user": "用户",
           "model": "模型",
+          "crossBorder": "跨境",
           "policy": "策略命中"
         },
         "compliant": "合规",
@@ -1177,6 +1198,7 @@
           "responseSummary": "输出摘要",
           "toolsCalled": "工具调用",
           "toolStatus": "工具状态",
+          "dataRegion": "数据域 → 上游",
           "noPolicyTitle": "未命中任何策略",
           "noPolicyDescription": "本次事件合规"
         },
@@ -1185,7 +1207,8 @@
           "session": "会话：",
           "user": "用户：",
           "model": "模型：",
-          "policy": "策略："
+          "policy": "策略：",
+          "cross": "仅跨境"
         },
         "toast": {
           "loadFailed": "加载失败",

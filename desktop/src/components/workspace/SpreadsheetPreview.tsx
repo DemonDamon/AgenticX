@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../i18n/i18n";
 import { PreviewFallback } from "./PreviewFallback";
 import { dataUrlToArrayBuffer, loadLocalPreviewDataUrl } from "./preview-data";
 import {
@@ -31,6 +33,7 @@ export function SpreadsheetPreview({
   onRevealInFileManager,
   revealInFileManagerLabel,
 }: SpreadsheetPreviewProps) {
+  const { t } = useTranslation("workspace");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sheetNames, setSheetNames] = useState<string[]>([]);
@@ -69,7 +72,7 @@ export function SpreadsheetPreview({
         const names = workbook.SheetNames.slice(0, MAX_SHEETS);
         if (cancelled) return;
         if (names.length === 0) {
-          setError("工作簿中没有工作表");
+          setError(i18n.t("preview.noSheets", { ns: "workspace" }));
           setLoading(false);
           return;
         }
@@ -107,12 +110,12 @@ export function SpreadsheetPreview({
         }) as string[][];
         const limitedRows = matrix.slice(0, MAX_ROWS).map((row) => row.slice(0, MAX_COLS));
         const hints: string[] = [];
-        if (matrix.length > MAX_ROWS) hints.push(`前 ${MAX_ROWS} 行`);
+        if (matrix.length > MAX_ROWS) hints.push(i18n.t("preview.truncRows", { ns: "workspace", count: MAX_ROWS }));
         const maxColCount = matrix.reduce((max, row) => Math.max(max, row.length), 0);
-        if (maxColCount > MAX_COLS) hints.push(`${MAX_COLS} 列`);
+        if (maxColCount > MAX_COLS) hints.push(i18n.t("preview.truncCols", { ns: "workspace", count: MAX_COLS }));
         if (cancelled) return;
         setRows(limitedRows);
-        setTruncatedHint(hints.length ? `仅展示${hints.join(" / ")}` : "");
+        setTruncatedHint(hints.length ? i18n.t("preview.truncOnly", { ns: "workspace", hints: hints.join(" / ") }) : "");
       } catch (err) {
         if (!cancelled) setError(String(err));
       }
@@ -192,7 +195,7 @@ export function SpreadsheetPreview({
   if (loading) {
     return (
       <div className="flex h-full min-h-[220px] items-center justify-center bg-surface-base p-6 text-sm text-text-muted">
-        正在加载电子表格…
+        {t("preview.spreadsheetLoading")}
       </div>
     );
   }
@@ -200,7 +203,7 @@ export function SpreadsheetPreview({
   if (error) {
     return (
       <PreviewFallback
-        title="Office 文档"
+        title={t("preview.officeTitle")}
         message={error}
         mimeType={mimeType}
         onCopyPath={onCopyPath}

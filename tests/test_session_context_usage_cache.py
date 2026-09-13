@@ -176,6 +176,15 @@ def test_estimate_reuses_occupancy_cache_without_rescan(monkeypatch) -> None:
     assert calls["skills"] == 1
     assert calls["workspace"] == 1
     assert first["categories"] == second["categories"]
+    assert set(first["categories"]) == {
+        "system_prompt",
+        "tool_definitions",
+        "skills",
+        "connectors_and_mcp",
+        "subagents",
+        "summarized_conversation",
+        "messages",
+    }
     assert second["max_tokens"] == 1_000_000
     invalidate_occupancy_cache("sid-cache")
     estimate_session_context_usage(managed, session_id="sid-cache")
@@ -212,6 +221,65 @@ def test_estimate_ignores_inline_attachment_data_urls(monkeypatch) -> None:
     usage = estimate_session_context_usage(managed, session_id="sid-image")
     assert usage["categories"]["messages"] < 2_000
     assert usage["used_tokens"] < 40_000
+
+
+def _stub_estimate_deps(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage.get_all_skill_summaries",
+        lambda bound_avatar_id=None: [],
+    )
+    monkeypatch.setattr(
+        "agenticx.studio.context_usage._build_workspace_context_block",
+        lambda *args, **kwargs: "",
+    )
+
+
+def test_estimate_counts_compacted_prefix_as_summarized_conversation(monkeypatch) -> None:
+    _reset_usage_caches()
+    _stub_estimate_deps(monkeypatch)
+    managed = _empty_managed("sid-compact")
+    compact_body = "早先对话已压缩为摘要。" * 40
+    managed.studio_session.agent_messages = [
+        {"role": "system", "content": f"[compacted]\n{compact_body}"},
+        {"role": "user", "content": "继续刚才的任务"},
+    ]
+    usage = estimate_session_context_usage(managed, session_id="sid-compact")
+    summary = usage["categories"]["summarized_conversation"]
+    messages = usage["categories"]["messages"]
+    assert summary > 80
+    assert messages < summary
+    assert usage["categories"]["subagents"] == 0
+
+
+def test_estimate_counts_subagents_from_managed_team_manager(monkeypatch) -> None:
+    _reset_usage_caches()
+    _stub_estimate_deps(monkeypatch)
+
+    class _FakeTeam:
+        def get_status(self, agent_id=None):
+            return {
+                "ok": True,
+                "subagents": [
+                    {
+                        "agent_id": "ag-1",
+                        "name": "researcher",
+                        "status": "running",
+                        "task": "search papers about GUI agents and desktop automation",
+                        "result_summary": "",
+                        "output_files": [],
+                    }
+                ],
+            }
+
+    managed = _empty_managed("sid-sub")
+    empty = estimate_session_context_usage(managed, session_id="sid-sub")
+    assert empty["categories"]["subagents"] == 0
+
+    managed.team_manager = _FakeTeam()
+    managed.studio_session._team_manager = None
+    filled = estimate_session_context_usage(managed, session_id="sid-sub")
+    assert filled["categories"]["subagents"] > 0
+    assert getattr(managed.studio_session, "_team_manager", None) is managed.team_manager
 
 
 def test_estimate_does_not_rebuild_live_system_prompt(monkeypatch) -> None:

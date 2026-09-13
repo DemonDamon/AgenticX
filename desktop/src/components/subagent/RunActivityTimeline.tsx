@@ -3,6 +3,8 @@
  * 运行中的 run 额外合并内存 `liveEvents`（去重后追加在尾部），随执行实时增长。
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { i18n } from "../../i18n/i18n";
 import { ChevronDown, Loader2, Wrench, AlertTriangle, MessageSquare } from "lucide-react";
 import type { SubAgentEvent } from "../../store";
 import { ACTIVITY_PAGE_SIZE, fetchRunActivityPage, type ActivityEntry } from "./run-drawer-api";
@@ -99,6 +101,7 @@ function TimelineRow({ item }: { item: TimelineItem }) {
 }
 
 export function RunActivityTimeline({ apiBase, apiToken, sessionId, runId, isRunning, liveEvents }: Props) {
+  const { t } = useTranslation("workspace");
   const [entries, setEntries] = useState<ActivityEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [limit, setLimit] = useState(ACTIVITY_PAGE_SIZE);
@@ -112,7 +115,9 @@ export function RunActivityTimeline({ apiBase, apiToken, sessionId, runId, isRun
       try {
         const res = await fetchRunActivityPage(apiBase, apiToken, sessionId, runId, 0, nextLimit);
         if (!res.ok) {
-          if (!opts.silent) setError(res.error || res.detail || "活动日志加载失败");
+          if (!opts.silent) {
+            setError(res.error || res.detail || String(i18n.t("subagentDrawer.activityLoadFailed", { ns: "workspace" })));
+          }
           return;
         }
         setEntries(res.entries ?? []);
@@ -156,12 +161,12 @@ export function RunActivityTimeline({ apiBase, apiToken, sessionId, runId, isRun
       {loading && entries.length === 0 ? (
         <div className="flex items-center gap-1.5 px-0.5 py-3 text-[11px] text-text-faint">
           <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
-          加载活动日志…
+          {t("subagentDrawer.loadingActivity")}
         </div>
       ) : error && entries.length === 0 ? (
         <div className="px-0.5 py-3 text-[11px] text-[var(--status-error)]">{error}</div>
       ) : items.length === 0 ? (
-        <div className="px-0.5 py-3 text-[11px] text-text-faint">暂无活动记录</div>
+        <div className="px-0.5 py-3 text-[11px] text-text-faint">{t("subagentDrawer.noActivity")}</div>
       ) : (
         <div className="flex flex-col">
           {entries.length < total ? (
@@ -170,7 +175,7 @@ export function RunActivityTimeline({ apiBase, apiToken, sessionId, runId, isRun
               className="mb-1 self-start rounded px-1.5 py-0.5 text-[10.5px] text-[var(--kb-citation-fg)] hover:bg-surface-hover"
               onClick={loadOlder}
             >
-              加载更早的活动（还有 {total - entries.length} 条）
+              {t("subagentDrawer.loadOlderActivity", { count: total - entries.length })}
             </button>
           ) : null}
           {items.map((item) => (

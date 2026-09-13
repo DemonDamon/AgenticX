@@ -17,7 +17,9 @@ import {
 } from "../../constants/confirm-strategy-options";
 import { SECURITY_RULES_FOCUS, type SettingsFocus, type SettingsTab } from "../../settings-tab";
 import { useAppStore } from "../../store";
+import { useTranslation } from "react-i18next";
 import { AllowAllConfirmDialog } from "./AllowAllConfirmDialog";
+import "../../i18n/i18n";
 
 const RUN_MODE_ICON: Record<RunMode, typeof Hand> = {
   ask: Hand,
@@ -69,6 +71,13 @@ export type ApplyRunModeArgs = {
     confirmText?: string;
     cancelText?: string;
   }) => Promise<{ confirmed: boolean }>;
+  t?: (key: string, options?: Record<string, unknown>) => string;
+};
+
+const RUN_MODE_I18N: Record<RunMode, { label: string; hint: string }> = {
+  ask: { label: "composer.runModeAsk", hint: "composer.runModeAskHint" },
+  allowlist: { label: "composer.runModeAllowlist", hint: "composer.runModeAllowlistHint" },
+  auto: { label: "composer.runModeAuto", hint: "composer.runModeAutoHint" },
 };
 
 export async function applyRunMode({
@@ -77,6 +86,7 @@ export async function applyRunMode({
   setRunMode,
   persistRunMode,
   confirmDialog,
+  t,
 }: ApplyRunModeArgs): Promise<void> {
   if (next === mode) return;
   if (next !== "auto") {
@@ -85,12 +95,13 @@ export async function applyRunMode({
     return;
   }
   if (typeof confirmDialog !== "function") return;
+  const autoLabel = t ? t("composer.runModeAuto") : runModeLabel("auto");
   const dlg = await confirmDialog({
-    title: `切换到${runModeLabel("auto")}？`,
-    message: "之后将不再逐条询问，智能体可自行执行命令、改文件和访问网络。",
-    detail: "工作区隔离仍然生效。可随时切回始终询问或按需确认。",
-    confirmText: "切换",
-    cancelText: "取消",
+    title: t ? String(t("composer.switchToAutoTitle", { label: autoLabel })) : `切换到${runModeLabel("auto")}？`,
+    message: t ? String(t("composer.switchToAutoMessage")) : "之后将不再逐条询问，智能体可自行执行命令、改文件和访问网络。",
+    detail: t ? String(t("composer.switchToAutoDetail")) : "工作区隔离仍然生效。可随时切回始终询问或按需确认。",
+    confirmText: t ? String(t("composer.switch")) : "切换",
+    cancelText: t ? String(t("composer.cancel")) : "Cancel",
   });
   if (dlg.confirmed) {
     setRunMode("auto");
@@ -108,10 +119,12 @@ export function RunModeMenu({
   /** 传入时在菜单底部追加「自定义」入口；它不是第四个运行模式，只是跳到安全中心的规则区。 */
   onCustomize?: () => void;
 }) {
+  const { t } = useTranslation("chat");
   return (
     <>
       {RUN_MODE_OPTIONS.map((option) => {
         const Icon = RUN_MODE_ICON[option.value];
+        const keys = RUN_MODE_I18N[option.value];
         return (
           <button
             key={option.value}
@@ -124,10 +137,10 @@ export function RunModeMenu({
             <Icon className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.8} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] leading-tight text-text-primary">
-                {option.label}
+                {t(keys.label)}
               </span>
               <span className="mt-0.5 block truncate text-[11px] leading-tight text-text-faint">
-                {option.description}
+                {t(keys.hint)}
               </span>
             </span>
             {option.value === mode ? (
@@ -147,10 +160,10 @@ export function RunModeMenu({
             <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.8} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] leading-tight text-text-primary">
-                自定义…
+                {t("composer.customize")}
               </span>
               <span className="mt-0.5 block truncate text-[11px] leading-tight text-text-faint">
-                拦截指定路径、命令或工具
+                {t("composer.customizeHint")}
               </span>
             </span>
           </button>
@@ -168,6 +181,7 @@ export function openRunModeCustomizeSettings(
 }
 
 export function RunModePicker() {
+  const { t } = useTranslation("chat");
   const mode = useAppStore((s) => s.runMode);
   const setRunMode = useAppStore((s) => s.setRunMode);
   const openSettings = useAppStore((s) => s.openSettings);
@@ -180,6 +194,7 @@ export function RunModePicker() {
   const allowAllResolverRef = useRef<((value: { confirmed: boolean }) => void) | null>(null);
   const currentOption = RUN_MODE_OPTIONS.find((option) => option.value === mode) ?? RUN_MODE_OPTIONS[0]!;
   const Icon = RUN_MODE_ICON[currentOption.value];
+  const currentKeys = RUN_MODE_I18N[currentOption.value];
 
   const syncPosition = useCallback(() => {
     const el = anchorRef.current;
@@ -231,6 +246,7 @@ export function RunModePicker() {
       next,
       mode,
       setRunMode,
+      t,
       persistRunMode: (value) => window.agenticxDesktop?.saveRunMode(value),
       confirmDialog: () =>
         new Promise<{ confirmed: boolean }>((resolve) => {
@@ -251,10 +267,10 @@ export function RunModePicker() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={currentOption.description}
+        title={t(currentKeys.hint)}
       >
         <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-        <span className="truncate">{currentOption.label}</span>
+        <span className="truncate">{t(currentKeys.label)}</span>
         {open && placement === "up" ? (
           <ChevronUp className="h-3 w-3 shrink-0 text-text-faint" strokeWidth={2} />
         ) : (

@@ -9,6 +9,7 @@ from __future__ import annotations
 from agenticx.runtime.usage_metadata import (
     add_usage_dicts,
     empty_usage_dict,
+    request_usage_for_message,
     usage_dict_has_counts,
 )
 
@@ -55,6 +56,32 @@ def test_add_usage_dicts_three_rounds_not_last_call_only() -> None:
     assert acc["total_tokens"] == 1750
     last_only = {"input_tokens": 200, "output_tokens": 50, "total_tokens": 250}
     assert acc["total_tokens"] != last_only["total_tokens"]
+
+
+def test_request_usage_for_message_uses_last_call_not_turn_sum() -> None:
+    last = {
+        "input_tokens": 27111,
+        "output_tokens": 345,
+        "cached_tokens": 26112,
+        "reasoning_tokens": 0,
+        "total_tokens": 27456,
+    }
+    turn = {
+        "input_tokens": 78821,
+        "output_tokens": 666,
+        "cached_tokens": 62848,
+        "reasoning_tokens": 0,
+        "total_tokens": 79487,
+    }
+    row = request_usage_for_message(last, turn)
+    assert row is not None
+    assert row["input_tokens"] == 27111
+    assert row["output_tokens"] == 345
+    assert row["cached_tokens"] == 26112
+    assert row["total_tokens"] == 27456
+    assert row["turn_input_tokens"] == 78821
+    assert row["turn_output_tokens"] == 666
+    assert row["turn_cached_tokens"] == 62848
 
 
 def test_add_usage_dicts_backfills_total() -> None:

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { CSSProperties } from "react";
 import { Check, ChevronDown, Cloud, Monitor } from "lucide-react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store";
 import {
   formatBackendChipLabel,
@@ -18,6 +19,7 @@ function panelStyle(rect: DOMRect): CSSProperties {
 }
 
 export function RunLocationPicker() {
+  const { t } = useTranslation("chat");
   const openSettings = useAppStore((s) => s.openSettings);
   const [tick, setTick] = useState(0);
   const [open, setOpen] = useState(false);
@@ -94,11 +96,11 @@ export function RunLocationPicker() {
     });
     if (remoteSave.mode_changed && typeof desktop.confirmDialog === "function") {
       const restartDlg = await desktop.confirmDialog({
-        title: "需要重启 Near",
-        message: "连接模式已切换，需要重启 Near 以加载新后端工作区。",
-        detail: "会话、窗格、分身与 MCP 状态将按新后端隔离，不会与上一套后端混用。",
-        confirmText: "立即重启",
-        cancelText: "稍后手动重启",
+        title: t("composer.needRestartTitle"),
+        message: t("composer.needRestartMessage"),
+        detail: t("composer.needRestartDetail"),
+        confirmText: t("composer.restartNow"),
+        cancelText: t("composer.restartLater"),
       });
       if (restartDlg.confirmed) {
         await desktop.appRelaunch();
@@ -117,7 +119,7 @@ export function RunLocationPicker() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={connectionMode === "remote" ? `当前连接到远程后端 ${backendScope}` : "当前使用本机 agx serve"}
+        title={connectionMode === "remote" ? t("composer.connectedRemote", { scope: backendScope }) : t("composer.connectedLocal")}
       >
         {connectionMode === "remote" ? (
           <Cloud className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
@@ -141,7 +143,7 @@ export function RunLocationPicker() {
                 onClick={() => void applyMode("local")}
               >
                 <Monitor className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.8} />
-                <span className="min-w-0 flex-1">本地</span>
+                <span className="min-w-0 flex-1">{t("composer.local")}</span>
                 {connectionMode === "local" ? (
                   <Check className="h-3.5 w-3.5 shrink-0 text-text-strong" strokeWidth={2} />
                 ) : null}
@@ -152,7 +154,7 @@ export function RunLocationPicker() {
                 onClick={() => void applyMode("remote")}
               >
                 <Cloud className="h-3.5 w-3.5 shrink-0 text-text-faint" strokeWidth={1.8} />
-                <span className="min-w-0 flex-1">远程</span>
+                <span className="min-w-0 flex-1">{t("composer.remote")}</span>
                 {connectionMode === "remote" ? (
                   <Check className="h-3.5 w-3.5 shrink-0 text-text-strong" strokeWidth={2} />
                 ) : null}

@@ -1,4 +1,6 @@
-import type { ForwardedHistoryCard as ForwardedHistoryCardData } from "../../store";
+import { useTranslation } from "react-i18next";
+import { formatDateTime } from "../../i18n/format";
+import { useAppStore, type ForwardedHistoryCard as ForwardedHistoryCardData } from "../../store";
 
 type Props = {
   open: boolean;
@@ -6,22 +8,26 @@ type Props = {
   onClose: () => void;
 };
 
-function formatTime(ts?: number): string {
-  if (!ts) return "";
-  try {
-    return new Date(ts).toLocaleString("zh-CN", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
-}
-
 export function ForwardedHistoryModal({ open, history, onClose }: Props) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
+  const locale = useAppStore((s) => s.locale);
+
+  const formatTime = (ts?: number): string => {
+    if (!ts) return "";
+    try {
+      return formatDateTime(ts, locale, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  };
+
   if (!open || !history) return null;
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
@@ -36,13 +42,13 @@ export function ForwardedHistoryModal({ open, history, onClose }: Props) {
             className="rounded px-2 py-1 text-xs text-text-subtle transition hover:bg-surface-hover hover:text-text-strong"
             onClick={onClose}
           >
-            关闭
+            {tCommon("close")}
           </button>
         </div>
         <div className="space-y-3 overflow-y-auto px-4 py-3">
           {history.note ? (
             <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-[15px] leading-relaxed text-cyan-200">
-              <div className="mb-1 text-xs font-medium text-cyan-300">附加说明</div>
+              <div className="mb-1 text-xs font-medium text-cyan-300">{t("forward.note")}</div>
               <div className="whitespace-pre-wrap break-words">{history.note}</div>
             </div>
           ) : null}

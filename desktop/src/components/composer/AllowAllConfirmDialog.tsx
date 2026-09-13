@@ -1,6 +1,8 @@
 import { TriangleAlert, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "../ds/Button";
 import { Modal } from "../ds/Modal";
+import "../../i18n/i18n";
 
 type Props = {
   open: boolean;
@@ -8,9 +10,10 @@ type Props = {
   onConfirm: () => void;
 };
 
-const RISKS = ["文件被误删或覆盖", "敏感数据被读取或外泄"];
-
 export function AllowAllConfirmDialog({ open, onCancel, onConfirm }: Props) {
+  const { t } = useTranslation("chat");
+  const { t: tCommon } = useTranslation("common");
+  const risks = [t("composer.allowAllRiskDelete"), t("composer.allowAllRiskLeak")];
   return (
     <Modal
       open={open}
@@ -19,10 +22,10 @@ export function AllowAllConfirmDialog({ open, onCancel, onConfirm }: Props) {
       footer={(
         <div className="flex justify-end gap-2">
           <Button variant="ghost" className="min-w-[68px]" onClick={onCancel}>
-            取消
+            {tCommon("cancel")}
           </Button>
           <Button variant="primary" className="min-w-[68px] font-medium" onClick={onConfirm}>
-            启用
+            {t("composer.enable")}
           </Button>
         </div>
       )}
@@ -33,12 +36,12 @@ export function AllowAllConfirmDialog({ open, onCancel, onConfirm }: Props) {
             <TriangleAlert className="h-[15px] w-[15px]" strokeWidth={2} />
           </span>
           <h3 className="truncate text-[15px] font-semibold leading-none text-text-strong">
-            启用全部允许？
+            {t("composer.allowAllTitle")}
           </h3>
         </div>
         <button
           type="button"
-          aria-label="关闭"
+          aria-label={tCommon("close")}
           className="-mr-1 -mt-0.5 shrink-0 rounded-md p-1 text-text-faint transition-colors hover:bg-surface-hover hover:text-text-primary"
           onClick={onCancel}
         >
@@ -47,15 +50,15 @@ export function AllowAllConfirmDialog({ open, onCancel, onConfirm }: Props) {
       </div>
 
       <p className="mt-3.5 text-[13px] leading-[1.7] text-text-muted">
-        开启后不再逐条审批，智能体可自行读写本地文件、执行终端命令、访问网络。
+        {t("composer.allowAllBody")}
       </p>
 
       <div className="mt-3 rounded-lg border-l-2 border-amber-500/60 bg-amber-500/[0.07] py-2 pl-3 pr-3">
         <p className="text-[12px] font-medium leading-none text-[var(--status-warning)]">
-          可能带来的风险
+          {t("composer.allowAllRisks")}
         </p>
         <ul className="mt-1.5 space-y-1">
-          {RISKS.map((risk) => (
+          {risks.map((risk) => (
             <li key={risk} className="flex items-start gap-1.5 text-[12.5px] leading-[1.6] text-text-muted">
               <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-amber-500/70" />
               {risk}
@@ -65,7 +68,7 @@ export function AllowAllConfirmDialog({ open, onCancel, onConfirm }: Props) {
       </div>
 
       <p className="mt-3 text-[12px] leading-[1.6] text-text-faint">
-        工作区隔离仍然生效，可在安全中心单独调整；随时可切回始终询问或按需确认。
+        {t("composer.allowAllFooter")}
       </p>
     </Modal>
   );

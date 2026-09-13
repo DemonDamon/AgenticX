@@ -1,0 +1,10 @@
+{
+  "menu": {
+    "settings": "Settings"
+  },
+  "tray": {
+    "toggleWindow": "Show/Hide Window",
+    "settings": "Settings",
+    "quit": "Quit"
+  }
+}

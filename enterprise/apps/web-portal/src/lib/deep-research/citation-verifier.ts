@@ -11,6 +11,7 @@
 import { selectRelevantEvidenceExcerpt } from "./evidence-pack";
 import { parseLlmJson } from "./llm-json";
 import type { Citation } from "./registry";
+import { languageDirective } from "./copy";
 
 /** Cap the audit itself: the check must not cost more than a section write. */
 export const MAX_VERIFIED_CLAIMS = 32;
@@ -263,6 +264,7 @@ export function buildVerificationMessages(input: {
   topic: string;
   claims: readonly ClaimUnit[];
   evidence: string;
+  locale?: "zh" | "en";
 }): Array<{ role: "system" | "user"; content: string }> {
   const claimLines = input.claims.map(
     (claim) =>
@@ -286,6 +288,7 @@ export function buildVerificationMessages(input: {
         "- 只能弱化或修正表述，禁止新增证据之外的事实、标题、代码块或列表结构。",
         "- 如果证据完全不支持且无法降级，replacement 用空字符串表示删除该条。",
         "- 保持与原文相同的语言和语气，不要写出“证据不足”“置信度”“已复核”之类的元话语。",
+        languageDirective(input.locale === "en" ? "en" : "zh"),
       ].join("\n"),
     },
     {
@@ -399,6 +402,7 @@ export type CitationVerifierInput = {
   modelCallsRemaining: number;
   /** Emits the single user-visible phase, only when the audit really runs. */
   onVerifyStart?: () => void;
+  locale?: "zh" | "en";
 };
 
 export async function verifyReportCitations(
@@ -423,7 +427,12 @@ export async function verifyReportCitations(
   try {
     raw = await input.callJson({
       ...input.baseBody,
-      messages: buildVerificationMessages({ topic: input.topic, claims, evidence }),
+      messages: buildVerificationMessages({
+        topic: input.topic,
+        claims,
+        evidence,
+        locale: input.locale,
+      }),
       temperature: 0,
       max_tokens: VERIFY_MAX_TOKENS,
     });

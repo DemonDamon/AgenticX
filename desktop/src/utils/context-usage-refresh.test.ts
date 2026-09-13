@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildContextUsageRefreshKey,
   contextUsageMessageSignature,
+  formatCategoryTokens,
+  formatOccupancyFullLabel,
+  formatOccupancyTokenPair,
+  formatWindowPercent,
   shouldDropCachedOccupancy,
   shouldFetchContextUsage,
 } from "./context-usage-refresh";
@@ -86,5 +90,29 @@ describe("shouldDropCachedOccupancy", () => {
     expect(
       shouldDropCachedOccupancy({ sessionInputTokens: 0, cachedLedgerInput: 0 })
     ).toBe(false);
+  });
+});
+
+describe("formatWindowPercent", () => {
+  it("reports category share of the model window", () => {
+    expect(formatWindowPercent(2_000, 1_000_000)).toBe("0.2%");
+    expect(formatWindowPercent(5_000, 1_000_000)).toBe("0.5%");
+    expect(formatWindowPercent(64_000, 1_000_000)).toBe("6.4%");
+    expect(formatWindowPercent(1_000, 1_000_000)).toBe("0.1%");
+    expect(formatWindowPercent(0, 1_000_000)).toBe("0%");
+    expect(formatWindowPercent(72_400, 1_000_000)).toBe("7.2%");
+  });
+});
+
+describe("occupancy headline", () => {
+  it("uses percent-full plus approximate used / cap tokens", () => {
+    expect(formatOccupancyFullLabel(2.9)).toBe("2.9% 已占用");
+    expect(formatOccupancyFullLabel(46)).toBe("46% 已占用");
+    expect(formatOccupancyFullLabel(0)).toBe("0% 已占用");
+    expect(formatOccupancyTokenPair(28_600, 1_000_000)).toBe("~28.6K / 1000K");
+    expect(formatOccupancyTokenPair(118_200, 256_000)).toBe("~118.2K / 256K");
+    expect(formatCategoryTokens(1_500)).toBe("1.5K");
+    expect(formatCategoryTokens(0)).toBe("0");
+    expect(formatCategoryTokens(613)).toBe("613");
   });
 });

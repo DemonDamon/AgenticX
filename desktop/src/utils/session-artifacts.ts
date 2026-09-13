@@ -24,7 +24,7 @@ const ABS_PATH_BODY =
   "(\\/(?:Users|home|tmp|var|opt|private|Volumes)[^\\s`<>\\[\\]()]+|[a-zA-Z]:[\\\\/][^\\s`<>\\[\\]()]+|~\\/[^\\s`<>\\[\\]()]+)";
 
 const SAVED_FILE_LABEL =
-  "(?:报告已保存(?:至|到)|文件已保存(?:至|到)|报告(?:文件)?已落盘(?:至|到)?|已保存(?:至|到)|保存路径|路径|saved\\s+to|written\\s+to|report\\s+saved\\s+to|file\\s+saved\\s+to)";
+  "(?:产物(?:位于|在)|报告已保存(?:至|到)|文件已保存(?:至|到)|报告(?:文件)?已落盘(?:至|到)?|已保存(?:至|到)|保存路径|路径|saved\\s+to|written\\s+to|report\\s+saved\\s+to|file\\s+saved\\s+to)";
 
 const LABELED_SAVE_PATH_RE = new RegExp(
   `${SAVED_FILE_LABEL}[：:\\s]*(\`?)${ABS_PATH_BODY}(\\1)`,
@@ -36,7 +36,9 @@ const LABELED_SAVE_PATH_RE = new RegExp(
  * Bare「路径」must be a label (`路径：`), not prose like「管理 ~/.codewiki/… 路径」.
  */
 const SAVE_CUE_LINE_RE =
-  /(?:保存路径|路径\s*[：:]|已保存(?:至|到)?|saved\s+to|written\s+to|report\s+saved\s+to|file\s+saved\s+to)/i;
+  /(?:产出文件|保存路径|路径\s*[：:]|已保存(?:至|到)?|saved\s+to|written\s+to|report\s+saved\s+to|file\s+saved\s+to)/i;
+const EXPLICIT_ARTIFACT_MANIFEST_RE =
+  /(?:产出文件|产物(?:位于|在)|\|\s*产物\s*\||(?:deliverables?|artifacts?)\s+(?:at|in)\b)/i;
 
 const INLINE_ABS_PATH_RE = new RegExp(`\`?${ABS_PATH_BODY}\`?`, "g");
 
@@ -46,9 +48,10 @@ const JSON_OUTPUT_PATH_RE =
 
 const BASH_REDIRECT_RE = /(?:>>?|\btee\b(?:\s+-a)?)\s+(['"]?)([^\s'"|;&<>]+)\1/g;
 
-/** Markdown table cell that looks like a bare filename with extension (any column). */
-const TABLE_FILENAME_RE =
-  /\|[ \t]*`?([^`|/\s\\]+\.[a-zA-Z0-9]{1,12})`?[ \t]*(?=\|)/g;
+/** Backticked relative output path in a Markdown table cell. */
+const TABLE_FILE_PATH_RE = /`([^`\r\n|]+?\.[a-zA-Z0-9]{1,12})`/g;
+const TABLE_BARE_FILENAME_RE =
+  /\|[ \t]*([^`|/\s\\]+\.[a-zA-Z0-9]{1,12})[ \t]*(?=\|)/g;
 
 /** Skill/source trees listed by find/ls must not become task artifacts. */
 const ARTIFACT_SOURCE_EXCLUDE_RE =
@@ -82,6 +85,23 @@ const WORKSPACE_ARTIFACT_SKIP_DIRS = new Set([
   "task_artifacts",
 ]);
 
+function isVirtualEnvironmentDirName(name: string): boolean {
+  const value = String(name || "").trim().toLowerCase();
+  return /^(?:env|venv|virtualenv|[a-z0-9_-]+env)$/.test(value);
+}
+
+function isRuntimeArtifactPath(path: string): boolean {
+  return String(path || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .some(
+      (part) =>
+        isVirtualEnvironmentDirName(part) ||
+        part.toLowerCase() === "site-packages",
+    );
+}
+
 export type WorkspaceArtifactListingEntry = {
   name: string;
   type: string;
@@ -97,6 +117,7 @@ export function isWalkableWorkspaceArtifactDir(
   const name = String(entry.name || "").trim();
   if (!name || name.startsWith(".")) return false;
   if (WORKSPACE_ARTIFACT_SKIP_DIRS.has(name.toLowerCase())) return false;
+  if (isVirtualEnvironmentDirName(name)) return false;
   if (String(entry.mount_mode || "").trim()) return false;
   return true;
 }
@@ -120,6 +141,7 @@ export function collectWorkspaceListingArtifactPaths(opts: {
     if (!looksLikeArtifactFile(name)) continue;
     const rel = String(entry.path || name).trim().replace(/\\/g, "/");
     if (!rel) continue;
+    if (isRuntimeArtifactPath(rel)) continue;
     const parts = rel.split("/").filter(Boolean);
     if (parts.some((part) => WORKSPACE_ARTIFACT_SKIP_DIRS.has(part.toLowerCase()))) {
       continue;
@@ -188,7 +210,55 @@ function normalizeArtifactPath(raw: string): string | null {
     return null;
   }
   const normalized = value.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (isRuntimeArtifactPath(normalized)) return null;
   return normalized || null;
+}
+
+function parseWbBridgeResultJson(raw: string): Record<string, unknown> | null {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  const stripped = text.replace(/^\[micro-compact[^\]]*\]\s*/i, "");
+  const start = stripped.indexOf("{");
+  if (start < 0) return null;
+  try {
+    const parsed = JSON.parse(stripped.slice(start)) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* persist may leave raw control chars inside tail — fall through */
+  }
+  const match = stripped.match(/"written_paths"\s*:\s*(\[[^\]]*\])/);
+  if (!match?.[1]) return null;
+  try {
+    const list = JSON.parse(match[1]) as unknown;
+    if (!Array.isArray(list)) return null;
+    const statusMatch = stripped.match(/"status"\s*:\s*"([^"]*)"/);
+    const turnMatch = stripped.match(/"turn_state"\s*:\s*"([^"]*)"/);
+    return {
+      status: statusMatch?.[1] ?? "",
+      turn_state: turnMatch?.[1] ?? "",
+      written_paths: list,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractWbBridgeWrittenPaths(
+  raw: string,
+  paths: string[],
+  seen: Set<string>,
+): void {
+  const parsed = parseWbBridgeResultJson(raw);
+  if (!parsed) return;
+  const status = String(parsed.status || parsed.turn_state || "");
+  if (status === "running") return;
+  const list = parsed.written_paths;
+  if (!Array.isArray(list)) return;
+  for (const item of list) {
+    addPath(paths, seen, String(item || "").trim());
+  }
 }
 
 function addPath(paths: string[], seen: Set<string>, raw: string): void {
@@ -306,7 +376,19 @@ function extractJsonOutputArtifactPaths(content: string, paths: string[], seen: 
   }
 }
 
-/** Join table filenames with a same-message「保存路径」directory (common agent report pattern). */
+function resolvePublishedRelativePath(outputDir: string, relativePath: string): string {
+  const dir = outputDir.replace(/\\/g, "/").replace(/\/+$/, "");
+  let relative = relativePath.replace(/\\/g, "/").replace(/^\.?\//, "");
+  if (!dir || !relative) return "";
+  const dirBase = artifactBaseName(dir);
+  if (relative === dirBase || relative.startsWith(`${dirBase}/`)) {
+    const parent = dir.slice(0, Math.max(0, dir.length - dirBase.length)).replace(/\/+$/, "");
+    return `${parent}/${relative}`;
+  }
+  return `${dir}/${relative}`;
+}
+
+/** Join table file paths with a same-message output directory. */
 function extractTableFilesUnderSaveDirs(content: string, paths: string[], seen: Set<string>): void {
   const dirs: string[] = [];
   const dirSeen = new Set<string>();
@@ -322,13 +404,33 @@ function extractTableFilesUnderSaveDirs(content: string, paths: string[], seen: 
   }
   if (dirs.length === 0) return;
 
-  TABLE_FILENAME_RE.lastIndex = 0;
-  let fileMatch: RegExpExecArray | null;
-  while ((fileMatch = TABLE_FILENAME_RE.exec(content)) !== null) {
-    const name = String(fileMatch[1] || "").trim();
-    if (!name || name.includes("..")) continue;
-    for (const dir of dirs) {
-      addPath(paths, seen, `${dir.replace(/\/+$/, "")}/${name}`);
+  for (const line of String(content || "").split(/\r?\n/)) {
+    if (!line.includes("|")) continue;
+    TABLE_FILE_PATH_RE.lastIndex = 0;
+    const tokens: string[] = [];
+    let fileMatch: RegExpExecArray | null;
+    while ((fileMatch = TABLE_FILE_PATH_RE.exec(line)) !== null) {
+      const value = String(fileMatch[1] || "").trim();
+      if (value && !value.includes("..")) tokens.push(value);
+    }
+    if (tokens.length === 0) {
+      TABLE_BARE_FILENAME_RE.lastIndex = 0;
+      while ((fileMatch = TABLE_BARE_FILENAME_RE.exec(line)) !== null) {
+        const value = String(fileMatch[1] || "").trim();
+        if (value && !value.includes("..")) tokens.push(value);
+      }
+    }
+    let lineRelativeDir = "";
+    for (const token of tokens) {
+      let relative = token;
+      if (!relative.includes("/") && lineRelativeDir) {
+        relative = `${lineRelativeDir}/${relative}`;
+      } else if (relative.includes("/")) {
+        lineRelativeDir = relative.slice(0, relative.lastIndexOf("/"));
+      }
+      for (const dir of dirs) {
+        addPath(paths, seen, resolvePublishedRelativePath(dir, relative));
+      }
     }
   }
 }
@@ -573,10 +675,18 @@ export function collectSessionArtifactPaths(
         extractOkWritePaths(String(message.content || ""), paths, seen);
         extractOkWritePaths(String(message.toolResultPreview || ""), paths, seen);
       } else if (toolName === "bash_exec") {
-        const command = String(message.toolArgs?.command ?? "").trim();
-        if (command) extractBashRedirectPaths(command, paths, seen);
-        extractJsonOutputArtifactPaths(String(message.content || ""), paths, seen);
-        extractJsonOutputArtifactPaths(String(message.toolResultPreview || ""), paths, seen);
+        // A denied/failed command never produced its redirect target.
+        if (!isFailedWriteToolMessage(message)) {
+          const command = String(message.toolArgs?.command ?? "").trim();
+          if (command) extractBashRedirectPaths(command, paths, seen);
+          extractJsonOutputArtifactPaths(String(message.content || ""), paths, seen);
+          extractJsonOutputArtifactPaths(String(message.toolResultPreview || ""), paths, seen);
+          extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
+          extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
+        }
+      } else if (toolName === "wb_bridge_send" || toolName === "wb_bridge_describe") {
+        extractWbBridgeWrittenPaths(String(message.content || ""), paths, seen);
+        extractWbBridgeWrittenPaths(String(message.toolResultPreview || ""), paths, seen);
         extractAbsArtifactPathsFromText(String(message.content || ""), paths, seen);
         extractAbsArtifactPathsFromText(String(message.toolResultPreview || ""), paths, seen);
       } else {
@@ -605,6 +715,32 @@ export function collectSessionArtifactPaths(
   for (const extra of extraPaths ?? []) addPath(paths, seen, extra);
 
   return paths;
+}
+
+/**
+ * Prefer files explicitly handed off in assistant reports over implementation
+ * helpers discovered by the workspace fallback scanner.
+ */
+export function selectSessionDeliverablePaths(
+  messages: Message[] | undefined | null,
+  candidatePaths: string[],
+): string[] {
+  const published: string[] = [];
+  const publishedSeen = new Set<string>();
+  for (const message of messages ?? []) {
+    if (message.role !== "assistant") continue;
+    const body = String(message.content || "");
+    if (!EXPLICIT_ARTIFACT_MANIFEST_RE.test(body)) continue;
+    extractLabeledSavePaths(body, published, publishedSeen);
+    extractNearbyLabeledSavePaths(body, published, publishedSeen);
+    extractTableFilesUnderSaveDirs(body, published, publishedSeen);
+  }
+  if (published.length > 0) return published;
+
+  const fallback: string[] = [];
+  const fallbackSeen = new Set<string>();
+  for (const path of candidatePaths) addPath(fallback, fallbackSeen, path);
+  return fallback;
 }
 
 export function isPreviewImageArtifactPath(path: string): boolean {
@@ -763,7 +899,7 @@ export function collectTurnArtifactPaths(
 ): string[] {
   const turnMsgs = turnWindowForAssistant(messages, assistantMessageId);
   if (!turnMsgs || turnMsgs.length === 0) return [];
-  return collectSessionArtifactPaths(turnMsgs);
+  return selectSessionDeliverablePaths(turnMsgs, collectSessionArtifactPaths(turnMsgs));
 }
 
 export type ArtifactChangeRow = {

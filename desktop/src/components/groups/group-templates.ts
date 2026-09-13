@@ -1,3 +1,10 @@
+export function groupTemplateI18nKey(
+  id: string,
+  field: "name" | "description",
+): `groupTemplates.${string}.${"name" | "description"}` {
+  return `groupTemplates.${id}.${field}`;
+}
+
 export interface GroupTemplateMember {
   id: string;
   name: string;

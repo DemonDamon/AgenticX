@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isAbsoluteFilePath, isAbsoluteLocalPath } from "./workspace-file-path";
+import {
+  collapseVirtualTaskspacePrefix,
+  canonicalizeArtifactPreviewPath,
+  isAbsoluteFilePath,
+  isAbsoluteLocalPath,
+  selectOpenableArtifactPath,
+} from "./workspace-file-path";
 
 describe("isAbsoluteFilePath", () => {
   it("accepts a spaced Unicode filename inside a taskspace path", () => {
@@ -22,5 +28,46 @@ describe("isAbsoluteFilePath", () => {
   it("rejects http(s) and file URLs", () => {
     expect(isAbsoluteFilePath("https://example.com/Hello World.txt")).toBe(false);
     expect(isAbsoluteFilePath("file:///Users/damon/Hello World.txt")).toBe(false);
+  });
+});
+
+describe("collapseVirtualTaskspacePrefix", () => {
+  it("folds one virtual default/ layer under the workspace root", () => {
+    expect(
+      collapseVirtualTaskspacePrefix(
+        "/Users/me/.agenticx/taskspaces/sid/default/default/mario-game/index.html",
+        "/Users/me/.agenticx/taskspaces/sid/default",
+        ["default"],
+      ),
+    ).toBe("/Users/me/.agenticx/taskspaces/sid/default/mario-game/index.html");
+  });
+
+  it("does not strip default/ when the workspace root does not match", () => {
+    expect(
+      collapseVirtualTaskspacePrefix(
+        "/Users/me/project/default/config.json",
+        "/Users/me/.agenticx/taskspaces/sid/default",
+        ["default"],
+      ),
+    ).toBe("/Users/me/project/default/config.json");
+  });
+});
+
+describe("selectOpenableArtifactPath", () => {
+  const workspaceRoot = "/Users/me/.agenticx/taskspaces/sid/default";
+  const stale = `${workspaceRoot}/default/mario-game/index.html`;
+  const real = `${workspaceRoot}/mario-game/index.html`;
+  const taskspaces = [{ id: "default", label: "默认工作区", path: workspaceRoot }];
+
+  it("canonicalizes a doubled default/ path before treating it as primary", () => {
+    expect(canonicalizeArtifactPreviewPath(stale, taskspaces)).toBe(real);
+  });
+
+  it("returns the collapsed path when it exists", () => {
+    expect(selectOpenableArtifactPath(stale, (path) => path === real, taskspaces)).toBe(real);
+  });
+
+  it("does not use a missing path as primary", () => {
+    expect(selectOpenableArtifactPath(stale, () => false, taskspaces)).toBeNull();
   });
 });

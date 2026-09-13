@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Check,
   Code2,
@@ -106,6 +107,7 @@ export function HtmlPreviewChrome({
   openDevToolsDisabled = false,
   className,
 }: HtmlPreviewChromeProps) {
+  const { t } = useTranslation("workspace");
   const [shareOpen, setShareOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [copied, setCopied] = useState<"path" | "url" | null>(null);
@@ -143,12 +145,12 @@ export function HtmlPreviewChrome({
     <div className={["flex shrink-0 flex-col border-b border-border", className ?? ""].join(" ")}>
       <div className="flex items-center justify-end gap-0.5 px-2 py-1">
         {onRefresh ? (
-          <IconBtn label="刷新" onClick={onRefresh}>
+          <IconBtn label={t("preview.refresh")} onClick={onRefresh}>
             <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
           </IconBtn>
         ) : null}
         <IconBtn
-          label={inspectEnabled ? "退出选择元素" : "选择元素"}
+          label={inspectEnabled ? t("preview.exitSelectElement") : t("preview.selectElement")}
           active={inspectEnabled}
           disabled={!inspectAvailable}
           onClick={() => onInspectEnabledChange(!inspectEnabled)}
@@ -156,14 +158,14 @@ export function HtmlPreviewChrome({
           <MousePointer2 className="h-3.5 w-3.5" strokeWidth={1.8} />
         </IconBtn>
         <IconBtn
-          label="在浏览器中打开"
+          label={t("preview.openInBrowser")}
           onClick={onOpenInBrowser}
           disabled={!absPath && !/^https?:\/\//i.test(url)}
         >
           <Compass className="h-3.5 w-3.5" strokeWidth={1.8} />
         </IconBtn>
         <IconBtn
-          label={deviceToolbarVisible ? "隐藏设备工具栏" : "显示设备工具栏"}
+          label={deviceToolbarVisible ? t("preview.hideDeviceToolbar") : t("preview.showDeviceToolbar")}
           active={deviceToolbarVisible}
           onClick={() => onDeviceToolbarVisibleChange(!deviceToolbarVisible)}
         >
@@ -171,7 +173,7 @@ export function HtmlPreviewChrome({
         </IconBtn>
         {onOpenDevTools ? (
           <IconBtn
-            label="打开开发者工具"
+            label={t("preview.openDevTools")}
             disabled={openDevToolsDisabled}
             onClick={onOpenDevTools}
           >
@@ -181,7 +183,7 @@ export function HtmlPreviewChrome({
 
         <div className="relative" ref={shareRef}>
           <IconBtn
-            label="分享"
+            label={t("preview.share")}
             active={shareOpen}
             onClick={() => {
               setMoreOpen(false);
@@ -199,7 +201,7 @@ export function HtmlPreviewChrome({
                 onClick={() => void copyText(absPath, "path")}
               >
                 {copied === "path" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                复制文件路径
+                {t("preview.copyFilePath")}
               </button>
               <button
                 type="button"
@@ -208,7 +210,7 @@ export function HtmlPreviewChrome({
                 onClick={() => void copyText(url, "url")}
               >
                 {copied === "url" ? <Check className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
-                复制链接
+                {t("preview.copyLink")}
               </button>
               <button
                 type="button"
@@ -220,7 +222,7 @@ export function HtmlPreviewChrome({
                 }}
               >
                 <FolderOpen className="h-3.5 w-3.5" />
-                在文件管理器中显示
+                {t("revealGeneric")}
               </button>
               <button
                 type="button"
@@ -232,7 +234,7 @@ export function HtmlPreviewChrome({
                 }}
               >
                 <Download className="h-3.5 w-3.5" />
-                另存为…
+                {t("preview.saveAsEllipsis")}
               </button>
             </div>
           ) : null}
@@ -241,7 +243,7 @@ export function HtmlPreviewChrome({
         {hasMoreMenu ? (
           <div className="relative" ref={moreRef}>
             <IconBtn
-              label="更多"
+              label={t("preview.more")}
               active={moreOpen}
               onClick={() => {
                 setShareOpen(false);
@@ -261,7 +263,7 @@ export function HtmlPreviewChrome({
                   }}
                 >
                   <Code2 className="h-3.5 w-3.5" />
-                  查看源码
+                  {t("preview.viewSource")}
                 </button>
               </div>
             ) : null}
@@ -274,7 +276,7 @@ export function HtmlPreviewChrome({
           <span className="shrink-0 text-text-faint">Size</span>
           <select
             value={viewport.presetId}
-            aria-label="预览尺寸预设"
+            aria-label={t("preview.sizePresetAria")}
             className="h-7 max-w-[140px] rounded-md border border-border bg-surface-card px-1.5 text-[11px] text-text-strong outline-none"
             onChange={(e) => {
               onViewportChange(applyDevicePreset(e.target.value as HtmlDevicePresetId));
@@ -290,9 +292,9 @@ export function HtmlPreviewChrome({
             type="number"
             min={200}
             max={4000}
-            aria-label="预览宽度"
+            aria-label={t("preview.widthAria")}
             value={viewport.width ?? ""}
-            placeholder="宽"
+            placeholder={t("preview.widthPh")}
             className="h-7 w-16 rounded-md border border-border bg-surface-card px-1.5 text-[11px] text-text-strong outline-none"
             onChange={(e) => {
               const n = Number(e.target.value);
@@ -308,9 +310,9 @@ export function HtmlPreviewChrome({
             type="number"
             min={200}
             max={4000}
-            aria-label="预览高度"
+            aria-label={t("preview.heightAria")}
             value={viewport.height ?? ""}
-            placeholder="高"
+            placeholder={t("preview.heightPh")}
             className="h-7 w-16 rounded-md border border-border bg-surface-card px-1.5 text-[11px] text-text-strong outline-none"
             onChange={(e) => {
               const n = Number(e.target.value);
@@ -323,7 +325,7 @@ export function HtmlPreviewChrome({
           />
           <select
             value={viewport.zoomPercent}
-            aria-label="预览缩放"
+            aria-label={t("preview.zoomAria")}
             className="h-7 rounded-md border border-border bg-surface-card px-1.5 text-[11px] text-text-strong outline-none"
             onChange={(e) => {
               onViewportChange({ ...viewport, zoomPercent: Number(e.target.value) || 100 });
@@ -336,7 +338,7 @@ export function HtmlPreviewChrome({
             ))}
           </select>
           <IconBtn
-            label="旋转方向"
+            label={t("preview.rotate")}
             onClick={() => onViewportChange(rotateViewport(viewport))}
             disabled={viewport.width == null || viewport.height == null}
           >

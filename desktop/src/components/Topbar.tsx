@@ -1,4 +1,5 @@
 import { ArrowLeft, Gauge, Settings } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../store";
 import { AccountIdentityControl } from "./AccountIdentityControl";
 import { ThemeToggleButton, TopbarLeftControls } from "./TopbarLeftControls";
@@ -10,6 +11,8 @@ type Props = {
 };
 
 export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
+  const { t } = useTranslation("sidebar");
+  const { t: tCommon } = useTranslation("common");
   const openSettings = useAppStore((s) => s.openSettings);
   const openTokenDashboard = useAppStore((s) => s.openTokenDashboard);
   const mainView = useAppStore((s) => s.mainView);
@@ -29,7 +32,7 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
             <SidebarCreateButton />
             <TopbarLeftControls
               onToggleSidebar={onToggleSidebar}
-              toggleTitle="展开侧栏"
+              toggleTitle={t("expandSidebar")}
               className="agx-topbar-left-controls"
             />
           </>
@@ -39,10 +42,10 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
             type="button"
             className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] font-medium text-text-faint transition-colors hover:bg-surface-hover hover:text-text-strong"
             onClick={returnToPreviousChat}
-            aria-label="返回"
+            aria-label={tCommon("back")}
           >
             <ArrowLeft className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
-            <span>返回</span>
+            <span>{tCommon("back")}</span>
           </button>
         ) : null}
       </div>
@@ -53,8 +56,8 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
             className="agx-topbar-btn agx-topbar-btn--icon-only"
             type="button"
             onClick={() => openTokenDashboard()}
-            title="Token 消耗看板"
-            aria-label="Token 消耗看板"
+            title={t("account.tokenDashboard")}
+            aria-label={t("account.tokenDashboard")}
           >
             <Gauge className="h-[18px] w-[18px]" strokeWidth={1.8} />
           </button>
@@ -62,8 +65,8 @@ export function Topbar({ sidebarCollapsed, onToggleSidebar }: Props) {
             className="agx-topbar-btn agx-topbar-btn--icon-only"
             type="button"
             onClick={() => openSettings()}
-            title="设置"
-            aria-label="设置"
+            title={tCommon("settings")}
+            aria-label={tCommon("settings")}
           >
             <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
           </button>

@@ -39,7 +39,15 @@ export function normalizeKimiReasoningEffort(raw: unknown): KimiReasoningEffort 
   return DEFAULT_KIMI_REASONING_EFFORT;
 }
 
-export function labelForKimiReasoningEffort(effort: KimiReasoningEffort): string {
+export function labelForKimiReasoningEffort(
+  effort: KimiReasoningEffort,
+  t?: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  if (t) {
+    if (effort === "low") return t("model.effortLow");
+    if (effort === "high") return t("model.effortHigh");
+    return t("model.effortMax");
+  }
   return KIMI_REASONING_EFFORT_OPTIONS.find((o) => o.value === effort)?.label ?? "最大";
 }
 
@@ -66,7 +74,13 @@ export function normalizeDeepSeekReasoningEffort(raw: unknown): DeepSeekReasonin
   return DEFAULT_DEEPSEEK_REASONING_EFFORT;
 }
 
-export function labelForDeepSeekReasoningEffort(effort: DeepSeekReasoningEffort): string {
+export function labelForDeepSeekReasoningEffort(
+  effort: DeepSeekReasoningEffort,
+  t?: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  if (t) {
+    return effort === "max" ? t("model.effortUltra") : t("model.effortHigh");
+  }
   return DEEPSEEK_REASONING_EFFORT_OPTIONS.find((o) => o.value === effort)?.label ?? "高";
 }
 

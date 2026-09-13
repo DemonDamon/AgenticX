@@ -1,3 +1,5 @@
+import { i18n } from "../i18n/i18n";
+
 /** Backend-scoped localStorage keys for Near Desktop (local vs remote agx serve). */
 
 export const LOCAL_BACKEND_SCOPE = "local";
@@ -69,7 +71,9 @@ export function writeScopedLocalStorage(base: string, value: string, scope?: str
 }
 
 export function formatBackendChipLabel(scope: string, mode: "local" | "remote"): string {
-  if (mode === "local" || scope === LOCAL_BACKEND_SCOPE) return "本地";
+  if (mode === "local" || scope === LOCAL_BACKEND_SCOPE) {
+    return String(i18n.t("composer.local", { ns: "chat" }));
+  }
   const label = scope.trim();
   if (label.length <= 22) return label;
   const colon = label.indexOf(":");

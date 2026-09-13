@@ -92,6 +92,22 @@ class SandboxSettings:
 
 
 @dataclass
+class OpsSettings:
+    """Read-only investigation tools (get_trace / get_logs / get_recent_changes)."""
+
+    tools_enabled: bool = True
+
+
+def _ops_tools_enabled_from_raw(raw: Any) -> bool:
+    """Missing key defaults to on. Explicit 0/false/off disables."""
+    if raw is None:
+        return True
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() in {"1", "true", "on", "yes"}
+
+
+@dataclass
 class ComputerUseSettings:
     """Computer Use capability settings (inspired by Claude Computer Use)."""
 
@@ -179,6 +195,7 @@ class AgxConfig:
     workspace_dir: str = "~/.agenticx/workspace"
     extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
     computer_use: ComputerUseSettings = field(default_factory=ComputerUseSettings)
+    ops: OpsSettings = field(default_factory=OpsSettings)
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
     longrun: LongRunSettings = field(default_factory=LongRunSettings)
     # Built-in web search (duckduckgo + optional API providers); see studio web_search routes.
@@ -354,6 +371,10 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
         if not isinstance(cu_raw, dict):
             cu_raw = {}
 
+        ops_raw = merged.get("ops", {}) or {}
+        if not isinstance(ops_raw, dict):
+            ops_raw = {}
+
         longrun_raw = merged.get("longrun", {}) or {}
         if not isinstance(longrun_raw, dict):
             longrun_raw = {}
@@ -385,6 +406,9 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
                 require_first_access_approval=bool(cu_raw.get("require_first_access_approval", True)),
                 scheduler_enabled=bool(cu_raw.get("scheduler_enabled", True)),
                 scheduler_max_concurrent=int(cu_raw.get("scheduler_max_concurrent", 5)),
+            ),
+            ops=OpsSettings(
+                tools_enabled=_ops_tools_enabled_from_raw(ops_raw.get("tools_enabled")),
             ),
             longrun=LongRunSettings(
                 enabled=bool(longrun_raw.get("enabled", False)),

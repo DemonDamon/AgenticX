@@ -354,6 +354,13 @@ class TestPlanModeLayer:
         result = layer.evaluate("file_read")
         assert result == PolicyAction.ALLOW
 
+    def test_active_denies_skill_activation(self):
+        from agenticx.tools.policy import PlanModeLayer, PolicyAction
+
+        layer = PlanModeLayer(active=True)
+        result = layer.evaluate("skill_use")
+        assert result == PolicyAction.DENY
+
     def test_active_allows_is_read_only_flag(self):
         from agenticx.tools.policy import PlanModeLayer, PolicyAction
 

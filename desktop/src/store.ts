@@ -14,6 +14,7 @@ import {
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 import { matchesToolCallForSession } from "./utils/pending-tool-result";
+import { cancelInFlightToolMessages } from "./utils/cancel-in-flight-tools";
 import type { PendingActionConfirmation } from "./utils/action-confirmation";
 import { shouldSuppressDuplicatePendingUserEcho } from "./utils/send-dedupe";
 import type { ContentBlock } from "./utils/content-blocks";
@@ -27,6 +28,15 @@ import {
   type DesktopCapabilityLocks,
 } from "./utils/enterprise-capability-policy";
 import type { RunMode } from "./constants/confirm-strategy-options";
+import {
+  LOCALE_STORAGE_KEY,
+  isAppLocale,
+  type AppLocale,
+} from "./i18n/locales";
+import type { TurnIntent } from "./utils/turn-intent";
+import { normalizeTurnIntent } from "./utils/turn-intent";
+import { resolveAppLocale } from "./i18n/resolve-locale";
+import { i18n } from "./i18n/i18n";
 
 export type { ContentBlock } from "./utils/content-blocks";
 
@@ -50,6 +60,7 @@ export type SubAgentStatus =
   | "cancelled";
 export type { RunMode } from "./constants/confirm-strategy-options";
 export type ThemeMode = "dark" | "light" | "dim";
+export type { AppLocale } from "./i18n/locales";
 export type ThemeColor = "blue" | "green" | "pink" | "yellow" | "white";
 export type ChatStyle = "im" | "terminal" | "clean";
 /** MCP 列表展示态（与 Studio `/api/mcp/servers` 对齐，近似 Cursor 绿/红/灰语义） */
@@ -205,6 +216,10 @@ export type ChatPane = {
   pendingQuote?: { messageId: string; body: string; label: string } | null;
   /** Harness mode for this pane's session (code_dev vs daily_office). */
   sessionMode?: "code_dev" | "daily_office";
+  /** + menu turn intent: default execute / plan first / isolated copy. */
+  turnIntent?: TurnIntent;
+  /** True after Multitask successfully created a worktree for this pane. */
+  isolateActive?: boolean;
   /** True while messages are being fetched after a session switch (shows skeleton). */
   loadingMessages?: boolean;
   /** Absolute index of the earliest loaded row in the full session snapshot (0 = full load). */
@@ -243,6 +258,9 @@ export type MessageUsage = {
   cachedTokens: number;
   reasoningTokens: number;
   totalTokens: number;
+  turnInputTokens?: number;
+  turnOutputTokens?: number;
+  turnCachedTokens?: number;
 };
 
 export type ModelSelection = "manual" | "auto";
@@ -318,6 +336,8 @@ export type Message = {
   subAgentCluster?: SubAgentClusterAnchor;
   /** Ordered text/image blocks for inline generated images. */
   blocks?: ContentBlock[];
+  /** Render-only presentation flag; never persist. */
+  presentationHoldDeliverables?: boolean;
 };
 
 export type SubAgentClusterAnchor = {
@@ -560,6 +580,7 @@ type AppState = {
   focusExitScrollBottomPaneId: string | null;
   clearFocusExitScrollBottomPaneId: () => void;
   theme: ThemeMode;
+  locale: AppLocale;
   /** Near 官网账号登录状态（与 AccountTab / Topbar 共享，首屏和事件回调同步）。 */
   agxAccount: { loggedIn: boolean; email: string; displayName: string };
   chatStyle: ChatStyle;
@@ -663,6 +684,7 @@ type AppState = {
   exitFocusMode: () => void;
   toggleFocusMode: (paneId?: string) => void;
   setTheme: (theme: ThemeMode) => void;
+  setLocale: (locale: AppLocale) => void;
   setThemeColor: (color: ThemeColor) => void;
   setAgxAccount: (acct: { loggedIn: boolean; email: string; displayName: string }) => void;
   setChatStyle: (style: ChatStyle) => void;
@@ -785,6 +807,10 @@ type AppState = {
       appendStreamLine?: string;
     }
   ) => boolean;
+  /** Stop/barge-in: flip live tool cards to cancelled so timers do not keep ticking. */
+  cancelInFlightPaneTools: (paneId: string, ownerSessionId?: string) => number;
+  /** Lite / global `messages` counterpart of {@link cancelInFlightPaneTools}. */
+  cancelInFlightLiteTools: (ownerSessionId?: string) => number;
   updateLastPaneMessage: (paneId: string, content: string) => void;
   /** Mark the pane message carrying `requestId` (clarificationPrompt) as answered. */
   markClarificationAnswered: (
@@ -794,6 +820,8 @@ type AppState = {
   clearPaneMessages: (paneId: string) => void;
   setPaneSessionId: (paneId: string, sessionId: string, modelHint?: { provider?: string; model?: string }) => void;
   setPaneSessionMode: (paneId: string, mode: "code_dev" | "daily_office") => void;
+  setPaneTurnIntent: (paneId: string, intent: TurnIntent) => void;
+  setPaneIsolateActive: (paneId: string, active: boolean) => void;
   setPaneMessages: (paneId: string, messages: Message[]) => void;
   prependPaneMessages: (paneId: string, messages: Message[]) => void;
   setPaneLoadingMessages: (paneId: string, loading: boolean) => void;
@@ -958,6 +986,21 @@ const sessionMessageCache: Map<string, Message[]> = new Map();
 
 const CHAT_STYLE_STORAGE_KEY = "agx-chat-style";
 const THEME_STORAGE_KEY = "agx-theme";
+
+function loadLocale(): AppLocale | null {
+  try {
+    const saved = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (isAppLocale(saved)) return saved;
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
+
+function initialLocale(): AppLocale {
+  const osTag = typeof navigator !== "undefined" ? navigator.language : undefined;
+  return resolveAppLocale({ saved: loadLocale(), osTag });
+}
 const THEME_COLOR_STORAGE_KEY = "agx-theme-color";
 const USER_DISPLAY_NAME_KEY = "agx-user-display-name";
 const USER_PREFERENCE_KEY = "agx-user-preference";
@@ -1142,6 +1185,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusModePaneId: null,
   focusExitScrollBottomPaneId: null,
   theme: loadTheme(),
+  locale: initialLocale(),
   themeColor: loadThemeColor(),
   agxAccount: { loggedIn: false, email: "", displayName: "" },
   chatStyle: loadChatStyle(),
@@ -1396,6 +1440,25 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore when not running inside Electron (e.g. unit tests)
       }
       return { theme };
+    }),
+  setLocale: (locale) =>
+    set(() => {
+      try {
+        window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+      } catch {
+        // ignore storage errors
+      }
+      try {
+        void window.agenticxDesktop.saveUiPrefs({ locale });
+      } catch {
+        // ignore when not running inside Electron (e.g. unit tests)
+      }
+      try {
+        void i18n.changeLanguage(locale);
+      } catch {
+        // ignore when i18n is not ready
+      }
+      return { locale };
     }),
   setThemeColor: (themeColor) =>
     set(() => {
@@ -2034,6 +2097,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     return found;
   },
+  cancelInFlightPaneTools: (paneId, ownerSessionId) => {
+    let cancelledCount = 0;
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const next = cancelInFlightToolMessages(pane.messages ?? [], { ownerSessionId });
+        cancelledCount = next.cancelledCount;
+        if (next.cancelledCount === 0) return pane;
+        return { ...pane, messages: next.messages };
+      }),
+    }));
+    return cancelledCount;
+  },
+  cancelInFlightLiteTools: (ownerSessionId) => {
+    let cancelledCount = 0;
+    set((state) => {
+      const next = cancelInFlightToolMessages(state.messages ?? [], { ownerSessionId });
+      cancelledCount = next.cancelledCount;
+      if (next.cancelledCount === 0) return state;
+      const byId = new Map(next.messages.map((message) => [message.id, message]));
+      return {
+        messages: next.messages,
+        panes: state.panes.map((pane) => ({
+          ...pane,
+          messages: (pane.messages ?? []).map((message) => byId.get(message.id) ?? message),
+        })),
+      };
+    });
+    return cancelledCount;
+  },
   updateLastPaneMessage: (paneId, content) =>
     set((state) => ({
       panes: state.panes.map((pane) => {
@@ -2242,6 +2335,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === paneId ? { ...pane, sessionMode: mode } : pane
+      ),
+    })),
+  setPaneTurnIntent: (paneId, intent) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, turnIntent: normalizeTurnIntent(intent) } : pane,
+      ),
+    })),
+  setPaneIsolateActive: (paneId, active) =>
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, isolateActive: active } : pane,
       ),
     })),
   setPaneMessages: (paneId, messages) =>

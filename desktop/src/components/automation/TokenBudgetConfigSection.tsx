@@ -1,4 +1,5 @@
 import type { ChangeEvent } from "react";
+import { useTranslation } from "react-i18next";
 
 export const TOKEN_BUDGET_MIN_SESSION = 100_000;
 export const TOKEN_BUDGET_MAX_SESSION = 5_000_000;
@@ -29,6 +30,7 @@ function clampTurn(raw: number): number {
 }
 
 export function TokenBudgetConfigSection({ value, onChange, disabled }: TokenBudgetConfigSectionProps) {
+  const { t } = useTranslation("workspace");
   const handleSessionChange = (e: ChangeEvent<HTMLInputElement>) => {
     onChange({ ...value, max_tokens_per_session: clampSession(Number(e.target.value)) });
   };
@@ -38,14 +40,14 @@ export function TokenBudgetConfigSection({ value, onChange, disabled }: TokenBud
 
   return (
     <div className="rounded-xl border border-border bg-surface-card px-4 py-3.5">
-      <div className="text-sm font-semibold text-text-strong">Token 预算</div>
+      <div className="text-sm font-semibold text-text-strong">{t("automation.tokenBudget")}</div>
       <p className="mt-1 text-xs leading-relaxed text-text-muted">
-        控制单个会话累计 token 上限，以及单轮对话 token 上限。达到会话累计上限后会硬截停，无人值守续跑无法绕过。修改后请点击窗口底部「退出」并重启后端生效。
+        {t("automation.tokenBudgetHint")}
       </p>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="block text-xs text-text-muted">
-          会话累计上限
+          {t("automation.sessionCap")}
           <input
             type="number"
             min={TOKEN_BUDGET_MIN_SESSION}
@@ -58,7 +60,7 @@ export function TokenBudgetConfigSection({ value, onChange, disabled }: TokenBud
           />
         </label>
         <label className="block text-xs text-text-muted">
-          单轮上限
+          {t("automation.turnCap")}
           <input
             type="number"
             min={TOKEN_BUDGET_MIN_TURN}
