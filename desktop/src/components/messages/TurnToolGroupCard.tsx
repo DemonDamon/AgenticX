@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { isTodoUpdateToolMessage } from "./MessageRenderer";
 import type { SkillPatchPreviewPayload } from "./skill-manage-preview";
 import { REACT_RAIL_ICON_TILE_STYLE, REACT_RAIL_TITLE_CLASS } from "./im-layout";
-import { isToolGroupInProgress } from "./group-tool-messages";
+import { isToolGroupCancelled, isToolGroupInProgress } from "./group-tool-messages";
 import {
   formatToolElapsedSeconds,
   useLiveToolElapsedSeconds,
@@ -108,6 +108,10 @@ export function TurnToolGroupCard({
     () => isToolGroupInProgress(visibleMessages) || holdProgress,
     [holdProgress, visibleMessages],
   );
+  const endedCancelled = useMemo(
+    () => !holdProgress && isToolGroupCancelled(visibleMessages),
+    [holdProgress, visibleMessages],
+  );
   const activeTools = useMemo(
     () =>
       visibleMessages.filter(
@@ -149,6 +153,10 @@ export function TurnToolGroupCard({
             >
               <Wrench className="h-2.5 w-2.5" strokeWidth={2.45} />
             </span>
+          ) : endedCancelled ? (
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-surface-hover text-text-faint">
+              <Wrench className="h-2.5 w-2.5" strokeWidth={2.45} />
+            </span>
           ) : (
             <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--theme-color-rgb,59,130,246))] ring-1 ring-[rgba(var(--theme-color-rgb,59,130,246),0.35)]">
               <Check className="h-2.5 w-2.5 text-[var(--theme-color-text)]" strokeWidth={2.45} />
@@ -170,6 +178,10 @@ export function TurnToolGroupCard({
               text={t("tool.running", { elapsed: formatToolElapsedSeconds(liveElapsedSec) })}
               className="shrink-0 whitespace-nowrap text-[12px] font-normal tabular-nums"
             />
+          ) : endedCancelled ? (
+            <span className="shrink-0 whitespace-nowrap text-[12px] font-normal text-text-faint">
+              {t("tool.cancelled")}
+            </span>
           ) : null}
         </span>
         {expanded ? (

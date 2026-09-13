@@ -1,7 +1,7 @@
 // Plan-Id: machi-kb-stage1-local-mvp
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FilePlus, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import { FilePlus, Loader2, RefreshCw, Trash2, X } from "lucide-react";
 import { Panel } from "../../ds/Panel";
 import type { KBApi } from "./api";
 import type { IngestJob, KBDocument, KBDocumentStatus } from "./types";
@@ -34,6 +34,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [activeJobs, setActiveJobs] = useState<Record<string, ActiveJob>>({});
   /** null = checking; true = chromadb/PDF/SOCKS deps importable in backend Python */
   const [backendDepsReady, setBackendDepsReady] = useState<boolean | null>(null);
@@ -76,7 +77,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
         const byDoc = new Map<string, IngestJob>();
         for (const j of jobs) {
           if (!j.document_id) continue;
-          if (j.status === "done" || j.status === "failed") continue;
+          if (j.status === "done" || j.status === "failed" || j.status === "cancelled") continue;
           const existing = byDoc.get(j.document_id);
           if (!existing) {
             byDoc.set(j.document_id, j);
@@ -134,7 +135,7 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
             changed = true;
             next[key] = { ...cur, status: job.status, progress: job.progress, message: job.message };
           }
-          if (job.status === "done" || job.status === "failed") {
+          if (job.status === "done" || job.status === "failed" || job.status === "cancelled") {
             anyTerminal = true;
             delete next[key];
             changed = true;
@@ -196,6 +197,31 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
       }
     };
     input.click();
+  }
+
+  async function cancelIngest(docId: string) {
+    const job = activeJobs[docId];
+    if (!job) return;
+    setCancellingId(docId);
+    setError(null);
+    try {
+      await api.cancelJob(job.jobId);
+      setActiveJobs((prev) => {
+        const next = { ...prev };
+        delete next[docId];
+        return next;
+      });
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === docId ? { ...d, status: "cancelled" as const } : d,
+        ),
+      );
+    } catch (exc) {
+      setError(String((exc as Error).message ?? exc));
+      void reload();
+    } finally {
+      setCancellingId(null);
+    }
   }
 
   async function rebuild(docId: string) {
@@ -328,7 +354,9 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
               const job = activeJobs[doc.id];
               const status = job?.status ?? doc.status;
               const progressPercent = Math.max(0, Math.min(100, Math.round((job?.progress ?? 0) * 100)));
-              const isRunning = Boolean(job && status !== "done" && status !== "failed");
+              const isRunning = Boolean(
+                job && status !== "done" && status !== "failed" && status !== "cancelled",
+              );
               return (
                 <li key={doc.id} className="flex min-w-0 items-start gap-3 py-2 text-sm">
                   <div className="min-w-0 flex-1 overflow-hidden">
@@ -378,6 +406,17 @@ export function KnowledgeMaterialsPanel({ api, enabled, extensions }: Props) {
                     ) : null}
                   </div>
                   <div className="flex shrink-0 gap-1">
+                    {isRunning ? (
+                      <button
+                        type="button"
+                        className="rounded border border-border px-2 py-1 text-xs"
+                        onClick={() => void cancelIngest(doc.id)}
+                        disabled={!enabled || cancellingId === doc.id}
+                        title={st("knowledge.cancelTitle")}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="rounded border border-border px-2 py-1 text-xs"
@@ -428,6 +467,7 @@ function statusLabel(status: KBDocumentStatus): string {
     writing: st("knowledge.stWriting"),
     done: st("knowledge.stDone"),
     failed: st("knowledge.stFailed"),
+    cancelled: st("knowledge.stCancelled"),
   };
   return map[status] ?? status;
 }
@@ -439,6 +479,8 @@ function statusTagClass(status: KBDocumentStatus): string {
       return `${base} bg-emerald-500/15 text-emerald-700 dark:text-emerald-300`;
     case "failed":
       return `${base} bg-rose-500/15 text-rose-700 dark:text-rose-300`;
+    case "cancelled":
+      return `${base} bg-zinc-500/15 text-zinc-700 dark:text-zinc-300`;
     default:
       return `${base} bg-blue-500/15 text-blue-700 dark:text-blue-300`;
   }

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable, List, Optional
 
 from agenticx.knowledge.readers import get_reader
-from agenticx.tools.adapters.liteparse import LiteParseAdapter
+from agenticx.tools.adapters.liteparse import LiteParseAdapter, LiteParseCancelled
 
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,12 @@ async def _read_with_native_reader(path: Path) -> str:
     return "\n\n".join(texts)
 
 
-async def _read_with_liteparse(path: Path, *, require_libreoffice: bool) -> str:
+async def _read_with_liteparse(
+    path: Path,
+    *,
+    require_libreoffice: bool,
+    cancel_event=None,
+) -> str:
     if not LiteParseAdapter.is_available():
         raise DocumentTextError(
             "liteparse_missing",
@@ -139,7 +144,12 @@ async def _read_with_liteparse(path: Path, *, require_libreoffice: bool) -> str:
 
     adapter = LiteParseAdapter(config={"debug": False})
     try:
-        text = await adapter.parse_to_text(path)
+        parse_kwargs = {}
+        if cancel_event is not None:
+            parse_kwargs["cancel_event"] = cancel_event
+        text = await adapter.parse_to_text(path, **parse_kwargs)
+    except LiteParseCancelled as exc:
+        raise DocumentTextError("cancelled", "解析已取消") from exc
     except Exception as exc:
         msg = str(exc)
         if "LibreOffice is not installed" in msg or "soffice" in msg.lower():
@@ -165,7 +175,7 @@ async def _read_with_liteparse(path: Path, *, require_libreoffice: bool) -> str:
     return text
 
 
-async def read_document_text(path: Path) -> str:
+async def read_document_text(path: Path, *, cancel_event=None) -> str:
     """Extract plain text from a document using the lowest-dependency route.
 
     Routing:
@@ -180,10 +190,12 @@ async def read_document_text(path: Path) -> str:
         return resolved.read_text(encoding="utf-8", errors="replace")
 
     if ext in LITEPARSE_REQUIRED_EXTS:
-        return await _read_with_liteparse(
-            resolved,
-            require_libreoffice=ext in LIBREOFFICE_REQUIRED_EXTS,
-        )
+        liteparse_kwargs = {
+            "require_libreoffice": ext in LIBREOFFICE_REQUIRED_EXTS,
+        }
+        if cancel_event is not None:
+            liteparse_kwargs["cancel_event"] = cancel_event
+        return await _read_with_liteparse(resolved, **liteparse_kwargs)
 
     if ext in NATIVE_READER_EXTS:
         try:
@@ -191,10 +203,10 @@ async def read_document_text(path: Path) -> str:
         except DocumentTextError as native_exc:
             if LiteParseAdapter.is_available():
                 try:
-                    return await _read_with_liteparse(
-                        resolved,
-                        require_libreoffice=False,
-                    )
+                    liteparse_kwargs = {"require_libreoffice": False}
+                    if cancel_event is not None:
+                        liteparse_kwargs["cancel_event"] = cancel_event
+                    return await _read_with_liteparse(resolved, **liteparse_kwargs)
                 except DocumentTextError:
                     raise native_exc from None
             raise
@@ -203,7 +215,7 @@ async def read_document_text(path: Path) -> str:
     return await _read_with_native_reader(resolved)
 
 
-def read_document_text_sync(path: Path) -> str:
+def read_document_text_sync(path: Path, *, cancel_event=None) -> str:
     """Synchronous wrapper for KB worker threads.
 
     Must not be called from a running asyncio event loop. Prefer
@@ -212,7 +224,7 @@ def read_document_text_sync(path: Path) -> str:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(read_document_text(path))
+        return asyncio.run(read_document_text(path, cancel_event=cancel_event))
     raise RuntimeError(
         "read_document_text_sync() cannot be called from a running event loop; "
         "use await read_document_text(path) instead."

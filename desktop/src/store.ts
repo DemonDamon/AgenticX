@@ -14,6 +14,7 @@ import {
 import type { SearchReference } from "./types/search-references";
 import { shouldClearMessagesOnSessionSwitch } from "./utils/pane-session-switch";
 import { matchesToolCallForSession } from "./utils/pending-tool-result";
+import { cancelInFlightToolMessages } from "./utils/cancel-in-flight-tools";
 import type { PendingActionConfirmation } from "./utils/action-confirmation";
 import { shouldSuppressDuplicatePendingUserEcho } from "./utils/send-dedupe";
 import type { ContentBlock } from "./utils/content-blocks";
@@ -806,6 +807,10 @@ type AppState = {
       appendStreamLine?: string;
     }
   ) => boolean;
+  /** Stop/barge-in: flip live tool cards to cancelled so timers do not keep ticking. */
+  cancelInFlightPaneTools: (paneId: string, ownerSessionId?: string) => number;
+  /** Lite / global `messages` counterpart of {@link cancelInFlightPaneTools}. */
+  cancelInFlightLiteTools: (ownerSessionId?: string) => number;
   updateLastPaneMessage: (paneId: string, content: string) => void;
   /** Mark the pane message carrying `requestId` (clarificationPrompt) as answered. */
   markClarificationAnswered: (
@@ -2091,6 +2096,36 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     });
     return found;
+  },
+  cancelInFlightPaneTools: (paneId, ownerSessionId) => {
+    let cancelledCount = 0;
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+        const next = cancelInFlightToolMessages(pane.messages ?? [], { ownerSessionId });
+        cancelledCount = next.cancelledCount;
+        if (next.cancelledCount === 0) return pane;
+        return { ...pane, messages: next.messages };
+      }),
+    }));
+    return cancelledCount;
+  },
+  cancelInFlightLiteTools: (ownerSessionId) => {
+    let cancelledCount = 0;
+    set((state) => {
+      const next = cancelInFlightToolMessages(state.messages ?? [], { ownerSessionId });
+      cancelledCount = next.cancelledCount;
+      if (next.cancelledCount === 0) return state;
+      const byId = new Map(next.messages.map((message) => [message.id, message]));
+      return {
+        messages: next.messages,
+        panes: state.panes.map((pane) => ({
+          ...pane,
+          messages: (pane.messages ?? []).map((message) => byId.get(message.id) ?? message),
+        })),
+      };
+    });
+    return cancelledCount;
   },
   updateLastPaneMessage: (paneId, content) =>
     set((state) => ({

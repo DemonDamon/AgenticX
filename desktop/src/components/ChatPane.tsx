@@ -282,7 +282,10 @@ import {
   type ContinueReason,
   type ContinueSource,
 } from "../utils/session-continue";
-import { mergeSessionMessagesTail } from "../utils/session-message-merge";
+import {
+  mergeSessionMessagesTail,
+  retainUnpersistedLiveUserTurns,
+} from "../utils/session-message-merge";
 import {
   buildPendingToolFallback,
   buildDeferredToolResultResolution,
@@ -3428,7 +3431,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     () =>
       // Cross-session ownership invariant: never render a row that belongs to a
       // different session, even if a stray write landed in this pane's array
-      // during a session switch. Untagged (legacy / in-flight) rows still show.
+      // during a session switch. Untagged user echoes still show; untagged
+      // assistants/tools stay hidden.
       visibleMessagesForSession(pane?.messages ?? [], pane?.sessionId).filter((item) => {
         if (isGroupPane) return true;
         if (item.role === "assistant" && isThinkingPlaceholderText(item.content || "")) return false;
@@ -3790,12 +3794,15 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             result.messages as LoadedSessionMessage[],
             currentSid
           );
+          const latest =
+            useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? current;
+          const retained = retainUnpersistedLiveUserTurns(latest, merged);
           const changed =
-            merged.length !== current.length ||
-            String(merged[merged.length - 1]?.content ?? "") !==
-              String(current[current.length - 1]?.content ?? "");
+            retained.length !== latest.length ||
+            String(retained[retained.length - 1]?.content ?? "") !==
+              String(latest[latest.length - 1]?.content ?? "");
           if (!changed) return;
-          setPaneMessages(pane.id, merged);
+          setPaneMessages(pane.id, retained);
           // 全量合并后内存已覆盖完整磁盘历史，复位分页游标，避免顶部
           // 「加载更早消息」按旧 oldestLoadedIndex 拉取与内存同 id 的行。
           if (livePane?.hasOlderMessages || (livePane?.oldestLoadedIndex ?? 0) > 0) {
@@ -6336,8 +6343,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         ) {
           return;
         }
-        const currentMsgs = livePane?.messages ?? [];
-        if (lastTurnHasCompletedAssistantReply(currentMsgs)) return;
         const result = await window.agenticxDesktop.loadSessionMessages(sid);
         if (!result.ok || !Array.isArray(result.messages)) return;
         const latestSid = String(
@@ -6347,10 +6352,18 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         if (sessionStreamStateRef.current[sid]?.active) return;
         const current =
           useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
-        const mapped = result.messages.map((item, midx) =>
-          mapLoadedSessionMessage(item as LoadedSessionMessage, sid, midx)
+        // Merge — never raw-replace. A disk snapshot taken before composer
+        // persist used to wipe the just-sent user bubbles while SSE assistants
+        // stayed; switching sessions reloaded the later disk copy and "fixed" it.
+        const merged = retainUnpersistedLiveUserTurns(
+          current,
+          mergeSessionMessagesTail(
+            current,
+            result.messages as LoadedSessionMessage[],
+            sid,
+          ),
         );
-        const enriched = enrichDiskMessagesWithInMemoryReferences(current, mapped);
+        const enriched = enrichDiskMessagesWithInMemoryReferences(current, merged);
         const differs =
           enriched.length !== current.length ||
           String(enriched[enriched.length - 1]?.content ?? "") !==
@@ -7143,18 +7156,27 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
           useAppStore.getState().panes.find((p) => p.id === pane.id)?.sessionId ?? ""
         ).trim();
         if (latestSid !== sid) return false;
+        // Load can outlive a new composer send. If a foreground stream started
+        // while we were on disk, do not clobber its optimistic user echo.
+        if (!opts?.allowDuringStream && sessionStreamStateRef.current[sid]?.active) return false;
         const current = useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? [];
-        const merged = mergeSessionMessagesTail(
+        const merged = retainUnpersistedLiveUserTurns(
           current,
-          msgs.messages as LoadedSessionMessage[],
-          sid
+          mergeSessionMessagesTail(
+            current,
+            msgs.messages as LoadedSessionMessage[],
+            sid
+          ),
         );
+        const latest =
+          useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? current;
+        const retained = retainUnpersistedLiveUserTurns(latest, merged);
         const changed =
-          merged.length !== current.length ||
-          String(merged[merged.length - 1]?.content ?? "") !==
-            String(current[current.length - 1]?.content ?? "");
+          retained.length !== latest.length ||
+          String(retained[retained.length - 1]?.content ?? "") !==
+            String(latest[latest.length - 1]?.content ?? "");
         if (changed) {
-          setPaneMessages(pane.id, merged);
+          setPaneMessages(pane.id, retained);
           recordProgressActivity();
         }
         return changed;
@@ -7293,6 +7315,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
     }
 
+    // Do not list `syncStreamingUiForCurrentSession` as a dep — it closes over
+    // `pane.messages` and would re-run this session-enter effect on every
+    // echo, then reconcile from a stale disk snapshot and hide the query.
     syncStreamingUiForCurrentSession();
 
     if (!sid) {
@@ -7344,7 +7369,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     pane.id,
     pane.sessionId,
     pane.avatarId,
-    syncStreamingUiForCurrentSession,
   ]);
 
   useEffect(() => {
@@ -7489,6 +7513,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     userStoppedSessionRef.current[sid] = true;
     setRunGuardSessionId(sid);
     setStallState("none");
+    useAppStore.getState().cancelInFlightPaneTools(pane.id, sid);
 
     // Commit visible partial BEFORE wiping overlay / aborting SSE. Lite ChatView
     // already does this; Pro previously only reloaded partial after session switch.
@@ -9507,6 +9532,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       } catch (err) {
         console.warn("[ChatPane] barge-in interrupt failed:", err);
       }
+      useAppStore.getState().cancelInFlightPaneTools(pane.id, requestSessionId);
       const prevAbort = sessionAbortControllersRef.current[requestSessionId];
       if (prevAbort) {
         try {
@@ -9622,53 +9648,6 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         text: messageText,
         at: now,
       };
-    }
-
-    // Re-sending the same user text after a completed turn (input box, not the retry
-    // button) must truncate the prior assistant/tool tail and strip [compacted] blocks;
-    // otherwise run_turn proactive compaction re-summarizes the old answer into context.
-    if (
-      !isContinuation &&
-      !skipUserHistory &&
-      !options?.suppressUserEcho &&
-      messageText.length > 0 &&
-      requestSessionId
-    ) {
-      const currentMsgs =
-        useAppStore.getState().panes.find((p) => p.id === pane.id)?.messages ?? pane.messages ?? [];
-      let implicitRetryIdx = -1;
-      for (let i = currentMsgs.length - 1; i >= 0; i -= 1) {
-        const row = currentMsgs[i];
-        if (!row || row.role !== "user" || row.content !== messageText) continue;
-        if (hasTrailingTurnMessages(currentMsgs, i)) {
-          implicitRetryIdx = i;
-          break;
-        }
-      }
-      if (implicitRetryIdx >= 0) {
-        const userOccurrence = countUserOccurrenceThrough(
-          currentMsgs,
-          implicitRetryIdx,
-          messageText
-        );
-        const remainingImplicit = currentMsgs.slice(0, implicitRetryIdx + 1);
-        setPaneMessages(pane.id, remainingImplicit);
-        useAppStore.getState().replacePaneTokens(pane.id, sessionTokensFromMessages(remainingImplicit));
-        const ok = await truncateSessionAtUserMessage(
-          requestSessionId,
-          messageText,
-          "after",
-          userOccurrence,
-          true
-        );
-        if (!ok) {
-          await reloadSessionFromDisk(requestSessionId);
-          releaseSendLock();
-          return;
-        }
-        suppressUserEcho = true;
-        skipUserHistory = true;
-      }
     }
 
     const selectedIsPaneSubagent =
