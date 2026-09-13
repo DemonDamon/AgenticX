@@ -59,18 +59,22 @@ class AgentCheckpoint(BaseModel):
 class CheckpointStore:
     """Synchronous checkpoint persistence over the session storage facade.
 
-    Write failures are logged and swallowed (same tolerance as the existing
-    mid-turn persist path); a missing/corrupt state reads as ``None``.
+    ``save()`` returns True on success and False on failure. Failures are
+    counted on ``save_failures`` and logged (first failure at error, later
+    ones at warning) but never raised — this path is best-effort, not the
+    primary persist-or-abort gate. A missing/corrupt state still reads as
+    ``None``.
     """
 
     def __init__(self, storage: SyncStorageFacade | None = None) -> None:
         self._storage = storage or get_sync_storage()
+        self.save_failures = 0
 
     @staticmethod
     def new_turn_id() -> str:
         return uuid.uuid4().hex
 
-    def save(self, checkpoint: AgentCheckpoint) -> None:
+    def save(self, checkpoint: AgentCheckpoint) -> bool:
         try:
             now = time.time()
             checkpoint.updated_at = now
@@ -80,12 +84,17 @@ class CheckpointStore:
                 checkpoint.session_id,
                 {"checkpoint": checkpoint.model_dump()},
             )
-        except Exception:
-            logger.warning(
-                "checkpoint save failed session=%s",
+            return True
+        except Exception as exc:
+            self.save_failures += 1
+            log = logger.error if self.save_failures == 1 else logger.warning
+            log(
+                "checkpoint save failed session=%s error=%s",
                 checkpoint.session_id,
+                type(exc).__name__,
                 exc_info=True,
             )
+            return False
 
     def load(self, session_id: str) -> Optional[AgentCheckpoint]:
         try:
