@@ -339,4 +339,22 @@ describe("ImBubble assistant protocol boundary", () => {
     expect(html).toContain("帮我估算100MW训练集群在内蒙古vs长三角的年度成本差");
     expect(html).toContain("缓存");
   });
+
+  it("shows continue-in-new-task on assistant actions only", () => {
+    const continueMark = "M12 12.5c.6-4.4 4.8-6.6 8.2-4.2";
+    const assistant = renderToStaticMarkup(
+      <ImBubble
+        message={{ id: "a-continue", role: "assistant", content: "模型回复" }}
+        onContinueFromMessage={() => {}}
+      />,
+    );
+    const user = renderToStaticMarkup(
+      <ImBubble
+        message={{ id: "u-continue", role: "user", content: "飞书mcp" }}
+        onContinueFromMessage={() => {}}
+      />,
+    );
+    expect(assistant).toContain(continueMark);
+    expect(user).not.toContain(continueMark);
+  });
 });

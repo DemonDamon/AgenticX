@@ -3070,6 +3070,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   const [stallTick, setStallTick] = useState(0);
   const [bgCompleteToast, setBgCompleteToast] = useState(false);
   const [stallHintToast, setStallHintToast] = useState("");
+  const [continueCreatingToast, setContinueCreatingToast] = useState(false);
   const [stallRejectReason, setStallRejectReason] = useState("");
   const [resumeInFlight, setResumeInFlight] = useState(false);
   const resumeInFlightRef = useRef<Record<string, boolean>>({});
@@ -7708,7 +7709,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
 
   const continueFromMessage = useCallback(
     async (msg: Message) => {
-      if (msg.role !== "user" && msg.role !== "assistant") return;
+      if (msg.role !== "assistant") return;
       if (isGroupPane || isAutomationTaskPane) return;
       const sid = (pane.sessionId || "").trim();
       const rawId = (msg.id || "").trim();
@@ -7722,7 +7723,9 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       if (!mid) return;
       if (continueInFlightRef.current) return;
       continueInFlightRef.current = true;
+      let showTimer: number | undefined;
       try {
+        showTimer = window.setTimeout(() => setContinueCreatingToast(true), 160);
         const api = window.agenticxDesktop as unknown as {
           continueFromMessage?: (payload: {
             sessionId: string;
@@ -7754,6 +7757,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         useAppStore.getState().bumpSessionCatalogRevision();
         window.setTimeout(() => useAppStore.getState().bumpSessionCatalogRevision(), 450);
       } finally {
+        if (showTimer !== undefined) window.clearTimeout(showTimer);
+        setContinueCreatingToast(false);
         continueInFlightRef.current = false;
       }
     },
@@ -7766,6 +7771,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       pane.messages,
       pane.sessionId,
       setActivePaneId,
+      setContinueCreatingToast,
       setStallHintToast,
       t,
     ],
@@ -8320,7 +8326,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
         const message = row.message;
         const canRetryThisUserMessage = message.role === "user" && !isStreamingCurrentSession;
         const canContinueFromMessage =
-          (message.role === "user" || message.role === "assistant") &&
+          message.role === "assistant" &&
           !isStreamingCurrentSession &&
           !isGroupPane &&
           !isAutomationTaskPane &&
@@ -13434,6 +13440,19 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
             timeoutMs={3200}
           />
           </div>
+
+          {continueCreatingToast ? (
+            <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center">
+              <div
+                className="inline-flex items-center gap-2 rounded-full bg-neutral-950 px-3.5 py-2 text-[13px] font-medium text-white shadow-[0_8px_28px_rgba(0,0,0,0.28)]"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-white/30 border-t-white" />
+                {t("toast.continueCreating")}
+              </div>
+            </div>
+          ) : null}
 
           {showJumpToBottomFab ? (
             <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-30 flex justify-center">

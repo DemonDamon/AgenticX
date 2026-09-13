@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
-import { Bookmark, Copy, Forward, GitBranch, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus } from "lucide-react";
+import { Bookmark, Copy, Forward, LayoutList, Quote, RotateCcw, Pencil, X, ArrowUp, ArrowRight, AlertTriangle, TextSelect, Search, MessageSquarePlus } from "lucide-react";
+import { ContinueInNewTaskIcon } from "./ContinueInNewTaskIcon";
 import type { Message, MessageAttachment } from "../../store";
 import { useAppStore } from "../../store";
 import type { SearchReference } from "../../types/search-references";
@@ -558,7 +559,7 @@ export function ImBubble({
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onContinueFromMessage(message)}
             >
-              <GitBranch size={14} strokeWidth={2} />
+              <ContinueInNewTaskIcon size={14} strokeWidth={2} />
             </button>
           </HoverTip>
         ) : null}
@@ -826,17 +827,6 @@ export function ImBubble({
                         onClick={() => onRetryMessage(message)}
                       >
                         <RotateCcw size={14} strokeWidth={2} />
-                      </button>
-                    </HoverTip>
-                  ) : null}
-                  {onContinueFromMessage ? (
-                    <HoverTip label={t("actions.continueFrom")}>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => onContinueFromMessage(message)}
-                      >
-                        <GitBranch size={14} strokeWidth={2} />
                       </button>
                     </HoverTip>
                   ) : null}
@@ -1133,13 +1123,13 @@ export function ImBubble({
               <MessageSquarePlus size={12} className="shrink-0 text-text-faint" />{t("actions.quoteToNew")}
             </button>
           ) : null}
-          {onContinueFromMessage ? (
+          {!isUser && onContinueFromMessage ? (
             <button
               className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-text-primary hover:bg-surface-hover"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => { setMenuOpen(false); onContinueFromMessage(message); }}
             >
-              <GitBranch size={12} className="shrink-0 text-text-faint" />{t("actions.continueFrom")}
+              <ContinueInNewTaskIcon size={12} strokeWidth={2} className="shrink-0 text-text-faint" />{t("actions.continueFrom")}
             </button>
           ) : null}
           <button

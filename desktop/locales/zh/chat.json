@@ -137,7 +137,7 @@
     "selectAll": "全选",
     "webSearch": "网页搜索",
     "quoteToNew": "引用到新对话",
-    "continueFrom": "从这里继续",
+    "continueFrom": "在新任务继续",
     "reanswer": "换模型回答",
     "reanswerAt": "@换模型",
     "pickReanswerModel": "选择模型重新回答",
@@ -538,8 +538,9 @@
     "busyForChat": "该智能体任务执行中，完成后才能进入对话",
     "bgTaskDone": "后台任务已完成",
     "turnInterrupted": "本轮请求已中断，正在同步状态…",
-    "continueUnsupported": "当前版本不支持从这里继续",
-    "continueFailed": "从这里继续失败：{{detail}}"
+    "continueCreating": "正在创建新任务...",
+    "continueUnsupported": "当前版本不支持在新任务继续",
+    "continueFailed": "在新任务继续失败：{{detail}}"
   },
   "md": {
     "zoom": "放大查看",
