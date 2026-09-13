@@ -290,6 +290,55 @@ def test_handoff_negative_with_tool_calls() -> None:
     assert _messages_last_turn_promised_action_without_followthrough(messages) is False
 
 
+def test_invoke_xml_without_tool_calls_is_deferred() -> None:
+    messages = [
+        {"role": "user", "content": "ExampleAgent 是哪个厂商"},
+        {
+            "role": "assistant",
+            "content": (
+                "团长，我先查一下再回答，避免凭印象误导。\n\n"
+                '<invoke name="web_search">\n'
+                "<parameter name=\"query\">ExampleAgent 是什么 哪个厂商 开源项目</parameter>\n"
+                "</invoke>"
+            ),
+        },
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is True
+
+
+def test_invoke_xml_negative_long_tutorial() -> None:
+    body = (
+        "下面用一个虚构示例说明 XML 工具标记长什么样。"
+        + "（具体分析展开）" * 20
+        + '\n<invoke name="web_search"><parameter name="query">demo</parameter></invoke>\n'
+        + "以上只是文档示例，不是本轮要执行的调用。"
+        + "（具体分析展开）" * 20
+    )
+    assert len(body) > 300
+    messages = [
+        {"role": "user", "content": "解释一下工具标记"},
+        {"role": "assistant", "content": body},
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is False
+
+
+def test_invoke_xml_negative_when_tool_calls_present() -> None:
+    messages = [
+        {"role": "user", "content": "ExampleAgent 是哪个厂商"},
+        {
+            "role": "assistant",
+            "content": (
+                "团长，我先查一下再回答，避免凭印象误导。\n\n"
+                '<invoke name="web_search">\n'
+                "<parameter name=\"query\">ExampleAgent</parameter>\n"
+                "</invoke>"
+            ),
+            "tool_calls": [{"id": "x", "function": {"name": "web_search"}}],
+        },
+    ]
+    assert _messages_last_turn_promised_action_without_followthrough(messages) is False
+
+
 def test_accumulate_meta_partial_text_skips_spinner() -> None:
     evt = RuntimeEvent(type=EventType.TOKEN.value, data={"text": "⏳"}, agent_id="meta")
     assert _accumulate_meta_partial_text("hello", evt) == "hello"

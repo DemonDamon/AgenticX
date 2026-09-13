@@ -6,7 +6,9 @@ Author: Damon Li
 
 from agenticx.runtime.agent_runtime import (
     _extract_inline_tool_call,
+    _has_unexecuted_inline_tool_markup,
     _sanitize_structured_assistant_text,
+    _strip_inline_tool_markup,
 )
 
 
@@ -93,3 +95,73 @@ def test_extract_glm_xml_ignores_unknown_tool_name() -> None:
     )
     parsed = _extract_inline_tool_call(text, {"file_edit"})
     assert parsed is None
+
+
+def test_extract_invoke_web_search_session_payload() -> None:
+    text = (
+        "\n团长，我先查一下再回答，避免凭印象误导。\n\n"
+        '<invoke name="web_search">\n'
+        "<parameter name=\"query\">ExampleAgent 是什么 哪个厂商 开源项目</parameter>\n"
+        "</invoke>"
+    )
+    parsed = _extract_inline_tool_call(text, {"web_search"})
+    assert parsed == {
+        "name": "web_search",
+        "arguments": {"query": "ExampleAgent 是什么 哪个厂商 开源项目"},
+    }
+
+
+def test_extract_invoke_wrapped_in_tool_call_tag() -> None:
+    inner = (
+        '<invoke name="web_search">'
+        "<parameter name=\"query\">latest release notes</parameter>"
+        "</invoke>"
+    )
+    wrapped = f"<tool_call>{inner}</tool_call>"
+    namespaced = f"<x:tool_call>{inner}</x:tool_call>"
+    allowed = {"web_search"}
+    assert _extract_inline_tool_call(wrapped, allowed) == {
+        "name": "web_search",
+        "arguments": {"query": "latest release notes"},
+    }
+    assert _extract_inline_tool_call(namespaced, allowed) == {
+        "name": "web_search",
+        "arguments": {"query": "latest release notes"},
+    }
+
+
+def test_extract_invoke_ignores_unknown_tool_name() -> None:
+    text = (
+        '<invoke name="not_a_real_tool">'
+        "<parameter name=\"query\">anything</parameter>"
+        "</invoke>"
+    )
+    parsed = _extract_inline_tool_call(text, {"web_search"})
+    assert parsed is None
+
+
+def test_strip_inline_tool_markup_keeps_preamble() -> None:
+    text = (
+        "团长，我先查一下再回答，避免凭印象误导。\n\n"
+        '<invoke name="web_search">\n'
+        "<parameter name=\"query\">ExampleAgent 是什么 哪个厂商 开源项目</parameter>\n"
+        "</invoke>"
+    )
+    cleaned = _strip_inline_tool_markup(text)
+    assert cleaned == "团长，我先查一下再回答，避免凭印象误导。"
+    assert "<invoke" not in cleaned
+    assert "<parameter" not in cleaned
+
+
+def test_has_unexecuted_inline_tool_markup_true_for_invoke() -> None:
+    text = (
+        "我先查一下。\n"
+        '<invoke name="web_search">'
+        "<parameter name=\"query\">q</parameter>"
+        "</invoke>"
+    )
+    assert _has_unexecuted_inline_tool_markup(text) is True
+
+
+def test_has_unexecuted_inline_tool_markup_false_for_plain_prose() -> None:
+    assert _has_unexecuted_inline_tool_markup("团长，这是普通回复。") is False

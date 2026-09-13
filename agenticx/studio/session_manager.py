@@ -36,6 +36,10 @@ from agenticx.runtime.truncated_final import (
     ACTION_INTENT_RE,
     detect_suspected_truncated_final,
 )
+from agenticx.runtime.agent_runtime import (
+    _has_inline_tool_markup,
+    _strip_inline_tool_markup,
+)
 from agenticx.studio.chat_attachments import materialize_message_lists_image_uploads
 from agenticx.workspace.loader import (
     ensure_group_workspace,
@@ -263,6 +267,14 @@ def _messages_last_turn_promised_action_without_followthrough(
         had_tool_calls_this_round=False,
         executed_tool_names=(),
         finish_reason=str(metadata.get("model_finish_reason") or ""),
+    ):
+        return True
+
+    # Path E: leftover invoke/tool_call XML in a short assistant body, no tool rows.
+    if (
+        not _turn_has_any_tool_row(tail)
+        and _has_inline_tool_markup(body)
+        and len(_strip_inline_tool_markup(body)) < 220
     ):
         return True
 

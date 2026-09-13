@@ -1825,6 +1825,23 @@ _GLM_TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*([A-Za-z0-9_./-]+)\s*(.*?)\s*</tool_call>",
     re.IGNORECASE | re.DOTALL,
 )
+_INVOKE_BLOCK_RE = re.compile(
+    r"<\s*invoke\s+name\s*=\s*[\"']([A-Za-z0-9_./-]+)[\"']\s*>"
+    r"(.*?)"
+    r"</\s*invoke\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_INVOKE_PARAM_RE = re.compile(
+    r"<\s*parameter\s+name\s*=\s*[\"']([^\"']+)[\"']\s*>"
+    r"(.*?)"
+    r"</\s*parameter\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_INLINE_TOOL_MARKUP_RE = re.compile(
+    r"<\s*(?:[\w.-]+:)?tool_call\b[^>]*>[\s\S]*?</\s*(?:[\w.-]+:)?tool_call\s*>"
+    r"|<\s*invoke\b[^>]*>[\s\S]*?</\s*invoke\s*>",
+    re.IGNORECASE,
+)
 _GLM_ARG_KEY_OPEN = "<arg_key>"
 _GLM_ARG_VALUE_CLOSE = "</arg_value>"
 _GLM_ARG_CANONICAL_SPLIT_RE = re.compile(
@@ -1965,6 +1982,25 @@ def _extract_inline_tool_call(
         args = _normalize_file_tool_arg_aliases(name, args)
         return {"name": name, "arguments": args}
 
+    # Vendor invoke/parameter dialect (often wrapped in *:tool_call).
+    for inv in _INVOKE_BLOCK_RE.finditer(text):
+        name = str(inv.group(1) or "").strip()
+        if name not in allowed_tool_names:
+            continue
+        args: Dict[str, Any] = {}
+        for param in _INVOKE_PARAM_RE.finditer(inv.group(2) or ""):
+            key = str(param.group(1) or "").strip()
+            raw = str(param.group(2) or "").strip()
+            if not key:
+                continue
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = raw
+            args[key] = parsed
+        args = _normalize_file_tool_arg_aliases(name, args)
+        return {"name": name, "arguments": args}
+
     # Find the first allowed tool call anywhere in the snippet.
     # This supports wrappers such as print(check_resources()).
     tool_name: Optional[str] = None
@@ -1991,6 +2027,23 @@ def _extract_inline_tool_call(
         "name": tool_name,
         "arguments": _normalize_file_tool_arg_aliases(tool_name, args_obj),
     }
+
+
+def _strip_inline_tool_markup(text: str) -> str:
+    """Remove invoke / tool_call XML wrappers from visible assistant text."""
+    cleaned = _INLINE_TOOL_MARKUP_RE.sub("", str(text or ""))
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def _has_inline_tool_markup(text: str) -> bool:
+    """True when assistant text still contains invoke or tool_call markup."""
+    return bool(_INLINE_TOOL_MARKUP_RE.search(str(text or "")))
+
+
+def _has_unexecuted_inline_tool_markup(text: str) -> bool:
+    """True when raw text has invoke or GLM tool_call blocks that need recovery."""
+    raw = str(text or "")
+    return bool(_INVOKE_BLOCK_RE.search(raw) or _GLM_TOOL_CALL_RE.search(raw))
 
 
 _THINK_OPEN_TAG = chr(60) + "think" + chr(62)
@@ -5168,6 +5221,40 @@ class AgentRuntime:
                             },
                         }
                     ]
+                    ac_clean = _strip_inline_tool_markup(ac_clean)
+                    response_text = ac_clean
+            if (
+                not tool_calls
+                and _has_unexecuted_inline_tool_markup(response_text)
+                and not getattr(session, "_inline_markup_retry_used", False)
+            ):
+                setattr(session, "_inline_markup_retry_used", True)
+                hint = (
+                    "[系统通知] 上一轮把工具写成了正文 XML（invoke / tool_call），运行时无法执行。"
+                    "请立即用原生 function calling 重新发出同一个工具调用，补全 required 参数；"
+                    "不要再把 XML 写进用户可见正文。"
+                )
+                visible = _strip_inline_tool_markup(ac_clean) or " "
+                messages.append({"role": "assistant", "content": visible})
+                messages.append({"role": "system", "content": hint})
+                session.agent_messages.append({"role": "assistant", "content": visible})
+                session.agent_messages.append({"role": "system", "content": hint})
+                logger.info(
+                    "unparsed_inline_tool_markup session=%s round=%s",
+                    getattr(session, "session_id", ""),
+                    round_idx,
+                )
+                yield RuntimeEvent(
+                    type=EventType.ROUND_END.value,
+                    data={
+                        "round": round_idx,
+                        "max_rounds": self.max_tool_rounds,
+                        "auto_retry": True,
+                        "reason": "unparsed_inline_tool_markup",
+                    },
+                    agent_id=agent_id,
+                )
+                continue
             model_finish_reason = _response_finish_reason(response)
             _fr = str(model_finish_reason or "").strip().lower()
             if (
