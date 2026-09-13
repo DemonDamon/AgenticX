@@ -14,7 +14,15 @@ from agenticx.runtime.replay_ledger.contracts import (
     RunEvent,
     WorkspaceSnapshotRef,
 )
-from agenticx.runtime.replay_ledger.store import ReplayLedgerStore
+
+
+def __getattr__(name: str):
+    if name == "ReplayLedgerStore":
+        from agenticx.runtime.replay_ledger.store import ReplayLedgerStore
+
+        return ReplayLedgerStore
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "COMPLETENESS_VALUES",
