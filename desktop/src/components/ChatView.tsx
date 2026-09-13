@@ -1198,6 +1198,7 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
       } catch (err) {
         console.warn("[ChatView] barge-in interrupt failed:", err);
       }
+      useAppStore.getState().cancelInFlightLiteTools(sessionId);
       abortRef.current?.abort();
       addMessage("tool", "已中断上一轮生成，开始处理新消息", "meta");
       streamTextRef.current = "";
@@ -2292,6 +2293,9 @@ export function ChatView({ onOpenConfirm, onOpenClarification, onSubmitClarifica
     const sid = String(sessionId || "").trim();
     if (sid) {
       void window.agenticxDesktop.interruptSession?.(sid);
+      useAppStore.getState().cancelInFlightLiteTools(sid);
+    } else {
+      useAppStore.getState().cancelInFlightLiteTools();
     }
     abortedByUserRef.current = true;
     abortRef.current?.abort();

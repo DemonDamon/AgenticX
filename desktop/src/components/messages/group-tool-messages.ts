@@ -56,6 +56,12 @@ export function isToolGroupInProgress(messages: Message[]): boolean {
   return messages.some((m) => m.toolStatus === "running" || m.toolStatus === "pending");
 }
 
+/** True when the group ended by user/runtime cancel, not a completed run. */
+export function isToolGroupCancelled(messages: Message[]): boolean {
+  if (isToolGroupInProgress(messages)) return false;
+  return messages.some((m) => m.toolStatus === "cancelled");
+}
+
 function findLastGroupedToolMessageId(messages: Message[]): string | undefined {
   const visibleMessages = messages.filter((m) => !isNoisyToolStatusMessage(m));
   for (let i = visibleMessages.length - 1; i >= 0; i -= 1) {

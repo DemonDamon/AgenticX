@@ -487,6 +487,10 @@ export function ToolCallCard({
       text={t("tool.running", { elapsed: formatToolElapsedSeconds(liveElapsedSec) })}
       className="shrink-0 whitespace-nowrap text-[12px] font-normal tabular-nums"
     />
+  ) : status === "cancelled" ? (
+    <span className="shrink-0 whitespace-nowrap text-[12px] font-normal text-text-faint">
+      {t("tool.cancelled")}
+    </span>
   ) : null;
 
   const expandedDetailClass =

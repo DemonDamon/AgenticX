@@ -19,6 +19,7 @@ import { dedupeContinuationNotices } from "./continuation-notice";
 /** A message-like object that may carry its owning session id. */
 export interface OwnedMessage {
   ownerSessionId?: string;
+  role?: string;
 }
 
 /**
@@ -42,8 +43,18 @@ export function messageBelongsToSession(
     return ownerWhenUnbound.length === 0;
   }
   const owner = String(msg.ownerSessionId ?? "").trim();
-  if (!owner) return false;
+  if (!owner) {
+    // Composer echoes can land before extras.ownerSessionId is stamped, or a
+    // later merge can strip it. Hiding every untagged row made the just-sent
+    // query vanish until a disk reload restamped ownerSessionId. Untagged
+    // assistants/tools stay hidden — those are the cross-session leak vector.
+    return String(msg.role ?? "") === "user";
+  }
   return owner === sid;
+}
+
+function clientTurnIdOf(message: { metadata?: Record<string, unknown> }): string {
+  return String(message.metadata?.client_turn_id ?? "").trim();
 }
 
 /**
@@ -53,21 +64,29 @@ export function messageBelongsToSession(
  * Keeping only the last occurrence preserves any richer metadata (attachments,
  * ownerSessionId) that the disk copy may carry while dropping the bare
  * optimistic duplicate.
+ *
+ * Distinct `client_turn_id`s are real turns (same sentence sent again) and
+ * must not be collapsed — otherwise the later query looks lost.
  */
-function dedupeConsecutiveUserMessages<T extends { role: string; content?: unknown }>(
-  messages: T[],
-): T[] {
+function dedupeConsecutiveUserMessages<
+  T extends { role: string; content?: unknown; metadata?: Record<string, unknown> },
+>(messages: T[]): T[] {
   const out: T[] = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
-    if (
+    const next = messages[i + 1];
+    const sameText =
       m.role === "user" &&
-      i + 1 < messages.length &&
-      messages[i + 1].role === "user" &&
-      String(m.content ?? "").trim() === String(messages[i + 1].content ?? "").trim() &&
-      String(m.content ?? "").trim().length > 0
-    ) {
-      // Skip this copy; the next one will be included (or itself deduplicated).
+      next?.role === "user" &&
+      String(m.content ?? "").trim().length > 0 &&
+      String(m.content ?? "").trim() === String(next.content ?? "").trim();
+    const distinctTurns = Boolean(
+      sameText &&
+        clientTurnIdOf(m) &&
+        clientTurnIdOf(next) &&
+        clientTurnIdOf(m) !== clientTurnIdOf(next),
+    );
+    if (sameText && !distinctTurns) {
       continue;
     }
     out.push(m);

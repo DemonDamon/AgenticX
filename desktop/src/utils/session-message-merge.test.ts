@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { Message } from "../store";
-import { mergeSessionMessagesTail } from "./session-message-merge";
+import {
+  mergeSessionMessagesTail,
+  retainUnpersistedLiveUserTurns,
+} from "./session-message-merge";
 import type { LoadedSessionMessage } from "./session-message-map";
 
 const sid = "sess-1";
@@ -408,6 +411,36 @@ describe("mergeSessionMessagesTail", () => {
     expect(out[0].toolStatus).toBe("done");
   });
 
+  it("keeps optimistic memory cancelled when disk still says running", () => {
+    const callId = "call_liteparse_1";
+    const existing: Message[] = [
+      {
+        id: `${sid}-i1`,
+        role: "tool",
+        content: JSON.stringify({ path: "/tmp/a.xlsx" }),
+        agentId: "meta",
+        toolCallId: callId,
+        toolName: "liteparse",
+        toolStatus: "cancelled",
+        toolElapsedSec: 13,
+      } as Message,
+    ];
+    const diskRows: LoadedSessionMessage[] = [
+      {
+        role: "tool",
+        content: JSON.stringify({ path: "/tmp/a.xlsx" }),
+        tool_call_id: callId,
+        tool_name: "liteparse",
+        tool_status: "running",
+      },
+    ];
+
+    const out = mergeSessionMessagesTail(existing, diskRows, sid);
+    expect(out).toHaveLength(1);
+    expect(out[0].toolStatus).toBe("cancelled");
+    expect(out[0].toolElapsedSec).toBe(13);
+  });
+
   it("does not append unmatched auto-approve confirm receipts after the disk tail", () => {
     const existing: Message[] = [
       uidMsg("user", "继续", "uid-u"),
@@ -499,5 +532,31 @@ describe("mergeSessionMessagesTail", () => {
     expect(out[1].usage?.totalTokens).toBe(12);
     expect(out[1].model).toBe("glm-5");
     expect(out[1].provider).toBe("zhipu");
+  });
+
+  it("reinserts live composer user turns that a stale disk snapshot dropped", () => {
+    const liveUser: Message = {
+      id: "uid-live",
+      role: "user",
+      content: "刚才解析到哪了",
+      ownerSessionId: sid,
+      metadata: { client_turn_id: "turn-live" },
+    };
+    const liveAssistant: Message = {
+      id: "uid-a",
+      role: "assistant",
+      content: "团长，进度汇报",
+      ownerSessionId: sid,
+    };
+    const staleDisk = [
+      uidMsg("user", "旧问", `${sid}-i0`),
+      uidMsg("assistant", "旧答", `${sid}-i1`),
+      liveAssistant,
+    ];
+    const out = retainUnpersistedLiveUserTurns(
+      [uidMsg("user", "旧问", `${sid}-i0`), liveUser, liveAssistant],
+      staleDisk,
+    );
+    expect(out.map((m) => m.id)).toEqual([`${sid}-i0`, "uid-live", `${sid}-i1`, "uid-a"]);
   });
 });

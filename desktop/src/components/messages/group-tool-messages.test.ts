@@ -3,6 +3,7 @@ import { test } from "vitest";
 
 import type { Message } from "../../store";
 import {
+  isToolGroupCancelled,
   isToolGroupInProgress,
   shouldHoldToolGroupProgress,
   groupConsecutiveToolMessages,
@@ -32,6 +33,24 @@ test("isToolGroupInProgress is true while any tool row is running", () => {
     ]),
     true,
   );
+});
+
+test("isToolGroupCancelled is true only after in-flight rows are cancelled", () => {
+  assert.equal(
+    isToolGroupCancelled([
+      toolMessage("t1", "done"),
+      toolMessage("t2", "running"),
+    ]),
+    false,
+  );
+  assert.equal(
+    isToolGroupCancelled([
+      toolMessage("t1", "done"),
+      toolMessage("t2", "cancelled"),
+    ]),
+    true,
+  );
+  assert.equal(isToolGroupCancelled([toolMessage("t1", "done")]), false);
 });
 
 test("shouldHoldToolGroupProgress bridges the gap between sequential tool calls", () => {
