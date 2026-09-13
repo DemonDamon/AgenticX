@@ -23,6 +23,8 @@ pytest.importorskip("chromadb")
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from agenticx.brain.manager import BrainManager  # noqa: E402
+from agenticx.brain.registry import BrainRegistry  # noqa: E402
 from agenticx.studio.kb import (  # noqa: E402
     ChunkingSpec,
     EmbeddingSpec,
@@ -62,6 +64,14 @@ class _DeterministicEmbedding:
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     KBManager.reset_for_tests()
     cfg_path = tmp_path / "config.yaml"
+    brains = tmp_path / "brains"
+    monkeypatch.setattr("agenticx.brain.registry.AGENTICX_HOME", tmp_path)
+    monkeypatch.setattr("agenticx.brain.registry.BRAINS_ROOT", brains)
+    monkeypatch.setattr("agenticx.brain.registry.REGISTRY_FILE", brains / "registry.json")
+    monkeypatch.setattr("agenticx.brain.registry.CONFIG_YAML", cfg_path)
+    monkeypatch.setattr("agenticx.brain.registry.AVATARS_ROOT", tmp_path / "avatars")
+    monkeypatch.setattr("agenticx.brain.registry.LEGACY_KB_REGISTRY", tmp_path / "storage" / "kb")
+
     # Pre-populate with an enabled config so routes operate against tmp storage.
     initial = KBConfig(
         enabled=True,
@@ -74,21 +84,18 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
         retrieval=RetrievalSpec(top_k=3),
     )
 
-    # Manually seed the singleton so all routes share this instance.
+    BrainRegistry.instance().bootstrap()
     manager = KBManager(config_path=str(cfg_path))
-    manager._runtime._config = initial  # type: ignore[attr-defined]
-    manager._runtime._embedding_provider = _DeterministicEmbedding()  # type: ignore[attr-defined]
-    # Reroute runtime's registry to a tmp dir so nothing lands in ~/.agenticx
+    manager.write_config(initial)
+
+    docs_rt = BrainManager.instance().default_docs_runtime()
     from agenticx.studio.kb.runtime import _DocumentRegistry  # type: ignore
 
     tmp_registry_dir = tmp_path / "kb"
     tmp_registry_dir.mkdir(parents=True, exist_ok=True)
-    manager._runtime._registry = _DocumentRegistry(tmp_registry_dir / "documents.json")  # type: ignore[attr-defined]
-    manager._runtime._state_path = tmp_registry_dir / "state.json"  # type: ignore[attr-defined]
-    # Write the initial config to disk so GET/PUT round-trip through YAML works.
-    manager.write_config(initial)
-    # Reinstall the stub embedding since write_config resets lazy state.
-    manager._runtime._embedding_provider = _DeterministicEmbedding()  # type: ignore[attr-defined]
+    docs_rt._runtime._registry = _DocumentRegistry(tmp_registry_dir / "documents.json")  # type: ignore[attr-defined]
+    docs_rt._runtime._state_path = tmp_registry_dir / "state.json"  # type: ignore[attr-defined]
+    docs_rt._runtime._embedding_provider = _DeterministicEmbedding()  # type: ignore[attr-defined]
 
     KBManager._instance = manager  # type: ignore[attr-defined]
 
@@ -315,3 +322,71 @@ def test_add_document_rejects_unknown_extension(client: TestClient, tmp_path: Pa
     assert "extension" in resp.json().get("detail", "").lower() or "unsupported" in resp.json().get(
         "detail", ""
     ).lower()
+
+
+# --------------------------------------------------------------------------- #
+# job cancel                                                                  #
+# --------------------------------------------------------------------------- #
+
+
+def test_cancel_unknown_job_404(client: TestClient):
+    resp = client.post("/api/kb/jobs/job_does_not_exist/cancel")
+    assert resp.status_code == 404
+
+
+def test_cancel_finished_job_409(client: TestClient, tmp_path: Path):
+    doc = tmp_path / "finished-cancel.md"
+    doc.write_text("already finished before cancel")
+    add = client.post("/api/kb/documents", data={"path": str(doc)})
+    assert add.status_code == 200
+    job_id = add.json()["job_id"]
+    _wait_for_job(client, job_id)
+
+    resp = client.post(f"/api/kb/jobs/{job_id}/cancel")
+    assert resp.status_code == 409
+    assert "already finished" in resp.json().get("detail", "").lower()
+
+
+def test_cancel_queued_or_running_job_200(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from agenticx.studio.kb.jobs import JobRegistry
+    from agenticx.studio.kb.runtime import KBRuntime
+
+    rt = BrainManager.instance().default_docs_runtime()
+    rt._jobs = JobRegistry(max_workers=1)
+
+    original_ingest = KBRuntime.ingest_document
+
+    def slow_ingest(self, document_id, *, progress_cb=None, cancel_event=None):
+        time.sleep(3)
+        return original_ingest(
+            self, document_id, progress_cb=progress_cb, cancel_event=cancel_event
+        )
+
+    monkeypatch.setattr(KBRuntime, "ingest_document", slow_ingest)
+
+    doc1 = tmp_path / "cancel-block1.md"
+    doc1.write_text("first ingest blocks the worker")
+    doc2 = tmp_path / "cancel-block2.md"
+    doc2.write_text("second ingest stays queued")
+
+    add1 = client.post("/api/kb/documents", data={"path": str(doc1)})
+    assert add1.status_code == 200
+    add2 = client.post("/api/kb/documents", data={"path": str(doc2)})
+    assert add2.status_code == 200
+    job2_id = add2.json()["job_id"]
+
+    time.sleep(0.2)
+    queued = client.get(f"/api/kb/jobs/{job2_id}").json()["job"]
+    assert queued["status"] == "queued"
+
+    resp = client.post(f"/api/kb/jobs/{job2_id}/cancel")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["job"]["status"] == "cancelled"
+
+    get_after = client.get(f"/api/kb/jobs/{job2_id}")
+    assert get_after.status_code == 200
+    assert get_after.json()["job"]["status"] == "cancelled"

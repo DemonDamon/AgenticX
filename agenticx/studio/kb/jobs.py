@@ -13,11 +13,11 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
 
-from .contracts import IngestJob, IngestJobStatus, KBDocumentStatus
+from .contracts import IngestJob, IngestJobStatus, IngestReport, KBDocumentStatus
 from .runtime import KBRuntime
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ _STATUS_MAP = {
     KBDocumentStatus.WRITING: IngestJobStatus.WRITING,
     KBDocumentStatus.DONE: IngestJobStatus.DONE,
     KBDocumentStatus.FAILED: IngestJobStatus.FAILED,
+    KBDocumentStatus.CANCELLED: IngestJobStatus.CANCELLED,
 }
 
 _PROGRESS_WEIGHTS = {
@@ -41,6 +42,7 @@ _PROGRESS_WEIGHTS = {
     IngestJobStatus.WRITING: 0.9,
     IngestJobStatus.DONE: 1.0,
     IngestJobStatus.FAILED: 1.0,
+    IngestJobStatus.CANCELLED: 1.0,
 }
 
 
@@ -48,7 +50,11 @@ def _weighted_progress(status: IngestJobStatus, stage_progress: Optional[float] 
     """Map coarse status + optional stage progress to a global 0~1 percentage."""
 
     start = float(_PROGRESS_WEIGHTS.get(status, 0.0))
-    if stage_progress is None or status in {IngestJobStatus.DONE, IngestJobStatus.FAILED}:
+    if stage_progress is None or status in {
+        IngestJobStatus.DONE,
+        IngestJobStatus.FAILED,
+        IngestJobStatus.CANCELLED,
+    }:
         return start
     stage_ratio = max(0.0, min(1.0, float(stage_progress)))
     next_weight = 1.0
@@ -81,6 +87,8 @@ class JobRegistry:
         )
         self._lock = threading.RLock()
         self._jobs: Dict[str, IngestJob] = {}
+        self._cancel_events: Dict[str, threading.Event] = {}
+        self._futures: Dict[str, Future] = {}
 
     # ------------------------------ crud ------------------------------- #
 
@@ -117,10 +125,58 @@ class JobRegistry:
             status=IngestJobStatus.QUEUED,
             started_at=datetime.now(timezone.utc).isoformat(),
         )
+        event = threading.Event()
         with self._lock:
             self._jobs[job.id] = job
-        self._executor.submit(self._run, runtime, job, on_done)
+            self._cancel_events[job.id] = event
+        fut = self._executor.submit(self._run, runtime, job, on_done, event)
+        with self._lock:
+            self._futures[job.id] = fut
         return job
+
+    def request_cancel(self, job_id: str, runtime: KBRuntime) -> tuple[IngestJob, bool]:
+        """Request cancellation of a queued or running ingest job."""
+
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if job.status in {
+                IngestJobStatus.DONE,
+                IngestJobStatus.FAILED,
+                IngestJobStatus.CANCELLED,
+            }:
+                return job, True
+
+            event = self._cancel_events.get(job_id)
+            if event is None:
+                event = threading.Event()
+                self._cancel_events[job_id] = event
+            event.set()
+
+            fut = self._futures.get(job_id)
+            doc_id = job.document_id
+
+        cancelled_before_start = False
+        if fut is not None and fut.cancel():
+            cancelled_before_start = True
+            finished_at = datetime.now(timezone.utc).isoformat()
+            with self._lock:
+                current = self._jobs.get(job_id)
+                if current is not None:
+                    current.status = IngestJobStatus.CANCELLED
+                    current.progress = 1.0
+                    current.finished_at = finished_at
+                    current.message = "已取消"
+                    current.report = IngestReport(cancelled=1)
+                    doc_id = current.document_id
+
+        if cancelled_before_start and doc_id:
+            runtime.mark_document_cancelled(doc_id)
+
+        with self._lock:
+            latest = self._jobs[job_id]
+        return latest, False
 
     # ------------------------------ worker ----------------------------- #
 
@@ -129,6 +185,7 @@ class JobRegistry:
         runtime: KBRuntime,
         job: IngestJob,
         on_done: Optional[Callable[[IngestJob], None]],
+        cancel_event: threading.Event,
     ) -> None:
         def _progress(status, message: str, stage_progress: Optional[float] = None) -> None:
             mapped = _STATUS_MAP.get(status, IngestJobStatus.PARSING)
@@ -142,15 +199,33 @@ class JobRegistry:
         try:
             if not job.document_id:
                 raise ValueError("job.document_id is required")
-            report = runtime.ingest_document(job.document_id, progress_cb=_progress)
-            terminal = IngestJobStatus.DONE if report.failed == 0 else IngestJobStatus.FAILED
+            report = runtime.ingest_document(
+                job.document_id,
+                progress_cb=_progress,
+                cancel_event=cancel_event,
+            )
+            if report.cancelled:
+                terminal = IngestJobStatus.CANCELLED
+            elif report.failed == 0:
+                terminal = IngestJobStatus.DONE
+            else:
+                terminal = IngestJobStatus.FAILED
+            message = (
+                "cancelled"
+                if terminal == IngestJobStatus.CANCELLED
+                else (
+                    "ok"
+                    if terminal == IngestJobStatus.DONE
+                    else "; ".join(report.reasons) or "failed"
+                )
+            )
             self._update(
                 job.id,
                 status=terminal,
                 progress=1.0,
                 report=report,
                 finished_at=datetime.now(timezone.utc).isoformat(),
-                message="ok" if terminal == IngestJobStatus.DONE else "; ".join(report.reasons) or "failed",
+                message=message,
             )
         except Exception as exc:
             logger.exception("ingest job %s crashed", job.id)

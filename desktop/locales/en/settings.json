@@ -1175,6 +1175,8 @@
     "stWriting": "Writing",
     "stDone": "Indexed",
     "stFailed": "Failed",
+    "cancelTitle": "Cancel ingest",
+    "stCancelled": "Cancelled",
     "depsDetectFailed": "Backend dependency check failed",
     "debugIntro": "Check retrieval quality and chunking here. This does not change ingested materials. Save Config first after changing settings.",
     "recallTitle": "Recall debug",

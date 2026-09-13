@@ -1175,6 +1175,8 @@
     "stWriting": "写入中",
     "stDone": "已索引",
     "stFailed": "失败",
+    "cancelTitle": "取消入库",
+    "stCancelled": "已取消",
     "depsDetectFailed": "后端依赖检测失败",
     "debugIntro": "在此验证检索质量与切片效果，不会修改已入库资料；配置变更后请先在「配置」页保存。",
     "recallTitle": "召回调试",
