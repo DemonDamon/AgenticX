@@ -869,7 +869,9 @@
   "citation": {
     "keyCitations": "关键引用",
     "noSnippet": "暂无摘录",
-    "fragmentCount": "{{count}} 个片段"
+    "fragmentCount": "{{count}} 个片段",
+    "sources": "引用",
+    "sourcesCount": "引用来源 {{count}}"
   },
   "sourceAttribution": {
     "verified": "已验证",

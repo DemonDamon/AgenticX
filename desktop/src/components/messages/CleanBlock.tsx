@@ -7,6 +7,7 @@ import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
 import { assistantVisibleBodyForUi } from "../../utils/assistant-output";
 import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
+import { withBibliographyFallback } from "./source-attribution-parse";
 
 type Props = {
   message: Message;
@@ -25,6 +26,9 @@ export function CleanBlock({ message, badge, onRevealPath, onOpenFileReference, 
     hasThinkTag && /<\/think>/i.test(String(message.content ?? ""));
   const bodyText = !isUser ? assistantVisibleBodyForUi(message.content) : message.content;
   const hasBody = !!bodyText?.trim();
+  const displayRefs = !isUser
+    ? withBibliographyFallback(message.references, bodyText)
+    : [];
   return (
     <div
       className={`w-full border-b border-border/60 py-2 ${isUser ? "pl-3" : "rounded-md border px-3 py-2"}`}
@@ -42,8 +46,8 @@ export function CleanBlock({ message, badge, onRevealPath, onOpenFileReference, 
     >
       <div className="msg-content break-words">
         {badge}
-        {!isUser && (message.references?.length ?? 0) > 0 ? (
-          <ReferencesCard references={message.references ?? []} searchedQueries={message.searchedQueries} />
+        {!isUser && displayRefs.length > 0 ? (
+          <ReferencesCard references={displayRefs} searchedQueries={message.searchedQueries} />
         ) : null}
         {!isUser && parsed?.reasoning ? (
           <ReasoningBlock
@@ -60,7 +64,7 @@ export function CleanBlock({ message, badge, onRevealPath, onOpenFileReference, 
             )
           ) : (
             <div className={!isUser && parsed?.reasoning ? "mt-2" : undefined}>
-              <CitationMarkdownBody content={bodyText} references={message.references} isStreaming={isStreaming} onRevealPath={onRevealPath} />
+              <CitationMarkdownBody content={bodyText} references={displayRefs} isStreaming={isStreaming} onRevealPath={onRevealPath} />
             </div>
           )
         ) : null}

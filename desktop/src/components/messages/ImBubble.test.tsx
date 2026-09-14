@@ -340,6 +340,84 @@ describe("ImBubble assistant protocol boundary", () => {
     expect(html).toContain("缓存");
   });
 
+  it("puts the citation chip on the model/action row, not under the body", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "cite-meta",
+          role: "assistant",
+          content: "补充分说明：搜索结果里还出现了派生仓库。",
+          model: "glm-5.3-flash",
+          timestamp: Date.parse("2026-09-14T00:59:00+08:00"),
+          references: [
+            {
+              id: 1,
+              title: "CowwAgent",
+              url: "https://github.com/example/cow-agent",
+              snippet: "",
+              source: "web",
+              domain: "github.com",
+            },
+          ],
+        }}
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onFavoriteMessage={() => {}}
+        onOpenWorkspaceRefs={() => {}}
+      />,
+    );
+
+    const lineIdx = html.indexOf("agx-assistant-action-line");
+    const iconsIdx = html.indexOf("agx-assistant-action-icons");
+    const chipIdx = html.indexOf('data-citation-chip="meta"');
+    const modelIdx = html.indexOf("glm-5.3-flash");
+    const timeIdx = html.indexOf("2026-09-14 00:59");
+    expect(lineIdx).toBeGreaterThan(-1);
+    expect(iconsIdx).toBeGreaterThan(lineIdx);
+    expect(chipIdx).toBeGreaterThan(iconsIdx);
+    expect(modelIdx).toBeGreaterThan(chipIdx);
+    expect(timeIdx).toBeGreaterThan(modelIdx);
+    expect(html).not.toContain('data-citation-chip="inline"');
+    const hoverStart = html.indexOf("agx-turn-hover-reveal");
+    expect(hoverStart).toBeGreaterThan(chipIdx);
+    expect(hoverStart).toBeGreaterThan(-1);
+    expect(html.indexOf("glm-5.3-flash", hoverStart)).toBeGreaterThan(hoverStart);
+  });
+
+  it("still shows the citation chip when only session-level refs exist", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "cite-session-fallback",
+          role: "assistant",
+          content: "补充分说明：搜索结果里还出现了派生仓库。",
+          model: "MiniMax-M2.1",
+          suggestedQuestions: ["你想部署一个 CowAgent 吗？"],
+        }}
+        sessionWebRefs={[
+          {
+            id: 1,
+            title: "example",
+            url: "https://github.com/example/repo",
+            snippet: "",
+            source: "web",
+            domain: "github.com",
+          },
+        ]}
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onFavoriteMessage={() => {}}
+        onFollowupClick={() => {}}
+        onOpenWorkspaceRefs={() => {}}
+      />,
+    );
+
+    expect(html).toContain("agx-assistant-action-line");
+    expect(html).toContain('data-citation-chip="meta"');
+    expect(html).not.toContain('data-citation-chip="inline"');
+    expect(html).toContain("你想部署一个 CowAgent 吗？");
+  });
+
   it("shows continue-in-new-task on assistant actions only", () => {
     const continueMark = "M12 12.5c.6-4.4 4.8-6.6 8.2-4.2";
     const assistant = renderToStaticMarkup(

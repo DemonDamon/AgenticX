@@ -38,6 +38,7 @@ import { isViewImageInjectMessage } from "../../utils/view-image-inject";
 import { parseTodoMessage } from "../TodoUpdateCard";
 import { isMetaLeaderIdentity, resolveMetaDisplayName } from "../../utils/display-name";
 import { resolveReferencesForAssistant } from "../../utils/turn-reference-context";
+import { collectSessionReferences } from "../../utils/session-references";
 import {
   collectTurnLightboxImages,
   hasImageBlock,
@@ -150,6 +151,8 @@ type Props = {
   onOpenAllArtifacts?: () => void;
   /** Open WorkPanel「变更」for the session write/edit list. */
   onOpenAllChanges?: () => void;
+  /** Open WorkPanel「参考信息」for web citations. */
+  onOpenAllRefs?: () => void;
   onViewPlan?: (path: string) => void;
   onBuildPlan?: (plan: PlanArtifactPayload) => void;
   onOpenBranchSource?: (lineage: BranchLineage) => void;
@@ -387,6 +390,7 @@ export function MessageRenderer({
   onResolveActionConfirmation,
   onOpenAllArtifacts,
   onOpenAllChanges,
+  onOpenAllRefs,
   onViewPlan,
   onBuildPlan,
   onOpenBranchSource,
@@ -397,6 +401,10 @@ export function MessageRenderer({
     if (message.role !== "assistant") return undefined;
     return resolveReferencesForAssistant(message, allMessages);
   }, [message, allMessages]);
+  const sessionWebRefs = useMemo(() => {
+    const bundle = collectSessionReferences(allMessages);
+    return [...bundle.webGroups, ...bundle.kbGroups].map((group) => group.primary);
+  }, [allMessages]);
   const displayMessage = useMemo(() => {
     if (message.role !== "assistant") return message;
     if (message.presentationHoldDeliverables) return message;
@@ -554,6 +562,8 @@ export function MessageRenderer({
         streamStalledSeconds={streamStalledSeconds}
         lightboxGallery={lightboxGallery}
         afterBody={handoff.card}
+        onOpenWorkspaceRefs={onOpenAllRefs}
+        sessionWebRefs={sessionWebRefs}
       />,
     );
   }

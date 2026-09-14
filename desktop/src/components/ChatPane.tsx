@@ -161,12 +161,15 @@ import {
 } from "../utils/group-stream-text";
 import { WorkingIndicator } from "./messages/WorkingIndicator";
 import { ImBubble } from "./messages/ImBubble";
+import { CitationSourcesCard } from "./messages/WebSearchSources";
 import { GroupExpertActivityCard } from "./messages/GroupExpertActivityCard";
 import { MessageTimestamp } from "./messages/MessageTimestamp";
 import { MessageTurnMeta } from "./messages/MessageTurnMeta";
 import {
   ASSISTANT_ACTION_ICON_ROW_CLASS,
+  ASSISTANT_ACTION_LINE_CLASS,
   ASSISTANT_ACTION_RHYTHM_END_CLASS,
+  ASSISTANT_HOVER_REVEAL_CLASS,
   ASSISTANT_BODY_TAIL_CLASS,
   ASSISTANT_FOLLOWUP_CHIP_CLASS,
   ASSISTANT_FOLLOWUP_LIST_CLASS,
@@ -306,6 +309,7 @@ import {
   referencesDifferBetweenTails,
 } from "../utils/session-reference-reconcile";
 import { resolveReferencesForAssistant } from "../utils/turn-reference-context";
+import { collectSessionReferences } from "../utils/session-references";
 import { reattachSessionStreamUrl, parseSseFrame } from "../utils/session-reattach";
 import {
   continueMessageIdForRequest,
@@ -3546,6 +3550,10 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
     () => (useReActImLayout ? expandMessagesToTopLevelRows(visibleMessagesWithStream) : null),
     [useReActImLayout, visibleMessagesWithStream]
   );
+  const sessionWebRefs = useMemo(() => {
+    const bundle = collectSessionReferences(visibleMessagesWithStream);
+    return [...bundle.webGroups, ...bundle.kbGroups].map((group) => group.primary);
+  }, [visibleMessagesWithStream]);
   const syncJumpToBottomFab = useCallback(() => {
     const el = listRef.current;
     if (!el) {
@@ -5886,7 +5894,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [pane.id, pane.sessionId, pane.taskspacePanelOpen, paneWidth, openSidePanel, openWorkspaceFilePreview]);
 
   const openWorkPanelSummary = useCallback(
-    (section: "artifacts" | "changes") => {
+    (section: "artifacts" | "changes" | "refs") => {
       if (!pane.taskspacePanelOpen) {
         openWorkspaceSidebarForPane(pane.id, paneRef.current?.clientWidth ?? paneWidth, openSidePanel);
       }
@@ -8407,6 +8415,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }}
               onOpenAllArtifacts={() => openWorkPanelSummary("artifacts")}
               onOpenAllChanges={() => openWorkPanelSummary("changes")}
+              onOpenAllRefs={() => openWorkPanelSummary("refs")}
               onOpenFileReference={(request) => openFileReferencePreview(request)}
               onOpenSubAgentRun={openSubAgentDetailFromCluster}
               onOpenBranchSource={(lineage) => {
@@ -8584,7 +8593,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               }
             }
             return (
-              <div key={blockKey} className="agx-assistant-action-rhythm mb-6 flex flex-col gap-2.5">
+              <div key={blockKey} className="agx-assistant-action-rhythm group mb-6 flex flex-col gap-2.5">
                 <div className="flex min-w-0 items-start gap-2">
                   {isSelecting ? (
                     <button
@@ -8628,8 +8637,21 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                         topLevelRowsIm !== null && segIdx === topLevelRowsIm.length - 1;
                       const collapseActive = hasStreamingRow || (isLastBlock && sessionWorkInProgress);
 
+                      const reactChipRefs = (() => {
+                        for (let i = workMessages.length - 1; i >= 0; i--) {
+                          const row = workMessages[i];
+                          if (row.role !== "assistant") continue;
+                          const refs = row.references ?? [];
+                          if (refs.length > 0) return refs;
+                        }
+                        return sessionWebRefs;
+                      })();
                       const renderReActBlockActionIcons = () => (
-                        <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={reactActionStyle}>
+                        <div
+                          className={ASSISTANT_ACTION_LINE_CLASS}
+                          style={reactActionStyle}
+                        >
+                        <div className={`${ASSISTANT_ACTION_ICON_ROW_CLASS} min-w-0`}>
                           <HoverTip label={t("actions.copy")}>
                             <button
                               type="button"
@@ -8693,12 +8715,24 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                               <LayoutList size={14} strokeWidth={2} />
                             </button>
                           </HoverTip>
-                          <MessageTurnMeta
-                            usage={lastAssistantInBlock?.usage}
-                            model={lastAssistantInBlock?.model}
-                            modelSelection={lastAssistantInBlock?.modelSelection}
-                          />
-                          <MessageTimestamp ts={lastAssistantInBlock?.timestamp} align="left" />
+                        </div>
+                        {reactChipRefs.length > 0 ? (
+                          <div className="shrink-0">
+                            <CitationSourcesCard
+                              references={reactChipRefs}
+                              onOpen={() => openWorkPanelSummary("refs")}
+                              variant="meta"
+                            />
+                          </div>
+                        ) : null}
+                          <div className={ASSISTANT_HOVER_REVEAL_CLASS}>
+                            <MessageTurnMeta
+                              usage={lastAssistantInBlock?.usage}
+                              model={lastAssistantInBlock?.model}
+                              modelSelection={lastAssistantInBlock?.modelSelection}
+                            />
+                            <MessageTimestamp ts={lastAssistantInBlock?.timestamp} align="left" />
+                          </div>
                         </div>
                       );
 
@@ -8899,6 +8933,8 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
               streamAssistantMessage,
               visibleMessagesWithStream,
             )}
+            onOpenWorkspaceRefs={() => openWorkPanelSummary("refs")}
+            sessionWebRefs={sessionWebRefs}
             highlightTerms={pane.historySearchTerms}
             badge={
               showInlineAssistantModelBadge && streamingModel ? (

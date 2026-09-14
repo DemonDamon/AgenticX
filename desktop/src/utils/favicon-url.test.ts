@@ -5,6 +5,7 @@ import {
   hostVariants,
   hostnameFromUrlOrDomain,
   resolveFaviconCandidates,
+  siteLabelFromUrl,
   yandexFaviconUrl,
 } from "./favicon-url";
 
@@ -43,5 +44,23 @@ describe("favicon-url", () => {
 
   it("returns empty when url/domain missing", () => {
     expect(resolveFaviconCandidates("", "")).toEqual([]);
+  });
+});
+
+describe("siteLabelFromUrl", () => {
+  it("uses registrable label and title-cases it", () => {
+    expect(siteLabelFromUrl("https://www.venturebeat.com/ai/example")).toBe("Venturebeat");
+    expect(siteLabelFromUrl("https://news.marsbit.co/flash/1")).toBe("Marsbit");
+    expect(siteLabelFromUrl("https://www.kimi.com/news/x")).toBe("Kimi");
+  });
+
+  it("prefers the name before com.cn / net.cn", () => {
+    expect(siteLabelFromUrl("https://www.toast.com.cn/news/x")).toBe("Toast");
+    expect(siteLabelFromUrl("https://t.cj.sina.com.cn/articles/view/1")).toBe("Sina");
+  });
+
+  it("falls back to [N] when url is unusable", () => {
+    expect(siteLabelFromUrl("", "", 3)).toBe("[3]");
+    expect(siteLabelFromUrl(undefined, undefined, 1)).toBe("[1]");
   });
 });

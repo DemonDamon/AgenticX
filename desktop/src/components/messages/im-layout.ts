@@ -119,6 +119,17 @@ export const ASSISTANT_ACTION_BLOCK_CLASS = `flex min-w-0 flex-col ${ASSISTANT_A
 export const ASSISTANT_ACTION_ICON_ROW_CLASS =
   "agx-assistant-action-icons group flex h-5 w-fit min-w-0 max-w-full flex-nowrap items-center gap-0.5 overflow-hidden text-text-muted";
 
+/** Full-width action row; also the container query root for squeezed-pane hover. */
+export const ASSISTANT_ACTION_LINE_CLASS =
+  "agx-assistant-action-line flex h-5 w-full min-w-0 max-w-full items-center gap-1.5";
+
+/**
+ * Usage / model / timestamp: hover-only when the chat column is wide enough.
+ * Narrow / squeezed panes keep these hidden (see index.css container query).
+ */
+export const ASSISTANT_HOVER_REVEAL_CLASS =
+  "agx-turn-hover-reveal hidden min-w-0 shrink-0 items-center group-hover:inline-flex";
+
 /**
  * ReAct block tail: last body row + icon row + follow-up chips share one flex column
  * with uniform gap-2.5 — never stack separate mt-* on children (line-height slack on the

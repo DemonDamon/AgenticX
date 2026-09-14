@@ -68,6 +68,45 @@ export function yandexFaviconUrl(hostname: string): string {
   return `https://favicon.yandex.net/favicon/${encodeURIComponent(host)}`;
 }
 
+/**
+ * Short site label for citation chips (portal parity).
+ * venturebeat.com → Venturebeat; toast.com.cn → Toast.
+ */
+export function siteLabelFromHost(host: string): string {
+  const raw = hostnameFromUrlOrDomain(host);
+  if (!raw) return "";
+  const parts = raw.split(".").filter(Boolean);
+  let label = raw;
+  if (
+    parts.length >= 3 &&
+    ["com", "net", "org", "gov", "edu"].includes(parts[parts.length - 2] ?? "") &&
+    (parts[parts.length - 1] ?? "").length <= 3
+  ) {
+    label = parts[parts.length - 3] ?? raw;
+  } else if (parts.length >= 2) {
+    const tld = parts[parts.length - 1] ?? "";
+    const sld = parts[parts.length - 2] ?? "";
+    if (tld.length <= 3 && sld.length > 1) {
+      label = sld;
+    } else {
+      label = parts[0] ?? raw;
+    }
+  }
+  if (label.length > 18) return `${label.slice(0, 16)}…`;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+export function siteLabelFromUrl(
+  url?: string,
+  domain?: string,
+  index1Based?: number,
+): string {
+  const host =
+    hostnameFromUrlOrDomain(domain || "") || hostnameFromUrlOrDomain(url || "");
+  if (!host) return index1Based ? `[${index1Based}]` : "";
+  return siteLabelFromHost(host);
+}
+
 export function resolveFaviconCandidates(
   url?: string,
   domain?: string,

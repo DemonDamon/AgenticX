@@ -113,3 +113,57 @@ test("extractSourceAttribution: 关键引用 bold heading without list is not st
   assert.equal(keyCitations.length, 0);
   assert.equal(body, input);
 });
+
+test("extractSourceAttribution: strips Sources bibliography and keeps structured rows", () => {
+  const input = `一句话总结。
+
+Sources:
+[1] 火星财经：亚信科技与月之暗面签署「登月计划」合作协议 https://news.marsbit.co/flash/20260826094024704584.html
+[2] 新时空：亚信科技(01675.HK)公告详情 https://www.newtimespace.com/zh-cn/finance/1439724.html
+[3] 北京拓实科技：以Palantir式FDE驻场模式切入企业AI交付 https://www.toast.com.cn/news/2026-09-10-月之暗面启动kimi登月计划
+`;
+
+  const { body, items, keyCitations, bibliography, legendKind } = extractSourceAttribution(input);
+  assert.equal(body.trim(), "一句话总结。");
+  assert.equal(body.includes("Sources"), false);
+  assert.equal(body.includes("marsbit"), false);
+  assert.equal(legendKind, "sources-bibliography");
+  assert.equal(items.length, 0);
+  assert.equal(keyCitations.length, 0);
+  assert.equal(bibliography.length, 3);
+  assert.equal(bibliography[0]?.id, 1);
+  assert.equal(bibliography[0]?.url, "https://news.marsbit.co/flash/20260826094024704584.html");
+  assert.match(bibliography[0]?.title ?? "", /火星财经/);
+  assert.equal(bibliography[1]?.id, 2);
+  assert.equal(bibliography[2]?.url, "https://www.toast.com.cn/news/2026-09-10-月之暗面启动kimi登月计划");
+});
+
+test("extractSourceAttribution: accepts markdown-link Sources rows", () => {
+  const input = `正文结束。
+
+## 来源
+
+1. [Kimi 官方](https://www.kimi.com/news/kimi-enterprise-partner-program)
+- [2] [每经报道](https://finance.eastmoney.com/a/202609103870467773.html)
+`;
+
+  const { body, bibliography, legendKind } = extractSourceAttribution(input);
+  assert.equal(body.trim(), "正文结束。");
+  assert.equal(legendKind, "sources-bibliography");
+  assert.equal(bibliography.length, 2);
+  assert.equal(bibliography[0]?.title, "Kimi 官方");
+  assert.equal(bibliography[0]?.url, "https://www.kimi.com/news/kimi-enterprise-partner-program");
+  assert.equal(bibliography[1]?.id, 2);
+});
+
+test("extractSourceAttribution: Sources heading without URL rows is left intact", () => {
+  const input = `结论。
+
+Sources:
+后续会补链接。
+`;
+  const { body, bibliography, legendKind } = extractSourceAttribution(input);
+  assert.equal(bibliography.length, 0);
+  assert.equal(legendKind, null);
+  assert.equal(body, input);
+});

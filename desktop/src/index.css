@@ -307,6 +307,18 @@ body {
   stroke-width: 2;
 }
 
+/* 主聊天栏被工作区挤窄时：用量 / 模型名 / 时间即使悬停也不展开，避免和图2一样撑破操作行 */
+.agx-assistant-action-line {
+  container-type: inline-size;
+  width: 100%;
+  min-width: 0;
+}
+@container (max-width: 36rem) {
+  .agx-assistant-action-line .agx-turn-hover-reveal {
+    display: none !important;
+  }
+}
+
 /* Turn deliverable chips: one file stays a compact tile; many files fill the column. */
 .agx-artifact-cq {
   container-type: inline-size;

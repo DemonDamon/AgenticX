@@ -2,7 +2,9 @@ import { FileText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { SearchReference } from "../../types/search-references";
 import { formatReferenceSnippet } from "../../utils/reference-snippet";
+import { hostnameFromUrlOrDomain } from "../../utils/favicon-url";
 import { openSearchReference } from "../../utils/open-kb-reference";
+import { SiteFavicon } from "../work-panel/SiteFavicon";
 
 type Props = {
   /** One reference for a single citation, or several chunks of the same document (merged pill). */
@@ -35,9 +37,28 @@ export function CitationPopover({ references }: Props) {
       }}
       role="tooltip"
     >
-      <div className="mb-2 text-[22px] leading-none text-text-faint" aria-hidden>
-        “
-      </div>
+      {!isKb ? (
+        <div className="mb-2.5 flex items-center gap-2">
+          <SiteFavicon
+            url={primary.url}
+            domain={primary.domain}
+            className="h-[22px] w-[22px] rounded-lg"
+            size={32}
+          />
+          <span className="truncate text-[12px] text-text-faint">
+            {primary.domain || hostnameFromUrlOrDomain(primary.url) || primary.title}
+          </span>
+        </div>
+      ) : (
+        <div className="mb-2 text-[22px] leading-none text-text-faint" aria-hidden>
+          “
+        </div>
+      )}
+      {!isKb ? (
+        <div className="mb-1.5 text-[13px] font-semibold leading-snug text-text-strong">
+          {primary.title || primary.url}
+        </div>
+      ) : null}
       {hasAnySnippet ? (
         <div className="space-y-2">
           {snippets.map((snippet, idx) =>

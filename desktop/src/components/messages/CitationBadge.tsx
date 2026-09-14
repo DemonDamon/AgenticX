@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import type { SearchReference } from "../../types/search-references";
 import { CitationPopover } from "./CitationPopover";
+import { WebSearchCitationChip } from "./WebSearchSources";
 
 type Props = {
   /** Document-level number shown on the pill. */
@@ -52,7 +53,12 @@ export function CitationBadge({ docNumber, references }: Props) {
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resolved = references.length > 0;
-  const primaryTitle = references[0]?.title ?? "";
+  const primary = references[0];
+  const primaryTitle = primary?.title ?? "";
+  const isWebChip =
+    resolved &&
+    primary?.source === "web" &&
+    /^https?:\/\//i.test(primary.url);
 
   const clearTimers = useCallback(() => {
     if (openTimerRef.current) clearTimeout(openTimerRef.current);
@@ -152,21 +158,30 @@ export function CitationBadge({ docNumber, references }: Props) {
         onMouseEnter={resolved ? scheduleOpen : undefined}
         onMouseLeave={resolved ? scheduleClose : undefined}
       >
-        <button
-          type="button"
-          className={`mx-0.5 inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-[4px] px-1 text-[11px] font-medium leading-none tabular-nums transition-opacity ${
-            resolved ? "cursor-pointer hover:opacity-90" : "cursor-default opacity-70"
-          }`}
-          style={pillStyle}
-          aria-label={resolved ? `引用 ${docNumber}: ${primaryTitle}` : `引用 ${docNumber}`}
-          aria-expanded={open}
-          onClick={() => {
-            if (!resolved) return;
-            setOpen((v) => !v);
-          }}
-        >
-          {docNumber}
-        </button>
+        {isWebChip && primary ? (
+          <WebSearchCitationChip
+            reference={primary}
+            docNumber={docNumber}
+            open={open}
+            onClick={() => setOpen((v) => !v)}
+          />
+        ) : (
+          <button
+            type="button"
+            className={`mx-0.5 inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-[4px] px-1 text-[11px] font-medium leading-none tabular-nums transition-opacity ${
+              resolved ? "cursor-pointer hover:opacity-90" : "cursor-default opacity-70"
+            }`}
+            style={pillStyle}
+            aria-label={resolved ? `引用 ${docNumber}: ${primaryTitle}` : `引用 ${docNumber}`}
+            aria-expanded={open}
+            onClick={() => {
+              if (!resolved) return;
+              setOpen((v) => !v);
+            }}
+          >
+            {docNumber}
+          </button>
+        )}
       </span>
       {popoverPortal}
     </>

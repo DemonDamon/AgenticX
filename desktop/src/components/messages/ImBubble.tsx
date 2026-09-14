@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent } from "react";
@@ -12,6 +12,8 @@ import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from ".
 import { ReasoningBlock } from "./ReasoningBlock";
 import { resolvePersistedReasoningSeconds } from "./reasoning-duration-cache";
 import { ReferencesCard } from "./ReferencesCard";
+import { CitationSourcesCard } from "./WebSearchSources";
+import { withBibliographyFallback } from "./source-attribution-parse";
 import { parseReasoningContent } from "./reasoning-parser";
 import { getContainedSelectionText } from "../../utils/favorite-selection";
 import { HoverTip } from "../ds/HoverTip";
@@ -30,7 +32,9 @@ import {
 import {
   ASSISTANT_ACTION_ICON_ONLY_CLASS,
   ASSISTANT_ACTION_ICON_ROW_CLASS,
+  ASSISTANT_ACTION_LINE_CLASS,
   ASSISTANT_ACTION_RHYTHM_GAP_CLASS,
+  ASSISTANT_HOVER_REVEAL_CLASS,
   ASSISTANT_FOLLOWUP_CHIP_CLASS,
   ASSISTANT_FOLLOWUP_LIST_CLASS,
   getAssistantActionStyle,
@@ -105,6 +109,10 @@ type Props = {
   lightboxGallery?: ImageContentBlock[];
   /** Deliverable cards after the body; copy/quote sit to the right of the cards. */
   afterBody?: ReactNode;
+  /** Open WorkPanel「参考信息」for this turn's web citations. */
+  onOpenWorkspaceRefs?: () => void;
+  /** Session-level web refs so the chip still shows when this row omitted `references`. */
+  sessionWebRefs?: SearchReference[];
 };
 
 function StalledStreamIndicator({ silentSeconds }: { silentSeconds: number }) {
@@ -237,6 +245,8 @@ export function ImBubble({
   streamStalledSeconds = 0,
   lightboxGallery,
   afterBody,
+  onOpenWorkspaceRefs,
+  sessionWebRefs,
 }: Props) {
   const { t } = useTranslation("chat");
   void _senderAvatarVariant;
@@ -283,8 +293,22 @@ export function ImBubble({
   const displayQuotedItems = isUser
     ? (userQuoteDisplay?.quotedItems ?? [])
     : parseQuotedContentItems(message.quotedContent);
-  const citationReferences =
-    (resolvedReferences?.length ?? 0) > 0 ? resolvedReferences : message.references;
+  const citationReferences = useMemo(
+    () =>
+      withBibliographyFallback(
+        (resolvedReferences?.length ?? 0) > 0 ? resolvedReferences : message.references,
+        String(bodyText ?? ""),
+      ),
+    [resolvedReferences, message.references, bodyText],
+  );
+  const kbReferences = useMemo(
+    () => citationReferences.filter((ref) => ref.source === "kb"),
+    [citationReferences],
+  );
+  const webReferences = useMemo(
+    () => citationReferences.filter((ref) => ref.source !== "kb"),
+    [citationReferences],
+  );
   const referenceAttachments = isUser
     ? (message.attachments ?? []).filter((attachment) => isWorkspaceReferenceAttachment(attachment))
     : [];
@@ -580,16 +604,40 @@ export function ImBubble({
       </>
     ) : null;
 
-  const assistantTurnMeta = (
-    <>
-      <MessageTurnMeta
-        usage={message.usage}
-        model={message.model}
-        modelSelection={message.modelSelection}
+  const chipWebRefs = webReferences.length > 0 ? webReferences : (sessionWebRefs ?? []);
+  const showMetaCitation = Boolean(onOpenWorkspaceRefs) && !isUser && chipWebRefs.length > 0;
+  const citationChip = showMetaCitation ? (
+      <CitationSourcesCard
+        references={chipWebRefs}
+        onOpen={onOpenWorkspaceRefs}
+        variant="meta"
       />
-      <MessageTimestamp ts={message.timestamp} align="left" />
-    </>
+    ) : null;
+
+  const assistantTurnMeta = (
+    <MessageTurnMeta
+      usage={message.usage}
+      model={message.model}
+      modelSelection={message.modelSelection}
+    />
   );
+
+  const assistantActionLine =
+    assistantIconButtons ? (
+      <div
+        className={ASSISTANT_ACTION_LINE_CLASS}
+        style={assistantActionStyle}
+      >
+        <div className={`${ASSISTANT_ACTION_ICON_ROW_CLASS} min-w-0`}>
+          {assistantIconButtons}
+        </div>
+        {citationChip ? <div className="shrink-0">{citationChip}</div> : null}
+        <div className={ASSISTANT_HOVER_REVEAL_CLASS}>
+          {assistantTurnMeta}
+          <MessageTimestamp ts={message.timestamp} align="left" />
+        </div>
+      </div>
+    ) : null;
 
   const assistantFollowupChipButtons =
     showAssistantFollowups && message.suggestedQuestions ? (
@@ -929,9 +977,9 @@ export function ImBubble({
                   )
                 ) : (
                   <>
-                    {(citationReferences?.length ?? 0) > 0 ? (
+                    {kbReferences.length > 0 ? (
                       <ReferencesCard
-                        references={citationReferences ?? []}
+                        references={kbReferences}
                         searchedQueries={message.searchedQueries}
                       />
                     ) : null}
@@ -1024,6 +1072,11 @@ export function ImBubble({
                         <StreamingDots compact={compactAssistant && noBubbleBorder} />
                       )
                     ) : null}
+                    {!showMetaCitation && webReferences.length > 0 ? (
+                      <div className="mt-2">
+                        <CitationSourcesCard references={webReferences} />
+                      </div>
+                    ) : null}
                   </>
                 )}
               </div>
@@ -1032,10 +1085,7 @@ export function ImBubble({
               <div className="agx-artifact-action-row mt-2 flex w-full min-w-0 items-center gap-1.5 px-3">
                 <div className="min-w-0 flex-1">{afterBody}</div>
                 {assistantIconButtons && !showAssistantFollowups ? (
-                  <div className={`${ASSISTANT_ACTION_ICON_ROW_CLASS} shrink-0 self-center`}>
-                    {assistantIconButtons}
-                    {assistantTurnMeta}
-                  </div>
+                  <div className="min-w-0 shrink-0 self-center">{assistantActionLine}</div>
                 ) : null}
               </div>
             ) : null}
@@ -1046,10 +1096,7 @@ export function ImBubble({
             ) : null}
             {showAssistantFollowups && assistantIconButtons ? (
               <>
-                <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
-                  {assistantIconButtons}
-                  {assistantTurnMeta}
-                </div>
+                {assistantActionLine}
                 <div className={ASSISTANT_FOLLOWUP_LIST_CLASS} style={assistantActionStyle}>
                   {assistantFollowupChipButtons}
                 </div>
@@ -1061,10 +1108,7 @@ export function ImBubble({
             ) : null}
             {hideActions || showAssistantFollowups || !assistantIconButtons || afterBody ? null : (
               <div className={actionOnlyClass}>
-                <div className={ASSISTANT_ACTION_ICON_ROW_CLASS} style={assistantActionStyle}>
-                  {assistantIconButtons}
-                  {assistantTurnMeta}
-                </div>
+                {assistantActionLine}
               </div>
             )}
           </>

@@ -7,6 +7,7 @@ import { CitationMarkdownBody } from "./CitationMarkdownBody";
 import { renderUserMessageInlineBody } from "./user-message-inline";
 import { assistantVisibleBodyForUi } from "../../utils/assistant-output";
 import { isWorkspaceReferenceAttachment, type FileReferenceOpenRequest } from "../../utils/reference-attachment";
+import { withBibliographyFallback } from "./source-attribution-parse";
 
 type Props = {
   message: Message;
@@ -25,6 +26,9 @@ export function TerminalLine({ message, badge, onRevealPath, onOpenFileReference
     hasThinkTag && /<\/think>/i.test(String(message.content ?? ""));
   const bodyText = !isUser ? assistantVisibleBodyForUi(message.content) : message.content;
   const hasBody = !!bodyText?.trim();
+  const displayRefs = !isUser
+    ? withBibliographyFallback(message.references, bodyText)
+    : [];
   return (
     <div className="font-mono text-[13px] leading-6">
       <div className="flex items-start gap-2">
@@ -39,8 +43,8 @@ export function TerminalLine({ message, badge, onRevealPath, onOpenFileReference
           style={{ color: isUser ? "var(--chat-terminal-user)" : "var(--chat-terminal-assistant)" }}
         >
           {badge}
-          {!isUser && (message.references?.length ?? 0) > 0 ? (
-            <ReferencesCard references={message.references ?? []} searchedQueries={message.searchedQueries} />
+          {!isUser && displayRefs.length > 0 ? (
+            <ReferencesCard references={displayRefs} searchedQueries={message.searchedQueries} />
           ) : null}
           {!isUser && parsed?.reasoning ? (
             <ReasoningBlock
@@ -56,7 +60,7 @@ export function TerminalLine({ message, badge, onRevealPath, onOpenFileReference
                 onOpenFileReference
               )
             ) : (
-              <CitationMarkdownBody content={bodyText} references={message.references} isStreaming={isStreaming} onRevealPath={onRevealPath} />
+              <CitationMarkdownBody content={bodyText} references={displayRefs} isStreaming={isStreaming} onRevealPath={onRevealPath} />
             )
           ) : null}
           {afterBody}

@@ -1,14 +1,18 @@
 /**
  * Strip model-authored citation legend blocks from assistant markdown:
- * 「数据来源标注」and「关键引用」.
+ * 「数据来源标注」、「关键引用」, and trailing `Sources:` / 「来源」 bibliographies.
  *
  * - 数据来源标注: epistemic labels (not clickable provenance) — strip and discard
  *   from body so `[N]` does not collide with citation pills.
  * - 关键引用: quote bibliography — strip from body (avoids broken inline-list
  *   rendering) but return structured items for a dedicated UI block.
+ * - Sources / 来源: model-authored title+URL dump — strip from body and return
+ *   structured rows so Desktop can render the portal-style sources list.
  */
 
 import { i18n } from "../../i18n/i18n";
+import type { SearchReference } from "../../types/search-references";
+import { hostnameFromUrlOrDomain } from "../../utils/favicon-url";
 
 export type SourceAttributionKind = "verified" | "inference" | "hypothesis" | "other";
 
@@ -26,7 +30,14 @@ export type KeyCitationItem = {
   text: string;
 };
 
-export type LegendKind = "source-attribution" | "key-citations";
+export type LegendKind = "source-attribution" | "key-citations" | "sources-bibliography";
+
+/** One row under a trailing `Sources:` / 「来源」 bibliography. */
+export type BibliographyItem = {
+  id: number | null;
+  title: string;
+  url: string;
+};
 
 export type SourceAttributionExtract = {
   body: string;
@@ -34,6 +45,8 @@ export type SourceAttributionExtract = {
   items: SourceAttributionItem[];
   /** 关键引用 rows — re-rendered below the body with unified styling. */
   keyCitations: KeyCitationItem[];
+  /** Sources / 来源 bibliography — re-rendered as the portal-style sources card. */
+  bibliography: BibliographyItem[];
   legendKind: LegendKind | null;
 };
 
@@ -42,6 +55,9 @@ const SOURCE_ATTRIBUTION_HEADING_RE =
 
 const KEY_CITATIONS_HEADING_RE =
   /^(?:>\s*){0,3}(?:#{1,6}\s*)?(?:\*\*)?关键引用(?:\*\*)?\s*[：:.．]?\s*$/u;
+
+const SOURCES_BIBLIOGRAPHY_HEADING_RE =
+  /^(?:>\s*){0,3}(?:#{1,6}\s*)?(?:\*\*)?(?:Sources?|来源|参考文献|参考来源|引用来源)(?:\*\*)?\s*[：:.．]?\s*$/iu;
 
 const KIND_PATTERNS: Array<{
   kind: SourceAttributionKind;
@@ -127,7 +143,51 @@ function detectLegendKind(line: string): LegendKind | null {
   const trimmed = stripBlockquotePrefix(line).trim();
   if (SOURCE_ATTRIBUTION_HEADING_RE.test(trimmed)) return "source-attribution";
   if (KEY_CITATIONS_HEADING_RE.test(trimmed)) return "key-citations";
+  if (SOURCES_BIBLIOGRAPHY_HEADING_RE.test(trimmed)) return "sources-bibliography";
   return null;
+}
+
+const SOURCES_MD_LINK_RE =
+  /^(?:[-*]\s+)?(?:\[(\d+)\]\s+|\d+\.\s+)?\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)\s*$/u;
+
+const SOURCES_MARKER_URL_RE =
+  /^(?:[-*]\s+)?(?:\[(\d+)\]|(\d+)\.)\s+(.+?)\s+(<?https?:\/\/\S+>?)\s*$/u;
+
+function unwrapUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("<") && trimmed.endsWith(">")) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function parseSourcesBibliographyRow(rawLine: string): BibliographyItem | null {
+  const stripped = stripBlockquotePrefix(rawLine).trim();
+  if (!stripped) return null;
+
+  const mdLink = stripped.match(SOURCES_MD_LINK_RE);
+  if (mdLink) {
+    const url = unwrapUrl(mdLink[3] ?? "");
+    const title = (mdLink[2] ?? "").trim();
+    if (!url || !title) return null;
+    return {
+      id: mdLink[1] ? Number(mdLink[1]) : null,
+      title,
+      url,
+    };
+  }
+
+  const marked = stripped.match(SOURCES_MARKER_URL_RE);
+  if (!marked) return null;
+  const url = unwrapUrl(marked[4] ?? "");
+  const title = (marked[3] ?? "").trim();
+  if (!url || !title) return null;
+  const idRaw = marked[1] || marked[2];
+  return {
+    id: idRaw ? Number(idRaw) : null,
+    title,
+    url,
+  };
 }
 
 function isLegendHeadingLine(line: string): boolean {
@@ -135,14 +195,16 @@ function isLegendHeadingLine(line: string): boolean {
 }
 
 /**
- * Pull the trailing (or last) 数据来源标注 / 关键引用 block out of assistant markdown.
- * Returns original content unchanged when no parseable items are found.
+ * Pull the trailing (or last) 数据来源标注 / 关键引用 / Sources bibliography
+ * out of assistant markdown. Returns original content unchanged when no
+ * parseable items are found.
  */
 export function extractSourceAttribution(content: string): SourceAttributionExtract {
   const empty: SourceAttributionExtract = {
     body: content,
     items: [],
     keyCitations: [],
+    bibliography: [],
     legendKind: null,
   };
   if (!content) return empty;
@@ -159,6 +221,39 @@ export function extractSourceAttribution(content: string): SourceAttributionExtr
     }
   }
   if (headingIdx < 0 || !legendKind) return empty;
+
+  if (legendKind === "sources-bibliography") {
+    const bibliography: BibliographyItem[] = [];
+    let endIdx = headingIdx;
+    for (let i = headingIdx + 1; i < lines.length; i += 1) {
+      const line = lines[i] ?? "";
+      const trimmed = stripBlockquotePrefix(line).trim();
+      if (!trimmed) {
+        if (bibliography.length > 0 && i + 1 < lines.length) {
+          const next = stripBlockquotePrefix(lines[i + 1] ?? "").trim();
+          if (!next) break;
+        }
+        endIdx = i;
+        continue;
+      }
+      if (THEMATIC_BREAK_RE.test(trimmed)) break;
+      if (/^#{1,6}\s+\S/u.test(trimmed) && !isLegendHeadingLine(line)) break;
+      const row = parseSourcesBibliographyRow(line);
+      if (!row) break;
+      bibliography.push(row);
+      endIdx = i;
+    }
+    if (bibliography.length === 0) return empty;
+    const bodyLines = [...lines.slice(0, headingIdx), ...lines.slice(endIdx + 1)];
+    const body = bodyLines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+    return {
+      body,
+      items: [],
+      keyCitations: [],
+      bibliography,
+      legendKind,
+    };
+  }
 
   const rows: ParsedLegendRow[] = [];
   let endIdx = headingIdx;
@@ -193,6 +288,7 @@ export function extractSourceAttribution(content: string): SourceAttributionExtr
       body,
       items: [],
       keyCitations: rows.map((r) => ({ id: r.citationId, text: r.text })),
+      bibliography: [],
       legendKind,
     };
   }
@@ -201,6 +297,33 @@ export function extractSourceAttribution(content: string): SourceAttributionExtr
     body,
     items: rows.map((r) => r.attribution!).filter(Boolean),
     keyCitations: [],
+    bibliography: [],
     legendKind,
   };
+}
+
+export function bibliographyToSearchReferences(rows: BibliographyItem[]): SearchReference[] {
+  const out: SearchReference[] = [];
+  rows.forEach((row, index) => {
+    const url = String(row.url ?? "").trim();
+    if (!url) return;
+    out.push({
+      id: row.id && Number.isFinite(row.id) ? row.id : index + 1,
+      title: String(row.title ?? "").trim() || url,
+      url,
+      snippet: "",
+      source: "web",
+      domain: hostnameFromUrlOrDomain(url) || undefined,
+    });
+  });
+  return out;
+}
+
+/** Prefer structured search refs; fall back to a stripped Sources bibliography. */
+export function withBibliographyFallback(
+  references: SearchReference[] | undefined,
+  content: string,
+): SearchReference[] {
+  if ((references?.length ?? 0) > 0) return references ?? [];
+  return bibliographyToSearchReferences(extractSourceAttribution(content).bibliography);
 }

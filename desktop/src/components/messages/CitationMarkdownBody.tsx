@@ -29,6 +29,7 @@ import {
 } from "./citation-normalize";
 import { buildDocNumberMap } from "../../utils/citation-doc-grouping";
 import {
+  bibliographyToSearchReferences,
   extractSourceAttribution,
   type KeyCitationItem,
 } from "./source-attribution-parse";
@@ -301,22 +302,20 @@ export function CitationMarkdownBody({
   style,
 }: Props) {
   const parentMarkdown = useContext(MarkdownContext);
+  const extracted = useMemo(() => extractSourceAttribution(content), [content]);
+  const { body: contentWithoutAttribution, keyCitations } = extracted;
+  const effectiveRefs = useMemo(() => {
+    if ((references?.length ?? 0) > 0) return references ?? [];
+    return bibliographyToSearchReferences(extracted.bibliography);
+  }, [references, extracted]);
   const refMap = useMemo(() => {
     const map = new Map<number, SearchReference>();
-    for (const ref of references ?? []) map.set(ref.id, ref);
+    for (const ref of effectiveRefs) map.set(ref.id, ref);
     return map;
-  }, [references]);
-  const docNumberById = useMemo(() => buildDocNumberMap(references ?? []), [references]);
+  }, [effectiveRefs]);
+  const docNumberById = useMemo(() => buildDocNumberMap(effectiveRefs), [effectiveRefs]);
 
-  // Strip model-authored legends from body:
-  // - 数据来源标注 → discarded (epistemic theater)
-  // - 关键引用 → re-rendered as KeyCitationsBlock (keeps English quotes, uniform rows)
-  const { body: contentWithoutAttribution, keyCitations } = useMemo(
-    () => extractSourceAttribution(content),
-    [content],
-  );
-
-  const hasReferences = (references?.length ?? 0) > 0;
+  const hasReferences = effectiveRefs.length > 0;
   const normalized = normalizeCitationMarkers(contentWithoutAttribution, hasReferences);
   const withCitationLayout = hasReferences
     ? relocateCitationMarkersForDisplay(normalized)
@@ -337,7 +336,7 @@ export function CitationMarkdownBody({
           isStreaming,
           onQuoteText: onQuoteText ?? parentMarkdown.onQuoteText,
           onRevealPath: onRevealPath ?? parentMarkdown.onRevealPath,
-          references: references ?? parentMarkdown.references,
+          references: effectiveRefs.length > 0 ? effectiveRefs : parentMarkdown.references,
         }}
       >
         {blocks.map((block, blockIndex) => (

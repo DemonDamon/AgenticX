@@ -869,7 +869,9 @@
   "citation": {
     "keyCitations": "Key citations",
     "noSnippet": "No excerpt",
-    "fragmentCount": "{{count}} fragments"
+    "fragmentCount": "{{count}} fragments",
+    "sources": "Citations",
+    "sourcesCount": "Citations {{count}}"
   },
   "sourceAttribution": {
     "verified": "Verified",
