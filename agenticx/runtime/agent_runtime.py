@@ -39,6 +39,7 @@ from agenticx.cli.agent_tools import (
     VIEW_IMAGE_INJECT_LLM_TEXT,
     VIEW_IMAGE_INJECT_METADATA_SOURCE,
     studio_tools_for_session,
+    studio_tool_is_concurrency_safe,
     _TOOL_REQUIRED_PARAMS,
     dispatch_tool_async,
     tool_denied_by_session_permissions,
@@ -49,13 +50,13 @@ from agenticx.llms.vision import is_vision_capable, strip_nonvision_multimodal_m
 from agenticx.runtime.compactor import ContextCompactor
 from agenticx.runtime.context_file_budget import serialize_context_files
 from agenticx.runtime.tool_result_budget import (
+    ToolResultBudgetConfig,
+    ToolResultObservation,
     apply_tool_result_budget,
     approx_tokens,
-    archive_tool_result,
-    get_result_class,
     load_config as load_tool_result_budget_config,
     persist_context_stats,
-    record_tool_result_meta,
+    prepare_tool_result_observation,
 )
 from agenticx.runtime.tool_orchestrator import partition_tool_calls
 from agenticx.runtime.confirm import ConfirmGate
@@ -2675,6 +2676,54 @@ def _kb_retrieval_always_mode(session: Any) -> bool:
         return False
 
 
+def _prepare_tool_result_for_context(
+    *,
+    runtime: "AgentRuntime",
+    session: Any,
+    round_idx: int,
+    tool_call_id: str,
+    tool_name: str,
+    raw_result: str,
+    budget_cfg: ToolResultBudgetConfig,
+) -> ToolResultObservation:
+    compacted = runtime.compactor.micro_compact_tool_result(tool_name, raw_result)
+    try:
+        observation = prepare_tool_result_observation(
+            session,
+            round_idx=round_idx,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            raw_text=raw_result,
+            compacted_text=compacted,
+            cfg=budget_cfg,
+        )
+    except Exception:
+        logger.warning("tool observation prepare failed; falling back to compact text", exc_info=True)
+        observation = ToolResultObservation(
+            observation_id=None,
+            archive_path=None,
+            raw_chars=len(raw_result),
+            raw_bytes=len(raw_result.encode("utf-8")),
+            projected_text=compacted,
+            projected_chars=len(compacted),
+        )
+    if observation.observation_id:
+        session._tool_observations_created = int(
+            getattr(session, "_tool_observations_created", 0) or 0
+        ) + 1
+        session._tool_observation_bytes_original = int(
+            getattr(session, "_tool_observation_bytes_original", 0) or 0
+        ) + int(observation.raw_bytes)
+        session._tool_observation_bytes_projected = int(
+            getattr(session, "_tool_observation_bytes_projected", 0) or 0
+        ) + len(observation.projected_text.encode("utf-8"))
+    if tool_name == "tool_result_recall":
+        session._tool_observation_recall_calls = int(
+            getattr(session, "_tool_observation_recall_calls", 0) or 0
+        ) + 1
+    return observation
+
+
 def _eager_knowledge_search_query(user_input: str) -> str:
     text = " ".join(str(user_input or "").split())
     return text[:800] if text else "知识库检索"
@@ -2737,7 +2786,17 @@ async def _eager_knowledge_search_events(
 
     raw_result = str(result)
     executed_tool_names.append(tool_name)
-    compacted = runtime.compactor.micro_compact_tool_result(tool_name, raw_result)
+    budget_cfg = load_tool_result_budget_config()
+    observation = _prepare_tool_result_for_context(
+        runtime=runtime,
+        session=session,
+        round_idx=0,
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        raw_result=raw_result,
+        budget_cfg=budget_cfg,
+    )
+    compacted = observation.projected_text
 
     assistant_tool_message: Dict[str, Any] = {
         "role": "assistant",
@@ -2842,6 +2901,7 @@ class AgentRuntime:
             critical_threshold=loop_critical_threshold,
         )
         self._pending_loop_nudge: Optional[str] = None
+        self._injected_loop_nudge: Optional[str] = None
         self._recent_exploratory_fps: deque[str] = deque(maxlen=10)
         # Exploratory tools get a bounded "schema discovery" budget:
         # the first N consecutive unique errors count as progress, after
@@ -3383,6 +3443,7 @@ class AgentRuntime:
         self._overflow_retries_this_turn = 0
         self._budget_compress_notice_sent_this_turn = False
         self._pending_loop_nudge = None
+        self._injected_loop_nudge = None
         setattr(session, "_context_chain_repair_attempted", False)
         self._last_persist_time = time.time()
         self._tools_since_persist = 0
@@ -3898,9 +3959,12 @@ class AgentRuntime:
             self._write_run_checkpoint(session, round_idx=round_idx - 1)
             # Re-project each round so tool_search loads take effect next round.
             active_tools, allowed_tool_names = _project_active_tools()
-            if self._pending_loop_nudge:
+            if (
+                self._pending_loop_nudge
+                and self._pending_loop_nudge != self._injected_loop_nudge
+            ):
                 nudge_text = self._pending_loop_nudge
-                self._pending_loop_nudge = None
+                self._injected_loop_nudge = nudge_text
                 messages.append(
                     {
                         "role": "system",
@@ -4132,6 +4196,23 @@ class AgentRuntime:
                     "tool_search_apply_threshold": int(_ts_apply_threshold),
                     "tool_search_threshold_strategy": str(_ts_strategy),
                     "tool_search_decision_latched": bool(_ts_latched),
+                    "_tool_observations_created": int(
+                        getattr(session, "_tool_observations_created", 0) or 0
+                    ),
+                    "_tool_observation_bytes_original": int(
+                        getattr(session, "_tool_observation_bytes_original", 0) or 0
+                    ),
+                    "_tool_observation_bytes_projected": int(
+                        getattr(session, "_tool_observation_bytes_projected", 0) or 0
+                    ),
+                    "tool_observation_bytes_avoided": max(
+                        0,
+                        int(getattr(session, "_tool_observation_bytes_original", 0) or 0)
+                        - int(getattr(session, "_tool_observation_bytes_projected", 0) or 0),
+                    ),
+                    "_tool_observation_recall_calls": int(
+                        getattr(session, "_tool_observation_recall_calls", 0) or 0
+                    ),
                 }
                 persist_context_stats(session, context_payload)
                 yield RuntimeEvent(
@@ -6564,26 +6645,16 @@ class AgentRuntime:
                     _classify_tool_turn_outcome(tool_name, raw_result),
                     tool_name,
                 )
-                rclass = get_result_class(tool_name, raw_result)
-                archive_path = None
-                if rclass in {"large", "blob"} or approx_tokens(raw_result) >= budget_cfg.large_threshold_tokens:
-                    archive_path = archive_tool_result(
-                        session,
-                        round_idx=round_idx,
-                        tool_call_id=tool_call_id,
-                        tool_name=tool_name,
-                        content=raw_result,
-                        cfg=budget_cfg,
-                    )
-                result = self.compactor.micro_compact_tool_result(tool_name, raw_result)
-                record_tool_result_meta(
-                    session,
+                observation = _prepare_tool_result_for_context(
+                    runtime=self,
+                    session=session,
                     round_idx=round_idx,
                     tool_call_id=tool_call_id,
                     tool_name=tool_name,
-                    content=raw_result,
-                    archive_path=archive_path,
+                    raw_result=raw_result,
+                    budget_cfg=budget_cfg,
                 )
+                result = observation.projected_text
                 # Learning counters for SessionReviewHook threshold checks
                 session._total_tool_calls = getattr(session, "_total_tool_calls", 0) + 1
                 if tool_name == "skill_manage":
@@ -6635,6 +6706,7 @@ class AgentRuntime:
                     "mcp_call", "list_mcps", "mcp_connect",
                     "web_search", "web_fetch",
                     "browser_navigate", "browser_snapshot", "browser_click",
+                    "tool_result_recall",
                 }
                 # schema 探索：同一工具连续失败但 error 内容不同，认知上仍在推进
                 EXPLORATORY_TOOLS = {"mcp_call", "list_mcps", "mcp_connect"}
@@ -6646,6 +6718,19 @@ class AgentRuntime:
                     and not is_error_result
                     and len(result.strip()) > 10
                 )
+                duplicate_evidence = False
+                result_digest: Optional[str] = None
+                if not is_error_result and raw_result:
+                    result_digest = hashlib.sha256(
+                        raw_result.encode("utf-8", errors="replace")
+                    ).hexdigest()
+                    if studio_tool_is_concurrency_safe(tool_name, arguments):
+                        args_sig = LoopDetector.args_signature(arguments)
+                        if self.loop_detector.has_seen_result(
+                            tool_name, args_sig, result_digest
+                        ):
+                            duplicate_evidence = True
+                            logical_progress = False
                 ok_flag = _tool_result_ok_flag(result)
                 if ok_flag is True:
                     # Meta tools (create_avatar, delegate_to_avatar, ...) return
@@ -6684,10 +6769,23 @@ class AgentRuntime:
                     ),
                     result_fingerprint=result_fp,
                     result_text=result if isinstance(result, str) else None,
+                    result_digest=result_digest,
                 )
                 loop_issue = self.loop_detector.check()
                 if loop_issue is not None and loop_issue.nudge:
                     self._pending_loop_nudge = loop_issue.nudge
+                if duplicate_evidence:
+                    oid = observation.observation_id
+                    if oid:
+                        self._pending_loop_nudge = (
+                            "相同只读工具再次返回同一证据。"
+                            f"请调用 tool_result_recall with {{\"id\":\"{oid}\",\"query\":\"literal\"}} "
+                            "回读原文，不要重跑原工具。"
+                        )
+                    else:
+                        self._pending_loop_nudge = (
+                            "相同只读工具再次返回同一证据。请复用上一条 tool result，不要重跑原工具。"
+                        )
                 loop_halt = loop_issue is not None and loop_issue.level == "critical"
                 if loop_issue is not None:
                     _original_task_snippet = (user_input or "").strip().replace("\n", " ")[:300]

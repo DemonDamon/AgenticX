@@ -378,7 +378,7 @@ class ContextCompactor:
         """Condense verbose tool results preserving head/tail."""
         name = str(tool_name or "").strip().lower()
         # Widget payloads are structured JSON + SVG/HTML; truncation breaks UI rendering.
-        if name == "show_widget":
+        if name in {"show_widget", "tool_result_recall"}:
             return str(result or "")
         if name == "query_data_source":
             # Time-series data must stay complete for chart rendering: a

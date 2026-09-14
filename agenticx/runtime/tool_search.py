@@ -43,6 +43,7 @@ CORE_ALWAYS_LOAD_TOOLS: frozenset[str] = frozenset(
         "bash_bg_input",
         "bash_bg_stop",
         "file_read",
+        "tool_result_recall",
         "file_write",
         "file_edit",
         "list_files",

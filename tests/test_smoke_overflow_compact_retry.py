@@ -53,7 +53,7 @@ class _RecordingCompactor:
         self.calls: List[Dict[str, Any]] = []
         self.progress = progress
 
-    async def maybe_compact(self, messages, *, force: bool = False, model: str = ""):
+    async def maybe_compact(self, messages, *, force: bool = False, model: str = "", session=None):
         copied = [dict(m) for m in messages if isinstance(m, dict)]
         self.calls.append({"force": force, "model": model, "n": len(copied)})
         if not self.progress or len(copied) <= 2:

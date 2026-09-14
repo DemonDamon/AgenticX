@@ -39,6 +39,14 @@ def test_micro_compact_skips_show_widget() -> None:
     assert "micro-compact" not in out
 
 
+def test_micro_compact_skips_tool_result_recall() -> None:
+    c = ContextCompactor(_LLM())
+    payload = "[tool_result_recall id=obs_abc offset=0 next_offset=100 eof=false]\n" + ("x" * 5000)
+    out = c.micro_compact_tool_result("tool_result_recall", payload, budget=400)
+    assert out == payload
+    assert "micro-compact" not in out
+
+
 @pytest.mark.asyncio
 async def test_maybe_compact_force_skips_threshold() -> None:
     c = ContextCompactor(_LLM(), threshold_messages=100, retain_recent_messages=4)

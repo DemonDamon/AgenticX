@@ -40,6 +40,7 @@ class LoopDetector:
         self._progress_marks: Deque[bool] = deque(maxlen=self.history_size)
         self._guard_rejections: Deque[str] = deque(maxlen=self.history_size)
         self._last_success_fingerprint: Dict[str, str] = {}
+        self._last_result_digests: Dict[Tuple[str, str], str] = {}
         self._file_edit_failures: Dict[str, int] = {}
         self._latest_file_edit_failure: Optional[Tuple[str, str, int]] = None
 
@@ -49,6 +50,7 @@ class LoopDetector:
         self._progress_marks.clear()
         self._guard_rejections.clear()
         self._last_success_fingerprint.clear()
+        self._last_result_digests.clear()
         self._file_edit_failures.clear()
         self._latest_file_edit_failure = None
 
@@ -133,6 +135,17 @@ class LoopDetector:
         self._file_edit_failures[path] = count
         self._latest_file_edit_failure = (path, error_code, count)
 
+    def has_seen_result(
+        self,
+        tool_name: str,
+        args_signature: str,
+        result_digest: str,
+    ) -> bool:
+        digest = str(result_digest or "").strip()
+        if not digest:
+            return False
+        return self._last_result_digests.get((tool_name, args_signature)) == digest
+
     def record_call(
         self,
         tool_name: str,
@@ -141,6 +154,7 @@ class LoopDetector:
         has_progress: bool,
         result_fingerprint: Optional[str] = None,
         result_text: Optional[str] = None,
+        result_digest: Optional[str] = None,
     ) -> None:
         self._calls.append((tool_name, args_signature))
         self._progress_marks.append(bool(has_progress))
@@ -151,6 +165,9 @@ class LoopDetector:
             snap = result_fingerprint[:256]
             if snap:
                 self._last_success_fingerprint[tool_name] = snap
+        digest = str(result_digest or "").strip()
+        if digest:
+            self._last_result_digests[(tool_name, args_signature)] = digest
 
     def _nudge_for_tool(self, tool_name: str) -> Optional[str]:
         fp = self._last_success_fingerprint.get(tool_name)

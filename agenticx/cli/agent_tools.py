@@ -47,6 +47,7 @@ from agenticx.runtime.plan_artifacts import (
     update_plan_artifact,
 )
 from agenticx.runtime.plan_mode import turn_intent_denial_message
+from agenticx.runtime.tool_result_budget import recall_tool_observation
 from agenticx.memory.session_store import SessionStore
 from agenticx.memory.workspace_memory import WorkspaceMemoryStore
 from agenticx.skills.guard import scan_skill, should_allow
@@ -179,6 +180,7 @@ def _dispatch_path_rule_denial(
 _CONCURRENCY_SAFE_STUDIO_TOOLS = frozenset(
     {
         "file_read",
+        "tool_result_recall",
         "skill_list",
         "scratchpad_read",
         "memory_search",
@@ -988,6 +990,29 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "end_line": {"type": "integer", "description": "End line (inclusive)."},
                 },
                 "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "tool_result_recall",
+            "description": (
+                "Recall exact text from a previously compacted tool result in the current session. "
+                "Use the observation id from [tool-result-observation]. "
+                "Page with offset_bytes, or search with a literal query. "
+                "Do not pass file paths."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "offset_bytes": {"type": "integer", "minimum": 0},
+                    "query": {"type": "string", "minLength": 1, "maxLength": 256},
+                    "context_lines": {"type": "integer", "minimum": 0, "maximum": 3},
+                },
+                "required": ["id"],
                 "additionalProperties": False,
             },
         },
@@ -5344,6 +5369,40 @@ def _tool_code_outline(arguments: Dict[str, Any], session: Optional[StudioSessio
     return format_outline_result(payload)
 
 
+def _tool_result_recall(
+    arguments: Dict[str, Any],
+    session: Optional[StudioSession] = None,
+) -> str:
+    """Read a previously archived tool observation for the current session."""
+    raw_id = str(arguments.get("id") or "").strip()
+    query = arguments.get("query")
+    offset = arguments.get("offset_bytes")
+    context_lines = arguments.get("context_lines", 2)
+    query_text = None if query is None else str(query)
+    offset_value: Optional[int]
+    if offset is None:
+        offset_value = None
+    else:
+        try:
+            offset_value = int(offset)
+        except (TypeError, ValueError):
+            return "ERROR: offset_bytes must be an integer"
+    try:
+        ctx = 2 if context_lines is None else int(context_lines)
+    except (TypeError, ValueError):
+        return "ERROR: context_lines must be an integer"
+    try:
+        return recall_tool_observation(
+            session,
+            raw_id,
+            offset_bytes=offset_value,
+            query=query_text,
+            context_lines=ctx,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return f"ERROR: {exc}"
+
+
 def _tool_file_read(arguments: Dict[str, Any], session: Optional[StudioSession] = None) -> str:
     try:
         path = _resolve_workspace_path(str(arguments.get("path", "")), session, pick_existing=True)
@@ -9603,6 +9662,8 @@ async def dispatch_tool_async(
             return _tool_code_outline(arguments, session)
         if name == "file_read":
             return _tool_file_read(arguments, session)
+        if name == "tool_result_recall":
+            return _tool_result_recall(arguments, session)
         if name == "stage_context_file":
             return _tool_stage_context_file(arguments, session)
         if name == "file_write":

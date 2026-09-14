@@ -123,6 +123,23 @@ def test_studio_tools_registers_tool_search():
     assert TOOL_SEARCH_TOOL_NAME in _tool_names(META_AGENT_TOOLS)
 
 
+def test_studio_tools_registers_tool_result_recall():
+    from agenticx.cli.agent_tools import STUDIO_TOOLS
+
+    schema = next(
+        fn
+        for tool in STUDIO_TOOLS
+        if isinstance(tool, dict)
+        for fn in [tool.get("function")]
+        if isinstance(fn, dict) and fn.get("name") == "tool_result_recall"
+    )
+    params = schema["parameters"]
+    assert set(params["properties"]) == {"id", "offset_bytes", "query", "context_lines"}
+    assert params["required"] == ["id"]
+    assert params.get("additionalProperties") is False
+    assert "tool_result_recall" in CORE_ALWAYS_LOAD_TOOLS
+
+
 def test_mode_off_parity(monkeypatch):
     monkeypatch.setattr(
         "agenticx.runtime.tool_search_runtime.read_tool_search_config",
@@ -149,7 +166,20 @@ def test_first_round_projected(monkeypatch):
     names0 = llm.tools_seen[0]
     assert TOOL_SEARCH_TOOL_NAME in names0
     assert "bash_exec" in names0
+    assert "tool_result_recall" in names0
     assert "web_fetch" not in names0
+
+
+def test_tool_result_recall_visible_in_auto_mode(monkeypatch):
+    monkeypatch.setattr(
+        "agenticx.runtime.tool_search_runtime.read_tool_search_config",
+        lambda: ToolSearchConfig(mode="auto"),
+    )
+    pool = _make_pool()
+    session = StudioSession()
+    ctx = build_runtime_context(session=session, full_openai_tools=pool)
+    out = project_tools_for_round(ctx, full_openai_tools=pool)
+    assert "tool_result_recall" in _tool_names(out)
 
 
 def test_load_builtin_next_round(monkeypatch):

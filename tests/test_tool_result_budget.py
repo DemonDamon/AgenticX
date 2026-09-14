@@ -59,8 +59,11 @@ def test_archive_and_record_meta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         tool_name="file_read",
         content=big,
         archive_path=path,
+        observation_id="obs_" + ("ab" * 32),
     )
     assert session._tool_result_tokens_session > 0
+    meta = session._tool_result_meta["call_abc"]
+    assert meta.observation_id == "obs_" + ("ab" * 32)
 
 
 def test_apply_budget_replaces_old_large_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,3 +111,23 @@ def test_apply_budget_replaces_old_large_results(tmp_path: Path, monkeypatch: py
     tool_msg = [m for m in out if m.get("role") == "tool"][0]
     assert "[tool-result-archived]" in tool_msg["content"]
     assert str(archive_path) in tool_msg["content"]
+
+
+def test_archived_summary_keeps_observation_id_without_path() -> None:
+    from agenticx.runtime.tool_result_budget import ToolResultMeta, _build_archived_summary
+
+    oid = "obs_" + ("cd" * 32)
+    meta = ToolResultMeta(
+        round_idx=1,
+        tool_name="file_read",
+        result_class="large",
+        original_chars=9000,
+        archive_path="/tmp/should-not-appear.txt",
+        one_line_summary="file_read: hello",
+        observation_id=oid,
+    )
+    summary = _build_archived_summary(meta)
+    assert oid in summary
+    assert "tool_result_recall" in summary
+    assert "/tmp/should-not-appear.txt" not in summary
+    assert "original_chars=9000" in summary
