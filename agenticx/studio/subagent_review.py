@@ -22,6 +22,7 @@ from agenticx.runtime.team_manager import AgentTeamManager
 _LOG = logging.getLogger(__name__)
 
 _TEXT_PREVIEW_MAX_BYTES = 32 * 1024
+_TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _BINARY_PREVIEW_KINDS = {
     ".png",
     ".jpg",
@@ -270,3 +271,47 @@ def _looks_text_file(path: Path) -> bool:
         ".sh",
         ".sql",
     }
+
+
+def _apply_memory_overrides(
+    target: Dict[str, Any],
+    record: RunRecord,
+    memory: Dict[str, Any],
+    *,
+    summary_only: bool,
+) -> None:
+    if str(record.status or "").strip() in _TERMINAL_RUN_STATUSES:
+        return
+    mem_updated = float(memory.get("updated_at", 0) or 0)
+    record_updated = float(record.updated_at or 0)
+    mem_status = str(memory.get("status", "") or "")
+    active = {"running", "pending"}
+    should_override = mem_status in active or mem_updated >= record_updated
+    if not should_override:
+        return
+
+    for key in (
+        "status",
+        "result_summary",
+        "error_text",
+        "updated_at",
+        "provider",
+        "model",
+        "avatar_id",
+        "badge_seq",
+        "cluster_id",
+        "name",
+        "role",
+    ):
+        if key in memory and memory.get(key) is not None:
+            target[key] = memory[key]
+
+    if summary_only:
+        return
+
+    for key in ("output_files", "result_file"):
+        if memory.get(key):
+            target[key] = memory[key]
+    recent = memory.get("recent_events")
+    if isinstance(recent, list) and recent:
+        target["recent_events"] = recent[-20:]
