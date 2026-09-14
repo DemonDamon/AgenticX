@@ -78,12 +78,27 @@ function looksLikeArtifactFile(path: string): boolean {
 /** Dirs that live in the session default workspace but are not task outputs. */
 const WORKSPACE_ARTIFACT_SKIP_DIRS = new Set([
   "memory",
+  "attachments",
   ".git",
   "node_modules",
   "site-packages",
   "__pycache__",
   "task_artifacts",
 ]);
+
+/** Chat uploads are materialized under <default>/attachments/; never task outputs. */
+const SESSION_USER_ATTACHMENT_RE =
+  /(?:^|\/)\.agenticx\/taskspaces\/[^/]+\/default\/attachments(?:\/|$)/i;
+
+/** True when a path is a user chat-upload, not an agent deliverable. */
+export function isSessionUserAttachmentPath(path: string): boolean {
+  const value = String(path || "")
+    .trim()
+    .replace(/\\/g, "/");
+  if (!value) return false;
+  if (SESSION_USER_ATTACHMENT_RE.test(value)) return true;
+  return /^attachments(?:\/|$)/i.test(value);
+}
 
 function isVirtualEnvironmentDirName(name: string): boolean {
   const value = String(name || "").trim().toLowerCase();
@@ -211,6 +226,7 @@ function normalizeArtifactPath(raw: string): string | null {
   }
   const normalized = value.replace(/\\/g, "/").replace(/\/+$/, "");
   if (isRuntimeArtifactPath(normalized)) return null;
+  if (isSessionUserAttachmentPath(normalized)) return null;
   return normalized || null;
 }
 

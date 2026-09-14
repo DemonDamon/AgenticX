@@ -17,6 +17,7 @@ import {
   matchesHandoffAncestor,
   displayChatLocalPath,
   collectWorkspaceListingArtifactPaths,
+  isSessionUserAttachmentPath,
   orderTurnArtifactsForCard,
   pickPrimaryTurnArtifact,
   expandArtifactHomePath,
@@ -105,6 +106,30 @@ describe("collectSessionArtifactPaths", () => {
       }),
     ];
     expect(collectSessionArtifactPaths(messages)).toEqual([path]);
+  });
+
+  it("does not collect session chat-upload attachments as artifacts", () => {
+    const upload =
+      "/Users/damon/.agenticx/taskspaces/sid/default/attachments/image.png";
+    const uploadDup =
+      "/Users/damon/.agenticx/taskspaces/sid/default/attachments/image_2.png";
+    const written =
+      "/Users/damon/.agenticx/taskspaces/sid/default/report.html";
+    const messages: Message[] = [
+      toolMsg({
+        id: "ls",
+        toolName: "bash_exec",
+        toolArgs: { command: "ls -lh attachments" },
+        content: `${upload}\n${uploadDup}\n${written}`,
+      }),
+    ];
+    expect(isSessionUserAttachmentPath(upload)).toBe(true);
+    expect(isSessionUserAttachmentPath(uploadDup)).toBe(true);
+    expect(isSessionUserAttachmentPath(written)).toBe(false);
+    expect(collectSessionArtifactPaths(messages)).toEqual([written]);
+    expect(collectSessionArtifactPaths([], [], [upload, uploadDup, written])).toEqual([
+      written,
+    ]);
   });
 
   it("skips written_paths while a wb_bridge_send turn is still running", () => {
@@ -1060,8 +1085,22 @@ describe("default workspace listing → 任务产物", () => {
       }),
     ).toBe(false);
     expect(isWalkableWorkspaceArtifactDir({ name: "output", type: "dir" })).toBe(true);
+    expect(isWalkableWorkspaceArtifactDir({ name: "attachments", type: "dir" })).toBe(false);
     expect(isWalkableWorkspaceArtifactDir({ name: "docxenv", type: "dir" })).toBe(false);
     expect(isWalkableWorkspaceArtifactDir({ name: "venv", type: "dir" })).toBe(false);
+  });
+
+  it("does not treat chat-upload attachments/ as 任务产物", () => {
+    expect(
+      collectWorkspaceListingArtifactPaths({
+        workspaceRoot: root,
+        entries: [
+          { name: "image.png", type: "file", path: "attachments/image.png" },
+          { name: "image_2.png", type: "file", path: "attachments/image_2.png" },
+          { name: "report.html", type: "file", path: "report.html" },
+        ],
+      }),
+    ).toEqual([`${root}/report.html`]);
   });
 
   it("skips virtual-environment files from nested workspace listings", () => {
