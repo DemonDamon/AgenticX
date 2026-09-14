@@ -1659,11 +1659,13 @@ export function WorkspaceFilePreview({
         ) : null}
         <div
           className={`preview-scrollbar min-h-0 flex-1 bg-surface-base ${
-            preview.kind === "pdf" ||
-            preview.kind === "video" ||
-            (isHtmlFile && viewMode === "preview")
-              ? "overflow-hidden"
-              : "overflow-auto"
+            sourceCollapsed
+              ? "hidden"
+              : preview.kind === "pdf" ||
+                  preview.kind === "video" ||
+                  (isHtmlFile && viewMode === "preview")
+                ? "overflow-hidden"
+                : "overflow-auto"
           }`}
         >
           {preview.kind === "image" ? (
