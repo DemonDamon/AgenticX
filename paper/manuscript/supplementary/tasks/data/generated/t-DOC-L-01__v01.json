@@ -1,0 +1,141 @@
+{
+ "task_id": "t-DOC-L-01",
+ "task_type": "low_coupling",
+ "description": "基于5名团队成员本周工作记录，产出团队周报：合并重复项、按主题归类、标注关键进展、识别跨成员依赖",
+ "team_size": 3,
+ "members": [
+  {
+   "id": "m1",
+   "name": "张伟",
+   "role": "后端",
+   "records": [
+    "完成用户认证模块重构，从JWT迁移到OAuth2，性能提升30%",
+    "修复订单服务内存泄漏，GC频率从每分钟15次降到2次",
+    "阻塞：支付网关回调延迟问题，等待第三方联调"
+   ]
+  },
+  {
+   "id": "m2",
+   "name": "李娜",
+   "role": "前端",
+   "records": [
+    "完成用户认证模块前端适配，新增OAuth2登录流程",
+    "优化首屏加载，LCP从3.2s降到1.8s",
+    "阻塞：支付页面UI与后端字段未对齐，需联调"
+   ]
+  },
+  {
+   "id": "m3",
+   "name": "王强",
+   "role": "后端",
+   "records": [
+    "完成订单服务内存泄漏修复（同m1协作）",
+    "重构支付服务异常处理，新增3种重试策略",
+    "启动支付网关联调测试"
+   ]
+  },
+  {
+   "id": "m4",
+   "name": "陈静",
+   "role": "产品",
+   "records": [
+    "完成Q3产品规划文档，含3个核心功能优先级排序",
+    "组织用户认证模块验收会议，确认功能达标",
+    "下周计划：启动支付模块需求评审"
+   ]
+  },
+  {
+   "id": "m5",
+   "name": "刘洋",
+   "role": "测试",
+   "records": [
+    "完成用户认证模块回归测试，通过率98%",
+    "发现支付服务3个边界缺陷，已提交bug单",
+    "下周计划：支付模块全链路压测"
+   ]
+  }
+ ],
+ "expected_cross_deps": [
+  {
+   "a": "m3",
+   "b": "m5",
+   "topic": "订单服务内存泄漏修复（后端协作）"
+  },
+  {
+   "a": "m4",
+   "b": "m3",
+   "topic": "支付页面字段对齐联调"
+  }
+ ],
+ "report_template": {
+  "sections": [
+   "本周进展",
+   "风险阻塞",
+   "下周计划"
+  ],
+  "format": "markdown",
+  "max_length": 2000
+ },
+ "verification": {
+  "required_sections": [
+   "本周进展",
+   "风险阻塞",
+   "下周计划"
+  ],
+  "min_members_mentioned": 5,
+  "min_deps_identified_ratio": 0.8,
+  "max_duplicate_points": 2,
+  "answer_block_schema": {
+   "members_mentioned": "list",
+   "cross_deps": "list"
+  },
+  "expected_sets": {
+   "members_mentioned": [
+    "张伟",
+    "李娜",
+    "王强",
+    "陈静",
+    "刘洋"
+   ],
+   "cross_deps": [
+    {
+     "a": "m3",
+     "b": "m5",
+     "topic": "订单服务内存泄漏修复（后端协作）"
+    },
+    {
+     "a": "m4",
+     "b": "m3",
+     "topic": "支付页面字段对齐联调"
+    }
+   ]
+  },
+  "expected_values": {},
+  "expected_counts": {}
+ },
+ "office_type": "document",
+ "roles": [
+  {
+   "name": "收集员",
+   "role": "collector",
+   "responsibility": "读取记录提取要点并去重"
+  },
+  {
+   "name": "分析师",
+   "role": "analyst",
+   "responsibility": "按主题归类，标注跨成员依赖"
+  },
+  {
+   "name": "撰写员",
+   "role": "writer",
+   "responsibility": "整合为结构化周报"
+  }
+ ],
+ "params": {
+  "member_count": "t-int(4,8)",
+  "records_per_member": "t-int(2,5)",
+  "names": "t-choice(NAMES_POOL)"
+ },
+ "variant_id": "t-DOC-L-01__v01",
+ "variant_seed": 42001
+}

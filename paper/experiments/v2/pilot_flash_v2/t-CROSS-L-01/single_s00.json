@@ -1,0 +1,32 @@
+{
+  "task_id": "t-CROSS-L-01",
+  "office_type": "cross_dept",
+  "task_type": "low_coupling",
+  "mode": "single",
+  "model": "deepseek-v4-flash",
+  "seed": 0,
+  "Q": 0.375,
+  "TMS": false,
+  "prompt_tokens": 584,
+  "completion_tokens": 1880,
+  "total_tokens": 2464,
+  "cached_tokens": 384,
+  "elapsed": 13.72,
+  "llm_calls": 1,
+  "error": "",
+  "detail": {
+    "L1": 0.0,
+    "L2": 1.0,
+    "L3": NaN,
+    "sec::HR清单": 0.0,
+    "sec::IT清单": 0.0,
+    "sec::Admin清单": 0.0,
+    "l2::min_total_items::count": 1.0,
+    "l2::min_completed_report_correct::count": 1.0,
+    "l2::min_pending_report_correct::count": 1.0,
+    "notes": []
+  },
+  "output": "### 新员工入职三部门Checklist（周晓彤）\n\n| 部门 | 清单项 | 状态 |\n|---|---|---|\n| HR | 合同签署 | 已完成 |\n| HR | 社保公积金开户 | 未完成 |\n| HR | 员工手册发放 | 未完成 |\n| HR | 背景调查确认 | 已完成 |\n| HR | 门禁开通申请 | 未完成 |\n| IT | 企业邮箱开通 | 已完成 |\n| IT | 电脑分配 | 未完成 |\n| IT | VPN配置 | 未完成 |\n| IT | 办公软件授权 | 已完成 |\n| IT | 代码仓库权限 | 未完成 |\n| Admin | 工位分配 | 已完成 |\n| Admin | 门禁卡制作 | 未完成 |\n| Admin | 办公用品领取 | 未完成 |\n| Admin | 入职礼包发放 | 未完成 |\n\n**汇总：** 总项 14 项，已完成 5 项，未完成 9 项。\n\n```json\n{\n  \"min_total_items\": [\"合同签署\", \"社保公积金开户\", \"员工手册发放\", \"背景调查确认\", \"门禁开通申请\", \"企业邮箱开通\", \"电脑分配\", \"VPN配置\", \"办公软件授权\", \"代码仓库权限\", \"工位分配\", \"门禁卡制作\", \"办公用品领取\", \"入职礼包发放\"],\n  \"min_completed_report_correct\": [\"合同签署\", \"背景调查确认\", \"企业邮箱开通\", \"办公软件授权\", \"工位分配\"],\n  \"min_pending_report_correct\": [\"社保公积金开户\", \"员工手册发放\", \"门禁开通申请\", \"电脑分配\", \"VPN配置\", \"代码仓库权限\", \"门禁卡制作\", \"办公用品领取\", \"入职礼包发放\"]\n}\n```",
+  "role_outputs": null,
+  "ts": "2026-08-29T09:54:54"
+}

@@ -1,0 +1,18 @@
+{
+  "model": "kimi-k3",
+  "base_url": "https://api.moonshot.cn/v1",
+  "temperature": 1.0,
+  "seeds": [
+    0
+  ],
+  "assembly": "last",
+  "char_budget": 4000,
+  "scorer": "v2",
+  "single_baseline": "none",
+  "llm_judge": false,
+  "upstream_ctx_limit": 16000,
+  "tasks": [
+    "t-DOC-L-01"
+  ],
+  "ts": "2026-08-29T20:38:53"
+}

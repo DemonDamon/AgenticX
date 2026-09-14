@@ -1,0 +1,29 @@
+{
+  "task_id": "t-DATA-H-03",
+  "office_type": "data",
+  "task_type": "high_coupling",
+  "mode": "single_refine_k",
+  "model": "deepseek-v4-flash",
+  "seed": 2,
+  "Q": 1.0,
+  "TMS": true,
+  "prompt_tokens": 12530,
+  "completion_tokens": 6129,
+  "total_tokens": 18659,
+  "cached_tokens": 0,
+  "elapsed": 47.39,
+  "llm_calls": 3,
+  "error": "",
+  "detail": {
+    "L1": 1.0,
+    "L2": 1.0,
+    "L3": NaN,
+    "l2::a_only::f1": 1.0,
+    "l2::b_only::f1": 1.0,
+    "l2::qty_mismatch_skus::f1": 1.0,
+    "notes": []
+  },
+  "output": "# 销售表A与库存表B交叉核对报告\n\n## 一、核对范围与方法\n- 表A（销售表）：52条记录，SKU编号SKU001~SKU052\n- 表B（库存表）：50条记录，SKU编号SKU001~SKU048、SKU053、SKU054\n- 核对字段：SKU、qty（数量）、date（日期）\n- 核对方法：以SKU为唯一键匹配；对共有SKU逐条比较qty与date\n\n## 二、差异汇总\n| 差异类型 | 差异数 | 说明 |\n|---|---|---|\n| A有B无 | 4 | 表A中存在但表B中不存在的SKU |\n| B有A无 | 2 | 表B中存在但表A中不存在的SKU |\n| qty不一致 | 2 | 共有SKU中qty不同的记录 |\n| date不一致 | 0 | 共有SKU中date不同的记录 |\n\n## 三、差异明细\n\n### 1. A有B无（共4条）\n| SKU | A.qty | A.date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n说明：以上SKU在表B中无对应记录。\n\n### 2. B有A无（共2条）\n| SKU | B.qty | B.date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n说明：以上SKU在表A中无对应记录。\n\n### 3. qty不一致（共2条）\n| SKU | A.qty | B.qty | 差异（B-A） |\n|---|---|---|---|\n| SKU006 | 80 | 85 | +5 |\n| SKU022 | 105 | 100 | -5 |\n\n说明：以上共有SKU的qty不一致；date全部一致。\n\n## 四、结论与建议\n1. 表A独有4条（SKU049~SKU052），表B独有2条（SKU053、SKU054），建议两边核对各自数据来源。\n2. SKU006、SKU022数量差异分别为+5、-5，建议以实际业务单据为准修正。\n3. 除上述差异外，其余共有SKU的qty与date完全一致。\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [\"SKU053\", \"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```",
+  "role_outputs": null,
+  "ts": "2026-08-29T10:06:14"
+}

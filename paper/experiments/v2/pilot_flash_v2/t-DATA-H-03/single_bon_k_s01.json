@@ -1,0 +1,29 @@
+{
+  "task_id": "t-DATA-H-03",
+  "office_type": "data",
+  "task_type": "high_coupling",
+  "mode": "single_bon_k",
+  "model": "deepseek-v4-flash",
+  "seed": 1,
+  "Q": 1.0,
+  "TMS": true,
+  "prompt_tokens": 13300,
+  "completion_tokens": 4363,
+  "total_tokens": 17663,
+  "cached_tokens": 0,
+  "elapsed": 33.63,
+  "llm_calls": 4,
+  "error": "",
+  "detail": {
+    "L1": 1.0,
+    "L2": 1.0,
+    "L3": NaN,
+    "l2::a_only::f1": 1.0,
+    "l2::b_only::f1": 1.0,
+    "l2::qty_mismatch_skus::f1": 1.0,
+    "notes": []
+  },
+  "output": "# 销售表A与库存表B交叉核对报告\n\n## 一、核对概览\n\n- 表A记录数：52条（SKU001–SKU052）\n- 表B记录数：50条（SKU001–SKU048、SKU053–SKU054）\n- 共同SKU数：48条\n- 差异SKU总数：6条（其中仅A有4条、仅B有2条、数值不一致2条）\n\n## 二、差异明细\n\n### 1. A有B无（仅在销售表A中存在的SKU）\n\n| SKU | A数量(qty) | A日期 |\n|------|------------|------------|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n说明：上述SKU在销售表A中有记录，但库存表B中无对应条目，疑似B表漏录或A表超录。\n\n### 2. B有A无（仅在库存表B中存在的SKU）\n\n| SKU | B数量(qty) | B日期 |\n|------|------------|------------|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n说明：上述SKU在库存表B中有记录，但销售表A中无对应条目，疑似A表漏录或B表超录。\n\n### 3. 数值不一致（两表均有但数量字段不同）\n\n| SKU | A数量(qty) | B数量(qty) | 差异值(B-A) |\n|------|------------|------------|--------------|\n| SKU006 | 80 | 85 | +5 |\n| SKU022 | 105 | 100 | -5 |\n\n说明：\n- SKU006：A表数量80，B表数量85，B表比A表多5；\n- SKU022：A表数量105，B表数量100，B表比A表少5。\n\n## 三、结论与建议\n\n1. 需核实SKU049–SKU052在库存表中是否确实缺失，若A表无误，应补录B表；\n2. 需核实SKU053–SKU054在销售表中是否确实缺失，若B表无误，应补录A表；\n3. 需查明SKU006、SKU022数量差异原因，并以实际业务凭证为准修正相应数据表。\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [\"SKU053\", \"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```",
+  "role_outputs": null,
+  "ts": "2026-08-29T14:08:19"
+}

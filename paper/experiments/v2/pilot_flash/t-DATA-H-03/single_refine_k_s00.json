@@ -1,0 +1,29 @@
+{
+ "task_id": "t-DATA-H-03",
+ "office_type": "data",
+ "task_type": "high_coupling",
+ "mode": "single_refine_k",
+ "model": "deepseek-v4-flash",
+ "seed": 0,
+ "Q": 1.0,
+ "TMS": true,
+ "prompt_tokens": 12644,
+ "completion_tokens": 6836,
+ "total_tokens": 19480,
+ "cached_tokens": 0,
+ "elapsed": 53.53,
+ "llm_calls": 3,
+ "error": "",
+ "detail": {
+  "L1": 1.0,
+  "L2": 1.0,
+  "L3": NaN,
+  "notes": [
+   "L2: 该任务无数值断言，记满分"
+  ]
+ },
+ "output": "# 销售表A与库存表B交叉核对报告\n\n## 一、核对范围与说明\n- 数据源：表A（销售表）52条，表B（库存表）50条\n- 核对键：SKU\n- 比对字段：qty、date\n- 差异类型：A有B无、B有A无、数值不一致（qty或date不一致）\n- 结果：日期字段全部一致，仅有qty差异\n\n## 二、差异明细\n\n### 1. A有B无（表A存在，表B缺失）——4条\n| SKU | A.qty | A.date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n### 2. B有A无（表B存在，表A缺失）——2条\n| SKU | B.qty | B.date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n### 3. 数值不一致（SKU相同，qty不同）——2条\n| SKU | A.qty | B.qty | 差异（B-A） | A.date | B.date |\n|---|---|---|---|---|---|\n| SKU006 | 80 | 85 | +5 | 2026-08-03 | 2026-08-03 |\n| SKU022 | 105 | 100 | -5 | 2026-08-11 | 2026-08-11 |\n\n## 三、一致数据说明\n除上述差异外，SKU001~SKU005、SKU007~SKU021、SKU023~SKU048共46条，其qty与date在A、B两表中完全一致。\n\n## 四、统计汇总\n| 差异类型 | 数量 |\n|---|---|\n| A有B无 | 4 |\n| B有A无 | 2 |\n| 数值不一致 | 2 |\n| 合计差异SKU数 | 8（无重复） |\n\n## 五、核对结论\n1. 表A与表B共有SKU 48个，其中46个完全一致，2个qty不一致。\n2. SKU049~SKU052在表B中缺失；SKU053~SKU054在表A中缺失。\n3. 所有共有SKU的date均一致，无日期差异。\n\n## 六、处理建议\n1. 核实SKU049~SKU052在库存表B中是否漏录或状态异常。\n2. 核实SKU053~SKU054在销售表A中是否漏录或确无销售。\n3. 复核SKU006、SKU022的qty差异，以实际业务凭证为准修正。",
+ "role_outputs": null,
+ "ts": "2026-08-28T19:55:07",
+ "Q_prev": 1.0
+}

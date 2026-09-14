@@ -1,0 +1,45 @@
+{
+  "task_id": "t-CROSS-L-01",
+  "office_type": "cross_dept",
+  "task_type": "low_coupling",
+  "mode": "team_blackboard",
+  "model": "kimi-k3",
+  "seed": 1,
+  "Q": 0.6728,
+  "TMS": false,
+  "prompt_tokens": 2090,
+  "completion_tokens": 1004,
+  "total_tokens": 3094,
+  "cached_tokens": 768,
+  "elapsed": 31.15,
+  "llm_calls": 3,
+  "error": "",
+  "detail": {
+    "L1": 1.0,
+    "L2": 0.1275132275132275,
+    "L3": NaN,
+    "sec::HR清单": 1.0,
+    "sec::IT清单": 1.0,
+    "sec::Admin清单": 1.0,
+    "l2::min_total_items::count": 0.0714,
+    "l2::min_completed_report_correct::count": 0.2,
+    "l2::min_pending_report_correct::count": 0.1111,
+    "notes": []
+  },
+  "output": "## HR清单\n\n**总项数：5 项 | 已完成：2 项 | 待办：3 项**\n\n## IT清单\n\n**总项数：5 项 | 已完成：2 项 | 待办：3 项**\n\n## Admin清单\n\n**总项数：4 项 | 已完成：1 项 | 待办：3 项**\n\n## 其他\n\n### ✅ 已完成（2项）\n1. 合同签署\n2. 背景调查确认\n\n### ⏳ 待办（3项）\n1. 社保公积金开户\n2. 员工手册发放\n3. 门禁开通申请\n\n### 核对说明\n- 清单完整性：5项均为HR标准入职项，无缺漏\n- 完成进度：40%（2/5），落后于预期，建议优先处理社保公积金开户（涉及法定时限）\n- 门禁开通申请与Admin\"门禁卡制作\"存在跨部门衔接，需同步跟进\n\n```json\n{\"min_total_items\": [5], \"min_completed_report_correct\": [2], \"min_pending_report_correct\": [3]}\n```\n\n### ✅ 已完成（2项）\n1. 企业邮箱开通\n2. 办公软件授权\n\n### ⏳ 待办（3项）\n1. 电脑分配\n2. VPN配置\n3. 代码仓库权限\n\n### 核对说明\n- 清单完整性：5项均为IT标准入职配置项，无缺漏\n- 完成进度：40%（2/5），待办项均为入职首日必需，建议加急处理\n- 优先级建议：电脑分配为其余配置的前置条件，应最先完成；VPN配置与代码仓库权限影响远程办公与研发协作，需同步推进\n\n```json\n{\"min_total_items\": [5], \"min_completed_report_correct\": [2], \"min_pending_report_correct\": [3]}\n```\n\n### ✅ 已完成（1项）\n1. 工位分配\n\n### ⏳ 待办（3项）\n1. 门禁卡制作\n2. 办公用品领取\n3. 入职礼包发放\n\n### 核对说明\n- 清单完整性：4项均为Admin标准入职项，无缺漏\n- 完成进度：25%（1/4），为三部门中进度最低，需加快处理\n- 跨部门衔接：门禁卡制作依赖HR\"门禁开通申请\"审批通过后方可制卡，建议与HR同步跟进，避免断点\n- 优先级建议：门禁卡制作为员工通行必需，应列首位；办公用品领取与入职礼包发放可在入职首日同步完成\n\n```json\n{\"min_total_items\": [4], \"min_completed_report_correct\": [1], \"min_pending_report_correct\": [3]}\n```",
+  "role_outputs": [
+    [
+      "HR清单核对员",
+      "## HR清单核对结果 — 周晓彤\n\n**总项数：5 项 | 已完成：2 项 | 待办：3 项**\n\n### ✅ 已完成（2项）\n1. 合同签署\n2. 背景调查确认\n\n### ⏳ 待办（3项）\n1. 社保公积金开户\n2. 员工手册发放\n3. 门禁开通申请\n\n### 核对说明\n- 清单完整性：5项均为HR标准入职项，无缺漏\n- 完成进度：40%（2/5），落后于预期，建议优先处理社保公积金开户（涉及法定时限）\n- 门禁开通申请与Admin\"门禁卡制作\"存在跨部门衔接，需同步跟进\n\n```json\n{\"min_total_items\": [5], \"min_completed_report_correct\": [2], \"min_pending_report_correct\": [3]}\n```"
+    ],
+    [
+      "IT清单核对员",
+      "## IT清单核对结果 — 周晓彤\n\n**总项数：5 项 | 已完成：2 项 | 待办：3 项**\n\n### ✅ 已完成（2项）\n1. 企业邮箱开通\n2. 办公软件授权\n\n### ⏳ 待办（3项）\n1. 电脑分配\n2. VPN配置\n3. 代码仓库权限\n\n### 核对说明\n- 清单完整性：5项均为IT标准入职配置项，无缺漏\n- 完成进度：40%（2/5），待办项均为入职首日必需，建议加急处理\n- 优先级建议：电脑分配为其余配置的前置条件，应最先完成；VPN配置与代码仓库权限影响远程办公与研发协作，需同步推进\n\n```json\n{\"min_total_items\": [5], \"min_completed_report_correct\": [2], \"min_pending_report_correct\": [3]}\n```"
+    ],
+    [
+      "Admin清单核对员",
+      "## Admin清单核对结果 — 周晓彤\n\n**总项数：4 项 | 已完成：1 项 | 待办：3 项**\n\n### ✅ 已完成（1项）\n1. 工位分配\n\n### ⏳ 待办（3项）\n1. 门禁卡制作\n2. 办公用品领取\n3. 入职礼包发放\n\n### 核对说明\n- 清单完整性：4项均为Admin标准入职项，无缺漏\n- 完成进度：25%（1/4），为三部门中进度最低，需加快处理\n- 跨部门衔接：门禁卡制作依赖HR\"门禁开通申请\"审批通过后方可制卡，建议与HR同步跟进，避免断点\n- 优先级建议：门禁卡制作为员工通行必需，应列首位；办公用品领取与入职礼包发放可在入职首日同步完成\n\n```json\n{\"min_total_items\": [4], \"min_completed_report_correct\": [1], \"min_pending_report_correct\": [3]}\n```"
+    ]
+  ],
+  "ts": "2026-08-30T14:28:41"
+}

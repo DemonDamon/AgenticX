@@ -1,0 +1,85 @@
+{
+ "task_id": "t-CROSS-L-01",
+ "office_type": "cross_dept",
+ "task_type": "low_coupling",
+ "team_size": 3,
+ "description": "核查新员工入职的三部门（HR/IT/Admin）清单完整性，产出最终checklist",
+ "roles": [
+  {
+   "name": "HR清单核对员",
+   "role": "hr",
+   "responsibility": "检查人力资源类4项是否完成"
+  },
+  {
+   "name": "IT清单核对员",
+   "role": "it",
+   "responsibility": "检查IT配置类5项是否完成"
+  },
+  {
+   "name": "Admin清单核对员",
+   "role": "admin",
+   "responsibility": "检查行政类4项是否完成"
+  }
+ ],
+ "shared_initial": {
+  "new_hire": "何思远",
+  "hr_checklist": [
+   "薪酬账户开通",
+   "门禁开通申请",
+   "社保公积金开户",
+   "员工手册发放"
+  ],
+  "it_checklist": [
+   "代码仓库权限",
+   "VPN配置",
+   "内网账号开通",
+   "电脑分配",
+   "IM群组拉入"
+  ],
+  "admin_checklist": [
+   "入职礼包发放",
+   "会议室预订培训",
+   "门禁卡制作",
+   "工位分配"
+  ],
+  "hr_completed": [
+   "社保公积金开户"
+  ],
+  "it_completed": [
+   "电脑分配",
+   "内网账号开通"
+  ],
+  "admin_completed": [
+   "工位分配"
+  ]
+ },
+ "verification": {
+  "required_sections": [
+   "HR清单",
+   "IT清单",
+   "Admin清单"
+  ],
+  "min_total_items": 13,
+  "min_completed_report_correct": 4,
+  "min_pending_report_correct": 9,
+  "answer_block_schema": {
+   "min_total_items": "list (min_length)",
+   "min_completed_report_correct": "list (min_length)",
+   "min_pending_report_correct": "list (min_length)"
+  },
+  "expected_sets": {},
+  "expected_values": {},
+  "expected_counts": {
+   "min_total_items": 13,
+   "min_completed_report_correct": 4,
+   "min_pending_report_correct": 9
+  }
+ },
+ "params": {
+  "hr_item_count": "t-int(4,7)",
+  "it_item_count": "t-int(4,7)",
+  "admin_item_count": "t-int(3,6)"
+ },
+ "variant_id": "t-CROSS-L-01__v06",
+ "variant_seed": 42006
+}

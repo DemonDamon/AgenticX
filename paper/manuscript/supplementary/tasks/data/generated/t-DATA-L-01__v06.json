@@ -1,0 +1,321 @@
+{
+ "task_id": "t-DATA-L-01",
+ "office_type": "data",
+ "task_type": "low_coupling",
+ "team_size": 2,
+ "description": "汇总月度销售渠道A和渠道B的销售指标，产出合并月度销售汇总表",
+ "roles": [
+  {
+   "name": "渠道A汇总员",
+   "role": "ch_a",
+   "responsibility": "统计渠道A的销量、销售额、Top3 SKU"
+  },
+  {
+   "name": "渠道B汇总员",
+   "role": "ch_b",
+   "responsibility": "统计渠道B的销量、销售额、Top3 SKU"
+  }
+ ],
+ "shared_initial": {
+  "channel_a": [
+   {
+    "sku": "SKU001",
+    "channel": "A",
+    "qty": 40,
+    "revenue": 3960
+   },
+   {
+    "sku": "SKU002",
+    "channel": "A",
+    "qty": 48,
+    "revenue": 4800
+   },
+   {
+    "sku": "SKU003",
+    "channel": "A",
+    "qty": 56,
+    "revenue": 5656
+   },
+   {
+    "sku": "SKU004",
+    "channel": "A",
+    "qty": 64,
+    "revenue": 6528
+   },
+   {
+    "sku": "SKU005",
+    "channel": "A",
+    "qty": 72,
+    "revenue": 7416
+   },
+   {
+    "sku": "SKU006",
+    "channel": "A",
+    "qty": 80,
+    "revenue": 8320
+   },
+   {
+    "sku": "SKU007",
+    "channel": "A",
+    "qty": 88,
+    "revenue": 9240
+   },
+   {
+    "sku": "SKU008",
+    "channel": "A",
+    "qty": 96,
+    "revenue": 10176
+   },
+   {
+    "sku": "SKU009",
+    "channel": "A",
+    "qty": 104,
+    "revenue": 11128
+   },
+   {
+    "sku": "SKU010",
+    "channel": "A",
+    "qty": 112,
+    "revenue": 12096
+   },
+   {
+    "sku": "SKU011",
+    "channel": "A",
+    "qty": 120,
+    "revenue": 13080
+   },
+   {
+    "sku": "SKU012",
+    "channel": "A",
+    "qty": 128,
+    "revenue": 14080
+   },
+   {
+    "sku": "SKU013",
+    "channel": "A",
+    "qty": 136,
+    "revenue": 15096
+   },
+   {
+    "sku": "SKU014",
+    "channel": "A",
+    "qty": 144,
+    "revenue": 16128
+   },
+   {
+    "sku": "SKU015",
+    "channel": "A",
+    "qty": 152,
+    "revenue": 17176
+   },
+   {
+    "sku": "SKU016",
+    "channel": "A",
+    "qty": 160,
+    "revenue": 18240
+   },
+   {
+    "sku": "SKU017",
+    "channel": "A",
+    "qty": 168,
+    "revenue": 19320
+   },
+   {
+    "sku": "SKU018",
+    "channel": "A",
+    "qty": 176,
+    "revenue": 20416
+   },
+   {
+    "sku": "SKU019",
+    "channel": "A",
+    "qty": 184,
+    "revenue": 21528
+   },
+   {
+    "sku": "SKU020",
+    "channel": "A",
+    "qty": 192,
+    "revenue": 22656
+   },
+   {
+    "sku": "SKU021",
+    "channel": "A",
+    "qty": 200,
+    "revenue": 23800
+   },
+   {
+    "sku": "SKU022",
+    "channel": "A",
+    "qty": 208,
+    "revenue": 24960
+   }
+  ],
+  "channel_b": [
+   {
+    "sku": "SKU001",
+    "channel": "B",
+    "qty": 40,
+    "revenue": 3040
+   },
+   {
+    "sku": "SKU002",
+    "channel": "B",
+    "qty": 57,
+    "revenue": 4389
+   },
+   {
+    "sku": "SKU003",
+    "channel": "B",
+    "qty": 74,
+    "revenue": 5772
+   },
+   {
+    "sku": "SKU004",
+    "channel": "B",
+    "qty": 91,
+    "revenue": 7189
+   },
+   {
+    "sku": "SKU005",
+    "channel": "B",
+    "qty": 108,
+    "revenue": 8640
+   },
+   {
+    "sku": "SKU006",
+    "channel": "B",
+    "qty": 125,
+    "revenue": 10125
+   },
+   {
+    "sku": "SKU007",
+    "channel": "B",
+    "qty": 142,
+    "revenue": 11644
+   },
+   {
+    "sku": "SKU008",
+    "channel": "B",
+    "qty": 159,
+    "revenue": 13197
+   },
+   {
+    "sku": "SKU009",
+    "channel": "B",
+    "qty": 176,
+    "revenue": 14784
+   },
+   {
+    "sku": "SKU010",
+    "channel": "B",
+    "qty": 193,
+    "revenue": 16405
+   },
+   {
+    "sku": "SKU011",
+    "channel": "B",
+    "qty": 210,
+    "revenue": 18060
+   },
+   {
+    "sku": "SKU012",
+    "channel": "B",
+    "qty": 47,
+    "revenue": 4089
+   },
+   {
+    "sku": "SKU013",
+    "channel": "B",
+    "qty": 64,
+    "revenue": 5632
+   },
+   {
+    "sku": "SKU014",
+    "channel": "B",
+    "qty": 81,
+    "revenue": 7209
+   },
+   {
+    "sku": "SKU015",
+    "channel": "B",
+    "qty": 98,
+    "revenue": 8820
+   },
+   {
+    "sku": "SKU016",
+    "channel": "B",
+    "qty": 115,
+    "revenue": 10465
+   },
+   {
+    "sku": "SKU017",
+    "channel": "B",
+    "qty": 132,
+    "revenue": 12144
+   },
+   {
+    "sku": "SKU018",
+    "channel": "B",
+    "qty": 149,
+    "revenue": 13857
+   },
+   {
+    "sku": "SKU019",
+    "channel": "B",
+    "qty": 166,
+    "revenue": 15604
+   },
+   {
+    "sku": "SKU020",
+    "channel": "B",
+    "qty": 183,
+    "revenue": 17385
+   },
+   {
+    "sku": "SKU021",
+    "channel": "B",
+    "qty": 200,
+    "revenue": 19200
+   },
+   {
+    "sku": "SKU022",
+    "channel": "B",
+    "qty": 217,
+    "revenue": 21049
+   }
+  ],
+  "period": "2026年8月"
+ },
+ "verification": {
+  "required_sections": [
+   "渠道A汇总",
+   "渠道B汇总",
+   "合计"
+  ],
+  "required_elements": [
+   "总销量",
+   "总销售额",
+   "Top3 SKU"
+  ],
+  "expected_total_qty": 5555,
+  "expected_total_revenue": 554499,
+  "answer_block_schema": {
+   "total_qty": "number",
+   "total_revenue": "number"
+  },
+  "expected_sets": {},
+  "expected_values": {
+   "total_qty": 5555,
+   "total_revenue": 554499
+  },
+  "expected_counts": {},
+  "value_tolerance": 0.02
+ },
+ "params": {
+  "sku_count": "t-int(20,40)",
+  "qty_base": "t-int(20,100)"
+ },
+ "variant_id": "t-DATA-L-01__v06",
+ "variant_seed": 42006
+}

@@ -1,0 +1,30 @@
+{
+ "task_id": "t-DATA-H-03",
+ "office_type": "data",
+ "task_type": "high_coupling",
+ "mode": "single",
+ "model": "kimi-k3",
+ "seed": 1,
+ "Q": 1.0,
+ "TMS": true,
+ "prompt_tokens": 3600,
+ "completion_tokens": 770,
+ "total_tokens": 4370,
+ "cached_tokens": 3584,
+ "elapsed": 22.99,
+ "llm_calls": 1,
+ "error": "",
+ "detail": {
+  "L1": 1.0,
+  "L2": 1.0,
+  "L3": NaN,
+  "l2::a_only::f1": 1.0,
+  "l2::b_only::f1": 1.0,
+  "l2::qty_mismatch_skus::f1": 1.0,
+  "notes": []
+ },
+ "output": "# 销售表A 与 库存表B 交叉核对报告\n\n## 一、核对范围\n- 表A记录数：52 条（SKU001–SKU052）\n- 表B记录数：50 条（SKU001–SKU048、SKU053–SKU054）\n- 比对键：sku；比对字段：qty、date\n\n## 二、差异汇总\n| 差异类型 | 数量 | 涉及SKU |\n|---|---|---|\n| A有B无 | 4 | SKU049、SKU050、SKU051、SKU052 |\n| B有A无 | 2 | SKU053、SKU054 |\n| 数值不一致 | 2 | SKU006、SKU022 |\n| 完全一致 | 46 | 其余SKU |\n\n## 三、差异明细\n\n### 1. A有B无（4条，销售已发生但库存无记录）\n| sku | A.qty | A.date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n### 2. B有A无（2条，库存有记录但销售无对应）\n| sku | B.qty | B.date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n### 3. 数值不一致（2条，日期一致、qty不符）\n| sku | A.qty | B.qty | 差值(B−A) | date |\n|---|---|---|---|---|\n| SKU006 | 80 | 85 | +5 | 2026-08-03 |\n| SKU022 | 105 | 100 | −5 | 2026-08-11 |\n\n## 四、结论与建议\n1. 两表共有 46 条完全一致，总体一致率约 88.5%（以A为基准）。\n2. SKU006、SKU022 差值均为 ±5，疑似录入/同步误差，建议回查原始单据后修正。\n3. SKU049–SKU052 集中在 8/25–8/26，疑为销售出库后库存未同步扣减登记，需补录。\n4. SKU053、SKU054 在库存表出现但无销售记录，需核实是否为采购入库未关联销售单或串号（与SKU049–SKU052日期相同，存在错登SKU的可能，建议重点比对这两组记录）。\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [\"SKU053\", \"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```",
+ "role_outputs": null,
+ "ts": "2026-08-29T22:35:27",
+ "Q_prev": 1.0
+}

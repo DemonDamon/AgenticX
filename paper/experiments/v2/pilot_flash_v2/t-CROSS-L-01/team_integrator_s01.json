@@ -1,0 +1,45 @@
+{
+  "task_id": "t-CROSS-L-01",
+  "office_type": "cross_dept",
+  "task_type": "low_coupling",
+  "mode": "team_integrator",
+  "model": "deepseek-v4-flash",
+  "seed": 1,
+  "Q": 0.1435,
+  "TMS": false,
+  "prompt_tokens": 2689,
+  "completion_tokens": 5560,
+  "total_tokens": 8249,
+  "cached_tokens": 1152,
+  "elapsed": 45.88,
+  "llm_calls": 4,
+  "error": "",
+  "detail": {
+    "L1": 0.0,
+    "L2": 0.3825396825396825,
+    "L3": NaN,
+    "sec::HR清单": 0.0,
+    "sec::IT清单": 0.0,
+    "sec::Admin清单": 0.0,
+    "l2::min_total_items::count": 0.2143,
+    "l2::min_completed_report_correct::count": 0.6,
+    "l2::min_pending_report_correct::count": 0.3333,
+    "notes": []
+  },
+  "output": "新员工：周晓彤\n\nHR清单\n- 合同签署：已完成\n- 社保公积金开户：未完成\n- 员工手册发放：未完成\n- 背景调查确认：已完成\n- 门禁开通申请：未完成\n\n本类共5项，完成2项，待办3项。\n\nIT清单\n- 企业邮箱开通：已完成\n- 电脑分配：未完成\n- VPN配置：未完成\n- 办公软件授权：已完成\n- 代码仓库权限：未完成\n\n本类共5项，完成2项，待办3项。\n\nAdmin清单\n- 工位分配：已完成\n- 门禁卡制作：未完成\n- 办公用品领取：未完成\n- 入职礼包发放：未完成\n\n本类共4项，完成1项，待办3项。\n\n```json\n{\n  \"min_total_items\": [\"hr_checklist (5)\", \"it_checklist (5)\", \"admin_checklist (4)\"],\n  \"min_completed_report_correct\": [\"hr_completed (2)\", \"it_completed (2)\", \"admin_completed (1)\"],\n  \"min_pending_report_correct\": [\"hr_pending (3)\", \"it_pending (3)\", \"admin_pending (3)\"]\n}\n```",
+  "role_outputs": [
+    [
+      "HR清单核对员",
+      "HR清单核对结果（新员工：周晓彤）\n\n- 合同签署：✅ 已完成\n- 社保公积金开户：❌ 未完成\n- 员工手册发放：❌ 未完成\n- 背景调查确认：✅ 已完成\n- 门禁开通申请：❌ 未完成\n\n结论：HR类5项中，完成2项，待办3项。\n\n```json\n{\"min_total_items\": \"hr_checklist (5)\", \"min_completed_report_correct\": \"hr_completed (2)\", \"min_pending_report_correct\": \"待办3项\"}\n```"
+    ],
+    [
+      "IT清单核对员",
+      "IT清单核对结果（新员工：周晓彤）\n\n- 企业邮箱开通：✅ 已完成\n- 电脑分配：❌ 未完成\n- VPN配置：❌ 未完成\n- 办公软件授权：✅ 已完成\n- 代码仓库权限：❌ 未完成\n\n结论：IT类5项中，完成2项，待办3项。\n\n```json\n{\"min_total_items\": \"it_checklist (5)\", \"min_completed_report_correct\": \"it_completed (2)\", \"min_pending_report_correct\": \"待办3项\"}\n```"
+    ],
+    [
+      "Admin清单核对员",
+      "Admin清单核对结果（新员工：周晓彤）\n\n- 工位分配：✅ 已完成\n- 门禁卡制作：❌ 未完成\n- 办公用品领取：❌ 未完成\n- 入职礼包发放：❌ 未完成\n\n结论：Admin类4项中，完成1项，待办3项。\n\n```json\n{\"min_total_items\": \"admin_checklist (4)\", \"min_completed_report_correct\": \"admin_completed (1)\", \"min_pending_report_correct\": \"待办3项\"}\n```"
+    ]
+  ],
+  "ts": "2026-08-29T11:28:57"
+}

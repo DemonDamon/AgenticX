@@ -1,0 +1,192 @@
+{
+ "task_id": "t-PROJ-H-03",
+ "office_type": "project",
+ "task_type": "high_coupling",
+ "team_size": 6,
+ "description": "检测5个项目的资源冲突，完成重排：5项目分别梳理需求→冲突消解→重排",
+ "roles": [
+  {
+   "name": "P1需求员",
+   "role": "p1",
+   "responsibility": "梳理P1项目资源需求和关键路径"
+  },
+  {
+   "name": "P2需求员",
+   "role": "p2",
+   "responsibility": "梳理P2项目资源需求和关键路径"
+  },
+  {
+   "name": "P3需求员",
+   "role": "p3",
+   "responsibility": "梳理P3项目资源需求和关键路径"
+  },
+  {
+   "name": "P4需求员",
+   "role": "p4",
+   "responsibility": "梳理P4项目资源需求和关键路径"
+  },
+  {
+   "name": "P5需求员",
+   "role": "p5",
+   "responsibility": "梳理P5项目资源需求和关键路径"
+  },
+  {
+   "name": "排期冲突消解员",
+   "role": "solver",
+   "responsibility": "检测人员重叠冲突，给出重排方案"
+  }
+ ],
+ "shared_initial": {
+  "people": [
+   "张伟工程师",
+   "李娜工程师",
+   "王强工程师",
+   "陈静工程师",
+   "刘洋工程师",
+   "杨帆工程师",
+   "赵磊工程师"
+  ],
+  "tasks": [
+   {
+    "id": "P1-T1",
+    "project": "P1",
+    "name": "P1项目任务1",
+    "est_hours": 40,
+    "start": "2026-09-05",
+    "end": "2026-09-09",
+    "required_skills": [
+     "产品"
+    ]
+   },
+   {
+    "id": "P1-T2",
+    "project": "P1",
+    "name": "P1项目任务2",
+    "est_hours": 48,
+    "start": "2026-09-08",
+    "end": "2026-09-13",
+    "required_skills": [
+     "研发"
+    ],
+    "assignee": "赵磊工程师"
+   },
+   {
+    "id": "P2-T1",
+    "project": "P2",
+    "name": "P2项目任务1",
+    "est_hours": 40,
+    "start": "2026-09-09",
+    "end": "2026-09-14",
+    "required_skills": [
+     "研发"
+    ]
+   },
+   {
+    "id": "P2-T2",
+    "project": "P2",
+    "name": "P2项目任务2",
+    "est_hours": 32,
+    "start": "2026-09-07",
+    "end": "2026-09-12",
+    "required_skills": [
+     "产品"
+    ]
+   },
+   {
+    "id": "P3-T1",
+    "project": "P3",
+    "name": "P3项目任务1",
+    "est_hours": 16,
+    "start": "2026-09-09",
+    "end": "2026-09-14",
+    "required_skills": [
+     "产品"
+    ],
+    "assignee": "陈静工程师"
+   },
+   {
+    "id": "P3-T2",
+    "project": "P3",
+    "name": "P3项目任务2",
+    "est_hours": 40,
+    "start": "2026-09-10",
+    "end": "2026-09-15",
+    "required_skills": [
+     "研发"
+    ],
+    "assignee": "赵磊工程师"
+   },
+   {
+    "id": "P4-T1",
+    "project": "P4",
+    "name": "P4项目任务1",
+    "est_hours": 24,
+    "start": "2026-09-03",
+    "end": "2026-09-10",
+    "required_skills": [
+     "研发"
+    ]
+   },
+   {
+    "id": "P4-T2",
+    "project": "P4",
+    "name": "P4项目任务2",
+    "est_hours": 48,
+    "start": "2026-09-04",
+    "end": "2026-09-07",
+    "required_skills": [
+     "前端"
+    ]
+   },
+   {
+    "id": "P5-T1",
+    "project": "P5",
+    "name": "P5项目任务1",
+    "est_hours": 40,
+    "start": "2026-09-11",
+    "end": "2026-09-16",
+    "required_skills": [
+     "运维"
+    ],
+    "assignee": "陈静工程师"
+   },
+   {
+    "id": "P5-T2",
+    "project": "P5",
+    "name": "P5项目任务2",
+    "est_hours": 48,
+    "start": "2026-09-05",
+    "end": "2026-09-09",
+    "required_skills": [
+     "运维"
+    ]
+   }
+  ]
+ },
+ "verification": {
+  "required_sections": [
+   "项目需求汇总",
+   "冲突列表",
+   "重排方案"
+  ],
+  "min_conflicts_identified": 1,
+  "min_rescheduling_actions": 2,
+  "answer_block_schema": {
+   "min_conflicts_identified": "list (min_length)",
+   "min_rescheduling_actions": "list (min_length)"
+  },
+  "expected_sets": {},
+  "expected_values": {},
+  "expected_counts": {
+   "min_conflicts_identified": 1,
+   "min_rescheduling_actions": 2
+  }
+ },
+ "params": {
+  "project_count": "t-int(3,5)",
+  "tasks_per_project": "t-int(2,5)",
+  "conflict_count": "t-int(1,4)"
+ },
+ "variant_id": "t-PROJ-H-03__v03",
+ "variant_seed": 42003
+}

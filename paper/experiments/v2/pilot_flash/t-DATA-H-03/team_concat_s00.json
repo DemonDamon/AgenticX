@@ -1,0 +1,42 @@
+{
+ "task_id": "t-DATA-H-03",
+ "office_type": "data",
+ "task_type": "high_coupling",
+ "mode": "team_concat",
+ "model": "deepseek-v4-flash",
+ "seed": 0,
+ "Q": 1.0,
+ "TMS": true,
+ "prompt_tokens": 11420,
+ "completion_tokens": 2423,
+ "total_tokens": 13843,
+ "cached_tokens": 10880,
+ "elapsed": 19.45,
+ "llm_calls": 3,
+ "error": "",
+ "detail": {
+  "L1": 1.0,
+  "L2": 1.0,
+  "L3": NaN,
+  "notes": [
+   "L2: 该任务无数值断言，记满分"
+  ]
+ },
+ "output": "## A源核对员\n\n**A源核对报告**\n\n**1. A有B无（仅表A存在）**\n- SKU049：qty=62，date=2026-08-25\n- SKU050：qty=172，date=2026-08-25\n- SKU051：qty=55，date=2026-08-26\n- SKU052：qty=138，date=2026-08-26\n\n**2. 数值不一致（两表均有，qty不同）**\n- SKU006：表A=80，表B=85（A比B少5）\n- SKU022：表A=105，表B=100（A比B多5）\n\n## B源核对员\n\n**B源核对报告**\n\n**1. B有A无（仅表B存在）**\n- SKU053：qty=65，date=2026-08-25\n- SKU054：qty=178，date=2026-08-25\n\n**2. 数值不一致（两表均有，qty不同）**\n- SKU006：表A=80，表B=85（B比A多5）\n- SKU022：表A=105，表B=100（B比A少5）\n\n## 合并员\n\n**合并核对报告**\n\n**1. 仅表A存在（A有B无）**\n- SKU049：qty=62，date=2026-08-25\n- SKU050：qty=172，date=2026-08-25\n- SKU051：qty=55，date=2026-08-26\n- SKU052：qty=138，date=2026-08-26\n\n**2. 仅表B存在（B有A无）**\n- SKU053：qty=65，date=2026-08-25\n- SKU054：qty=178，date=2026-08-25\n\n**3. 数值不一致（两表均有，qty不同）**\n- SKU006：表A=80，表B=85（A比B少5）\n- SKU022：表A=105，表B=100（A比B多5）\n\n**结论**：共10条差异；A独有4条，B独有2条，数值不一致2条。双方报告一致，无冲突。",
+ "role_outputs": [
+  [
+   "A源核对员",
+   "**A源核对报告**\n\n**1. A有B无（仅表A存在）**\n- SKU049：qty=62，date=2026-08-25\n- SKU050：qty=172，date=2026-08-25\n- SKU051：qty=55，date=2026-08-26\n- SKU052：qty=138，date=2026-08-26\n\n**2. 数值不一致（两表均有，qty不同）**\n- SKU006：表A=80，表B=85（A比B少5）\n- SKU022：表A=105，表B=100（A比B多5）"
+  ],
+  [
+   "B源核对员",
+   "**B源核对报告**\n\n**1. B有A无（仅表B存在）**\n- SKU053：qty=65，date=2026-08-25\n- SKU054：qty=178，date=2026-08-25\n\n**2. 数值不一致（两表均有，qty不同）**\n- SKU006：表A=80，表B=85（B比A多5）\n- SKU022：表A=105，表B=100（B比A少5）"
+  ],
+  [
+   "合并员",
+   "**合并核对报告**\n\n**1. 仅表A存在（A有B无）**\n- SKU049：qty=62，date=2026-08-25\n- SKU050：qty=172，date=2026-08-25\n- SKU051：qty=55，date=2026-08-26\n- SKU052：qty=138，date=2026-08-26\n\n**2. 仅表B存在（B有A无）**\n- SKU053：qty=65，date=2026-08-25\n- SKU054：qty=178，date=2026-08-25\n\n**3. 数值不一致（两表均有，qty不同）**\n- SKU006：表A=80，表B=85（A比B少5）\n- SKU022：表A=105，表B=100（A比B多5）\n\n**结论**：共10条差异；A独有4条，B独有2条，数值不一致2条。双方报告一致，无冲突。"
+  ]
+ ],
+ "ts": "2026-08-28T22:16:02",
+ "Q_prev": 1.0
+}

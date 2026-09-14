@@ -1,0 +1,32 @@
+{
+  "task_id": "t-CROSS-L-01",
+  "office_type": "cross_dept",
+  "task_type": "low_coupling",
+  "mode": "single_refine_k",
+  "model": "deepseek-v4-flash",
+  "seed": 2,
+  "Q": 0.375,
+  "TMS": false,
+  "prompt_tokens": 3025,
+  "completion_tokens": 8815,
+  "total_tokens": 11840,
+  "cached_tokens": 0,
+  "elapsed": 67.81,
+  "llm_calls": 3,
+  "error": "",
+  "detail": {
+    "L1": 0.0,
+    "L2": 1.0,
+    "L3": NaN,
+    "sec::HR清单": 0.0,
+    "sec::IT清单": 0.0,
+    "sec::Admin清单": 0.0,
+    "l2::min_total_items::count": 1.0,
+    "l2::min_completed_report_correct::count": 1.0,
+    "l2::min_pending_report_correct::count": 1.0,
+    "notes": []
+  },
+  "output": "# 新员工入职三部门清单完整性核查与最终Checklist\n\n核查对象：周晓彤  \n核查范围：HR清单5项、IT清单5项、Admin清单4项，共14项\n\n## 一、核查结论\n\n1. **清单完整性**：三部门清单共14项，与预设清单完全一致，未发现缺失项或清单外项目。\n2. **状态准确性**：已完成项目均属于对应部门清单，未出现错报、漏报；已完成5项，待办9项。\n\n## 二、部门完整性汇总\n\n| 部门 | 清单项数 | 已完成 | 待办 | 完整性判定 |\n|---|---|---|---|---|\n| HR | 5 | 2 | 3 | 完整 |\n| IT | 5 | 2 | 3 | 完整 |\n| Admin | 4 | 1 | 3 | 完整 |\n| 合计 | 14 | 5 | 9 | 完整 |\n\n## 三、最终Checklist\n\n| 部门 | 项目 | 状态 |\n|---|---|---|\n| HR | 合同签署 | 已完成 |\n| HR | 社保公积金开户 | 待办 |\n| HR | 员工手册发放 | 待办 |\n| HR | 背景调查确认 | 已完成 |\n| HR | 门禁开通申请 | 待办 |\n| IT | 企业邮箱开通 | 已完成 |\n| IT | 电脑分配 | 待办 |\n| IT | VPN配置 | 待办 |\n| IT | 办公软件授权 | 已完成 |\n| IT | 代码仓库权限 | 待办 |\n| Admin | 工位分配 | 已完成 |\n| Admin | 门禁卡制作 | 待办 |\n| Admin | 办公用品领取 | 待办 |\n| Admin | 入职礼包发放 | 待办 |\n\n## 四、待办事项汇总\n\n- HR待办（3项）：社保公积金开户、员工手册发放、门禁开通申请\n- IT待办（3项）：电脑分配、VPN配置、代码仓库权限\n- Admin待办（3项）：门禁卡制作、办公用品领取、入职礼包发放\n\n```json\n{\n  \"min_total_items\": [\n    \"合同签署\",\n    \"社保公积金开户\",\n    \"员工手册发放\",\n    \"背景调查确认\",\n    \"门禁开通申请\",\n    \"企业邮箱开通\",\n    \"电脑分配\",\n    \"VPN配置\",\n    \"办公软件授权\",\n    \"代码仓库权限\",\n    \"工位分配\",\n    \"门禁卡制作\",\n    \"办公用品领取\",\n    \"入职礼包发放\"\n  ],\n  \"min_completed_report_correct\": [\n    \"合同签署\",\n    \"背景调查确认\",\n    \"企业邮箱开通\",\n    \"办公软件授权\",\n    \"工位分配\"\n  ],\n  \"min_pending_report_correct\": [\n    \"社保公积金开户\",\n    \"员工手册发放\",\n    \"门禁开通申请\",\n    \"电脑分配\",\n    \"VPN配置\",\n    \"代码仓库权限\",\n    \"门禁卡制作\",\n    \"办公用品领取\",\n    \"入职礼包发放\"\n  ]\n}\n```",
+  "role_outputs": null,
+  "ts": "2026-08-29T09:57:36"
+}

@@ -1,0 +1,29 @@
+{
+ "task_id": "t-DATA-H-03",
+ "office_type": "data",
+ "task_type": "high_coupling",
+ "mode": "single_bon_k",
+ "model": "deepseek-v4-flash",
+ "seed": 1,
+ "Q": 1.0,
+ "TMS": true,
+ "prompt_tokens": 13007,
+ "completion_tokens": 6834,
+ "total_tokens": 19841,
+ "cached_tokens": 0,
+ "elapsed": 54.71,
+ "llm_calls": 4,
+ "error": "",
+ "detail": {
+  "L1": 1.0,
+  "L2": 1.0,
+  "L3": NaN,
+  "notes": [
+   "L2: 该任务无数值断言，记满分"
+  ]
+ },
+ "output": "# 销售表A与库存表B交叉核对报告\n\n## 一、核对概况\n\n- 数据源：表A（销售表）52条，表B（库存表）50条。\n- 核对键：SKU。\n- 比对字段：qty、date。\n- 表内重复SKU：未发现。\n- 共同存在SKU：48个。\n- 完全一致SKU：46个。\n- 差异合计：8项。\n\n## 二、差异汇总\n\n| 差异类别 | 差异项数 | 涉及SKU |\n|---|---:|---|\n| A有B无 | 4 | SKU049、SKU050、SKU051、SKU052 |\n| B有A无 | 2 | SKU053、SKU054 |\n| 数值不一致 | 2 | SKU006、SKU022 |\n\n## 三、A有B无明细\n\n| SKU | A.qty | A.date | 说明 |\n|---|---:|---|---|\n| SKU049 | 62 | 2026-08-25 | 表B无此SKU |\n| SKU050 | 172 | 2026-08-25 | 表B无此SKU |\n| SKU051 | 55 | 2026-08-26 | 表B无此SKU |\n| SKU052 | 138 | 2026-08-26 | 表B无此SKU |\n\n## 四、B有A无明细\n\n| SKU | B.qty | B.date | 说明 |\n|---|---:|---|---|\n| SKU053 | 65 | 2026-08-25 | 表A无此SKU |\n| SKU054 | 178 | 2026-08-25 | 表A无此SKU |\n\n## 五、数值不一致明细\n\n| SKU | A.qty | B.qty | A.date | B.date | 差值（B-A） | 说明 |\n|---|---:|---:|---|---|---:|---|\n| SKU006 | 80 | 85 | 2026-08-03 | 2026-08-03 | +5 | 表B比表A多5 |\n| SKU022 | 105 | 100 | 2026-08-11 | 2026-08-11 | -5 | 表B比表A少5 |\n\n## 六、处理建议\n\n1. 核实SKU049-SKU052在表B中是否漏录、漏同步。\n2. 核实SKU053、SKU054在表A中是否漏传、漏采集。\n3. 重点复核SKU006、SKU022的数量差异，确认统计口径后修正并同步数据。\n4. 建议后续按SKU+日期作为唯一键，建立定期自动核对机制。",
+ "role_outputs": null,
+ "ts": "2026-08-28T23:38:40",
+ "Q_prev": 1.0
+}

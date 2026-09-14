@@ -1,0 +1,42 @@
+{
+ "task_id": "t-DATA-H-03",
+ "office_type": "data",
+ "task_type": "high_coupling",
+ "mode": "team_integrator",
+ "model": "deepseek-v4-flash",
+ "seed": 2,
+ "Q": 1.0,
+ "TMS": true,
+ "prompt_tokens": 12446,
+ "completion_tokens": 2074,
+ "total_tokens": 14520,
+ "cached_tokens": 10752,
+ "elapsed": 16.19,
+ "llm_calls": 4,
+ "error": "",
+ "detail": {
+  "L1": 1.0,
+  "L2": 1.0,
+  "L3": NaN,
+  "notes": [
+   "L2: 该任务无数值断言，记满分"
+  ]
+ },
+ "output": "# 销售表A与库存表B交叉核对报告\n\n## 一、A有B无（仅销售表A存在）\n- SKU049：A qty=62\n- SKU050：A qty=172\n- SKU051：A qty=55\n- SKU052：A qty=138\n\n## 二、B有A无（仅库存表B存在）\n- SKU053：B qty=65\n- SKU054：B qty=178\n\n## 三、数值不一致（A与B均存在，但qty不同）\n\n| SKU | A qty | B qty | 差异 |\n|---|---|---|---|\n| SKU006 | 80 | 85 | -5 |\n| SKU022 | 105 | 100 | +5 |\n\n## 四、汇总\n- 差异总数：8条（SKU049-054共6条存在性差异，SKU006、SKU022共2条数值差异）\n- 其余共有SKU（SKU001-SKU005、SKU007-SKU021、SKU023-SKU048）数值均一致。",
+ "role_outputs": [
+  [
+   "A源核对员",
+   "# A源核对报告（checker_a）\n\n## 一、A有B无（仅表A存在）\n- SKU049：A qty=62\n- SKU050：A qty=172\n- SKU051：A qty=55\n- SKU052：A qty=138\n\n## 二、数值不一致（A与B均存在，但qty不同）\n| SKU | A qty | B qty | 差异 |\n|---|---|---|---|\n| SKU006 | 80 | 85 | -5 |\n| SKU022 | 105 | 100 | +5 |\n\n## 三、说明\n其余A与B共有的SKU（SKU001-SKU005、SKU007-SKU021、SKU023-SKU048）数值均一致。未检查B有A无的SKU（SKU053、SKU054），该部分不属于本角色职责。"
+  ],
+  [
+   "B源核对员",
+   "# B源核对报告（checker_b）\n\n## 一、B有A无（仅表B存在）\n- SKU053：B qty=65\n- SKU054：B qty=178\n\n## 二、数值不一致（A与B均存在，但qty不同）\n| SKU | A qty | B qty | 差异 |\n|---|---|---|---|\n| SKU006 | 80 | 85 | -5 |\n| SKU022 | 105 | 100 | +5 |\n\n## 三、说明\n其余A与B共有的SKU（SKU001-SKU005、SKU007-SKU021、SKU023-SKU052）数值均一致。A有B无及B有A无已分别由对应核对员输出，本角色仅列出上述差异。"
+  ],
+  [
+   "合并员",
+   "# 合并核对报告\n\n## 一、A有B无（仅销售表A存在）\n- SKU049：A qty=62\n- SKU050：A qty=172\n- SKU051：A qty=55\n- SKU052：A qty=138\n\n## 二、B有A无（仅库存表B存在）\n- SKU053：B qty=65\n- SKU054：B qty=178\n\n## 三、数值不一致（两表均存在，qty不同）\n| SKU | A qty | B qty | 差异 |\n|---|---|---|---|\n| SKU006 | 80 | 85 | -5 |\n| SKU022 | 105 | 100 | +5 |\n\n## 四、汇总\n- 差异总数：8条（SKU049-054共6条存在性差异，SKU006、SKU022共2条数值差异）\n- 其余共有SKU（SKU001-SKU005、SKU007-SKU021、SKU023-SKU048）数值均一致。"
+  ]
+ ],
+ "ts": "2026-08-28T21:27:06",
+ "Q_prev": 1.0
+}

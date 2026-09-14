@@ -1,0 +1,45 @@
+{
+  "task_id": "t-CROSS-L-01",
+  "office_type": "cross_dept",
+  "task_type": "low_coupling",
+  "mode": "team_last",
+  "model": "deepseek-v4-flash",
+  "seed": 0,
+  "Q": 0.1024,
+  "TMS": false,
+  "prompt_tokens": 2004,
+  "completion_tokens": 2058,
+  "total_tokens": 4062,
+  "cached_tokens": 1152,
+  "elapsed": 20.39,
+  "llm_calls": 3,
+  "error": "",
+  "detail": {
+    "L1": 0.0,
+    "L2": 0.273015873015873,
+    "L3": NaN,
+    "sec::HR清单": 0.0,
+    "sec::IT清单": 0.0,
+    "sec::Admin清单": 0.0,
+    "l2::min_total_items::count": 0.2857,
+    "l2::min_completed_report_correct::count": 0.2,
+    "l2::min_pending_report_correct::count": 0.3333,
+    "notes": []
+  },
+  "output": "行政类4项核查结果：\n\n- 总项（4项）：工位分配、门禁卡制作、办公用品领取、入职礼包发放\n- 已完成（1项）：工位分配\n- 未完成（3项）：门禁卡制作、办公用品领取、入职礼包发放\n\n```json\n{\n  \"min_total_items\": [\"工位分配\", \"门禁卡制作\", \"办公用品领取\", \"入职礼包发放\"],\n  \"min_completed_report_correct\": [\"工位分配\"],\n  \"min_pending_report_correct\": [\"门禁卡制作\", \"办公用品领取\", \"入职礼包发放\"]\n}\n```",
+  "role_outputs": [
+    [
+      "HR清单核对员",
+      "作为HR清单核对员，我负责核查人力资源类5项完成情况：\n\n- **总项（5项）**：合同签署、社保公积金开户、员工手册发放、背景调查确认、门禁开通申请。\n- **已完成（2项）**：合同签署、背景调查确认。\n- **未完成（3项）**：社保公积金开户、员工手册发放、门禁开通申请。\n\n```json\n{\n  \"min_total_items\": [\"合同签署\", \"社保公积金开户\", \"员工手册发放\", \"背景调查确认\", \"门禁开通申请\"],\n  \"min_completed_report_correct\": [\"合同签署\", \"背景调查确认\"],\n  \"min_pending_report_correct\": [\"社保公积金开户\", \"员工手册发放\", \"门禁开通申请\"]\n}\n```"
+    ],
+    [
+      "IT清单核对员",
+      "IT清单核对结果（5项）：\n\n- 已完成（2项）：企业邮箱开通、办公软件授权\n- 未完成（3项）：电脑分配、VPN配置、代码仓库权限\n\n```json\n{\n  \"min_total_items\": [\"企业邮箱开通\", \"电脑分配\", \"VPN配置\", \"办公软件授权\", \"代码仓库权限\"],\n  \"min_completed_report_correct\": [\"企业邮箱开通\", \"办公软件授权\"],\n  \"min_pending_report_correct\": [\"电脑分配\", \"VPN配置\", \"代码仓库权限\"]\n}\n```"
+    ],
+    [
+      "Admin清单核对员",
+      "行政类4项核查结果：\n\n- 总项（4项）：工位分配、门禁卡制作、办公用品领取、入职礼包发放\n- 已完成（1项）：工位分配\n- 未完成（3项）：门禁卡制作、办公用品领取、入职礼包发放\n\n```json\n{\n  \"min_total_items\": [\"工位分配\", \"门禁卡制作\", \"办公用品领取\", \"入职礼包发放\"],\n  \"min_completed_report_correct\": [\"工位分配\"],\n  \"min_pending_report_correct\": [\"门禁卡制作\", \"办公用品领取\", \"入职礼包发放\"]\n}\n```"
+    ]
+  ],
+  "ts": "2026-08-29T12:06:21"
+}

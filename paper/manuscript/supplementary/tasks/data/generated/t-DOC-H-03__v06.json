@@ -1,0 +1,117 @@
+{
+ "task_id": "t-DOC-H-03",
+ "office_type": "document",
+ "task_type": "high_coupling",
+ "team_size": 4,
+ "description": "对供应商合同进行多角色交叉审阅：分别审责任/保密/付款条款，并汇总冲突和修改建议",
+ "roles": [
+  {
+   "name": "责任条款审阅员",
+   "role": "liability",
+   "responsibility": "检查SLA、违约责任、赔偿上限条款"
+  },
+  {
+   "name": "保密条款审阅员",
+   "role": "nda",
+   "responsibility": "检查保密范围、期限、例外、违约条款"
+  },
+  {
+   "name": "付款条款审阅员",
+   "role": "payment",
+   "responsibility": "检查付款节点、开票要求、滞纳金条款"
+  },
+  {
+   "name": "冲突消解员",
+   "role": "merge",
+   "responsibility": "合并三方意见，识别条款间冲突，给出统一修改建议"
+  }
+ ],
+ "shared_initial": {
+  "contract_clauses": [
+   {
+    "id": "C1",
+    "type": "责任",
+    "text": "乙方SLA可用性98.6%，单次违约赔偿上限为合同金额1%，总赔偿不超8%"
+   },
+   {
+    "id": "C2",
+    "type": "保密",
+    "text": "保密期限4年，员工离职后保密义务自动解除，泄密赔偿12万元/次"
+   },
+   {
+    "id": "C3",
+    "type": "付款",
+    "text": "预付款40%，验收后89天内付款尾款，逾期滞纳金按日0.5%"
+   },
+   {
+    "id": "C4",
+    "type": "责任",
+    "text": "重大数据泄露不适用赔偿上限，按实际损失赔偿"
+   },
+   {
+    "id": "C5",
+    "type": "保密",
+    "text": "审计数据属双方共有，不受保密期限限制"
+   },
+   {
+    "id": "C6",
+    "type": "付款",
+    "text": "验收标准以附件B为准，附件与正文冲突以正文优先"
+   },
+   {
+    "id": "C8",
+    "type": "保密",
+    "text": "双方高管及法务视为保密义务当然知悉人"
+   },
+   {
+    "id": "C10",
+    "type": "责任",
+    "text": "间接损失不在赔偿范围之列"
+   }
+  ],
+  "industry_standard": {
+   "SLA_min": "99.5%",
+   "nda_term_years": 5,
+   "late_fee_max_daily": "0.05%"
+  }
+ },
+ "verification": {
+  "required_sections": [
+   "责任条款意见",
+   "保密条款意见",
+   "付款条款意见",
+   "冲突识别",
+   "修改建议"
+  ],
+  "min_conflicts_identified": 2,
+  "min_amendments": 4,
+  "expected_conflicts": [
+   "保密期限4年 vs 行业标准5年",
+   "滞纳金0.5%/日 vs 行业标准上限0.05%/日",
+   "离职后保密义务解除 vs 行业惯例"
+  ],
+  "answer_block_schema": {
+   "conflicts": "list",
+   "min_conflicts_identified": "list (min_length)",
+   "min_amendments": "list (min_length)"
+  },
+  "expected_sets": {
+   "conflicts": [
+    "保密期限4年 vs 行业标准5年",
+    "滞纳金0.5%/日 vs 行业标准上限0.05%/日",
+    "离职后保密义务解除 vs 行业惯例"
+   ]
+  },
+  "expected_values": {},
+  "expected_counts": {
+   "min_conflicts_identified": 2,
+   "min_amendments": 4
+  }
+ },
+ "params": {
+  "clause_count": "t-int(8,8)",
+  "sla": "t-float(98.5,99.9,1)"
+ },
+ "variant_id": "t-DOC-H-03__v06",
+ "variant_seed": 42006
+}

@@ -1,0 +1,42 @@
+{
+  "task_id": "t-DATA-H-03",
+  "office_type": "data",
+  "task_type": "high_coupling",
+  "mode": "team_last",
+  "model": "deepseek-v4-flash",
+  "seed": 2,
+  "Q": 1.0,
+  "TMS": true,
+  "prompt_tokens": 11638,
+  "completion_tokens": 1756,
+  "total_tokens": 13394,
+  "cached_tokens": 10880,
+  "elapsed": 15.69,
+  "llm_calls": 3,
+  "error": "",
+  "detail": {
+    "L1": 1.0,
+    "L2": 1.0,
+    "L3": NaN,
+    "l2::a_only::f1": 1.0,
+    "l2::b_only::f1": 1.0,
+    "l2::qty_mismatch_skus::f1": 1.0,
+    "notes": []
+  },
+  "output": "## 合并核对报告\n\n### 三类差异汇总\n\n- **A有B无（仅销售表存在）**：SKU049、SKU050、SKU051、SKU052\n- **B有A无（仅库存表存在）**：SKU053、SKU054\n- **数值不一致（同一SKU数量不同）**：\n  - SKU006：A=80，B=85\n  - SKU022：A=105，B=100\n\n其余SKU两表数量一致。\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [\"SKU053\", \"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```",
+  "role_outputs": [
+    [
+      "A源核对员",
+      "### A源核对员交付物\n\n- **A有B无（仅A存在）**：SKU049, SKU050, SKU051, SKU052\n- **数值不一致（同一SKU数量不同）**：\n  - SKU006：A=80，B=85\n  - SKU022：A=105，B=100\n\n```json\n{\n  \"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"],\n  \"b_only\": [\"SKU053\", \"SKU054\"],\n  \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]\n}\n```"
+    ],
+    [
+      "B源核对员",
+      "### B源核对员交付物\n\n- **B有A无**：SKU053, SKU054\n- **数值不一致**：\n  - SKU006：A=80，B=85\n  - SKU022：A=105，B=100\n- **A有B无（交叉参考）**：SKU049, SKU050, SKU051, SKU052\n- 其余SKU数量一致。\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [\"SKU053\", \"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```"
+    ],
+    [
+      "合并员",
+      "## 合并核对报告\n\n### 三类差异汇总\n\n- **A有B无（仅销售表存在）**：SKU049、SKU050、SKU051、SKU052\n- **B有A无（仅库存表存在）**：SKU053、SKU054\n- **数值不一致（同一SKU数量不同）**：\n  - SKU006：A=80，B=85\n  - SKU022：A=105，B=100\n\n其余SKU两表数量一致。\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [\"SKU053\", \"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```"
+    ]
+  ],
+  "ts": "2026-08-29T12:09:19"
+}

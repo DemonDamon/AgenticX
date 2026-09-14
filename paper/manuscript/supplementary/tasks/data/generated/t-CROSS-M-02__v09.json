@@ -1,0 +1,81 @@
+{
+ "task_id": "t-CROSS-M-02",
+ "office_type": "cross_dept",
+ "task_type": "medium_coupling",
+ "team_size": 3,
+ "description": "处理客户投诉工单：提取客诉→技术根因分析→撰写回复邮件",
+ "roles": [
+  {
+   "name": "客诉提取员",
+   "role": "extract",
+   "responsibility": "从工单中提取客户信息、问题描述、期望诉求"
+  },
+  {
+   "name": "技术分析师",
+   "role": "tech",
+   "responsibility": "结合技术日志，分析根因和修复方案"
+  },
+  {
+   "name": "回复撰写员",
+   "role": "reply",
+   "responsibility": "撰写客户回复邮件（含解决方案+时限+责任人）"
+  }
+ ],
+ "shared_initial": {
+  "ticket": {
+   "id": "TK-20260116-018",
+   "customer": "蓝箭科技有限公司",
+   "contact": "王强经理",
+   "issue": "业务系统间歇性异常，近三天发生4次，每次约4分钟恢复，严重影响一线人员使用。已排除本地网络问题。",
+   "severity": "P2",
+   "expectation": "尽快查明原因并给出修复计划，若短期无法修复需给出临时方案。"
+  },
+  "tech_logs": [
+   "08-02 18:54 WARN api_rate_limited 5s",
+   "08-06 12:57 ERR db_slow_query_detected",
+   "08-21 14:11 ERR cdn_cache_stale 1s",
+   "08-24 15:37 WARN auth_token_refresh_failed",
+   "08-25 10:43 ERR gateway_503_upstream_timeout 4s",
+   "08-02 12:17 ERR oss_upload_retry",
+   "08-06 09:39 WARN kafka_consumer_lag_alert 4s"
+  ]
+ },
+ "verification": {
+  "required_sections": [
+   "客诉摘要",
+   "根因分析",
+   "回复邮件"
+  ],
+  "reply_required_elements": [
+   "致歉",
+   "根因",
+   "修复方案",
+   "修复时限",
+   "责任人"
+  ],
+  "reply_element_count_min": 4,
+  "answer_block_schema": {
+   "reply_elements": "list",
+   "reply_element_count_min": "list (min_length)"
+  },
+  "expected_sets": {
+   "reply_elements": [
+    "致歉",
+    "根因",
+    "修复方案",
+    "修复时限",
+    "责任人"
+   ]
+  },
+  "expected_values": {},
+  "expected_counts": {
+   "reply_element_count_min": 4
+  }
+ },
+ "params": {
+  "error_count": "t-int(3,8)",
+  "severity": "t-choice(['P1','P2','P3'])"
+ },
+ "variant_id": "t-CROSS-M-02__v09",
+ "variant_seed": 42009
+}

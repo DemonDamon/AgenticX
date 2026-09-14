@@ -1,0 +1,42 @@
+{
+ "task_id": "t-DATA-H-03",
+ "office_type": "data",
+ "task_type": "high_coupling",
+ "mode": "team_last",
+ "model": "deepseek-v4-flash",
+ "seed": 1,
+ "Q": 1.0,
+ "TMS": true,
+ "prompt_tokens": 11528,
+ "completion_tokens": 1491,
+ "total_tokens": 13019,
+ "cached_tokens": 10752,
+ "elapsed": 13.68,
+ "llm_calls": 3,
+ "error": "",
+ "detail": {
+  "L1": 1.0,
+  "L2": 1.0,
+  "L3": NaN,
+  "notes": [
+   "L2: 该任务无数值断言，记满分"
+  ]
+ },
+ "output": "# 销售表A与库存表B核对报告\n\n## 一、A有B无（A表存在、B表缺失）共4条\n| SKU | 数量(qty) |\n|---|---|\n| SKU049 | 62 |\n| SKU050 | 172 |\n| SKU051 | 55 |\n| SKU052 | 138 |\n\n## 二、B有A无（B表存在、A表缺失）共2条\n| SKU | 数量(qty) |\n|---|---|\n| SKU053 | 65 |\n| SKU054 | 178 |\n\n## 三、数值不一致（同一SKU，两表qty不同）共2条\n| SKU | A表qty | B表qty | 差额(B-A) |\n|---|---|---|---|\n| SKU006 | 80 | 85 | +5 |\n| SKU022 | 105 | 100 | -5 |\n\n## 四、汇总\n- A表总记录数：52\n- B表总记录数：50\n- 完全一致：46条\n- 差异合计：8条（A有B无4条 + B有A无2条 + 数值不一致2条）\n- 建议：优先核实SKU006、SKU022数量差异；补齐缺失SKU049-052、SKU053-054对应记录。",
+ "role_outputs": [
+  [
+   "A源核对员",
+   "## A源核对员交付物：A表 vs B表核对结果\n\n### 1. A有B无（A表存在、B表缺失）共4条\n- SKU049（A表 qty=62）\n- SKU050（A表 qty=172）\n- SKU051（A表 qty=55）\n- SKU052（A表 qty=138）\n\n### 2. 数值不一致（同一SKU，两表qty不同）共2条\n- SKU006：A表 qty=80，B表 qty=85\n- SKU022：A表 qty=105，B表 qty=100\n\n### 3. 汇总\n- A表总记录数：52\n- 完全一致：46条\n- A有B无：4条\n- 数值不一致：2条"
+  ],
+  [
+   "B源核对员",
+   "## B源核对员交付物：B表 vs A表核对结果\n\n### 1. B有A无（B表存在、A表缺失）共2条\n- SKU053（B表 qty=65）\n- SKU054（B表 qty=178）\n\n### 2. 数值不一致（同一SKU，两表qty不同）共2条\n- SKU006：A表 qty=80，B表 qty=85\n- SKU022：A表 qty=105，B表 qty=100\n\n### 3. 汇总\n- B表总记录数：50\n- 完全一致：46条\n- B有A无：2条\n- 数值不一致：2条"
+  ],
+  [
+   "合并员",
+   "# 销售表A与库存表B核对报告\n\n## 一、A有B无（A表存在、B表缺失）共4条\n| SKU | 数量(qty) |\n|---|---|\n| SKU049 | 62 |\n| SKU050 | 172 |\n| SKU051 | 55 |\n| SKU052 | 138 |\n\n## 二、B有A无（B表存在、A表缺失）共2条\n| SKU | 数量(qty) |\n|---|---|\n| SKU053 | 65 |\n| SKU054 | 178 |\n\n## 三、数值不一致（同一SKU，两表qty不同）共2条\n| SKU | A表qty | B表qty | 差额(B-A) |\n|---|---|---|---|\n| SKU006 | 80 | 85 | +5 |\n| SKU022 | 105 | 100 | -5 |\n\n## 四、汇总\n- A表总记录数：52\n- B表总记录数：50\n- 完全一致：46条\n- 差异合计：8条（A有B无4条 + B有A无2条 + 数值不一致2条）\n- 建议：优先核实SKU006、SKU022数量差异；补齐缺失SKU049-052、SKU053-054对应记录。"
+  ]
+ ],
+ "ts": "2026-08-28T21:56:07",
+ "Q_prev": 1.0
+}

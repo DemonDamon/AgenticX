@@ -1,0 +1,42 @@
+{
+  "task_id": "t-DATA-H-03",
+  "office_type": "data",
+  "task_type": "high_coupling",
+  "mode": "team_concat",
+  "model": "kimi-k3",
+  "seed": 0,
+  "Q": 1.0,
+  "TMS": true,
+  "prompt_tokens": 11495,
+  "completion_tokens": 1966,
+  "total_tokens": 13461,
+  "cached_tokens": 6656,
+  "elapsed": 47.45,
+  "llm_calls": 3,
+  "error": "",
+  "detail": {
+    "L1": 1.0,
+    "L2": 1.0,
+    "L3": NaN,
+    "l2::a_only::f1": 1.0,
+    "l2::b_only::f1": 1.0,
+    "l2::qty_mismatch_skus::f1": 1.0,
+    "notes": []
+  },
+  "output": "## A源核对员\n\n## checker_a 交付物：A源核对结果\n\n**一、A有B无（a_only）— 共4条**\n\n| SKU | A.qty | A.date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n**二、数值不一致（qty_mismatch）— 共2条**\n\n| SKU | A.qty | B.qty | 差值(A-B) | 日期 |\n|---|---|---|---|---|\n| SKU006 | 80 | 85 | -5 | 2026-08-03 |\n| SKU022 | 105 | 100 | +5 | 2026-08-11 |\n\n**三、核对口径说明**\n- 比对键：sku（两表sku均唯一，无重复）\n- 共有SKU：48条（SKU001–SKU048），其中46条qty一致，2条不一致\n- b_only非本人职责范围，由checker_b产出，此处JSON字段留空待其填核\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```\n\n## B源核对员\n\n## checker_b 交付物：B源核对结果\n\n**一、B有A无（b_only）— 共2条**\n\n| SKU | B.qty | B.date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n**二、数值不一致（qty_mismatch）— 共2条（复核确认，与A源结论一致）**\n\n| SKU | B.qty | A.qty | 差值(B-A) | 日期 |\n|---|---|---|---|---|\n| SKU006 | 85 | 80 | +5 | 2026-08-03 |\n| SKU022 | 100 | 105 | -5 | 2026-08-11 |\n\n**三、核对口径说明**\n- 比对键：sku（B表sku均唯一，无重复）\n- B表共50条：SKU001–SKU048与A共有，SKU053、SKU054为B独有\n- 共有48条SKU中：46条qty一致，2条不一致（SKU006、SKU022），差异方向与checker_a互补\n- a_only非本人职责范围，由checker_a产出（SKU049–SKU052），JSON中如实转录\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [\"SKU053\", \"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```\n\n## 合并员\n\n## merge 交付物：销售表A × 库存表B 交叉核对报告\n\n**一、核对结论总览**\n\n| 差异类型 | 数量 | SKU |\n|---|---|---|\n| A有B无（a_only） | 4 | SKU049、SKU050、SKU051、SKU052 |\n| B有A无（b_only） | 2 | SKU053、SKU054 |\n| 数值不一致（qty_mismatch） | 2 | SKU006、SKU022 |\n| **差异合计** | **8** | 其余44条完全一致 |\n\n- 两表规模：A表52条、B表50条；共有SKU 48条（SKU001–SKU048）\n- 比对键：sku，两表均无重复键，无去重冲突\n- checker_a 与 checker_b 交付结果完全一致，交叉验证通过，无冲突项需仲裁\n\n**二、差异明细**\n\n1. A有B无（销售已记账、库存无记录）— 4条\n\n| SKU | A.qty | A.date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n2. B有A无（库存有记录、销售未记账）— 2条\n\n| SKU | B.qty | B.date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n3. 数值不一致（qty差异）— 2条\n\n| SKU | A.qty | B.qty | 差值(A−B) | 日期 |\n|---|---|---|---|---|\n| SKU006 | 80 | 85 | −5 | 2026-08-03 |\n| SKU022 | 105 | 100 | +5 | 2026-08-11 |\n\n**三、合并与去重说明**\n- a_only：直接采用 checker_a 结果（4条），checker_b 转录一致，无增删\n- b_only：直接采用 checker_b 结果（2条），无重叠\n- qty_mismatch：双向核对各自独立发现 SKU006、SKU022，差异方向互补、数值吻合，合并去重后保留2条\n- 三类差异SKU集合互不相交，无重复计数\n\n**四、处理建议**\n- SKU049–SKU052：核查库存B是否漏录2026-08-25/26出入库记录\n- SKU053、SKU054：核查销售A是否漏记或单据尚未同步\n- SKU006、SKU022：差值均为5，建议回溯当日原始单据确认录入错误方\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [\"SKU053\", \"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```",
+  "role_outputs": [
+    [
+      "A源核对员",
+      "## checker_a 交付物：A源核对结果\n\n**一、A有B无（a_only）— 共4条**\n\n| SKU | A.qty | A.date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n**二、数值不一致（qty_mismatch）— 共2条**\n\n| SKU | A.qty | B.qty | 差值(A-B) | 日期 |\n|---|---|---|---|---|\n| SKU006 | 80 | 85 | -5 | 2026-08-03 |\n| SKU022 | 105 | 100 | +5 | 2026-08-11 |\n\n**三、核对口径说明**\n- 比对键：sku（两表sku均唯一，无重复）\n- 共有SKU：48条（SKU001–SKU048），其中46条qty一致，2条不一致\n- b_only非本人职责范围，由checker_b产出，此处JSON字段留空待其填核\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```"
+    ],
+    [
+      "B源核对员",
+      "## checker_b 交付物：B源核对结果\n\n**一、B有A无（b_only）— 共2条**\n\n| SKU | B.qty | B.date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n**二、数值不一致（qty_mismatch）— 共2条（复核确认，与A源结论一致）**\n\n| SKU | B.qty | A.qty | 差值(B-A) | 日期 |\n|---|---|---|---|---|\n| SKU006 | 85 | 80 | +5 | 2026-08-03 |\n| SKU022 | 100 | 105 | -5 | 2026-08-11 |\n\n**三、核对口径说明**\n- 比对键：sku（B表sku均唯一，无重复）\n- B表共50条：SKU001–SKU048与A共有，SKU053、SKU054为B独有\n- 共有48条SKU中：46条qty一致，2条不一致（SKU006、SKU022），差异方向与checker_a互补\n- a_only非本人职责范围，由checker_a产出（SKU049–SKU052），JSON中如实转录\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [\"SKU053\", \"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```"
+    ],
+    [
+      "合并员",
+      "## merge 交付物：销售表A × 库存表B 交叉核对报告\n\n**一、核对结论总览**\n\n| 差异类型 | 数量 | SKU |\n|---|---|---|\n| A有B无（a_only） | 4 | SKU049、SKU050、SKU051、SKU052 |\n| B有A无（b_only） | 2 | SKU053、SKU054 |\n| 数值不一致（qty_mismatch） | 2 | SKU006、SKU022 |\n| **差异合计** | **8** | 其余44条完全一致 |\n\n- 两表规模：A表52条、B表50条；共有SKU 48条（SKU001–SKU048）\n- 比对键：sku，两表均无重复键，无去重冲突\n- checker_a 与 checker_b 交付结果完全一致，交叉验证通过，无冲突项需仲裁\n\n**二、差异明细**\n\n1. A有B无（销售已记账、库存无记录）— 4条\n\n| SKU | A.qty | A.date |\n|---|---|---|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n2. B有A无（库存有记录、销售未记账）— 2条\n\n| SKU | B.qty | B.date |\n|---|---|---|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n3. 数值不一致（qty差异）— 2条\n\n| SKU | A.qty | B.qty | 差值(A−B) | 日期 |\n|---|---|---|---|---|\n| SKU006 | 80 | 85 | −5 | 2026-08-03 |\n| SKU022 | 105 | 100 | +5 | 2026-08-11 |\n\n**三、合并与去重说明**\n- a_only：直接采用 checker_a 结果（4条），checker_b 转录一致，无增删\n- b_only：直接采用 checker_b 结果（2条），无重叠\n- qty_mismatch：双向核对各自独立发现 SKU006、SKU022，差异方向互补、数值吻合，合并去重后保留2条\n- 三类差异SKU集合互不相交，无重复计数\n\n**四、处理建议**\n- SKU049–SKU052：核查库存B是否漏录2026-08-25/26出入库记录\n- SKU053、SKU054：核查销售A是否漏记或单据尚未同步\n- SKU006、SKU022：差值均为5，建议回溯当日原始单据确认录入错误方\n\n```json\n{\"a_only\": [\"SKU049\", \"SKU050\", \"SKU051\", \"SKU052\"], \"b_only\": [\"SKU053\", \"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\", \"SKU022\"]}\n```"
+    ]
+  ],
+  "ts": "2026-08-30T13:23:05"
+}

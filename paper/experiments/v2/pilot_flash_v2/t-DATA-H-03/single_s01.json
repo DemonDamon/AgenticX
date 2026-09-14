@@ -1,0 +1,29 @@
+{
+  "task_id": "t-DATA-H-03",
+  "office_type": "data",
+  "task_type": "high_coupling",
+  "mode": "single",
+  "model": "deepseek-v4-flash",
+  "seed": 1,
+  "Q": 1.0,
+  "TMS": true,
+  "prompt_tokens": 3813,
+  "completion_tokens": 972,
+  "total_tokens": 4785,
+  "cached_tokens": 3712,
+  "elapsed": 7.77,
+  "llm_calls": 1,
+  "error": "",
+  "detail": {
+    "L1": 1.0,
+    "L2": 1.0,
+    "L3": NaN,
+    "l2::a_only::f1": 1.0,
+    "l2::b_only::f1": 1.0,
+    "l2::qty_mismatch_skus::f1": 1.0,
+    "notes": []
+  },
+  "output": "# 销售表A与库存表B交叉核对报告\n\n## 一、核对概况\n- 销售表A记录数：52条\n- 库存表B记录数：50条\n- 差异类型：A有B无、B有A无、数量不一致\n\n## 二、差异明细\n\n### 1. A有B无（销售表有，库存表无）\n| SKU | 数量(qty) | 日期(date) |\n|------|------|------|\n| SKU049 | 62 | 2026-08-25 |\n| SKU050 | 172 | 2026-08-25 |\n| SKU051 | 55 | 2026-08-26 |\n| SKU052 | 138 | 2026-08-26 |\n\n共4条。\n\n### 2. B有A无（库存表有，销售表无）\n| SKU | 数量(qty) | 日期(date) |\n|------|------|------|\n| SKU053 | 65 | 2026-08-25 |\n| SKU054 | 178 | 2026-08-25 |\n\n共2条。\n\n### 3. 数量不一致（两表均有但数值不同）\n| SKU | A表数量 | B表数量 | 差异（B-A） |\n|------|------|------|------|\n| SKU006 | 80 | 85 | +5 |\n| SKU022 | 105 | 100 | -5 |\n\n共2条。日期一致。\n\n## 三、结论\n1. A表存在4个SKU未在B表中登记，需补充库存或确认是否已下架。\n2. B表存在2个SKU未在A表中体现，需核实销售记录是否缺失。\n3. 2个SKU数量不一致，建议以实际盘点为准，追溯差异原因。\n\n```json\n{\"a_only\": [\"SKU049\",\"SKU050\",\"SKU051\",\"SKU052\"], \"b_only\": [\"SKU053\",\"SKU054\"], \"qty_mismatch_skus\": [\"SKU006\",\"SKU022\"]}\n```",
+  "role_outputs": null,
+  "ts": "2026-08-29T10:03:37"
+}
