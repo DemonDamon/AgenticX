@@ -484,6 +484,7 @@ import {
 } from "../utils/chat-file-mention";
 import { absoluteTaskspacePath, canonicalizeArtifactPreviewPath } from "../utils/workspace-file-path";
 import { formatTaskspaceAddError } from "../utils/taskspace-errors";
+import { queuedMessagesForSession } from "../utils/pending-message-queue";
 import {
   bootstrapMarkerForSessionBinding,
   ensureWorkspaceSessionBeforeFirstMessage,
@@ -14582,7 +14583,7 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
                   });
                   const queue = queuedMessagesForSession(
                     useAppStore.getState().pendingMessages[paneId] ?? [],
-                    sid,
+                    queueSid,
                   );
 
                   if (streamActive) {

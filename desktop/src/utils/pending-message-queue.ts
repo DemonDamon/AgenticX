@@ -1,6 +1,11 @@
 import type { QueuedMessage } from "../store";
 
-/** Return only messages owned by the active session; empty/new sessions show none. */
+/**
+ * Return only queued follow-ups owned by the session currently shown in a pane.
+ *
+ * A pane can retain queued messages while the user navigates between sessions;
+ * callers must never render or trigger a continuation from another session.
+ */
 export function queuedMessagesForSession(
   messages: readonly QueuedMessage[],
   sessionId: string | undefined | null,

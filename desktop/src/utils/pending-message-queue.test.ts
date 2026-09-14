@@ -47,6 +47,18 @@ describe("pending message queue session isolation", () => {
     expect(remainingIds).toEqual(["m1", "m3"]);
   });
 
+  it("shows only queued messages owned by the active session", () => {
+    const queue = useAppStore.getState().pendingMessages[paneId] ?? [];
+    expect(queuedMessagesForSession(queue, "sess-a").map((message) => message.id)).toEqual([
+      "m1",
+      "m3",
+    ]);
+    expect(queuedMessagesForSession(queue, "sess-b").map((message) => message.id)).toEqual([
+      "m2",
+    ]);
+    expect(queuedMessagesForSession(queue, "")).toEqual([]);
+  });
+
   it("keeps queue unchanged when session id is empty", () => {
     const removed = useAppStore.getState().dequeuePaneMessageForSession(paneId, " ");
     expect(removed).toBeUndefined();
