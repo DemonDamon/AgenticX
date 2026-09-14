@@ -368,19 +368,19 @@
   <rect x="592" y="732" width="4" height="4.5" rx="1" fill="#64748B"/>
   <rect x="599" y="729.5" width="4" height="7" rx="1" fill="#64748B"/>
   <rect x="606" y="727" width="4" height="9.5" rx="1" fill="#64748B"/>
-  <text x="616" y="739" font-size="11" font-weight="bold" fill="#94A3B8">VARIANCE IN QUALITY Q EXPLAINED BY</text>
-  <text x="592" y="790" font-size="30" font-weight="bold" fill="#34D399">40&#8211;43%</text>
-  <text x="724" y="790" font-size="14.5" fill="#F1F5F9">assembly protocol</text>
-  <text x="592" y="816" font-size="12.5" fill="#94A3B8">vs <tspan font-weight="bold" fill="#F87171">&#8804; 0.3%</tspan> for compute matching</text>
+  <text x="616" y="739" font-size="11" font-weight="bold" fill="#94A3B8">ARM-MEAN QUALITY RANGE (Q)</text>
+  <text x="592" y="790" font-size="30" font-weight="bold" fill="#34D399">0.46&#8211;0.49</text>
+  <text x="775" y="790" font-size="14.5" fill="#F1F5F9">assembly protocol</text>
+  <text x="592" y="816" font-size="12.5" fill="#94A3B8">vs <tspan font-weight="bold" fill="#F87171">0.025</tspan> for compute matching</text>
 
   <!-- col 3 -->
   <path d="M 1092 737 L 1099 730 L 1104 734 L 1112 726" fill="none" stroke="#64748B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   <polygon points="1114,728 1114.8,723.2 1110,724" fill="#64748B"/>
   <text x="1118" y="739" font-size="11" font-weight="bold" fill="#94A3B8">CTR_MATCHED &#183; BY PROTOCOL ALONE</text>
-  <text x="1092" y="790" font-size="30" font-weight="bold" fill="#E2E8F0">0.69</text>
+  <text x="1092" y="790" font-size="30" font-weight="bold" fill="#E2E8F0">0.66</text>
   <line x1="1178" y1="780" x2="1206" y2="780" stroke="#34D399" stroke-width="3"/>
   <polygon points="1206,774 1218,780 1206,786" fill="#34D399"/>
-  <text x="1230" y="790" font-size="30" font-weight="bold" fill="#34D399">1.61</text>
+  <text x="1230" y="790" font-size="30" font-weight="bold" fill="#34D399">1.55</text>
   <text x="1092" y="816" font-size="12.5" fill="#94A3B8">no model or prompt change &#8212; protocol choice alone</text>
 
   <!-- ============ footer ============ -->

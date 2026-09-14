@@ -106,29 +106,29 @@
   <text x="1100" y="152" font-size="16" fill="#475569">last</text>
   <rect x="1100" y="160" width="161" height="26" fill="#2563EB"/>
   <text x="1269" y="178" font-size="16" font-weight="bold" fill="#1F2937">0.69</text>
-  <rect x="1100" y="196" width="161" height="26" fill="#7C3AED"/>
-  <text x="1269" y="214" font-size="16" font-weight="bold" fill="#1F2937">0.69</text>
+  <rect x="1100" y="196" width="154" height="26" fill="#7C3AED"/>
+  <text x="1262" y="214" font-size="16" font-weight="bold" fill="#1F2937">0.66</text>
 
   <!-- concat group -->
   <text x="1100" y="302" font-size="16" fill="#475569">concat</text>
   <rect x="1100" y="310" width="212" height="26" fill="#2563EB"/>
   <text x="1320" y="328" font-size="16" font-weight="bold" fill="#1F2937">0.91</text>
-  <rect x="1100" y="346" width="208" height="26" fill="#7C3AED"/>
-  <text x="1316" y="364" font-size="16" font-weight="bold" fill="#1F2937">0.89</text>
+  <rect x="1100" y="346" width="205" height="26" fill="#7C3AED"/>
+  <text x="1313" y="364" font-size="16" font-weight="bold" fill="#1F2937">0.88</text>
 
   <!-- blackboard group -->
   <text x="1100" y="452" font-size="16" fill="#475569">blackboard</text>
   <rect x="1100" y="460" width="189" height="26" fill="#2563EB"/>
   <text x="1297" y="478" font-size="16" font-weight="bold" fill="#1F2937">0.81</text>
-  <rect x="1100" y="496" width="175" height="26" fill="#7C3AED"/>
-  <text x="1283" y="514" font-size="16" font-weight="bold" fill="#1F2937">0.75</text>
+  <rect x="1100" y="496" width="168" height="26" fill="#7C3AED"/>
+  <text x="1276" y="514" font-size="16" font-weight="bold" fill="#1F2937">0.72</text>
 
   <!-- integrator group -->
   <text x="1100" y="602" font-size="16" font-weight="bold" fill="#059669">integrator</text>
   <rect x="1100" y="610" width="361" height="26" fill="#2563EB"/>
   <text x="1469" y="628" font-size="16" font-weight="bold" fill="#1F2937">1.55</text>
-  <rect x="1100" y="646" width="376" height="26" fill="#7C3AED"/>
-  <text x="1484" y="664" font-size="16" font-weight="bold" fill="#1F2937">1.61</text>
+  <rect x="1100" y="646" width="349" height="26" fill="#7C3AED"/>
+  <text x="1457" y="664" font-size="16" font-weight="bold" fill="#1F2937">1.50</text>
 
   <!-- axis -->
   <line x1="1100" y1="735" x2="1520" y2="735" stroke="#94A3B8" stroke-width="1.5"/>
@@ -147,6 +147,6 @@
 
   <!-- ===== Bottom banner ===== -->
   <rect x="40" y="780" width="1520" height="80" rx="12" fill="#1E293B"/>
-  <text x="70" y="822" font-size="22" font-weight="bold" fill="#FFFFFF">Protocol alone swings CTR_matched from 0.69 to 1.61 — over identical role outputs</text>
+  <text x="70" y="822" font-size="22" font-weight="bold" fill="#FFFFFF">Protocol alone swings CTR_matched from 0.66 to 1.55 — over identical role outputs</text>
   <text x="70" y="846" font-size="15" fill="#CBD5E1">15 tasks × 3 seeds per model · CTR vs compute-matched refine-k · Wilcoxon p ≤ 5×10⁻³ (BH-FDR)</text>
 </svg>

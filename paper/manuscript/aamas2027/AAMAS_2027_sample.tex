@@ -1,0 +1,358 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% LaTeX Template for AAMAS-2027 (based on sigconf.tex)
+%%% Prepared by the AAMAS-2027 Publication Chairs based on the version from AAMAS-2026. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% Start your document with the \documentclass command.
+
+
+%%% == IMPORTANT ==
+%%% Use the first variant below to anonymize your submission (no author information shown).
+%%% Use the second variant below for the final paper (including author information).
+%%% For further information on anonymity and double-blind reviewing, 
+%%% please consult the call for paper information
+%%% https://warwick.ac.uk/fac/sci/dcs/aamas2027/calls/
+
+%%%% For anonymized submission, use this
+\documentclass[sigconf,anonymous]{aamas} 
+
+%%%% For camera-ready, use this
+%\documentclass[sigconf]{aamas} 
+
+
+%%% Load required packages here (note that many are included already).
+
+\usepackage{balance} % for balancing columns on the final page
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% AAMAS-2027 copyright block (do not change!)
+
+\makeatletter
+\gdef\@copyrightpermission{
+  \begin{minipage}{0.2\columnwidth}
+   \href{https://creativecommons.org/licenses/by/4.0/}{\includegraphics[width=0.90\textwidth]{by}}
+  \end{minipage}\hfill
+  \begin{minipage}{0.8\columnwidth}
+   \href{https://creativecommons.org/licenses/by/4.0/}{This work is licensed under a Creative Commons Attribution International 4.0 License.}
+  \end{minipage}
+  \vspace{5pt}
+}
+\makeatother
+
+\setcopyright{ifaamas}
+\acmConference[AAMAS 2027]{Proc.\@ of the 26th International Conference
+on Autonomous Agents and Multiagent Systems (AAMAS 2027)}{3--7 May 2027}{Hanoi, Vietnam}{M.~Baldoni, F.~Fang, W.~Yeoh, N.~Yorke-Smith (eds.)}
+\copyrightyear{2027}
+\acmYear{2027}
+\acmDOI{}
+%\acmPrice{}
+\acmISBN{}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% == IMPORTANT ==
+%%% Use this command to specify your OpenReview submission number.
+%%% In anonymous mode, it will be printed on the first page.
+
+\acmSubmissionID{<<OpenReview submission id>>}
+
+%%% Use this command to specify the track you want to submit your paper to.
+
+\submissionType{Research Paper Track}
+%\submissionType{AAAI Track}
+%\submissionType{Demonstration Track}
+%\submissionType{Blue Sky Ideas Track}
+%\submissionType{JAAMAS Track}
+%\submissionType{Doctoral Consortium}
+
+%%% Use this command to specify the title of your paper.
+
+\title[AAMAS-2027 Formatting Instructions]{Formatting Instructions for the 26th International Conference on Autonomous Agents and Multiagent Systems}
+
+%%% Provide names, affiliations, and email addresses for all authors.
+
+\author{Arthur Pendragon}
+\affiliation{
+  \institution{Camelot Castle}
+  \city{Camelot}
+  \country{United Kingdom}}
+\email{king.arthur@camelot.uk}
+
+\author{Nimue}
+\affiliation{
+  \institution{The Lady's Lake}
+  \city{Avalon}
+  \country{United Kingdom}}
+\email{lady.of.the.lake@avalon.uk}
+
+%%% Use this environment to specify a short abstract for your paper.
+
+\begin{abstract}
+This document outlines the formatting instructions for submissions to
+AAMAS-2027. You can use its source file as a template when writing 
+your own paper. It is based on the file `\texttt{sigconf.tex}'
+distributed with the ACM article template for \LaTeX\@.
+\end{abstract}
+
+%%% Use this command to specify a few keywords describing your work.
+%%% Keywords should be separated by commas.
+
+\keywords{Legends, Myths, Folktales}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% Include any author-defined commands here.
+         
+\newcommand{\BibTeX}{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em\TeX}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+
+%%% The following commands remove the headers in your paper. For final 
+%%% papers, these will be inserted during the pagination process.
+
+%\pagestyle{fancy}
+%\fancyhead{}
+
+%%% The next command prints the information defined in the preamble.
+
+\maketitle 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Introduction}
+
+This document explains the main features of the `\texttt{aamas}' 
+document class, which is essentially identical to the `\texttt{acmart}'
+document class provided by the ACM. The only difference is a minor 
+modification to allow for the correct copyright attribution to IFAAMAS.
+For detailed documentation of the original document class, please refer
+to the relevant website maintained by the~ACM:
+%
+\begin{center}
+\url{https://www.acm.org/publications/proceedings-template}
+\end{center}
+%
+The first command in your source file should be either one of these:
+\begin{verbatim}
+    \documentclass[sigconf,anonymous]{aamas}
+    \documentclass[sigconf]{aamas}
+\end{verbatim}
+%
+The first variant should be
+used when you submit your paper for blind review; it will replace the names of the authors with the submission number.
+The second variant should be used for final papers. 
+
+Make sure your paper includes the correct copyright information and 
+the correct specification of the \emph{ACM Reference Format}. Both of 
+these will be generated automatically if you include the correct 
+\emph{copyright block} as shown in the source file of this document.
+
+Modifying the template---e.g., by changing margins, typeface sizes, 
+line spacing, paragraph or list definitions---or making excessive use 
+of the `\verb|\vspace|' command to manually adjust the vertical spacing 
+between elements of your work is not allowed. You risk getting your 
+submission rejected (or your final paper excluded from the proceedings) 
+in case such modifications are discovered. The `\texttt{aamas}' document 
+class requires the use of the \textit{Libertine} typeface family, which 
+should be included with your \LaTeX\ installation. Please do not use 
+other typefaces instead.
+
+Please consult the \emph{Call for Papers} for information on matters 
+such as the page limit or anonymity requirements. It is available from
+the conference website:
+%
+\begin{center}
+\url{https://warwick.ac.uk/fac/sci/dcs/aamas2027/}
+\end{center}
+%
+To balance the columns on the final page of your paper, use the 
+`\texttt{balance}' package and issue the `\verb|\balance|' command
+ somewhere in the text of what would be the first column of the last 
+ page without balanced columns. This will be required for final papers.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{The Preamble}
+
+For your initial manuscript submission, you will be assigned a submission number when you register the abstract 
+of your paper on \textit{OpenReview}. Include this number in your 
+document using the `\verb|\acmSubmissionID|' command.
+Use the `\verb|\submissionType|' command to specify the track you want to 
+submit your paper to. Note that you no longer have to explicitly specify the track in 
+the subtitle. The command will update both the header and subtitle accordingly.
+
+Then use the familiar commands to specify the title and authors of your
+paper in the preamble of the document. The title should be appropriately 
+capitalised (meaning that every `important' word in the title should 
+start with a capital letter). For the final version of your paper, make 
+sure to specify the affiliation and email address of each author using 
+the appropriate commands. Specify an affiliation and email address 
+separately for each author, even if two authors share the same 
+affiliation. You can specify more than one affiliation for an author by 
+using a separate `\verb|\affiliation|' command for each affiliation.
+
+Provide a short abstract using the `\texttt{abstract}' environment.
+ 
+Finally, specify a small number of keywords characterising your work, 
+using the `\verb|\keywords|' command. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{The Body of the Paper}
+
+For help with typesetting the body of your paper in \LaTeX\@, please 
+make use of the familiar resources~\cite{Lam94}. In this section we 
+merely highlight a few specific features. 
+
+\subsection{Mathematical Expressions}
+
+You can typeset all sorts of in-line mathematical expressions 
+with the usual \verb|$...$| construct, as in 
+$\Diamond\Diamond\varphi \rightarrow \Diamond\varphi$ or 
+$\boldsymbol{R} = (R_1,\ldots,R_n)$.
+For more complex expressions, it may often be preferable to use one of
+the various equation-type environments available in \LaTeX\@, as shown 
+in the following example:
+%
+\begin{eqnarray}
+Z_i & = & \frac{u_i(x_i) - u_i(x_{-i})}{u_i(x_i)}
+\end{eqnarray}
+%
+Here is a second example for an equation: 
+%
+\begin{eqnarray}\label{eq:vcg}
+p_i(\boldsymbol{\hat{v}}) & = &
+\sum_{j \neq i} \hat{v}_j(f(\boldsymbol{\hat{v}}_{-i})) - 
+\sum_{j \neq i} \hat{v}_j(f(\boldsymbol{\hat{v}})) 
+\end{eqnarray}
+%
+Use the usual combination of `\verb|\label|' and `\verb|\ref|' to refer
+to numbered equations, such as Equation~(\ref{eq:vcg}) above. Of course,
+introducing numbers in the first place is only helpful if you in fact 
+need to refer back to the equation in question elsewhere in the paper.
+
+
+\subsection{Tables and Figures}
+
+Use the `\texttt{table}' environment (or its variant `\texttt{table*}')
+in combination with the `\texttt{tabular}' environment to typeset tables
+as floating objects. The `\texttt{aamas}' document class includes the 
+`\texttt{booktabs}' package for preparing high-quality tables. Tables 
+are often placed at the top of a page near their initial cite, as done 
+here for Table~\ref{tab:locations}.
+
+\begin{table}[t]
+	\caption{Locations of the first five editions of AAMAS}
+	\label{tab:locations}
+	\begin{tabular}{rll}\toprule
+		\textit{Year} & \textit{City} & \textit{Country} \\ \midrule
+		2002 & Bologna & Italy \\
+		2003 & Melbourne & Australia \\
+		2004 & New York City & USA \\
+		2005 & Utrecht & The Netherlands \\
+		2006 & Hakodate & Japan \\ \bottomrule
+	\end{tabular}
+\end{table}
+
+The caption of a table should be placed \emph{above} the table. 
+Always use the `\verb|\midrule|' command to separate header rows from 
+data rows, and use it only for this purpose. This enables assistive 
+technologies to recognise table headers and support their users in 
+navigating tables more easily.
+
+%%% The following command should be issued somewhere in the first column 
+%%% of the final page of your paper.
+\balance
+
+Use the `\texttt{figure}' environment for figures. If your figure 
+contains third-party material, make sure to clearly identify it as such.
+Every figure should include a caption, and this caption should be placed 
+\emph{below} the figure itself, as shown here for Figure~\ref{fig:logo}.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.75\linewidth]{aamas27-logo-small}
+  \caption{The logo of AAMAS 2027}
+  \label{fig:logo}
+  \Description{Logo of AAMAS 2027 -- The 26th International Conference on Autonomous Agents and Multiagent Systems.}
+\end{figure}
+
+In addition, every figure should also have a figure description, unless
+it is purely decorative. Use the `\verb|\Description|' command for this 
+purpose. These descriptions will not be printed but can be used to 
+convey what's in an image to someone who cannot see it. They are also 
+used by search engine crawlers for indexing images, and when images 
+cannot be loaded. A figure description must consist of unformatted plain 
+text of up to 2000~characters. For example, the definition of 
+Figure~\ref{fig:logo} in the source file of this document includes the 
+following description: ``Logo of AAMAS 2027 -- The 26th International Conference on Autonomous Agents and Multiagent Systems.'' For more information on how best to write figure descriptions 
+and why doing so is important, consult the information available here: 
+%
+\begin{center}
+\url{https://www.acm.org/publications/taps/describing-figures/}
+\end{center}
+%
+The use of colour in figures and graphs is permitted, provided they 
+remain readable when printed in greyscale and provided they are 
+intelligible also for people with a colour vision deficiency.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Citations and References}
+  
+The use of the \BibTeX\ to prepare your list of references is highly 
+recommended. To include the references at the end of your document, put 
+the following two commands just before the `\verb|\end{document}|' 
+command in your source file:
+%
+\begin{verbatim}
+   \bibliographystyle{ACM-Reference-Format}
+   \bibliography{sample}
+\end{verbatim}
+%
+Here we assume that `\texttt{sample.bib}' is the name of your 
+\BibTeX\ file. Use the `\verb|\cite|' command to produce citations 
+to your references. Here are a few examples for citations of journal 
+articles~\cite{GrKr96,WoJe95}, books~\cite{Knu97}, articles in 
+conference proceedings~\cite{Hag1993}, technical reports~\cite{Har78},
+Master's and PhD theses~\cite{Ani03,Cla85}, online videos~\cite{Oba08}, 
+datasets~\cite{AnMC13}, and patents~\cite{Sci09}. Both citations and 
+references are numbered by default. 
+
+Make sure you provide complete and correct bibliographic information 
+for all your references, and list authors with their full names 
+(``Donald E.\ Knuth'') rather than just initials (``D.\ E.\ Knuth''). 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% The acknowledgments section is defined using the "acks" environment
+%%% (rather than an unnumbered section). The use of this environment 
+%%% ensures the proper identification of the section in the article 
+%%% metadata as well as the consistent spelling of the heading.
+
+\begin{acks}
+If you wish to include any acknowledgments in your paper (e.g., to 
+people or funding agencies), please do so using the `\texttt{acks}' 
+environment. Note that the text of your acknowledgments will be omitted
+if you compile your document with the `\texttt{anonymous}' option.
+\end{acks}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% The next two lines define, first, the bibliography style to be 
+%%% applied, and, second, the bibliography file to be used.
+
+\bibliographystyle{ACM-Reference-Format} 
+\bibliography{sample}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\end{document}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+

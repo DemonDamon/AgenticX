@@ -1,7 +1,7 @@
 # TeamBench — Supplementary Material (Anonymous Submission)
 
 This archive contains the complete, runnable TeamBench benchmark referenced in the paper
-"TeamBench: Assembly Protocol, Not Model Capability, Determines Whether LLM Agent Teams Pay Off".
+"TeamBench: Assembly Protocol Determines Whether LLM Agent Teams Pay Off—A Paired, Compute-Matched Benchmark".
 
 ## Contents
 
@@ -21,6 +21,11 @@ metrics/                  Artifact scoring protocol (v2.2)
   llm_judge.py            L3 semantic judge
 analysis/                 Statistical analysis and experiment data
   stats_v2.py             Wilcoxon signed-rank, geometric-mean CTR, log-domain bootstrap, Cliff's delta
+  recompute_unified_ctr.py  Unified estimator for all CTRs reported in the paper: geometric-mean CTR
+                           with explicit zero-score handling (zero runs excluded, counts reported as
+                           Table 1 superscripts), layer-wise L1/L2 CTR, L1 saturation rates, integrator
+                           vs. single L2 parity test, and 7-arm variance decomposition with design-aware
+                           between-arm spread of arm means
   rescore.py              Deterministic offline re-scoring
   judge_ablation_v2.py    L3 on/off ablation with cross-family judge matrix
   data/pilot_flash_v2/    DS v4 Flash: 315 runs (summary.jsonl, pairs.csv)
@@ -46,6 +51,10 @@ python infra/teambench_runner.py --model flash --arms all --tasks tasks/data/gen
 # 3. Score offline (deterministic) and compute statistics
 python analysis/rescore.py
 python analysis/stats_v2.py
+
+# 4. Recompute every CTR / CI / p-value reported in the paper (unified estimator:
+#    geometric mean, zero-score runs excluded and counted, L1/L2 layer-wise)
+python analysis/recompute_unified_ctr.py
 ```
 
 The runner supports breakpoint-resume (completed runs are skipped on restart) and a balance

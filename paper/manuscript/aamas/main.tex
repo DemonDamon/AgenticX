@@ -49,10 +49,10 @@ on Autonomous Agents and Multiagent Systems (AAMAS 2027)}{3--7 May 2027}{Hanoi, 
 \newcommand{\cmark}{\ding{51}}
 \newcommand{\xmark}{\ding{55}}
 
-\title[TeamBench: Assembly Protocols Determine Whether LLM Agent Teams Pay Off]{TeamBench: Assembly Protocol, Not Model Capability, Determines Whether LLM Agent Teams Pay Off}
+\title[TeamBench: Assembly Protocol Determines Whether LLM Agent Teams Pay Off]{TeamBench: Assembly Protocol Determines Whether LLM Agent Teams Pay Off---A Paired, Compute-Matched Benchmark}
 
 \begin{abstract}
-Multi-agent LLM frameworks orchestrate specialized role-playing agents for complex work, yet evaluations of these systems report contradictory conclusions. We identify an overlooked confounder: \emph{no existing study controls or even reports how team outputs are assembled from their constituent roles.} We introduce \teambench{}, a paired individual-vs-team benchmark comprising 15 parameterized office tasks across 5 workplace scenarios $\times$ 3 coupling levels, evaluated across 7 arms: a na\"ive single agent, two compute-matched single baselines (k-round self-revision and best-of-k), and four assembly protocols (last-role output, deterministic concatenation, a dedicated integrator role, and section-slot blackboard). We run all 7 arms on \textbf{two model families} (DeepSeek-V4-Flash and Kimi-K3, 630 runs total) with Wilcoxon signed-rank tests, bootstrap CIs, and BH-FDR correction. \textbf{Assembly protocol is the dominant factor} in Capability Transfer Rate (CTR, team quality over compute-matched single quality), and the effect replicates across both families: on identical role outputs, $\ctrm$ ranges from 0.69 (last-role) to 1.55 (integrator) on Flash and from 0.69 to 1.61 on K3, with the integrator arm significant on both (Flash: 1.55, 95\% CI $[1.37, 1.76]$, $p = 2.1\times10^{-7}$, $d = +0.74$; K3: 1.50, 95\% CI $[1.33, 1.67]$, $p = 1.5\times10^{-6}$, $d = +0.65$). The assembly factor explains 40--43\% of quality variance versus $\le$0.3\% for the compute strategy---a 130--200$\times$ gap replicated across families. Strikingly, neither k-round self-revision nor best-of-k achieves the gains of team collaboration under the correct assembly---specialization with semantic integration is qualitatively different from more sampling or more rounds, and the gap \emph{widens} on the stronger self-revising model (K3 refine-k CTR 1.08 vs.\ integrator 1.72). We also report a measurement-integrity episode: the blackboard protocol mechanically produced correct section headings without content, trivially gaming a structure-only L1 rubric in an earlier scorer version; we fix this via content-aware section scoring and publish the incident. All tasks, parameterized generators, runners, and scoring rubrics are released.
+Multi-agent LLM frameworks orchestrate specialized role-playing agents for complex work, yet evaluations of these systems report contradictory conclusions. We identify an overlooked confounder: \emph{how team outputs are assembled from their constituent roles is rarely controlled or even reported in paired team-vs-single evaluations.} We introduce \teambench{}, a paired individual-vs-team benchmark comprising 15 parameterized office tasks across 5 workplace scenarios $\times$ 3 coupling levels, evaluated across 7 arms: a na\"ive single agent, two compute-matched single baselines (k-round self-revision and best-of-k), and four assembly protocols (last-role output, deterministic concatenation, a dedicated integrator role, and section-slot blackboard), all applied to \emph{identical role outputs}. We run all 7 arms on \textbf{two model families} (DeepSeek-V4-Flash and Kimi-K3, 630 runs total) with Wilcoxon signed-rank tests, task-block bootstrap CIs, and BH-FDR correction. \textbf{Assembly protocol alone flips the sign of the measured team effect}, replicating across both families: geometric-mean $\ctrm$ (team quality over compute-matched single quality) spans 0.69 (last-role) $\to$ 1.55 (integrator) on Flash and 0.66 $\to$ 1.50 on K3, with the integrator arm significant on both (Flash: 1.55, 95\% CI $[1.32, 1.82]$, $p = 4.2\times10^{-7}$, $d = +0.74$; K3: 1.50, $[1.26, 1.78]$, $p = 1.2\times10^{-6}$, $d = +0.65$) and robust to call-matched comparison against best-of-k (1.56 / 1.54, both $p < 10^{-5}$). Neither k-round self-revision nor best-of-k reaches integrator-assembled quality on either model. A layer-wise decomposition shows \emph{where} the effect lives: mechanical protocols destroy the factual layer (L2 CTR 0.69--0.78, all $p<0.05$), while the integrator restores it to parity with single agents (L2 CTR $\approx$ 1.05, n.s.) and adds structural conformance (L1 saturation 96--98\% vs.\ 27--33\% for singles)---assembly determines whether the capability already present in role outputs survives into the final artifact. We also report a measurement-integrity episode: the blackboard protocol mechanically produced correct section headings without content, trivially gaming a structure-only L1 rubric in an earlier scorer version; we fix this via content-aware section scoring and publish the incident. All tasks, parameterized generators, runners, and scoring rubrics are released.
 \end{abstract}
 
 \keywords{multi-agent systems, LLM agents, benchmark, evaluation, agent orchestration, agent teams}
@@ -64,7 +64,7 @@ Multi-agent LLM frameworks orchestrate specialized role-playing agents for compl
 \section{Introduction}
 \label{sec:intro}
 
-Frameworks for multi-agent LLM systems---AutoGen~\citep{wu2023autogen}, CrewAI~\citep{crewai2024}, LangGraph~\citep{langgraph2024}, MetaGPT~\citep{hong2024metagpt}---promise that role-specialized teams outperform a single agent on complex work. Yet the empirical evidence is deeply contradictory. Some studies report monotonic gains from more agents~\citep{li2024moreagents}; others find teams degrade quality~\citep{cemri2025masfail}; many of these papers run on non-overlapping task suites and none control for assembly. This paper argues that a large share of the contradiction is not about model capability---it is about how the final team artifact is produced from role outputs, a step rarely documented and \textbf{never before treated as a controlled variable in LLM team evaluation}.
+Frameworks for multi-agent LLM systems---AutoGen~\citep{wu2023autogen}, CrewAI~\citep{crewai2024}, LangGraph~\citep{langgraph2024}, MetaGPT~\citep{hong2024metagpt}---promise that role-specialized teams outperform a single agent on complex work. Yet the empirical evidence is deeply contradictory. Some studies report monotonic gains from more agents~\citep{li2024moreagents}; others find teams degrade quality~\citep{cemri2025masfail}; many of these papers run on non-overlapping task suites and none control for assembly. This paper argues that a large share of the contradiction is not about model capability---it is about how the final team artifact is produced from role outputs, a step rarely documented and \textbf{not previously isolated as a controlled variable over frozen role outputs in LLM team evaluation}.
 
 We arrived at this hypothesis through our own work. In an earlier \teambench{} version (now obsolete), we adopted the engineering default of taking the last role's output as the team's artifact, and reached the headline conclusion that LLM agent teams systematically underperform individuals. But when we varied only the assembly step---leaving role prompts, task inputs, and LLM calls identical---the measured CTR swung from 0.68 to 1.52, i.e., a 0.84 point effect attributable solely to how outputs are assembled. The ``team inferiority'' finding had been a pipeline artifact, not an empirical law.
 
@@ -78,9 +78,9 @@ We arrived at this hypothesis through our own work. In an earlier \teambench{} v
 
 \paragraph{Contributions.}
 \begin{itemize}
-\item \textbf{\teambench{}}, the first paired individual-vs-team benchmark that controls \emph{how} team outputs are assembled: 15 tasks across 5 office scenarios $\times$ 3 coupling levels, with 150 parameterized task variants, 7 evaluation arms, and a runner with breakpoint-resume, balance-guard, and deterministic rescore tools.
+\item \textbf{\teambench{}}, a paired individual-vs-team benchmark that isolates \emph{how} team outputs are assembled as a controlled factor over frozen role outputs: 15 tasks across 5 office scenarios $\times$ 3 coupling levels, with 150 parameterized task variants, 7 evaluation arms, and a runner with breakpoint-resume, balance-guard, and deterministic rescore tools.
 \item An \textbf{artifact scoring protocol} with a documented measurement-integrity correction; $\ge$80\% of scoring weight is deterministic; closed-form definitions of Capability Transfer Rate (CTR), Coordination Overhead (CO), and Team Memory \& Structure (TMS), consistent across paper, code, and metrics docs.
-\item An empirical study on \textbf{two model families} (DS v4 Flash and Kimi K3, 15 tasks $\times$ 3 seeds $\times$ 7 arms each, 630 runs total, L2 assertions active) showing that \textbf{assembly protocol dominates CTR variance on both} (Flash $\eta^2 = 0.400$, K3 $\eta^2 = 0.428$, versus $\le$0.003 for compute strategy), integrator-assembled teams significantly outperform compute-matched single baselines on both (Flash $\ctrm$ 1.55, 95\% CI $[1.37,1.76]$, $p=2.1\times10^{-7}$, $d=+0.74$; K3 1.50, $[1.33,1.67]$, $p=1.5\times10^{-6}$, $d=+0.65$), while naive engineering defaults (last-role) produce artifactual ``team-inferiority'' effects on both ($\ctrm$ 0.69).
+\item An empirical study on \textbf{two model families} (DS v4 Flash and Kimi K3, 15 tasks $\times$ 3 seeds $\times$ 7 arms each, 630 runs total, L2 assertions active) showing that \textbf{assembly protocol flips the sign of the measured team effect on both}: geometric-mean $\ctrm$ spans 0.69--1.55 (Flash) and 0.66--1.50 (K3) over identical role outputs; the integrator arm beats both compute-matched baselines on both (vs.\ refine-k: Flash 1.55, 95\% CI $[1.32,1.82]$, $p=4.2\times10^{-7}$, $d=+0.74$; K3 1.50, $[1.26,1.78]$, $p=1.2\times10^{-6}$, $d=+0.65$; vs.\ best-of-k at identical call counts: 1.56 / 1.54), while naive engineering defaults (last-role) produce artifactual ``team-inferiority'' effects on both ($\ctrm$ 0.69 / 0.66). A layer-wise decomposition localizes the effect: mechanical protocols degrade the factual layer (L2 CTR 0.69--0.78), the integrator restores it to parity (L2 CTR $\approx$1.05, n.s.) while adding structural conformance (L1 saturation 96--98\% vs.\ 27--33\%).
 \item A cross-model negative result on structured assembly: deterministic section-slot (blackboard) and raw concatenation perform near or below the single baseline on both families---on K3, mechanical protocols collapse to $Q=0$ on one aggregation task (\code{t-DATA-L-01}) across all seeds while the integrator turns the \emph{same role outputs} into a perfect artifact---because LLMs write role-specific rather than schema-matching headings; only the semantic integrator normalizes these free-form outputs.
 \item Full release of tasks, parameterized generators, runner infrastructure, and scoring rubrics.
 \end{itemize}
@@ -92,7 +92,10 @@ We arrived at this hypothesis through our own work. In an earlier \teambench{} v
 AgentBench~\citep{liu2023agentbench}, GAIA~\citep{mialon2023gaia}, SWE-bench~\citep{jimenez2024swebench}, and OSWorld~\citep{xie2024osworld} evaluate a \emph{single} agent per task on success-oriented rubrics. TheAgentCompany~\citep{xu2024theagentcompany} is closest to us in task flavor (office work) but does not report the marginal value of adding agents.
 
 \subsection{Multi-agent systems and their evaluation}
-Orchestration frameworks~\citep{wu2023autogen,hong2024metagpt,crewai2024,langgraph2024,qian2024chatdev} report demo success rather than controlled paired comparisons. Recent scaling studies: ``More Agents\ldots''~\citep{li2024moreagents} and ``More LLM Calls\ldots''~\citep{chen2024morellmcalls} study \emph{performance scaling with agent count / LLM-call count} on single-success metrics, without separating specialization gains from compute gains. MultiAgentBench~\citep{zhu2025multiagentbench} scores collaboration behaviors, not quality transfer. Agents' Room~\citep{huot2025agentsroom} provides a structural existence proof. \citet{cemri2025masfail} contribute a MAST taxonomy of failures, including assembly-stage bugs; our work complements this by quantifying how \emph{a single class} (output assembly) dominates end-to-end quality variance across a controlled task space.
+Orchestration frameworks~\citep{wu2023autogen,hong2024metagpt,crewai2024,langgraph2024,qian2024chatdev} report demo success rather than controlled paired comparisons. Recent scaling studies: ``More Agents\ldots''~\citep{li2024moreagents} and ``More LLM Calls\ldots''~\citep{chen2024morellmcalls} study \emph{performance scaling with agent count / LLM-call count} on single-success metrics, without separating specialization gains from compute gains. MultiAgentBench~\citep{zhu2025multiagentbench} scores collaboration behaviors, not quality transfer. Agents' Room~\citep{huot2025agentsroom} provides a structural existence proof. \citet{cemri2025masfail} contribute a MAST taxonomy of failures, including assembly-stage bugs; our work complements this by quantifying, in a controlled task space, how \emph{a single class} (output assembly) alone flips the sign of the measured team--single difference over identical role outputs.
+
+\paragraph{Closest prior work: TeamBench of \citet{kim2026teambench}.}
+Concurrent with our work, \citet{kim2026teambench} introduce a same-named but complementary benchmark (931 seeded instances, SWE-style tasks) that enforces \emph{OS-level role separation} across Planner/Executor/Verifier containers and asks whether coordination genuinely occurs; their Teamwork Necessity Index measures when teams beat solos under that separation. Our \teambench{} asks a different question on a different task distribution: given whatever role outputs a team produces, \emph{how the final artifact is assembled from them} is an unmeasured pipeline step. We freeze role outputs and vary only assembly (4 protocols) against compute-matched single baselines, yielding CTR as a paired quality-transfer measure. The two benchmarks are complementary: they test whether coordination happens; we test whether assembled artifacts preserve the capability that coordination produced.
 
 \subsection{Team science, coordination cost, and aggregation}
 Coordination theory~\citep{malone1994interdisciplinary} and Brooks' law~\citep{brooks1995mythical} explain why adding human workers can reduce throughput; \teambench{} transplants this question to LLM teams whose members share weights and pass messages losslessly~\citep{woolley2010evidence}. Debate, self-consistency, and majority voting evaluate answer aggregation of \emph{independent answers to the same question}. Assembly protocols aggregate \emph{non-overlapping role slices of a complex document} into a single artifact---a qualitatively different problem of semantic alignment, structure, and completeness.
@@ -120,6 +123,7 @@ More Agents~\citep{li2024moreagents} & \xmark & \xmark & partial & single & \xma
 More LLM Calls~\citep{chen2024morellmcalls} & \xmark & \xmark & \cmark & single & \xmark & \xmark \\
 MultiAgentBench~\citep{zhu2025multiagentbench} & \xmark & \xmark & \xmark & behavior & \xmark & \xmark \\
 Agents' Room~\citep{huot2025agentsroom} & \xmark & \xmark & \xmark & per-task & \xmark & \xmark \\
+TeamBench-Kim~\citep{kim2026teambench} & \cmark & \xmark & \xmark & TNI & \xmark & \cmark \\
 \textbf{\teambench{} (ours)} & \cmark & \cmark\,(4) & \cmark\,(2) & CTR/CO/TMS & \cmark\,(L/M/H) & \cmark\,(param.) \\
 \bottomrule
 \end{tabular}
@@ -156,7 +160,7 @@ Weights in $Q$: $Q = w_1 \cdot \mathrm{L1} + w_2 \cdot \mathrm{L2} + w_3 \cdot \
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{fig2_mechanism_wb.png}
-\caption{The four assembly protocols over \emph{identical role outputs}. Only the integrator performs semantic merging of role content into the required artifact schema; the three mechanical protocols (last, concat, blackboard) rearrange or pass through role text without reconciling it against the schema. CTR\_matched by protocol alone spans 0.69--1.61 across both model families, with no change to model, prompts, or role outputs.}
+\caption{The four assembly protocols over \emph{identical role outputs}. Only the integrator performs semantic merging of role content into the required artifact schema; the three mechanical protocols (last, concat, blackboard) rearrange or pass through role text without reconciling it against the schema. CTR\_matched by protocol alone spans 0.66--1.55 (geometric mean) across both model families, with no change to model, prompts, or role outputs.}
 \label{fig:mechanism}
 \end{figure*}
 
@@ -210,42 +214,44 @@ The runner supports any combination of assembly protocol, single-baseline kind, 
 
 \paragraph{Data note.} All numbers below are pilot v2 final, \textbf{two model families}: DS v4 Flash and Kimi K3, each 15 tasks (migrated L2 assertions) $\times$ 3 seeds $\times$ 7 arms $=$ 315 runs (630 total), scoring v2.2, L3 judge off in the main tables. An earlier v1 pilot (same matrix, L2 inactive, Flash only) is used only for the scorer ablation in \S\ref{sec:scorer-validity}.
 
-\subsection{Main result: assembly protocol dominates CTR}
+\subsection{Main result: assembly protocol flips the team effect}
 \label{sec:main}
 
 \begin{table*}[t]
 \centering
-\caption{Seven arms, pooled over 15 tasks $\times$ 3 seeds ($n{=}45$ per arm per model). No L3 judge. $\ctrm$ is computed against each model's own refine-k arm.}
+\caption{Seven arms, pooled over 15 tasks $\times$ 3 seeds ($n{=}45$ per arm per model). No L3 judge. $\ctrm$ is the geometric mean over paired runs against each model's own refine-k arm (ratios with zero team scores are excluded from the geometric mean and reported as superscript zero-counts, e.g.\ $0.69^{(2)}$ = 2 zero-score runs of 45).}
 \label{tab:main}
 \small
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{lcccc|cccc}
+\begin{tabular}{lccccc|ccccc}
 \toprule
-& \multicolumn{4}{c|}{DS v4 Flash} & \multicolumn{4}{c}{Kimi K3} \\
-Arm & $Q$ & L2 & TR & $\ctrm$ & $Q$ & L2 & TR & $\ctrm$ \\
+& \multicolumn{5}{c|}{DS v4 Flash} & \multicolumn{5}{c}{Kimi K3} \\
+Arm & $Q$ & L1 & L2 & TR & $\ctrm$ & $Q$ & L1 & L2 & TR & $\ctrm$ \\
 \midrule
-single (1-shot) & 0.606 & 0.759 & 1.00$\times$ & --- & 0.613 & 0.775 & 1.00$\times$ & --- \\
-single\_refine\_k & 0.582 & 0.720 & 3.33$\times$ & 1.00 (ref) & 0.637 & 0.795 & 4.27$\times$ & 1.00 (ref) \\
-single\_bon\_k & 0.584 & 0.715 & 4.27$\times$ & $\sim$1.00 & 0.624 & 0.806 & 5.18$\times$ & 0.97 \\
-team\_last & 0.417 & 0.566 & 1.46$\times$ & \textbf{0.69} & 0.420 & 0.580 & 2.53$\times$ & \textbf{0.69} \\
-team\_concat & 0.535 & 0.536 & 1.42$\times$ & 0.91 & 0.542 & 0.548 & 2.46$\times$ & 0.89 \\
-team\_blackboard & 0.478 & 0.602 & 1.44$\times$ & 0.81 & 0.449 & 0.594 & 2.49$\times$ & 0.75 \\
-team\_integrator & \textbf{0.881} & 0.741 & 2.14$\times$ & \textbf{1.55} & \textbf{0.905} & 0.785 & 4.44$\times$ & \textbf{1.61} \\
+single (1-shot) & 0.606 & 0.515 & 0.759 & 1.00$\times$ & --- & 0.613 & 0.515 & 0.775 & 1.00$\times$ & --- \\
+single\_refine\_k & 0.582 & 0.499 & 0.720 & 3.33$\times$ & (ref) & 0.637 & 0.543 & 0.795 & 4.27$\times$ & (ref) \\
+single\_bon\_k & 0.584 & 0.506 & 0.715 & 4.27$\times$ & --- & 0.624 & 0.515 & 0.806 & 5.18$\times$ & --- \\
+team\_last & 0.417 & 0.328 & 0.566 & 1.46$\times$ & \textbf{0.69}$^{(2)}$ & 0.420 & 0.324 & 0.580 & 2.53$\times$ & \textbf{0.66}$^{(3)}$ \\
+team\_concat & 0.535 & 0.534 & 0.536 & 1.42$\times$ & 0.91$^{(1)}$ & 0.542 & 0.538 & 0.548 & 2.46$\times$ & 0.88$^{(2)}$ \\
+team\_blackboard & 0.478 & 0.404 & 0.602 & 1.44$\times$ & 0.81$^{(2)}$ & 0.449 & 0.362 & 0.594 & 2.49$\times$ & 0.72$^{(3)}$ \\
+team\_integrator & \textbf{0.881} & \textbf{0.964} & 0.741 & 2.14$\times$ & \textbf{1.55} & \textbf{0.905} & \textbf{0.978} & 0.785 & 4.44$\times$ & \textbf{1.50} \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
-$\ctrm$ shown as arithmetic means for cross-arm comparability (K3 mechanical arms contain genuine zero-score runs); geometric-mean CTR with log-domain bootstrap CI for the integrator arm: Flash 1.55 $[1.37, 1.76]$, K3 1.50 $[1.33, 1.67]$. All four team arms deviate from the refine-k baseline significantly on both models (Wilcoxon signed-rank with BH-FDR at $q=0.05$; K3: last $p=4.4\times10^{-6}$, concat $p=5.0\times10^{-3}$, blackboard $p=3.5\times10^{-5}$, integrator $p=1.5\times10^{-6}$).
+Geometric-mean $\ctrm$ with task-block bootstrap CIs for the integrator arm: Flash 1.55 $[1.32, 1.82]$, K3 1.50 $[1.26, 1.78]$; against the call-matched best-of-k baseline (both 4.2 LLM calls), the integrator reaches 1.56 (Flash) and 1.54 (K3), both $p<10^{-5}$ (Wilcoxon). All four team arms deviate from the refine-k baseline significantly on both models (two-sided Wilcoxon signed-rank with BH-FDR at $q=0.05$; Flash: last $p=1.0\times10^{-4}$, concat $p=5.1\times10^{-2}$, blackboard $p=4.6\times10^{-3}$, integrator $p=4.2\times10^{-7}$; K3: last $p=1.8\times10^{-5}$, concat $p=7.1\times10^{-3}$, blackboard $p=9.4\times10^{-5}$, integrator $p=1.2\times10^{-6}$).
 
-\paragraph{Finding 1 (assembly dominates).} On Flash, geometric-mean $\ctrm$ across 4 team protocols spans $\mathbf{0.69 \to 1.55}$ ($\Delta 0.86$) over \emph{identical role outputs}; on K3 the span is $\mathbf{0.69 \to 1.61}$ ($\Delta 0.92$). The integrator arm beats the compute-matched baseline on both models (Flash: $p=2.1\times10^{-7}$, $d=+0.74$; K3: $p=1.5\times10^{-6}$, $d=+0.65$); every mechanical protocol is significantly \emph{worse} than even the 1-shot single on both (K3 Cliff's $d$: last $-0.52$, blackboard $-0.42$, concat $-0.21$). The default engineering choice of last-role $=$ team output does not merely underperform---it produces a ``team-inferiority'' artifact (CTR 0.69 on \emph{both} models) that flips sign under integrator assembly.
+\paragraph{Finding 1 (assembly flips the measured team effect).} On Flash, geometric-mean $\ctrm$ across 4 team protocols spans $\mathbf{0.69 \to 1.55}$ ($\Delta 0.86$) over \emph{identical role outputs}; on K3 the span is $\mathbf{0.66 \to 1.50}$ ($\Delta 0.84$). The integrator arm beats both compute-matched baselines on both models (vs.\ refine-k: Flash $p=4.2\times10^{-7}$, $d=+0.74$; K3 $p=1.2\times10^{-6}$, $d=+0.65$; vs.\ call-matched bon-k: 1.56 / 1.54, both $p<10^{-5}$); every mechanical protocol is significantly \emph{worse} than even the 1-shot single on both (K3 Cliff's $d$: last $-0.52$, blackboard $-0.42$, concat $-0.21$). The default engineering choice of last-role $=$ team output does not merely underperform---it produces a ``team-inferiority'' artifact ($\ctrm$ 0.69 / 0.66) that flips sign under integrator assembly.
 
-\paragraph{Finding 2 (variance decomposition).} Over the same set of role outputs, the assembly protocol factor explains \textbf{40.0\%} of artifact-quality variance on Flash (one-way ANOVA $F=39.1$, $p=2.0\times10^{-19}$, $\eta^2=0.400$) and \textbf{42.8\%} on K3, whereas the single-agent compute strategy explains \textbf{0.3\%} on Flash and \textbf{0.2\%} on K3. Assembly explains 130--200$\times$ more variance than compute, on both families. See Figure~\ref{fig:heatmap}(c).
+\paragraph{Finding 2 (assembly dwarfs compute as a design axis).} Over the same set of role outputs, team-arm mean quality spans a range of \textbf{0.46} on Flash ($Q$ 0.417--0.881) and \textbf{0.49} on K3 (0.420--0.905), whereas single-arm compute strategies span only \textbf{0.025} on both (Flash 0.582--0.606; K3 0.613--0.637)---a $\sim$19$\times$ difference in range. Formally, in a pooled one-way ANOVA over all seven arms, arm identity explains $\eta^2 = 0.28$ (Flash) / $0.29$ (K3) of quality variance; the four team arms differ strongly from one another ($F=39.1$, $p=2.0\times10^{-19}$ Flash; $F=43.9$, $p=3.0\times10^{-21}$ K3) while the three single arms are statistically indistinguishable ($F=0.18$, $p=0.84$; $F=0.12$, $p=0.89$). We stress that these subset tests are descriptive---the two factors are not crossed in a single design, so we do not report a ratio of variance-explained figures. See Figure~\ref{fig:heatmap}(c).
 
-\paragraph{Finding 3 (team gains survive compute-matching).} On Flash, the integrator burns 2.14$\times$ tokens vs.\ the 1-shot single and reaches $\ctrn$ 1.52, while refine-k (3.33$\times$) and bon-k (4.27$\times$) burn \emph{more} compute yet score \emph{below} the 1-shot single ($\ctrn$ 0.96). K3 sharpens this result: its stronger self-revision lifts refine-k to $\ctrn$ 1.08, yet the integrator still reaches 1.72---a $+59\%$ gap over the best compute-matched baseline on the \emph{same} model. Better models narrow the self-revision deficit but do not close the semantic-integration gap.
+\paragraph{Finding 2b (where the effect lives: layers).} The layer-wise decomposition in Table~\ref{tab:main} localizes the integrator's gain. Its L1 saturation rate is \textbf{95.6\%} (Flash) / \textbf{97.8\%} (K3), versus 26.7--31.1\% for the single arms; layer-wise $\ctrm$(L1) reaches 1.97 / 2.04. On the factual layer, however, the integrator is at \emph{parity} with single agents ($\ctrm$(L2) vs.\ 1-shot: 1.05, $p=0.87$ Flash; 1.04, $p=0.89$ K3), while every mechanical protocol significantly \emph{degrades} it ($\ctrm$(L2) 0.69--0.78, all $p<0.05$). TMS (perfect structure \emph{and} facts) passes for 46.7\% / 55.6\% of integrator runs versus $\le$22.2\% for any single arm and 6.7\% for all mechanical arms. The correct reading is not that teams generate better \emph{facts} than individuals, but that assembly governs whether the facts already produced by the roles survive into the artifact: mechanical assembly loses them; semantic integration preserves them and restores the schema-compliant structure that singles rarely produce.
+
+\paragraph{Finding 3 (team gains survive compute-matching).} On Flash, the integrator burns 2.14$\times$ tokens vs.\ the 1-shot single and reaches $\ctrn$ 1.52, while refine-k (3.33$\times$) and bon-k (4.27$\times$) burn \emph{more} compute yet score \emph{below} the 1-shot single ($\ctrn$ 0.96). K3 sharpens this result: its stronger self-revision lifts refine-k to $\ctrn$ 1.08, yet the integrator still reaches $\ctrn$ 1.72. The integrator's advantage also holds under the strictest call-matched comparison (vs.\ bon-k, both 4.2 LLM calls): $\ctrm$ 1.56 (Flash) / 1.54 (K3), both $p<10^{-5}$. More sampling or more revision rounds does not substitute for semantic integration on either model.
 
 \paragraph{Finding 4 (mechanical assembly fails at semantics; L2 localizes where).} On both Flash and K3, concat's factual layer (L2 0.536 / 0.548) falls \emph{below} last's (0.566 / 0.580): the answer-block extractor takes the last \code{json} block, which in a naive concatenation is the final role's \emph{partial} block, while earlier roles' numeric content is stranded. The integrator is the only protocol that reliably aggregates all roles' numbers into one consistent answer block.
 
-\paragraph{Finding 5 (cross-model replication).} The entire effect structure replicates across two model families: the arm ordering (integrator $\gg$ concat $>$ blackboard $>$ last) is identical; all four team arms deviate significantly from refine-k on both models under BH-FDR; the assembly-vs-compute variance gap holds on both; and per-coupling $\ctrm$ CIs exclude 1.0 in all six cells. A single-case study makes the mechanism vivid (K3, \code{t-DATA-L-01}, seed 0; Figure~\ref{fig:case}): the same two role outputs score $Q=1.00$ under the integrator, 0.42 under concat, and \textbf{0.00 under both last and blackboard}---while every single-mode baseline lands at 0.38--0.79. The capability was present in the role outputs all along; the assembly protocol alone determined whether it survived to the artifact.
+\paragraph{Finding 5 (cross-model replication, with honest failure cases).} The effect structure replicates across two model families: the arm ordering (integrator $\gg$ concat $>$ blackboard $>$ last) is identical; all four team arms deviate significantly from refine-k on both models under BH-FDR; and per-coupling integrator $\ctrm$ CIs exclude 1.0 in all six cells, though the high-coupling cells are marginal (lower CI bounds 1.05--1.06 with $n{=}15$ per cell). The integrator is not uniformly superior: it scores below the 1-shot single on 3/15 tasks on Flash and 4/15 on K3 (e.g.\ \code{t-CONTENT-H-03}, \code{t-CROSS-L-01}). A single-case study makes the mechanism vivid (K3, \code{t-DATA-L-01}, seed 0; Figure~\ref{fig:case})---we present it as an illustrative extreme, not a typical case: the same two role outputs score $Q=1.00$ under the integrator, 0.42 under concat, and \textbf{0.00 under both last and blackboard}---while every single-mode baseline lands at 0.38--0.79. The capability was present in the role outputs all along; the assembly protocol alone determined whether it survived to the artifact.
 
 \begin{figure*}[t]
 \centering
@@ -272,17 +278,17 @@ Low & 0.603 & 0.522 & 0.404 & 0.537 & \textbf{0.905} & 0.500 & 0.604 & 0.657 & 0
 Medium & 0.595 & 0.608 & 0.339 & 0.493 & \textbf{0.876} & 0.447 & 0.579 & 0.586 & 0.321 & 0.432 & \textbf{0.872} & 0.292 \\
 High & 0.621 & 0.615 & 0.510 & 0.574 & \textbf{0.861} & 0.488 & 0.656 & 0.669 & 0.494 & 0.569 & \textbf{0.925} & 0.573 \\
 \midrule
-$\ctrm$ (integ.) & \multicolumn{6}{c|}{1.69 / 1.46 / 1.51} & \multicolumn{6}{c}{1.43 / 1.55 / 1.52} \\
+$\ctrm$ (integ., geo.) & \multicolumn{6}{c|}{1.69 / 1.46 / 1.51} & \multicolumn{6}{c}{1.43 / 1.55 / 1.52} \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
-The integrator advantage is \textbf{uniform across coupling levels on both models} (all six cells $p < 0.005$, all six bootstrap CIs exclude 1.0); no Simpson paradox emerges when pooling. Notably, an earlier ``coupling law'' (CTR increasing monotonically with coupling) does \textbf{not} reappear once assembly is controlled: it was an artifact of last-role assembly interacting with role ordering, not a property of teams.
+The integrator advantage is \textbf{uniform across coupling levels on both models} (all six cells $p < 0.005$; all six geometric-mean bootstrap CIs exclude 1.0, though the high-coupling cells are marginal with lower bounds 1.05--1.06 at $n{=}15$ per cell); no Simpson paradox emerges when pooling. Notably, an earlier ``coupling law'' (CTR increasing monotonically with coupling) does \textbf{not} reappear once assembly is controlled: it was an artifact of last-role assembly interacting with role ordering, not a property of teams.
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{fig4_assembly_coupling_wb.png}
-\caption{(a)(b) Quality $Q$ by assembly protocol $\times$ coupling level (15 paired runs per cell), DS v4 Flash and Kimi K3 side by side. The integrator row dominates every coupling level on both models while all mechanical protocols fall below both single baselines. (c) Variance decomposition of $Q$: the assembly-protocol factor explains 40.0\% of variance on Flash and 42.8\% on K3 ($\eta^2 = 0.400/0.428$) versus 0.3\%/0.2\% for the compute strategy---a 130--200$\times$ gap over identical role outputs, replicated across model families.}
+\caption{(a)(b) Quality $Q$ by assembly protocol $\times$ coupling level (15 paired runs per cell), DS v4 Flash and Kimi K3 side by side. The integrator row dominates every coupling level on both models while all mechanical protocols fall below both single baselines. (c) Range of arm means: assembly protocol spans 0.417--0.881 (Flash) and 0.420--0.905 (K3) over identical role outputs, whereas compute strategy spans only 0.582--0.606 and 0.613--0.637---a $\sim$19$\times$ difference in range, replicated across model families.}
 \label{fig:heatmap}
 \end{figure*}
 
@@ -308,12 +314,12 @@ We re-scored the full seed-0 subsample of both models (15 tasks $\times$ 7 arms 
 \subsection{Statistical details}
 \label{sec:stats}
 
-All directional claims use the one-sided Wilcoxon signed-rank test on paired per-(task,seed) differences. CTR CIs use 2000 block-bootstrap replications at the task level (task $=$ block). Multi-Finding tables apply BH-FDR correction at $q=0.05$.
+All comparative claims use the two-sided Wilcoxon signed-rank test on paired per-(task,seed) differences, with BH-FDR correction at $q=0.05$ where multiple arms are compared. CTR is reported as the geometric mean over paired runs (ratio scale); paired runs with zero team scores are excluded from the geometric mean and their counts reported explicitly. CTR CIs use 5000 task-block bootstrap replications (task $=$ block). Effect sizes are Cliff's $d$ on paired quality differences.
 
 \section{Discussion}
 \label{sec:discussion}
 
-\paragraph{For practitioners.} Decision table for ``when to use a team and which assembly'':
+\paragraph{For practitioners.} The data support three decision rules (``when to use a team and which assembly''):
 
 \begin{table}[h]
 \centering
@@ -324,14 +330,14 @@ All directional claims use the one-sided Wilcoxon signed-rank test on paired per
 \toprule
 Scenario & Recommendation & Why \\
 \midrule
-Low coupl., small doc & Single + refine-3 & Last-team is worse; integrator overhead not justified. \\
-Medium coupling & Team + integrator & $\ctrm \approx 1.5\times$; 2$\times$ token cost acceptable if time-to-quality matters. \\
-High coupling & Team + integrator & Only integrator reliably assembles conflicting-source info. \\
+Any team use & Never ship last-role & Last-role loses 31--34\% of compute-matched quality on both models. \\
+Team justified & Integrator assembly & $\ctrm \approx 1.5\times$ at every coupling level (Low 1.69/1.43, Med 1.46/1.55, High 1.51/1.52); $\sim$2$\times$ token cost. \\
+No team & Single + 1-shot & Refine-k / bon-k do not beat 1-shot on Flash; on K3 refine-k gains 8\% for 4.3$\times$ tokens. \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{For framework developers.} Expose assembly protocol as a first-class knob. Today, AutoGen (groupchat speaker-selection $\to$ last-speaker reply), CrewAI (sequential $\to$ last agent output unless explicitly wired), and LangGraph (edge endpoints) behave like the \code{last} arm unless the user patches in explicit aggregation. A built-in \code{team.finalize()} with token-cost attribution would align research and production practices.
+\paragraph{For framework developers.} Expose assembly protocol as a first-class knob. In their default configurations, common group-chat and sequential-pipeline patterns (AutoGen group chat, CrewAI sequential, LangGraph edge endpoints) typically return the last agent's reply as the final answer unless the developer wires in explicit aggregation---an informal survey of the three frameworks' defaults, not a controlled trace study. A built-in \code{team.finalize()} with token-cost attribution would align research and production practices.
 
 \paragraph{For benchmark designers.} Three lessons: (1) Report assembly protocol the same way you report temperature---it can swing the measured effect more than the model does. (2) Structural rubrics require a content gate; mechanical headings are always a gaming risk when evaluation is automated. (3) Compute-matched baselines are not optional for ``multi vs.\ single'' papers.
 
@@ -342,7 +348,8 @@ High coupling & Team + integrator & Only integrator reliably assembles conflicti
 \item \textbf{Monolingual, Chinese-heavy.} Task descriptions and role prompts are in Chinese; artifact rubrics check Chinese-section headings. An English subset is deferred to follow-up work.
 \item \textbf{Synthetic office tasks.} Seeded from real documents but synthetic; no ground-truth downstream outcomes.
 \item \textbf{Fixed team topology.} Serial handoff with fixed role templates; no self-organizing role discovery, no parallel tool usage, no agent churn.
-\item \textbf{Model coverage.} Two model families completed (DS v4 Flash, Kimi K3, 630 runs); the assembly effect, arm ordering, and variance structure replicate across both. A third family is queued.
+\item \textbf{Model coverage.} Two model families completed (DS v4 Flash, Kimi K3, 630 runs); the assembly effect, arm ordering, and variance structure replicate across both. Conclusions about ``model capability'' are necessarily limited to these two families.
+\item \textbf{Integrator prompt visibility.} The integrator's system prompt receives the task's required-section schema, as any final-stage editor in a real pipeline would; its near-perfect L1 saturation is therefore partly attributable to rubric visibility. The layer-wise decomposition (\S\ref{sec:main}, Finding 2b) partially controls for this---the factual layer (L2), whose schema is \emph{not} disclosed in a gameable way, shows parity rather than gain---but a fully rubric-blind integrator ablation remains future work, and the structural share of the integrator's advantage should be read with this caveat.
 \item \textbf{L3 judge.} Main tables score with L3 off (renormalized L1/L2); \S\ref{sec:scorer-validity} reports a completed L3-on ablation over the full seed-0 subsample (210 runs, cross-family judges, two rounds each) showing the arm ordering is perfectly stable (Spearman $= 1.000$ on both models).
 \item \textbf{Open-loop runtime.} No mid-run budget halts, no human-in-the-loop interventions.
 \end{enumerate}
@@ -350,7 +357,7 @@ High coupling & Team + integrator & Only integrator reliably assembles conflicti
 \section{Conclusion}
 \label{sec:conclusion}
 
-The field has been asking ``do LLM teams outperform individuals,'' but most of the variance in the answer comes from \emph{how the team's output is assembled}, not from the model's capability or even the task's coupling. Our controlled experiment over four assembly protocols, replicated on two model families (630 runs), shows that the integrator protocol achieves a mean $\ctrm$ of 1.55 (Flash) and 1.50 (K3, geometric mean) against a compute-matched self-revision baseline ($p=2.1\times10^{-7}$ and $1.5\times10^{-6}$), while naive last-role assembly---the default behavior of many frameworks---yields $\ctrm = 0.69$ on \emph{both} models. The assembly factor explains 40--43\% of quality variance versus $\le$0.3\% for the compute strategy, and the full arm ordering replicates across families. \teambench{} provides the first reproducible testbed for disentangling these effects and will enable future work on topology, prompts, and cross-framework generalization without conflating them with a pipeline step that nobody had been measuring.
+The field has been asking ``do LLM teams outperform individuals,'' but our controlled experiment shows that on identical role outputs, most of the variance in the answer comes from \emph{how the team's output is assembled}, not from additional compute or the task's coupling. Across four assembly protocols and two model families (630 runs), the measured team effect flips sign with the protocol alone: geometric-mean $\ctrm$ spans 0.69--1.55 (Flash) and 0.66--1.50 (K3), and the integrator arm beats both compute-matched baselines on both (vs.\ best-of-k at identical call counts: 1.56 / 1.54), while naive last-role assembly---a common engineering default---manufactures ``team inferiority.'' Layer-wise decomposition sharpens the message: mechanical assembly destroys the factual content that roles produced; semantic integration preserves it and restores schema-compliant structure. Multi-agent papers that do not report their assembly protocol are reporting a pipeline artifact as a property of teams.
 
 \balance
 
