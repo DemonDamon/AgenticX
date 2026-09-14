@@ -107,6 +107,40 @@ export function siteLabelFromUrl(
   return siteLabelFromHost(host);
 }
 
+export type FaviconTone = "empty" | "light" | "normal";
+
+/**
+ * Classify favicon raster pixels so white marks do not vanish on a light plate.
+ * - empty: no ink, or a solid white fill that would cover the badge
+ * - light: bright mark (often on transparency) → needs a dark plate
+ * - normal: dark / colorful mark → keep on a light plate
+ */
+export function classifyFaviconPixels(data: ArrayLike<number>): FaviconTone {
+  const pixelCount = Math.floor(data.length / 4);
+  if (pixelCount === 0) return "empty";
+
+  let opaque = 0;
+  let bright = 0;
+  for (let i = 0; i < pixelCount; i += 1) {
+    const offset = i * 4;
+    const alpha = data[offset + 3] ?? 0;
+    if (alpha < 24) continue;
+    opaque += 1;
+    const r = data[offset] ?? 0;
+    const g = data[offset + 1] ?? 0;
+    const b = data[offset + 2] ?? 0;
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    if (luminance > 228) bright += 1;
+  }
+
+  if (opaque < 12) return "empty";
+  const brightRatio = bright / opaque;
+  const opaqueRatio = opaque / pixelCount;
+  if (brightRatio >= 0.85 && opaqueRatio >= 0.75) return "empty";
+  if (brightRatio >= 0.55) return "light";
+  return "normal";
+}
+
 export function resolveFaviconCandidates(
   url?: string,
   domain?: string,

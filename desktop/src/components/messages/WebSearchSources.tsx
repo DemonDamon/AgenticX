@@ -33,7 +33,7 @@ function FaviconStack({ groups, variant = "inline" }: { groups: DocGroup[]; vari
             key={`fav-${group.docKey}-${idx}`}
             className={
               isMeta
-                ? "flex h-4 w-4 items-center justify-center overflow-hidden rounded-full border border-black/15 bg-white text-neutral-600 shadow-sm [html[data-theme=light]_&]:border-black/10"
+                ? "flex h-4 w-4 items-center justify-center overflow-hidden rounded-full border border-black/25 bg-neutral-200 text-neutral-800 shadow-sm [html[data-theme=light]_&]:border-black/15"
                 : "flex h-4 w-4 items-center justify-center overflow-hidden rounded-full border border-[var(--surface-base)] bg-[var(--surface-base)] shadow-sm"
             }
           >
