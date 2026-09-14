@@ -1,2 +1,0 @@
-task_id,office_type,task_type,model,seed,assembly,Q_single,Q_single_matched,Q_team,CTR_naive,CTR_matched,TR,call_ratio,team_token_overhead
-t-DOC-L-01,document,low_coupling,kimi-k3,0,last,0.8125,NA,0.8125,1.0000,NA,2.8952,3.0000,5265

@@ -1,2 +1,0 @@
-task_id,office_type,task_type,model,seed,assembly,Q_single,Q_single_matched,Q_team,CTR_naive,CTR_matched,TR,call_ratio,team_token_overhead
-t-CONTENT-H-03,content,high_coupling,deepseek-v4-flash,0,last,1.0,NA,0.5312,0.5312,NA,1.5347,4.0000,3181

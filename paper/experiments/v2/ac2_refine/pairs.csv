@@ -1,2 +1,0 @@
-task_id,office_type,task_type,model,seed,assembly,Q_single,Q_single_matched,Q_team,CTR_naive,CTR_matched,TR,call_ratio,team_token_overhead
-t-DOC-M-02,document,medium_coupling,deepseek-v4-flash,0,integrator,0.7917,0.7917,1.0,1.2632,1.2632,1.6675,4.0000,5192

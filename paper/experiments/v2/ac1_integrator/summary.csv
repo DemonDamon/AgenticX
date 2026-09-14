@@ -1,3 +1,0 @@
-task_id,office_type,task_type,mode,model,seed,Q,TMS,prompt_tokens,completion_tokens,total_tokens,cached_tokens,elapsed,llm_calls,error
-t-CONTENT-H-03,content,high_coupling,single,deepseek-v4-flash,0,1.0,True,576,10606,11182,512,83.68,1,""
-t-CONTENT-H-03,content,high_coupling,team_integrator,deepseek-v4-flash,0,1.0,True,7593,8005,15598,3072,60.64,5,""
