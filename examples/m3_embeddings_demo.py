@@ -112,7 +112,7 @@ class EmbeddingModelTester:
         
         # OpenAI Provider
         openai_key = os.getenv('OPENAI_API_KEY')
-        if openai_key and openai_key != 'sk-jQ0b8347cc1b8d06395eeefe1461da93c99050f9ac8PZmEd':
+        if openai_key:
             providers['OpenAI'] = {
                 'provider': OpenAIEmbeddingProvider(
                     api_key=openai_key,
@@ -127,7 +127,7 @@ class EmbeddingModelTester:
         
         # LiteLLM Provider (支持多种模型)
         litellm_key = os.getenv('OPENAI_API_KEY')  # 使用 OpenAI key 作为示例
-        if litellm_key and litellm_key != 'sk-jQ0b8347cc1b8d06395eeefe1461da93c99050f9ac8PZmEd':
+        if litellm_key:
             providers['LiteLLM'] = {
                 'provider': LiteLLMEmbeddingProvider(
                     model='text-embedding-ada-002',
