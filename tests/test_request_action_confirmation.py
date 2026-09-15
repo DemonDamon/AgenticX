@@ -103,6 +103,33 @@ def test_request_action_confirmation_timeout_clears_pending(monkeypatch) -> None
     assert "secret" not in ctx
 
 
+def test_request_action_confirmation_fast_submit_during_emit_keeps_answer() -> None:
+    gate = AsyncClarifyGate(timeout_seconds=5.0)
+    events: List[Dict[str, Any]] = []
+
+    async def emit(evt: Dict[str, Any]) -> None:
+        events.append(evt)
+        if evt.get("type") != "clarification_required":
+            return
+        req_id = str((evt.get("data") or {}).get("id") or "")
+        accepted = gate.resolve(
+            req_id,
+            {"answer_text": "", "selected_options": ["确认执行"]},
+        )
+        assert accepted is True
+
+    async def _main() -> str:
+        return await _request_action_confirmation(
+            title="确认？",
+            clarify_gate=gate,
+            emit_event=emit,
+            expires_in_seconds=5,
+        )
+
+    out = asyncio.run(_main())
+    assert out.startswith("[ACTION_CONFIRMED]")
+
+
 def test_request_action_confirmation_approved_via_gate() -> None:
     gate = AsyncClarifyGate(timeout_seconds=5.0)
     events: List[Dict[str, Any]] = []

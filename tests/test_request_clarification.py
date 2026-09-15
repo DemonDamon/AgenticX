@@ -253,6 +253,46 @@ def test_request_clarification_normal_round_trip() -> None:
     assert "clarification_response" in types
 
 
+def test_request_clarification_fast_submit_during_emit_keeps_answer() -> None:
+    """UI may POST /api/clarify as soon as clarification_required is emitted.
+
+    The pending future must already be registered, otherwise resolve() is a
+    no-op and the tool result becomes CLARIFICATION_TIMEOUT (issue #32).
+    """
+    gate = AsyncClarifyGate(timeout_seconds=1.0)
+    events: List[Dict[str, Any]] = []
+
+    async def emit(evt: Dict[str, Any]) -> None:
+        events.append(evt)
+        if evt.get("type") != "clarification_required":
+            return
+        req_id = str((evt.get("data") or {}).get("id") or "")
+        accepted = gate.resolve(
+            req_id,
+            {"answer_text": "https://github.com/acme/repo", "selected_options": []},
+        )
+        assert accepted is True
+
+    async def _main() -> str:
+        return await _request_clarification(
+            "仓库链接？",
+            options=[],
+            allow_free_text=True,
+            context={"request_id": "req-fast"},
+            clarify_gate=gate,
+            emit_event=emit,
+            is_unattended=False,
+        )
+
+    result = asyncio.run(_main())
+    assert "https://github.com/acme/repo" in result
+    assert not result.startswith("[CLARIFICATION_TIMEOUT]")
+    assert [e["type"] for e in events] == [
+        "clarification_required",
+        "clarification_response",
+    ]
+
+
 def test_request_clarification_timeout_returns_sentinel() -> None:
     gate = AsyncClarifyGate(timeout_seconds=0.05)
     events: List[Dict[str, Any]] = []

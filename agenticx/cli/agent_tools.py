@@ -3761,38 +3761,45 @@ async def _request_action_confirmation(
 
     gate = clarify_gate or AsyncClarifyGate()
     emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
-    if emit_prompt:
-        await emit_event(
-            {
-                "type": "clarification_required",
-                "data": {
-                    "id": request_id,
-                    "prompt": title_text,
-                    "options": [approve, reject],
-                    "decisions": [],
-                    "allow_free_text": True,
-                    "context": payload_context,
-                },
-            }
-        )
-
     _log.info("[action_confirm] requested id=%s title=%s ttl=%.1fs", request_id, title_text[:80], ttl)
-    try:
-        answer = await asyncio.wait_for(
-            gate.request_clarification(
-                title_text,
-                options=[approve, reject],
-                allow_free_text=True,
-                context=payload_context,
-            ),
-            timeout=ttl,
+    wait_task = asyncio.create_task(
+        gate.request_clarification(
+            title_text,
+            options=[approve, reject],
+            allow_free_text=True,
+            context=payload_context,
         )
-    except asyncio.TimeoutError:
-        _log.warning("[action_confirm] timed out id=%s after %.1fs", request_id, ttl)
-        # Best-effort: resolve pending future so the gate does not linger.
-        if isinstance(gate, AsyncClarifyGate):
-            gate.resolve(request_id, {"__timeout__": True})
-        answer = {"__timeout__": True}
+    )
+    # Register _pending[id] before publishing the prompt. A fast UI callback
+    # otherwise resolves nothing and the turn sits until ttl.
+    await asyncio.sleep(0)
+    try:
+        if emit_prompt:
+            await emit_event(
+                {
+                    "type": "clarification_required",
+                    "data": {
+                        "id": request_id,
+                        "prompt": title_text,
+                        "options": [approve, reject],
+                        "decisions": [],
+                        "allow_free_text": True,
+                        "context": payload_context,
+                    },
+                }
+            )
+        try:
+            answer = await asyncio.wait_for(wait_task, timeout=ttl)
+        except asyncio.TimeoutError:
+            _log.warning("[action_confirm] timed out id=%s after %.1fs", request_id, ttl)
+            # Best-effort: resolve pending future so the gate does not linger.
+            if isinstance(gate, AsyncClarifyGate):
+                gate.resolve(request_id, {"__timeout__": True})
+            answer = {"__timeout__": True}
+    except BaseException:
+        wait_task.cancel()
+        await asyncio.gather(wait_task, return_exceptions=True)
+        raise
 
     _log.info("[action_confirm] resolved id=%s answer=%s", request_id, answer)
     if emit_prompt:
@@ -3861,27 +3868,46 @@ async def _request_clarification(
 
     gate = clarify_gate or AsyncClarifyGate()
     emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
-    if emit_prompt:
-        await emit_event(
-            {
-                "type": "clarification_required",
-                "data": {
-                    "id": request_id,
-                    "prompt": prompt,
-                    "options": options,
-                    "decisions": decisions,
-                    "allow_free_text": allow_free_text,
-                    "context": payload_context,
-                },
-            }
-        )
     _log.info("[clarify] requested id=%s prompt=%s", request_id, prompt[:80])
-    answer = await gate.request_clarification(
-        prompt,
-        options=options,
-        allow_free_text=allow_free_text,
-        context=payload_context,
-    )
+    if emit_prompt:
+        # Register the pending future before publishing its ID. Otherwise a
+        # fast UI submit arrives before AsyncClarifyGate.resolve() has a
+        # future and the turn hangs until timeout (issue #32).
+        wait_task = asyncio.create_task(
+            gate.request_clarification(
+                prompt,
+                options=options,
+                allow_free_text=allow_free_text,
+                context=payload_context,
+            )
+        )
+        await asyncio.sleep(0)
+        try:
+            await emit_event(
+                {
+                    "type": "clarification_required",
+                    "data": {
+                        "id": request_id,
+                        "prompt": prompt,
+                        "options": options,
+                        "decisions": decisions,
+                        "allow_free_text": allow_free_text,
+                        "context": payload_context,
+                    },
+                }
+            )
+            answer = await wait_task
+        except BaseException:
+            wait_task.cancel()
+            await asyncio.gather(wait_task, return_exceptions=True)
+            raise
+    else:
+        answer = await gate.request_clarification(
+            prompt,
+            options=options,
+            allow_free_text=allow_free_text,
+            context=payload_context,
+        )
     _log.info("[clarify] resolved id=%s answer=%s", request_id, answer)
     if emit_prompt:
         await emit_event(
@@ -9503,25 +9529,41 @@ async def _maybe_guard_shared_workspace_write(
     gate = clarify_gate or AsyncClarifyGate()
     emit_prompt = emit_event is not None and isinstance(gate, AsyncClarifyGate)
     if emit_prompt:
-        await emit_event(
-            {
-                "type": "clarification_required",
-                "data": {
-                    "id": payload_context["request_id"],
-                    "prompt": prompt,
-                    "options": options,
-                    "decisions": [],
-                    "allow_free_text": True,
-                    "context": payload_context,
-                },
-            }
+        wait_task = asyncio.create_task(
+            gate.request_clarification(
+                prompt,
+                options=options,
+                allow_free_text=True,
+                context=payload_context,
+            )
         )
-    answer = await gate.request_clarification(
-        prompt,
-        options=options,
-        allow_free_text=True,
-        context=payload_context,
-    )
+        await asyncio.sleep(0)
+        try:
+            await emit_event(
+                {
+                    "type": "clarification_required",
+                    "data": {
+                        "id": payload_context["request_id"],
+                        "prompt": prompt,
+                        "options": options,
+                        "decisions": [],
+                        "allow_free_text": True,
+                        "context": payload_context,
+                    },
+                }
+            )
+            answer = await wait_task
+        except BaseException:
+            wait_task.cancel()
+            await asyncio.gather(wait_task, return_exceptions=True)
+            raise
+    else:
+        answer = await gate.request_clarification(
+            prompt,
+            options=options,
+            allow_free_text=True,
+            context=payload_context,
+        )
     if emit_prompt:
         await emit_event(
             {
