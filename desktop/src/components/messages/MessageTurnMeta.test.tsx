@@ -38,8 +38,8 @@ describe("MessageTurnMeta", () => {
     expect(html).toContain("data-turn-meta-gutter");
     expect(html).toContain('data-turn-meta=""');
     expect(html).toContain("data-turn-model-chip");
-    expect(html).toContain("bg-surface-card-strong");
-    expect(html).not.toContain("rounded-full");
+    expect(html).not.toContain("bg-surface-card-strong");
+    expect(html).toContain("rounded-full");
     expect(html).not.toContain("border-border");
     expect(html).not.toContain("font-mono");
     expect(html).not.toContain("arrow-up-from-line");
