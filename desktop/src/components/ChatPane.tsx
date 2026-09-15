@@ -357,17 +357,14 @@ import { avatarTintBg } from "../utils/avatar-color";
 import { formatModelDisplayParts, formatModelOptionLabel } from "../utils/model-display";
 import { SettingsSwitch } from "./settings/SettingsSwitch";
 import {
-  DEFAULT_KIMI_REASONING_EFFORT,
-  DEEPSEEK_REASONING_EFFORT_OPTIONS,
+  contextWindowOptionsForModel,
   describeModelForPicker,
-  KIMI_REASONING_EFFORT_OPTIONS,
-  labelForDeepSeekReasoningEffort,
-  labelForKimiReasoningEffort,
-  normalizeDeepSeekReasoningEffort,
-  normalizeKimiReasoningEffort,
+  labelForContextWindow,
+  labelForModelReasoningEffort,
+  normalizeContextWindow,
+  normalizeReasoningEffortForModel,
+  reasoningEffortOptionsForModel,
   supportsDeepSeekV4Thinking,
-  supportsKimiK3ReasoningEffort,
-  type DeepSeekReasoningEffort,
   type KimiReasoningEffort,
 } from "../utils/model-hover-blurb";
 import { getProviderDisplayName } from "../utils/provider-display";
@@ -1233,38 +1230,31 @@ const MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT = 30;
 /** Rough height budget for the model hover card (used for first paint before measure). */
 function estimateModelHoverTipHeight(args: {
   showDeepSeekThinking: boolean;
-  paneThinkingEnabled: boolean;
-  effortMenuOpen: boolean;
+  hoverSubMenu: "effort" | "window" | null;
   showEffortControls: boolean;
-  deepSeekEffortCount: number;
-  kimiEffortCount: number;
+  showContextWindow: boolean;
+  effortCount: number;
+  windowCount: number;
 }): number {
   const {
     showDeepSeekThinking,
-    paneThinkingEnabled,
-    effortMenuOpen,
+    hoverSubMenu,
     showEffortControls,
-    deepSeekEffortCount,
-    kimiEffortCount,
+    showContextWindow,
+    effortCount,
+    windowCount,
   } = args;
-  if (showDeepSeekThinking) {
-    let h = 140;
-    if (paneThinkingEnabled) {
-      h = 172;
-      if (effortMenuOpen) {
-        h += 12 + deepSeekEffortCount * MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT + 8;
-      }
-    }
-    return h;
+  let h = 108;
+  if (showDeepSeekThinking) h += 36;
+  if (showEffortControls) h += 40;
+  if (showContextWindow) h += 40;
+  if (hoverSubMenu === "effort") {
+    h += 12 + effortCount * MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT + 8;
   }
-  if (showEffortControls) {
-    let h = 148;
-    if (effortMenuOpen) {
-      h += 12 + kimiEffortCount * MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT + 8;
-    }
-    return h;
+  if (hoverSubMenu === "window") {
+    h += 12 + windowCount * MODEL_HOVER_TIP_EFFORT_ROW_HEIGHT + 8;
   }
-  return 108;
+  return h;
 }
 
 function clampFixedPopoverTop(top: number, height: number, margin = PANE_MODEL_PICKER_MARGIN): number {
@@ -1284,6 +1274,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const setPaneModel = useAppStore((s) => s.setPaneModel);
   const setPaneReasoningEffort = useAppStore((s) => s.setPaneReasoningEffort);
   const setPaneThinkingEnabled = useAppStore((s) => s.setPaneThinkingEnabled);
+  const setPaneContextWindow = useAppStore((s) => s.setPaneContextWindow);
   const paneModel = useAppStore((s) => s.panes.find((pane) => pane.id === paneId));
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -1293,7 +1284,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [hoverRowTop, setHoverRowTop] = useState(0);
-  const [effortMenuOpen, setEffortMenuOpen] = useState(false);
+  const [hoverSubMenu, setHoverSubMenu] = useState<"effort" | "window" | null>(null);
   const [collapsedProviders, setCollapsedProviders] = useState<Set<string>>(() => new Set());
   const hoverTipRef = useRef<HTMLDivElement>(null);
   const [hoverTipLayout, setHoverTipLayout] = useState<{ top: number; maxHeight: number } | null>(
@@ -1312,7 +1303,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     cancelClearHover();
     hoverClearTimerRef.current = setTimeout(() => {
       setHoverKey(null);
-      setEffortMenuOpen(false);
+      setHoverSubMenu(null);
       hoverClearTimerRef.current = null;
     }, 120);
   }, [cancelClearHover]);
@@ -1418,7 +1409,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   useEffect(() => {
     if (!open) {
       setHoverKey(null);
-      setEffortMenuOpen(false);
+      setHoverSubMenu(null);
       cancelClearHover();
     }
   }, [open, cancelClearHover]);
@@ -1476,11 +1467,17 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
     return describeModelForPicker(hoverOpt.provider, hoverOpt.model, providerLabel);
   }, [hoverOpt, settings.providers]);
 
-  const paneReasoningEffort = normalizeKimiReasoningEffort(paneModel?.reasoningEffort);
-  const paneDeepSeekEffort = normalizeDeepSeekReasoningEffort(paneModel?.reasoningEffort);
+  const hoverModel = hoverOpt?.model ?? "";
+  const paneReasoningEffort = normalizeReasoningEffortForModel(
+    hoverModel,
+    paneModel?.reasoningEffort,
+  );
+  const paneContextWindow = normalizeContextWindow(hoverModel, paneModel?.contextWindowTokens);
   const paneThinkingEnabled = paneModel?.thinkingEnabled !== false;
   const showEffortControls = Boolean(hoverBlurb?.supportsReasoningEffort);
   const showDeepSeekThinking = Boolean(hoverBlurb?.supportsDeepSeekThinking);
+  const showContextWindow = Boolean(hoverBlurb?.supportsContextWindow);
+  const hoverInteractive = showEffortControls || showDeepSeekThinking || showContextWindow;
 
   const hoverTipStyle = useMemo((): CSSProperties | null => {
     if (!hoverBlurb || !panelRef.current) return null;
@@ -1494,11 +1491,11 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
       : Math.max(PANE_MODEL_PICKER_MARGIN, panel.left - MODEL_HOVER_TIP_GAP - tipW);
     const tipH = estimateModelHoverTipHeight({
       showDeepSeekThinking,
-      paneThinkingEnabled,
-      effortMenuOpen,
+      hoverSubMenu,
       showEffortControls,
-      deepSeekEffortCount: DEEPSEEK_REASONING_EFFORT_OPTIONS.length,
-      kimiEffortCount: KIMI_REASONING_EFFORT_OPTIONS.length,
+      showContextWindow,
+      effortCount: hoverBlurb.reasoningEffortOptions.length,
+      windowCount: hoverBlurb.contextWindowOptions.length,
     });
     const top = clampFixedPopoverTop(hoverRowTop, tipH);
     return {
@@ -1506,7 +1503,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
       top,
       width: tipW,
     };
-  }, [hoverBlurb, hoverRowTop, showEffortControls, showDeepSeekThinking, paneThinkingEnabled, effortMenuOpen]);
+  }, [hoverBlurb, hoverRowTop, showEffortControls, showDeepSeekThinking, showContextWindow, hoverSubMenu]);
 
   useLayoutEffect(() => {
     const el = hoverTipRef.current;
@@ -1527,11 +1524,12 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
   }, [
     hoverBlurb,
     hoverTipStyle,
-    effortMenuOpen,
+    hoverSubMenu,
     paneThinkingEnabled,
     hoverKey,
     showEffortControls,
     showDeepSeekThinking,
+    showContextWindow,
   ]);
 
   return (
@@ -1653,7 +1651,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                                   onMouseEnter={(e) => {
                                     cancelClearHover();
                                     setHoverKey(rowKey);
-                                    setEffortMenuOpen(false);
+                                    setHoverSubMenu(null);
                                     setHoverRowTop(e.currentTarget.getBoundingClientRect().top);
                                   }}
                                   onClick={() => handleSelect(opt.provider, opt.model)}
@@ -1699,7 +1697,7 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
               <div
                 ref={hoverTipRef}
                 className={`agx-menu-pop fixed z-[9999] overflow-x-hidden overflow-y-auto rounded-xl border border-border bg-surface-panel px-3.5 py-3 shadow-2xl backdrop-blur-xl ${
-                  showEffortControls || showDeepSeekThinking
+                  hoverInteractive
                     ? "pointer-events-auto"
                     : "pointer-events-none"
                 }`}
@@ -1724,98 +1722,43 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                   <span className="truncate font-medium text-text-strong">{hoverBlurb.metaValue}</span>
                 </div>
                 {showDeepSeekThinking ? (
-                  <div className="relative mt-2 border-t border-border pt-2">
-                    <div className="flex w-full items-center justify-between gap-3 text-[11px]">
-                      <span className="text-text-muted">{t("model.thinkingMode")}</span>
-                      <SettingsSwitch
-                        checked={paneThinkingEnabled}
-                        size="sm"
-                        aria-label={t("model.thinkingMode")}
-                        onChange={(next) => {
-                          setPaneThinkingEnabled(paneId, next);
-                          if (!next) setEffortMenuOpen(false);
-                        }}
-                      />
-                    </div>
-                    {paneThinkingEnabled ? (
-                      <>
-                        <button
-                          type="button"
-                          className="mt-2 flex w-full items-center justify-between gap-3 text-[11px] transition-colors hover:text-text-strong"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEffortMenuOpen((v) => !v);
-                          }}
-                        >
-                          <span className="text-text-muted">{t("model.thinkingEffort")}</span>
-                          <span className="inline-flex items-center gap-0.5 font-medium text-text-strong">
-                            {labelForDeepSeekReasoningEffort(paneDeepSeekEffort, t)}
-                            <ChevronRight
-                              className={`h-3 w-3 text-text-muted transition-transform ${
-                                effortMenuOpen ? "rotate-90" : ""
-                              }`}
-                              strokeWidth={2}
-                              aria-hidden
-                            />
-                          </span>
-                        </button>
-                        {effortMenuOpen ? (
-                          <div className="mt-1.5 overflow-hidden rounded-lg border border-border bg-surface-cardStrong p-0.5">
-                            {DEEPSEEK_REASONING_EFFORT_OPTIONS.map((opt) => {
-                              const active = paneDeepSeekEffort === opt.value;
-                              return (
-                                <button
-                                  key={opt.value}
-                                  type="button"
-                                  className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
-                                    active
-                                      ? "bg-surface-hover font-medium text-text-strong"
-                                      : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
-                                  }`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const next = opt.value as DeepSeekReasoningEffort;
-                                    setPaneReasoningEffort(paneId, next);
-                                    setEffortMenuOpen(false);
-                                  }}
-                                >
-                                  <span>{labelForDeepSeekReasoningEffort(opt.value, t)}</span>
-                                  {active ? (
-                                    <Check className="h-3 w-3 text-status-success" strokeWidth={2.5} />
-                                  ) : null}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
+                  <div className="mt-2 flex w-full items-center justify-between gap-3 border-t border-border pt-2 text-[11px]">
+                    <span className="text-text-muted">{t("model.thinkingMode")}</span>
+                    <SettingsSwitch
+                      checked={paneThinkingEnabled}
+                      size="sm"
+                      aria-label={t("model.thinkingMode")}
+                      onChange={(next) => {
+                        setPaneThinkingEnabled(paneId, next);
+                      }}
+                    />
                   </div>
-                ) : showEffortControls ? (
+                ) : null}
+                {showEffortControls ? (
                   <div className="relative mt-2 border-t border-border pt-2">
                     <button
                       type="button"
                       className="flex w-full items-center justify-between gap-3 text-[11px] transition-colors hover:text-text-strong"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setEffortMenuOpen((v) => !v);
+                        setHoverSubMenu((v) => (v === "effort" ? null : "effort"));
                       }}
                     >
                       <span className="text-text-muted">{t("model.thinkingEffort")}</span>
                       <span className="inline-flex items-center gap-0.5 font-medium text-text-strong">
-                        {labelForKimiReasoningEffort(paneReasoningEffort, t)}
+                        {labelForModelReasoningEffort(hoverModel, paneReasoningEffort, t)}
                         <ChevronRight
                           className={`h-3 w-3 text-text-muted transition-transform ${
-                            effortMenuOpen ? "rotate-90" : ""
+                            hoverSubMenu === "effort" ? "rotate-90" : ""
                           }`}
                           strokeWidth={2}
                           aria-hidden
                         />
                       </span>
                     </button>
-                    {effortMenuOpen ? (
+                    {hoverSubMenu === "effort" ? (
                       <div className="mt-1.5 overflow-hidden rounded-lg border border-border bg-surface-cardStrong p-0.5">
-                        {KIMI_REASONING_EFFORT_OPTIONS.map((opt) => {
+                        {hoverBlurb.reasoningEffortOptions.map((opt) => {
                           const active = paneReasoningEffort === opt.value;
                           return (
                             <button
@@ -1828,12 +1771,63 @@ function PaneModelPicker({ paneId }: { paneId: string }) {
                               }`}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                const next = opt.value as KimiReasoningEffort;
-                                setPaneReasoningEffort(paneId, next);
-                                setEffortMenuOpen(false);
+                                setPaneReasoningEffort(paneId, opt.value as KimiReasoningEffort);
+                                setHoverSubMenu(null);
                               }}
                             >
-                              <span>{labelForKimiReasoningEffort(opt.value, t)}</span>
+                              <span>{t(`model.${opt.labelKey}`)}</span>
+                              {active ? (
+                                <Check className="h-3 w-3 text-status-success" strokeWidth={2.5} />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {showContextWindow ? (
+                  <div className="relative mt-2 border-t border-border pt-2">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 text-[11px] transition-colors hover:text-text-strong"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setHoverSubMenu((v) => (v === "window" ? null : "window"));
+                      }}
+                    >
+                      <span className="text-text-muted">{t("model.contextWindow")}</span>
+                      <span className="inline-flex items-center gap-0.5 font-medium text-text-strong">
+                        {labelForContextWindow(hoverModel, paneContextWindow)}
+                        <ChevronRight
+                          className={`h-3 w-3 text-text-muted transition-transform ${
+                            hoverSubMenu === "window" ? "rotate-90" : ""
+                          }`}
+                          strokeWidth={2}
+                          aria-hidden
+                        />
+                      </span>
+                    </button>
+                    {hoverSubMenu === "window" ? (
+                      <div className="mt-1.5 overflow-hidden rounded-lg border border-border bg-surface-cardStrong p-0.5">
+                        {hoverBlurb.contextWindowOptions.map((opt) => {
+                          const active = paneContextWindow === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                                active
+                                  ? "bg-surface-hover font-medium text-text-strong"
+                                  : "text-text-muted hover:bg-surface-hover hover:text-text-strong"
+                              }`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPaneContextWindow(paneId, opt.value);
+                                setHoverSubMenu(null);
+                              }}
+                            >
+                              <span>{opt.label}</span>
                               {active ? (
                                 <Check className="h-3 w-3 text-status-success" strokeWidth={2.5} />
                               ) : null}
@@ -10097,16 +10091,16 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
       }
       if (chatProvider) body.provider = chatProvider;
       if (chatModel) body.model = chatModel;
-      if (chatModel && supportsKimiK3ReasoningEffort(chatModel)) {
-        body.reasoning_effort = normalizeKimiReasoningEffort(
-          pane.reasoningEffort ?? DEFAULT_KIMI_REASONING_EFFORT,
+      if (chatModel && reasoningEffortOptionsForModel(chatModel).length > 0) {
+        body.reasoning_effort = normalizeReasoningEffortForModel(
+          chatModel,
+          pane.reasoningEffort,
         );
       } else if (chatModel && supportsDeepSeekV4Thinking(chatModel)) {
-        const thinkingOn = pane.thinkingEnabled !== false;
-        body.thinking_enabled = thinkingOn;
-        if (thinkingOn) {
-          body.reasoning_effort = normalizeDeepSeekReasoningEffort(pane.reasoningEffort);
-        }
+        body.thinking_enabled = pane.thinkingEnabled !== false;
+      }
+      if (chatModel && contextWindowOptionsForModel(chatModel).length > 0) {
+        body.context_window = normalizeContextWindow(chatModel, pane.contextWindowTokens);
       }
       if (targetAgentId !== "meta") body.agent_id = targetAgentId;
       // Per-session KB retrieval mode: carry the session's explicit choice so the

@@ -70,6 +70,12 @@ describe("buildContextUsageRefreshKey", () => {
     });
     expect(settled).not.toBe(streaming);
   });
+
+  it("changes when the client-declared context window changes", () => {
+    const small = buildContextUsageRefreshKey({ ...base, contextWindow: 300_000 });
+    const large = buildContextUsageRefreshKey({ ...base, contextWindow: 1_000_000 });
+    expect(small).not.toBe(large);
+  });
 });
 
 describe("shouldFetchContextUsage", () => {

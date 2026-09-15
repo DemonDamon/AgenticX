@@ -12,15 +12,21 @@ from agenticx.runtime.agent_runtime import (
 from agenticx.runtime.group_router import _copy_group_member_runtime_flags
 
 
-def test_enabled_high_default():
+def test_enabled_omits_effort():
     session = SimpleNamespace()
     out = _deepseek_v4_thinking_kwargs(session, "deepseek-v4-flash")
     assert "reasoning_effort" not in out
-    assert out["extra_body"]["reasoning_effort"] == "high"
+    assert "reasoning_effort" not in out["extra_body"]
     assert out["extra_body"]["thinking"] == {"type": "enabled"}
-    assert _deepseek_v4_thinking_kwargs(session, "openai/deepseek-v4-pro")[
-        "extra_body"
-    ]["reasoning_effort"] == "high"
+    assert (
+        _deepseek_v4_thinking_kwargs(session, "openai/deepseek-v4-pro")["extra_body"][
+            "thinking"
+        ]["type"]
+        == "enabled"
+    )
+    assert "reasoning_effort" not in _deepseek_v4_thinking_kwargs(
+        session, "openai/deepseek-v4-pro"
+    )["extra_body"]
     assert (
         _deepseek_v4_thinking_kwargs(session, "deepseek-v4-pro-0813")["extra_body"][
             "thinking"
@@ -29,11 +35,12 @@ def test_enabled_high_default():
     )
 
 
-def test_max_effort():
+def test_effort_is_ignored_when_thinking_on():
     session = SimpleNamespace(_thinking_enabled=True, _reasoning_effort="max")
     out = _deepseek_v4_thinking_kwargs(session, "deepseek-v4-pro")
     assert "reasoning_effort" not in out
-    assert out["extra_body"]["reasoning_effort"] == "max"
+    assert "reasoning_effort" not in out["extra_body"]
+    assert out["extra_body"]["thinking"] == {"type": "enabled"}
 
 
 def test_disabled_omits_effort():
@@ -48,13 +55,6 @@ def test_ignored_for_other_models():
     session = SimpleNamespace(_thinking_enabled=True, _reasoning_effort="max")
     assert _deepseek_v4_thinking_kwargs(session, "kimi-k3") == {}
     assert _deepseek_v4_thinking_kwargs(session, "deepseek-chat") == {}
-
-
-def test_invalid_effort_falls_back_to_high():
-    session = SimpleNamespace(_thinking_enabled=True, _reasoning_effort="low")
-    assert _deepseek_v4_thinking_kwargs(session, "deepseek-v4-pro")["extra_body"][
-        "reasoning_effort"
-    ] == "high"
 
 
 def test_merge_llm_call_kwargs_keeps_existing_extra_body():

@@ -12,6 +12,10 @@ import {
   shouldDropCachedOccupancy,
   shouldFetchContextUsage,
 } from "../utils/context-usage-refresh";
+import {
+  contextWindowOptionsForModel,
+  normalizeContextWindow,
+} from "../utils/model-hover-blurb";
 import { HoverTip } from "./ds/HoverTip";
 
 interface SessionCacheUsage {
@@ -88,21 +92,29 @@ const CONTEXT_PANEL_GUTTER = 12;
 const USAGE_CACHE_MAX = 24;
 const usageBySession = new Map<string, ContextUsage>();
 
-function usageCacheKey(sessionId: string, model: string): string {
-  return `${sessionId}\0${model}`;
+function usageCacheKey(sessionId: string, model: string, contextWindow = 0): string {
+  return `${sessionId}\0${model}\0${contextWindow > 0 ? contextWindow : ""}`;
 }
 
-function readUsageCache(sessionId: string, model: string): ContextUsage | null {
-  const exact = usageBySession.get(usageCacheKey(sessionId, model));
+function readUsageCache(
+  sessionId: string,
+  model: string,
+  contextWindow = 0,
+): ContextUsage | null {
+  const exact = usageBySession.get(usageCacheKey(sessionId, model, contextWindow));
   if (exact) return exact;
+  if (contextWindow > 0) return null;
   for (const row of usageBySession.values()) {
     if (row.fetchedForSessionId === sessionId) return row;
   }
   return null;
 }
 
-function writeUsageCache(row: ContextUsage): void {
-  usageBySession.set(usageCacheKey(row.fetchedForSessionId, row.fetchedForModel), row);
+function writeUsageCache(row: ContextUsage, contextWindow = 0): void {
+  usageBySession.set(
+    usageCacheKey(row.fetchedForSessionId, row.fetchedForModel, contextWindow),
+    row,
+  );
   while (usageBySession.size > USAGE_CACHE_MAX) {
     const first = usageBySession.keys().next().value;
     if (!first) break;
@@ -180,6 +192,14 @@ export function ContextUsageButton({
     const pane = s.panes.find((item) => item.id === paneId);
     return String(pane?.modelName ?? "").trim();
   });
+  const paneContextWindow = useAppStore((s) => {
+    const pane = s.panes.find((item) => item.id === paneId);
+    return pane?.contextWindowTokens;
+  });
+  const declaredContextWindow = useMemo(() => {
+    if (!paneModel || contextWindowOptionsForModel(paneModel).length === 0) return 0;
+    return normalizeContextWindow(paneModel, paneContextWindow);
+  }, [paneModel, paneContextWindow]);
   const messageCount = useAppStore((s) => {
     const pane = s.panes.find((item) => item.id === paneId);
     return contextUsageMessageSignature(pane?.messages ?? []).messageCount;
@@ -204,6 +224,7 @@ export function ContextUsageButton({
     lastMessageId,
     sessionInputTokens,
     sessionOutputTokens,
+    contextWindow: declaredContextWindow || undefined,
   });
 
   const refreshPanelPosition = useCallback(() => {
@@ -229,10 +250,12 @@ export function ContextUsageButton({
     const requestSeq = ++requestSeqRef.current;
     const requestedSessionId = sessionId;
     const requestedModel = paneModel;
+    const requestedWindow = declaredContextWindow;
     setLoadFailed(false);
     try {
       const params = new URLSearchParams({ session_id: requestedSessionId });
       if (requestedModel) params.set("model", requestedModel);
+      if (requestedWindow > 0) params.set("context_window", String(requestedWindow));
       const res = await fetch(`${apiBase}/api/session/context_usage?${params.toString()}`, {
         headers: { "X-Agx-Desktop-Token": apiToken },
       });
@@ -250,16 +273,16 @@ export function ContextUsageButton({
         fetchedForSessionId: returnedSessionId,
         fetchedForModel: requestedModel,
       };
-      writeUsageCache(next);
+      writeUsageCache(next, requestedWindow);
       setUsage(next);
     } catch {
       if (requestSeq !== requestSeqRef.current) return;
-      if (!readUsageCache(requestedSessionId, requestedModel)) {
+      if (!readUsageCache(requestedSessionId, requestedModel, requestedWindow)) {
         setUsage(null);
         setLoadFailed(true);
       }
     }
-  }, [apiBase, apiToken, paneModel, sessionId]);
+  }, [apiBase, apiToken, declaredContextWindow, paneModel, sessionId]);
 
   const toggleOpen = useCallback(() => {
     if (!sessionId) return;
@@ -305,7 +328,7 @@ export function ContextUsageButton({
       setUsage(null);
       return;
     }
-    const cached = readUsageCache(sessionId, paneModel);
+    const cached = readUsageCache(sessionId, paneModel, declaredContextWindow);
     if (
       cached &&
       shouldDropCachedOccupancy({
@@ -319,7 +342,7 @@ export function ContextUsageButton({
     }
     if (!shouldFetchContextUsage(isStreaming)) return;
     void fetchUsage();
-  }, [fetchUsage, isStreaming, paneModel, refreshKey, sessionId, sessionInputTokens]);
+  }, [declaredContextWindow, fetchUsage, isStreaming, paneModel, refreshKey, sessionId, sessionInputTokens]);
 
   useEffect(() => {
     if (open && sessionId) refreshPanelPosition();

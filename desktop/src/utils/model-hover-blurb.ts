@@ -1,16 +1,38 @@
 import { normalizeBareModelId } from "./model-display";
 import { isKnownNonVisionChatModel } from "./model-vision";
 
+export type ReasoningEffortLabelKey =
+  | "effortLow"
+  | "effortHigh"
+  | "effortMax"
+  | "effortUltra"
+  | "effortExtreme";
+
+export type ReasoningEffortOption = {
+  value: KimiReasoningEffort;
+  labelKey: ReasoningEffortLabelKey;
+  label: string;
+};
+
+export type ContextWindowOption = {
+  value: number;
+  label: string;
+};
+
 export type ModelHoverBlurb = {
   title: string;
   description: string;
   /** Bottom meta row — real product info only, never invent consumption multipliers. */
   metaLabel: string;
   metaValue: string;
-  /** True when this SKU accepts Moonshot K3 `reasoning_effort` (low/high/max). */
+  /** True when this SKU accepts a user-selectable thinking-effort ladder. */
   supportsReasoningEffort: boolean;
-  /** True when this SKU accepts DeepSeek V4 thinking switch + high/max effort. */
+  /** True when this SKU accepts a DeepSeek V4 thinking on/off switch (no intensity). */
   supportsDeepSeekThinking: boolean;
+  /** True when this SKU exposes a selectable context budget. */
+  supportsContextWindow: boolean;
+  reasoningEffortOptions: ReadonlyArray<ReasoningEffortOption>;
+  contextWindowOptions: ReadonlyArray<ContextWindowOption>;
 };
 
 /** Kimi K3 top-level `reasoning_effort` values (Moonshot API). */
@@ -31,6 +53,113 @@ export const DEFAULT_KIMI_REASONING_EFFORT: KimiReasoningEffort = "max";
 export function supportsKimiK3ReasoningEffort(model: string): boolean {
   const bare = normalizeBareModelId(model).toLowerCase();
   return bare === "kimi-k3" || bare.startsWith("kimi-k3-") || bare.startsWith("kimi-k3.");
+}
+
+/** GLM-5.3 family: always-on thinking + official `low` / `high` / `max` effort. */
+export function supportsGlm53ReasoningEffort(model: string): boolean {
+  const bare = normalizeBareModelId(model).toLowerCase();
+  return bare === "glm-5.3" || bare.startsWith("glm-5.3-") || bare.startsWith("glm-5.3.");
+}
+
+/** GLM-5.2: thinking + official `high` / `max` (shown as 高 / 超高). */
+export function supportsGlm52ReasoningEffort(model: string): boolean {
+  const bare = normalizeBareModelId(model).toLowerCase();
+  return bare === "glm-5.2" || bare.startsWith("glm-5.2-") || bare.startsWith("glm-5.2.");
+}
+
+/** Kimi K2.8 Preview: same low/high/max ladder as K3. */
+export function supportsKimiK28ReasoningEffort(model: string): boolean {
+  return normalizeBareModelId(model).toLowerCase().includes("kimi-k2.8");
+}
+
+export function supportsMiniMaxM3(model: string): boolean {
+  const bare = normalizeBareModelId(model).toLowerCase();
+  return /minimax[-_]?m3\b/.test(bare);
+}
+
+export const CONTEXT_WINDOW_300K = 300_000;
+export const CONTEXT_WINDOW_512K = 512_000;
+export const CONTEXT_WINDOW_1M = 1_000_000;
+
+export function reasoningEffortOptionsForModel(model: string): ReasoningEffortOption[] {
+  if (supportsGlm52ReasoningEffort(model)) {
+    return [
+      { value: "high", labelKey: "effortHigh", label: "高" },
+      { value: "max", labelKey: "effortUltra", label: "超高" },
+    ];
+  }
+  if (supportsKimiK3ReasoningEffort(model)) {
+    return [
+      { value: "low", labelKey: "effortLow", label: "低" },
+      { value: "high", labelKey: "effortHigh", label: "高" },
+      { value: "max", labelKey: "effortMax", label: "最大" },
+    ];
+  }
+  if (supportsGlm53ReasoningEffort(model) || supportsKimiK28ReasoningEffort(model)) {
+    return [
+      { value: "low", labelKey: "effortLow", label: "低" },
+      { value: "high", labelKey: "effortHigh", label: "高" },
+      { value: "max", labelKey: "effortExtreme", label: "极致" },
+    ];
+  }
+  return [];
+}
+
+export function contextWindowOptionsForModel(model: string): ContextWindowOption[] {
+  if (supportsMiniMaxM3(model)) {
+    return [
+      { value: CONTEXT_WINDOW_300K, label: "300K" },
+      { value: CONTEXT_WINDOW_512K, label: "512K" },
+    ];
+  }
+  if (
+    supportsGlm53ReasoningEffort(model) ||
+    supportsGlm52ReasoningEffort(model) ||
+    supportsKimiK3ReasoningEffort(model) ||
+    supportsKimiK28ReasoningEffort(model) ||
+    supportsDeepSeekV4Thinking(model)
+  ) {
+    return [
+      { value: CONTEXT_WINDOW_300K, label: "300K" },
+      { value: CONTEXT_WINDOW_1M, label: "1M" },
+    ];
+  }
+  return [];
+}
+
+export function normalizeReasoningEffortForModel(
+  model: string,
+  raw: unknown,
+): KimiReasoningEffort {
+  const opts = reasoningEffortOptionsForModel(model);
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (opts.some((opt) => opt.value === v)) return v as KimiReasoningEffort;
+  if (supportsGlm52ReasoningEffort(model)) return "max";
+  return DEFAULT_KIMI_REASONING_EFFORT;
+}
+
+export function labelForModelReasoningEffort(
+  model: string,
+  effort: KimiReasoningEffort,
+  t?: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  const opt = reasoningEffortOptionsForModel(model).find((item) => item.value === effort);
+  if (opt) {
+    return t ? t(`model.${opt.labelKey}`) : opt.label;
+  }
+  return labelForKimiReasoningEffort(effort, t);
+}
+
+export function normalizeContextWindow(model: string, raw: unknown): number {
+  const opts = contextWindowOptionsForModel(model);
+  if (!opts.length) return 0;
+  const n = Number(raw);
+  if (opts.some((opt) => opt.value === n)) return n;
+  return opts[0].value;
+}
+
+export function labelForContextWindow(model: string, tokens: number): string {
+  return contextWindowOptionsForModel(model).find((opt) => opt.value === tokens)?.label ?? "";
 }
 
 export function normalizeKimiReasoningEffort(raw: unknown): KimiReasoningEffort {
@@ -209,13 +338,18 @@ export function describeModelForPicker(
   const lower = title.toLowerCase();
   const curated = CURATED_BLURBS.find((rule) => rule.test(lower));
   const description = curated?.description ?? heuristicDescription(provider, model, lower);
+  const reasoningEffortOptions = reasoningEffortOptionsForModel(model);
+  const contextWindowOptions = contextWindowOptionsForModel(model);
 
   return {
     title,
     description,
     metaLabel: "服务渠道",
     metaValue: (providerLabel || "").trim() || provider,
-    supportsReasoningEffort: supportsKimiK3ReasoningEffort(model),
+    supportsReasoningEffort: reasoningEffortOptions.length > 0,
     supportsDeepSeekThinking: supportsDeepSeekV4Thinking(model),
+    supportsContextWindow: contextWindowOptions.length > 0,
+    reasoningEffortOptions,
+    contextWindowOptions,
   };
 }

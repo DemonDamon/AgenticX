@@ -2129,6 +2129,7 @@ def create_studio_app() -> FastAPI:
     async def get_session_context_usage(
         session_id: str = Query(...),
         model: str | None = Query(default=None),
+        context_window: int | None = Query(default=None),
         x_agx_desktop_token: str | None = Header(default=None),
     ) -> dict:
         _check_token(x_agx_desktop_token)
@@ -2166,6 +2167,7 @@ def create_studio_app() -> FastAPI:
                     group_chat=group_chat,
                     model_name=model or "",
                     session_id=session_id,
+                    declared_context_window=context_window,
                 ),
                 asyncio.to_thread(load_session_cache_payload, session_id),
                 return_exceptions=True,
@@ -2982,8 +2984,8 @@ def create_studio_app() -> FastAPI:
                 )
             except Exception:
                 logger.warning("pdf page rendering skipped, falling back to text", exc_info=True)
-        # Kimi K3 / DeepSeek V4 reasoning_effort; cleared when absent so stale
-        # values from a previous turn do not leak onto other models.
+        # Kimi / GLM reasoning_effort; cleared when absent so stale values from
+        # a previous turn do not leak onto other models.
         _effort = str(getattr(payload, "reasoning_effort", None) or "").strip().lower()
         if _effort in {"low", "high", "max"}:
             setattr(session, "_reasoning_effort", _effort)
@@ -3001,6 +3003,19 @@ def create_studio_app() -> FastAPI:
                 delattr(session, "_thinking_enabled")
             except Exception:
                 setattr(session, "_thinking_enabled", None)
+
+        _window = getattr(payload, "context_window", None)
+        try:
+            _window_n = int(_window) if _window is not None else 0
+        except (TypeError, ValueError):
+            _window_n = 0
+        if _window_n > 0:
+            setattr(session, "declared_context_window", _window_n)
+        elif hasattr(session, "declared_context_window"):
+            try:
+                delattr(session, "declared_context_window")
+            except Exception:
+                setattr(session, "declared_context_window", None)
 
         from agenticx.llms.vision import is_vision_capable
 

@@ -1017,13 +1017,19 @@ def _resolve_round_max_tokens(
     return int(resolved)
 
 
+def _is_kimi_effort_model(model_name: str) -> bool:
+    bare = str(model_name or "").strip().lower().split("/")[-1]
+    if bare == "kimi-k3" or bare.startswith("kimi-k3-") or bare.startswith("kimi-k3."):
+        return True
+    return "kimi-k2.8" in bare
+
+
 def _kimi_k3_reasoning_effort_kwargs(session: Any, model_name: str) -> Dict[str, Any]:
-    """Pass Moonshot Kimi K3 top-level ``reasoning_effort`` when set on the session.
+    """Pass Moonshot top-level ``reasoning_effort`` for K3 and K2.8 Preview.
 
     Values: ``low`` / ``high`` / ``max``. Other models ignore this attribute.
     """
-    bare = str(model_name or "").strip().lower().split("/")[-1]
-    if not (bare == "kimi-k3" or bare.startswith("kimi-k3-") or bare.startswith("kimi-k3.")):
+    if not _is_kimi_effort_model(model_name):
         return {}
     raw = str(getattr(session, "_reasoning_effort", "") or "").strip().lower()
     if raw not in {"low", "high", "max"}:
@@ -1037,20 +1043,60 @@ def _is_deepseek_v4_model(model_name: str) -> bool:
 
 
 def _deepseek_v4_thinking_kwargs(session: Any, model_name: str) -> Dict[str, Any]:
-    """OpenAI-compat DeepSeek V4 thinking via extra_body only.
+    """OpenAI-compat DeepSeek V4 thinking switch via extra_body only.
 
-    LiteLLM's OpenAI adapter rejects top-level ``reasoning_effort`` for
-    ``openai/deepseek-v4-*`` (UnsupportedParamsError). Official Chat Completions
-    still accepts ``reasoning_effort`` in the JSON body, so nest it next to
-    ``thinking`` in extra_body.
+    Product surface is on/off; intensity is not user-selectable after thinking
+    is enabled. LiteLLM's OpenAI adapter may drop vendor ``thinking``, so nest
+    it in extra_body.
     """
     if not _is_deepseek_v4_model(model_name):
         return {}
     enabled = getattr(session, "_thinking_enabled", None)
     if enabled is False:
         return {"extra_body": {"thinking": {"type": "disabled"}}}
+    return {"extra_body": {"thinking": {"type": "enabled"}}}
+
+
+def _is_glm53_model(model_name: str) -> bool:
+    bare = str(model_name or "").strip().lower().split("/")[-1]
+    return bare == "glm-5.3" or bare.startswith("glm-5.3-") or bare.startswith("glm-5.3.")
+
+
+def _glm53_thinking_kwargs(session: Any, model_name: str) -> Dict[str, Any]:
+    """Zhipu GLM-5.3 always-on thinking + reasoning_effort via extra_body.
+
+    Official Chat Completions: ``thinking.type`` is enabled-only; effort is
+    ``low`` / ``high`` / ``max`` (default max). Zhipu and custom OpenAI-compat
+    routes go through LiteLLM's OpenAI adapter, so nest vendor fields in
+    extra_body instead of top-level kwargs.
+    """
+    if not _is_glm53_model(model_name):
+        return {}
     raw = str(getattr(session, "_reasoning_effort", "") or "").strip().lower()
-    effort = raw if raw in {"high", "max"} else "high"
+    effort = raw if raw in {"low", "high", "max"} else "max"
+    return {
+        "extra_body": {
+            "thinking": {"type": "enabled"},
+            "reasoning_effort": effort,
+        },
+    }
+
+
+def _is_glm52_model(model_name: str) -> bool:
+    bare = str(model_name or "").strip().lower().split("/")[-1]
+    return bare == "glm-5.2" or bare.startswith("glm-5.2-") or bare.startswith("glm-5.2.")
+
+
+def _glm52_thinking_kwargs(session: Any, model_name: str) -> Dict[str, Any]:
+    """Zhipu GLM-5.2 thinking + high/max reasoning_effort via extra_body.
+
+    Official values include more aliases; the product surface is high / max
+    (shown as 高 / 超高). Default max.
+    """
+    if not _is_glm52_model(model_name):
+        return {}
+    raw = str(getattr(session, "_reasoning_effort", "") or "").strip().lower()
+    effort = raw if raw in {"high", "max"} else "max"
     return {
         "extra_body": {
             "thinking": {"type": "enabled"},
@@ -4126,6 +4172,14 @@ class AgentRuntime:
                     _merge_llm_call_kwargs(
                         llm_call_kwargs,
                         _deepseek_v4_thinking_kwargs(session, model_name),
+                    )
+                    _merge_llm_call_kwargs(
+                        llm_call_kwargs,
+                        _glm53_thinking_kwargs(session, model_name),
+                    )
+                    _merge_llm_call_kwargs(
+                        llm_call_kwargs,
+                        _glm52_thinking_kwargs(session, model_name),
                     )
                 except Exception:
                     pass

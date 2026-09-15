@@ -327,7 +327,9 @@
     "effortLow": "低",
     "effortHigh": "高",
     "effortMax": "最大",
-    "effortUltra": "超高"
+    "effortUltra": "超高",
+    "effortExtreme": "极致",
+    "contextWindow": "上下文窗口"
   },
   "composer": {
     "bindFolders": "绑定文件夹",

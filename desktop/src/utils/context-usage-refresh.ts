@@ -8,6 +8,8 @@ export type ContextUsageRefreshInput = {
   lastMessageId: string;
   sessionInputTokens: number;
   sessionOutputTokens: number;
+  /** Client-declared window; occupancy refetch when the user switches 300K/1M. */
+  contextWindow?: number;
 };
 
 export function contextUsageMessageSignature(
@@ -29,8 +31,12 @@ export function buildContextUsageRefreshKey(input: ContextUsageRefreshInput): st
   ].join("\0");
   // Streaming still tracks message trim (retry/edit). Token ticks stay out of
   // the key so SSE token_usage does not refetch every chunk.
+  const windowPart =
+    input.contextWindow != null && Number.isFinite(input.contextWindow) && input.contextWindow > 0
+      ? String(Math.floor(input.contextWindow))
+      : "";
   if (input.isStreaming) {
-    return `${session}\0${model}\0${messagePart}\0streaming`;
+    return `${session}\0${model}\0${messagePart}\0streaming${windowPart ? `\0${windowPart}` : ""}`;
   }
   return [
     session,
@@ -38,6 +44,7 @@ export function buildContextUsageRefreshKey(input: ContextUsageRefreshInput): st
     messagePart,
     String(input.sessionInputTokens ?? 0),
     String(input.sessionOutputTokens ?? 0),
+    windowPart,
   ].join("\0");
 }
 

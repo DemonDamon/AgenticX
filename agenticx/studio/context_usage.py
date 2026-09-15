@@ -14,7 +14,11 @@ from agenticx.cli.agent_tools import STUDIO_TOOLS
 from agenticx.cli.studio_skill import get_all_skill_summaries
 from agenticx.runtime.compactor import ContextCompactor
 from agenticx.runtime.meta_tools import META_AGENT_TOOLS
-from agenticx.runtime.model_context_window import resolve_context_window
+from agenticx.runtime.model_context_window import (
+    declared_window_for_session,
+    resolve_context_window,
+    resolve_effective_context_window,
+)
 from agenticx.runtime.prompts.current_time import build_current_time_rules_block
 from agenticx.runtime.prompts.meta_agent import (
     _build_active_subagents_context,
@@ -241,11 +245,13 @@ def _payload_from_categories(
     *,
     session_model: str,
     override_model: str,
+    declared: object = None,
 ) -> dict:
     used_tokens = sum(categories.values())
     max_tokens = resolve_usage_window(
         session_model=session_model,
         override_model=override_model,
+        declared=declared,
     )
     return {
         "used_tokens": used_tokens,
@@ -285,7 +291,12 @@ def apply_last_request_occupancy_floor(
     }
 
 
-def resolve_usage_window(*, session_model: str = "", override_model: str = "") -> int:
+def resolve_usage_window(
+    *,
+    session_model: str = "",
+    override_model: str = "",
+    declared: object = None,
+) -> int:
     """Pane-selected model wins over a blank/stale session.model_name.
 
     Occupancy percent is window / used. If the Desktop pane has already
@@ -293,7 +304,7 @@ def resolve_usage_window(*, session_model: str = "", override_model: str = "") -
     lookup must not pin the default 128K window.
     """
     name = str(override_model or "").strip() or str(session_model or "").strip()
-    return resolve_context_window(name)
+    return resolve_effective_context_window(name, declared)
 
 
 def estimate_session_context_usage(
@@ -305,6 +316,7 @@ def estimate_session_context_usage(
     user_preference: str = "",
     model_name: str = "",
     session_id: str = "",
+    declared_context_window: object = None,
 ) -> dict:
     """Read-only estimate of context usage broken down by window category.
 
@@ -322,6 +334,9 @@ def estimate_session_context_usage(
         group_chat = None
     sid = str(session_id or getattr(session, "session_id", "") or "").strip()
     session_model = str(getattr(session, "model_name", "") or "")
+    declared = declared_context_window
+    if declared is None:
+        declared = declared_window_for_session(session)
     fingerprint = _occupancy_fingerprint(
         managed,
         avatar_context=avatar_context,
@@ -335,6 +350,7 @@ def estimate_session_context_usage(
                 cached[1],
                 session_model=session_model,
                 override_model=model_name,
+                declared=declared,
             )
 
     skill_summaries = _skill_summaries(bound_avatar_id)
@@ -455,6 +471,7 @@ def estimate_session_context_usage(
         categories,
         session_model=session_model,
         override_model=model_name,
+        declared=declared,
     )
 
 

@@ -327,7 +327,9 @@
     "effortLow": "Low",
     "effortHigh": "High",
     "effortMax": "Max",
-    "effortUltra": "Ultra"
+    "effortUltra": "Ultra",
+    "effortExtreme": "Extreme",
+    "contextWindow": "Context window"
   },
   "composer": {
     "bindFolders": "Bind folders",

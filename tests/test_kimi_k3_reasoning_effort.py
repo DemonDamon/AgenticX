@@ -15,6 +15,12 @@ def test_kimi_k3_reasoning_effort_kwargs_for_k3():
     assert _kimi_k3_reasoning_effort_kwargs(session, "moonshot/kimi-k3") == {
         "reasoning_effort": "high"
     }
+    assert _kimi_k3_reasoning_effort_kwargs(session, "kimi-k2.8-preview") == {
+        "reasoning_effort": "high"
+    }
+    assert _kimi_k3_reasoning_effort_kwargs(session, "openai/kimi-k2.8") == {
+        "reasoning_effort": "high"
+    }
 
 
 def test_kimi_k3_reasoning_effort_ignored_for_other_models():

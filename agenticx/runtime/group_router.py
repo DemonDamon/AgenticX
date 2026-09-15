@@ -650,6 +650,7 @@ def _auto_dispatch_owner_blocked(group_id: str, owner_id: str) -> str:
 _GROUP_MEMBER_RUNTIME_FLAG_ATTRS = (
     "_thinking_enabled",
     "_reasoning_effort",
+    "declared_context_window",
     "kb_retrieval_mode",
 )
 

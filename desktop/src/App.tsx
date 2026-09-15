@@ -64,10 +64,11 @@ type PersistedPaneState = {
   sessionId: string;
   modelProvider?: string;
   modelName?: string;
-  /** Kimi K3 reasoning_effort: low | high | max. DeepSeek V4: high | max. */
+  /** Thinking effort: low | high | max. */
   reasoningEffort?: "low" | "high" | "max";
   /** DeepSeek V4 thinking switch; undefined = default on. */
   thinkingEnabled?: boolean;
+  contextWindowTokens?: number;
   historyOpen: boolean;
   memoryGraphOpen?: boolean;
   contextInherited: boolean;
@@ -190,6 +191,10 @@ function normalizePersistedWorkspaceState(raw: unknown): PersistedWorkspaceState
         })(),
         thinkingEnabled:
           typeof row.thinkingEnabled === "boolean" ? row.thinkingEnabled : undefined,
+        contextWindowTokens: (() => {
+          const n = Number(row.contextWindowTokens);
+          return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+        })(),
         historyOpen: Boolean(row.historyOpen),
         memoryGraphOpen: Boolean(row.memoryGraphOpen),
         contextInherited: Boolean(row.contextInherited),
@@ -836,6 +841,7 @@ export function App() {
                 modelName: pane.modelName ?? "",
                 reasoningEffort: pane.reasoningEffort,
                 thinkingEnabled: pane.thinkingEnabled,
+                contextWindowTokens: pane.contextWindowTokens,
                 membersPanelOpen: pane.membersPanelOpen ?? false,
                 graphPanelOpen: pane.graphPanelOpen ?? false,
                 activeGraphRunId: pane.activeGraphRunId ?? null,
@@ -1044,6 +1050,7 @@ export function App() {
         modelName: pane.modelName,
         reasoningEffort: pane.reasoningEffort,
         thinkingEnabled: pane.thinkingEnabled,
+        contextWindowTokens: pane.contextWindowTokens,
         historyOpen: pane.historyOpen,
         memoryGraphOpen: pane.memoryGraphOpen,
         contextInherited: pane.contextInherited,

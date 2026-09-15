@@ -174,9 +174,8 @@ export type ChatPane = {
   modelProvider: string;
   modelName: string;
   /**
-   * Kimi K3 `reasoning_effort` for this pane (`low` | `high` | `max`).
-   * DeepSeek V4 uses `high` | `max` when thinking is on.
-   * Only sent when the active model accepts the corresponding API.
+   * Thinking effort for this pane (`low` | `high` | `max`).
+   * Only sent when the active model accepts a selectable effort ladder.
    */
   reasoningEffort?: "low" | "high" | "max";
   /**
@@ -184,6 +183,8 @@ export type ChatPane = {
    * Ignored for models that do not support the V4 thinking API.
    */
   thinkingEnabled?: boolean;
+  /** Client-declared context budget in tokens (e.g. 300000 / 512000 / 1000000). */
+  contextWindowTokens?: number;
   messages: Message[];
   historyOpen: boolean;
   memoryGraphOpen: boolean;
@@ -668,10 +669,12 @@ type AppState = {
   setStatus: (status: UiStatus) => void;
   setActiveModel: (provider: string, model: string) => void;
   setPaneModel: (paneId: string, provider: string, model: string) => void;
-  /** Persist Kimi K3 / DeepSeek V4 reasoning_effort for a pane. */
+  /** Persist thinking effort for a pane. */
   setPaneReasoningEffort: (paneId: string, effort: "low" | "high" | "max") => void;
   /** Persist DeepSeek V4 thinking switch for a pane. */
   setPaneThinkingEnabled: (paneId: string, enabled: boolean) => void;
+  /** Persist a client-declared context budget for a pane. */
+  setPaneContextWindow: (paneId: string, tokens: number) => void;
   /** Migrate pane/global picks that are no longer in the visible model catalog. */
   reconcilePaneModels: () => { changedPaneIds: string[]; activeChanged: boolean };
   setUserMode: (mode: "pro" | "lite") => void;
@@ -1339,6 +1342,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         pane.id === paneId ? { ...pane, thinkingEnabled: enabled } : pane,
       ),
     })),
+  setPaneContextWindow: (paneId, tokens) =>
+    set((state) => {
+      const next = Number(tokens);
+      if (!Number.isFinite(next) || next <= 0) return state;
+      return {
+        panes: state.panes.map((pane) =>
+          pane.id === paneId ? { ...pane, contextWindowTokens: Math.floor(next) } : pane,
+        ),
+      };
+    }),
   reconcilePaneModels: () => {
     let changedPaneIds: string[] = [];
     let activeChanged = false;
