@@ -25,8 +25,14 @@ describe("MessageTurnMeta", () => {
     expect(html).toContain("data-turn-cache-hit");
     expect(html).toContain("data-turn-usage-counts");
     expect(html).toContain("data-turn-model-cluster");
-    expect(html).toContain("leading-5");
-    expect(html).toContain("overflow-x-hidden");
+    expect(html).toContain("h-5");
+    expect(html).toContain("h-6");
+    expect(html).toContain("shrink-0");
+    expect(html).toContain("w-max");
+    expect(html).toContain("px-3.5");
+    expect(html).not.toContain("backdrop-blur");
+    expect(html).not.toContain("max-w-[14rem]");
+    expect(html).not.toContain("leading-5");
     expect(html).toContain("data-turn-model-chip");
     expect(html).toContain("kimi-k2.6");
     expect(html).toContain('data-turn-usage-arrow="in"');

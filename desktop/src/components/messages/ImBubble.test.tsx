@@ -340,6 +340,39 @@ describe("ImBubble assistant protocol boundary", () => {
     expect(html).toContain("缓存");
   });
 
+  it("gives the model chip a 24px action line when there are no follow-ups", () => {
+    const html = renderToStaticMarkup(
+      <ImBubble
+        message={{
+          id: "no-followup-chip",
+          role: "assistant",
+          content: "分析完毕。",
+          model: "glm-5.3-flash",
+          usage: {
+            inputTokens: 2330,
+            outputTokens: 465,
+            cachedTokens: 0,
+            reasoningTokens: 0,
+            totalTokens: 2795,
+          },
+        }}
+        onCopyMessage={() => {}}
+        onQuoteMessage={() => {}}
+        onFavoriteMessage={() => {}}
+      />,
+    );
+
+    expect(html).toContain("glm-5.3-flash");
+    expect(html).not.toContain("agx-followup-chip");
+    expect(html).toMatch(/class="[^"]*agx-assistant-action-line[^"]*\bh-6\b[^"]*"/);
+    expect(html).toMatch(/class="[^"]*agx-turn-hover-reveal[^"]*\bgap-2.5\b[^"]*"/);
+    expect(html).toMatch(/data-turn-model-chip=""[^>]*\bw-max\b/);
+    expect(html).toMatch(/data-turn-model-chip=""[^>]*\bpx-3.5\b/);
+    expect(html).toMatch(/data-turn-model-chip=""[^>]*\bshrink-0\b/);
+    expect(html).not.toMatch(/data-turn-meta=""[^>]*\boverflow-x-hidden\b/);
+    expect(html).not.toMatch(/data-turn-meta=""[^>]*\boverflow-hidden\b/);
+  });
+
   it("puts the citation chip on the model/action row, not under the body", () => {
     const html = renderToStaticMarkup(
       <ImBubble

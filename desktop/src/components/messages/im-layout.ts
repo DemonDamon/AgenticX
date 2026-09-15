@@ -112,23 +112,27 @@ export const ASSISTANT_ACTION_RHYTHM_STACK_CLASS = `agx-assistant-action-rhythm 
 export const ASSISTANT_ACTION_BLOCK_CLASS = `flex min-w-0 flex-col ${ASSISTANT_ACTION_RHYTHM_GAP_CLASS} self-stretch`;
 
 /**
- * Copy/quote + turn-meta stay on one 20px line. `flex-wrap` + `h-5` used to
- * overflow the usage/cache text onto follow-up chips in a squeezed pane.
- * `min-w-0 overflow-hidden` lets the row clip instead of painting over chips.
+ * Copy/quote stay on one 20px icon row. `flex-wrap` + `h-5` used to overflow
+ * the usage/cache text onto follow-up chips in a squeezed pane.
+ * `min-w-0 overflow-hidden` lets the icon row clip instead of painting over chips.
+ *
+ * The action *line* is 24px so a 20px model pill has 2px air above/below and
+ * is not vertically sliced when there are no follow-up chips underneath.
  */
 export const ASSISTANT_ACTION_ICON_ROW_CLASS =
   "agx-assistant-action-icons group flex h-5 w-fit min-w-0 max-w-full flex-nowrap items-center gap-0.5 overflow-hidden text-text-muted";
 
 /** Full-width action row; also the container query root for squeezed-pane hover. */
 export const ASSISTANT_ACTION_LINE_CLASS =
-  "agx-assistant-action-line flex h-5 w-full min-w-0 max-w-full items-center gap-1.5";
+  "agx-assistant-action-line flex h-6 w-full min-w-0 max-w-full items-center gap-1.5";
 
 /**
  * Usage / model / timestamp: hover-only when the chat column is wide enough.
  * Narrow / squeezed panes keep these hidden (see index.css container query).
+ * No min-w-0: the model pill must stay intact; usage can shrink inside TurnMeta.
  */
 export const ASSISTANT_HOVER_REVEAL_CLASS =
-  "agx-turn-hover-reveal hidden min-w-0 shrink-0 items-center group-hover:inline-flex";
+  "agx-turn-hover-reveal hidden shrink-0 items-center gap-2.5 group-hover:inline-flex";
 
 /**
  * ReAct block tail: last body row + icon row + follow-up chips share one flex column

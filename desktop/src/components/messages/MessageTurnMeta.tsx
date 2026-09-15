@@ -75,7 +75,7 @@ export function MessageTurnMeta({
   const modelChip = modelLabel ? (
     <span
       data-turn-model-chip=""
-      className="agx-liquid-glass-chip inline-flex min-h-[20px] min-w-0 max-w-[14rem] items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium leading-none tracking-wide backdrop-blur-md cursor-default select-none"
+      className="agx-liquid-glass-chip inline-flex h-5 w-max shrink-0 items-center gap-1 rounded-full px-3.5 text-[11px] font-medium leading-none cursor-default select-none"
       title={modelLabel}
     >
       <Sparkle
@@ -84,7 +84,7 @@ export function MessageTurnMeta({
         strokeWidth={2}
       />
       {isAuto ? <span className="shrink-0 text-amber-200/70 [html[data-theme=light]_&]:text-amber-700/70 text-[10px]">auto</span> : null}
-      <span className="min-w-0 overflow-x-hidden text-ellipsis whitespace-nowrap leading-5">
+      <span className="whitespace-nowrap leading-none">
         {bareModel}
       </span>
     </span>
@@ -93,7 +93,7 @@ export function MessageTurnMeta({
   return (
     <span
       data-turn-meta=""
-      className="inline-flex min-h-5 min-w-0 items-center overflow-hidden select-none"
+      className="inline-flex h-6 shrink-0 items-center select-none"
       title={
         usage
           ? formatTurnUsageTitle(usage, t)
@@ -151,7 +151,7 @@ export function MessageTurnMeta({
       {modelChip && (usageSplit || usageMissing) ? (
         <span
           data-turn-model-cluster=""
-          className="inline-flex min-w-0 items-center ml-1"
+          className="inline-flex shrink-0 items-center ml-1"
         >
           <TurnMetaRule kind="model" />
           {modelChip}

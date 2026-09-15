@@ -245,6 +245,12 @@ body {
 
 /* 消息元数据行：Apple 液态玻璃模型徽标 (Liquid Glass Chip) */
 .agx-liquid-glass-chip {
+  width: max-content;
+  max-width: none;
+  min-width: max-content;
+  box-sizing: border-box;
+  overflow: visible;
+  /* backdrop-filter clips descendants to the rounded mask — do not use it here */
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.03) 45%, rgba(192, 132, 252, 0.08) 80%, rgba(56, 189, 248, 0.06) 100%);
   border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.5),
@@ -347,6 +353,14 @@ body {
   container-type: inline-size;
   width: 100%;
   min-width: 0;
+  overflow: visible;
+}
+.agx-assistant-action-line .agx-turn-hover-reveal,
+.agx-assistant-action-line [data-turn-meta] {
+  overflow: visible;
+}
+.agx-assistant-action-line [data-turn-model-chip] {
+  flex-shrink: 0;
 }
 @container (max-width: 36rem) {
   .agx-assistant-action-line .agx-turn-hover-reveal {
