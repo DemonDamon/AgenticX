@@ -107,6 +107,7 @@ import { latestRunningWbBridgeProgress } from "../../utils/wb-bridge-ui";
 import type { ParsedTodo } from "../TodoUpdateCard";
 import {
   ensureArtifactTaskspacesForSession,
+  loadPersistedSessionArtifactPaths,
   startPersistedArtifactPathResync,
 } from "../../utils/ensure-artifact-taskspaces";
 import { RUNTIME_DEFAULT_TASKSPACES } from "../automation/RuntimeConfigSection";
@@ -145,6 +146,14 @@ let inAppBrowserOpenIpcWired = false;
 
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_TERMINAL_TABS: PaneTerminalTab[] = [];
+
+function logWorkspacePerf(payload: Record<string, unknown>): void {
+  console.debug("[workspace-perf]", payload);
+  void window.agenticxDesktop?.writeWorkspacePerfLog?.({
+    component: "WorkPanel",
+    ...payload,
+  })?.catch(() => undefined);
+}
 
 function ensureInAppBrowserOpenIpc(): void {
   if (inAppBrowserOpenIpcWired) return;
@@ -887,14 +896,26 @@ export function WorkPanel({
     }
     return startPersistedArtifactPathResync({
       sessionId: sid,
-      enabled: summaryTabOpen,
+      enabled: summaryTabOpen && activeKind === "summary",
+      load: async (targetSid) => {
+        const startedAt = performance.now();
+        const paths = await loadPersistedSessionArtifactPaths(targetSid);
+        logWorkspacePerf({
+          event: "persisted artifact resync",
+          paneId,
+          sessionId: targetSid,
+          artifactCount: paths.length,
+          durationMs: Math.round(performance.now() - startedAt),
+        });
+        return paths;
+      },
       onPaths: setDiskArtifactPaths,
       onError: (err) => {
         console.warn("[WorkPanel] persisted artifacts load failed:", err);
         setDiskArtifactPaths([]);
       },
     });
-  }, [sessionId, summaryTabOpen, autoRefreshKey]);
+  }, [sessionId, summaryTabOpen, activeKind, autoRefreshKey]);
 
   const reloadWorkItems = useCallback(async () => {
     if (!groupId || !apiBase) return;

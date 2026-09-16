@@ -455,6 +455,7 @@ function metaWorkspaceMarkdownPath(filename: string, cfg?: AgxConfig): string {
 
 const AUTOMATION_TASKS_PATH = path.join(CONFIG_DIR, "automation_tasks.json");
 const AUTOMATION_LOGS_DIR = path.join(CONFIG_DIR, "logs", "automation");
+const WORKSPACE_PERF_LOG_PATH = path.join(CONFIG_DIR, "logs", "workspace-perf.log");
 
 function automationLogPath(taskId: string): string {
   const id = String(taskId ?? "").trim() || "unknown";
@@ -475,6 +476,28 @@ function appendAutomationLog(taskId: string, line: string): void {
     const ts = new Date().toISOString();
     fs.appendFileSync(file, `[${ts}] ${line.replace(/\s+$/,"")}\n`, "utf-8");
   } catch { /* best-effort */ }
+}
+
+/** Append renderer workspace timing data to a local diagnostic log. */
+function appendWorkspacePerfLog(payload: unknown): void {
+  try {
+    const line = typeof payload === "string" ? payload : JSON.stringify(payload);
+    fs.mkdirSync(path.dirname(WORKSPACE_PERF_LOG_PATH), { recursive: true });
+    try {
+      if (fs.statSync(WORKSPACE_PERF_LOG_PATH).size > 2 * 1024 * 1024) {
+        fs.renameSync(WORKSPACE_PERF_LOG_PATH, `${WORKSPACE_PERF_LOG_PATH}.1`);
+      }
+    } catch {
+      /* first write */
+    }
+    fs.appendFileSync(
+      WORKSPACE_PERF_LOG_PATH,
+      `[${new Date().toISOString()}] ${line}\n`,
+      "utf-8",
+    );
+  } catch {
+    /* best-effort diagnostics */
+  }
 }
 /** 默认定时任务根目录：~/.agenticx/crontask/<taskId>/，与用户指定 workspace 二选一；venv/脚本均应落在任务根下 */
 const AUTOMATION_CRONTASK_DIR = path.join(CONFIG_DIR, "crontask");
@@ -9824,6 +9847,11 @@ function registerIpc(): void {
   });
 
   // ── Automation Tasks CRUD ──
+
+  ipcMain.handle("workspace-perf-log", async (_event, payload: unknown) => {
+    appendWorkspacePerfLog(payload);
+    return { ok: true, path: WORKSPACE_PERF_LOG_PATH };
+  });
 
   ipcMain.handle("confirm-dialog", async (_event, payload: unknown) => {
     const p = (payload && typeof payload === "object")

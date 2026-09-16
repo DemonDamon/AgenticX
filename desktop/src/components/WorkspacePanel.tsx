@@ -28,6 +28,10 @@ import { isPaneAwaitingFreshSession } from "../utils/pane-fresh-session";
 import { shouldKeepWorkspaceVisibleWhenSessionMissing } from "../utils/workspace-session-visibility";
 import { mountModeSwitchForEntry } from "../utils/workspace-mount-mode";
 import {
+  isCurrentWorkspaceRequest,
+  workspaceNodeKey,
+} from "../utils/workspace-session-cache";
+import {
   findTaskspaceForAbsPath,
   relativePathFromRoot,
   absoluteTaskspacePath,
@@ -70,6 +74,14 @@ type TaskspaceFile = {
   source_path?: string;
   virtual?: boolean;
 };
+
+function logWorkspacePerf(payload: Record<string, unknown>): void {
+  console.debug("[workspace-perf]", payload);
+  void window.agenticxDesktop?.writeWorkspacePerfLog?.({
+    component: "WorkspacePanel",
+    ...payload,
+  })?.catch(() => undefined);
+}
 
 function WorkspaceFileTypeIcon({ name }: { name: string }) {
   return <FileTypeMark kind={artifactGlyph(name).kind} />;
@@ -194,10 +206,6 @@ function pickMostRecentSessionId(
     });
   const sid = sorted[0]?.session_id;
   return sid ? String(sid).trim() : undefined;
-}
-
-function nodeKey(taskspaceId: string, relPath: string): string {
-  return `${taskspaceId}:${relPath || "."}`;
 }
 
 function taskspaceReferenceLabel(taskspace: Taskspace): string {
@@ -353,7 +361,7 @@ export function WorkspacePanel({
   /** Sidebar: true while eagerly linking session artifacts on first open. */
   const [sidebarBootstrapping, setSidebarBootstrapping] = useState(false);
 
-  const defaultRootKey = nodeKey("default", ".");
+  const defaultRootKey = workspaceNodeKey(getBrowseSessionId(), "default", ".");
   const defaultRootEntries = entriesByDir[defaultRootKey];
   const defaultContentReady = defaultRootEntries !== undefined;
 
@@ -481,6 +489,7 @@ export function WorkspacePanel({
   const loadTaskspaces = async (): Promise<Taskspace[] | undefined> => {
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) return undefined;
+    const startedAt = performance.now();
     setLoading(true);
     // Read live store value — event-handler closures can stale-capture null and
     // call onActiveTaskspaceChange on every refresh → update-depth loop.
@@ -500,30 +509,63 @@ export function WorkspacePanel({
       applyWorkspaces(workspaces);
       setWorkspaceLoadedOnce(true);
       setLoading(false);
+      logWorkspacePerf({
+        event: "listTaskspaces preload",
+        paneId,
+        sessionId: browseSessionId,
+        workspaceCount: workspaces.length,
+        durationMs: Math.round(performance.now() - startedAt),
+      });
       return workspaces;
     }
     const result = await window.agenticxDesktop.listTaskspaces(browseSessionId);
+    if (!isCurrentWorkspaceRequest(browseSessionId, getBrowseSessionId())) return undefined;
     if (!result.ok) {
       setErrorText(result.error ?? t("panel.loadFailed"));
       setLoading(false);
+      logWorkspacePerf({
+        event: "listTaskspaces failed",
+        paneId,
+        sessionId: browseSessionId,
+        durationMs: Math.round(performance.now() - startedAt),
+        error: result.error,
+      });
       return undefined;
     }
     const workspaces = Array.isArray(result.workspaces) ? result.workspaces : [];
     applyWorkspaces(workspaces);
     setWorkspaceLoadedOnce(true);
     setLoading(false);
+    logWorkspacePerf({
+      event: "listTaskspaces",
+      paneId,
+      sessionId: browseSessionId,
+      workspaceCount: workspaces.length,
+      durationMs: Math.round(performance.now() - startedAt),
+    });
     return workspaces;
   };
 
   const loadDir = async (taskspaceId: string, relPath = ".", force = false) => {
     const browseSessionId = getBrowseSessionId();
     if (!browseSessionId) return;
-    const key = nodeKey(taskspaceId, relPath);
+    const key = workspaceNodeKey(browseSessionId, taskspaceId, relPath);
     if (!force && entriesByDir[key]) return;
+    const startedAt = performance.now();
     const result = await window.agenticxDesktop.listTaskspaceFiles({ sessionId: browseSessionId, taskspaceId, path: relPath });
+    if (!isCurrentWorkspaceRequest(browseSessionId, getBrowseSessionId())) return;
     if (!result.ok) {
       if ((result.error ?? "").includes("session not found")) return;
       setErrorText(result.error ?? t("panel.readDirFailed"));
+      logWorkspacePerf({
+        event: "listTaskspaceFiles failed",
+        paneId,
+        sessionId: browseSessionId,
+        taskspaceId,
+        path: relPath,
+        durationMs: Math.round(performance.now() - startedAt),
+        error: result.error,
+      });
       return;
     }
     setEntriesByDir((prev) => ({ ...prev, [key]: result.files ?? [] }));
@@ -534,10 +576,24 @@ export function WorkspacePanel({
         totalSeen: Number(result.total_seen || (result.files ?? []).length),
       },
     }));
+    logWorkspacePerf({
+      event: "listTaskspaceFiles",
+      paneId,
+      sessionId: browseSessionId,
+      taskspaceId,
+      path: relPath,
+      force,
+      fileCount: (result.files ?? []).length,
+      totalSeen: Number(result.total_seen || (result.files ?? []).length),
+      truncated: !!result.truncated,
+      durationMs: Math.round(performance.now() - startedAt),
+    });
   };
 
   const refreshTaskspace = async (taskspaceId: string) => {
-    const prefix = `${taskspaceId}:`;
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) return;
+    const prefix = `${browseSessionId}:${taskspaceId}:`;
     const expandedPaths = Array.from(expandedDirs)
       .filter((key) => key.startsWith(prefix))
       .map((key) => key.slice(prefix.length));
@@ -548,6 +604,8 @@ export function WorkspacePanel({
   const refreshListAndActiveTaskspace = async () => {
     const workspaces = await loadTaskspaces();
     if (!workspaces?.length) return;
+    const browseSessionId = getBrowseSessionId();
+    if (!browseSessionId) return;
     // Flat view always shows default children — force-refresh that listing.
     if (workspaces.some((ts) => ts.id === "default")) {
       await refreshTaskspace("default");
@@ -555,7 +613,7 @@ export function WorkspacePanel({
     }
     await Promise.all(
       workspaces.map((ts) => {
-        const key = nodeKey(ts.id, ".");
+        const key = workspaceNodeKey(browseSessionId, ts.id, ".");
         if (expandedDirs.has(key)) {
           return refreshTaskspace(ts.id);
         }
@@ -634,6 +692,11 @@ export function WorkspacePanel({
   }, [sessionId, awaitingFreshSession, paneAvatarId, recoverTick]);
 
   useEffect(() => {
+    logWorkspacePerf({
+      event: "session workspace switch",
+      paneId,
+      sessionId: String(sessionId ?? "").trim(),
+    });
     if (!sessionId) {
       if (shouldKeepWorkspaceVisibleWhenSessionMissing(sessionId, isPaneAwaitingFreshSession(paneId))) {
         return;
@@ -785,7 +848,7 @@ export function WorkspacePanel({
     if (!browseSessionId) return;
     const timer = window.setInterval(() => {
       taskspaces.forEach((ts) => {
-        const key = nodeKey(ts.id, ".");
+        const key = workspaceNodeKey(getBrowseSessionId(), ts.id, ".");
         if (expandedDirs.has(key)) {
           void refreshTaskspace(ts.id);
         }
@@ -1239,7 +1302,7 @@ export function WorkspacePanel({
     if (activeTaskspaceId !== taskspaceId) {
       onActiveTaskspaceChange(taskspaceId);
     }
-    const key = nodeKey(taskspaceId, relPath);
+    const key = workspaceNodeKey(getBrowseSessionId(), taskspaceId, relPath);
     if (expandedDirs.has(key)) {
       const next = new Set(expandedDirs);
       next.delete(key);
@@ -1272,7 +1335,8 @@ export function WorkspacePanel({
   };
 
   const renderDir = (taskspaceId: string, relPath: string, depth: number) => {
-    const key = nodeKey(taskspaceId, relPath);
+    const browseSessionId = getBrowseSessionId();
+    const key = workspaceNodeKey(browseSessionId, taskspaceId, relPath);
     const rows = entriesByDir[key] ?? [];
     const trunc = truncatedDirs[key];
     if (rows.length === 0) return null;
@@ -1280,7 +1344,7 @@ export function WorkspacePanel({
     return (
       <>
         {rows.map((item) => {
-          const itemKey = nodeKey(taskspaceId, item.path);
+          const itemKey = workspaceNodeKey(browseSessionId, taskspaceId, item.path);
           const isExpanded = expandedDirs.has(itemKey);
           const paddingLeft = 8 + depth * 14;
           const badge = showMountBadge ? mountModeBadge(item.mount_mode) : null;

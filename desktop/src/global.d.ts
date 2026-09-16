@@ -1024,6 +1024,7 @@ declare global {
       saveTurnArchiveConfig: (payload: TurnArchiveConfig) => Promise<{ ok: boolean; error?: string }>;
       loadAutomationConfig: () => Promise<{ ok: boolean; config?: AutomationConfig; error?: string }>;
       saveAutomationConfig: (payload: AutomationConfig) => Promise<{ ok: boolean; error?: string }>;
+      writeWorkspacePerfLog: (payload: unknown) => Promise<{ ok: boolean; path?: string }>;
       confirmDialog: (payload: {
         title?: string;
         message: string;
