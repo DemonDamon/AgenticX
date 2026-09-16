@@ -18,6 +18,7 @@ from .builders import build_sft, build_dpo
 from .heldout import heldout_split
 from .quality import score_trajectory
 from .exporters import export_llama_factory, write_card
+from .registry import ModelRegistry
 
 def _cmd_collect(args) -> int:
     store = TrajectoryStore(Path(args.store))
@@ -46,6 +47,24 @@ def _cmd_build(args) -> int:
     print(json.dumps({"n_samples": len(samples), "heldout": len(split.heldout)}))
     return 0
 
+def _make_reg(path: str) -> ModelRegistry:
+    return ModelRegistry(Path(path))
+
+def _cmd_registry(args) -> int:
+    reg = _make_reg(args.registry)
+    if args.action == "register":
+        vid = reg.register(args.alias, model_spec=args.model, backend=args.backend)
+        print(json.dumps({"registered": vid}))
+    elif args.action == "promote":
+        print(json.dumps({"promoted": reg.promote(args.alias)}))
+    elif args.action == "rollback":
+        print(json.dumps({"rollback_to": reg.rollback(args.alias)}))
+    elif args.action == "resolve":
+        print(json.dumps(reg.resolve(args.alias), ensure_ascii=False))
+    elif args.action == "list":
+        print(json.dumps(reg.list(), ensure_ascii=False, indent=2))
+    return 0
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="agenticx.trainer")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -61,6 +80,13 @@ def main(argv=None) -> int:
     b.add_argument("--seed", default="v1")
     b.add_argument("--min-quality", type=float, default=0.5)
     b.set_defaults(func=_cmd_build)
+    r = sub.add_parser("registry")
+    r.add_argument("action", choices=["register", "promote", "rollback", "resolve", "list"])
+    r.add_argument("alias", nargs="?", default=None)
+    r.add_argument("--model", default="")
+    r.add_argument("--backend", default="")
+    r.add_argument("--registry", default=str(Path.home() / ".agenticx/registry/models.json"))
+    r.set_defaults(func=_cmd_registry)
     args = ap.parse_args(argv)
     return args.func(args)
 
