@@ -94,30 +94,64 @@ function rememberRecentDir(path: string): void {
   writeScopedLocalStorage(RECENT_DIRS_KEY, JSON.stringify(next));
 }
 
-function panelPlacement(rect: DOMRect): { panel: CSSProperties; listMaxHeight: number } {
-  const width = 340;
-  const margin = 8;
-  const gap = 6;
-  const chrome = 92;
+export type WorkspaceFolderPanelPlacement = "up" | "down";
+
+const FOLDER_PANEL_WIDTH = 340;
+const FOLDER_PANEL_MARGIN = 8;
+const FOLDER_PANEL_GAP = 6;
+/** 「最近」标题 + 底部分隔 +「选择文件夹」行 + 内边距。 */
+const FOLDER_PANEL_CHROME = 92;
+const FOLDER_LIST_MIN = 96;
+const FOLDER_LIST_MAX = 320;
+
+/** 空态输入框贴底时往下开会被窗口底裁切，空间不够就向上翻。 */
+export function workspaceFolderPanelPlacement(rect: DOMRect): {
+  panel: CSSProperties;
+  listMaxHeight: number;
+  placement: WorkspaceFolderPanelPlacement;
+} {
   const viewport = window.visualViewport;
   const viewWidth = viewport?.width ?? window.innerWidth;
   const viewHeight = viewport?.height ?? window.innerHeight;
   const viewLeft = viewport?.offsetLeft ?? 0;
-  const viewBottom = (viewport?.offsetTop ?? 0) + viewHeight;
+  const viewTop = viewport?.offsetTop ?? 0;
+  const viewBottom = viewTop + viewHeight;
   const left = Math.max(
-    viewLeft + margin,
-    Math.min(rect.left, viewLeft + viewWidth - width - margin),
+    viewLeft + FOLDER_PANEL_MARGIN,
+    Math.min(rect.left, viewLeft + viewWidth - FOLDER_PANEL_WIDTH - FOLDER_PANEL_MARGIN),
   );
-  const spaceBelow = Math.max(0, viewBottom - rect.bottom - margin - gap);
+  const spaceBelow = Math.max(0, viewBottom - rect.bottom - FOLDER_PANEL_MARGIN - FOLDER_PANEL_GAP);
+  const spaceAbove = Math.max(0, rect.top - viewTop - FOLDER_PANEL_MARGIN - FOLDER_PANEL_GAP);
+  const needed = FOLDER_LIST_MIN + FOLDER_PANEL_CHROME;
+  const preferUp = spaceBelow < needed && spaceAbove > spaceBelow;
+  const available = preferUp ? spaceAbove : spaceBelow;
+  const listMaxHeight = Math.max(
+    FOLDER_LIST_MIN,
+    Math.min(FOLDER_LIST_MAX, Math.floor(available - FOLDER_PANEL_CHROME)),
+  );
+  if (preferUp) {
+    return {
+      placement: "up",
+      panel: {
+        position: "fixed",
+        left,
+        bottom: Math.max(FOLDER_PANEL_MARGIN, window.innerHeight - rect.top + FOLDER_PANEL_GAP),
+        width: FOLDER_PANEL_WIDTH,
+        zIndex: 280,
+      },
+      listMaxHeight,
+    };
+  }
   return {
+    placement: "down",
     panel: {
       position: "fixed",
       left,
-      top: rect.bottom + gap,
-      width,
+      top: rect.bottom + FOLDER_PANEL_GAP,
+      width: FOLDER_PANEL_WIDTH,
       zIndex: 280,
     },
-    listMaxHeight: Math.max(96, Math.min(220, Math.floor(spaceBelow - chrome))),
+    listMaxHeight,
   };
 }
 
@@ -360,7 +394,7 @@ export function WorkspaceFolderPicker({ api }: { api: ComposerWorkspaceFoldersAp
   const syncPosition = useCallback(() => {
     const el = anchorRef.current;
     if (!el) return;
-    const next = panelPlacement(el.getBoundingClientRect());
+    const next = workspaceFolderPanelPlacement(el.getBoundingClientRect());
     setStyle(next.panel);
     setListMaxHeight(next.listMaxHeight);
   }, []);
@@ -504,7 +538,7 @@ export function WorkspaceFolderPicker({ api }: { api: ComposerWorkspaceFoldersAp
                 <>
                   <div className="px-2.5 pb-1 pt-1.5 text-[11px] text-text-faint">{t("composer.recent")}</div>
                   <div
-                    className="preview-scrollbar overflow-y-scroll pr-0.5"
+                    className="preview-scrollbar overflow-y-auto pr-0.5"
                     style={{ maxHeight: listMaxHeight }}
                   >
                     {listItems.map((item) => {
