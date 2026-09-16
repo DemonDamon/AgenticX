@@ -255,7 +255,14 @@ def _build_near_browser_capabilities_block() -> str:
         "## 应用内浏览器（WorkPanel）\n"
         "当前已启用应用内浏览器工具。操作的是用户右侧 WorkPanel 里那个可见 webview，"
         "会复用其登录态；**优先于** `browser-use` MCP（那是另一套外部浏览器进程）。\n"
-        "- `near_browser_open`：打开或复用浏览器 tab，并切到浏览器视图。\n"
+        "用户说「打开/看看这个页面/打开这个链接」时必须 `near_browser_open`："
+        "它会自动展开右侧工作区浏览器，即使用户还没打开工作区。"
+        "**禁止**用 bash / `open` / `xdg-open` 调系统默认浏览器；"
+        "**禁止**因此改走 browser-use。"
+        "若 `near_browser_open` 超时或失败，再调用一次即可，不要改用系统浏览器。"
+        "对用户说话不要提工具名，只说「已在右侧打开」。\n"
+        "- `near_browser_open`：打开或复用浏览器 tab，并切到浏览器视图。"
+        "工作区未展开时也会先拉开再打开页面。\n"
         "- `near_browser_snapshot`：给可交互元素打 index，返回 url/title/elements"
         "（含 `is_password`）。**每次点击/输入前必须先 snapshot**。\n"
         "- `near_browser_click` / `near_browser_type` / `near_browser_press_key`："
@@ -743,7 +750,8 @@ def _build_url_vision_capability_block() -> str:
     """Describe built-in web_fetch + view_image workflow for URL visual tasks."""
     return (
         "## URL 正文与看图\n"
-        "- URL 正文用 `web_fetch`；要看图用 `view_image`（`target` 可为 discovered_images / 本地路径 / data URL）。\n"
+        "- 用户要在应用里看见页面（打开/看看这个链接）：用 `near_browser_open`，不要只用 `web_fetch`，也不要调系统浏览器。\n"
+        "- 只要摘要/事实、用户不必看见页面：才用 `web_fetch`；要看图用 `view_image`（`target` 可为 discovered_images / 本地路径 / data URL）。\n"
         "- 当前模型不支持视觉时改用 `analyze_image`；不要对每一张图预览。每轮视觉附件最多 4 张。\n\n"
     )
 

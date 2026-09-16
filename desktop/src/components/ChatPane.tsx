@@ -93,6 +93,10 @@ import {
   type NearWorkspacePickFileDetail,
 } from "../utils/workspace-sidebar-events";
 import { WorkPanel, type WorkPanelFocus } from "./work-panel/WorkPanel";
+import {
+  ensureBrowserAgentIpc,
+  registerBrowserAgentOpenFallback,
+} from "./work-panel/browser-agent-registry";
 import { loadPreparedHtmlSrcDoc } from "../utils/html-preview-assets";
 import { buildHtmlElementContextSnippet } from "../utils/html-preview-inspect";
 import {
@@ -3415,6 +3419,34 @@ export function ChatPane({ paneId, focused, onFocus, onOpenConfirm, onOpenClarif
   }, [crewSettingsAvatarId, isDedicatedAvatarPane, pane?.avatarId, avatars]);
   const paneRef = useRef<HTMLDivElement | null>(null);
   const [paneWidth, setPaneWidth] = useState(0);
+  const ensureInAppBrowserOpenRef = useRef<(url: string) => { ok: true; url: string } | { ok: false; error: string }>(
+    () => ({ ok: false, error: "no_browser_pane" }),
+  );
+  ensureInAppBrowserOpenRef.current = (url) => {
+    const nextUrl = String(url || "").trim();
+    if (!nextUrl) return { ok: false, error: "missing_url" };
+    if (!pane.taskspacePanelOpen) {
+      openWorkspaceSidebarForPane(
+        pane.id,
+        paneRef.current?.clientWidth ?? paneWidth,
+        openSidePanel,
+      );
+    }
+    setWorkPanelFocus({
+      kind: "browser",
+      url: nextUrl,
+      title: nextUrl,
+    });
+    return { ok: true, url: nextUrl };
+  };
+  useEffect(() => {
+    // Wire IPC here, not only inside WorkPanel: a closed workspace never mounts
+    // WorkPanel, so near_browser_open would wait 30s and time out.
+    ensureBrowserAgentIpc();
+    const sid = String(pane.sessionId || "").trim();
+    if (!sid) return;
+    return registerBrowserAgentOpenFallback(sid, async (url) => ensureInAppBrowserOpenRef.current(url));
+  }, [pane.sessionId]);
 
   // 会话是否有过真实的用户轮——用于抑制「空会话孤立中断占位」。旧数据里可能残留
   // 一条无用户消息的 turn_interrupted（continuation 误触发在新会话上），不应展示为

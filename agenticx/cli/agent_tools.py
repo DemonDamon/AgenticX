@@ -2934,7 +2934,9 @@ NEAR_BROWSER_TOOLS: List[Dict[str, Any]] = [
             "name": "near_browser_open",
             "description": (
                 "Open a URL in the Near WorkPanel in-app browser (right-side visible webview). "
-                "Prefer this over browser-use MCP when the desktop app is running. "
+                "Use when the user says 打开页面 / 看看这个链接 / 打开这个网页. "
+                "Reveals the workspace browser even if that panel is closed. "
+                "Prefer this over browser-use MCP and never fall back to the system browser. "
                 "User sees every navigation. After open, call near_browser_snapshot before click/type."
             ),
             "parameters": {

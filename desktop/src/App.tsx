@@ -45,6 +45,7 @@ import {
   workspaceFromConfirmContext,
 } from "./utils/confirm-scope";
 import { KbDocumentOpenOverlay } from "./components/kb/KbDocumentOpenOverlay";
+import { ensureBrowserAgentIpc } from "./components/work-panel/browser-agent-registry";
 import { resolveSubAgentOutputPaths } from "./utils/subagent-output-files";
 import {
   coerceSelectableModel,
@@ -419,6 +420,9 @@ export function App() {
     if (!sid) return;
     rememberSessionForAvatar(activePane?.avatarId ?? null, sid);
   }, [activePaneId, panes]);
+  useEffect(() => {
+    ensureBrowserAgentIpc();
+  }, []);
   const resolvePaneForSession = useCallback((sid: string, fallbackAgentId?: string) => {
     const store = useAppStore.getState();
     let pane = store.panes.find((p) => p.sessionId === sid);
