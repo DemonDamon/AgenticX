@@ -121,6 +121,13 @@ class ComputerUseSettings:
 
 
 @dataclass
+class BrowserControlSettings:
+    """WorkPanel in-app browser control (near_browser_* tools)."""
+
+    enabled: bool = True
+
+
+@dataclass
 class ExtensionRegistryConfig:
     """Configuration for a single extension registry source."""
 
@@ -195,6 +202,7 @@ class AgxConfig:
     workspace_dir: str = "~/.agenticx/workspace"
     extensions: ExtensionsConfig = field(default_factory=ExtensionsConfig)
     computer_use: ComputerUseSettings = field(default_factory=ComputerUseSettings)
+    browser_control: BrowserControlSettings = field(default_factory=BrowserControlSettings)
     ops: OpsSettings = field(default_factory=OpsSettings)
     permissions: PermissionsConfig = field(default_factory=PermissionsConfig)
     longrun: LongRunSettings = field(default_factory=LongRunSettings)
@@ -371,6 +379,10 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
         if not isinstance(cu_raw, dict):
             cu_raw = {}
 
+        bc_raw = merged.get("browser_control", {}) or {}
+        if not isinstance(bc_raw, dict):
+            bc_raw = {}
+
         ops_raw = merged.get("ops", {}) or {}
         if not isinstance(ops_raw, dict):
             ops_raw = {}
@@ -406,6 +418,9 @@ class ConfigManager(metaclass=_ConfigManagerMeta):
                 require_first_access_approval=bool(cu_raw.get("require_first_access_approval", True)),
                 scheduler_enabled=bool(cu_raw.get("scheduler_enabled", True)),
                 scheduler_max_concurrent=int(cu_raw.get("scheduler_max_concurrent", 5)),
+            ),
+            browser_control=BrowserControlSettings(
+                enabled=bool(bc_raw.get("enabled", True)),
             ),
             ops=OpsSettings(
                 tools_enabled=_ops_tools_enabled_from_raw(ops_raw.get("tools_enabled")),

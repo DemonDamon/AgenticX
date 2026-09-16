@@ -12,6 +12,8 @@ type NearElectronWebview = HTMLElement & {
   openDevTools: () => void;
   /** Run script in the guest page (used for WorkPanel browser text selection). */
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
+  getWebContentsId?: () => number;
+  capturePage?: () => Promise<{ toPNG?: () => Uint8Array; toDataURL?: () => string }>;
 };
 
 declare namespace React {
@@ -75,6 +77,32 @@ type EmailConfig = {
 
 type ComputerUseConfig = {
   enabled: boolean;
+};
+type BrowserControlConfig = {
+  enabled: boolean;
+};
+type NearBrowserActPayload = {
+  request_id: string;
+  session_id: string;
+  action: string;
+  url?: unknown;
+  index?: unknown;
+  text?: unknown;
+  key?: unknown;
+  submit?: unknown;
+  query?: unknown;
+};
+type NearBrowserActResult = {
+  ok: boolean;
+  request_id?: string;
+  session_id?: string;
+  error?: string;
+  hint?: string;
+  url?: string;
+  title?: string;
+  elements?: unknown;
+  path?: string;
+  text?: string;
 };
 type TrinityConfig = {
   skill_protocol: boolean;
@@ -970,6 +998,8 @@ declare global {
       }) => Promise<{ ok: boolean; error?: string }>;
       loadComputerUseConfig: () => Promise<{ ok: boolean; config?: ComputerUseConfig; error?: string }>;
       saveComputerUseConfig: (payload: ComputerUseConfig) => Promise<{ ok: boolean; error?: string }>;
+      loadBrowserControlConfig: () => Promise<{ ok: boolean; config?: BrowserControlConfig; error?: string }>;
+      saveBrowserControlConfig: (payload: BrowserControlConfig) => Promise<{ ok: boolean; error?: string }>;
       loadCodeIndexConfig: () => Promise<{
         ok: boolean;
         config?: {
@@ -1586,6 +1616,30 @@ declare global {
       }) => Promise<{ ok: boolean; error?: string }>;
       /** Popup / top-level http(s) from iframe → navigate WorkPanel browser in-app. */
       onInAppBrowserOpen: (cb: (url: string) => void) => () => void;
+      onNearBrowserAct: (cb: (payload: NearBrowserActPayload) => void) => () => void;
+      replyNearBrowserAct: (payload: NearBrowserActResult) => Promise<{ ok: boolean; error?: string }>;
+      saveNearBrowserScreenshot: (payload: { dataUrl: string }) => Promise<{
+        ok: boolean;
+        path?: string;
+        error?: string;
+      }>;
+      extractNearBrowserFrames: (payload: { webContentsId: number; query?: string }) => Promise<{
+        ok: boolean;
+        text?: string;
+        frame_count?: number;
+        error?: string;
+      }>;
+      listChromeCookieProfiles: () => Promise<{
+        ok: boolean;
+        profiles?: Array<{ id: string; name: string; cookiePath: string }>;
+        error?: string;
+      }>;
+      importChromeCookies: (payload: { profileId: string }) => Promise<{
+        ok: boolean;
+        imported?: number;
+        skipped?: number;
+        error?: string;
+      }>;
       copyPngToClipboard: (buffer: ArrayBuffer) => Promise<{ ok: boolean; error?: string }>;
       downloadPngToDownloads: (payload: {
         buffer: ArrayBuffer;

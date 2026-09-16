@@ -2927,6 +2927,193 @@ def merge_computer_use_tools_into(tool_list: List[Dict[str, Any]]) -> List[Dict[
     return out
 
 
+NEAR_BROWSER_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_open",
+            "description": (
+                "Open a URL in the Near WorkPanel in-app browser (right-side visible webview). "
+                "Prefer this over browser-use MCP when the desktop app is running. "
+                "User sees every navigation. After open, call near_browser_snapshot before click/type."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "http(s) URL or a host that will be prefixed with https://.",
+                    },
+                },
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_snapshot",
+            "description": (
+                "Snapshot interactive elements in the WorkPanel browser and return index/tag/text/"
+                "is_password. Must be called before every near_browser_click or near_browser_type."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_click",
+            "description": (
+                "Click an indexed element in the WorkPanel browser. "
+                "Call near_browser_snapshot first and use the returned index."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "index": {
+                        "type": "integer",
+                        "description": "Element index from the latest near_browser_snapshot.",
+                    },
+                },
+                "required": ["index"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_type",
+            "description": (
+                "Type into an indexed input in the WorkPanel browser. "
+                "Call near_browser_snapshot first. Password fields require one user confirmation. "
+                "Set submit=true to press Enter / requestSubmit after typing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "index": {
+                        "type": "integer",
+                        "description": "Element index from the latest near_browser_snapshot.",
+                    },
+                    "text": {"type": "string", "description": "Text to insert."},
+                    "submit": {
+                        "type": "boolean",
+                        "description": "If true, press Enter and try form.requestSubmit after typing.",
+                    },
+                },
+                "required": ["index", "text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_press_key",
+            "description": (
+                "Dispatch a key (e.g. Enter, Escape, Tab) in the WorkPanel browser."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Keyboard key name, e.g. Enter."},
+                },
+                "required": ["key"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_extract_text",
+            "description": (
+                "Read visible text from the current WorkPanel browser page. "
+                "Optional query keeps matching lines."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional substring filter for visible text lines.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "near_browser_screenshot",
+            "description": (
+                "Capture the current WorkPanel browser viewport to a PNG under "
+                "~/.agenticx/desktop-use/ and return the absolute path."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+]
+
+NEAR_BROWSER_TOOL_NAMES = frozenset(
+    name
+    for t in NEAR_BROWSER_TOOLS
+    if isinstance(t, dict)
+    for name in (str(t.get("function", {}).get("name", "") or "").strip(),)
+    if name
+)
+
+_NEAR_BROWSER_HUMAN_TAKEOVER = "用户已接管浏览器，请停止自动操作并询问用户下一步。"
+
+
+def browser_control_config_enabled() -> bool:
+    """True when ``browser_control.enabled`` is unset or true (default on)."""
+    try:
+        return bool(ConfigManager.load().browser_control.enabled)
+    except Exception:
+        return True
+
+
+def merge_near_browser_tools_into(tool_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Append WorkPanel browser tool specs when enabled; dedupe by function name."""
+    if not browser_control_config_enabled():
+        return tool_list
+    seen: set[str] = set()
+    for t in tool_list:
+        if not isinstance(t, dict):
+            continue
+        fn = t.get("function", {})
+        if isinstance(fn, dict):
+            n = str(fn.get("name", "") or "").strip()
+            if n:
+                seen.add(n)
+    out = list(tool_list)
+    for spec in NEAR_BROWSER_TOOLS:
+        if not isinstance(spec, dict):
+            continue
+        fn = spec.get("function", {})
+        if not isinstance(fn, dict):
+            continue
+        name = str(fn.get("name", "") or "").strip()
+        if not name or name in seen:
+            continue
+        out.append(spec)
+        seen.add(name)
+    return out
+
+
 _CODE_SEARCH_TOOL: Dict[str, Any] = {
     "type": "function",
     "function": {
@@ -2989,6 +3176,7 @@ def _code_search_tool_defs() -> List[Dict[str, Any]]:
 def studio_tools_for_session(session: Optional[StudioSession] = None) -> List[Dict[str, Any]]:
     """Studio/Meta tool list with optional code_search when mounted code brains exist."""
     tools = merge_computer_use_tools_into(list(STUDIO_TOOLS))
+    tools = merge_near_browser_tools_into(tools)
     from agenticx.ops.tools import merge_ops_tools_into
 
     tools = merge_ops_tools_into(tools)
@@ -3227,6 +3415,186 @@ async def _tool_desktop_keyboard_type(
             ensure_ascii=False,
         )
     return json.dumps({"ok": True, "chars": len(text)}, ensure_ascii=False)
+
+
+def _studio_session_id(session: Optional[StudioSession]) -> str:
+    if session is None:
+        return ""
+    for attr in ("_session_id", "session_id", "id"):
+        raw = getattr(session, attr, None)
+        if raw is not None and str(raw).strip():
+            return str(raw).strip()
+    return ""
+
+
+def _near_browser_index(arguments: Dict[str, Any]) -> Optional[int]:
+    raw = arguments.get("index")
+    if isinstance(raw, bool) or raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_near_browser_result(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return raw
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    error = str(payload.get("error") or "").strip()
+    if error == "human_takeover":
+        return _NEAR_BROWSER_HUMAN_TAKEOVER
+    return raw
+
+
+async def _tool_near_browser_http(
+    session: StudioSession,
+    action: str,
+    payload: Optional[Dict[str, Any]] = None,
+    *,
+    timeout_sec: float,
+) -> str:
+    from agenticx.cli.browser_bridge_settings import (
+        MISSING_BRIDGE_ERROR,
+        browser_bridge_base_url,
+        browser_bridge_token,
+    )
+
+    try:
+        import httpx
+    except ImportError:
+        return "ERROR: httpx is required for near_browser tools"
+
+    base = browser_bridge_base_url()
+    token = browser_bridge_token()
+    if not base or not token:
+        return f"ERROR: {MISSING_BRIDGE_ERROR}"
+    session_id = _studio_session_id(session)
+    if not session_id:
+        return "ERROR: near_browser tools require an active Studio session"
+    body: Dict[str, Any] = {"session_id": session_id, "action": action}
+    if payload:
+        body.update(payload)
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{base}/v1/browser/act"
+    client_kwargs = _cc_bridge_http_client_kwargs(base, timeout_sec)
+    try:
+        async with httpx.AsyncClient(**client_kwargs) as client:
+            response = await client.post(url, headers=headers, json=body)
+    except httpx.ConnectError as exc:
+        return (
+            f"ERROR: {MISSING_BRIDGE_ERROR}；连接失败 {base}。可改用 browser-use MCP。Details: {exc}"
+        )
+    except httpx.TimeoutException as exc:
+        return f"ERROR: Near 浏览器桥超时（browser_bridge.port / {base}）：{exc}"
+    except httpx.HTTPError as exc:
+        return f"ERROR: Near 浏览器桥请求失败（browser_bridge.port / {base}）：{exc}"
+    text = response.text
+    if response.status_code in (401, 403):
+        return (
+            f"ERROR: Near 浏览器桥鉴权失败（HTTP {response.status_code}，browser_bridge.port）。"
+            f" Body: {text[:800]}"
+        )
+    if response.status_code >= 400:
+        return f"ERROR: Near 浏览器桥 {response.status_code}（browser_bridge.port）：{text[:2000]}"
+    return _format_near_browser_result(text)
+
+
+async def _tool_near_browser_open(arguments: Dict[str, Any], session: StudioSession) -> str:
+    url = str(arguments.get("url") or "").strip()
+    if not url:
+        return "ERROR: near_browser_open requires parameter url"
+    return await _tool_near_browser_http(session, "open", {"url": url}, timeout_sec=30.0)
+
+
+async def _tool_near_browser_snapshot(arguments: Dict[str, Any], session: StudioSession) -> str:
+    _ = arguments
+    return await _tool_near_browser_http(session, "snapshot", {}, timeout_sec=20.0)
+
+
+async def _tool_near_browser_click(arguments: Dict[str, Any], session: StudioSession) -> str:
+    index = _near_browser_index(arguments)
+    if index is None:
+        return "ERROR: near_browser_click requires integer parameter index"
+    return await _tool_near_browser_http(session, "click", {"index": index}, timeout_sec=20.0)
+
+
+async def _tool_near_browser_type(
+    arguments: Dict[str, Any],
+    session: StudioSession,
+    *,
+    confirm_gate: ConfirmGate,
+    emit_event: Optional[Any] = None,
+) -> str:
+    index = _near_browser_index(arguments)
+    if index is None:
+        return "ERROR: near_browser_type requires integer parameter index"
+    text = str(arguments.get("text") or "")
+    submit = arguments.get("submit") is True
+    snap_raw = await _tool_near_browser_http(session, "snapshot", {}, timeout_sec=20.0)
+    if snap_raw == _NEAR_BROWSER_HUMAN_TAKEOVER:
+        return snap_raw
+    if snap_raw.startswith("ERROR:"):
+        return snap_raw
+    try:
+        snap = json.loads(snap_raw)
+    except Exception:
+        snap = {}
+    elements = snap.get("elements") if isinstance(snap, dict) else None
+    if isinstance(elements, list):
+        target = next(
+            (
+                row
+                for row in elements
+                if isinstance(row, dict) and row.get("index") == index
+            ),
+            None,
+        )
+        if target is None:
+            return (
+                "ERROR: index not found in latest snapshot; call near_browser_snapshot first"
+            )
+        if target.get("is_password") is True:
+            preview = text if len(text) <= 8 else text[:3] + "…"
+            if not await _confirm(
+                f"将在应用内浏览器密码框输入（预览 {preview!r}）— 是否继续？",
+                confirm_gate=confirm_gate,
+                context={"tool": "near_browser_type", "risk": "computer_use"},
+                emit_event=emit_event,
+            ):
+                return _cancelled("应用内浏览器密码输入未执行", confirm_gate)
+    return await _tool_near_browser_http(
+        session,
+        "type",
+        {"index": index, "text": text, "submit": submit},
+        timeout_sec=20.0,
+    )
+
+
+async def _tool_near_browser_press_key(arguments: Dict[str, Any], session: StudioSession) -> str:
+    key = str(arguments.get("key") or "").strip()
+    if not key:
+        return "ERROR: near_browser_press_key requires parameter key"
+    return await _tool_near_browser_http(session, "press_key", {"key": key}, timeout_sec=20.0)
+
+
+async def _tool_near_browser_extract_text(arguments: Dict[str, Any], session: StudioSession) -> str:
+    query = str(arguments.get("query") or "").strip()
+    payload: Dict[str, Any] = {}
+    if query:
+        payload["query"] = query
+    return await _tool_near_browser_http(session, "extract_text", payload, timeout_sec=20.0)
+
+
+async def _tool_near_browser_screenshot(arguments: Dict[str, Any], session: StudioSession) -> str:
+    _ = arguments
+    return await _tool_near_browser_http(session, "screenshot", {}, timeout_sec=30.0)
 
 
 META_TOOL_NAMES = {
@@ -9265,6 +9633,12 @@ for _td in COMPUTER_USE_TOOLS:
     _req = _fn.get("parameters", {}).get("required", [])
     if _name and _req:
         _TOOL_REQUIRED_PARAMS[_name] = _req
+for _td in NEAR_BROWSER_TOOLS:
+    _fn = _td.get("function", {})
+    _name = _fn.get("name", "")
+    _req = _fn.get("parameters", {}).get("required", [])
+    if _name and _req:
+        _TOOL_REQUIRED_PARAMS[_name] = _req
 
 
 def _repair_malformed_file_tool_arguments(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -9745,6 +10119,22 @@ async def dispatch_tool_async(
             return await _tool_desktop_mouse_click(arguments, session, confirm_gate=gate, emit_event=event_callback)
         if name == "desktop_keyboard_type":
             return await _tool_desktop_keyboard_type(arguments, session, confirm_gate=gate, emit_event=event_callback)
+        if name == "near_browser_open":
+            return await _tool_near_browser_open(arguments, session)
+        if name == "near_browser_snapshot":
+            return await _tool_near_browser_snapshot(arguments, session)
+        if name == "near_browser_click":
+            return await _tool_near_browser_click(arguments, session)
+        if name == "near_browser_type":
+            return await _tool_near_browser_type(
+                arguments, session, confirm_gate=gate, emit_event=event_callback
+            )
+        if name == "near_browser_press_key":
+            return await _tool_near_browser_press_key(arguments, session)
+        if name == "near_browser_extract_text":
+            return await _tool_near_browser_extract_text(arguments, session)
+        if name == "near_browser_screenshot":
+            return await _tool_near_browser_screenshot(arguments, session)
         if name == "mcp_call":
             return await _tool_mcp_call_async(arguments, session)
         if name == "tool_search":

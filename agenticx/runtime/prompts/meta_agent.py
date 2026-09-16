@@ -242,6 +242,36 @@ def _build_computer_use_capabilities_block() -> str:
     )
 
 
+def _build_near_browser_capabilities_block() -> str:
+    """When ``browser_control.enabled`` (default true), describe WorkPanel browser tools."""
+    try:
+        from agenticx.cli.config_manager import ConfigManager
+
+        if not ConfigManager.load().browser_control.enabled:
+            return ""
+    except Exception:
+        pass
+    return (
+        "## 应用内浏览器（WorkPanel）\n"
+        "当前已启用应用内浏览器工具。操作的是用户右侧 WorkPanel 里那个可见 webview，"
+        "会复用其登录态；**优先于** `browser-use` MCP（那是另一套外部浏览器进程）。\n"
+        "- `near_browser_open`：打开或复用浏览器 tab，并切到浏览器视图。\n"
+        "- `near_browser_snapshot`：给可交互元素打 index，返回 url/title/elements"
+        "（含 `is_password`）。**每次点击/输入前必须先 snapshot**。\n"
+        "- `near_browser_click` / `near_browser_type` / `near_browser_press_key`："
+        "按最近 snapshot 的 index 操作。页面可能重渲染，动作前会重跑索引；"
+        "若返回 `stale_index` 请重新 snapshot。\n"
+        "- `near_browser_type`：对 React 受控输入会派发 input/change；"
+        "`submit=true` 会追加 Enter / requestSubmit。密码框会先向用户确认一次。\n"
+        "- `near_browser_extract_text` / `near_browser_screenshot`：读正文或截图。"
+        "extract 会收集同源 iframe、Shadow DOM 以及 Electron 子 frame 文本；"
+        "右侧已经能看见的正文应再 extract 一次，不要只因顶栏有「登录/注册」就断定没有正文。\n"
+        "循环：导航 → 快照 → 动作 → 快照。不要连续重复 snapshot 而不动作。\n"
+        "若工具返回「用户已接管浏览器」，立即停手并询问用户下一步，不要重试刷屏。\n"
+        "桌面未运行或缺 `~/.agenticx/browser_bridge.port` 时改用 `browser-use` MCP。\n\n"
+    )
+
+
 def _build_active_subagents_context(session: StudioSession) -> str:
     """Inject a live snapshot of active/recent sub-agents so the LLM never hallucinates empty status."""
     import logging
@@ -896,6 +926,7 @@ def build_meta_agent_system_prompt(
         else ""
     )
     computer_use_block = _build_computer_use_capabilities_block()
+    near_browser_block = _build_near_browser_capabilities_block()
     provider_fault_block = _build_provider_hard_failure_block(session)
     effective_kb_mode = (
         str(kb_retrieval_mode_override or "").strip().lower()
@@ -936,6 +967,7 @@ def build_meta_agent_system_prompt(
         "- 复杂/多步骤任务（需多文件协作、长时间运行、需要专业角色）：拆解后通过 spawn_subagent 委派。\n\n"
         f"{mode_line}"
         f"{computer_use_block}"
+        f"{near_browser_block}"
         "## 身份应答策略\n"
         "- 当用户询问“你是谁/你的定位”时，优先基于对话末尾 `<session-context>` 里的“身份与长期上下文”简洁回答（身份、职责、边界）。\n"
         "- 回答身份问题时不要罗列完整 skills/MCP 清单，除非用户明确要求查看能力清单。\n\n"

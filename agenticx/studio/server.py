@@ -3710,6 +3710,9 @@ def create_studio_app() -> FastAPI:
         else:
             effective_tools_source = list(visible_meta_agent_tools())
         effective_tools_source = merge_computer_use_tools_into(effective_tools_source)
+        from agenticx.cli.agent_tools import merge_near_browser_tools_into
+
+        effective_tools_source = merge_near_browser_tools_into(effective_tools_source)
         from agenticx.ops.tools import merge_ops_tools_into
 
         effective_tools_source = merge_ops_tools_into(effective_tools_source)
@@ -3854,6 +3857,16 @@ def create_studio_app() -> FastAPI:
                                     _cu_ctx = _build_computer_use_capabilities_block()
                                     if _cu_ctx:
                                         sys_prompt += "\n\n" + _cu_ctx
+                                except Exception:
+                                    pass
+                                try:
+                                    from agenticx.runtime.prompts.meta_agent import (
+                                        _build_near_browser_capabilities_block,
+                                    )
+
+                                    _nb_ctx = _build_near_browser_capabilities_block()
+                                    if _nb_ctx:
+                                        sys_prompt += "\n\n" + _nb_ctx
                                 except Exception:
                                     pass
                                 _ts_ctx = _build_taskspaces_context(
@@ -4605,6 +4618,9 @@ def create_studio_app() -> FastAPI:
                 loop_avatar_tools_enabled = _sanitize_tools_enabled(loop_avatar_cfg.tools_enabled)
         loop_tools_source: list = list(STUDIO_TOOLS) if loop_is_avatar else list(visible_meta_agent_tools())
         loop_tools_source = merge_computer_use_tools_into(loop_tools_source)
+        from agenticx.cli.agent_tools import merge_near_browser_tools_into
+
+        loop_tools_source = merge_near_browser_tools_into(loop_tools_source)
         from agenticx.ops.tools import merge_ops_tools_into
 
         loop_tools_source = merge_ops_tools_into(loop_tools_source)

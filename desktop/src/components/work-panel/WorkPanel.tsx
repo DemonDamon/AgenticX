@@ -17,6 +17,7 @@ import {
   Bot,
   CheckSquare,
   ChevronDown,
+  Cookie,
   FileCode2,
   FileDiff,
   FileText,
@@ -86,6 +87,7 @@ import { SessionChangeList } from "./SessionChangeList";
 import { SessionReferenceList } from "./SessionReferenceList";
 import { SessionTodoList } from "./SessionTodoList";
 import { GroupWorkItemList } from "./GroupWorkItemList";
+import { ChromeCookieImportBanner, ChromeCookieImportDialog } from "./ChromeCookieImport";
 import {
   applyPinnedAutoExpand,
   contentDrivenOpenSections,
@@ -117,6 +119,21 @@ import {
 } from "./browser-selection";
 import { BrowserSelectionToolbar } from "./BrowserSelectionToolbar";
 import type { SelectionPopupAnchor } from "../workspace/selection-quote-popover";
+import { BrowserAgentOverlay } from "./BrowserAgentOverlay";
+import {
+  BROWSER_AGENT_INDEX_JS,
+  browserAgentClickJs,
+  browserAgentExtractJs,
+  browserAgentPressKeyJs,
+  browserAgentTypeJs,
+  filterExtractedText,
+  parseBrowserAgentResult,
+  type BrowserAgentResult,
+} from "./browser-agent-actions";
+import {
+  ensureBrowserAgentIpc,
+  registerBrowserAgentController,
+} from "./browser-agent-registry";
 
 /**
  * Multipane: each WorkPanel may register a handler. First one that claims the URL
@@ -187,6 +204,7 @@ function RemoteBrowserPane({
   onNavigate,
   onQuoteSelection,
   onSearchSelection,
+  onWebviewReady,
 }: {
   title: string;
   url: string;
@@ -195,6 +213,7 @@ function RemoteBrowserPane({
   onNavigate?: (nextUrl: string) => void;
   onQuoteSelection?: (payload: BrowserQuotePayload) => void;
   onSearchSelection?: (text: string) => void;
+  onWebviewReady?: (wv: NearElectronWebview | null) => void;
 }) {
   const [deviceToolbarVisible, setDeviceToolbarVisible] = useState(false);
   const [viewport, setViewport] = useState<HtmlPreviewViewport>(DEFAULT_HTML_PREVIEW_VIEWPORT);
@@ -210,6 +229,13 @@ function RemoteBrowserPane({
   const committedUrlRef = useRef(url);
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+  const onWebviewReadyRef = useRef(onWebviewReady);
+  onWebviewReadyRef.current = onWebviewReady;
+  useEffect(() => {
+    return () => {
+      onWebviewReadyRef.current?.(null);
+    };
+  }, []);
   const fixed =
     viewport.width != null && viewport.height != null && viewport.width > 0 && viewport.height > 0;
   const zoom = Math.max(25, Math.min(300, viewport.zoomPercent || 100)) / 100;
@@ -384,6 +410,7 @@ function RemoteBrowserPane({
           <webview
             ref={(el) => {
               webviewRef.current = el as NearElectronWebview | null;
+              onWebviewReadyRef.current?.(webviewRef.current);
             }}
             title={title}
             src={initialSrcRef.current}
@@ -765,6 +792,8 @@ export function WorkPanel({
   const [activeKind, setActiveKind] = useState<WorkPanelTabKind | null>("summary");
   const [activeBrowserId, setActiveBrowserId] = useState<string | null>(null);
   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
+  const [chromeCookieDialogOpen, setChromeCookieDialogOpen] = useState(false);
+  const [chromeCookieBannerRev, setChromeCookieBannerRev] = useState(0);
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previewTabs, setPreviewTabs] = useState<PreviewTab[]>([]);
   const [workspaceTabOpen, setWorkspaceTabOpen] = useState(false);
@@ -797,6 +826,8 @@ export function WorkPanel({
   const plusBtnRef = useRef<HTMLButtonElement | null>(null);
   const activeKindRef = useRef(activeKind);
   const activeBrowserIdRef = useRef(activeBrowserId);
+  const agentWebviewRef = useRef<NearElectronWebview | null>(null);
+  const openWebReferenceInBrowserRef = useRef<(url: string, title: string) => void>(() => undefined);
   const previewDirtyRef = useRef(false);
   const previewRequestLeaveRef = useRef<((proceed: () => void) => void) | null>(null);
   const previewTabsRef = useRef(previewTabs);
@@ -1629,6 +1660,81 @@ export function WorkPanel({
     });
     setActiveKind("browser");
   };
+  openWebReferenceInBrowserRef.current = openWebReferenceInBrowser;
+
+  useEffect(() => {
+    ensureBrowserAgentIpc();
+    const execGuest = async (script: string, reindex = true): Promise<BrowserAgentResult> => {
+      const wv = agentWebviewRef.current;
+      if (!wv) {
+        return { ok: false, error: "guest_not_ready" };
+      }
+      try {
+        if (reindex) {
+          await wv.executeJavaScript(BROWSER_AGENT_INDEX_JS);
+        }
+        const raw = await wv.executeJavaScript(script);
+        return parseBrowserAgentResult(raw);
+      } catch {
+        return { ok: false, error: "guest_not_ready" };
+      }
+    };
+    const unregister = registerBrowserAgentController(sessionId, {
+      open: async (url) => {
+        const nextUrl = url.trim();
+        if (!nextUrl) return { ok: false, error: "invalid_url" };
+        openWebReferenceInBrowserRef.current(nextUrl, nextUrl);
+        return { ok: true, url: nextUrl };
+      },
+      snapshot: async () => execGuest(BROWSER_AGENT_INDEX_JS, false),
+      click: async (index) => execGuest(browserAgentClickJs(index)),
+      type: async (index, text, submit) => execGuest(browserAgentTypeJs(index, text, submit)),
+      pressKey: async (key) => execGuest(browserAgentPressKeyJs(key)),
+      extractText: async (query) => {
+        const guest = await execGuest(browserAgentExtractJs(query), false);
+        const wv = agentWebviewRef.current;
+        const id = wv?.getWebContentsId?.();
+        if (typeof id === "number" && id > 0 && window.agenticxDesktop.extractNearBrowserFrames) {
+          try {
+            const framed = await window.agenticxDesktop.extractNearBrowserFrames({
+              webContentsId: id,
+              query,
+            });
+            const framedText = filterExtractedText(framed?.text || "", query);
+            const guestText = guest.text || "";
+            if (framed?.ok && framedText.length > guestText.length) {
+              return {
+                ...guest,
+                ok: true,
+                error: undefined,
+                text: framedText,
+              };
+            }
+          } catch {
+            /* guest JS extract still used */
+          }
+        }
+        return guest;
+      },
+      screenshot: async () => {
+        const wv = agentWebviewRef.current;
+        if (!wv?.capturePage) return { ok: false, error: "guest_not_ready" };
+        try {
+          const image = await wv.capturePage();
+          const dataUrl = image.toDataURL?.();
+          if (!dataUrl) return { ok: false, error: "screenshot_failed" };
+          const saved = await window.agenticxDesktop.saveNearBrowserScreenshot?.({ dataUrl });
+          if (!saved?.ok || !saved.path) {
+            return { ok: false, error: saved?.error ?? "screenshot_failed" };
+          }
+          return { ok: true, path: saved.path };
+        } catch {
+          return { ok: false, error: "screenshot_failed" };
+        }
+      },
+    });
+    return unregister;
+  }, [sessionId]);
 
   const closeBrowserTab = (tabId: string) => {
     const next = browserTabs.filter((t) => t.id !== tabId);
@@ -2618,7 +2724,23 @@ export function WorkPanel({
                 spellCheck={false}
                 autoComplete="off"
               />
+              <HoverTip label={t("work.chromeCookieBannerTitle")}>
+                <button
+                  type="button"
+                  aria-label={t("work.chromeCookieBannerTitle")}
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-surface-hover hover:text-text-strong"
+                  onClick={() => setChromeCookieDialogOpen(true)}
+                >
+                  <Cookie className="h-3.5 w-3.5" strokeWidth={1.8} />
+                </button>
+              </HoverTip>
             </form>
+            {activeBrowser.srcDoc == null ? (
+              <ChromeCookieImportBanner
+                key={chromeCookieBannerRev}
+                onImport={() => setChromeCookieDialogOpen(true)}
+              />
+            ) : null}
             {activeBrowser.srcDoc != null ? (
               <div className="min-h-0 flex-1">
                 <HtmlPreviewShell
@@ -2632,25 +2754,31 @@ export function WorkPanel({
                 />
               </div>
             ) : activeBrowser.url && activeBrowser.url !== "about:blank" ? (
-              <RemoteBrowserPane
-                key={activeBrowser.id}
-                title={activeBrowser.title}
-                url={activeBrowser.url}
-                reloadKey={activeBrowser.reloadNonce ?? 0}
-                onQuoteSelection={onQuoteBrowserSelection}
-                onSearchSelection={onSearchBrowserSelection}
-                onNavigate={(nextUrl) => {
-                  const tabId = activeBrowser.id;
-                  const title = browserTitleFromUrl(nextUrl);
-                  setBrowserTabs((prev) =>
-                    prev.map((t) =>
-                      t.id === tabId
-                        ? pushBrowserHistory(t, browserEntry(nextUrl, title, null))
-                        : t,
-                    ),
-                  );
-                }}
-              />
+              <div className="relative flex min-h-0 h-full flex-1 flex-col">
+                <RemoteBrowserPane
+                  key={activeBrowser.id}
+                  title={activeBrowser.title}
+                  url={activeBrowser.url}
+                  reloadKey={activeBrowser.reloadNonce ?? 0}
+                  onQuoteSelection={onQuoteBrowserSelection}
+                  onSearchSelection={onSearchBrowserSelection}
+                  onWebviewReady={(wv) => {
+                    agentWebviewRef.current = wv;
+                  }}
+                  onNavigate={(nextUrl) => {
+                    const tabId = activeBrowser.id;
+                    const title = browserTitleFromUrl(nextUrl);
+                    setBrowserTabs((prev) =>
+                      prev.map((t) =>
+                        t.id === tabId
+                          ? pushBrowserHistory(t, browserEntry(nextUrl, title, null))
+                          : t,
+                      ),
+                    );
+                  }}
+                />
+                <BrowserAgentOverlay sessionId={sessionId} />
+              </div>
             ) : (
               <EmptyBlock
                 icon={<Globe className="h-9 w-9" strokeWidth={1.3} />}
@@ -2658,6 +2786,14 @@ export function WorkPanel({
                 subtitle={t("work.emptyBrowserHint")}
               />
             )}
+            <ChromeCookieImportDialog
+              open={chromeCookieDialogOpen}
+              onClose={() => setChromeCookieDialogOpen(false)}
+              onImported={() => {
+                setChromeCookieBannerRev((n) => n + 1);
+                refreshBrowser(activeBrowser.id);
+              }}
+            />
           </div>
         ) : null}
       </div>

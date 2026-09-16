@@ -1,5 +1,30 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
+type NearBrowserActPayload = {
+  request_id: string;
+  session_id: string;
+  action: string;
+  url?: unknown;
+  index?: unknown;
+  text?: unknown;
+  key?: unknown;
+  submit?: unknown;
+  query?: unknown;
+};
+
+type NearBrowserActResult = {
+  ok: boolean;
+  request_id?: string;
+  session_id?: string;
+  error?: string;
+  hint?: string;
+  url?: string;
+  title?: string;
+  elements?: unknown;
+  path?: string;
+  text?: string;
+};
+
 function parseArgvFlag(prefix: string, fallback: string): string {
   for (const arg of process.argv) {
     if (arg.startsWith(prefix)) {
@@ -427,6 +452,9 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
   loadComputerUseConfig: async () => ipcRenderer.invoke("load-computer-use-config"),
   saveComputerUseConfig: async (payload: { enabled: boolean }) =>
     ipcRenderer.invoke("save-computer-use-config", payload),
+  loadBrowserControlConfig: async () => ipcRenderer.invoke("load-browser-control-config"),
+  saveBrowserControlConfig: async (payload: { enabled: boolean }) =>
+    ipcRenderer.invoke("save-browser-control-config", payload),
   loadCodeIndexConfig: async () => ipcRenderer.invoke("load-code-index-config"),
   saveCodeIndexConfig: async (payload: Record<string, unknown>) =>
     ipcRenderer.invoke("save-code-index-config", payload),
@@ -1066,6 +1094,20 @@ contextBridge.exposeInMainWorld("agenticxDesktop", {
     ipcRenderer.on("in-app-browser-open", handler);
     return () => ipcRenderer.removeListener("in-app-browser-open", handler);
   },
+  onNearBrowserAct: (cb: (payload: NearBrowserActPayload) => void): (() => void) => {
+    const handler = (_event: unknown, payload: NearBrowserActPayload) => cb(payload);
+    ipcRenderer.on("near-browser-act", handler);
+    return () => ipcRenderer.removeListener("near-browser-act", handler);
+  },
+  replyNearBrowserAct: async (payload: NearBrowserActResult) =>
+    ipcRenderer.invoke("near-browser-act-result", payload),
+  saveNearBrowserScreenshot: async (payload: { dataUrl: string }) =>
+    ipcRenderer.invoke("save-near-browser-screenshot", payload),
+  extractNearBrowserFrames: async (payload: { webContentsId: number; query?: string }) =>
+    ipcRenderer.invoke("extract-near-browser-frames", payload),
+  listChromeCookieProfiles: async () => ipcRenderer.invoke("list-chrome-cookie-profiles"),
+  importChromeCookies: async (payload: { profileId: string }) =>
+    ipcRenderer.invoke("import-chrome-cookies", payload),
   copyPngToClipboard: async (buffer: ArrayBuffer) =>
     ipcRenderer.invoke("clipboard-write-png", buffer) as Promise<{ ok: boolean; error?: string }>,
   downloadPngToDownloads: async (payload: { buffer: ArrayBuffer; defaultFileName?: string }) =>
