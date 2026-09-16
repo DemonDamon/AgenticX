@@ -2122,9 +2122,11 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                 "Render an inline visualization in the chat. REQUIRED whenever you "
                 "would show a flow, pipeline, sequence, architecture, MitM/proxy path, or any "
                 "A->B->C style diagram — including simple 3-node chains. NEVER substitute "
-                "markdown text/code blocks (```text```, arrow chains, ↓ lines). "
-                "For flowcharts, architecture, pipelines, and sequence diagrams: set "
-                "widget_format='mermaid' and pass Mermaid source (no Markdown fence). "
+                "markdown text/code blocks (```text```, ```mermaid```, arrow chains, ↓ lines). "
+                "Default to the most visually effective format: SVG for static flow / "
+                "architecture / pipeline / sequence / comparison diagrams; HTML for "
+                "interactive or data-driven charts. Use widget_format='mermaid' ONLY when "
+                "the user explicitly asks for a Mermaid diagram. "
                 "Before calling: output 1-3 sentences of visible intro prose in the same turn "
                 "(not in reasoning/thinking). Then call show_widget, then explain in detail. "
                 "For structured stock/macro charts, widget_code MUST be JSON starting with "
@@ -2142,19 +2144,20 @@ STUDIO_TOOLS: List[Dict[str, Any]] = [
                     "widget_code": {
                         "type": "string",
                         "description": (
-                            "Mermaid source (flowchart/sequenceDiagram/...), "
-                            "SVG string starting with '<svg', OR an HTML fragment. "
-                            "Mermaid: no Markdown fence. SVG: viewBox='0 0 680 H' width='100%' "
-                            "and CSS vars like var(--text-primary), var(--text-muted)."
+                            "SVG string starting with '<svg', an HTML fragment, "
+                            "OR Mermaid source when the user explicitly asked for Mermaid. "
+                            "SVG: viewBox='0 0 680 H' width='100%' and CSS vars like "
+                            "var(--text-primary), var(--text-muted). "
+                            "Mermaid: no Markdown fence."
                         ),
                     },
                     "widget_format": {
                         "type": "string",
                         "enum": ["svg", "html", "mermaid"],
                         "description": (
-                            "Explicit widget source format. Use mermaid for flowcharts, "
-                            "architecture, pipelines, and sequence diagrams; svg for custom "
-                            "free-form vector graphics; html for interactive widgets."
+                            "Explicit widget source format. Default svg for static "
+                            "structure diagrams or html for interactive / data-driven "
+                            "widgets. Use mermaid only when the user explicitly asks."
                         ),
                     },
                     "loading_messages": {

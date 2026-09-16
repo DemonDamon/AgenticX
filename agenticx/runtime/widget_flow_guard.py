@@ -132,6 +132,9 @@ def find_text_flow_diagram_hits(text: str) -> list[TextFlowHit]:
     hits: list[TextFlowHit] = []
     prose, fences = _split_fences(text)
     for info, body in fences:
+        if info.lower() in ("mermaid", "mmd") and body.strip():
+            hits.append(TextFlowHit("用 mermaid 代码块代替 show_widget", _snippet(body)))
+            continue
         if not _is_text_fence(info):
             continue
         lines = body.split("\n")
@@ -173,10 +176,11 @@ def contains_text_flow_diagram(text: str) -> bool:
 
 
 WIDGET_FLOW_RETRY_HINT = (
-    "[系统纪律违规] 你的回复包含了文字流程图（箭头链/↓/ASCII框线）。"
-    "所有流程/链路/架构/实现路径必须用 `show_widget` 输出 SVG 图（优先），"
-    "或在简单场景用 ```mermaid``` 代码块；"
-    "禁止在正文或无语言标注的 ``` 代码块里用文字箭头或 ASCII 框线画流程。"
+    "[系统纪律违规] 你的回复包含了文字流程图（箭头链/↓/ASCII框线）或 mermaid 代码块。"
+    "所有流程/链路/架构/实现路径必须用 `show_widget` 输出可视化效果最好的图："
+    "默认精心排版的 SVG，交互或数据驱动用 HTML；"
+    "仅当用户明确要求 Mermaid 时才用 widget_format='mermaid'。"
+    "禁止用 ```mermaid``` / ```text``` 或正文箭头链代替。"
     "若本轮已调用过 `show_widget` 展示架构，正文只写分步解读，不得再重复画架构。"
     "代码示例须标注语言（```python / ```json / ```yaml），Prompt 模板用 ```yaml，"
     "禁止裸 ``` 块（会显示为 TEXT）。请立即重新回答。"

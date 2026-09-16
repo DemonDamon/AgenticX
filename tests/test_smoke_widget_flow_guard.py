@@ -88,12 +88,12 @@ search_reports(keyword="AI")
     assert contains_text_flow_diagram(text)
 
 
-def test_mermaid_block_not_flagged() -> None:
+def test_mermaid_block_is_flagged_as_widget_substitute() -> None:
     text = """```mermaid
 flowchart LR
     A --> B --> C
 ```"""
-    assert not contains_text_flow_diagram(text)
+    assert contains_text_flow_diagram(text)
 
 
 def test_language_fences_with_hr_between_not_flagged() -> None:
@@ -164,6 +164,7 @@ def test_retry_hint_includes_hit_snippet() -> None:
     assert "命中片段" in hint
     assert "mitmproxy" in hint
     assert hint.startswith("[系统纪律违规]")
+    assert "简单场景用 ```mermaid" not in hint
 
 
 def test_widget_flow_max_retries_is_one() -> None:

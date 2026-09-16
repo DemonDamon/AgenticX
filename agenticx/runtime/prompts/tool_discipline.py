@@ -22,9 +22,10 @@ from __future__ import annotations
 
 SHOW_WIDGET_USAGE = (
     "\n\n=== 渲染细则（中文） ===\n"
-    "【格式选择】流程图/架构图/链路图/时序图 → widget_format='mermaid'（自动布局，避免节点重叠）；"
-    "自由矢量插图或 Mermaid 无法表达的几何 → 'svg'；"
-    "需要交互或数据驱动（折线/饼图/动态筛选）→ 'html' + Chart.js/D3，脚本只能从 CDN 白名单加载。\n"
+    "【格式选择】默认选可视化效果最好的形式，禁止图省事默认 Mermaid。"
+    "流程图/架构图/链路图/时序图/对比图 → widget_format='svg'（手写矢量、主题变量、信息密度高）；"
+    "交互或数据驱动（折线/饼图/动态筛选）→ 'html' + Chart.js/D3，脚本只能从 CDN 白名单加载；"
+    "仅当用户明确要求「Mermaid / mermaid 图 / mermaid 源码」时才用 'mermaid'。\n"
     "【Mermaid 规范】widget_code 直接从 flowchart / sequenceDiagram 等声明开始，不要包 Markdown 代码围栏；"
     "节点优先短标签，长标签用 <br/> 拆行，不要塞整段；按结构选 TB 或 LR，避免同层塞过多节点；"
     "不要在 Mermaid 里写大段自定义 HTML/CSS。\n"

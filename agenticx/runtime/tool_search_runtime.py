@@ -9,7 +9,6 @@ from agenticx.runtime.model_context_window import (
     resolve_effective_context_window,
 )
 from agenticx.runtime.tool_search import (
-    BUILTIN_DEFER_ALLOWLIST,
     CORE_ALWAYS_LOAD_TOOLS,
     DEFAULT_AUTO_SCHEMA_TOKEN_THRESHOLD,
     DEFAULT_CONTEXT_BUDGET_RATIO,
@@ -91,7 +90,7 @@ def build_builtin_catalog(openai_tools: list[dict]) -> ToolCatalog:
             fn = {}
         desc = str(fn.get("description") or "")
         params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
-        always = name in CORE_ALWAYS_LOAD_TOOLS or name not in BUILTIN_DEFER_ALLOWLIST
+        always = name in CORE_ALWAYS_LOAD_TOOLS
         descriptors.append(
             ToolDescriptor(
                 stable_id=f"builtin:{name}",

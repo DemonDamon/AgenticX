@@ -16,6 +16,8 @@ from agenticx.runtime.tool_search import (
     TOOL_SEARCH_TOOL_NAME,
     ToolSearchConfig,
     dump_state_to_scratchpad,
+    is_deferred_builtin,
+    is_tool_pending_next_round,
     project_tools_for_round,
 )
 from agenticx.runtime.tool_search_runtime import build_runtime_context
@@ -340,6 +342,54 @@ def test_meta_prompt_mentions_tool_search():
     session = StudioSession()
     prompt = build_meta_agent_system_prompt(session)
     assert "tool_search" in prompt
+
+
+def test_catalog_always_load_matches_defer_gate():
+    """always_load must follow is_deferred_builtin, or auto-load is skipped."""
+    from agenticx.cli.agent_tools import studio_tools_for_session
+
+    session = StudioSession()
+    pool = studio_tools_for_session(session)
+    ctx = build_runtime_context(
+        session=session,
+        full_openai_tools=pool,
+        config=ToolSearchConfig(mode="always"),
+    )
+    for d in ctx.catalog.descriptors:
+        if d.kind != "builtin":
+            continue
+        assert d.always_load is (not is_deferred_builtin(d.name)), d.name
+
+
+def test_show_widget_direct_call_is_pending_not_hard_denied(monkeypatch):
+    """Direct show_widget must self-heal, not hit the hard-deny branch."""
+    monkeypatch.setattr(
+        "agenticx.runtime.tool_search_runtime.read_tool_search_config",
+        lambda: ToolSearchConfig(mode="always"),
+    )
+    pool = _make_pool()
+    pool.append(
+        {
+            "type": "function",
+            "function": {
+                "name": "show_widget",
+                "description": "inline widget",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    )
+    session = StudioSession()
+    ctx = build_runtime_context(session=session, full_openai_tools=pool)
+    names = _tool_names(project_tools_for_round(ctx, full_openai_tools=pool))
+    assert "show_widget" not in names
+    desc = next(d for d in ctx.catalog.descriptors if d.name == "show_widget")
+    assert desc.always_load is False
+    assert is_tool_pending_next_round(
+        ctx,
+        "show_widget",
+        allowed_tool_names=names,
+        full_openai_tools=pool,
+    )
 
 
 def test_show_widget_is_deferred_until_loaded(monkeypatch):

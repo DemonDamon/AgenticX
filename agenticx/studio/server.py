@@ -3646,8 +3646,9 @@ def create_studio_app() -> FastAPI:
                 "- 优先动手执行，不要反复确认。\n"
                 "- 边做边汇报，每完成一步简要说明。\n"
                 "- 连续 2 次工具调用失败或返回相同结果后，必须切换策略，禁止重复同一操作。\n"
-                "- **流程/链路/架构**：先写 1–3 句可见衔接语，再 `show_widget` 出 SVG 图，后分节解读；"
-                "禁止在 ```text``` 或正文里用 `A->B->C`、`↓` 文字链代替可视化。\n"
+                "- **流程/链路/架构**：先写 1–3 句可见衔接语，再 `show_widget` 出图"
+                "（默认 SVG 或 HTML；仅用户明确要 Mermaid 时才 mermaid），后分节解读；"
+                "禁止在 ```text``` / ```mermaid``` 或正文里用 `A->B->C`、`↓` 文字链代替可视化。\n"
             )
             try:
                 from agenticx.runtime.prompts.meta_agent import AVATAR_IDENTITY_UPDATE_RULES
